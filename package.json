@@ -1,0 +1,44 @@
+{
+  "name": "sech-lims-by-nickland",
+  "version": "0.1.0",
+  "description": "Foundation MVP scaffold for SECH_LIMS by Nickland, an offline-first LAN-ready Laboratory Quality Management System.",
+  "main": "dist-electron/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm:dev:api\" \"npm:dev:web\" \"npm:dev:electron\"",
+    "dev:web": "vite --host 127.0.0.1 --port 5173",
+    "dev:api": "tsx watch server/index.ts",
+    "dev:electron": "wait-on tcp:5173 tcp:4317 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 API_PORT=4317 electron .",
+    "api": "tsx server/index.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit && vite build && tsc -p tsconfig.electron.json",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "archiver": "latest",
+    "bcryptjs": "latest",
+    "better-sqlite3": "latest",
+    "cors": "latest",
+    "express": "latest",
+    "lucide-react": "latest",
+    "multer": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "react-router-dom": "latest"
+  },
+  "devDependencies": {
+    "@types/cors": "latest",
+    "@types/express": "latest",
+    "@types/multer": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "concurrently": "latest",
+    "cross-env": "latest",
+    "electron": "latest",
+    "tsx": "latest",
+    "typescript": "latest",
+    "vite": "latest",
+    "wait-on": "latest"
+  }
+}

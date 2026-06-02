@@ -1,0 +1,29 @@
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import AppLayout from './layouts/AppLayout';
+import SettingsLayout from './layouts/SettingsLayout';
+import { AuthProvider, useAuth } from './hooks/useAuth';
+import { ModuleProvider } from './hooks/useModules';
+import { getSetupStatus } from './services/api';
+import { LoginPage, SetupPage } from './pages/AuthPages';
+import { Dashboard, Documents, Home, ModulePage, Organisation, Personnel } from './pages/CorePages';
+import { ActionTracker, BackupRestore, Devices, DocumentImport, EvidenceUpload, ModuleToggles, PermissionMatrix, Positions, UsersAccess } from './pages/SettingsPages';
+import { MODULES } from '../shared/constants/modules';
+import './styles/app.css';
+
+function Gate({ children }: { children: React.ReactNode }) {
+  const [setupComplete, setSetupComplete] = useState<boolean | null>(null); const { user, loading } = useAuth(); const location = useLocation();
+  useEffect(() => { getSetupStatus().then(s => setSetupComplete(s.setupComplete)).catch(() => setSetupComplete(false)); }, []);
+  if (setupComplete === null || loading) return <div className="auth"><div className="card">Loading SECH_LIMS host...</div></div>;
+  if (!setupComplete && location.pathname !== '/setup') return <Navigate to="/setup" replace />;
+  if (setupComplete && location.pathname === '/setup') return <Navigate to={user ? '/home' : '/login'} replace />;
+  if (setupComplete && !user && location.pathname !== '/login') return <Navigate to="/login" replace />;
+  if (setupComplete && user && location.pathname === '/login') return <Navigate to="/home" replace />;
+  return <>{children}</>;
+}
+
+function AppRoutes() {
+  const placeholders = MODULES.filter(m => m.placeholder);
+  return <Routes><Route path="/setup" element={<SetupPage/>}/><Route path="/login" element={<LoginPage/>}/><Route element={<ModuleProvider><AppLayout/></ModuleProvider>}><Route index element={<Navigate to="/home"/>}/><Route path="/home" element={<Home/>}/><Route path="/dashboard" element={<Dashboard/>}/><Route path="/documents" element={<Documents/>}/><Route path="/organisation" element={<Organisation/>}/><Route path="/personnel" element={<Personnel/>}/><Route path="/actions" element={<ActionTracker/>}/>{placeholders.map(m=><Route key={m.key} path={m.path.slice(1)} element={<ModulePage moduleKey={m.key} title={m.label} placeholder/>}/>) }<Route path="/settings" element={<SettingsLayout/>}><Route index element={<Navigate to="users"/>}/><Route path="users" element={<UsersAccess/>}/><Route path="positions" element={<Positions/>}/><Route path="permissions" element={<PermissionMatrix/>}/><Route path="modules" element={<ModuleToggles/>}/><Route path="document-import" element={<DocumentImport/>}/><Route path="evidence" element={<EvidenceUpload/>}/><Route path="actions" element={<ActionTracker/>}/><Route path="backup" element={<BackupRestore/>}/><Route path="devices" element={<Devices/>}/></Route></Route><Route path="*" element={<Navigate to="/home"/>}/></Routes>;
+}
+export default function App(){return <AuthProvider><Gate><AppRoutes/></Gate></AuthProvider>}
