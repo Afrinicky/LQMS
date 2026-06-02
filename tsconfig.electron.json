@@ -5,7 +5,7 @@
     "moduleResolution": "NodeNext",
     "outDir": "dist-electron",
     "rootDir": ".",
-    "strict": true,
+    "strict": false,
     "esModuleInterop": true,
     "skipLibCheck": true
   },

@@ -33,7 +33,7 @@ export function seedDefaults() {
   tx();
 }
 
-export function setupInitialSystem(input: { facilityName: string; shortName?: string; username: string; password: string; fullName: string; createLinkedStaff?: boolean; employeeNo?: string; email?: string; phone?: string }) {
+export function setupInitialSystem(input: { facilityName: string; shortName?: string; username: string; password: string; fullName: string }) {
   seedDefaults();
   const db = getDb();
   const exists = db.prepare('SELECT COUNT(*) AS count FROM users').get() as { count: number };
@@ -41,16 +41,10 @@ export function setupInitialSystem(input: { facilityName: string; shortName?: st
   const adminRole = db.prepare('SELECT id FROM roles WHERE name = ?').get('System Administrator') as { id: number };
   const hash = bcrypt.hashSync(input.password, 12);
   const tx = db.transaction(() => {
-    let staffId: number | null = null;
-    if (input.createLinkedStaff) {
-      const staffResult = db.prepare('INSERT INTO staff (employee_no, full_name, email, phone) VALUES (?, ?, ?, ?)').run(input.employeeNo ?? null, input.fullName, input.email ?? null, input.phone ?? null);
-      staffId = Number(staffResult.lastInsertRowid);
-    }
-    const userResult = db.prepare('INSERT INTO users (username, password_hash, full_name, role_id, staff_id) VALUES (?, ?, ?, ?, ?)').run(input.username, hash, input.fullName, adminRole.id, staffId);
+    db.prepare('INSERT INTO users (username, password_hash, full_name, role_id) VALUES (?, ?, ?, ?)').run(input.username, hash, input.fullName, adminRole.id);
     db.prepare('INSERT OR REPLACE INTO laboratory_profile (id, facility_name, short_name, host_mode, host_api_port) VALUES (1, ?, ?, 1, ?)').run(input.facilityName, input.shortName ?? 'SECH Laboratory', Number(process.env.API_PORT ?? 4317));
     db.prepare("UPDATE settings SET value = 'true', updated_at = CURRENT_TIMESTAMP WHERE key = 'setupComplete'").run();
-    db.prepare('INSERT INTO audit_logs (actor_user_id, action, entity, entity_id, new_value) VALUES (NULL, ?, ?, ?, ?)').run('initial_setup', 'setup', '1', JSON.stringify({ facilityName: input.facilityName, username: input.username, staffId }));
-    db.prepare('INSERT INTO audit_logs (actor_user_id, action, entity, entity_id, new_value) VALUES (NULL, ?, ?, ?, ?)').run('create', 'users', String(userResult.lastInsertRowid), JSON.stringify({ username: input.username, fullName: input.fullName, roleId: adminRole.id, staffId }));
+    db.prepare('INSERT INTO audit_logs (actor_user_id, action, entity, entity_id, new_value) VALUES (NULL, ?, ?, ?, ?)').run('initial_setup', 'setup', '1', JSON.stringify({ facilityName: input.facilityName, username: input.username }));
   });
   tx();
 }
