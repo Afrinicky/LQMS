@@ -20,24 +20,12 @@ export function commonRoutes() {
   });
 
   router.get('/roles', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT id, name, description, is_system isSystem FROM roles ORDER BY name').all()));
-  router.get('/users', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT u.id, u.username, u.full_name fullName, u.role_id roleId, r.name roleName, u.staff_id staffId, s.full_name staffName, u.is_active isActive FROM users u JOIN roles r ON r.id = u.role_id LEFT JOIN staff s ON s.id = u.staff_id ORDER BY u.full_name').all()));
+  router.get('/users', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT u.id, u.username, u.full_name fullName, u.role_id roleId, r.name roleName, u.is_active isActive FROM users u JOIN roles r ON r.id = u.role_id ORDER BY u.full_name').all()));
   router.post('/users', requirePermission('settings', 'create'), (req, res) => {
-    const { username, password, fullName, roleId, staffId } = req.body;
-    const result = getDb().prepare('INSERT INTO users (username, password_hash, full_name, role_id, staff_id) VALUES (?, ?, ?, ?, ?)').run(username, bcrypt.hashSync(password, 12), fullName, roleId, staffId ?? null);
-    audit(req, { action: 'create', entity: 'users', entityId: result.lastInsertRowid, newValue: { username, fullName, roleId, staffId } });
+    const { username, password, fullName, roleId } = req.body;
+    const result = getDb().prepare('INSERT INTO users (username, password_hash, full_name, role_id) VALUES (?, ?, ?, ?)').run(username, bcrypt.hashSync(password, 12), fullName, roleId);
+    audit(req, { action: 'create', entity: 'users', entityId: result.lastInsertRowid, newValue: { username, fullName, roleId } });
     res.status(201).json({ id: result.lastInsertRowid });
-  });
-  router.put('/users/:id', requirePermission('settings', 'edit'), (req, res) => {
-    const oldValue = getDb().prepare('SELECT id, username, full_name, role_id, staff_id, is_active FROM users WHERE id = ?').get(req.params.id);
-    getDb().prepare('UPDATE users SET full_name = ?, role_id = ?, staff_id = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(req.body.fullName, req.body.roleId, req.body.staffId ?? null, req.body.isActive ? 1 : 0, req.params.id);
-    audit(req, { action: 'edit', entity: 'users', entityId: req.params.id, oldValue, newValue: { fullName: req.body.fullName, roleId: req.body.roleId, staffId: req.body.staffId ?? null, isActive: req.body.isActive } });
-    res.json({ ok: true });
-  });
-  router.put('/users/:id/link-staff', requirePermission('settings', 'edit'), (req, res) => {
-    const oldValue = getDb().prepare('SELECT id, staff_id FROM users WHERE id = ?').get(req.params.id);
-    getDb().prepare('UPDATE users SET staff_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(req.body.staffId ?? null, req.params.id);
-    audit(req, { action: 'link_staff', entity: 'users', entityId: req.params.id, oldValue, newValue: { staffId: req.body.staffId ?? null } });
-    res.json({ ok: true });
   });
 
   router.get('/positions', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT id, title, description, reports_to_position_id reportsToPositionId, is_active isActive, archived_at archivedAt FROM positions ORDER BY is_active DESC, title').all()));
@@ -81,29 +69,6 @@ export function commonRoutes() {
     res.json({ permissions: db.prepare('SELECT * FROM permissions ORDER BY module_key, action').all(), rolePermissions: db.prepare('SELECT * FROM role_permissions').all(), positionPermissions: db.prepare('SELECT * FROM position_permissions').all(), userOverrides: db.prepare('SELECT * FROM user_permission_overrides').all(), technicalAuthorizations: db.prepare('SELECT * FROM technical_authorizations').all(), auditHistory: db.prepare("SELECT * FROM audit_logs WHERE entity IN ('permissions','role_permissions','position_permissions','user_permission_overrides') ORDER BY id DESC LIMIT 50").all() });
   });
 
-
-  router.post('/permissions/role', requirePermission('settings', 'edit'), (req, res) => {
-    const result = getDb().prepare('INSERT INTO role_permissions (role_id, permission_id, allowed, source) VALUES (?, ?, ?, ?) ON CONFLICT(role_id, permission_id) DO UPDATE SET allowed = excluded.allowed, source = excluded.source').run(req.body.roleId, req.body.permissionId, req.body.allowed ? 1 : 0, 'Role default');
-    audit(req, { action: 'edit', entity: 'role_permissions', entityId: `${req.body.roleId}:${req.body.permissionId}`, newValue: req.body });
-    res.json({ ok: true, changes: result.changes });
-  });
-  router.post('/permissions/position', requirePermission('settings', 'edit'), (req, res) => {
-    const result = getDb().prepare('INSERT INTO position_permissions (position_id, permission_id, allowed, source) VALUES (?, ?, ?, ?) ON CONFLICT(position_id, permission_id) DO UPDATE SET allowed = excluded.allowed, source = excluded.source').run(req.body.positionId, req.body.permissionId, req.body.allowed ? 1 : 0, 'Position default');
-    audit(req, { action: 'edit', entity: 'position_permissions', entityId: `${req.body.positionId}:${req.body.permissionId}`, newValue: req.body });
-    res.json({ ok: true, changes: result.changes });
-  });
-  router.post('/permissions/user-override', requirePermission('settings', 'edit'), (req, res) => {
-    const source = req.body.allowed ? 'Manual override' : 'Denied override';
-    const result = getDb().prepare('INSERT INTO user_permission_overrides (user_id, permission_id, allowed, source, reason) VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id, permission_id) DO UPDATE SET allowed = excluded.allowed, source = excluded.source, reason = excluded.reason').run(req.body.userId, req.body.permissionId, req.body.allowed ? 1 : 0, source, req.body.reason ?? null);
-    audit(req, { action: 'edit', entity: 'user_permission_overrides', entityId: `${req.body.userId}:${req.body.permissionId}`, newValue: { ...req.body, source } });
-    res.json({ ok: true, changes: result.changes });
-  });
-  router.post('/authorizations', requirePermission('settings', 'edit'), (req, res) => {
-    const result = getDb().prepare('INSERT INTO technical_authorizations (staff_id, position_id, module_key, section_id, level, is_active, expires_at) VALUES (?, ?, ?, ?, ?, 1, ?)').run(req.body.staffId ?? null, req.body.positionId ?? null, req.body.moduleKey, req.body.sectionId ?? null, req.body.level, req.body.expiresAt ?? null);
-    audit(req, { action: 'create', entity: 'technical_authorizations', entityId: result.lastInsertRowid, newValue: req.body });
-    res.status(201).json({ id: result.lastInsertRowid });
-  });
-
   const storage = multer.diskStorage({ destination: (_req, _file, cb) => cb(null, uploadRoot), filename: (_req, file, cb) => cb(null, safeStoredFilename(file.originalname)) });
   const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } });
   router.post('/files', requirePermission('documents', 'create'), upload.single('file'), (req, res) => {
@@ -124,15 +89,11 @@ export function commonRoutes() {
   router.get('/documents', requirePermission('documents', 'view'), (_req, res) => res.json(getDb().prepare('SELECT * FROM documents ORDER BY created_at DESC').all()));
   router.post('/documents/import-master-list', requirePermission('documents', 'create'), (req, res) => { audit(req, { action: 'create', entity: 'documents', newValue: req.body }); res.json({ ok: true, message: 'MVP import placeholder accepted. CSV parsing will be implemented in the next phase.' }); });
 
-  router.get('/actions', requirePermission('actions', 'view'), (_req, res) => res.json(getDb().prepare('SELECT * FROM actions ORDER BY created_at DESC').all()));
-  router.post('/actions', requirePermission('actions', 'create'), (req, res) => { const r = getDb().prepare('INSERT INTO actions (title, module_key, priority, due_date, created_by) VALUES (?, ?, ?, ?, ?)').run(req.body.title, req.body.moduleKey ?? 'actions', req.body.priority ?? 'normal', req.body.dueDate ?? null, req.user!.id); audit(req, { action: 'create', entity: 'actions', entityId: r.lastInsertRowid, newValue: req.body }); res.status(201).json({ id: r.lastInsertRowid }); });
-  router.put('/actions/:id', requirePermission('actions', 'edit'), (req, res) => { const oldValue = getDb().prepare('SELECT * FROM actions WHERE id = ?').get(req.params.id); getDb().prepare('UPDATE actions SET title = ?, module_key = ?, status = ?, priority = ?, due_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(req.body.title, req.body.moduleKey ?? 'actions', req.body.status ?? 'open', req.body.priority ?? 'normal', req.body.dueDate ?? null, req.params.id); audit(req, { action: 'edit', entity: 'actions', entityId: req.params.id, oldValue, newValue: req.body }); res.json({ ok: true }); });
+  router.get('/actions', requirePermission('nc_capa', 'view'), (_req, res) => res.json(getDb().prepare('SELECT * FROM actions ORDER BY created_at DESC').all()));
+  router.post('/actions', requirePermission('nc_capa', 'create'), (req, res) => { const r = getDb().prepare('INSERT INTO actions (title, module_key, priority, due_date, created_by) VALUES (?, ?, ?, ?, ?)').run(req.body.title, req.body.moduleKey, req.body.priority ?? 'normal', req.body.dueDate ?? null, req.user!.id); audit(req, { action: 'create', entity: 'actions', entityId: r.lastInsertRowid, newValue: req.body }); res.status(201).json({ id: r.lastInsertRowid }); });
 
   router.get('/devices', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT * FROM devices ORDER BY created_at DESC').all()));
   router.post('/devices/request-pairing', requirePermission('settings', 'create'), (req, res) => { const code = Math.random().toString(36).slice(2, 10).toUpperCase(); const r = getDb().prepare('INSERT INTO devices (device_code, name, type) VALUES (?, ?, ?)').run(code, req.body.name, req.body.type ?? 'desktop'); audit(req, { action: 'create', entity: 'devices', entityId: r.lastInsertRowid, newValue: { code, ...req.body } }); res.status(201).json({ id: r.lastInsertRowid, code }); });
-  router.post('/devices/:id/approve', requirePermission('settings', 'approve'), (req, res) => updateDeviceStatus(req, res, 'approved'));
-  router.post('/devices/:id/revoke', requirePermission('settings', 'void_archive'), (req, res) => updateDeviceStatus(req, res, 'revoked'));
-  router.post('/devices/:id/block', requirePermission('settings', 'void_archive'), (req, res) => updateDeviceStatus(req, res, 'blocked'));
 
   router.post('/backup/create', requirePermission('settings', 'export'), async (req, res) => {
     const fileName = `sech-lims-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.zip`;
@@ -153,11 +114,4 @@ export function commonRoutes() {
 
   for (const group of ['lab-profile','departments','sections','locations','authorizations','approval-routes','links','notifications','settings']) router.get(`/${group}`, (_req, res) => res.json([]));
   return router;
-}
-
-function updateDeviceStatus(req: any, res: any, status: 'approved' | 'revoked' | 'blocked') {
-  const oldValue = getDb().prepare('SELECT * FROM devices WHERE id = ?').get(req.params.id);
-  getDb().prepare('UPDATE devices SET status = ?, paired_user_id = CASE WHEN ? = ? THEN paired_user_id ELSE NULL END, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?').run(status, status, 'approved', req.params.id);
-  audit(req, { action: `device_${status}`, entity: 'devices', entityId: req.params.id, oldValue, newValue: { status } });
-  res.json({ ok: true, status });
 }

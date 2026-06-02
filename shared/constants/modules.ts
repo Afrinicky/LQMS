@@ -25,7 +25,6 @@ export const MODULES: ModuleDefinition[] = [
   { key: 'monthly_reports', label: 'Monthly Reports & LHIMS Archive', path: '/monthly-reports', placeholder: true },
   { key: 'reports_exports', label: 'Reports & Exports', path: '/reports-exports', placeholder: true },
   { key: 'notifications', label: 'Notifications', path: '/notifications', placeholder: true },
-  { key: 'actions', label: 'Action Tracker', path: '/settings/actions', protected: true },
   { key: 'settings', label: 'Settings', path: '/settings', protected: true }
 ];
 
