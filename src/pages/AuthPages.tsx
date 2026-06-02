@@ -3,29 +3,5 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 
-export function LoginPage() {
-  const { login, user } = useAuth();
-  const [error, setError] = useState('');
-  const nav = useNavigate();
-  if (user) return <Navigate to="/home" />;
-  async function submit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const fd = new FormData(e.currentTarget);
-    try { await login(String(fd.get('username')), String(fd.get('password'))); nav('/home'); } catch (err) { setError(err instanceof Error ? err.message : 'Login failed'); }
-  }
-  return <div className="auth"><form className="card form" onSubmit={submit}><h1>SECH_LIMS Login</h1><p>Sign in to the local host QMS workspace.</p><label>Username<input name="username" required /></label><label>Password<input name="password" type="password" required /></label>{error && <p style={{ color: 'var(--danger)' }}>{error}</p>}<button>Login</button></form></div>;
-}
-
-export function SetupPage() {
-  const [error, setError] = useState('');
-  const nav = useNavigate();
-  async function submit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const fd = new FormData(e.currentTarget);
-    try {
-      await api('/setup/initialize', { method: 'POST', body: JSON.stringify({ facilityName: fd.get('facilityName'), shortName: fd.get('shortName'), fullName: fd.get('fullName'), username: fd.get('username'), password: fd.get('password'), createLinkedStaff: fd.get('createLinkedStaff') === 'on', employeeNo: fd.get('employeeNo'), email: fd.get('email'), phone: fd.get('phone') }) });
-      nav('/login');
-    } catch (err) { setError(err instanceof Error ? err.message : 'Setup failed'); }
-  }
-  return <div className="auth"><form className="card form" onSubmit={submit}><h1>First-Time Setup</h1><p>Create the host database, laboratory profile, default roles, positions, permissions, modules, and first administrator.</p><label>Facility name<input name="facilityName" defaultValue="St. Elizabeth Catholic Hospital Laboratory" required /></label><label>Short name<input name="shortName" defaultValue="SECH Laboratory" /></label><label>Administrator full name<input name="fullName" required /></label><label>Admin username<input name="username" required /></label><label>Admin password<input name="password" type="password" minLength={8} required /></label><label><span><input name="createLinkedStaff" type="checkbox" /> Create and link a staff record for this administrator</span></label><label>Employee no<input name="employeeNo" /></label><label>Staff email<input name="email" type="email" /></label><label>Staff phone<input name="phone" /></label>{error && <p style={{ color: 'var(--danger)' }}>{error}</p>}<button className="gold">Initialize Foundation MVP</button></form></div>;
-}
+export function LoginPage(){const {login,user}=useAuth(); const [error,setError]=useState(''); const nav=useNavigate(); if(user) return <Navigate to="/home"/>; async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault(); const fd=new FormData(e.currentTarget); try{await login(String(fd.get('username')),String(fd.get('password'))); nav('/home')}catch(err){setError(err instanceof Error?err.message:'Login failed')}} return <div className="auth"><form className="card form" onSubmit={submit}><h1>SECH_LIMS Login</h1><p>Sign in to the local host QMS workspace.</p><label>Username<input name="username" required/></label><label>Password<input name="password" type="password" required/></label>{error&&<p style={{color:'var(--danger)'}}>{error}</p>}<button>Login</button></form></div>}
+export function SetupPage(){const [error,setError]=useState(''); const nav=useNavigate(); async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault(); const fd=new FormData(e.currentTarget); try{await api('/setup/initialize',{method:'POST',body:JSON.stringify({facilityName:fd.get('facilityName'),shortName:fd.get('shortName'),fullName:fd.get('fullName'),username:fd.get('username'),password:fd.get('password')})}); nav('/login')}catch(err){setError(err instanceof Error?err.message:'Setup failed')}} return <div className="auth"><form className="card form" onSubmit={submit}><h1>First-Time Setup</h1><p>Create the host database, laboratory profile, default roles, positions, permissions, modules, and first administrator.</p><label>Facility name<input name="facilityName" defaultValue="St. Elizabeth Catholic Hospital Laboratory" required/></label><label>Short name<input name="shortName" defaultValue="SECH Laboratory"/></label><label>Administrator full name<input name="fullName" required/></label><label>Admin username<input name="username" required/></label><label>Admin password<input name="password" type="password" minLength={8} required/></label>{error&&<p style={{color:'var(--danger)'}}>{error}</p>}<button className="gold">Initialize Foundation MVP</button></form></div>}

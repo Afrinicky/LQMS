@@ -46,8 +46,8 @@ The API binds to `0.0.0.0` so the host desktop can later serve desktop clients o
 1. Start the app with `npm run dev`.
 2. Open the Electron window.
 3. If the database is uninitialized, the app redirects to `/setup`.
-4. Enter the facility profile and first administrator details. You may optionally create and link a staff record for the first administrator during setup.
-5. Setup seeds default roles, permissions, positions, modules, departments, sections, locations, optional admin staff linkage, and audit history.
+4. Enter the facility profile and first administrator details.
+5. Setup seeds default roles, permissions, positions, modules, departments, sections, locations, and audit history.
 6. After setup, sign in at `/login`.
 
 The setup status endpoint is:
@@ -72,7 +72,7 @@ Most advanced operational modules are placeholders in this MVP. Settings remains
 
 Settings contains:
 
-- Users & Access, including optional user-to-staff linkage
+- Users & Access
 - Positions & Organogram
 - Permission Matrix
 - System Modules Toggle
@@ -86,14 +86,13 @@ Module toggles hide disabled modules from the main sidebar, pause alerts by flag
 
 ## Permission foundation
 
-The server includes a central permission resolver and `requirePermission(moduleKey, action)` middleware. Users can be linked to staff records through `users.staff_id`; permission resolution no longer relies on matching staff email to usernames. The resolver considers:
+The server includes a central permission resolver and `requirePermission(moduleKey, action)` middleware. The resolver considers:
 
 - module enabled/disabled status
 - user overrides
 - role permissions
 - position permissions
-- staff-position assignments through `users.staff_id` with assignment types `primary`, `acting`, `deputy`, and `temporary`
-- scoped technical authorizations attached only to the linked staff record or that staff member's active positions
+- staff-position assignments
 - section/unit and technical authorization foundations
 
 Permission columns include View, Create, Edit, Void/Archive, Export, Print, Approve, and Source. Permission sources are Role default, Position default, Section scope, Technical authorization, Manual override, and Denied override.
@@ -104,7 +103,7 @@ Uploads use `multer` with a 25 MB file size limit and safe stored filenames. Fil
 
 ## Device pairing foundation
 
-The Device Access / Pairing page creates pending device records and pairing codes for future desktop LAN and mobile LAN clients. Administrators can approve, revoke, or block devices in the foundation UI. Full device enforcement is intentionally deferred.
+The Device Access / Pairing page creates pending device records and pairing codes for future desktop LAN and mobile LAN clients. Full client pairing approval is intentionally deferred.
 
 ## Backup foundation
 
@@ -125,8 +124,6 @@ npm run typecheck
 npm run build
 ```
 
-`npm run build` runs `tsc --noEmit`, `vite build`, and `tsc -p tsconfig.electron.json`, producing the real React/Vite UI bundle in `dist/` when dependencies are installed.
-
 ## Known limitations
 
 - No full blood bank workflows.
@@ -137,4 +134,4 @@ npm run build
 - No advanced SOP editor.
 - Document master list import accepts a placeholder request; CSV parsing comes later.
 - Restore workflow is a safe placeholder.
-- Permissions are wired server-side and the Permission Matrix has basic MVP forms for role permissions, position permissions, user overrides, and technical authorizations; advanced matrix editing remains future work.
+- Permissions are wired server-side, but fine-grained UI editing of every permission source is MVP-level only.
