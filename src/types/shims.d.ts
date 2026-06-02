@@ -7,10 +7,9 @@ declare module 'node:http' { export type Server = any; }
 declare module '*.css' {}
 interface ImportMeta { env: Record<string, string | undefined>; url: string }
 declare module 'vite' { export const defineConfig:any; }
-declare module '@vitejs/plugin-react' { const react:any; export default react; }
 declare module 'electron' { export const app:any; export const BrowserWindow:any; export const contextBridge:any; }
 declare namespace React { export type ReactNode = any; }
-declare module 'react' { export type FormEvent<T=any> = any; export function createContext<T=any>(v?:T): any; export function useContext<T=any>(v:any): T; export function useEffect(cb:any,deps?:any[]): void; export function useMemo<T=any>(cb:()=>T,deps?:any[]): T; export function useState<T=any>(v:T|(()=>T)): [T,(v:T|((old:T)=>T))=>void]; export const StrictMode:any; const React:any; export default React; }
+declare module 'react' { export type FormEvent<T=any> = any; export function createContext<T=any>(v?:T): any; export function useContext<T=any>(v:any): T; export function useEffect(cb:any,deps?:any[]): void; export function useState<T=any>(v:T|(()=>T)): [T,(v:T|((old:T)=>T))=>void]; export const StrictMode:any; const React:any; export default React; }
 declare module 'react/jsx-runtime' { export const jsx:any; export const jsxs:any; export const Fragment:any; }
 declare namespace JSX { interface IntrinsicElements { [elemName: string]: any } }
 declare module 'react-dom/client' { export const createRoot:any; }
