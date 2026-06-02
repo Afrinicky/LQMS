@@ -1,0 +1,1 @@
+export default function DisabledModule() { return <div className="disabled-page"><h2>Module disabled</h2><p>This module is currently turned off by an administrator. Data is preserved, alerts are paused, and the module can be re-enabled from Settings.</p></div>; }
