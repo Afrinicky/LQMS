@@ -1,6 +1,9 @@
 export type SetupStatus = { setupComplete: boolean; adminExists: boolean; hostMode: boolean };
-export type ApiUser = { id: number; username: string; fullName: string; roleId: number; roleName?: string; staffId?: number | null; isActive: boolean };
+export type ApiUser = { id: number; username: string; fullName: string; roleId: number; roleName?: string; staffId?: number | null; staffName?: string | null; isActive: boolean };
 export type SystemModule = { id: number; key: string; label: string; path: string; enabled: boolean; alertsPaused: boolean };
 export type Position = { id: number; title: string; description?: string; reportsToPositionId?: number | null; isActive: boolean; archivedAt?: string | null };
 export type Staff = { id: number; employeeNo?: string; fullName: string; email?: string; phone?: string; isActive: boolean };
 export type DashboardSummary = { documents: number; actionsOpen: number; staff: number; modulesEnabled: number; latestBackup?: string | null };
+export type Permission = { id: number; module_key: string; action: string; label: string };
+export type Section = { id: number; name: string };
+export type Device = { id: number; device_code: string; name: string; type: string; status: string; paired_user_id?: number | null; last_seen_at?: string | null; created_at: string };
