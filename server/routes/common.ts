@@ -20,11 +20,11 @@ export function commonRoutes() {
   });
 
   router.get('/roles', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT id, name, description, is_system isSystem FROM roles ORDER BY name').all()));
-  router.get('/users', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT u.id, u.username, u.full_name fullName, u.role_id roleId, r.name roleName, u.is_active isActive FROM users u JOIN roles r ON r.id = u.role_id ORDER BY u.full_name').all()));
+  router.get('/users', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT u.id, u.username, u.full_name fullName, u.role_id roleId, u.staff_id staffId, r.name roleName, u.is_active isActive FROM users u JOIN roles r ON r.id = u.role_id ORDER BY u.full_name').all()));
   router.post('/users', requirePermission('settings', 'create'), (req, res) => {
-    const { username, password, fullName, roleId } = req.body;
-    const result = getDb().prepare('INSERT INTO users (username, password_hash, full_name, role_id) VALUES (?, ?, ?, ?)').run(username, bcrypt.hashSync(password, 12), fullName, roleId);
-    audit(req, { action: 'create', entity: 'users', entityId: result.lastInsertRowid, newValue: { username, fullName, roleId } });
+    const { username, password, fullName, roleId, staffId } = req.body;
+    const result = getDb().prepare('INSERT INTO users (username, password_hash, full_name, role_id, staff_id) VALUES (?, ?, ?, ?, ?)').run(username, bcrypt.hashSync(password, 12), fullName, roleId, staffId ?? null);
+    audit(req, { action: 'create', entity: 'users', entityId: result.lastInsertRowid, newValue: { username, fullName, roleId, staffId } });
     res.status(201).json({ id: result.lastInsertRowid });
   });
 
@@ -89,8 +89,8 @@ export function commonRoutes() {
   router.get('/documents', requirePermission('documents', 'view'), (_req, res) => res.json(getDb().prepare('SELECT * FROM documents ORDER BY created_at DESC').all()));
   router.post('/documents/import-master-list', requirePermission('documents', 'create'), (req, res) => { audit(req, { action: 'create', entity: 'documents', newValue: req.body }); res.json({ ok: true, message: 'MVP import placeholder accepted. CSV parsing will be implemented in the next phase.' }); });
 
-  router.get('/actions', requirePermission('nc_capa', 'view'), (_req, res) => res.json(getDb().prepare('SELECT * FROM actions ORDER BY created_at DESC').all()));
-  router.post('/actions', requirePermission('nc_capa', 'create'), (req, res) => { const r = getDb().prepare('INSERT INTO actions (title, module_key, priority, due_date, created_by) VALUES (?, ?, ?, ?, ?)').run(req.body.title, req.body.moduleKey, req.body.priority ?? 'normal', req.body.dueDate ?? null, req.user!.id); audit(req, { action: 'create', entity: 'actions', entityId: r.lastInsertRowid, newValue: req.body }); res.status(201).json({ id: r.lastInsertRowid }); });
+  router.get('/actions', requirePermission('actions', 'view'), (_req, res) => res.json(getDb().prepare('SELECT * FROM actions ORDER BY created_at DESC').all()));
+  router.post('/actions', requirePermission('actions', 'create'), (req, res) => { const r = getDb().prepare('INSERT INTO actions (title, module_key, priority, due_date, created_by) VALUES (?, ?, ?, ?, ?)').run(req.body.title, req.body.moduleKey, req.body.priority ?? 'normal', req.body.dueDate ?? null, req.user!.id); audit(req, { action: 'create', entity: 'actions', entityId: r.lastInsertRowid, newValue: req.body }); res.status(201).json({ id: r.lastInsertRowid }); });
 
   router.get('/devices', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT * FROM devices ORDER BY created_at DESC').all()));
   router.post('/devices/request-pairing', requirePermission('settings', 'create'), (req, res) => { const code = Math.random().toString(36).slice(2, 10).toUpperCase(); const r = getDb().prepare('INSERT INTO devices (device_code, name, type) VALUES (?, ?, ?)').run(code, req.body.name, req.body.type ?? 'desktop'); audit(req, { action: 'create', entity: 'devices', entityId: r.lastInsertRowid, newValue: { code, ...req.body } }); res.status(201).json({ id: r.lastInsertRowid, code }); });

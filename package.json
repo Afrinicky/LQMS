@@ -11,7 +11,7 @@
     "dev:electron": "wait-on tcp:5173 tcp:4317 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 API_PORT=4317 electron .",
     "api": "tsx server/index.ts",
     "typecheck": "tsc --noEmit",
-    "build": "tsc --noEmit && tsc -p tsconfig.electron.json && node scripts/foundation-build.mjs",
+    "build": "tsc --noEmit && vite build && tsc -p tsconfig.electron.json",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -27,6 +27,12 @@
     "react-router-dom": "latest"
   },
   "devDependencies": {
+    "@types/cors": "latest",
+    "@types/express": "latest",
+    "@types/multer": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
     "concurrently": "latest",
     "cross-env": "latest",
     "electron": "latest",

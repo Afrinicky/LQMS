@@ -12,6 +12,7 @@ export const MODULES: ModuleDefinition[] = [
   { key: 'documents', label: 'Documents & Records', path: '/documents', protected: true },
   { key: 'organisation', label: 'Organisation & Leadership', path: '/organisation', protected: true },
   { key: 'personnel', label: 'Personnel Management', path: '/personnel', protected: true },
+  { key: 'actions', label: 'Action Tracker', path: '/actions', protected: true },
   { key: 'customer_focus', label: 'Customer Focus', path: '/customer-focus', placeholder: true },
   { key: 'equipment', label: 'Equipment Management', path: '/equipment', placeholder: true },
   { key: 'assessments', label: 'Assessments', path: '/assessments', placeholder: true },
