@@ -3,6 +3,10 @@ import cors from 'cors';
 import setupRoutes from './routes/setup.js';
 import authRoutes from './routes/auth.js';
 import { commonRoutes } from './routes/common.js';
+import { nonconformityRoutes } from './routes/nonconformities.js';
+import { capaRoutes } from './routes/capa.js';
+import { complaintsRoutes } from './routes/complaints.js';
+import { riskRoutes } from './routes/risks.js';
 import { optionalAuth } from './middleware/auth.js';
 import { ensureDataDirs } from './db/database.js';
 import { seedDefaults } from './db/seed.js';
@@ -17,6 +21,10 @@ export function createApiServer() {
   app.get('/api/health', (_req, res) => res.json({ ok: true, product: 'SECH_LIMS by Nickland', lanReady: true }));
   app.use('/api/setup', setupRoutes);
   app.use('/api/auth', authRoutes);
+  app.use('/api/nonconformities', nonconformityRoutes());
+  app.use('/api/capa', capaRoutes());
+  app.use('/api/complaints', complaintsRoutes());
+  app.use('/api/risks', riskRoutes());
   app.use('/api', commonRoutes());
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const message = err instanceof Error ? err.message : 'Unexpected server error';

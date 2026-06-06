@@ -5,8 +5,19 @@ import { getDb } from './database.js';
 export function seedDefaults() {
   const db = getDb();
   const tx = db.transaction(() => {
-    db.prepare('INSERT OR IGNORE INTO roles (name, description, is_system) VALUES (?, ?, ?)').run('System Administrator', 'Full foundation administration role.', 1);
-    db.prepare('INSERT OR IGNORE INTO roles (name, description, is_system) VALUES (?, ?, ?)').run('Quality User', 'General QMS user role.', 1);
+    const rolesToSeed = [
+      { name: 'System Administrator', description: 'Full foundation administration role.' },
+      { name: 'Laboratory Manager', description: 'Lab leadership role for oversight of quality and operations.' },
+      { name: 'Quality Manager', description: 'Lead quality assurance, corrective action, and review workflows.' },
+      { name: 'Quality Team Member', description: 'Operational QMS user for investigations, CAPA, and action follow-up.' },
+      { name: 'Section Head', description: 'Section manager with oversight for department-scoped quality records.' },
+      { name: 'Biomedical Scientist', description: 'Technical staff member assigned to quality and operational records.' },
+      { name: 'Technician', description: 'Frontline technical staff with access to assigned quality actions and records.' },
+      { name: 'Quality User', description: 'General QMS user role.', is_system: 1 }
+    ];
+    for (const role of rolesToSeed) {
+      db.prepare('INSERT OR IGNORE INTO roles (name, description, is_system) VALUES (?, ?, ?)').run(role.name, role.description, role.is_system ?? 0);
+    }
     for (const module of MODULES) {
       db.prepare('INSERT OR IGNORE INTO system_modules (key, label, path, enabled, alerts_paused) VALUES (?, ?, ?, 1, 0)').run(module.key, module.label, module.path);
       for (const action of PERMISSION_ACTIONS) {
@@ -24,10 +35,67 @@ export function seedDefaults() {
     db.prepare('INSERT OR IGNORE INTO locations (name, description) VALUES (?, ?)').run('Main Laboratory', 'Default local site location.');
     db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('setupComplete', 'false')").run();
     db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('hostMode', 'true')").run();
+
+    const rolePermissionsMap: Record<string, Record<string, string[]>> = {
+      'Laboratory Manager': {
+        nc_capa: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        complaints: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        risks: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        actions: ['view', 'create', 'edit', 'approve', 'export', 'print']
+      },
+      'Quality Manager': {
+        nc_capa: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        complaints: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        risks: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        actions: ['view', 'create', 'edit', 'approve', 'export', 'print']
+      },
+      'Quality Team Member': {
+        nc_capa: ['view', 'create', 'edit', 'print'],
+        complaints: ['view', 'create', 'edit', 'print'],
+        risks: ['view', 'create', 'edit', 'print'],
+        actions: ['view', 'create', 'edit', 'print']
+      },
+      'Section Head': {
+        nc_capa: ['view', 'create', 'edit', 'print'],
+        complaints: ['view', 'create', 'edit', 'print'],
+        risks: ['view', 'create', 'edit', 'print'],
+        actions: ['view', 'create', 'edit', 'print']
+      },
+      'Biomedical Scientist': {
+        nc_capa: ['view', 'create', 'print'],
+        complaints: ['view', 'create', 'print'],
+        risks: ['view', 'create', 'print'],
+        actions: ['view', 'create', 'print']
+      },
+      'Technician': {
+        nc_capa: ['view', 'create', 'print'],
+        complaints: ['view', 'create', 'print'],
+        risks: ['view', 'create', 'print'],
+        actions: ['view', 'create', 'print']
+      },
+      'Quality User': {
+        nc_capa: ['view', 'create', 'edit', 'print'],
+        complaints: ['view', 'create', 'edit', 'print'],
+        risks: ['view', 'create', 'edit', 'print'],
+        actions: ['view', 'create', 'edit', 'print']
+      }
+    };
+
     const adminRole = db.prepare('SELECT id FROM roles WHERE name = ?').get('System Administrator') as { id: number };
-    const permissions = db.prepare('SELECT id FROM permissions').all() as { id: number }[];
-    for (const permission of permissions) {
+    const allPermissions = db.prepare('SELECT id, module_key, action FROM permissions').all() as { id: number; module_key: string; action: string }[];
+
+    for (const permission of allPermissions) {
       db.prepare('INSERT OR IGNORE INTO role_permissions (role_id, permission_id, allowed, source) VALUES (?, ?, 1, ?)').run(adminRole.id, permission.id, 'Role default');
+    }
+
+    for (const [roleName, modulePermissions] of Object.entries(rolePermissionsMap)) {
+      const role = db.prepare('SELECT id FROM roles WHERE name = ?').get(roleName) as { id: number } | undefined;
+      if (!role) continue;
+      for (const permission of allPermissions) {
+        if (modulePermissions[permission.module_key]?.includes(permission.action)) {
+          db.prepare('INSERT OR REPLACE INTO role_permissions (role_id, permission_id, allowed, source) VALUES (?, ?, 1, ?)').run(role.id, permission.id, 'Role default');
+        }
+      }
     }
   });
   tx();

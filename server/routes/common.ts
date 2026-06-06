@@ -18,6 +18,17 @@ export function commonRoutes() {
     const db = getDb();
     res.json({ documents: db.prepare('SELECT COUNT(*) count FROM documents').get(), actionsOpen: db.prepare("SELECT COUNT(*) count FROM actions WHERE status != 'closed'").get(), staff: db.prepare('SELECT COUNT(*) count FROM staff').get(), modulesEnabled: db.prepare('SELECT COUNT(*) count FROM system_modules WHERE enabled = 1').get(), latestBackup: db.prepare('SELECT file_name FROM backup_logs ORDER BY id DESC LIMIT 1').get() });
   });
+  router.get('/dashboard/qms-summary', (_req, res) => {
+    const db = getDb();
+    res.json({
+      openNCs: db.prepare("SELECT COUNT(*) count FROM nonconforming_events WHERE status != 'closed'").get(),
+      openCAPAs: db.prepare("SELECT COUNT(*) count FROM capa_records WHERE status != 'closed'").get(),
+      pendingComplaints: db.prepare("SELECT COUNT(*) count FROM complaints WHERE status != 'closed'").get(),
+      highRisks: db.prepare("SELECT COUNT(*) count FROM risks WHERE risk_level IN ('High','Critical') AND status != 'closed'").get(),
+      myAssignedActions: db.prepare('SELECT COUNT(*) count FROM actions WHERE assigned_to_staff_id = ? AND status != ?').get(_req.user?.id ?? null, 'Closed'),
+      overdueActions: db.prepare('SELECT COUNT(*) count FROM actions WHERE due_date IS NOT NULL AND due_date < CURRENT_TIMESTAMP AND status != ?').get('Closed')
+    });
+  });
 
   router.get('/roles', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT id, name, description, is_system isSystem FROM roles ORDER BY name').all()));
   router.get('/users', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT u.id, u.username, u.full_name fullName, u.role_id roleId, u.staff_id staffId, s.full_name staffName, r.name roleName, u.is_active isActive FROM users u JOIN roles r ON r.id = u.role_id LEFT JOIN staff s ON s.id = u.staff_id ORDER BY u.full_name').all()));
@@ -97,8 +108,65 @@ export function commonRoutes() {
   router.get('/documents', requirePermission('documents', 'view'), (_req, res) => res.json(getDb().prepare('SELECT * FROM documents ORDER BY created_at DESC').all()));
   router.post('/documents/import-master-list', requirePermission('documents', 'create'), (req, res) => { audit(req, { action: 'create', entity: 'documents', newValue: req.body }); res.json({ ok: true, message: 'MVP import placeholder accepted. CSV parsing will be implemented in the next phase.' }); });
 
-  router.get('/actions', requirePermission('actions', 'view'), (_req, res) => res.json(getDb().prepare('SELECT * FROM actions ORDER BY created_at DESC').all()));
-  router.post('/actions', requirePermission('actions', 'create'), (req, res) => { const r = getDb().prepare('INSERT INTO actions (title, module_key, priority, due_date, created_by) VALUES (?, ?, ?, ?, ?)').run(req.body.title, req.body.moduleKey, req.body.priority ?? 'normal', req.body.dueDate ?? null, req.user!.id); audit(req, { action: 'create', entity: 'actions', entityId: r.lastInsertRowid, newValue: req.body }); res.status(201).json({ id: r.lastInsertRowid }); });
+  router.get('/actions', requirePermission('actions', 'view'), (req, res) => {
+    const db = getDb();
+    const filters = [];
+    const params: unknown[] = [];
+    let query = 'SELECT * FROM actions';
+    if (req.query.assignedToStaffId) {
+      filters.push('assigned_to_staff_id = ?');
+      params.push(Number(req.query.assignedToStaffId));
+    }
+    if (req.query.status) {
+      filters.push('status = ?');
+      params.push(String(req.query.status));
+    }
+    if (req.query.overdue === 'true') {
+      filters.push('due_date IS NOT NULL AND due_date < CURRENT_TIMESTAMP AND status != ?');
+      params.push('Closed');
+    }
+    if (filters.length) query += ` WHERE ${filters.join(' AND ')}`;
+    query += ' ORDER BY created_at DESC';
+    res.json(db.prepare(query).all(...params));
+  });
+  router.post('/actions', requirePermission('actions', 'create'), (req, res) => {
+    const r = getDb().prepare('INSERT INTO actions (title, module_key, source_module, source_record_id, description, priority, assigned_to_staff_id, due_date, status, evidence_required, completion_notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+      req.body.title,
+      req.body.moduleKey ?? 'actions',
+      req.body.sourceModule ?? null,
+      req.body.sourceRecordId ?? null,
+      req.body.description ?? null,
+      req.body.priority ?? 'normal',
+      req.body.assignedToStaffId ?? null,
+      req.body.dueDate ?? null,
+      req.body.status ?? 'Not started',
+      req.body.evidenceRequired ? 1 : 0,
+      req.body.completionNotes ?? null,
+      req.user!.id
+    );
+    audit(req, { action: 'create', entity: 'actions', entityId: r.lastInsertRowid, newValue: req.body });
+    res.status(201).json({ id: r.lastInsertRowid });
+  });
+  router.put('/actions/:id', requirePermission('actions', 'edit'), (req, res) => {
+    const db = getDb();
+    const oldValue = db.prepare('SELECT * FROM actions WHERE id = ?').get(req.params.id);
+    if (!oldValue) return res.status(404).json({ error: 'Action not found' });
+    db.prepare('UPDATE actions SET title = ?, source_module = ?, source_record_id = ?, description = ?, priority = ?, assigned_to_staff_id = ?, due_date = ?, status = ?, evidence_required = ?, completion_notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+      req.body.title ?? oldValue.title,
+      req.body.sourceModule ?? oldValue.source_module,
+      req.body.sourceRecordId ?? oldValue.source_record_id,
+      req.body.description ?? oldValue.description,
+      req.body.priority ?? oldValue.priority,
+      req.body.assignedToStaffId ?? oldValue.assigned_to_staff_id,
+      req.body.dueDate ?? oldValue.due_date,
+      req.body.status ?? oldValue.status,
+      req.body.evidenceRequired ? 1 : oldValue.evidence_required,
+      req.body.completionNotes ?? oldValue.completion_notes,
+      req.params.id
+    );
+    audit(req, { action: 'edit', entity: 'actions', entityId: req.params.id, oldValue, newValue: req.body });
+    res.json({ ok: true });
+  });
 
   router.get('/permissions', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT * FROM permissions ORDER BY module_key, action').all()));
   router.post('/permissions/role', requirePermission('settings', 'edit'), (req, res) => {
