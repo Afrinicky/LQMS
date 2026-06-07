@@ -47,6 +47,8 @@ export function commonRoutes() {
     });
   });
 
+  // Deprecated: kept for backward compatibility. New code should use the per-module
+  // summary endpoints below (/dashboard/iqc-summary etc).
   router.get('/dashboard/technical-quality-summary', (_req, res) => {
     const db = getDb();
     const now = new Date().toISOString();
@@ -55,13 +57,68 @@ export function commonRoutes() {
     const count = (sql: string, ...params: unknown[]) => (db.prepare(sql).get(...params) as { count: number }).count;
     res.json({
       activeIqcMaterials: count('SELECT COUNT(*) count FROM iqc_materials WHERE is_active = 1'),
-      iqcFailuresThisMonth: count("SELECT COUNT(*) count FROM iqc_results WHERE status IN ('rejected','warning') AND run_date >= ?", monthStartIso),
+      iqcFailuresThisMonth: count("SELECT COUNT(*) count FROM iqc_results WHERE status IN ('rejected','warning','out_of_control') AND run_date >= ?", monthStartIso),
       iqcResultsPendingReview: count("SELECT COUNT(*) count FROM iqc_results WHERE reviewed_at IS NULL AND status != 'accepted'"),
       eqaEventsDue: count('SELECT COUNT(*) count FROM eqa_events WHERE submission_due_date IS NOT NULL AND submitted_date IS NULL AND submission_due_date <= ?', now),
       eqaUnsatisfactoryEvents: count("SELECT COUNT(*) count FROM eqa_events WHERE performance_status IN ('unsatisfactory','poor','fail','failed')"),
       openVerifications: count("SELECT COUNT(*) count FROM method_verifications WHERE status IN ('planned','in_progress')"),
       equipmentVerificationsDue: count("SELECT COUNT(*) count FROM equipment_verifications WHERE status IN ('planned','in_progress')"),
       muRecordsDueForReview: count("SELECT COUNT(*) count FROM measurement_uncertainty_records WHERE status IN ('draft','in_review')")
+    });
+  });
+
+  router.get('/dashboard/iqc-summary', (_req, res) => {
+    const db = getDb();
+    const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+    const yearStart = new Date(); yearStart.setMonth(0, 1); yearStart.setHours(0, 0, 0, 0);
+    const count = (sql: string, ...params: unknown[]) => (db.prepare(sql).get(...params) as { count: number }).count;
+    res.json({
+      activeMaterials: count('SELECT COUNT(*) count FROM iqc_materials WHERE is_active = 1'),
+      resultsThisMonth: count('SELECT COUNT(*) count FROM iqc_results WHERE run_date >= ?', monthStart.toISOString()),
+      failedThisMonth: count("SELECT COUNT(*) count FROM iqc_results WHERE status IN ('rejected','out_of_control','warning') AND run_date >= ?", monthStart.toISOString()),
+      resultsPendingReview: count("SELECT COUNT(*) count FROM iqc_results WHERE reviewed_at IS NULL AND status != 'accepted'"),
+      lotChangesThisYear: count('SELECT COUNT(*) count FROM iqc_lot_changes WHERE change_date >= ?', yearStart.toISOString())
+    });
+  });
+
+  router.get('/dashboard/eqa-summary', (_req, res) => {
+    const db = getDb();
+    const now = new Date().toISOString();
+    const dueSoonCutoff = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    const count = (sql: string, ...params: unknown[]) => (db.prepare(sql).get(...params) as { count: number }).count;
+    res.json({
+      activePrograms: count('SELECT COUNT(*) count FROM eqa_programs WHERE is_active = 1'),
+      openEvents: count('SELECT COUNT(*) count FROM eqa_events WHERE submitted_date IS NULL'),
+      eventsDueSoon: count('SELECT COUNT(*) count FROM eqa_events WHERE submitted_date IS NULL AND submission_due_date IS NOT NULL AND submission_due_date <= ? AND submission_due_date >= ?', dueSoonCutoff, now),
+      unsatisfactoryEvents: count("SELECT COUNT(*) count FROM eqa_events WHERE performance_status IN ('unsatisfactory','poor','fail','failed')"),
+      eventsRequiringCorrectiveAction: count('SELECT COUNT(*) count FROM eqa_events WHERE corrective_action_required = 1')
+    });
+  });
+
+  router.get('/dashboard/verification-summary', (_req, res) => {
+    const db = getDb();
+    const yearStart = new Date(); yearStart.setMonth(0, 1); yearStart.setHours(0, 0, 0, 0);
+    const count = (sql: string, ...params: unknown[]) => (db.prepare(sql).get(...params) as { count: number }).count;
+    res.json({
+      openMethodVerifications: count("SELECT COUNT(*) count FROM method_verifications WHERE status IN ('planned','in_progress')"),
+      completedVerifications: count("SELECT COUNT(*) count FROM method_verifications WHERE status IN ('completed','approved')"),
+      pendingApproval: count("SELECT COUNT(*) count FROM method_verifications WHERE status = 'completed' AND approved_by_staff_id IS NULL"),
+      equipmentVerificationsThisYear: count('SELECT COUNT(*) count FROM equipment_verifications WHERE verification_date >= ?', yearStart.toISOString()),
+      equipmentVerificationsPendingApproval: count("SELECT COUNT(*) count FROM equipment_verifications WHERE status IN ('planned','in_progress','completed') AND approved_by_staff_id IS NULL")
+    });
+  });
+
+  router.get('/dashboard/measurement-uncertainty-summary', (_req, res) => {
+    const db = getDb();
+    const yearStart = new Date(); yearStart.setMonth(0, 1); yearStart.setHours(0, 0, 0, 0);
+    const dueSoonCutoff = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    const count = (sql: string, ...params: unknown[]) => (db.prepare(sql).get(...params) as { count: number }).count;
+    res.json({
+      activeRecords: count("SELECT COUNT(*) count FROM measurement_uncertainty_records WHERE status != 'archived'"),
+      recordsPendingReview: count("SELECT COUNT(*) count FROM measurement_uncertainty_records WHERE status = 'draft'"),
+      recordsPendingApproval: count("SELECT COUNT(*) count FROM measurement_uncertainty_records WHERE status = 'in_review'"),
+      recordsDueForReview: count("SELECT COUNT(*) count FROM measurement_uncertainty_records WHERE status IN ('draft','in_review') AND calculation_date <= ?", dueSoonCutoff),
+      recordsCompletedThisYear: count("SELECT COUNT(*) count FROM measurement_uncertainty_records WHERE status = 'approved' AND calculation_date >= ?", yearStart.toISOString())
     });
   });
 

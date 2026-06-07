@@ -51,6 +51,15 @@ export function verificationValidationRoutes() {
     res.status(201).json({ id: verId, verificationNumber });
   });
 
+  router.get('/equipment/:id', requirePermission('verification_validation', 'view'), (req, res) => {
+    const db = getDb();
+    const record = db.prepare(`SELECT ev.*, e.name AS equipment_name, e.equipment_number FROM equipment_verifications ev JOIN equipment_items e ON e.id = ev.equipment_id WHERE ev.id = ?`).get(req.params.id);
+    if (!record) return res.status(404).json({ error: 'Equipment verification not found' });
+    const links = db.prepare('SELECT * FROM record_links WHERE (source_module_key = ? AND source_record_type = ? AND source_record_id = ?) OR (target_module_key = ? AND target_record_type = ? AND target_record_id = ?)')
+      .all('verification_validation', 'equipment_verifications', String(req.params.id), 'verification_validation', 'equipment_verifications', String(req.params.id));
+    res.json({ ...record, links });
+  });
+
   router.put('/equipment/:id', requirePermission('verification_validation', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM equipment_verifications WHERE id = ?').get(req.params.id) as any;

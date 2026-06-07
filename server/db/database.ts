@@ -439,4 +439,9 @@ CREATE TABLE IF NOT EXISTS measurement_uncertainty_records (
   updated_at TEXT
 );
 `);
+
+  // Phase 4 polish: extend iqc_results with z_score
+  const iqcResultColumns = database.prepare("PRAGMA table_info(iqc_results)").all() as Array<{ name: string }>;
+  const iqcResultNames = new Set(iqcResultColumns.map(col => col.name));
+  if (!iqcResultNames.has('z_score')) database.exec('ALTER TABLE iqc_results ADD COLUMN z_score REAL');
 }

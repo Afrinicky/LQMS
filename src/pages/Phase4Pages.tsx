@@ -7,7 +7,9 @@ import type {
   IqcMaterial, IqcResult, IqcLotChange,
   EqaProgram, EqaEvent, EqaResultRow,
   MethodVerification, VerificationExperiment, EquipmentVerification,
-  MeasurementUncertaintyRecord, TechnicalQualitySummary
+  MeasurementUncertaintyRecord,
+  IqcSummary, EqaSummary, VerificationSummary, MeasurementUncertaintySummary,
+  LeveyJenningsData, EquipmentVerificationDetail
 } from '../../shared/types/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
@@ -34,6 +36,51 @@ function staffName(staffList: Staff[], id?: number | null) {
   return staffList.find(s => s.id === id)?.fullName || `Staff #${id}`;
 }
 
+function LeveyJenningsChart({ data }: { data: LeveyJenningsData }) {
+  const { points, targetMean, targetSd } = data;
+  if (!points.length) return <p>No results to chart yet.</p>;
+  const w = 720, h = 280, padL = 48, padR = 16, padT = 16, padB = 28;
+  const innerW = w - padL - padR, innerH = h - padT - padB;
+  const mean = targetMean ?? 0;
+  const sd = targetSd ?? 0;
+  const hasStats = targetMean !== null && targetMean !== undefined && targetSd !== null && targetSd !== undefined && targetSd > 0;
+  // Y-axis spans mean ± 4 SD when stats available; otherwise data range with 10% padding
+  let yMin: number, yMax: number;
+  if (hasStats) { yMin = mean - 4 * sd; yMax = mean + 4 * sd; }
+  else {
+    const values = points.map(p => p.result_value);
+    const lo = Math.min(...values), hi = Math.max(...values);
+    const span = (hi - lo) || 1;
+    yMin = lo - span * 0.1; yMax = hi + span * 0.1;
+  }
+  const x = (i: number) => padL + (points.length === 1 ? innerW / 2 : (i * innerW) / (points.length - 1));
+  const y = (v: number) => padT + innerH - ((v - yMin) / (yMax - yMin)) * innerH;
+  const colorFor = (status: string) => status === 'accepted' ? 'var(--success)' : status === 'warning' ? 'var(--warning)' : 'var(--danger)';
+  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${x(i).toFixed(1)} ${y(p.result_value).toFixed(1)}`).join(' ');
+  const refLine = (val: number, label: string, dashed: boolean) => <g key={label}>
+    <line x1={padL} x2={w - padR} y1={y(val)} y2={y(val)} stroke="var(--border)" strokeWidth={1} strokeDasharray={dashed ? '4 4' : undefined} />
+    <text x={padL - 6} y={y(val) + 4} fontSize={10} textAnchor="end" fill="var(--muted)">{label}</text>
+  </g>;
+  return <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label="Levey-Jennings chart" style={{ width: '100%', maxWidth: w, height: 'auto', background: '#fff', border: '1px solid var(--border)', borderRadius: 12 }}>
+    {hasStats && <>
+      {refLine(mean + 3 * sd, '+3 SD', true)}
+      {refLine(mean + 2 * sd, '+2 SD', true)}
+      {refLine(mean + sd, '+1 SD', true)}
+      {refLine(mean, 'Mean', false)}
+      {refLine(mean - sd, '-1 SD', true)}
+      {refLine(mean - 2 * sd, '-2 SD', true)}
+      {refLine(mean - 3 * sd, '-3 SD', true)}
+    </>}
+    {!hasStats && refLine((yMin + yMax) / 2, 'mid', false)}
+    <path d={linePath} fill="none" stroke="var(--navy)" strokeWidth={1.5} />
+    {points.map((p, i) => <circle key={i} cx={x(i)} cy={y(p.result_value)} r={4} fill={colorFor(p.status)} stroke="#fff" strokeWidth={1}>
+      <title>{p.run_date}{p.run_time ? ' ' + p.run_time : ''} – {p.result_value}{p.z_score === null || p.z_score === undefined ? '' : ` (z=${p.z_score.toFixed(2)})`} – ${p.status}${p.rule_violation ? ' / ' + p.rule_violation : ''}</title>
+    </circle>)}
+    <text x={padL} y={h - 8} fontSize={10} fill="var(--muted)">{points[0].run_date}</text>
+    <text x={w - padR} y={h - 8} fontSize={10} textAnchor="end" fill="var(--muted)">{points[points.length - 1].run_date}</text>
+  </svg>;
+}
+
 // ============= IQC =============
 export function IqcPage() {
   const { isEnabled } = useModules();
@@ -42,7 +89,9 @@ export function IqcPage() {
   const [materials, setMaterials] = useState<IqcMaterial[]>([]);
   const [results, setResults] = useState<IqcResult[]>([]);
   const [lotChanges, setLotChanges] = useState<IqcLotChange[]>([]);
-  const [summary, setSummary] = useState<TechnicalQualitySummary | null>(null);
+  const [summary, setSummary] = useState<IqcSummary | null>(null);
+  const [lj, setLj] = useState<LeveyJenningsData | null>(null);
+  const [ljMaterialId, setLjMaterialId] = useState<string>('');
   const [materialForm, setMaterialForm] = useState({ materialName: '', testName: '', analyte: '', lotNumber: '', manufacturer: '', expiryDate: '', storageCondition: '', sectionId: '', targetMean: '', targetSd: '', acceptableLow: '', acceptableHigh: '', equipmentId: '', isActive: true });
   const [resultForm, setResultForm] = useState({ iqcMaterialId: '', runDate: '', runTime: '', resultValue: '', equipmentId: '', comment: '', immediateAction: '' });
   const [lotForm, setLotForm] = useState({ oldIqcMaterialId: '', newIqcMaterialId: '', changeDate: '', reason: '', verificationSummary: '' });
@@ -54,7 +103,7 @@ export function IqcPage() {
         api<IqcMaterial[]>('/iqc/materials'),
         api<IqcResult[]>('/iqc/results'),
         api<IqcLotChange[]>('/iqc/lot-changes'),
-        api<TechnicalQualitySummary>('/dashboard/technical-quality-summary').catch(() => null)
+        api<IqcSummary>('/dashboard/iqc-summary').catch(() => null)
       ]);
       setMaterials(mats); setResults(ress); setLotChanges(lots);
       if (sum) setSummary(sum);
@@ -62,6 +111,12 @@ export function IqcPage() {
   }
   useEffect(() => { if (isEnabled('iqc')) void load(); }, [isEnabled]);
   if (!isEnabled('iqc')) return <DisabledModule />;
+
+  async function loadLj(id: string) {
+    if (!id) { setLj(null); return; }
+    try { setLj(await api<LeveyJenningsData>(`/iqc/materials/${id}/levey-jennings`)); }
+    catch (e) { setError((e as Error).message); }
+  }
 
   async function submitMaterial(e: FormEvent) {
     e.preventDefault(); setError(null);
@@ -104,7 +159,7 @@ export function IqcPage() {
     catch (e) { setError((e as Error).message); }
   }
 
-  const tabs = ['Dashboard', 'IQC Materials', 'New Material', 'Result Entry', 'QC Failures', 'Lot Changes', 'Reports'];
+  const tabs = ['Dashboard', 'IQC Materials', 'New Material', 'Result Entry', 'QC Failures', 'Levey-Jennings', 'Lot Changes', 'Reports'];
   const failures = results.filter(r => r.status !== 'accepted');
 
   return <div className="module-page">
@@ -113,9 +168,11 @@ export function IqcPage() {
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && summary && <div className="cards">
-      <div className="card"><h4>Active IQC materials</h4><p className="metric">{summary.activeIqcMaterials}</p></div>
-      <div className="card"><h4>IQC failures this month</h4><p className="metric">{summary.iqcFailuresThisMonth}</p></div>
-      <div className="card"><h4>Pending review</h4><p className="metric">{summary.iqcResultsPendingReview}</p></div>
+      <div className="card"><h4>Active materials</h4><p className="metric">{summary.activeMaterials}</p></div>
+      <div className="card"><h4>Results this month</h4><p className="metric">{summary.resultsThisMonth}</p></div>
+      <div className="card"><h4>Failed/out-of-control this month</h4><p className="metric">{summary.failedThisMonth}</p></div>
+      <div className="card"><h4>Pending review</h4><p className="metric">{summary.resultsPendingReview}</p></div>
+      <div className="card"><h4>Lot changes this year</h4><p className="metric">{summary.lotChangesThisYear}</p></div>
     </div>}
 
     {tab === 'IQC Materials' && <table className="data-table"><thead><tr><th>Code</th><th>Name</th><th>Test</th><th>Analyte</th><th>Lot</th><th>Expiry</th><th>Status</th></tr></thead><tbody>
@@ -163,6 +220,19 @@ export function IqcPage() {
       </tr>)}
     </tbody></table>}
 
+    {tab === 'Levey-Jennings' && <>
+      <label>Material<select value={ljMaterialId} onChange={e => { setLjMaterialId(e.target.value); void loadLj(e.target.value); }}><option value="">—</option>{materials.map(m => <option key={m.id} value={m.id}>{m.material_name} / {m.lot_number}</option>)}</select></label>
+      {lj && <>
+        <p>Mean: {lj.targetMean ?? '—'} | SD: {lj.targetSd ?? '—'} | points: {lj.points.length}</p>
+        <LeveyJenningsChart data={lj} />
+        <table className="data-table"><thead><tr><th>Date</th><th>Time</th><th>Value</th><th>z</th><th>Status</th><th>Rule</th></tr></thead><tbody>
+          {lj.points.map((p, i) => <tr key={i}><td>{p.run_date}</td><td>{p.run_time || '—'}</td><td>{p.result_value}</td><td>{p.z_score === null || p.z_score === undefined ? '—' : p.z_score.toFixed(2)}</td><td>{formatBadge(p.status)}</td><td>{p.rule_violation || '—'}</td></tr>)}
+        </tbody></table>
+      </>}
+      {!lj && ljMaterialId && <p>Loading…</p>}
+      {!ljMaterialId && <p>Select an IQC material to load its recent results.</p>}
+    </>}
+
     {tab === 'Lot Changes' && <>
       <form className="form-grid" onSubmit={submitLotChange}>
         <label>Old material<select value={lotForm.oldIqcMaterialId} onChange={e => setLotForm({ ...lotForm, oldIqcMaterialId: e.target.value })}><option value="">—</option>{materials.map(m => <option key={m.id} value={m.id}>{m.material_name} / {m.lot_number}</option>)}</select></label>
@@ -188,7 +258,7 @@ export function EqaPage() {
   const [tab, setTab] = useState('Dashboard');
   const [programs, setPrograms] = useState<EqaProgram[]>([]);
   const [events, setEvents] = useState<EqaEvent[]>([]);
-  const [summary, setSummary] = useState<TechnicalQualitySummary | null>(null);
+  const [summary, setSummary] = useState<EqaSummary | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<(EqaEvent & { results?: EqaResultRow[] }) | null>(null);
   const [programForm, setProgramForm] = useState({ programName: '', provider: '', testArea: '', sectionId: '', frequency: '', contact: '', isActive: true });
   const [eventForm, setEventForm] = useState({ eqaProgramId: '', cycleName: '', receivedDate: '', submissionDueDate: '', submittedDate: '', resultReceivedDate: '', performanceStatus: '', score: '', findings: '', responsibleStaffId: '' });
@@ -200,7 +270,7 @@ export function EqaPage() {
       const [progs, evs, sum] = await Promise.all([
         api<EqaProgram[]>('/eqa/programs'),
         api<EqaEvent[]>('/eqa/events'),
-        api<TechnicalQualitySummary>('/dashboard/technical-quality-summary').catch(() => null)
+        api<EqaSummary>('/dashboard/eqa-summary').catch(() => null)
       ]);
       setPrograms(progs); setEvents(evs);
       if (sum) setSummary(sum);
@@ -261,8 +331,11 @@ export function EqaPage() {
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && summary && <div className="cards">
-      <div className="card"><h4>EQA events due</h4><p className="metric">{summary.eqaEventsDue}</p></div>
-      <div className="card"><h4>Unsatisfactory events</h4><p className="metric">{summary.eqaUnsatisfactoryEvents}</p></div>
+      <div className="card"><h4>Active programs</h4><p className="metric">{summary.activePrograms}</p></div>
+      <div className="card"><h4>Open events</h4><p className="metric">{summary.openEvents}</p></div>
+      <div className="card"><h4>Events due soon</h4><p className="metric">{summary.eventsDueSoon}</p></div>
+      <div className="card"><h4>Unsatisfactory events</h4><p className="metric">{summary.unsatisfactoryEvents}</p></div>
+      <div className="card"><h4>Requiring corrective action</h4><p className="metric">{summary.eventsRequiringCorrectiveAction}</p></div>
     </div>}
 
     {tab === 'EQA Programs' && <table className="data-table"><thead><tr><th>Code</th><th>Program</th><th>Provider</th><th>Test area</th><th>Frequency</th><th>Active</th></tr></thead><tbody>
@@ -338,8 +411,9 @@ export function VerificationValidationPage() {
   const [tab, setTab] = useState('Dashboard');
   const [methods, setMethods] = useState<MethodVerification[]>([]);
   const [equipVerifs, setEquipVerifs] = useState<EquipmentVerification[]>([]);
-  const [summary, setSummary] = useState<TechnicalQualitySummary | null>(null);
+  const [summary, setSummary] = useState<VerificationSummary | null>(null);
   const [selected, setSelected] = useState<(MethodVerification & { experiments?: VerificationExperiment[] }) | null>(null);
+  const [selectedEquip, setSelectedEquip] = useState<EquipmentVerificationDetail | null>(null);
   const [methodForm, setMethodForm] = useState({ methodName: '', testName: '', verificationType: 'method_verification', equipmentId: '', reason: '', startDate: '', completionDate: '', parametersAssessed: '', acceptanceCriteria: '', summary: '', conclusion: '', status: 'in_progress' });
   const [expForm, setExpForm] = useState({ verificationId: '', experimentType: '', datePerformed: '', sampleCount: '', resultsSummary: '', acceptanceMet: false, performedByStaffId: '' });
   const [equipForm, setEquipForm] = useState({ equipmentId: '', verificationType: 'calibration_verification', verificationDate: '', reason: '', acceptanceCriteria: '', resultsSummary: '', conclusion: '', status: 'in_progress' });
@@ -350,7 +424,7 @@ export function VerificationValidationPage() {
       const [methodList, equipList, sum] = await Promise.all([
         api<MethodVerification[]>('/verification-validation'),
         api<EquipmentVerification[]>('/verification-validation/equipment'),
-        api<TechnicalQualitySummary>('/dashboard/technical-quality-summary').catch(() => null)
+        api<VerificationSummary>('/dashboard/verification-summary').catch(() => null)
       ]);
       setMethods(methodList); setEquipVerifs(equipList);
       if (sum) setSummary(sum);
@@ -399,7 +473,12 @@ export function VerificationValidationPage() {
   }
 
   async function approveEquip(id: number) {
-    try { await api(`/verification-validation/equipment/${id}/approve`, { method: 'POST', body: JSON.stringify({}) }); await load(); }
+    try { await api(`/verification-validation/equipment/${id}/approve`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selectedEquip?.id === id) await openEquip(id); }
+    catch (e) { setError((e as Error).message); }
+  }
+
+  async function openEquip(id: number) {
+    try { setSelectedEquip(await api<EquipmentVerificationDetail>(`/verification-validation/equipment/${id}`)); }
     catch (e) { setError((e as Error).message); }
   }
 
@@ -411,8 +490,11 @@ export function VerificationValidationPage() {
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && summary && <div className="cards">
-      <div className="card"><h4>Open method verifications</h4><p className="metric">{summary.openVerifications}</p></div>
-      <div className="card"><h4>Equipment verifications in progress</h4><p className="metric">{summary.equipmentVerificationsDue}</p></div>
+      <div className="card"><h4>Open method verifications</h4><p className="metric">{summary.openMethodVerifications}</p></div>
+      <div className="card"><h4>Completed verifications</h4><p className="metric">{summary.completedVerifications}</p></div>
+      <div className="card"><h4>Pending approval</h4><p className="metric">{summary.pendingApproval}</p></div>
+      <div className="card"><h4>Equipment verifications this year</h4><p className="metric">{summary.equipmentVerificationsThisYear}</p></div>
+      <div className="card"><h4>Equipment verifications pending approval</h4><p className="metric">{summary.equipmentVerificationsPendingApproval}</p></div>
     </div>}
 
     {tab === 'Method Verification Register' && <table className="data-table"><thead><tr><th>Number</th><th>Method</th><th>Test</th><th>Type</th><th>Equipment</th><th>Status</th><th></th></tr></thead><tbody>
@@ -474,9 +556,26 @@ export function VerificationValidationPage() {
       <table className="data-table"><thead><tr><th>Number</th><th>Equipment</th><th>Type</th><th>Date</th><th>Status</th><th></th></tr></thead><tbody>
         {equipVerifs.map(ev => <tr key={ev.id}>
           <td>{ev.verification_number}</td><td>{ev.equipment_name}</td><td>{ev.verification_type}</td><td>{ev.verification_date}</td><td>{formatBadge(ev.status)}</td>
-          <td>{ev.status !== 'approved' && <button onClick={() => approveEquip(ev.id)}>Approve</button>}</td>
+          <td>
+            <button onClick={() => openEquip(ev.id)}>Open</button>
+            {ev.status !== 'approved' && <button onClick={() => approveEquip(ev.id)}>Approve</button>}
+          </td>
         </tr>)}
       </tbody></table>
+      {selectedEquip && <div className="card" style={{ marginTop: 16 }}>
+        <h3>{selectedEquip.verification_number} – {selectedEquip.equipment_name}</h3>
+        <p>Status: {formatBadge(selectedEquip.status)} | Date: {selectedEquip.verification_date} | Type: {selectedEquip.verification_type}</p>
+        {selectedEquip.reason && <p><strong>Reason:</strong> {selectedEquip.reason}</p>}
+        {selectedEquip.acceptance_criteria && <p><strong>Acceptance criteria:</strong> {selectedEquip.acceptance_criteria}</p>}
+        {selectedEquip.results_summary && <p><strong>Results:</strong> {selectedEquip.results_summary}</p>}
+        {selectedEquip.conclusion && <p><strong>Conclusion:</strong> {selectedEquip.conclusion}</p>}
+        <p>Verified by staff #{selectedEquip.verified_by_staff_id ?? '—'} | Approved by staff #{selectedEquip.approved_by_staff_id ?? '—'}</p>
+        {selectedEquip.links && selectedEquip.links.length > 0 && <>
+          <h4>Linked records</h4>
+          <ul>{selectedEquip.links.map(l => <li key={l.id}>{l.source_module_key}/{l.source_record_type}#{l.source_record_id} → {l.target_module_key}/{l.target_record_type}#{l.target_record_id}{l.notes ? ` — ${l.notes}` : ''}</li>)}</ul>
+        </>}
+        <button className="secondary" onClick={() => setSelectedEquip(null)}>Close</button>
+      </div>}
     </>}
 
     {tab === 'Reports' && <p>Verification & validation reports will be added in a later phase.</p>}
@@ -489,7 +588,7 @@ export function MeasurementUncertaintyPage() {
   const { equipment } = useLookups();
   const [tab, setTab] = useState('Dashboard');
   const [records, setRecords] = useState<MeasurementUncertaintyRecord[]>([]);
-  const [summary, setSummary] = useState<TechnicalQualitySummary | null>(null);
+  const [summary, setSummary] = useState<MeasurementUncertaintySummary | null>(null);
   const [form, setForm] = useState({ testName: '', analyte: '', methodName: '', equipmentId: '', calculationDate: '', dataPeriodStart: '', dataPeriodEnd: '', sourceData: '', meanValue: '', sdValue: '', cvPercent: '', uncertaintyValue: '', expandedUncertainty: '', coverageFactor: '2', interpretation: '', status: 'draft' });
   const [error, setError] = useState<string | null>(null);
 
@@ -497,7 +596,7 @@ export function MeasurementUncertaintyPage() {
     try {
       const [recs, sum] = await Promise.all([
         api<MeasurementUncertaintyRecord[]>('/measurement-uncertainty'),
-        api<TechnicalQualitySummary>('/dashboard/technical-quality-summary').catch(() => null)
+        api<MeasurementUncertaintySummary>('/dashboard/measurement-uncertainty-summary').catch(() => null)
       ]);
       setRecords(recs);
       if (sum) setSummary(sum);
@@ -533,7 +632,11 @@ export function MeasurementUncertaintyPage() {
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && summary && <div className="cards">
-      <div className="card"><h4>MU records due for review</h4><p className="metric">{summary.muRecordsDueForReview}</p></div>
+      <div className="card"><h4>Active records</h4><p className="metric">{summary.activeRecords}</p></div>
+      <div className="card"><h4>Pending review</h4><p className="metric">{summary.recordsPendingReview}</p></div>
+      <div className="card"><h4>Pending approval</h4><p className="metric">{summary.recordsPendingApproval}</p></div>
+      <div className="card"><h4>Due for review</h4><p className="metric">{summary.recordsDueForReview}</p></div>
+      <div className="card"><h4>Completed this year</h4><p className="metric">{summary.recordsCompletedThisYear}</p></div>
     </div>}
 
     {tab === 'MU Register' && <table className="data-table"><thead><tr><th>Number</th><th>Test</th><th>Analyte</th><th>Method</th><th>Equipment</th><th>Date</th><th>U (k={records[0]?.coverage_factor ?? '—'})</th><th>Status</th></tr></thead><tbody>
