@@ -84,4 +84,175 @@ CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, 
   if (!actionNames.has('description')) database.exec('ALTER TABLE actions ADD COLUMN description TEXT');
   if (!actionNames.has('evidence_required')) database.exec('ALTER TABLE actions ADD COLUMN evidence_required INTEGER NOT NULL DEFAULT 0');
   if (!actionNames.has('completion_notes')) database.exec('ALTER TABLE actions ADD COLUMN completion_notes TEXT');
+
+  // Phase 3: extend equipment_items with maintenance/calibration scheduling fields
+  const equipmentColumns = database.prepare("PRAGMA table_info(equipment_items)").all() as Array<{ name: string }>;
+  const equipmentNames = new Set(equipmentColumns.map(col => col.name));
+  if (!equipmentNames.has('equipment_type')) database.exec('ALTER TABLE equipment_items ADD COLUMN equipment_type TEXT');
+  if (!equipmentNames.has('maintenance_frequency')) database.exec('ALTER TABLE equipment_items ADD COLUMN maintenance_frequency TEXT');
+  if (!equipmentNames.has('calibration_frequency')) database.exec('ALTER TABLE equipment_items ADD COLUMN calibration_frequency TEXT');
+  if (!equipmentNames.has('next_maintenance_due')) database.exec('ALTER TABLE equipment_items ADD COLUMN next_maintenance_due TEXT');
+  if (!equipmentNames.has('next_calibration_due')) database.exec('ALTER TABLE equipment_items ADD COLUMN next_calibration_due TEXT');
+  if (!equipmentNames.has('responsible_staff_id')) database.exec('ALTER TABLE equipment_items ADD COLUMN responsible_staff_id INTEGER REFERENCES staff(id)');
+  if (!equipmentNames.has('date_received')) database.exec('ALTER TABLE equipment_items ADD COLUMN date_received TEXT');
+  if (!equipmentNames.has('date_commissioned')) database.exec('ALTER TABLE equipment_items ADD COLUMN date_commissioned TEXT');
+  if (!equipmentNames.has('calibration_required')) database.exec('ALTER TABLE equipment_items ADD COLUMN calibration_required INTEGER NOT NULL DEFAULT 0');
+  if (!equipmentNames.has('notes')) database.exec('ALTER TABLE equipment_items ADD COLUMN notes TEXT');
+
+  // Phase 3: extend inventory_items
+  const inventoryColumns = database.prepare("PRAGMA table_info(inventory_items)").all() as Array<{ name: string }>;
+  const inventoryNames = new Set(inventoryColumns.map(col => col.name));
+  if (!inventoryNames.has('storage_requirement')) database.exec('ALTER TABLE inventory_items ADD COLUMN storage_requirement TEXT');
+  if (!inventoryNames.has('department_id')) database.exec('ALTER TABLE inventory_items ADD COLUMN department_id INTEGER REFERENCES departments(id)');
+  if (!inventoryNames.has('section_id')) database.exec('ALTER TABLE inventory_items ADD COLUMN section_id INTEGER REFERENCES sections(id)');
+  if (!inventoryNames.has('minimum_stock')) database.exec('ALTER TABLE inventory_items ADD COLUMN minimum_stock INTEGER NOT NULL DEFAULT 0');
+  if (!inventoryNames.has('is_active')) database.exec('ALTER TABLE inventory_items ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1');
+
+  // Phase 3: extend suppliers
+  const supplierColumns = database.prepare("PRAGMA table_info(suppliers)").all() as Array<{ name: string }>;
+  const supplierNames = new Set(supplierColumns.map(col => col.name));
+  if (!supplierNames.has('contact_person')) database.exec('ALTER TABLE suppliers ADD COLUMN contact_person TEXT');
+  if (!supplierNames.has('item_category')) database.exec('ALTER TABLE suppliers ADD COLUMN item_category TEXT');
+  if (!supplierNames.has('evaluation_required')) database.exec('ALTER TABLE suppliers ADD COLUMN evaluation_required INTEGER NOT NULL DEFAULT 0');
+  if (!supplierNames.has('last_evaluation_date')) database.exec('ALTER TABLE suppliers ADD COLUMN last_evaluation_date TEXT');
+  if (!supplierNames.has('next_evaluation_due')) database.exec('ALTER TABLE suppliers ADD COLUMN next_evaluation_due TEXT');
+
+  // Phase 3: extend safety_incidents
+  const safetyColumns = database.prepare("PRAGMA table_info(safety_incidents)").all() as Array<{ name: string }>;
+  const safetyNames = new Set(safetyColumns.map(col => col.name));
+  if (!safetyNames.has('incident_type')) database.exec('ALTER TABLE safety_incidents ADD COLUMN incident_type TEXT');
+  if (!safetyNames.has('title')) database.exec('ALTER TABLE safety_incidents ADD COLUMN title TEXT');
+  if (!safetyNames.has('immediate_action')) database.exec('ALTER TABLE safety_incidents ADD COLUMN immediate_action TEXT');
+  if (!safetyNames.has('persons_involved')) database.exec('ALTER TABLE safety_incidents ADD COLUMN persons_involved TEXT');
+  if (!safetyNames.has('nc_id')) database.exec('ALTER TABLE safety_incidents ADD COLUMN nc_id INTEGER REFERENCES nonconforming_events(id)');
+  if (!safetyNames.has('capa_id')) database.exec('ALTER TABLE safety_incidents ADD COLUMN capa_id INTEGER REFERENCES capa_records(id)');
+  if (!safetyNames.has('closed_by_staff_id')) database.exec('ALTER TABLE safety_incidents ADD COLUMN closed_by_staff_id INTEGER REFERENCES staff(id)');
+  if (!safetyNames.has('closed_at')) database.exec('ALTER TABLE safety_incidents ADD COLUMN closed_at TEXT');
+
+  // Phase 3: new tables
+  database.exec(`
+CREATE TABLE IF NOT EXISTS equipment_maintenance_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  equipment_id INTEGER NOT NULL REFERENCES equipment_items(id),
+  maintenance_date TEXT NOT NULL,
+  maintenance_type TEXT NOT NULL,
+  performed_by_staff_id INTEGER REFERENCES staff(id),
+  findings TEXT,
+  action_taken TEXT,
+  next_due_date TEXT,
+  status TEXT NOT NULL DEFAULT 'completed',
+  evidence_file_id INTEGER REFERENCES files(id),
+  reviewed_by_staff_id INTEGER REFERENCES staff(id),
+  reviewed_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS equipment_breakdowns (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  equipment_id INTEGER NOT NULL REFERENCES equipment_items(id),
+  breakdown_date TEXT NOT NULL,
+  reported_by_staff_id INTEGER REFERENCES staff(id),
+  description TEXT NOT NULL,
+  service_impact TEXT,
+  immediate_action TEXT,
+  equipment_status TEXT,
+  repair_action TEXT,
+  service_provider TEXT,
+  return_to_service_date TEXT,
+  verified_by_staff_id INTEGER REFERENCES staff(id),
+  nc_id INTEGER REFERENCES nonconforming_events(id),
+  capa_id INTEGER REFERENCES capa_records(id),
+  status TEXT NOT NULL DEFAULT 'open',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS monitoring_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  monitoring_type TEXT,
+  parameter TEXT NOT NULL,
+  unit TEXT,
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  location_id INTEGER REFERENCES locations(id),
+  lower_limit REAL,
+  upper_limit REAL,
+  warning_lower_limit REAL,
+  warning_upper_limit REAL,
+  critical_lower_limit REAL,
+  critical_upper_limit REAL,
+  frequency TEXT,
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  reviewer_staff_id INTEGER REFERENCES staff(id),
+  nc_trigger_enabled INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS monitoring_readings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  monitoring_item_id INTEGER NOT NULL REFERENCES monitoring_items(id),
+  reading_date TEXT NOT NULL,
+  reading_time TEXT,
+  value REAL NOT NULL,
+  entered_by_staff_id INTEGER REFERENCES staff(id),
+  status TEXT NOT NULL DEFAULT 'normal',
+  comment TEXT,
+  immediate_action TEXT,
+  reviewed_by_staff_id INTEGER REFERENCES staff(id),
+  reviewed_at TEXT,
+  nc_id INTEGER REFERENCES nonconforming_events(id),
+  capa_id INTEGER REFERENCES capa_records(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS inventory_batches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_id INTEGER NOT NULL REFERENCES inventory_items(id),
+  batch_number TEXT,
+  lot_number TEXT,
+  supplier_id INTEGER REFERENCES suppliers(id),
+  supplier_name TEXT,
+  quantity_received REAL NOT NULL DEFAULT 0,
+  quantity_available REAL NOT NULL DEFAULT 0,
+  date_received TEXT NOT NULL,
+  expiry_date TEXT,
+  acceptance_status TEXT NOT NULL DEFAULT 'pending',
+  acceptance_checked_by_staff_id INTEGER REFERENCES staff(id),
+  acceptance_date TEXT,
+  storage_location_id INTEGER REFERENCES locations(id),
+  status TEXT NOT NULL DEFAULT 'available',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS inventory_movements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_id INTEGER NOT NULL REFERENCES inventory_items(id),
+  batch_id INTEGER REFERENCES inventory_batches(id),
+  movement_type TEXT NOT NULL,
+  quantity REAL NOT NULL,
+  movement_date TEXT NOT NULL,
+  issued_to_section_id INTEGER REFERENCES sections(id),
+  received_by_staff_id INTEGER REFERENCES staff(id),
+  reason TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS supplier_evaluations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+  evaluation_date TEXT NOT NULL,
+  evaluated_by_staff_id INTEGER REFERENCES staff(id),
+  rating TEXT,
+  findings TEXT,
+  action_required TEXT,
+  next_evaluation_date TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+`);
 }
