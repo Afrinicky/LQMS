@@ -41,42 +41,70 @@ export function seedDefaults() {
         nc_capa: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         complaints: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         risks: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        supplier_inventory: ['view', 'create', 'edit', 'print'],
+        equipment: ['view', 'create', 'edit', 'print'],
+        monitoring: ['view', 'create', 'edit', 'print'],
+        facilities_safety: ['view', 'create', 'edit', 'print'],
         actions: ['view', 'create', 'edit', 'approve', 'export', 'print']
       },
       'Quality Manager': {
         nc_capa: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         complaints: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         risks: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        supplier_inventory: ['view', 'create', 'edit', 'print'],
+        equipment: ['view', 'create', 'edit', 'print'],
+        monitoring: ['view', 'create', 'edit', 'print'],
+        facilities_safety: ['view', 'create', 'edit', 'print'],
         actions: ['view', 'create', 'edit', 'approve', 'export', 'print']
       },
       'Quality Team Member': {
         nc_capa: ['view', 'create', 'edit', 'print'],
         complaints: ['view', 'create', 'edit', 'print'],
         risks: ['view', 'create', 'edit', 'print'],
+        supplier_inventory: ['view', 'create', 'edit', 'print'],
+        equipment: ['view', 'create', 'edit', 'print'],
+        monitoring: ['view', 'create', 'edit', 'print'],
+        facilities_safety: ['view', 'create', 'edit', 'print'],
         actions: ['view', 'create', 'edit', 'print']
       },
       'Section Head': {
         nc_capa: ['view', 'create', 'edit', 'print'],
         complaints: ['view', 'create', 'edit', 'print'],
         risks: ['view', 'create', 'edit', 'print'],
+        supplier_inventory: ['view', 'create', 'edit', 'print'],
+        equipment: ['view', 'create', 'edit', 'print'],
+        monitoring: ['view', 'create', 'edit', 'print'],
+        facilities_safety: ['view', 'create', 'edit', 'print'],
         actions: ['view', 'create', 'edit', 'print']
       },
       'Biomedical Scientist': {
         nc_capa: ['view', 'create', 'print'],
         complaints: ['view', 'create', 'print'],
         risks: ['view', 'create', 'print'],
+        supplier_inventory: ['view', 'create', 'print'],
+        equipment: ['view', 'create', 'print'],
+        monitoring: ['view', 'create', 'print'],
+        facilities_safety: ['view', 'create', 'print'],
         actions: ['view', 'create', 'print']
       },
       'Technician': {
         nc_capa: ['view', 'create', 'print'],
         complaints: ['view', 'create', 'print'],
         risks: ['view', 'create', 'print'],
+        supplier_inventory: ['view', 'create', 'print'],
+        equipment: ['view', 'create', 'print'],
+        monitoring: ['view', 'create', 'print'],
+        facilities_safety: ['view', 'create', 'print'],
         actions: ['view', 'create', 'print']
       },
       'Quality User': {
         nc_capa: ['view', 'create', 'edit', 'print'],
         complaints: ['view', 'create', 'edit', 'print'],
         risks: ['view', 'create', 'edit', 'print'],
+        supplier_inventory: ['view', 'create', 'edit', 'print'],
+        equipment: ['view', 'create', 'edit', 'print'],
+        monitoring: ['view', 'create', 'edit', 'print'],
+        facilities_safety: ['view', 'create', 'edit', 'print'],
         actions: ['view', 'create', 'edit', 'print']
       }
     };

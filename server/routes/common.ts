@@ -16,7 +16,17 @@ export function commonRoutes() {
 
   router.get('/dashboard', (_req, res) => {
     const db = getDb();
-    res.json({ documents: db.prepare('SELECT COUNT(*) count FROM documents').get(), actionsOpen: db.prepare("SELECT COUNT(*) count FROM actions WHERE status != 'closed'").get(), staff: db.prepare('SELECT COUNT(*) count FROM staff').get(), modulesEnabled: db.prepare('SELECT COUNT(*) count FROM system_modules WHERE enabled = 1').get(), latestBackup: db.prepare('SELECT file_name FROM backup_logs ORDER BY id DESC LIMIT 1').get() });
+    res.json({
+      documents: db.prepare('SELECT COUNT(*) count FROM documents').get(),
+      actionsOpen: db.prepare("SELECT COUNT(*) count FROM actions WHERE status != 'closed'").get(),
+      staff: db.prepare('SELECT COUNT(*) count FROM staff').get(),
+      equipmentItems: db.prepare('SELECT COUNT(*) count FROM equipment_items').get(),
+      inventoryItems: db.prepare('SELECT COUNT(*) count FROM inventory_items').get(),
+      monitoringRecords: db.prepare('SELECT COUNT(*) count FROM monitoring_records').get(),
+      safetyIncidents: db.prepare('SELECT COUNT(*) count FROM safety_incidents').get(),
+      modulesEnabled: db.prepare('SELECT COUNT(*) count FROM system_modules WHERE enabled = 1').get(),
+      latestBackup: db.prepare('SELECT file_name FROM backup_logs ORDER BY id DESC LIMIT 1').get()
+    });
   });
   router.get('/dashboard/qms-summary', (_req, res) => {
     const db = getDb();

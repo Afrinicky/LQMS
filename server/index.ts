@@ -7,6 +7,10 @@ import { nonconformityRoutes } from './routes/nonconformities.js';
 import { capaRoutes } from './routes/capa.js';
 import { complaintsRoutes } from './routes/complaints.js';
 import { riskRoutes } from './routes/risks.js';
+import { equipmentRoutes } from './routes/equipment.js';
+import { inventoryRoutes } from './routes/inventory.js';
+import { monitoringRoutes } from './routes/monitoring.js';
+import { safetyRoutes } from './routes/safety.js';
 import { optionalAuth } from './middleware/auth.js';
 import { ensureDataDirs } from './db/database.js';
 import { seedDefaults } from './db/seed.js';
@@ -25,6 +29,10 @@ export function createApiServer() {
   app.use('/api/capa', capaRoutes());
   app.use('/api/complaints', complaintsRoutes());
   app.use('/api/risks', riskRoutes());
+  app.use('/api/equipment', equipmentRoutes());
+  app.use('/api/supplier-inventory', inventoryRoutes());
+  app.use('/api/monitoring', monitoringRoutes());
+  app.use('/api/facilities-safety', safetyRoutes());
   app.use('/api', commonRoutes());
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const message = err instanceof Error ? err.message : 'Unexpected server error';
