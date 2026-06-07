@@ -6,8 +6,9 @@ import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 
 type PriorResult = { result_value: number };
+type SiblingZ = { z_score: number };
 
-function evaluateIqcRules(value: number, material: any, prior: PriorResult[]): { status: string; rule: string | null; zScore: number | null } {
+function evaluateIqcRules(value: number, material: any, prior: PriorResult[], siblings: SiblingZ[]): { status: string; rule: string | null; zScore: number | null } {
   const low = material.acceptable_low;
   const high = material.acceptable_high;
   const mean = material.target_mean;
@@ -35,6 +36,17 @@ function evaluateIqcRules(value: number, material: any, prior: PriorResult[]): {
         return { status: 'out_of_control', rule: 'reject_R_4s', zScore };
       }
     }
+    // 2of3_2s across control materials in the same run: current + at least one sibling
+    // both beyond ±2 SD on the same side (sample of 3 = current plus up to two siblings)
+    const siblingsSameSide = siblings.filter(s => Math.sign(s.z_score) === Math.sign(zScore) && Math.abs(s.z_score) > 2);
+    if (siblingsSameSide.length >= 1 && siblings.length >= 1) {
+      return { status: 'out_of_control', rule: 'reject_2of3_2s', zScore };
+    }
+    // R_4s across control materials: current and a sibling differ by ≥4 SD on opposite sides
+    const oppositeFarSibling = siblings.find(s => Math.sign(s.z_score) !== Math.sign(zScore) && Math.abs(zScore - s.z_score) >= 4);
+    if (oppositeFarSibling) {
+      return { status: 'out_of_control', rule: 'reject_R_4s', zScore };
+    }
     return { status: 'warning', rule: 'warning_1_2s', zScore };
   }
 
@@ -53,6 +65,29 @@ function evaluateIqcRules(value: number, material: any, prior: PriorResult[]): {
   }
 
   return { status: 'accepted', rule: 'within_control', zScore };
+}
+
+function fetchSiblingZScores(db: any, material: any, runDate: string): SiblingZ[] {
+  // Sibling control materials = same test + analyte, different material id.
+  // If equipment_id is set on the current material, restrict to siblings with the same equipment.
+  const params: unknown[] = [material.test_name, material.analyte, material.id];
+  let equipmentClause = '';
+  if (material.equipment_id) {
+    equipmentClause = ' AND equipment_id = ?';
+    params.push(material.equipment_id);
+  }
+  const siblingMaterials = db.prepare(
+    `SELECT id, target_mean, target_sd FROM iqc_materials WHERE test_name = ? AND analyte = ? AND id != ?${equipmentClause} AND is_active = 1`
+  ).all(...params) as Array<{ id: number; target_mean: number | null; target_sd: number | null }>;
+  const out: SiblingZ[] = [];
+  for (const sib of siblingMaterials) {
+    if (sib.target_mean === null || sib.target_sd === null || !sib.target_sd) continue;
+    const latest = db.prepare(
+      'SELECT result_value FROM iqc_results WHERE iqc_material_id = ? AND run_date = ? ORDER BY id DESC LIMIT 1'
+    ).get(sib.id, runDate) as { result_value: number } | undefined;
+    if (latest) out.push({ z_score: (latest.result_value - sib.target_mean) / sib.target_sd });
+  }
+  return out;
 }
 
 export function iqcRoutes() {
@@ -149,7 +184,8 @@ export function iqcRoutes() {
     const value = Number(req.body.resultValue);
     if (!Number.isFinite(value)) return res.status(400).json({ error: 'resultValue must be numeric' });
     const prior = db.prepare('SELECT result_value FROM iqc_results WHERE iqc_material_id = ? ORDER BY run_date DESC, id DESC LIMIT 9').all(req.params.id) as PriorResult[];
-    const { status, rule, zScore } = evaluateIqcRules(value, material, prior);
+    const siblings = fetchSiblingZScores(db, material, req.body.runDate);
+    const { status, rule, zScore } = evaluateIqcRules(value, material, prior, siblings);
     if (status !== 'accepted' && !req.body.comment && !req.body.immediateAction) {
       return res.status(400).json({ error: 'comment or immediateAction is required for non-accepted IQC results' });
     }

@@ -47,6 +47,8 @@ export function commonRoutes() {
     });
   });
 
+  // Deprecated: kept for backward compatibility. New code should use the per-module
+  // summary endpoints below (/dashboard/iqc-summary etc).
   router.get('/dashboard/technical-quality-summary', (_req, res) => {
     const db = getDb();
     const now = new Date().toISOString();
