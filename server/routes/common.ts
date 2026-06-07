@@ -47,6 +47,24 @@ export function commonRoutes() {
     });
   });
 
+  router.get('/dashboard/technical-quality-summary', (_req, res) => {
+    const db = getDb();
+    const now = new Date().toISOString();
+    const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+    const monthStartIso = monthStart.toISOString();
+    const count = (sql: string, ...params: unknown[]) => (db.prepare(sql).get(...params) as { count: number }).count;
+    res.json({
+      activeIqcMaterials: count('SELECT COUNT(*) count FROM iqc_materials WHERE is_active = 1'),
+      iqcFailuresThisMonth: count("SELECT COUNT(*) count FROM iqc_results WHERE status IN ('rejected','warning') AND run_date >= ?", monthStartIso),
+      iqcResultsPendingReview: count("SELECT COUNT(*) count FROM iqc_results WHERE reviewed_at IS NULL AND status != 'accepted'"),
+      eqaEventsDue: count('SELECT COUNT(*) count FROM eqa_events WHERE submission_due_date IS NOT NULL AND submitted_date IS NULL AND submission_due_date <= ?', now),
+      eqaUnsatisfactoryEvents: count("SELECT COUNT(*) count FROM eqa_events WHERE performance_status IN ('unsatisfactory','poor','fail','failed')"),
+      openVerifications: count("SELECT COUNT(*) count FROM method_verifications WHERE status IN ('planned','in_progress')"),
+      equipmentVerificationsDue: count("SELECT COUNT(*) count FROM equipment_verifications WHERE status IN ('planned','in_progress')"),
+      muRecordsDueForReview: count("SELECT COUNT(*) count FROM measurement_uncertainty_records WHERE status IN ('draft','in_review')")
+    });
+  });
+
   router.get('/dashboard/qms-summary', (_req, res) => {
     const db = getDb();
     const staffId = _req.user?.staffId ?? null;
