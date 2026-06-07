@@ -7,7 +7,7 @@ declare module 'multer' { const multer: any; export default multer; }
 declare module 'electron' { export const app: any; export const BrowserWindow: any; export const contextBridge: any; }
 declare module 'lucide-react' { export const Bell: any; export const Database: any; export const Server: any; export const Shield: any; }
 
-declare namespace Express { interface Request { user?: { id: number; username: string; roleId: number } } }
+declare namespace Express { interface Request { user?: { id: number; username: string; roleId: number; staffId?: number | null } } }
 declare module 'express' {
   export type Request = any;
   export type Response = any;

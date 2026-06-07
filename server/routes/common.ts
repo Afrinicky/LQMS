@@ -20,12 +20,16 @@ export function commonRoutes() {
   });
   router.get('/dashboard/qms-summary', (_req, res) => {
     const db = getDb();
+    const staffId = _req.user?.staffId ?? null;
+    const myAssignedActions = staffId
+      ? db.prepare('SELECT COUNT(*) count FROM actions WHERE assigned_to_staff_id = ? AND status != ?').get(staffId, 'Closed')
+      : { count: 0 };
     res.json({
       openNCs: db.prepare("SELECT COUNT(*) count FROM nonconforming_events WHERE status != 'closed'").get(),
       openCAPAs: db.prepare("SELECT COUNT(*) count FROM capa_records WHERE status != 'closed'").get(),
       pendingComplaints: db.prepare("SELECT COUNT(*) count FROM complaints WHERE status != 'closed'").get(),
       highRisks: db.prepare("SELECT COUNT(*) count FROM risks WHERE risk_level IN ('High','Critical') AND status != 'closed'").get(),
-      myAssignedActions: db.prepare('SELECT COUNT(*) count FROM actions WHERE assigned_to_staff_id = ? AND status != ?').get(_req.user?.id ?? null, 'Closed'),
+      myAssignedActions,
       overdueActions: db.prepare('SELECT COUNT(*) count FROM actions WHERE due_date IS NOT NULL AND due_date < CURRENT_TIMESTAMP AND status != ?').get('Closed')
     });
   });
