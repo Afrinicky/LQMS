@@ -7,7 +7,9 @@ import type {
   IqcMaterial, IqcResult, IqcLotChange,
   EqaProgram, EqaEvent, EqaResultRow,
   MethodVerification, VerificationExperiment, EquipmentVerification,
-  MeasurementUncertaintyRecord, TechnicalQualitySummary
+  MeasurementUncertaintyRecord,
+  IqcSummary, EqaSummary, VerificationSummary, MeasurementUncertaintySummary,
+  LeveyJenningsData
 } from '../../shared/types/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
@@ -42,7 +44,9 @@ export function IqcPage() {
   const [materials, setMaterials] = useState<IqcMaterial[]>([]);
   const [results, setResults] = useState<IqcResult[]>([]);
   const [lotChanges, setLotChanges] = useState<IqcLotChange[]>([]);
-  const [summary, setSummary] = useState<TechnicalQualitySummary | null>(null);
+  const [summary, setSummary] = useState<IqcSummary | null>(null);
+  const [lj, setLj] = useState<LeveyJenningsData | null>(null);
+  const [ljMaterialId, setLjMaterialId] = useState<string>('');
   const [materialForm, setMaterialForm] = useState({ materialName: '', testName: '', analyte: '', lotNumber: '', manufacturer: '', expiryDate: '', storageCondition: '', sectionId: '', targetMean: '', targetSd: '', acceptableLow: '', acceptableHigh: '', equipmentId: '', isActive: true });
   const [resultForm, setResultForm] = useState({ iqcMaterialId: '', runDate: '', runTime: '', resultValue: '', equipmentId: '', comment: '', immediateAction: '' });
   const [lotForm, setLotForm] = useState({ oldIqcMaterialId: '', newIqcMaterialId: '', changeDate: '', reason: '', verificationSummary: '' });
@@ -54,7 +58,7 @@ export function IqcPage() {
         api<IqcMaterial[]>('/iqc/materials'),
         api<IqcResult[]>('/iqc/results'),
         api<IqcLotChange[]>('/iqc/lot-changes'),
-        api<TechnicalQualitySummary>('/dashboard/technical-quality-summary').catch(() => null)
+        api<IqcSummary>('/dashboard/iqc-summary').catch(() => null)
       ]);
       setMaterials(mats); setResults(ress); setLotChanges(lots);
       if (sum) setSummary(sum);
@@ -62,6 +66,12 @@ export function IqcPage() {
   }
   useEffect(() => { if (isEnabled('iqc')) void load(); }, [isEnabled]);
   if (!isEnabled('iqc')) return <DisabledModule />;
+
+  async function loadLj(id: string) {
+    if (!id) { setLj(null); return; }
+    try { setLj(await api<LeveyJenningsData>(`/iqc/materials/${id}/levey-jennings`)); }
+    catch (e) { setError((e as Error).message); }
+  }
 
   async function submitMaterial(e: FormEvent) {
     e.preventDefault(); setError(null);
@@ -104,7 +114,7 @@ export function IqcPage() {
     catch (e) { setError((e as Error).message); }
   }
 
-  const tabs = ['Dashboard', 'IQC Materials', 'New Material', 'Result Entry', 'QC Failures', 'Lot Changes', 'Reports'];
+  const tabs = ['Dashboard', 'IQC Materials', 'New Material', 'Result Entry', 'QC Failures', 'Levey-Jennings', 'Lot Changes', 'Reports'];
   const failures = results.filter(r => r.status !== 'accepted');
 
   return <div className="module-page">
@@ -113,9 +123,11 @@ export function IqcPage() {
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && summary && <div className="cards">
-      <div className="card"><h4>Active IQC materials</h4><p className="metric">{summary.activeIqcMaterials}</p></div>
-      <div className="card"><h4>IQC failures this month</h4><p className="metric">{summary.iqcFailuresThisMonth}</p></div>
-      <div className="card"><h4>Pending review</h4><p className="metric">{summary.iqcResultsPendingReview}</p></div>
+      <div className="card"><h4>Active materials</h4><p className="metric">{summary.activeMaterials}</p></div>
+      <div className="card"><h4>Results this month</h4><p className="metric">{summary.resultsThisMonth}</p></div>
+      <div className="card"><h4>Failed/out-of-control this month</h4><p className="metric">{summary.failedThisMonth}</p></div>
+      <div className="card"><h4>Pending review</h4><p className="metric">{summary.resultsPendingReview}</p></div>
+      <div className="card"><h4>Lot changes this year</h4><p className="metric">{summary.lotChangesThisYear}</p></div>
     </div>}
 
     {tab === 'IQC Materials' && <table className="data-table"><thead><tr><th>Code</th><th>Name</th><th>Test</th><th>Analyte</th><th>Lot</th><th>Expiry</th><th>Status</th></tr></thead><tbody>
@@ -163,6 +175,18 @@ export function IqcPage() {
       </tr>)}
     </tbody></table>}
 
+    {tab === 'Levey-Jennings' && <>
+      <label>Material<select value={ljMaterialId} onChange={e => { setLjMaterialId(e.target.value); void loadLj(e.target.value); }}><option value="">—</option>{materials.map(m => <option key={m.id} value={m.id}>{m.material_name} / {m.lot_number}</option>)}</select></label>
+      {lj && <>
+        <p>Mean: {lj.targetMean ?? '—'} | SD: {lj.targetSd ?? '—'} | points: {lj.points.length}</p>
+        <table className="data-table"><thead><tr><th>Date</th><th>Time</th><th>Value</th><th>z</th><th>Status</th><th>Rule</th></tr></thead><tbody>
+          {lj.points.map((p, i) => <tr key={i}><td>{p.run_date}</td><td>{p.run_time || '—'}</td><td>{p.result_value}</td><td>{p.z_score === null || p.z_score === undefined ? '—' : p.z_score.toFixed(2)}</td><td>{formatBadge(p.status)}</td><td>{p.rule_violation || '—'}</td></tr>)}
+        </tbody></table>
+      </>}
+      {!lj && ljMaterialId && <p>Loading…</p>}
+      {!ljMaterialId && <p>Select an IQC material to load its recent results.</p>}
+    </>}
+
     {tab === 'Lot Changes' && <>
       <form className="form-grid" onSubmit={submitLotChange}>
         <label>Old material<select value={lotForm.oldIqcMaterialId} onChange={e => setLotForm({ ...lotForm, oldIqcMaterialId: e.target.value })}><option value="">—</option>{materials.map(m => <option key={m.id} value={m.id}>{m.material_name} / {m.lot_number}</option>)}</select></label>
@@ -188,7 +212,7 @@ export function EqaPage() {
   const [tab, setTab] = useState('Dashboard');
   const [programs, setPrograms] = useState<EqaProgram[]>([]);
   const [events, setEvents] = useState<EqaEvent[]>([]);
-  const [summary, setSummary] = useState<TechnicalQualitySummary | null>(null);
+  const [summary, setSummary] = useState<EqaSummary | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<(EqaEvent & { results?: EqaResultRow[] }) | null>(null);
   const [programForm, setProgramForm] = useState({ programName: '', provider: '', testArea: '', sectionId: '', frequency: '', contact: '', isActive: true });
   const [eventForm, setEventForm] = useState({ eqaProgramId: '', cycleName: '', receivedDate: '', submissionDueDate: '', submittedDate: '', resultReceivedDate: '', performanceStatus: '', score: '', findings: '', responsibleStaffId: '' });
@@ -200,7 +224,7 @@ export function EqaPage() {
       const [progs, evs, sum] = await Promise.all([
         api<EqaProgram[]>('/eqa/programs'),
         api<EqaEvent[]>('/eqa/events'),
-        api<TechnicalQualitySummary>('/dashboard/technical-quality-summary').catch(() => null)
+        api<EqaSummary>('/dashboard/eqa-summary').catch(() => null)
       ]);
       setPrograms(progs); setEvents(evs);
       if (sum) setSummary(sum);
@@ -261,8 +285,11 @@ export function EqaPage() {
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && summary && <div className="cards">
-      <div className="card"><h4>EQA events due</h4><p className="metric">{summary.eqaEventsDue}</p></div>
-      <div className="card"><h4>Unsatisfactory events</h4><p className="metric">{summary.eqaUnsatisfactoryEvents}</p></div>
+      <div className="card"><h4>Active programs</h4><p className="metric">{summary.activePrograms}</p></div>
+      <div className="card"><h4>Open events</h4><p className="metric">{summary.openEvents}</p></div>
+      <div className="card"><h4>Events due soon</h4><p className="metric">{summary.eventsDueSoon}</p></div>
+      <div className="card"><h4>Unsatisfactory events</h4><p className="metric">{summary.unsatisfactoryEvents}</p></div>
+      <div className="card"><h4>Requiring corrective action</h4><p className="metric">{summary.eventsRequiringCorrectiveAction}</p></div>
     </div>}
 
     {tab === 'EQA Programs' && <table className="data-table"><thead><tr><th>Code</th><th>Program</th><th>Provider</th><th>Test area</th><th>Frequency</th><th>Active</th></tr></thead><tbody>
@@ -338,7 +365,7 @@ export function VerificationValidationPage() {
   const [tab, setTab] = useState('Dashboard');
   const [methods, setMethods] = useState<MethodVerification[]>([]);
   const [equipVerifs, setEquipVerifs] = useState<EquipmentVerification[]>([]);
-  const [summary, setSummary] = useState<TechnicalQualitySummary | null>(null);
+  const [summary, setSummary] = useState<VerificationSummary | null>(null);
   const [selected, setSelected] = useState<(MethodVerification & { experiments?: VerificationExperiment[] }) | null>(null);
   const [methodForm, setMethodForm] = useState({ methodName: '', testName: '', verificationType: 'method_verification', equipmentId: '', reason: '', startDate: '', completionDate: '', parametersAssessed: '', acceptanceCriteria: '', summary: '', conclusion: '', status: 'in_progress' });
   const [expForm, setExpForm] = useState({ verificationId: '', experimentType: '', datePerformed: '', sampleCount: '', resultsSummary: '', acceptanceMet: false, performedByStaffId: '' });
@@ -350,7 +377,7 @@ export function VerificationValidationPage() {
       const [methodList, equipList, sum] = await Promise.all([
         api<MethodVerification[]>('/verification-validation'),
         api<EquipmentVerification[]>('/verification-validation/equipment'),
-        api<TechnicalQualitySummary>('/dashboard/technical-quality-summary').catch(() => null)
+        api<VerificationSummary>('/dashboard/verification-summary').catch(() => null)
       ]);
       setMethods(methodList); setEquipVerifs(equipList);
       if (sum) setSummary(sum);
@@ -411,8 +438,11 @@ export function VerificationValidationPage() {
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && summary && <div className="cards">
-      <div className="card"><h4>Open method verifications</h4><p className="metric">{summary.openVerifications}</p></div>
-      <div className="card"><h4>Equipment verifications in progress</h4><p className="metric">{summary.equipmentVerificationsDue}</p></div>
+      <div className="card"><h4>Open method verifications</h4><p className="metric">{summary.openMethodVerifications}</p></div>
+      <div className="card"><h4>Completed verifications</h4><p className="metric">{summary.completedVerifications}</p></div>
+      <div className="card"><h4>Pending approval</h4><p className="metric">{summary.pendingApproval}</p></div>
+      <div className="card"><h4>Equipment verifications this year</h4><p className="metric">{summary.equipmentVerificationsThisYear}</p></div>
+      <div className="card"><h4>Equipment verifications pending approval</h4><p className="metric">{summary.equipmentVerificationsPendingApproval}</p></div>
     </div>}
 
     {tab === 'Method Verification Register' && <table className="data-table"><thead><tr><th>Number</th><th>Method</th><th>Test</th><th>Type</th><th>Equipment</th><th>Status</th><th></th></tr></thead><tbody>
@@ -489,7 +519,7 @@ export function MeasurementUncertaintyPage() {
   const { equipment } = useLookups();
   const [tab, setTab] = useState('Dashboard');
   const [records, setRecords] = useState<MeasurementUncertaintyRecord[]>([]);
-  const [summary, setSummary] = useState<TechnicalQualitySummary | null>(null);
+  const [summary, setSummary] = useState<MeasurementUncertaintySummary | null>(null);
   const [form, setForm] = useState({ testName: '', analyte: '', methodName: '', equipmentId: '', calculationDate: '', dataPeriodStart: '', dataPeriodEnd: '', sourceData: '', meanValue: '', sdValue: '', cvPercent: '', uncertaintyValue: '', expandedUncertainty: '', coverageFactor: '2', interpretation: '', status: 'draft' });
   const [error, setError] = useState<string | null>(null);
 
@@ -497,7 +527,7 @@ export function MeasurementUncertaintyPage() {
     try {
       const [recs, sum] = await Promise.all([
         api<MeasurementUncertaintyRecord[]>('/measurement-uncertainty'),
-        api<TechnicalQualitySummary>('/dashboard/technical-quality-summary').catch(() => null)
+        api<MeasurementUncertaintySummary>('/dashboard/measurement-uncertainty-summary').catch(() => null)
       ]);
       setRecords(recs);
       if (sum) setSummary(sum);
@@ -533,7 +563,11 @@ export function MeasurementUncertaintyPage() {
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && summary && <div className="cards">
-      <div className="card"><h4>MU records due for review</h4><p className="metric">{summary.muRecordsDueForReview}</p></div>
+      <div className="card"><h4>Active records</h4><p className="metric">{summary.activeRecords}</p></div>
+      <div className="card"><h4>Pending review</h4><p className="metric">{summary.recordsPendingReview}</p></div>
+      <div className="card"><h4>Pending approval</h4><p className="metric">{summary.recordsPendingApproval}</p></div>
+      <div className="card"><h4>Due for review</h4><p className="metric">{summary.recordsDueForReview}</p></div>
+      <div className="card"><h4>Completed this year</h4><p className="metric">{summary.recordsCompletedThisYear}</p></div>
     </div>}
 
     {tab === 'MU Register' && <table className="data-table"><thead><tr><th>Number</th><th>Test</th><th>Analyte</th><th>Method</th><th>Equipment</th><th>Date</th><th>U (k={records[0]?.coverage_factor ?? '—'})</th><th>Status</th></tr></thead><tbody>

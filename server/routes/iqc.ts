@@ -5,19 +5,54 @@ import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 
-function computeIqcStatus(value: number, material: any): { status: string; rule: string | null } {
+type PriorResult = { result_value: number };
+
+function evaluateIqcRules(value: number, material: any, prior: PriorResult[]): { status: string; rule: string | null; zScore: number | null } {
   const low = material.acceptable_low;
   const high = material.acceptable_high;
   const mean = material.target_mean;
   const sd = material.target_sd;
-  if (low !== null && low !== undefined && value < low) return { status: 'rejected', rule: 'below_acceptable_range' };
-  if (high !== null && high !== undefined && value > high) return { status: 'rejected', rule: 'above_acceptable_range' };
-  if (mean !== null && mean !== undefined && sd !== null && sd !== undefined && sd > 0) {
-    const diff = Math.abs(value - mean);
-    if (diff > 3 * sd) return { status: 'rejected', rule: '1_3s' };
-    if (diff > 2 * sd) return { status: 'warning', rule: '1_2s' };
+  const hasStats = mean !== null && mean !== undefined && sd !== null && sd !== undefined && sd > 0;
+  const zScore = hasStats ? (value - mean) / sd : null;
+
+  if (low !== null && low !== undefined && value < low) return { status: 'out_of_control', rule: 'out_of_range', zScore };
+  if (high !== null && high !== undefined && value > high) return { status: 'out_of_control', rule: 'out_of_range', zScore };
+
+  if (!hasStats || zScore === null) return { status: 'accepted', rule: 'within_control', zScore };
+
+  if (Math.abs(zScore) > 3) return { status: 'out_of_control', rule: 'reject_1_3s', zScore };
+
+  // Prior results are most-recent first
+  const priorZ = prior.map(r => (r.result_value - mean) / sd);
+
+  if (Math.abs(zScore) > 2) {
+    if (priorZ.length >= 1) {
+      const prev = priorZ[0];
+      if (Math.abs(prev) > 2 && Math.sign(prev) === Math.sign(zScore)) {
+        return { status: 'out_of_control', rule: 'reject_2_2s', zScore };
+      }
+      if (Math.abs(prev) > 2 && Math.sign(prev) !== Math.sign(zScore) && Math.abs(zScore - prev) >= 4) {
+        return { status: 'out_of_control', rule: 'reject_R_4s', zScore };
+      }
+    }
+    return { status: 'warning', rule: 'warning_1_2s', zScore };
   }
-  return { status: 'accepted', rule: null };
+
+  if (priorZ.length >= 3) {
+    const window4 = [zScore, ...priorZ.slice(0, 3)];
+    if (window4.every(z => z > 1) || window4.every(z => z < -1)) {
+      return { status: 'out_of_control', rule: 'reject_4_1s', zScore };
+    }
+  }
+
+  if (priorZ.length >= 9) {
+    const window10 = [zScore, ...priorZ.slice(0, 9)];
+    if (window10.every(z => z > 0) || window10.every(z => z < 0)) {
+      return { status: 'out_of_control', rule: 'reject_10x', zScore };
+    }
+  }
+
+  return { status: 'accepted', rule: 'within_control', zScore };
 }
 
 export function iqcRoutes() {
@@ -113,12 +148,13 @@ export function iqcRoutes() {
     if (!material) return res.status(404).json({ error: 'IQC material not found' });
     const value = Number(req.body.resultValue);
     if (!Number.isFinite(value)) return res.status(400).json({ error: 'resultValue must be numeric' });
-    const { status, rule } = computeIqcStatus(value, material);
+    const prior = db.prepare('SELECT result_value FROM iqc_results WHERE iqc_material_id = ? ORDER BY run_date DESC, id DESC LIMIT 9').all(req.params.id) as PriorResult[];
+    const { status, rule, zScore } = evaluateIqcRules(value, material, prior);
     if (status !== 'accepted' && !req.body.comment && !req.body.immediateAction) {
       return res.status(400).json({ error: 'comment or immediateAction is required for non-accepted IQC results' });
     }
     const enteredBy = getStaffIdOrCurrent(req, req.body.enteredByStaffId);
-    const result = db.prepare(`INSERT INTO iqc_results (iqc_material_id, run_date, run_time, result_value, entered_by_staff_id, equipment_id, inventory_batch_id, status, rule_violation, comment, immediate_action, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    const result = db.prepare(`INSERT INTO iqc_results (iqc_material_id, run_date, run_time, result_value, entered_by_staff_id, equipment_id, inventory_batch_id, status, rule_violation, z_score, comment, immediate_action, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(
         req.params.id,
         req.body.runDate,
@@ -129,12 +165,41 @@ export function iqcRoutes() {
         parseIntNullable(req.body.inventoryBatchId) ?? material.inventory_batch_id,
         status,
         rule,
+        zScore,
         req.body.comment ?? null,
         req.body.immediateAction ?? null,
         req.user!.id
       );
-    audit(req, { action: 'create', entity: 'iqc_results', entityId: result.lastInsertRowid, newValue: { iqcMaterialId: req.params.id, value, status, rule, ...req.body } });
-    res.status(201).json({ id: result.lastInsertRowid, status, rule });
+    audit(req, { action: 'create', entity: 'iqc_results', entityId: result.lastInsertRowid, newValue: { iqcMaterialId: req.params.id, value, status, rule, zScore, ...req.body } });
+    if (status !== 'accepted') {
+      audit(req, { action: 'rule_evaluation', entity: 'iqc_results', entityId: result.lastInsertRowid, newValue: { iqcMaterialId: req.params.id, value, status, rule, zScore } });
+    }
+    res.status(201).json({ id: result.lastInsertRowid, status, rule, zScore });
+  });
+
+  router.get('/materials/:id/levey-jennings', requirePermission('iqc', 'view'), (req, res) => {
+    const db = getDb();
+    const material = db.prepare('SELECT id, material_name, lot_number, target_mean, target_sd FROM iqc_materials WHERE id = ?').get(req.params.id) as any;
+    if (!material) return res.status(404).json({ error: 'IQC material not found' });
+    const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
+    const points = db.prepare('SELECT run_date, run_time, result_value, z_score, status, rule_violation FROM iqc_results WHERE iqc_material_id = ? ORDER BY run_date DESC, id DESC LIMIT ?').all(req.params.id, limit) as any[];
+    res.json({
+      materialId: material.id,
+      materialName: material.material_name,
+      lotNumber: material.lot_number,
+      targetMean: material.target_mean,
+      targetSd: material.target_sd,
+      points: points.reverse().map(p => ({
+        run_date: p.run_date,
+        run_time: p.run_time,
+        result_value: p.result_value,
+        target_mean: material.target_mean,
+        target_sd: material.target_sd,
+        z_score: p.z_score,
+        status: p.status,
+        rule_violation: p.rule_violation
+      }))
+    });
   });
 
   router.get('/results', requirePermission('iqc', 'view'), (req, res) => {
