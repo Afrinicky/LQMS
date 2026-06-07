@@ -130,34 +130,6 @@ export function inventoryRoutes() {
     res.json({ ok: true });
   });
 
-  router.put('/:id', requirePermission('supplier_inventory', 'edit'), (req, res) => {
-    const db = getDb();
-    const oldValue = db.prepare('SELECT * FROM inventory_items WHERE id = ?').get(req.params.id) as any;
-    if (!oldValue) return res.status(404).json({ error: 'Inventory item not found' });
-    db.prepare('UPDATE inventory_items SET name = ?, category = ?, supplier_id = ?, location_id = ?, quantity = ?, unit = ?, status = ?, reorder_level = ?, expiry_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-      .run(
-        req.body.name ?? oldValue.name,
-        req.body.category ?? oldValue.category,
-        parseIntNullable(req.body.supplierId) ?? oldValue.supplier_id,
-        parseIntNullable(req.body.locationId) ?? oldValue.location_id,
-        req.body.quantity !== undefined ? Number(req.body.quantity) : oldValue.quantity,
-        req.body.unit ?? oldValue.unit,
-        req.body.status ?? oldValue.status,
-        req.body.reorderLevel !== undefined ? Number(req.body.reorderLevel) : oldValue.reorder_level,
-        req.body.expiryDate ?? oldValue.expiry_date,
-        req.params.id
-      );
-    audit(req, { action: 'edit', entity: 'inventory_items', entityId: req.params.id, oldValue, newValue: req.body });
-    res.json({ ok: true });
-  });
-
-  router.get('/:id', requirePermission('supplier_inventory', 'view'), (req, res) => {
-    const db = getDb();
-    const item = db.prepare('SELECT i.*, s.name AS supplier_name, s.contact AS supplier_contact FROM inventory_items i LEFT JOIN suppliers s ON s.id = i.supplier_id WHERE i.id = ?').get(req.params.id);
-    if (!item) return res.status(404).json({ error: 'Inventory item not found' });
-    res.json(item);
-  });
-
   // Batches
   router.post('/items/:id/batches', requirePermission('supplier_inventory', 'create'), (req, res) => {
     if (req.body.quantityReceived === undefined || req.body.quantityReceived === '' || req.body.quantityReceived === null) return res.status(400).json({ error: 'quantityReceived is required' });
@@ -346,6 +318,35 @@ export function inventoryRoutes() {
     db.prepare('UPDATE suppliers SET last_evaluation_date = ?, next_evaluation_due = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(evalDate, req.body.nextEvaluationDate ?? null, req.params.id);
     audit(req, { action: 'create', entity: 'supplier_evaluations', entityId: result.lastInsertRowid, newValue: { supplierId: req.params.id, ...req.body } });
     res.status(201).json({ id: result.lastInsertRowid });
+  });
+
+  // Legacy generic item lookup — MUST come AFTER /items, /batches, /suppliers so those specific paths win
+  router.get('/:id', requirePermission('supplier_inventory', 'view'), (req, res) => {
+    const db = getDb();
+    const item = db.prepare('SELECT i.*, s.name AS supplier_name, s.contact AS supplier_contact FROM inventory_items i LEFT JOIN suppliers s ON s.id = i.supplier_id WHERE i.id = ?').get(req.params.id);
+    if (!item) return res.status(404).json({ error: 'Inventory item not found' });
+    res.json(item);
+  });
+
+  router.put('/:id', requirePermission('supplier_inventory', 'edit'), (req, res) => {
+    const db = getDb();
+    const oldValue = db.prepare('SELECT * FROM inventory_items WHERE id = ?').get(req.params.id) as any;
+    if (!oldValue) return res.status(404).json({ error: 'Inventory item not found' });
+    db.prepare('UPDATE inventory_items SET name = ?, category = ?, supplier_id = ?, location_id = ?, quantity = ?, unit = ?, status = ?, reorder_level = ?, expiry_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(
+        req.body.name ?? oldValue.name,
+        req.body.category ?? oldValue.category,
+        parseIntNullable(req.body.supplierId) ?? oldValue.supplier_id,
+        parseIntNullable(req.body.locationId) ?? oldValue.location_id,
+        req.body.quantity !== undefined ? Number(req.body.quantity) : oldValue.quantity,
+        req.body.unit ?? oldValue.unit,
+        req.body.status ?? oldValue.status,
+        req.body.reorderLevel !== undefined ? Number(req.body.reorderLevel) : oldValue.reorder_level,
+        req.body.expiryDate ?? oldValue.expiry_date,
+        req.params.id
+      );
+    audit(req, { action: 'edit', entity: 'inventory_items', entityId: req.params.id, oldValue, newValue: req.body });
+    res.json({ ok: true });
   });
 
   return router;
