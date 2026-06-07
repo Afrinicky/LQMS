@@ -255,4 +255,188 @@ CREATE TABLE IF NOT EXISTS supplier_evaluations (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 `);
+
+  // Phase 4: IQC, EQA, Verification/Validation, Measurement Uncertainty
+  database.exec(`
+CREATE TABLE IF NOT EXISTS iqc_materials (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  material_code TEXT NOT NULL UNIQUE,
+  material_name TEXT NOT NULL,
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  test_name TEXT NOT NULL,
+  analyte TEXT NOT NULL,
+  lot_number TEXT NOT NULL,
+  manufacturer TEXT,
+  expiry_date TEXT,
+  storage_condition TEXT,
+  target_mean REAL,
+  target_sd REAL,
+  acceptable_low REAL,
+  acceptable_high REAL,
+  equipment_id INTEGER REFERENCES equipment_items(id),
+  inventory_batch_id INTEGER REFERENCES inventory_batches(id),
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS iqc_results (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  iqc_material_id INTEGER NOT NULL REFERENCES iqc_materials(id),
+  run_date TEXT NOT NULL,
+  run_time TEXT,
+  result_value REAL NOT NULL,
+  entered_by_staff_id INTEGER REFERENCES staff(id),
+  equipment_id INTEGER REFERENCES equipment_items(id),
+  inventory_batch_id INTEGER REFERENCES inventory_batches(id),
+  status TEXT NOT NULL DEFAULT 'accepted',
+  rule_violation TEXT,
+  comment TEXT,
+  immediate_action TEXT,
+  reviewed_by_staff_id INTEGER REFERENCES staff(id),
+  reviewed_at TEXT,
+  nc_id INTEGER REFERENCES nonconforming_events(id),
+  capa_id INTEGER REFERENCES capa_records(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS iqc_lot_changes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  old_iqc_material_id INTEGER REFERENCES iqc_materials(id),
+  new_iqc_material_id INTEGER REFERENCES iqc_materials(id),
+  change_date TEXT NOT NULL,
+  reason TEXT,
+  verification_summary TEXT,
+  approved_by_staff_id INTEGER REFERENCES staff(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS eqa_programs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  program_code TEXT NOT NULL UNIQUE,
+  program_name TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  test_area TEXT NOT NULL,
+  frequency TEXT,
+  contact TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS eqa_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  eqa_program_id INTEGER NOT NULL REFERENCES eqa_programs(id),
+  cycle_name TEXT NOT NULL,
+  received_date TEXT,
+  submission_due_date TEXT,
+  submitted_date TEXT,
+  result_received_date TEXT,
+  performance_status TEXT,
+  score TEXT,
+  findings TEXT,
+  corrective_action_required INTEGER NOT NULL DEFAULT 0,
+  nc_id INTEGER REFERENCES nonconforming_events(id),
+  capa_id INTEGER REFERENCES capa_records(id),
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS eqa_results (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  eqa_event_id INTEGER NOT NULL REFERENCES eqa_events(id),
+  analyte_or_test TEXT NOT NULL,
+  reported_result TEXT,
+  expected_result TEXT,
+  performance TEXT,
+  comment TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS method_verifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  verification_number TEXT NOT NULL UNIQUE,
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  method_name TEXT NOT NULL,
+  test_name TEXT NOT NULL,
+  equipment_id INTEGER REFERENCES equipment_items(id),
+  verification_type TEXT NOT NULL,
+  reason TEXT,
+  start_date TEXT,
+  completion_date TEXT,
+  parameters_assessed TEXT,
+  acceptance_criteria TEXT,
+  summary TEXT,
+  conclusion TEXT,
+  status TEXT NOT NULL DEFAULT 'in_progress',
+  approved_by_staff_id INTEGER REFERENCES staff(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS verification_experiments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  verification_id INTEGER NOT NULL REFERENCES method_verifications(id),
+  experiment_type TEXT NOT NULL,
+  date_performed TEXT,
+  sample_count INTEGER,
+  results_summary TEXT,
+  acceptance_met INTEGER NOT NULL DEFAULT 0,
+  evidence_file_id INTEGER REFERENCES files(id),
+  performed_by_staff_id INTEGER REFERENCES staff(id),
+  reviewed_by_staff_id INTEGER REFERENCES staff(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS equipment_verifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  equipment_id INTEGER NOT NULL REFERENCES equipment_items(id),
+  verification_number TEXT NOT NULL UNIQUE,
+  verification_type TEXT NOT NULL,
+  verification_date TEXT NOT NULL,
+  reason TEXT,
+  acceptance_criteria TEXT,
+  results_summary TEXT,
+  conclusion TEXT,
+  status TEXT NOT NULL DEFAULT 'in_progress',
+  verified_by_staff_id INTEGER REFERENCES staff(id),
+  approved_by_staff_id INTEGER REFERENCES staff(id),
+  evidence_file_id INTEGER REFERENCES files(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS measurement_uncertainty_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  mu_number TEXT NOT NULL UNIQUE,
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  test_name TEXT NOT NULL,
+  analyte TEXT NOT NULL,
+  method_name TEXT,
+  equipment_id INTEGER REFERENCES equipment_items(id),
+  calculation_date TEXT NOT NULL,
+  data_period_start TEXT,
+  data_period_end TEXT,
+  source_data TEXT,
+  mean_value REAL,
+  sd_value REAL,
+  cv_percent REAL,
+  uncertainty_value REAL,
+  expanded_uncertainty REAL,
+  coverage_factor REAL,
+  interpretation TEXT,
+  reviewed_by_staff_id INTEGER REFERENCES staff(id),
+  approved_by_staff_id INTEGER REFERENCES staff(id),
+  status TEXT NOT NULL DEFAULT 'draft',
+  evidence_file_id INTEGER REFERENCES files(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+`);
 }

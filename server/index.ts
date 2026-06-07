@@ -11,6 +11,10 @@ import { equipmentRoutes } from './routes/equipment.js';
 import { inventoryRoutes } from './routes/inventory.js';
 import { monitoringRoutes } from './routes/monitoring.js';
 import { safetyRoutes } from './routes/safety.js';
+import { iqcRoutes } from './routes/iqc.js';
+import { eqaRoutes } from './routes/eqa.js';
+import { verificationValidationRoutes } from './routes/verificationValidation.js';
+import { measurementUncertaintyRoutes } from './routes/measurementUncertainty.js';
 import { optionalAuth } from './middleware/auth.js';
 import { ensureDataDirs } from './db/database.js';
 import { seedDefaults } from './db/seed.js';
@@ -33,6 +37,10 @@ export function createApiServer() {
   app.use('/api/supplier-inventory', inventoryRoutes());
   app.use('/api/monitoring', monitoringRoutes());
   app.use('/api/facilities-safety', safetyRoutes());
+  app.use('/api/iqc', iqcRoutes());
+  app.use('/api/eqa', eqaRoutes());
+  app.use('/api/verification-validation', verificationValidationRoutes());
+  app.use('/api/measurement-uncertainty', measurementUncertaintyRoutes());
   app.use('/api', commonRoutes());
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const message = err instanceof Error ? err.message : 'Unexpected server error';
