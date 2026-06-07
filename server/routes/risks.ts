@@ -28,6 +28,10 @@ export function riskRoutes() {
   });
 
   router.post('/', requirePermission('risks', 'create'), (req, res) => {
+    const requiredFields = ['riskArea', 'riskDescription', 'likelihood', 'severity', 'detectability'];
+    for (const field of requiredFields) {
+      if (!req.body[field]) return res.status(400).json({ error: `${field} is required` });
+    }
     const db = getDb();
     const createdAt = new Date().toISOString();
     const riskNumber = generateRecordNumber(db, 'risks', 'RISK', createdAt);
@@ -66,7 +70,8 @@ export function riskRoutes() {
     const item = db.prepare('SELECT * FROM risks WHERE id = ?').get(req.params.id);
     if (!item) return res.status(404).json({ error: 'Risk not found' });
     const reviews = db.prepare('SELECT * FROM risk_reviews WHERE risk_id = ? ORDER BY review_date DESC').all(req.params.id);
-    res.json({ ...item, reviews });
+    const links = db.prepare('SELECT * FROM record_links WHERE (source_module_key = ? AND source_record_type = ? AND source_record_id = ?) OR (target_module_key = ? AND target_record_type = ? AND target_record_id = ?)').all('risks', 'risks', String(req.params.id), 'risks', 'risks', String(req.params.id));
+    res.json({ ...item, reviews, links });
   });
 
   router.put('/:id', requirePermission('risks', 'edit'), (req, res) => {

@@ -18,6 +18,10 @@ export function nonconformityRoutes() {
   });
 
   router.post('/', requirePermission('nc_capa', 'create'), (req, res) => {
+    const requiredFields = ['title', 'description', 'eventDate', 'severity'];
+    for (const field of requiredFields) {
+      if (!req.body[field]) return res.status(400).json({ error: `${field} is required` });
+    }
     const db = getDb();
     const createdAt = new Date().toISOString();
     const ncNumber = generateRecordNumber(db, 'nonconforming_events', 'NC', createdAt);
@@ -49,7 +53,7 @@ export function nonconformityRoutes() {
     const db = getDb();
     const item = db.prepare('SELECT * FROM nonconforming_events WHERE id = ?').get(req.params.id);
     if (!item) return res.status(404).json({ error: 'Nonconforming event not found' });
-    const links = db.prepare('SELECT * FROM record_links WHERE source_module_key = ? AND source_record_type = ? AND source_record_id = ? OR target_module_key = ? AND target_record_type = ? AND target_record_id = ?').all('nc_capa', 'nonconforming_events', req.params.id, 'nc_capa', 'nonconforming_events', req.params.id);
+    const links = db.prepare('SELECT * FROM record_links WHERE (source_module_key = ? AND source_record_type = ? AND source_record_id = ?) OR (target_module_key = ? AND target_record_type = ? AND target_record_id = ?)').all('nc_capa', 'nonconforming_events', String(req.params.id), 'nc_capa', 'nonconforming_events', String(req.params.id));
     res.json({ ...item, links });
   });
 

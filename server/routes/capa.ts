@@ -18,6 +18,8 @@ export function capaRoutes() {
   });
 
   router.post('/', requirePermission('nc_capa', 'create'), (req, res) => {
+    if (!req.body.title) return res.status(400).json({ error: 'title is required' });
+    if (!req.body.problemSummary) return res.status(400).json({ error: 'problemSummary is required' });
     const db = getDb();
     const createdAt = new Date().toISOString();
     const capaNumber = generateRecordNumber(db, 'capa_records', 'CAPA', createdAt);
@@ -62,7 +64,8 @@ export function capaRoutes() {
     const item = db.prepare('SELECT * FROM capa_records WHERE id = ?').get(req.params.id);
     if (!item) return res.status(404).json({ error: 'CAPA not found' });
     const updates = db.prepare('SELECT * FROM capa_updates WHERE capa_id = ? ORDER BY update_date DESC').all(req.params.id);
-    res.json({ ...item, updates });
+    const links = db.prepare('SELECT * FROM record_links WHERE (source_module_key = ? AND source_record_type = ? AND source_record_id = ?) OR (target_module_key = ? AND target_record_type = ? AND target_record_id = ?)').all('nc_capa', 'capa_records', String(req.params.id), 'nc_capa', 'capa_records', String(req.params.id));
+    res.json({ ...item, updates, links });
   });
 
   router.put('/:id', requirePermission('nc_capa', 'edit'), (req, res) => {

@@ -18,6 +18,10 @@ export function complaintsRoutes() {
   });
 
   router.post('/', requirePermission('complaints', 'create'), (req, res) => {
+    const requiredFields = ['title', 'description', 'receivedDate', 'complainantType', 'category'];
+    for (const field of requiredFields) {
+      if (!req.body[field]) return res.status(400).json({ error: `${field} is required` });
+    }
     const db = getDb();
     const createdAt = new Date().toISOString();
     const complaintNumber = generateRecordNumber(db, 'complaints', 'COMP', createdAt);
@@ -51,7 +55,7 @@ export function complaintsRoutes() {
     const db = getDb();
     const item = db.prepare('SELECT * FROM complaints WHERE id = ?').get(req.params.id);
     if (!item) return res.status(404).json({ error: 'Complaint not found' });
-    const links = db.prepare('SELECT * FROM record_links WHERE source_record_type = ? AND source_record_id = ? OR target_record_type = ? AND target_record_id = ?').all('complaints', req.params.id, 'complaints', req.params.id);
+    const links = db.prepare('SELECT * FROM record_links WHERE (source_record_type = ? AND source_record_id = ?) OR (target_record_type = ? AND target_record_id = ?)').all('complaints', String(req.params.id), 'complaints', String(req.params.id));
     res.json({ ...item, links });
   });
 
