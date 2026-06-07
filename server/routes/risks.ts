@@ -3,6 +3,7 @@ import { getDb } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
+import { getStaffIdOrCurrent } from './routeHelpers.js';
 
 function parseIntNullable(value: unknown) {
   const num = Number(value);
@@ -113,6 +114,8 @@ export function riskRoutes() {
     const likelihood = Number(req.body.riskScore) || existing.risk_score;
     const riskLevel = req.body.riskLevel ?? existing.risk_level;
     const nextReviewDate = req.body.nextReviewDate ?? null;
+    const reviewedByStaffId = getStaffIdOrCurrent(req, req.body.reviewedByStaffId);
+    if (reviewedByStaffId === null) return res.status(400).json({ error: 'This action requires the logged-in user to be linked to a staff record.' });
     const result = db.prepare('INSERT INTO risk_reviews (risk_id, review_date, review_notes, risk_score, risk_level, next_review_date, reviewed_by_staff_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
       req.params.id,
       reviewDate,
@@ -120,7 +123,7 @@ export function riskRoutes() {
       likelihood,
       riskLevel,
       nextReviewDate,
-      parseIntNullable(req.body.reviewedByStaffId) ?? req.user!.id,
+      reviewedByStaffId,
       new Date().toISOString()
     );
     db.prepare('UPDATE risks SET review_due_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(nextReviewDate, req.params.id);

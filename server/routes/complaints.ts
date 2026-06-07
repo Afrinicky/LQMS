@@ -3,6 +3,7 @@ import { getDb } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
+import { getStaffIdOrCurrent } from './routeHelpers.js';
 
 function parseIntNullable(value: unknown) {
   const num = Number(value);
@@ -165,7 +166,9 @@ export function complaintsRoutes() {
     const db = getDb();
     const oldValue = db.prepare('SELECT status, closure_summary, closed_by_staff_id, closed_at FROM complaints WHERE id = ?').get(req.params.id);
     if (!oldValue) return res.status(404).json({ error: 'Complaint not found' });
-    db.prepare('UPDATE complaints SET status = ?, closure_summary = ?, closed_by_staff_id = ?, closed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(req.body.status ?? 'closed', req.body.closureSummary, parseIntNullable(req.body.closedByStaffId) ?? req.user!.id, req.params.id);
+    const closedByStaffId = getStaffIdOrCurrent(req, req.body.closedByStaffId);
+    if (closedByStaffId === null) return res.status(400).json({ error: 'This action requires the logged-in user to be linked to a staff record.' });
+    db.prepare('UPDATE complaints SET status = ?, closure_summary = ?, closed_by_staff_id = ?, closed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(req.body.status ?? 'closed', req.body.closureSummary, closedByStaffId, req.params.id);
     audit(req, { action: 'void_archive', entity: 'complaints', entityId: req.params.id, oldValue, newValue: { status: req.body.status ?? 'closed', closureSummary: req.body.closureSummary } });
     res.json({ ok: true });
   });

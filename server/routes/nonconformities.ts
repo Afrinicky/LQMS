@@ -3,6 +3,7 @@ import { getDb } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
+import { getStaffIdOrCurrent } from './routeHelpers.js';
 
 function parseIntNullable(value: unknown) {
   const num = Number(value);
@@ -81,8 +82,10 @@ export function nonconformityRoutes() {
     const db = getDb();
     const oldValue = db.prepare('SELECT reviewer_staff_id, reviewed_at, status FROM nonconforming_events WHERE id = ?').get(req.params.id);
     if (!oldValue) return res.status(404).json({ error: 'Nonconforming event not found' });
-    db.prepare('UPDATE nonconforming_events SET reviewer_staff_id = ?, reviewed_at = CURRENT_TIMESTAMP, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(parseIntNullable(req.body.reviewerStaffId) ?? req.user!.id, req.body.status ?? 'reviewed', req.params.id);
-    audit(req, { action: 'approve', entity: 'nonconforming_events', entityId: req.params.id, oldValue, newValue: { reviewerStaffId: req.body.reviewerStaffId ?? req.user!.id, status: req.body.status ?? 'reviewed' } });
+    const reviewerStaffId = getStaffIdOrCurrent(req, req.body.reviewerStaffId);
+    if (reviewerStaffId === null) return res.status(400).json({ error: 'This action requires the logged-in user to be linked to a staff record.' });
+    db.prepare('UPDATE nonconforming_events SET reviewer_staff_id = ?, reviewed_at = CURRENT_TIMESTAMP, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(reviewerStaffId, req.body.status ?? 'reviewed', req.params.id);
+    audit(req, { action: 'approve', entity: 'nonconforming_events', entityId: req.params.id, oldValue, newValue: { reviewerStaffId, status: req.body.status ?? 'reviewed' } });
     res.json({ ok: true });
   });
 
@@ -120,7 +123,9 @@ export function nonconformityRoutes() {
     const db = getDb();
     const oldValue = db.prepare('SELECT status, closure_notes, closed_by_staff_id, closed_at FROM nonconforming_events WHERE id = ?').get(req.params.id);
     if (!oldValue) return res.status(404).json({ error: 'Nonconforming event not found' });
-    db.prepare('UPDATE nonconforming_events SET status = ?, closure_notes = ?, closed_by_staff_id = ?, closed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(req.body.status ?? 'closed', req.body.closureNotes, parseIntNullable(req.body.closedByStaffId) ?? req.user!.id, req.params.id);
+    const closedByStaffId = getStaffIdOrCurrent(req, req.body.closedByStaffId);
+    if (closedByStaffId === null) return res.status(400).json({ error: 'This action requires the logged-in user to be linked to a staff record.' });
+    db.prepare('UPDATE nonconforming_events SET status = ?, closure_notes = ?, closed_by_staff_id = ?, closed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(req.body.status ?? 'closed', req.body.closureNotes, closedByStaffId, req.params.id);
     audit(req, { action: 'void_archive', entity: 'nonconforming_events', entityId: req.params.id, oldValue, newValue: { status: req.body.status ?? 'closed', closureNotes: req.body.closureNotes } });
     res.json({ ok: true });
   });
