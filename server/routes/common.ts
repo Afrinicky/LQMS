@@ -122,6 +122,26 @@ export function commonRoutes() {
     });
   });
 
+  router.get('/dashboard/blood-bank-summary', (_req, res) => {
+    const db = getDb();
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const expiringSoonCutoff = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+    const count = (sql: string, ...params: unknown[]) => (db.prepare(sql).get(...params) as { count: number }).count;
+    res.json({
+      unitsAvailable: count("SELECT COUNT(*) count FROM blood_units WHERE current_status = 'available' AND expiry_date > ?", nowIso),
+      unitsExpiringSoon: count("SELECT COUNT(*) count FROM blood_units WHERE current_status = 'available' AND expiry_date > ? AND expiry_date <= ?", nowIso, expiringSoonCutoff),
+      unitsExpired: count("SELECT COUNT(*) count FROM blood_units WHERE expiry_date < ? AND current_status NOT IN ('discarded','transfused')", nowIso),
+      pendingHandovers: count("SELECT COUNT(*) count FROM blood_bank_handovers WHERE status NOT IN ('closed','reviewed')"),
+      openAdverseEvents: count("SELECT COUNT(*) count FROM blood_adverse_events WHERE status != 'closed'"),
+      discardsThisMonth: count('SELECT COUNT(*) count FROM blood_discards WHERE discard_date BETWEEN ? AND ?', monthStart, monthEnd),
+      donorReactionsThisMonth: count("SELECT COUNT(*) count FROM blood_adverse_events WHERE event_type LIKE 'donor%' AND event_date BETWEEN ? AND ?", monthStart, monthEnd),
+      transfusionReactionsThisMonth: count("SELECT COUNT(*) count FROM blood_adverse_events WHERE event_type LIKE 'transfusion%' AND event_date BETWEEN ? AND ?", monthStart, monthEnd)
+    });
+  });
+
   router.get('/dashboard/qms-summary', (_req, res) => {
     const db = getDb();
     const staffId = _req.user?.staffId ?? null;

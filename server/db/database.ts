@@ -444,4 +444,165 @@ CREATE TABLE IF NOT EXISTS measurement_uncertainty_records (
   const iqcResultColumns = database.prepare("PRAGMA table_info(iqc_results)").all() as Array<{ name: string }>;
   const iqcResultNames = new Set(iqcResultColumns.map(col => col.name));
   if (!iqcResultNames.has('z_score')) database.exec('ALTER TABLE iqc_results ADD COLUMN z_score REAL');
+
+  // Phase 5: Blood Bank Quality & Inventory Handover
+  database.exec(`
+CREATE TABLE IF NOT EXISTS blood_units (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  unit_number TEXT NOT NULL UNIQUE,
+  batch_number TEXT,
+  blood_group TEXT NOT NULL,
+  component_type TEXT NOT NULL,
+  donor_type TEXT,
+  collection_date TEXT NOT NULL,
+  expiry_date TEXT NOT NULL,
+  screening_hbsag TEXT,
+  screening_hcv TEXT,
+  screening_syphilis TEXT,
+  screening_hiv TEXT,
+  screening_status TEXT,
+  current_status TEXT NOT NULL DEFAULT 'available',
+  location_id INTEGER REFERENCES locations(id),
+  refrigerator_monitoring_item_id INTEGER REFERENCES monitoring_items(id),
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS blood_bank_handovers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  handover_number TEXT NOT NULL UNIQUE,
+  handover_date TEXT NOT NULL,
+  period_start TEXT NOT NULL,
+  period_end TEXT NOT NULL,
+  outgoing_staff_id INTEGER REFERENCES staff(id),
+  incoming_staff_id INTEGER REFERENCES staff(id),
+  blood_bank_unit_head_id INTEGER REFERENCES staff(id),
+  total_units_available INTEGER NOT NULL DEFAULT 0,
+  total_units_expiring_soon INTEGER NOT NULL DEFAULT 0,
+  total_units_expired INTEGER NOT NULL DEFAULT 0,
+  total_donations INTEGER NOT NULL DEFAULT 0,
+  family_donor_count INTEGER NOT NULL DEFAULT 0,
+  voluntary_donor_count INTEGER NOT NULL DEFAULT 0,
+  commercial_paid_donor_count INTEGER NOT NULL DEFAULT 0,
+  outside_campaign_donor_count INTEGER NOT NULL DEFAULT 0,
+  total_transfusions INTEGER NOT NULL DEFAULT 0,
+  total_discards INTEGER NOT NULL DEFAULT 0,
+  donor_reactions_count INTEGER NOT NULL DEFAULT 0,
+  transfusion_reactions_count INTEGER NOT NULL DEFAULT 0,
+  issues_noted TEXT,
+  outgoing_staff_signed_at TEXT,
+  incoming_staff_signed_at TEXT,
+  unit_head_reviewed_at TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS blood_handover_units (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  handover_id INTEGER NOT NULL REFERENCES blood_bank_handovers(id),
+  blood_unit_id INTEGER REFERENCES blood_units(id),
+  unit_number TEXT,
+  batch_number TEXT,
+  blood_group TEXT,
+  component_type TEXT,
+  collection_date TEXT,
+  expiry_date TEXT,
+  screening_hbsag TEXT,
+  screening_hcv TEXT,
+  screening_syphilis TEXT,
+  screening_hiv TEXT,
+  screening_status TEXT,
+  unit_status_at_handover TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS blood_donation_campaigns (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  campaign_number TEXT,
+  campaign_date TEXT NOT NULL,
+  location TEXT NOT NULL,
+  organizer TEXT,
+  total_screened INTEGER NOT NULL DEFAULT 0,
+  total_collected INTEGER NOT NULL DEFAULT 0,
+  family_donor_count INTEGER NOT NULL DEFAULT 0,
+  voluntary_donor_count INTEGER NOT NULL DEFAULT 0,
+  commercial_paid_donor_count INTEGER NOT NULL DEFAULT 0,
+  rejected_or_deferred_count INTEGER NOT NULL DEFAULT 0,
+  remarks TEXT,
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS blood_donation_summaries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  summary_date TEXT NOT NULL,
+  handover_id INTEGER REFERENCES blood_bank_handovers(id),
+  donor_type TEXT,
+  number_screened INTEGER NOT NULL DEFAULT 0,
+  number_accepted INTEGER NOT NULL DEFAULT 0,
+  number_deferred INTEGER NOT NULL DEFAULT 0,
+  number_collected INTEGER NOT NULL DEFAULT 0,
+  remarks TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS blood_transfusion_summaries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  summary_date TEXT NOT NULL,
+  handover_id INTEGER REFERENCES blood_bank_handovers(id),
+  blood_group TEXT,
+  component_type TEXT,
+  number_transfused INTEGER NOT NULL DEFAULT 0,
+  remarks TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS blood_adverse_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_number TEXT NOT NULL UNIQUE,
+  event_date TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  related_unit_id INTEGER REFERENCES blood_units(id),
+  blood_group TEXT,
+  donor_type TEXT,
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  location_id INTEGER REFERENCES locations(id),
+  reported_by_staff_id INTEGER REFERENCES staff(id),
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  immediate_action TEXT,
+  severity TEXT,
+  outcome TEXT,
+  investigation_summary TEXT,
+  nc_id INTEGER REFERENCES nonconforming_events(id),
+  capa_id INTEGER REFERENCES capa_records(id),
+  safety_incident_id INTEGER REFERENCES safety_incidents(id),
+  status TEXT NOT NULL DEFAULT 'open',
+  closed_by_staff_id INTEGER REFERENCES staff(id),
+  closed_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS blood_discards (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  discard_date TEXT NOT NULL,
+  blood_unit_id INTEGER REFERENCES blood_units(id),
+  unit_number TEXT,
+  blood_group TEXT,
+  component_type TEXT,
+  reason TEXT NOT NULL,
+  authorized_by_staff_id INTEGER REFERENCES staff(id),
+  discarded_by_staff_id INTEGER REFERENCES staff(id),
+  nc_id INTEGER REFERENCES nonconforming_events(id),
+  capa_id INTEGER REFERENCES capa_records(id),
+  remarks TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+`);
 }
