@@ -8,6 +8,9 @@ import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 const ASSESSMENT_STATUSES = ['planned', 'in_progress', 'completed', 'closed'];
 const FINDING_TYPES = ['observation', 'nonconformity', 'improvement_opportunity', 'risk'];
 const FINDING_STATUSES = ['open', 'action_required', 'linked_to_capa', 'closed'];
+const CHECKLIST_STATUSES = ['draft', 'active', 'inactive', 'archived', 'replaced'];
+const SELECTION_MODES = ['whole_checklist', 'selected_sections', 'selected_questions', 'mixed'];
+const RESPONSE_OPTIONS = ['met', 'partially_met', 'not_met', 'not_applicable', 'not_assessed', 'observation_only'];
 
 function insertLink(db: any, source: { module: string; type: string; id: string | number }, target: { module: string; type: string; id: string | number }, notes?: string) {
   db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run(source.module, source.type, String(source.id), target.module, target.type, String(target.id), notes ?? null);
@@ -96,12 +99,346 @@ export function assessmentsRoutes() {
     res.json({ ok: true });
   });
 
+  // -------- Checklist library (specific paths before /:id) --------
+  router.get('/checklists', requirePermission('assessments', 'view'), (req, res) => {
+    const db = getDb();
+    const filters: string[] = [];
+    const params: unknown[] = [];
+    if (req.query.status) { filters.push('status = ?'); params.push(String(req.query.status)); }
+    if (req.query.checklistType) { filters.push('checklist_type = ?'); params.push(String(req.query.checklistType)); }
+    let query = 'SELECT * FROM assessment_checklists';
+    if (filters.length) query += ` WHERE ${filters.join(' AND ')}`;
+    query += ' ORDER BY checklist_name';
+    res.json(db.prepare(query).all(...params));
+  });
+
+  router.post('/checklists', requirePermission('assessments', 'create'), (req, res) => {
+    if (!req.body.checklistName) return res.status(400).json({ error: 'checklistName is required' });
+    if (!req.body.checklistType) return res.status(400).json({ error: 'checklistType is required' });
+    const status = req.body.status ?? 'draft';
+    if (!CHECKLIST_STATUSES.includes(status)) return res.status(400).json({ error: `status must be one of: ${CHECKLIST_STATUSES.join(', ')}` });
+    const db = getDb();
+    const result = db.prepare(`INSERT INTO assessment_checklists (checklist_code, checklist_name, checklist_type, description, source_name, version_label, effective_date, status, is_default, is_editable, marking_enabled, total_possible_marks, internal_threshold_label, internal_pass_mark, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(req.body.checklistCode ?? null, req.body.checklistName, req.body.checklistType, req.body.description ?? null, req.body.sourceName ?? null, req.body.versionLabel ?? null, req.body.effectiveDate ?? null, status, req.body.isDefault ? 1 : 0, req.body.isEditable === false ? 0 : 1, req.body.markingEnabled ? 1 : 0, req.body.totalPossibleMarks !== undefined && req.body.totalPossibleMarks !== '' ? Number(req.body.totalPossibleMarks) : null, req.body.internalThresholdLabel ?? null, req.body.internalPassMark !== undefined && req.body.internalPassMark !== '' ? Number(req.body.internalPassMark) : null, req.user!.id);
+    const id = Number(result.lastInsertRowid);
+    audit(req, { action: 'create', entity: 'assessment_checklists', entityId: id, newValue: req.body });
+    res.status(201).json({ id });
+  });
+
+  router.post('/checklists/import', requirePermission('assessments', 'create'), (req, res) => {
+    const c = req.body.checklist;
+    if (!c || !c.checklistName || !c.checklistType) return res.status(400).json({ error: 'checklist.checklistName and checklist.checklistType are required' });
+    const sections = Array.isArray(req.body.sections) ? req.body.sections : [];
+    const db = getDb();
+    let checklistId = 0;
+    let sectionsInserted = 0;
+    let questionsInserted = 0;
+    const tx = db.transaction(() => {
+      const r = db.prepare(`INSERT INTO assessment_checklists (checklist_code, checklist_name, checklist_type, description, source_name, version_label, effective_date, status, is_default, is_editable, marking_enabled, total_possible_marks, internal_threshold_label, internal_pass_mark, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?, ?, ?)`)
+        .run(c.checklistCode ?? null, c.checklistName, c.checklistType, c.description ?? null, c.sourceName ?? null, c.versionLabel ?? null, c.effectiveDate ?? null, c.status ?? 'draft', c.markingEnabled ? 1 : 0, c.totalPossibleMarks ?? null, c.internalThresholdLabel ?? null, c.internalPassMark ?? null, req.user!.id);
+      checklistId = Number(r.lastInsertRowid);
+      const insertSection = db.prepare(`INSERT INTO assessment_checklist_sections (checklist_id, section_code, section_title, section_description, display_order, is_active, section_possible_marks, section_weight, created_by) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`);
+      const insertQuestion = db.prepare(`INSERT INTO assessment_checklist_questions (checklist_id, section_id, question_code, question_text, guidance, expected_evidence, response_type, display_order, is_required, is_active, max_marks, weight, scoring_guidance, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`);
+      sections.forEach((s: any, idx: number) => {
+        const sr = insertSection.run(checklistId, s.sectionCode ?? null, s.sectionTitle ?? `Section ${idx + 1}`, s.sectionDescription ?? null, s.displayOrder ?? idx, s.sectionPossibleMarks ?? null, s.sectionWeight ?? null, req.user!.id);
+        const sId = Number(sr.lastInsertRowid);
+        sectionsInserted++;
+        (s.questions || []).forEach((q: any, qIdx: number) => {
+          insertQuestion.run(checklistId, sId, q.questionCode ?? null, q.questionText ?? '', q.guidance ?? null, q.expectedEvidence ?? null, q.responseType ?? 'met_partial_not_met', q.displayOrder ?? qIdx, q.isRequired ? 1 : 0, q.maxMarks ?? null, q.weight ?? null, q.scoringGuidance ?? null, req.user!.id);
+          questionsInserted++;
+        });
+      });
+    });
+    tx();
+    audit(req, { action: 'import', entity: 'assessment_checklists', entityId: checklistId, newValue: { checklistName: c.checklistName, sectionsInserted, questionsInserted } });
+    res.status(201).json({ id: checklistId, sectionsInserted, questionsInserted });
+  });
+
+  router.get('/checklists/:id', requirePermission('assessments', 'view'), (req, res) => {
+    const db = getDb();
+    const checklist = db.prepare('SELECT * FROM assessment_checklists WHERE id = ?').get(req.params.id) as any;
+    if (!checklist) return res.status(404).json({ error: 'Checklist not found' });
+    const sections = db.prepare('SELECT * FROM assessment_checklist_sections WHERE checklist_id = ? ORDER BY display_order, id').all(req.params.id);
+    const questions = db.prepare('SELECT * FROM assessment_checklist_questions WHERE checklist_id = ? ORDER BY section_id, display_order, id').all(req.params.id);
+    res.json({ ...checklist, sections, questions });
+  });
+
+  router.put('/checklists/:id', requirePermission('assessments', 'edit'), (req, res) => {
+    const db = getDb();
+    const oldValue = db.prepare('SELECT * FROM assessment_checklists WHERE id = ?').get(req.params.id) as any;
+    if (!oldValue) return res.status(404).json({ error: 'Checklist not found' });
+    if (req.body.status && !CHECKLIST_STATUSES.includes(req.body.status)) return res.status(400).json({ error: `status must be one of: ${CHECKLIST_STATUSES.join(', ')}` });
+    if (oldValue.is_editable === 0 && oldValue.is_default === 1) {
+      // still allow status/marking/threshold updates but block destructive name/type changes
+    }
+    db.prepare(`UPDATE assessment_checklists SET checklist_code = ?, checklist_name = ?, checklist_type = ?, description = ?, source_name = ?, version_label = ?, effective_date = ?, status = ?, marking_enabled = ?, total_possible_marks = ?, internal_threshold_label = ?, internal_pass_mark = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(req.body.checklistCode ?? oldValue.checklist_code, req.body.checklistName ?? oldValue.checklist_name, req.body.checklistType ?? oldValue.checklist_type, req.body.description ?? oldValue.description, req.body.sourceName ?? oldValue.source_name, req.body.versionLabel ?? oldValue.version_label, req.body.effectiveDate ?? oldValue.effective_date, req.body.status ?? oldValue.status, req.body.markingEnabled !== undefined ? (req.body.markingEnabled ? 1 : 0) : oldValue.marking_enabled, req.body.totalPossibleMarks !== undefined && req.body.totalPossibleMarks !== '' ? Number(req.body.totalPossibleMarks) : oldValue.total_possible_marks, req.body.internalThresholdLabel ?? oldValue.internal_threshold_label, req.body.internalPassMark !== undefined && req.body.internalPassMark !== '' ? Number(req.body.internalPassMark) : oldValue.internal_pass_mark, req.params.id);
+    audit(req, { action: 'edit', entity: 'assessment_checklists', entityId: req.params.id, oldValue, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  router.post('/checklists/:id/archive', requirePermission('assessments', 'approve'), (req, res) => {
+    const db = getDb();
+    const c = db.prepare('SELECT * FROM assessment_checklists WHERE id = ?').get(req.params.id) as any;
+    if (!c) return res.status(404).json({ error: 'Checklist not found' });
+    db.prepare("UPDATE assessment_checklists SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
+    audit(req, { action: 'archive', entity: 'assessment_checklists', entityId: req.params.id, oldValue: { status: c.status }, newValue: { status: 'archived' } });
+    res.json({ ok: true });
+  });
+
+  router.post('/checklists/:id/toggle', requirePermission('assessments', 'edit'), (req, res) => {
+    const db = getDb();
+    const c = db.prepare('SELECT * FROM assessment_checklists WHERE id = ?').get(req.params.id) as any;
+    if (!c) return res.status(404).json({ error: 'Checklist not found' });
+    const newStatus = c.status === 'active' ? 'inactive' : 'active';
+    db.prepare('UPDATE assessment_checklists SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newStatus, req.params.id);
+    audit(req, { action: 'toggle', entity: 'assessment_checklists', entityId: req.params.id, oldValue: { status: c.status }, newValue: { status: newStatus } });
+    res.json({ ok: true, status: newStatus });
+  });
+
+  router.post('/checklists/:id/sections', requirePermission('assessments', 'create'), (req, res) => {
+    if (!req.body.sectionTitle) return res.status(400).json({ error: 'sectionTitle is required' });
+    const db = getDb();
+    const checklist = db.prepare('SELECT id FROM assessment_checklists WHERE id = ?').get(req.params.id);
+    if (!checklist) return res.status(404).json({ error: 'Checklist not found' });
+    const result = db.prepare(`INSERT INTO assessment_checklist_sections (checklist_id, section_code, section_title, section_description, display_order, is_active, section_possible_marks, section_weight, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(req.params.id, req.body.sectionCode ?? null, req.body.sectionTitle, req.body.sectionDescription ?? null, parseIntNullable(req.body.displayOrder) ?? 0, req.body.isActive === false ? 0 : 1, req.body.sectionPossibleMarks !== undefined && req.body.sectionPossibleMarks !== '' ? Number(req.body.sectionPossibleMarks) : null, req.body.sectionWeight !== undefined && req.body.sectionWeight !== '' ? Number(req.body.sectionWeight) : null, req.user!.id);
+    const id = Number(result.lastInsertRowid);
+    audit(req, { action: 'create', entity: 'assessment_checklist_sections', entityId: id, newValue: { checklistId: req.params.id, ...req.body } });
+    res.status(201).json({ id });
+  });
+
+  router.put('/checklists/:id/sections/:sectionId', requirePermission('assessments', 'edit'), (req, res) => {
+    const db = getDb();
+    const old = db.prepare('SELECT * FROM assessment_checklist_sections WHERE id = ? AND checklist_id = ?').get(req.params.sectionId, req.params.id) as any;
+    if (!old) return res.status(404).json({ error: 'Section not found' });
+    db.prepare(`UPDATE assessment_checklist_sections SET section_code = ?, section_title = ?, section_description = ?, display_order = ?, is_active = ?, section_possible_marks = ?, section_weight = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(req.body.sectionCode ?? old.section_code, req.body.sectionTitle ?? old.section_title, req.body.sectionDescription ?? old.section_description, parseIntNullable(req.body.displayOrder) ?? old.display_order, req.body.isActive !== undefined ? (req.body.isActive ? 1 : 0) : old.is_active, req.body.sectionPossibleMarks !== undefined && req.body.sectionPossibleMarks !== '' ? Number(req.body.sectionPossibleMarks) : old.section_possible_marks, req.body.sectionWeight !== undefined && req.body.sectionWeight !== '' ? Number(req.body.sectionWeight) : old.section_weight, req.params.sectionId);
+    audit(req, { action: 'edit', entity: 'assessment_checklist_sections', entityId: req.params.sectionId, oldValue: old, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  router.post('/checklists/:id/questions', requirePermission('assessments', 'create'), (req, res) => {
+    if (!req.body.questionText) return res.status(400).json({ error: 'questionText is required' });
+    if (!req.body.responseType) return res.status(400).json({ error: 'responseType is required' });
+    const db = getDb();
+    const checklist = db.prepare('SELECT id FROM assessment_checklists WHERE id = ?').get(req.params.id);
+    if (!checklist) return res.status(404).json({ error: 'Checklist not found' });
+    const result = db.prepare(`INSERT INTO assessment_checklist_questions (checklist_id, section_id, question_code, question_text, guidance, expected_evidence, response_type, display_order, is_required, is_active, max_marks, weight, scoring_guidance, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(req.params.id, parseIntNullable(req.body.sectionId), req.body.questionCode ?? null, req.body.questionText, req.body.guidance ?? null, req.body.expectedEvidence ?? null, req.body.responseType, parseIntNullable(req.body.displayOrder) ?? 0, req.body.isRequired ? 1 : 0, req.body.isActive === false ? 0 : 1, req.body.maxMarks !== undefined && req.body.maxMarks !== '' ? Number(req.body.maxMarks) : null, req.body.weight !== undefined && req.body.weight !== '' ? Number(req.body.weight) : null, req.body.scoringGuidance ?? null, req.user!.id);
+    const id = Number(result.lastInsertRowid);
+    audit(req, { action: 'create', entity: 'assessment_checklist_questions', entityId: id, newValue: { checklistId: req.params.id, ...req.body } });
+    res.status(201).json({ id });
+  });
+
+  router.put('/checklists/:id/questions/:questionId', requirePermission('assessments', 'edit'), (req, res) => {
+    const db = getDb();
+    const old = db.prepare('SELECT * FROM assessment_checklist_questions WHERE id = ? AND checklist_id = ?').get(req.params.questionId, req.params.id) as any;
+    if (!old) return res.status(404).json({ error: 'Question not found' });
+    db.prepare(`UPDATE assessment_checklist_questions SET section_id = ?, question_code = ?, question_text = ?, guidance = ?, expected_evidence = ?, response_type = ?, display_order = ?, is_required = ?, is_active = ?, max_marks = ?, weight = ?, scoring_guidance = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(parseIntNullable(req.body.sectionId) ?? old.section_id, req.body.questionCode ?? old.question_code, req.body.questionText ?? old.question_text, req.body.guidance ?? old.guidance, req.body.expectedEvidence ?? old.expected_evidence, req.body.responseType ?? old.response_type, parseIntNullable(req.body.displayOrder) ?? old.display_order, req.body.isRequired !== undefined ? (req.body.isRequired ? 1 : 0) : old.is_required, req.body.isActive !== undefined ? (req.body.isActive ? 1 : 0) : old.is_active, req.body.maxMarks !== undefined && req.body.maxMarks !== '' ? Number(req.body.maxMarks) : old.max_marks, req.body.weight !== undefined && req.body.weight !== '' ? Number(req.body.weight) : old.weight, req.body.scoringGuidance ?? old.scoring_guidance, req.params.questionId);
+    audit(req, { action: 'edit', entity: 'assessment_checklist_questions', entityId: req.params.questionId, oldValue: old, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  // -------- Per-assessment planning + responses --------
+  router.post('/:id/select-checklist', requirePermission('assessments', 'edit'), (req, res) => {
+    if (!parseIntNullable(req.body.checklistId)) return res.status(400).json({ error: 'checklistId is required' });
+    if (!req.body.selectionMode) return res.status(400).json({ error: 'selectionMode is required' });
+    if (!SELECTION_MODES.includes(req.body.selectionMode)) return res.status(400).json({ error: `selectionMode must be one of: ${SELECTION_MODES.join(', ')}` });
+    const db = getDb();
+    const program = db.prepare('SELECT id FROM assessment_programs WHERE id = ?').get(req.params.id);
+    if (!program) return res.status(404).json({ error: 'Assessment not found' });
+    const checklist = db.prepare('SELECT * FROM assessment_checklists WHERE id = ?').get(req.body.checklistId) as any;
+    if (!checklist) return res.status(404).json({ error: 'Checklist not found' });
+    const selectedBy = getStaffIdOrCurrent(req, req.body.selectedByStaffId);
+    const mode = req.body.selectionMode;
+    const sectionIds: number[] = Array.isArray(req.body.sectionIds) ? req.body.sectionIds.map((n: unknown) => Number(n)).filter((n: number) => isFinite(n)) : [];
+    const questionIds: number[] = Array.isArray(req.body.questionIds) ? req.body.questionIds.map((n: unknown) => Number(n)).filter((n: number) => isFinite(n)) : [];
+
+    let resolvedQuestionIds: number[] = [];
+    if (mode === 'whole_checklist') {
+      resolvedQuestionIds = (db.prepare('SELECT id FROM assessment_checklist_questions WHERE checklist_id = ? AND is_active = 1').all(req.body.checklistId) as Array<{ id: number }>).map(r => r.id);
+    } else if (mode === 'selected_sections') {
+      if (!sectionIds.length) return res.status(400).json({ error: 'sectionIds is required for selected_sections mode' });
+      const placeholders = sectionIds.map(() => '?').join(',');
+      resolvedQuestionIds = (db.prepare(`SELECT id FROM assessment_checklist_questions WHERE checklist_id = ? AND is_active = 1 AND section_id IN (${placeholders})`).all(req.body.checklistId, ...sectionIds) as Array<{ id: number }>).map(r => r.id);
+    } else if (mode === 'selected_questions' || mode === 'mixed') {
+      if (!questionIds.length && !sectionIds.length) return res.status(400).json({ error: 'questionIds or sectionIds is required for selected_questions/mixed mode' });
+      const set = new Set<number>(questionIds);
+      if (sectionIds.length) {
+        const placeholders = sectionIds.map(() => '?').join(',');
+        for (const r of db.prepare(`SELECT id FROM assessment_checklist_questions WHERE checklist_id = ? AND is_active = 1 AND section_id IN (${placeholders})`).all(req.body.checklistId, ...sectionIds) as Array<{ id: number }>) set.add(r.id);
+      }
+      resolvedQuestionIds = Array.from(set);
+    }
+    if (!resolvedQuestionIds.length) return res.status(400).json({ error: 'No questions resolved for this selection' });
+
+    const insertSel = db.prepare(`INSERT OR REPLACE INTO assessment_selected_checklists (assessment_program_id, checklist_id, selection_mode, selected_by_staff_id, selected_at, notes, marking_enabled_at_selection, total_possible_marks_at_selection, created_by) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?)`);
+    const insertQ = db.prepare(`INSERT OR IGNORE INTO assessment_selected_questions (assessment_program_id, checklist_id, section_id, question_id, included, planned_for_review, question_text_at_selection, section_title_at_selection, max_marks_at_selection, weight_at_selection, scoring_guidance_at_selection, created_by) VALUES (?, ?, ?, ?, 1, 1, ?, ?, ?, ?, ?, ?)`);
+    let totalPossibleAtSelection = 0;
+    let savedCount = 0;
+    const tx = db.transaction(() => {
+      insertSel.run(req.params.id, req.body.checklistId, mode, selectedBy, req.body.notes ?? null, checklist.marking_enabled, checklist.total_possible_marks ?? null, req.user!.id);
+      for (const qid of resolvedQuestionIds) {
+        const q = db.prepare('SELECT q.*, s.section_title FROM assessment_checklist_questions q LEFT JOIN assessment_checklist_sections s ON s.id = q.section_id WHERE q.id = ?').get(qid) as any;
+        if (!q) continue;
+        insertQ.run(req.params.id, req.body.checklistId, q.section_id, q.id, q.question_text, q.section_title, q.max_marks, q.weight, q.scoring_guidance, req.user!.id);
+        if (checklist.marking_enabled && q.max_marks !== null && q.max_marks !== undefined) totalPossibleAtSelection += Number(q.max_marks);
+        savedCount++;
+      }
+    });
+    tx();
+
+    audit(req, { action: 'select_checklist', entity: 'assessment_programs', entityId: req.params.id, newValue: { checklistId: req.body.checklistId, mode, savedCount, totalPossibleAtSelection } });
+    res.status(201).json({ ok: true, savedCount, totalPossibleAtSelection });
+  });
+
+  router.get('/:id/selected-questions', requirePermission('assessments', 'view'), (req, res) => {
+    const db = getDb();
+    res.json(db.prepare(`SELECT sq.*, c.checklist_name, c.checklist_type, c.marking_enabled
+      FROM assessment_selected_questions sq JOIN assessment_checklists c ON c.id = sq.checklist_id
+      WHERE sq.assessment_program_id = ? AND sq.included = 1
+      ORDER BY c.checklist_name, sq.section_id, sq.id`).all(req.params.id));
+  });
+
+  router.post('/:id/selected-questions', requirePermission('assessments', 'edit'), (req, res) => {
+    const ids: number[] = Array.isArray(req.body.removeQuestionIds) ? req.body.removeQuestionIds.map((n: unknown) => Number(n)).filter((n: number) => isFinite(n)) : [];
+    const db = getDb();
+    let removed = 0;
+    if (ids.length) {
+      const placeholders = ids.map(() => '?').join(',');
+      const r = db.prepare(`UPDATE assessment_selected_questions SET included = 0 WHERE assessment_program_id = ? AND question_id IN (${placeholders})`).run(req.params.id, ...ids);
+      removed = r.changes;
+    }
+    audit(req, { action: 'edit_selected_questions', entity: 'assessment_programs', entityId: req.params.id, newValue: { removed, removeQuestionIds: ids } });
+    res.json({ ok: true, removed });
+  });
+
+  router.post('/:id/question-response', requirePermission('assessments', 'edit'), (req, res) => {
+    if (!parseIntNullable(req.body.questionId)) return res.status(400).json({ error: 'questionId is required' });
+    if (!req.body.response) return res.status(400).json({ error: 'response is required' });
+    if (!RESPONSE_OPTIONS.includes(req.body.response)) return res.status(400).json({ error: `response must be one of: ${RESPONSE_OPTIONS.join(', ')}` });
+    const db = getDb();
+    const sel = db.prepare('SELECT sq.*, c.marking_enabled FROM assessment_selected_questions sq JOIN assessment_checklists c ON c.id = sq.checklist_id WHERE sq.assessment_program_id = ? AND sq.question_id = ? AND sq.included = 1').get(req.params.id, req.body.questionId) as any;
+    if (!sel) return res.status(404).json({ error: 'Question is not part of this assessment' });
+    const marksAwarded = req.body.marksAwarded !== undefined && req.body.marksAwarded !== '' ? Number(req.body.marksAwarded) : null;
+    const maxAtAssessment = req.body.maxMarksAtAssessment !== undefined && req.body.maxMarksAtAssessment !== '' ? Number(req.body.maxMarksAtAssessment) : sel.max_marks_at_selection;
+    if (marksAwarded !== null) {
+      if (!Number.isFinite(marksAwarded) || marksAwarded < 0) return res.status(400).json({ error: 'marksAwarded must be a non-negative number' });
+      if (maxAtAssessment !== null && maxAtAssessment !== undefined) {
+        if (!Number.isFinite(Number(maxAtAssessment)) || Number(maxAtAssessment) < 0) return res.status(400).json({ error: 'maxMarksAtAssessment must be a non-negative number' });
+        if (marksAwarded > Number(maxAtAssessment)) return res.status(400).json({ error: 'marksAwarded cannot exceed maxMarksAtAssessment' });
+      }
+    }
+    const assessedBy = getStaffIdOrCurrent(req, req.body.assessedByStaffId);
+    const existing = db.prepare('SELECT id FROM assessment_question_responses WHERE assessment_program_id = ? AND question_id = ?').get(req.params.id, req.body.questionId) as any;
+    let id: number;
+    if (existing) {
+      db.prepare('UPDATE assessment_question_responses SET response = ?, evidence_summary = ?, finding_required = ?, marks_awarded = ?, max_marks_at_assessment = ?, score_comment = ?, assessed_by_staff_id = ?, assessed_at = CURRENT_TIMESTAMP, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .run(req.body.response, req.body.evidenceSummary ?? null, req.body.findingRequired ? 1 : 0, marksAwarded, maxAtAssessment ?? null, req.body.scoreComment ?? null, assessedBy, req.body.notes ?? null, existing.id);
+      id = existing.id;
+    } else {
+      const result = db.prepare(`INSERT INTO assessment_question_responses (assessment_program_id, checklist_id, section_id, question_id, response, evidence_summary, finding_required, marks_awarded, max_marks_at_assessment, score_comment, assessed_by_staff_id, assessed_at, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)`)
+        .run(req.params.id, sel.checklist_id, sel.section_id, req.body.questionId, req.body.response, req.body.evidenceSummary ?? null, req.body.findingRequired ? 1 : 0, marksAwarded, maxAtAssessment ?? null, req.body.scoreComment ?? null, assessedBy, req.body.notes ?? null, req.user!.id);
+      id = Number(result.lastInsertRowid);
+    }
+    audit(req, { action: existing ? 'edit_question_response' : 'create_question_response', entity: 'assessment_question_responses', entityId: id, newValue: { assessmentProgramId: req.params.id, ...req.body } });
+    res.status(existing ? 200 : 201).json({ id });
+  });
+
+  router.put('/:id/question-response/:responseId', requirePermission('assessments', 'edit'), (req, res) => {
+    const db = getDb();
+    const old = db.prepare('SELECT * FROM assessment_question_responses WHERE id = ? AND assessment_program_id = ?').get(req.params.responseId, req.params.id) as any;
+    if (!old) return res.status(404).json({ error: 'Response not found' });
+    if (req.body.response && !RESPONSE_OPTIONS.includes(req.body.response)) return res.status(400).json({ error: `response must be one of: ${RESPONSE_OPTIONS.join(', ')}` });
+    const marksAwarded = req.body.marksAwarded !== undefined && req.body.marksAwarded !== '' ? Number(req.body.marksAwarded) : old.marks_awarded;
+    const maxAtAssessment = req.body.maxMarksAtAssessment !== undefined && req.body.maxMarksAtAssessment !== '' ? Number(req.body.maxMarksAtAssessment) : old.max_marks_at_assessment;
+    if (marksAwarded !== null && marksAwarded !== undefined) {
+      if (!Number.isFinite(marksAwarded) || marksAwarded < 0) return res.status(400).json({ error: 'marksAwarded must be a non-negative number' });
+      if (maxAtAssessment !== null && maxAtAssessment !== undefined && marksAwarded > Number(maxAtAssessment)) return res.status(400).json({ error: 'marksAwarded cannot exceed maxMarksAtAssessment' });
+    }
+    db.prepare('UPDATE assessment_question_responses SET response = ?, evidence_summary = ?, finding_required = ?, marks_awarded = ?, max_marks_at_assessment = ?, score_comment = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(req.body.response ?? old.response, req.body.evidenceSummary ?? old.evidence_summary, req.body.findingRequired !== undefined ? (req.body.findingRequired ? 1 : 0) : old.finding_required, marksAwarded, maxAtAssessment, req.body.scoreComment ?? old.score_comment, req.body.notes ?? old.notes, req.params.responseId);
+    audit(req, { action: 'edit_question_response', entity: 'assessment_question_responses', entityId: req.params.responseId, oldValue: old, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  router.post('/:id/question-response/:responseId/create-finding', requirePermission('assessments', 'create'), (req, res) => {
+    if (!req.body.findingType) return res.status(400).json({ error: 'findingType is required' });
+    if (!FINDING_TYPES.includes(req.body.findingType)) return res.status(400).json({ error: `findingType must be one of: ${FINDING_TYPES.join(', ')}` });
+    if (!req.body.description) return res.status(400).json({ error: 'description is required' });
+    const db = getDb();
+    const response = db.prepare('SELECT r.*, q.question_text FROM assessment_question_responses r JOIN assessment_checklist_questions q ON q.id = r.question_id WHERE r.id = ? AND r.assessment_program_id = ?').get(req.params.responseId, req.params.id) as any;
+    if (!response) return res.status(404).json({ error: 'Response not found' });
+    const createdAt = new Date().toISOString();
+    const findingNumber = generateRecordNumber(db, 'assessment_findings', 'FIND', createdAt);
+    const result = db.prepare(`INSERT INTO assessment_findings (finding_number, assessment_program_id, finding_date, finding_type, title, description, evidence_summary, severity, responsible_staff_id, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(findingNumber, req.params.id, req.body.findingDate ?? createdAt.slice(0, 10), req.body.findingType, req.body.title ?? response.question_text.slice(0, 120), req.body.description, req.body.evidenceSummary ?? response.evidence_summary ?? null, req.body.severity ?? null, parseIntNullable(req.body.responsibleStaffId), 'open', req.user!.id, createdAt);
+    const findingId = Number(result.lastInsertRowid);
+    db.prepare('UPDATE assessment_question_responses SET finding_id = ?, finding_required = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(findingId, req.params.responseId);
+    insertLink(db, { module: 'assessments', type: 'assessment_question_responses', id: req.params.responseId }, { module: 'assessments', type: 'assessment_findings', id: findingId }, 'Finding created from checklist response');
+    audit(req, { action: 'create', entity: 'assessment_findings', entityId: findingId, newValue: { findingNumber, sourceResponseId: req.params.responseId, ...req.body } });
+    res.status(201).json({ id: findingId, findingNumber });
+  });
+
+  router.get('/:id/internal-score-summary', requirePermission('assessments', 'view'), (req, res) => {
+    const db = getDb();
+    const program = db.prepare('SELECT id FROM assessment_programs WHERE id = ?').get(req.params.id);
+    if (!program) return res.status(404).json({ error: 'Assessment not found' });
+    const selectedChecklists = db.prepare('SELECT marking_enabled_at_selection FROM assessment_selected_checklists WHERE assessment_program_id = ?').all(req.params.id) as Array<{ marking_enabled_at_selection: number }>;
+    const markingEnabled = selectedChecklists.some(c => c.marking_enabled_at_selection === 1);
+    const planned = db.prepare("SELECT COUNT(*) AS c FROM assessment_selected_questions WHERE assessment_program_id = ? AND included = 1").get(req.params.id) as { c: number };
+    const assessed = db.prepare("SELECT COUNT(*) AS c FROM assessment_question_responses WHERE assessment_program_id = ?").get(req.params.id) as { c: number };
+    const sums = db.prepare("SELECT COALESCE(SUM(max_marks_at_selection), 0) AS total_possible FROM assessment_selected_questions WHERE assessment_program_id = ? AND included = 1").get(req.params.id) as { total_possible: number };
+    const awarded = db.prepare("SELECT COALESCE(SUM(marks_awarded), 0) AS total_awarded FROM assessment_question_responses WHERE assessment_program_id = ? AND marks_awarded IS NOT NULL").get(req.params.id) as { total_awarded: number };
+    const totalPossible = Number(sums.total_possible || 0);
+    const totalAwarded = Number(awarded.total_awarded || 0);
+    const pct = totalPossible > 0 ? (totalAwarded / totalPossible) * 100 : null;
+    const sectionRows = db.prepare(`SELECT sq.section_id, MAX(sq.section_title_at_selection) AS section_title,
+        COUNT(*) AS questions_planned,
+        SUM(CASE WHEN r.id IS NOT NULL THEN 1 ELSE 0 END) AS questions_assessed,
+        COALESCE(SUM(sq.max_marks_at_selection), 0) AS possible_marks,
+        COALESCE(SUM(r.marks_awarded), 0) AS marks_awarded
+      FROM assessment_selected_questions sq
+      LEFT JOIN assessment_question_responses r ON r.assessment_program_id = sq.assessment_program_id AND r.question_id = sq.question_id
+      WHERE sq.assessment_program_id = ? AND sq.included = 1
+      GROUP BY sq.section_id`).all(req.params.id) as any[];
+    const sections = sectionRows.map(s => ({
+      section_id: s.section_id,
+      section_title: s.section_title,
+      questions_planned: s.questions_planned ?? 0,
+      questions_assessed: s.questions_assessed ?? 0,
+      possible_marks: Number(s.possible_marks || 0),
+      marks_awarded: Number(s.marks_awarded || 0),
+      internal_score_percentage: Number(s.possible_marks || 0) > 0 ? (Number(s.marks_awarded || 0) / Number(s.possible_marks)) * 100 : null
+    }));
+    const responseRows = db.prepare("SELECT response, COUNT(*) AS c FROM assessment_question_responses WHERE assessment_program_id = ? GROUP BY response").all(req.params.id) as Array<{ response: string; c: number }>;
+    const response_summary: Record<string, number> = { met: 0, partially_met: 0, not_met: 0, not_applicable: 0, not_assessed: 0, observation_only: 0 };
+    for (const r of responseRows) response_summary[r.response] = r.c;
+    const findingsCount = (db.prepare("SELECT COUNT(*) AS c FROM assessment_findings WHERE assessment_program_id = ?").get(req.params.id) as { c: number }).c;
+    res.json({
+      assessment_program_id: Number(req.params.id),
+      marking_enabled: markingEnabled,
+      total_questions_planned: planned.c,
+      total_questions_assessed: assessed.c,
+      total_possible_marks: totalPossible,
+      total_marks_awarded: totalAwarded,
+      internal_score_percentage: pct,
+      sections,
+      response_summary,
+      findings_count: findingsCount,
+      label: 'Internal Audit Marks — not an accreditation, GAS/SLIPTA/ISO, or official compliance score.'
+    });
+  });
+
   router.get('/:id', requirePermission('assessments', 'view'), (req, res) => {
     const db = getDb();
     const program = db.prepare('SELECT * FROM assessment_programs WHERE id = ?').get(req.params.id) as any;
     if (!program) return res.status(404).json({ error: 'Assessment not found' });
     const findings = db.prepare('SELECT * FROM assessment_findings WHERE assessment_program_id = ? ORDER BY finding_date DESC, id DESC').all(req.params.id);
-    res.json({ ...program, findings });
+    const selectedChecklists = db.prepare('SELECT sc.*, c.checklist_name, c.checklist_type FROM assessment_selected_checklists sc JOIN assessment_checklists c ON c.id = sc.checklist_id WHERE sc.assessment_program_id = ? ORDER BY sc.id').all(req.params.id);
+    res.json({ ...program, findings, selectedChecklists });
   });
 
   router.put('/:id', requirePermission('assessments', 'edit'), (req, res) => {
@@ -140,4 +477,4 @@ export function assessmentsRoutes() {
   return router;
 }
 
-export { ASSESSMENT_STATUSES, FINDING_TYPES, FINDING_STATUSES };
+export { ASSESSMENT_STATUSES, FINDING_TYPES, FINDING_STATUSES, CHECKLIST_STATUSES, SELECTION_MODES, RESPONSE_OPTIONS };

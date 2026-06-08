@@ -228,6 +228,23 @@ export function seedDefaults() {
         }
       }
     }
+
+    const defaultChecklists = [
+      { code: 'CHK-GEN', name: 'General Laboratory Assessment Checklist', type: 'general' },
+      { code: 'CHK-SEC', name: 'Sectional Assessment Checklist', type: 'sectional' },
+      { code: 'CHK-HAEM', name: 'Haematology Assessment Checklist', type: 'section_specific' },
+      { code: 'CHK-MICRO', name: 'Microbiology Assessment Checklist', type: 'section_specific' },
+      { code: 'CHK-BB', name: 'Blood Bank Quality Assessment Checklist', type: 'section_specific' },
+      { code: 'CHK-SAFETY', name: 'Safety Assessment Checklist', type: 'safety' },
+      { code: 'CHK-DOC', name: 'Document Control Assessment Checklist', type: 'document_control' }
+    ];
+    for (const c of defaultChecklists) {
+      const existing = db.prepare('SELECT id FROM assessment_checklists WHERE checklist_code = ? AND is_default = 1').get(c.code);
+      if (!existing) {
+        db.prepare(`INSERT INTO assessment_checklists (checklist_code, checklist_name, checklist_type, description, status, is_default, is_editable, marking_enabled) VALUES (?, ?, ?, ?, 'draft', 1, 1, 0)`)
+          .run(c.code, c.name, c.type, 'Default placeholder checklist. Add sections and questions to suit the laboratory. Edit, replace, or archive freely.');
+      }
+    }
   });
   tx();
 }

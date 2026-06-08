@@ -9,7 +9,9 @@ import type {
   ManagementReview, ManagementReviewInput,
   QualityIndicator, QualityIndicatorResult,
   ImprovementProject, ImprovementUpdate,
-  GovernanceSummary
+  GovernanceSummary,
+  AssessmentChecklist, AssessmentChecklistSection, AssessmentChecklistQuestion,
+  AssessmentSelectedQuestion, AssessmentInternalScoreSummary
 } from '../../shared/types/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
@@ -23,6 +25,11 @@ const MEETING_TYPES = ['quality_meeting', 'section_meeting', 'safety_meeting', '
 const ATTENDANCE_STATUSES = ['invited', 'present', 'absent', 'excused'];
 const FREQUENCIES = ['daily', 'weekly', 'monthly', 'quarterly', 'biannual', 'annual'];
 const IMPROVEMENT_AREAS = ['pre_analytical', 'analytical', 'post_analytical', 'turnaround_time', 'safety', 'customer_service', 'staff_competency', 'other'];
+const CHECKLIST_TYPES = ['general', 'sectional', 'section_specific', 'safety', 'document_control', 'theme', 'other'];
+const CHECKLIST_STATUSES = ['draft', 'active', 'inactive', 'archived', 'replaced'];
+const RESPONSE_OPTIONS = ['met', 'partially_met', 'not_met', 'not_applicable', 'not_assessed', 'observation_only'];
+const RESPONSE_TYPES = ['met_partial_not_met', 'yes_no', 'observation_only', 'numeric_marks'];
+const SELECTION_MODES = ['whole_checklist', 'selected_sections', 'selected_questions', 'mixed'];
 
 function useLookups() {
   const [staff, setStaff] = useState<Staff[]>([]);
@@ -61,18 +68,123 @@ export function AssessmentsPage() {
   const [error, setError] = useState<string | null>(null);
   const [programs, setPrograms] = useState<AssessmentProgram[]>([]);
   const [findings, setFindings] = useState<AssessmentFinding[]>([]);
-  const [selected, setSelected] = useState<(AssessmentProgram & { findings?: AssessmentFinding[] }) | null>(null);
+  const [selected, setSelected] = useState<(AssessmentProgram & { findings?: AssessmentFinding[]; selectedChecklists?: any[] }) | null>(null);
   const [progForm, setProgForm] = useState({ title: '', assessmentType: 'internal_audit', departmentId: '', sectionId: '', plannedStartDate: '', plannedEndDate: '', leadAssessorStaffId: '', scope: '', objectives: '' });
   const [findForm, setFindForm] = useState({ findingType: 'observation', findingDate: '', title: '', description: '', severity: 'medium', evidenceSummary: '', responsibleStaffId: '' });
+  // Checklist library state
+  const [checklists, setChecklists] = useState<AssessmentChecklist[]>([]);
+  const [selectedChecklist, setSelectedChecklist] = useState<AssessmentChecklist | null>(null);
+  const [chForm, setChForm] = useState({ checklistCode: '', checklistName: '', checklistType: 'general', description: '', sourceName: '', versionLabel: '', effectiveDate: '', markingEnabled: false, internalThresholdLabel: '', internalPassMark: '' });
+  const [secForm, setSecForm] = useState({ sectionTitle: '', sectionCode: '', sectionDescription: '', displayOrder: '0', sectionPossibleMarks: '', sectionWeight: '' });
+  const [qForm, setQForm] = useState({ questionText: '', questionCode: '', sectionId: '', responseType: 'met_partial_not_met', guidance: '', expectedEvidence: '', maxMarks: '', weight: '', scoringGuidance: '', isRequired: false });
+  // Planning state
+  const [planAssessmentId, setPlanAssessmentId] = useState<string>('');
+  const [planChecklistId, setPlanChecklistId] = useState<string>('');
+  const [planChecklistDetail, setPlanChecklistDetail] = useState<AssessmentChecklist | null>(null);
+  const [planMode, setPlanMode] = useState<string>('whole_checklist');
+  const [planSelectedSections, setPlanSelectedSections] = useState<number[]>([]);
+  const [planSelectedQuestions, setPlanSelectedQuestions] = useState<number[]>([]);
+  const [planNotes, setPlanNotes] = useState('');
+  // Question response state
+  const [respAssessmentId, setRespAssessmentId] = useState<string>('');
+  const [respQuestions, setRespQuestions] = useState<AssessmentSelectedQuestion[]>([]);
+  const [respValues, setRespValues] = useState<Record<number, { response: string; evidenceSummary: string; marksAwarded: string; scoreComment: string; findingRequired: boolean; existingResponseId?: number }>>({});
+  // Internal score summary state
+  const [scoreAssessmentId, setScoreAssessmentId] = useState<string>('');
+  const [scoreSummary, setScoreSummary] = useState<AssessmentInternalScoreSummary | null>(null);
 
   async function load() {
     try {
       setPrograms(await api<AssessmentProgram[]>('/assessments'));
       setFindings(await api<AssessmentFinding[]>('/assessments/findings'));
+      setChecklists(await api<AssessmentChecklist[]>('/assessments/checklists').catch(() => []));
     } catch (e) { setError((e as Error).message); }
   }
   useEffect(() => { if (isEnabled('assessments')) void load(); }, [isEnabled]);
   if (!isEnabled('assessments')) return <DisabledModule />;
+
+  // Checklist library helpers
+  async function openChecklist(id: number) {
+    try { setSelectedChecklist(await api<AssessmentChecklist>(`/assessments/checklists/${id}`)); }
+    catch (e) { setError((e as Error).message); }
+  }
+  async function submitChecklist(e: FormEvent) {
+    e.preventDefault(); setError(null);
+    try {
+      await api('/assessments/checklists', { method: 'POST', body: JSON.stringify(chForm) });
+      setChForm({ checklistCode: '', checklistName: '', checklistType: 'general', description: '', sourceName: '', versionLabel: '', effectiveDate: '', markingEnabled: false, internalThresholdLabel: '', internalPassMark: '' });
+      await load();
+    } catch (e) { setError((e as Error).message); }
+  }
+  async function toggleChecklist(id: number) { try { await api(`/assessments/checklists/${id}/toggle`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selectedChecklist?.id === id) await openChecklist(id); } catch (e) { setError((e as Error).message); } }
+  async function archiveChecklist(id: number) { try { await api(`/assessments/checklists/${id}/archive`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selectedChecklist?.id === id) await openChecklist(id); } catch (e) { setError((e as Error).message); } }
+  async function updateChecklistMarking(id: number, markingEnabled: boolean) { try { await api(`/assessments/checklists/${id}`, { method: 'PUT', body: JSON.stringify({ markingEnabled }) }); await load(); if (selectedChecklist?.id === id) await openChecklist(id); } catch (e) { setError((e as Error).message); } }
+  async function addSection(e: FormEvent) {
+    e.preventDefault(); setError(null);
+    if (!selectedChecklist) return;
+    try {
+      await api(`/assessments/checklists/${selectedChecklist.id}/sections`, { method: 'POST', body: JSON.stringify(secForm) });
+      setSecForm({ sectionTitle: '', sectionCode: '', sectionDescription: '', displayOrder: '0', sectionPossibleMarks: '', sectionWeight: '' });
+      await openChecklist(selectedChecklist.id);
+    } catch (e) { setError((e as Error).message); }
+  }
+  async function addQuestion(e: FormEvent) {
+    e.preventDefault(); setError(null);
+    if (!selectedChecklist) return;
+    try {
+      await api(`/assessments/checklists/${selectedChecklist.id}/questions`, { method: 'POST', body: JSON.stringify(qForm) });
+      setQForm({ questionText: '', questionCode: '', sectionId: '', responseType: 'met_partial_not_met', guidance: '', expectedEvidence: '', maxMarks: '', weight: '', scoringGuidance: '', isRequired: false });
+      await openChecklist(selectedChecklist.id);
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  // Planning helpers
+  async function loadPlanChecklist(id: string) {
+    if (!id) { setPlanChecklistDetail(null); return; }
+    try { setPlanChecklistDetail(await api<AssessmentChecklist>(`/assessments/checklists/${id}`)); }
+    catch (e) { setError((e as Error).message); }
+  }
+  async function savePlan() {
+    setError(null);
+    if (!planAssessmentId || !planChecklistId) return setError('Choose an assessment and checklist');
+    try {
+      const payload: any = { checklistId: Number(planChecklistId), selectionMode: planMode, notes: planNotes };
+      if (planMode === 'selected_sections') payload.sectionIds = planSelectedSections;
+      if (planMode === 'selected_questions' || planMode === 'mixed') { payload.questionIds = planSelectedQuestions; payload.sectionIds = planSelectedSections; }
+      const result = await api<{ savedCount: number; totalPossibleAtSelection: number }>(`/assessments/${planAssessmentId}/select-checklist`, { method: 'POST', body: JSON.stringify(payload) });
+      alert(`Saved ${result.savedCount} question(s). Possible marks at selection: ${result.totalPossibleAtSelection}.`);
+      setPlanSelectedSections([]); setPlanSelectedQuestions([]); setPlanNotes('');
+      await load();
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  // Response helpers
+  async function loadResponseQuestions(id: string) {
+    if (!id) { setRespQuestions([]); setRespValues({}); return; }
+    try {
+      const qs = await api<AssessmentSelectedQuestion[]>(`/assessments/${id}/selected-questions`);
+      setRespQuestions(qs);
+      const init: typeof respValues = {};
+      for (const q of qs) init[q.question_id] = { response: 'not_assessed', evidenceSummary: '', marksAwarded: '', scoreComment: '', findingRequired: false };
+      setRespValues(init);
+    } catch (e) { setError((e as Error).message); }
+  }
+  async function saveResponse(questionId: number) {
+    if (!respAssessmentId) return;
+    const v = respValues[questionId];
+    if (!v) return;
+    try {
+      await api(`/assessments/${respAssessmentId}/question-response`, { method: 'POST', body: JSON.stringify({ questionId, response: v.response, evidenceSummary: v.evidenceSummary, marksAwarded: v.marksAwarded, scoreComment: v.scoreComment, findingRequired: v.findingRequired }) });
+      alert('Response saved.');
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  // Score summary helpers
+  async function loadScoreSummary(id: string) {
+    if (!id) { setScoreSummary(null); return; }
+    try { setScoreSummary(await api<AssessmentInternalScoreSummary>(`/assessments/${id}/internal-score-summary`)); }
+    catch (e) { setError((e as Error).message); }
+  }
 
   async function submitProgram(e: FormEvent) {
     e.preventDefault(); setError(null);
@@ -93,7 +205,7 @@ export function AssessmentsPage() {
   async function createCapa(id: number) { try { await api(`/assessments/findings/${id}/create-capa`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selected) await open(selected.id); } catch (e) { setError((e as Error).message); } }
   async function closeFinding(id: number) { try { await api(`/assessments/findings/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selected) await open(selected.id); } catch (e) { setError((e as Error).message); } }
 
-  const tabs = ['Dashboard', 'Assessment Programmes', 'New Assessment', 'Findings', 'Reports'];
+  const tabs = ['Dashboard', 'Assessment Programmes', 'New Assessment', 'Checklist Library', 'Plan Assessment', 'Assessment Questions', 'Internal Audit Marks', 'Findings', 'Reports'];
   return <div className="module-page">
     <h2>Internal Assessments</h2>
     {tabBar(tab, tabs, setTab)}
@@ -143,6 +255,152 @@ export function AssessmentsPage() {
       <label>Objectives<textarea value={progForm.objectives} onChange={e => setProgForm({ ...progForm, objectives: e.target.value })} /></label>
       <button type="submit">Create assessment</button>
     </form>}
+
+    {tab === 'Checklist Library' && <>
+      <p><small>Edit, replace, or archive default checklists. Marking is optional per checklist. Internal marks are not GAS/SLIPTA/ISO/accreditation scores.</small></p>
+      <table className="data-table"><thead><tr><th>Code</th><th>Name</th><th>Type</th><th>Status</th><th>Default</th><th>Marking</th><th></th></tr></thead><tbody>
+        {checklists.map(c => <tr key={c.id}>
+          <td>{c.checklist_code || '—'}</td><td>{c.checklist_name}</td><td>{c.checklist_type.replace(/_/g, ' ')}</td>
+          <td>{formatBadge(c.status)}</td><td>{c.is_default ? 'Yes' : 'No'}</td>
+          <td><label><input type="checkbox" checked={!!c.marking_enabled} onChange={e => updateChecklistMarking(c.id, e.target.checked)} /> marks</label></td>
+          <td>
+            <button onClick={() => openChecklist(c.id)}>Open</button>
+            <button onClick={() => toggleChecklist(c.id)}>{c.status === 'active' ? 'Deactivate' : 'Activate'}</button>
+            {c.status !== 'archived' && <button onClick={() => archiveChecklist(c.id)}>Archive</button>}
+          </td>
+        </tr>)}
+      </tbody></table>
+      <h3>Create new checklist</h3>
+      <form className="form-grid" onSubmit={submitChecklist}>
+        <label>Code<input value={chForm.checklistCode} onChange={e => setChForm({ ...chForm, checklistCode: e.target.value })} /></label>
+        <label>Name<input value={chForm.checklistName} onChange={e => setChForm({ ...chForm, checklistName: e.target.value })} required /></label>
+        <label>Type<select value={chForm.checklistType} onChange={e => setChForm({ ...chForm, checklistType: e.target.value })}>{CHECKLIST_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
+        <label>Source<input value={chForm.sourceName} onChange={e => setChForm({ ...chForm, sourceName: e.target.value })} placeholder="e.g. internal QMS, framework name" /></label>
+        <label>Version<input value={chForm.versionLabel} onChange={e => setChForm({ ...chForm, versionLabel: e.target.value })} /></label>
+        <label>Effective date<input type="date" value={chForm.effectiveDate} onChange={e => setChForm({ ...chForm, effectiveDate: e.target.value })} /></label>
+        <label>Description<textarea value={chForm.description} onChange={e => setChForm({ ...chForm, description: e.target.value })} /></label>
+        <label><input type="checkbox" checked={chForm.markingEnabled} onChange={e => setChForm({ ...chForm, markingEnabled: e.target.checked })} /> Enable internal marking</label>
+        <label>Threshold label<input value={chForm.internalThresholdLabel} onChange={e => setChForm({ ...chForm, internalThresholdLabel: e.target.value })} placeholder="optional, e.g. Internal pass threshold" /></label>
+        <label>Internal pass mark<input type="number" step="any" value={chForm.internalPassMark} onChange={e => setChForm({ ...chForm, internalPassMark: e.target.value })} /></label>
+        <button type="submit">Create checklist</button>
+      </form>
+
+      {selectedChecklist && <div className="card" style={{ marginTop: 16 }}>
+        <h3>{selectedChecklist.checklist_code ? selectedChecklist.checklist_code + ' — ' : ''}{selectedChecklist.checklist_name}</h3>
+        <p>Status: {formatBadge(selectedChecklist.status)} | Type: {selectedChecklist.checklist_type.replace(/_/g, ' ')} | Marking: {selectedChecklist.marking_enabled ? 'enabled' : 'disabled'}</p>
+        <h4>Sections</h4>
+        <table className="data-table"><thead><tr><th>Order</th><th>Title</th><th>Possible marks</th><th>Weight</th></tr></thead><tbody>
+          {(selectedChecklist.sections || []).map(s => <tr key={s.id}><td>{s.display_order}</td><td>{s.section_title}</td><td>{s.section_possible_marks ?? '—'}</td><td>{s.section_weight ?? '—'}</td></tr>)}
+        </tbody></table>
+        <form className="form-grid" onSubmit={addSection}>
+          <label>Section title<input value={secForm.sectionTitle} onChange={e => setSecForm({ ...secForm, sectionTitle: e.target.value })} required /></label>
+          <label>Code<input value={secForm.sectionCode} onChange={e => setSecForm({ ...secForm, sectionCode: e.target.value })} /></label>
+          <label>Order<input type="number" value={secForm.displayOrder} onChange={e => setSecForm({ ...secForm, displayOrder: e.target.value })} /></label>
+          <label>Possible marks<input type="number" step="any" value={secForm.sectionPossibleMarks} onChange={e => setSecForm({ ...secForm, sectionPossibleMarks: e.target.value })} /></label>
+          <label>Weight<input type="number" step="any" value={secForm.sectionWeight} onChange={e => setSecForm({ ...secForm, sectionWeight: e.target.value })} /></label>
+          <label>Description<textarea value={secForm.sectionDescription} onChange={e => setSecForm({ ...secForm, sectionDescription: e.target.value })} /></label>
+          <button type="submit">Add section</button>
+        </form>
+        <h4>Questions</h4>
+        <table className="data-table"><thead><tr><th>Section</th><th>Code</th><th>Text</th><th>Response type</th><th>Max marks</th><th>Active</th></tr></thead><tbody>
+          {(selectedChecklist.questions || []).map(q => <tr key={q.id}>
+            <td>{(selectedChecklist.sections || []).find(s => s.id === q.section_id)?.section_title || '—'}</td>
+            <td>{q.question_code || '—'}</td><td>{q.question_text}</td>
+            <td>{q.response_type}</td><td>{q.max_marks ?? '—'}</td><td>{q.is_active ? 'Yes' : 'No'}</td>
+          </tr>)}
+        </tbody></table>
+        <form className="form-grid" onSubmit={addQuestion}>
+          <label>Section<select value={qForm.sectionId} onChange={e => setQForm({ ...qForm, sectionId: e.target.value })}><option value="">(no section)</option>{(selectedChecklist.sections || []).map(s => <option key={s.id} value={s.id}>{s.section_title}</option>)}</select></label>
+          <label>Code<input value={qForm.questionCode} onChange={e => setQForm({ ...qForm, questionCode: e.target.value })} /></label>
+          <label>Response type<select value={qForm.responseType} onChange={e => setQForm({ ...qForm, responseType: e.target.value })}>{RESPONSE_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
+          <label>Max marks<input type="number" step="any" value={qForm.maxMarks} onChange={e => setQForm({ ...qForm, maxMarks: e.target.value })} /></label>
+          <label>Weight<input type="number" step="any" value={qForm.weight} onChange={e => setQForm({ ...qForm, weight: e.target.value })} /></label>
+          <label><input type="checkbox" checked={qForm.isRequired} onChange={e => setQForm({ ...qForm, isRequired: e.target.checked })} /> Required</label>
+          <label>Question text<textarea value={qForm.questionText} onChange={e => setQForm({ ...qForm, questionText: e.target.value })} required /></label>
+          <label>Guidance<textarea value={qForm.guidance} onChange={e => setQForm({ ...qForm, guidance: e.target.value })} /></label>
+          <label>Expected evidence<textarea value={qForm.expectedEvidence} onChange={e => setQForm({ ...qForm, expectedEvidence: e.target.value })} /></label>
+          <label>Scoring guidance<textarea value={qForm.scoringGuidance} onChange={e => setQForm({ ...qForm, scoringGuidance: e.target.value })} /></label>
+          <button type="submit">Add question</button>
+        </form>
+        <button className="secondary" onClick={() => setSelectedChecklist(null)}>Close panel</button>
+      </div>}
+    </>}
+
+    {tab === 'Plan Assessment' && <>
+      <p><small>Select a checklist, then pick whole/sections/individual questions. Selected questions are copied into the assessment so it stays stable if the source checklist later changes.</small></p>
+      <div className="form-grid">
+        <label>Assessment<select value={planAssessmentId} onChange={e => setPlanAssessmentId(e.target.value)}><option value="">—</option>{programs.map(p => <option key={p.id} value={p.id}>{p.program_number} — {p.title}</option>)}</select></label>
+        <label>Checklist<select value={planChecklistId} onChange={e => { setPlanChecklistId(e.target.value); void loadPlanChecklist(e.target.value); setPlanSelectedSections([]); setPlanSelectedQuestions([]); }}><option value="">—</option>{checklists.filter(c => c.status !== 'archived').map(c => <option key={c.id} value={c.id}>{c.checklist_name} ({c.status})</option>)}</select></label>
+        <label>Selection mode<select value={planMode} onChange={e => setPlanMode(e.target.value)}>{SELECTION_MODES.map(m => <option key={m} value={m}>{m.replace(/_/g, ' ')}</option>)}</select></label>
+        <label>Notes<input value={planNotes} onChange={e => setPlanNotes(e.target.value)} /></label>
+      </div>
+      {planChecklistDetail && <>
+        <h4>Sections{planMode === 'selected_sections' || planMode === 'mixed' ? ' (tick to include)' : ''}</h4>
+        <table className="data-table"><thead><tr><th>Pick</th><th>Section</th><th>Possible marks</th></tr></thead><tbody>
+          {(planChecklistDetail.sections || []).map(s => <tr key={s.id}>
+            <td><input type="checkbox" disabled={planMode === 'whole_checklist' || planMode === 'selected_questions'} checked={planSelectedSections.includes(s.id)} onChange={e => setPlanSelectedSections(e.target.checked ? [...planSelectedSections, s.id] : planSelectedSections.filter(id => id !== s.id))} /></td>
+            <td>{s.section_title}</td><td>{s.section_possible_marks ?? '—'}</td>
+          </tr>)}
+        </tbody></table>
+        <h4>Questions{planMode === 'selected_questions' || planMode === 'mixed' ? ' (tick to include)' : ''}</h4>
+        <table className="data-table"><thead><tr><th>Pick</th><th>Section</th><th>Text</th><th>Max marks</th></tr></thead><tbody>
+          {(planChecklistDetail.questions || []).filter(q => q.is_active).map(q => <tr key={q.id}>
+            <td><input type="checkbox" disabled={planMode === 'whole_checklist' || planMode === 'selected_sections'} checked={planSelectedQuestions.includes(q.id)} onChange={e => setPlanSelectedQuestions(e.target.checked ? [...planSelectedQuestions, q.id] : planSelectedQuestions.filter(id => id !== q.id))} /></td>
+            <td>{(planChecklistDetail.sections || []).find(s => s.id === q.section_id)?.section_title || '—'}</td>
+            <td>{q.question_text}</td><td>{q.max_marks ?? '—'}</td>
+          </tr>)}
+        </tbody></table>
+        <button type="button" onClick={savePlan}>Save selection for this assessment</button>
+      </>}
+    </>}
+
+    {tab === 'Assessment Questions' && <>
+      <div className="form-grid">
+        <label>Assessment<select value={respAssessmentId} onChange={e => { setRespAssessmentId(e.target.value); void loadResponseQuestions(e.target.value); }}><option value="">—</option>{programs.map(p => <option key={p.id} value={p.id}>{p.program_number} — {p.title}</option>)}</select></label>
+      </div>
+      {respQuestions.length === 0 && respAssessmentId && <p>No questions selected for this assessment yet. Use the Plan Assessment tab first.</p>}
+      {respQuestions.length > 0 && <table className="data-table"><thead><tr><th>Checklist</th><th>Section</th><th>Question</th><th>Response</th><th>Evidence summary</th><th>Marks awarded / max</th><th>Finding?</th><th></th></tr></thead><tbody>
+        {respQuestions.map(q => {
+          const v = respValues[q.question_id] || { response: 'not_assessed', evidenceSummary: '', marksAwarded: '', scoreComment: '', findingRequired: false };
+          const max = q.max_marks_at_selection;
+          return <tr key={q.question_id}>
+            <td>{q.checklist_name || '—'}</td>
+            <td>{q.section_title_at_selection || '—'}</td>
+            <td>{q.question_text_at_selection || `Question #${q.question_id}`}</td>
+            <td><select value={v.response} onChange={e => setRespValues({ ...respValues, [q.question_id]: { ...v, response: e.target.value } })}>{RESPONSE_OPTIONS.map(r => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}</select></td>
+            <td><input value={v.evidenceSummary} onChange={e => setRespValues({ ...respValues, [q.question_id]: { ...v, evidenceSummary: e.target.value } })} /></td>
+            <td>{q.marking_enabled ? <input type="number" step="any" value={v.marksAwarded} onChange={e => setRespValues({ ...respValues, [q.question_id]: { ...v, marksAwarded: e.target.value } })} style={{ width: 80 }} placeholder={max !== null && max !== undefined ? `/ ${max}` : ''} /> : <em>n/a</em>}{q.marking_enabled && max !== null && max !== undefined ? ` / ${max}` : ''}</td>
+            <td><label><input type="checkbox" checked={v.findingRequired} onChange={e => setRespValues({ ...respValues, [q.question_id]: { ...v, findingRequired: e.target.checked } })} /> required</label></td>
+            <td><button type="button" onClick={() => saveResponse(q.question_id)}>Save</button></td>
+          </tr>;
+        })}
+      </tbody></table>}
+    </>}
+
+    {tab === 'Internal Audit Marks' && <>
+      <div className="form-grid">
+        <label>Assessment<select value={scoreAssessmentId} onChange={e => { setScoreAssessmentId(e.target.value); void loadScoreSummary(e.target.value); }}><option value="">—</option>{programs.map(p => <option key={p.id} value={p.id}>{p.program_number} — {p.title}</option>)}</select></label>
+      </div>
+      {scoreSummary && <>
+        <div className="cards">
+          <div className="card"><h4>Questions planned</h4><p className="metric">{scoreSummary.total_questions_planned}</p></div>
+          <div className="card"><h4>Questions assessed</h4><p className="metric">{scoreSummary.total_questions_assessed}</p></div>
+          <div className="card"><h4>Total possible marks</h4><p className="metric">{scoreSummary.total_possible_marks}</p></div>
+          <div className="card"><h4>Marks awarded</h4><p className="metric">{scoreSummary.total_marks_awarded}</p></div>
+          <div className="card"><h4>Internal Assessment Score</h4><p className="metric">{scoreSummary.internal_score_percentage !== null ? scoreSummary.internal_score_percentage.toFixed(1) + '%' : '—'}</p></div>
+          <div className="card"><h4>Findings</h4><p className="metric">{scoreSummary.findings_count}</p></div>
+        </div>
+        <p><small>{scoreSummary.label}</small></p>
+        <h4>Section Scores</h4>
+        <table className="data-table"><thead><tr><th>Section</th><th>Planned</th><th>Assessed</th><th>Possible</th><th>Awarded</th><th>Section Score</th></tr></thead><tbody>
+          {scoreSummary.sections.map((s, i) => <tr key={i}><td>{s.section_title || '—'}</td><td>{s.questions_planned}</td><td>{s.questions_assessed}</td><td>{s.possible_marks}</td><td>{s.marks_awarded}</td><td>{s.internal_score_percentage !== null ? s.internal_score_percentage.toFixed(1) + '%' : '—'}</td></tr>)}
+        </tbody></table>
+        <h4>Response distribution</h4>
+        <table className="data-table"><thead><tr><th>Response</th><th>Count</th></tr></thead><tbody>
+          {Object.entries(scoreSummary.response_summary).map(([k, v]) => <tr key={k}><td>{k.replace(/_/g, ' ')}</td><td>{v}</td></tr>)}
+        </tbody></table>
+      </>}
+    </>}
 
     {tab === 'Findings' && <table className="data-table"><thead><tr><th>Number</th><th>Programme</th><th>Date</th><th>Type</th><th>Title</th><th>Status</th><th></th></tr></thead><tbody>
       {findings.map(f => <tr key={f.id}><td>{f.finding_number}</td><td>{f.program_number || f.assessment_program_id}</td><td>{f.finding_date}</td><td>{f.finding_type.replace(/_/g, ' ')}</td><td>{f.title}</td><td>{formatBadge(f.status)}</td><td>{!f.nc_id && <button onClick={() => createNc(f.id)}>NC</button>}{!f.capa_id && <button onClick={() => createCapa(f.id)}>CAPA</button>}</td></tr>)}
@@ -396,7 +654,54 @@ export function QualityIndicatorsPage() {
       </tbody></table>}
     </>}
 
-    {tab === 'Trends' && <p>Indicator trend charts will be added in a later phase. The results table above already shows period-over-period values.</p>}
+    {tab === 'Trends' && <>
+      <label>Indicator<select value={selectedId} onChange={e => { setSelectedId(e.target.value); void loadResults(e.target.value); }}><option value="">—</option>{indicators.map(i => <option key={i.id} value={i.id}>{i.indicator_code} — {i.indicator_name}</option>)}</select></label>
+      {!selectedId && <p>Select an indicator to see its trend.</p>}
+      {selectedId && results.length === 0 && <p>No results yet for this indicator.</p>}
+      {selectedId && results.length > 0 && (() => {
+        const indicator = indicators.find(i => String(i.id) === selectedId);
+        const ordered = [...results].reverse(); // oldest first
+        const values = ordered.map(r => r.calculated_value).filter((v): v is number => v !== null && v !== undefined);
+        if (!values.length) return <p>No numeric calculated values to chart.</p>;
+        const w = 720, h = 240, padL = 48, padR = 16, padT = 16, padB = 32;
+        const innerW = w - padL - padR, innerH = h - padT - padB;
+        const target = indicator?.target_value ?? null;
+        const warning = indicator?.warning_threshold ?? null;
+        const critical = indicator?.critical_threshold ?? null;
+        const candidates = [...values, ...(target !== null && target !== undefined ? [target] : []), ...(warning !== null && warning !== undefined ? [warning] : []), ...(critical !== null && critical !== undefined ? [critical] : [])];
+        const lo = Math.min(...candidates);
+        const hi = Math.max(...candidates);
+        const span = (hi - lo) || 1;
+        const yMin = lo - span * 0.1;
+        const yMax = hi + span * 0.1;
+        const x = (i: number) => padL + (ordered.length === 1 ? innerW / 2 : (i * innerW) / (ordered.length - 1));
+        const y = (v: number) => padT + innerH - ((v - yMin) / (yMax - yMin)) * innerH;
+        const colorFor = (status?: string) => status === 'within_target' ? 'var(--success, #2a9d4a)' : status === 'warning' ? 'var(--warning, #d99500)' : status === 'critical' ? 'var(--danger, #d23a2a)' : 'var(--muted, #888)';
+        const linePath = ordered.map((p, i) => p.calculated_value === null || p.calculated_value === undefined ? '' : `${i === 0 ? 'M' : 'L'} ${x(i).toFixed(1)} ${y(p.calculated_value).toFixed(1)}`).filter(Boolean).join(' ');
+        const refLine = (val: number, label: string, color: string) => <g key={label}>
+          <line x1={padL} x2={w - padR} y1={y(val)} y2={y(val)} stroke={color} strokeWidth={1} strokeDasharray="4 4" />
+          <text x={padL - 6} y={y(val) + 4} fontSize={10} textAnchor="end" fill="var(--muted, #666)">{label}</text>
+        </g>;
+        return <>
+          <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label="Indicator trend" style={{ width: '100%', maxWidth: w, height: 'auto', background: '#fff', border: '1px solid var(--border, #ddd)', borderRadius: 8 }}>
+            {target !== null && target !== undefined && refLine(target, `Target ${target}`, '#2a9d4a')}
+            {warning !== null && warning !== undefined && refLine(warning, `Warning ${warning}`, '#d99500')}
+            {critical !== null && critical !== undefined && refLine(critical, `Critical ${critical}`, '#d23a2a')}
+            <path d={linePath} fill="none" stroke="#1B3A6B" strokeWidth={1.5} />
+            {ordered.map((p, i) => p.calculated_value === null || p.calculated_value === undefined ? null : (
+              <circle key={i} cx={x(i)} cy={y(p.calculated_value)} r={4} fill={colorFor(p.status)} stroke="#fff" strokeWidth={1}>
+                <title>{p.period_start} → {p.period_end}: {p.calculated_value.toFixed(2)} ({p.status})</title>
+              </circle>
+            ))}
+            <text x={padL} y={h - 8} fontSize={10} fill="var(--muted, #666)">{ordered[0].period_start}</text>
+            <text x={w - padR} y={h - 8} fontSize={10} textAnchor="end" fill="var(--muted, #666)">{ordered[ordered.length - 1].period_end}</text>
+          </svg>
+          <table className="data-table" style={{ marginTop: 12 }}><thead><tr><th>Period start</th><th>Period end</th><th>Calculated value</th><th>Status</th><th>Interpretation</th></tr></thead><tbody>
+            {ordered.map(r => <tr key={r.id}><td>{r.period_start}</td><td>{r.period_end}</td><td>{r.calculated_value !== null && r.calculated_value !== undefined ? r.calculated_value.toFixed(2) : '—'}</td><td>{formatBadge(r.status)}</td><td>{r.interpretation || '—'}</td></tr>)}
+          </tbody></table>
+        </>;
+      })()}
+    </>}
     {tab === 'Reports' && <p>Indicator reports will be added in a later phase.</p>}
   </div>;
 }

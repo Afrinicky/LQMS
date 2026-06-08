@@ -1114,5 +1114,110 @@ CREATE TABLE IF NOT EXISTS improvement_updates (
   created_by INTEGER REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS assessment_checklists (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  checklist_code TEXT,
+  checklist_name TEXT NOT NULL,
+  checklist_type TEXT NOT NULL,
+  description TEXT,
+  source_name TEXT,
+  version_label TEXT,
+  effective_date TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  is_default INTEGER NOT NULL DEFAULT 0,
+  is_editable INTEGER NOT NULL DEFAULT 1,
+  marking_enabled INTEGER NOT NULL DEFAULT 0,
+  total_possible_marks REAL,
+  internal_threshold_label TEXT,
+  internal_pass_mark REAL,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS assessment_checklist_sections (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  checklist_id INTEGER NOT NULL REFERENCES assessment_checklists(id),
+  section_code TEXT,
+  section_title TEXT NOT NULL,
+  section_description TEXT,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  section_possible_marks REAL,
+  section_weight REAL,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS assessment_checklist_questions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  checklist_id INTEGER NOT NULL REFERENCES assessment_checklists(id),
+  section_id INTEGER REFERENCES assessment_checklist_sections(id),
+  question_code TEXT,
+  question_text TEXT NOT NULL,
+  guidance TEXT,
+  expected_evidence TEXT,
+  response_type TEXT NOT NULL DEFAULT 'met_partial_not_met',
+  display_order INTEGER NOT NULL DEFAULT 0,
+  is_required INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  max_marks REAL,
+  weight REAL,
+  scoring_guidance TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS assessment_selected_checklists (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  assessment_program_id INTEGER NOT NULL REFERENCES assessment_programs(id),
+  checklist_id INTEGER NOT NULL REFERENCES assessment_checklists(id),
+  selection_mode TEXT NOT NULL,
+  selected_by_staff_id INTEGER REFERENCES staff(id),
+  selected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  notes TEXT,
+  marking_enabled_at_selection INTEGER NOT NULL DEFAULT 0,
+  total_possible_marks_at_selection REAL,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(assessment_program_id, checklist_id)
+);
+CREATE TABLE IF NOT EXISTS assessment_selected_questions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  assessment_program_id INTEGER NOT NULL REFERENCES assessment_programs(id),
+  checklist_id INTEGER NOT NULL REFERENCES assessment_checklists(id),
+  section_id INTEGER REFERENCES assessment_checklist_sections(id),
+  question_id INTEGER NOT NULL REFERENCES assessment_checklist_questions(id),
+  included INTEGER NOT NULL DEFAULT 1,
+  planned_for_review INTEGER NOT NULL DEFAULT 1,
+  question_text_at_selection TEXT,
+  section_title_at_selection TEXT,
+  max_marks_at_selection REAL,
+  weight_at_selection REAL,
+  scoring_guidance_at_selection TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(assessment_program_id, question_id)
+);
+CREATE TABLE IF NOT EXISTS assessment_question_responses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  assessment_program_id INTEGER NOT NULL REFERENCES assessment_programs(id),
+  checklist_id INTEGER NOT NULL REFERENCES assessment_checklists(id),
+  section_id INTEGER REFERENCES assessment_checklist_sections(id),
+  question_id INTEGER NOT NULL REFERENCES assessment_checklist_questions(id),
+  response TEXT NOT NULL,
+  evidence_summary TEXT,
+  finding_required INTEGER NOT NULL DEFAULT 0,
+  finding_id INTEGER REFERENCES assessment_findings(id),
+  marks_awarded REAL,
+  max_marks_at_assessment REAL,
+  score_comment TEXT,
+  assessed_by_staff_id INTEGER REFERENCES staff(id),
+  assessed_at TEXT,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT,
+  UNIQUE(assessment_program_id, question_id)
+);
 `);
 }

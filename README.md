@@ -131,11 +131,16 @@ NC/CAPA, Complaints, Risks, Actions, Equipment Management, Supplier & Inventory,
 ## Known limitations
 
 - All modules are foundation-level and require real-world testing before production use.
+- Assessment checklist library, flexible question selection, and optional internal audit marking foundation exist. Advanced checklist import templates, sophisticated audit reporting, and official accreditation scoring are not included.
+- Internal audit marking is supported as a configurable internal assessment tool.
+- Official accreditation scoring, star ratings, and GAS/SLIPTA/ISO compliance grading are not included.
 - No mobile application yet.
 - No advanced AI SOP conversion yet.
 - No full POCT workflow yet.
 - No advanced report designer yet (CSV/HTML/DOC exports exist on key modules; rich PDF templating is pending).
 - No cloud/internet sync yet.
 - Some export and print layouts are placeholder templates; richer per-report-type designs will follow.
+- PDSA/run-chart designer remains a future improvement.
+- Management review narrative templating remains a future improvement.
 - Restore workflow remains a conservative guarded placeholder.
 - Permissions are wired server-side, but fine-grained UI editing of every permission source is still MVP-level.
