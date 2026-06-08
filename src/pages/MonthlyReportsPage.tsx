@@ -5,7 +5,8 @@ import DisabledModule from '../components/DisabledModule';
 import type {
   Section, Department, Staff,
   LhimsImportBatch, LhimsImportRow, ReportMappingRule, MonthlyReportBatch,
-  MonthlyReportException, TatRecord, MonthlyReportsSummary, TatSummary
+  MonthlyReportException, TatRecord, MonthlyReportsSummary, TatSummary,
+  MonthlyReportArchiveEntry
 } from '../../shared/types/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
@@ -47,6 +48,7 @@ export function MonthlyReportsPage() {
   const [reports, setReports] = useState<MonthlyReportBatch[]>([]);
   const [tatRecords, setTatRecords] = useState<TatRecord[]>([]);
   const [tatSummary, setTatSummary] = useState<TatSummary | null>(null);
+  const [archive, setArchive] = useState<MonthlyReportArchiveEntry[]>([]);
   const [selectedImport, setSelectedImport] = useState<(LhimsImportBatch & { rows?: LhimsImportRow[] }) | null>(null);
   const [selectedReport, setSelectedReport] = useState<MonthlyReportBatch | null>(null);
 
@@ -143,9 +145,29 @@ export function MonthlyReportsPage() {
     catch (e) { setError((e as Error).message); }
   }
 
-  async function exportReport(id: number) {
-    try { await api(`/monthly-reports/reports/${id}/export`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selectedReport?.id === id) await openReport(id); }
+  async function exportReport(id: number, format: 'csv' | 'html' | 'doc') {
+    try { await api(`/monthly-reports/reports/${id}/export`, { method: 'POST', body: JSON.stringify({ format }) }); await load(); if (selectedReport?.id === id) await openReport(id); }
     catch (e) { setError((e as Error).message); }
+  }
+
+  async function loadArchive() {
+    try { setArchive(await api<MonthlyReportArchiveEntry[]>('/monthly-reports/archive')); }
+    catch (e) { setError((e as Error).message); }
+  }
+  useEffect(() => { if (tab === 'Reports/Exports' && isEnabled('monthly_reports')) void loadArchive(); }, [tab, isEnabled]);
+
+  async function downloadArchiveFile(reportId: number, fileId: number, name: string) {
+    try {
+      const token = getToken();
+      const response = await fetch(`${API_BASE}/monthly-reports/reports/${reportId}/download?fileId=${fileId}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+      if (!response.ok) throw new Error(await response.text() || response.statusText);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) { setError((e as Error).message); }
   }
 
   async function submitResolve(e: FormEvent) {
@@ -207,10 +229,10 @@ export function MonthlyReportsPage() {
       <label>Report month<input type="number" min={1} max={12} value={importForm.reportMonth} onChange={e => setImportForm({ ...importForm, reportMonth: Number(e.target.value) })} required /></label>
       <label>Report year<input type="number" min={2000} max={2100} value={importForm.reportYear} onChange={e => setImportForm({ ...importForm, reportYear: Number(e.target.value) })} required /></label>
       <label>Import type<select value={importForm.importType} onChange={e => setImportForm({ ...importForm, importType: e.target.value })} required>{IMPORT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
-      <label>CSV file<input type="file" accept=".csv,text/csv" onChange={e => setImportForm({ ...importForm, file: e.target.files?.[0] ?? null })} required /></label>
+      <label>Source file<input type="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={e => setImportForm({ ...importForm, file: e.target.files?.[0] ?? null })} required /></label>
       <label>Notes<textarea value={importForm.notes} onChange={e => setImportForm({ ...importForm, notes: e.target.value })} /></label>
       <button type="submit">Upload import batch</button>
-      <p><em>Only CSV imports are parsed in this phase; XLSX support can be added later. The uploaded file is retained as raw LHIMS archive evidence.</em></p>
+      <p><em>CSV (.csv) and Excel (.xlsx, .xls) imports are parsed. The uploaded file is retained as raw LHIMS archive evidence and included in backups.</em></p>
     </form>}
 
     {tab === 'Import Batches' && <>
@@ -307,7 +329,11 @@ export function MonthlyReportsPage() {
             {r.status === 'draft' && <button onClick={() => reviewReport(r.id)}>Mark reviewed</button>}
             {(r.status === 'reviewed' || r.status === 'draft') && <button onClick={() => approveReport(r.id, false)}>Approve</button>}
             {(r.status === 'reviewed' || r.status === 'draft') && r.exception_count > 0 && <button onClick={() => approveReport(r.id, true)}>Approve (override)</button>}
-            {(r.status === 'approved' || r.status === 'exported') && <button onClick={() => exportReport(r.id)}>Export CSV</button>}
+            {(r.status === 'approved' || r.status === 'exported') && <>
+              <button onClick={() => exportReport(r.id, 'csv')}>Export CSV</button>
+              <button onClick={() => exportReport(r.id, 'html')}>Export HTML (print)</button>
+              <button onClick={() => exportReport(r.id, 'doc')}>Export DOC</button>
+            </>}
           </td>
         </tr>)}
       </tbody></table>
@@ -331,19 +357,44 @@ export function MonthlyReportsPage() {
         <label>Year<input type="number" min={2000} max={2100} value={tatFilter.year} onChange={e => setTatFilter({ ...tatFilter, year: Number(e.target.value) })} /></label>
         <button type="button" onClick={loadTatSummary}>Load summary</button>
       </div>
-      {tatSummary && <div className="cards">
-        <div className="card"><h4>Total records</h4><p className="metric">{tatSummary.total}</p></div>
-        <div className="card"><h4>Within target</h4><p className="metric">{tatSummary.withinTarget}</p></div>
-        <div className="card"><h4>Delayed</h4><p className="metric">{tatSummary.delayed}</p></div>
-        <div className="card"><h4>Incomplete / exception</h4><p className="metric">{tatSummary.incompleteOrException}</p></div>
-        <div className="card"><h4>Average TAT (min)</h4><p className="metric">{tatSummary.averageTatMinutes ?? '—'}</p></div>
-      </div>}
+      {tatSummary && <>
+        <div className="cards">
+          <div className="card"><h4>Total records</h4><p className="metric">{tatSummary.total}</p></div>
+          <div className="card"><h4>Within target</h4><p className="metric">{tatSummary.withinTarget}</p></div>
+          <div className="card"><h4>Delayed</h4><p className="metric">{tatSummary.delayed}</p></div>
+          <div className="card"><h4>Incomplete / exception</h4><p className="metric">{tatSummary.incompleteOrException}</p></div>
+          <div className="card"><h4>Average TAT (min)</h4><p className="metric">{tatSummary.averageTatMinutes ?? '—'}</p></div>
+        </div>
+        {tatSummary.bySection && tatSummary.bySection.length > 0 && <>
+          <h4>By section</h4>
+          <table className="data-table"><thead><tr><th>Section</th><th>Total</th><th>Within target</th><th>Delayed</th><th>Incomplete / exception</th><th>Average TAT (min)</th></tr></thead><tbody>
+            {tatSummary.bySection.map((s, i) => <tr key={i}><td>{s.section}</td><td>{s.total}</td><td>{s.withinTarget}</td><td>{s.delayed}</td><td>{s.incompleteOrException}</td><td>{s.averageTatMinutes ?? '—'}</td></tr>)}
+          </tbody></table>
+        </>}
+      </>}
       <h4>Recent TAT records</h4>
       <table className="data-table"><thead><tr><th>Request</th><th>Patient type</th><th>Test</th><th>TAT (min)</th><th>Target</th><th>Status</th><th>Exception</th></tr></thead><tbody>
         {tatRecords.slice(0, 100).map(t => <tr key={t.id}><td>{t.request_id || `#${t.id}`}</td><td>{t.patient_type || '—'}</td><td>{t.test_name || '—'}</td><td>{t.tat_minutes ?? '—'}</td><td>{t.target_minutes ?? '—'}</td><td>{formatBadge(t.status)}</td><td>{t.exception_reason || '—'}</td></tr>)}
       </tbody></table>
     </>}
 
-    {tab === 'Reports/Exports' && <p>Exported monthly report files are attached to each approved report record under <em>Monthly Reports → Open → Linked records</em>. A consolidated archive view will be added in a later phase.</p>}
+    {tab === 'Reports/Exports' && <>
+      <div style={{ margin: '8px 0' }}><button type="button" onClick={loadArchive}>Refresh archive</button></div>
+      <table className="data-table"><thead><tr><th>Report #</th><th>Period</th><th>Type</th><th>Status</th><th>File</th><th>Format</th><th>Size</th><th>Exported at</th><th>Notes</th><th></th></tr></thead><tbody>
+        {archive.map(a => <tr key={a.link_id}>
+          <td>{a.report_number}</td>
+          <td>{a.report_year}-{String(a.report_month).padStart(2, '0')}</td>
+          <td>{a.report_type.replace(/_/g, ' ')}</td>
+          <td>{formatBadge(a.report_status)}</td>
+          <td>{a.original_name}</td>
+          <td>{(a.original_name.split('.').pop() || '').toLowerCase()}</td>
+          <td>{(a.size_bytes / 1024).toFixed(1)} KB</td>
+          <td>{a.file_created_at}</td>
+          <td>{a.link_notes || '—'}</td>
+          <td><button onClick={() => downloadArchiveFile(a.report_id, a.file_id, a.original_name)}>Download</button></td>
+        </tr>)}
+      </tbody></table>
+      {archive.length === 0 && <p>No exported reports yet. Export an approved report to populate the archive.</p>}
+    </>}
   </div>;
 }

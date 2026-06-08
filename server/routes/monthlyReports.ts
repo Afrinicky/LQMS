@@ -3,6 +3,7 @@ import multer from 'multer';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import * as XLSX from 'xlsx';
 import { getDb, uploadRoot } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
@@ -140,13 +141,31 @@ function processImportBatch(db: any, batchId: number) {
   const file = readSourceFile(db, batch.source_file_id);
   if (!file) throw new Error('Source file is missing on disk');
   const ext = path.extname(file.originalName).toLowerCase();
-  if (ext !== '.csv') {
+  let parsed: { headers: string[]; rows: Record<string, string>[] };
+  if (ext === '.csv') {
+    parsed = parseCsv(fs.readFileSync(file.path, 'utf-8'));
+  } else if (ext === '.xlsx' || ext === '.xls') {
+    try {
+      const wb = XLSX.readFile(file.path, { cellDates: false });
+      const firstSheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, { defval: '', raw: false });
+      const headers = rows.length ? Object.keys(rows[0]).map(h => String(h).trim()) : [];
+      const stringRows = rows.map(r => {
+        const out: Record<string, string> = {};
+        for (const h of headers) out[h] = r[h] === null || r[h] === undefined ? '' : String(r[h]).trim();
+        return out;
+      });
+      parsed = { headers, rows: stringRows };
+    } catch (e) {
+      db.prepare("UPDATE lhims_import_batches SET status = 'failed', notes = COALESCE(notes, '') || ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .run(`\nXLSX parse failed: ${(e as Error).message}`, batchId);
+      return { rows: 0, processed: 0, exceptions: 0, skipped: true };
+    }
+  } else {
     db.prepare("UPDATE lhims_import_batches SET status = 'failed', notes = COALESCE(notes, '') || ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-      .run(`\nXLSX/other formats are not parsed yet. Re-upload as CSV.`, batchId);
+      .run(`\nUnsupported file extension "${ext}". Upload .csv, .xlsx, or .xls.`, batchId);
     return { rows: 0, processed: 0, exceptions: 0, skipped: true };
   }
-  const text = fs.readFileSync(file.path, 'utf-8');
-  const parsed = parseCsv(text);
   const map = mapHeaders(parsed.headers);
   db.prepare('DELETE FROM lhims_import_rows WHERE import_batch_id = ?').run(batchId);
   db.prepare('DELETE FROM monthly_report_exceptions WHERE import_batch_id = ?').run(batchId);
@@ -248,6 +267,8 @@ function processImportBatch(db: any, batchId: number) {
           requestId: raw[map.request_id || ''] || null,
           patientType: get('patient_type'),
           testName,
+          departmentName: get('department_name'),
+          sectionName: get('section_name'),
           requestTime: startTime?.toISOString() ?? null,
           sampleReceivedTime: sampleReceivedTime?.toISOString() ?? null,
           verificationTime: verificationTime?.toISOString() ?? null,
@@ -265,9 +286,9 @@ function processImportBatch(db: any, batchId: number) {
     });
 
     if (tatRowsToInsert.length) {
-      const insertTat = db.prepare(`INSERT INTO tat_records (import_batch_id, request_id, patient_type, test_name, request_time, sample_received_time, verification_time, dispatch_time, tat_minutes, target_minutes, status, exception_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      const insertTat = db.prepare(`INSERT INTO tat_records (import_batch_id, request_id, patient_type, test_name, department_name, section_name, request_time, sample_received_time, verification_time, dispatch_time, tat_minutes, target_minutes, status, exception_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
       for (const t of tatRowsToInsert) {
-        insertTat.run(batchId, t.requestId, t.patientType, t.testName, t.requestTime, t.sampleReceivedTime, t.verificationTime, t.dispatchTime, t.tat, t.target, t.status, t.exceptionReason);
+        insertTat.run(batchId, t.requestId, t.patientType, t.testName, t.departmentName, t.sectionName, t.requestTime, t.sampleReceivedTime, t.verificationTime, t.dispatchTime, t.tat, t.target, t.status, t.exceptionReason);
       }
     }
 
@@ -288,21 +309,48 @@ function generateReportLines(db: any, reportId: number, reportType: string, impo
 
   if (reportType === 'tat_summary') {
     const tatRows = db.prepare(`SELECT * FROM tat_records WHERE import_batch_id IN (${placeholders})`).all(...importBatchIds) as any[];
-    const grouped = new Map<string, { count: number; within: number; delayed: number; incomplete: number; tatSum: number; tatCount: number }>();
+    type TatBucket = { count: number; within: number; delayed: number; incomplete: number; tatSum: number; tatCount: number };
+    const newBucket = (): TatBucket => ({ count: 0, within: 0, delayed: 0, incomplete: 0, tatSum: 0, tatCount: 0 });
+    const pivot = (key: string, buckets: Map<string, TatBucket>) => {
+      let b = buckets.get(key);
+      if (!b) { b = newBucket(); buckets.set(key, b); }
+      return b;
+    };
+    const drillDown = new Map<string, Map<string, Map<string, TatBucket>>>(); // section -> patientType -> test -> bucket
     for (const r of tatRows) {
-      const key = `${r.patient_type || 'unknown'}|${r.test_name || 'unknown'}`;
-      let bucket = grouped.get(key);
-      if (!bucket) { bucket = { count: 0, within: 0, delayed: 0, incomplete: 0, tatSum: 0, tatCount: 0 }; grouped.set(key, bucket); }
+      const section = r.section_name || (r.department_name ? `${r.department_name} (no section)` : 'Unassigned');
+      const pt = r.patient_type || 'unknown';
+      const test = r.test_name || 'unknown';
+      let bySection = drillDown.get(section);
+      if (!bySection) { bySection = new Map(); drillDown.set(section, bySection); }
+      let byPatient = bySection.get(pt);
+      if (!byPatient) { byPatient = new Map(); bySection.set(pt, byPatient); }
+      const bucket = pivot(test, byPatient);
       bucket.count++;
       if (r.status === 'within_target') bucket.within++;
       else if (r.status === 'delayed') bucket.delayed++;
       else { bucket.incomplete++; exceptionCount++; }
       if (r.tat_minutes !== null && r.tat_minutes !== undefined) { bucket.tatSum += r.tat_minutes; bucket.tatCount++; }
     }
-    for (const [key, b] of grouped) {
-      const [pt, test] = key.split('|');
-      const avg = b.tatCount > 0 ? Math.round(b.tatSum / b.tatCount) : null;
-      insertLine.run(reportId, pt, test, 'count', `${b.within}/${b.count} within target`, b.within, b.count, `delayed=${b.delayed}; incomplete/exception=${b.incomplete}; avg_minutes=${avg ?? '—'}`);
+    for (const [section, byPatient] of drillDown) {
+      const sectionTotals = newBucket();
+      for (const [pt, byTest] of byPatient) {
+        const patientTotals = newBucket();
+        for (const [test, b] of byTest) {
+          const avg = b.tatCount > 0 ? Math.round(b.tatSum / b.tatCount) : null;
+          insertLine.run(reportId, section, `${pt} • ${test}`, 'count', `${b.within}/${b.count} within target`, b.within, b.count, `delayed=${b.delayed}; incomplete/exception=${b.incomplete}; avg_minutes=${avg ?? '—'}`);
+          linesInserted++;
+          patientTotals.count += b.count; patientTotals.within += b.within; patientTotals.delayed += b.delayed; patientTotals.incomplete += b.incomplete;
+          patientTotals.tatSum += b.tatSum; patientTotals.tatCount += b.tatCount;
+        }
+        const avgP = patientTotals.tatCount > 0 ? Math.round(patientTotals.tatSum / patientTotals.tatCount) : null;
+        insertLine.run(reportId, section, `${pt} • subtotal`, 'subtotal', `${patientTotals.within}/${patientTotals.count} within target`, patientTotals.within, patientTotals.count, `delayed=${patientTotals.delayed}; incomplete/exception=${patientTotals.incomplete}; avg_minutes=${avgP ?? '—'}`);
+        linesInserted++;
+        sectionTotals.count += patientTotals.count; sectionTotals.within += patientTotals.within; sectionTotals.delayed += patientTotals.delayed; sectionTotals.incomplete += patientTotals.incomplete;
+        sectionTotals.tatSum += patientTotals.tatSum; sectionTotals.tatCount += patientTotals.tatCount;
+      }
+      const avgS = sectionTotals.tatCount > 0 ? Math.round(sectionTotals.tatSum / sectionTotals.tatCount) : null;
+      insertLine.run(reportId, section, 'Section total', 'total', `${sectionTotals.within}/${sectionTotals.count} within target`, sectionTotals.within, sectionTotals.count, `delayed=${sectionTotals.delayed}; incomplete/exception=${sectionTotals.incomplete}; avg_minutes=${avgS ?? '—'}`);
       linesInserted++;
     }
     return { lines: linesInserted, exceptionCount };
@@ -333,6 +381,9 @@ function generateReportLines(db: any, reportId: number, reportType: string, impo
     return c === pattern || c.includes(pattern);
   }
 
+  // Multi-match: a row may contribute to every active rule it matches, so a
+  // single LHIMS row that is both an FBC request and an HIV-positive result
+  // can be counted under both lines in the same report.
   for (const row of mappedRows) {
     for (const rule of rules) {
       if (reportType !== 'combined_lab_monthly' && rule.report_type !== reportType) continue;
@@ -341,7 +392,6 @@ function generateReportLines(db: any, reportId: number, reportType: string, impo
       let b = buckets.get(key);
       if (!b) { b = { rule, rows: [] }; buckets.set(key, b); }
       b.rows.push(row);
-      break;
     }
   }
 
@@ -622,23 +672,81 @@ export function monthlyReportsRoutes() {
     const db = getDb();
     const report = db.prepare('SELECT * FROM monthly_report_batches WHERE id = ?').get(req.params.id) as any;
     if (!report) return res.status(404).json({ error: 'Monthly report not found' });
+    const format = (req.body.format ?? 'csv').toLowerCase();
+    if (!['csv', 'html', 'doc'].includes(format)) return res.status(400).json({ error: 'format must be csv, html, or doc' });
     const lines = db.prepare('SELECT * FROM monthly_report_lines WHERE monthly_report_batch_id = ? ORDER BY report_section, report_row, id').all(req.params.id) as any[];
-    const csvEscape = (v: unknown) => { const s = v === null || v === undefined ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-    const out: string[] = ['Section,Row,Category,Value,SourceCount,Notes'];
-    for (const l of lines) out.push([l.report_section, l.report_row, l.category ?? '', l.value_text ?? l.value_number ?? '', l.source_count, l.notes ?? ''].map(csvEscape).join(','));
-    const fileName = `${report.report_number}.csv`;
+    const period = `${report.report_year}-${String(report.report_month).padStart(2, '0')}`;
+
+    let body: string;
+    let mimeType: string;
+    let extension: string;
+    if (format === 'csv') {
+      const csvEscape = (v: unknown) => { const s = v === null || v === undefined ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+      const out: string[] = ['Section,Row,Category,Value,SourceCount,Notes'];
+      for (const l of lines) out.push([l.report_section, l.report_row, l.category ?? '', l.value_text ?? l.value_number ?? '', l.source_count, l.notes ?? ''].map(csvEscape).join(','));
+      body = out.join('\n');
+      mimeType = 'text/csv';
+      extension = 'csv';
+    } else {
+      const esc = (v: unknown) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const sections = new Map<string, any[]>();
+      for (const l of lines) {
+        if (!sections.has(l.report_section)) sections.set(l.report_section, []);
+        sections.get(l.report_section)!.push(l);
+      }
+      const sectionHtml = Array.from(sections.entries()).map(([section, rows]) => `<h2>${esc(section)}</h2><table><thead><tr><th>Row</th><th>Category</th><th>Value</th><th>Source count</th><th>Notes</th></tr></thead><tbody>${rows.map(r => `<tr><td>${esc(r.report_row)}</td><td>${esc(r.category)}</td><td>${esc(r.value_text ?? r.value_number ?? '')}</td><td>${esc(r.source_count)}</td><td>${esc(r.notes)}</td></tr>`).join('')}</tbody></table>`).join('');
+      const docPrelude = format === 'doc' ? '<?xml version="1.0"?><?mso-application progid="Word.Document"?>' : '';
+      body = `${docPrelude}<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${esc(report.report_number)}</title><style>body{font-family:'Times New Roman',serif;color:#111;margin:24px}h1{font-size:20px;border-bottom:2px solid #1B3A6B;padding-bottom:6px}h2{font-size:14px;margin-top:18px;color:#1B3A6B}table{border-collapse:collapse;width:100%;margin:6px 0 14px;font-size:11px}th,td{border:1px solid #999;padding:4px 6px;text-align:left;vertical-align:top}thead{background:#eef2f7}@media print{body{margin:12mm}}</style></head><body><h1>${esc(report.report_number)} — ${esc(report.report_type.replace(/_/g, ' '))}</h1><p><strong>Period:</strong> ${esc(period)} &nbsp; <strong>Status:</strong> ${esc(report.status)} &nbsp; <strong>Exceptions:</strong> ${report.exception_count}</p>${sectionHtml}<p style="margin-top:24px;font-size:10px;color:#555">Generated by SECH_LIMS on ${new Date().toISOString()}</p></body></html>`;
+      mimeType = format === 'doc' ? 'application/msword' : 'text/html';
+      extension = format;
+    }
+
+    const fileName = `${report.report_number}.${extension}`;
     const storedName = safeStoredFilename(fileName);
-    fs.writeFileSync(path.join(uploadRoot, storedName), out.join('\n'), 'utf-8');
+    fs.writeFileSync(path.join(uploadRoot, storedName), body, 'utf-8');
     const fileResult = db.prepare('INSERT INTO files (original_name, stored_name, mime_type, size_bytes, storage_area, uploaded_by) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(fileName, storedName, 'text/csv', out.join('\n').length, 'uploads', req.user!.id);
+      .run(fileName, storedName, mimeType, Buffer.byteLength(body, 'utf-8'), 'uploads', req.user!.id);
     const fileId = Number(fileResult.lastInsertRowid);
     db.prepare("UPDATE monthly_report_batches SET final_file_id = ?, status = CASE WHEN status = 'approved' THEN 'exported' ELSE status END, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(fileId, req.params.id);
     db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run('monthly_reports', 'monthly_report_batches', String(req.params.id), 'documents', 'files', String(fileId), 'Exported monthly report CSV');
+      .run('monthly_reports', 'monthly_report_batches', String(req.params.id), 'documents', 'files', String(fileId), `Exported monthly report (${format})`);
     db.prepare('INSERT INTO evidence_files (file_id, module_key, record_type, record_id, notes, linked_by) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(fileId, 'monthly_reports', 'monthly_report_batches', String(req.params.id), 'Final exported monthly report', req.user!.id);
-    audit(req, { action: 'export', entity: 'monthly_report_batches', entityId: req.params.id, newValue: { fileId, fileName } });
-    res.json({ ok: true, fileId, fileName });
+      .run(fileId, 'monthly_reports', 'monthly_report_batches', String(req.params.id), `Final exported monthly report (${format})`, req.user!.id);
+    audit(req, { action: 'export', entity: 'monthly_report_batches', entityId: req.params.id, newValue: { fileId, fileName, format } });
+    res.json({ ok: true, fileId, fileName, format });
+  });
+
+  router.get('/reports/:id/download', requirePermission('monthly_reports', 'export'), (req, res) => {
+    const db = getDb();
+    const report = db.prepare('SELECT * FROM monthly_report_batches WHERE id = ?').get(req.params.id) as any;
+    if (!report) return res.status(404).json({ error: 'Monthly report not found' });
+    const fileId = parseIntNullable(req.query.fileId) ?? report.final_file_id;
+    if (!fileId) return res.status(404).json({ error: 'No exported file for this report yet' });
+    const file = db.prepare('SELECT * FROM files WHERE id = ?').get(fileId) as any;
+    if (!file) return res.status(404).json({ error: 'File not found' });
+    const fp = path.join(file.storage_area === 'evidence' ? path.join(uploadRoot, '..', 'evidence') : uploadRoot, file.stored_name);
+    if (!fs.existsSync(fp)) return res.status(404).json({ error: 'File missing on disk' });
+    res.setHeader('Content-Type', file.mime_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${file.original_name}"`);
+    fs.createReadStream(fp).pipe(res);
+  });
+
+  router.get('/archive', requirePermission('monthly_reports', 'view'), (_req, res) => {
+    const db = getDb();
+    const rows = db.prepare(`
+      SELECT rl.id AS link_id, rl.notes AS link_notes,
+             mrb.id AS report_id, mrb.report_number, mrb.report_type, mrb.report_month, mrb.report_year, mrb.status AS report_status,
+             f.id AS file_id, f.original_name, f.stored_name, f.mime_type, f.size_bytes, f.storage_area, f.created_at AS file_created_at
+        FROM record_links rl
+        JOIN files f ON f.id = CAST(rl.target_record_id AS INTEGER)
+        JOIN monthly_report_batches mrb ON mrb.id = CAST(rl.source_record_id AS INTEGER)
+       WHERE rl.source_module_key = 'monthly_reports'
+         AND rl.source_record_type = 'monthly_report_batches'
+         AND rl.target_module_key = 'documents'
+         AND rl.target_record_type = 'files'
+       ORDER BY mrb.report_year DESC, mrb.report_month DESC, mrb.id DESC, f.id DESC
+    `).all();
+    res.json(rows);
   });
 
   // ============= Exceptions =============
@@ -707,12 +815,21 @@ export function monthlyReportsRoutes() {
     }
     const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
     const row = db.prepare(`SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'within_target' THEN 1 ELSE 0 END) AS within_target, SUM(CASE WHEN status = 'delayed' THEN 1 ELSE 0 END) AS delayed, SUM(CASE WHEN status IN ('incomplete','exception') THEN 1 ELSE 0 END) AS incomplete, AVG(CASE WHEN tat_minutes IS NOT NULL AND tat_minutes >= 0 THEN tat_minutes END) AS avg_tat_minutes FROM tat_records ${where}`).get(...params) as any;
+    const bySection = db.prepare(`SELECT COALESCE(NULLIF(section_name, ''), 'Unassigned') AS section, COUNT(*) AS total, SUM(CASE WHEN status = 'within_target' THEN 1 ELSE 0 END) AS within_target, SUM(CASE WHEN status = 'delayed' THEN 1 ELSE 0 END) AS delayed, SUM(CASE WHEN status IN ('incomplete','exception') THEN 1 ELSE 0 END) AS incomplete, AVG(CASE WHEN tat_minutes IS NOT NULL AND tat_minutes >= 0 THEN tat_minutes END) AS avg_tat_minutes FROM tat_records ${where} GROUP BY section ORDER BY section`).all(...params) as any[];
     res.json({
       total: row.total ?? 0,
       withinTarget: row.within_target ?? 0,
       delayed: row.delayed ?? 0,
       incompleteOrException: row.incomplete ?? 0,
-      averageTatMinutes: row.avg_tat_minutes !== null && row.avg_tat_minutes !== undefined ? Math.round(row.avg_tat_minutes) : null
+      averageTatMinutes: row.avg_tat_minutes !== null && row.avg_tat_minutes !== undefined ? Math.round(row.avg_tat_minutes) : null,
+      bySection: bySection.map(r => ({
+        section: r.section,
+        total: r.total ?? 0,
+        withinTarget: r.within_target ?? 0,
+        delayed: r.delayed ?? 0,
+        incompleteOrException: r.incomplete ?? 0,
+        averageTatMinutes: r.avg_tat_minutes !== null && r.avg_tat_minutes !== undefined ? Math.round(r.avg_tat_minutes) : null
+      }))
     });
   });
 

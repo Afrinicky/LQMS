@@ -735,4 +735,9 @@ CREATE TABLE IF NOT EXISTS tat_records (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 `);
+
+  const tatColumns = database.prepare("PRAGMA table_info(tat_records)").all() as Array<{ name: string }>;
+  const tatNames = new Set(tatColumns.map(col => col.name));
+  if (!tatNames.has('section_name')) database.exec('ALTER TABLE tat_records ADD COLUMN section_name TEXT');
+  if (!tatNames.has('department_name')) database.exec('ALTER TABLE tat_records ADD COLUMN department_name TEXT');
 }
