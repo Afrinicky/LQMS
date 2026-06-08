@@ -740,4 +740,203 @@ CREATE TABLE IF NOT EXISTS tat_records (
   const tatNames = new Set(tatColumns.map(col => col.name));
   if (!tatNames.has('section_name')) database.exec('ALTER TABLE tat_records ADD COLUMN section_name TEXT');
   if (!tatNames.has('department_name')) database.exec('ALTER TABLE tat_records ADD COLUMN department_name TEXT');
+
+  // Phase 7: Document Control, Staff Declarations, Training, Competency, Duty Rosters
+  const documentColumns = database.prepare("PRAGMA table_info(documents)").all() as Array<{ name: string }>;
+  const documentNames = new Set(documentColumns.map(col => col.name));
+  if (!documentNames.has('department_id')) database.exec('ALTER TABLE documents ADD COLUMN department_id INTEGER REFERENCES departments(id)');
+  if (!documentNames.has('section_id')) database.exec('ALTER TABLE documents ADD COLUMN section_id INTEGER REFERENCES sections(id)');
+  if (!documentNames.has('owner_staff_id')) database.exec('ALTER TABLE documents ADD COLUMN owner_staff_id INTEGER REFERENCES staff(id)');
+  if (!documentNames.has('current_version_id')) database.exec('ALTER TABLE documents ADD COLUMN current_version_id INTEGER REFERENCES document_versions(id)');
+  if (!documentNames.has('review_frequency_months')) database.exec('ALTER TABLE documents ADD COLUMN review_frequency_months INTEGER');
+  if (!documentNames.has('next_review_date')) database.exec('ALTER TABLE documents ADD COLUMN next_review_date TEXT');
+  if (!documentNames.has('access_level')) database.exec("ALTER TABLE documents ADD COLUMN access_level TEXT DEFAULT 'internal'");
+  if (!documentNames.has('is_controlled')) database.exec('ALTER TABLE documents ADD COLUMN is_controlled INTEGER NOT NULL DEFAULT 1');
+  if (!documentNames.has('created_by')) database.exec('ALTER TABLE documents ADD COLUMN created_by INTEGER REFERENCES users(id)');
+  if (!documentNames.has('obsolete_reason')) database.exec('ALTER TABLE documents ADD COLUMN obsolete_reason TEXT');
+
+  const versionColumns = database.prepare("PRAGMA table_info(document_versions)").all() as Array<{ name: string }>;
+  const versionNames = new Set(versionColumns.map(col => col.name));
+  if (!versionNames.has('version_number')) database.exec('ALTER TABLE document_versions ADD COLUMN version_number TEXT');
+  if (!versionNames.has('revision_summary')) database.exec('ALTER TABLE document_versions ADD COLUMN revision_summary TEXT');
+  if (!versionNames.has('prepared_by_staff_id')) database.exec('ALTER TABLE document_versions ADD COLUMN prepared_by_staff_id INTEGER REFERENCES staff(id)');
+  if (!versionNames.has('reviewed_by_staff_id')) database.exec('ALTER TABLE document_versions ADD COLUMN reviewed_by_staff_id INTEGER REFERENCES staff(id)');
+  if (!versionNames.has('approved_by_staff_id')) database.exec('ALTER TABLE document_versions ADD COLUMN approved_by_staff_id INTEGER REFERENCES staff(id)');
+  if (!versionNames.has('review_date')) database.exec('ALTER TABLE document_versions ADD COLUMN review_date TEXT');
+  if (!versionNames.has('obsolete_date')) database.exec('ALTER TABLE document_versions ADD COLUMN obsolete_date TEXT');
+  if (!versionNames.has('obsolete_reason')) database.exec('ALTER TABLE document_versions ADD COLUMN obsolete_reason TEXT');
+  if (!versionNames.has('approved_at')) database.exec('ALTER TABLE document_versions ADD COLUMN approved_at TEXT');
+  if (!versionNames.has('created_by')) database.exec('ALTER TABLE document_versions ADD COLUMN created_by INTEGER REFERENCES users(id)');
+
+  const attestationColumns = database.prepare("PRAGMA table_info(document_attestations)").all() as Array<{ name: string }>;
+  const attestationNames = new Set(attestationColumns.map(col => col.name));
+  if (!attestationNames.has('document_id')) database.exec('ALTER TABLE document_attestations ADD COLUMN document_id INTEGER REFERENCES documents(id)');
+  if (!attestationNames.has('assigned_by_staff_id')) database.exec('ALTER TABLE document_attestations ADD COLUMN assigned_by_staff_id INTEGER REFERENCES staff(id)');
+  if (!attestationNames.has('assigned_at')) database.exec('ALTER TABLE document_attestations ADD COLUMN assigned_at TEXT');
+  if (!attestationNames.has('due_date')) database.exec('ALTER TABLE document_attestations ADD COLUMN due_date TEXT');
+  if (!attestationNames.has('signature_file_id')) database.exec('ALTER TABLE document_attestations ADD COLUMN signature_file_id INTEGER REFERENCES files(id)');
+  if (!attestationNames.has('notes')) database.exec('ALTER TABLE document_attestations ADD COLUMN notes TEXT');
+
+  const authColumns = database.prepare("PRAGMA table_info(technical_authorizations)").all() as Array<{ name: string }>;
+  const authNames = new Set(authColumns.map(col => col.name));
+  if (!authNames.has('competency_assessment_id')) database.exec('ALTER TABLE technical_authorizations ADD COLUMN competency_assessment_id INTEGER');
+  if (!authNames.has('created_by')) database.exec('ALTER TABLE technical_authorizations ADD COLUMN created_by INTEGER REFERENCES users(id)');
+  if (!authNames.has('notes')) database.exec('ALTER TABLE technical_authorizations ADD COLUMN notes TEXT');
+
+  database.exec(`
+CREATE TABLE IF NOT EXISTS document_reviews (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  review_number TEXT,
+  document_id INTEGER NOT NULL REFERENCES documents(id),
+  document_version_id INTEGER REFERENCES document_versions(id),
+  review_date TEXT NOT NULL,
+  review_outcome TEXT NOT NULL,
+  review_notes TEXT,
+  next_review_date TEXT,
+  reviewed_by_staff_id INTEGER REFERENCES staff(id),
+  action_required INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS document_print_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  document_id INTEGER NOT NULL REFERENCES documents(id),
+  document_version_id INTEGER REFERENCES document_versions(id),
+  printed_by_staff_id INTEGER REFERENCES staff(id),
+  print_date TEXT NOT NULL,
+  print_purpose TEXT,
+  controlled_copy INTEGER NOT NULL DEFAULT 0,
+  copy_number TEXT,
+  watermark TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS document_distribution (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  document_id INTEGER NOT NULL REFERENCES documents(id),
+  document_version_id INTEGER REFERENCES document_versions(id),
+  target_type TEXT NOT NULL,
+  target_staff_id INTEGER REFERENCES staff(id),
+  target_position_id INTEGER REFERENCES positions(id),
+  target_section_id INTEGER REFERENCES sections(id),
+  assigned_by_staff_id INTEGER REFERENCES staff(id),
+  assigned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  due_date TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS staff_declarations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  declaration_number TEXT NOT NULL UNIQUE,
+  declaration_type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  document_id INTEGER REFERENCES documents(id),
+  document_version_id INTEGER REFERENCES document_versions(id),
+  staff_id INTEGER REFERENCES staff(id),
+  signed_at TEXT,
+  signature_file_id INTEGER REFERENCES files(id),
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS training_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  training_number TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  description TEXT,
+  training_type TEXT,
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  trainer_staff_id INTEGER REFERENCES staff(id),
+  training_date TEXT NOT NULL,
+  start_time TEXT,
+  end_time TEXT,
+  location TEXT,
+  evidence_file_id INTEGER REFERENCES files(id),
+  status TEXT NOT NULL DEFAULT 'planned',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS training_attendance (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  training_event_id INTEGER NOT NULL REFERENCES training_events(id),
+  staff_id INTEGER NOT NULL REFERENCES staff(id),
+  attendance_status TEXT NOT NULL DEFAULT 'invited',
+  signed_at TEXT,
+  remarks TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(training_event_id, staff_id)
+);
+CREATE TABLE IF NOT EXISTS competency_assessments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  competency_number TEXT NOT NULL UNIQUE,
+  staff_id INTEGER NOT NULL REFERENCES staff(id),
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  activity TEXT NOT NULL,
+  assessment_method TEXT NOT NULL,
+  assessor_staff_id INTEGER REFERENCES staff(id),
+  assessment_date TEXT NOT NULL,
+  outcome TEXT,
+  findings TEXT,
+  retraining_required INTEGER NOT NULL DEFAULT 0,
+  next_assessment_due TEXT,
+  evidence_file_id INTEGER REFERENCES files(id),
+  authorization_recommendation TEXT,
+  status TEXT NOT NULL DEFAULT 'planned',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS staff_documents (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  staff_id INTEGER NOT NULL REFERENCES staff(id),
+  document_type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  file_id INTEGER REFERENCES files(id),
+  issue_date TEXT,
+  expiry_date TEXT,
+  verification_status TEXT NOT NULL DEFAULT 'pending',
+  verified_by_staff_id INTEGER REFERENCES staff(id),
+  verified_at TEXT,
+  remarks TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS duty_rosters (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  roster_number TEXT NOT NULL UNIQUE,
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  roster_start_date TEXT NOT NULL,
+  roster_end_date TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft',
+  prepared_by_staff_id INTEGER REFERENCES staff(id),
+  approved_by_staff_id INTEGER REFERENCES staff(id),
+  approved_at TEXT,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS duty_roster_assignments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  roster_id INTEGER NOT NULL REFERENCES duty_rosters(id),
+  staff_id INTEGER NOT NULL REFERENCES staff(id),
+  duty_date TEXT NOT NULL,
+  shift_name TEXT,
+  start_time TEXT,
+  end_time TEXT,
+  duty_role TEXT,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+`);
 }

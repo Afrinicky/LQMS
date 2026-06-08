@@ -6,7 +6,9 @@ import { AuthProvider, useAuth } from './hooks/useAuth';
 import { ModuleProvider } from './hooks/useModules';
 import { getSetupStatus } from './services/api';
 import { LoginPage, SetupPage } from './pages/AuthPages';
-import { Dashboard, Documents, Home, ModulePage, Organisation, Personnel } from './pages/CorePages';
+import { Dashboard, Home, ModulePage, Organisation } from './pages/CorePages';
+import { DocumentControlPage } from './pages/DocumentControlPage';
+import { PersonnelManagementPage } from './pages/PersonnelManagementPage';
 import { ActionTracker, BackupRestore, Devices, DocumentImport, EvidenceUpload, ModuleToggles, PermissionMatrix, Positions, UsersAccess } from './pages/SettingsPages';
 import { EquipmentPage, InventoryPage, MonitoringPage, SafetyPage } from './pages/Phase3Pages';
 import { IqcPage, EqaPage, VerificationValidationPage, MeasurementUncertaintyPage } from './pages/Phase4Pages';
@@ -36,9 +38,9 @@ function AppRoutes() {
       <Route index element={<Navigate to="/home"/>}/>
       <Route path="/home" element={<Home/>}/>
       <Route path="/dashboard" element={<Dashboard/>}/>
-      <Route path="/documents" element={<Documents/>}/>
+      <Route path="/documents" element={<DocumentControlPage/>}/>
       <Route path="/organisation" element={<Organisation/>}/>
-      <Route path="/personnel" element={<Personnel/>}/>
+      <Route path="/personnel" element={<PersonnelManagementPage/>}/>
       <Route path="/nc-capa" element={<NcCapaPage/>}/>
       <Route path="/complaints" element={<ComplaintsPage/>}/>
       <Route path="/risks" element={<RisksPage/>}/>
