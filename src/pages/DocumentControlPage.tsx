@@ -4,7 +4,7 @@ import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import type {
   Section, Department, Staff, Position,
-  DocumentRecord, DocumentAttestation, DocumentControlSummary
+  DocumentRecord, DocumentAttestation, DocumentControlSummary, DistributionInboxEntry
 } from '../../shared/types/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
@@ -52,6 +52,7 @@ export function DocumentControlPage() {
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [reviewsDue, setReviewsDue] = useState<DocumentRecord[]>([]);
   const [pendingAttestations, setPendingAttestations] = useState<DocumentAttestation[]>([]);
+  const [inbox, setInbox] = useState<DistributionInboxEntry[]>([]);
   const [selectedDoc, setSelectedDoc] = useState<DocumentRecord | null>(null);
 
   const [docForm, setDocForm] = useState(emptyDocForm);
@@ -65,14 +66,15 @@ export function DocumentControlPage() {
 
   async function load() {
     try {
-      const [sum, docs, due, att] = await Promise.all([
+      const [sum, docs, due, att, ib] = await Promise.all([
         api<DocumentControlSummary>('/dashboard/document-control-summary').catch(() => null),
         api<DocumentRecord[]>('/documents'),
         api<DocumentRecord[]>('/documents/reviews/due').catch(() => []),
-        api<DocumentAttestation[]>('/documents/attestations/pending').catch(() => [])
+        api<DocumentAttestation[]>('/documents/attestations/pending').catch(() => []),
+        api<DistributionInboxEntry[]>('/documents/distribution/inbox').catch(() => [])
       ]);
       if (sum) setSummary(sum);
-      setDocuments(docs); setReviewsDue(due); setPendingAttestations(att);
+      setDocuments(docs); setReviewsDue(due); setPendingAttestations(att); setInbox(ib);
     } catch (e) { setError((e as Error).message); }
   }
   useEffect(() => { if (isEnabled('documents')) void load(); }, [isEnabled]);
@@ -181,7 +183,39 @@ export function DocumentControlPage() {
     catch (e) { setError((e as Error).message); }
   }
 
-  const tabs = ['Dashboard', 'Document Register', 'New Document', 'Versions', 'Reviews Due', 'Pending Attestations', 'Print Logs', 'Obsolete Documents', 'Reports'];
+  async function markVersionObsolete(versionId: number) {
+    if (!selectedDoc) return;
+    const reason = prompt('Reason for marking this version obsolete?');
+    if (!reason) return;
+    try {
+      await api(`/documents/${selectedDoc.id}/versions/${versionId}/mark-obsolete`, { method: 'POST', body: JSON.stringify({ obsoleteReason: reason }) });
+      await openDoc(selectedDoc.id); await load();
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  function openPrintPreview(versionId?: number) {
+    if (!selectedDoc) return;
+    const purpose = prompt('Print purpose (e.g. reference, training, controlled distribution)?') || '';
+    const copyNumber = prompt('Copy number (leave blank for uncontrolled)?') || '';
+    const watermark = copyNumber ? 'CONTROLLED COPY' : 'UNCONTROLLED COPY';
+    const url = new URL(`${API_BASE}/documents/${selectedDoc.id}/print-render`, window.location.origin);
+    if (versionId) url.searchParams.set('versionId', String(versionId));
+    if (copyNumber) url.searchParams.set('copyNumber', copyNumber);
+    if (purpose) url.searchParams.set('purpose', purpose);
+    url.searchParams.set('watermark', watermark);
+    const token = getToken();
+    if (token) {
+      fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.text())
+        .then(html => {
+          const w = window.open('', '_blank');
+          if (w) { w.document.write(html); w.document.close(); }
+        })
+        .catch(e => setError((e as Error).message));
+    }
+  }
+
+  const tabs = ['Dashboard', 'Document Register', 'New Document', 'Versions', 'Reviews Due', 'Pending Attestations', 'My Inbox', 'Print Logs', 'Obsolete Documents', 'Reports'];
   const obsoleteDocs = documents.filter(d => d.status === 'obsolete');
 
   return <div className="module-page">
@@ -215,7 +249,8 @@ export function DocumentControlPage() {
         printForm={printForm} setPrintForm={setPrintForm} submitPrint={submitPrint}
         obsoleteReason={obsoleteReason} setObsoleteReason={setObsoleteReason} submitObsolete={submitDoc_obsolete}
         submitForReview={submitForReview} approveDoc={approveDoc}
-        onSignAttestation={signAttestation} onClose={() => setSelectedDoc(null)} />}
+        onSignAttestation={signAttestation} onMarkVersionObsolete={markVersionObsolete} onPrintPreview={openPrintPreview}
+        onClose={() => setSelectedDoc(null)} />}
     </>}
 
     {tab === 'New Document' && <form className="form-grid" onSubmit={submitDoc}>
@@ -267,7 +302,26 @@ export function DocumentControlPage() {
       </tr>)}
     </tbody></table>}
 
-    {tab === 'Print Logs' && <p>Print logs are recorded per document. Open a document from the register and use the "Log print" form in the detail panel.</p>}
+    {tab === 'My Inbox' && <>
+      <p>Controlled documents distributed to your staff record. Sign each attestation as you read the document.</p>
+      <table className="data-table"><thead><tr><th>Document</th><th>Version</th><th>Distribution status</th><th>Attestation status</th><th>Due</th><th>Signed</th><th>Actions</th></tr></thead><tbody>
+        {inbox.map(e => <tr key={e.id}>
+          <td>{e.document_code || '—'} — {e.title}</td>
+          <td>{e.version_number || '—'}</td>
+          <td>{formatBadge(e.status)}</td>
+          <td>{formatBadge(e.attestation_status)}</td>
+          <td>{e.due_date || e.attestation_due || '—'}</td>
+          <td>{e.attested_at || '—'}</td>
+          <td>
+            <button onClick={() => openDoc(e.document_id)}>Open</button>
+            {e.attestation_id && e.attestation_status !== 'signed' && <button onClick={() => signAttestation(e.attestation_id!, e.document_id)}>Sign</button>}
+          </td>
+        </tr>)}
+      </tbody></table>
+      {inbox.length === 0 && <p>Your inbox is empty.</p>}
+    </>}
+
+    {tab === 'Print Logs' && <p>Print logs are recorded per document. Open a document from the register, click <em>Print preview</em> to render a watermarked cover sheet, then use the <em>Log print</em> form to capture the print event in the audit trail.</p>}
 
     {tab === 'Obsolete Documents' && <table className="data-table"><thead><tr><th>Code</th><th>Title</th><th>Type</th><th>Reason</th><th></th></tr></thead><tbody>
       {obsoleteDocs.map(d => <tr key={d.id}>
@@ -288,7 +342,7 @@ function DocumentDetailPanel(props: any) {
     attestForm, setAttestForm, submitAttest,
     printForm, setPrintForm, submitPrint,
     obsoleteReason, setObsoleteReason, submitObsolete,
-    submitForReview, approveDoc, onSignAttestation, onClose } = props;
+    submitForReview, approveDoc, onSignAttestation, onMarkVersionObsolete, onPrintPreview, onClose } = props;
   return <div className="card" style={{ marginTop: 16 }}>
     <h3>{doc.document_code || '—'} — {doc.title}</h3>
     <p>Type: {doc.document_type || '—'} | Status: {formatBadge(doc.status)} | Access: {doc.access_level || '—'} | Controlled: {doc.is_controlled ? 'Yes' : 'No'}</p>
@@ -297,12 +351,20 @@ function DocumentDetailPanel(props: any) {
     <div style={{ marginTop: 8 }}>
       {doc.status === 'draft' && <button onClick={submitForReview}>Submit for review</button>}
       {(doc.status === 'under_review' || doc.status === 'draft' || doc.status === 'approved') && <button onClick={approveDoc}>Approve current version</button>}
+      <button onClick={() => onPrintPreview(doc.current_version_id)}>Print preview</button>
       <button className="secondary" onClick={onClose}>Close panel</button>
     </div>
 
     <h4>Versions</h4>
-    <table className="data-table"><thead><tr><th>Version</th><th>Status</th><th>Effective</th><th>Approved</th><th>Summary</th></tr></thead><tbody>
-      {(doc.versions || []).map((v: any) => <tr key={v.id}><td>{v.version_number || v.version_label}</td><td>{formatBadge(v.status)}</td><td>{v.effective_date || '—'}</td><td>{v.approved_at || '—'}</td><td>{v.revision_summary || '—'}</td></tr>)}
+    <table className="data-table"><thead><tr><th>Version</th><th>Status</th><th>Effective</th><th>Approved</th><th>Summary</th><th>Actions</th></tr></thead><tbody>
+      {(doc.versions || []).map((v: any) => <tr key={v.id}>
+        <td>{v.version_number || v.version_label}{doc.current_version_id === v.id ? ' (current)' : ''}</td>
+        <td>{formatBadge(v.status)}</td><td>{v.effective_date || '—'}</td><td>{v.approved_at || '—'}</td><td>{v.revision_summary || '—'}</td>
+        <td>
+          <button onClick={() => onPrintPreview(v.id)}>Print preview</button>
+          {v.status !== 'obsolete' && <button onClick={() => onMarkVersionObsolete(v.id)}>Mark obsolete</button>}
+        </td>
+      </tr>)}
     </tbody></table>
     <form className="form-grid" onSubmit={submitVersion}>
       <label>New version number<input value={versionForm.versionNumber} onChange={(e: any) => setVersionForm({ ...versionForm, versionNumber: e.target.value })} required /></label>

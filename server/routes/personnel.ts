@@ -297,6 +297,61 @@ export function personnelRoutes() {
     res.json({ ok: true });
   });
 
+  router.get('/rosters/:id/coverage', requirePermission('personnel', 'view'), (req, res) => {
+    const db = getDb();
+    const roster = db.prepare('SELECT * FROM duty_rosters WHERE id = ?').get(req.params.id) as any;
+    if (!roster) return res.status(404).json({ error: 'Roster not found' });
+    const assignments = db.prepare('SELECT * FROM duty_roster_assignments WHERE roster_id = ? ORDER BY duty_date, start_time').all(req.params.id) as any[];
+
+    const dates: string[] = [];
+    const start = new Date(roster.roster_start_date);
+    const end = new Date(roster.roster_end_date);
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      dates.push(d.toISOString().slice(0, 10));
+    }
+    const byDate = new Map<string, any[]>();
+    for (const a of assignments) {
+      if (!byDate.has(a.duty_date)) byDate.set(a.duty_date, []);
+      byDate.get(a.duty_date)!.push(a);
+    }
+    const gaps = dates.filter(d => !byDate.has(d));
+
+    const conflicts: Array<{ duty_date: string; staff_id: number; assignments: any[] }> = [];
+    const overlaps = (aStart?: string, aEnd?: string, bStart?: string, bEnd?: string) => {
+      if (!aStart || !aEnd || !bStart || !bEnd) return Boolean(aStart === bStart && aEnd === bEnd);
+      return aStart < bEnd && bStart < aEnd;
+    };
+    for (const [date, rows] of byDate) {
+      const byStaff = new Map<number, any[]>();
+      for (const r of rows) {
+        if (!byStaff.has(r.staff_id)) byStaff.set(r.staff_id, []);
+        byStaff.get(r.staff_id)!.push(r);
+      }
+      for (const [staffId, list] of byStaff) {
+        if (list.length < 2) continue;
+        for (let i = 0; i < list.length; i++) {
+          for (let j = i + 1; j < list.length; j++) {
+            if (overlaps(list[i].start_time, list[i].end_time, list[j].start_time, list[j].end_time)) {
+              conflicts.push({ duty_date: date, staff_id: staffId, assignments: [list[i], list[j]] });
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    res.json({
+      rosterId: Number(req.params.id),
+      periodStart: roster.roster_start_date,
+      periodEnd: roster.roster_end_date,
+      totalDates: dates.length,
+      coveredDates: dates.length - gaps.length,
+      gapDates: gaps,
+      conflicts,
+      assignmentsByDate: dates.map(d => ({ date: d, count: (byDate.get(d) ?? []).length }))
+    });
+  });
+
   // ============= Self-service =============
   router.get('/my-profile', (req, res) => {
     if (!req.user) return res.status(401).json({ error: 'Authentication required' });
@@ -322,6 +377,37 @@ export function personnelRoutes() {
       assignedActions: db.prepare("SELECT * FROM actions WHERE assigned_to_staff_id = ? AND status != 'Closed' ORDER BY due_date NULLS LAST").all(staffId),
       upcomingDuties: db.prepare("SELECT a.*, r.roster_number FROM duty_roster_assignments a JOIN duty_rosters r ON r.id = a.roster_id WHERE a.staff_id = ? AND a.duty_date >= date('now') AND r.status IN ('published','approved') ORDER BY a.duty_date").all(staffId)
     });
+  });
+
+  router.get('/staff-suggestions', (req, res) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    const db = getDb();
+    const user = db.prepare('SELECT id, username, full_name, staff_id FROM users WHERE id = ?').get(req.user.id) as any;
+    if (user.staff_id) return res.json({ alreadyLinked: true, suggestions: [] });
+    const suggestions = db.prepare(`SELECT s.id, s.full_name, s.email, s.employee_no, sec.name AS section_name,
+        CASE WHEN EXISTS (SELECT 1 FROM users u WHERE u.staff_id = s.id) THEN 1 ELSE 0 END AS already_taken
+      FROM staff s LEFT JOIN sections sec ON sec.id = s.section_id
+      WHERE s.is_active = 1 AND (LOWER(s.full_name) = LOWER(?) OR LOWER(s.email) = LOWER(COALESCE(?, '')))
+      ORDER BY already_taken, s.full_name`).all(user.full_name, user.username);
+    res.json({ alreadyLinked: false, suggestions });
+  });
+
+  router.post('/link-my-staff', (req, res) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    if (!parseIntNullable(req.body.staffId)) return res.status(400).json({ error: 'staffId is required' });
+    const db = getDb();
+    const me = db.prepare('SELECT id, username, full_name, staff_id FROM users WHERE id = ?').get(req.user.id) as any;
+    if (me.staff_id) return res.status(400).json({ error: 'Your user is already linked to a staff record.' });
+    const candidate = db.prepare('SELECT id, full_name, email FROM staff WHERE id = ? AND is_active = 1').get(req.body.staffId) as any;
+    if (!candidate) return res.status(404).json({ error: 'Staff record not found' });
+    const taken = db.prepare('SELECT id FROM users WHERE staff_id = ?').get(req.body.staffId);
+    if (taken) return res.status(400).json({ error: 'That staff record is already linked to another user.' });
+    const nameMatch = candidate.full_name && candidate.full_name.toLowerCase() === me.full_name.toLowerCase();
+    const emailMatch = candidate.email && me.username && candidate.email.toLowerCase() === me.username.toLowerCase();
+    if (!nameMatch && !emailMatch) return res.status(400).json({ error: 'Self-link requires exact name or email match. Ask an administrator to link your account.' });
+    db.prepare('UPDATE users SET staff_id = ? WHERE id = ?').run(req.body.staffId, req.user.id);
+    audit(req, { action: 'self_link_staff', entity: 'users', entityId: req.user.id, oldValue: { staffId: null }, newValue: { staffId: req.body.staffId, matchedOn: nameMatch ? 'full_name' : 'email' } });
+    res.json({ ok: true, staffId: req.body.staffId });
   });
 
   return router;
