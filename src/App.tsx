@@ -9,6 +9,8 @@ import { LoginPage, SetupPage } from './pages/AuthPages';
 import { Dashboard, Documents, Home, ModulePage, Organisation, Personnel } from './pages/CorePages';
 import { ActionTracker, BackupRestore, Devices, DocumentImport, EvidenceUpload, ModuleToggles, PermissionMatrix, Positions, UsersAccess } from './pages/SettingsPages';
 import { EquipmentPage, InventoryPage, MonitoringPage, SafetyPage } from './pages/Phase3Pages';
+import { IqcPage, EqaPage, VerificationValidationPage, MeasurementUncertaintyPage } from './pages/Phase4Pages';
+import { BloodBankHandoverPage } from './pages/BloodBankHandoverPage';
 import { NcCapaPage, ComplaintsPage, RisksPage, QmsActionTracker } from './pages/QMSPages';
 import { MODULES } from '../shared/constants/modules';
 import './styles/app.css';
@@ -44,6 +46,11 @@ function AppRoutes() {
       <Route path="/supplier-inventory" element={<InventoryPage/>}/>
       <Route path="/monitoring" element={<MonitoringPage/>}/>
       <Route path="/facilities-safety" element={<SafetyPage/>}/>
+      <Route path="/iqc" element={<IqcPage/>}/>
+      <Route path="/eqa" element={<EqaPage/>}/>
+      <Route path="/verification-validation" element={<VerificationValidationPage/>}/>
+      <Route path="/measurement-uncertainty" element={<MeasurementUncertaintyPage/>}/>
+      <Route path="/blood-bank-handover" element={<BloodBankHandoverPage/>}/>
       {placeholders.map(m => <Route key={m.key} path={m.path.slice(1)} element={<ModulePage moduleKey={m.key} title={m.label} placeholder/>}/>)}
       <Route path="/settings" element={<SettingsLayout/>}>
         <Route index element={<Navigate to="users"/>}/>

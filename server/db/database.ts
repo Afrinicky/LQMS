@@ -84,4 +84,525 @@ CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, 
   if (!actionNames.has('description')) database.exec('ALTER TABLE actions ADD COLUMN description TEXT');
   if (!actionNames.has('evidence_required')) database.exec('ALTER TABLE actions ADD COLUMN evidence_required INTEGER NOT NULL DEFAULT 0');
   if (!actionNames.has('completion_notes')) database.exec('ALTER TABLE actions ADD COLUMN completion_notes TEXT');
+
+  // Phase 3: extend equipment_items with maintenance/calibration scheduling fields
+  const equipmentColumns = database.prepare("PRAGMA table_info(equipment_items)").all() as Array<{ name: string }>;
+  const equipmentNames = new Set(equipmentColumns.map(col => col.name));
+  if (!equipmentNames.has('equipment_type')) database.exec('ALTER TABLE equipment_items ADD COLUMN equipment_type TEXT');
+  if (!equipmentNames.has('maintenance_frequency')) database.exec('ALTER TABLE equipment_items ADD COLUMN maintenance_frequency TEXT');
+  if (!equipmentNames.has('calibration_frequency')) database.exec('ALTER TABLE equipment_items ADD COLUMN calibration_frequency TEXT');
+  if (!equipmentNames.has('next_maintenance_due')) database.exec('ALTER TABLE equipment_items ADD COLUMN next_maintenance_due TEXT');
+  if (!equipmentNames.has('next_calibration_due')) database.exec('ALTER TABLE equipment_items ADD COLUMN next_calibration_due TEXT');
+  if (!equipmentNames.has('responsible_staff_id')) database.exec('ALTER TABLE equipment_items ADD COLUMN responsible_staff_id INTEGER REFERENCES staff(id)');
+  if (!equipmentNames.has('date_received')) database.exec('ALTER TABLE equipment_items ADD COLUMN date_received TEXT');
+  if (!equipmentNames.has('date_commissioned')) database.exec('ALTER TABLE equipment_items ADD COLUMN date_commissioned TEXT');
+  if (!equipmentNames.has('calibration_required')) database.exec('ALTER TABLE equipment_items ADD COLUMN calibration_required INTEGER NOT NULL DEFAULT 0');
+  if (!equipmentNames.has('notes')) database.exec('ALTER TABLE equipment_items ADD COLUMN notes TEXT');
+
+  // Phase 3: extend inventory_items
+  const inventoryColumns = database.prepare("PRAGMA table_info(inventory_items)").all() as Array<{ name: string }>;
+  const inventoryNames = new Set(inventoryColumns.map(col => col.name));
+  if (!inventoryNames.has('storage_requirement')) database.exec('ALTER TABLE inventory_items ADD COLUMN storage_requirement TEXT');
+  if (!inventoryNames.has('department_id')) database.exec('ALTER TABLE inventory_items ADD COLUMN department_id INTEGER REFERENCES departments(id)');
+  if (!inventoryNames.has('section_id')) database.exec('ALTER TABLE inventory_items ADD COLUMN section_id INTEGER REFERENCES sections(id)');
+  if (!inventoryNames.has('minimum_stock')) database.exec('ALTER TABLE inventory_items ADD COLUMN minimum_stock INTEGER NOT NULL DEFAULT 0');
+  if (!inventoryNames.has('is_active')) database.exec('ALTER TABLE inventory_items ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1');
+
+  // Phase 3: extend suppliers
+  const supplierColumns = database.prepare("PRAGMA table_info(suppliers)").all() as Array<{ name: string }>;
+  const supplierNames = new Set(supplierColumns.map(col => col.name));
+  if (!supplierNames.has('contact_person')) database.exec('ALTER TABLE suppliers ADD COLUMN contact_person TEXT');
+  if (!supplierNames.has('item_category')) database.exec('ALTER TABLE suppliers ADD COLUMN item_category TEXT');
+  if (!supplierNames.has('evaluation_required')) database.exec('ALTER TABLE suppliers ADD COLUMN evaluation_required INTEGER NOT NULL DEFAULT 0');
+  if (!supplierNames.has('last_evaluation_date')) database.exec('ALTER TABLE suppliers ADD COLUMN last_evaluation_date TEXT');
+  if (!supplierNames.has('next_evaluation_due')) database.exec('ALTER TABLE suppliers ADD COLUMN next_evaluation_due TEXT');
+
+  // Phase 3: extend safety_incidents
+  const safetyColumns = database.prepare("PRAGMA table_info(safety_incidents)").all() as Array<{ name: string }>;
+  const safetyNames = new Set(safetyColumns.map(col => col.name));
+  if (!safetyNames.has('incident_type')) database.exec('ALTER TABLE safety_incidents ADD COLUMN incident_type TEXT');
+  if (!safetyNames.has('title')) database.exec('ALTER TABLE safety_incidents ADD COLUMN title TEXT');
+  if (!safetyNames.has('immediate_action')) database.exec('ALTER TABLE safety_incidents ADD COLUMN immediate_action TEXT');
+  if (!safetyNames.has('persons_involved')) database.exec('ALTER TABLE safety_incidents ADD COLUMN persons_involved TEXT');
+  if (!safetyNames.has('nc_id')) database.exec('ALTER TABLE safety_incidents ADD COLUMN nc_id INTEGER REFERENCES nonconforming_events(id)');
+  if (!safetyNames.has('capa_id')) database.exec('ALTER TABLE safety_incidents ADD COLUMN capa_id INTEGER REFERENCES capa_records(id)');
+  if (!safetyNames.has('closed_by_staff_id')) database.exec('ALTER TABLE safety_incidents ADD COLUMN closed_by_staff_id INTEGER REFERENCES staff(id)');
+  if (!safetyNames.has('closed_at')) database.exec('ALTER TABLE safety_incidents ADD COLUMN closed_at TEXT');
+
+  // Phase 3: new tables
+  database.exec(`
+CREATE TABLE IF NOT EXISTS equipment_maintenance_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  equipment_id INTEGER NOT NULL REFERENCES equipment_items(id),
+  maintenance_date TEXT NOT NULL,
+  maintenance_type TEXT NOT NULL,
+  performed_by_staff_id INTEGER REFERENCES staff(id),
+  findings TEXT,
+  action_taken TEXT,
+  next_due_date TEXT,
+  status TEXT NOT NULL DEFAULT 'completed',
+  evidence_file_id INTEGER REFERENCES files(id),
+  reviewed_by_staff_id INTEGER REFERENCES staff(id),
+  reviewed_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS equipment_breakdowns (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  equipment_id INTEGER NOT NULL REFERENCES equipment_items(id),
+  breakdown_date TEXT NOT NULL,
+  reported_by_staff_id INTEGER REFERENCES staff(id),
+  description TEXT NOT NULL,
+  service_impact TEXT,
+  immediate_action TEXT,
+  equipment_status TEXT,
+  repair_action TEXT,
+  service_provider TEXT,
+  return_to_service_date TEXT,
+  verified_by_staff_id INTEGER REFERENCES staff(id),
+  nc_id INTEGER REFERENCES nonconforming_events(id),
+  capa_id INTEGER REFERENCES capa_records(id),
+  status TEXT NOT NULL DEFAULT 'open',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS monitoring_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  monitoring_type TEXT,
+  parameter TEXT NOT NULL,
+  unit TEXT,
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  location_id INTEGER REFERENCES locations(id),
+  lower_limit REAL,
+  upper_limit REAL,
+  warning_lower_limit REAL,
+  warning_upper_limit REAL,
+  critical_lower_limit REAL,
+  critical_upper_limit REAL,
+  frequency TEXT,
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  reviewer_staff_id INTEGER REFERENCES staff(id),
+  nc_trigger_enabled INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS monitoring_readings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  monitoring_item_id INTEGER NOT NULL REFERENCES monitoring_items(id),
+  reading_date TEXT NOT NULL,
+  reading_time TEXT,
+  value REAL NOT NULL,
+  entered_by_staff_id INTEGER REFERENCES staff(id),
+  status TEXT NOT NULL DEFAULT 'normal',
+  comment TEXT,
+  immediate_action TEXT,
+  reviewed_by_staff_id INTEGER REFERENCES staff(id),
+  reviewed_at TEXT,
+  nc_id INTEGER REFERENCES nonconforming_events(id),
+  capa_id INTEGER REFERENCES capa_records(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS inventory_batches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_id INTEGER NOT NULL REFERENCES inventory_items(id),
+  batch_number TEXT,
+  lot_number TEXT,
+  supplier_id INTEGER REFERENCES suppliers(id),
+  supplier_name TEXT,
+  quantity_received REAL NOT NULL DEFAULT 0,
+  quantity_available REAL NOT NULL DEFAULT 0,
+  date_received TEXT NOT NULL,
+  expiry_date TEXT,
+  acceptance_status TEXT NOT NULL DEFAULT 'pending',
+  acceptance_checked_by_staff_id INTEGER REFERENCES staff(id),
+  acceptance_date TEXT,
+  storage_location_id INTEGER REFERENCES locations(id),
+  status TEXT NOT NULL DEFAULT 'available',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS inventory_movements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_id INTEGER NOT NULL REFERENCES inventory_items(id),
+  batch_id INTEGER REFERENCES inventory_batches(id),
+  movement_type TEXT NOT NULL,
+  quantity REAL NOT NULL,
+  movement_date TEXT NOT NULL,
+  issued_to_section_id INTEGER REFERENCES sections(id),
+  received_by_staff_id INTEGER REFERENCES staff(id),
+  reason TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS supplier_evaluations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+  evaluation_date TEXT NOT NULL,
+  evaluated_by_staff_id INTEGER REFERENCES staff(id),
+  rating TEXT,
+  findings TEXT,
+  action_required TEXT,
+  next_evaluation_date TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+`);
+
+  // Phase 4: IQC, EQA, Verification/Validation, Measurement Uncertainty
+  database.exec(`
+CREATE TABLE IF NOT EXISTS iqc_materials (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  material_code TEXT NOT NULL UNIQUE,
+  material_name TEXT NOT NULL,
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  test_name TEXT NOT NULL,
+  analyte TEXT NOT NULL,
+  lot_number TEXT NOT NULL,
+  manufacturer TEXT,
+  expiry_date TEXT,
+  storage_condition TEXT,
+  target_mean REAL,
+  target_sd REAL,
+  acceptable_low REAL,
+  acceptable_high REAL,
+  equipment_id INTEGER REFERENCES equipment_items(id),
+  inventory_batch_id INTEGER REFERENCES inventory_batches(id),
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS iqc_results (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  iqc_material_id INTEGER NOT NULL REFERENCES iqc_materials(id),
+  run_date TEXT NOT NULL,
+  run_time TEXT,
+  result_value REAL NOT NULL,
+  entered_by_staff_id INTEGER REFERENCES staff(id),
+  equipment_id INTEGER REFERENCES equipment_items(id),
+  inventory_batch_id INTEGER REFERENCES inventory_batches(id),
+  status TEXT NOT NULL DEFAULT 'accepted',
+  rule_violation TEXT,
+  comment TEXT,
+  immediate_action TEXT,
+  reviewed_by_staff_id INTEGER REFERENCES staff(id),
+  reviewed_at TEXT,
+  nc_id INTEGER REFERENCES nonconforming_events(id),
+  capa_id INTEGER REFERENCES capa_records(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS iqc_lot_changes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  old_iqc_material_id INTEGER REFERENCES iqc_materials(id),
+  new_iqc_material_id INTEGER REFERENCES iqc_materials(id),
+  change_date TEXT NOT NULL,
+  reason TEXT,
+  verification_summary TEXT,
+  approved_by_staff_id INTEGER REFERENCES staff(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS eqa_programs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  program_code TEXT NOT NULL UNIQUE,
+  program_name TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  test_area TEXT NOT NULL,
+  frequency TEXT,
+  contact TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS eqa_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  eqa_program_id INTEGER NOT NULL REFERENCES eqa_programs(id),
+  cycle_name TEXT NOT NULL,
+  received_date TEXT,
+  submission_due_date TEXT,
+  submitted_date TEXT,
+  result_received_date TEXT,
+  performance_status TEXT,
+  score TEXT,
+  findings TEXT,
+  corrective_action_required INTEGER NOT NULL DEFAULT 0,
+  nc_id INTEGER REFERENCES nonconforming_events(id),
+  capa_id INTEGER REFERENCES capa_records(id),
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS eqa_results (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  eqa_event_id INTEGER NOT NULL REFERENCES eqa_events(id),
+  analyte_or_test TEXT NOT NULL,
+  reported_result TEXT,
+  expected_result TEXT,
+  performance TEXT,
+  comment TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS method_verifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  verification_number TEXT NOT NULL UNIQUE,
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  method_name TEXT NOT NULL,
+  test_name TEXT NOT NULL,
+  equipment_id INTEGER REFERENCES equipment_items(id),
+  verification_type TEXT NOT NULL,
+  reason TEXT,
+  start_date TEXT,
+  completion_date TEXT,
+  parameters_assessed TEXT,
+  acceptance_criteria TEXT,
+  summary TEXT,
+  conclusion TEXT,
+  status TEXT NOT NULL DEFAULT 'in_progress',
+  approved_by_staff_id INTEGER REFERENCES staff(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS verification_experiments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  verification_id INTEGER NOT NULL REFERENCES method_verifications(id),
+  experiment_type TEXT NOT NULL,
+  date_performed TEXT,
+  sample_count INTEGER,
+  results_summary TEXT,
+  acceptance_met INTEGER NOT NULL DEFAULT 0,
+  evidence_file_id INTEGER REFERENCES files(id),
+  performed_by_staff_id INTEGER REFERENCES staff(id),
+  reviewed_by_staff_id INTEGER REFERENCES staff(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS equipment_verifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  equipment_id INTEGER NOT NULL REFERENCES equipment_items(id),
+  verification_number TEXT NOT NULL UNIQUE,
+  verification_type TEXT NOT NULL,
+  verification_date TEXT NOT NULL,
+  reason TEXT,
+  acceptance_criteria TEXT,
+  results_summary TEXT,
+  conclusion TEXT,
+  status TEXT NOT NULL DEFAULT 'in_progress',
+  verified_by_staff_id INTEGER REFERENCES staff(id),
+  approved_by_staff_id INTEGER REFERENCES staff(id),
+  evidence_file_id INTEGER REFERENCES files(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS measurement_uncertainty_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  mu_number TEXT NOT NULL UNIQUE,
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  test_name TEXT NOT NULL,
+  analyte TEXT NOT NULL,
+  method_name TEXT,
+  equipment_id INTEGER REFERENCES equipment_items(id),
+  calculation_date TEXT NOT NULL,
+  data_period_start TEXT,
+  data_period_end TEXT,
+  source_data TEXT,
+  mean_value REAL,
+  sd_value REAL,
+  cv_percent REAL,
+  uncertainty_value REAL,
+  expanded_uncertainty REAL,
+  coverage_factor REAL,
+  interpretation TEXT,
+  reviewed_by_staff_id INTEGER REFERENCES staff(id),
+  approved_by_staff_id INTEGER REFERENCES staff(id),
+  status TEXT NOT NULL DEFAULT 'draft',
+  evidence_file_id INTEGER REFERENCES files(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+`);
+
+  // Phase 4 polish: extend iqc_results with z_score
+  const iqcResultColumns = database.prepare("PRAGMA table_info(iqc_results)").all() as Array<{ name: string }>;
+  const iqcResultNames = new Set(iqcResultColumns.map(col => col.name));
+  if (!iqcResultNames.has('z_score')) database.exec('ALTER TABLE iqc_results ADD COLUMN z_score REAL');
+
+  // Phase 5: Blood Bank Quality & Inventory Handover
+  database.exec(`
+CREATE TABLE IF NOT EXISTS blood_units (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  unit_number TEXT NOT NULL UNIQUE,
+  batch_number TEXT,
+  blood_group TEXT NOT NULL,
+  component_type TEXT NOT NULL,
+  donor_type TEXT,
+  collection_date TEXT NOT NULL,
+  expiry_date TEXT NOT NULL,
+  screening_hbsag TEXT,
+  screening_hcv TEXT,
+  screening_syphilis TEXT,
+  screening_hiv TEXT,
+  screening_status TEXT,
+  current_status TEXT NOT NULL DEFAULT 'available',
+  location_id INTEGER REFERENCES locations(id),
+  refrigerator_monitoring_item_id INTEGER REFERENCES monitoring_items(id),
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS blood_bank_handovers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  handover_number TEXT NOT NULL UNIQUE,
+  handover_date TEXT NOT NULL,
+  period_start TEXT NOT NULL,
+  period_end TEXT NOT NULL,
+  outgoing_staff_id INTEGER REFERENCES staff(id),
+  incoming_staff_id INTEGER REFERENCES staff(id),
+  blood_bank_unit_head_id INTEGER REFERENCES staff(id),
+  total_units_available INTEGER NOT NULL DEFAULT 0,
+  total_units_expiring_soon INTEGER NOT NULL DEFAULT 0,
+  total_units_expired INTEGER NOT NULL DEFAULT 0,
+  total_donations INTEGER NOT NULL DEFAULT 0,
+  family_donor_count INTEGER NOT NULL DEFAULT 0,
+  voluntary_donor_count INTEGER NOT NULL DEFAULT 0,
+  commercial_paid_donor_count INTEGER NOT NULL DEFAULT 0,
+  outside_campaign_donor_count INTEGER NOT NULL DEFAULT 0,
+  total_transfusions INTEGER NOT NULL DEFAULT 0,
+  total_discards INTEGER NOT NULL DEFAULT 0,
+  donor_reactions_count INTEGER NOT NULL DEFAULT 0,
+  transfusion_reactions_count INTEGER NOT NULL DEFAULT 0,
+  issues_noted TEXT,
+  outgoing_staff_signed_at TEXT,
+  incoming_staff_signed_at TEXT,
+  unit_head_reviewed_at TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS blood_handover_units (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  handover_id INTEGER NOT NULL REFERENCES blood_bank_handovers(id),
+  blood_unit_id INTEGER REFERENCES blood_units(id),
+  unit_number TEXT,
+  batch_number TEXT,
+  blood_group TEXT,
+  component_type TEXT,
+  collection_date TEXT,
+  expiry_date TEXT,
+  screening_hbsag TEXT,
+  screening_hcv TEXT,
+  screening_syphilis TEXT,
+  screening_hiv TEXT,
+  screening_status TEXT,
+  unit_status_at_handover TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS blood_donation_campaigns (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  campaign_number TEXT,
+  campaign_date TEXT NOT NULL,
+  location TEXT NOT NULL,
+  organizer TEXT,
+  total_screened INTEGER NOT NULL DEFAULT 0,
+  total_collected INTEGER NOT NULL DEFAULT 0,
+  family_donor_count INTEGER NOT NULL DEFAULT 0,
+  voluntary_donor_count INTEGER NOT NULL DEFAULT 0,
+  commercial_paid_donor_count INTEGER NOT NULL DEFAULT 0,
+  rejected_or_deferred_count INTEGER NOT NULL DEFAULT 0,
+  remarks TEXT,
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS blood_donation_summaries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  summary_date TEXT NOT NULL,
+  handover_id INTEGER REFERENCES blood_bank_handovers(id),
+  donor_type TEXT,
+  number_screened INTEGER NOT NULL DEFAULT 0,
+  number_accepted INTEGER NOT NULL DEFAULT 0,
+  number_deferred INTEGER NOT NULL DEFAULT 0,
+  number_collected INTEGER NOT NULL DEFAULT 0,
+  remarks TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS blood_transfusion_summaries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  summary_date TEXT NOT NULL,
+  handover_id INTEGER REFERENCES blood_bank_handovers(id),
+  blood_group TEXT,
+  component_type TEXT,
+  number_transfused INTEGER NOT NULL DEFAULT 0,
+  remarks TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS blood_adverse_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_number TEXT NOT NULL UNIQUE,
+  event_date TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  related_unit_id INTEGER REFERENCES blood_units(id),
+  blood_group TEXT,
+  donor_type TEXT,
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  location_id INTEGER REFERENCES locations(id),
+  reported_by_staff_id INTEGER REFERENCES staff(id),
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  immediate_action TEXT,
+  severity TEXT,
+  outcome TEXT,
+  investigation_summary TEXT,
+  nc_id INTEGER REFERENCES nonconforming_events(id),
+  capa_id INTEGER REFERENCES capa_records(id),
+  safety_incident_id INTEGER REFERENCES safety_incidents(id),
+  status TEXT NOT NULL DEFAULT 'open',
+  closed_by_staff_id INTEGER REFERENCES staff(id),
+  closed_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS blood_discards (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  discard_date TEXT NOT NULL,
+  blood_unit_id INTEGER REFERENCES blood_units(id),
+  unit_number TEXT,
+  blood_group TEXT,
+  component_type TEXT,
+  reason TEXT NOT NULL,
+  authorized_by_staff_id INTEGER REFERENCES staff(id),
+  discarded_by_staff_id INTEGER REFERENCES staff(id),
+  nc_id INTEGER REFERENCES nonconforming_events(id),
+  capa_id INTEGER REFERENCES capa_records(id),
+  remarks TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+`);
 }
