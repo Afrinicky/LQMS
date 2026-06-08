@@ -64,9 +64,9 @@ Use the administrator username/password created during first-time setup. Auth us
 
 ## Foundation modules
 
-The sidebar includes Home, Main Dashboard, Documents & Records, Organisation & Leadership, Personnel Management, Customer Focus, Equipment Management, Assessments, Supplier & Inventory, Process Management, Information Management, Nonconforming Events & CAPA, Continual Improvement, Facilities & Safety, Blood Bank Handover, Monthly Reports & LHIMS Archive, Reports & Exports, Notifications, and Settings.
+The sidebar includes Home, Main Dashboard, Documents & Records, Organisation & Leadership, Personnel Management, Action Tracker, Nonconforming Events & CAPA, Complaints Register, Risk Register, Customer Focus, Equipment Management, Internal Assessments, Supplier & Inventory, Process Management, Information Management, Continual Improvement, Meetings & Minutes, Management Review, Quality Indicators, Facilities & Safety, Environmental Monitoring, IQC Management, EQA Management, Method & Equipment Verification, Measurement Uncertainty, Blood Bank Handover, Monthly Reports & LHIMS Archive, Reports & Exports, Notifications, and Settings.
 
-Most advanced operational modules are placeholders in this MVP. Settings remains functional and always accessible.
+Foundation workflows are wired for every non-placeholder module above. Settings remains functional and always accessible.
 
 ## Settings foundation
 
@@ -124,14 +124,18 @@ npm run typecheck
 npm run build
 ```
 
+## Foundations now in place
+
+NC/CAPA, Complaints, Risks, Actions, Equipment Management, Supplier & Inventory, Environmental Monitoring, Facilities & Safety, IQC, EQA, Method & Equipment Verification, Measurement Uncertainty, Blood Bank Quality & Inventory Handover, Monthly Reports & LHIMS Archive (CSV + XLSX import, mapping rules, exception review, draft/approve/export, TAT summary with per-section drill-down), Document Control (versioning, attestations, distribution inbox, watermarked print render), Personnel Management (staff documents, declarations, training, competency, technical authorisations, duty rosters with coverage/conflict detection, self-service profile), and the Phase 8 governance modules: Internal Assessments & Findings, Meetings & Minutes, Management Review (with one-click input generation across QMS modules), Quality Indicators (numerator/denominator with target/warning/critical thresholds), and Continual Improvement Projects.
+
 ## Known limitations
 
-- No full blood bank workflows.
-- No LHIMS monthly report generation engine.
-- No full NC/CAPA, equipment, inventory, monitoring, IQC, or EQA workflows.
-- No mobile application.
-- No WebSocket notifications yet.
-- No advanced SOP editor.
-- Document master list import accepts a placeholder request; CSV parsing comes later.
-- Restore workflow is a safe placeholder.
-- Permissions are wired server-side, but fine-grained UI editing of every permission source is MVP-level only.
+- All modules are foundation-level and require real-world testing before production use.
+- No mobile application yet.
+- No advanced AI SOP conversion yet.
+- No full POCT workflow yet.
+- No advanced report designer yet (CSV/HTML/DOC exports exist on key modules; rich PDF templating is pending).
+- No cloud/internet sync yet.
+- Some export and print layouts are placeholder templates; richer per-report-type designs will follow.
+- Restore workflow remains a conservative guarded placeholder.
+- Permissions are wired server-side, but fine-grained UI editing of every permission source is still MVP-level.

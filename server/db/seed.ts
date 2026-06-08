@@ -56,7 +56,12 @@ export function seedDefaults() {
         verification_validation: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         measurement_uncertainty: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         blood_bank_handover: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        monthly_reports: ['view', 'create', 'edit', 'approve', 'export', 'print']
+        monthly_reports: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        assessments: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        meetings: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        management_review: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        quality_indicators: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        continual_improvement: ['view', 'create', 'edit', 'approve', 'export', 'print']
       },
       'Quality Manager': {
         documents: ['view', 'create', 'edit', 'approve', 'export', 'print'],
@@ -74,7 +79,12 @@ export function seedDefaults() {
         verification_validation: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         measurement_uncertainty: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         blood_bank_handover: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        monthly_reports: ['view', 'create', 'edit', 'approve', 'export', 'print']
+        monthly_reports: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        assessments: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        meetings: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        management_review: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        quality_indicators: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        continual_improvement: ['view', 'create', 'edit', 'approve', 'export', 'print']
       },
       'Data Officer': {
         monthly_reports: ['view', 'create', 'edit', 'export', 'print'],
@@ -113,7 +123,12 @@ export function seedDefaults() {
         verification_validation: ['view', 'create', 'edit', 'print'],
         measurement_uncertainty: ['view', 'create', 'edit', 'print'],
         blood_bank_handover: ['view', 'create', 'edit', 'print'],
-        monthly_reports: ['view', 'create', 'edit', 'print']
+        monthly_reports: ['view', 'create', 'edit', 'print'],
+        assessments: ['view', 'create', 'edit', 'print'],
+        meetings: ['view', 'create', 'edit', 'print'],
+        management_review: ['view', 'create', 'edit', 'print'],
+        quality_indicators: ['view', 'create', 'edit', 'print'],
+        continual_improvement: ['view', 'create', 'edit', 'print']
       },
       'Section Head': {
         documents: ['view', 'create', 'edit', 'print'],
@@ -130,7 +145,12 @@ export function seedDefaults() {
         eqa: ['view', 'create', 'edit', 'print'],
         verification_validation: ['view', 'create', 'edit', 'print'],
         measurement_uncertainty: ['view', 'create', 'edit', 'print'],
-        monthly_reports: ['view', 'create', 'edit', 'print']
+        monthly_reports: ['view', 'create', 'edit', 'print'],
+        assessments: ['view', 'create', 'edit', 'print'],
+        meetings: ['view', 'create', 'edit', 'print'],
+        management_review: ['view'],
+        quality_indicators: ['view', 'create', 'edit', 'print'],
+        continual_improvement: ['view', 'create', 'edit', 'print']
       },
       'Biomedical Scientist': {
         documents: ['view', 'print'],
@@ -148,7 +168,11 @@ export function seedDefaults() {
         verification_validation: ['view', 'create', 'print'],
         measurement_uncertainty: ['view', 'create', 'print'],
         blood_bank_handover: ['view', 'create', 'edit', 'print'],
-        monthly_reports: ['view', 'print']
+        monthly_reports: ['view', 'print'],
+        assessments: ['view', 'create', 'print'],
+        meetings: ['view', 'print'],
+        quality_indicators: ['view', 'create', 'print'],
+        continual_improvement: ['view', 'create', 'print']
       },
       'Technician': {
         documents: ['view', 'print'],
@@ -166,7 +190,11 @@ export function seedDefaults() {
         verification_validation: ['view', 'create', 'print'],
         measurement_uncertainty: ['view', 'create', 'print'],
         blood_bank_handover: ['view', 'create'],
-        monthly_reports: ['view']
+        monthly_reports: ['view'],
+        assessments: ['view'],
+        meetings: ['view'],
+        quality_indicators: ['view'],
+        continual_improvement: ['view']
       },
       'Quality User': {
         nc_capa: ['view', 'create', 'edit', 'print'],

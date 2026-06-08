@@ -19,6 +19,11 @@ import { bloodBankHandoverRoutes } from './routes/bloodBankHandover.js';
 import { monthlyReportsRoutes } from './routes/monthlyReports.js';
 import { documentControlRoutes } from './routes/documents.js';
 import { personnelRoutes } from './routes/personnel.js';
+import { assessmentsRoutes } from './routes/assessments.js';
+import { meetingsRoutes } from './routes/meetings.js';
+import { managementReviewRoutes } from './routes/managementReview.js';
+import { qualityIndicatorsRoutes } from './routes/qualityIndicators.js';
+import { improvementRoutes } from './routes/improvement.js';
 import { optionalAuth } from './middleware/auth.js';
 import { ensureDataDirs } from './db/database.js';
 import { seedDefaults } from './db/seed.js';
@@ -49,6 +54,11 @@ export function createApiServer() {
   app.use('/api/monthly-reports', monthlyReportsRoutes());
   app.use('/api/documents', documentControlRoutes());
   app.use('/api/personnel', personnelRoutes());
+  app.use('/api/assessments', assessmentsRoutes());
+  app.use('/api/meetings', meetingsRoutes());
+  app.use('/api/management-review', managementReviewRoutes());
+  app.use('/api/quality-indicators', qualityIndicatorsRoutes());
+  app.use('/api/improvement', improvementRoutes());
   app.use('/api', commonRoutes());
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const message = err instanceof Error ? err.message : 'Unexpected server error';
