@@ -6,8 +6,9 @@ import type {
   Location, Section, Staff, MonitoringItem,
   BloodUnit, BloodBankHandover, BloodHandoverUnit, BloodDonationCampaign,
   BloodAdverseEvent, BloodDiscard, BloodBankSummary, BloodMonthlySummary,
-  BloodDonationSummary, BloodTransfusionSummary
+  BloodDonationSummary, BloodTransfusionSummary, BloodBankReports
 } from '../../shared/types/api';
+import { API_BASE, getToken } from '../services/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
@@ -61,6 +62,7 @@ export function BloodBankHandoverPage() {
   const [discards, setDiscards] = useState<BloodDiscard[]>([]);
   const [monthlySummary, setMonthlySummary] = useState<BloodMonthlySummary | null>(null);
   const [monthSelector, setMonthSelector] = useState(new Date().toISOString().slice(0, 7));
+  const [reports, setReports] = useState<BloodBankReports | null>(null);
 
   const [unitForm, setUnitForm] = useState(emptyUnitForm);
   const [handoverForm, setHandoverForm] = useState(emptyHandoverForm);
@@ -73,23 +75,16 @@ export function BloodBankHandoverPage() {
 
   async function load() {
     try {
-      const [sum, u, h, c, ae] = await Promise.all([
+      const [sum, u, h, c, ae, d] = await Promise.all([
         api<BloodBankSummary>('/dashboard/blood-bank-summary').catch(() => null),
         api<BloodUnit[]>('/blood-bank-handover/units'),
         api<BloodBankHandover[]>('/blood-bank-handover/handovers'),
         api<BloodDonationCampaign[]>('/blood-bank-handover/campaigns'),
-        api<BloodAdverseEvent[]>('/blood-bank-handover/adverse-events')
+        api<BloodAdverseEvent[]>('/blood-bank-handover/adverse-events'),
+        api<BloodDiscard[]>('/blood-bank-handover/discards').catch(() => [])
       ]);
       if (sum) setSummary(sum);
-      setUnits(u); setHandovers(h); setCampaigns(c); setAdverseEvents(ae);
-      const allDiscards: BloodDiscard[] = [];
-      for (const unit of u) {
-        if (unit.current_status === 'discarded') {
-          const detail = await api<any>(`/blood-bank-handover/units/${unit.id}`).catch(() => null);
-          if (detail) allDiscards.push({ id: unit.id, discard_date: unit.updated_at || unit.created_at, blood_unit_id: unit.id, unit_number: unit.unit_number, blood_group: unit.blood_group, component_type: unit.component_type, reason: '—', created_by: unit.created_by, created_at: unit.updated_at || unit.created_at });
-        }
-      }
-      setDiscards(allDiscards);
+      setUnits(u); setHandovers(h); setCampaigns(c); setAdverseEvents(ae); setDiscards(d);
     } catch (e) { setError((e as Error).message); }
   }
   useEffect(() => { if (isEnabled('blood_bank_handover')) void load(); }, [isEnabled]);
@@ -220,6 +215,26 @@ export function BloodBankHandoverPage() {
     catch (e) { setError((e as Error).message); }
   }
 
+  async function downloadMonthlySummaryCsv() {
+    try {
+      const token = getToken();
+      const response = await fetch(`${API_BASE}/blood-bank-handover/monthly-summary.csv?month=${monthSelector}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+      if (!response.ok) throw new Error(await response.text() || response.statusText);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `blood-bank-monthly-${monthSelector}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  async function loadReports() {
+    try { setReports(await api<BloodBankReports>('/blood-bank-handover/reports')); }
+    catch (e) { setError((e as Error).message); }
+  }
+  useEffect(() => { if (tab === 'Reports' && isEnabled('blood_bank_handover') && !reports) void loadReports(); }, [tab, isEnabled, reports]);
+
   const tabs = ['Dashboard', 'Blood Units', 'New Blood Unit', 'Thursday Handover', 'Handovers', 'Donation Campaigns', 'Adverse Events', 'Discards', 'Monthly Summary', 'Reports'];
 
   return <div className="module-page">
@@ -237,7 +252,7 @@ export function BloodBankHandoverPage() {
         <div className="card"><h4>Discards this month</h4><p className="metric">{summary.discardsThisMonth}</p></div>
         <div className="card"><h4>Donor reactions (month)</h4><p className="metric">{summary.donorReactionsThisMonth}</p></div>
         <div className="card"><h4>Transfusion reactions (month)</h4><p className="metric">{summary.transfusionReactionsThisMonth}</p></div>
-        <div className="card"><h4>NC/CAPA links</h4><p className="metric">—</p><small>Surfaced via individual records.</small></div>
+        <div className="card"><h4>NC/CAPA links</h4><p className="metric">{summary.ncCapaLinkedRecords}</p><small>Adverse events + discards linked to NC/CAPA.</small></div>
       </div> : <p>Loading summary…</p>}
     </>}
 
@@ -436,10 +451,16 @@ export function BloodBankHandoverPage() {
         <label>Remarks<textarea value={discardForm.remarks} onChange={e => setDiscardForm({ ...discardForm, remarks: e.target.value })} /></label>
         <button type="submit">Mark as discard</button>
       </form>
-      <table className="data-table"><thead><tr><th>Unit #</th><th>Group</th><th>Component</th><th>Status</th><th>Expiry</th></tr></thead><tbody>
-        {units.filter(u => u.current_status === 'discarded').map(u => <tr key={u.id}><td>{u.unit_number}</td><td>{u.blood_group}</td><td>{u.component_type.replace(/_/g, ' ')}</td><td>{formatBadge(u.current_status)}</td><td>{u.expiry_date}</td></tr>)}
+      <table className="data-table"><thead><tr><th>Date</th><th>Unit #</th><th>Group</th><th>Component</th><th>Reason</th><th>Authorised by</th><th>Discarded by</th><th>NC/CAPA</th></tr></thead><tbody>
+        {discards.map(d => <tr key={d.id}>
+          <td>{d.discard_date}</td><td>{d.unit_number || '—'}</td><td>{d.blood_group || '—'}</td>
+          <td>{(d.component_type || '—').replace(/_/g, ' ')}</td><td>{d.reason}</td>
+          <td>{(d as any).authorized_by_name || staffName(staff, d.authorized_by_staff_id)}</td>
+          <td>{(d as any).discarded_by_name || staffName(staff, d.discarded_by_staff_id)}</td>
+          <td>{d.nc_id ? `NC #${d.nc_id}` : '—'}{d.capa_id ? ` / CAPA #${d.capa_id}` : ''}</td>
+        </tr>)}
       </tbody></table>
-      {discards.length === 0 && <p>No discarded units yet.</p>}
+      {discards.length === 0 && <p>No discard records yet.</p>}
     </>}
 
     {tab === 'Monthly Summary' && <>
@@ -448,6 +469,7 @@ export function BloodBankHandoverPage() {
         <button type="button" onClick={loadMonthlySummary}>Load summary</button>
       </div>
       {monthlySummary && <>
+        <div style={{ margin: '8px 0' }}><button type="button" onClick={downloadMonthlySummaryCsv}>Download CSV</button></div>
         <div className="cards">
           <div className="card"><h4>Units at month end</h4><p className="metric">{monthlySummary.unitsAvailableAtMonthEnd}</p></div>
           <div className="card"><h4>Expiring soon</h4><p className="metric">{monthlySummary.unitsExpiringSoon}</p></div>
@@ -465,11 +487,46 @@ export function BloodBankHandoverPage() {
         <table className="data-table"><thead><tr><th>Group</th><th>Component</th><th>Transfused</th></tr></thead><tbody>
           {monthlySummary.transfusions.map((t, i) => <tr key={i}><td>{t.blood_group || '—'}</td><td>{(t.component_type || '—').replace(/_/g, ' ')}</td><td>{t.transfused || 0}</td></tr>)}
         </tbody></table>
-        <p><em>Export to printable monthly report will be added in a later phase.</em></p>
+        <p><em>CSV export above includes the same counts plus per-donor-type and per-component-type rows.</em></p>
       </>}
       {!monthlySummary && <p>Select a month and click load.</p>}
     </>}
 
-    {tab === 'Reports' && <p>Detailed blood bank reports (weekly trend, screening reactivity rate, discard reasons) will be added in a later phase.</p>}
+    {tab === 'Reports' && <>
+      <div style={{ margin: '8px 0' }}><button type="button" onClick={loadReports}>Refresh reports</button></div>
+      {!reports && <p>Loading reports…</p>}
+      {reports && <>
+        <h3>Weekly handover trend (last {reports.weeks} weeks since {reports.windowStart})</h3>
+        <table className="data-table"><thead><tr><th>Week</th><th>Handovers</th><th>Donations</th><th>Transfusions</th><th>Discards</th></tr></thead><tbody>
+          {reports.weeklyHandovers.map((w, i) => <tr key={i}><td>{w.week}</td><td>{w.handovers}</td><td>{w.donations}</td><td>{w.transfusions}</td><td>{w.discards}</td></tr>)}
+        </tbody></table>
+        {reports.weeklyHandovers.length === 0 && <p>No handovers in this window.</p>}
+
+        <h3>Screening reactivity (since {reports.screeningWindowStart})</h3>
+        {reports.screening.totalUnits === 0 ? <p>No units collected in this window.</p> : (() => {
+          const pct = (n: number) => `${((n / reports.screening.totalUnits) * 100).toFixed(2)}%`;
+          return <table className="data-table"><thead><tr><th>Marker</th><th>Reactive count</th><th>Reactive rate</th></tr></thead><tbody>
+            <tr><td>HBsAg</td><td>{reports.screening.hbsagReactive}</td><td>{pct(reports.screening.hbsagReactive)}</td></tr>
+            <tr><td>HCV</td><td>{reports.screening.hcvReactive}</td><td>{pct(reports.screening.hcvReactive)}</td></tr>
+            <tr><td>Syphilis</td><td>{reports.screening.syphilisReactive}</td><td>{pct(reports.screening.syphilisReactive)}</td></tr>
+            <tr><td>HIV</td><td>{reports.screening.hivReactive}</td><td>{pct(reports.screening.hivReactive)}</td></tr>
+            <tr><td>Any indeterminate</td><td>{reports.screening.anyIndeterminate}</td><td>{pct(reports.screening.anyIndeterminate)}</td></tr>
+            <tr><td><strong>Total units collected</strong></td><td colSpan={2}>{reports.screening.totalUnits}</td></tr>
+          </tbody></table>;
+        })()}
+
+        <h3>Discard reasons (since {reports.screeningWindowStart})</h3>
+        <table className="data-table"><thead><tr><th>Reason</th><th>Count</th></tr></thead><tbody>
+          {reports.discardReasons.map((r, i) => <tr key={i}><td>{r.reason}</td><td>{r.count}</td></tr>)}
+        </tbody></table>
+        {reports.discardReasons.length === 0 && <p>No discards in this window.</p>}
+
+        <h3>Adverse events by type (since {reports.screeningWindowStart})</h3>
+        <table className="data-table"><thead><tr><th>Event type</th><th>Total</th><th>Closed</th></tr></thead><tbody>
+          {reports.adverseEventsByType.map((e, i) => <tr key={i}><td>{e.event_type.replace(/_/g, ' ')}</td><td>{e.count}</td><td>{e.closed}</td></tr>)}
+        </tbody></table>
+        {reports.adverseEventsByType.length === 0 && <p>No adverse events in this window.</p>}
+      </>}
+    </>}
   </div>;
 }

@@ -12,6 +12,10 @@ const DONOR_TYPES = ['family_donor', 'voluntary_donor', 'commercial_paid_donor',
 const COMPONENT_TYPES = ['whole_blood', 'packed_cells', 'plasma', 'platelets', 'other'];
 const HANDOVER_STATUSES = ['draft', 'outgoing_signed', 'incoming_signed', 'reviewed', 'closed', 'issue_flagged'];
 
+const ADVERSE_EVENT_TYPES = ['donor_reaction', 'transfusion_reaction', 'transfusion_incident', 'other'];
+const DONOR_EVENT_TYPES = new Set(['donor_reaction']);
+const TRANSFUSION_EVENT_TYPES = new Set(['transfusion_reaction', 'transfusion_incident']);
+
 const EXPIRING_SOON_DAYS = 7;
 
 function expiryStatus(expiryDate: string | null | undefined, now: Date = new Date()): 'valid' | 'expiring_soon' | 'expired' | 'unknown' {
@@ -570,6 +574,7 @@ export function bloodBankHandoverRoutes() {
   router.post('/adverse-events', requirePermission('blood_bank_handover', 'create'), (req, res) => {
     if (!req.body.eventDate) return res.status(400).json({ error: 'eventDate is required' });
     if (!req.body.eventType) return res.status(400).json({ error: 'eventType is required' });
+    if (!ADVERSE_EVENT_TYPES.includes(req.body.eventType)) return res.status(400).json({ error: `eventType must be one of: ${ADVERSE_EVENT_TYPES.join(', ')}` });
     if (!req.body.title) return res.status(400).json({ error: 'title is required' });
     if (!req.body.description) return res.status(400).json({ error: 'description is required' });
     if (!req.body.severity) return res.status(400).json({ error: 'severity is required' });
@@ -737,8 +742,10 @@ export function bloodBankHandoverRoutes() {
     const donationsByDonorType = db.prepare(`SELECT donor_type, SUM(number_screened) AS screened, SUM(number_accepted) AS accepted, SUM(number_deferred) AS deferred, SUM(number_collected) AS collected FROM blood_donation_summaries WHERE summary_date BETWEEN ? AND ? GROUP BY donor_type`).all(monthStartDate, monthEndDate);
     const transfusions = db.prepare(`SELECT blood_group, component_type, SUM(number_transfused) AS transfused FROM blood_transfusion_summaries WHERE summary_date BETWEEN ? AND ? GROUP BY blood_group, component_type`).all(monthStartDate, monthEndDate);
     const discards = count('SELECT COUNT(*) count FROM blood_discards WHERE discard_date BETWEEN ? AND ?', monthStartDate, monthEndDate);
-    const donorAdverseEvents = count("SELECT COUNT(*) count FROM blood_adverse_events WHERE event_type LIKE 'donor%' AND event_date BETWEEN ? AND ?", monthStartDate, monthEndDate);
-    const transfusionReactions = count("SELECT COUNT(*) count FROM blood_adverse_events WHERE event_type LIKE 'transfusion%' AND event_date BETWEEN ? AND ?", monthStartDate, monthEndDate);
+    const donorPlaceholders = Array.from(DONOR_EVENT_TYPES).map(() => '?').join(', ');
+    const transfusionPlaceholders = Array.from(TRANSFUSION_EVENT_TYPES).map(() => '?').join(', ');
+    const donorAdverseEvents = count(`SELECT COUNT(*) count FROM blood_adverse_events WHERE event_type IN (${donorPlaceholders}) AND event_date BETWEEN ? AND ?`, ...Array.from(DONOR_EVENT_TYPES), monthStartDate, monthEndDate);
+    const transfusionReactions = count(`SELECT COUNT(*) count FROM blood_adverse_events WHERE event_type IN (${transfusionPlaceholders}) AND event_date BETWEEN ? AND ?`, ...Array.from(TRANSFUSION_EVENT_TYPES), monthStartDate, monthEndDate);
     const ncCapaLinked = count("SELECT COUNT(*) count FROM blood_adverse_events WHERE (nc_id IS NOT NULL OR capa_id IS NOT NULL) AND event_date BETWEEN ? AND ?", monthStartDate, monthEndDate);
     audit(req, { action: 'generate_summary', entity: 'blood_bank_handover_monthly_summary', entityId: monthArg, newValue: { month: monthArg } });
     res.json({
@@ -752,6 +759,84 @@ export function bloodBankHandoverRoutes() {
       donorAdverseEvents,
       transfusionReactions,
       ncCapaLinkedEvents: ncCapaLinked
+    });
+  });
+
+  router.get('/monthly-summary.csv', requirePermission('blood_bank_handover', 'export'), (req, res) => {
+    const db = getDb();
+    const monthArg = (typeof req.query.month === 'string' ? req.query.month : '') || new Date().toISOString().slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(monthArg)) return res.status(400).json({ error: 'month must be in YYYY-MM format' });
+    const [year, monthIdx] = monthArg.split('-').map(Number);
+    const periodStart = new Date(Date.UTC(year, monthIdx - 1, 1));
+    const periodEnd = new Date(Date.UTC(year, monthIdx, 1));
+    const monthEndIso = new Date(periodEnd.getTime() - 1).toISOString();
+    const monthStartDate = periodStart.toISOString().slice(0, 10);
+    const monthEndDate = new Date(periodEnd.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const expiringSoon = new Date(periodEnd.getTime() + EXPIRING_SOON_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const count = (sql: string, ...params: unknown[]) => (db.prepare(sql).get(...params) as { count: number }).count;
+    const unitsAtMonthEnd = count("SELECT COUNT(*) count FROM blood_units WHERE created_at <= ? AND current_status = 'available' AND expiry_date > ?", monthEndIso, monthEndIso);
+    const unitsExpiringSoonCount = count("SELECT COUNT(*) count FROM blood_units WHERE current_status = 'available' AND expiry_date > ? AND expiry_date <= ?", monthEndIso, expiringSoon);
+    const unitsExpired = count("SELECT COUNT(*) count FROM blood_units WHERE expiry_date < ? AND current_status != 'discarded'", monthEndIso);
+    const donationsByDonorType = db.prepare(`SELECT donor_type, SUM(number_screened) AS screened, SUM(number_accepted) AS accepted, SUM(number_deferred) AS deferred, SUM(number_collected) AS collected FROM blood_donation_summaries WHERE summary_date BETWEEN ? AND ? GROUP BY donor_type`).all(monthStartDate, monthEndDate) as Array<{ donor_type: string | null; screened: number; accepted: number; deferred: number; collected: number }>;
+    const transfusions = db.prepare(`SELECT blood_group, component_type, SUM(number_transfused) AS transfused FROM blood_transfusion_summaries WHERE summary_date BETWEEN ? AND ? GROUP BY blood_group, component_type`).all(monthStartDate, monthEndDate) as Array<{ blood_group: string | null; component_type: string | null; transfused: number }>;
+    const discardsCount = count('SELECT COUNT(*) count FROM blood_discards WHERE discard_date BETWEEN ? AND ?', monthStartDate, monthEndDate);
+    const donorPlaceholders = Array.from(DONOR_EVENT_TYPES).map(() => '?').join(', ');
+    const transfusionPlaceholders = Array.from(TRANSFUSION_EVENT_TYPES).map(() => '?').join(', ');
+    const donorAdverseEvents = count(`SELECT COUNT(*) count FROM blood_adverse_events WHERE event_type IN (${donorPlaceholders}) AND event_date BETWEEN ? AND ?`, ...Array.from(DONOR_EVENT_TYPES), monthStartDate, monthEndDate);
+    const transfusionReactions = count(`SELECT COUNT(*) count FROM blood_adverse_events WHERE event_type IN (${transfusionPlaceholders}) AND event_date BETWEEN ? AND ?`, ...Array.from(TRANSFUSION_EVENT_TYPES), monthStartDate, monthEndDate);
+    const ncCapaLinked = count("SELECT COUNT(*) count FROM blood_adverse_events WHERE (nc_id IS NOT NULL OR capa_id IS NOT NULL) AND event_date BETWEEN ? AND ?", monthStartDate, monthEndDate);
+    const csvEscape = (v: unknown) => { const s = v === null || v === undefined ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    const lines: string[] = [];
+    lines.push('Section,Key,Value');
+    lines.push(`Period,Month,${monthArg}`);
+    lines.push(`Inventory,Units available at month end,${unitsAtMonthEnd}`);
+    lines.push(`Inventory,Units expiring soon,${unitsExpiringSoonCount}`);
+    lines.push(`Inventory,Units expired,${unitsExpired}`);
+    lines.push(`Adverse events,Donor adverse events,${donorAdverseEvents}`);
+    lines.push(`Adverse events,Transfusion reactions,${transfusionReactions}`);
+    lines.push(`Adverse events,NC/CAPA-linked events,${ncCapaLinked}`);
+    lines.push(`Discards,Total discards,${discardsCount}`);
+    lines.push('');
+    lines.push('Donations,Donor type,Screened,Accepted,Deferred,Collected');
+    for (const row of donationsByDonorType) lines.push(`Donations,${csvEscape(row.donor_type ?? 'unknown')},${row.screened ?? 0},${row.accepted ?? 0},${row.deferred ?? 0},${row.collected ?? 0}`);
+    lines.push('');
+    lines.push('Transfusions,Blood group,Component type,Transfused');
+    for (const row of transfusions) lines.push(`Transfusions,${csvEscape(row.blood_group ?? 'unknown')},${csvEscape(row.component_type ?? 'unknown')},${row.transfused ?? 0}`);
+    audit(req, { action: 'export', entity: 'blood_bank_handover_monthly_summary', entityId: monthArg, newValue: { format: 'csv', month: monthArg } });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="blood-bank-monthly-${monthArg}.csv"`);
+    res.send(lines.join('\n'));
+  });
+
+  router.get('/discards', requirePermission('blood_bank_handover', 'view'), (_req, res) => {
+    const db = getDb();
+    res.json(db.prepare(`SELECT d.*, sa.full_name AS authorized_by_name, sd.full_name AS discarded_by_name FROM blood_discards d LEFT JOIN staff sa ON sa.id = d.authorized_by_staff_id LEFT JOIN staff sd ON sd.id = d.discarded_by_staff_id ORDER BY d.discard_date DESC, d.id DESC`).all());
+  });
+
+  router.get('/reports', requirePermission('blood_bank_handover', 'view'), (req, res) => {
+    const db = getDb();
+    const weeks = Math.min(Math.max(Number(req.query.weeks) || 12, 1), 52);
+    const cutoff = new Date(Date.now() - weeks * 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const weeklyHandovers = db.prepare(`SELECT strftime('%Y-%W', handover_date) AS week, COUNT(*) AS handovers, SUM(total_donations) AS donations, SUM(total_transfusions) AS transfusions, SUM(total_discards) AS discards FROM blood_bank_handovers WHERE handover_date >= ? GROUP BY week ORDER BY week`).all(cutoff);
+    const reactivityCutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const screeningTotals = db.prepare(`SELECT COUNT(*) AS total, SUM(CASE WHEN screening_hbsag = 'reactive' THEN 1 ELSE 0 END) AS hbsag_reactive, SUM(CASE WHEN screening_hcv = 'reactive' THEN 1 ELSE 0 END) AS hcv_reactive, SUM(CASE WHEN screening_syphilis = 'reactive' THEN 1 ELSE 0 END) AS syphilis_reactive, SUM(CASE WHEN screening_hiv = 'reactive' THEN 1 ELSE 0 END) AS hiv_reactive, SUM(CASE WHEN screening_hbsag = 'indeterminate' OR screening_hcv = 'indeterminate' OR screening_syphilis = 'indeterminate' OR screening_hiv = 'indeterminate' THEN 1 ELSE 0 END) AS any_indeterminate FROM blood_units WHERE collection_date >= ?`).get(reactivityCutoff) as any;
+    const discardReasons = db.prepare(`SELECT COALESCE(NULLIF(TRIM(reason), ''), 'unspecified') AS reason, COUNT(*) AS count FROM blood_discards WHERE discard_date >= ? GROUP BY reason ORDER BY count DESC`).all(reactivityCutoff);
+    const adverseEventsByType = db.prepare(`SELECT event_type, COUNT(*) AS count, SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) AS closed FROM blood_adverse_events WHERE event_date >= ? GROUP BY event_type ORDER BY count DESC`).all(reactivityCutoff);
+    res.json({
+      weeks,
+      windowStart: cutoff,
+      weeklyHandovers,
+      screeningWindowStart: reactivityCutoff,
+      screening: {
+        totalUnits: screeningTotals?.total ?? 0,
+        hbsagReactive: screeningTotals?.hbsag_reactive ?? 0,
+        hcvReactive: screeningTotals?.hcv_reactive ?? 0,
+        syphilisReactive: screeningTotals?.syphilis_reactive ?? 0,
+        hivReactive: screeningTotals?.hiv_reactive ?? 0,
+        anyIndeterminate: screeningTotals?.any_indeterminate ?? 0
+      },
+      discardReasons,
+      adverseEventsByType
     });
   });
 

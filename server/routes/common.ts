@@ -137,8 +137,9 @@ export function commonRoutes() {
       pendingHandovers: count("SELECT COUNT(*) count FROM blood_bank_handovers WHERE status NOT IN ('closed','reviewed')"),
       openAdverseEvents: count("SELECT COUNT(*) count FROM blood_adverse_events WHERE status != 'closed'"),
       discardsThisMonth: count('SELECT COUNT(*) count FROM blood_discards WHERE discard_date BETWEEN ? AND ?', monthStart, monthEnd),
-      donorReactionsThisMonth: count("SELECT COUNT(*) count FROM blood_adverse_events WHERE event_type LIKE 'donor%' AND event_date BETWEEN ? AND ?", monthStart, monthEnd),
-      transfusionReactionsThisMonth: count("SELECT COUNT(*) count FROM blood_adverse_events WHERE event_type LIKE 'transfusion%' AND event_date BETWEEN ? AND ?", monthStart, monthEnd)
+      donorReactionsThisMonth: count("SELECT COUNT(*) count FROM blood_adverse_events WHERE event_type = 'donor_reaction' AND event_date BETWEEN ? AND ?", monthStart, monthEnd),
+      transfusionReactionsThisMonth: count("SELECT COUNT(*) count FROM blood_adverse_events WHERE event_type IN ('transfusion_reaction','transfusion_incident') AND event_date BETWEEN ? AND ?", monthStart, monthEnd),
+      ncCapaLinkedRecords: count("SELECT COUNT(*) count FROM blood_adverse_events WHERE nc_id IS NOT NULL OR capa_id IS NOT NULL") + count("SELECT COUNT(*) count FROM blood_discards WHERE nc_id IS NOT NULL OR capa_id IS NOT NULL")
     });
   });
 
