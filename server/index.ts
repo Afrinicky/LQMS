@@ -16,6 +16,7 @@ import { eqaRoutes } from './routes/eqa.js';
 import { verificationValidationRoutes } from './routes/verificationValidation.js';
 import { measurementUncertaintyRoutes } from './routes/measurementUncertainty.js';
 import { bloodBankHandoverRoutes } from './routes/bloodBankHandover.js';
+import { monthlyReportsRoutes } from './routes/monthlyReports.js';
 import { optionalAuth } from './middleware/auth.js';
 import { ensureDataDirs } from './db/database.js';
 import { seedDefaults } from './db/seed.js';
@@ -43,6 +44,7 @@ export function createApiServer() {
   app.use('/api/verification-validation', verificationValidationRoutes());
   app.use('/api/measurement-uncertainty', measurementUncertaintyRoutes());
   app.use('/api/blood-bank-handover', bloodBankHandoverRoutes());
+  app.use('/api/monthly-reports', monthlyReportsRoutes());
   app.use('/api', commonRoutes());
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const message = err instanceof Error ? err.message : 'Unexpected server error';

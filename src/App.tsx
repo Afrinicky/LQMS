@@ -11,6 +11,7 @@ import { ActionTracker, BackupRestore, Devices, DocumentImport, EvidenceUpload, 
 import { EquipmentPage, InventoryPage, MonitoringPage, SafetyPage } from './pages/Phase3Pages';
 import { IqcPage, EqaPage, VerificationValidationPage, MeasurementUncertaintyPage } from './pages/Phase4Pages';
 import { BloodBankHandoverPage } from './pages/BloodBankHandoverPage';
+import { MonthlyReportsPage } from './pages/MonthlyReportsPage';
 import { NcCapaPage, ComplaintsPage, RisksPage, QmsActionTracker } from './pages/QMSPages';
 import { MODULES } from '../shared/constants/modules';
 import './styles/app.css';
@@ -51,6 +52,7 @@ function AppRoutes() {
       <Route path="/verification-validation" element={<VerificationValidationPage/>}/>
       <Route path="/measurement-uncertainty" element={<MeasurementUncertaintyPage/>}/>
       <Route path="/blood-bank-handover" element={<BloodBankHandoverPage/>}/>
+      <Route path="/monthly-reports" element={<MonthlyReportsPage/>}/>
       {placeholders.map(m => <Route key={m.key} path={m.path.slice(1)} element={<ModulePage moduleKey={m.key} title={m.label} placeholder/>}/>)}
       <Route path="/settings" element={<SettingsLayout/>}>
         <Route index element={<Navigate to="users"/>}/>

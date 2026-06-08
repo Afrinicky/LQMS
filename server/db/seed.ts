@@ -15,6 +15,7 @@ export function seedDefaults() {
       { name: 'Technician', description: 'Frontline technical staff with access to assigned quality actions and records.' },
       { name: 'Blood Bank Unit Head', description: 'Blood bank section lead for handover review and quality oversight.' },
       { name: 'Safety Manager', description: 'Oversees safety incidents and reviews blood bank adverse events.' },
+      { name: 'Data Officer', description: 'Imports LHIMS raw data and prepares monthly reports.' },
       { name: 'Quality User', description: 'General QMS user role.', is_system: 1 }
     ];
     for (const role of rolesToSeed) {
@@ -52,7 +53,8 @@ export function seedDefaults() {
         eqa: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         verification_validation: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         measurement_uncertainty: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        blood_bank_handover: ['view', 'create', 'edit', 'approve', 'export', 'print']
+        blood_bank_handover: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        monthly_reports: ['view', 'create', 'edit', 'approve', 'export', 'print']
       },
       'Quality Manager': {
         nc_capa: ['view', 'create', 'edit', 'approve', 'export', 'print'],
@@ -67,7 +69,14 @@ export function seedDefaults() {
         eqa: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         verification_validation: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         measurement_uncertainty: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        blood_bank_handover: ['view', 'create', 'edit', 'approve', 'export', 'print']
+        blood_bank_handover: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        monthly_reports: ['view', 'create', 'edit', 'approve', 'export', 'print']
+      },
+      'Data Officer': {
+        monthly_reports: ['view', 'create', 'edit', 'export', 'print'],
+        nc_capa: ['view', 'create', 'print'],
+        actions: ['view', 'create', 'edit', 'print'],
+        supplier_inventory: ['view', 'print']
       },
       'Blood Bank Unit Head': {
         blood_bank_handover: ['view', 'create', 'edit', 'approve', 'export', 'print'],
@@ -97,7 +106,8 @@ export function seedDefaults() {
         eqa: ['view', 'create', 'edit', 'print'],
         verification_validation: ['view', 'create', 'edit', 'print'],
         measurement_uncertainty: ['view', 'create', 'edit', 'print'],
-        blood_bank_handover: ['view', 'create', 'edit', 'print']
+        blood_bank_handover: ['view', 'create', 'edit', 'print'],
+        monthly_reports: ['view', 'create', 'edit', 'print']
       },
       'Section Head': {
         nc_capa: ['view', 'create', 'edit', 'print'],
@@ -111,7 +121,8 @@ export function seedDefaults() {
         iqc: ['view', 'create', 'edit', 'print'],
         eqa: ['view', 'create', 'edit', 'print'],
         verification_validation: ['view', 'create', 'edit', 'print'],
-        measurement_uncertainty: ['view', 'create', 'edit', 'print']
+        measurement_uncertainty: ['view', 'create', 'edit', 'print'],
+        monthly_reports: ['view', 'create', 'edit', 'print']
       },
       'Biomedical Scientist': {
         nc_capa: ['view', 'create', 'print'],
@@ -126,7 +137,8 @@ export function seedDefaults() {
         eqa: ['view', 'create', 'print'],
         verification_validation: ['view', 'create', 'print'],
         measurement_uncertainty: ['view', 'create', 'print'],
-        blood_bank_handover: ['view', 'create', 'edit', 'print']
+        blood_bank_handover: ['view', 'create', 'edit', 'print'],
+        monthly_reports: ['view', 'print']
       },
       'Technician': {
         nc_capa: ['view', 'create', 'print'],
@@ -141,7 +153,8 @@ export function seedDefaults() {
         eqa: ['view', 'create', 'print'],
         verification_validation: ['view', 'create', 'print'],
         measurement_uncertainty: ['view', 'create', 'print'],
-        blood_bank_handover: ['view', 'create']
+        blood_bank_handover: ['view', 'create'],
+        monthly_reports: ['view']
       },
       'Quality User': {
         nc_capa: ['view', 'create', 'edit', 'print'],
