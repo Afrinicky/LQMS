@@ -5,7 +5,7 @@ import DisabledModule from '../components/DisabledModule';
 import type {
   Section, Department, Staff, Position,
   StaffDocument, StaffDeclaration, TrainingEvent, CompetencyAssessment, DutyRoster,
-  PersonnelSummary, MyTasks, MyProfile
+  PersonnelSummary, MyTasks, MyProfile, RosterCoverage, StaffSuggestionsResponse
 } from '../../shared/types/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
@@ -56,6 +56,8 @@ export function PersonnelManagementPage() {
   const [selectedRoster, setSelectedRoster] = useState<DutyRoster | null>(null);
   const [myProfile, setMyProfile] = useState<MyProfile | null>(null);
   const [myTasks, setMyTasks] = useState<MyTasks | null>(null);
+  const [staffSuggestions, setStaffSuggestions] = useState<StaffSuggestionsResponse | null>(null);
+  const [rosterCoverage, setRosterCoverage] = useState<RosterCoverage | null>(null);
 
   const [docForm, setDocForm] = useState({ staffId: '', documentType: 'CV', title: '', issueDate: '', expiryDate: '', remarks: '' });
   const [docFile, setDocFile] = useState<File | null>(null);
@@ -87,6 +89,7 @@ export function PersonnelManagementPage() {
     if (tab === 'My Profile' && isEnabled('personnel')) {
       api<MyProfile>('/personnel/my-profile').then(setMyProfile).catch((e) => setError((e as Error).message));
       api<MyTasks>('/personnel/my-tasks').then(setMyTasks).catch(() => undefined);
+      api<StaffSuggestionsResponse>('/personnel/staff-suggestions').then(setStaffSuggestions).catch(() => undefined);
     }
   }, [tab, isEnabled]);
   if (!isEnabled('personnel')) return <DisabledModule />;
@@ -199,8 +202,21 @@ export function PersonnelManagementPage() {
   }
 
   async function openRoster(id: number) {
-    try { setSelectedRoster(await api<DutyRoster>(`/personnel/rosters/${id}`)); }
-    catch (e) { setError((e as Error).message); }
+    try {
+      setSelectedRoster(await api<DutyRoster>(`/personnel/rosters/${id}`));
+      setRosterCoverage(await api<RosterCoverage>(`/personnel/rosters/${id}/coverage`));
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  async function linkMyStaff(staffId: number) {
+    try {
+      await api('/personnel/link-my-staff', { method: 'POST', body: JSON.stringify({ staffId }) });
+      const [prof, sug] = await Promise.all([
+        api<MyProfile>('/personnel/my-profile'),
+        api<StaffSuggestionsResponse>('/personnel/staff-suggestions')
+      ]);
+      setMyProfile(prof); setStaffSuggestions(sug);
+    } catch (e) { setError((e as Error).message); }
   }
 
   async function submitAssignment(e: FormEvent) {
@@ -389,6 +405,11 @@ export function PersonnelManagementPage() {
       {selectedRoster && <div className="card" style={{ marginTop: 16 }}>
         <h3>{selectedRoster.roster_number}</h3>
         <p>Period: {selectedRoster.roster_start_date} → {selectedRoster.roster_end_date} | Status: {formatBadge(selectedRoster.status)}</p>
+        {rosterCoverage && <div className="cards">
+          <div className="card"><h4>Days covered</h4><p className="metric">{rosterCoverage.coveredDates}/{rosterCoverage.totalDates}</p></div>
+          <div className="card"><h4>Gap days</h4><p className="metric">{rosterCoverage.gapDates.length}</p>{rosterCoverage.gapDates.length > 0 && <small>{rosterCoverage.gapDates.slice(0, 5).join(', ')}{rosterCoverage.gapDates.length > 5 ? '…' : ''}</small>}</div>
+          <div className="card"><h4>Time conflicts</h4><p className="metric">{rosterCoverage.conflicts.length}</p>{rosterCoverage.conflicts.length > 0 && <small>{rosterCoverage.conflicts.slice(0, 3).map(c => `${c.duty_date} staff #${c.staff_id}`).join('; ')}</small>}</div>
+        </div>}
         <table className="data-table"><thead><tr><th>Date</th><th>Staff</th><th>Shift</th><th>Hours</th><th>Role</th><th>Notes</th></tr></thead><tbody>
           {(selectedRoster.assignments || []).map(a => <tr key={a.id}><td>{a.duty_date}</td><td>{a.staff_name || staffName(staff, a.staff_id)}</td><td>{a.shift_name || '—'}</td><td>{a.start_time || '—'} – {a.end_time || '—'}</td><td>{a.duty_role || '—'}</td><td>{a.notes || '—'}</td></tr>)}
         </tbody></table>
@@ -409,7 +430,21 @@ export function PersonnelManagementPage() {
     {tab === 'My Profile' && <>
       {myProfile && <div className="card">
         <h3>{myProfile.staff?.fullName || myProfile.user.fullName}</h3>
-        {!myProfile.staff && <p className="error">Your user account is not linked to a staff record. Ask an administrator to link your staff record before signing attestations or declarations.</p>}
+        {!myProfile.staff && <>
+          <p className="error">Your user account is not linked to a staff record. You need a link before signing attestations or declarations.</p>
+          {staffSuggestions && staffSuggestions.suggestions.length > 0 && <>
+            <h4>Candidate staff records</h4>
+            <table className="data-table"><thead><tr><th>Staff</th><th>Email</th><th>Section</th><th></th></tr></thead><tbody>
+              {staffSuggestions.suggestions.map(s => <tr key={s.id}>
+                <td>{s.full_name}{s.employee_no ? ` (${s.employee_no})` : ''}</td>
+                <td>{s.email || '—'}</td><td>{s.section_name || '—'}</td>
+                <td>{s.already_taken ? <em>linked to another user</em> : <button onClick={() => linkMyStaff(s.id)}>Link to me</button>}</td>
+              </tr>)}
+            </tbody></table>
+            <small>Self-link only succeeds when your account's full name or username/email exactly matches the candidate. Otherwise an administrator must link you.</small>
+          </>}
+          {staffSuggestions && staffSuggestions.suggestions.length === 0 && <p>No matching staff records found. Ask an administrator to create your staff record and link your account.</p>}
+        </>}
         {myProfile.staff && <p>Employee #: {myProfile.staff.employeeNo || '—'} | Section: {myProfile.staff.section_name || '—'}</p>}
         {myProfile.positions.length > 0 && <p>Positions: {myProfile.positions.map(p => `${p.title}${p.is_active ? '' : ' (inactive)'}`).join(', ')}</p>}
         {myProfile.authorizations.length > 0 && <>

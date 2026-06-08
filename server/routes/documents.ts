@@ -18,6 +18,20 @@ function addMonths(dateIso: string, months: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+function flipOverdueAttestations(db: any) {
+  db.prepare("UPDATE document_attestations SET status = 'overdue' WHERE status = 'pending' AND due_date IS NOT NULL AND due_date < date('now')").run();
+}
+
+function notifyStaff(db: any, staffId: number | null, moduleKey: string, title: string, message: string) {
+  if (!staffId) return;
+  const users = db.prepare('SELECT id FROM users WHERE staff_id = ? AND is_active = 1').all(staffId) as Array<{ id: number }>;
+  for (const u of users) {
+    db.prepare('INSERT INTO notifications (user_id, module_key, title, message, status) VALUES (?, ?, ?, ?, ?)').run(u.id, moduleKey, title, message, 'unread');
+  }
+}
+
+function htmlEscape(v: unknown) { return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
 export function documentControlRoutes() {
   const router = Router();
 
@@ -31,10 +45,28 @@ export function documentControlRoutes() {
 
   router.get('/attestations/pending', requirePermission('documents', 'view'), (req, res) => {
     const db = getDb();
+    flipOverdueAttestations(db);
     const staffId = parseIntNullable(req.query.staffId);
     const where = staffId ? 'WHERE a.staff_id = ? AND a.status IN (\'pending\',\'overdue\')' : 'WHERE a.status IN (\'pending\',\'overdue\')';
     const params: unknown[] = staffId ? [staffId] : [];
     res.json(db.prepare(`SELECT a.*, d.document_code, d.title, d.document_type, v.version_number FROM document_attestations a JOIN documents d ON d.id = COALESCE(a.document_id, (SELECT document_id FROM document_versions WHERE id = a.document_version_id)) LEFT JOIN document_versions v ON v.id = a.document_version_id ${where} ORDER BY a.due_date NULLS LAST, a.id DESC`).all(...params));
+  });
+
+  router.get('/distribution/inbox', requirePermission('documents', 'view'), (req, res) => {
+    const db = getDb();
+    flipOverdueAttestations(db);
+    const staffId = parseIntNullable(req.query.staffId) ?? req.user?.staffId ?? null;
+    if (!staffId) return res.json([]);
+    res.json(db.prepare(`
+      SELECT dd.*, d.document_code, d.title, d.document_type, v.version_number,
+             a.id AS attestation_id, a.status AS attestation_status, a.attested_at, a.due_date AS attestation_due
+      FROM document_distribution dd
+      JOIN documents d ON d.id = dd.document_id
+      LEFT JOIN document_versions v ON v.id = dd.document_version_id
+      LEFT JOIN document_attestations a ON a.document_id = dd.document_id AND a.staff_id = dd.target_staff_id AND a.document_version_id = dd.document_version_id
+      WHERE dd.target_staff_id = ?
+      ORDER BY CASE dd.status WHEN 'pending' THEN 0 WHEN 'overdue' THEN 1 ELSE 2 END, dd.due_date NULLS LAST, dd.id DESC
+    `).all(staffId));
   });
 
   // -------- Documents CRUD --------
@@ -207,6 +239,7 @@ export function documentControlRoutes() {
 
     const dueDate = req.body.dueDate ?? null;
     const created: number[] = [];
+    const notifiedStaffIds: number[] = [];
     const tx = db.transaction(() => {
       for (const staffId of resolvedStaffIds) {
         const existing = db.prepare("SELECT id FROM document_attestations WHERE document_version_id = ? AND staff_id = ? AND status IN ('pending','overdue')").get(versionId, staffId);
@@ -218,9 +251,12 @@ export function documentControlRoutes() {
           .run(req.params.id, versionId, 'staff', staffId, assignedBy, dueDate, 'pending', req.user!.id);
         db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run('documents', 'documents', String(req.params.id), 'documents', 'document_attestations', String(attId), 'Attestation assignment');
         created.push(attId);
+        notifiedStaffIds.push(staffId);
       }
     });
     tx();
+    const msg = `Please review and sign: ${doc.document_code ? doc.document_code + ' — ' : ''}${doc.title}${dueDate ? ` (due ${dueDate})` : ''}`;
+    for (const sId of notifiedStaffIds) notifyStaff(db, sId, 'documents', 'Attestation assigned', msg);
     audit(req, { action: 'assign_attestation', entity: 'documents', entityId: req.params.id, newValue: { versionId, targetType, staffCount: created.length, dueDate } });
     res.status(201).json({ ok: true, assigned: created.length, attestationIds: created });
   });
@@ -247,6 +283,66 @@ export function documentControlRoutes() {
     db.prepare("UPDATE document_distribution SET status = 'completed' WHERE document_id = ? AND target_staff_id = ? AND status = 'pending'").run(req.params.id, staffId);
     audit(req, { action: 'attest_sign', entity: 'document_attestations', entityId: attestation.id, oldValue: { status: attestation.status }, newValue: { status: 'signed', staffId } });
     res.json({ ok: true, attestationId: attestation.id });
+  });
+
+  router.post('/:id/versions/:versionId/mark-obsolete', requirePermission('documents', 'approve'), (req, res) => {
+    if (!req.body.obsoleteReason) return res.status(400).json({ error: 'obsoleteReason is required' });
+    const db = getDb();
+    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    const version = db.prepare('SELECT * FROM document_versions WHERE id = ? AND document_id = ?').get(req.params.versionId, req.params.id) as any;
+    if (!version) return res.status(404).json({ error: 'Version not found on this document' });
+    db.prepare("UPDATE document_versions SET status = 'obsolete', obsolete_date = CURRENT_TIMESTAMP, obsolete_reason = ? WHERE id = ?").run(req.body.obsoleteReason, req.params.versionId);
+    if (doc.current_version_id && Number(doc.current_version_id) === Number(req.params.versionId)) {
+      db.prepare('UPDATE documents SET current_version_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(req.params.id);
+    }
+    audit(req, { action: 'mark_version_obsolete', entity: 'document_versions', entityId: req.params.versionId, oldValue: { status: version.status }, newValue: { status: 'obsolete', obsoleteReason: req.body.obsoleteReason } });
+    res.json({ ok: true });
+  });
+
+  router.get('/:id/print-render', requirePermission('documents', 'print'), (req, res) => {
+    const db = getDb();
+    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    const versionId = parseIntNullable(req.query.versionId) ?? doc.current_version_id;
+    const version = versionId ? db.prepare('SELECT v.*, f.original_name AS file_name FROM document_versions v LEFT JOIN files f ON f.id = v.file_id WHERE v.id = ?').get(versionId) as any : null;
+    const copyNumber = req.query.copyNumber ? String(req.query.copyNumber) : '';
+    const watermark = req.query.watermark ? String(req.query.watermark) : (doc.is_controlled ? 'CONTROLLED COPY' : 'UNCONTROLLED COPY');
+    const purpose = req.query.purpose ? String(req.query.purpose) : '';
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${htmlEscape(doc.document_code || doc.title)}</title>
+<style>
+@page { size: A4; margin: 14mm; }
+body { font-family: 'Times New Roman', serif; color: #111; margin: 0; padding: 0; position: relative; }
+.watermark { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 0; }
+.watermark span { font-size: 96px; font-weight: bold; color: rgba(180, 0, 0, 0.12); transform: rotate(-30deg); border: 4px solid rgba(180,0,0,0.12); padding: 8px 24px; letter-spacing: 4px; }
+.page { position: relative; z-index: 1; padding: 18px 24px; }
+h1 { font-size: 18px; border-bottom: 2px solid #1B3A6B; padding-bottom: 6px; margin: 0 0 12px; }
+table.meta { border-collapse: collapse; width: 100%; font-size: 12px; margin-bottom: 16px; }
+table.meta th, table.meta td { border: 1px solid #888; padding: 4px 8px; text-align: left; vertical-align: top; }
+table.meta th { background: #eef2f7; width: 22%; }
+.banner { background: #fff8e1; border: 1px solid #d9b400; padding: 8px 12px; margin: 12px 0; font-size: 12px; }
+.footer { font-size: 10px; color: #555; margin-top: 24px; border-top: 1px solid #ccc; padding-top: 6px; }
+@media print { .no-print { display: none; } }
+.no-print { background: #f4f6fb; padding: 8px 12px; border-bottom: 1px solid #ccc; font-size: 12px; }
+</style></head><body>
+<div class="watermark"><span>${htmlEscape(watermark)}</span></div>
+<div class="no-print">Use your browser's Print to produce a watermarked cover sheet. After printing, log the print on the document detail page so the print is captured in the audit trail.</div>
+<div class="page">
+  <h1>${htmlEscape(doc.document_code || '')} ${doc.document_code ? '—' : ''} ${htmlEscape(doc.title)}</h1>
+  <table class="meta">
+    <tr><th>Document type</th><td>${htmlEscape(doc.document_type || '—')}</td><th>Version</th><td>${htmlEscape(version?.version_number || version?.version_label || '—')}</td></tr>
+    <tr><th>Status</th><td>${htmlEscape(doc.status)}</td><th>Effective date</th><td>${htmlEscape(version?.effective_date || '—')}</td></tr>
+    <tr><th>Access level</th><td>${htmlEscape(doc.access_level || '—')}</td><th>Controlled</th><td>${doc.is_controlled ? 'Yes' : 'No'}</td></tr>
+    <tr><th>Next review</th><td>${htmlEscape(doc.next_review_date || '—')}</td><th>Copy #</th><td>${htmlEscape(copyNumber || '—')}</td></tr>
+    <tr><th>Print purpose</th><td colspan="3">${htmlEscape(purpose || '—')}</td></tr>
+    ${version?.revision_summary ? `<tr><th>Revision summary</th><td colspan="3">${htmlEscape(version.revision_summary)}</td></tr>` : ''}
+  </table>
+  ${version?.file_name ? `<div class="banner">Attached document file: <strong>${htmlEscape(version.file_name)}</strong>. Open the file from the document detail panel and print alongside this cover sheet.</div>` : '<div class="banner">No file is attached to this version. Print this cover sheet only.</div>'}
+  <div class="footer">SECH_LIMS by Nickland · Generated ${new Date().toISOString()} · Recipient is responsible for verifying that this is the current authorised version before use.</div>
+</div>
+</body></html>`;
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
   });
 
   router.post('/:id/print-log', requirePermission('documents', 'print'), (req, res) => {
