@@ -56,7 +56,12 @@ export function seedDefaults() {
         verification_validation: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         measurement_uncertainty: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         blood_bank_handover: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        monthly_reports: ['view', 'create', 'edit', 'approve', 'export', 'print']
+        monthly_reports: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        assessments: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        meetings: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        management_review: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        quality_indicators: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        continual_improvement: ['view', 'create', 'edit', 'approve', 'export', 'print']
       },
       'Quality Manager': {
         documents: ['view', 'create', 'edit', 'approve', 'export', 'print'],
@@ -74,7 +79,12 @@ export function seedDefaults() {
         verification_validation: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         measurement_uncertainty: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         blood_bank_handover: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        monthly_reports: ['view', 'create', 'edit', 'approve', 'export', 'print']
+        monthly_reports: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        assessments: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        meetings: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        management_review: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        quality_indicators: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        continual_improvement: ['view', 'create', 'edit', 'approve', 'export', 'print']
       },
       'Data Officer': {
         monthly_reports: ['view', 'create', 'edit', 'export', 'print'],
@@ -113,7 +123,12 @@ export function seedDefaults() {
         verification_validation: ['view', 'create', 'edit', 'print'],
         measurement_uncertainty: ['view', 'create', 'edit', 'print'],
         blood_bank_handover: ['view', 'create', 'edit', 'print'],
-        monthly_reports: ['view', 'create', 'edit', 'print']
+        monthly_reports: ['view', 'create', 'edit', 'print'],
+        assessments: ['view', 'create', 'edit', 'print'],
+        meetings: ['view', 'create', 'edit', 'print'],
+        management_review: ['view', 'create', 'edit', 'print'],
+        quality_indicators: ['view', 'create', 'edit', 'print'],
+        continual_improvement: ['view', 'create', 'edit', 'print']
       },
       'Section Head': {
         documents: ['view', 'create', 'edit', 'print'],
@@ -130,7 +145,12 @@ export function seedDefaults() {
         eqa: ['view', 'create', 'edit', 'print'],
         verification_validation: ['view', 'create', 'edit', 'print'],
         measurement_uncertainty: ['view', 'create', 'edit', 'print'],
-        monthly_reports: ['view', 'create', 'edit', 'print']
+        monthly_reports: ['view', 'create', 'edit', 'print'],
+        assessments: ['view', 'create', 'edit', 'print'],
+        meetings: ['view', 'create', 'edit', 'print'],
+        management_review: ['view'],
+        quality_indicators: ['view', 'create', 'edit', 'print'],
+        continual_improvement: ['view', 'create', 'edit', 'print']
       },
       'Biomedical Scientist': {
         documents: ['view', 'print'],
@@ -148,7 +168,11 @@ export function seedDefaults() {
         verification_validation: ['view', 'create', 'print'],
         measurement_uncertainty: ['view', 'create', 'print'],
         blood_bank_handover: ['view', 'create', 'edit', 'print'],
-        monthly_reports: ['view', 'print']
+        monthly_reports: ['view', 'print'],
+        assessments: ['view', 'create', 'print'],
+        meetings: ['view', 'print'],
+        quality_indicators: ['view', 'create', 'print'],
+        continual_improvement: ['view', 'create', 'print']
       },
       'Technician': {
         documents: ['view', 'print'],
@@ -166,7 +190,11 @@ export function seedDefaults() {
         verification_validation: ['view', 'create', 'print'],
         measurement_uncertainty: ['view', 'create', 'print'],
         blood_bank_handover: ['view', 'create'],
-        monthly_reports: ['view']
+        monthly_reports: ['view'],
+        assessments: ['view'],
+        meetings: ['view'],
+        quality_indicators: ['view'],
+        continual_improvement: ['view']
       },
       'Quality User': {
         nc_capa: ['view', 'create', 'edit', 'print'],
@@ -198,6 +226,23 @@ export function seedDefaults() {
         if (modulePermissions[permission.module_key]?.includes(permission.action)) {
           db.prepare('INSERT OR REPLACE INTO role_permissions (role_id, permission_id, allowed, source) VALUES (?, ?, 1, ?)').run(role.id, permission.id, 'Role default');
         }
+      }
+    }
+
+    const defaultChecklists = [
+      { code: 'CHK-GEN', name: 'General Laboratory Assessment Checklist', type: 'general' },
+      { code: 'CHK-SEC', name: 'Sectional Assessment Checklist', type: 'sectional' },
+      { code: 'CHK-HAEM', name: 'Haematology Assessment Checklist', type: 'section_specific' },
+      { code: 'CHK-MICRO', name: 'Microbiology Assessment Checklist', type: 'section_specific' },
+      { code: 'CHK-BB', name: 'Blood Bank Quality Assessment Checklist', type: 'section_specific' },
+      { code: 'CHK-SAFETY', name: 'Safety Assessment Checklist', type: 'safety' },
+      { code: 'CHK-DOC', name: 'Document Control Assessment Checklist', type: 'document_control' }
+    ];
+    for (const c of defaultChecklists) {
+      const existing = db.prepare('SELECT id FROM assessment_checklists WHERE checklist_code = ? AND is_default = 1').get(c.code);
+      if (!existing) {
+        db.prepare(`INSERT INTO assessment_checklists (checklist_code, checklist_name, checklist_type, description, status, is_default, is_editable, marking_enabled) VALUES (?, ?, ?, ?, 'draft', 1, 1, 0)`)
+          .run(c.code, c.name, c.type, 'Default placeholder checklist. Add sections and questions to suit the laboratory. Edit, replace, or archive freely.');
       }
     }
   });

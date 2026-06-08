@@ -193,6 +193,22 @@ export function commonRoutes() {
     });
   });
 
+  router.get('/dashboard/governance-summary', (_req, res) => {
+    const db = getDb();
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const count = (sql: string, ...params: unknown[]) => (db.prepare(sql).get(...params) as { count: number }).count;
+    res.json({
+      plannedAssessments: count("SELECT COUNT(*) count FROM assessment_programs WHERE status IN ('planned','in_progress')"),
+      openFindings: count("SELECT COUNT(*) count FROM assessment_findings WHERE status != 'closed'"),
+      openMeetings: count("SELECT COUNT(*) count FROM meetings WHERE status IN ('scheduled','completed')"),
+      pendingManagementReviews: count("SELECT COUNT(*) count FROM management_reviews WHERE status IN ('draft','inputs_collected','reviewed')"),
+      activeQualityIndicators: count("SELECT COUNT(*) count FROM quality_indicators WHERE is_active = 1"),
+      criticalQualityIndicatorResults: count("SELECT COUNT(*) count FROM quality_indicator_results WHERE status = 'critical' AND (reviewed_at IS NULL OR nc_id IS NULL)"),
+      activeImprovementProjects: count("SELECT COUNT(*) count FROM improvement_projects WHERE status IN ('planned','active')"),
+      overdueImprovementActions: count("SELECT COUNT(*) count FROM actions WHERE module_key = 'continual_improvement' AND status != 'Closed' AND due_date IS NOT NULL AND due_date < ?", todayIso)
+    });
+  });
+
   router.get('/dashboard/qms-summary', (_req, res) => {
     const db = getDb();
     const staffId = _req.user?.staffId ?? null;

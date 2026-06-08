@@ -939,4 +939,285 @@ CREATE TABLE IF NOT EXISTS duty_roster_assignments (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 `);
+
+  // Phase 8: Internal Assessments, Meetings, Management Review, Quality Indicators, Continual Improvement
+  database.exec(`
+CREATE TABLE IF NOT EXISTS assessment_programs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  program_number TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  assessment_type TEXT NOT NULL,
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  planned_start_date TEXT NOT NULL,
+  planned_end_date TEXT,
+  lead_assessor_staff_id INTEGER REFERENCES staff(id),
+  scope TEXT,
+  objectives TEXT,
+  status TEXT NOT NULL DEFAULT 'planned',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS assessment_findings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  finding_number TEXT NOT NULL UNIQUE,
+  assessment_program_id INTEGER NOT NULL REFERENCES assessment_programs(id),
+  finding_date TEXT NOT NULL,
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  finding_type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  evidence_summary TEXT,
+  severity TEXT,
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  nc_id INTEGER REFERENCES nonconforming_events(id),
+  capa_id INTEGER REFERENCES capa_records(id),
+  status TEXT NOT NULL DEFAULT 'open',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS meetings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  meeting_number TEXT NOT NULL UNIQUE,
+  meeting_type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  meeting_date TEXT NOT NULL,
+  start_time TEXT,
+  end_time TEXT,
+  location TEXT,
+  chair_staff_id INTEGER REFERENCES staff(id),
+  secretary_staff_id INTEGER REFERENCES staff(id),
+  agenda TEXT,
+  minutes TEXT,
+  status TEXT NOT NULL DEFAULT 'scheduled',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS meeting_attendance (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  meeting_id INTEGER NOT NULL REFERENCES meetings(id),
+  staff_id INTEGER NOT NULL REFERENCES staff(id),
+  attendance_status TEXT NOT NULL DEFAULT 'invited',
+  signed_at TEXT,
+  remarks TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(meeting_id, staff_id)
+);
+CREATE TABLE IF NOT EXISTS meeting_actions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  meeting_id INTEGER NOT NULL REFERENCES meetings(id),
+  action_id INTEGER NOT NULL REFERENCES actions(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(meeting_id, action_id)
+);
+CREATE TABLE IF NOT EXISTS management_reviews (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  review_number TEXT NOT NULL UNIQUE,
+  review_period_start TEXT NOT NULL,
+  review_period_end TEXT NOT NULL,
+  review_date TEXT NOT NULL,
+  chair_staff_id INTEGER REFERENCES staff(id),
+  secretary_staff_id INTEGER REFERENCES staff(id),
+  summary TEXT,
+  conclusions TEXT,
+  decisions TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  approved_by_staff_id INTEGER REFERENCES staff(id),
+  approved_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS management_review_inputs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  management_review_id INTEGER NOT NULL REFERENCES management_reviews(id),
+  input_area TEXT NOT NULL,
+  source_module TEXT,
+  source_record_id TEXT,
+  summary TEXT,
+  issues TEXT,
+  actions_required TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS quality_indicators (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  indicator_code TEXT NOT NULL UNIQUE,
+  indicator_name TEXT NOT NULL,
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  description TEXT,
+  numerator_definition TEXT,
+  denominator_definition TEXT,
+  target_value REAL,
+  warning_threshold REAL,
+  critical_threshold REAL,
+  frequency TEXT NOT NULL,
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  reviewer_staff_id INTEGER REFERENCES staff(id),
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS quality_indicator_results (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  indicator_id INTEGER NOT NULL REFERENCES quality_indicators(id),
+  period_start TEXT NOT NULL,
+  period_end TEXT NOT NULL,
+  numerator_value REAL,
+  denominator_value REAL,
+  calculated_value REAL,
+  interpretation TEXT,
+  status TEXT NOT NULL DEFAULT 'pending_review',
+  reviewed_by_staff_id INTEGER REFERENCES staff(id),
+  reviewed_at TEXT,
+  nc_id INTEGER REFERENCES nonconforming_events(id),
+  capa_id INTEGER REFERENCES capa_records(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS improvement_projects (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_number TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  source_module TEXT,
+  source_record_id TEXT,
+  improvement_area TEXT NOT NULL,
+  aim_statement TEXT NOT NULL,
+  baseline_measure TEXT,
+  target_measure TEXT,
+  start_date TEXT,
+  expected_completion_date TEXT,
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  status TEXT NOT NULL DEFAULT 'planned',
+  outcome_summary TEXT,
+  closed_by_staff_id INTEGER REFERENCES staff(id),
+  closed_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS improvement_updates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES improvement_projects(id),
+  update_date TEXT NOT NULL,
+  update_text TEXT,
+  progress_status TEXT,
+  evidence_file_id INTEGER REFERENCES files(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS assessment_checklists (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  checklist_code TEXT,
+  checklist_name TEXT NOT NULL,
+  checklist_type TEXT NOT NULL,
+  description TEXT,
+  source_name TEXT,
+  version_label TEXT,
+  effective_date TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  is_default INTEGER NOT NULL DEFAULT 0,
+  is_editable INTEGER NOT NULL DEFAULT 1,
+  marking_enabled INTEGER NOT NULL DEFAULT 0,
+  total_possible_marks REAL,
+  internal_threshold_label TEXT,
+  internal_pass_mark REAL,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS assessment_checklist_sections (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  checklist_id INTEGER NOT NULL REFERENCES assessment_checklists(id),
+  section_code TEXT,
+  section_title TEXT NOT NULL,
+  section_description TEXT,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  section_possible_marks REAL,
+  section_weight REAL,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS assessment_checklist_questions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  checklist_id INTEGER NOT NULL REFERENCES assessment_checklists(id),
+  section_id INTEGER REFERENCES assessment_checklist_sections(id),
+  question_code TEXT,
+  question_text TEXT NOT NULL,
+  guidance TEXT,
+  expected_evidence TEXT,
+  response_type TEXT NOT NULL DEFAULT 'met_partial_not_met',
+  display_order INTEGER NOT NULL DEFAULT 0,
+  is_required INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  max_marks REAL,
+  weight REAL,
+  scoring_guidance TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS assessment_selected_checklists (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  assessment_program_id INTEGER NOT NULL REFERENCES assessment_programs(id),
+  checklist_id INTEGER NOT NULL REFERENCES assessment_checklists(id),
+  selection_mode TEXT NOT NULL,
+  selected_by_staff_id INTEGER REFERENCES staff(id),
+  selected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  notes TEXT,
+  marking_enabled_at_selection INTEGER NOT NULL DEFAULT 0,
+  total_possible_marks_at_selection REAL,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(assessment_program_id, checklist_id)
+);
+CREATE TABLE IF NOT EXISTS assessment_selected_questions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  assessment_program_id INTEGER NOT NULL REFERENCES assessment_programs(id),
+  checklist_id INTEGER NOT NULL REFERENCES assessment_checklists(id),
+  section_id INTEGER REFERENCES assessment_checklist_sections(id),
+  question_id INTEGER NOT NULL REFERENCES assessment_checklist_questions(id),
+  included INTEGER NOT NULL DEFAULT 1,
+  planned_for_review INTEGER NOT NULL DEFAULT 1,
+  question_text_at_selection TEXT,
+  section_title_at_selection TEXT,
+  max_marks_at_selection REAL,
+  weight_at_selection REAL,
+  scoring_guidance_at_selection TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(assessment_program_id, question_id)
+);
+CREATE TABLE IF NOT EXISTS assessment_question_responses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  assessment_program_id INTEGER NOT NULL REFERENCES assessment_programs(id),
+  checklist_id INTEGER NOT NULL REFERENCES assessment_checklists(id),
+  section_id INTEGER REFERENCES assessment_checklist_sections(id),
+  question_id INTEGER NOT NULL REFERENCES assessment_checklist_questions(id),
+  response TEXT NOT NULL,
+  evidence_summary TEXT,
+  finding_required INTEGER NOT NULL DEFAULT 0,
+  finding_id INTEGER REFERENCES assessment_findings(id),
+  marks_awarded REAL,
+  max_marks_at_assessment REAL,
+  score_comment TEXT,
+  assessed_by_staff_id INTEGER REFERENCES staff(id),
+  assessed_at TEXT,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT,
+  UNIQUE(assessment_program_id, question_id)
+);
+`);
 }
