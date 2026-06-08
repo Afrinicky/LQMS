@@ -41,6 +41,8 @@ export function seedDefaults() {
 
     const rolePermissionsMap: Record<string, Record<string, string[]>> = {
       'Laboratory Manager': {
+        documents: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        personnel: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         nc_capa: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         complaints: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         risks: ['view', 'create', 'edit', 'approve', 'export', 'print'],
@@ -57,6 +59,8 @@ export function seedDefaults() {
         monthly_reports: ['view', 'create', 'edit', 'approve', 'export', 'print']
       },
       'Quality Manager': {
+        documents: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        personnel: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         nc_capa: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         complaints: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         risks: ['view', 'create', 'edit', 'approve', 'export', 'print'],
@@ -94,6 +98,8 @@ export function seedDefaults() {
         actions: ['view', 'create', 'edit', 'print']
       },
       'Quality Team Member': {
+        documents: ['view', 'create', 'edit', 'print'],
+        personnel: ['view', 'create', 'edit', 'print'],
         nc_capa: ['view', 'create', 'edit', 'print'],
         complaints: ['view', 'create', 'edit', 'print'],
         risks: ['view', 'create', 'edit', 'print'],
@@ -110,6 +116,8 @@ export function seedDefaults() {
         monthly_reports: ['view', 'create', 'edit', 'print']
       },
       'Section Head': {
+        documents: ['view', 'create', 'edit', 'print'],
+        personnel: ['view', 'create', 'edit', 'print'],
         nc_capa: ['view', 'create', 'edit', 'print'],
         complaints: ['view', 'create', 'edit', 'print'],
         risks: ['view', 'create', 'edit', 'print'],
@@ -125,6 +133,8 @@ export function seedDefaults() {
         monthly_reports: ['view', 'create', 'edit', 'print']
       },
       'Biomedical Scientist': {
+        documents: ['view', 'print'],
+        personnel: ['view'],
         nc_capa: ['view', 'create', 'print'],
         complaints: ['view', 'create', 'print'],
         risks: ['view', 'create', 'print'],
@@ -141,6 +151,8 @@ export function seedDefaults() {
         monthly_reports: ['view', 'print']
       },
       'Technician': {
+        documents: ['view', 'print'],
+        personnel: ['view'],
         nc_capa: ['view', 'create', 'print'],
         complaints: ['view', 'create', 'print'],
         risks: ['view', 'create', 'print'],
