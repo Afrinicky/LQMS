@@ -605,4 +605,139 @@ CREATE TABLE IF NOT EXISTS blood_discards (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 `);
+
+  // Phase 6: Monthly Reports & LHIMS Archive
+  database.exec(`
+CREATE TABLE IF NOT EXISTS lhims_import_batches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  batch_number TEXT NOT NULL UNIQUE,
+  report_month INTEGER NOT NULL,
+  report_year INTEGER NOT NULL,
+  import_type TEXT NOT NULL,
+  source_file_id INTEGER REFERENCES files(id),
+  original_filename TEXT,
+  file_hash TEXT,
+  imported_by_staff_id INTEGER REFERENCES staff(id),
+  imported_at TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  total_rows INTEGER NOT NULL DEFAULT 0,
+  processed_rows INTEGER NOT NULL DEFAULT 0,
+  exception_count INTEGER NOT NULL DEFAULT 0,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS lhims_import_rows (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  import_batch_id INTEGER NOT NULL REFERENCES lhims_import_batches(id),
+  row_number INTEGER,
+  patient_type TEXT,
+  request_date TEXT,
+  sample_date TEXT,
+  result_date TEXT,
+  patient_id TEXT,
+  patient_age TEXT,
+  patient_sex TEXT,
+  department_name TEXT,
+  section_name TEXT,
+  test_name TEXT,
+  parameter_name TEXT,
+  result_value TEXT,
+  unit TEXT,
+  sample_type TEXT,
+  organism TEXT,
+  antibiotic TEXT,
+  susceptibility TEXT,
+  raw_json TEXT,
+  mapping_status TEXT NOT NULL DEFAULT 'unprocessed',
+  exception_reason TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS report_mapping_rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  mapping_name TEXT NOT NULL,
+  source_pattern TEXT NOT NULL,
+  source_field TEXT NOT NULL DEFAULT 'test_name',
+  report_type TEXT NOT NULL,
+  report_section TEXT NOT NULL,
+  report_row TEXT NOT NULL,
+  counting_rule TEXT NOT NULL DEFAULT 'count_rows',
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS monthly_report_batches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  report_number TEXT NOT NULL UNIQUE,
+  report_month INTEGER NOT NULL,
+  report_year INTEGER NOT NULL,
+  report_type TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft',
+  generated_from_import_batch_ids TEXT,
+  generated_by_staff_id INTEGER REFERENCES staff(id),
+  generated_at TEXT,
+  reviewed_by_staff_id INTEGER REFERENCES staff(id),
+  reviewed_at TEXT,
+  approved_by_staff_id INTEGER REFERENCES staff(id),
+  approved_at TEXT,
+  exception_count INTEGER NOT NULL DEFAULT 0,
+  notes TEXT,
+  final_file_id INTEGER REFERENCES files(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS monthly_report_lines (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  monthly_report_batch_id INTEGER NOT NULL REFERENCES monthly_report_batches(id),
+  report_section TEXT NOT NULL,
+  report_row TEXT NOT NULL,
+  category TEXT,
+  value_text TEXT,
+  value_number REAL,
+  source_count INTEGER NOT NULL DEFAULT 0,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS monthly_report_exceptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  import_batch_id INTEGER NOT NULL REFERENCES lhims_import_batches(id),
+  import_row_id INTEGER REFERENCES lhims_import_rows(id),
+  exception_type TEXT NOT NULL,
+  exception_message TEXT,
+  suggested_mapping_rule_id INTEGER REFERENCES report_mapping_rules(id),
+  status TEXT NOT NULL DEFAULT 'open',
+  resolution_notes TEXT,
+  resolved_by_staff_id INTEGER REFERENCES staff(id),
+  resolved_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS tat_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  import_batch_id INTEGER NOT NULL REFERENCES lhims_import_batches(id),
+  request_id TEXT,
+  patient_type TEXT,
+  test_name TEXT,
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  request_time TEXT,
+  sample_received_time TEXT,
+  verification_time TEXT,
+  dispatch_time TEXT,
+  tat_minutes INTEGER,
+  target_minutes INTEGER,
+  status TEXT,
+  exception_reason TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+`);
+
+  const tatColumns = database.prepare("PRAGMA table_info(tat_records)").all() as Array<{ name: string }>;
+  const tatNames = new Set(tatColumns.map(col => col.name));
+  if (!tatNames.has('section_name')) database.exec('ALTER TABLE tat_records ADD COLUMN section_name TEXT');
+  if (!tatNames.has('department_name')) database.exec('ALTER TABLE tat_records ADD COLUMN department_name TEXT');
 }
