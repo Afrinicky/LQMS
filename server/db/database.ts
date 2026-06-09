@@ -1219,5 +1219,21 @@ CREATE TABLE IF NOT EXISTS assessment_question_responses (
   updated_at TEXT,
   UNIQUE(assessment_program_id, question_id)
 );
+CREATE TABLE IF NOT EXISTS assessment_question_response_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  response_id INTEGER NOT NULL REFERENCES assessment_question_responses(id),
+  assessment_program_id INTEGER NOT NULL,
+  question_id INTEGER NOT NULL,
+  response TEXT,
+  evidence_summary TEXT,
+  finding_required INTEGER,
+  marks_awarded REAL,
+  max_marks_at_assessment REAL,
+  score_comment TEXT,
+  notes TEXT,
+  snapshot_by_staff_id INTEGER REFERENCES staff(id),
+  snapshot_by_user_id INTEGER REFERENCES users(id),
+  snapshot_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 `);
 }
