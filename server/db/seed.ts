@@ -16,6 +16,7 @@ export function seedDefaults() {
       { name: 'Blood Bank Unit Head', description: 'Blood bank section lead for handover review and quality oversight.' },
       { name: 'Safety Manager', description: 'Oversees safety incidents and reviews blood bank adverse events.' },
       { name: 'Data Officer', description: 'Imports LHIMS raw data and prepares monthly reports.' },
+      { name: 'POCT Officer', description: 'Oversees point-of-care testing sites, devices, operators, QC, EQA, and incidents.' },
       { name: 'Quality User', description: 'General QMS user role.', is_system: 1 }
     ];
     for (const role of rolesToSeed) {
@@ -62,7 +63,8 @@ export function seedDefaults() {
         management_review: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         quality_indicators: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         continual_improvement: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        customer_focus: ['view', 'create', 'edit', 'approve', 'export', 'print']
+        customer_focus: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        poct: ['view', 'create', 'edit', 'approve', 'export', 'print']
       },
       'Quality Manager': {
         documents: ['view', 'create', 'edit', 'approve', 'export', 'print'],
@@ -86,13 +88,25 @@ export function seedDefaults() {
         management_review: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         quality_indicators: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         continual_improvement: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        customer_focus: ['view', 'create', 'edit', 'approve', 'export', 'print']
+        customer_focus: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        poct: ['view', 'create', 'edit', 'approve', 'export', 'print']
       },
       'Data Officer': {
         monthly_reports: ['view', 'create', 'edit', 'export', 'print'],
         nc_capa: ['view', 'create', 'print'],
         actions: ['view', 'create', 'edit', 'print'],
         supplier_inventory: ['view', 'print']
+      },
+      'POCT Officer': {
+        poct: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        nc_capa: ['view', 'create', 'edit', 'print'],
+        actions: ['view', 'create', 'edit', 'print'],
+        equipment: ['view', 'create', 'edit', 'print'],
+        iqc: ['view', 'create', 'edit', 'print'],
+        eqa: ['view', 'create', 'edit', 'print'],
+        personnel: ['view', 'create', 'edit', 'print'],
+        supplier_inventory: ['view', 'print'],
+        documents: ['view', 'print']
       },
       'Blood Bank Unit Head': {
         blood_bank_handover: ['view', 'create', 'edit', 'approve', 'export', 'print'],
@@ -131,7 +145,8 @@ export function seedDefaults() {
         management_review: ['view', 'create', 'edit', 'print'],
         quality_indicators: ['view', 'create', 'edit', 'print'],
         continual_improvement: ['view', 'create', 'edit', 'print'],
-        customer_focus: ['view', 'create', 'edit', 'print']
+        customer_focus: ['view', 'create', 'edit', 'print'],
+        poct: ['view', 'create', 'edit', 'print']
       },
       'Section Head': {
         documents: ['view', 'create', 'edit', 'print'],
@@ -154,7 +169,8 @@ export function seedDefaults() {
         management_review: ['view'],
         quality_indicators: ['view', 'create', 'edit', 'print'],
         continual_improvement: ['view', 'create', 'edit', 'print'],
-        customer_focus: ['view', 'create', 'edit', 'print']
+        customer_focus: ['view', 'create', 'edit', 'print'],
+        poct: ['view', 'create', 'edit', 'print']
       },
       'Biomedical Scientist': {
         documents: ['view', 'print'],
@@ -177,7 +193,8 @@ export function seedDefaults() {
         meetings: ['view', 'print'],
         quality_indicators: ['view', 'create', 'print'],
         continual_improvement: ['view', 'create', 'print'],
-        customer_focus: ['view', 'create', 'print']
+        customer_focus: ['view', 'create', 'print'],
+        poct: ['view', 'create', 'edit', 'print']
       },
       'Technician': {
         documents: ['view', 'print'],
@@ -200,7 +217,8 @@ export function seedDefaults() {
         meetings: ['view'],
         quality_indicators: ['view'],
         continual_improvement: ['view'],
-        customer_focus: ['view']
+        customer_focus: ['view'],
+        poct: ['view', 'create']
       },
       'Quality User': {
         nc_capa: ['view', 'create', 'edit', 'print'],
