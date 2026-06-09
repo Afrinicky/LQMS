@@ -126,7 +126,7 @@ npm run build
 
 ## Foundations now in place
 
-NC/CAPA, Complaints, Risks, Actions, Equipment Management, Supplier & Inventory, Environmental Monitoring, Facilities & Safety, IQC, EQA, Method & Equipment Verification, Measurement Uncertainty, Blood Bank Quality & Inventory Handover, Monthly Reports & LHIMS Archive (CSV + XLSX import, mapping rules, exception review, draft/approve/export, TAT summary with per-section drill-down), Document Control (versioning, attestations, distribution inbox, watermarked print render), Personnel Management (staff documents, declarations, training, competency, technical authorisations, duty rosters with coverage/conflict detection, self-service profile), and the Phase 8 governance modules: Internal Assessments & Findings, Meetings & Minutes, Management Review (with one-click input generation across QMS modules), Quality Indicators (numerator/denominator with target/warning/critical thresholds), and Continual Improvement Projects.
+NC/CAPA, Complaints, Risks, Actions, Equipment Management, Supplier & Inventory, Environmental Monitoring, Facilities & Safety, IQC, EQA, Method & Equipment Verification, Measurement Uncertainty, Blood Bank Quality & Inventory Handover, Monthly Reports & LHIMS Archive (CSV + XLSX import, mapping rules, exception review, draft/approve/export, TAT summary with per-section drill-down), Document Control (versioning, attestations, distribution inbox, watermarked print render), Personnel Management (staff documents, declarations, training, competency, technical authorisations, duty rosters with coverage/conflict detection, self-service profile), the Phase 8 governance modules: Internal Assessments & Findings (with flexible checklist library + optional internal audit marking + printable reports), Meetings & Minutes, Management Review (with one-click input generation across QMS modules), Quality Indicators (numerator/denominator with target/warning/critical thresholds + simple trend chart), and Continual Improvement Projects, and the Phase 9 Customer Focus module covering stakeholders, service agreements, feedback intake with escalation to Complaints / Actions / NC / CAPA, satisfaction surveys with question library and response capture, customer communication log, and CSV/XLSX import batches.
 
 ## Known limitations
 
@@ -139,6 +139,7 @@ NC/CAPA, Complaints, Risks, Actions, Equipment Management, Supplier & Inventory,
 - No full POCT workflow yet.
 - No advanced report designer yet (CSV/HTML/DOC exports exist on key modules; rich PDF templating is pending).
 - No cloud/internet sync yet.
+- No live Google Forms / Google Sheets / Gmail integration yet (CSV/XLSX import is the supported intake path).
 - Some export and print layouts are placeholder templates; richer per-report-type designs will follow.
 - PDSA/run-chart designer remains a future improvement.
 - Management review narrative templating remains a future improvement.
