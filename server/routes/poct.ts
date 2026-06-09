@@ -32,12 +32,39 @@ function flagExpired(rows: any[], dateField: string) {
   });
 }
 
+function flipExpiredAuthorizations(db: any) {
+  db.prepare("UPDATE poct_operator_authorizations SET status = 'expired', updated_at = CURRENT_TIMESTAMP WHERE status = 'active' AND expiry_date IS NOT NULL AND expiry_date < date('now')").run();
+}
+
+function escHtml(v: unknown) { return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+function printShell(title: string, bodyHtml: string, autoprint: boolean): string {
+  const autoprintScript = autoprint ? '<script>window.addEventListener("load", () => { setTimeout(() => window.print(), 250); });</script>' : '';
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${escHtml(title)}</title>
+<style>@page{size:A4;margin:14mm}body{font-family:'Times New Roman',Georgia,serif;color:#111;padding:18px 24px;line-height:1.4}
+.no-print{background:#f4f6fb;padding:8px 12px;border:1px solid #ccd;border-radius:6px;margin-bottom:12px;font-size:12px}
+h1{font-size:20px;border-bottom:2px solid #1B3A6B;padding-bottom:6px;margin:0 0 12px}
+h2{font-size:14px;color:#1B3A6B;margin-top:18px;border-bottom:1px solid #ccd;padding-bottom:3px}
+table{border-collapse:collapse;width:100%;font-size:10.5px;margin:6px 0 12px}
+table th,table td{border:1px solid #aaa;padding:4px 6px;vertical-align:top;text-align:left}
+table thead th{background:#eef2f7}
+.meta th{background:#eef2f7;width:22%}
+.footer{font-size:10px;color:#555;margin-top:24px;border-top:1px solid #ccc;padding-top:6px}
+@media print{.no-print{display:none}body{padding:0}}
+</style>${autoprintScript}</head><body>
+<div class="no-print">The print dialog will open automatically. Choose any printer or Save as PDF. <button onclick="window.print()">Print</button> <a href="?autoprint=0">disable autoprint</a></div>
+${bodyHtml}
+<div class="footer">SECH_LIMS by Nickland · Generated ${new Date().toISOString().slice(0,19).replace('T',' ')} · Internal use only.</div>
+</body></html>`;
+}
+
 export function poctRoutes() {
   const router = Router();
 
   // -------- Summary (specific before everything) --------
   router.get('/summary', requirePermission('poct', 'view'), (_req, res) => {
     const db = getDb();
+    flipExpiredAuthorizations(db);
     const today = new Date().toISOString().slice(0, 10);
     const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
     const count = (sql: string, ...params: unknown[]) => (db.prepare(sql).get(...params) as { count: number }).count;
@@ -215,6 +242,7 @@ export function poctRoutes() {
   // ============= Operator Authorizations =============
   router.get('/authorizations', requirePermission('poct', 'view'), (req, res) => {
     const db = getDb();
+    flipExpiredAuthorizations(db);
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.staffId) { filters.push('a.staff_id = ?'); params.push(Number(req.query.staffId)); }
     if (req.query.status) { filters.push('a.status = ?'); params.push(String(req.query.status)); }
@@ -768,11 +796,14 @@ export function poctRoutes() {
     const eqaUnsat = count("SELECT COUNT(*) count FROM poct_eqa_events WHERE performance_status = 'unsatisfactory' AND (due_date BETWEEN ? AND ? OR submitted_date BETWEEN ? AND ?)" + siteFilter, monthStart, monthEndDate, monthStart, monthEndDate, ...siteArg);
     const openIncidents = count("SELECT COUNT(*) count FROM poct_incidents WHERE status != 'closed'" + siteFilter, ...siteArg);
     const maintenanceDue = count("SELECT COUNT(*) count FROM poct_devices WHERE next_service_due IS NOT NULL AND next_service_due <= ?" + (review.site_id ? ' AND site_id = ?' : ''), monthEndDate, ...siteArg);
-    const qcSummary = `${qcResults} QC results recorded; ${qcFailed} flagged warning/failed.`;
-    const eqaSummary = `${eqaEvents} EQA events in scope; ${eqaUnsat} unsatisfactory.`;
-    const operatorSummary = `${operatorsAuthorized} authorised operators; ${expiredAuthorizations} expired authorisation(s).`;
-    const deviceSummary = `${activeDevices} active POCT device(s); ${maintenanceDue} due for maintenance.`;
-    const incidentSummary = `${openIncidents} open POCT incident(s).`;
+    const qcByDevice = db.prepare(`SELECT pd.device_name AS name, COUNT(*) AS total, SUM(CASE WHEN r.status IN ('failed','warning') THEN 1 ELSE 0 END) AS flagged FROM poct_qc_results r LEFT JOIN poct_devices pd ON pd.id = r.device_id WHERE r.qc_date BETWEEN ? AND ?${siteFilter ? ' AND r.site_id = ?' : ''} GROUP BY pd.device_name`).all(monthStart, monthEndDate, ...siteArg) as Array<{ name: string | null; total: number; flagged: number }>;
+    const incBySev = db.prepare(`SELECT severity, COUNT(*) AS c FROM poct_incidents WHERE incident_date BETWEEN ? AND ?${siteFilter} GROUP BY severity`).all(monthStart, monthEndDate, ...siteArg) as Array<{ severity: string; c: number }>;
+    const dueDevices = db.prepare(`SELECT device_name, next_service_due FROM poct_devices WHERE next_service_due IS NOT NULL AND next_service_due <= ?${siteFilter} ORDER BY next_service_due LIMIT 10`).all(monthEndDate, ...siteArg) as Array<{ device_name: string; next_service_due: string }>;
+    const qcSummary = `Total QC results: ${qcResults}\nFlagged warning/failed: ${qcFailed}` + (qcByDevice.length ? `\nBy device:\n` + qcByDevice.map(r => `  - ${r.name || 'unknown'}: ${r.total} total, ${r.flagged} flagged`).join('\n') : '');
+    const eqaSummary = `Total EQA events in scope: ${eqaEvents}\nUnsatisfactory performance: ${eqaUnsat}`;
+    const operatorSummary = `Authorised operators (active, not expired): ${operatorsAuthorized}\nExpired authorisations: ${expiredAuthorizations}`;
+    const deviceSummary = `Active POCT devices: ${activeDevices}\nDue for maintenance by month end: ${maintenanceDue}` + (dueDevices.length ? `\nDevices due:\n` + dueDevices.map(d => `  - ${d.device_name} (due ${d.next_service_due})`).join('\n') : '');
+    const incidentSummary = `Open POCT incidents (all dates): ${openIncidents}` + (incBySev.length ? `\nThis month by severity:\n` + incBySev.map(i => `  - ${i.severity}: ${i.c}`).join('\n') : '');
     db.prepare(`UPDATE poct_monthly_reviews SET qc_summary = ?, eqa_summary = ?, operator_authorization_summary = ?, device_issue_summary = ?, incidents_summary = ?, status = CASE WHEN status = 'draft' THEN 'draft' ELSE status END, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
       .run(qcSummary, eqaSummary, operatorSummary, deviceSummary, incidentSummary, req.params.id);
     audit(req, { action: 'generate_summary', entity: 'poct_monthly_reviews', entityId: req.params.id, newValue: { activeSites, activeDevices, operatorsAuthorized, expiredAuthorizations, qcResults, qcFailed, eqaEvents, eqaUnsat, openIncidents, maintenanceDue } });
@@ -808,6 +839,133 @@ export function poctRoutes() {
     db.prepare("UPDATE poct_monthly_reviews SET status = 'closed', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
     audit(req, { action: 'close', entity: 'poct_monthly_reviews', entityId: req.params.id, oldValue: { status: review.status }, newValue: { status: 'closed' } });
     res.json({ ok: true });
+  });
+
+  // ============= QC trend chart data =============
+  router.get('/qc-trend', requirePermission('poct', 'view'), (req, res) => {
+    const db = getDb();
+    if (!req.query.deviceId || !req.query.testId) return res.status(400).json({ error: 'deviceId and testId are required' });
+    const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
+    const materialId = parseIntNullable(req.query.materialId);
+    const materialClause = materialId ? ' AND qc_material_id = ?' : '';
+    const params: unknown[] = [Number(req.query.deviceId), Number(req.query.testId)];
+    if (materialId) params.push(materialId);
+    params.push(limit);
+    const points = db.prepare(`SELECT id, qc_date, qc_time, result_value, status, interpretation FROM poct_qc_results WHERE device_id = ? AND test_id = ?${materialClause} ORDER BY qc_date DESC, id DESC LIMIT ?`).all(...params) as any[];
+    let target: number | null = null, low: number | null = null, high: number | null = null, materialName: string | null = null;
+    if (materialId) {
+      const m = db.prepare('SELECT material_name, target_value, acceptable_low, acceptable_high FROM poct_qc_materials WHERE id = ?').get(materialId) as any;
+      if (m) { materialName = m.material_name; target = m.target_value; low = m.acceptable_low; high = m.acceptable_high; }
+    }
+    res.json({
+      deviceId: Number(req.query.deviceId), testId: Number(req.query.testId), materialId, materialName,
+      target, acceptableLow: low, acceptableHigh: high,
+      points: points.reverse()
+    });
+  });
+
+  // ============= POCT actions list =============
+  router.get('/actions', requirePermission('poct', 'view'), (_req, res) => {
+    const db = getDb();
+    res.json(db.prepare(`SELECT a.*, s.full_name AS assigned_to_name FROM actions a LEFT JOIN staff s ON s.id = a.assigned_to_staff_id WHERE a.module_key = 'poct' OR a.source_module = 'poct' ORDER BY a.due_date NULLS LAST, a.id DESC LIMIT 500`).all());
+  });
+
+  // ============= Print endpoints =============
+  router.get('/sites/:id/print', requirePermission('poct', 'print'), (req, res) => {
+    const db = getDb();
+    const site = db.prepare('SELECT s.*, d.name AS department_name, sec.name AS section_name, l.name AS location_name FROM poct_sites s LEFT JOIN departments d ON d.id = s.department_id LEFT JOIN sections sec ON sec.id = s.section_id LEFT JOIN locations l ON l.id = s.location_id WHERE s.id = ?').get(req.params.id) as any;
+    if (!site) return res.status(404).send('Site not found');
+    const devices = db.prepare('SELECT * FROM poct_devices WHERE site_id = ? ORDER BY device_name').all(req.params.id) as any[];
+    flipExpiredAuthorizations(db);
+    const auths = db.prepare("SELECT a.*, s.full_name AS staff_name, pd.device_name, pt.test_name FROM poct_operator_authorizations a LEFT JOIN staff s ON s.id = a.staff_id LEFT JOIN poct_devices pd ON pd.id = a.device_id LEFT JOIN poct_tests pt ON pt.id = a.test_id WHERE a.site_id = ? AND a.status IN ('active','suspended') ORDER BY s.full_name").all(req.params.id) as any[];
+    const recentQc = db.prepare(`SELECT r.*, pd.device_name, pt.test_name FROM poct_qc_results r LEFT JOIN poct_devices pd ON pd.id = r.device_id LEFT JOIN poct_tests pt ON pt.id = r.test_id WHERE r.site_id = ? ORDER BY r.qc_date DESC LIMIT 25`).all(req.params.id) as any[];
+    const openInc = db.prepare("SELECT * FROM poct_incidents WHERE site_id = ? AND status != 'closed' ORDER BY incident_date DESC LIMIT 25").all(req.params.id) as any[];
+    const body = `<h1>${escHtml(site.site_code || '—')} &nbsp;&mdash;&nbsp; ${escHtml(site.site_name)}</h1>
+<table class="meta"><tr><th>Department</th><td>${escHtml(site.department_name || '—')}</td><th>Section</th><td>${escHtml(site.section_name || '—')}</td></tr>
+<tr><th>Location</th><td>${escHtml(site.location_name || '—')}</td><th>Status</th><td>${escHtml(site.status)}</td></tr>
+<tr><th>Service area</th><td>${escHtml(site.service_area || '—')}</td><th>Contact</th><td>${escHtml(site.contact_person || '—')}</td></tr></table>
+<h2>Devices</h2><table><thead><tr><th>Code</th><th>Name</th><th>Type</th><th>Status</th><th>Next service</th></tr></thead><tbody>
+${devices.map(d => `<tr><td>${escHtml(d.device_code || '—')}</td><td>${escHtml(d.device_name)}</td><td>${escHtml(d.device_type)}</td><td>${escHtml(d.status)}</td><td>${escHtml(d.next_service_due || '—')}</td></tr>`).join('')}
+</tbody></table>
+<h2>Active operator authorisations</h2><table><thead><tr><th>Staff</th><th>Device</th><th>Test</th><th>Level</th><th>Expiry</th></tr></thead><tbody>
+${auths.map(a => `<tr><td>${escHtml(a.staff_name || '—')}</td><td>${escHtml(a.device_name || '—')}</td><td>${escHtml(a.test_name || '—')}</td><td>${escHtml((a.authorization_level || '').replace(/_/g, ' '))}</td><td>${escHtml(a.expiry_date || '—')}</td></tr>`).join('')}
+</tbody></table>
+<h2>Recent QC results</h2><table><thead><tr><th>Number</th><th>Date</th><th>Device</th><th>Test</th><th>Value</th><th>Status</th></tr></thead><tbody>
+${recentQc.map(r => `<tr><td>${escHtml(r.qc_number)}</td><td>${escHtml(r.qc_date)}</td><td>${escHtml(r.device_name || '—')}</td><td>${escHtml(r.test_name || '—')}</td><td>${r.result_value ?? '—'}</td><td>${escHtml(r.status)}</td></tr>`).join('')}
+</tbody></table>
+<h2>Open incidents</h2><table><thead><tr><th>Number</th><th>Date</th><th>Title</th><th>Severity</th><th>Status</th></tr></thead><tbody>
+${openInc.map(i => `<tr><td>${escHtml(i.incident_number)}</td><td>${escHtml(i.incident_date)}</td><td>${escHtml(i.title)}</td><td>${escHtml(i.severity)}</td><td>${escHtml(i.status)}</td></tr>`).join('')}
+</tbody></table>`;
+    audit(req, { action: 'print', entity: 'poct_sites', entityId: req.params.id });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(printShell(`${site.site_code || ''} ${site.site_name} — POCT site report`, body, req.query.autoprint !== '0'));
+  });
+
+  router.get('/sites/:id/authorization-roster/print', requirePermission('poct', 'print'), (req, res) => {
+    const db = getDb();
+    const site = db.prepare('SELECT * FROM poct_sites WHERE id = ?').get(req.params.id) as any;
+    if (!site) return res.status(404).send('Site not found');
+    flipExpiredAuthorizations(db);
+    const auths = db.prepare(`SELECT a.*, s.full_name AS staff_name, pd.device_name, pt.test_name FROM poct_operator_authorizations a LEFT JOIN staff s ON s.id = a.staff_id LEFT JOIN poct_devices pd ON pd.id = a.device_id LEFT JOIN poct_tests pt ON pt.id = a.test_id WHERE a.site_id = ? ORDER BY a.status, s.full_name`).all(req.params.id) as any[];
+    const body = `<h1>Authorisation roster — ${escHtml(site.site_name)}</h1>
+<p>${escHtml(site.site_code || '—')} &nbsp;|&nbsp; status: ${escHtml(site.status)}</p>
+<table><thead><tr><th>Number</th><th>Staff</th><th>Device</th><th>Test</th><th>Level</th><th>Authorised</th><th>Expiry</th><th>Status</th></tr></thead><tbody>
+${auths.map(a => `<tr><td>${escHtml(a.authorization_number || '—')}</td><td>${escHtml(a.staff_name || '—')}</td><td>${escHtml(a.device_name || '—')}</td><td>${escHtml(a.test_name || '—')}</td><td>${escHtml((a.authorization_level || '').replace(/_/g, ' '))}</td><td>${escHtml(a.authorized_date || '—')}</td><td>${escHtml(a.expiry_date || '—')}</td><td>${escHtml(a.status)}</td></tr>`).join('')}
+</tbody></table>
+<p>Total authorisations: ${auths.length}</p>
+<div style="margin-top:36px"><strong>Site lead signature:</strong> __________________________ &nbsp; Date: ____________</div>`;
+    audit(req, { action: 'print_roster', entity: 'poct_sites', entityId: req.params.id });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(printShell(`Authorisation roster — ${site.site_name}`, body, req.query.autoprint !== '0'));
+  });
+
+  router.get('/qc-report/print', requirePermission('poct', 'print'), (req, res) => {
+    const db = getDb();
+    const from = typeof req.query.from === 'string' ? req.query.from : new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
+    const to = typeof req.query.to === 'string' ? req.query.to : new Date().toISOString().slice(0, 10);
+    const filters: string[] = ['r.qc_date BETWEEN ? AND ?']; const params: unknown[] = [from, to];
+    if (req.query.siteId) { filters.push('r.site_id = ?'); params.push(Number(req.query.siteId)); }
+    if (req.query.deviceId) { filters.push('r.device_id = ?'); params.push(Number(req.query.deviceId)); }
+    const rows = db.prepare(`SELECT r.*, pd.device_name, pt.test_name, m.material_name FROM poct_qc_results r LEFT JOIN poct_devices pd ON pd.id = r.device_id LEFT JOIN poct_tests pt ON pt.id = r.test_id LEFT JOIN poct_qc_materials m ON m.id = r.qc_material_id WHERE ${filters.join(' AND ')} ORDER BY r.qc_date, r.id`).all(...params) as any[];
+    const total = rows.length;
+    const failed = rows.filter(r => r.status === 'failed' || r.status === 'warning').length;
+    const body = `<h1>POCT QC report</h1>
+<p>Period: ${escHtml(from)} → ${escHtml(to)} &nbsp;|&nbsp; Total results: ${total} &nbsp;|&nbsp; Flagged: ${failed}</p>
+<table><thead><tr><th>Number</th><th>Date</th><th>Device</th><th>Test</th><th>Material</th><th>Value</th><th>Interp.</th><th>Status</th><th>Immediate action</th></tr></thead><tbody>
+${rows.map(r => `<tr><td>${escHtml(r.qc_number)}</td><td>${escHtml(r.qc_date)}${r.qc_time ? ' ' + escHtml(r.qc_time) : ''}</td><td>${escHtml(r.device_name || '—')}</td><td>${escHtml(r.test_name || '—')}</td><td>${escHtml(r.material_name || '—')}</td><td>${r.result_value ?? '—'}</td><td>${escHtml(r.interpretation || '—')}</td><td>${escHtml(r.status)}</td><td>${escHtml(r.immediate_action || '—')}</td></tr>`).join('')}
+</tbody></table>`;
+    audit(req, { action: 'print_qc_report', entity: 'poct_qc_results', entityId: `${from}_to_${to}` });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(printShell('POCT QC report', body, req.query.autoprint !== '0'));
+  });
+
+  router.get('/monthly-reviews/:id/print', requirePermission('poct', 'print'), (req, res) => {
+    const db = getDb();
+    const review = db.prepare('SELECT mr.*, ps.site_name FROM poct_monthly_reviews mr LEFT JOIN poct_sites ps ON ps.id = mr.site_id WHERE mr.id = ?').get(req.params.id) as any;
+    if (!review) return res.status(404).send('Monthly review not found');
+    const monthStart = `${review.review_year}-${String(review.review_month).padStart(2, '0')}-01`;
+    const monthEnd = new Date(review.review_year, review.review_month, 0).toISOString().slice(0, 10);
+    const siteFilter = review.site_id ? ' AND site_id = ?' : '';
+    const siteArg: unknown[] = review.site_id ? [review.site_id] : [];
+    const qcRows = db.prepare(`SELECT r.*, pd.device_name, pt.test_name FROM poct_qc_results r LEFT JOIN poct_devices pd ON pd.id = r.device_id LEFT JOIN poct_tests pt ON pt.id = r.test_id WHERE r.qc_date BETWEEN ? AND ?${siteFilter ? ' AND r.site_id = ?' : ''} AND r.status IN ('failed','warning') ORDER BY r.qc_date`).all(monthStart, monthEnd, ...siteArg) as any[];
+    const incRows = db.prepare(`SELECT * FROM poct_incidents WHERE incident_date BETWEEN ? AND ?${siteFilter} ORDER BY incident_date`).all(monthStart, monthEnd, ...siteArg) as any[];
+    const body = `<h1>${escHtml(review.review_number)} &nbsp;&mdash;&nbsp; POCT Monthly Review</h1>
+<table class="meta"><tr><th>Period</th><td>${review.review_year}-${String(review.review_month).padStart(2, '0')}</td><th>Site</th><td>${escHtml(review.site_name || 'all sites')}</td></tr>
+<tr><th>Status</th><td>${escHtml(review.status)}</td><th>Reviewed at</th><td>${escHtml(review.reviewed_at || '—')}</td></tr></table>
+${review.summary ? `<h2>Summary</h2><p>${escHtml(review.summary)}</p>` : ''}
+${review.qc_summary ? `<h2>QC</h2><p>${escHtml(review.qc_summary)}</p>` : ''}
+${review.eqa_summary ? `<h2>EQA</h2><p>${escHtml(review.eqa_summary)}</p>` : ''}
+${review.operator_authorization_summary ? `<h2>Operator authorisations</h2><p>${escHtml(review.operator_authorization_summary)}</p>` : ''}
+${review.device_issue_summary ? `<h2>Devices</h2><p>${escHtml(review.device_issue_summary)}</p>` : ''}
+${review.incidents_summary ? `<h2>Incidents</h2><p>${escHtml(review.incidents_summary)}</p>` : ''}
+${review.actions_required ? `<h2>Actions required</h2><p>${escHtml(review.actions_required)}</p>` : ''}
+${qcRows.length ? `<h2>QC failures / warnings in period</h2><table><thead><tr><th>Date</th><th>Device</th><th>Test</th><th>Value</th><th>Status</th></tr></thead><tbody>${qcRows.map(r => `<tr><td>${escHtml(r.qc_date)}</td><td>${escHtml(r.device_name || '—')}</td><td>${escHtml(r.test_name || '—')}</td><td>${r.result_value ?? '—'}</td><td>${escHtml(r.status)}</td></tr>`).join('')}</tbody></table>` : ''}
+${incRows.length ? `<h2>Incidents in period</h2><table><thead><tr><th>Number</th><th>Date</th><th>Title</th><th>Severity</th><th>Status</th></tr></thead><tbody>${incRows.map(i => `<tr><td>${escHtml(i.incident_number)}</td><td>${escHtml(i.incident_date)}</td><td>${escHtml(i.title)}</td><td>${escHtml(i.severity)}</td><td>${escHtml(i.status)}</td></tr>`).join('')}</tbody></table>` : ''}
+<div style="margin-top:36px"><strong>Reviewer signature:</strong> __________________________ &nbsp; Date: ____________</div>
+<div style="margin-top:18px"><strong>Approver signature:</strong> __________________________ &nbsp; Date: ____________</div>`;
+    audit(req, { action: 'print', entity: 'poct_monthly_reviews', entityId: req.params.id });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(printShell(`${review.review_number} — POCT Monthly Review`, body, req.query.autoprint !== '0'));
   });
 
   return router;

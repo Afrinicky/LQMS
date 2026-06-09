@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useModules } from '../hooks/useModules';
-import { api } from '../services/api';
+import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import type {
   Section, Department, Staff, Location,
@@ -58,6 +58,9 @@ export function POCTPage() {
   const [maintenance, setMaintenance] = useState<PoctMaintenanceLog[]>([]);
   const [incidents, setIncidents] = useState<PoctIncident[]>([]);
   const [reviews, setReviews] = useState<PoctMonthlyReview[]>([]);
+  const [poctActions, setPoctActions] = useState<any[]>([]);
+  const [trendFilter, setTrendFilter] = useState<{ deviceId: string; testId: string; materialId: string }>({ deviceId: '', testId: '', materialId: '' });
+  const [trendData, setTrendData] = useState<any | null>(null);
 
   const [siteForm, setSiteForm] = useState({ siteCode: '', siteName: '', departmentId: '', sectionId: '', locationId: '', serviceArea: '', responsibleStaffId: '', contactPerson: '', notes: '' });
   const [deviceForm, setDeviceForm] = useState({ siteId: '', deviceCode: '', deviceName: '', deviceType: '', manufacturer: '', model: '', serialNumber: '', testMenuSummary: '', installationDate: '', nextServiceDue: '', notes: '' });
@@ -96,6 +99,30 @@ export function POCTPage() {
   if (!isEnabled('poct')) return <DisabledModule />;
 
   async function post(path: string, body: any) { return api(path, { method: 'POST', body: JSON.stringify(body) }); }
+
+  async function openPrintPage(path: string) {
+    try {
+      const token = getToken();
+      const response = await fetch(`${API_BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+      if (!response.ok) throw new Error(await response.text() || response.statusText);
+      const html = await response.text();
+      const w = window.open('', '_blank');
+      if (!w) { setError('Pop-up blocked. Allow pop-ups to open the print dialog.'); return; }
+      w.document.open(); w.document.write(html); w.document.close();
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  async function loadTrend() {
+    if (!trendFilter.deviceId || !trendFilter.testId) { setTrendData(null); return; }
+    try {
+      const params = new URLSearchParams({ deviceId: trendFilter.deviceId, testId: trendFilter.testId });
+      if (trendFilter.materialId) params.set('materialId', trendFilter.materialId);
+      setTrendData(await api(`/poct/qc-trend?${params.toString()}`));
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  async function loadActions() { try { setPoctActions(await api<any[]>('/poct/actions')); } catch (e) { setError((e as Error).message); } }
+  useEffect(() => { if (tab === 'Reports' && isEnabled('poct')) void loadActions(); }, [tab, isEnabled]);
 
   async function submitSite(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/poct/sites', siteForm); setSiteForm({ siteCode: '', siteName: '', departmentId: '', sectionId: '', locationId: '', serviceArea: '', responsibleStaffId: '', contactPerson: '', notes: '' }); await load(); } catch (e) { setError((e as Error).message); } }
   async function toggleSite(id: number) { try { await post(`/poct/sites/${id}/toggle`, {}); await load(); } catch (e) { setError((e as Error).message); } }
@@ -161,7 +188,7 @@ export function POCTPage() {
         <button type="submit">Create site</button>
       </form>
       <table className="data-table"><thead><tr><th>Code</th><th>Name</th><th>Section</th><th>Responsible</th><th>Status</th><th></th></tr></thead><tbody>
-        {sites.map(s => <tr key={s.id}><td>{s.site_code || '—'}</td><td>{s.site_name}</td><td>{sections.find(x => x.id === s.section_id)?.name || '—'}</td><td>{staffName(staff, s.responsible_staff_id)}</td><td>{formatBadge(s.status)}</td><td><button onClick={() => toggleSite(s.id)}>Toggle</button></td></tr>)}
+        {sites.map(s => <tr key={s.id}><td>{s.site_code || '—'}</td><td>{s.site_name}</td><td>{sections.find(x => x.id === s.section_id)?.name || '—'}</td><td>{staffName(staff, s.responsible_staff_id)}</td><td>{formatBadge(s.status)}</td><td><button onClick={() => toggleSite(s.id)}>Toggle</button> <button onClick={() => openPrintPage(`/poct/sites/${s.id}/print`)}>Print site report</button> <button onClick={() => openPrintPage(`/poct/sites/${s.id}/authorization-roster/print`)}>Print roster</button></td></tr>)}
       </tbody></table>
     </>}
 
@@ -280,6 +307,42 @@ export function POCTPage() {
           <td>{!r.reviewed_at && <button onClick={() => reviewQc(r.id)}>Review</button>}{!r.nc_id && (r.status === 'failed' || r.status === 'warning') && <button onClick={() => qcCreateNc(r.id)}>NC</button>}{!r.capa_id && (r.status === 'failed' || r.status === 'warning') && <button onClick={() => qcCreateCapa(r.id)}>CAPA</button>}</td>
         </tr>)}
       </tbody></table>
+
+      <h3>QC trend</h3>
+      <div className="form-grid">
+        <label>Device<select value={trendFilter.deviceId} onChange={e => setTrendFilter({ ...trendFilter, deviceId: e.target.value })}><option value="">—</option>{devices.map(d => <option key={d.id} value={d.id}>{d.device_name}</option>)}</select></label>
+        <label>Test<select value={trendFilter.testId} onChange={e => setTrendFilter({ ...trendFilter, testId: e.target.value })}><option value="">—</option>{tests.map(t => <option key={t.id} value={t.id}>{t.test_name}</option>)}</select></label>
+        <label>QC material (optional)<select value={trendFilter.materialId} onChange={e => setTrendFilter({ ...trendFilter, materialId: e.target.value })}><option value="">—</option>{qcMaterials.map(m => <option key={m.id} value={m.id}>{m.material_name}</option>)}</select></label>
+        <button type="button" onClick={loadTrend}>Load trend</button>
+        <button type="button" onClick={() => openPrintPage(`/poct/qc-report/print${trendFilter.deviceId ? `?deviceId=${trendFilter.deviceId}` : ''}`)}>Print QC report</button>
+      </div>
+      {trendData && trendData.points && trendData.points.length > 0 && (() => {
+        const points = trendData.points as Array<{ qc_date: string; result_value: number | null; status: string }>;
+        const values = points.map(p => p.result_value).filter((v): v is number => v !== null && v !== undefined);
+        const target = trendData.target as number | null;
+        const low = trendData.acceptableLow as number | null;
+        const high = trendData.acceptableHigh as number | null;
+        const candidates = [...values, ...(target !== null ? [target] : []), ...(low !== null ? [low] : []), ...(high !== null ? [high] : [])];
+        if (!candidates.length) return <p>No numeric data.</p>;
+        const lo = Math.min(...candidates), hi = Math.max(...candidates);
+        const span = (hi - lo) || 1;
+        const yMin = lo - span * 0.1, yMax = hi + span * 0.1;
+        const w = 720, h = 240, padL = 48, padR = 16, padT = 16, padB = 32;
+        const innerW = w - padL - padR, innerH = h - padT - padB;
+        const x = (i: number) => padL + (points.length === 1 ? innerW / 2 : (i * innerW) / (points.length - 1));
+        const y = (v: number) => padT + innerH - ((v - yMin) / (yMax - yMin)) * innerH;
+        const colorFor = (status: string) => status === 'accepted' ? 'var(--success, #2a9d4a)' : status === 'warning' ? 'var(--warning, #d99500)' : status === 'failed' ? 'var(--danger, #d23a2a)' : 'var(--muted, #888)';
+        const linePath = points.map((p, i) => p.result_value === null || p.result_value === undefined ? '' : `${i === 0 ? 'M' : 'L'} ${x(i).toFixed(1)} ${y(p.result_value).toFixed(1)}`).filter(Boolean).join(' ');
+        const refLine = (val: number, label: string, color: string) => <g key={label}><line x1={padL} x2={w - padR} y1={y(val)} y2={y(val)} stroke={color} strokeWidth={1} strokeDasharray="4 4" /><text x={padL - 6} y={y(val) + 4} fontSize={10} textAnchor="end" fill="var(--muted, #666)">{label}</text></g>;
+        return <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label="POCT QC trend" style={{ width: '100%', maxWidth: w, height: 'auto', background: '#fff', border: '1px solid var(--border, #ddd)', borderRadius: 8 }}>
+          {target !== null && refLine(target, `Target ${target}`, '#2a9d4a')}
+          {low !== null && refLine(low, `Low ${low}`, '#d99500')}
+          {high !== null && refLine(high, `High ${high}`, '#d99500')}
+          <path d={linePath} fill="none" stroke="#1B3A6B" strokeWidth={1.5} />
+          {points.map((p, i) => p.result_value === null || p.result_value === undefined ? null : <circle key={i} cx={x(i)} cy={y(p.result_value)} r={4} fill={colorFor(p.status)} stroke="#fff" strokeWidth={1}><title>{p.qc_date}: {p.result_value} ({p.status})</title></circle>)}
+        </svg>;
+      })()}
+      {trendData && (!trendData.points || trendData.points.length === 0) && <p>No QC results for the selected filters.</p>}
     </>}
 
     {tab === 'EQA Monitoring' && <>
@@ -350,18 +413,24 @@ export function POCTPage() {
       <table className="data-table"><thead><tr><th>Number</th><th>Period</th><th>Site</th><th>Status</th><th>Summaries</th><th></th></tr></thead><tbody>
         {reviews.map(r => <tr key={r.id}><td>{r.review_number}</td><td>{r.review_year}-{String(r.review_month).padStart(2, '0')}</td><td>{r.site_name || 'all'}</td><td>{formatBadge(r.status)}</td>
           <td>{[r.qc_summary, r.eqa_summary, r.operator_authorization_summary, r.device_issue_summary, r.incidents_summary].filter(Boolean).join(' · ') || '—'}</td>
-          <td><button onClick={() => generateReviewSummary(r.id)}>Generate summary</button>{r.status === 'draft' && <button onClick={() => reviewReview(r.id)}>Review</button>}{r.status === 'reviewed' && <button onClick={() => approveReview(r.id)}>Approve</button>}{r.status === 'approved' && <button onClick={() => closeReview(r.id)}>Close</button>}</td>
+          <td><button onClick={() => generateReviewSummary(r.id)}>Generate summary</button>{r.status === 'draft' && <button onClick={() => reviewReview(r.id)}>Review</button>}{r.status === 'reviewed' && <button onClick={() => approveReview(r.id)}>Approve</button>}{r.status === 'approved' && <button onClick={() => closeReview(r.id)}>Close</button>} <button onClick={() => openPrintPage(`/poct/monthly-reviews/${r.id}/print`)}>Print</button></td>
         </tr>)}
       </tbody></table>
     </>}
 
     {tab === 'Reports' && <>
+      <h3>Printable reports</h3>
       <ul>
-        <li>POCT site report — placeholder. Future printable per-site summary.</li>
-        <li>POCT QC report — placeholder. Future Levey-Jennings-style trend per device/test.</li>
-        <li>POCT authorisation report — placeholder. Future printable operator roster per site.</li>
-        <li>POCT monthly review report — placeholder. Future printable monthly review.</li>
+        <li>Site report: open Sites tab and click <em>Print site report</em> on the desired row. Includes devices, active authorisations, recent QC, and open incidents.</li>
+        <li>Authorisation roster: open Sites tab and click <em>Print roster</em>.</li>
+        <li>QC report: <button type="button" onClick={() => openPrintPage('/poct/qc-report/print')}>Print QC report (current month, all sites)</button> — or use the Print QC report button inside QC Monitoring to scope by device.</li>
+        <li>Monthly review: open Monthly Reviews tab and click <em>Print</em>.</li>
       </ul>
+      <h3>POCT actions (from incidents)</h3>
+      <table className="data-table"><thead><tr><th>Title</th><th>Status</th><th>Priority</th><th>Assigned to</th><th>Due</th><th>Source record</th></tr></thead><tbody>
+        {poctActions.map(a => <tr key={a.id}><td>{a.title}</td><td>{formatBadge(a.status)}</td><td>{a.priority}</td><td>{a.assigned_to_name || (a.assigned_to_staff_id ? `Staff #${a.assigned_to_staff_id}` : '—')}</td><td>{a.due_date || '—'}</td><td>{a.source_module && a.source_record_id ? `${a.source_module}#${a.source_record_id}` : '—'}</td></tr>)}
+      </tbody></table>
+      {poctActions.length === 0 && <p>No POCT-linked actions yet.</p>}
     </>}
   </div>;
 }

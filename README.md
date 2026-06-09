@@ -140,7 +140,7 @@ NC/CAPA, Complaints, Risks, Actions, Equipment Management, Supplier & Inventory,
 - No advanced report designer yet (CSV/HTML/DOC exports exist on key modules; rich PDF templating is pending).
 - No cloud/internet sync yet.
 - No live Google Forms / Google Sheets / Gmail integration yet. CSV/XLSX import is the supported intake path; outbound email communications can be drafted via the operating system's default mail client through a mailto link, but no SMTP/Gmail API is wired.
-- No live POCT device or result interfacing yet. POCT Oversight captures the quality-management workflow (sites, devices, operators, QC, EQA, maintenance, incidents, monthly reviews); patient result reporting remains with LHIMS/Lightwave and direct device communication has not been added.
+- No live POCT device or result interfacing yet. POCT Oversight captures the quality-management workflow (sites, devices, operators, QC, EQA, maintenance, incidents, monthly reviews) plus inline QC trend chart, auto-flip of expired operator authorisations, multi-section monthly review summary generation, and printable site / authorisation roster / QC / monthly review reports through the OS print dialog. Patient result reporting remains with LHIMS/Lightwave and direct device communication has not been added.
 - Customer Focus now includes survey response analytics, a cross-survey response list, CSV/XLSX import auto-mapping for stakeholders, feedback, and survey_responses (with surveyNumber/surveyId + per-question columns), and a per-service-agreement performance panel derived from feedback and communications in the agreement period.
 - Some export and print layouts are placeholder templates; richer per-report-type designs will follow.
 - PDSA/run-chart designer remains a future improvement.
