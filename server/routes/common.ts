@@ -211,6 +211,23 @@ export function commonRoutes() {
     });
   });
 
+  router.get('/dashboard/poct-summary', (_req, res) => {
+    const db = getDb();
+    const today = new Date().toISOString().slice(0, 10);
+    const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
+    const count = (sql: string, ...params: unknown[]) => (db.prepare(sql).get(...params) as { count: number }).count;
+    res.json({
+      activeSites: count("SELECT COUNT(*) count FROM poct_sites WHERE status = 'active'"),
+      activeDevices: count("SELECT COUNT(*) count FROM poct_devices WHERE status = 'active'"),
+      authorizedOperators: count("SELECT COUNT(DISTINCT staff_id) count FROM poct_operator_authorizations WHERE status = 'active' AND (expiry_date IS NULL OR expiry_date >= ?)", today),
+      expiredAuthorizations: count("SELECT COUNT(*) count FROM poct_operator_authorizations WHERE expiry_date IS NOT NULL AND expiry_date < ? AND status NOT IN ('revoked')", today),
+      qcFailuresThisMonth: count("SELECT COUNT(*) count FROM poct_qc_results WHERE status IN ('failed','warning') AND qc_date >= ?", monthStart),
+      unsatisfactoryEqaEvents: count("SELECT COUNT(*) count FROM poct_eqa_events WHERE performance_status = 'unsatisfactory'"),
+      openIncidents: count("SELECT COUNT(*) count FROM poct_incidents WHERE status != 'closed'"),
+      maintenanceDue: count("SELECT COUNT(*) count FROM poct_devices WHERE next_service_due IS NOT NULL AND next_service_due <= ?", today)
+    });
+  });
+
   router.get('/dashboard/governance-summary', (_req, res) => {
     const db = getDb();
     const todayIso = new Date().toISOString().slice(0, 10);

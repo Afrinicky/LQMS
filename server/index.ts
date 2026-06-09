@@ -25,6 +25,7 @@ import { managementReviewRoutes } from './routes/managementReview.js';
 import { qualityIndicatorsRoutes } from './routes/qualityIndicators.js';
 import { improvementRoutes } from './routes/improvement.js';
 import { customerFocusRoutes } from './routes/customerFocus.js';
+import { poctRoutes } from './routes/poct.js';
 import { optionalAuth } from './middleware/auth.js';
 import { ensureDataDirs } from './db/database.js';
 import { seedDefaults } from './db/seed.js';
@@ -61,6 +62,7 @@ export function createApiServer() {
   app.use('/api/quality-indicators', qualityIndicatorsRoutes());
   app.use('/api/improvement', improvementRoutes());
   app.use('/api/customer-focus', customerFocusRoutes());
+  app.use('/api/poct', poctRoutes());
   app.use('/api', commonRoutes());
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const message = err instanceof Error ? err.message : 'Unexpected server error';
