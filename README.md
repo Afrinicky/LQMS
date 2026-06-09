@@ -2,7 +2,7 @@
 
 Foundation MVP scaffold for an offline-first, LAN-ready Windows desktop Laboratory Quality Management System for St. Elizabeth Catholic Hospital Laboratory.
 
-SECH_LIMS works alongside LHIMS/Lightwave. It focuses on neutral daily QMS operations such as document control, records/evidence, personnel, organogram positions, authorization foundations, actions, audit trail, backups, and host/client readiness. It does **not** include GAS, SLIPTA, ISO scoring, accreditation scoring, star ratings, checklist scores, or compliance percentages.
+SECH_LIMS works alongside LHIMS/Lightwave. It focuses on neutral daily QMS operations such as document control, records/evidence, personnel, organogram positions, authorization foundations, actions, audit trail, backups, and host/client readiness. It does **not** include official GAS, SLIPTA, ISO scoring, accreditation scoring, star ratings, or official compliance grading. Internal audit marking is supported as a configurable internal assessment tool inside the assessment checklist module; it is an internal score only and is never relabelled as an accreditation or official compliance score.
 
 ## Technology stack
 
@@ -139,7 +139,8 @@ NC/CAPA, Complaints, Risks, Actions, Equipment Management, Supplier & Inventory,
 - No full POCT workflow yet.
 - No advanced report designer yet (CSV/HTML/DOC exports exist on key modules; rich PDF templating is pending).
 - No cloud/internet sync yet.
-- No live Google Forms / Google Sheets / Gmail integration yet (CSV/XLSX import is the supported intake path).
+- No live Google Forms / Google Sheets / Gmail integration yet. CSV/XLSX import is the supported intake path; outbound email communications can be drafted via the operating system's default mail client through a mailto link, but no SMTP/Gmail API is wired.
+- Customer Focus now includes survey response analytics, a cross-survey response list, CSV/XLSX import auto-mapping for stakeholders, feedback, and survey_responses (with surveyNumber/surveyId + per-question columns), and a per-service-agreement performance panel derived from feedback and communications in the agreement period.
 - Some export and print layouts are placeholder templates; richer per-report-type designs will follow.
 - PDSA/run-chart designer remains a future improvement.
 - Management review narrative templating remains a future improvement.

@@ -434,6 +434,65 @@ export function customerFocusRoutes() {
     res.json({ ok: true });
   });
 
+  router.get('/surveys/:id/analytics', requirePermission('customer_focus', 'view'), (req, res) => {
+    const db = getDb();
+    const survey = db.prepare('SELECT * FROM satisfaction_surveys WHERE id = ?').get(req.params.id) as any;
+    if (!survey) return res.status(404).json({ error: 'Survey not found' });
+    const questions = db.prepare('SELECT * FROM satisfaction_survey_questions WHERE survey_id = ? ORDER BY display_order, id').all(req.params.id) as any[];
+    const totalResponses = (db.prepare('SELECT COUNT(*) AS c FROM satisfaction_survey_responses WHERE survey_id = ?').get(req.params.id) as { c: number }).c;
+    const analytics = questions.map(q => {
+      const items = db.prepare('SELECT answer_text, answer_number FROM satisfaction_survey_answer_items WHERE question_id = ?').all(q.id) as Array<{ answer_text: string | null; answer_number: number | null }>;
+      const answered = items.length;
+      if (q.question_type === 'scale') {
+        const nums = items.map(i => i.answer_number).filter((n): n is number => n !== null && n !== undefined && Number.isFinite(Number(n)));
+        const mean = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
+        const min = nums.length ? Math.min(...nums) : null;
+        const max = nums.length ? Math.max(...nums) : null;
+        const dist: Record<string, number> = {};
+        for (const n of nums) dist[String(n)] = (dist[String(n)] || 0) + 1;
+        return { question_id: q.id, question_text: q.question_text, question_type: q.question_type, answered, mean, min, max, distribution: dist };
+      }
+      if (q.question_type === 'yes_no' || q.question_type === 'multiple_choice') {
+        const dist: Record<string, number> = {};
+        for (const i of items) { const k = (i.answer_text || '').trim() || '(blank)'; dist[k] = (dist[k] || 0) + 1; }
+        return { question_id: q.id, question_text: q.question_text, question_type: q.question_type, answered, distribution: dist };
+      }
+      const samples = items.slice(0, 5).map(i => (i.answer_text || '').slice(0, 200));
+      return { question_id: q.id, question_text: q.question_text, question_type: q.question_type, answered, samples };
+    });
+    res.json({ survey_id: Number(req.params.id), survey_title: survey.survey_title, total_responses: totalResponses, period_start: survey.period_start, period_end: survey.period_end, status: survey.status, questions: analytics });
+  });
+
+  router.get('/service-agreements/:id/performance', requirePermission('customer_focus', 'view'), (req, res) => {
+    const db = getDb();
+    const sa = db.prepare('SELECT sa.*, cs.stakeholder_name FROM service_agreements sa LEFT JOIN customer_stakeholders cs ON cs.id = sa.stakeholder_id WHERE sa.id = ?').get(req.params.id) as any;
+    if (!sa) return res.status(404).json({ error: 'Service agreement not found' });
+    const start = sa.start_date || '1900-01-01';
+    const end = sa.end_date || '2100-12-31';
+    const count = (sql: string, ...params: unknown[]) => (db.prepare(sql).get(...params) as { count: number }).count;
+    const feedbackTotal = count('SELECT COUNT(*) count FROM customer_feedback WHERE stakeholder_id = ? AND feedback_date BETWEEN ? AND ?', sa.stakeholder_id, start, end);
+    const feedbackOpen = count("SELECT COUNT(*) count FROM customer_feedback WHERE stakeholder_id = ? AND feedback_date BETWEEN ? AND ? AND status NOT IN ('resolved','closed')", sa.stakeholder_id, start, end);
+    const feedbackHigh = count("SELECT COUNT(*) count FROM customer_feedback WHERE stakeholder_id = ? AND feedback_date BETWEEN ? AND ? AND urgency IN ('high','critical')", sa.stakeholder_id, start, end);
+    const escalated = count('SELECT COUNT(*) count FROM customer_feedback WHERE stakeholder_id = ? AND feedback_date BETWEEN ? AND ? AND complaint_id IS NOT NULL', sa.stakeholder_id, start, end);
+    const communications = count('SELECT COUNT(*) count FROM customer_communication_logs WHERE stakeholder_id = ? AND communication_date BETWEEN ? AND ?', sa.stakeholder_id, start, end);
+    const byType = db.prepare("SELECT feedback_type, COUNT(*) AS c FROM customer_feedback WHERE stakeholder_id = ? AND feedback_date BETWEEN ? AND ? GROUP BY feedback_type").all(sa.stakeholder_id, start, end) as Array<{ feedback_type: string; c: number }>;
+    res.json({
+      agreement_id: Number(req.params.id),
+      agreement_number: sa.agreement_number,
+      stakeholder_name: sa.stakeholder_name,
+      period_start: sa.start_date,
+      period_end: sa.end_date,
+      agreed_turnaround: sa.agreed_turnaround,
+      feedback_total: feedbackTotal,
+      feedback_open: feedbackOpen,
+      feedback_high_urgency: feedbackHigh,
+      feedback_escalated_to_complaint: escalated,
+      communications_total: communications,
+      feedback_by_type: byType,
+      note: 'Performance counts are derived from feedback and communications recorded against the stakeholder during the agreement period.'
+    });
+  });
+
   router.get('/surveys/:id/responses', requirePermission('customer_focus', 'view'), (req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT r.*, cs.stakeholder_name FROM satisfaction_survey_responses r LEFT JOIN customer_stakeholders cs ON cs.id = r.stakeholder_id WHERE r.survey_id = ? ORDER BY r.response_date DESC, r.id DESC').all(req.params.id));
@@ -464,6 +523,23 @@ export function customerFocusRoutes() {
     if (parseIntNullable(req.body.feedbackId)) insertLink(db, { module: 'customer_focus', type: 'satisfaction_survey_responses', id: responseId }, { module: 'customer_focus', type: 'customer_feedback', id: parseIntNullable(req.body.feedbackId)! }, 'Survey response linked to feedback');
     audit(req, { action: 'create', entity: 'satisfaction_survey_responses', entityId: responseId, newValue: { surveyId: req.params.id, answerCount: answers.length, ...req.body } });
     res.status(201).json({ id: responseId, answersSaved: answers.length });
+  });
+
+  router.get('/responses', requirePermission('customer_focus', 'view'), (req, res) => {
+    const db = getDb();
+    const filters: string[] = [];
+    const params: unknown[] = [];
+    if (req.query.surveyType) { filters.push('s.survey_type = ?'); params.push(String(req.query.surveyType)); }
+    if (req.query.stakeholderId) { filters.push('r.stakeholder_id = ?'); params.push(Number(req.query.stakeholderId)); }
+    if (req.query.from) { filters.push('r.response_date >= ?'); params.push(String(req.query.from)); }
+    if (req.query.to) { filters.push('r.response_date <= ?'); params.push(String(req.query.to)); }
+    let query = `SELECT r.*, s.survey_number, s.survey_title, s.survey_type, cs.stakeholder_name
+      FROM satisfaction_survey_responses r
+      JOIN satisfaction_surveys s ON s.id = r.survey_id
+      LEFT JOIN customer_stakeholders cs ON cs.id = r.stakeholder_id`;
+    if (filters.length) query += ` WHERE ${filters.join(' AND ')}`;
+    query += ' ORDER BY r.response_date DESC, r.id DESC LIMIT 500';
+    res.json(db.prepare(query).all(...params));
   });
 
   router.get('/responses/:id', requirePermission('customer_focus', 'view'), (req, res) => {
@@ -643,9 +719,42 @@ export function customerFocusRoutes() {
             const r = db.prepare(`INSERT INTO customer_feedback (feedback_number, feedback_date, feedback_type, source_channel, contact_name, contact_detail, title, description, urgency, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?)`)
               .run(feedbackNumber, feedbackDate, validType, pickField(row, 'sourceChannel', 'channel') || 'import', pickField(row, 'contactName') || null, pickField(row, 'contactDetail') || null, title, description, URGENCY.includes(urgency) ? urgency : null, req.user!.id, createdAt);
             mappedTarget = 'customer_feedback'; mappedTargetId = Number(r.lastInsertRowid);
+          } else if (batch.import_type === 'survey_responses') {
+            const surveyNumber = pickField(row, 'surveyNumber', 'survey');
+            const surveyIdField = pickField(row, 'surveyId');
+            let survey: any = null;
+            if (surveyIdField) survey = db.prepare('SELECT * FROM satisfaction_surveys WHERE id = ?').get(Number(surveyIdField));
+            if (!survey && surveyNumber) survey = db.prepare('SELECT * FROM satisfaction_surveys WHERE survey_number = ?').get(surveyNumber);
+            if (!survey) throw new Error('survey not resolved — provide surveyNumber or surveyId column');
+            if (survey.status !== 'active') throw new Error(`survey ${survey.survey_number} is not active`);
+            const responseDate = pickField(row, 'responseDate', 'date') || new Date().toISOString().slice(0, 10);
+            const respondentName = pickField(row, 'respondentName', 'respondent') || null;
+            const respondentRole = pickField(row, 'respondentRole', 'role') || null;
+            const overallComment = pickField(row, 'overallComment', 'comment') || null;
+            const sourceChannel = pickField(row, 'sourceChannel', 'channel') || 'import';
+            const r = db.prepare('INSERT INTO satisfaction_survey_responses (survey_id, response_date, source_channel, respondent_name, respondent_role, overall_comment, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)')
+              .run(survey.id, responseDate, sourceChannel, respondentName, respondentRole, overallComment, req.user!.id);
+            const responseId = Number(r.lastInsertRowid);
+            const questions = db.prepare('SELECT id, question_code, question_text, question_type FROM satisfaction_survey_questions WHERE survey_id = ?').all(survey.id) as Array<{ id: number; question_code: string | null; question_text: string; question_type: string }>;
+            const insertItem = db.prepare('INSERT OR REPLACE INTO satisfaction_survey_answer_items (response_id, question_id, answer_text, answer_number) VALUES (?, ?, ?, ?)');
+            let matched = 0;
+            for (const q of questions) {
+              const candidates = [q.question_code, q.question_text, `Q${q.id}`, `q${q.id}`].filter(Boolean) as string[];
+              let raw = '';
+              for (const c of candidates) { const v = pickField(row, c); if (v) { raw = v; break; } }
+              if (!raw) continue;
+              if (q.question_type === 'scale' || (Number.isFinite(Number(raw)) && raw.trim() !== '')) {
+                insertItem.run(responseId, q.id, null, Number.isFinite(Number(raw)) ? Number(raw) : null);
+              } else {
+                insertItem.run(responseId, q.id, raw, null);
+              }
+              matched++;
+            }
+            mappedTarget = 'satisfaction_survey_responses'; mappedTargetId = responseId;
+            if (matched === 0) exceptionReason = 'response saved but no question columns matched';
           } else {
             status = 'unmapped';
-            exceptionReason = `Import type ${batch.import_type} is captured as raw rows; manual review required.`;
+            exceptionReason = `Import type ${batch.import_type} captured as raw rows for manual review.`;
           }
         } catch (e) {
           status = 'exception';

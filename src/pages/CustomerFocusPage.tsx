@@ -6,7 +6,8 @@ import type {
   Section, Department, Staff,
   CustomerStakeholder, ServiceAgreement, CustomerFeedback,
   SatisfactionSurvey, SatisfactionSurveyQuestion, SatisfactionSurveyResponse,
-  CustomerCommunicationLog, CustomerFocusImportBatch, CustomerFocusSummary
+  CustomerCommunicationLog, CustomerFocusImportBatch, CustomerFocusSummary,
+  SurveyAnalytics, ServiceAgreementPerformance
 } from '../../shared/types/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
@@ -55,6 +56,9 @@ export function CustomerFocusPage() {
   const [surveyResponses, setSurveyResponses] = useState<SatisfactionSurveyResponse[]>([]);
   const [communications, setCommunications] = useState<CustomerCommunicationLog[]>([]);
   const [imports, setImports] = useState<CustomerFocusImportBatch[]>([]);
+  const [analytics, setAnalytics] = useState<SurveyAnalytics | null>(null);
+  const [allResponses, setAllResponses] = useState<SatisfactionSurveyResponse[]>([]);
+  const [performance, setPerformance] = useState<ServiceAgreementPerformance | null>(null);
 
   const [stakeForm, setStakeForm] = useState({ stakeholderName: '', stakeholderType: 'internal_unit', organisation: '', contactPerson: '', email: '', phone: '', address: '', departmentId: '', sectionId: '', notes: '' });
   const [agreeForm, setAgreeForm] = useState({ stakeholderId: '', agreementTitle: '', serviceScope: '', startDate: '', endDate: '', reviewDueDate: '', responsibleStaffId: '', agreedTurnaround: '', reportingFormat: '', notes: '' });
@@ -87,8 +91,20 @@ export function CustomerFocusPage() {
     try {
       setSelectedSurvey(await api<SatisfactionSurvey>(`/customer-focus/surveys/${id}`));
       setSurveyResponses(await api<SatisfactionSurveyResponse[]>(`/customer-focus/surveys/${id}/responses`));
+      setAnalytics(await api<SurveyAnalytics>(`/customer-focus/surveys/${id}/analytics`).catch(() => null));
       setRespForm(r => ({ ...r, answers: {} }));
     } catch (e) { setError((e as Error).message); }
+  }
+
+  async function loadAllResponses() {
+    try { setAllResponses(await api<SatisfactionSurveyResponse[]>('/customer-focus/responses')); }
+    catch (e) { setError((e as Error).message); }
+  }
+  useEffect(() => { if (tab === 'Survey Responses' && !selectedSurvey) void loadAllResponses(); }, [tab, selectedSurvey]);
+
+  async function loadAgreementPerformance(id: number) {
+    try { setPerformance(await api<ServiceAgreementPerformance>(`/customer-focus/service-agreements/${id}/performance`)); }
+    catch (e) { setError((e as Error).message); }
   }
 
   async function submitStakeholder(e: FormEvent) {
@@ -256,11 +272,26 @@ export function CustomerFocusPage() {
           <td>{a.agreement_number}</td><td>{a.stakeholder_name || '—'}</td><td>{a.agreement_title}</td>
           <td>{a.start_date || '—'} → {a.end_date || '—'}</td><td>{formatBadge(a.status)}</td>
           <td>
+            <button onClick={() => loadAgreementPerformance(a.id)}>Performance</button>
             {a.status !== 'active' && <button onClick={() => approveAgreement(a.id)}>Approve</button>}
             {a.status !== 'archived' && <button onClick={() => archiveAgreement(a.id)}>Archive</button>}
           </td>
         </tr>)}
       </tbody></table>
+      {performance && <div className="card" style={{ marginTop: 16 }}>
+        <h3>Performance — {performance.agreement_number}</h3>
+        <p>Stakeholder: {performance.stakeholder_name || '—'} | Period: {performance.period_start || '—'} → {performance.period_end || '—'} | Agreed turnaround: {performance.agreed_turnaround || '—'}</p>
+        <div className="cards">
+          <div className="card"><h4>Feedback total</h4><p className="metric">{performance.feedback_total}</p></div>
+          <div className="card"><h4>Open feedback</h4><p className="metric">{performance.feedback_open}</p></div>
+          <div className="card"><h4>High urgency feedback</h4><p className="metric">{performance.feedback_high_urgency}</p></div>
+          <div className="card"><h4>Escalated to complaint</h4><p className="metric">{performance.feedback_escalated_to_complaint}</p></div>
+          <div className="card"><h4>Communications</h4><p className="metric">{performance.communications_total}</p></div>
+        </div>
+        {performance.feedback_by_type.length > 0 && <table className="data-table"><thead><tr><th>Feedback type</th><th>Count</th></tr></thead><tbody>{performance.feedback_by_type.map(t => <tr key={t.feedback_type}><td>{t.feedback_type}</td><td>{t.c}</td></tr>)}</tbody></table>}
+        <small>{performance.note}</small>
+        <div><button className="secondary" onClick={() => setPerformance(null)}>Close performance panel</button></div>
+      </div>}
     </>}
 
     {tab === 'Feedback Intake' && <>
@@ -320,6 +351,19 @@ export function CustomerFocusPage() {
       {selectedSurvey && <div className="card" style={{ marginTop: 16 }}>
         <h3>{selectedSurvey.survey_number} — {selectedSurvey.survey_title}</h3>
         <p>Status: {formatBadge(selectedSurvey.status)} | Type: {selectedSurvey.survey_type.replace(/_/g, ' ')} | Responses: {selectedSurvey.responseCount ?? 0}</p>
+        {analytics && analytics.total_responses > 0 && <>
+          <h4>Response analytics</h4>
+          <table className="data-table"><thead><tr><th>Question</th><th>Type</th><th>Answered</th><th>Summary</th></tr></thead><tbody>
+            {analytics.questions.map(q => <tr key={q.question_id}>
+              <td>{q.question_text}</td><td>{q.question_type.replace(/_/g, ' ')}</td><td>{q.answered}</td>
+              <td>
+                {q.question_type === 'scale' && q.mean !== null && q.mean !== undefined ? `mean ${q.mean.toFixed(2)} · range ${q.min}–${q.max}` : null}
+                {(q.question_type === 'yes_no' || q.question_type === 'multiple_choice') && q.distribution ? Object.entries(q.distribution).map(([k, v]) => `${k}: ${v}`).join(' · ') : null}
+                {(q.question_type === 'short_text' || q.question_type === 'long_text') && q.samples && q.samples.length > 0 ? <small>{q.samples.slice(0, 3).join(' / ')}</small> : null}
+              </td>
+            </tr>)}
+          </tbody></table>
+        </>}
         <h4>Questions</h4>
         <table className="data-table"><thead><tr><th>Order</th><th>Text</th><th>Type</th><th>Scale</th><th>Required</th></tr></thead><tbody>
           {(selectedSurvey.questions || []).map(q => <tr key={q.id}><td>{q.display_order}</td><td>{q.question_text}</td><td>{q.question_type}</td><td>{q.scale_min !== null && q.scale_max !== null ? `${q.scale_min}–${q.scale_max}` : '—'}</td><td>{q.is_required ? 'Yes' : 'No'}</td></tr>)}
@@ -340,7 +384,12 @@ export function CustomerFocusPage() {
     </>}
 
     {tab === 'Survey Responses' && <>
-      <p>Open a survey from the Satisfaction Surveys tab. Active surveys accept new responses.</p>
+      {!selectedSurvey && <>
+        <p>All survey responses across all surveys. Open a survey from the Satisfaction Surveys tab to record new responses.</p>
+        <table className="data-table"><thead><tr><th>Survey</th><th>Type</th><th>Date</th><th>Respondent</th><th>Source</th><th>Stakeholder</th><th>Comment</th></tr></thead><tbody>
+          {allResponses.map(r => <tr key={r.id}><td>{(r as any).survey_number ? `${(r as any).survey_number} — ` : ''}{r.survey_title || `Survey #${r.survey_id}`}</td><td>{((r as any).survey_type || '').replace(/_/g, ' ')}</td><td>{r.response_date}</td><td>{r.respondent_name || '—'}</td><td>{r.source_channel || '—'}</td><td>{r.stakeholder_name || '—'}</td><td>{r.overall_comment || '—'}</td></tr>)}
+        </tbody></table>
+      </>}
       {selectedSurvey && <div className="card">
         <h3>{selectedSurvey.survey_number} — {selectedSurvey.survey_title}</h3>
         <table className="data-table"><thead><tr><th>Date</th><th>Respondent</th><th>Role</th><th>Source</th><th>Overall comment</th></tr></thead><tbody>
@@ -386,6 +435,7 @@ export function CustomerFocusPage() {
           <td>{c.communication_number}</td><td>{c.communication_date}</td><td>{c.communication_type.replace(/_/g, ' ')}</td>
           <td>{c.direction}</td><td>{c.subject}</td><td>{c.stakeholder_name || '—'}</td><td>{formatBadge(c.status)}</td>
           <td>
+            {c.direction === 'outbound' && (c.channel || '').toLowerCase().includes('email') && c.contact_detail && c.contact_detail.includes('@') && <a href={`mailto:${encodeURIComponent(c.contact_detail)}?subject=${encodeURIComponent(c.subject)}&body=${encodeURIComponent(c.message_summary)}`} target="_blank" rel="noreferrer"><button type="button">Open in mail</button></a>}
             <button onClick={() => commCreateAction(c.id)}>Action</button>
             {c.status !== 'closed' && <button onClick={() => closeComm(c.id)}>Close</button>}
           </td>
