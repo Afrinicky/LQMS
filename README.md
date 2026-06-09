@@ -2,7 +2,7 @@
 
 Foundation MVP scaffold for an offline-first, LAN-ready Windows desktop Laboratory Quality Management System for St. Elizabeth Catholic Hospital Laboratory.
 
-SECH_LIMS works alongside LHIMS/Lightwave. It focuses on neutral daily QMS operations such as document control, records/evidence, personnel, organogram positions, authorization foundations, actions, audit trail, backups, and host/client readiness. It does **not** include GAS, SLIPTA, ISO scoring, accreditation scoring, star ratings, checklist scores, or compliance percentages.
+SECH_LIMS works alongside LHIMS/Lightwave. It focuses on neutral daily QMS operations such as document control, records/evidence, personnel, organogram positions, authorization foundations, actions, audit trail, backups, and host/client readiness. It does **not** include official GAS, SLIPTA, ISO scoring, accreditation scoring, star ratings, or official compliance grading. Internal audit marking is supported as a configurable internal assessment tool.
 
 ## Technology stack
 
