@@ -10,6 +10,7 @@ import { Dashboard, Home, ModulePage, Organisation } from './pages/CorePages';
 import { DocumentControlPage } from './pages/DocumentControlPage';
 import { PersonnelManagementPage } from './pages/PersonnelManagementPage';
 import { AssessmentsPage, MeetingsPage, ManagementReviewPage, QualityIndicatorsPage, ContinualImprovementPage } from './pages/Phase8Pages';
+import { CustomerFocusPage } from './pages/CustomerFocusPage';
 import { ActionTracker, BackupRestore, Devices, DocumentImport, EvidenceUpload, ModuleToggles, PermissionMatrix, Positions, UsersAccess } from './pages/SettingsPages';
 import { EquipmentPage, InventoryPage, MonitoringPage, SafetyPage } from './pages/Phase3Pages';
 import { IqcPage, EqaPage, VerificationValidationPage, MeasurementUncertaintyPage } from './pages/Phase4Pages';
@@ -61,6 +62,7 @@ function AppRoutes() {
       <Route path="/management-review" element={<ManagementReviewPage/>}/>
       <Route path="/quality-indicators" element={<QualityIndicatorsPage/>}/>
       <Route path="/continual-improvement" element={<ContinualImprovementPage/>}/>
+      <Route path="/customer-focus" element={<CustomerFocusPage/>}/>
       {placeholders.map(m => <Route key={m.key} path={m.path.slice(1)} element={<ModulePage moduleKey={m.key} title={m.label} placeholder/>}/>)}
       <Route path="/settings" element={<SettingsLayout/>}>
         <Route index element={<Navigate to="users"/>}/>

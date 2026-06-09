@@ -16,7 +16,7 @@ export const MODULES: ModuleDefinition[] = [
   { key: 'nc_capa', label: 'Nonconforming Events & CAPA', path: '/nc-capa' },
   { key: 'complaints', label: 'Complaints Register', path: '/complaints' },
   { key: 'risks', label: 'Risk Register', path: '/risks' },
-  { key: 'customer_focus', label: 'Customer Focus', path: '/customer-focus', placeholder: true },
+  { key: 'customer_focus', label: 'Customer Focus', path: '/customer-focus' },
   { key: 'equipment', label: 'Equipment Management', path: '/equipment' },
   { key: 'assessments', label: 'Internal Assessments', path: '/assessments' },
   { key: 'supplier_inventory', label: 'Supplier & Inventory', path: '/supplier-inventory' },
