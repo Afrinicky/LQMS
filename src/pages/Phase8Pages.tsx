@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useModules } from '../hooks/useModules';
-import { api } from '../services/api';
+import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import type {
   Section, Department, Staff,
@@ -165,7 +165,14 @@ export function AssessmentsPage() {
       const qs = await api<AssessmentSelectedQuestion[]>(`/assessments/${id}/selected-questions`);
       setRespQuestions(qs);
       const init: typeof respValues = {};
-      for (const q of qs) init[q.question_id] = { response: 'not_assessed', evidenceSummary: '', marksAwarded: '', scoreComment: '', findingRequired: false };
+      for (const q of qs) init[q.question_id] = {
+        response: q.existing_response ?? 'not_assessed',
+        evidenceSummary: q.existing_evidence_summary ?? '',
+        marksAwarded: q.existing_marks_awarded !== null && q.existing_marks_awarded !== undefined ? String(q.existing_marks_awarded) : '',
+        scoreComment: q.existing_score_comment ?? '',
+        findingRequired: !!q.existing_finding_required,
+        existingResponseId: q.response_id
+      };
       setRespValues(init);
     } catch (e) { setError((e as Error).message); }
   }
@@ -183,6 +190,56 @@ export function AssessmentsPage() {
   async function loadScoreSummary(id: string) {
     if (!id) { setScoreSummary(null); return; }
     try { setScoreSummary(await api<AssessmentInternalScoreSummary>(`/assessments/${id}/internal-score-summary`)); }
+    catch (e) { setError((e as Error).message); }
+  }
+
+  // Delete helpers (history-safe)
+  async function deleteChecklist(id: number) {
+    if (!confirm('Delete this checklist? Only unused checklists can be deleted; otherwise archive.')) return;
+    try { await api(`/assessments/checklists/${id}`, { method: 'DELETE' }); if (selectedChecklist?.id === id) setSelectedChecklist(null); await load(); }
+    catch (e) { setError((e as Error).message); }
+  }
+  async function deleteSection(checklistId: number, sectionId: number) {
+    if (!confirm('Delete this section? Only sections with no questions and no assessment usage can be deleted.')) return;
+    try { await api(`/assessments/checklists/${checklistId}/sections/${sectionId}`, { method: 'DELETE' }); await openChecklist(checklistId); }
+    catch (e) { setError((e as Error).message); }
+  }
+  async function deleteQuestion(checklistId: number, questionId: number) {
+    if (!confirm('Delete this question? Only questions never used in any assessment can be deleted; otherwise deactivate.')) return;
+    try { await api(`/assessments/checklists/${checklistId}/questions/${questionId}`, { method: 'DELETE' }); await openChecklist(checklistId); }
+    catch (e) { setError((e as Error).message); }
+  }
+
+  // File import helper (CSV / XLSX)
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importMeta, setImportMeta] = useState({ checklistName: '', checklistType: 'general', markingEnabled: false, internalPassMark: '' });
+  async function submitFileImport(e: FormEvent) {
+    e.preventDefault(); setError(null);
+    if (!importFile) return setError('Choose a CSV or XLSX file');
+    if (!importMeta.checklistName) return setError('Checklist name is required');
+    try {
+      const fd = new FormData();
+      fd.append('file', importFile);
+      fd.append('checklistName', importMeta.checklistName);
+      fd.append('checklistType', importMeta.checklistType);
+      fd.append('markingEnabled', String(importMeta.markingEnabled));
+      if (importMeta.internalPassMark) fd.append('internalPassMark', importMeta.internalPassMark);
+      const token = getToken();
+      const response = await fetch(`${API_BASE}/assessments/checklists/import-file`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
+      if (!response.ok) throw new Error((await response.json().catch(() => ({ error: response.statusText }))).error ?? response.statusText);
+      const data = await response.json();
+      alert(`Imported checklist #${data.id}: ${data.sectionsInserted} section(s), ${data.questionsInserted} question(s).`);
+      setImportFile(null); setImportMeta({ checklistName: '', checklistType: 'general', markingEnabled: false, internalPassMark: '' });
+      await load();
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  // Response history viewer
+  const [historyResponseId, setHistoryResponseId] = useState<number | null>(null);
+  const [history, setHistory] = useState<Array<{ snapshot_at: string; response: string; marks_awarded?: number; evidence_summary?: string }>>([]);
+  async function loadHistory(responseId: number) {
+    if (!respAssessmentId) return;
+    try { setHistoryResponseId(responseId); setHistory(await api(`/assessments/${respAssessmentId}/question-response/${responseId}/history`)); }
     catch (e) { setError((e as Error).message); }
   }
 
@@ -267,9 +324,21 @@ export function AssessmentsPage() {
             <button onClick={() => openChecklist(c.id)}>Open</button>
             <button onClick={() => toggleChecklist(c.id)}>{c.status === 'active' ? 'Deactivate' : 'Activate'}</button>
             {c.status !== 'archived' && <button onClick={() => archiveChecklist(c.id)}>Archive</button>}
+            <button onClick={() => deleteChecklist(c.id)} className="secondary">Delete</button>
           </td>
         </tr>)}
       </tbody></table>
+      <h3>Import checklist from CSV / XLSX</h3>
+      <p><small>Expected columns: SectionTitle, QuestionText (required), and optionally SectionCode, SectionPossibleMarks, SectionWeight, QuestionCode, ResponseType, MaxMarks, Weight, Guidance, ExpectedEvidence, ScoringGuidance, IsRequired. Rows are grouped into sections by SectionTitle.</small></p>
+      <form className="form-grid" onSubmit={submitFileImport}>
+        <label>Checklist name<input value={importMeta.checklistName} onChange={e => setImportMeta({ ...importMeta, checklistName: e.target.value })} required /></label>
+        <label>Checklist type<select value={importMeta.checklistType} onChange={e => setImportMeta({ ...importMeta, checklistType: e.target.value })}>{CHECKLIST_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
+        <label><input type="checkbox" checked={importMeta.markingEnabled} onChange={e => setImportMeta({ ...importMeta, markingEnabled: e.target.checked })} /> Enable internal marking</label>
+        <label>Internal pass mark<input type="number" step="any" value={importMeta.internalPassMark} onChange={e => setImportMeta({ ...importMeta, internalPassMark: e.target.value })} /></label>
+        <label>File<input type="file" accept=".csv,.xlsx,.xls" onChange={e => setImportFile(e.target.files?.[0] ?? null)} required /></label>
+        <button type="submit">Import file</button>
+      </form>
+
       <h3>Create new checklist</h3>
       <form className="form-grid" onSubmit={submitChecklist}>
         <label>Code<input value={chForm.checklistCode} onChange={e => setChForm({ ...chForm, checklistCode: e.target.value })} /></label>
@@ -289,8 +358,8 @@ export function AssessmentsPage() {
         <h3>{selectedChecklist.checklist_code ? selectedChecklist.checklist_code + ' — ' : ''}{selectedChecklist.checklist_name}</h3>
         <p>Status: {formatBadge(selectedChecklist.status)} | Type: {selectedChecklist.checklist_type.replace(/_/g, ' ')} | Marking: {selectedChecklist.marking_enabled ? 'enabled' : 'disabled'}</p>
         <h4>Sections</h4>
-        <table className="data-table"><thead><tr><th>Order</th><th>Title</th><th>Possible marks</th><th>Weight</th></tr></thead><tbody>
-          {(selectedChecklist.sections || []).map(s => <tr key={s.id}><td>{s.display_order}</td><td>{s.section_title}</td><td>{s.section_possible_marks ?? '—'}</td><td>{s.section_weight ?? '—'}</td></tr>)}
+        <table className="data-table"><thead><tr><th>Order</th><th>Title</th><th>Possible marks</th><th>Weight</th><th></th></tr></thead><tbody>
+          {(selectedChecklist.sections || []).map(s => <tr key={s.id}><td>{s.display_order}</td><td>{s.section_title}</td><td>{s.section_possible_marks ?? '—'}</td><td>{s.section_weight ?? '—'}</td><td><button onClick={() => deleteSection(selectedChecklist.id, s.id)} className="secondary">Delete</button></td></tr>)}
         </tbody></table>
         <form className="form-grid" onSubmit={addSection}>
           <label>Section title<input value={secForm.sectionTitle} onChange={e => setSecForm({ ...secForm, sectionTitle: e.target.value })} required /></label>
@@ -302,11 +371,12 @@ export function AssessmentsPage() {
           <button type="submit">Add section</button>
         </form>
         <h4>Questions</h4>
-        <table className="data-table"><thead><tr><th>Section</th><th>Code</th><th>Text</th><th>Response type</th><th>Max marks</th><th>Active</th></tr></thead><tbody>
+        <table className="data-table"><thead><tr><th>Section</th><th>Code</th><th>Text</th><th>Response type</th><th>Max marks</th><th>Active</th><th></th></tr></thead><tbody>
           {(selectedChecklist.questions || []).map(q => <tr key={q.id}>
             <td>{(selectedChecklist.sections || []).find(s => s.id === q.section_id)?.section_title || '—'}</td>
             <td>{q.question_code || '—'}</td><td>{q.question_text}</td>
             <td>{q.response_type}</td><td>{q.max_marks ?? '—'}</td><td>{q.is_active ? 'Yes' : 'No'}</td>
+            <td><button onClick={() => deleteQuestion(selectedChecklist.id, q.id)} className="secondary">Delete</button></td>
           </tr>)}
         </tbody></table>
         <form className="form-grid" onSubmit={addQuestion}>
@@ -359,7 +429,7 @@ export function AssessmentsPage() {
         <label>Assessment<select value={respAssessmentId} onChange={e => { setRespAssessmentId(e.target.value); void loadResponseQuestions(e.target.value); }}><option value="">—</option>{programs.map(p => <option key={p.id} value={p.id}>{p.program_number} — {p.title}</option>)}</select></label>
       </div>
       {respQuestions.length === 0 && respAssessmentId && <p>No questions selected for this assessment yet. Use the Plan Assessment tab first.</p>}
-      {respQuestions.length > 0 && <table className="data-table"><thead><tr><th>Checklist</th><th>Section</th><th>Question</th><th>Response</th><th>Evidence summary</th><th>Marks awarded / max</th><th>Finding?</th><th></th></tr></thead><tbody>
+      {respQuestions.length > 0 && <table className="data-table"><thead><tr><th>Checklist</th><th>Section</th><th>Question</th><th>Response</th><th>Evidence summary</th><th>Marks awarded / max</th><th>Finding?</th><th>Save / history</th></tr></thead><tbody>
         {respQuestions.map(q => {
           const v = respValues[q.question_id] || { response: 'not_assessed', evidenceSummary: '', marksAwarded: '', scoreComment: '', findingRequired: false };
           const max = q.max_marks_at_selection;
@@ -371,10 +441,21 @@ export function AssessmentsPage() {
             <td><input value={v.evidenceSummary} onChange={e => setRespValues({ ...respValues, [q.question_id]: { ...v, evidenceSummary: e.target.value } })} /></td>
             <td>{q.marking_enabled ? <input type="number" step="any" value={v.marksAwarded} onChange={e => setRespValues({ ...respValues, [q.question_id]: { ...v, marksAwarded: e.target.value } })} style={{ width: 80 }} placeholder={max !== null && max !== undefined ? `/ ${max}` : ''} /> : <em>n/a</em>}{q.marking_enabled && max !== null && max !== undefined ? ` / ${max}` : ''}</td>
             <td><label><input type="checkbox" checked={v.findingRequired} onChange={e => setRespValues({ ...respValues, [q.question_id]: { ...v, findingRequired: e.target.checked } })} /> required</label></td>
-            <td><button type="button" onClick={() => saveResponse(q.question_id)}>Save</button></td>
+            <td>
+              <button type="button" onClick={() => saveResponse(q.question_id)}>Save</button>
+              {v.existingResponseId && <button type="button" className="secondary" onClick={() => loadHistory(v.existingResponseId!)}>History</button>}
+            </td>
           </tr>;
         })}
       </tbody></table>}
+      {historyResponseId !== null && <div className="card" style={{ marginTop: 12 }}>
+        <h4>Response history for response #{historyResponseId}</h4>
+        <table className="data-table"><thead><tr><th>Snapshot at</th><th>Response</th><th>Marks</th><th>Evidence</th></tr></thead><tbody>
+          {history.length === 0 && <tr><td colSpan={4}><em>No prior revisions — current value is the first saved value.</em></td></tr>}
+          {history.map((h, i) => <tr key={i}><td>{h.snapshot_at}</td><td>{h.response || '—'}</td><td>{h.marks_awarded ?? '—'}</td><td>{h.evidence_summary || '—'}</td></tr>)}
+        </tbody></table>
+        <button className="secondary" onClick={() => { setHistoryResponseId(null); setHistory([]); }}>Close history</button>
+      </div>}
     </>}
 
     {tab === 'Internal Audit Marks' && <>
@@ -387,13 +468,27 @@ export function AssessmentsPage() {
           <div className="card"><h4>Questions assessed</h4><p className="metric">{scoreSummary.total_questions_assessed}</p></div>
           <div className="card"><h4>Total possible marks</h4><p className="metric">{scoreSummary.total_possible_marks}</p></div>
           <div className="card"><h4>Marks awarded</h4><p className="metric">{scoreSummary.total_marks_awarded}</p></div>
-          <div className="card"><h4>Internal Assessment Score</h4><p className="metric">{scoreSummary.internal_score_percentage !== null ? scoreSummary.internal_score_percentage.toFixed(1) + '%' : '—'}</p></div>
+          <div className="card"><h4>Internal Assessment Score (raw)</h4><p className="metric">{scoreSummary.internal_score_percentage !== null ? scoreSummary.internal_score_percentage.toFixed(1) + '%' : '—'}</p></div>
+          <div className="card"><h4>Weighted Internal Score</h4><p className="metric">{scoreSummary.weighted_internal_score_percentage !== null && scoreSummary.weighted_internal_score_percentage !== undefined ? scoreSummary.weighted_internal_score_percentage.toFixed(1) + '%' : '—'}</p><small>Only computed when section weights are set.</small></div>
           <div className="card"><h4>Findings</h4><p className="metric">{scoreSummary.findings_count}</p></div>
         </div>
         <p><small>{scoreSummary.label}</small></p>
+        {scoreSummary.pass_status_per_checklist && scoreSummary.pass_status_per_checklist.length > 0 && <>
+          <h4>Internal pass threshold (laboratory-defined)</h4>
+          <table className="data-table"><thead><tr><th>Checklist</th><th>Threshold</th><th>Pass mark</th><th>Score</th><th>Status</th></tr></thead><tbody>
+            {scoreSummary.pass_status_per_checklist.map(p => <tr key={p.checklist_id}>
+              <td>{p.checklist_name}</td>
+              <td>{p.internal_threshold_label}</td>
+              <td>{p.internal_pass_mark}%</td>
+              <td>{p.score_against_checklist !== null ? p.score_against_checklist.toFixed(1) + '%' : '—'}</td>
+              <td>{formatBadge(p.status === 'pass' ? 'within-target' : p.status === 'attention' ? 'attention' : 'pending')} <small>({p.status})</small></td>
+            </tr>)}
+          </tbody></table>
+          <small>Pass/attention labels reflect a laboratory-defined internal threshold only. Not an accreditation/GAS/SLIPTA/ISO grade.</small>
+        </>}
         <h4>Section Scores</h4>
-        <table className="data-table"><thead><tr><th>Section</th><th>Planned</th><th>Assessed</th><th>Possible</th><th>Awarded</th><th>Section Score</th></tr></thead><tbody>
-          {scoreSummary.sections.map((s, i) => <tr key={i}><td>{s.section_title || '—'}</td><td>{s.questions_planned}</td><td>{s.questions_assessed}</td><td>{s.possible_marks}</td><td>{s.marks_awarded}</td><td>{s.internal_score_percentage !== null ? s.internal_score_percentage.toFixed(1) + '%' : '—'}</td></tr>)}
+        <table className="data-table"><thead><tr><th>Section</th><th>Planned</th><th>Assessed</th><th>Possible</th><th>Awarded</th><th>Section Score</th><th>Weight</th></tr></thead><tbody>
+          {scoreSummary.sections.map((s, i) => <tr key={i}><td>{s.section_title || '—'}</td><td>{s.questions_planned}</td><td>{s.questions_assessed}</td><td>{s.possible_marks}</td><td>{s.marks_awarded}</td><td>{s.internal_score_percentage !== null ? s.internal_score_percentage.toFixed(1) + '%' : '—'}</td><td>{s.section_weight ?? '—'}</td></tr>)}
         </tbody></table>
         <h4>Response distribution</h4>
         <table className="data-table"><thead><tr><th>Response</th><th>Count</th></tr></thead><tbody>

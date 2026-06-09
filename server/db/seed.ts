@@ -229,20 +229,95 @@ export function seedDefaults() {
       }
     }
 
-    const defaultChecklists = [
-      { code: 'CHK-GEN', name: 'General Laboratory Assessment Checklist', type: 'general' },
-      { code: 'CHK-SEC', name: 'Sectional Assessment Checklist', type: 'sectional' },
-      { code: 'CHK-HAEM', name: 'Haematology Assessment Checklist', type: 'section_specific' },
-      { code: 'CHK-MICRO', name: 'Microbiology Assessment Checklist', type: 'section_specific' },
-      { code: 'CHK-BB', name: 'Blood Bank Quality Assessment Checklist', type: 'section_specific' },
-      { code: 'CHK-SAFETY', name: 'Safety Assessment Checklist', type: 'safety' },
-      { code: 'CHK-DOC', name: 'Document Control Assessment Checklist', type: 'document_control' }
+    type SeedSection = { title: string; description?: string; questions: Array<{ text: string; guidance?: string; evidence?: string }> };
+    const defaultChecklists: Array<{ code: string; name: string; type: string; sections: SeedSection[] }> = [
+      { code: 'CHK-GEN', name: 'General Laboratory Assessment Checklist', type: 'general', sections: [
+        { title: 'Organisation and management', questions: [
+          { text: 'Is there a current organogram with named leadership roles?', evidence: 'Organogram document, position descriptions' },
+          { text: 'Are roles, responsibilities, and authorities documented for key positions?', evidence: 'Job descriptions, responsibility matrix' }
+        ]},
+        { title: 'Quality management system', questions: [
+          { text: 'Is there a current quality manual or equivalent QMS reference?', evidence: 'Quality manual record' },
+          { text: 'Are management reviews conducted at a defined frequency?', evidence: 'Management review minutes' }
+        ]}
+      ]},
+      { code: 'CHK-SEC', name: 'Sectional Assessment Checklist', type: 'sectional', sections: [
+        { title: 'Section staffing and supervision', questions: [
+          { text: 'Is the section supervised by a competent staff member?', evidence: 'Supervisor authorisation, competency record' },
+          { text: 'Are duty rosters maintained and approved?', evidence: 'Duty roster' }
+        ]},
+        { title: 'Section quality records', questions: [
+          { text: 'Are corrective actions documented for section-level issues?', evidence: 'CAPA records' }
+        ]}
+      ]},
+      { code: 'CHK-HAEM', name: 'Haematology Assessment Checklist', type: 'section_specific', sections: [
+        { title: 'IQC for haematology analysers', questions: [
+          { text: 'Is daily IQC run on each haematology analyser before patient testing?', evidence: 'IQC log, Levey-Jennings record' },
+          { text: 'Are out-of-control IQC results investigated and documented?', evidence: 'IQC nonconformance log' }
+        ]},
+        { title: 'Sample integrity', questions: [
+          { text: 'Are EDTA samples rejected when clotted or inadequate volume?', evidence: 'Sample rejection log' }
+        ]}
+      ]},
+      { code: 'CHK-MICRO', name: 'Microbiology Assessment Checklist', type: 'section_specific', sections: [
+        { title: 'Media and reagent control', questions: [
+          { text: 'Are culture media QC checks performed before use?', evidence: 'Media QC log' },
+          { text: 'Are stains, antisera, and reagents within validity?', evidence: 'Reagent register, expiry log' }
+        ]},
+        { title: 'Antimicrobial susceptibility testing', questions: [
+          { text: 'Are AST QC strains run at the defined frequency?', evidence: 'AST QC log' }
+        ]}
+      ]},
+      { code: 'CHK-BB', name: 'Blood Bank Quality Assessment Checklist', type: 'section_specific', sections: [
+        { title: 'Blood unit screening and storage', questions: [
+          { text: 'Are all blood units screened for HBsAg, HCV, syphilis, and HIV before issue?', evidence: 'Screening log per unit' },
+          { text: 'Are blood storage refrigerator temperatures monitored continuously?', evidence: 'Temperature monitoring records' }
+        ]},
+        { title: 'Handover and traceability', questions: [
+          { text: 'Is a Thursday-to-Thursday handover record maintained?', evidence: 'Handover register' }
+        ]}
+      ]},
+      { code: 'CHK-SAFETY', name: 'Safety Assessment Checklist', type: 'safety', sections: [
+        { title: 'PPE and biosafety', questions: [
+          { text: 'Is appropriate PPE available and worn during sample handling?', evidence: 'PPE register, observation' },
+          { text: 'Are biosafety cabinets serviced and certified within the validity period?', evidence: 'BSC certificate' }
+        ]},
+        { title: 'Incident reporting', questions: [
+          { text: 'Are safety incidents reported and investigated promptly?', evidence: 'Incident register, CAPA' }
+        ]}
+      ]},
+      { code: 'CHK-DOC', name: 'Document Control Assessment Checklist', type: 'document_control', sections: [
+        { title: 'Document master list', questions: [
+          { text: 'Is there a current document master list of controlled SOPs and policies?', evidence: 'Master list' },
+          { text: 'Are document review due dates tracked and acted upon?', evidence: 'Document review register' }
+        ]},
+        { title: 'Attestations', questions: [
+          { text: 'Do staff attest to reading current versions of relevant SOPs?', evidence: 'Attestation records' }
+        ]}
+      ]}
     ];
+
+    const insertSection = db.prepare(`INSERT INTO assessment_checklist_sections (checklist_id, section_title, section_description, display_order, is_active, created_by) VALUES (?, ?, ?, ?, 1, NULL)`);
+    const insertQuestion = db.prepare(`INSERT INTO assessment_checklist_questions (checklist_id, section_id, question_text, expected_evidence, guidance, response_type, display_order, is_required, is_active, created_by) VALUES (?, ?, ?, ?, ?, 'met_partial_not_met', ?, 0, 1, NULL)`);
+    const sectionCountByChecklist = db.prepare('SELECT COUNT(*) AS c FROM assessment_checklist_sections WHERE checklist_id = ?');
+
     for (const c of defaultChecklists) {
-      const existing = db.prepare('SELECT id FROM assessment_checklists WHERE checklist_code = ? AND is_default = 1').get(c.code);
-      if (!existing) {
-        db.prepare(`INSERT INTO assessment_checklists (checklist_code, checklist_name, checklist_type, description, status, is_default, is_editable, marking_enabled) VALUES (?, ?, ?, ?, 'draft', 1, 1, 0)`)
-          .run(c.code, c.name, c.type, 'Default placeholder checklist. Add sections and questions to suit the laboratory. Edit, replace, or archive freely.');
+      let row = db.prepare('SELECT id FROM assessment_checklists WHERE checklist_code = ? AND is_default = 1').get(c.code) as { id: number } | undefined;
+      if (!row) {
+        const r = db.prepare(`INSERT INTO assessment_checklists (checklist_code, checklist_name, checklist_type, description, status, is_default, is_editable, marking_enabled) VALUES (?, ?, ?, ?, 'draft', 1, 1, 0)`)
+          .run(c.code, c.name, c.type, 'Default starter checklist. Sections and questions are editable; replace, archive, or delete unused checklists freely.');
+        row = { id: Number(r.lastInsertRowid) };
+      }
+      const existing = sectionCountByChecklist.get(row.id) as { c: number };
+      if (existing.c > 0) continue; // already seeded sections — never overwrite editor changes
+      let order = 0;
+      for (const s of c.sections) {
+        const sr = insertSection.run(row.id, s.title, s.description ?? null, order++);
+        const sectionId = Number(sr.lastInsertRowid);
+        let qOrder = 0;
+        for (const q of s.questions) {
+          insertQuestion.run(row.id, sectionId, q.text, q.evidence ?? null, q.guidance ?? null, qOrder++);
+        }
       }
     }
   });

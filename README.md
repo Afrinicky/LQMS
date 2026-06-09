@@ -131,7 +131,7 @@ NC/CAPA, Complaints, Risks, Actions, Equipment Management, Supplier & Inventory,
 ## Known limitations
 
 - All modules are foundation-level and require real-world testing before production use.
-- Assessment checklist library, flexible question selection, and optional internal audit marking foundation exist. Advanced checklist import templates, sophisticated audit reporting, and official accreditation scoring are not included.
+- Assessment checklist library supports JSON and CSV/XLSX imports, flexible question selection, optional internal audit marking, weighted section scoring, laboratory-defined internal pass thresholds, history-safe delete (only unused checklists/sections/questions), and per-response edit history. Sophisticated audit reporting templates and official accreditation scoring remain out of scope.
 - Internal audit marking is supported as a configurable internal assessment tool.
 - Official accreditation scoring, star ratings, and GAS/SLIPTA/ISO compliance grading are not included.
 - No mobile application yet.
