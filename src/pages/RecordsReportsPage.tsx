@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useModules } from '../hooks/useModules';
-import { api } from '../services/api';
+import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import type {
   Staff, ReportTemplate, ReportRequest, PrintJob, EvidencePack,
@@ -124,6 +124,18 @@ export function RecordsReportsPage() {
     try { await api(`/records-reports/evidence-packs/${selectedPack.id}/items/${itemId}`, { method: 'DELETE' }); await openPack(selectedPack.id); await load(); }
     catch (e) { setError((e as Error).message); }
   }
+  async function openPackPrint(id: number) {
+    try {
+      const token = getToken();
+      const response = await fetch(`${API_BASE}/records-reports/evidence-packs/${id}/print`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+      if (!response.ok) throw new Error(await response.text() || response.statusText);
+      const html = await response.text();
+      const w = window.open('', '_blank');
+      if (!w) { setError('Pop-up blocked. Allow pop-ups to open the print dialog.'); return; }
+      w.document.open(); w.document.write(html); w.document.close();
+    } catch (e) { setError((e as Error).message); }
+  }
+
   async function packAction(id: number, action: 'generate' | 'review' | 'approve' | 'archive') {
     try { await api(`/records-reports/evidence-packs/${id}/${action}`, { method: 'POST', body: JSON.stringify({}) }); if (selectedPack?.id === id) await openPack(id); await load(); }
     catch (e) { setError((e as Error).message); }
@@ -266,6 +278,7 @@ export function RecordsReportsPage() {
           <td>
             <button onClick={() => openPack(p.id)}>Open</button>
             <button onClick={() => packAction(p.id, 'generate')}>Generate JSON</button>
+            <button onClick={() => openPackPrint(p.id)}>Print</button>
             {p.status === 'prepared' && <button onClick={() => packAction(p.id, 'review')}>Review</button>}
             {p.status === 'reviewed' && <button onClick={() => packAction(p.id, 'approve')}>Approve</button>}
             {p.status === 'approved' && <button onClick={() => packAction(p.id, 'archive')}>Archive</button>}
@@ -314,9 +327,11 @@ export function RecordsReportsPage() {
         <label>Findings summary<textarea value={auditReviewForm.findingsSummary} onChange={e => setAuditReviewForm({ ...auditReviewForm, findingsSummary: e.target.value })} /></label>
         <button type="submit">Create audit review</button>
       </form>
-      <table className="data-table"><thead><tr><th>Number</th><th>Date</th><th>Period</th><th>Module</th><th>Unusual</th><th>Findings</th><th>Status</th><th></th></tr></thead><tbody>
-        {auditReviews.map(r => <tr key={r.id}><td>{r.review_number}</td><td>{r.review_date}</td><td>{r.date_from} → {r.date_to}</td><td>{r.module_key || '—'}</td><td>{r.unusual_activity_noted ? 'Yes' : 'No'}</td><td>{r.findings_summary || '—'}</td><td>{formatBadge(r.status)}</td>
-          <td><button onClick={() => auditReviewCreateAction(r.id)}>Create action</button>{r.status !== 'closed' && <button onClick={() => auditReviewClose(r.id)}>Close</button>}</td></tr>)}
+      <table className="data-table"><thead><tr><th>Number</th><th>Date</th><th>Period</th><th>Module</th><th>Unusual</th><th>Findings</th><th>Linked action</th><th>Status</th><th></th></tr></thead><tbody>
+        {auditReviews.map(r => <tr key={r.id}><td>{r.review_number}</td><td>{r.review_date}</td><td>{r.date_from} → {r.date_to}</td><td>{r.module_key || '—'}</td><td>{r.unusual_activity_noted ? 'Yes' : 'No'}</td><td>{r.findings_summary || '—'}</td>
+          <td>{r.action_id ? <small>#{r.action_id} {r.action_title ? `· ${r.action_title}` : ''} {r.action_status ? `(${r.action_status})` : ''}{r.action_due_date ? ` · due ${r.action_due_date}` : ''}</small> : '—'}</td>
+          <td>{formatBadge(r.status)}</td>
+          <td>{!r.action_id && <button onClick={() => auditReviewCreateAction(r.id)}>Create action</button>}{r.status !== 'closed' && <button onClick={() => auditReviewClose(r.id)}>Close</button>}</td></tr>)}
       </tbody></table>
     </>}
 

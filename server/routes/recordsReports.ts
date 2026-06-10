@@ -24,6 +24,40 @@ function insertLink(db: any, source: { module: string; type: string; id: string 
 
 function csvEscape(v: unknown) { const s = v === null || v === undefined ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }
 
+function tableColumns(db: any, table: string): Set<string> {
+  try { const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>; return new Set(cols.map(c => c.name)); } catch { return new Set(); }
+}
+
+function applyFilterJson(db: any, table: string, filterJson: string | null | undefined, baseFilters: string[], baseParams: unknown[]): { filters: string[]; params: unknown[]; rejectedKeys: string[] } {
+  const filters = [...baseFilters]; const params = [...baseParams]; const rejectedKeys: string[] = [];
+  if (!filterJson) return { filters, params, rejectedKeys };
+  let parsed: any;
+  try { parsed = JSON.parse(filterJson); } catch { return { filters, params, rejectedKeys }; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { filters, params, rejectedKeys };
+  const cols = tableColumns(db, table);
+  for (const [rawKey, rawVal] of Object.entries(parsed)) {
+    const key = rawKey.toLowerCase();
+    if (!cols.has(rawKey)) { rejectedKeys.push(rawKey); continue; }
+    if (rawVal === null) { filters.push(`${rawKey} IS NULL`); continue; }
+    if (Array.isArray(rawVal) && rawVal.length > 0) {
+      filters.push(`${rawKey} IN (${rawVal.map(() => '?').join(',')})`);
+      for (const v of rawVal) params.push(v);
+      continue;
+    }
+    if (typeof rawVal === 'object' && rawVal !== null) {
+      for (const [op, v] of Object.entries(rawVal as Record<string, unknown>)) {
+        const sqlOp = ({ gt: '>', gte: '>=', lt: '<', lte: '<=', ne: '!=', eq: '=', like: 'LIKE' } as Record<string, string>)[op.toLowerCase()];
+        if (!sqlOp) continue;
+        filters.push(`${rawKey} ${sqlOp} ?`); params.push(v);
+      }
+      continue;
+    }
+    filters.push(`${rawKey} = ?`); params.push(rawVal);
+    void key;
+  }
+  return { filters, params, rejectedKeys };
+}
+
 function tableForModule(moduleKey: string): { table: string; dateField: string; titleField: string } | null {
   switch (moduleKey) {
     case 'nc_capa': return { table: 'nonconforming_events', dateField: 'event_date', titleField: 'title' };
@@ -183,16 +217,17 @@ export function recordsReportsRoutes() {
       audit(req, { action: 'generate', entity: 'report_requests', entityId: req.params.id, newValue: { skipped: true, moduleKey: r.module_key } });
       return res.json({ ok: true, skipped: true, summary: `Module ${r.module_key} has no direct data source mapping in the simple report engine.` });
     }
-    const filters: string[] = []; const params: unknown[] = [];
-    if (r.date_from) { filters.push(`${map.dateField} >= ?`); params.push(r.date_from); }
-    if (r.date_to) { filters.push(`${map.dateField} <= ?`); params.push(r.date_to); }
-    const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
-    const total = (db.prepare(`SELECT COUNT(*) AS c FROM ${map.table} ${where}`).get(...params) as { c: number }).c;
-    const sample = db.prepare(`SELECT * FROM ${map.table} ${where} ORDER BY ${map.dateField} DESC LIMIT 200`).all(...params) as any[];
-    const summary = `Report generated for ${r.module_key} (${map.table}) from ${r.date_from || 'beginning'} to ${r.date_to || 'today'}. Total records: ${total}. Showing first ${Math.min(sample.length, 200)} in sample.`;
+    const baseFilters: string[] = []; const baseParams: unknown[] = [];
+    if (r.date_from) { baseFilters.push(`${map.dateField} >= ?`); baseParams.push(r.date_from); }
+    if (r.date_to) { baseFilters.push(`${map.dateField} <= ?`); baseParams.push(r.date_to); }
+    const applied = applyFilterJson(db, map.table, r.filter_json, baseFilters, baseParams);
+    const where = applied.filters.length ? `WHERE ${applied.filters.join(' AND ')}` : '';
+    const total = (db.prepare(`SELECT COUNT(*) AS c FROM ${map.table} ${where}`).get(...applied.params) as { c: number }).c;
+    const sample = db.prepare(`SELECT * FROM ${map.table} ${where} ORDER BY ${map.dateField} DESC LIMIT 200`).all(...applied.params) as any[];
+    const summary = `Report generated for ${r.module_key} (${map.table}) from ${r.date_from || 'beginning'} to ${r.date_to || 'today'}. Total records: ${total}. Sample size: ${Math.min(sample.length, 200)}.${applied.rejectedKeys.length ? ` Filter keys ignored (no such column): ${applied.rejectedKeys.join(', ')}.` : ''}`;
     db.prepare("UPDATE report_requests SET summary = ?, status = 'generated', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(summary, req.params.id);
-    audit(req, { action: 'generate', entity: 'report_requests', entityId: req.params.id, newValue: { totalRecords: total, moduleKey: r.module_key } });
-    res.json({ ok: true, total, sampleCount: sample.length, summary });
+    audit(req, { action: 'generate', entity: 'report_requests', entityId: req.params.id, newValue: { totalRecords: total, moduleKey: r.module_key, rejectedFilterKeys: applied.rejectedKeys } });
+    res.json({ ok: true, total, sampleCount: sample.length, summary, rejectedFilterKeys: applied.rejectedKeys });
   });
 
   router.post('/reports/:id/review', requirePermission('records_reports', 'edit'), (req, res) => {
@@ -225,11 +260,12 @@ export function recordsReportsRoutes() {
     if (!r) return res.status(404).json({ error: 'Report request not found' });
     const map = tableForModule(r.module_key);
     if (!map) return res.status(400).json({ error: `No data source mapping for module ${r.module_key}` });
-    const filters: string[] = []; const params: unknown[] = [];
-    if (r.date_from) { filters.push(`${map.dateField} >= ?`); params.push(r.date_from); }
-    if (r.date_to) { filters.push(`${map.dateField} <= ?`); params.push(r.date_to); }
-    const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
-    const rows = db.prepare(`SELECT * FROM ${map.table} ${where} ORDER BY ${map.dateField} DESC LIMIT 5000`).all(...params) as any[];
+    const baseFilters: string[] = []; const baseParams: unknown[] = [];
+    if (r.date_from) { baseFilters.push(`${map.dateField} >= ?`); baseParams.push(r.date_from); }
+    if (r.date_to) { baseFilters.push(`${map.dateField} <= ?`); baseParams.push(r.date_to); }
+    const applied = applyFilterJson(db, map.table, r.filter_json, baseFilters, baseParams);
+    const where = applied.filters.length ? `WHERE ${applied.filters.join(' AND ')}` : '';
+    const rows = db.prepare(`SELECT * FROM ${map.table} ${where} ORDER BY ${map.dateField} DESC LIMIT 5000`).all(...applied.params) as any[];
     let body = ''; let mime = ''; let ext = format;
     if (format === 'json') { body = JSON.stringify({ request: r, rows }, null, 2); mime = 'application/json'; }
     else if (format === 'csv') {
@@ -368,6 +404,32 @@ export function recordsReportsRoutes() {
     insertLink(db, { module: 'records_reports', type: 'evidence_packs', id: req.params.id }, { module: 'documents', type: 'files', id: fileId }, 'Evidence pack summary');
     audit(req, { action: 'generate', entity: 'evidence_packs', entityId: req.params.id, newValue: { fileId, itemCount: items.length } });
     res.json({ ok: true, fileId, fileName, itemCount: items.length });
+  });
+
+  router.get('/evidence-packs/:id/print', requirePermission('records_reports', 'print'), (req, res) => {
+    const db = getDb();
+    const pack = db.prepare('SELECT * FROM evidence_packs WHERE id = ?').get(req.params.id) as any;
+    if (!pack) return res.status(404).send('Evidence pack not found');
+    const items = db.prepare('SELECT * FROM evidence_pack_items WHERE evidence_pack_id = ? ORDER BY display_order, id').all(req.params.id) as any[];
+    const esc = (v: unknown) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const autoprint = req.query.autoprint === '0' ? '' : '<script>window.addEventListener("load", () => { setTimeout(() => window.print(), 250); });</script>';
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${esc(pack.pack_number)} — Evidence pack</title>
+<style>@page{size:A4;margin:14mm}body{font-family:'Times New Roman',Georgia,serif;color:#111;padding:18px 24px;line-height:1.4}.no-print{background:#f4f6fb;padding:8px 12px;border:1px solid #ccd;border-radius:6px;margin-bottom:12px;font-size:12px}h1{font-size:20px;border-bottom:2px solid #1B3A6B;padding-bottom:6px;margin:0 0 12px}h2{font-size:14px;color:#1B3A6B;margin-top:18px;border-bottom:1px solid #ccd;padding-bottom:3px}table.meta{border-collapse:collapse;width:100%;font-size:11px;margin:6px 0 16px}table.meta th,table.meta td{border:1px solid #888;padding:4px 8px;text-align:left;vertical-align:top}table.meta th{background:#eef2f7;width:22%}table.items{border-collapse:collapse;width:100%;font-size:10.5px}table.items th,table.items td{border:1px solid #aaa;padding:4px 6px;vertical-align:top}table.items thead th{background:#eef2f7}.signoff{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:28px}.signoff .block{border-top:1px solid #555;padding-top:4px;font-size:11px}@media print{.no-print{display:none}body{padding:0}}</style>${autoprint}</head><body>
+<div class="no-print">The print dialog will open automatically. Choose any printer or Save as PDF. <button onclick="window.print()">Print</button> <a href="?autoprint=0">disable autoprint</a></div>
+<h1>${esc(pack.pack_number)} &nbsp;&mdash;&nbsp; ${esc(pack.pack_title)}</h1>
+<table class="meta"><tr><th>Purpose</th><td>${esc(pack.pack_purpose)}</td><th>Status</th><td>${esc(pack.status)}</td></tr>
+<tr><th>Period</th><td>${esc(pack.date_from || '—')} → ${esc(pack.date_to || '—')}</td><th>Items</th><td>${items.length}</td></tr>
+${pack.notes ? `<tr><th>Notes</th><td colspan="3">${esc(pack.notes)}</td></tr>` : ''}</table>
+<h2>Pack items</h2>
+<table class="items"><thead><tr><th style="width:5%">#</th><th>Module / record</th><th>Title</th><th>Summary</th></tr></thead><tbody>
+${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(i.module_key)}/${esc(i.record_type)}#${esc(i.record_id)}</td><td>${esc(i.item_title)}</td><td>${esc(i.item_summary || '—')}</td></tr>`).join('')}
+</tbody></table>
+<div class="signoff"><div class="block"><strong>Prepared by</strong><br/>__________________________<br/><br/>Date: __________________</div><div class="block"><strong>Reviewed/approved by</strong><br/>__________________________<br/><br/>Date: __________________</div></div>
+<p style="margin-top:24px;font-size:10px;color:#555">SECH_LIMS by Nickland · Generated ${new Date().toISOString().slice(0,19).replace('T',' ')} · Internal use only.</p>
+</body></html>`;
+    audit(req, { action: 'print', entity: 'evidence_packs', entityId: req.params.id });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
   });
 
   router.post('/evidence-packs/:id/review', requirePermission('records_reports', 'edit'), (req, res) => {
@@ -521,7 +583,7 @@ export function recordsReportsRoutes() {
 
   router.get('/audit-reviews', requirePermission('records_reports', 'view'), (_req, res) => {
     const db = getDb();
-    res.json(db.prepare('SELECT * FROM audit_trail_reviews ORDER BY review_date DESC').all());
+    res.json(db.prepare(`SELECT r.*, a.title AS action_title, a.status AS action_status, a.due_date AS action_due_date FROM audit_trail_reviews r LEFT JOIN actions a ON a.id = r.action_id ORDER BY r.review_date DESC`).all());
   });
 
   router.post('/audit-reviews', requirePermission('records_reports', 'create'), (req, res) => {
@@ -699,6 +761,48 @@ export function recordsReportsRoutes() {
     const backupMissingStatus = countSafe("SELECT COUNT(*) AS c FROM backup_restore_checks WHERE backup_status IS NULL OR backup_status = ''");
     if (backupMissingStatus > 0) { findings.push(`backup checks missing backup_status: ${backupMissingStatus}`); issues += backupMissingStatus; }
     recordsChecked += countSafe('SELECT COUNT(*) AS c FROM backup_restore_checks');
+
+    // Module-specific deeper checks
+    if (tableHas('blood_units', 'screening_status')) {
+      const ncScreening = countSafe("SELECT COUNT(*) AS c FROM blood_units WHERE current_status = 'available' AND (screening_status IS NULL OR screening_status = '' OR screening_status = 'incomplete')");
+      if (ncScreening > 0) { findings.push(`available blood units with incomplete screening: ${ncScreening}`); issues += ncScreening; }
+      recordsChecked += countSafe('SELECT COUNT(*) AS c FROM blood_units');
+    }
+    if (tableHas('monitoring_readings', 'reviewed_at')) {
+      const unreviewedExcursions = countSafe("SELECT COUNT(*) AS c FROM monitoring_readings WHERE status IN ('critical','out_of_range') AND reviewed_at IS NULL");
+      if (unreviewedExcursions > 0) { findings.push(`monitoring excursions without reviewed_at: ${unreviewedExcursions}`); issues += unreviewedExcursions; }
+      recordsChecked += countSafe('SELECT COUNT(*) AS c FROM monitoring_readings');
+    }
+    if (tableHas('iqc_results', 'reviewed_at')) {
+      const iqcPending = countSafe("SELECT COUNT(*) AS c FROM iqc_results WHERE reviewed_at IS NULL AND status != 'accepted' AND run_date < date('now','-14 day')");
+      if (iqcPending > 0) { findings.push(`IQC non-accepted results unreviewed >14 days: ${iqcPending}`); issues += iqcPending; }
+      recordsChecked += countSafe('SELECT COUNT(*) AS c FROM iqc_results');
+    }
+    if (tableHas('equipment_items', 'next_calibration_due')) {
+      const overdueCal = countSafe("SELECT COUNT(*) AS c FROM equipment_items WHERE next_calibration_due IS NOT NULL AND next_calibration_due < date('now') AND status = 'active'");
+      if (overdueCal > 0) { findings.push(`active equipment with overdue calibration: ${overdueCal}`); issues += overdueCal; }
+      recordsChecked += countSafe('SELECT COUNT(*) AS c FROM equipment_items');
+    }
+    if (tableHas('nonconforming_events', 'closure_notes')) {
+      const closedNoNotes = countSafe("SELECT COUNT(*) AS c FROM nonconforming_events WHERE status = 'closed' AND (closure_notes IS NULL OR closure_notes = '')");
+      if (closedNoNotes > 0) { findings.push(`closed NC records without closure_notes: ${closedNoNotes}`); issues += closedNoNotes; }
+      recordsChecked += countSafe('SELECT COUNT(*) AS c FROM nonconforming_events');
+    }
+    if (tableHas('capa_records', 'effectiveness_required') && tableHas('capa_records', 'effectiveness_status')) {
+      const capaEffMissing = countSafe("SELECT COUNT(*) AS c FROM capa_records WHERE status = 'closed' AND effectiveness_required = 1 AND (effectiveness_status IS NULL OR effectiveness_status = 'pending')");
+      if (capaEffMissing > 0) { findings.push(`closed CAPAs requiring effectiveness review but pending: ${capaEffMissing}`); issues += capaEffMissing; }
+      recordsChecked += countSafe('SELECT COUNT(*) AS c FROM capa_records');
+    }
+    if (tableHas('poct_operator_authorizations', 'expiry_date')) {
+      const poctStale = countSafe("SELECT COUNT(*) AS c FROM poct_operator_authorizations WHERE status = 'active' AND expiry_date IS NOT NULL AND expiry_date < date('now')");
+      if (poctStale > 0) { findings.push(`POCT authorizations still 'active' past expiry: ${poctStale}`); issues += poctStale; }
+      recordsChecked += countSafe('SELECT COUNT(*) AS c FROM poct_operator_authorizations');
+    }
+    if (tableHas('staff_documents', 'expiry_date')) {
+      const expiredStaffDocs = countSafe("SELECT COUNT(*) AS c FROM staff_documents WHERE expiry_date IS NOT NULL AND expiry_date < date('now') AND verification_status != 'expired'");
+      if (expiredStaffDocs > 0) { findings.push(`staff documents past expiry not marked expired: ${expiredStaffDocs}`); issues += expiredStaffDocs; }
+      recordsChecked += countSafe('SELECT COUNT(*) AS c FROM staff_documents');
+    }
 
     const createdAt = new Date().toISOString();
     const checkNumber = generateRecordNumber(db, 'data_integrity_checks', 'DIC', createdAt);
