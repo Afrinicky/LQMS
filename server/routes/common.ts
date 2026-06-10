@@ -211,6 +211,12 @@ export function commonRoutes() {
     });
   });
 
+  router.get('/dashboard/notifications-summary', (req, res) => {
+    // Reuse the central summary computation to keep numbers identical.
+    // Defer the import to avoid a circular module load.
+    import('./notifications.js').then(m => res.json(m.computeSummary(req))).catch(e => res.status(500).json({ error: (e as Error).message }));
+  });
+
   router.get('/dashboard/poct-summary', (_req, res) => {
     const db = getDb();
     const today = new Date().toISOString().slice(0, 10);

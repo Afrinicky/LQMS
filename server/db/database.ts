@@ -1601,6 +1601,81 @@ CREATE TABLE IF NOT EXISTS poct_incidents (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT
 );
+CREATE TABLE IF NOT EXISTS notification_rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  rule_code TEXT,
+  rule_name TEXT NOT NULL,
+  module_key TEXT NOT NULL,
+  trigger_type TEXT NOT NULL,
+  due_field TEXT,
+  reminder_days_before INTEGER,
+  escalation_days_after INTEGER,
+  target_role_key TEXT,
+  target_position_id INTEGER REFERENCES positions(id),
+  target_staff_id INTEGER REFERENCES staff(id),
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS notification_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  notification_id INTEGER NOT NULL REFERENCES notifications(id),
+  event_type TEXT NOT NULL,
+  event_note TEXT,
+  actor_staff_id INTEGER REFERENCES staff(id),
+  actor_user_id INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS review_calendar_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  calendar_number TEXT,
+  module_key TEXT NOT NULL,
+  record_type TEXT,
+  record_id TEXT,
+  title TEXT NOT NULL,
+  description TEXT,
+  due_date TEXT NOT NULL,
+  item_type TEXT NOT NULL,
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  responsible_position_id INTEGER REFERENCES positions(id),
+  status TEXT NOT NULL DEFAULT 'pending',
+  completed_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS user_task_queue (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_number TEXT,
+  title TEXT NOT NULL,
+  description TEXT,
+  module_key TEXT,
+  record_type TEXT,
+  record_id TEXT,
+  assigned_to_staff_id INTEGER REFERENCES staff(id),
+  assigned_to_user_id INTEGER REFERENCES users(id),
+  priority TEXT NOT NULL DEFAULT 'normal',
+  due_date TEXT,
+  status TEXT NOT NULL DEFAULT 'open',
+  completed_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS notification_preferences (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER REFERENCES users(id),
+  staff_id INTEGER REFERENCES staff(id),
+  module_key TEXT,
+  in_app_enabled INTEGER NOT NULL DEFAULT 1,
+  digest_enabled INTEGER NOT NULL DEFAULT 0,
+  email_enabled INTEGER NOT NULL DEFAULT 0,
+  sms_enabled INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT,
+  UNIQUE(user_id, module_key)
+);
 CREATE TABLE IF NOT EXISTS poct_monthly_reviews (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   review_number TEXT NOT NULL UNIQUE,
@@ -1624,4 +1699,22 @@ CREATE TABLE IF NOT EXISTS poct_monthly_reviews (
   updated_at TEXT
 );
 `);
+
+  const notificationColumns = database.prepare("PRAGMA table_info(notifications)").all() as Array<{ name: string }>;
+  const notificationNames = new Set(notificationColumns.map(c => c.name));
+  if (!notificationNames.has('notification_number')) database.exec('ALTER TABLE notifications ADD COLUMN notification_number TEXT');
+  if (!notificationNames.has('record_type')) database.exec('ALTER TABLE notifications ADD COLUMN record_type TEXT');
+  if (!notificationNames.has('record_id')) database.exec('ALTER TABLE notifications ADD COLUMN record_id TEXT');
+  if (!notificationNames.has('severity')) database.exec("ALTER TABLE notifications ADD COLUMN severity TEXT NOT NULL DEFAULT 'info'");
+  if (!notificationNames.has('notification_type')) database.exec("ALTER TABLE notifications ADD COLUMN notification_type TEXT NOT NULL DEFAULT 'system_notice'");
+  if (!notificationNames.has('due_date')) database.exec('ALTER TABLE notifications ADD COLUMN due_date TEXT');
+  if (!notificationNames.has('assigned_to_staff_id')) database.exec('ALTER TABLE notifications ADD COLUMN assigned_to_staff_id INTEGER REFERENCES staff(id)');
+  if (!notificationNames.has('assigned_to_user_id')) database.exec('ALTER TABLE notifications ADD COLUMN assigned_to_user_id INTEGER REFERENCES users(id)');
+  if (!notificationNames.has('source_rule_id')) database.exec('ALTER TABLE notifications ADD COLUMN source_rule_id INTEGER REFERENCES notification_rules(id)');
+  if (!notificationNames.has('acknowledged_by_staff_id')) database.exec('ALTER TABLE notifications ADD COLUMN acknowledged_by_staff_id INTEGER REFERENCES staff(id)');
+  if (!notificationNames.has('acknowledged_at')) database.exec('ALTER TABLE notifications ADD COLUMN acknowledged_at TEXT');
+  if (!notificationNames.has('resolved_by_staff_id')) database.exec('ALTER TABLE notifications ADD COLUMN resolved_by_staff_id INTEGER REFERENCES staff(id)');
+  if (!notificationNames.has('resolved_at')) database.exec('ALTER TABLE notifications ADD COLUMN resolved_at TEXT');
+  if (!notificationNames.has('created_by')) database.exec('ALTER TABLE notifications ADD COLUMN created_by INTEGER REFERENCES users(id)');
+  if (!notificationNames.has('updated_at')) database.exec('ALTER TABLE notifications ADD COLUMN updated_at TEXT');
 }
