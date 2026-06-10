@@ -15,6 +15,7 @@ import { POCTPage } from './pages/POCTPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { RecordsReportsPage } from './pages/RecordsReportsPage';
 import { ProcessManagementPage } from './pages/ProcessManagementPage';
+import { InformationManagementPage } from './pages/InformationManagementPage';
 import { ActionTracker, BackupRestore, Devices, DocumentImport, EvidenceUpload, ModuleToggles, PermissionMatrix, Positions, UsersAccess } from './pages/SettingsPages';
 import { EquipmentPage, InventoryPage, MonitoringPage, SafetyPage } from './pages/Phase3Pages';
 import { IqcPage, EqaPage, VerificationValidationPage, MeasurementUncertaintyPage } from './pages/Phase4Pages';
@@ -71,6 +72,7 @@ function AppRoutes() {
       <Route path="/notifications" element={<NotificationsPage/>}/>
       <Route path="/records-reports" element={<RecordsReportsPage/>}/>
       <Route path="/process-management" element={<ProcessManagementPage/>}/>
+      <Route path="/information-management" element={<InformationManagementPage/>}/>
       {placeholders.map(m => <Route key={m.key} path={m.path.slice(1)} element={<ModulePage moduleKey={m.key} title={m.label} placeholder/>}/>)}
       <Route path="/settings" element={<SettingsLayout/>}>
         <Route index element={<Navigate to="users"/>}/>
