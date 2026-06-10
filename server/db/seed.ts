@@ -67,7 +67,8 @@ export function seedDefaults() {
         poct: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         notifications: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         records_reports: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        process_management: ['view', 'create', 'edit', 'approve', 'export', 'print']
+        process_management: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        information_management: ['view', 'create', 'edit', 'approve', 'export', 'print']
       },
       'Quality Manager': {
         documents: ['view', 'create', 'edit', 'approve', 'export', 'print'],
@@ -95,14 +96,16 @@ export function seedDefaults() {
         poct: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         notifications: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         records_reports: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        process_management: ['view', 'create', 'edit', 'approve', 'export', 'print']
+        process_management: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        information_management: ['view', 'create', 'edit', 'approve', 'export', 'print']
       },
       'Data Officer': {
         monthly_reports: ['view', 'create', 'edit', 'export', 'print'],
         nc_capa: ['view', 'create', 'print'],
         actions: ['view', 'create', 'edit', 'print'],
         supplier_inventory: ['view', 'print'],
-        process_management: ['view', 'create', 'edit', 'print']
+        process_management: ['view', 'create', 'edit', 'print'],
+        information_management: ['view', 'create', 'edit', 'export', 'print']
       },
       'POCT Officer': {
         poct: ['view', 'create', 'edit', 'approve', 'export', 'print'],
@@ -156,7 +159,8 @@ export function seedDefaults() {
         poct: ['view', 'create', 'edit', 'print'],
         notifications: ['view', 'create', 'edit', 'print'],
         records_reports: ['view', 'create', 'edit', 'export', 'print'],
-        process_management: ['view', 'create', 'edit', 'print']
+        process_management: ['view', 'create', 'edit', 'print'],
+        information_management: ['view', 'create', 'edit', 'export', 'print']
       },
       'Section Head': {
         documents: ['view', 'create', 'edit', 'print'],
@@ -183,7 +187,8 @@ export function seedDefaults() {
         poct: ['view', 'create', 'edit', 'print'],
         notifications: ['view', 'create', 'edit', 'print'],
         records_reports: ['view', 'create', 'edit', 'export', 'print'],
-        process_management: ['view', 'create', 'edit', 'print']
+        process_management: ['view', 'create', 'edit', 'print'],
+        information_management: ['view', 'create', 'edit', 'export', 'print']
       },
       'Biomedical Scientist': {
         documents: ['view', 'print'],
@@ -210,7 +215,8 @@ export function seedDefaults() {
         poct: ['view', 'create', 'edit', 'print'],
         notifications: ['view', 'create', 'print'],
         records_reports: ['view', 'create', 'print'],
-        process_management: ['view', 'create', 'print']
+        process_management: ['view', 'create', 'print'],
+        information_management: ['view', 'create']
       },
       'Technician': {
         documents: ['view', 'print'],
@@ -237,7 +243,8 @@ export function seedDefaults() {
         poct: ['view', 'create'],
         notifications: ['view'],
         records_reports: ['view'],
-        process_management: ['view', 'create']
+        process_management: ['view', 'create'],
+        information_management: ['view']
       },
       'Quality User': {
         nc_capa: ['view', 'create', 'edit', 'print'],
