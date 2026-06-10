@@ -64,7 +64,8 @@ export function seedDefaults() {
         quality_indicators: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         continual_improvement: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         customer_focus: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        poct: ['view', 'create', 'edit', 'approve', 'export', 'print']
+        poct: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        notifications: ['view', 'create', 'edit', 'approve', 'export', 'print']
       },
       'Quality Manager': {
         documents: ['view', 'create', 'edit', 'approve', 'export', 'print'],
@@ -89,7 +90,8 @@ export function seedDefaults() {
         quality_indicators: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         continual_improvement: ['view', 'create', 'edit', 'approve', 'export', 'print'],
         customer_focus: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        poct: ['view', 'create', 'edit', 'approve', 'export', 'print']
+        poct: ['view', 'create', 'edit', 'approve', 'export', 'print'],
+        notifications: ['view', 'create', 'edit', 'approve', 'export', 'print']
       },
       'Data Officer': {
         monthly_reports: ['view', 'create', 'edit', 'export', 'print'],
@@ -146,7 +148,8 @@ export function seedDefaults() {
         quality_indicators: ['view', 'create', 'edit', 'print'],
         continual_improvement: ['view', 'create', 'edit', 'print'],
         customer_focus: ['view', 'create', 'edit', 'print'],
-        poct: ['view', 'create', 'edit', 'print']
+        poct: ['view', 'create', 'edit', 'print'],
+        notifications: ['view', 'create', 'edit', 'print']
       },
       'Section Head': {
         documents: ['view', 'create', 'edit', 'print'],
@@ -170,7 +173,8 @@ export function seedDefaults() {
         quality_indicators: ['view', 'create', 'edit', 'print'],
         continual_improvement: ['view', 'create', 'edit', 'print'],
         customer_focus: ['view', 'create', 'edit', 'print'],
-        poct: ['view', 'create', 'edit', 'print']
+        poct: ['view', 'create', 'edit', 'print'],
+        notifications: ['view', 'create', 'edit', 'print']
       },
       'Biomedical Scientist': {
         documents: ['view', 'print'],
@@ -194,7 +198,8 @@ export function seedDefaults() {
         quality_indicators: ['view', 'create', 'print'],
         continual_improvement: ['view', 'create', 'print'],
         customer_focus: ['view', 'create', 'print'],
-        poct: ['view', 'create', 'edit', 'print']
+        poct: ['view', 'create', 'edit', 'print'],
+        notifications: ['view', 'create', 'print']
       },
       'Technician': {
         documents: ['view', 'print'],
@@ -218,7 +223,8 @@ export function seedDefaults() {
         quality_indicators: ['view'],
         continual_improvement: ['view'],
         customer_focus: ['view'],
-        poct: ['view', 'create']
+        poct: ['view', 'create'],
+        notifications: ['view']
       },
       'Quality User': {
         nc_capa: ['view', 'create', 'edit', 'print'],
