@@ -1717,4 +1717,186 @@ CREATE TABLE IF NOT EXISTS poct_monthly_reviews (
   if (!notificationNames.has('resolved_at')) database.exec('ALTER TABLE notifications ADD COLUMN resolved_at TEXT');
   if (!notificationNames.has('created_by')) database.exec('ALTER TABLE notifications ADD COLUMN created_by INTEGER REFERENCES users(id)');
   if (!notificationNames.has('updated_at')) database.exec('ALTER TABLE notifications ADD COLUMN updated_at TEXT');
+
+  database.exec(`
+CREATE TABLE IF NOT EXISTS report_templates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  template_code TEXT,
+  template_name TEXT NOT NULL,
+  template_type TEXT NOT NULL,
+  module_key TEXT,
+  description TEXT,
+  output_format TEXT NOT NULL DEFAULT 'html',
+  template_config_json TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS report_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  request_number TEXT NOT NULL UNIQUE,
+  report_template_id INTEGER REFERENCES report_templates(id),
+  report_title TEXT NOT NULL,
+  module_key TEXT NOT NULL,
+  date_from TEXT,
+  date_to TEXT,
+  requested_by_staff_id INTEGER REFERENCES staff(id),
+  status TEXT NOT NULL DEFAULT 'draft',
+  filter_json TEXT,
+  summary TEXT,
+  generated_file_id INTEGER REFERENCES files(id),
+  reviewed_by_staff_id INTEGER REFERENCES staff(id),
+  reviewed_at TEXT,
+  approved_by_staff_id INTEGER REFERENCES staff(id),
+  approved_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS report_exports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  export_number TEXT NOT NULL UNIQUE,
+  report_request_id INTEGER NOT NULL REFERENCES report_requests(id),
+  export_format TEXT NOT NULL,
+  file_id INTEGER REFERENCES files(id),
+  exported_by_staff_id INTEGER REFERENCES staff(id),
+  exported_at TEXT,
+  status TEXT NOT NULL DEFAULT 'completed',
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS print_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  print_number TEXT NOT NULL UNIQUE,
+  module_key TEXT,
+  record_type TEXT,
+  record_id TEXT,
+  print_title TEXT NOT NULL,
+  print_purpose TEXT NOT NULL,
+  printed_by_staff_id INTEGER REFERENCES staff(id),
+  printed_at TEXT,
+  controlled_copy INTEGER NOT NULL DEFAULT 0,
+  copy_number TEXT,
+  watermark TEXT,
+  status TEXT NOT NULL DEFAULT 'logged',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS evidence_packs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pack_number TEXT NOT NULL UNIQUE,
+  pack_title TEXT NOT NULL,
+  pack_purpose TEXT NOT NULL,
+  date_from TEXT,
+  date_to TEXT,
+  prepared_by_staff_id INTEGER REFERENCES staff(id),
+  reviewed_by_staff_id INTEGER REFERENCES staff(id),
+  reviewed_at TEXT,
+  approved_by_staff_id INTEGER REFERENCES staff(id),
+  approved_at TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  notes TEXT,
+  generated_file_id INTEGER REFERENCES files(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS evidence_pack_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  evidence_pack_id INTEGER NOT NULL REFERENCES evidence_packs(id),
+  module_key TEXT NOT NULL,
+  record_type TEXT NOT NULL,
+  record_id TEXT NOT NULL,
+  item_title TEXT NOT NULL,
+  item_summary TEXT,
+  file_id INTEGER REFERENCES files(id),
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS record_retention_rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  rule_code TEXT,
+  rule_name TEXT NOT NULL,
+  module_key TEXT NOT NULL,
+  record_type TEXT NOT NULL,
+  retention_period_months INTEGER NOT NULL,
+  archive_action TEXT NOT NULL DEFAULT 'flag_for_review',
+  is_active INTEGER NOT NULL DEFAULT 1,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS record_retention_reviews (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  review_number TEXT NOT NULL UNIQUE,
+  review_date TEXT NOT NULL,
+  module_key TEXT,
+  record_type TEXT,
+  records_reviewed INTEGER NOT NULL DEFAULT 0,
+  records_due_for_archive INTEGER NOT NULL DEFAULT 0,
+  records_archived INTEGER NOT NULL DEFAULT 0,
+  reviewed_by_staff_id INTEGER REFERENCES staff(id),
+  status TEXT NOT NULL DEFAULT 'draft',
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS audit_trail_reviews (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  review_number TEXT NOT NULL UNIQUE,
+  review_date TEXT NOT NULL,
+  date_from TEXT NOT NULL,
+  date_to TEXT NOT NULL,
+  module_key TEXT,
+  reviewed_by_staff_id INTEGER REFERENCES staff(id),
+  unusual_activity_noted INTEGER NOT NULL DEFAULT 0,
+  findings_summary TEXT,
+  action_required INTEGER NOT NULL DEFAULT 0,
+  action_id INTEGER REFERENCES actions(id),
+  status TEXT NOT NULL DEFAULT 'draft',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS backup_restore_checks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  check_number TEXT NOT NULL UNIQUE,
+  check_date TEXT NOT NULL,
+  check_type TEXT NOT NULL,
+  backup_location TEXT,
+  backup_file_name TEXT,
+  backup_status TEXT,
+  restore_test_status TEXT,
+  checked_by_staff_id INTEGER REFERENCES staff(id),
+  findings TEXT,
+  action_required INTEGER NOT NULL DEFAULT 0,
+  action_id INTEGER REFERENCES actions(id),
+  status TEXT NOT NULL DEFAULT 'draft',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS data_integrity_checks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  check_number TEXT NOT NULL UNIQUE,
+  check_date TEXT NOT NULL,
+  check_type TEXT NOT NULL,
+  module_key TEXT,
+  records_checked INTEGER NOT NULL DEFAULT 0,
+  issues_found INTEGER NOT NULL DEFAULT 0,
+  findings_summary TEXT,
+  action_required INTEGER NOT NULL DEFAULT 0,
+  action_id INTEGER REFERENCES actions(id),
+  status TEXT NOT NULL DEFAULT 'draft',
+  checked_by_staff_id INTEGER REFERENCES staff(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+`);
 }

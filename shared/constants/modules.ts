@@ -35,7 +35,7 @@ export const MODULES: ModuleDefinition[] = [
   { key: 'poct', label: 'POCT Oversight', path: '/poct' },
   { key: 'blood_bank_handover', label: 'Blood Bank Handover', path: '/blood-bank-handover' },
   { key: 'monthly_reports', label: 'Monthly Reports & LHIMS Archive', path: '/monthly-reports' },
-  { key: 'reports_exports', label: 'Reports & Exports', path: '/reports-exports', placeholder: true },
+  { key: 'records_reports', label: 'Records, Reports & Evidence', path: '/records-reports' },
   { key: 'notifications', label: 'Notifications & Review Calendar', path: '/notifications' },
   { key: 'settings', label: 'Settings', path: '/settings', protected: true }
 ];
