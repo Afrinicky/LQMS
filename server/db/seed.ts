@@ -356,6 +356,27 @@ export function seedDefaults() {
         }
       }
     }
+
+    const defaultTemplates: Array<{ code: string; name: string; type: string; module: string; format: string; description: string }> = [
+      { code: 'RPTT-NCCAPA-OPEN', name: 'Open NC/CAPA register', type: 'register', module: 'nc_capa', format: 'csv', description: 'Open NC events list for the period.' },
+      { code: 'RPTT-COMPLAINTS-PERIOD', name: 'Complaints in period', type: 'register', module: 'complaints', format: 'html', description: 'Complaints received within the period.' },
+      { code: 'RPTT-EQUIP-CAL-DUE', name: 'Equipment calibration register', type: 'register', module: 'equipment', format: 'csv', description: 'Equipment items with calibration data, filterable by status.' },
+      { code: 'RPTT-MONITORING-PERIOD', name: 'Monitoring records in period', type: 'list', module: 'monitoring', format: 'csv', description: 'Environmental monitoring records.' },
+      { code: 'RPTT-IQC-PERIOD', name: 'IQC results in period', type: 'list', module: 'iqc', format: 'csv', description: 'IQC results filterable by status.' },
+      { code: 'RPTT-EQA-PERIOD', name: 'EQA events in period', type: 'list', module: 'eqa', format: 'html', description: 'EQA events received or due in the period.' },
+      { code: 'RPTT-BB-HANDOVERS', name: 'Blood bank handovers register', type: 'register', module: 'blood_bank_handover', format: 'csv', description: 'Blood bank handover records.' },
+      { code: 'RPTT-ASSESSMENTS-LIST', name: 'Assessment programmes register', type: 'register', module: 'assessments', format: 'html', description: 'Assessment programmes filterable by status.' },
+      { code: 'RPTT-QI-RESULTS', name: 'Quality indicator results', type: 'list', module: 'quality_indicators', format: 'csv', description: 'Quality indicator results across indicators.' },
+      { code: 'RPTT-POCT-QC', name: 'POCT QC results', type: 'list', module: 'poct', format: 'csv', description: 'POCT QC results filterable by status.' },
+      { code: 'RPTT-CUSTOMER-FEEDBACK', name: 'Customer feedback register', type: 'register', module: 'customer_focus', format: 'html', description: 'Customer feedback filterable by urgency/status.' },
+      { code: 'RPTT-NOTIFICATIONS', name: 'Notifications register', type: 'list', module: 'notifications', format: 'csv', description: 'Notifications filterable by status/severity.' }
+    ];
+    for (const t of defaultTemplates) {
+      const existing = db.prepare('SELECT id FROM report_templates WHERE template_code = ?').get(t.code);
+      if (!existing) {
+        db.prepare(`INSERT INTO report_templates (template_code, template_name, template_type, module_key, description, output_format, is_active, created_by) VALUES (?, ?, ?, ?, ?, ?, 1, NULL)`).run(t.code, t.name, t.type, t.module, t.description, t.format);
+      }
+    }
   });
   tx();
 }
