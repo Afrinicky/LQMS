@@ -28,6 +28,7 @@ import { customerFocusRoutes } from './routes/customerFocus.js';
 import { poctRoutes } from './routes/poct.js';
 import { notificationsRoutes, computeSummary } from './routes/notifications.js';
 import { recordsReportsRoutes } from './routes/recordsReports.js';
+import { processManagementRoutes } from './routes/processManagement.js';
 import { optionalAuth } from './middleware/auth.js';
 import { ensureDataDirs } from './db/database.js';
 import { seedDefaults } from './db/seed.js';
@@ -67,6 +68,7 @@ export function createApiServer() {
   app.use('/api/poct', poctRoutes());
   app.use('/api/notifications', notificationsRoutes());
   app.use('/api/records-reports', recordsReportsRoutes());
+  app.use('/api/process-management', processManagementRoutes());
   app.use('/api', commonRoutes());
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const message = err instanceof Error ? err.message : 'Unexpected server error';
