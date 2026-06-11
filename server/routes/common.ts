@@ -3,13 +3,8 @@ import bcrypt from 'bcryptjs';
 import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
-<<<<<<< HEAD
-import * as archiver from 'archiver';
-import { getDb, uploadRoot, evidenceRoot, backupRoot, dbPath, configRoot } from '../db/database.js';
-=======
 import archiver from 'archiver';
 import { getDb, uploadRoot, evidenceRoot, backupRoot, dbPath, configRoot, dataRoot } from '../db/database.js';
->>>>>>> 9151315165ea82f27686cce6e98227f2069d3cc3
 import { requireAuth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
@@ -517,9 +512,7 @@ export function commonRoutes() {
     const fullPath = path.join(backupRoot, fileName);
     const manifest = { product: 'SECH_LIMS by Nickland', createdAt: new Date().toISOString(), includes: ['SQLite database', 'uploads', 'evidence', 'config', 'backup-manifest.json'] };
     await new Promise<void>((resolve, reject) => {
-      const output = fs.createWriteStream(fullPath);
-      const ZipArchiveCtor = (archiver as unknown as { ZipArchive: new (options: unknown) => any }).ZipArchive;
-      const archive = new ZipArchiveCtor({ zlib: { level: 9 } });
+      const output = fs.createWriteStream(fullPath); const archive = archiver('zip', { zlib: { level: 9 } });
       output.on('close', resolve); archive.on('error', reject); archive.pipe(output);
       if (fs.existsSync(dbPath)) archive.file(dbPath, { name: 'database/sech_lims.sqlite' });
       archive.directory(uploadRoot, 'uploads'); archive.directory(evidenceRoot, 'evidence'); archive.directory(configRoot, 'config'); archive.append(JSON.stringify(manifest, null, 2), { name: 'backup-manifest.json' }); archive.finalize();
