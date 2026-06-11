@@ -170,6 +170,19 @@ Notes:
 - The installer is **unsigned**. Windows SmartScreen may show a warning the first time it runs. Sign the installer in a future phase before distributing it publicly.
 - **The installer must still be tested on a real Windows PC before production use.** Use [`docs/RELEASE_CANDIDATE_CHECKLIST.md`](docs/RELEASE_CANDIDATE_CHECKLIST.md) and [`docs/MODULE_ROUTE_SMOKE_TEST.md`](docs/MODULE_ROUTE_SMOKE_TEST.md) on the target machine after installation.
 
+### Troubleshooting: GitHub Actions fails while rebuilding `better-sqlite3`
+
+The native build step is the most fragile part of the Windows packaging pipeline. If the workflow fails inside `node-gyp` while rebuilding `better-sqlite3`:
+
+1. **Confirm Electron is pinned and not floating to latest.** `package.json` must show `"electron": "32.3.3"` (no caret, no `latest`). Floating Electron versions caused an earlier failure where `electron-builder` pulled Electron 42 and `better-sqlite3` failed to compile against the `.electron-gyp/42.x` headers.
+2. **Confirm `better-sqlite3` is pinned** to `11.7.0` (no caret, no `latest`).
+3. **Confirm the workflow runs on `windows-latest`.** The first line of the job is `runs-on: windows-latest`.
+4. **Confirm Node.js 20 is used.** The `actions/setup-node@v4` step sets `node-version: '20'`.
+5. **Confirm native modules are rebuilt before packaging.** The workflow runs `npm run rebuild:native` (which calls `electron-builder install-app-deps`) *before* `npm run dist:win`. If you removed this step, add it back.
+6. **Rerun the workflow manually** — Actions → Build Windows Installer → Run workflow. Cached state from a previous failed run is occasionally the cause.
+
+If a future Electron upgrade is needed, bump `electron`, `electron-builder`, and `better-sqlite3` together in the same commit, then run `npm install` to refresh `package-lock.json` and verify locally before pushing.
+
 ## Phase 16 Release-candidate hardening
 
 Phase 16 prepares the build for desktop release. It does not add new QMS workflows.
