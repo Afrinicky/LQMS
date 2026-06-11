@@ -15,14 +15,15 @@
     "build": "tsc --noEmit && vite build && tsc -p tsconfig.electron.json",
     "preview": "vite preview",
     "smoke": "node scripts/smoke-check.mjs",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder",
-    "dist:win": "electron-builder --win"
+    "rebuild:native": "electron-builder install-app-deps",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win"
   },
   "dependencies": {
     "archiver": "latest",
     "bcryptjs": "latest",
-    "better-sqlite3": "latest",
+    "better-sqlite3": "11.7.0",
     "cors": "latest",
     "express": "latest",
     "lucide-react": "latest",
@@ -41,8 +42,8 @@
     "@types/react-dom": "latest",
     "concurrently": "latest",
     "cross-env": "latest",
-    "electron": "latest",
-    "electron-builder": "latest",
+    "electron": "32.3.3",
+    "electron-builder": "25.1.8",
     "tsx": "latest",
     "typescript": "latest",
     "vite": "latest",
@@ -67,6 +68,7 @@
     "extraMetadata": {
       "main": "dist-electron/main.js"
     },
+    "npmRebuild": true,
     "asarUnpack": [
       "node_modules/better-sqlite3/**/*"
     ],
