@@ -1,0 +1,75 @@
+name: Build Windows Installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-windows-installer:
+    name: Build SECH_LIMS Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Smoke check
+        shell: bash
+        run: |
+          if npm run | grep -q '^  smoke$'; then
+            npm run smoke
+          else
+            echo "smoke script not defined; skipping"
+          fi
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build client and Electron bundle
+        run: npm run build
+
+      - name: Build Windows installer (electron-builder)
+        env:
+          # electron-builder reads GH_TOKEN to attach to releases; this workflow
+          # only uploads as an artifact, so an empty token is fine.
+          GH_TOKEN: ''
+          # Skip code signing for unsigned internal builds.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run dist:win
+
+      - name: List release output
+        if: always()
+        shell: bash
+        run: |
+          echo "Release folder contents:"
+          ls -la release || true
+
+      - name: Upload installer artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SECH_LIMS_Windows_Installer
+          path: |
+            release/*.exe
+            release/*.blockmap
+            release/latest.yml
+          if-no-files-found: error
+          retention-days: 14
