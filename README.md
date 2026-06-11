@@ -147,6 +147,29 @@ The module covers:
 
 Default permissions for the new module follow the established role pattern: System Administrator has all permissions, Laboratory Manager and Quality Manager have view/create/edit/approve/export/print, Quality Team Member / Section Head / Data Officer have view/create/edit/export/print, Biomedical Scientist has view/create, and Technician has view.
 
+## Building the Windows installer with GitHub Actions
+
+GitHub does not automatically build a `.exe` installer for SECH_LIMS — the build only happens when this workflow runs. If you do not push to GitHub, no installer is produced.
+
+To produce a downloadable Windows installer without owning a Windows build machine:
+
+1. Push the code to GitHub (the `claude/cool-gauss-gnBTr` branch or `main`).
+2. Open the repository on GitHub in a browser.
+3. Click the **Actions** tab.
+4. In the left-hand list, select **Build Windows Installer**.
+5. Click **Run workflow**, pick the branch you want to build, and confirm.
+6. Wait for the workflow to finish (roughly 10–20 minutes — Electron must rebuild `better-sqlite3` against the bundled Electron headers on the Windows runner).
+7. When the run finishes successfully, scroll to the **Artifacts** section at the bottom of the run summary page.
+8. Download the artifact named **`SECH_LIMS_Windows_Installer`**.
+9. Extract the downloaded `.zip`. Inside you will find `SECH_LIMS-by-Nickland-<version>-Setup.exe` plus the matching `.blockmap` and `latest.yml`. Run the `.exe` to install the application on a Windows machine.
+
+Notes:
+
+- The workflow runs on `windows-latest` so that `electron-builder` can natively rebuild `better-sqlite3` for the bundled Electron version. Linux runners cannot produce a Windows installer with the current packaging configuration.
+- The workflow runs **manually** via `workflow_dispatch` and also on pushes to `main`. Other branches can use the manual "Run workflow" button at any time.
+- The installer is **unsigned**. Windows SmartScreen may show a warning the first time it runs. Sign the installer in a future phase before distributing it publicly.
+- **The installer must still be tested on a real Windows PC before production use.** Use [`docs/RELEASE_CANDIDATE_CHECKLIST.md`](docs/RELEASE_CANDIDATE_CHECKLIST.md) and [`docs/MODULE_ROUTE_SMOKE_TEST.md`](docs/MODULE_ROUTE_SMOKE_TEST.md) on the target machine after installation.
+
 ## Phase 16 Release-candidate hardening
 
 Phase 16 prepares the build for desktop release. It does not add new QMS workflows.
