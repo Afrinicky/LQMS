@@ -57,8 +57,17 @@ async function createWindow() {
   win.webContents.on('preload-error', (_e, file, err) => {
     bootLog('preload-error', { file, error: String(err) });
   });
-  win.webContents.on('console-message', (_e, level, message, line, sourceId) => {
-    bootLog('renderer console', { level, message, line, sourceId });
+  // Electron 32+ emits console-message with a single `details` object
+  // ({ level, message, lineNumber, sourceId, frame }). Older versions emit
+  // positional arguments (level, message, line, sourceId). Accept both so
+  // renderer logs always reach boot.log.
+  win.webContents.on('console-message', (...args: unknown[]) => {
+    const [first, ...rest] = args.slice(1); // drop the Event
+    if (typeof first === 'object' && first !== null && 'message' in (first as any)) {
+      bootLog('renderer console', first as any);
+    } else {
+      bootLog('renderer console', { level: first, message: rest[0], line: rest[1], sourceId: rest[2] });
+    }
   });
   win.webContents.on('render-process-gone', (_e, details) => {
     bootLog('render-process-gone', details);
