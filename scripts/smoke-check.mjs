@@ -24,7 +24,7 @@ checkFile('README.md');
 
 // Electron entry points
 checkFile('electron/main.ts');
-checkFile('electron/preload.ts');
+checkFile('electron/preload.cjs');
 checkFile('electron/apiServer.ts');
 
 // Server entry + core routes
