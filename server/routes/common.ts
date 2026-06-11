@@ -4,7 +4,7 @@ import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
 import archiver from 'archiver';
-import { getDb, uploadRoot, evidenceRoot, backupRoot, dbPath, configRoot } from '../db/database.js';
+import { getDb, uploadRoot, evidenceRoot, backupRoot, dbPath, configRoot, dataRoot } from '../db/database.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
@@ -531,6 +531,22 @@ export function commonRoutes() {
   function safeCount(db: any, sql: string, ...params: unknown[]): number {
     try { return (db.prepare(sql).get(...params) as { count: number }).count; } catch { return 0; }
   }
+
+  router.get('/system/about', (_req, res) => {
+    const db = getDb();
+    let dbOk = true;
+    try { db.prepare('SELECT 1').get(); } catch { dbOk = false; }
+    res.json({
+      productName: 'SECH_LIMS by Nickland',
+      version: process.env.npm_package_version ?? '0.1.0',
+      buildMode: process.env.NODE_ENV ?? 'development',
+      apiStatus: dbOk ? 'ok' : 'database_unavailable',
+      databasePath: dbPath,
+      dataDirectory: dataRoot,
+      lanReady: true,
+      generatedAt: new Date().toISOString()
+    });
+  });
 
   router.get('/dashboard/system-health-summary', (_req, res) => {
     const db = getDb();
