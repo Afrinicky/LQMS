@@ -78,7 +78,7 @@ try {
   check('package.json build.productName set', !!pkg.build?.productName, pkg.build?.productName ?? 'missing');
   check('package.json build.win target configured', Array.isArray(pkg.build?.win?.target), JSON.stringify(pkg.build?.win?.target ?? null));
   check('package.json build.asarUnpack includes better-sqlite3', (pkg.build?.asarUnpack ?? []).some(x => /better-sqlite3/.test(x)));
-  check('main field points to dist-electron', pkg.main === 'dist-electron/main.js', pkg.main ?? 'missing');
+  check('main field points to dist-electron/electron/main.js', pkg.main === 'dist-electron/electron/main.js', pkg.main ?? 'missing');
 } catch (e) {
   check('package.json parses cleanly', false, String(e));
 }
