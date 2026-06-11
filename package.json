@@ -69,6 +69,7 @@
       "main": "dist-electron/electron/main.js"
     },
     "npmRebuild": true,
+    "publish": null,
     "asarUnpack": [
       "node_modules/better-sqlite3/**/*"
     ],
