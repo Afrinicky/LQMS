@@ -2,7 +2,7 @@
   "name": "sech-lims-by-nickland",
   "version": "0.1.0",
   "description": "Foundation MVP scaffold for SECH_LIMS by Nickland, an offline-first LAN-ready Laboratory Quality Management System.",
-  "main": "dist-electron/main.js",
+  "main": "dist-electron/electron/main.js",
   "type": "module",
   "scripts": {
     "dev": "concurrently \"npm:dev:api\" \"npm:dev:web\" \"npm:dev:electron\"",
@@ -66,7 +66,7 @@
       "!**/__tests__/**"
     ],
     "extraMetadata": {
-      "main": "dist-electron/main.js"
+      "main": "dist-electron/electron/main.js"
     },
     "npmRebuild": true,
     "asarUnpack": [

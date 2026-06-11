@@ -22,7 +22,7 @@ async function createWindow() {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false }
   });
   const devUrl = process.env.VITE_DEV_SERVER_URL;
-  if (devUrl) await win.loadURL(devUrl); else await win.loadFile(path.join(__dirname, '../dist/index.html'));
+  if (devUrl) await win.loadURL(devUrl); else await win.loadFile(path.join(__dirname, '../../dist/index.html'));
 }
 
 app.whenReady().then(createWindow);
