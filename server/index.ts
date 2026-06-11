@@ -81,5 +81,6 @@ export function createApiServer() {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.env.API_PORT ?? 4317);
-  createApiServer().listen(port, '0.0.0.0', () => console.log(`SECH_LIMS host API listening on http://0.0.0.0:${port}`));
+  const host = process.env.SECH_LIMS_API_HOST ?? '127.0.0.1';
+  createApiServer().listen(port, host, () => console.log(`SECH_LIMS host API listening on http://${host}:${port}`));
 }

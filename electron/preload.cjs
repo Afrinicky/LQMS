@@ -5,6 +5,12 @@
 // conflict and guarantees a CommonJS file in the asar.
 const { contextBridge } = require('electron');
 
-contextBridge.exposeInMainWorld('sechLims', {
-  apiBaseUrl: process.env.SECH_LIMS_API_URL || 'http://127.0.0.1:4317/api'
-});
+// process.env.SECH_LIMS_API_URL is set by electron/main.ts after the embedded
+// API has bound a port. Because the BrowserWindow is created only after the
+// API is ready, this preload script sees the actually-resolved URL — including
+// the fallback port if 4317 was busy.
+const apiBaseUrl =
+  process.env.SECH_LIMS_API_URL ||
+  `http://${process.env.SECH_LIMS_API_HOST || '127.0.0.1'}:${process.env.SECH_LIMS_API_PORT || process.env.API_PORT || '4317'}/api`;
+
+contextBridge.exposeInMainWorld('sechLims', { apiBaseUrl });

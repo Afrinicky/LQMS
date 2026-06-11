@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, dialog } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -11,9 +11,16 @@ if (!process.env.SECH_LIMS_DATA_DIR) {
   process.env.SECH_LIMS_DATA_DIR = path.join(app.getPath('userData'), 'local-data');
 }
 
-// boot.log persists per-launch diagnostics next to the user data folder so a
-// non-developer running the installed app can capture renderer / preload
-// failures even when DevTools cannot be opened.
+// Enforce a single Electron main process. Double-clicking the .exe a second
+// time would otherwise launch a second process that tries to bind the same
+// port and crashes with EADDRINUSE. The second instance just quits and the
+// existing window is focused.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+  process.exit(0);
+}
+
 const bootLogPath = path.join(app.getPath('userData'), 'boot.log');
 function bootLog(...parts: unknown[]) {
   const line = `[${new Date().toISOString()}] ${parts.map(p => typeof p === 'string' ? p : JSON.stringify(p)).join(' ')}\n`;
@@ -26,6 +33,7 @@ const preloadPath = path.join(__dirname, 'preload.cjs');
 const indexHtmlPath = path.join(__dirname, '../../dist/index.html');
 
 bootLog('main starting');
+bootLog('singleInstanceLock', gotSingleInstanceLock);
 bootLog('app.isPackaged', isPackaged);
 bootLog('__dirname', __dirname);
 bootLog('process.resourcesPath', process.resourcesPath);
@@ -33,13 +41,28 @@ bootLog('preload path', preloadPath, 'exists?', fs.existsSync(preloadPath));
 bootLog('index.html path', indexHtmlPath, 'exists?', fs.existsSync(indexHtmlPath));
 bootLog('SECH_LIMS_DATA_DIR', process.env.SECH_LIMS_DATA_DIR);
 
-async function createWindow() {
+let mainWindow: BrowserWindow | null = null;
+
+async function bootApiOnce(): Promise<void> {
   try {
     const { startLocalApi } = await import('./apiServer.js');
-    startLocalApi();
-    bootLog('local API started');
+    const state = await startLocalApi();
+    bootLog('local API ready', state);
   } catch (err) {
     bootLog('local API failed to start', String(err));
+    dialog.showErrorBox(
+      'SECH_LIMS by Nickland — startup error',
+      `The local API could not start.\n\n${String(err)}\n\nCheck the log at:\n${bootLogPath}`
+    );
+    throw err;
+  }
+}
+
+async function createWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.focus();
+    bootLog('createWindow: existing window focused');
+    return;
   }
 
   const win = new BrowserWindow({
@@ -50,6 +73,9 @@ async function createWindow() {
     title: 'SECH_LIMS by Nickland',
     webPreferences: { preload: preloadPath, contextIsolation: true, nodeIntegration: false }
   });
+  mainWindow = win;
+
+  win.on('closed', () => { if (mainWindow === win) mainWindow = null; });
 
   win.webContents.on('did-fail-load', (_e, code, desc, url) => {
     bootLog('did-fail-load', { code, desc, url });
@@ -88,6 +114,41 @@ async function createWindow() {
   }
 }
 
-app.whenReady().then(createWindow);
+app.on('second-instance', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+    bootLog('second-instance: focused existing window');
+  }
+});
+
+process.on('uncaughtException', (err) => {
+  bootLog('uncaughtException', String(err), (err as Error)?.stack ?? '');
+  try {
+    dialog.showErrorBox(
+      'SECH_LIMS by Nickland — fatal error',
+      `An unexpected error occurred.\n\n${String(err)}\n\nCheck the log at:\n${bootLogPath}`
+    );
+  } catch { /* ignore */ }
+});
+process.on('unhandledRejection', (reason) => {
+  bootLog('unhandledRejection', String(reason));
+});
+
+app.whenReady().then(async () => {
+  try {
+    await bootApiOnce();
+    await createWindow();
+  } catch (err) {
+    bootLog('startup aborted', String(err));
+    app.quit();
+  }
+});
+
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    bootLog('activate: creating window (API already running)');
+    void createWindow();
+  }
+});
