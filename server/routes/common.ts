@@ -3,9 +3,16 @@ import bcrypt from 'bcryptjs';
 import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
-import archiver from 'archiver';
+import { createRequire } from 'node:module';
 import { getDb, uploadRoot, evidenceRoot, backupRoot, dbPath, configRoot, dataRoot } from '../db/database.js';
 import { requireAuth } from '../middleware/auth.js';
+
+// archiver is a CommonJS module that does not provide an ESM `default`
+// export. Importing it as `import archiver from 'archiver'` crashes the
+// packaged Electron app under app.asar. Load via createRequire so the
+// same line works in dev, production, and packaged modes.
+const requireFromHere = createRequire(import.meta.url);
+const archiver = requireFromHere('archiver') as (format: string, options?: unknown) => any;
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
