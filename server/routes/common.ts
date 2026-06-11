@@ -524,6 +524,94 @@ export function commonRoutes() {
   router.post('/backup/restore-placeholder', requirePermission('settings', 'approve'), (_req, res) => res.json({ ok: true, message: 'Restore is a guarded placeholder in the foundation MVP.' }));
   router.get('/audit-log', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 200').all()));
 
+  // -------- Phase 15: System health, my-work, setup health, linked records --------
+  function tableExists(db: any, name: string): boolean {
+    return !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?").get(name);
+  }
+  function safeCount(db: any, sql: string, ...params: unknown[]): number {
+    try { return (db.prepare(sql).get(...params) as { count: number }).count; } catch { return 0; }
+  }
+
+  router.get('/dashboard/system-health-summary', (_req, res) => {
+    const db = getDb();
+    const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+    const today = new Date().toISOString().slice(0, 10);
+    res.json({
+      activeModules: safeCount(db, 'SELECT COUNT(*) count FROM system_modules WHERE enabled = 1'),
+      totalUsers: safeCount(db, 'SELECT COUNT(*) count FROM users'),
+      usersLinkedToStaff: safeCount(db, 'SELECT COUNT(*) count FROM users WHERE staff_id IS NOT NULL'),
+      usersNotLinkedToStaff: safeCount(db, 'SELECT COUNT(*) count FROM users WHERE staff_id IS NULL'),
+      openActions: safeCount(db, "SELECT COUNT(*) count FROM actions WHERE status != 'Closed'"),
+      overdueActions: safeCount(db, "SELECT COUNT(*) count FROM actions WHERE due_date IS NOT NULL AND due_date < ? AND status != 'Closed'", today),
+      unreadNotifications: tableExists(db, 'notifications') ? safeCount(db, "SELECT COUNT(*) count FROM notifications WHERE status = 'unread'") : 0,
+      overdueCalendarItems: tableExists(db, 'review_calendar_items') ? safeCount(db, "SELECT COUNT(*) count FROM review_calendar_items WHERE due_date IS NOT NULL AND due_date < ? AND status NOT IN ('completed','cancelled')", today) : 0,
+      recentAuditEvents: safeCount(db, "SELECT COUNT(*) count FROM audit_logs WHERE created_at >= ?", monthStart),
+      backupChecksThisMonth: tableExists(db, 'backup_restore_checks') ? safeCount(db, 'SELECT COUNT(*) count FROM backup_restore_checks WHERE created_at >= ?', monthStart) : 0,
+      openDataIntegrityIssues: tableExists(db, 'data_integrity_checks') ? safeCount(db, "SELECT COUNT(*) count FROM data_integrity_checks WHERE status IN ('issues_found','action_required')") : 0
+    });
+  });
+
+  router.get('/dashboard/my-work-summary', (req, res) => {
+    const db = getDb();
+    const userId = req.user?.id ?? null;
+    const staffId = req.user?.staffId ?? null;
+    const today = new Date().toISOString().slice(0, 10);
+    let myOpenTasks = 0, myUnreadNotifications = 0, myDueToday = 0, myOverdueItems = 0, myOpenActions = 0, myPendingApprovals = 0;
+    if (tableExists(db, 'user_task_queue')) {
+      if (staffId) myOpenTasks = safeCount(db, "SELECT COUNT(*) count FROM user_task_queue WHERE status IN ('open','in_progress','overdue') AND assigned_to_staff_id = ?", staffId);
+      else if (userId) myOpenTasks = safeCount(db, "SELECT COUNT(*) count FROM user_task_queue WHERE status IN ('open','in_progress','overdue') AND assigned_to_user_id = ?", userId);
+    }
+    if (tableExists(db, 'notifications')) {
+      if (staffId) {
+        myUnreadNotifications = safeCount(db, "SELECT COUNT(*) count FROM notifications WHERE status = 'unread' AND (assigned_to_staff_id = ? OR assigned_to_staff_id IS NULL)", staffId);
+        myDueToday = safeCount(db, "SELECT COUNT(*) count FROM notifications WHERE due_date = ? AND status NOT IN ('resolved','dismissed') AND (assigned_to_staff_id = ? OR assigned_to_staff_id IS NULL)", today, staffId);
+        myOverdueItems = safeCount(db, "SELECT COUNT(*) count FROM notifications WHERE due_date IS NOT NULL AND due_date < ? AND status NOT IN ('resolved','dismissed') AND (assigned_to_staff_id = ? OR assigned_to_staff_id IS NULL)", today, staffId);
+        myPendingApprovals = safeCount(db, "SELECT COUNT(*) count FROM notifications WHERE notification_type = 'approval_required' AND status NOT IN ('resolved','dismissed') AND (assigned_to_staff_id = ? OR assigned_to_staff_id IS NULL)", staffId);
+      }
+    }
+    if (staffId) myOpenActions = safeCount(db, "SELECT COUNT(*) count FROM actions WHERE assigned_to_staff_id = ? AND status != 'Closed'", staffId);
+    res.json({ myOpenTasks, myUnreadNotifications, myDueToday, myOverdueItems, myOpenActions, myPendingApprovals });
+  });
+
+  router.get('/settings/setup-health', requirePermission('settings', 'view'), (req, res) => {
+    const db = getDb();
+    const adminRole = db.prepare("SELECT id FROM roles WHERE name = 'System Administrator'").get() as { id: number } | undefined;
+    const hasAdminUser = adminRole ? safeCount(db, 'SELECT COUNT(*) count FROM users WHERE role_id = ?', adminRole.id) > 0 : false;
+    const adminLinkedToStaff = adminRole ? safeCount(db, 'SELECT COUNT(*) count FROM users WHERE role_id = ? AND staff_id IS NOT NULL', adminRole.id) > 0 : false;
+    const moduleCount = safeCount(db, 'SELECT COUNT(*) count FROM system_modules');
+    const activeModuleCount = safeCount(db, 'SELECT COUNT(*) count FROM system_modules WHERE enabled = 1');
+    const permissionRowsCount = safeCount(db, 'SELECT COUNT(*) count FROM permissions');
+    const staffCount = safeCount(db, 'SELECT COUNT(*) count FROM staff');
+    const positionsCount = safeCount(db, 'SELECT COUNT(*) count FROM positions');
+    const backupRow = db.prepare("SELECT value FROM settings WHERE key = 'backupConfigured'").get() as { value: string } | undefined;
+    const backupConfigured = backupRow?.value === 'true';
+    const warnings: string[] = [];
+    if (!hasAdminUser) warnings.push('No system administrator user exists.');
+    if (hasAdminUser && !adminLinkedToStaff) warnings.push('System administrator user is not linked to a staff record.');
+    if (staffCount === 0) warnings.push('No staff records exist yet.');
+    if (positionsCount === 0) warnings.push('No positions seeded.');
+    if (activeModuleCount === 0) warnings.push('No active modules.');
+    if (!backupConfigured) warnings.push('Backup configuration setting not recorded — confirm backup folder before going live.');
+    audit(req, { action: 'view', entity: 'setup_health', newValue: { activeModuleCount, hasAdminUser, adminLinkedToStaff } });
+    res.json({ hasAdminUser, adminLinkedToStaff, moduleCount, activeModuleCount, permissionRowsCount, staffCount, positionsCount, backupConfigured, warnings });
+  });
+
+  router.post('/settings/demo-data/seed', requirePermission('settings', 'create'), (req, res) => {
+    audit(req, { action: 'attempt', entity: 'demo_data_seed', newValue: { note: 'demo seed disabled' } });
+    res.json({ ok: false, message: 'Demo data seeding is disabled in this foundation build.' });
+  });
+
+  router.get('/common/linked-records', (req, res) => {
+    const moduleKey = String(req.query.module_key ?? '').trim();
+    const recordType = String(req.query.record_type ?? '').trim();
+    const recordId = String(req.query.record_id ?? '').trim();
+    if (!moduleKey || !recordType || !recordId) return res.status(400).json({ error: 'module_key, record_type, and record_id are required' });
+    const db = getDb();
+    const outgoing = db.prepare('SELECT id, source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes, created_at FROM record_links WHERE source_module_key = ? AND source_record_type = ? AND source_record_id = ? ORDER BY id DESC').all(moduleKey, recordType, recordId);
+    const incoming = db.prepare('SELECT id, source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes, created_at FROM record_links WHERE target_module_key = ? AND target_record_type = ? AND target_record_id = ? ORDER BY id DESC').all(moduleKey, recordType, recordId);
+    res.json({ outgoing, incoming });
+  });
+
   for (const group of ['lab-profile','departments','sections','locations','authorizations','approval-routes','links','notifications','settings']) router.get(`/${group}`, (_req, res) => res.json([]));
   return router;
 }

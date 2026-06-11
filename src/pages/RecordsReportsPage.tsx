@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
+import { LinkedRecordsPanel } from '../components/LinkedRecordsPanel';
 import type {
   Staff, ReportTemplate, ReportRequest, PrintJob, EvidencePack,
   RecordRetentionRule, RecordRetentionReview, AuditTrailReview,
@@ -287,6 +288,7 @@ export function RecordsReportsPage() {
       {selectedPack && <div className="card" style={{ marginTop: 16 }}>
         <h3>{selectedPack.pack_number} — {selectedPack.pack_title}</h3>
         <p>Purpose: {selectedPack.pack_purpose} | Status: {formatBadge(selectedPack.status)}</p>
+        <LinkedRecordsPanel moduleKey="records_reports" recordType="evidence_packs" recordId={selectedPack.id} title="Cross-module links for this evidence pack" />
         <h4>Items</h4>
         <table className="data-table"><thead><tr><th>#</th><th>Module / record</th><th>Title</th><th>Summary</th><th></th></tr></thead><tbody>
           {(selectedPack.items || []).map(i => <tr key={i.id}><td>{i.display_order}</td><td>{i.module_key}/{i.record_type}#{i.record_id}</td><td>{i.item_title}</td><td>{i.item_summary || '—'}</td><td><button onClick={() => removePackItem(i.id)}>Remove</button></td></tr>)}

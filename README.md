@@ -147,6 +147,20 @@ The module covers:
 
 Default permissions for the new module follow the established role pattern: System Administrator has all permissions, Laboratory Manager and Quality Manager have view/create/edit/approve/export/print, Quality Team Member / Section Head / Data Officer have view/create/edit/export/print, Biomedical Scientist has view/create, and Technician has view.
 
+## Phase 15 Integration hardening
+
+Phase 15 is an integration/hardening pass — not a new QMS domain. It pulls the previously built foundations together for desktop/LAN testing:
+
+- **Master dashboard** at `/dashboard` now aggregates the per-module summary endpoints (QMS Core, Operations, Technical Quality, People & Documents, Governance, Customer + POCT + Blood Bank, Process Management, Information & Records, Alerts & Tasks) plus a System Health row and a My Work row. Failed endpoints degrade gracefully — missing sections render `—` instead of crashing the page.
+- **System Health summary** at `GET /api/dashboard/system-health-summary` returns active modules, total users, users linked vs not linked to a staff record, open and overdue actions, unread notifications, overdue calendar items, recent audit events, monthly backup checks, and open data-integrity issues — using safe SQL guards so older databases without optional tables still respond.
+- **My Work summary** at `GET /api/dashboard/my-work-summary` resolves the signed-in user's open tasks, unread notifications, due-today, overdue, open actions, and pending approvals. Uses `req.user.staffId` for staff-scoped fields and `req.user.id` only as a fall-back.
+- **Setup Health Check** at `GET /api/settings/setup-health` reports whether an admin user exists and is linked to a staff record, the active module count, permission row count, staff and position counts, and whether a backup configuration setting has been recorded — plus a `warnings[]` array surfaced in the UI.
+- **Linked Records viewer** at `GET /api/common/linked-records?module_key=…&record_type=…&record_id=…` returns the outgoing and incoming `record_links` rows for a given record. A reusable `LinkedRecordsPanel` component is wired into the Records, Reports & Evidence pack detail card and can be re-used across any module.
+- **Demo data seed** is a deliberate no-op: `POST /api/settings/demo-data/seed` is wired but returns `Demo data seeding is disabled in this foundation build.` so the production database can never accidentally be filled with fake clinical/patient data.
+- **Acceptance testing checklist** has been added at `docs/ACCEPTANCE_TESTING_PHASE_15.md` covering 21 sections from setup and login through to build and packaging readiness.
+
+The master dashboard, My Work block on the Home page, and System Health card give a single landing surface for daily QMS oversight without rebuilding any of the per-module pages.
+
 ## Known limitations
 
 - All modules are foundation-level and require real-world testing before production use.
@@ -168,3 +182,4 @@ Default permissions for the new module follow the established role pattern: Syst
 - Management review narrative templating remains a future improvement.
 - Restore workflow remains a conservative guarded placeholder.
 - Permissions are wired server-side, but fine-grained UI editing of every permission source is still MVP-level.
+- Installer packaging for Windows needs a final on-target test pass. The Electron shell, Vite build, and host API have been verified through `npm run build`, but a packaged installer should be smoke-tested on the deployment laptop before go-live.
