@@ -147,6 +147,21 @@ The module covers:
 
 Default permissions for the new module follow the established role pattern: System Administrator has all permissions, Laboratory Manager and Quality Manager have view/create/edit/approve/export/print, Quality Team Member / Section Head / Data Officer have view/create/edit/export/print, Biomedical Scientist has view/create, and Technician has view.
 
+## Phase 16 Release-candidate hardening
+
+Phase 16 prepares the build for desktop release. It does not add new QMS workflows.
+
+- **Code-splitting.** The major module pages (`DocumentControlPage`, `PersonnelManagementPage`, Phase 3/4/8 pages, `CustomerFocusPage`, `POCTPage`, `NotificationsPage`, `RecordsReportsPage`, `ProcessManagementPage`, `InformationManagementPage`, `BloodBankHandoverPage`, `MonthlyReportsPage`) are now lazy-loaded via `React.lazy` + `Suspense`. The main client bundle dropped from ~864 KB to ~344 KB and each module page is a separate chunk loaded on demand with a `Loading module…` fallback.
+- **System/About endpoint.** `GET /api/system/about` returns `productName`, `version` (from `package.json`), `buildMode`, `apiStatus`, `databasePath`, `dataDirectory`, `lanReady`, and `generatedAt`. No secrets are exposed.
+- **Electron-builder configuration.** `electron-builder` has been added as a dev dependency with NSIS Windows packaging targeting `release/SECH_LIMS-by-Nickland-<version>-Setup.exe`. The native `better-sqlite3` module is in `asarUnpack` so it can be loaded at runtime. The Electron main process sets `SECH_LIMS_DATA_DIR` to `app.getPath('userData')/local-data` before starting the API — the SQLite database, uploads, evidence, backups, and config never land in the installation directory, so reinstalling or updating the app does not touch user data.
+- **New npm scripts.** `npm run smoke` runs a non-destructive structure check; `npm run pack` produces a packaged directory without an installer; `npm run dist` and `npm run dist:win` produce the NSIS installer.
+- **Deployment guide.** [`docs/WINDOWS_INSTALLER_AND_LAN_DEPLOYMENT.md`](docs/WINDOWS_INSTALLER_AND_LAN_DEPLOYMENT.md) covers install, dev, build, installer creation, where data lives, backup, host desktop, LAN client preparation, firewall, and safe upgrades.
+- **Release-candidate checklist.** [`docs/RELEASE_CANDIDATE_CHECKLIST.md`](docs/RELEASE_CANDIDATE_CHECKLIST.md) — 17 sections covering build, login, permissions, dashboard, backups, audit trail, notifications, linked records, sample workflows, LAN readiness, and Windows installer sign-off.
+- **Module route smoke test.** [`docs/MODULE_ROUTE_SMOKE_TEST.md`](docs/MODULE_ROUTE_SMOKE_TEST.md) — table of every active frontend path and every documented API health endpoint with a pass/fail column.
+- **Acceptance testing checklist.** Phase 15's [`docs/ACCEPTANCE_TESTING_PHASE_15.md`](docs/ACCEPTANCE_TESTING_PHASE_15.md) remains the per-module hands-on verification document.
+
+> Important: `npm run dist:win` must run on a build host with the correct native toolchain to rebuild `better-sqlite3` against the Electron headers. On environments without that toolchain — including most sandboxed CI images — the packaging command will fail at the native rebuild step. This is expected; build the installer on a Windows machine (or a Linux host with the matching Electron + node-gyp toolchain) before signing off the release candidate.
+
 ## Phase 15 Integration hardening
 
 Phase 15 is an integration/hardening pass — not a new QMS domain. It pulls the previously built foundations together for desktop/LAN testing:

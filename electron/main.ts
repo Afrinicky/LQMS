@@ -1,11 +1,17 @@
 import { app, BrowserWindow } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { startLocalApi } from './apiServer.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Direct SQLite + uploads + evidence + backup + config to the per-user app data
+// directory so the installer never writes into Program Files.
+if (!process.env.SECH_LIMS_DATA_DIR) {
+  process.env.SECH_LIMS_DATA_DIR = path.join(app.getPath('userData'), 'local-data');
+}
+
 async function createWindow() {
+  const { startLocalApi } = await import('./apiServer.js');
   startLocalApi();
   const win = new BrowserWindow({
     width: 1380,
