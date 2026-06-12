@@ -1,10 +1,10 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import { Suspense, lazy, useEffect, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import AppLayout from './layouts/AppLayout';
 import SettingsLayout from './layouts/SettingsLayout';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { ModuleProvider } from './hooks/useModules';
-import { getSetupStatus } from './services/api';
+import { API_BASE, getSetupStatus } from './services/api';
 import { LoginPage, SetupPage } from './pages/AuthPages';
 import { Dashboard, Home, ModulePage, Organisation } from './pages/CorePages';
 import { ActionTracker, BackupRestore, Devices, DocumentImport, EvidenceUpload, ModuleToggles, PermissionMatrix, Positions, UsersAccess } from './pages/SettingsPages';
@@ -38,15 +38,111 @@ const MonthlyReportsPage = lazy(() => import('./pages/MonthlyReportsPage').then(
 
 const ModuleFallback = () => <div className="card">Loading module…</div>;
 
+type StartupState = 'booting' | 'checkingApi' | 'apiUnavailable' | 'checkingSetup' | 'setupRequired' | 'checkingAuth' | 'loginRequired' | 'authenticated' | 'startupError';
+
+function StartupShell({ heading, message, detail, children }: { heading: string; message: string; detail?: string; children?: React.ReactNode }) {
+  return <div className="auth">
+    <div className="card" style={{ maxWidth: 640 }}>
+      <h2 style={{ marginTop: 0, color: 'var(--navy)' }}>SECH_LIMS by Nickland</h2>
+      <p style={{ fontWeight: 600 }}>{heading}</p>
+      <p style={{ color: 'var(--muted)' }}>{message}</p>
+      {detail && <pre style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 8, padding: 12, whiteSpace: 'pre-wrap', color: '#172033', fontSize: 12 }}>{detail}</pre>}
+      {children}
+    </div>
+  </div>;
+}
+
 function Gate({ children }: { children: React.ReactNode }) {
-  const [setupComplete, setSetupComplete] = useState<boolean | null>(null); const { user, loading } = useAuth(); const location = useLocation();
-  useEffect(() => { getSetupStatus().then(s => setSetupComplete(s.setupComplete)).catch(() => setSetupComplete(false)); }, []);
-  if (setupComplete === null || loading) return <div className="auth"><div className="card">Loading SECH_LIMS host...</div></div>;
-  if (!setupComplete && location.pathname !== '/setup') return <Navigate to="/setup" replace />;
-  if (setupComplete && location.pathname === '/setup') return <Navigate to={user ? '/home' : '/login'} replace />;
-  if (setupComplete && !user && location.pathname !== '/login') return <Navigate to="/login" replace />;
-  if (setupComplete && user && location.pathname === '/login') return <Navigate to="/home" replace />;
-  return <>{children}</>;
+  const { user, loading } = useAuth();
+  const location = useLocation();
+  const [state, setState] = useState<StartupState>('booting');
+  const [errorDetail, setErrorDetail] = useState<string>('');
+  const [setupComplete, setSetupComplete] = useState<boolean | null>(null);
+  const [attempt, setAttempt] = useState(0);
+
+  const retry = useCallback(() => setAttempt(a => a + 1), []);
+
+  // Phase 1: ping the local API health endpoint with a 10 s timeout.
+  useEffect(() => {
+    let cancelled = false;
+    setState('checkingApi');
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10000);
+    fetch(`${API_BASE}/health`, { signal: ctrl.signal })
+      .then(r => r.json())
+      .then(() => { if (!cancelled) { console.log('[renderer] startup state -> checkingSetup'); setState('checkingSetup'); } })
+      .catch(err => { if (!cancelled) { console.error('[renderer] API health failed', err); setErrorDetail(String(err)); setState('apiUnavailable'); } })
+      .finally(() => clearTimeout(timer));
+    return () => { cancelled = true; clearTimeout(timer); ctrl.abort(); };
+  }, [attempt]);
+
+  // Phase 2: ask the API whether first-time setup is complete.
+  useEffect(() => {
+    if (state !== 'checkingSetup') return;
+    let cancelled = false;
+    getSetupStatus()
+      .then(s => { if (cancelled) return; console.log('[renderer] setup status', s); setSetupComplete(s.setupComplete); setState(s.setupComplete ? 'checkingAuth' : 'setupRequired'); })
+      .catch(err => { if (cancelled) return; console.error('[renderer] setup status failed', err); setErrorDetail(String(err)); setState('startupError'); });
+    return () => { cancelled = true; };
+  }, [state]);
+
+  // Phase 3: wait for AuthProvider to finish its /auth/me check.
+  useEffect(() => {
+    if (state !== 'checkingAuth') return;
+    if (loading) return;
+    setState(user ? 'authenticated' : 'loginRequired');
+    console.log('[renderer] startup state ->', user ? 'authenticated' : 'loginRequired');
+  }, [state, loading, user]);
+
+  // Render a visible screen for every state. Never return null.
+  if (state === 'booting' || state === 'checkingApi') {
+    return <StartupShell heading="Starting up" message="Checking local API…" detail={`API base URL: ${API_BASE}`} />;
+  }
+
+  if (state === 'apiUnavailable') {
+    return <StartupShell
+      heading="Local API is not responding"
+      message="The host API did not respond within 10 seconds. Make sure no other copy of SECH_LIMS is running and the host service is reachable."
+      detail={`API base URL: ${API_BASE}\n${errorDetail}`}
+    >
+      <button onClick={retry} style={{ marginTop: 12 }}>Retry connection</button>
+      <p style={{ color: 'var(--muted)', marginTop: 12, fontSize: 13 }}>Open <strong>View → Toggle Developer Tools</strong> to inspect the failure.</p>
+    </StartupShell>;
+  }
+
+  if (state === 'checkingSetup') {
+    return <StartupShell heading="Starting up" message="Checking setup status…" detail={`API base URL: ${API_BASE}`} />;
+  }
+
+  if (state === 'setupRequired') {
+    if (location.pathname !== '/setup') return <Navigate to="/setup" replace />;
+    return <>{children}</>;
+  }
+
+  if (state === 'checkingAuth') {
+    return <StartupShell heading="Starting up" message="Checking session…" />;
+  }
+
+  if (state === 'loginRequired') {
+    if (location.pathname !== '/login') return <Navigate to="/login" replace />;
+    return <>{children}</>;
+  }
+
+  if (state === 'authenticated') {
+    if (location.pathname === '/login') return <Navigate to="/home" replace />;
+    if (location.pathname === '/setup' && setupComplete) return <Navigate to="/home" replace />;
+    return <>{children}</>;
+  }
+
+  // startupError
+  return <StartupShell
+    heading="Startup error"
+    message="Something went wrong while the application was starting up."
+    detail={errorDetail || 'No further details available.'}
+  >
+    <button onClick={retry} style={{ marginTop: 12 }}>Retry</button>
+    <p style={{ color: 'var(--muted)', marginTop: 12, fontSize: 13 }}>Open <strong>View → Toggle Developer Tools</strong> for the full stack trace.</p>
+  </StartupShell>;
 }
 
 function AppRoutes() {
