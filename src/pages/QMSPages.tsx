@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
+import PageHeader from '../components/ui/PageHeader';
 import { api } from '../services/api';
 import { useModules } from '../hooks/useModules';
 import DisabledModule from '../components/DisabledModule';
@@ -289,7 +290,7 @@ export function NcCapaPage() {
   if (!isEnabled('nc_capa')) return <DisabledModule />;
 
   return <div>
-    <h2>Nonconforming Events & CAPA</h2>
+    <PageHeader eyebrow="Quality &amp; compliance" title="Nonconforming Events &amp; CAPA" subtitle="Incidents, investigations, and corrective/preventive actions." />
     <div className="tabs">{['Dashboard', 'Nonconforming Events', 'New Event', 'CAPA Register', 'Overdue CAPAs', 'Effectiveness Reviews', 'Reports placeholder'].map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
     {loadState.error && <div className="card"><strong>Error:</strong> {loadState.error}</div>}
     {loadState.loading && <div className="card"><em>Loading QMS data…</em></div>}
@@ -529,7 +530,7 @@ export function ComplaintsPage() {
   if (!isEnabled('complaints')) return <DisabledModule />;
 
   return <div>
-    <h2>Complaints Register</h2>
+    <PageHeader eyebrow="Customer service" title="Complaints Register" subtitle="Complaints intake, investigation, and resolution." />
     <div className="tabs">{['Dashboard', 'Complaints Register', 'New Complaint', 'Investigation', 'Trends placeholder', 'Reports placeholder'].map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
     {loadState.error && <div className="card"><strong>Error:</strong> {loadState.error}</div>}
     {loadState.loading && <div className="card"><em>Loading complaints…</em></div>}
@@ -690,7 +691,7 @@ export function RisksPage() {
   if (!isEnabled('risks')) return <DisabledModule />;
 
   return <div>
-    <h2>Risk Register</h2>
+    <PageHeader eyebrow="Risk management" title="Risk Register" subtitle="Risk identification, mitigation, and periodic review." />
     <div className="tabs">{['Dashboard', 'Risk Register', 'New Risk', 'Reviews Due', 'Reports placeholder'].map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
     {loadState.error && <div className="card"><strong>Error:</strong> {loadState.error}</div>}
     {loadState.loading && <div className="card"><em>Loading risk register…</em></div>}
@@ -812,7 +813,7 @@ export function QmsActionTracker() {
   if (!isEnabled('actions')) return <DisabledModule />;
 
   return <div>
-    <h2>Action Tracker</h2>
+    <PageHeader eyebrow="Quality &amp; compliance" title="Action Tracker" subtitle="Centralized actions, owners, due dates, and status." />
     {loadState.error && <div className="card"><strong>Error:</strong> {loadState.error}</div>}
     {loadState.loading && <div className="card"><em>Loading actions…</em></div>}
     <div className="card"><h3>Filters</h3><div className="form" style={{ gridTemplateColumns: '1fr auto auto', alignItems: 'end' }}><label>Status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All</option>{statusOptions.map(s => <option key={s} value={s}>{s}</option>)}</select></label><label>Assigned staff<select value={staffFilter} onChange={e => setStaffFilter(e.target.value)}><option value="">All</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label><label><input type="checkbox" checked={overdueFilter} onChange={e => setOverdueFilter(e.target.checked)} /> Overdue only</label><button onClick={load}>Refresh</button></div></div>

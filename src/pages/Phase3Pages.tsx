@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
+import PageHeader from '../components/ui/PageHeader';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -116,7 +117,7 @@ export function EquipmentPage() {
   }
 
   return <div>
-    <h2>Equipment Management</h2>
+    <PageHeader eyebrow="Operations" title="Equipment Management" subtitle="Asset register, maintenance, calibration, and breakdown tracking." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
     {tabBar(tab, ['Dashboard', 'Equipment Register', 'New Equipment', 'Maintenance Records', 'Breakdowns', 'Reports placeholder'], setTab)}
 
@@ -328,7 +329,7 @@ export function InventoryPage() {
   }
 
   return <div>
-    <h2>Supplier & Inventory</h2>
+    <PageHeader eyebrow="Operations" title="Supplier &amp; Inventory" subtitle="Reagents, supplies, stock levels, batches, and vendor records." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
     {tabBar(tab, ['Dashboard', 'Item Register', 'New Item', 'Batches/Lots', 'Stock Movements', 'Suppliers', 'Reports placeholder'], setTab)}
 
@@ -548,7 +549,7 @@ export function MonitoringPage() {
   }
 
   return <div>
-    <h2>Environmental Monitoring</h2>
+    <PageHeader eyebrow="Operations" title="Environmental Monitoring" subtitle="Temperature and environment readings, excursions, and trends." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
     {tabBar(tab, ['Dashboard', 'Monitoring Items', 'New Monitoring Item', 'Enter Reading', 'Excursions', 'Monthly Charts placeholder'], setTab)}
 
@@ -668,7 +669,7 @@ export function SafetyPage() {
   async function closeIncident(id: number) { try { await api(`/facilities-safety/incidents/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); if (selected) await openDetail(selected.id); await load(); } catch (e) { setError((e as Error).message); } }
 
   return <div>
-    <h2>Facilities & Safety</h2>
+    <PageHeader eyebrow="Operations" title="Facilities &amp; Safety" subtitle="Safety incidents, inspections, and facility checks." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
     {tabBar(tab, ['Dashboard', 'Safety Incidents', 'New Incident', 'Safety Actions placeholder', 'Reports placeholder'], setTab)}
 

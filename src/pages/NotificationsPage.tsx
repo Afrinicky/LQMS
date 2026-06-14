@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
+import PageHeader from '../components/ui/PageHeader';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -116,7 +117,7 @@ export function NotificationsPage() {
   const tabs = ['Dashboard', 'My Notifications', 'My Tasks', 'Review Calendar', 'Generate Alerts', 'Notification Rules', 'Preferences', 'Reports'];
 
   return <div className="module-page">
-    <h2>Notifications & Review Calendar</h2>
+    <PageHeader eyebrow="Alerts" title="Notifications &amp; Review Calendar" subtitle="Alerts, reminders, announcements, and review scheduling." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 

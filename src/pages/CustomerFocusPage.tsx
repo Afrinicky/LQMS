@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
+import PageHeader from '../components/ui/PageHeader';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -215,7 +216,7 @@ export function CustomerFocusPage() {
   const tabs = ['Dashboard', 'Stakeholders', 'New Stakeholder', 'Service Agreements', 'Feedback Intake', 'Satisfaction Surveys', 'Survey Responses', 'Communication Log', 'Imports', 'Reports'];
 
   return <div className="module-page">
-    <h2>Customer Focus</h2>
+    <PageHeader eyebrow="Customer service" title="Customer Focus" subtitle="Stakeholders, feedback, and satisfaction follow-up." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
