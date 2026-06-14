@@ -111,6 +111,11 @@ async function createWindow() {
     bootLog('window load completed');
   } catch (err) {
     bootLog('window load failed', String(err));
+    try {
+      const msg = String(err).replace(/`/g, "\\`");
+      const html = `<!doctype html><html><body style="font-family:Inter,Segoe UI,Arial,sans-serif;padding:48px;background:#F6F8FC;color:#172033;"><h1>SECH_LIMS — renderer load error</h1><p style=\"color:#DC2626;font-weight:600\">Could not load the application UI.</p><pre style=\"background:#fff;border:1px solid #DDE3F0;border-radius:8px;padding:16px;white-space:pre-wrap;\">${msg}</pre><p>Check the installer and application files.</p></body></html>`;
+      await win.loadURL(`data:text/html,${encodeURIComponent(html)}`);
+    } catch { /* ignore secondary failures */ }
   }
 }
 
@@ -137,11 +142,28 @@ process.on('unhandledRejection', (reason) => {
 
 app.whenReady().then(async () => {
   try {
-    await bootApiOnce();
+    // Create the window first so the user sees progress or errors instead
+    // of a transient blank/white screen. Then start the embedded API and
+    // let the renderer show any API errors.
     await createWindow();
+    try {
+      await bootApiOnce();
+      bootLog('API started after window creation');
+    } catch (err) {
+      bootLog('startup aborted (API failed)', String(err));
+      // Keep the app running and surface a clear error UI in the renderer
+      // so users don't just see a white screen and the app exit.
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        try {
+          const msg = String(err).replace(/`/g, "\\`");
+          const html = `<!doctype html><html><body style="font-family:Inter,Segoe UI,Arial,sans-serif;padding:48px;background:#F6F8FC;color:#172033;"><h1>SECH_LIMS — startup error</h1><p style=\"color:#DC2626;font-weight:600\">The embedded API failed to start.</p><pre style=\"background:#fff;border:1px solid #DDE3F0;border-radius:8px;padding:16px;white-space:pre-wrap;\">${msg}</pre><p>See the application log for details.</p></body></html>`;
+          await mainWindow.loadURL(`data:text/html,${encodeURIComponent(html)}`);
+        } catch { /* best-effort only */ }
+      }
+    }
   } catch (err) {
-    bootLog('startup aborted', String(err));
-    app.quit();
+    bootLog('unexpected startup error', String(err));
+    try { dialog.showErrorBox('SECH_LIMS startup error', String(err)); } catch { /* ignore */ }
   }
 });
 
