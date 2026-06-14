@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
+import PageHeader from '../components/ui/PageHeader';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -192,7 +193,7 @@ export function RecordsReportsPage() {
   const tabs = ['Dashboard', 'Report Templates', 'Generate Report', 'Report Requests', 'Print Jobs', 'Evidence Packs', 'Audit Trail', 'Audit Trail Reviews', 'Retention Rules', 'Backup/Restore Checks', 'Data Integrity Checks'];
 
   return <div className="module-page">
-    <h2>Records, Reports & Evidence</h2>
+    <PageHeader eyebrow="Reports" title="Records, Reports &amp; Evidence" subtitle="Report templates, generated reports, and evidence packs." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 

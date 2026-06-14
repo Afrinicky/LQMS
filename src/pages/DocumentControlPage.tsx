@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
+import PageHeader from '../components/ui/PageHeader';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -219,7 +220,7 @@ export function DocumentControlPage() {
   const obsoleteDocs = documents.filter(d => d.status === 'obsolete');
 
   return <div className="module-page">
-    <h2>Document Control</h2>
+    <PageHeader eyebrow="Documents &amp; SOPs" title="Document Control" subtitle="Controlled documents, versions, reviews, and attestations." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 

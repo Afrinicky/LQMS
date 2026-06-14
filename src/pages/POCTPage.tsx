@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
+import PageHeader from '../components/ui/PageHeader';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -159,7 +160,7 @@ export function POCTPage() {
   const tabs = ['Dashboard', 'Sites', 'Devices', 'Test Menu', 'Operator Authorizations', 'Reagent Lots', 'QC Monitoring', 'EQA Monitoring', 'Maintenance Logs', 'Incidents', 'Monthly Reviews', 'Reports'];
 
   return <div className="module-page">
-    <h2>POCT Oversight</h2>
+    <PageHeader eyebrow="Technical quality" title="POCT Oversight" subtitle="Point-of-care testing sites, QC, and incident oversight." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 

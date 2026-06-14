@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
+import PageHeader from '../components/ui/PageHeader';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -237,7 +238,7 @@ export function PersonnelManagementPage() {
   const tabs = ['Dashboard', 'Staff Documents', 'Declarations', 'Training Events', 'Competency Assessments', 'Technical Authorizations', 'Duty Rosters', 'My Profile', 'Reports'];
 
   return <div className="module-page">
-    <h2>Personnel Management</h2>
+    <PageHeader eyebrow="People" title="Personnel Management" subtitle="Staff records, competency, training, rosters, and attestations." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 

@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
+import PageHeader from '../components/ui/PageHeader';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -238,7 +239,7 @@ export function BloodBankHandoverPage() {
   const tabs = ['Dashboard', 'Blood Units', 'New Blood Unit', 'Thursday Handover', 'Handovers', 'Donation Campaigns', 'Adverse Events', 'Discards', 'Monthly Summary', 'Reports'];
 
   return <div className="module-page">
-    <h2>Blood Bank Quality & Inventory Handover</h2>
+    <PageHeader eyebrow="Operations" title="Blood Bank Quality &amp; Inventory Handover" subtitle="Blood unit inventory, handovers, and adverse events." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 

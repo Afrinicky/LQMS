@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
+import PageHeader from '../components/ui/PageHeader';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -163,7 +164,7 @@ export function IqcPage() {
   const failures = results.filter(r => r.status !== 'accepted');
 
   return <div className="module-page">
-    <h2>IQC Management</h2>
+    <PageHeader eyebrow="Process control" title="IQC Management" subtitle="Internal quality control materials, results, and review." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
@@ -326,7 +327,7 @@ export function EqaPage() {
   const unsatisfactory = events.filter(ev => ['unsatisfactory', 'poor', 'fail', 'failed'].includes((ev.performance_status || '').toLowerCase()));
 
   return <div className="module-page">
-    <h2>EQA Management</h2>
+    <PageHeader eyebrow="Process control" title="EQA Management" subtitle="External quality assessment events, results, and follow-up." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
@@ -485,7 +486,7 @@ export function VerificationValidationPage() {
   const tabs = ['Dashboard', 'Method Verification Register', 'New Verification', 'Experiments', 'Equipment Verification', 'Reports'];
 
   return <div className="module-page">
-    <h2>Verification & Validation</h2>
+    <PageHeader eyebrow="Technical quality" title="Verification &amp; Validation" subtitle="Method and equipment verification and validation records." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
@@ -627,7 +628,7 @@ export function MeasurementUncertaintyPage() {
   const pending = records.filter(r => r.status === 'draft' || r.status === 'in_review');
 
   return <div className="module-page">
-    <h2>Measurement Uncertainty</h2>
+    <PageHeader eyebrow="Technical quality" title="Measurement Uncertainty" subtitle="Measurement uncertainty budgets and periodic review." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 

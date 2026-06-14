@@ -15,10 +15,10 @@ console.log('[renderer] root element found?', Boolean(root));
 
 if (!root) {
   document.body.innerHTML = `
-    <div style="padding:48px;font-family:Inter,Segoe UI,Arial,sans-serif;color:#172033;background:#F6F8FC;min-height:100vh;">
-      <h1 style="color:#1B3A6B;margin:0 0 12px;">SECH_LIMS by Nickland</h1>
-      <p style="color:#DC2626;font-weight:600;">Startup error: #root element is missing from index.html.</p>
-      <p style="color:#5F6F89;">This is an installer/packaging defect. Reinstall the application, or contact support.</p>
+    <div style="padding:48px;font-family:Inter,Segoe UI,Arial,sans-serif;color:#F5F8FF;background:#080D1A;min-height:100vh;">
+      <h1 style="color:#F5F8FF;margin:0 0 12px;">SECH_LIMS by Nickland</h1>
+      <p style="color:#FF6B7D;font-weight:600;">Startup error: #root element is missing from index.html.</p>
+      <p style="color:#A8B3C7;">This is an installer/packaging defect. Reinstall the application, or contact support.</p>
     </div>`;
 } else {
   try {
@@ -33,11 +33,11 @@ if (!root) {
   } catch (err) {
     console.error('[renderer] React root render() threw', err);
     root.innerHTML = `
-      <div style="padding:48px;font-family:Inter,Segoe UI,Arial,sans-serif;color:#172033;background:#F6F8FC;min-height:100vh;">
-        <h1 style="color:#1B3A6B;margin:0 0 12px;">SECH_LIMS by Nickland</h1>
-        <p style="color:#DC2626;font-weight:600;">React failed to mount.</p>
-        <pre style="background:#fff;border:1px solid #DDE3F0;border-radius:8px;padding:16px;white-space:pre-wrap;color:#172033;">${String(err)}</pre>
-        <p style="color:#5F6F89;">Open View &rarr; Toggle Developer Tools and check the Console tab for the full stack trace.</p>
+      <div style="padding:48px;font-family:Inter,Segoe UI,Arial,sans-serif;color:#F5F8FF;background:#080D1A;min-height:100vh;">
+        <h1 style="color:#F5F8FF;margin:0 0 12px;">SECH_LIMS by Nickland</h1>
+        <p style="color:#FF6B7D;font-weight:600;">React failed to mount.</p>
+        <pre style="background:#122038;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:16px;white-space:pre-wrap;color:#A8B3C7;">${String(err)}</pre>
+        <p style="color:#A8B3C7;">Open View &rarr; Toggle Developer Tools and check the Console tab for the full stack trace.</p>
       </div>`;
   }
 }

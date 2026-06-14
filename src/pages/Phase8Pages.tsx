@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
+import PageHeader from '../components/ui/PageHeader';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -280,7 +281,7 @@ export function AssessmentsPage() {
 
   const tabs = ['Dashboard', 'Assessment Programmes', 'New Assessment', 'Checklist Library', 'Plan Assessment', 'Assessment Questions', 'Internal Audit Marks', 'Findings', 'Reports'];
   return <div className="module-page">
-    <h2>Internal Assessments</h2>
+    <PageHeader eyebrow="Assessments &amp; audits" title="Internal Assessments" subtitle="Internal audits, assessments, checklists, and findings follow-up." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
@@ -552,7 +553,7 @@ export function MeetingsPage() {
 
   const tabs = ['Dashboard', 'Meetings', 'New Meeting', 'Attendance', 'Action Items', 'Reports'];
   return <div className="module-page">
-    <h2>Meetings & Minutes</h2>
+    <PageHeader eyebrow="Governance" title="Meetings &amp; Minutes" subtitle="Meeting scheduling, agendas, minutes, and action items." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
@@ -639,7 +640,7 @@ export function ManagementReviewPage() {
 
   const tabs = ['Dashboard', 'Review Register', 'New Review', 'Inputs', 'Actions', 'Reports'];
   return <div className="module-page">
-    <h2>Management Review</h2>
+    <PageHeader eyebrow="Governance" title="Management Review" subtitle="Management review inputs, outputs, and resulting actions." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
@@ -723,7 +724,7 @@ export function QualityIndicatorsPage() {
 
   const tabs = ['Dashboard', 'Indicator Register', 'New Indicator', 'Results Entry', 'Trends', 'Reports'];
   return <div className="module-page">
-    <h2>Quality Indicators</h2>
+    <PageHeader eyebrow="Governance" title="Quality Indicators" subtitle="Quality indicators, targets, and result monitoring." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
@@ -844,7 +845,7 @@ export function ContinualImprovementPage() {
 
   const tabs = ['Dashboard', 'Improvement Projects', 'New Project', 'Updates', 'Reports'];
   return <div className="module-page">
-    <h2>Continual Improvement</h2>
+    <PageHeader eyebrow="Improvement" title="Continual Improvement" subtitle="Improvement projects, indicators, and action tracking." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
