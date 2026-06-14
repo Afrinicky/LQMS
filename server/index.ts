@@ -1,5 +1,8 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import setupRoutes from './routes/setup.js';
 import authRoutes from './routes/auth.js';
 import { commonRoutes } from './routes/common.js';
@@ -33,6 +36,26 @@ import { informationManagementRoutes } from './routes/informationManagement.js';
 import { optionalAuth } from './middleware/auth.js';
 import { ensureDataDirs } from './db/database.js';
 import { seedDefaults } from './db/seed.js';
+
+/**
+ * Resolve the directory that holds the built renderer (dist/index.html).
+ * The packaged Electron main process passes SECH_LIMS_RENDERER_DIR; otherwise
+ * we probe paths relative to this compiled file and the working directory.
+ */
+function resolveRendererDir(): string | null {
+  const fromEnv = process.env.SECH_LIMS_RENDERER_DIR;
+  if (fromEnv && fs.existsSync(path.join(fromEnv, 'index.html'))) return fromEnv;
+
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    fromEnv,
+    path.resolve(here, '../../dist'), // packaged: dist-electron/server -> dist
+    path.resolve(here, '../dist'),    // dev tsx: server -> ../dist (if built)
+    path.resolve(process.cwd(), 'dist'),
+  ].filter(Boolean) as string[];
+
+  return candidates.find(dir => fs.existsSync(path.join(dir, 'index.html'))) ?? null;
+}
 
 export function createApiServer() {
   ensureDataDirs();
@@ -72,6 +95,25 @@ export function createApiServer() {
   app.use('/api/process-management', processManagementRoutes());
   app.use('/api/information-management', informationManagementRoutes());
   app.use('/api', commonRoutes());
+
+  // Serve the built single-page renderer so the packaged Electron window can
+  // load the UI over http://127.0.0.1:<port>/ (same origin as the API) instead
+  // of file://. In dev, Vite serves the renderer separately and this is a no-op.
+  const rendererDir = resolveRendererDir();
+  if (rendererDir) {
+    app.use(express.static(rendererDir, { index: false }));
+    // SPA fallback: any non-API GET that did not match a static asset returns
+    // index.html so client-side routes (/home, /dashboard, …) resolve. Uses a
+    // plain middleware to stay compatible with Express 5 path matching.
+    const indexFile = path.join(rendererDir, 'index.html');
+    app.use((req, res, next) => {
+      if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+      if (req.path.startsWith('/api')) return next();
+      if (req.path.includes('.')) return next(); // let missing assets 404 normally
+      res.sendFile(indexFile, err => { if (err) next(err); });
+    });
+  }
+
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const message = err instanceof Error ? err.message : 'Unexpected server error';
     res.status(500).json({ error: message });

@@ -894,6 +894,99 @@ label {
 .auth .card pre { background: var(--surface) !important; border-color: var(--border) !important; color: var(--muted) !important; }
 
 /* ============================================================================
+   BOOT / SPLASH SCREEN (startup state machine)
+   ========================================================================= */
+.boot {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: 24px;
+  background:
+    radial-gradient(1000px 640px at 50% -12%, rgba(47, 107, 255, 0.20), transparent 60%),
+    linear-gradient(160deg, #0A1322 0%, #060A14 100%);
+}
+.boot-inner {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 18px;
+  max-width: 560px;
+  width: 100%;
+}
+.boot-brand { display: flex; align-items: center; gap: 14px; }
+.boot-brand .brand-mark { width: 54px; height: 54px; border-radius: 16px; }
+.boot-brand .brand-mark svg { width: 28px; height: 28px; }
+.boot-brand .bt { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.1; }
+.boot-brand .bt strong { font-size: 26px; letter-spacing: 0.02em; color: var(--text); }
+.boot-brand .bt span { font-size: 13px; color: var(--muted); }
+
+.boot-status { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-top: 6px; }
+.boot-status h2 { margin: 0; font-size: 18px; }
+.boot-status p { margin: 0; color: var(--muted); font-size: 13.5px; max-width: 460px; }
+.boot-detail {
+  width: 100%;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: pre-wrap;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+.boot-actions { display: flex; gap: 10px; margin-top: 4px; }
+.boot-hint { font-size: 12px; color: var(--faint); margin-top: 6px; }
+
+/* Spinner */
+.spinner {
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  border: 3px solid rgba(78, 141, 255, 0.18);
+  border-top-color: var(--accent-bright);
+  animation: spin 0.8s linear infinite;
+}
+.spinner.sm { width: 18px; height: 18px; border-width: 2px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.boot-error-ico {
+  width: 54px; height: 54px;
+  border-radius: 16px;
+  display: grid; place-items: center;
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid rgba(255, 107, 125, 0.28);
+}
+
+/* ============================================================================
+   AUTH FIELDS (login / setup) — inputs with leading icon
+   ========================================================================= */
+.auth .card { padding: 30px 30px 28px; }
+.auth-head { display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; }
+.auth-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.auth-brand .brand-mark { width: 44px; height: 44px; border-radius: 13px; }
+.auth-brand .ab { display: flex; flex-direction: column; line-height: 1.15; }
+.auth-brand .ab strong { font-size: 18px; letter-spacing: 0.02em; }
+.auth-brand .ab span { font-size: 12px; color: var(--muted); }
+.auth-head h2 { margin: 0; font-size: 22px; }
+.auth-head p { margin: 0; color: var(--muted); font-size: 13.5px; }
+
+.auth-field { display: grid; gap: 6px; }
+.auth-field > span { font-size: 12.5px; color: var(--muted); font-weight: 500; }
+.auth-input { position: relative; display: flex; align-items: center; }
+.auth-input .ai-ico { position: absolute; left: 13px; color: var(--faint); display: grid; place-items: center; pointer-events: none; }
+.auth-input input { padding-left: 40px; height: 44px; }
+.auth-submit { height: 46px; justify-content: center; font-size: 14px; margin-top: 4px; }
+.auth-foot { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 4px; color: var(--faint); font-size: 12px; }
+.auth-foot .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--success); box-shadow: 0 0 6px var(--success); }
+
+/* ============================================================================
    RESPONSIVE
    ========================================================================= */
 @media (max-width: 1500px) {

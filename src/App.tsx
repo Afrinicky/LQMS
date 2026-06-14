@@ -10,6 +10,8 @@ import { Dashboard, Home, ModulePage, Organisation } from './pages/CorePages';
 import { ActionTracker, BackupRestore, Devices, DocumentImport, EvidenceUpload, ModuleToggles, PermissionMatrix, Positions, UsersAccess } from './pages/SettingsPages';
 import { NcCapaPage, ComplaintsPage, RisksPage, QmsActionTracker } from './pages/QMSPages';
 import { MODULES } from '../shared/constants/modules';
+import { FlaskConical, TriangleAlert } from 'lucide-react';
+import { WaveBackground } from './components/ui';
 import './styles/app.css';
 
 const DocumentControlPage = lazy(() => import('./pages/DocumentControlPage').then(m => ({ default: m.DocumentControlPage })));
@@ -40,14 +42,23 @@ const ModuleFallback = () => <div className="card">Loading module…</div>;
 
 type StartupState = 'booting' | 'checkingApi' | 'apiUnavailable' | 'checkingSetup' | 'setupRequired' | 'checkingAuth' | 'loginRequired' | 'authenticated' | 'startupError';
 
-function StartupShell({ heading, message, detail, children }: { heading: string; message: string; detail?: string; children?: React.ReactNode }) {
-  return <div className="auth">
-    <div className="card" style={{ maxWidth: 640 }}>
-      <h2 style={{ marginTop: 0, color: 'var(--navy)' }}>SECH_LIMS by Nickland</h2>
-      <p style={{ fontWeight: 600 }}>{heading}</p>
-      <p style={{ color: 'var(--muted)' }}>{message}</p>
-      {detail && <pre style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 8, padding: 12, whiteSpace: 'pre-wrap', color: '#172033', fontSize: 12 }}>{detail}</pre>}
-      {children}
+function StartupShell({ variant = 'loading', heading, message, detail, children }: { variant?: 'loading' | 'error'; heading: string; message: string; detail?: string; children?: React.ReactNode }) {
+  return <div className="boot">
+    <div className="bg-deco"><WaveBackground variant="hero" /></div>
+    <div className="boot-inner">
+      <div className="boot-brand">
+        <span className="brand-mark"><FlaskConical size={26} /></span>
+        <div className="bt"><strong>SECH_LIMS</strong><span>by Nickland</span></div>
+      </div>
+      {variant === 'error'
+        ? <div className="boot-error-ico"><TriangleAlert size={26} /></div>
+        : <div className="spinner" />}
+      <div className="boot-status">
+        <h2>{heading}</h2>
+        <p>{message}</p>
+      </div>
+      {detail && <div className="boot-detail">{detail}</div>}
+      {children && <div className="boot-actions">{children}</div>}
     </div>
   </div>;
 }
@@ -101,12 +112,13 @@ function Gate({ children }: { children: React.ReactNode }) {
 
   if (state === 'apiUnavailable') {
     return <StartupShell
-      heading="Local API is not responding"
-      message="The host API did not respond within 10 seconds. Make sure no other copy of SECH_LIMS is running and the host service is reachable."
+      variant="error"
+      heading="Local service is not responding"
+      message="The host service did not respond in time. You can retry the connection, or restart the application for a clean start."
       detail={`API base URL: ${API_BASE}\n${errorDetail}`}
     >
-      <button onClick={retry} style={{ marginTop: 12 }}>Retry connection</button>
-      <p style={{ color: 'var(--muted)', marginTop: 12, fontSize: 13 }}>Open <strong>View → Toggle Developer Tools</strong> to inspect the failure.</p>
+      <button onClick={retry}>Retry connection</button>
+      {window.sechLims?.relaunch && <button className="secondary" onClick={() => window.sechLims?.relaunch?.()}>Restart application</button>}
     </StartupShell>;
   }
 
@@ -136,12 +148,13 @@ function Gate({ children }: { children: React.ReactNode }) {
 
   // startupError
   return <StartupShell
+    variant="error"
     heading="Startup error"
-    message="Something went wrong while the application was starting up."
+    message="Something went wrong while the application was starting up. Retry, or restart the application."
     detail={errorDetail || 'No further details available.'}
   >
-    <button onClick={retry} style={{ marginTop: 12 }}>Retry</button>
-    <p style={{ color: 'var(--muted)', marginTop: 12, fontSize: 13 }}>Open <strong>View → Toggle Developer Tools</strong> for the full stack trace.</p>
+    <button onClick={retry}>Retry</button>
+    {window.sechLims?.relaunch && <button className="secondary" onClick={() => window.sechLims?.relaunch?.()}>Restart application</button>}
   </StartupShell>;
 }
 

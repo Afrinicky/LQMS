@@ -98,5 +98,9 @@ export function startLocalApi(): Promise<ApiState> {
     throw new Error(`Could not bind any SECH_LIMS API port from ${candidates.join(', ')}: ${String(lastErr)}`);
   })();
 
+  // If startup fails, clear the cached promise so a later retry can make a
+  // fresh attempt instead of receiving the same rejected promise forever.
+  startPromise.catch(() => { startPromise = undefined; });
+
   return startPromise;
 }
