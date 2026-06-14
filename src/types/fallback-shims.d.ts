@@ -5,7 +5,9 @@ declare module 'archiver' { const archiver: any; export default archiver; }
 declare module 'cors' { const cors: any; export default cors; }
 declare module 'multer' { const multer: any; export default multer; }
 declare module 'electron' { export const app: any; export const BrowserWindow: any; export const contextBridge: any; }
-declare module 'lucide-react' { export const Bell: any; export const Database: any; export const Server: any; export const Shield: any; }
+// lucide-react ships its own complete TypeScript types (dist/lucide-react.d.ts),
+// so no fallback override is declared here — that lets every icon and the
+// LucideIcon type resolve from the real package.
 
 declare namespace Express { interface Request { user?: { id: number; username: string; roleId: number; staffId?: number | null } } }
 declare module 'express' {

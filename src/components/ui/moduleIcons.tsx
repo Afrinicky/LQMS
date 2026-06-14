@@ -1,0 +1,49 @@
+import {
+  LayoutDashboard, LayoutGrid, FileText, Building2, Users, ListChecks, AlertOctagon,
+  MessageSquareWarning, ShieldAlert, HeartHandshake, Wrench, ClipboardCheck, Boxes,
+  Workflow, Database, TrendingUp, CalendarClock, FileSignature, Gauge, ShieldCheck,
+  Thermometer, FlaskConical, Microscope, BadgeCheck, Ruler, Droplets,
+  CalendarRange, FolderArchive, Bell, Settings, Home, Activity, type LucideIcon,
+} from 'lucide-react';
+
+/**
+ * Maps module keys (from shared/constants/modules) to thin-line lucide icons,
+ * so the sidebar and homepage launchpad share one visual vocabulary.
+ */
+export const MODULE_ICONS: Record<string, LucideIcon> = {
+  home: Home,
+  dashboard: LayoutDashboard,
+  documents: FileText,
+  organisation: Building2,
+  personnel: Users,
+  actions: ListChecks,
+  nc_capa: AlertOctagon,
+  complaints: MessageSquareWarning,
+  risks: ShieldAlert,
+  customer_focus: HeartHandshake,
+  equipment: Wrench,
+  assessments: ClipboardCheck,
+  supplier_inventory: Boxes,
+  process_management: Workflow,
+  information_management: Database,
+  continual_improvement: TrendingUp,
+  meetings: CalendarClock,
+  management_review: FileSignature,
+  quality_indicators: Gauge,
+  facilities_safety: ShieldCheck,
+  monitoring: Thermometer,
+  iqc: FlaskConical,
+  eqa: Microscope,
+  verification_validation: BadgeCheck,
+  measurement_uncertainty: Ruler,
+  poct: Activity,
+  blood_bank_handover: Droplets,
+  monthly_reports: CalendarRange,
+  records_reports: FolderArchive,
+  notifications: Bell,
+  settings: Settings,
+};
+
+export function moduleIcon(key: string): LucideIcon {
+  return MODULE_ICONS[key] ?? LayoutGrid;
+}
