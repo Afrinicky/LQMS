@@ -40,7 +40,13 @@ const MonthlyReportsPage = lazy(() => import('./pages/MonthlyReportsPage').then(
 
 const ModuleFallback = () => <div className="card">Loading module…</div>;
 
-type StartupState = 'booting' | 'checkingApi' | 'apiUnavailable' | 'checkingSetup' | 'setupRequired' | 'checkingAuth' | 'loginRequired' | 'authenticated' | 'startupError';
+// Startup is a one-shot sequence that validates the environment (local API
+// reachable, first-time setup complete). Once it reaches `ready`, auth gating is
+// driven LIVE from the AuthProvider's `user`/`loading` instead of being frozen
+// in a stale snapshot. The old machine latched on `loginRequired`/`authenticated`
+// and never re-evaluated after sign-in, which produced an infinite
+// /login <-> /home redirect loop (Chromium "throttling navigation" → blank screen).
+type StartupState = 'booting' | 'checkingApi' | 'apiUnavailable' | 'checkingSetup' | 'setupRequired' | 'ready' | 'startupError';
 
 function StartupShell({ variant = 'loading', heading, message, detail, children }: { variant?: 'loading' | 'error'; heading: string; message: string; detail?: string; children?: React.ReactNode }) {
   return <div className="boot">
@@ -87,23 +93,17 @@ function Gate({ children }: { children: React.ReactNode }) {
     return () => { cancelled = true; clearTimeout(timer); ctrl.abort(); };
   }, [attempt]);
 
-  // Phase 2: ask the API whether first-time setup is complete.
+  // Phase 2: ask the API whether first-time setup is complete. On success we move
+  // to `ready`, after which auth gating is reactive (see below) — there is no
+  // separate frozen "checkingAuth/loginRequired/authenticated" phase anymore.
   useEffect(() => {
     if (state !== 'checkingSetup') return;
     let cancelled = false;
     getSetupStatus()
-      .then(s => { if (cancelled) return; console.log('[renderer] setup status', s); setSetupComplete(s.setupComplete); setState(s.setupComplete ? 'checkingAuth' : 'setupRequired'); })
+      .then(s => { if (cancelled) return; console.log('[renderer] setup status', s); setSetupComplete(s.setupComplete); setState(s.setupComplete ? 'ready' : 'setupRequired'); })
       .catch(err => { if (cancelled) return; console.error('[renderer] setup status failed', err); setErrorDetail(String(err)); setState('startupError'); });
     return () => { cancelled = true; };
   }, [state]);
-
-  // Phase 3: wait for AuthProvider to finish its /auth/me check.
-  useEffect(() => {
-    if (state !== 'checkingAuth') return;
-    if (loading) return;
-    setState(user ? 'authenticated' : 'loginRequired');
-    console.log('[renderer] startup state ->', user ? 'authenticated' : 'loginRequired');
-  }, [state, loading, user]);
 
   // Render a visible screen for every state. Never return null.
   if (state === 'booting' || state === 'checkingApi') {
@@ -131,16 +131,20 @@ function Gate({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  if (state === 'checkingAuth') {
-    return <StartupShell heading="Starting up" message="Checking session…" />;
-  }
+  // Setup is complete: gate purely on live auth state. This block re-renders
+  // whenever `user`/`loading` change, so signing in (user becomes set) or out
+  // (user becomes null) flips the gate without any stale-state redirect loop.
+  if (state === 'ready') {
+    // AuthProvider is still resolving the existing session (/auth/me).
+    if (loading) return <StartupShell heading="Starting up" message="Checking session…" />;
 
-  if (state === 'loginRequired') {
-    if (location.pathname !== '/login') return <Navigate to="/login" replace />;
-    return <>{children}</>;
-  }
+    if (!user) {
+      // Not signed in — only the login screen is reachable.
+      if (location.pathname !== '/login') return <Navigate to="/login" replace />;
+      return <>{children}</>;
+    }
 
-  if (state === 'authenticated') {
+    // Signed in — keep the user out of the login/setup screens.
     if (location.pathname === '/login') return <Navigate to="/home" replace />;
     if (location.pathname === '/setup' && setupComplete) return <Navigate to="/home" replace />;
     return <>{children}</>;
