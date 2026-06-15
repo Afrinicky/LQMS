@@ -456,6 +456,67 @@ p { line-height: 1.55; }
 .muted { color: var(--muted); }
 
 /* ============================================================================
+   CHARTS  (dependency-free SVG dashboard visuals)
+   ========================================================================= */
+.chart-card { display: flex; flex-direction: column; gap: 16px; }
+.chart-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.chart-card-head h3 { margin: 0; font-size: 15px; }
+.chart-card-head p { margin: 3px 0 0; font-size: 12.5px; color: var(--muted); }
+.chart-card-body { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+
+.chart-empty {
+  display: grid; place-items: center; width: 100%;
+  border: 1px dashed var(--border-strong); border-radius: var(--radius-sm);
+  color: var(--faint); font-size: 12.5px;
+}
+
+/* ---- Donut ---- */
+.chart-donut { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
+.donut-svg { position: relative; flex: none; }
+.donut-svg svg circle { transition: stroke-dashoffset .6s ease, stroke-dasharray .6s ease; }
+.donut-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+.donut-center strong { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; line-height: 1; }
+.donut-center span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+
+/* ---- Legend ---- */
+.chart-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; flex: 1; min-width: 130px; }
+.chart-legend li { display: flex; align-items: center; gap: 9px; font-size: 12.5px; }
+.chart-legend .lg-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.chart-legend .lg-label { color: var(--muted); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chart-legend .lg-val { color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* ---- Vertical bars ---- */
+.chart-bars { display: flex; align-items: flex-end; gap: 12px; padding-top: 6px; }
+.chart-bars .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 7px; height: 100%; justify-content: flex-end; }
+.chart-bars .bar-val { font-size: 12px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.chart-bars .bar-track { width: 100%; max-width: 46px; flex: 1; display: flex; align-items: flex-end; background: rgba(255,255,255,0.04); border-radius: 8px 8px 4px 4px; overflow: hidden; }
+.chart-bars .bar-fill { width: 100%; border-radius: 8px 8px 4px 4px; min-height: 3px; transition: height .6s ease; }
+.chart-bars .bar-label { font-size: 11px; color: var(--muted); text-align: center; line-height: 1.25; max-width: 72px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- Horizontal meter bars ---- */
+.chart-meter { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 13px; }
+.chart-meter .meter-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+.chart-meter .meter-label { font-size: 12.5px; color: var(--muted); }
+.chart-meter .meter-val { font-size: 13px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.chart-meter .meter-track { height: 8px; border-radius: 999px; background: rgba(255,255,255,0.05); overflow: hidden; }
+.chart-meter .meter-fill { height: 100%; border-radius: 999px; min-width: 2px; transition: width .6s ease; }
+
+/* ---- Radial gauge ---- */
+.chart-gauge { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.gauge-svg { position: relative; }
+.gauge-svg svg circle { transition: stroke-dasharray .6s ease; }
+.gauge-center { position: absolute; inset: 0; bottom: 18%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; }
+.gauge-center strong { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; }
+.gauge-center span { font-size: 11px; color: var(--muted); }
+.gauge-sub { font-size: 12px; color: var(--muted); text-align: center; }
+
+/* ---- Sparkline ---- */
+.chart-spark { display: block; width: 100%; }
+
+/* ---- Gauge cluster (several gauges in a row) ---- */
+.gauge-cluster { display: flex; flex-wrap: wrap; gap: 18px; justify-content: space-around; }
+
+/* ============================================================================
    BUTTONS
    ========================================================================= */
 button, .btn {

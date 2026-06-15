@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
+import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { api } from '../services/api';
 import { useModules } from '../hooks/useModules';
 import DisabledModule from '../components/DisabledModule';
@@ -294,14 +295,30 @@ export function NcCapaPage() {
     <div className="tabs">{['Dashboard', 'Nonconforming Events', 'New Event', 'CAPA Register', 'Overdue CAPAs', 'Effectiveness Reviews', 'Reports placeholder'].map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
     {loadState.error && <div className="card"><strong>Error:</strong> {loadState.error}</div>}
     {loadState.loading && <div className="card"><em>Loading QMS data…</em></div>}
-    {tab === 'Dashboard' && <div className="grid cols-4">
+    {tab === 'Dashboard' && <><div className="grid cols-4">
       <div className="card metric"><span>Open NCs</span><br/><strong>{summary?.openNCs.count ?? ncList.filter(n => n.status !== 'closed').length}</strong></div>
       <div className="card metric"><span>NCs pending review</span><br/><strong>{ncList.filter(n => n.status === 'open').length}</strong></div>
       <div className="card metric"><span>Open CAPAs</span><br/><strong>{summary?.openCAPAs.count ?? capaList.filter(c => c.status !== 'closed').length}</strong></div>
       <div className="card metric"><span>Overdue CAPAs</span><br/><strong>{overdueCAPAs.length}</strong></div>
       <div className="card metric"><span>Effectiveness reviews due</span><br/><strong>{effectivenessDue.length}</strong></div>
       <div className="card metric"><span>High risk CAPAs</span><br/><strong>{summary?.highRisks.count ?? 0}</strong></div>
-    </div>}
+    </div>
+    <div className="grid cols-2" style={{ marginTop: 18 }}>
+      <ChartCard title="Open quality items" subtitle="Composition of active NCs and CAPAs">
+        <DonutChart centerLabel="Open" data={[
+          { label: 'Open NCs', value: summary?.openNCs.count ?? ncList.filter(n => n.status !== 'closed').length, color: CHART_COLORS[3] },
+          { label: 'Open CAPAs', value: summary?.openCAPAs.count ?? capaList.filter(c => c.status !== 'closed').length, color: CHART_COLORS[0] },
+          { label: 'High-risk CAPAs', value: summary?.highRisks.count ?? 0, color: CHART_COLORS[4] },
+        ]} />
+      </ChartCard>
+      <ChartCard title="Attention required" subtitle="Items breaching or approaching their due dates">
+        <BarMeter data={[
+          { label: 'Overdue CAPAs', value: overdueCAPAs.length, color: CHART_COLORS[3] },
+          { label: 'Effectiveness reviews due', value: effectivenessDue.length, color: CHART_COLORS[2] },
+          { label: 'NCs pending review', value: ncList.filter(n => n.status === 'open').length, color: CHART_COLORS[0] },
+        ]} />
+      </ChartCard>
+    </div></>}
 
     {tab === 'Nonconforming Events' && <div className="card">
       <div className="form" style={{ gridTemplateColumns: '1fr auto', alignItems: 'end' }}>
@@ -534,7 +551,23 @@ export function ComplaintsPage() {
     <div className="tabs">{['Dashboard', 'Complaints Register', 'New Complaint', 'Investigation', 'Trends placeholder', 'Reports placeholder'].map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
     {loadState.error && <div className="card"><strong>Error:</strong> {loadState.error}</div>}
     {loadState.loading && <div className="card"><em>Loading complaints…</em></div>}
-    {tab === 'Dashboard' && <div className="grid cols-4"><div className="card metric"><span>Open complaints</span><br/><strong>{complaints.filter(c => c.status !== 'closed').length}</strong></div><div className="card metric"><span>Under investigation</span><br/><strong>{complaints.filter(c => c.status === 'investigating').length}</strong></div><div className="card metric"><span>Overdue</span><br/><strong>{complaints.filter(c => c.status !== 'closed' && c.received_date && new Date(c.received_date).getTime() + 1000 * 60 * 60 * 24 * 30 < Date.now()).length}</strong></div><div className="card metric"><span>Closed</span><br/><strong>{complaints.filter(c => c.status === 'closed').length}</strong></div><div className="card metric"><span>Linked CAPAs</span><br/><strong>{complaints.filter(c => c.capa_required === 1).length}</strong></div></div>}
+    {tab === 'Dashboard' && <><div className="grid cols-4"><div className="card metric"><span>Open complaints</span><br/><strong>{complaints.filter(c => c.status !== 'closed').length}</strong></div><div className="card metric"><span>Under investigation</span><br/><strong>{complaints.filter(c => c.status === 'investigating').length}</strong></div><div className="card metric"><span>Overdue</span><br/><strong>{complaints.filter(c => c.status !== 'closed' && c.received_date && new Date(c.received_date).getTime() + 1000 * 60 * 60 * 24 * 30 < Date.now()).length}</strong></div><div className="card metric"><span>Closed</span><br/><strong>{complaints.filter(c => c.status === 'closed').length}</strong></div><div className="card metric"><span>Linked CAPAs</span><br/><strong>{complaints.filter(c => c.capa_required === 1).length}</strong></div></div>
+    <div className="grid cols-2" style={{ marginTop: 18 }}>
+      <ChartCard title="Complaint status mix" subtitle="Distribution across the resolution lifecycle">
+        <DonutChart centerLabel="Total" data={[
+          { label: 'Under investigation', value: complaints.filter(c => c.status === 'investigating').length, color: CHART_COLORS[2] },
+          { label: 'Open (other)', value: complaints.filter(c => c.status !== 'closed' && c.status !== 'investigating').length, color: CHART_COLORS[0] },
+          { label: 'Closed', value: complaints.filter(c => c.status === 'closed').length, color: CHART_COLORS[1] },
+        ]} />
+      </ChartCard>
+      <ChartCard title="Follow-up load" subtitle="Items needing escalation or linked corrective action">
+        <BarMeter data={[
+          { label: 'Overdue', value: complaints.filter(c => c.status !== 'closed' && c.received_date && new Date(c.received_date).getTime() + 1000 * 60 * 60 * 24 * 30 < Date.now()).length, color: CHART_COLORS[3] },
+          { label: 'Linked CAPAs', value: complaints.filter(c => c.capa_required === 1).length, color: CHART_COLORS[4] },
+          { label: 'Under investigation', value: complaints.filter(c => c.status === 'investigating').length, color: CHART_COLORS[2] },
+        ]} />
+      </ChartCard>
+    </div></>}
     {tab === 'Complaints Register' && <div className="card">
       <div className="form" style={{ gridTemplateColumns: '1fr auto', alignItems: 'end' }}>
         <label>Search<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search complaint number, title" /></label>
@@ -695,7 +728,24 @@ export function RisksPage() {
     <div className="tabs">{['Dashboard', 'Risk Register', 'New Risk', 'Reviews Due', 'Reports placeholder'].map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
     {loadState.error && <div className="card"><strong>Error:</strong> {loadState.error}</div>}
     {loadState.loading && <div className="card"><em>Loading risk register…</em></div>}
-    {tab === 'Dashboard' && <div className="grid cols-4"><div className="card metric"><span>Active risks</span><br/><strong>{risks.filter(r => r.status !== 'closed').length}</strong></div><div className="card metric"><span>High / critical risks</span><br/><strong>{high}</strong></div><div className="card metric"><span>Reviews due</span><br/><strong>{reviewsDue}</strong></div><div className="card metric"><span>Mitigation overdue</span><br/><strong>{mitigationOverdue}</strong></div><div className="card metric"><span>Critical risk flags</span><br/><strong>{risks.filter(r => r.risk_level === 'Critical').length}</strong></div></div>}
+    {tab === 'Dashboard' && <><div className="grid cols-4"><div className="card metric"><span>Active risks</span><br/><strong>{risks.filter(r => r.status !== 'closed').length}</strong></div><div className="card metric"><span>High / critical risks</span><br/><strong>{high}</strong></div><div className="card metric"><span>Reviews due</span><br/><strong>{reviewsDue}</strong></div><div className="card metric"><span>Mitigation overdue</span><br/><strong>{mitigationOverdue}</strong></div><div className="card metric"><span>Critical risk flags</span><br/><strong>{risks.filter(r => r.risk_level === 'Critical').length}</strong></div></div>
+    <div className="grid cols-2" style={{ marginTop: 18 }}>
+      <ChartCard title="Risk severity profile" subtitle="Active register grouped by rated level">
+        <DonutChart centerLabel="Active" data={[
+          { label: 'Critical', value: risks.filter(r => r.risk_level === 'Critical').length, color: CHART_COLORS[3] },
+          { label: 'High', value: risks.filter(r => r.risk_level === 'High').length, color: CHART_COLORS[2] },
+          { label: 'Medium', value: risks.filter(r => r.risk_level === 'Medium').length, color: CHART_COLORS[0] },
+          { label: 'Low', value: risks.filter(r => r.risk_level === 'Low').length, color: CHART_COLORS[1] },
+        ]} />
+      </ChartCard>
+      <ChartCard title="Review & mitigation status" subtitle="Outstanding review and treatment actions">
+        <BarMeter data={[
+          { label: 'Reviews due', value: reviewsDue, color: CHART_COLORS[2] },
+          { label: 'Mitigation overdue', value: mitigationOverdue, color: CHART_COLORS[3] },
+          { label: 'High / critical', value: high, color: CHART_COLORS[4] },
+        ]} />
+      </ChartCard>
+    </div></>}
     {tab === 'Risk Register' && <div className="card">
       <div className="form" style={{ gridTemplateColumns: '1fr auto', alignItems: 'end' }}>
         <label>Search<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search risk number, area" /></label>

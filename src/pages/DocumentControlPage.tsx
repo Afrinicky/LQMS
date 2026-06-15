@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
+import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -232,6 +233,22 @@ export function DocumentControlPage() {
       <div className="card"><h4>Pending attestations</h4><p className="metric">{summary.pendingAttestations}</p></div>
       <div className="card"><h4>Obsolete documents</h4><p className="metric">{summary.obsoleteDocuments}</p></div>
     </div> : <p>Loading summary…</p>)}
+    {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
+      <ChartCard title="Document lifecycle" subtitle="Controlled set by current state">
+        <DonutChart centerLabel="Documents" data={[
+          { label: 'Current', value: summary.currentDocuments, color: CHART_COLORS[1] },
+          { label: 'Drafts', value: summary.drafts, color: CHART_COLORS[0] },
+          { label: 'Obsolete', value: summary.obsoleteDocuments, color: CHART_COLORS[7] },
+        ]} />
+      </ChartCard>
+      <ChartCard title="Review & attestation load" subtitle="Outstanding controlled-document actions">
+        <BarMeter data={[
+          { label: 'Due review (30d)', value: summary.dueReviews, color: CHART_COLORS[2] },
+          { label: 'Overdue reviews', value: summary.overdueReviews, color: CHART_COLORS[3] },
+          { label: 'Pending attestations', value: summary.pendingAttestations, color: CHART_COLORS[4] },
+        ]} />
+      </ChartCard>
+    </div>}
 
     {tab === 'Document Register' && <>
       <table className="data-table"><thead><tr><th>Code</th><th>Title</th><th>Type</th><th>Section</th><th>Owner</th><th>Status</th><th>Next review</th><th>Actions</th></tr></thead><tbody>

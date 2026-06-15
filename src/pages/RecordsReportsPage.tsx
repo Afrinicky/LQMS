@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
+import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -207,6 +208,23 @@ export function RecordsReportsPage() {
       <div className="card"><h4>Backup checks this month</h4><p className="metric">{summary.backupChecksThisMonth}</p></div>
       <div className="card"><h4>Integrity issues open</h4><p className="metric">{summary.openIntegrityIssues}</p></div>
     </div> : <p>Loading…</p>)}
+    {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
+      <ChartCard title="Reporting activity" subtitle="This month's output and assets">
+        <DonutChart centerLabel="This month" data={[
+          { label: 'Reports generated', value: summary.reportsGeneratedThisMonth, color: CHART_COLORS[0] },
+          { label: 'Print jobs', value: summary.printJobsThisMonth, color: CHART_COLORS[5] },
+          { label: 'Backup checks', value: summary.backupChecksThisMonth, color: CHART_COLORS[1] },
+        ]} />
+      </ChartCard>
+      <ChartCard title="Records governance" subtitle="Approvals, retention and integrity">
+        <BarMeter data={[
+          { label: 'Pending approvals', value: summary.pendingApprovals, color: CHART_COLORS[2] },
+          { label: 'Open evidence packs', value: summary.openEvidencePacks, color: CHART_COLORS[0] },
+          { label: 'Retention reviews due', value: summary.retentionReviewsDue, color: CHART_COLORS[4] },
+          { label: 'Integrity issues open', value: summary.openIntegrityIssues, color: CHART_COLORS[3] },
+        ]} />
+      </ChartCard>
+    </div>}
 
     {tab === 'Report Templates' && <>
       <form className="form-grid" onSubmit={submitTemplate}>

@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
+import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -210,6 +211,22 @@ export function MonthlyReportsPage() {
         <div className="card"><h4>Delayed TAT records</h4><p className="metric">{summary.delayedTatRecords}</p></div>
         <div className="card"><h4>Average TAT (min)</h4><p className="metric">{summary.averageTatMinutes ?? '—'}</p></div>
       </div> : <p>Loading summary…</p>}
+      {summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
+        <ChartCard title="Import pipeline" subtitle="This month's LHIMS processing">
+          <DonutChart centerLabel="Imports" data={[
+            { label: 'Processed', value: Math.max(0, summary.importsThisMonth - summary.unprocessedImports), color: CHART_COLORS[1] },
+            { label: 'Unprocessed', value: summary.unprocessedImports, color: CHART_COLORS[2] },
+            { label: 'Unresolved exceptions', value: summary.unresolvedExceptions, color: CHART_COLORS[3] },
+          ]} />
+        </ChartCard>
+        <ChartCard title="Reporting & turnaround" subtitle="Report status and TAT pressure">
+          <BarMeter data={[
+            { label: 'Draft reports', value: summary.draftReports, color: CHART_COLORS[0] },
+            { label: 'Approved (month)', value: summary.approvedReportsThisMonth, color: CHART_COLORS[1] },
+            { label: 'Delayed TAT records', value: summary.delayedTatRecords, color: CHART_COLORS[3] },
+          ]} />
+        </ChartCard>
+      </div>}
     </>}
 
     {tab === 'Raw LHIMS Archive' && <table className="data-table"><thead><tr><th>Batch #</th><th>Period</th><th>Type</th><th>File</th><th>Imported by</th><th>Status</th><th>Rows</th><th>Exceptions</th><th>Actions</th></tr></thead><tbody>

@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
+import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -161,6 +162,23 @@ export function InformationManagementPage() {
       <div className="card"><h4>Downtime records (month)</h4><p className="metric">{summary.downtimeRecordsThisMonth}</p></div>
       <div className="card"><h4>Pending information reviews</h4><p className="metric">{summary.pendingInformationReviews}</p></div>
     </div> : <p>Loading summary…</p>)}
+    {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
+      <ChartCard title="Information estate" subtitle="Managed assets and systems">
+        <DonutChart centerLabel="Assets" data={[
+          { label: 'Information assets', value: summary.activeInformationAssets, color: CHART_COLORS[0] },
+          { label: 'Active systems', value: summary.activeSystems, color: CHART_COLORS[5] },
+        ]} />
+      </ChartCard>
+      <ChartCard title="Open governance items" subtitle="Reviews, incidents and changes to action">
+        <BarMeter data={[
+          { label: 'Access reviews', value: summary.openAccessReviews, color: CHART_COLORS[0] },
+          { label: 'Security incidents', value: summary.openSecurityIncidents, color: CHART_COLORS[3] },
+          { label: 'Data corrections', value: summary.pendingDataCorrections, color: CHART_COLORS[2] },
+          { label: 'Change requests', value: summary.openChangeRequests, color: CHART_COLORS[4] },
+          { label: 'Validations pending', value: summary.validationsPendingApproval, color: CHART_COLORS[5] },
+        ]} />
+      </ChartCard>
+    </div>}
 
     {tab === 'Information Assets' && <>
       <form className="form-grid" onSubmit={submitAsset}>

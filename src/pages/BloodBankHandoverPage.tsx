@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
+import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -255,6 +256,24 @@ export function BloodBankHandoverPage() {
         <div className="card"><h4>Transfusion reactions (month)</h4><p className="metric">{summary.transfusionReactionsThisMonth}</p></div>
         <div className="card"><h4>NC/CAPA links</h4><p className="metric">{summary.ncCapaLinkedRecords}</p><small>Adverse events + discards linked to NC/CAPA.</small></div>
       </div> : <p>Loading summary…</p>}
+      {summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
+        <ChartCard title="Inventory status" subtitle="Available stock vs expiry risk">
+          <DonutChart centerLabel="Units" data={[
+            { label: 'Available', value: summary.unitsAvailable, color: CHART_COLORS[1] },
+            { label: 'Expiring soon', value: summary.unitsExpiringSoon, color: CHART_COLORS[2] },
+            { label: 'Expired', value: summary.unitsExpired, color: CHART_COLORS[3] },
+          ]} />
+        </ChartCard>
+        <ChartCard title="Safety & haemovigilance" subtitle="Events and discards this month">
+          <BarMeter data={[
+            { label: 'Pending handovers', value: summary.pendingHandovers, color: CHART_COLORS[0] },
+            { label: 'Adverse events open', value: summary.openAdverseEvents, color: CHART_COLORS[3] },
+            { label: 'Discards (month)', value: summary.discardsThisMonth, color: CHART_COLORS[6] },
+            { label: 'Donor reactions (month)', value: summary.donorReactionsThisMonth, color: CHART_COLORS[2] },
+            { label: 'Transfusion reactions (month)', value: summary.transfusionReactionsThisMonth, color: CHART_COLORS[4] },
+          ]} />
+        </ChartCard>
+      </div>}
     </>}
 
     {tab === 'Blood Units' && <table className="data-table"><thead><tr><th>Unit #</th><th>Batch</th><th>Group</th><th>Component</th><th>Donor type</th><th>Collected</th><th>Expiry</th><th>Expiry status</th><th>Screening</th><th>Current</th><th>Actions</th></tr></thead><tbody>

@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
+import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -175,6 +176,21 @@ export function IqcPage() {
       <div className="card"><h4>Pending review</h4><p className="metric">{summary.resultsPendingReview}</p></div>
       <div className="card"><h4>Lot changes this year</h4><p className="metric">{summary.lotChangesThisYear}</p></div>
     </div>}
+    {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
+      <ChartCard title="QC outcomes this month" subtitle="In-control vs flagged results">
+        <DonutChart centerLabel="Results" data={[
+          { label: 'In control', value: Math.max(0, summary.resultsThisMonth - summary.failedThisMonth), color: CHART_COLORS[1] },
+          { label: 'Failed / OOC', value: summary.failedThisMonth, color: CHART_COLORS[3] },
+        ]} />
+      </ChartCard>
+      <ChartCard title="QC workload" subtitle="Active materials and review backlog">
+        <BarMeter data={[
+          { label: 'Active materials', value: summary.activeMaterials, color: CHART_COLORS[0] },
+          { label: 'Pending review', value: summary.resultsPendingReview, color: CHART_COLORS[2] },
+          { label: 'Lot changes (year)', value: summary.lotChangesThisYear, color: CHART_COLORS[5] },
+        ]} />
+      </ChartCard>
+    </div>}
 
     {tab === 'IQC Materials' && <table className="data-table"><thead><tr><th>Code</th><th>Name</th><th>Test</th><th>Analyte</th><th>Lot</th><th>Expiry</th><th>Status</th></tr></thead><tbody>
       {materials.map(m => <tr key={m.id}><td>{m.material_code}</td><td>{m.material_name}</td><td>{m.test_name}</td><td>{m.analyte}</td><td>{m.lot_number}</td><td>{m.expiry_date || '—'}</td><td>{m.is_active ? 'Active' : 'Inactive'}</td></tr>)}
@@ -338,6 +354,21 @@ export function EqaPage() {
       <div className="card"><h4>Unsatisfactory events</h4><p className="metric">{summary.unsatisfactoryEvents}</p></div>
       <div className="card"><h4>Requiring corrective action</h4><p className="metric">{summary.eventsRequiringCorrectiveAction}</p></div>
     </div>}
+    {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
+      <ChartCard title="EQA event status" subtitle="Open events by performance outcome">
+        <DonutChart centerLabel="Open" data={[
+          { label: 'Satisfactory', value: Math.max(0, summary.openEvents - summary.unsatisfactoryEvents), color: CHART_COLORS[1] },
+          { label: 'Unsatisfactory', value: summary.unsatisfactoryEvents, color: CHART_COLORS[3] },
+        ]} />
+      </ChartCard>
+      <ChartCard title="EQA attention" subtitle="Scheduling and corrective-action load">
+        <BarMeter data={[
+          { label: 'Events due soon', value: summary.eventsDueSoon, color: CHART_COLORS[2] },
+          { label: 'Unsatisfactory', value: summary.unsatisfactoryEvents, color: CHART_COLORS[3] },
+          { label: 'Corrective action', value: summary.eventsRequiringCorrectiveAction, color: CHART_COLORS[4] },
+        ]} />
+      </ChartCard>
+    </div>}
 
     {tab === 'EQA Programs' && <table className="data-table"><thead><tr><th>Code</th><th>Program</th><th>Provider</th><th>Test area</th><th>Frequency</th><th>Active</th></tr></thead><tbody>
       {programs.map(p => <tr key={p.id}><td>{p.program_code}</td><td>{p.program_name}</td><td>{p.provider}</td><td>{p.test_area}</td><td>{p.frequency || '—'}</td><td>{p.is_active ? 'Yes' : 'No'}</td></tr>)}
@@ -497,6 +528,22 @@ export function VerificationValidationPage() {
       <div className="card"><h4>Equipment verifications this year</h4><p className="metric">{summary.equipmentVerificationsThisYear}</p></div>
       <div className="card"><h4>Equipment verifications pending approval</h4><p className="metric">{summary.equipmentVerificationsPendingApproval}</p></div>
     </div>}
+    {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
+      <ChartCard title="Method verification status" subtitle="Open vs completed verifications">
+        <DonutChart centerLabel="Methods" data={[
+          { label: 'Completed', value: summary.completedVerifications, color: CHART_COLORS[1] },
+          { label: 'Open', value: summary.openMethodVerifications, color: CHART_COLORS[0] },
+          { label: 'Pending approval', value: summary.pendingApproval, color: CHART_COLORS[2] },
+        ]} />
+      </ChartCard>
+      <ChartCard title="Approval backlog" subtitle="Method and equipment sign-offs awaiting approval">
+        <BarMeter data={[
+          { label: 'Methods pending approval', value: summary.pendingApproval, color: CHART_COLORS[2] },
+          { label: 'Equip. verifications (year)', value: summary.equipmentVerificationsThisYear, color: CHART_COLORS[0] },
+          { label: 'Equip. pending approval', value: summary.equipmentVerificationsPendingApproval, color: CHART_COLORS[4] },
+        ]} />
+      </ChartCard>
+    </div>}
 
     {tab === 'Method Verification Register' && <table className="data-table"><thead><tr><th>Number</th><th>Method</th><th>Test</th><th>Type</th><th>Equipment</th><th>Status</th><th></th></tr></thead><tbody>
       {methods.map(m => <tr key={m.id}>
@@ -638,6 +685,23 @@ export function MeasurementUncertaintyPage() {
       <div className="card"><h4>Pending approval</h4><p className="metric">{summary.recordsPendingApproval}</p></div>
       <div className="card"><h4>Due for review</h4><p className="metric">{summary.recordsDueForReview}</p></div>
       <div className="card"><h4>Completed this year</h4><p className="metric">{summary.recordsCompletedThisYear}</p></div>
+    </div>}
+    {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
+      <ChartCard title="MU record status" subtitle="Active records by review stage">
+        <DonutChart centerLabel="Active" data={[
+          { label: 'Pending review', value: summary.recordsPendingReview, color: CHART_COLORS[2] },
+          { label: 'Pending approval', value: summary.recordsPendingApproval, color: CHART_COLORS[0] },
+          { label: 'Due for review', value: summary.recordsDueForReview, color: CHART_COLORS[4] },
+        ]} />
+      </ChartCard>
+      <ChartCard title="Review pipeline" subtitle="Measurement-uncertainty workload">
+        <BarMeter data={[
+          { label: 'Pending review', value: summary.recordsPendingReview, color: CHART_COLORS[2] },
+          { label: 'Pending approval', value: summary.recordsPendingApproval, color: CHART_COLORS[0] },
+          { label: 'Due for review', value: summary.recordsDueForReview, color: CHART_COLORS[4] },
+          { label: 'Completed (year)', value: summary.recordsCompletedThisYear, color: CHART_COLORS[1] },
+        ]} />
+      </ChartCard>
     </div>}
 
     {tab === 'MU Register' && <table className="data-table"><thead><tr><th>Number</th><th>Test</th><th>Analyte</th><th>Method</th><th>Equipment</th><th>Date</th><th>U (k={records[0]?.coverage_factor ?? '—'})</th><th>Status</th></tr></thead><tbody>
