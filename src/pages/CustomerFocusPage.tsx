@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
+import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -230,6 +231,23 @@ export function CustomerFocusPage() {
       <div className="card"><h4>Survey responses this month</h4><p className="metric">{summary.surveyResponsesThisMonth}</p></div>
       <div className="card"><h4>Follow-ups due</h4><p className="metric">{summary.followUpsDue}</p></div>
     </div> : <p>Loading summary…</p>)}
+    {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
+      <ChartCard title="Feedback handling" subtitle="This month's feedback by state">
+        <DonutChart centerLabel="Feedback" data={[
+          { label: 'Resolved', value: Math.max(0, summary.feedbackThisMonth - summary.openFeedback), color: CHART_COLORS[1] },
+          { label: 'Open', value: summary.openFeedback, color: CHART_COLORS[0] },
+          { label: 'High urgency', value: summary.highUrgencyFeedback, color: CHART_COLORS[3] },
+        ]} />
+      </ChartCard>
+      <ChartCard title="Engagement & follow-up" subtitle="Stakeholder and survey activity">
+        <BarMeter data={[
+          { label: 'Active stakeholders', value: summary.activeStakeholders, color: CHART_COLORS[0] },
+          { label: 'Active surveys', value: summary.activeSurveys, color: CHART_COLORS[5] },
+          { label: 'Survey responses (month)', value: summary.surveyResponsesThisMonth, color: CHART_COLORS[1] },
+          { label: 'Follow-ups due', value: summary.followUpsDue, color: CHART_COLORS[2] },
+        ]} />
+      </ChartCard>
+    </div>}
 
     {tab === 'Stakeholders' && <table className="data-table"><thead><tr><th>Number</th><th>Name</th><th>Type</th><th>Organisation</th><th>Contact</th><th>Active</th><th></th></tr></thead><tbody>
       {stakeholders.map(s => <tr key={s.id}>

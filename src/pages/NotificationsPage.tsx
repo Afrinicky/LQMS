@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
+import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -134,8 +135,28 @@ export function NotificationsPage() {
         <div className="card"><h4>Follow-ups due</h4><p className="metric">{summary.followUpsDue}</p></div>
         <div className="card"><h4>Review items due</h4><p className="metric">{summary.reviewItemsDue}</p></div>
       </div>
-      <h3>By module</h3>
-      <table className="data-table"><thead><tr><th>Module</th><th>Open notifications</th></tr></thead><tbody>
+      <div className="grid cols-2" style={{ marginTop: 18 }}>
+        <ChartCard title="Timeliness" subtitle="Notifications by due-date pressure">
+          <DonutChart centerLabel="Items" data={[
+            { label: 'Due today', value: summary.dueToday, color: CHART_COLORS[2] },
+            { label: 'Due soon', value: summary.dueSoon, color: CHART_COLORS[0] },
+            { label: 'Overdue', value: summary.overdue, color: CHART_COLORS[3] },
+          ]} />
+        </ChartCard>
+        <ChartCard title="Task workload" subtitle="Open items awaiting action">
+          <BarMeter data={[
+            { label: 'Open tasks', value: summary.openTasks, color: CHART_COLORS[0] },
+            { label: 'Pending approvals', value: summary.pendingApprovals, color: CHART_COLORS[2] },
+            { label: 'Follow-ups due', value: summary.followUpsDue, color: CHART_COLORS[4] },
+            { label: 'Review items due', value: summary.reviewItemsDue, color: CHART_COLORS[5] },
+          ]} />
+        </ChartCard>
+      </div>
+      <h3 style={{ marginTop: 22 }}>By module</h3>
+      <ChartCard title="Open notifications by module" subtitle="Where attention is concentrated">
+        <BarMeter data={Object.entries(summary.byModule).map(([k, v], i) => ({ label: k.replace(/_/g, ' '), value: Number(v) || 0, color: CHART_COLORS[i % CHART_COLORS.length] }))} />
+      </ChartCard>
+      <table className="data-table" style={{ marginTop: 16 }}><thead><tr><th>Module</th><th>Open notifications</th></tr></thead><tbody>
         {Object.entries(summary.byModule).map(([k, v]) => <tr key={k}><td>{k}</td><td>{v}</td></tr>)}
       </tbody></table>
     </> : <p>Loading…</p>)}

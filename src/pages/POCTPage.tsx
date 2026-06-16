@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
+import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -174,6 +175,24 @@ export function POCTPage() {
       <div className="card"><h4>Open POCT incidents</h4><p className="metric">{summary.openIncidents}</p></div>
       <div className="card"><h4>Maintenance due</h4><p className="metric">{summary.maintenanceDue}</p></div>
     </div> : <p>Loading summary…</p>)}
+    {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
+      <ChartCard title="POCT network" subtitle="Active estate and authorised operators">
+        <DonutChart centerLabel="Estate" data={[
+          { label: 'Active sites', value: summary.activeSites, color: CHART_COLORS[0] },
+          { label: 'Active devices', value: summary.activeDevices, color: CHART_COLORS[5] },
+          { label: 'Authorised operators', value: summary.authorizedOperators, color: CHART_COLORS[1] },
+        ]} />
+      </ChartCard>
+      <ChartCard title="Quality & compliance" subtitle="Issues needing attention">
+        <BarMeter data={[
+          { label: 'QC failures (month)', value: summary.qcFailuresThisMonth, color: CHART_COLORS[3] },
+          { label: 'Unsatisfactory EQA', value: summary.unsatisfactoryEqaEvents, color: CHART_COLORS[2] },
+          { label: 'Open incidents', value: summary.openIncidents, color: CHART_COLORS[4] },
+          { label: 'Expired authorisations', value: summary.expiredAuthorizations, color: CHART_COLORS[6] },
+          { label: 'Maintenance due', value: summary.maintenanceDue, color: CHART_COLORS[0] },
+        ]} />
+      </ChartCard>
+    </div>}
 
     {tab === 'Sites' && <>
       <form className="form-grid" onSubmit={submitSite}>

@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
+import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -136,6 +137,22 @@ export function ProcessManagementPage() {
       <div className="card"><h4>Report amendments (month)</h4><p className="metric">{summary.reportAmendmentsThisMonth}</p></div>
       <div className="card"><h4>Pending process reviews</h4><p className="metric">{summary.pendingProcessReviews}</p></div>
     </div> : <p>Loading summary…</p>)}
+    {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
+      <ChartCard title="Pre-analytical quality" subtitle="Specimen rejection handling this month">
+        <DonutChart centerLabel="Rejections" data={[
+          { label: 'Resolved', value: Math.max(0, summary.specimenRejectionsThisMonth - summary.openSpecimenRejections), color: CHART_COLORS[1] },
+          { label: 'Open', value: summary.openSpecimenRejections, color: CHART_COLORS[3] },
+        ]} />
+      </ChartCard>
+      <ChartCard title="Turnaround risks" subtitle="Critical results, referrals and amendments">
+        <BarMeter data={[
+          { label: 'Delayed critical notifs', value: summary.delayedCriticalNotifications, color: CHART_COLORS[3] },
+          { label: 'Referral sendouts pending', value: summary.referralSendoutsPending, color: CHART_COLORS[0] },
+          { label: 'Delayed sendouts', value: summary.delayedReferralSendouts, color: CHART_COLORS[2] },
+          { label: 'Report amendments (month)', value: summary.reportAmendmentsThisMonth, color: CHART_COLORS[4] },
+        ]} />
+      </ChartCard>
+    </div>}
 
     {tab === 'Test Directory' && <>
       <form className="form-grid" onSubmit={submitTest}>

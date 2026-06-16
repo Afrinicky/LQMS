@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
+import { ChartCard, BarMeter, BarChart, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -251,6 +252,23 @@ export function PersonnelManagementPage() {
       <div className="card"><h4>Authorisations due review</h4><p className="metric">{summary.authorizationsDueReview}</p></div>
       <div className="card"><h4>Rosters this month</h4><p className="metric">{summary.rostersThisMonth}</p></div>
     </div> : <p>Loading summary…</p>)}
+    {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
+      <ChartCard title="Compliance backlog" subtitle="Personnel records needing action">
+        <BarMeter data={[
+          { label: 'Docs pending verification', value: summary.staffDocumentsPendingVerification, color: CHART_COLORS[0] },
+          { label: 'Certificates expiring', value: summary.certificatesExpiringSoon, color: CHART_COLORS[2] },
+          { label: 'Pending declarations', value: summary.pendingDeclarations, color: CHART_COLORS[4] },
+          { label: 'Authorisations due', value: summary.authorizationsDueReview, color: CHART_COLORS[3] },
+        ]} />
+      </ChartCard>
+      <ChartCard title="Training & competency" subtitle="Development and assessment activity">
+        <BarChart data={[
+          { label: 'Training', value: summary.plannedTrainingEvents, color: CHART_COLORS[0] },
+          { label: 'Competency due', value: summary.competencyAssessmentsDue, color: CHART_COLORS[2] },
+          { label: 'Rosters', value: summary.rostersThisMonth, color: CHART_COLORS[1] },
+        ]} />
+      </ChartCard>
+    </div>}
 
     {tab === 'Staff Documents' && <>
       <form className="form-grid" onSubmit={submitStaffDoc}>

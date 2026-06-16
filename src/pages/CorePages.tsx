@@ -10,7 +10,7 @@ import { api } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import DisabledModule from '../components/DisabledModule';
 import { useModules } from '../hooks/useModules';
-import { WaveBackground, MedicalLabBackgroundMarks, PageHeader, StatCard } from '../components/ui';
+import { WaveBackground, MedicalLabBackgroundMarks, PageHeader, StatCard, ChartCard, DonutChart, BarChart, BarMeter, CHART_COLORS } from '../components/ui';
 
 type CountRow = { count: number };
 type AnyRec = Record<string, any>;
@@ -214,7 +214,39 @@ export function Dashboard() {
 
   const c = (x: unknown): number | string | undefined =>
     (x && typeof x === 'object' && 'count' in (x as any)) ? (x as CountRow).count : (x as number | string | undefined);
+  const n = (x: unknown): number => { const v = c(x); return typeof v === 'number' ? v : (typeof v === 'string' && v !== '' ? Number(v) || 0 : 0); };
   const firstName = user?.fullName?.trim().split(/\s+/)[0];
+
+  // Chart series derived entirely from the real summary counts above.
+  const qualityWorkload = [
+    { label: 'Open NCs', value: n(qms?.openNCs), color: CHART_COLORS[3] },
+    { label: 'Open CAPAs', value: n(qms?.openCAPAs), color: CHART_COLORS[0] },
+    { label: 'Pending complaints', value: n(qms?.pendingComplaints), color: CHART_COLORS[2] },
+    { label: 'High/critical risks', value: n(qms?.highRisks), color: CHART_COLORS[4] },
+  ];
+  const operationalReadiness = [
+    { label: 'Maintenance due', value: n(ops?.equipmentMaintenanceDue), color: CHART_COLORS[0] },
+    { label: 'Calibration due', value: n(ops?.equipmentCalibrationDue), color: CHART_COLORS[5] },
+    { label: 'Out of service', value: n(ops?.equipmentOutOfService), color: CHART_COLORS[3] },
+    { label: 'Low stock', value: n(ops?.inventoryLowStock), color: CHART_COLORS[2] },
+    { label: 'Expiring soon', value: n(ops?.inventoryExpiringSoon), color: CHART_COLORS[1] },
+    { label: 'Expired stock', value: n(ops?.inventoryExpired), color: CHART_COLORS[6] },
+  ];
+  const alertsBreakdown = [
+    { label: 'Due today', value: n(notifs?.dueToday), color: CHART_COLORS[2] },
+    { label: 'Due soon', value: n(notifs?.dueSoon), color: CHART_COLORS[0] },
+    { label: 'Overdue', value: n(notifs?.overdue), color: CHART_COLORS[3] },
+    { label: 'Open tasks', value: n(notifs?.openTasks), color: CHART_COLORS[5] },
+    { label: 'Approvals', value: n(notifs?.pendingApprovals), color: CHART_COLORS[4] },
+  ];
+  const technicalQuality = [
+    { label: 'IQC failures (month)', value: n(tech?.iqcFailuresThisMonth), color: CHART_COLORS[3] },
+    { label: 'IQC pending review', value: n(tech?.iqcResultsPendingReview), color: CHART_COLORS[0] },
+    { label: 'EQA events due', value: n(tech?.eqaEventsDue), color: CHART_COLORS[5] },
+    { label: 'Unsatisfactory EQA', value: n(tech?.eqaUnsatisfactoryEvents), color: CHART_COLORS[2] },
+    { label: 'Open verifications', value: n(tech?.openVerifications), color: CHART_COLORS[1] },
+    { label: 'MU records due', value: n(tech?.muRecordsDueForReview), color: CHART_COLORS[4] },
+  ];
 
   return (
     <div className="module-page">
@@ -231,6 +263,16 @@ export function Dashboard() {
         <StatCard label="Overdue actions" value={health?.overdueActions ?? c(qms?.overdueActions)} icon={<TriangleAlert size={20} />} hint="Across all modules" />
         <StatCard label="Documents due review" value={docs?.dueReviews} icon={<FileText size={20} />} hint="Within review window" />
         <StatCard label="Training due" value={people?.competencyAssessmentsDue} icon={<GraduationCap size={20} />} hint="Competency assessments" />
+      </div>
+
+      {/* Signature charts — composition + comparison views of the live counts */}
+      <div className="grid cols-2">
+        <ChartCard title="Quality workload" subtitle="Open quality items across the management system">
+          <DonutChart data={qualityWorkload} centerLabel="Open items" />
+        </ChartCard>
+        <ChartCard title="Operational readiness" subtitle="Equipment & inventory items needing attention">
+          <BarMeter data={operationalReadiness} />
+        </ChartCard>
       </div>
 
       {/* My Work + Quick Actions */}
@@ -260,6 +302,16 @@ export function Dashboard() {
             })}
           </div>
         </div>
+      </div>
+
+      {/* Alerts + technical quality charts */}
+      <div className="grid cols-2">
+        <ChartCard title="Alerts & tasks" subtitle="Time-sensitive items needing follow-up">
+          <BarChart data={alertsBreakdown} />
+        </ChartCard>
+        <ChartCard title="Technical quality" subtitle="IQC, EQA, verification and measurement uncertainty">
+          <BarMeter data={technicalQuality} />
+        </ChartCard>
       </div>
 
       <Section title="System Health" available={!!health}>
