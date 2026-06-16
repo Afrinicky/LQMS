@@ -39,6 +39,16 @@
   --info: #4E8DFF;
   --info-bg: rgba(78, 141, 255, 0.14);
 
+  /* ---- Categorical dashboard palette (KPI tiles cycle through these) ---- */
+  --c1: #4E8DFF;  /* blue   */
+  --c2: #2DD4BF;  /* teal   */
+  --c3: #A78BFA;  /* violet */
+  --c4: #F5B544;  /* amber  */
+  --c5: #34D399;  /* green  */
+  --c6: #F472B6;  /* pink   */
+  --c7: #FF6B7D;  /* coral  */
+  --c8: #60A5FA;  /* sky    */
+
   /* ---- Legacy aliases (kept so inline var() usages keep working) ---- */
   --navy: #EAF1FF;            /* was heading/strong color → now light on dark */
   --gold: #4E8DFF;            /* repurposed to accent blue */
@@ -448,6 +458,64 @@ p { line-height: 1.55; }
 .stat-card .stat-delta.up { color: var(--success); }
 .stat-card .stat-delta.down { color: var(--danger); }
 .stat-card .stat-delta.flat { color: var(--muted); }
+
+/* ============================================================================
+   COLOURFUL DASHBOARD TILES
+   KPI tiles, summary cards and stat cards cycle through a categorical palette
+   by position, so every dashboard reads as vibrant and colour-coded without
+   any per-page changes. Tone is exposed as --tone and consumed by the stripe,
+   the value, the icon chip and a soft corner glow.
+   ========================================================================= */
+.grid > .card.metric,
+.cards > .card,
+.grid > .stat-card { --tone: var(--c1); }
+
+.grid > .card.metric:nth-child(8n+2), .cards > .card:nth-child(8n+2), .grid > .stat-card:nth-child(8n+2) { --tone: var(--c2); }
+.grid > .card.metric:nth-child(8n+3), .cards > .card:nth-child(8n+3), .grid > .stat-card:nth-child(8n+3) { --tone: var(--c3); }
+.grid > .card.metric:nth-child(8n+4), .cards > .card:nth-child(8n+4), .grid > .stat-card:nth-child(8n+4) { --tone: var(--c4); }
+.grid > .card.metric:nth-child(8n+5), .cards > .card:nth-child(8n+5), .grid > .stat-card:nth-child(8n+5) { --tone: var(--c5); }
+.grid > .card.metric:nth-child(8n+6), .cards > .card:nth-child(8n+6), .grid > .stat-card:nth-child(8n+6) { --tone: var(--c6); }
+.grid > .card.metric:nth-child(8n+7), .cards > .card:nth-child(8n+7), .grid > .stat-card:nth-child(8n+7) { --tone: var(--c7); }
+.grid > .card.metric:nth-child(8n+8), .cards > .card:nth-child(8n+8), .grid > .stat-card:nth-child(8n+8) { --tone: var(--c8); }
+
+/* Soft corner glow in the tile's hue */
+.grid > .card.metric, .cards > .card, .grid > .stat-card { position: relative; overflow: hidden; }
+.grid > .card.metric::after, .cards > .card::after, .grid > .stat-card::after {
+  content: ""; position: absolute; right: -34px; top: -34px; width: 130px; height: 130px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--tone) 26%, transparent) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+/* Coloured left stripe on summary cards (metric cards already have ::before) */
+.cards > .card { border-left: 3px solid var(--tone); }
+.card.metric::before { background: linear-gradient(180deg, var(--tone), color-mix(in srgb, var(--tone) 55%, #1B49C0)); }
+
+/* Colour the big numbers in the tile hue for a vibrant, categorical read */
+.grid > .card.metric strong { color: var(--tone); }
+.cards > .card p.metric { color: var(--tone); }
+.grid > .stat-card .stat-value { color: var(--tone); }
+
+/* Tint the stat-card icon chip to match */
+.grid > .stat-card .stat-ico {
+  background: color-mix(in srgb, var(--tone) 16%, transparent);
+  color: var(--tone);
+}
+
+/* Subtle hue-matched border + lift on hover */
+.grid > .card.metric:hover, .cards > .card:hover, .grid > .stat-card:hover {
+  border-color: color-mix(in srgb, var(--tone) 40%, var(--border));
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--tone) 16%, transparent);
+}
+
+/* Give chart cards a thin coloured top accent so they feel part of the system */
+.chart-card { background-clip: padding-box; }
+.chart-card::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: linear-gradient(90deg, var(--c1), var(--c2), var(--c3), var(--c4), var(--c5), var(--c6));
+  opacity: 0.85;
+}
+.chart-card { position: relative; overflow: hidden; }
 
 /* Section header inside content */
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 14px; }
