@@ -1,6 +1,9 @@
 import type { Request } from 'express';
 
 export function parseIntNullable(value: unknown) {
+  // Treat null/undefined/empty-string as "no value" so an unselected dropdown
+  // does not become 0 (which then fails foreign-key checks against real ids).
+  if (value === null || value === undefined || value === '') return null;
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
 }

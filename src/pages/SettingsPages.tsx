@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../services/api';
 import { PERMISSION_ACTIONS, TECHNICAL_AUTHORIZATION_LEVELS } from '../../shared/constants/modules';
 import type { Position, Staff, SystemModule, ApiUser, Permission, Section, Device } from '../../shared/types/api';
@@ -33,40 +34,66 @@ export function UsersAccess(){
 export function Positions(){
   const [positions,setPositions]=useState<Position[]>([]);
   const [staff,setStaff]=useState<Staff[]>([]);
+  const [posErr,setPosErr]=useState('');
+  const [posMsg,setPosMsg]=useState('');
+  const [staffErr,setStaffErr]=useState('');
+  const [staffMsg,setStaffMsg]=useState('');
+  const [posBusy,setPosBusy]=useState(false);
+  const [staffBusy,setStaffBusy]=useState(false);
   const load=()=>{api<Position[]>('/positions').then(setPositions); api<Staff[]>('/staff').then(setStaff).catch(()=>setStaff([]))};
   useEffect(()=>{void load()},[]);
   async function addPosition(e:FormEvent<HTMLFormElement>){
     e.preventDefault();
-    const fd=new FormData(e.currentTarget);
-    await api('/positions',{method:'POST',body:JSON.stringify({title:fd.get('title'),description:fd.get('description'),reportsToPositionId:fd.get('reportsToPositionId')||null})});
-    e.currentTarget.reset();
-    load();
+    const form=e.currentTarget;                 // capture before await (React nulls currentTarget after yielding)
+    const fd=new FormData(form);
+    const title=String(fd.get('title')||'').trim();
+    if(!title){setPosErr('Position title is required.');return;}
+    setPosBusy(true);setPosErr('');setPosMsg('');
+    try{
+      await api('/positions',{method:'POST',body:JSON.stringify({title,description:String(fd.get('description')||'').trim()||null,reportsToPositionId:fd.get('reportsToPositionId')||null})});
+      form.reset();
+      setPosMsg(`Position “${title}” created.`);
+      load();
+    }catch(err){setPosErr(err instanceof Error?err.message:'Could not create position.');}
+    finally{setPosBusy(false);}
   }
   async function addStaff(e:FormEvent<HTMLFormElement>){
     e.preventDefault();
-    const fd=new FormData(e.currentTarget);
-    await api('/staff',{method:'POST',body:JSON.stringify({employeeNo:fd.get('employeeNo'),fullName:fd.get('fullName'),email:fd.get('email'),phone:fd.get('phone'),positionId:Number(fd.get('positionId'))})});
-    e.currentTarget.reset();
-    load();
+    const form=e.currentTarget;                 // capture before await
+    const fd=new FormData(form);
+    const fullName=String(fd.get('fullName')||'').trim();
+    if(!fullName){setStaffErr('Staff full name is required.');return;}
+    setStaffBusy(true);setStaffErr('');setStaffMsg('');
+    try{
+      await api('/staff',{method:'POST',body:JSON.stringify({employeeNo:String(fd.get('employeeNo')||'').trim()||null,fullName,email:String(fd.get('email')||'').trim()||null,phone:String(fd.get('phone')||'').trim()||null,positionId:fd.get('positionId')?Number(fd.get('positionId')):null})});
+      form.reset();
+      setStaffMsg(`Staff “${fullName}” created.`);
+      load();
+    }catch(err){setStaffErr(err instanceof Error?err.message:'Could not create staff.');}
+    finally{setStaffBusy(false);}
   }
   return <div className="grid cols-2">
     <div className="card"><h3>Positions & Organogram</h3><p>Create, edit, assign reporting lines, activate/deactivate, and archive used positions instead of hard-deleting them.</p>
       <form className="form" onSubmit={addPosition}>
-        <label>Position title<input name="title" required/></label>
-        <label>Description<textarea name="description"/></label>
+        <label>Position title<input name="title" required placeholder="e.g. Biochemistry Unit Head"/></label>
+        <label>Description<textarea name="description" placeholder="Optional"/></label>
         <label>Reporting line<select name="reportsToPositionId"><option value="">None</option>{positions.map(p=><option value={p.id} key={p.id}>{p.title}</option>)}</select></label>
-        <button>Create position</button>
+        {posErr && <div className="error">{posErr}</div>}
+        {posMsg && <div className="success-msg">{posMsg}</div>}
+        <button disabled={posBusy}>{posBusy?'Creating…':'Create position'}</button>
       </form>
       <Table rows={positions}/>
     </div>
     <div className="card"><h3>Staff Assignment</h3>
       <form className="form" onSubmit={addStaff}>
-        <label>Employee no<input name="employeeNo"/></label>
-        <label>Staff full name<input name="fullName" required/></label>
-        <label>Email<input name="email"/></label>
-        <label>Phone<input name="phone"/></label>
-        <label>Assign position<select name="positionId" required>{positions.map(p=><option value={p.id} key={p.id}>{p.title}</option>)}</select></label>
-        <button>Create staff</button>
+        <label>Staff full name<input name="fullName" required placeholder="e.g. Dr. Paul Ntiamoah"/></label>
+        <label>Employee no<input name="employeeNo" placeholder="Optional"/></label>
+        <label>Email<input name="email" type="email" placeholder="Optional"/></label>
+        <label>Phone<input name="phone" placeholder="Optional"/></label>
+        <label>Assign position<select name="positionId"><option value="">None</option>{positions.map(p=><option value={p.id} key={p.id}>{p.title}</option>)}</select></label>
+        {staffErr && <div className="error">{staffErr}</div>}
+        {staffMsg && <div className="success-msg">{staffMsg}</div>}
+        <button disabled={staffBusy}>{staffBusy?'Creating…':'Create staff'}</button>
       </form>
       <Table rows={staff}/>
     </div>
@@ -186,8 +213,10 @@ export function ModuleToggles(){
 }
 
 export function DocumentImport(){
-  return <div className="card"><h3>Document Master List Import</h3><p>Upload/import workflow scaffold for SOPs, policies, forms, registers, logs, and trackers. CSV parsing is intentionally deferred.</p>
-    <button onClick={()=>api('/documents/import-master-list',{method:'POST',body:JSON.stringify({source:'mvp-ui'})})}>Run placeholder import</button>
+  return <div className="card"><h3>Document Master List Import</h3>
+    <p>Bulk import of SOPs, policies, forms, registers, logs and trackers now lives in the Documents module, where each uploaded file becomes a controlled document with its first version.</p>
+    <p className="muted">Open <strong>Documents &amp; Records → Bulk Import</strong> to upload multiple files at once, set a shared section, owner and review frequency, and auto-number their document codes.</p>
+    <Link to="/documents"><button>Go to Documents</button></Link>
   </div>;
 }
 

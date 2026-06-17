@@ -683,6 +683,14 @@ label {
   padding: 12px 14px;
   font-size: 13px;
 }
+.success-msg {
+  background: var(--success-bg);
+  border: 1px solid rgba(52, 211, 153, 0.30);
+  color: #9EF0CE;
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: 13px;
+}
 
 /* ============================================================================
    TABS

@@ -66,6 +66,13 @@ export function DocumentControlPage() {
   const [newDocFile, setNewDocFile] = useState<File | null>(null);
   const [versionFile, setVersionFile] = useState<File | null>(null);
 
+  // Bulk import (multiple SOPs/policies/forms in one pass)
+  const emptyBulkForm = { documentType: 'SOP', sectionId: '', ownerStaffId: '', reviewFrequencyMonths: '12', accessLevel: 'internal', isControlled: true, codePrefix: 'SOP-' };
+  const [bulkForm, setBulkForm] = useState(emptyBulkForm);
+  const [bulkFiles, setBulkFiles] = useState<File[]>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResults, setBulkResults] = useState<{ name: string; ok: boolean; message: string }[]>([]);
+
   async function load() {
     try {
       const [sum, docs, due, att, ib] = await Promise.all([
@@ -102,6 +109,41 @@ export function DocumentControlPage() {
       setDocForm(emptyDocForm); setNewDocFile(null);
       await load(); setTab('Document Register');
     } catch (e) { setError((e as Error).message); }
+  }
+
+  async function submitBulk(e: FormEvent) {
+    e.preventDefault(); setError(null);
+    if (!bulkFiles.length) { setError('Choose one or more files to import.'); return; }
+    setBulkBusy(true);
+    const results: { name: string; ok: boolean; message: string }[] = [];
+    // Seed the running sequence from existing codes that share the prefix so
+    // re-running the import keeps numbering unique instead of colliding.
+    const prefix = bulkForm.codePrefix.trim();
+    let seq = documents.reduce((max, d) => {
+      const m = d.document_code && prefix && d.document_code.startsWith(prefix) ? Number(d.document_code.slice(prefix.length)) : NaN;
+      return Number.isFinite(m) && m > max ? m : max;
+    }, 0);
+    for (const file of bulkFiles) {
+      const title = file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim() || file.name;
+      try {
+        const fileId = await uploadFileIfAny(file);
+        seq += 1;
+        const documentCode = prefix ? `${prefix}${String(seq).padStart(3, '0')}` : title;
+        await api('/documents', { method: 'POST', body: JSON.stringify({
+          documentCode, title, documentType: bulkForm.documentType,
+          sectionId: bulkForm.sectionId || null, ownerStaffId: bulkForm.ownerStaffId || null,
+          reviewFrequencyMonths: bulkForm.reviewFrequencyMonths || null, accessLevel: bulkForm.accessLevel,
+          isControlled: bulkForm.isControlled, fileId, versionNumber: '1.0', revisionSummary: 'Bulk import',
+        }) });
+        results.push({ name: file.name, ok: true, message: `Created as ${documentCode}` });
+      } catch (err) {
+        results.push({ name: file.name, ok: false, message: err instanceof Error ? err.message : 'Failed' });
+      }
+      setBulkResults([...results]);
+    }
+    setBulkBusy(false);
+    setBulkFiles([]);
+    await load();
   }
 
   async function openDoc(id: number) {
@@ -217,7 +259,7 @@ export function DocumentControlPage() {
     }
   }
 
-  const tabs = ['Dashboard', 'Document Register', 'New Document', 'Versions', 'Reviews Due', 'Pending Attestations', 'My Inbox', 'Print Logs', 'Obsolete Documents', 'Reports'];
+  const tabs = ['Dashboard', 'Document Register', 'New Document', 'Bulk Import', 'Versions', 'Reviews Due', 'Pending Attestations', 'My Inbox', 'Print Logs', 'Obsolete Documents', 'Reports'];
   const obsoleteDocs = documents.filter(d => d.status === 'obsolete');
 
   return <div className="module-page">
@@ -288,6 +330,25 @@ export function DocumentControlPage() {
       <label>File upload (optional)<input type="file" onChange={e => setNewDocFile(e.target.files?.[0] ?? null)} /></label>
       <button type="submit">Create document</button>
     </form>}
+
+    {tab === 'Bulk Import' && <div className="card">
+      <h3 style={{ marginTop: 0 }}>Bulk import documents</h3>
+      <p className="muted" style={{ marginTop: 0 }}>Import many SOPs, policies, forms or registers at once. Each file becomes a controlled document (draft) with the file as its first version. The title is taken from the file name and document codes are auto-numbered from the prefix below.</p>
+      <form className="form-grid" onSubmit={submitBulk}>
+        <label>Document type<select value={bulkForm.documentType} onChange={e => setBulkForm({ ...bulkForm, documentType: e.target.value })}>{DOCUMENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
+        <label>Code prefix<input value={bulkForm.codePrefix} onChange={e => setBulkForm({ ...bulkForm, codePrefix: e.target.value })} placeholder="e.g. SOP-" /></label>
+        <label>Section (applied to all)<select value={bulkForm.sectionId} onChange={e => setBulkForm({ ...bulkForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+        <label>Owner staff (applied to all)<select value={bulkForm.ownerStaffId} onChange={e => setBulkForm({ ...bulkForm, ownerStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        <label>Review frequency (months)<input type="number" min={1} value={bulkForm.reviewFrequencyMonths} onChange={e => setBulkForm({ ...bulkForm, reviewFrequencyMonths: e.target.value })} /></label>
+        <label>Access level<select value={bulkForm.accessLevel} onChange={e => setBulkForm({ ...bulkForm, accessLevel: e.target.value })}>{ACCESS_LEVELS.map(a => <option key={a} value={a}>{a}</option>)}</select></label>
+        <label><input type="checkbox" checked={bulkForm.isControlled} onChange={e => setBulkForm({ ...bulkForm, isControlled: e.target.checked })} /> Controlled documents</label>
+        <label>Files<input type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.odt,.ods" onChange={e => setBulkFiles(Array.from(e.target.files ?? []))} /></label>
+        <button type="submit" disabled={bulkBusy}>{bulkBusy ? `Importing… (${bulkResults.filter(r => r.ok).length}/${bulkFiles.length || bulkResults.length})` : `Import ${bulkFiles.length || ''} document${bulkFiles.length === 1 ? '' : 's'}`}</button>
+      </form>
+      {bulkResults.length > 0 && <table className="data-table" style={{ marginTop: 16 }}><thead><tr><th>File</th><th>Result</th></tr></thead><tbody>
+        {bulkResults.map((r, i) => <tr key={i}><td>{r.name}</td><td>{r.ok ? <span className="badge approved">{r.message}</span> : <span className="badge error">{r.message}</span>}</td></tr>)}
+      </tbody></table>}
+    </div>}
 
     {tab === 'Versions' && <>
       <p>Open a document from the register to view, add, approve, or mark its versions obsolete.</p>
