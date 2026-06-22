@@ -2320,4 +2320,31 @@ CREATE TABLE IF NOT EXISTS information_management_reviews (
   updated_at TEXT
 );
 `);
+
+  // Section/Unit Configuration: extend sections with a profile and add a per-unit
+  // service catalogue. The unit's test menu, equipment and inventory reuse the
+  // existing section-scoped tables (lab_test_catalog, equipment_items,
+  // inventory_items) so configuration here stays interconnected with the
+  // Process Management, Equipment and Supplier & Inventory modules.
+  const sectionColumns = database.prepare("PRAGMA table_info(sections)").all() as Array<{ name: string }>;
+  const sectionNames = new Set(sectionColumns.map(col => col.name));
+  if (!sectionNames.has('code')) database.exec('ALTER TABLE sections ADD COLUMN code TEXT');
+  if (!sectionNames.has('description')) database.exec('ALTER TABLE sections ADD COLUMN description TEXT');
+  if (!sectionNames.has('service_summary')) database.exec('ALTER TABLE sections ADD COLUMN service_summary TEXT');
+  if (!sectionNames.has('operating_hours')) database.exec('ALTER TABLE sections ADD COLUMN operating_hours TEXT');
+  if (!sectionNames.has('head_staff_id')) database.exec('ALTER TABLE sections ADD COLUMN head_staff_id INTEGER REFERENCES staff(id)');
+
+  database.exec(`
+CREATE TABLE IF NOT EXISTS section_services (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  section_id INTEGER NOT NULL REFERENCES sections(id),
+  name TEXT NOT NULL,
+  category TEXT,
+  is_offered INTEGER NOT NULL DEFAULT 1,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+`);
 }
