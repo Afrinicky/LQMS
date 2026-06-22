@@ -7,7 +7,7 @@ import { ModuleProvider } from './hooks/useModules';
 import { API_BASE, getSetupStatus } from './services/api';
 import { LoginPage, SetupPage } from './pages/AuthPages';
 import { Dashboard, Home, ModulePage, Organisation } from './pages/CorePages';
-import { ActionTracker, BackupRestore, Devices, DocumentImport, EvidenceUpload, ModuleToggles, PermissionMatrix, Positions, UsersAccess } from './pages/SettingsPages';
+import { ActionTracker, BackupRestore, Devices, DocumentImport, EvidenceUpload, ModuleToggles, PermissionMatrix, Positions, RegisterStaff, UsersAccess } from './pages/SettingsPages';
 import { NcCapaPage, ComplaintsPage, RisksPage, QmsActionTracker } from './pages/QMSPages';
 import { MODULES } from '../shared/constants/modules';
 import { FlaskConical, TriangleAlert } from 'lucide-react';
@@ -201,7 +201,8 @@ function AppRoutes() {
       <Route path="/information-management" element={<Suspense fallback={<ModuleFallback/>}><InformationManagementPage/></Suspense>}/>
       {placeholders.map(m => <Route key={m.key} path={m.path.slice(1)} element={<ModulePage moduleKey={m.key} title={m.label} placeholder/>}/>)}
       <Route path="/settings" element={<SettingsLayout/>}>
-        <Route index element={<Navigate to="users"/>}/>
+        <Route index element={<Navigate to="register-staff"/>}/>
+        <Route path="register-staff" element={<RegisterStaff/>}/>
         <Route path="users" element={<UsersAccess/>}/>
         <Route path="positions" element={<Positions/>}/>
         <Route path="permissions" element={<PermissionMatrix/>}/>
