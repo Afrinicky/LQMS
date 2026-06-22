@@ -9,6 +9,7 @@ import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
 import { parseIntNullable } from './routeHelpers.js';
+import { generateRecordNumber } from '../utils/recordNumber.js';
 
 // archiver is loaded lazily inside the backup handler. Loading it at module
 // top level breaks the packaged Electron app under app.asar:
@@ -635,6 +636,154 @@ export function commonRoutes() {
     res.json({ ok: true });
   });
   router.get('/sections', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT id, name FROM sections WHERE is_active = 1 ORDER BY name').all()));
+
+  // =====================================================================
+  // Section / Unit Configuration
+  // ---------------------------------------------------------------------
+  // One place to configure each laboratory unit: its profile, the services
+  // it offers (and explicitly does not offer), its own test menu, its
+  // equipment, and its stock/inventory. Test menu, equipment and inventory
+  // write to the same section-scoped tables used by the Process Management,
+  // Equipment and Supplier & Inventory modules, keeping everything linked.
+  // =====================================================================
+  router.get('/section-config/sections', requirePermission('settings', 'view'), (_req, res) => {
+    res.json(getDb().prepare(`
+      SELECT s.id, s.name, s.code, s.description, s.service_summary AS serviceSummary, s.operating_hours AS operatingHours,
+        s.department_id AS departmentId, d.name AS departmentName, s.head_staff_id AS headStaffId, hs.full_name AS headStaffName, s.is_active AS isActive,
+        (SELECT COUNT(*) FROM section_services ss WHERE ss.section_id = s.id AND ss.is_offered = 1) AS servicesOffered,
+        (SELECT COUNT(*) FROM section_services ss WHERE ss.section_id = s.id AND ss.is_offered = 0) AS servicesNotOffered,
+        (SELECT COUNT(*) FROM lab_test_catalog t WHERE t.section_id = s.id) AS testCount,
+        (SELECT COUNT(*) FROM equipment_items e WHERE e.section_id = s.id) AS equipmentCount,
+        (SELECT COUNT(*) FROM inventory_items i WHERE i.section_id = s.id) AS inventoryCount,
+        (SELECT COUNT(*) FROM staff st WHERE st.section_id = s.id AND st.is_active = 1) AS staffCount
+      FROM sections s
+      LEFT JOIN departments d ON d.id = s.department_id
+      LEFT JOIN staff hs ON hs.id = s.head_staff_id
+      ORDER BY s.is_active DESC, s.name`).all());
+  });
+
+  router.post('/section-config/sections', requirePermission('settings', 'create'), (req, res) => {
+    const db = getDb();
+    const { name, departmentId, code, description, serviceSummary, operatingHours, headStaffId } = req.body;
+    if (!name || !String(name).trim()) return res.status(400).json({ error: 'A unit/section name is required.' });
+    const deptId = parseIntNullable(departmentId) ?? (db.prepare('SELECT id FROM departments ORDER BY id LIMIT 1').get() as any)?.id ?? null;
+    try {
+      const r = db.prepare('INSERT INTO sections (department_id, name, code, description, service_summary, operating_hours, head_staff_id, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)')
+        .run(deptId, String(name).trim(), code || null, description || null, serviceSummary || null, operatingHours || null, parseIntNullable(headStaffId));
+      audit(req, { action: 'create', entity: 'sections', entityId: Number(r.lastInsertRowid), newValue: req.body });
+      res.status(201).json({ id: Number(r.lastInsertRowid) });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error && /UNIQUE/.test(err.message) ? 'A unit with that name already exists in this department.' : (err instanceof Error ? err.message : 'Failed to create unit.') });
+    }
+  });
+
+  router.put('/section-config/sections/:id', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const oldValue = db.prepare('SELECT * FROM sections WHERE id = ?').get(req.params.id);
+    if (!oldValue) return res.status(404).json({ error: 'Unit not found' });
+    db.prepare('UPDATE sections SET name = ?, code = ?, description = ?, service_summary = ?, operating_hours = ?, department_id = ?, head_staff_id = ? WHERE id = ?')
+      .run(req.body.name ?? (oldValue as any).name, req.body.code ?? null, req.body.description ?? null, req.body.serviceSummary ?? null, req.body.operatingHours ?? null, parseIntNullable(req.body.departmentId) ?? (oldValue as any).department_id, parseIntNullable(req.body.headStaffId), req.params.id);
+    audit(req, { action: 'edit', entity: 'sections', entityId: req.params.id, oldValue, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  router.post('/section-config/sections/:id/toggle', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const sec = db.prepare('SELECT is_active FROM sections WHERE id = ?').get(req.params.id) as { is_active: number } | undefined;
+    if (!sec) return res.status(404).json({ error: 'Unit not found' });
+    const next = sec.is_active ? 0 : 1;
+    db.prepare('UPDATE sections SET is_active = ? WHERE id = ?').run(next, req.params.id);
+    audit(req, { action: next ? 'activate' : 'deactivate', entity: 'sections', entityId: req.params.id, oldValue: { is_active: sec.is_active }, newValue: { is_active: next } });
+    res.json({ ok: true, isActive: next });
+  });
+
+  router.get('/section-config/sections/:id', requirePermission('settings', 'view'), (req, res) => {
+    const db = getDb();
+    const section = db.prepare(`SELECT s.*, d.name AS department_name, hs.full_name AS head_staff_name FROM sections s LEFT JOIN departments d ON d.id = s.department_id LEFT JOIN staff hs ON hs.id = s.head_staff_id WHERE s.id = ?`).get(req.params.id);
+    if (!section) return res.status(404).json({ error: 'Unit not found' });
+    const services = db.prepare('SELECT id, name, category, is_offered, notes FROM section_services WHERE section_id = ? ORDER BY is_offered DESC, name').all(req.params.id);
+    const tests = db.prepare('SELECT id, test_code, test_name, sample_type, method_name, tat_target_minutes, status FROM lab_test_catalog WHERE section_id = ? ORDER BY test_name').all(req.params.id);
+    const equipment = db.prepare('SELECT id, equipment_number, name, category, manufacturer, model, serial_number, status FROM equipment_items WHERE section_id = ? ORDER BY name').all(req.params.id);
+    const inventory = db.prepare('SELECT id, item_code, name, category, quantity, unit, reorder_level, expiry_date, status FROM inventory_items WHERE section_id = ? ORDER BY name').all(req.params.id);
+    const staff = db.prepare('SELECT id, full_name, employee_no, is_active FROM staff WHERE section_id = ? ORDER BY is_active DESC, full_name').all(req.params.id);
+    res.json({ section, services, tests, equipment, inventory, staff });
+  });
+
+  // --- Services (what the unit does / does not do) ---
+  router.post('/section-config/sections/:id/services', requirePermission('settings', 'create'), (req, res) => {
+    const db = getDb();
+    if (!db.prepare('SELECT id FROM sections WHERE id = ?').get(req.params.id)) return res.status(404).json({ error: 'Unit not found' });
+    if (!req.body.name || !String(req.body.name).trim()) return res.status(400).json({ error: 'A service/activity name is required.' });
+    const r = db.prepare('INSERT INTO section_services (section_id, name, category, is_offered, notes, created_by) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(req.params.id, String(req.body.name).trim(), req.body.category || null, req.body.isOffered === false ? 0 : 1, req.body.notes || null, req.user!.id);
+    audit(req, { action: 'create', entity: 'section_services', entityId: Number(r.lastInsertRowid), newValue: { sectionId: req.params.id, ...req.body } });
+    res.status(201).json({ id: Number(r.lastInsertRowid) });
+  });
+  router.put('/section-config/services/:serviceId', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const existing = db.prepare('SELECT * FROM section_services WHERE id = ?').get(req.params.serviceId) as any;
+    if (!existing) return res.status(404).json({ error: 'Service not found' });
+    db.prepare('UPDATE section_services SET name = ?, category = ?, is_offered = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(req.body.name ?? existing.name, req.body.category ?? existing.category, req.body.isOffered === undefined ? existing.is_offered : (req.body.isOffered ? 1 : 0), req.body.notes ?? existing.notes, req.params.serviceId);
+    audit(req, { action: 'edit', entity: 'section_services', entityId: req.params.serviceId, oldValue: existing, newValue: req.body });
+    res.json({ ok: true });
+  });
+  router.delete('/section-config/services/:serviceId', requirePermission('settings', 'void_archive'), (req, res) => {
+    const db = getDb();
+    const existing = db.prepare('SELECT * FROM section_services WHERE id = ?').get(req.params.serviceId);
+    if (!existing) return res.status(404).json({ error: 'Service not found' });
+    db.prepare('DELETE FROM section_services WHERE id = ?').run(req.params.serviceId);
+    audit(req, { action: 'delete', entity: 'section_services', entityId: req.params.serviceId, oldValue: existing });
+    res.json({ ok: true });
+  });
+
+  // --- Test menu (writes to the shared lab_test_catalog, scoped to this unit) ---
+  router.post('/section-config/sections/:id/tests', requirePermission('settings', 'create'), (req, res) => {
+    const db = getDb();
+    const section = db.prepare('SELECT department_id FROM sections WHERE id = ?').get(req.params.id) as { department_id: number | null } | undefined;
+    if (!section) return res.status(404).json({ error: 'Unit not found' });
+    if (!req.body.testName || !String(req.body.testName).trim()) return res.status(400).json({ error: 'A test name is required.' });
+    const testCode = req.body.testCode || generateRecordNumber(db, 'lab_test_catalog', 'TEST');
+    const r = db.prepare(`INSERT INTO lab_test_catalog (test_code, test_name, department_id, section_id, sample_type, container_type, minimum_volume, method_name, method_summary, tat_target_minutes, critical_result_applicable, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(testCode, String(req.body.testName).trim(), section.department_id, req.params.id, req.body.sampleType || null, req.body.containerType || null, req.body.minimumVolume || null, req.body.methodName || null, req.body.methodSummary || null, parseIntNullable(req.body.tatTargetMinutes), req.body.criticalResultApplicable ? 1 : 0, req.body.status || 'active', req.user!.id);
+    audit(req, { action: 'create', entity: 'lab_test_catalog', entityId: Number(r.lastInsertRowid), newValue: { testCode, sectionId: req.params.id, ...req.body } });
+    res.status(201).json({ id: Number(r.lastInsertRowid), testCode });
+  });
+  router.post('/section-config/tests/:testId/toggle', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const t = db.prepare('SELECT status FROM lab_test_catalog WHERE id = ?').get(req.params.testId) as { status: string } | undefined;
+    if (!t) return res.status(404).json({ error: 'Test not found' });
+    const next = t.status === 'active' ? 'inactive' : 'active';
+    db.prepare('UPDATE lab_test_catalog SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(next, req.params.testId);
+    audit(req, { action: 'edit', entity: 'lab_test_catalog', entityId: req.params.testId, oldValue: { status: t.status }, newValue: { status: next } });
+    res.json({ ok: true, status: next });
+  });
+
+  // --- Equipment (writes to the shared equipment_items, scoped to this unit) ---
+  router.post('/section-config/sections/:id/equipment', requirePermission('settings', 'create'), (req, res) => {
+    const db = getDb();
+    const section = db.prepare('SELECT department_id FROM sections WHERE id = ?').get(req.params.id) as { department_id: number | null } | undefined;
+    if (!section) return res.status(404).json({ error: 'Unit not found' });
+    if (!req.body.name || !String(req.body.name).trim()) return res.status(400).json({ error: 'An equipment name is required.' });
+    const equipmentNumber = req.body.equipmentNumber || generateRecordNumber(db, 'equipment_items', 'EQP');
+    const r = db.prepare(`INSERT INTO equipment_items (equipment_number, name, category, manufacturer, model, serial_number, department_id, section_id, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(equipmentNumber, String(req.body.name).trim(), req.body.category || null, req.body.manufacturer || null, req.body.model || null, req.body.serialNumber || null, section.department_id, req.params.id, req.body.status || 'operational', req.user!.id);
+    audit(req, { action: 'create', entity: 'equipment_items', entityId: Number(r.lastInsertRowid), newValue: { equipmentNumber, sectionId: req.params.id, ...req.body } });
+    res.status(201).json({ id: Number(r.lastInsertRowid), equipmentNumber });
+  });
+
+  // --- Stock / inventory (writes to the shared inventory_items, scoped to this unit) ---
+  router.post('/section-config/sections/:id/inventory', requirePermission('settings', 'create'), (req, res) => {
+    const db = getDb();
+    const section = db.prepare('SELECT department_id FROM sections WHERE id = ?').get(req.params.id) as { department_id: number | null } | undefined;
+    if (!section) return res.status(404).json({ error: 'Unit not found' });
+    if (!req.body.name || !String(req.body.name).trim()) return res.status(400).json({ error: 'An item name is required.' });
+    const itemCode = req.body.itemCode || generateRecordNumber(db, 'inventory_items', 'ITEM');
+    const r = db.prepare(`INSERT INTO inventory_items (item_code, name, category, quantity, unit, status, reorder_level, expiry_date, storage_requirement, department_id, section_id, minimum_stock, is_active, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`)
+      .run(itemCode, String(req.body.name).trim(), req.body.category || null, parseIntNullable(req.body.quantity) ?? 0, req.body.unit || null, req.body.status || 'available', parseIntNullable(req.body.reorderLevel) ?? 0, req.body.expiryDate || null, req.body.storageRequirement || null, section.department_id, req.params.id, parseIntNullable(req.body.minimumStock) ?? 0, req.user!.id);
+    audit(req, { action: 'create', entity: 'inventory_items', entityId: Number(r.lastInsertRowid), newValue: { itemCode, sectionId: req.params.id, ...req.body } });
+    res.status(201).json({ id: Number(r.lastInsertRowid), itemCode });
+  });
 
   router.get('/devices', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT * FROM devices ORDER BY created_at DESC').all()));
   router.post('/devices/request-pairing', requirePermission('settings', 'create'), (req, res) => { const code = Math.random().toString(36).slice(2, 10).toUpperCase(); const r = getDb().prepare('INSERT INTO devices (device_code, name, type) VALUES (?, ?, ?)').run(code, req.body.name, req.body.type ?? 'desktop'); audit(req, { action: 'create', entity: 'devices', entityId: r.lastInsertRowid, newValue: { code, ...req.body } }); res.status(201).json({ id: r.lastInsertRowid, code }); });

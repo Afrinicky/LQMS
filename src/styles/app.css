@@ -1212,3 +1212,24 @@ label {
 .auth-chip.off:hover { color: var(--muted); border-color: var(--accent); }
 .auth-chip.on { background: var(--accent); color: #fff; border-color: var(--accent-bright); }
 .auth-chip.on:hover { background: var(--danger); border-color: var(--danger); }
+
+/* ============================================================
+   Settings — Section / Unit Configuration
+   ============================================================ */
+.section-config { display: grid; gap: 22px; }
+.unit-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); margin-top: 14px; }
+.unit-card {
+  display: flex; flex-direction: column; gap: 8px; text-align: left;
+  padding: 14px 16px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.02); color: var(--text); cursor: pointer; box-shadow: none;
+  transition: all 0.12s ease;
+}
+.unit-card:hover { border-color: var(--accent); background: var(--accent-soft); }
+.unit-card.active { border-color: var(--accent-bright); background: var(--accent-soft); box-shadow: var(--shadow-glow); }
+.unit-card.inactive { opacity: 0.62; }
+.unit-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.unit-card-top strong { font-size: 14.5px; }
+.unit-stats { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+.section-detail .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.section-detail .panel-head > div { display: flex; gap: 8px; }

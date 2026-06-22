@@ -5,6 +5,7 @@ import { MODULES, PERMISSION_ACTIONS, TECHNICAL_AUTHORIZATION_LEVELS } from '../
 import type {
   Position, Staff, SystemModule, ApiUser, Permission, Section, Device,
   Department, PermissionMatrixData, TechnicalAuthorizationRow, StaffProfile,
+  SectionConfigRow, SectionConfigDetail,
 } from '../../shared/types/api';
 
 // ---------------------------------------------------------------------------
@@ -286,6 +287,248 @@ export function Positions(){
         {staff.map(s => <tr key={s.id}><td>{s.fullName}</td><td>{s.primaryPosition || '—'}</td><td>{s.sectionName || '—'}</td></tr>)}
       </tbody></table>
     </div>
+  </div>;
+}
+
+// ---------------------------------------------------------------------------
+// Section / Unit Configuration
+// ---------------------------------------------------------------------------
+// A single workspace to configure each laboratory unit/section: its profile,
+// the services it offers (and explicitly does NOT offer), its own test menu,
+// its equipment, and its stock/inventory. Test menu / equipment / inventory
+// write to the same section-scoped tables used by Process Management,
+// Equipment and Supplier & Inventory, so the configuration stays linked.
+
+const SECTION_SUBTABS = ['Profile', 'Services', 'Test Menu', 'Equipment', 'Stock & Inventory', 'Staff'] as const;
+type SectionSubtab = typeof SECTION_SUBTABS[number];
+
+export function SectionConfig() {
+  const [sections, setSections] = useState<SectionConfigRow[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [staff, setStaff] = useState<Staff[]>([]);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<SectionConfigDetail | null>(null);
+  const [subtab, setSubtab] = useState<SectionSubtab>('Profile');
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [showNew, setShowNew] = useState(false);
+
+  function loadSections() { api<SectionConfigRow[]>('/section-config/sections').then(setSections).catch(e => setError((e as Error).message)); }
+  function loadDetail(id: number) { api<SectionConfigDetail>(`/section-config/sections/${id}`).then(setDetail).catch(e => setError((e as Error).message)); }
+  useEffect(() => {
+    loadSections();
+    api<Department[]>('/departments').then(setDepartments).catch(() => setDepartments([]));
+    api<Staff[]>('/staff').then(setStaff).catch(() => setStaff([]));
+  }, []);
+  useEffect(() => { if (selectedId != null) { loadDetail(selectedId); setSubtab('Profile'); } }, [selectedId]);
+
+  function refresh() { loadSections(); if (selectedId != null) loadDetail(selectedId); }
+  async function call(path: string, options: RequestInit, okMsg?: string) {
+    setError(null); setSuccess(null);
+    try { await api(path, options); if (okMsg) setSuccess(okMsg); refresh(); return true; }
+    catch (e) { setError((e as Error).message); return false; }
+  }
+
+  // --- new unit ---
+  const [newForm, setNewForm] = useState({ name: '', departmentId: '', code: '', operatingHours: '', headStaffId: '', serviceSummary: '', description: '' });
+  async function createSection(e: FormEvent) {
+    e.preventDefault();
+    const ok = await call('/section-config/sections', { method: 'POST', body: JSON.stringify(newForm) }, 'Unit created.');
+    if (ok) { setNewForm({ name: '', departmentId: '', code: '', operatingHours: '', headStaffId: '', serviceSummary: '', description: '' }); setShowNew(false); }
+  }
+
+  return <div className="section-config">
+    <div className="card">
+      <div className="panel-head">
+        <h3>Section / Unit Configuration</h3>
+        <button onClick={() => setShowNew(v => !v)}>{showNew ? 'Cancel' : '+ New unit'}</button>
+      </div>
+      <p>Configure every laboratory unit in one place. Not all laboratories run every unit — create only the units you operate, define what each one does (and does not) do, and set up its test menu, equipment and stock. These feed Process Management, Equipment, Supplier &amp; Inventory and Personnel automatically.</p>
+      {error && <div className="error">{error}</div>}
+      {success && <div className="notice-ok">{success}</div>}
+
+      {showNew && <form className="form" onSubmit={createSection}>
+        <div className="form-grid">
+          <label>Unit / section name<input value={newForm.name} onChange={e => setNewForm({ ...newForm, name: e.target.value })} required placeholder="e.g. Molecular Biology" /></label>
+          <label>Department<select value={newForm.departmentId} onChange={e => setNewForm({ ...newForm, departmentId: e.target.value })}><option value="">Default</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
+          <label>Unit code<input value={newForm.code} onChange={e => setNewForm({ ...newForm, code: e.target.value })} placeholder="e.g. MOL" /></label>
+          <label>Operating hours<input value={newForm.operatingHours} onChange={e => setNewForm({ ...newForm, operatingHours: e.target.value })} placeholder="e.g. 24/7 or Mon–Fri 08:00–17:00" /></label>
+          <label>Unit head<select value={newForm.headStaffId} onChange={e => setNewForm({ ...newForm, headStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        </div>
+        <label>Service summary<input value={newForm.serviceSummary} onChange={e => setNewForm({ ...newForm, serviceSummary: e.target.value })} placeholder="Short description of what this unit provides" /></label>
+        <label>Description / scope<textarea value={newForm.description} onChange={e => setNewForm({ ...newForm, description: e.target.value })} /></label>
+        <button type="submit">Create unit</button>
+      </form>}
+
+      <div className="unit-grid">
+        {sections.map(s => <button key={s.id} type="button" className={`unit-card ${selectedId === s.id ? 'active' : ''} ${s.isActive ? '' : 'inactive'}`} onClick={() => setSelectedId(s.id)}>
+          <div className="unit-card-top">
+            <strong>{s.name}</strong>
+            {s.isActive ? <span className="badge active">active</span> : <span className="badge inactive">inactive</span>}
+          </div>
+          <span className="hint">{s.code ? `${s.code} · ` : ''}{s.departmentName || 'Laboratory'}</span>
+          <div className="unit-stats">
+            <span title="Services offered">🧪 {s.servicesOffered}</span>
+            <span title="Tests in menu">📋 {s.testCount}</span>
+            <span title="Equipment">⚙️ {s.equipmentCount}</span>
+            <span title="Stock items">📦 {s.inventoryCount}</span>
+            <span title="Active staff">👤 {s.staffCount}</span>
+          </div>
+        </button>)}
+        {sections.length === 0 && <p className="hint">No units configured yet. Use “+ New unit” to create your first one.</p>}
+      </div>
+    </div>
+
+    {detail && selectedId != null && <SectionDetailPanel
+      detail={detail}
+      departments={departments}
+      staff={staff}
+      subtab={subtab}
+      onSubtab={setSubtab}
+      onClose={() => { setSelectedId(null); setDetail(null); }}
+      call={call}
+      sectionId={selectedId}
+    />}
+  </div>;
+}
+
+function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onClose, call, sectionId }: {
+  detail: SectionConfigDetail; departments: Department[]; staff: Staff[]; subtab: SectionSubtab;
+  onSubtab: (t: SectionSubtab) => void; onClose: () => void;
+  call: (path: string, options: RequestInit, okMsg?: string) => Promise<boolean>; sectionId: number;
+}) {
+  const s = detail.section;
+  const [profile, setProfile] = useState({ name: s.name, code: s.code || '', departmentId: s.department_id ? String(s.department_id) : '', headStaffId: s.head_staff_id ? String(s.head_staff_id) : '', operatingHours: s.operating_hours || '', serviceSummary: s.service_summary || '', description: s.description || '' });
+  useEffect(() => { setProfile({ name: s.name, code: s.code || '', departmentId: s.department_id ? String(s.department_id) : '', headStaffId: s.head_staff_id ? String(s.head_staff_id) : '', operatingHours: s.operating_hours || '', serviceSummary: s.service_summary || '', description: s.description || '' }); }, [s.id]);
+
+  const [svc, setSvc] = useState({ name: '', category: '', isOffered: 'yes', notes: '' });
+  const [test, setTest] = useState({ testName: '', sampleType: '', methodName: '', tatTargetMinutes: '' });
+  const [equip, setEquip] = useState({ name: '', category: '', manufacturer: '', model: '', serialNumber: '' });
+  const [item, setItem] = useState({ name: '', category: '', quantity: '', unit: '', reorderLevel: '', expiryDate: '' });
+
+  return <div className="card section-detail">
+    <div className="panel-head">
+      <h3>{s.name} {s.is_active ? '' : <span className="badge inactive">inactive</span>}</h3>
+      <div>
+        <button className="secondary" onClick={() => call(`/section-config/sections/${sectionId}/toggle`, { method: 'POST' }, s.is_active ? 'Unit deactivated.' : 'Unit activated.')}>{s.is_active ? 'Deactivate unit' : 'Activate unit'}</button>
+        <button className="secondary" onClick={onClose}>Close</button>
+      </div>
+    </div>
+
+    <div className="tabs">{SECTION_SUBTABS.map(t => <button key={t} className={subtab === t ? 'active' : ''} onClick={() => onSubtab(t)}>{t}</button>)}</div>
+
+    {subtab === 'Profile' && <form className="form" onSubmit={e => { e.preventDefault(); call(`/section-config/sections/${sectionId}`, { method: 'PUT', body: JSON.stringify(profile) }, 'Unit profile updated.'); }}>
+      <div className="form-grid">
+        <label>Unit name<input value={profile.name} onChange={e => setProfile({ ...profile, name: e.target.value })} required /></label>
+        <label>Unit code<input value={profile.code} onChange={e => setProfile({ ...profile, code: e.target.value })} /></label>
+        <label>Department<select value={profile.departmentId} onChange={e => setProfile({ ...profile, departmentId: e.target.value })}><option value="">Default</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
+        <label>Unit head<select value={profile.headStaffId} onChange={e => setProfile({ ...profile, headStaffId: e.target.value })}><option value="">—</option>{staff.map(st => <option key={st.id} value={st.id}>{st.fullName}</option>)}</select></label>
+        <label>Operating hours<input value={profile.operatingHours} onChange={e => setProfile({ ...profile, operatingHours: e.target.value })} /></label>
+      </div>
+      <label>Service summary<input value={profile.serviceSummary} onChange={e => setProfile({ ...profile, serviceSummary: e.target.value })} /></label>
+      <label>Description / scope<textarea value={profile.description} onChange={e => setProfile({ ...profile, description: e.target.value })} /></label>
+      <button type="submit">Save profile</button>
+    </form>}
+
+    {subtab === 'Services' && <>
+      <p className="hint">Define what this unit does and explicitly does not do. This makes the lab's true scope clear and drives section-specific configuration.</p>
+      <form className="form" onSubmit={e => { e.preventDefault(); call(`/section-config/sections/${sectionId}/services`, { method: 'POST', body: JSON.stringify({ ...svc, isOffered: svc.isOffered === 'yes' }) }, 'Service saved.').then(ok => { if (ok) setSvc({ name: '', category: '', isOffered: 'yes', notes: '' }); }); }}>
+        <div className="form-grid">
+          <label>Service / activity<input value={svc.name} onChange={e => setSvc({ ...svc, name: e.target.value })} required placeholder="e.g. Full Blood Count, Blood Culture" /></label>
+          <label>Category<input value={svc.category} onChange={e => setSvc({ ...svc, category: e.target.value })} placeholder="e.g. Routine, Referral" /></label>
+          <label>Offered here?<select value={svc.isOffered} onChange={e => setSvc({ ...svc, isOffered: e.target.value })}><option value="yes">Yes — done in this unit</option><option value="no">No — not offered / referred out</option></select></label>
+          <label>Notes<input value={svc.notes} onChange={e => setSvc({ ...svc, notes: e.target.value })} /></label>
+        </div>
+        <button type="submit">Add service</button>
+      </form>
+      <table className="data-table"><thead><tr><th>Service</th><th>Category</th><th>Status</th><th>Notes</th><th></th></tr></thead><tbody>
+        {detail.services.map(sv => <tr key={sv.id}>
+          <td>{sv.name}</td><td>{sv.category || '—'}</td>
+          <td>{sv.is_offered ? <span className="badge active">offered</span> : <span className="badge inactive">not offered</span>}</td>
+          <td>{sv.notes || '—'}</td>
+          <td>
+            <button onClick={() => call(`/section-config/services/${sv.id}`, { method: 'PUT', body: JSON.stringify({ isOffered: !sv.is_offered }) })}>{sv.is_offered ? 'Mark not offered' : 'Mark offered'}</button>
+            <button className="secondary" onClick={() => call(`/section-config/services/${sv.id}`, { method: 'DELETE' })}>Remove</button>
+          </td>
+        </tr>)}
+        {detail.services.length === 0 && <tr><td colSpan={5} className="hint">No services defined yet.</td></tr>}
+      </tbody></table>
+    </>}
+
+    {subtab === 'Test Menu' && <>
+      <p className="hint">Each unit has its own test menu. Tests added here appear in <Link to="/process-management">Process Management</Link> scoped to this unit.</p>
+      <form className="form" onSubmit={e => { e.preventDefault(); call(`/section-config/sections/${sectionId}/tests`, { method: 'POST', body: JSON.stringify(test) }, 'Test added to menu.').then(ok => { if (ok) setTest({ testName: '', sampleType: '', methodName: '', tatTargetMinutes: '' }); }); }}>
+        <div className="form-grid">
+          <label>Test name<input value={test.testName} onChange={e => setTest({ ...test, testName: e.target.value })} required /></label>
+          <label>Sample type<input value={test.sampleType} onChange={e => setTest({ ...test, sampleType: e.target.value })} placeholder="e.g. EDTA blood, Serum" /></label>
+          <label>Method<input value={test.methodName} onChange={e => setTest({ ...test, methodName: e.target.value })} /></label>
+          <label>TAT target (min)<input type="number" value={test.tatTargetMinutes} onChange={e => setTest({ ...test, tatTargetMinutes: e.target.value })} /></label>
+        </div>
+        <button type="submit">Add test</button>
+      </form>
+      <table className="data-table"><thead><tr><th>Code</th><th>Test</th><th>Sample</th><th>Method</th><th>TAT</th><th>Status</th><th></th></tr></thead><tbody>
+        {detail.tests.map(t => <tr key={t.id}>
+          <td>{t.test_code || '—'}</td><td>{t.test_name}</td><td>{t.sample_type || '—'}</td><td>{t.method_name || '—'}</td>
+          <td>{t.tat_target_minutes != null ? `${t.tat_target_minutes}m` : '—'}</td>
+          <td>{t.status === 'active' ? <span className="badge active">active</span> : <span className="badge inactive">{t.status}</span>}</td>
+          <td><button onClick={() => call(`/section-config/tests/${t.id}/toggle`, { method: 'POST' })}>{t.status === 'active' ? 'Deactivate' : 'Activate'}</button></td>
+        </tr>)}
+        {detail.tests.length === 0 && <tr><td colSpan={7} className="hint">No tests in this unit's menu yet.</td></tr>}
+      </tbody></table>
+    </>}
+
+    {subtab === 'Equipment' && <>
+      <p className="hint">Equipment registered here is scoped to this unit and appears in the <Link to="/equipment">Equipment Management</Link> module for scheduling and maintenance.</p>
+      <form className="form" onSubmit={e => { e.preventDefault(); call(`/section-config/sections/${sectionId}/equipment`, { method: 'POST', body: JSON.stringify(equip) }, 'Equipment registered.').then(ok => { if (ok) setEquip({ name: '', category: '', manufacturer: '', model: '', serialNumber: '' }); }); }}>
+        <div className="form-grid">
+          <label>Equipment name<input value={equip.name} onChange={e => setEquip({ ...equip, name: e.target.value })} required /></label>
+          <label>Category<input value={equip.category} onChange={e => setEquip({ ...equip, category: e.target.value })} placeholder="e.g. Analyser, Centrifuge" /></label>
+          <label>Manufacturer<input value={equip.manufacturer} onChange={e => setEquip({ ...equip, manufacturer: e.target.value })} /></label>
+          <label>Model<input value={equip.model} onChange={e => setEquip({ ...equip, model: e.target.value })} /></label>
+          <label>Serial number<input value={equip.serialNumber} onChange={e => setEquip({ ...equip, serialNumber: e.target.value })} /></label>
+        </div>
+        <button type="submit">Register equipment</button>
+      </form>
+      <table className="data-table"><thead><tr><th>Number</th><th>Name</th><th>Category</th><th>Make / model</th><th>Serial</th><th>Status</th></tr></thead><tbody>
+        {detail.equipment.map(eq => <tr key={eq.id}>
+          <td>{eq.equipment_number}</td><td>{eq.name}</td><td>{eq.category || '—'}</td>
+          <td>{[eq.manufacturer, eq.model].filter(Boolean).join(' ') || '—'}</td><td>{eq.serial_number || '—'}</td>
+          <td><span className={`badge ${eq.status === 'operational' ? 'active' : ''}`}>{eq.status}</span></td>
+        </tr>)}
+        {detail.equipment.length === 0 && <tr><td colSpan={6} className="hint">No equipment registered for this unit yet.</td></tr>}
+      </tbody></table>
+    </>}
+
+    {subtab === 'Stock & Inventory' && <>
+      <p className="hint">Stock and reagents set here are scoped to this unit and managed in the <Link to="/supplier-inventory">Supplier &amp; Inventory</Link> module.</p>
+      <form className="form" onSubmit={e => { e.preventDefault(); call(`/section-config/sections/${sectionId}/inventory`, { method: 'POST', body: JSON.stringify(item) }, 'Stock item added.').then(ok => { if (ok) setItem({ name: '', category: '', quantity: '', unit: '', reorderLevel: '', expiryDate: '' }); }); }}>
+        <div className="form-grid">
+          <label>Item name<input value={item.name} onChange={e => setItem({ ...item, name: e.target.value })} required /></label>
+          <label>Category<input value={item.category} onChange={e => setItem({ ...item, category: e.target.value })} placeholder="e.g. Reagent, Consumable" /></label>
+          <label>Quantity<input type="number" value={item.quantity} onChange={e => setItem({ ...item, quantity: e.target.value })} /></label>
+          <label>Unit<input value={item.unit} onChange={e => setItem({ ...item, unit: e.target.value })} placeholder="e.g. boxes, vials" /></label>
+          <label>Reorder level<input type="number" value={item.reorderLevel} onChange={e => setItem({ ...item, reorderLevel: e.target.value })} /></label>
+          <label>Expiry date<input type="date" value={item.expiryDate} onChange={e => setItem({ ...item, expiryDate: e.target.value })} /></label>
+        </div>
+        <button type="submit">Add stock item</button>
+      </form>
+      <table className="data-table"><thead><tr><th>Code</th><th>Item</th><th>Category</th><th>Qty</th><th>Reorder</th><th>Expiry</th><th>Status</th></tr></thead><tbody>
+        {detail.inventory.map(it => <tr key={it.id}>
+          <td>{it.item_code}</td><td>{it.name}</td><td>{it.category || '—'}</td>
+          <td>{it.quantity}{it.unit ? ` ${it.unit}` : ''}</td><td>{it.reorder_level}</td><td>{it.expiry_date || '—'}</td>
+          <td><span className="badge">{it.status}</span></td>
+        </tr>)}
+        {detail.inventory.length === 0 && <tr><td colSpan={7} className="hint">No stock items for this unit yet.</td></tr>}
+      </tbody></table>
+    </>}
+
+    {subtab === 'Staff' && <>
+      <p className="hint">Staff assigned to this unit. Assign people to a unit during <Link to="/settings/register-staff">Register New Staff</Link> or in <Link to="/personnel">Personnel Management</Link>.</p>
+      <table className="data-table"><thead><tr><th>Name</th><th>Employee no</th><th>Status</th></tr></thead><tbody>
+        {detail.staff.map(p => <tr key={p.id}><td>{p.full_name}</td><td>{p.employee_no || '—'}</td><td>{p.is_active ? <span className="badge active">active</span> : <span className="badge inactive">inactive</span>}</td></tr>)}
+        {detail.staff.length === 0 && <tr><td colSpan={3} className="hint">No staff assigned to this unit yet.</td></tr>}
+      </tbody></table>
+    </>}
   </div>;
 }
 
