@@ -1,12 +1,13 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import {
-  Users, Network, ShieldCheck, ToggleRight, FileUp, Paperclip, ListChecks,
+  Users, UserPlus, Network, ShieldCheck, ToggleRight, FileUp, Paperclip, ListChecks,
   DatabaseBackup, MonitorSmartphone,
 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import type { LucideIcon } from 'lucide-react';
 
 const items: { to: string; label: string; Icon: LucideIcon }[] = [
+  { to: '/settings/register-staff', label: 'Register New Staff', Icon: UserPlus },
   { to: '/settings/users', label: 'Users & Access', Icon: Users },
   { to: '/settings/positions', label: 'Positions & Organogram', Icon: Network },
   { to: '/settings/permissions', label: 'Permission Matrix', Icon: ShieldCheck },
