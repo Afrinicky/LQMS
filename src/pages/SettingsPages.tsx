@@ -16,13 +16,12 @@ import type {
 // (Users & Access), and optional starting Technical Authorizations (Permission
 // Matrix → Section Scope). Everything is created in one transaction server-side.
 
-type AuthRow = { moduleKey: string; sectionId: string; level: string };
-
 export function RegisterStaff() {
   const [roles, setRoles] = useState<{ id: number; name: string }[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
+  const [matrix, setMatrix] = useState<PermissionMatrixData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [profile, setProfile] = useState<StaffProfile | null>(null);
@@ -32,33 +31,71 @@ export function RegisterStaff() {
   const [positionIds, setPositionIds] = useState<number[]>([]);
   const [createUser, setCreateUser] = useState(false);
   const [account, setAccount] = useState({ username: '', password: '', roleId: '' });
-  const [auths, setAuths] = useState<AuthRow[]>([]);
+  // Authorization grid: explicit allow/deny per permission for this staff member.
+  // Seeded from the selected positions, then freely editable (add / remove).
+  const [perm, setPerm] = useState<Record<number, boolean>>({});
 
   function loadLookups() {
     api<{ id: number; name: string }[]>('/roles').then(setRoles).catch(() => setRoles([]));
     api<Position[]>('/positions').then(setPositions).catch(() => setPositions([]));
     api<Section[]>('/sections').then(setSections).catch(() => setSections([]));
     api<Staff[]>('/staff').then(setStaff).catch(() => setStaff([]));
+    api<PermissionMatrixData>('/permissions/matrix').then(setMatrix).catch(() => setMatrix(null));
   }
   useEffect(() => { loadLookups(); }, []);
+
+  // Baseline = permissions inherited from the selected organogram positions. Positions
+  // map to role defaults by matching title↔role-name (the lab's standard roles), and we
+  // also include any explicit position-permission grants an admin has configured.
+  const baseline = useMemo(() => {
+    const set = new Set<number>();
+    if (!matrix) return set;
+    for (const pp of matrix.positionPermissions) {
+      if (pp.allowed === 1 && positionIds.includes(pp.position_id)) set.add(pp.permission_id);
+    }
+    const selectedTitles = new Set(positions.filter(p => positionIds.includes(p.id)).map(p => p.title.toLowerCase()));
+    const roleIds = new Set(roles.filter(r => selectedTitles.has(r.name.toLowerCase())).map(r => r.id));
+    for (const rp of matrix.rolePermissions) {
+      if (rp.allowed === 1 && roleIds.has(rp.role_id)) set.add(rp.permission_id);
+    }
+    return set;
+  }, [matrix, positionIds, positions, roles]);
+
+  // Whenever the selected positions change, reset the grid to the inherited baseline.
+  useEffect(() => {
+    const next: Record<number, boolean> = {};
+    baseline.forEach(id => { next[id] = true; });
+    setPerm(next);
+  }, [baseline]);
+
+  const permById = useMemo(() => {
+    const m = new Map<string, Permission>();
+    matrix?.permissions.forEach(p => m.set(`${p.module_key}:${p.action}`, p));
+    return m;
+  }, [matrix]);
+  const matrixModules = useMemo(() => {
+    if (!matrix) return [] as { key: string; label: string }[];
+    const present = new Set(matrix.permissions.map(p => p.module_key));
+    return MODULES.filter(m => present.has(m.key)).map(m => ({ key: m.key, label: m.label }));
+  }, [matrix]);
 
   function togglePosition(id: number) {
     setPositionIds(prev => {
       const next = prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id];
-      // keep primary valid
       setForm(f => ({ ...f, primaryPositionId: next.includes(Number(f.primaryPositionId)) ? f.primaryPositionId : (next[0] ? String(next[0]) : '') }));
       return next;
     });
   }
-
-  function addAuthRow() { setAuths(prev => [...prev, { moduleKey: 'documents', sectionId: '', level: 'Perform' }]); }
-  function updateAuthRow(i: number, patch: Partial<AuthRow>) { setAuths(prev => prev.map((r, idx) => idx === i ? { ...r, ...patch } : r)); }
-  function removeAuthRow(i: number) { setAuths(prev => prev.filter((_, idx) => idx !== i)); }
+  function togglePerm(permId: number) { setPerm(prev => ({ ...prev, [permId]: !prev[permId] })); }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null); setSuccess(null);
     try {
+      // Send only the deltas vs. the position baseline as explicit overrides.
+      const permissions: { permissionId: number; allowed: boolean }[] = [];
+      const ids = new Set<number>([...baseline, ...Object.keys(perm).map(Number)]);
+      ids.forEach(id => { const on = !!perm[id]; if (on !== baseline.has(id)) permissions.push({ permissionId: id, allowed: on }); });
       const payload = {
         employeeNo: form.employeeNo || null,
         fullName: form.fullName,
@@ -71,11 +108,11 @@ export function RegisterStaff() {
         username: createUser ? account.username : undefined,
         password: createUser ? account.password : undefined,
         roleId: createUser ? account.roleId : undefined,
-        authorizations: auths.filter(a => a.moduleKey && a.level).map(a => ({ moduleKey: a.moduleKey, sectionId: a.sectionId || null, level: a.level })),
+        permissions: createUser ? permissions : [],
       };
       const res = await api<{ staffId: number; userId: number | null }>('/staff/register', { method: 'POST', body: JSON.stringify(payload) });
-      setSuccess(`Staff record created (#${res.staffId})${res.userId ? ` with linked login account (user #${res.userId})` : ''}. Positions, authorizations and personnel records are now linked.`);
-      setForm(blank); setPositionIds([]); setCreateUser(false); setAccount({ username: '', password: '', roleId: '' }); setAuths([]);
+      setSuccess(`Staff record created (#${res.staffId})${res.userId ? ` with linked login account (user #${res.userId})` : ''}. Positions, permissions and personnel records are now linked.`);
+      setForm(blank); setPositionIds([]); setCreateUser(false); setAccount({ username: '', password: '', roleId: '' }); setPerm({});
       loadLookups();
     } catch (err) { setError((err as Error).message); }
   }
@@ -132,15 +169,35 @@ export function RegisterStaff() {
         </fieldset>
 
         <fieldset className="reg-section">
-          <legend>Initial technical authorizations <span className="hint">(optional)</span></legend>
-          <p className="hint">Grant module/section authorization levels now, or add them later from the Permission Matrix → Section Scope.</p>
-          {auths.map((a, i) => <div className="form-grid auth-row" key={i}>
-            <label>Module<select value={a.moduleKey} onChange={e => updateAuthRow(i, { moduleKey: e.target.value })}>{MODULES.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}</select></label>
-            <label>Section scope<select value={a.sectionId} onChange={e => updateAuthRow(i, { sectionId: e.target.value })}><option value="">All sections</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-            <label>Level<select value={a.level} onChange={e => updateAuthRow(i, { level: e.target.value })}>{TECHNICAL_AUTHORIZATION_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}</select></label>
-            <button type="button" className="secondary" onClick={() => removeAuthRow(i)}>Remove</button>
-          </div>)}
-          <button type="button" className="secondary" onClick={addAuthRow}>+ Add authorization</button>
+          <legend>Permissions &amp; authorizations</legend>
+          <p className="hint">
+            The grid below is pre-set from the organogram position(s) selected above — change the positions and it updates automatically.
+            Click any action chip to grant or revoke it for this staff member. These apply to the login account
+            {createUser ? '' : ' (enable “Create a system login account” above to save them)'}. Role defaults still apply on top of these.
+          </p>
+          <div className="matrix-legend">
+            {PERMISSION_ACTIONS.map(a => <span key={a} className="leg"><span className="auth-chip on">{ACTION_META[a]?.short ?? a[0].toUpperCase()}</span>{ACTION_META[a]?.title ?? a}</span>)}
+          </div>
+          <div className="auth-matrix-wrap">
+            <table className="auth-matrix">
+              <thead><tr><th className="corner">Module</th>{PERMISSION_ACTIONS.map(a => <th key={a} className="act-col">{ACTION_META[a]?.short ?? a[0].toUpperCase()}</th>)}</tr></thead>
+              <tbody>
+                {matrixModules.map(m => <tr key={m.key}>
+                  <th className="row-head">{m.label}</th>
+                  {PERMISSION_ACTIONS.map(action => {
+                    const p = permById.get(`${m.key}:${action}`);
+                    if (!p) return <td key={action} className="auth-cell" />;
+                    const on = !!perm[p.id];
+                    const inherited = baseline.has(p.id);
+                    return <td key={action} className="auth-cell">
+                      <button type="button" title={`${ACTION_META[action]?.title ?? action}${inherited ? ' — from position' : ''} — click to ${on ? 'revoke' : 'grant'}`} className={`auth-chip ${on ? 'on' : 'off'} ${inherited ? 'inherited' : ''}`} onClick={() => togglePerm(p.id)}>{ACTION_META[action]?.short ?? action[0].toUpperCase()}</button>
+                    </td>;
+                  })}
+                </tr>)}
+                {matrixModules.length === 0 && <tr><td className="hint" colSpan={PERMISSION_ACTIONS.length + 1}>Loading permissions…</td></tr>}
+              </tbody>
+            </table>
+          </div>
         </fieldset>
 
         <button type="submit">Register staff member</button>
@@ -240,54 +297,208 @@ export function UsersAccess(){
 // ---------------------------------------------------------------------------
 // Positions & Organogram
 // ---------------------------------------------------------------------------
+type OrgNodeData = { id: number; title: string; description?: string | null; reportsToPositionId: number | null; isActive: number; occupants: { staffId: number; staffName: string; assignmentType: string }[] };
+
 export function Positions(){
+  const [view,setView]=useState<'list'|'organogram'>('list');
   const [positions,setPositions]=useState<Position[]>([]);
   const [staff,setStaff]=useState<Staff[]>([]);
   const [sections,setSections]=useState<Section[]>([]);
+  const [error,setError]=useState<string|null>(null);
+  const [editing,setEditing]=useState<Position | null>(null);
+  const [editForm,setEditForm]=useState({ title:'', reportsToPositionId:'', isActive:true });
   const load=()=>{api<Position[]>('/positions').then(setPositions); api<Staff[]>('/staff').then(setStaff).catch(()=>setStaff([])); api<Section[]>('/sections').then(setSections).catch(()=>setSections([]))};
   useEffect(()=>{void load()},[]);
+
   async function addPosition(e:FormEvent<HTMLFormElement>){
-    e.preventDefault();
+    e.preventDefault(); setError(null);
     const fd=new FormData(e.currentTarget);
-    await api('/positions',{method:'POST',body:JSON.stringify({title:fd.get('title'),description:fd.get('description'),reportsToPositionId:fd.get('reportsToPositionId')||null})});
-    e.currentTarget.reset();
-    load();
+    try {
+      await api('/positions',{method:'POST',body:JSON.stringify({title:fd.get('title'),description:fd.get('description'),reportsToPositionId:fd.get('reportsToPositionId')||null})});
+      e.currentTarget.reset(); load();
+    } catch (err) { setError((err as Error).message); }
   }
   async function addStaff(e:FormEvent<HTMLFormElement>){
-    e.preventDefault();
+    e.preventDefault(); setError(null);
     const fd=new FormData(e.currentTarget);
-    await api('/staff',{method:'POST',body:JSON.stringify({employeeNo:fd.get('employeeNo'),fullName:fd.get('fullName'),email:fd.get('email'),phone:fd.get('phone'),sectionId:fd.get('sectionId')||null,positionId:Number(fd.get('positionId'))})});
-    e.currentTarget.reset();
-    load();
+    try {
+      await api('/staff',{method:'POST',body:JSON.stringify({employeeNo:fd.get('employeeNo'),fullName:fd.get('fullName'),email:fd.get('email'),phone:fd.get('phone'),sectionId:fd.get('sectionId')||null,positionId:Number(fd.get('positionId'))})});
+      e.currentTarget.reset(); load();
+    } catch (err) { setError((err as Error).message); }
+  }
+  function startEdit(p:Position){ setEditing(p); setEditForm({ title:p.title, reportsToPositionId:p.reportsToPositionId?String(p.reportsToPositionId):'', isActive:p.isActive!==false }); }
+  async function saveEdit(e:FormEvent<HTMLFormElement>){
+    e.preventDefault(); setError(null);
+    if(!editing) return;
+    try {
+      await api(`/positions/${editing.id}`,{method:'PUT',body:JSON.stringify({ title:editForm.title, reportsToPositionId:editForm.reportsToPositionId||null, isActive:editForm.isActive })});
+      setEditing(null); load();
+    } catch (err) { setError((err as Error).message); }
+  }
+  async function toggleStatus(p:Position){
+    setError(null);
+    try { await api(`/positions/${p.id}`,{method:'PUT',body:JSON.stringify({ isActive:p.isActive===false })}); load(); }
+    catch (err) { setError((err as Error).message); }
+  }
+  async function removePosition(p:Position){
+    setError(null);
+    try { await api(`/positions/${p.id}`,{method:'DELETE'}); load(); }
+    catch (err) { setError((err as Error).message); }
   }
   const byId = (id?: number | null) => positions.find(p => p.id === id)?.title;
-  return <div className="grid cols-2">
-    <div className="card"><h3>Positions &amp; Organogram</h3><p>Create positions and assign reporting lines. Staff are mapped to positions here and during <Link to="/settings/register-staff">Register New Staff</Link>.</p>
-      <form className="form" onSubmit={addPosition}>
-        <label>Position title<input name="title" required/></label>
-        <label>Description<textarea name="description"/></label>
-        <label>Reporting line<select name="reportsToPositionId"><option value="">None</option>{positions.map(p=><option value={p.id} key={p.id}>{p.title}</option>)}</select></label>
-        <button>Create position</button>
-      </form>
-      <table className="data-table"><thead><tr><th>Title</th><th>Reports to</th><th>Status</th></tr></thead><tbody>
-        {positions.map(p => <tr key={p.id}><td>{p.title}</td><td>{byId(p.reportsToPositionId) || '—'}</td><td>{p.isActive ? <span className="badge active">active</span> : <span className="badge inactive">archived</span>}</td></tr>)}
-      </tbody></table>
-    </div>
-    <div className="card"><h3>Quick staff assignment</h3>
-      <form className="form" onSubmit={addStaff}>
-        <label>Employee no<input name="employeeNo"/></label>
-        <label>Staff full name<input name="fullName" required/></label>
-        <label>Email<input name="email"/></label>
-        <label>Phone<input name="phone"/></label>
-        <label>Section<select name="sectionId"><option value="">Unassigned</option>{sections.map(s=><option value={s.id} key={s.id}>{s.name}</option>)}</select></label>
-        <label>Assign position<select name="positionId" required><option value="">Select…</option>{positions.map(p=><option value={p.id} key={p.id}>{p.title}</option>)}</select></label>
-        <button>Create staff</button>
-      </form>
-      <table className="data-table"><thead><tr><th>Name</th><th>Position</th><th>Section</th></tr></thead><tbody>
-        {staff.map(s => <tr key={s.id}><td>{s.fullName}</td><td>{s.primaryPosition || '—'}</td><td>{s.sectionName || '—'}</td></tr>)}
-      </tbody></table>
-    </div>
+
+  return <div>
+    <div className="tabs"><button className={view==='list'?'active':''} onClick={()=>setView('list')}>Positions list</button><button className={view==='organogram'?'active':''} onClick={()=>setView('organogram')}>Organogram</button></div>
+    {error && <div className="error">{error}</div>}
+
+    {view==='list' && <div className="grid cols-2">
+      <div className="card"><h3>Positions &amp; Organogram</h3><p>Create positions and assign reporting lines. Not every laboratory has every position — deactivate the ones you don't use. Staff are mapped here and during <Link to="/settings/register-staff">Register New Staff</Link>.</p>
+        <form className="form" onSubmit={addPosition}>
+          <label>Position title<input name="title" required/></label>
+          <label>Description<textarea name="description"/></label>
+          <label>Reporting line<select name="reportsToPositionId"><option value="">None</option>{positions.map(p=><option value={p.id} key={p.id}>{p.title}</option>)}</select></label>
+          <button>Create position</button>
+        </form>
+        <table className="data-table"><thead><tr><th>Title</th><th>Reports to</th><th>Status</th><th></th></tr></thead><tbody>
+          {positions.map(p => editing?.id===p.id
+            ? <tr key={p.id}><td colSpan={4}>
+                <form className="form inline-edit" onSubmit={saveEdit}>
+                  <label>Title<input value={editForm.title} onChange={e=>setEditForm({...editForm,title:e.target.value})} required/></label>
+                  <label>Reports to<select value={editForm.reportsToPositionId} onChange={e=>setEditForm({...editForm,reportsToPositionId:e.target.value})}><option value="">None</option>{positions.filter(x=>x.id!==p.id).map(x=><option value={x.id} key={x.id}>{x.title}</option>)}</select></label>
+                  <label className="toggle"><input type="checkbox" checked={editForm.isActive} onChange={e=>setEditForm({...editForm,isActive:e.target.checked})}/> Active</label>
+                  <button type="submit">Save</button>
+                  <button type="button" className="secondary" onClick={()=>setEditing(null)}>Cancel</button>
+                </form>
+              </td></tr>
+            : <tr key={p.id}><td>{p.title}</td><td>{byId(p.reportsToPositionId) || '—'}</td><td>{p.isActive ? <span className="badge active">active</span> : <span className="badge inactive">inactive</span>}</td>
+                <td><button onClick={()=>startEdit(p)}>Edit</button> <button className="secondary" onClick={()=>toggleStatus(p)}>{p.isActive?'Deactivate':'Activate'}</button> <button className="secondary" onClick={()=>removePosition(p)}>Remove</button></td>
+              </tr>)}
+        </tbody></table>
+      </div>
+      <div className="card"><h3>Quick staff assignment</h3>
+        <form className="form" onSubmit={addStaff}>
+          <label>Employee no<input name="employeeNo"/></label>
+          <label>Staff full name<input name="fullName" required/></label>
+          <label>Email<input name="email"/></label>
+          <label>Phone<input name="phone"/></label>
+          <label>Section<select name="sectionId"><option value="">Unassigned</option>{sections.map(s=><option value={s.id} key={s.id}>{s.name}</option>)}</select></label>
+          <label>Assign position<select name="positionId" required><option value="">Select…</option>{positions.filter(p=>p.isActive!==false).map(p=><option value={p.id} key={p.id}>{p.title}</option>)}</select></label>
+          <button>Create staff</button>
+        </form>
+        <table className="data-table"><thead><tr><th>Name</th><th>Position</th><th>Section</th></tr></thead><tbody>
+          {staff.map(s => <tr key={s.id}><td>{s.fullName}</td><td>{s.primaryPosition || '—'}</td><td>{s.sectionName || '—'}</td></tr>)}
+        </tbody></table>
+      </div>
+    </div>}
+
+    {view==='organogram' && <Organogram staff={staff} onChanged={load} />}
   </div>;
+}
+
+// Laboratory organogram — interactive reporting-structure diagram.
+function Organogram({ staff, onChanged }: { staff: Staff[]; onChanged: () => void }) {
+  const [nodes,setNodes]=useState<OrgNodeData[]>([]);
+  const [selectedId,setSelectedId]=useState<number|null>(null);
+  const [error,setError]=useState<string|null>(null);
+  const [success,setSuccess]=useState<string|null>(null);
+  const load=()=>api<OrgNodeData[]>('/organogram').then(setNodes).catch(e=>setError((e as Error).message));
+  useEffect(()=>{void load()},[]);
+
+  function refresh(){ load(); onChanged(); }
+  async function call(path:string, options:RequestInit, okMsg?:string){
+    setError(null); setSuccess(null);
+    try { await api(path,options); if(okMsg) setSuccess(okMsg); refresh(); return true; }
+    catch(e){ setError((e as Error).message); return false; }
+  }
+
+  const childrenOf = (id:number|null) => nodes.filter(n => n.reportsToPositionId === id);
+  const roots = nodes.filter(n => n.reportsToPositionId === null || !nodes.some(x => x.id === n.reportsToPositionId));
+  const selected = nodes.find(n => n.id === selectedId) || null;
+
+  // descendants of a node (to forbid creating reporting cycles)
+  function descendants(id:number): Set<number> {
+    const out = new Set<number>(); const stack=[id];
+    while(stack.length){ const cur=stack.pop()!; for(const c of nodes.filter(n=>n.reportsToPositionId===cur)){ if(!out.has(c.id)){ out.add(c.id); stack.push(c.id); } } }
+    return out;
+  }
+
+  async function applyStandard(){ await call('/organogram/apply-standard',{method:'POST',body:JSON.stringify({})},'Standard laboratory structure applied.'); }
+  async function addRoot(){
+    const title = window.prompt('New top-level role title:'); if(!title) return;
+    await call('/positions',{method:'POST',body:JSON.stringify({ title, reportsToPositionId:null })},'Role added.');
+  }
+  async function addChild(parentId:number){
+    const title = window.prompt('New subordinate role title:'); if(!title) return;
+    await call('/positions',{method:'POST',body:JSON.stringify({ title, reportsToPositionId:parentId })},'Role added.');
+  }
+  function printChart(){ window.print(); }
+
+  const printedAt = new Date().toLocaleString();
+
+  return <div className="card organogram-card">
+    <div className="panel-head no-print">
+      <h3>Laboratory Organogram</h3>
+      <div className="org-toolbar">
+        <button onClick={applyStandard}>Apply standard structure</button>
+        <button onClick={addRoot}>+ Add top role</button>
+        <button onClick={printChart}>Print</button>
+      </div>
+    </div>
+    <p className="hint no-print">Click a role to manage its occupant, reporting line, subordinates and status. Changes update Positions &amp; Organogram, the Permission Matrix and Personnel everywhere.</p>
+    {error && <div className="error no-print">{error}</div>}
+    {success && <div className="notice-ok no-print">{success}</div>}
+
+    <div className="org-print-area">
+      <div className="org-print-head"><strong>SECH_LIMS — Laboratory Organisational Structure</strong><span>Printed {printedAt}</span></div>
+      {nodes.length===0 ? <p className="hint">No positions yet.</p> : <div className="org-chart">
+        <ul className="org-tree">
+          {roots.map(r => <OrgBranch key={r.id} node={r} childrenOf={childrenOf} selectedId={selectedId} onSelect={setSelectedId} />)}
+        </ul>
+      </div>}
+    </div>
+
+    {selected && <div className="org-editor no-print">
+      <div className="panel-head"><h4>{selected.title}{selected.isActive ? '' : ' (inactive)'}</h4><button className="secondary" onClick={()=>setSelectedId(null)}>Close</button></div>
+
+      <div className="org-editor-grid">
+        <label>Title<input defaultValue={selected.title} key={`t${selected.id}`} onBlur={e=>{ if(e.target.value && e.target.value!==selected.title) call(`/positions/${selected.id}`,{method:'PUT',body:JSON.stringify({title:e.target.value})},'Title updated.'); }}/></label>
+        <label>Reports to<select value={selected.reportsToPositionId?String(selected.reportsToPositionId):''} onChange={e=>call(`/positions/${selected.id}`,{method:'PUT',body:JSON.stringify({reportsToPositionId:e.target.value||null})},'Reporting line updated.')}>
+          <option value="">None (top level)</option>
+          {nodes.filter(n=>n.id!==selected.id && !descendants(selected.id).has(n.id)).map(n=><option key={n.id} value={n.id}>{n.title}</option>)}
+        </select></label>
+        <label className="toggle"><input type="checkbox" checked={selected.isActive===1} onChange={e=>call(`/positions/${selected.id}`,{method:'PUT',body:JSON.stringify({isActive:e.target.checked})})}/> Active position</label>
+      </div>
+
+      <h5>Occupant(s)</h5>
+      {selected.occupants.length>0
+        ? <ul className="link-list">{selected.occupants.map(o=><li key={o.staffId}>{o.staffName} <span className="badge">{o.assignmentType}</span> <button className="secondary tiny" onClick={()=>call(`/positions/${selected.id}/occupant/${o.staffId}`,{method:'DELETE'},'Occupant removed.')}>Remove</button></li>)}</ul>
+        : <p className="hint">Vacant — no one currently holds this role.</p>}
+      <div className="org-assign">
+        <select id={`assign-${selected.id}`} defaultValue="">
+          <option value="" disabled>Assign staff…</option>
+          {staff.filter(s=>s.isActive!==false).map(s=><option key={s.id} value={s.id}>{s.fullName}</option>)}
+        </select>
+        <button onClick={()=>{ const el=document.getElementById(`assign-${selected.id}`) as HTMLSelectElement; if(el?.value) call(`/positions/${selected.id}/occupant`,{method:'POST',body:JSON.stringify({staffId:Number(el.value),assignmentType:'primary'})},'Occupant assigned.'); }}>Set as holder</button>
+        <button className="secondary" onClick={()=>{ const el=document.getElementById(`assign-${selected.id}`) as HTMLSelectElement; if(el?.value) call(`/positions/${selected.id}/occupant`,{method:'POST',body:JSON.stringify({staffId:Number(el.value),assignmentType:'secondary'})},'Role added to staff.'); }}>Add (secondary)</button>
+      </div>
+
+      <div className="org-editor-actions">
+        <button onClick={()=>addChild(selected.id)}>+ Add subordinate role</button>
+        <button className="secondary" onClick={()=>{ if(window.confirm(`Remove the role "${selected.title}"? If it has staff or subordinates it will be deactivated instead of deleted.`)) call(`/positions/${selected.id}`,{method:'DELETE'},'Role removed.').then(()=>setSelectedId(null)); }}>Remove role</button>
+      </div>
+    </div>}
+  </div>;
+}
+
+function OrgBranch({ node, childrenOf, selectedId, onSelect }: { node: OrgNodeData; childrenOf: (id:number|null)=>OrgNodeData[]; selectedId: number|null; onSelect: (id:number)=>void }) {
+  const kids = childrenOf(node.id);
+  return <li>
+    <button type="button" className={`org-node ${selectedId===node.id?'selected':''} ${node.isActive?'':'inactive'}`} onClick={()=>onSelect(node.id)}>
+      <span className="org-title">{node.title}</span>
+      <span className="org-occupant">{node.occupants.length ? node.occupants.map(o=>o.staffName).join(', ') : 'Vacant'}</span>
+    </button>
+    {kids.length>0 && <ul>{kids.map(k=><OrgBranch key={k.id} node={k} childrenOf={childrenOf} selectedId={selectedId} onSelect={onSelect} />)}</ul>}
+  </li>;
 }
 
 // ---------------------------------------------------------------------------

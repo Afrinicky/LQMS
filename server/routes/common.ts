@@ -24,6 +24,16 @@ async function loadArchiver(): Promise<(format: string, options?: unknown) => an
   return (mod.default ?? mod) as (format: string, options?: unknown) => any;
 }
 
+// Safe foreign-key id coercion: empty string / null / undefined / 0 → null,
+// otherwise the parsed positive integer. parseIntNullable() alone is unsafe
+// for FK columns because Number(null) === Number('') === 0, which would store
+// a 0 that violates the foreign-key constraint.
+function idOrNull(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
 export function commonRoutes() {
   const router = Router();
   router.use(requireAuth);
@@ -352,21 +362,139 @@ export function commonRoutes() {
   router.get('/positions', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT id, title, description, reports_to_position_id reportsToPositionId, is_active isActive, archived_at archivedAt FROM positions ORDER BY is_active DESC, title').all()));
   router.post('/positions', requirePermission('settings', 'create'), (req, res) => {
     const { title, description, reportsToPositionId } = req.body;
-    const result = getDb().prepare('INSERT INTO positions (title, description, reports_to_position_id) VALUES (?, ?, ?)').run(title, description ?? null, reportsToPositionId ?? null);
-    audit(req, { action: 'create', entity: 'positions', entityId: result.lastInsertRowid, newValue: req.body });
-    res.status(201).json({ id: result.lastInsertRowid });
+    if (!title || !String(title).trim()) return res.status(400).json({ error: 'A position title is required.' });
+    try {
+      const result = getDb().prepare('INSERT INTO positions (title, description, reports_to_position_id, is_active) VALUES (?, ?, ?, 1)').run(String(title).trim(), description ?? null, idOrNull(reportsToPositionId));
+      audit(req, { action: 'create', entity: 'positions', entityId: result.lastInsertRowid, newValue: req.body });
+      res.status(201).json({ id: result.lastInsertRowid });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error && /UNIQUE/.test(err.message) ? 'A position with that title already exists.' : (err instanceof Error ? err.message : 'Failed to create position.') });
+    }
   });
+  // Partial update: only the supplied fields change, so editing just the status or
+  // just the reporting line never wipes the others.
   router.put('/positions/:id', requirePermission('settings', 'edit'), (req, res) => {
-    const oldValue = getDb().prepare('SELECT * FROM positions WHERE id = ?').get(req.params.id);
-    getDb().prepare('UPDATE positions SET title = ?, description = ?, reports_to_position_id = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(req.body.title, req.body.description ?? null, req.body.reportsToPositionId ?? null, req.body.isActive ? 1 : 0, req.params.id);
-    audit(req, { action: 'edit', entity: 'positions', entityId: req.params.id, oldValue, newValue: req.body });
-    res.json({ ok: true });
+    const db = getDb();
+    const oldValue = db.prepare('SELECT * FROM positions WHERE id = ?').get(req.params.id) as any;
+    if (!oldValue) return res.status(404).json({ error: 'Position not found' });
+    const title = req.body.title !== undefined ? String(req.body.title).trim() : oldValue.title;
+    if (!title) return res.status(400).json({ error: 'A position title is required.' });
+    const description = req.body.description !== undefined ? (req.body.description || null) : oldValue.description;
+    const reportsTo = req.body.reportsToPositionId !== undefined ? idOrNull(req.body.reportsToPositionId) : oldValue.reports_to_position_id;
+    const isActive = req.body.isActive !== undefined ? (req.body.isActive ? 1 : 0) : oldValue.is_active;
+    if (idOrNull(reportsTo) === Number(req.params.id)) return res.status(400).json({ error: 'A position cannot report to itself.' });
+    try {
+      db.prepare('UPDATE positions SET title = ?, description = ?, reports_to_position_id = ?, is_active = ?, archived_at = CASE WHEN ? = 0 THEN COALESCE(archived_at, CURRENT_TIMESTAMP) ELSE NULL END, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .run(title, description, reportsTo, isActive, isActive, req.params.id);
+      audit(req, { action: 'edit', entity: 'positions', entityId: req.params.id, oldValue, newValue: req.body });
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error && /UNIQUE/.test(err.message) ? 'A position with that title already exists.' : (err instanceof Error ? err.message : 'Failed to update position.') });
+    }
   });
   router.delete('/positions/:id', requirePermission('settings', 'void_archive'), (req, res) => {
-    const used = getDb().prepare('SELECT COUNT(*) count FROM staff_position_assignments WHERE position_id = ?').get(req.params.id) as { count: number };
-    if (used.count > 0) getDb().prepare('UPDATE positions SET is_active = 0, archived_at = CURRENT_TIMESTAMP WHERE id = ?').run(req.params.id); else getDb().prepare('DELETE FROM positions WHERE id = ?').run(req.params.id);
-    audit(req, { action: used.count > 0 ? 'archive' : 'delete', entity: 'positions', entityId: req.params.id });
-    res.json({ ok: true, archived: used.count > 0 });
+    const db = getDb();
+    const used = db.prepare('SELECT COUNT(*) count FROM staff_position_assignments WHERE position_id = ?').get(req.params.id) as { count: number };
+    const children = db.prepare('SELECT COUNT(*) count FROM positions WHERE reports_to_position_id = ?').get(req.params.id) as { count: number };
+    if (used.count > 0 || children.count > 0) db.prepare('UPDATE positions SET is_active = 0, archived_at = CURRENT_TIMESTAMP WHERE id = ?').run(req.params.id);
+    else db.prepare('DELETE FROM positions WHERE id = ?').run(req.params.id);
+    audit(req, { action: used.count > 0 || children.count > 0 ? 'archive' : 'delete', entity: 'positions', entityId: req.params.id });
+    res.json({ ok: true, archived: used.count > 0 || children.count > 0 });
+  });
+
+  // =====================================================================
+  // Organogram
+  // ---------------------------------------------------------------------
+  // The laboratory reporting structure. Nodes are positions; edges are the
+  // reports-to relationships. Each node carries its current occupant(s)
+  // (active staff assignments), so the chart doubles as a live "who holds
+  // which role" view. Edits here write straight to positions and
+  // staff_position_assignments, so they reflect in Positions & Organogram,
+  // the Permission Matrix (position permissions) and Personnel.
+  // =====================================================================
+  router.get('/organogram', requirePermission('settings', 'view'), (_req, res) => {
+    const db = getDb();
+    const positions = db.prepare(`
+      SELECT p.id, p.title, p.description, p.reports_to_position_id AS reportsToPositionId, p.is_active AS isActive
+      FROM positions p ORDER BY p.is_active DESC, p.title`).all() as any[];
+    const occupants = db.prepare(`
+      SELECT spa.position_id AS positionId, spa.staff_id AS staffId, s.full_name AS staffName, spa.assignment_type AS assignmentType, spa.is_active AS isActive
+      FROM staff_position_assignments spa JOIN staff s ON s.id = spa.staff_id
+      WHERE spa.is_active = 1 ORDER BY CASE spa.assignment_type WHEN 'primary' THEN 0 ELSE 1 END, s.full_name`).all() as any[];
+    const byPosition = new Map<number, any[]>();
+    for (const o of occupants) { if (!byPosition.has(o.positionId)) byPosition.set(o.positionId, []); byPosition.get(o.positionId)!.push(o); }
+    res.json(positions.map(p => ({ ...p, occupants: byPosition.get(p.id) ?? [] })));
+  });
+
+  // Assign a staff member to a position. assignmentType 'primary' replaces any
+  // existing primary occupant of that position (a role is held by one person at a
+  // time, others moved to secondary); 'secondary' simply adds the role to a person.
+  router.post('/positions/:id/occupant', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const positionId = idOrNull(req.params.id);
+    const staffId = idOrNull(req.body.staffId);
+    if (!positionId || !db.prepare('SELECT id FROM positions WHERE id = ?').get(positionId)) return res.status(404).json({ error: 'Position not found' });
+    if (!staffId || !db.prepare('SELECT id FROM staff WHERE id = ?').get(staffId)) return res.status(400).json({ error: 'Select a valid staff member.' });
+    const assignmentType = req.body.assignmentType === 'secondary' ? 'secondary' : 'primary';
+    try {
+      db.transaction(() => {
+        if (assignmentType === 'primary') {
+          db.prepare("UPDATE staff_position_assignments SET assignment_type = 'secondary' WHERE position_id = ? AND is_active = 1 AND assignment_type = 'primary'").run(positionId);
+        }
+        const existing = db.prepare('SELECT id FROM staff_position_assignments WHERE position_id = ? AND staff_id = ? AND is_active = 1').get(positionId, staffId) as any;
+        if (existing) db.prepare('UPDATE staff_position_assignments SET assignment_type = ? WHERE id = ?').run(assignmentType, existing.id);
+        else db.prepare('INSERT INTO staff_position_assignments (staff_id, position_id, assignment_type) VALUES (?, ?, ?)').run(staffId, positionId, assignmentType);
+      })();
+      audit(req, { action: 'assign_occupant', entity: 'positions', entityId: positionId, newValue: { staffId, assignmentType } });
+      res.status(201).json({ ok: true });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to assign occupant.' });
+    }
+  });
+  router.delete('/positions/:id/occupant/:staffId', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    db.prepare('UPDATE staff_position_assignments SET is_active = 0, ends_at = CURRENT_TIMESTAMP WHERE position_id = ? AND staff_id = ? AND is_active = 1').run(req.params.id, req.params.staffId);
+    audit(req, { action: 'remove_occupant', entity: 'positions', entityId: req.params.id, newValue: { staffId: req.params.staffId } });
+    res.json({ ok: true });
+  });
+
+  // Apply a standard medical-laboratory reporting structure to existing positions by
+  // recognised title, without overwriting reporting lines that are already set. This
+  // gives an instant, sensible organogram that the user can then fine-tune.
+  router.post('/organogram/apply-standard', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const structure: Record<string, string> = {
+      'Quality Manager': 'Laboratory Manager',
+      'Safety Manager': 'Laboratory Manager',
+      'Customer Service Officer': 'Laboratory Manager',
+      'Haematology Unit Head': 'Laboratory Manager',
+      'Biochemistry Unit Head': 'Laboratory Manager',
+      'Microbiology Unit Head': 'Laboratory Manager',
+      'Blood Bank Unit Head': 'Laboratory Manager',
+      'Data Officer': 'Laboratory Manager',
+      'Stores Officer': 'Laboratory Manager',
+      'POCT Officer': 'Quality Manager',
+      'Quality Team Member': 'Quality Manager',
+      'Biomedical Scientist': 'Haematology Unit Head',
+      'Technician': 'Biomedical Scientist',
+    };
+    const idByTitle = new Map<string, number>();
+    for (const p of db.prepare('SELECT id, title FROM positions').all() as any[]) idByTitle.set(p.title, p.id);
+    const force = req.body?.force === true;
+    let updated = 0;
+    const tx = db.transaction(() => {
+      for (const [childTitle, parentTitle] of Object.entries(structure)) {
+        const childId = idByTitle.get(childTitle); const parentId = idByTitle.get(parentTitle);
+        if (!childId || !parentId || childId === parentId) continue;
+        const current = db.prepare('SELECT reports_to_position_id AS r FROM positions WHERE id = ?').get(childId) as any;
+        if (!force && current?.r != null) continue;
+        db.prepare('UPDATE positions SET reports_to_position_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(parentId, childId);
+        updated++;
+      }
+    });
+    tx();
+    audit(req, { action: 'apply_standard', entity: 'positions', newValue: { updated, force } });
+    res.json({ ok: true, updated });
   });
 
   router.get('/departments', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT id, name, is_active FROM departments ORDER BY name').all()));
@@ -382,24 +510,26 @@ export function commonRoutes() {
     ORDER BY s.is_active DESC, s.full_name`).all()));
 
   router.post('/staff', requirePermission('personnel', 'create'), (req, res) => {
-    const r = getDb().prepare('INSERT INTO staff (employee_no, full_name, email, phone, section_id) VALUES (?, ?, ?, ?, ?)').run(req.body.employeeNo ?? null, req.body.fullName, req.body.email ?? null, req.body.phone ?? null, req.body.sectionId ?? null);
-    if (req.body.positionId) getDb().prepare('INSERT INTO staff_position_assignments (staff_id, position_id, assignment_type) VALUES (?, ?, ?)').run(r.lastInsertRowid, req.body.positionId, req.body.assignmentType ?? 'primary');
+    const r = getDb().prepare('INSERT INTO staff (employee_no, full_name, email, phone, section_id) VALUES (?, ?, ?, ?, ?)').run(req.body.employeeNo ?? null, req.body.fullName, req.body.email ?? null, req.body.phone ?? null, idOrNull(req.body.sectionId));
+    if (idOrNull(req.body.positionId)) getDb().prepare('INSERT INTO staff_position_assignments (staff_id, position_id, assignment_type) VALUES (?, ?, ?)').run(r.lastInsertRowid, idOrNull(req.body.positionId), req.body.assignmentType ?? 'primary');
     audit(req, { action: 'create', entity: 'staff', entityId: r.lastInsertRowid, newValue: req.body });
     res.status(201).json({ id: r.lastInsertRowid });
   });
 
   // Comprehensive staff registration: creates the staff record, position assignments,
-  // an optional linked login account, and optional initial technical authorizations,
-  // all in one transaction. This is the Settings → Register New Staff workflow and is
-  // the single source that wires a new person into Users & Access, Positions &
-  // Organogram, the Permission Matrix and Personnel Management.
+  // an optional linked login account, optional section-scoped technical authorizations,
+  // and (when a login account is created) per-user permission overrides derived from
+  // the authorization grid. All in one transaction. This is the Settings → Register
+  // New Staff workflow and is the single source that wires a new person into Users &
+  // Access, Positions & Organogram, the Permission Matrix and Personnel Management.
   router.post('/staff/register', requirePermission('personnel', 'create'), (req, res) => {
     const db = getDb();
-    const { employeeNo, fullName, email, phone, sectionId, positionIds, primaryPositionId, createUser, username, password, roleId, authorizations } = req.body as {
+    const { employeeNo, fullName, email, phone, sectionId, positionIds, primaryPositionId, createUser, username, password, roleId, authorizations, permissions } = req.body as {
       employeeNo?: string; fullName?: string; email?: string; phone?: string; sectionId?: number | string | null;
       positionIds?: Array<number | string>; primaryPositionId?: number | string | null;
       createUser?: boolean; username?: string; password?: string; roleId?: number | string;
       authorizations?: Array<{ moduleKey: string; sectionId?: number | string | null; level: string }>;
+      permissions?: Array<{ permissionId: number | string; allowed: boolean }>;
     };
     if (!fullName || !String(fullName).trim()) return res.status(400).json({ error: 'fullName is required' });
     if (createUser) {
@@ -412,12 +542,12 @@ export function commonRoutes() {
     try {
       const out = db.transaction(() => {
         const staffResult = db.prepare('INSERT INTO staff (employee_no, full_name, email, phone, section_id) VALUES (?, ?, ?, ?, ?)')
-          .run(employeeNo || null, String(fullName).trim(), email || null, phone || null, parseIntNullable(sectionId));
+          .run(employeeNo || null, String(fullName).trim(), email || null, phone || null, idOrNull(sectionId));
         const staffId = Number(staffResult.lastInsertRowid);
         audit(req, { action: 'create', entity: 'staff', entityId: staffId, newValue: { employeeNo, fullName, email, phone, sectionId } });
 
-        const allPositions = Array.from(new Set((positionIds ?? []).map(p => parseIntNullable(p)).filter((p): p is number => p !== null)));
-        const primary = parseIntNullable(primaryPositionId) ?? allPositions[0] ?? null;
+        const allPositions = Array.from(new Set((positionIds ?? []).map(p => idOrNull(p)).filter((p): p is number => p !== null)));
+        const primary = idOrNull(primaryPositionId) ?? allPositions[0] ?? null;
         for (const positionId of allPositions) {
           db.prepare('INSERT INTO staff_position_assignments (staff_id, position_id, assignment_type) VALUES (?, ?, ?)')
             .run(staffId, positionId, positionId === primary ? 'primary' : 'secondary');
@@ -431,12 +561,21 @@ export function commonRoutes() {
           db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)')
             .run('settings', 'users', String(userId), 'personnel', 'staff', String(staffId), 'Login account linked to staff record at registration');
           audit(req, { action: 'create', entity: 'users', entityId: userId, newValue: { username, fullName, roleId, staffId } });
+
+          // Persist authorization-grid edits as per-user permission overrides. These
+          // are the explicit grant/deny deltas on top of the role + position defaults.
+          for (const p of permissions ?? []) {
+            const permId = idOrNull(p?.permissionId);
+            if (!permId) continue;
+            db.prepare('INSERT OR REPLACE INTO user_permission_overrides (user_id, permission_id, allowed, source, reason) VALUES (?, ?, ?, ?, ?)')
+              .run(userId, permId, p.allowed ? 1 : 0, 'Manual override', 'Set during staff registration');
+          }
         }
 
         for (const a of authorizations ?? []) {
           if (!a?.moduleKey || !a?.level) continue;
           const authResult = db.prepare('INSERT INTO technical_authorizations (staff_id, module_key, section_id, level, is_active) VALUES (?, ?, ?, ?, 1)')
-            .run(staffId, a.moduleKey, parseIntNullable(a.sectionId), a.level);
+            .run(staffId, a.moduleKey, idOrNull(a.sectionId), a.level);
           audit(req, { action: 'create', entity: 'technical_authorizations', entityId: Number(authResult.lastInsertRowid), newValue: { staffId, ...a } });
         }
         return { staffId, userId };
@@ -474,7 +613,7 @@ export function commonRoutes() {
     const oldValue = db.prepare('SELECT * FROM staff WHERE id = ?').get(req.params.id);
     if (!oldValue) return res.status(404).json({ error: 'Staff record not found' });
     db.prepare('UPDATE staff SET employee_no = ?, full_name = ?, email = ?, phone = ?, section_id = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-      .run(req.body.employeeNo ?? null, req.body.fullName, req.body.email ?? null, req.body.phone ?? null, parseIntNullable(req.body.sectionId), req.body.isActive === false ? 0 : 1, req.params.id);
+      .run(req.body.employeeNo ?? null, req.body.fullName, req.body.email ?? null, req.body.phone ?? null, idOrNull(req.body.sectionId), req.body.isActive === false ? 0 : 1, req.params.id);
     audit(req, { action: 'edit', entity: 'staff', entityId: req.params.id, oldValue, newValue: req.body });
     res.json({ ok: true });
   });
@@ -622,8 +761,8 @@ export function commonRoutes() {
   router.post('/authorizations/technical', requirePermission('settings', 'edit'), (req, res) => {
     const { staffId, positionId, moduleKey, sectionId, level, expiresAt } = req.body;
     if (!moduleKey || !level) return res.status(400).json({ error: 'moduleKey and level are required.' });
-    if (!parseIntNullable(staffId) && !parseIntNullable(positionId)) return res.status(400).json({ error: 'Select a staff member or a position to scope this authorization.' });
-    const result = getDb().prepare('INSERT INTO technical_authorizations (staff_id, position_id, module_key, section_id, level, is_active, expires_at) VALUES (?, ?, ?, ?, ?, 1, ?)').run(parseIntNullable(staffId), parseIntNullable(positionId), moduleKey, parseIntNullable(sectionId), level, expiresAt || null);
+    if (!idOrNull(staffId) && !idOrNull(positionId)) return res.status(400).json({ error: 'Select a staff member or a position to scope this authorization.' });
+    const result = getDb().prepare('INSERT INTO technical_authorizations (staff_id, position_id, module_key, section_id, level, is_active, expires_at) VALUES (?, ?, ?, ?, ?, 1, ?)').run(idOrNull(staffId), idOrNull(positionId), moduleKey, idOrNull(sectionId), level, expiresAt || null);
     audit(req, { action: 'create', entity: 'technical_authorizations', entityId: result.lastInsertRowid, newValue: { staffId, positionId, moduleKey, sectionId, level, expiresAt } });
     res.status(201).json({ ok: true, id: Number(result.lastInsertRowid) });
   });
@@ -666,10 +805,10 @@ export function commonRoutes() {
     const db = getDb();
     const { name, departmentId, code, description, serviceSummary, operatingHours, headStaffId } = req.body;
     if (!name || !String(name).trim()) return res.status(400).json({ error: 'A unit/section name is required.' });
-    const deptId = parseIntNullable(departmentId) ?? (db.prepare('SELECT id FROM departments ORDER BY id LIMIT 1').get() as any)?.id ?? null;
+    const deptId = idOrNull(departmentId) ?? (db.prepare('SELECT id FROM departments ORDER BY id LIMIT 1').get() as any)?.id ?? null;
     try {
       const r = db.prepare('INSERT INTO sections (department_id, name, code, description, service_summary, operating_hours, head_staff_id, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)')
-        .run(deptId, String(name).trim(), code || null, description || null, serviceSummary || null, operatingHours || null, parseIntNullable(headStaffId));
+        .run(deptId, String(name).trim(), code || null, description || null, serviceSummary || null, operatingHours || null, idOrNull(headStaffId));
       audit(req, { action: 'create', entity: 'sections', entityId: Number(r.lastInsertRowid), newValue: req.body });
       res.status(201).json({ id: Number(r.lastInsertRowid) });
     } catch (err) {
@@ -682,7 +821,7 @@ export function commonRoutes() {
     const oldValue = db.prepare('SELECT * FROM sections WHERE id = ?').get(req.params.id);
     if (!oldValue) return res.status(404).json({ error: 'Unit not found' });
     db.prepare('UPDATE sections SET name = ?, code = ?, description = ?, service_summary = ?, operating_hours = ?, department_id = ?, head_staff_id = ? WHERE id = ?')
-      .run(req.body.name ?? (oldValue as any).name, req.body.code ?? null, req.body.description ?? null, req.body.serviceSummary ?? null, req.body.operatingHours ?? null, parseIntNullable(req.body.departmentId) ?? (oldValue as any).department_id, parseIntNullable(req.body.headStaffId), req.params.id);
+      .run(req.body.name ?? (oldValue as any).name, req.body.code ?? null, req.body.description ?? null, req.body.serviceSummary ?? null, req.body.operatingHours ?? null, idOrNull(req.body.departmentId) ?? (oldValue as any).department_id, idOrNull(req.body.headStaffId), req.params.id);
     audit(req, { action: 'edit', entity: 'sections', entityId: req.params.id, oldValue, newValue: req.body });
     res.json({ ok: true });
   });
