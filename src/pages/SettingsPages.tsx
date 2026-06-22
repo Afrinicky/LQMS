@@ -395,12 +395,33 @@ export function Positions(){
   </div>;
 }
 
-// Laboratory organogram — interactive reporting-structure diagram.
+// Classify a role for ISO/WHO-style colour coding on the organogram.
+function roleType(title: string): 'management' | 'quality' | 'technical' | 'support' {
+  const t = title.toLowerCase();
+  if (/quality/.test(t)) return 'quality';
+  if (/^laboratory manager|laboratory director|^lab manager|^director|superintend/.test(t)) return 'management';
+  if (/unit head|head of|scientist|technologist|technician|technical officer|biomedical|microbiolog|haematolog|chemistry|blood bank|laboratory assistant/.test(t)) return 'technical';
+  return 'support';
+}
+
+type OrgCtx = {
+  nodes: OrgNodeData[];
+  staff: Staff[];
+  selectedId: number | null;
+  onSelect: (id: number | null) => void;
+  childrenOf: (id: number | null) => OrgNodeData[];
+  descendants: (id: number) => Set<number>;
+  call: (path: string, options: RequestInit, okMsg?: string) => Promise<boolean>;
+};
+
+// Laboratory organogram — interactive, ISO 15189 / WHO LQMS-style reporting and
+// deputisation chart. Editing happens in place on each node.
 function Organogram({ staff, onChanged }: { staff: Staff[]; onChanged: () => void }) {
   const [nodes,setNodes]=useState<OrgNodeData[]>([]);
   const [selectedId,setSelectedId]=useState<number|null>(null);
   const [error,setError]=useState<string|null>(null);
   const [success,setSuccess]=useState<string|null>(null);
+  const [newRoot,setNewRoot]=useState('');
   const load=()=>api<OrgNodeData[]>('/organogram').then(setNodes).catch(e=>setError((e as Error).message));
   useEffect(()=>{void load()},[]);
 
@@ -411,94 +432,138 @@ function Organogram({ staff, onChanged }: { staff: Staff[]; onChanged: () => voi
     catch(e){ setError((e as Error).message); return false; }
   }
 
-  const childrenOf = (id:number|null) => nodes.filter(n => n.reportsToPositionId === id);
+  const childrenOf = (id:number|null) => nodes.filter(n => n.reportsToPositionId === id).sort((a,b)=>a.title.localeCompare(b.title));
   const roots = nodes.filter(n => n.reportsToPositionId === null || !nodes.some(x => x.id === n.reportsToPositionId));
-  const selected = nodes.find(n => n.id === selectedId) || null;
 
-  // descendants of a node (to forbid creating reporting cycles)
   function descendants(id:number): Set<number> {
     const out = new Set<number>(); const stack=[id];
     while(stack.length){ const cur=stack.pop()!; for(const c of nodes.filter(n=>n.reportsToPositionId===cur)){ if(!out.has(c.id)){ out.add(c.id); stack.push(c.id); } } }
     return out;
   }
 
+  const ctx: OrgCtx = { nodes, staff, selectedId, onSelect:setSelectedId, childrenOf, descendants, call };
+
   async function applyStandard(){ await call('/organogram/apply-standard',{method:'POST',body:JSON.stringify({})},'Standard laboratory structure applied.'); }
-  async function addRoot(){
-    const title = window.prompt('New top-level role title:'); if(!title) return;
-    await call('/positions',{method:'POST',body:JSON.stringify({ title, reportsToPositionId:null })},'Role added.');
-  }
-  async function addChild(parentId:number){
-    const title = window.prompt('New subordinate role title:'); if(!title) return;
-    await call('/positions',{method:'POST',body:JSON.stringify({ title, reportsToPositionId:parentId })},'Role added.');
-  }
+  async function addRoot(e:FormEvent){ e.preventDefault(); if(!newRoot.trim()) return; const ok=await call('/positions',{method:'POST',body:JSON.stringify({ title:newRoot.trim(), reportsToPositionId:null })},'Top-level role added.'); if(ok) setNewRoot(''); }
   function printChart(){ window.print(); }
 
   const printedAt = new Date().toLocaleString();
 
   return <div className="card organogram-card">
     <div className="panel-head no-print">
-      <h3>Laboratory Organogram</h3>
+      <h3>Laboratory Organogram &amp; Deputisation</h3>
       <div className="org-toolbar">
         <button onClick={applyStandard}>Apply standard structure</button>
-        <button onClick={addRoot}>+ Add top role</button>
         <button onClick={printChart}>Print</button>
       </div>
     </div>
-    <p className="hint no-print">Click a role to manage its occupant, reporting line, subordinates and status. Changes update Positions &amp; Organogram, the Permission Matrix and Personnel everywhere.</p>
+    <p className="hint no-print">Click any role to edit it in place — rename it, assign or change its <strong>holder</strong> and <strong>deputy</strong> (acting officer), set its reporting line, or add a subordinate. A subordinate always reports to the role directly above it. Every change flows through Positions &amp; Organogram, the Permission Matrix and Personnel.</p>
+    <div className="org-legend no-print">
+      <span className="leg"><span className="org-swatch rt-management" />Management</span>
+      <span className="leg"><span className="org-swatch rt-quality" />Quality function</span>
+      <span className="leg"><span className="org-swatch rt-technical" />Technical / bench</span>
+      <span className="leg"><span className="org-swatch rt-support" />Support / admin</span>
+      <span className="leg"><span className="org-dep-dot" />Deputy shown on node</span>
+    </div>
+    <form className="org-add-root no-print" onSubmit={addRoot}>
+      <input placeholder="Add a top-level role (e.g. Laboratory Manager)…" value={newRoot} onChange={e=>setNewRoot(e.target.value)} />
+      <button type="submit">Add top role</button>
+    </form>
     {error && <div className="error no-print">{error}</div>}
     {success && <div className="notice-ok no-print">{success}</div>}
 
     <div className="org-print-area">
-      <div className="org-print-head"><strong>SECH_LIMS — Laboratory Organisational Structure</strong><span>Printed {printedAt}</span></div>
-      {nodes.length===0 ? <p className="hint">No positions yet.</p> : <div className="org-chart">
-        <ul className="org-tree">
-          {roots.map(r => <OrgBranch key={r.id} node={r} childrenOf={childrenOf} selectedId={selectedId} onSelect={setSelectedId} />)}
-        </ul>
-      </div>}
+      <div className="org-print-head"><strong>SECH_LIMS — Laboratory Organisational Structure &amp; Deputisation</strong><span>Printed {printedAt}</span></div>
+      {nodes.length===0
+        ? <p className="hint">No positions yet. Use “Add top role” or “Apply standard structure”.</p>
+        : <div className="org-chart"><ul className="org-tree">{roots.map(r => <OrgBranch key={r.id} node={r} ctx={ctx} />)}</ul></div>}
     </div>
-
-    {selected && <div className="org-editor no-print">
-      <div className="panel-head"><h4>{selected.title}{selected.isActive ? '' : ' (inactive)'}</h4><button className="secondary" onClick={()=>setSelectedId(null)}>Close</button></div>
-
-      <div className="org-editor-grid">
-        <label>Title<input defaultValue={selected.title} key={`t${selected.id}`} onBlur={e=>{ if(e.target.value && e.target.value!==selected.title) call(`/positions/${selected.id}`,{method:'PUT',body:JSON.stringify({title:e.target.value})},'Title updated.'); }}/></label>
-        <label>Reports to<select value={selected.reportsToPositionId?String(selected.reportsToPositionId):''} onChange={e=>call(`/positions/${selected.id}`,{method:'PUT',body:JSON.stringify({reportsToPositionId:e.target.value||null})},'Reporting line updated.')}>
-          <option value="">None (top level)</option>
-          {nodes.filter(n=>n.id!==selected.id && !descendants(selected.id).has(n.id)).map(n=><option key={n.id} value={n.id}>{n.title}</option>)}
-        </select></label>
-        <label className="toggle"><input type="checkbox" checked={selected.isActive===1} onChange={e=>call(`/positions/${selected.id}`,{method:'PUT',body:JSON.stringify({isActive:e.target.checked})})}/> Active position</label>
-      </div>
-
-      <h5>Occupant(s)</h5>
-      {selected.occupants.length>0
-        ? <ul className="link-list">{selected.occupants.map(o=><li key={o.staffId}>{o.staffName} <span className="badge">{o.assignmentType}</span> <button className="secondary tiny" onClick={()=>call(`/positions/${selected.id}/occupant/${o.staffId}`,{method:'DELETE'},'Occupant removed.')}>Remove</button></li>)}</ul>
-        : <p className="hint">Vacant — no one currently holds this role.</p>}
-      <div className="org-assign">
-        <select id={`assign-${selected.id}`} defaultValue="">
-          <option value="" disabled>Assign staff…</option>
-          {staff.filter(s=>s.isActive!==false).map(s=><option key={s.id} value={s.id}>{s.fullName}</option>)}
-        </select>
-        <button onClick={()=>{ const el=document.getElementById(`assign-${selected.id}`) as HTMLSelectElement; if(el?.value) call(`/positions/${selected.id}/occupant`,{method:'POST',body:JSON.stringify({staffId:Number(el.value),assignmentType:'primary'})},'Occupant assigned.'); }}>Set as holder</button>
-        <button className="secondary" onClick={()=>{ const el=document.getElementById(`assign-${selected.id}`) as HTMLSelectElement; if(el?.value) call(`/positions/${selected.id}/occupant`,{method:'POST',body:JSON.stringify({staffId:Number(el.value),assignmentType:'secondary'})},'Role added to staff.'); }}>Add (secondary)</button>
-      </div>
-
-      <div className="org-editor-actions">
-        <button onClick={()=>addChild(selected.id)}>+ Add subordinate role</button>
-        <button className="secondary" onClick={()=>{ if(window.confirm(`Remove the role "${selected.title}"? If it has staff or subordinates it will be deactivated instead of deleted.`)) call(`/positions/${selected.id}`,{method:'DELETE'},'Role removed.').then(()=>setSelectedId(null)); }}>Remove role</button>
-      </div>
-    </div>}
   </div>;
 }
 
-function OrgBranch({ node, childrenOf, selectedId, onSelect }: { node: OrgNodeData; childrenOf: (id:number|null)=>OrgNodeData[]; selectedId: number|null; onSelect: (id:number)=>void }) {
-  const kids = childrenOf(node.id);
+function OrgBranch({ node, ctx }: { node: OrgNodeData; ctx: OrgCtx }) {
+  const kids = ctx.childrenOf(node.id);
+  const holder = node.occupants.find(o => o.assignmentType === 'primary');
+  const deputy = node.occupants.find(o => o.assignmentType === 'deputy');
+  const rt = roleType(node.title);
   return <li>
-    <button type="button" className={`org-node ${selectedId===node.id?'selected':''} ${node.isActive?'':'inactive'}`} onClick={()=>onSelect(node.id)}>
-      <span className="org-title">{node.title}</span>
-      <span className="org-occupant">{node.occupants.length ? node.occupants.map(o=>o.staffName).join(', ') : 'Vacant'}</span>
-    </button>
-    {kids.length>0 && <ul>{kids.map(k=><OrgBranch key={k.id} node={k} childrenOf={childrenOf} selectedId={selectedId} onSelect={onSelect} />)}</ul>}
+    {ctx.selectedId === node.id
+      ? <OrgNodeEditor node={node} ctx={ctx} />
+      : <button type="button" className={`org-node rt-${rt} ${node.isActive ? '' : 'inactive'}`} onClick={()=>ctx.onSelect(node.id)}>
+          <span className="org-title">{node.title}</span>
+          <span className={`org-holder ${holder ? '' : 'vacant'}`}>{holder ? holder.staffName : 'Vacant — click to assign'}</span>
+          <span className="org-deputy">{deputy ? <>Deputy: {deputy.staffName}</> : <span className="muted">Deputy: —</span>}</span>
+        </button>}
+    {kids.length>0 && <ul>{kids.map(k=><OrgBranch key={k.id} node={k} ctx={ctx} />)}</ul>}
   </li>;
+}
+
+// In-place editor rendered as the node itself when selected.
+function OrgNodeEditor({ node, ctx }: { node: OrgNodeData; ctx: OrgCtx }) {
+  const [title,setTitle]=useState(node.title);
+  const [child,setChild]=useState('');
+  useEffect(()=>{ setTitle(node.title); },[node.id, node.title]);
+  const holder = node.occupants.find(o => o.assignmentType === 'primary');
+  const deputy = node.occupants.find(o => o.assignmentType === 'deputy');
+  const secondaries = node.occupants.filter(o => o.assignmentType === 'secondary');
+  const rt = roleType(node.title);
+  const reportOptions = ctx.nodes.filter(n => n.id !== node.id && !ctx.descendants(node.id).has(n.id));
+
+  function saveTitle(){ const t=title.trim(); if(t && t!==node.title) ctx.call(`/positions/${node.id}`,{method:'PUT',body:JSON.stringify({title:t})},'Title updated.'); }
+  function assign(staffId:string, assignmentType:'primary'|'deputy'|'secondary'){ if(staffId) ctx.call(`/positions/${node.id}/occupant`,{method:'POST',body:JSON.stringify({staffId:Number(staffId),assignmentType})}, assignmentType==='deputy'?'Deputy assigned.':'Occupant assigned.'); }
+  function removeOcc(staffId:number){ ctx.call(`/positions/${node.id}/occupant/${staffId}`,{method:'DELETE'},'Removed.'); }
+  function addChildRole(e:FormEvent){ e.preventDefault(); const t=child.trim(); if(!t) return; ctx.call('/positions',{method:'POST',body:JSON.stringify({title:t, reportsToPositionId:node.id})},'Subordinate role added.').then(ok=>{ if(ok) setChild(''); }); }
+
+  const freeStaff = ctx.staff.filter(s => s.isActive !== false);
+
+  return <div className={`org-node org-node-edit rt-${rt}`}>
+    <input className="org-title-input" value={title} onChange={e=>setTitle(e.target.value)} onBlur={saveTitle} onKeyDown={e=>{ if(e.key==='Enter'){ e.preventDefault(); (e.target as HTMLInputElement).blur(); } }} aria-label="Role title" />
+
+    <div className="org-edit-row">
+      <span className="lab">Holder</span>
+      {holder ? <span className="who">{holder.staffName} <button type="button" className="x" title="Vacate" onClick={()=>removeOcc(holder.staffId)}>×</button></span> : <span className="who vacant">Vacant</span>}
+    </div>
+    <div className="org-edit-row">
+      <select defaultValue="" onChange={e=>{ assign(e.target.value,'primary'); e.target.value=''; }}>
+        <option value="" disabled>{holder ? 'Change holder…' : 'Assign holder…'}</option>
+        {freeStaff.map(s=><option key={s.id} value={s.id}>{s.fullName}</option>)}
+      </select>
+      <Link className="org-newstaff" to="/settings/register-staff" title="Create and link a new staff member">+ New</Link>
+    </div>
+
+    <div className="org-edit-row">
+      <span className="lab">Deputy</span>
+      {deputy ? <span className="who">{deputy.staffName} <button type="button" className="x" title="Remove deputy" onClick={()=>removeOcc(deputy.staffId)}>×</button></span> : <span className="who vacant">—</span>}
+    </div>
+    <div className="org-edit-row">
+      <select defaultValue="" onChange={e=>{ assign(e.target.value,'deputy'); e.target.value=''; }}>
+        <option value="" disabled>{deputy ? 'Change deputy…' : 'Assign deputy…'}</option>
+        {freeStaff.map(s=><option key={s.id} value={s.id}>{s.fullName}</option>)}
+      </select>
+    </div>
+
+    {secondaries.length>0 && <div className="org-edit-row wrap">{secondaries.map(o=><span key={o.staffId} className="badge">{o.staffName} <button type="button" className="x" onClick={()=>removeOcc(o.staffId)}>×</button></span>)}</div>}
+
+    <div className="org-edit-row">
+      <span className="lab">Reports to</span>
+      <select value={node.reportsToPositionId?String(node.reportsToPositionId):''} onChange={e=>ctx.call(`/positions/${node.id}`,{method:'PUT',body:JSON.stringify({reportsToPositionId:e.target.value||null})},'Reporting line updated.')}>
+        <option value="">None (top level)</option>
+        {reportOptions.map(n=><option key={n.id} value={n.id}>{n.title}</option>)}
+      </select>
+    </div>
+
+    <label className="org-edit-row toggle"><input type="checkbox" checked={node.isActive===1} onChange={e=>ctx.call(`/positions/${node.id}`,{method:'PUT',body:JSON.stringify({isActive:e.target.checked})})} /> Active</label>
+
+    <form className="org-edit-row" onSubmit={addChildRole}>
+      <input placeholder="Add subordinate role…" value={child} onChange={e=>setChild(e.target.value)} />
+      <button type="submit" className="tiny">Add</button>
+    </form>
+
+    <div className="org-edit-actions">
+      <button type="button" className="secondary tiny" onClick={()=>{ if(window.confirm(`Remove the role "${node.title}"? If it has staff or subordinates it is deactivated instead of deleted.`)) ctx.call(`/positions/${node.id}`,{method:'DELETE'},'Role removed.').then(()=>ctx.onSelect(null)); }}>Remove</button>
+      <button type="button" className="tiny" onClick={()=>ctx.onSelect(null)}>Done</button>
+    </div>
+  </div>;
 }
 
 // ---------------------------------------------------------------------------
