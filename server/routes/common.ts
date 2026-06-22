@@ -420,26 +420,28 @@ export function commonRoutes() {
     const occupants = db.prepare(`
       SELECT spa.position_id AS positionId, spa.staff_id AS staffId, s.full_name AS staffName, spa.assignment_type AS assignmentType, spa.is_active AS isActive
       FROM staff_position_assignments spa JOIN staff s ON s.id = spa.staff_id
-      WHERE spa.is_active = 1 ORDER BY CASE spa.assignment_type WHEN 'primary' THEN 0 ELSE 1 END, s.full_name`).all() as any[];
+      WHERE spa.is_active = 1 ORDER BY CASE spa.assignment_type WHEN 'primary' THEN 0 WHEN 'deputy' THEN 1 ELSE 2 END, s.full_name`).all() as any[];
     const byPosition = new Map<number, any[]>();
     for (const o of occupants) { if (!byPosition.has(o.positionId)) byPosition.set(o.positionId, []); byPosition.get(o.positionId)!.push(o); }
     res.json(positions.map(p => ({ ...p, occupants: byPosition.get(p.id) ?? [] })));
   });
 
-  // Assign a staff member to a position. assignmentType 'primary' replaces any
-  // existing primary occupant of that position (a role is held by one person at a
-  // time, others moved to secondary); 'secondary' simply adds the role to a person.
+  // Assign a staff member to a position.
+  //  - 'primary' (the holder): one per position; any current holder is moved to secondary.
+  //  - 'deputy'  (the designated deputy / acting officer per ISO 15189 §5 continuity):
+  //              one per position; any current deputy is moved to secondary.
+  //  - 'secondary': an additional non-primary assignment.
   router.post('/positions/:id/occupant', requirePermission('settings', 'edit'), (req, res) => {
     const db = getDb();
     const positionId = idOrNull(req.params.id);
     const staffId = idOrNull(req.body.staffId);
     if (!positionId || !db.prepare('SELECT id FROM positions WHERE id = ?').get(positionId)) return res.status(404).json({ error: 'Position not found' });
     if (!staffId || !db.prepare('SELECT id FROM staff WHERE id = ?').get(staffId)) return res.status(400).json({ error: 'Select a valid staff member.' });
-    const assignmentType = req.body.assignmentType === 'secondary' ? 'secondary' : 'primary';
+    const assignmentType = ['primary', 'deputy', 'secondary'].includes(req.body.assignmentType) ? req.body.assignmentType : 'primary';
     try {
       db.transaction(() => {
-        if (assignmentType === 'primary') {
-          db.prepare("UPDATE staff_position_assignments SET assignment_type = 'secondary' WHERE position_id = ? AND is_active = 1 AND assignment_type = 'primary'").run(positionId);
+        if (assignmentType === 'primary' || assignmentType === 'deputy') {
+          db.prepare('UPDATE staff_position_assignments SET assignment_type = ? WHERE position_id = ? AND is_active = 1 AND assignment_type = ?').run('secondary', positionId, assignmentType);
         }
         const existing = db.prepare('SELECT id FROM staff_position_assignments WHERE position_id = ? AND staff_id = ? AND is_active = 1').get(positionId, staffId) as any;
         if (existing) db.prepare('UPDATE staff_position_assignments SET assignment_type = ? WHERE id = ?').run(assignmentType, existing.id);

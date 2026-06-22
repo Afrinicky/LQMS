@@ -1244,47 +1244,78 @@ label {
 button.tiny { padding: 2px 8px; font-size: 11px; }
 
 /* ============================================================
-   Laboratory Organogram
+   Laboratory Organogram & Deputisation (ISO 15189 / WHO LQMS style)
    ============================================================ */
 .organogram-card .org-toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
-.org-chart { overflow-x: auto; padding: 14px 4px 6px; }
+.org-legend { display: flex; flex-wrap: wrap; gap: 16px; margin: 6px 0 12px; font-size: 12px; color: var(--muted); }
+.org-legend .leg { display: inline-flex; align-items: center; gap: 6px; }
+.org-swatch { width: 14px; height: 14px; border-radius: 4px; display: inline-block; border: 1px solid var(--border-strong); }
+.org-dep-dot { width: 14px; height: 14px; border-radius: 4px; display: inline-block; border: 1px dashed var(--c3); }
+.org-add-root { display: flex; gap: 8px; margin-bottom: 12px; max-width: 520px; }
+.org-add-root input { flex: 1; }
+
+/* Centered top-down tree with orthogonal connectors */
+.org-chart { overflow: auto; padding: 16px 8px 8px; }
 .org-tree, .org-tree ul { display: flex; justify-content: center; list-style: none; padding: 0; margin: 0; }
-.org-tree ul { position: relative; padding-top: 20px; }
-.org-tree li { list-style: none; position: relative; padding: 20px 10px 0; display: flex; flex-direction: column; align-items: center; }
+.org-tree ul { position: relative; padding-top: 24px; }
+.org-tree li { list-style: none; position: relative; padding: 24px 12px 0; display: flex; flex-direction: column; align-items: center; }
 .org-tree li::before, .org-tree li::after {
   content: ''; position: absolute; top: 0; right: 50%;
-  border-top: 2px solid var(--border-strong); width: 50%; height: 20px;
+  border-top: 2px solid var(--border-strong); width: 50%; height: 24px;
 }
 .org-tree li::after { right: auto; left: 50%; border-left: 2px solid var(--border-strong); }
 .org-tree li:only-child::after, .org-tree li:only-child::before { display: none; }
 .org-tree li:only-child { padding-top: 0; }
 .org-tree li:first-child::before, .org-tree li:last-child::after { border: 0 none; }
-.org-tree li:last-child::before { border-right: 2px solid var(--border-strong); border-radius: 0 6px 0 0; }
-.org-tree li:first-child::after { border-radius: 6px 0 0 0; }
-.org-tree ul ul::before { content: ''; position: absolute; top: 0; left: 50%; border-left: 2px solid var(--border-strong); width: 0; height: 20px; }
+.org-tree li:last-child::before { border-right: 2px solid var(--border-strong); border-radius: 0 7px 0 0; }
+.org-tree li:first-child::after { border-radius: 7px 0 0 0; }
+.org-tree ul ul::before { content: ''; position: absolute; top: 0; left: 50%; border-left: 2px solid var(--border-strong); width: 0; height: 24px; }
 .org-tree > li::before, .org-tree > li::after { display: none; }
 .org-tree > li { padding-top: 0; }
 
+/* Node card */
 .org-node {
-  display: flex; flex-direction: column; gap: 3px; min-width: 156px; max-width: 200px;
-  padding: 9px 12px; border: 1px solid var(--border-strong); border-radius: 9px;
-  background: var(--panel); color: var(--text); cursor: pointer; box-shadow: none; text-align: center;
-  transition: all 0.12s ease;
+  display: flex; flex-direction: column; gap: 3px; width: 172px;
+  padding: 10px 12px 10px 14px; border: 1px solid var(--border-strong); border-left-width: 4px; border-radius: 10px;
+  background: var(--panel); color: var(--text); cursor: pointer; box-shadow: var(--shadow-sm); text-align: left;
+  transition: border-color 0.12s ease, transform 0.12s ease;
 }
-.org-node:hover { border-color: var(--accent); }
-.org-node.selected { border-color: var(--accent-bright); box-shadow: var(--shadow-glow); background: var(--accent-soft); }
+.org-node:hover { transform: translateY(-1px); border-color: var(--accent); }
 .org-node.inactive { opacity: 0.5; }
-.org-title { font-weight: 600; font-size: 13px; line-height: 1.25; }
-.org-occupant { font-size: 11.5px; color: var(--muted); }
+.org-title { font-weight: 700; font-size: 12.5px; line-height: 1.25; }
+.org-holder { font-size: 11.5px; color: var(--text); }
+.org-holder.vacant { color: var(--warning); font-style: italic; }
+.org-deputy { font-size: 11px; color: var(--muted); }
+.org-deputy .muted { color: var(--faint); }
 
-.org-editor { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 14px; }
-.org-editor h5 { margin: 14px 0 6px; }
-.org-editor-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
-.org-editor .toggle { display: flex; align-items: center; gap: 8px; }
-.org-editor .toggle input { width: auto; }
-.org-assign { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
-.org-assign select { max-width: 260px; }
-.org-editor-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+/* Role-type accents */
+.org-node.rt-management { border-left-color: var(--accent-bright); }
+.org-node.rt-quality { border-left-color: var(--c4); }
+.org-node.rt-technical { border-left-color: var(--c2); }
+.org-node.rt-support { border-left-color: var(--c3); }
+.org-swatch.rt-management { background: var(--accent-bright); }
+.org-swatch.rt-quality { background: var(--c4); }
+.org-swatch.rt-technical { background: var(--c2); }
+.org-swatch.rt-support { background: var(--c3); }
+
+/* In-place node editor */
+.org-node-edit {
+  width: 250px; cursor: default; gap: 7px;
+  border-color: var(--accent-bright); box-shadow: var(--shadow-glow); background: var(--panel-2);
+}
+.org-title-input { font-weight: 700; font-size: 13px; width: 100%; padding: 5px 8px; }
+.org-edit-row { display: flex; align-items: center; gap: 6px; font-size: 11.5px; }
+.org-edit-row.wrap { flex-wrap: wrap; }
+.org-edit-row .lab { width: 64px; color: var(--muted); flex: none; }
+.org-edit-row select, .org-edit-row input { flex: 1; min-width: 0; padding: 4px 6px; font-size: 11.5px; }
+.org-edit-row .who { display: inline-flex; align-items: center; gap: 4px; }
+.org-edit-row .who.vacant { color: var(--warning); font-style: italic; }
+.org-edit-row.toggle { gap: 8px; }
+.org-edit-row.toggle input { flex: none; width: auto; }
+.org-node-edit .x { background: none; border: 0; box-shadow: none; color: var(--danger); padding: 0 2px; cursor: pointer; font-size: 13px; line-height: 1; }
+.org-newstaff { flex: none; font-size: 11px; white-space: nowrap; }
+.org-edit-actions { display: flex; justify-content: space-between; gap: 8px; margin-top: 2px; }
+
 .org-print-head { display: none; justify-content: space-between; align-items: baseline; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
 .org-print-head span { color: var(--muted); font-size: 12px; }
 
@@ -1295,7 +1326,14 @@ button.tiny { padding: 2px 8px; font-size: 11px; }
   .no-print { display: none !important; }
   .org-print-head { display: flex !important; color: #000; }
   .org-print-head span { color: #333; }
-  .org-node { background: #fff !important; color: #000 !important; border-color: #444 !important; box-shadow: none !important; }
-  .org-occupant { color: #333 !important; }
-  .org-tree li::before, .org-tree li::after, .org-tree ul ul::before { border-color: #444 !important; }
+  .org-chart { overflow: visible; }
+  .org-node { background: #fff !important; color: #000 !important; border-color: #888 !important; box-shadow: none !important; }
+  .org-node.rt-management { border-left-color: #2F6BFF !important; }
+  .org-node.rt-quality { border-left-color: #C98A12 !important; }
+  .org-node.rt-technical { border-left-color: #0E9F8E !important; }
+  .org-node.rt-support { border-left-color: #7C5CCB !important; }
+  .org-holder { color: #000 !important; }
+  .org-holder.vacant { color: #8a6d00 !important; }
+  .org-deputy { color: #333 !important; }
+  .org-tree li::before, .org-tree li::after, .org-tree ul ul::before { border-color: #888 !important; }
 }
