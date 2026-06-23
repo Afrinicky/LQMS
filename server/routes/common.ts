@@ -10,6 +10,7 @@ import { audit } from '../services/auditService.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
 import { parseIntNullable } from './routeHelpers.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
+import * as XLSX from 'xlsx';
 
 // archiver is loaded lazily inside the backup handler. Loading it at module
 // top level breaks the packaged Electron app under app.asar:
@@ -32,6 +33,23 @@ function idOrNull(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
   const n = Number(value);
   return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+// Compose a display full name as "First Other Surname" from the structured parts,
+// falling back to an explicit fullName when the parts are not supplied.
+function composeFullName(first?: unknown, surname?: unknown, other?: unknown, fallback?: unknown): string {
+  const parts = [first, other, surname].map(s => (s ?? '').toString().trim()).filter(Boolean);
+  if (parts.length) return parts.join(' ');
+  return (fallback ?? '').toString().trim();
+}
+
+// Staff Excel template columns and a best-effort splitter for legacy single-field names.
+const STAFF_XLSX_HEADERS = ['Employee No', 'First Name', 'Surname', 'Other Names', 'Email', 'Contact', 'Position', 'Reports To', 'Assigned Unit', 'Status'];
+function splitName(full?: string): { first: string; surname: string; other: string } {
+  const parts = (full ?? '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { first: '', surname: '', other: '' };
+  if (parts.length === 1) return { first: parts[0], surname: '', other: '' };
+  return { first: parts[0], surname: parts[parts.length - 1], other: parts.slice(1, -1).join(' ') };
 }
 
 export function commonRoutes() {
@@ -500,6 +518,48 @@ export function commonRoutes() {
   });
 
   router.get('/departments', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT id, name, is_active FROM departments ORDER BY name').all()));
+  router.post('/departments', requirePermission('settings', 'create'), (req, res) => {
+    if (!req.body.name || !String(req.body.name).trim()) return res.status(400).json({ error: 'A department name is required.' });
+    try {
+      const r = getDb().prepare('INSERT INTO departments (name) VALUES (?)').run(String(req.body.name).trim());
+      audit(req, { action: 'create', entity: 'departments', entityId: Number(r.lastInsertRowid), newValue: req.body });
+      res.status(201).json({ id: Number(r.lastInsertRowid) });
+    } catch (err) { res.status(400).json({ error: err instanceof Error && /UNIQUE/.test(err.message) ? 'A department with that name already exists.' : 'Failed to create department.' }); }
+  });
+  router.put('/departments/:id', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const old = db.prepare('SELECT * FROM departments WHERE id = ?').get(req.params.id);
+    if (!old) return res.status(404).json({ error: 'Department not found' });
+    db.prepare('UPDATE departments SET name = COALESCE(?, name), is_active = ? WHERE id = ?').run(req.body.name ? String(req.body.name).trim() : null, req.body.isActive === false ? 0 : 1, req.params.id);
+    audit(req, { action: 'edit', entity: 'departments', entityId: req.params.id, oldValue: old, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  // ===== My Laboratory — laboratory profile / identity =====
+  router.get('/laboratory-profile', requirePermission('settings', 'view'), (_req, res) => {
+    const row = getDb().prepare('SELECT * FROM laboratory_profile WHERE id = 1').get();
+    res.json(row ?? null);
+  });
+  router.put('/laboratory-profile', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const b = req.body ?? {};
+    const old = db.prepare('SELECT * FROM laboratory_profile WHERE id = 1').get() as any;
+    if (!old) {
+      if (!b.facilityName) return res.status(400).json({ error: 'Facility name is required.' });
+      db.prepare('INSERT INTO laboratory_profile (id, facility_name, short_name) VALUES (1, ?, ?)').run(String(b.facilityName), b.shortName ?? null);
+    }
+    const fields: Array<[string, string]> = [
+      ['facility_name', 'facilityName'], ['short_name', 'shortName'], ['address', 'address'], ['city', 'city'],
+      ['country', 'country'], ['phone', 'phone'], ['email', 'email'], ['website', 'website'],
+      ['registration_number', 'registrationNumber'], ['accreditation_body', 'accreditationBody'],
+      ['accreditation_number', 'accreditationNumber'], ['accreditation_status', 'accreditationStatus'], ['motto', 'motto'],
+    ];
+    for (const [col, key] of fields) {
+      if (b[key] !== undefined) db.prepare(`UPDATE laboratory_profile SET ${col} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1`).run(b[key] === '' ? null : b[key]);
+    }
+    audit(req, { action: 'edit', entity: 'laboratory_profile', entityId: 1, newValue: b });
+    res.json({ ok: true });
+  });
 
   router.get('/staff', requirePermission('personnel', 'view'), (_req, res) => res.json(getDb().prepare(`
     SELECT s.id, s.employee_no employeeNo, s.full_name fullName, s.email, s.phone, s.section_id sectionId, sec.name sectionName, s.is_active isActive,
@@ -526,14 +586,16 @@ export function commonRoutes() {
   // Access, Positions & Organogram, the Permission Matrix and Personnel Management.
   router.post('/staff/register', requirePermission('personnel', 'create'), (req, res) => {
     const db = getDb();
-    const { employeeNo, fullName, email, phone, sectionId, positionIds, primaryPositionId, createUser, username, password, roleId, authorizations, permissions } = req.body as {
+    const { firstName, surname, otherNames, employeeNo, fullName, email, phone, sectionId, positionIds, primaryPositionId, createUser, username, password, roleId, authorizations, permissions } = req.body as {
+      firstName?: string; surname?: string; otherNames?: string;
       employeeNo?: string; fullName?: string; email?: string; phone?: string; sectionId?: number | string | null;
       positionIds?: Array<number | string>; primaryPositionId?: number | string | null;
       createUser?: boolean; username?: string; password?: string; roleId?: number | string;
       authorizations?: Array<{ moduleKey: string; sectionId?: number | string | null; level: string }>;
       permissions?: Array<{ permissionId: number | string; allowed: boolean }>;
     };
-    if (!fullName || !String(fullName).trim()) return res.status(400).json({ error: 'fullName is required' });
+    const composedName = composeFullName(firstName, surname, otherNames, fullName);
+    if (!composedName) return res.status(400).json({ error: 'A staff name is required (first name and surname, or full name).' });
     if (createUser) {
       if (!username || !String(username).trim()) return res.status(400).json({ error: 'A username is required to create a login account.' });
       if (!password || String(password).length < 8) return res.status(400).json({ error: 'A password of at least 8 characters is required to create a login account.' });
@@ -543,10 +605,10 @@ export function commonRoutes() {
     }
     try {
       const out = db.transaction(() => {
-        const staffResult = db.prepare('INSERT INTO staff (employee_no, full_name, email, phone, section_id) VALUES (?, ?, ?, ?, ?)')
-          .run(employeeNo || null, String(fullName).trim(), email || null, phone || null, idOrNull(sectionId));
+        const staffResult = db.prepare('INSERT INTO staff (employee_no, full_name, first_name, surname, other_names, email, phone, section_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+          .run(employeeNo || null, composedName, (firstName || '').trim() || null, (surname || '').trim() || null, (otherNames || '').trim() || null, email || null, phone || null, idOrNull(sectionId));
         const staffId = Number(staffResult.lastInsertRowid);
-        audit(req, { action: 'create', entity: 'staff', entityId: staffId, newValue: { employeeNo, fullName, email, phone, sectionId } });
+        audit(req, { action: 'create', entity: 'staff', entityId: staffId, newValue: { employeeNo, fullName: composedName, email, phone, sectionId } });
 
         const allPositions = Array.from(new Set((positionIds ?? []).map(p => idOrNull(p)).filter((p): p is number => p !== null)));
         const primary = idOrNull(primaryPositionId) ?? allPositions[0] ?? null;
@@ -586,6 +648,32 @@ export function commonRoutes() {
     } catch (err) {
       res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to register staff member.' });
     }
+  });
+
+  // Export the full staff register as an Excel workbook (matches the import template).
+  // Registered before '/staff/:id' so the ":id" param route does not capture "export".
+  router.get('/staff/export', requirePermission('personnel', 'view'), (_req, res) => {
+    const db = getDb();
+    const rows = db.prepare(`
+      SELECT s.employee_no, s.full_name, s.first_name, s.surname, s.other_names, s.email, s.phone, sec.name AS section_name, s.is_active,
+        (SELECT p.title FROM staff_position_assignments spa JOIN positions p ON p.id = spa.position_id WHERE spa.staff_id = s.id AND spa.is_active = 1 ORDER BY CASE spa.assignment_type WHEN 'primary' THEN 0 ELSE 1 END, spa.id LIMIT 1) AS position_title,
+        (SELECT rp.title FROM staff_position_assignments spa JOIN positions p ON p.id = spa.position_id LEFT JOIN positions rp ON rp.id = p.reports_to_position_id WHERE spa.staff_id = s.id AND spa.is_active = 1 ORDER BY CASE spa.assignment_type WHEN 'primary' THEN 0 ELSE 1 END, spa.id LIMIT 1) AS reports_to_title
+      FROM staff s LEFT JOIN sections sec ON sec.id = s.section_id ORDER BY s.full_name`).all() as any[];
+    const data = rows.map(r => {
+      const n = (r.first_name || r.surname) ? { first: r.first_name || '', surname: r.surname || '', other: r.other_names || '' } : splitName(r.full_name);
+      return {
+        'Employee No': r.employee_no || '', 'First Name': n.first, 'Surname': n.surname, 'Other Names': n.other,
+        'Email': r.email || '', 'Contact': r.phone || '', 'Position': r.position_title || '',
+        'Reports To': r.reports_to_title || '', 'Assigned Unit': r.section_name || '', 'Status': r.is_active ? 'Active' : 'Inactive',
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(data.length ? data : [Object.fromEntries(STAFF_XLSX_HEADERS.map(h => [h, '']))], { header: STAFF_XLSX_HEADERS });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Staff');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="staff-export-${new Date().toISOString().slice(0, 10)}.xlsx"`);
+    res.send(buf);
   });
 
   // Full linkage profile for a staff member — surfaces every place the person is
@@ -655,6 +743,85 @@ export function commonRoutes() {
 
   const storage = multer.diskStorage({ destination: (_req, _file, cb) => cb(null, uploadRoot), filename: (_req, file, cb) => cb(null, safeStoredFilename(file.originalname)) });
   const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } });
+
+  // ===== People & Access — staff Excel import (export lives near the staff routes) =====
+  router.post('/staff/import', requirePermission('personnel', 'create'), upload.single('file'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const db = getDb();
+    let rows: Record<string, unknown>[] = [];
+    try {
+      const buf = fs.readFileSync(req.file.path);
+      const wb = XLSX.read(buf, { type: 'buffer', cellDates: false });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '', raw: false });
+    } catch {
+      return res.status(400).json({ error: 'Could not read the spreadsheet. Upload a .xlsx or .xls file based on the exported template.' });
+    } finally {
+      try { fs.unlinkSync(req.file.path); } catch { /* ignore */ }
+    }
+    const get = (row: Record<string, unknown>, ...keys: string[]) => {
+      for (const k of keys) { const hit = Object.keys(row).find(h => h.trim().toLowerCase() === k.toLowerCase()); if (hit && String(row[hit]).trim()) return String(row[hit]).trim(); }
+      return '';
+    };
+    const posByTitle = new Map<string, number>();
+    for (const p of db.prepare('SELECT id, title FROM positions').all() as any[]) posByTitle.set(String(p.title).toLowerCase(), p.id);
+    const secByName = new Map<string, number>();
+    for (const s of db.prepare('SELECT id, name FROM sections').all() as any[]) secByName.set(String(s.name).toLowerCase(), s.id);
+
+    const result = { created: 0, updated: 0, skipped: 0, errors: [] as string[] };
+    const tx = db.transaction(() => {
+      rows.forEach((row, idx) => {
+        const first = get(row, 'First Name', 'FirstName', 'First');
+        const surname = get(row, 'Surname', 'Last Name', 'LastName');
+        const other = get(row, 'Other Names', 'OtherNames', 'Middle Name');
+        const fullFromCol = get(row, 'Full Name', 'Name');
+        const fullName = composeFullName(first, surname, other, fullFromCol);
+        if (!fullName) { result.skipped++; return; }
+        const employeeNo = get(row, 'Employee No', 'EmployeeNo', 'Employee Number', 'Staff ID') || null;
+        const email = get(row, 'Email') || null;
+        const phone = get(row, 'Contact', 'Phone', 'Telephone') || null;
+        const positionTitle = get(row, 'Position', 'Role');
+        const unitName = get(row, 'Assigned Unit', 'Unit', 'Section');
+        const status = get(row, 'Status').toLowerCase();
+        const sectionId = unitName ? (secByName.get(unitName.toLowerCase()) ?? null) : null;
+        const positionId = positionTitle ? posByTitle.get(positionTitle.toLowerCase()) : undefined;
+        const isActive = status === 'inactive' || status === 'no' || status === '0' ? 0 : 1;
+        try {
+          const existing = employeeNo ? db.prepare('SELECT id FROM staff WHERE employee_no = ?').get(employeeNo) as any : null;
+          let staffId: number;
+          if (existing) {
+            db.prepare('UPDATE staff SET full_name = ?, first_name = ?, surname = ?, other_names = ?, email = ?, phone = ?, section_id = COALESCE(?, section_id), is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+              .run(fullName, first || null, surname || null, other || null, email, phone, sectionId, isActive, existing.id);
+            staffId = existing.id; result.updated++;
+          } else {
+            const r = db.prepare('INSERT INTO staff (employee_no, full_name, first_name, surname, other_names, email, phone, section_id, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+              .run(employeeNo, fullName, first || null, surname || null, other || null, email, phone, sectionId, isActive);
+            staffId = Number(r.lastInsertRowid); result.created++;
+          }
+          if (positionTitle && positionId == null && !posByTitle.has(positionTitle.toLowerCase())) {
+            const pr = db.prepare('INSERT INTO positions (title, is_active) VALUES (?, 1)').run(positionTitle);
+            posByTitle.set(positionTitle.toLowerCase(), Number(pr.lastInsertRowid));
+          }
+          const resolvedPos = positionTitle ? posByTitle.get(positionTitle.toLowerCase()) : undefined;
+          if (resolvedPos) {
+            const has = db.prepare("SELECT id FROM staff_position_assignments WHERE staff_id = ? AND position_id = ? AND is_active = 1").get(staffId, resolvedPos);
+            if (!has) db.prepare("INSERT INTO staff_position_assignments (staff_id, position_id, assignment_type) VALUES (?, ?, 'primary')").run(staffId, resolvedPos);
+            const reportsTo = get(row, 'Reports To', 'ReportsTo', 'Reporting Line');
+            if (reportsTo) {
+              let rtId = posByTitle.get(reportsTo.toLowerCase());
+              if (rtId == null) { const rr = db.prepare('INSERT INTO positions (title, is_active) VALUES (?, 1)').run(reportsTo); rtId = Number(rr.lastInsertRowid); posByTitle.set(reportsTo.toLowerCase(), rtId); }
+              if (rtId && rtId !== resolvedPos) db.prepare('UPDATE positions SET reports_to_position_id = COALESCE(reports_to_position_id, ?) WHERE id = ?').run(rtId, resolvedPos);
+            }
+          }
+        } catch (err) {
+          result.errors.push(`Row ${idx + 2}: ${err instanceof Error ? err.message : 'failed'}`);
+        }
+      });
+    });
+    tx();
+    audit(req, { action: 'import', entity: 'staff', newValue: { created: result.created, updated: result.updated, skipped: result.skipped } });
+    res.json(result);
+  });
   router.post('/files', requirePermission('documents', 'create'), upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const r = getDb().prepare('INSERT INTO files (original_name, stored_name, mime_type, size_bytes, storage_area, uploaded_by) VALUES (?, ?, ?, ?, ?, ?)').run(req.file.originalname, req.file.filename, req.file.mimetype, req.file.size, 'uploads', req.user!.id);
@@ -836,6 +1003,29 @@ export function commonRoutes() {
     db.prepare('UPDATE sections SET is_active = ? WHERE id = ?').run(next, req.params.id);
     audit(req, { action: next ? 'activate' : 'deactivate', entity: 'sections', entityId: req.params.id, oldValue: { is_active: sec.is_active }, newValue: { is_active: next } });
     res.json({ ok: true, isActive: next });
+  });
+
+  // Delete a unit/section. If the unit is referenced by other records (staff,
+  // tests, equipment, inventory, services) it is deactivated instead of hard
+  // deleted, to protect referential integrity across the system.
+  router.delete('/section-config/sections/:id', requirePermission('settings', 'void_archive'), (req, res) => {
+    const db = getDb();
+    const sec = db.prepare('SELECT id FROM sections WHERE id = ?').get(req.params.id);
+    if (!sec) return res.status(404).json({ error: 'Unit not found' });
+    const refs =
+      (db.prepare('SELECT COUNT(*) c FROM staff WHERE section_id = ?').get(req.params.id) as any).c +
+      (db.prepare('SELECT COUNT(*) c FROM lab_test_catalog WHERE section_id = ?').get(req.params.id) as any).c +
+      (db.prepare('SELECT COUNT(*) c FROM equipment_items WHERE section_id = ?').get(req.params.id) as any).c +
+      (db.prepare('SELECT COUNT(*) c FROM inventory_items WHERE section_id = ?').get(req.params.id) as any).c;
+    if (refs > 0) {
+      db.prepare('UPDATE sections SET is_active = 0 WHERE id = ?').run(req.params.id);
+      audit(req, { action: 'deactivate', entity: 'sections', entityId: req.params.id, newValue: { reason: 'in use', references: refs } });
+      return res.json({ ok: true, deactivated: true, message: `This unit is referenced by ${refs} record(s), so it was deactivated instead of deleted.` });
+    }
+    db.prepare('DELETE FROM section_services WHERE section_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM sections WHERE id = ?').run(req.params.id);
+    audit(req, { action: 'delete', entity: 'sections', entityId: req.params.id });
+    res.json({ ok: true, deactivated: false });
   });
 
   router.get('/section-config/sections/:id', requirePermission('settings', 'view'), (req, res) => {

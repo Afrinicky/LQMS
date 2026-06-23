@@ -1337,3 +1337,8 @@ button.tiny { padding: 2px 8px; font-size: 11px; }
   .org-deputy { color: #333 !important; }
   .org-tree li::before, .org-tree li::after, .org-tree ul ul::before { border-color: #888 !important; }
 }
+
+/* Settings merged modules (People & Access, System) */
+.settings-module-head h2 { margin: 0 0 4px; font-size: 18px; }
+.settings-module-head p { margin: 0 0 6px; color: var(--muted); font-size: 13.5px; }
+.people-tab-body { margin-top: 6px; }

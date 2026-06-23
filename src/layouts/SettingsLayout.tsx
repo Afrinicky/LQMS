@@ -1,23 +1,18 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import {
-  Users, UserPlus, Network, ShieldCheck, ToggleRight, FileUp, Paperclip, ListChecks,
-  DatabaseBackup, MonitorSmartphone, Microscope,
+  Users, Building2, Microscope, SlidersHorizontal, FileUp, Paperclip, ListChecks,
 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import type { LucideIcon } from 'lucide-react';
 
 const items: { to: string; label: string; Icon: LucideIcon }[] = [
-  { to: '/settings/register-staff', label: 'Register New Staff', Icon: UserPlus },
-  { to: '/settings/users', label: 'Users & Access', Icon: Users },
-  { to: '/settings/positions', label: 'Positions & Organogram', Icon: Network },
+  { to: '/settings/laboratory', label: 'My Laboratory', Icon: Building2 },
+  { to: '/settings/people', label: 'People & Access', Icon: Users },
   { to: '/settings/sections', label: 'Section/Unit Configuration', Icon: Microscope },
-  { to: '/settings/permissions', label: 'Permission Matrix', Icon: ShieldCheck },
-  { to: '/settings/modules', label: 'System Modules Toggle', Icon: ToggleRight },
+  { to: '/settings/system', label: 'System', Icon: SlidersHorizontal },
   { to: '/settings/document-import', label: 'Document Master List Import', Icon: FileUp },
   { to: '/settings/evidence', label: 'Evidence Upload', Icon: Paperclip },
   { to: '/settings/actions', label: 'Action Tracker', Icon: ListChecks },
-  { to: '/settings/backup', label: 'Backup & Restore', Icon: DatabaseBackup },
-  { to: '/settings/devices', label: 'Device Access / Pairing', Icon: MonitorSmartphone },
 ];
 
 export default function SettingsLayout() {
