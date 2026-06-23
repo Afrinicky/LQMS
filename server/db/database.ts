@@ -2347,4 +2347,24 @@ CREATE TABLE IF NOT EXISTS section_services (
   updated_at TEXT
 );
 `);
+
+  // People & Access: structured staff name parts (used by the staff Excel
+  // import/export) alongside the canonical full_name.
+  const staffColumns = database.prepare("PRAGMA table_info(staff)").all() as Array<{ name: string }>;
+  const staffColNames = new Set(staffColumns.map(col => col.name));
+  if (!staffColNames.has('first_name')) database.exec('ALTER TABLE staff ADD COLUMN first_name TEXT');
+  if (!staffColNames.has('surname')) database.exec('ALTER TABLE staff ADD COLUMN surname TEXT');
+  if (!staffColNames.has('other_names')) database.exec('ALTER TABLE staff ADD COLUMN other_names TEXT');
+
+  // My Laboratory: extend the single-row laboratory_profile with identity and
+  // accreditation fields so each laboratory can fully configure its own details.
+  const labColumns = database.prepare("PRAGMA table_info(laboratory_profile)").all() as Array<{ name: string }>;
+  const labColNames = new Set(labColumns.map(col => col.name));
+  for (const [col, type] of [
+    ['address', 'TEXT'], ['city', 'TEXT'], ['country', 'TEXT'], ['phone', 'TEXT'], ['email', 'TEXT'],
+    ['website', 'TEXT'], ['registration_number', 'TEXT'], ['accreditation_body', 'TEXT'],
+    ['accreditation_number', 'TEXT'], ['accreditation_status', 'TEXT'], ['motto', 'TEXT'], ['logo_file_id', 'INTEGER'],
+  ] as const) {
+    if (!labColNames.has(col)) database.exec(`ALTER TABLE laboratory_profile ADD COLUMN ${col} ${type}`);
+  }
 }

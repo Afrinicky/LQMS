@@ -7,7 +7,7 @@ import { ModuleProvider } from './hooks/useModules';
 import { API_BASE, getSetupStatus } from './services/api';
 import { LoginPage, SetupPage } from './pages/AuthPages';
 import { Dashboard, Home, ModulePage, Organisation } from './pages/CorePages';
-import { ActionTracker, BackupRestore, Devices, DocumentImport, EvidenceUpload, ModuleToggles, PermissionMatrix, Positions, RegisterStaff, SectionConfig, UsersAccess } from './pages/SettingsPages';
+import { ActionTracker, DocumentImport, EvidenceUpload, MyLaboratory, PeopleAccess, SectionConfig, SystemSettings } from './pages/SettingsPages';
 import { NcCapaPage, ComplaintsPage, RisksPage, QmsActionTracker } from './pages/QMSPages';
 import { MODULES } from '../shared/constants/modules';
 import { FlaskConical, TriangleAlert } from 'lucide-react';
@@ -201,18 +201,22 @@ function AppRoutes() {
       <Route path="/information-management" element={<Suspense fallback={<ModuleFallback/>}><InformationManagementPage/></Suspense>}/>
       {placeholders.map(m => <Route key={m.key} path={m.path.slice(1)} element={<ModulePage moduleKey={m.key} title={m.label} placeholder/>}/>)}
       <Route path="/settings" element={<SettingsLayout/>}>
-        <Route index element={<Navigate to="register-staff"/>}/>
-        <Route path="register-staff" element={<RegisterStaff/>}/>
-        <Route path="users" element={<UsersAccess/>}/>
-        <Route path="positions" element={<Positions/>}/>
+        <Route index element={<Navigate to="laboratory"/>}/>
+        <Route path="laboratory" element={<MyLaboratory/>}/>
+        <Route path="people" element={<PeopleAccess/>}/>
         <Route path="sections" element={<SectionConfig/>}/>
-        <Route path="permissions" element={<PermissionMatrix/>}/>
-        <Route path="modules" element={<ModuleToggles/>}/>
+        <Route path="system" element={<SystemSettings/>}/>
         <Route path="document-import" element={<DocumentImport/>}/>
         <Route path="evidence" element={<EvidenceUpload/>}/>
         <Route path="actions" element={<ActionTracker/>}/>
-        <Route path="backup" element={<BackupRestore/>}/>
-        <Route path="devices" element={<Devices/>}/>
+        {/* legacy deep links → People & Access */}
+        <Route path="register-staff" element={<Navigate to="/settings/people" replace/>}/>
+        <Route path="users" element={<Navigate to="/settings/people" replace/>}/>
+        <Route path="positions" element={<Navigate to="/settings/people" replace/>}/>
+        <Route path="permissions" element={<Navigate to="/settings/people" replace/>}/>
+        <Route path="modules" element={<Navigate to="/settings/system" replace/>}/>
+        <Route path="backup" element={<Navigate to="/settings/system" replace/>}/>
+        <Route path="devices" element={<Navigate to="/settings/system" replace/>}/>
       </Route>
     </Route>
     <Route path="*" element={<Navigate to="/home"/>}/>

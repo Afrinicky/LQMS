@@ -1,12 +1,32 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '../services/api';
+import { api, API_BASE, getToken } from '../services/api';
 import { MODULES, PERMISSION_ACTIONS, TECHNICAL_AUTHORIZATION_LEVELS } from '../../shared/constants/modules';
 import type {
   Position, Staff, SystemModule, ApiUser, Permission, Section, Device,
   Department, PermissionMatrixData, TechnicalAuthorizationRow, StaffProfile,
   SectionConfigRow, SectionConfigDetail,
 } from '../../shared/types/api';
+
+// Maps an organogram position title to the lab role(s) whose default permissions
+// it should inherit, so that selecting a position pre-fills the authorization grid
+// even when the position title is not an exact role name.
+const POSITION_ROLE_MAP: Record<string, string> = {
+  'haematology unit head': 'Section Head',
+  'biochemistry unit head': 'Section Head',
+  'microbiology unit head': 'Section Head',
+  'blood bank unit head': 'Blood Bank Unit Head',
+  'customer service officer': 'Quality User',
+  'stores officer': 'Quality User',
+  'secretary': 'Quality User',
+};
+function effectiveRoleNames(title: string): string[] {
+  const t = title.toLowerCase().trim();
+  const names = new Set<string>([t]);
+  if (POSITION_ROLE_MAP[t]) names.add(POSITION_ROLE_MAP[t].toLowerCase());
+  if (/unit head|head of/.test(t)) names.add('section head');
+  return [...names];
+}
 
 // ---------------------------------------------------------------------------
 // Register New Staff
@@ -26,7 +46,7 @@ export function RegisterStaff() {
   const [success, setSuccess] = useState<string | null>(null);
   const [profile, setProfile] = useState<StaffProfile | null>(null);
 
-  const blank = { employeeNo: '', fullName: '', email: '', phone: '', sectionId: '', primaryPositionId: '' };
+  const blank = { firstName: '', surname: '', otherNames: '', employeeNo: '', email: '', phone: '', sectionId: '', primaryPositionId: '' };
   const [form, setForm] = useState(blank);
   const [positionIds, setPositionIds] = useState<number[]>([]);
   const [createUser, setCreateUser] = useState(false);
@@ -53,8 +73,11 @@ export function RegisterStaff() {
     for (const pp of matrix.positionPermissions) {
       if (pp.allowed === 1 && positionIds.includes(pp.position_id)) set.add(pp.permission_id);
     }
-    const selectedTitles = new Set(positions.filter(p => positionIds.includes(p.id)).map(p => p.title.toLowerCase()));
-    const roleIds = new Set(roles.filter(r => selectedTitles.has(r.name.toLowerCase())).map(r => r.id));
+    const wantedRoleNames = new Set<string>();
+    for (const p of positions.filter(p => positionIds.includes(p.id))) {
+      for (const rn of effectiveRoleNames(p.title)) wantedRoleNames.add(rn);
+    }
+    const roleIds = new Set(roles.filter(r => wantedRoleNames.has(r.name.toLowerCase())).map(r => r.id));
     for (const rp of matrix.rolePermissions) {
       if (rp.allowed === 1 && roleIds.has(rp.role_id)) set.add(rp.permission_id);
     }
@@ -97,8 +120,10 @@ export function RegisterStaff() {
       const ids = new Set<number>([...baseline, ...Object.keys(perm).map(Number)]);
       ids.forEach(id => { const on = !!perm[id]; if (on !== baseline.has(id)) permissions.push({ permissionId: id, allowed: on }); });
       const payload = {
+        firstName: form.firstName,
+        surname: form.surname,
+        otherNames: form.otherNames || null,
         employeeNo: form.employeeNo || null,
-        fullName: form.fullName,
         email: form.email || null,
         phone: form.phone || null,
         sectionId: form.sectionId || null,
@@ -136,7 +161,9 @@ export function RegisterStaff() {
         <fieldset className="reg-section">
           <legend>Personal &amp; role details</legend>
           <div className="form-grid">
-            <label>Full name<input value={form.fullName} onChange={e => setForm({ ...form, fullName: e.target.value })} required /></label>
+            <label>First name<input value={form.firstName} onChange={e => setForm({ ...form, firstName: e.target.value })} required /></label>
+            <label>Surname<input value={form.surname} onChange={e => setForm({ ...form, surname: e.target.value })} required /></label>
+            <label>Other names<input value={form.otherNames} onChange={e => setForm({ ...form, otherNames: e.target.value })} placeholder="Optional" /></label>
             <label>Employee no<input value={form.employeeNo} onChange={e => setForm({ ...form, employeeNo: e.target.value })} placeholder="Optional" /></label>
             <label>Email<input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="Used for self-link to login" /></label>
             <label>Phone<input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></label>
@@ -230,20 +257,20 @@ export function RegisterStaff() {
 
       <h4>Login account (Users &amp; Access)</h4>
       {profile.account
-        ? <p>{profile.account.username} — role <span className="badge">{profile.account.role_name}</span> {profile.account.is_active ? '' : '(disabled)'} · <Link to="/settings/users">Manage in Users &amp; Access</Link></p>
-        : <p className="hint">No login account linked. <Link to="/settings/users">Create one in Users &amp; Access</Link>.</p>}
+        ? <p>{profile.account.username} — role <span className="badge">{profile.account.role_name}</span> {profile.account.is_active ? '' : '(disabled)'} · <Link to="/settings/people">Manage in Users &amp; Access</Link></p>
+        : <p className="hint">No login account linked. <Link to="/settings/people">Create one in Users &amp; Access</Link>.</p>}
 
       <h4>Positions &amp; organogram</h4>
       {profile.positions.length > 0
         ? <ul className="link-list">{profile.positions.map(p => <li key={p.id}><strong>{p.title}</strong> <span className="badge">{p.assignment_type}</span>{p.reports_to_title ? ` → reports to ${p.reports_to_title}` : ''}{p.is_active ? '' : ' (inactive)'}</li>)}</ul>
-        : <p className="hint">No positions assigned. <Link to="/settings/positions">Assign in Positions &amp; Organogram</Link>.</p>}
+        : <p className="hint">No positions assigned. <Link to="/settings/people">Assign in Positions &amp; Organogram</Link>.</p>}
 
       <h4>Technical authorizations &amp; section scope (Permission Matrix)</h4>
       {profile.authorizations.length > 0
         ? <table className="data-table"><thead><tr><th>Module</th><th>Section</th><th>Level</th><th>Status</th><th>Expires</th></tr></thead><tbody>
             {profile.authorizations.map(a => <tr key={a.id}><td>{moduleLabel(a.module_key)}</td><td>{a.section_name || 'All sections'}</td><td><span className="badge">{a.level}</span></td><td>{a.is_active ? <span className="badge active">active</span> : <span className="badge inactive">inactive</span>}</td><td>{a.expires_at || '—'}</td></tr>)}
           </tbody></table>
-        : <p className="hint">No technical authorizations. <Link to="/settings/permissions">Add in Permission Matrix → Section Scope</Link>.</p>}
+        : <p className="hint">No technical authorizations. <Link to="/settings/people">Add in Permission Matrix → Section Scope</Link>.</p>}
 
       <h4>Personnel activity</h4>
       <div className="cards">
@@ -280,7 +307,7 @@ export function UsersAccess(){
   }
   const unlinkedStaff = staff.filter(s => !s.userId);
   return <div className="card"><h3>Users &amp; Access</h3>
-    <p>Create login accounts and link them to staff records. To onboard a whole new person (staff + account + positions) use <Link to="/settings/register-staff">Register New Staff</Link>.</p>
+    <p>Create login accounts and link them to staff records. To onboard a whole new person (staff + account + positions) use <Link to="/settings/people">Register New Staff</Link>.</p>
     {error && <div className="error">{error}</div>}
     <form className="form" onSubmit={submit}>
       <label>Full name<input name="fullName" required/></label>
@@ -352,7 +379,7 @@ export function Positions(){
     {error && <div className="error">{error}</div>}
 
     {view==='list' && <div className="grid cols-2">
-      <div className="card"><h3>Positions &amp; Organogram</h3><p>Create positions and assign reporting lines. Not every laboratory has every position — deactivate the ones you don't use. Staff are mapped here and during <Link to="/settings/register-staff">Register New Staff</Link>.</p>
+      <div className="card"><h3>Positions &amp; Organogram</h3><p>Create positions and assign reporting lines. Not every laboratory has every position — deactivate the ones you don't use. Staff are mapped here and during <Link to="/settings/people">Register New Staff</Link>.</p>
         <form className="form" onSubmit={addPosition}>
           <label>Position title<input name="title" required/></label>
           <label>Description<textarea name="description"/></label>
@@ -528,7 +555,7 @@ function OrgNodeEditor({ node, ctx }: { node: OrgNodeData; ctx: OrgCtx }) {
         <option value="" disabled>{holder ? 'Change holder…' : 'Assign holder…'}</option>
         {freeStaff.map(s=><option key={s.id} value={s.id}>{s.fullName}</option>)}
       </select>
-      <Link className="org-newstaff" to="/settings/register-staff" title="Create and link a new staff member">+ New</Link>
+      <Link className="org-newstaff" to="/settings/people" title="Create and link a new staff member">+ New</Link>
     </div>
 
     <div className="org-edit-row">
@@ -612,6 +639,16 @@ export function SectionConfig() {
     const ok = await call('/section-config/sections', { method: 'POST', body: JSON.stringify(newForm) }, 'Unit created.');
     if (ok) { setNewForm({ name: '', departmentId: '', code: '', operatingHours: '', headStaffId: '', serviceSummary: '', description: '' }); setShowNew(false); }
   }
+  async function deleteSection() {
+    if (selectedId == null) return;
+    if (!window.confirm('Delete this unit? If it is referenced by staff, tests, equipment or stock it will be deactivated instead of deleted.')) return;
+    setError(null); setSuccess(null);
+    try {
+      const r = await api<{ deactivated?: boolean; message?: string }>(`/section-config/sections/${selectedId}`, { method: 'DELETE' });
+      setSuccess(r?.message || (r?.deactivated ? 'Unit deactivated (it is in use).' : 'Unit deleted.'));
+      setSelectedId(null); setDetail(null); loadSections();
+    } catch (e) { setError((e as Error).message); }
+  }
 
   return <div className="section-config">
     <div className="card">
@@ -662,15 +699,16 @@ export function SectionConfig() {
       subtab={subtab}
       onSubtab={setSubtab}
       onClose={() => { setSelectedId(null); setDetail(null); }}
+      onDelete={deleteSection}
       call={call}
       sectionId={selectedId}
     />}
   </div>;
 }
 
-function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onClose, call, sectionId }: {
+function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onClose, onDelete, call, sectionId }: {
   detail: SectionConfigDetail; departments: Department[]; staff: Staff[]; subtab: SectionSubtab;
-  onSubtab: (t: SectionSubtab) => void; onClose: () => void;
+  onSubtab: (t: SectionSubtab) => void; onClose: () => void; onDelete: () => void;
   call: (path: string, options: RequestInit, okMsg?: string) => Promise<boolean>; sectionId: number;
 }) {
   const s = detail.section;
@@ -687,6 +725,7 @@ function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onCl
       <h3>{s.name} {s.is_active ? '' : <span className="badge inactive">inactive</span>}</h3>
       <div>
         <button className="secondary" onClick={() => call(`/section-config/sections/${sectionId}/toggle`, { method: 'POST' }, s.is_active ? 'Unit deactivated.' : 'Unit activated.')}>{s.is_active ? 'Deactivate unit' : 'Activate unit'}</button>
+        <button className="secondary" onClick={onDelete}>Delete unit</button>
         <button className="secondary" onClick={onClose}>Close</button>
       </div>
     </div>
@@ -799,7 +838,7 @@ function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onCl
     </>}
 
     {subtab === 'Staff' && <>
-      <p className="hint">Staff assigned to this unit. Assign people to a unit during <Link to="/settings/register-staff">Register New Staff</Link> or in <Link to="/personnel">Personnel Management</Link>.</p>
+      <p className="hint">Staff assigned to this unit. Assign people to a unit during <Link to="/settings/people">Register New Staff</Link> or in <Link to="/personnel">Personnel Management</Link>.</p>
       <table className="data-table"><thead><tr><th>Name</th><th>Employee no</th><th>Status</th></tr></thead><tbody>
         {detail.staff.map(p => <tr key={p.id}><td>{p.full_name}</td><td>{p.employee_no || '—'}</td><td>{p.is_active ? <span className="badge active">active</span> : <span className="badge inactive">inactive</span>}</td></tr>)}
         {detail.staff.length === 0 && <tr><td colSpan={3} className="hint">No staff assigned to this unit yet.</td></tr>}
@@ -1163,5 +1202,212 @@ export function Devices(){
       <button>Request pairing code</button>
     </form>
     <table className="table"><thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Code</th><th>Actions</th></tr></thead><tbody>{devices.map(d=><tr key={d.id}><td>{d.name}</td><td>{d.type}</td><td>{d.status}</td><td>{d.device_code}</td><td><button onClick={()=>deviceAction(d.id,'approve')} disabled={d.status==='approved'}>Approve</button> <button onClick={()=>deviceAction(d.id,'revoke')} disabled={d.status==='revoked'}>Revoke</button> <button onClick={()=>deviceAction(d.id,'block')} disabled={d.status==='blocked'}>Block</button></td></tr>)}</tbody></table>
+  </div>;
+}
+
+// ---------------------------------------------------------------------------
+// People & Access  (merged module: everything about staff, users, positions,
+// the organogram, the permission matrix, and staff Excel import/export)
+// ---------------------------------------------------------------------------
+const PEOPLE_TABS = ['Register New Staff', 'Users & Access', 'Positions & Organogram', 'Permission Matrix', 'Import / Export'] as const;
+type PeopleTab = typeof PEOPLE_TABS[number];
+
+export function PeopleAccess() {
+  const [tab, setTab] = useState<PeopleTab>('Register New Staff');
+  return <div className="settings-module">
+    <div className="settings-module-head">
+      <h2>People &amp; Access</h2>
+      <p>One place for everyone who works in the laboratory: register staff, manage login accounts, the positions &amp; organogram, the authorization matrix, and bulk import/export of the staff register.</p>
+    </div>
+    <div className="tabs">{PEOPLE_TABS.map(t => <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>)}</div>
+    <div className="people-tab-body">
+      {tab === 'Register New Staff' && <RegisterStaff />}
+      {tab === 'Users & Access' && <UsersAccess />}
+      {tab === 'Positions & Organogram' && <Positions />}
+      {tab === 'Permission Matrix' && <PermissionMatrix />}
+      {tab === 'Import / Export' && <StaffImportExport />}
+    </div>
+  </div>;
+}
+
+// Staff register Excel import / export.
+function StaffImportExport() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<{ created: number; updated: number; skipped: number; errors: string[] } | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+
+  async function download() {
+    setError(null);
+    try {
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/staff/export`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({ error: res.statusText }))).error ?? res.statusText);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `staff-export-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  async function upload(e: FormEvent) {
+    e.preventDefault(); setError(null); setResult(null);
+    if (!file) { setError('Choose a .xlsx file first.'); return; }
+    setBusy(true);
+    try {
+      const fd = new FormData(); fd.append('file', file);
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/staff/import`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? res.statusText);
+      setResult(data); setFile(null);
+    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  }
+
+  return <div className="grid cols-2">
+    <div className="card">
+      <h3>Export staff register</h3>
+      <p>Download all staff as an Excel workbook — names (First, Surname, Other), employee no, email, contact, position, reporting line, assigned unit and status. Edit or append rows and import it back.</p>
+      <button onClick={download}>Download staff (.xlsx)</button>
+    </div>
+    <div className="card">
+      <h3>Import staff register</h3>
+      <p>Upload a completed template. Rows are matched by <strong>Employee No</strong> — existing records are updated, new ones are created. Positions and reporting lines are created and linked automatically.</p>
+      {error && <div className="error">{error}</div>}
+      <form className="form" onSubmit={upload}>
+        <label>Excel file (.xlsx)<input type="file" accept=".xlsx,.xls" onChange={e => setFile(e.target.files?.[0] ?? null)} /></label>
+        <button type="submit" disabled={busy}>{busy ? 'Importing…' : 'Import staff'}</button>
+      </form>
+      {result && <div className="notice-ok">Import complete — {result.created} created, {result.updated} updated, {result.skipped} skipped{result.errors.length ? `, ${result.errors.length} error(s)` : ''}.{result.errors.length > 0 && <ul className="link-list">{result.errors.slice(0, 8).map((er, i) => <li key={i}>{er}</li>)}</ul>}</div>}
+    </div>
+  </div>;
+}
+
+// ---------------------------------------------------------------------------
+// My Laboratory  (laboratory identity / profile + departments)
+// ---------------------------------------------------------------------------
+export function MyLaboratory() {
+  const blank = { facilityName: '', shortName: '', motto: '', registrationNumber: '', address: '', city: '', country: '', phone: '', email: '', website: '', accreditationBody: '', accreditationNumber: '', accreditationStatus: '' };
+  const [form, setForm] = useState(blank);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  function load() {
+    api<Record<string, unknown> | null>('/laboratory-profile').then(p => {
+      if (!p) return;
+      setForm({
+        facilityName: String(p.facility_name ?? ''), shortName: String(p.short_name ?? ''), motto: String(p.motto ?? ''),
+        registrationNumber: String(p.registration_number ?? ''), address: String(p.address ?? ''), city: String(p.city ?? ''),
+        country: String(p.country ?? ''), phone: String(p.phone ?? ''), email: String(p.email ?? ''), website: String(p.website ?? ''),
+        accreditationBody: String(p.accreditation_body ?? ''), accreditationNumber: String(p.accreditation_number ?? ''), accreditationStatus: String(p.accreditation_status ?? ''),
+      });
+    }).catch(() => undefined);
+    api<Department[]>('/departments').then(setDepartments).catch(() => setDepartments([]));
+  }
+  useEffect(() => { load(); }, []);
+
+  async function save(e: FormEvent) {
+    e.preventDefault(); setError(null); setSuccess(null);
+    try { await api('/laboratory-profile', { method: 'PUT', body: JSON.stringify(form) }); setSuccess('Laboratory profile saved.'); }
+    catch (err) { setError((err as Error).message); }
+  }
+  async function addDepartment(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault(); setError(null);
+    const fd = new FormData(e.currentTarget);
+    try { await api('/departments', { method: 'POST', body: JSON.stringify({ name: fd.get('name') }) }); e.currentTarget.reset(); load(); }
+    catch (err) { setError((err as Error).message); }
+  }
+  async function toggleDepartment(d: Department) {
+    try { await api(`/departments/${d.id}`, { method: 'PUT', body: JSON.stringify({ isActive: d.is_active ? false : true }) }); load(); }
+    catch (err) { setError((err as Error).message); }
+  }
+
+  return <div className="grid cols-2">
+    <div className="card">
+      <h3>My Laboratory</h3>
+      <p>Your laboratory's identity and accreditation details. This is where each laboratory configures its own profile so the software can be used by any facility.</p>
+      {error && <div className="error">{error}</div>}
+      {success && <div className="notice-ok">{success}</div>}
+      <form className="form" onSubmit={save}>
+        <fieldset className="reg-section"><legend>Identity</legend>
+          <div className="form-grid">
+            <label>Facility name<input value={form.facilityName} onChange={e => setForm({ ...form, facilityName: e.target.value })} required /></label>
+            <label>Short name<input value={form.shortName} onChange={e => setForm({ ...form, shortName: e.target.value })} /></label>
+            <label>Motto / tagline<input value={form.motto} onChange={e => setForm({ ...form, motto: e.target.value })} /></label>
+            <label>Registration no<input value={form.registrationNumber} onChange={e => setForm({ ...form, registrationNumber: e.target.value })} /></label>
+          </div>
+        </fieldset>
+        <fieldset className="reg-section"><legend>Contact</legend>
+          <div className="form-grid">
+            <label>Address<input value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} /></label>
+            <label>City / town<input value={form.city} onChange={e => setForm({ ...form, city: e.target.value })} /></label>
+            <label>Country<input value={form.country} onChange={e => setForm({ ...form, country: e.target.value })} /></label>
+            <label>Phone<input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></label>
+            <label>Email<input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></label>
+            <label>Website<input value={form.website} onChange={e => setForm({ ...form, website: e.target.value })} /></label>
+          </div>
+        </fieldset>
+        <fieldset className="reg-section"><legend>Accreditation</legend>
+          <div className="form-grid">
+            <label>Accreditation body<input value={form.accreditationBody} onChange={e => setForm({ ...form, accreditationBody: e.target.value })} placeholder="e.g. SANAS, KENAS, ISO 15189" /></label>
+            <label>Accreditation no<input value={form.accreditationNumber} onChange={e => setForm({ ...form, accreditationNumber: e.target.value })} /></label>
+            <label>Status<select value={form.accreditationStatus} onChange={e => setForm({ ...form, accreditationStatus: e.target.value })}><option value="">—</option><option>Accredited</option><option>In progress</option><option>Not accredited</option><option>Suspended</option></select></label>
+          </div>
+        </fieldset>
+        <button type="submit">Save laboratory profile</button>
+      </form>
+    </div>
+    <div className="card">
+      <h3>Departments</h3>
+      <p>Top-level departments. Sections/units (configured under Section/Unit Configuration) belong to a department.</p>
+      <form className="form" onSubmit={addDepartment}>
+        <label>New department<input name="name" required placeholder="e.g. Laboratory, Pathology" /></label>
+        <button>Add department</button>
+      </form>
+      <table className="data-table"><thead><tr><th>Name</th><th>Status</th><th></th></tr></thead><tbody>
+        {departments.map(d => <tr key={d.id}><td>{d.name}</td><td>{d.is_active ? <span className="badge active">active</span> : <span className="badge inactive">inactive</span>}</td><td><button className="secondary" onClick={() => toggleDepartment(d)}>{d.is_active ? 'Deactivate' : 'Activate'}</button></td></tr>)}
+        {departments.length === 0 && <tr><td colSpan={3} className="hint">No departments yet.</td></tr>}
+      </tbody></table>
+    </div>
+  </div>;
+}
+
+// ---------------------------------------------------------------------------
+// System  (system-level settings: modules, backups, devices)
+// ---------------------------------------------------------------------------
+const SYSTEM_TABS = ['Overview', 'System Modules', 'Backup & Restore', 'Device Access / Pairing'] as const;
+type SystemTab = typeof SYSTEM_TABS[number];
+
+export function SystemSettings() {
+  const [tab, setTab] = useState<SystemTab>('Overview');
+  return <div className="settings-module">
+    <div className="settings-module-head">
+      <h2>System</h2>
+      <p>System-level configuration for this laboratory's deployment: enabled modules, backups, and LAN device access.</p>
+    </div>
+    <div className="tabs">{SYSTEM_TABS.map(t => <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>)}</div>
+    <div className="people-tab-body">
+      {tab === 'Overview' && <SystemOverview />}
+      {tab === 'System Modules' && <ModuleToggles />}
+      {tab === 'Backup & Restore' && <BackupRestore />}
+      {tab === 'Device Access / Pairing' && <Devices />}
+    </div>
+  </div>;
+}
+
+function SystemOverview() {
+  const [modules, setModules] = useState<SystemModule[]>([]);
+  useEffect(() => { api<SystemModule[]>('/system-modules').then(setModules).catch(() => setModules([])); }, []);
+  const enabled = modules.filter(m => m.enabled).length;
+  return <div>
+    <p>This is a multi-laboratory quality management system — each facility configures its own <Link to="/settings/laboratory">My Laboratory</Link> profile, <Link to="/settings/people">People &amp; Access</Link>, and <Link to="/settings/sections">units</Link>.</p>
+    <div className="cards">
+      <div className="card mini"><h4>Modules enabled</h4><p className="metric">{enabled}/{modules.length}</p></div>
+      <div className="card mini"><h4>Product</h4><p>SECH_LIMS by Nickland</p></div>
+      <div className="card mini"><h4>Data</h4><p>Local SQLite host</p></div>
+    </div>
+    <p className="hint">Use the tabs above to enable/disable modules, run backups, and manage LAN device pairing.</p>
   </div>;
 }
