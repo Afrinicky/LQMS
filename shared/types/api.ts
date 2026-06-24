@@ -2,7 +2,23 @@ export type SetupStatus = { setupComplete: boolean; adminExists: boolean; hostMo
 export type ApiUser = { id: number; username: string; fullName: string; roleId: number; roleName?: string; staffId?: number | null; staffName?: string | null; isActive: boolean };
 export type SystemModule = { id: number; key: string; label: string; path: string; enabled: boolean; alertsPaused: boolean };
 export type Position = { id: number; title: string; description?: string; reportsToPositionId?: number | null; isActive: boolean; archivedAt?: string | null };
-export type Staff = { id: number; employeeNo?: string; fullName: string; email?: string; phone?: string; isActive: boolean };
+export type Staff = {
+  id: number; employeeNo?: string; fullName: string; email?: string; phone?: string; isActive: boolean;
+  surname?: string; middleName?: string; firstName?: string; initials?: string;
+  dateOfBirth?: string; gender?: string; designation?: string; jobTitle?: string;
+  professionalRegulator?: string; professionalLicence?: string; licenceExpiryDate?: string;
+  qualifications?: string; unit?: string; personnelCategory?: string; appointmentType?: string;
+  appointmentDate?: string; nationalIdType?: string; nationalIdNumber?: string;
+  emergencyContact?: string; sectionId?: number; staffFileLocation?: string;
+};
+export type StaffOrientation = {
+  id: number; staff_id: number; staff_name?: string; hire_date?: string; orientation_start?: string;
+  orientation_complete: number; welcome_orientation: string; safety_training: string; ethics_training: string;
+  lis_training: string; equipment_training: string; sop_review: string; competency_baseline: string;
+  department_induction: string; form_completed_date?: string; facilitator_staff_id?: number; facilitator_name?: string;
+  staff_sign_off?: string; facilitator_sign_off?: string; status: string; notes?: string; created_at: string; updated_at?: string;
+};
+export type RegisterImportResult = { ok: boolean; created: number; updated: number; totalRows: number; errors: string[] };
 export type DashboardSummary = { documents: number; actionsOpen: number; staff: number; modulesEnabled: number; equipmentItems?: number; inventoryItems?: number; monitoringRecords?: number; safetyIncidents?: number; latestBackup?: string | null };
 export type QmsSummary = { openNCs: { count: number }; openCAPAs: { count: number }; pendingComplaints: { count: number }; highRisks: { count: number }; myAssignedActions: { count: number }; overdueActions: { count: number } };
 export type Permission = { id: number; module_key: string; action: string; label: string };
@@ -73,7 +89,7 @@ export type DocumentReview = { id:number; review_number?:string; document_id:num
 export type DocumentAttestation = { id:number; document_id?:number; document_version_id?:number; staff_id?:number; staff_name?:string; version_number?:string; assigned_by_staff_id?:number; assigned_at?:string; due_date?:string; signature_file_id?:number; status:string; attested_at?:string; notes?:string; document_code?:string; title?:string; document_type?:string };
 export type DocumentPrintLog = { id:number; document_id:number; document_version_id?:number; printed_by_staff_id?:number; printed_by_name?:string; print_date:string; print_purpose?:string; controlled_copy:number; copy_number?:string; watermark?:string; created_by?:number; created_at:string };
 export type DocumentDistribution = { id:number; document_id:number; document_version_id?:number; target_type:string; target_staff_id?:number; target_position_id?:number; target_section_id?:number; assigned_by_staff_id?:number; assigned_at:string; due_date?:string; status:string; created_at:string };
-export type StaffDeclaration = { id:number; declaration_number:string; declaration_type:string; title:string; description?:string; document_id?:number; document_version_id?:number; staff_id?:number; staff_name?:string; signed_at?:string; signature_file_id?:number; status:string; created_at:string; updated_at?:string };
+export type StaffDeclaration = { id:number; declaration_number:string; declaration_type:string; title:string; description?:string; document_id?:number; document_version_id?:number; staff_id?:number; staff_name?:string; signed_at?:string; signature_file_id?:number; status:string; impartiality_confirmed?:number; confidentiality_confirmed?:number; conflict_of_interest?:string; code_of_conduct_ack?:number; form_completed_date?:string; reviewed_by_staff_id?:number; review_date?:string; next_review_date?:string; created_at:string; updated_at?:string };
 export type TrainingEvent = { id:number; training_number:string; title:string; description?:string; training_type?:string; department_id?:number; section_id?:number; trainer_staff_id?:number; training_date:string; start_time?:string; end_time?:string; location?:string; evidence_file_id?:number; status:string; created_at:string; updated_at?:string; attendance?:TrainingAttendance[] };
 export type TrainingAttendance = { id:number; training_event_id:number; staff_id:number; staff_name?:string; attendance_status:string; signed_at?:string; remarks?:string; created_at:string };
 export type CompetencyAssessment = { id:number; competency_number:string; staff_id:number; staff_name?:string; department_id?:number; section_id?:number; activity:string; assessment_method:string; assessor_staff_id?:number; assessor_name?:string; assessment_date:string; outcome?:string; findings?:string; retraining_required:number; next_assessment_due?:string; evidence_file_id?:number; authorization_recommendation?:string; status:string; created_at:string; updated_at?:string; links?:Array<{ id:number; source_module_key:string; source_record_type:string; source_record_id:string; target_module_key:string; target_record_type:string; target_record_id:string; notes?:string }> };
@@ -81,7 +97,7 @@ export type StaffDocument = { id:number; staff_id:number; staff_name?:string; do
 export type DutyRoster = { id:number; roster_number:string; department_id?:number; section_id?:number; roster_start_date:string; roster_end_date:string; status:string; prepared_by_staff_id?:number; approved_by_staff_id?:number; approved_at?:string; notes?:string; created_at:string; updated_at?:string; assignments?:DutyRosterAssignment[] };
 export type DutyRosterAssignment = { id:number; roster_id:number; staff_id:number; staff_name?:string; duty_date:string; shift_name?:string; start_time?:string; end_time?:string; duty_role?:string; notes?:string; created_at:string };
 export type DocumentControlSummary = { currentDocuments:number; drafts:number; dueReviews:number; overdueReviews:number; pendingAttestations:number; obsoleteDocuments:number };
-export type PersonnelSummary = { staffDocumentsPendingVerification:number; certificatesExpiringSoon:number; pendingDeclarations:number; plannedTrainingEvents:number; competencyAssessmentsDue:number; authorizationsDueReview:number; rostersThisMonth:number };
+export type PersonnelSummary = { staffDocumentsPendingVerification:number; certificatesExpiringSoon:number; pendingDeclarations:number; plannedTrainingEvents:number; competencyAssessmentsDue:number; authorizationsDueReview:number; rostersThisMonth:number; totalStaff?:number; licencesExpiringSoon?:number; orientationsInProgress?:number; ethicsReviewsDue?:number };
 export type MyTasks = { pendingAttestations:DocumentAttestation[]; pendingDeclarations:StaffDeclaration[]; upcomingTraining:Array<TrainingEvent & { attendance_status?:string }>; upcomingCompetency:CompetencyAssessment[]; assignedActions:ActionRecord[]; upcomingDuties:Array<DutyRosterAssignment & { roster_number?:string }> };
 export type MyProfile = { user:{ id:number; fullName:string }; staff:(Staff & { section_name?:string }) | null; positions:Array<{ title:string; assignment_type:string; is_active:number }>; authorizations:Array<{ id:number; module_key:string; level:string; section_id?:number; expires_at?:string; is_active:number; competency_assessment_id?:number; notes?:string }> };
 export type DistributionInboxEntry = { id:number; document_id:number; document_version_id?:number; target_staff_id:number; status:string; due_date?:string; document_code?:string; title:string; document_type?:string; version_number?:string; attestation_id?:number; attestation_status?:string; attested_at?:string; attestation_due?:string };

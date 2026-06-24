@@ -691,6 +691,11 @@ label {
   padding: 12px 14px;
   font-size: 13px;
 }
+/* Inline checkbox label (forms) and orientation step toggle */
+.check-inline { display: flex; flex-direction: row; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.check-inline input { width: auto; }
+button.step-toggle { background: transparent; border: 0; box-shadow: none; padding: 2px 4px; font-size: 16px; cursor: pointer; line-height: 1; }
+button.step-toggle:hover { background: rgba(255,255,255,0.05); box-shadow: none; transform: none; }
 
 /* ============================================================================
    TABS

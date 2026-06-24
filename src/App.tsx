@@ -7,7 +7,7 @@ import { ModuleProvider } from './hooks/useModules';
 import { API_BASE, getSetupStatus } from './services/api';
 import { LoginPage, SetupPage } from './pages/AuthPages';
 import { Dashboard, Home, ModulePage, Organisation } from './pages/CorePages';
-import { ActionTracker, BackupRestore, Devices, DocumentImport, EvidenceUpload, ModuleToggles, PermissionMatrix, Positions, UsersAccess } from './pages/SettingsPages';
+import { ActionTracker, BackupRestore, Devices, DocumentImport, EvidenceUpload, ModuleToggles, PermissionMatrix, PersonnelRegisterIO, Positions, UsersAccess } from './pages/SettingsPages';
 import { NcCapaPage, ComplaintsPage, RisksPage, QmsActionTracker } from './pages/QMSPages';
 import { MODULES } from '../shared/constants/modules';
 import { FlaskConical, TriangleAlert } from 'lucide-react';
@@ -204,6 +204,7 @@ function AppRoutes() {
         <Route index element={<Navigate to="users"/>}/>
         <Route path="users" element={<UsersAccess/>}/>
         <Route path="positions" element={<Positions/>}/>
+        <Route path="personnel-register" element={<PersonnelRegisterIO/>}/>
         <Route path="permissions" element={<PermissionMatrix/>}/>
         <Route path="modules" element={<ModuleToggles/>}/>
         <Route path="document-import" element={<DocumentImport/>}/>

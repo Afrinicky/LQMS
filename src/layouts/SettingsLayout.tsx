@@ -1,7 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import {
   Users, Network, ShieldCheck, ToggleRight, FileUp, Paperclip, ListChecks,
-  DatabaseBackup, MonitorSmartphone,
+  DatabaseBackup, MonitorSmartphone, UsersRound,
 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import type { LucideIcon } from 'lucide-react';
@@ -9,6 +9,7 @@ import type { LucideIcon } from 'lucide-react';
 const items: { to: string; label: string; Icon: LucideIcon }[] = [
   { to: '/settings/users', label: 'Users & Access', Icon: Users },
   { to: '/settings/positions', label: 'Positions & Organogram', Icon: Network },
+  { to: '/settings/personnel-register', label: 'Personnel Register I/O', Icon: UsersRound },
   { to: '/settings/permissions', label: 'Permission Matrix', Icon: ShieldCheck },
   { to: '/settings/modules', label: 'System Modules Toggle', Icon: ToggleRight },
   { to: '/settings/document-import', label: 'Document Master List Import', Icon: FileUp },

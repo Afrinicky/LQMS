@@ -1,9 +1,38 @@
 import { Router } from 'express';
+import multer from 'multer';
+import * as XLSX from 'xlsx';
 import { getDb } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+
+const ORIENTATION_STEPS = ['welcome_orientation', 'safety_training', 'ethics_training', 'lis_training', 'equipment_training', 'sop_review', 'competency_baseline', 'department_induction'] as const;
+
+// Master Personnel Register sheet definition (header row mirrors the workbook,
+// SECHFO003). Used for the import template and Excel export.
+const REGISTER_HEADERS = [
+  'STAFF ID', 'SURNAME', 'MIDDLE NAME(S)', 'FIRSTNAME(S)', 'INITIALS', 'DATE OF BIRTH', 'GENDER',
+  'DESIGNATION', 'POSITION', 'PROFESSIONAL REGULATOR', 'PROFESSIONAL LICENCE', 'PROFESSIONAL QUALIFICATION(S)',
+  'UNIT', 'PERSONNEL CATEGORY', 'APPOINTMENT TYPE', 'DATE OF APPOINTMENT', 'TYPE OF NATIONAL ID',
+  'NATIONAL ID NUM', 'EMERGENCY CONTACT', 'CONTACT PHONE', 'EMAIL ADDRESS', 'STAFF FILE LOCATION',
+] as const;
+
+// Map a register row (header → value) to staff columns. Accepts a few header
+// aliases so slightly different workbook exports still import cleanly.
+function pick(row: Record<string, unknown>, ...keys: string[]): string | null {
+  for (const k of keys) {
+    const found = Object.keys(row).find(h => h.trim().toUpperCase() === k.trim().toUpperCase());
+    if (found) {
+      const v = row[found];
+      const s = v === null || v === undefined ? '' : String(v).trim();
+      if (s) return s;
+    }
+  }
+  return null;
+}
 
 const DECLARATION_TYPES = ['confidentiality', 'ethical_declaration', 'conflict_of_interest', 'safety_commitment', 'other'];
 const DECLARATION_STATUSES = ['pending', 'signed', 'withdrawn'];
@@ -80,8 +109,17 @@ export function personnelRoutes() {
     const db = getDb();
     const createdAt = new Date().toISOString();
     const declarationNumber = generateRecordNumber(db, 'staff_declarations', 'DEC', createdAt);
-    const result = db.prepare(`INSERT INTO staff_declarations (declaration_number, declaration_type, title, description, document_id, document_version_id, staff_id, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(declarationNumber, req.body.declarationType, req.body.title, req.body.description ?? null, parseIntNullable(req.body.documentId), parseIntNullable(req.body.documentVersionId), parseIntNullable(req.body.staffId), 'pending', req.user!.id, createdAt);
+    const boolInt = (v: unknown) => v === true || v === 'true' || v === 1 || v === 'Yes' || v === 'yes' ? 1 : (v === undefined || v === null || v === '' ? null : 0);
+    const result = db.prepare(`INSERT INTO staff_declarations
+      (declaration_number, declaration_type, title, description, document_id, document_version_id, staff_id,
+       impartiality_confirmed, confidentiality_confirmed, conflict_of_interest, code_of_conduct_ack,
+       form_completed_date, reviewed_by_staff_id, review_date, next_review_date, status, created_by, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(declarationNumber, req.body.declarationType, req.body.title, req.body.description ?? null,
+        parseIntNullable(req.body.documentId), parseIntNullable(req.body.documentVersionId), parseIntNullable(req.body.staffId),
+        boolInt(req.body.impartialityConfirmed), boolInt(req.body.confidentialityConfirmed), req.body.conflictOfInterest ?? null,
+        boolInt(req.body.codeOfConductAck), req.body.formCompletedDate ?? null, parseIntNullable(req.body.reviewedByStaffId),
+        req.body.reviewDate ?? null, req.body.nextReviewDate ?? null, 'pending', req.user!.id, createdAt);
     const id = Number(result.lastInsertRowid);
     audit(req, { action: 'create', entity: 'staff_declarations', entityId: id, newValue: { declarationNumber, ...req.body } });
     res.status(201).json({ id, declarationNumber });
@@ -408,6 +446,181 @@ export function personnelRoutes() {
     db.prepare('UPDATE users SET staff_id = ? WHERE id = ?').run(req.body.staffId, req.user.id);
     audit(req, { action: 'self_link_staff', entity: 'users', entityId: req.user.id, oldValue: { staffId: null }, newValue: { staffId: req.body.staffId, matchedOn: nameMatch ? 'full_name' : 'email' } });
     res.json({ ok: true, staffId: req.body.staffId });
+  });
+
+  /* ──────────────────────────────────────────────────────────────────────
+   * Master Personnel Register — Excel import / export (Settings → People & Access)
+   * ──────────────────────────────────────────────────────────────────────── */
+  function buildRegisterRows() {
+    const db = getDb();
+    const staff = db.prepare(`SELECT s.*, sec.name AS section_name,
+        (SELECT p.title FROM staff_position_assignments spa JOIN positions p ON p.id = spa.position_id
+         WHERE spa.staff_id = s.id AND spa.is_active = 1 ORDER BY spa.id DESC LIMIT 1) AS position_title
+      FROM staff s LEFT JOIN sections sec ON sec.id = s.section_id ORDER BY s.employee_no, s.full_name`).all() as any[];
+    return staff.map(s => [
+      s.employee_no || '', s.surname || '', s.middle_name || '', s.first_name || '', s.initials || '',
+      s.date_of_birth || '', s.gender || '', s.designation || '', s.job_title || s.position_title || '',
+      s.professional_regulator || '', s.professional_licence || '', s.qualifications || '',
+      s.unit || s.section_name || '', s.personnel_category || '', s.appointment_type || '', s.appointment_date || '',
+      s.national_id_type || '', s.national_id_number || '', s.emergency_contact || '', s.phone || '',
+      s.email || '', s.staff_file_location || '',
+    ]);
+  }
+
+  function registerWorkbook(includeData: boolean) {
+    const guide = [
+      ['ST. ELIZABETH CATHOLIC HOSPITAL — LABORATORY · MASTER PERSONNEL REGISTER'],
+      ['Import template (ISO 15189:2022 §6.2 personnel records). Fill one row per staff member.'],
+      ['STAFF ID is the unique key — existing rows with the same STAFF ID are updated, new ones are created.'],
+      ['Dates may be DD/MM/YYYY or YYYY-MM-DD. PROFESSIONAL QUALIFICATION(S) may list several, separated by " | ".'],
+      ['PERSONNEL CATEGORY: STAFF / INTERN / NSS / LOCUM.  APPOINTMENT TYPE: FULL TIME / PART TIME / CONTRACT / INTERN.'],
+    ];
+    const wb = XLSX.utils.book_new();
+    const guideWs = XLSX.utils.aoa_to_sheet(guide);
+    XLSX.utils.book_append_sheet(wb, guideWs, 'GUIDE');
+    const rows = includeData ? buildRegisterRows() : [];
+    const ws = XLSX.utils.aoa_to_sheet([REGISTER_HEADERS as unknown as string[], ...rows]);
+    ws['!cols'] = REGISTER_HEADERS.map(h => ({ wch: Math.max(12, Math.min(40, h.length + 4)) }));
+    XLSX.utils.book_append_sheet(wb, ws, 'MASTER PERSONNEL REGISTER');
+    return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+  }
+
+  function sendWorkbook(res: any, buf: Buffer, filename: string) {
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buf);
+  }
+
+  router.get('/register/template', requirePermission('personnel', 'view'), (_req, res) => {
+    sendWorkbook(res, registerWorkbook(false), 'Master_Personnel_Register_Template.xlsx');
+  });
+
+  router.get('/register/export', requirePermission('personnel', 'view'), (_req, res) => {
+    sendWorkbook(res, registerWorkbook(true), 'Master_Personnel_Register.xlsx');
+  });
+
+  router.post('/register/import', requirePermission('personnel', 'create'), upload.single('file'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the Master Personnel Register .xlsx file.' });
+    let rows: Record<string, unknown>[];
+    try {
+      const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+      const sheetName = wb.SheetNames.find(n => n.trim().toUpperCase().includes('MASTER PERSONNEL REGISTER'))
+        || wb.SheetNames.find(n => n.trim().toUpperCase().includes('REGISTER')) || wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '', raw: false });
+    } catch (err) {
+      return res.status(400).json({ error: `Could not read the workbook: ${err instanceof Error ? err.message : String(err)}` });
+    }
+    const db = getDb();
+    const sections = db.prepare('SELECT id, name FROM sections').all() as Array<{ id: number; name: string }>;
+    const sectionByName = (name: string | null) => name ? sections.find(s => s.name.trim().toUpperCase() === name.trim().toUpperCase())?.id ?? null : null;
+
+    let created = 0, updated = 0; const errors: string[] = [];
+    const upsert = db.transaction((records: Record<string, unknown>[]) => {
+      records.forEach((row, i) => {
+        const employeeNo = pick(row, 'STAFF ID', 'STAFF_ID', 'EMPLOYEE NO', 'EMPLOYEE_NO');
+        const surname = pick(row, 'SURNAME', 'LAST NAME');
+        const firstName = pick(row, 'FIRSTNAME(S)', 'FIRSTNAME', 'FIRST NAME', 'FIRST NAME(S)');
+        const middleName = pick(row, 'MIDDLE NAME(S)', 'MIDDLE NAME', 'MIDDLE NAMES');
+        if (!surname && !firstName && !employeeNo) return; // skip blank rows silently
+        const fullName = [firstName, middleName, surname].filter(Boolean).join(' ').trim();
+        if (!fullName) { errors.push(`Row ${i + 2}: missing name.`); return; }
+        const unit = pick(row, 'UNIT', 'DEPARTMENT', 'SECTION');
+        const cols: Record<string, string | number | null> = {
+          employee_no: employeeNo, surname, middle_name: middleName, first_name: firstName, full_name: fullName,
+          initials: pick(row, 'INITIALS') || [firstName, middleName, surname].map(p => p ? p[0] : '').join('').toUpperCase() || null,
+          date_of_birth: pick(row, 'DATE OF BIRTH', 'DOB'), gender: pick(row, 'GENDER'),
+          designation: pick(row, 'DESIGNATION'), job_title: pick(row, 'POSITION', 'JOB TITLE'),
+          professional_regulator: pick(row, 'PROFESSIONAL REGULATOR', 'PRFOFESSIONAL REGULATOR', 'REGULATOR', 'PROFESSIONAL REGULATORY BODY'),
+          professional_licence: pick(row, 'PROFESSIONAL LICENCE', 'PROFESSIONAL LICENSE', 'LICENCE'),
+          qualifications: (() => {
+            // The register spreads several qualifications across the columns
+            // after "PROFESSIONAL QUALIFICATION(S)" (blank headers → __EMPTY*).
+            // Merge them into one " | "-joined cell.
+            const parts: string[] = [];
+            const main = pick(row, 'PROFESSIONAL QUALIFICATION(S)', 'QUALIFICATIONS', 'QUALIFICATION');
+            if (main) parts.push(main);
+            for (const k of Object.keys(row)) {
+              if (/^__EMPTY/.test(k)) {
+                const v = String(row[k] ?? '').trim();
+                if (v && !/^\d+$/.test(v) && v.length > 2) parts.push(v);
+              }
+            }
+            return parts.length ? Array.from(new Set(parts)).join(' | ') : null;
+          })(),
+          unit, personnel_category: pick(row, 'PERSONNEL CATEGORY', 'CATEGORY'),
+          appointment_type: pick(row, 'APPOINTMENT TYPE'), appointment_date: pick(row, 'DATE OF APPOINTMENT', 'APPOINTMENT DATE'),
+          national_id_type: pick(row, 'TYPE OF NATIONAL ID', 'NATIONAL ID TYPE'),
+          national_id_number: pick(row, 'NATIONAL ID NUM', 'NATIONAL ID NUMBER', 'NATIONAL ID'),
+          emergency_contact: pick(row, 'EMERGENCY CONTACT'), phone: pick(row, 'CONTACT PHONE', 'CONTACT_PHONE', 'PHONE'),
+          email: pick(row, 'EMAIL ADDRESS', 'EMAIL_ADDRESS', 'EMAIL'), staff_file_location: pick(row, 'STAFF FILE LOCATION', 'STAFF_FILE_LOCATION', 'FILE LOCATION'),
+          section_id: sectionByName(unit),
+        };
+        const existing = employeeNo ? db.prepare('SELECT id FROM staff WHERE employee_no = ?').get(employeeNo) as { id: number } | undefined : undefined;
+        try {
+          if (existing) {
+            const keys = Object.keys(cols).filter(k => cols[k] !== null);
+            if (keys.length) db.prepare(`UPDATE staff SET ${keys.map(k => `${k} = ?`).join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...keys.map(k => cols[k]), existing.id);
+            updated++;
+          } else {
+            const keys = Object.keys(cols);
+            db.prepare(`INSERT INTO staff (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`).run(...keys.map(k => cols[k]));
+            created++;
+          }
+        } catch (err) {
+          errors.push(`Row ${i + 2} (${fullName}): ${err instanceof Error ? err.message : String(err)}`);
+        }
+      });
+    });
+    upsert(rows);
+    audit(req, { action: 'import', entity: 'staff', newValue: { created, updated, errorCount: errors.length } });
+    res.json({ ok: true, created, updated, totalRows: rows.length, errors: errors.slice(0, 50) });
+  });
+
+  /* ──────────────────────────────────────────────────────────────────────
+   * Orientation / Induction tracking (ISO 15189 §6.2.3, WHO LQMS induction).
+   * ──────────────────────────────────────────────────────────────────────── */
+  router.get('/orientations', requirePermission('personnel', 'view'), (_req, res) => {
+    res.json(getDb().prepare(`SELECT o.*, s.full_name AS staff_name, f.full_name AS facilitator_name
+      FROM staff_orientations o JOIN staff s ON s.id = o.staff_id
+      LEFT JOIN staff f ON f.id = o.facilitator_staff_id ORDER BY o.created_at DESC, o.id DESC`).all());
+  });
+
+  router.post('/orientations', requirePermission('personnel', 'create'), (req, res) => {
+    if (!parseIntNullable(req.body.staffId)) return res.status(400).json({ error: 'staffId is required' });
+    const db = getDb();
+    const stepCols: Record<string, string> = {};
+    for (const step of ORIENTATION_STEPS) stepCols[step] = req.body[step] === 'completed' || req.body[step] === true ? 'completed' : 'pending';
+    const r = db.prepare(`INSERT INTO staff_orientations
+      (staff_id, hire_date, orientation_start, ${ORIENTATION_STEPS.join(', ')}, facilitator_staff_id, notes, status, created_by)
+      VALUES (?, ?, ?, ${ORIENTATION_STEPS.map(() => '?').join(', ')}, ?, ?, ?, ?)`)
+      .run(req.body.staffId, req.body.hireDate ?? null, req.body.orientationStart ?? null,
+        ...ORIENTATION_STEPS.map(s => stepCols[s]), parseIntNullable(req.body.facilitatorStaffId), req.body.notes ?? null,
+        req.body.status ?? 'in_progress', req.user?.id ?? null);
+    audit(req, { action: 'create', entity: 'staff_orientations', entityId: r.lastInsertRowid, newValue: req.body });
+    res.status(201).json({ id: r.lastInsertRowid });
+  });
+
+  router.put('/orientations/:id', requirePermission('personnel', 'edit'), (req, res) => {
+    const db = getDb();
+    const existing = db.prepare('SELECT * FROM staff_orientations WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Orientation record not found' });
+    const sets: string[] = []; const vals: unknown[] = [];
+    for (const step of ORIENTATION_STEPS) if (step in req.body) { sets.push(`${step} = ?`); vals.push(req.body[step] === 'completed' || req.body[step] === true ? 'completed' : 'pending'); }
+    for (const [api, col] of [['hireDate', 'hire_date'], ['orientationStart', 'orientation_start'], ['formCompletedDate', 'form_completed_date'], ['staffSignOff', 'staff_sign_off'], ['facilitatorSignOff', 'facilitator_sign_off'], ['status', 'status'], ['notes', 'notes']] as Array<[string, string]>) {
+      if (api in req.body) { sets.push(`${col} = ?`); vals.push(req.body[api] ?? null); }
+    }
+    if ('facilitatorStaffId' in req.body) { sets.push('facilitator_staff_id = ?'); vals.push(parseIntNullable(req.body.facilitatorStaffId)); }
+    // Mark complete when every step is done.
+    const merged = { ...(existing as any) };
+    for (const step of ORIENTATION_STEPS) if (step in req.body) merged[step] = req.body[step] === 'completed' || req.body[step] === true ? 'completed' : 'pending';
+    const allDone = ORIENTATION_STEPS.every(s => merged[s] === 'completed');
+    sets.push('orientation_complete = ?'); vals.push(allDone ? 1 : 0);
+    if (allDone && (existing as any).status !== 'completed' && !('status' in req.body)) { sets.push('status = ?'); vals.push('completed'); }
+    sets.push('updated_at = CURRENT_TIMESTAMP');
+    db.prepare(`UPDATE staff_orientations SET ${sets.join(', ')} WHERE id = ?`).run(...vals, req.params.id);
+    audit(req, { action: 'edit', entity: 'staff_orientations', entityId: Number(req.params.id), oldValue: existing, newValue: req.body });
+    res.json({ ok: true });
   });
 
   return router;

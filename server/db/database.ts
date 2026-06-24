@@ -2320,4 +2320,69 @@ CREATE TABLE IF NOT EXISTS information_management_reviews (
   updated_at TEXT
 );
 `);
+
+  // ── Personnel upgrade (ISO 15189 §6.2 / WHO LQMS / HR): enrich the staff
+  //    register with the Master Personnel Register fields, plus orientation
+  //    (induction) tracking and structured ethical-declaration confirmations.
+  const staffCols = new Set((database.prepare("PRAGMA table_info(staff)").all() as Array<{ name: string }>).map(c => c.name));
+  const addStaffCol = (name: string, ddl: string) => { if (!staffCols.has(name)) database.exec(`ALTER TABLE staff ADD COLUMN ${ddl}`); };
+  addStaffCol('surname', 'surname TEXT');
+  addStaffCol('middle_name', 'middle_name TEXT');
+  addStaffCol('first_name', 'first_name TEXT');
+  addStaffCol('initials', 'initials TEXT');
+  addStaffCol('date_of_birth', 'date_of_birth TEXT');
+  addStaffCol('gender', 'gender TEXT');
+  addStaffCol('designation', 'designation TEXT');           // professional grade, e.g. Principal Medical Lab Scientist
+  addStaffCol('job_title', 'job_title TEXT');               // functional role/position title in the register
+  addStaffCol('professional_regulator', 'professional_regulator TEXT');
+  addStaffCol('professional_licence', 'professional_licence TEXT');
+  addStaffCol('licence_expiry_date', 'licence_expiry_date TEXT');
+  addStaffCol('qualifications', 'qualifications TEXT');
+  addStaffCol('unit', 'unit TEXT');                          // free-text unit/section label as written in the register
+  addStaffCol('personnel_category', 'personnel_category TEXT'); // STAFF / INTERN / NSS / LOCUM
+  addStaffCol('appointment_type', 'appointment_type TEXT');  // FULL TIME / PART TIME / CONTRACT / INTERN
+  addStaffCol('appointment_date', 'appointment_date TEXT');
+  addStaffCol('national_id_type', 'national_id_type TEXT');
+  addStaffCol('national_id_number', 'national_id_number TEXT');
+  addStaffCol('emergency_contact', 'emergency_contact TEXT');
+  addStaffCol('staff_file_location', 'staff_file_location TEXT');
+
+  const declCols = new Set((database.prepare("PRAGMA table_info(staff_declarations)").all() as Array<{ name: string }>).map(c => c.name));
+  const addDeclCol = (name: string, ddl: string) => { if (!declCols.has(name)) database.exec(`ALTER TABLE staff_declarations ADD COLUMN ${ddl}`); };
+  addDeclCol('impartiality_confirmed', 'impartiality_confirmed INTEGER');
+  addDeclCol('confidentiality_confirmed', 'confidentiality_confirmed INTEGER');
+  addDeclCol('conflict_of_interest', 'conflict_of_interest TEXT');
+  addDeclCol('code_of_conduct_ack', 'code_of_conduct_ack INTEGER');
+  addDeclCol('form_completed_date', 'form_completed_date TEXT');
+  addDeclCol('reviewed_by_staff_id', 'reviewed_by_staff_id INTEGER REFERENCES staff(id)');
+  addDeclCol('review_date', 'review_date TEXT');
+  addDeclCol('next_review_date', 'next_review_date TEXT');
+
+  database.exec(`
+CREATE TABLE IF NOT EXISTS staff_orientations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  staff_id INTEGER NOT NULL REFERENCES staff(id),
+  hire_date TEXT,
+  orientation_start TEXT,
+  orientation_complete INTEGER NOT NULL DEFAULT 0,
+  welcome_orientation TEXT NOT NULL DEFAULT 'pending',
+  safety_training TEXT NOT NULL DEFAULT 'pending',
+  ethics_training TEXT NOT NULL DEFAULT 'pending',
+  lis_training TEXT NOT NULL DEFAULT 'pending',
+  equipment_training TEXT NOT NULL DEFAULT 'pending',
+  sop_review TEXT NOT NULL DEFAULT 'pending',
+  competency_baseline TEXT NOT NULL DEFAULT 'pending',
+  department_induction TEXT NOT NULL DEFAULT 'pending',
+  form_completed_date TEXT,
+  facilitator_staff_id INTEGER REFERENCES staff(id),
+  staff_sign_off TEXT,
+  facilitator_sign_off TEXT,
+  status TEXT NOT NULL DEFAULT 'in_progress',
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_staff_orientations_staff ON staff_orientations(staff_id);
+`);
 }

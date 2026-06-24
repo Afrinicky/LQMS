@@ -1,6 +1,8 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '../services/api';
+import { FileDown, FileSpreadsheet } from 'lucide-react';
+import { api, API_BASE, getToken } from '../services/api';
+import type { RegisterImportResult } from '../../shared/types/api';
 import { PERMISSION_ACTIONS, TECHNICAL_AUTHORIZATION_LEVELS } from '../../shared/constants/modules';
 import type { Position, Staff, SystemModule, ApiUser, Permission, Section, Device } from '../../shared/types/api';
 
@@ -96,6 +98,72 @@ export function Positions(){
         <button disabled={staffBusy}>{staffBusy?'Creating…':'Create staff'}</button>
       </form>
       <Table rows={staff}/>
+    </div>
+  </div>;
+}
+
+export function PersonnelRegisterIO(){
+  const [busy,setBusy]=useState('');
+  const [file,setFile]=useState<File|null>(null);
+  const [result,setResult]=useState<RegisterImportResult|null>(null);
+  const [error,setError]=useState('');
+
+  async function download(path:string, fallbackName:string){
+    setError(''); setBusy(path);
+    try{
+      const token=getToken();
+      const res=await fetch(`${API_BASE}${path}`,{headers:token?{Authorization:`Bearer ${token}`}:undefined});
+      if(!res.ok) throw new Error((await res.json().catch(()=>({error:res.statusText}))).error ?? res.statusText);
+      const blob=await res.blob();
+      const dispo=res.headers.get('Content-Disposition')||'';
+      const m=dispo.match(/filename="?([^"]+)"?/);
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a'); a.href=url; a.download=m?m[1]:fallbackName; document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    }catch(err){ setError(err instanceof Error?err.message:'Download failed'); }
+    finally{ setBusy(''); }
+  }
+
+  async function doImport(){
+    if(!file){ setError('Choose a .xlsx file to import.'); return; }
+    setError(''); setResult(null); setBusy('import');
+    try{
+      const fd=new FormData(); fd.append('file',file);
+      const token=getToken();
+      const res=await fetch(`${API_BASE}/personnel/register/import`,{method:'POST',headers:token?{Authorization:`Bearer ${token}`}:undefined,body:fd});
+      const data=await res.json().catch(()=>({error:res.statusText}));
+      if(!res.ok) throw new Error(data.error ?? res.statusText);
+      setResult(data as RegisterImportResult); setFile(null);
+    }catch(err){ setError(err instanceof Error?err.message:'Import failed'); }
+    finally{ setBusy(''); }
+  }
+
+  return <div className="grid cols-2">
+    <div className="card">
+      <h3>Personnel Register — Export</h3>
+      <p>Download the laboratory’s personnel data as an Excel workbook matching the <strong>Master Personnel Register</strong> layout (ISO 15189:2022 §6.2). Use the blank template to prepare a bulk upload, or export the current register for review, backup, or external reporting.</p>
+      <div className="quick-actions" style={{marginTop:8}}>
+        <button type="button" className="quick-action" disabled={!!busy} onClick={()=>download('/personnel/register/template','Master_Personnel_Register_Template.xlsx')}>
+          <span className="qa-ico"><FileDown size={20}/></span><strong>{busy==='/personnel/register/template'?'Preparing…':'Download blank template'}</strong>
+        </button>
+        <button type="button" className="quick-action" disabled={!!busy} onClick={()=>download('/personnel/register/export','Master_Personnel_Register.xlsx')}>
+          <span className="qa-ico"><FileSpreadsheet size={20}/></span><strong>{busy==='/personnel/register/export'?'Preparing…':'Export current register'}</strong>
+        </button>
+      </div>
+    </div>
+    <div className="card">
+      <h3>Personnel Register — Import</h3>
+      <p>Upload a completed Master Personnel Register workbook. Rows are matched on <strong>STAFF ID</strong>: existing staff are updated and new staff are created. Names, qualifications, professional licence, appointment details and emergency contacts are mapped automatically.</p>
+      <label className="auth-field" style={{display:'block',marginTop:6}}>
+        <span>Workbook (.xlsx)</span>
+        <input type="file" accept=".xlsx,.xls" onChange={e=>setFile(e.target.files?.[0]??null)} />
+      </label>
+      {error && <div className="error" style={{marginTop:10}}>{error}</div>}
+      <button type="button" disabled={!!busy||!file} style={{marginTop:10}} onClick={doImport}>{busy==='import'?'Importing…':'Import register'}</button>
+      {result && <div className="success-msg" style={{marginTop:12}}>
+        Imported {result.totalRows} row{result.totalRows===1?'':'s'}: <strong>{result.created}</strong> created, <strong>{result.updated}</strong> updated.
+        {result.errors.length>0 && <ul style={{margin:'8px 0 0',paddingLeft:18}}>{result.errors.map((er,i)=><li key={i} style={{fontSize:12}}>{er}</li>)}</ul>}
+      </div>}
     </div>
   </div>;
 }

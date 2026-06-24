@@ -7,7 +7,7 @@ import DisabledModule from '../components/DisabledModule';
 import type {
   Section, Department, Staff, Position,
   StaffDocument, StaffDeclaration, TrainingEvent, CompetencyAssessment, DutyRoster,
-  PersonnelSummary, MyTasks, MyProfile, RosterCoverage, StaffSuggestionsResponse
+  PersonnelSummary, MyTasks, MyProfile, RosterCoverage, StaffSuggestionsResponse, StaffOrientation
 } from '../../shared/types/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
@@ -21,19 +21,48 @@ const ATTENDANCE_STATUSES = ['invited', 'attended', 'absent', 'excused'];
 const COMPETENCY_METHODS = ['direct_observation', 'record_review', 'blind_sample', 'split_sample', 'problem_solving', 'result_interpretation', 'interview', 'other'];
 const COMPETENCY_OUTCOMES = ['competent', 'competent_with_supervision', 'not_yet_competent'];
 const AUTHORIZATION_LEVELS = ['View only', 'Perform', 'Review', 'Verify', 'Approve', 'Supervise', 'Train others'];
+const GENDERS = ['MALE', 'FEMALE', 'OTHER'];
+const PERSONNEL_CATEGORIES = ['STAFF', 'INTERN', 'NSS', 'LOCUM', 'STUDENT', 'CONTRACTOR'];
+const APPOINTMENT_TYPES = ['FULL TIME', 'PART TIME', 'CONTRACT', 'INTERN', 'NSS', 'LOCUM'];
+const NATIONAL_ID_TYPES = ['GHANA CARD', 'PASSPORT', 'VOTER ID', 'DRIVERS LICENCE', 'OTHER'];
+const ORIENTATION_STEPS: { key: string; label: string }[] = [
+  { key: 'welcome_orientation', label: 'Welcome orientation' },
+  { key: 'safety_training', label: 'Safety training' },
+  { key: 'ethics_training', label: 'Ethics & confidentiality' },
+  { key: 'lis_training', label: 'LIS training' },
+  { key: 'equipment_training', label: 'Equipment training' },
+  { key: 'sop_review', label: 'SOP review' },
+  { key: 'competency_baseline', label: 'Competency baseline' },
+  { key: 'department_induction', label: 'Department induction' },
+];
+const emptyStaffForm = {
+  employeeNo: '', surname: '', middleName: '', firstName: '', initials: '', dateOfBirth: '', gender: '',
+  designation: '', jobTitle: '', professionalRegulator: '', professionalLicence: '', licenceExpiryDate: '',
+  qualifications: '', sectionId: '', unit: '', personnelCategory: 'STAFF', appointmentType: 'FULL TIME',
+  appointmentDate: '', nationalIdType: 'GHANA CARD', nationalIdNumber: '', emergencyContact: '', phone: '',
+  email: '', staffFileLocation: '', positionId: '',
+};
+function yearsBetween(dateStr?: string): string {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '—';
+  const yrs = (Date.now() - d.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
+  return yrs >= 0 ? `${yrs.toFixed(1)} yrs` : '—';
+}
 
 function useLookups() {
   const [staff, setStaff] = useState<Staff[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
+  const reloadStaff = () => api<Staff[]>('/staff').then(setStaff).catch(() => setStaff([]));
   useEffect(() => {
-    api<Staff[]>('/staff').then(setStaff).catch(() => setStaff([]));
+    void reloadStaff();
     api<Section[]>('/sections').then(setSections).catch(() => setSections([]));
     api<Department[]>('/departments').then(setDepartments).catch(() => setDepartments([]));
     api<Position[]>('/positions').then(setPositions).catch(() => setPositions([]));
   }, []);
-  return { staff, sections, departments, positions };
+  return { staff, sections, departments, positions, reloadStaff };
 }
 
 function staffName(staffList: Staff[], id?: number | null) {
@@ -43,7 +72,7 @@ function staffName(staffList: Staff[], id?: number | null) {
 
 export function PersonnelManagementPage() {
   const { isEnabled } = useModules();
-  const { staff, sections, departments, positions } = useLookups();
+  const { staff, sections, departments, positions, reloadStaff } = useLookups();
   const [tab, setTab] = useState('Dashboard');
   const [error, setError] = useState<string | null>(null);
 
@@ -63,7 +92,12 @@ export function PersonnelManagementPage() {
 
   const [docForm, setDocForm] = useState({ staffId: '', documentType: 'CV', title: '', issueDate: '', expiryDate: '', remarks: '' });
   const [docFile, setDocFile] = useState<File | null>(null);
-  const [declForm, setDeclForm] = useState({ declarationType: 'confidentiality', title: '', description: '', staffId: '' });
+  const [declForm, setDeclForm] = useState({ declarationType: 'ethical_declaration', title: '', description: '', staffId: '', impartialityConfirmed: true, confidentialityConfirmed: true, codeOfConductAck: true, conflictOfInterest: 'None Declared', formCompletedDate: '', reviewedByStaffId: '', nextReviewDate: '' });
+  const [staffForm, setStaffForm] = useState(emptyStaffForm);
+  const [editingStaffId, setEditingStaffId] = useState<number | null>(null);
+  const [staffSearch, setStaffSearch] = useState('');
+  const [orientations, setOrientations] = useState<StaffOrientation[]>([]);
+  const [orientForm, setOrientForm] = useState({ staffId: '', hireDate: '', orientationStart: '', facilitatorStaffId: '', notes: '' });
   const [trainingForm, setTrainingForm] = useState({ title: '', description: '', trainingType: '', sectionId: '', trainerStaffId: '', trainingDate: '', startTime: '', endTime: '', location: '' });
   const [attendanceForm, setAttendanceForm] = useState({ staffId: '', attendanceStatus: 'attended', remarks: '' });
   const [compForm, setCompForm] = useState({ staffId: '', sectionId: '', activity: '', assessmentMethod: 'direct_observation', assessorStaffId: '', assessmentDate: '', findings: '', authorizationRecommendation: '' });
@@ -93,6 +127,7 @@ export function PersonnelManagementPage() {
       api<MyTasks>('/personnel/my-tasks').then(setMyTasks).catch(() => undefined);
       api<StaffSuggestionsResponse>('/personnel/staff-suggestions').then(setStaffSuggestions).catch(() => undefined);
     }
+    if (tab === 'Orientation & Induction' && isEnabled('personnel')) void loadOrientations();
   }, [tab, isEnabled]);
   if (!isEnabled('personnel')) return <DisabledModule />;
 
@@ -126,8 +161,56 @@ export function PersonnelManagementPage() {
     e.preventDefault(); setError(null);
     try {
       await api('/personnel/declarations', { method: 'POST', body: JSON.stringify(declForm) });
-      setDeclForm({ declarationType: 'confidentiality', title: '', description: '', staffId: '' });
+      setDeclForm({ declarationType: 'ethical_declaration', title: '', description: '', staffId: '', impartialityConfirmed: true, confidentialityConfirmed: true, codeOfConductAck: true, conflictOfInterest: 'None Declared', formCompletedDate: '', reviewedByStaffId: '', nextReviewDate: '' });
       await load();
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  function editStaff(s: Staff) {
+    setEditingStaffId(s.id);
+    setStaffForm({
+      employeeNo: s.employeeNo ?? '', surname: s.surname ?? '', middleName: s.middleName ?? '', firstName: s.firstName ?? '',
+      initials: s.initials ?? '', dateOfBirth: s.dateOfBirth ?? '', gender: s.gender ?? '', designation: s.designation ?? '',
+      jobTitle: s.jobTitle ?? '', professionalRegulator: s.professionalRegulator ?? '', professionalLicence: s.professionalLicence ?? '',
+      licenceExpiryDate: s.licenceExpiryDate ?? '', qualifications: s.qualifications ?? '', sectionId: s.sectionId ? String(s.sectionId) : '',
+      unit: s.unit ?? '', personnelCategory: s.personnelCategory ?? 'STAFF', appointmentType: s.appointmentType ?? 'FULL TIME',
+      appointmentDate: s.appointmentDate ?? '', nationalIdType: s.nationalIdType ?? 'GHANA CARD', nationalIdNumber: s.nationalIdNumber ?? '',
+      emergencyContact: s.emergencyContact ?? '', phone: s.phone ?? '', email: s.email ?? '', staffFileLocation: s.staffFileLocation ?? '', positionId: '',
+    });
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  async function submitStaff(e: FormEvent) {
+    e.preventDefault(); setError(null);
+    if (!staffForm.surname && !staffForm.firstName) { setError('At least a first name or surname is required.'); return; }
+    try {
+      if (editingStaffId) await api(`/staff/${editingStaffId}`, { method: 'PUT', body: JSON.stringify(staffForm) });
+      else await api('/staff', { method: 'POST', body: JSON.stringify(staffForm) });
+      setStaffForm(emptyStaffForm); setEditingStaffId(null);
+      await reloadStaff();
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  async function loadOrientations() {
+    try { setOrientations(await api<StaffOrientation[]>('/personnel/orientations')); }
+    catch (e) { setError((e as Error).message); }
+  }
+
+  async function submitOrientation(e: FormEvent) {
+    e.preventDefault(); setError(null);
+    if (!orientForm.staffId) { setError('Select a staff member.'); return; }
+    try {
+      await api('/personnel/orientations', { method: 'POST', body: JSON.stringify(orientForm) });
+      setOrientForm({ staffId: '', hireDate: '', orientationStart: '', facilitatorStaffId: '', notes: '' });
+      await loadOrientations();
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  async function toggleOrientationStep(o: StaffOrientation, key: string) {
+    const current = (o as unknown as Record<string, string>)[key];
+    try {
+      await api(`/personnel/orientations/${o.id}`, { method: 'PUT', body: JSON.stringify({ [key]: current === 'completed' ? 'pending' : 'completed' }) });
+      await loadOrientations();
     } catch (e) { setError((e as Error).message); }
   }
 
@@ -236,17 +319,21 @@ export function PersonnelManagementPage() {
     catch (e) { setError((e as Error).message); }
   }
 
-  const tabs = ['Dashboard', 'Staff Documents', 'Declarations', 'Training Events', 'Competency Assessments', 'Technical Authorizations', 'Duty Rosters', 'My Profile', 'Reports'];
+  const tabs = ['Dashboard', 'Staff Register', 'Staff Documents', 'Orientation & Induction', 'Declarations', 'Training Events', 'Competency Assessments', 'Technical Authorizations', 'Duty Rosters', 'My Profile', 'Reports'];
 
   return <div className="module-page">
-    <PageHeader eyebrow="People" title="Personnel Management" subtitle="Staff records, competency, training, rosters, and attestations." />
+    <PageHeader eyebrow="People" title="Personnel Management" subtitle="ISO 15189 §6.2 personnel records — competence, authorisation, training, induction, and ethics." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && (summary ? <div className="cards">
+      <div className="card"><h4>Active staff</h4><p className="metric">{summary.totalStaff ?? staff.length}</p></div>
       <div className="card"><h4>Staff docs pending verification</h4><p className="metric">{summary.staffDocumentsPendingVerification}</p></div>
       <div className="card"><h4>Certificates expiring soon</h4><p className="metric">{summary.certificatesExpiringSoon}</p></div>
+      <div className="card"><h4>Licences expiring soon</h4><p className="metric">{summary.licencesExpiringSoon ?? 0}</p></div>
       <div className="card"><h4>Pending declarations</h4><p className="metric">{summary.pendingDeclarations}</p></div>
+      <div className="card"><h4>Ethics reviews due</h4><p className="metric">{summary.ethicsReviewsDue ?? 0}</p></div>
+      <div className="card"><h4>Orientations in progress</h4><p className="metric">{summary.orientationsInProgress ?? 0}</p></div>
       <div className="card"><h4>Planned training events</h4><p className="metric">{summary.plannedTrainingEvents}</p></div>
       <div className="card"><h4>Competency assessments due</h4><p className="metric">{summary.competencyAssessmentsDue}</p></div>
       <div className="card"><h4>Authorisations due review</h4><p className="metric">{summary.authorizationsDueReview}</p></div>
@@ -269,6 +356,60 @@ export function PersonnelManagementPage() {
         ]} />
       </ChartCard>
     </div>}
+
+    {tab === 'Staff Register' && <>
+      <div className="card">
+        <div className="section-head"><h3 style={{ margin: 0 }}>{editingStaffId ? 'Edit staff record' : 'New staff record'}</h3>
+          {editingStaffId && <button type="button" className="secondary" onClick={() => { setEditingStaffId(null); setStaffForm(emptyStaffForm); }}>Cancel edit</button>}</div>
+        <p className="muted" style={{ marginTop: 0 }}>Maintains the Master Personnel Register (ISO 15189:2022 §6.2.2): identity, professional registration, qualifications, appointment and emergency contact for every member of staff.</p>
+        <form className="form-grid" onSubmit={submitStaff}>
+          <label>Staff ID<input value={staffForm.employeeNo} onChange={e => setStaffForm({ ...staffForm, employeeNo: e.target.value })} placeholder="e.g. SNO-001" /></label>
+          <label>Surname<input value={staffForm.surname} onChange={e => setStaffForm({ ...staffForm, surname: e.target.value })} /></label>
+          <label>Middle name(s)<input value={staffForm.middleName} onChange={e => setStaffForm({ ...staffForm, middleName: e.target.value })} /></label>
+          <label>First name(s)<input value={staffForm.firstName} onChange={e => setStaffForm({ ...staffForm, firstName: e.target.value })} /></label>
+          <label>Initials<input value={staffForm.initials} onChange={e => setStaffForm({ ...staffForm, initials: e.target.value })} placeholder="auto" /></label>
+          <label>Date of birth<input type="date" value={staffForm.dateOfBirth} onChange={e => setStaffForm({ ...staffForm, dateOfBirth: e.target.value })} /></label>
+          <label>Gender<select value={staffForm.gender} onChange={e => setStaffForm({ ...staffForm, gender: e.target.value })}><option value="">—</option>{GENDERS.map(g => <option key={g} value={g}>{g}</option>)}</select></label>
+          <label>Designation (grade)<input value={staffForm.designation} onChange={e => setStaffForm({ ...staffForm, designation: e.target.value })} placeholder="e.g. Principal Medical Lab Scientist" /></label>
+          <label>Position / role<input value={staffForm.jobTitle} onChange={e => setStaffForm({ ...staffForm, jobTitle: e.target.value })} placeholder="e.g. Biochemistry Unit Head" /></label>
+          <label>Unit / Section<select value={staffForm.sectionId} onChange={e => setStaffForm({ ...staffForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+          <label>Professional regulator<input value={staffForm.professionalRegulator} onChange={e => setStaffForm({ ...staffForm, professionalRegulator: e.target.value })} placeholder="e.g. AHPC" /></label>
+          <label>Professional licence no.<input value={staffForm.professionalLicence} onChange={e => setStaffForm({ ...staffForm, professionalLicence: e.target.value })} /></label>
+          <label>Licence expiry<input type="date" value={staffForm.licenceExpiryDate} onChange={e => setStaffForm({ ...staffForm, licenceExpiryDate: e.target.value })} /></label>
+          <label>Qualifications<input value={staffForm.qualifications} onChange={e => setStaffForm({ ...staffForm, qualifications: e.target.value })} placeholder="Separate several with |" /></label>
+          <label>Personnel category<select value={staffForm.personnelCategory} onChange={e => setStaffForm({ ...staffForm, personnelCategory: e.target.value })}>{PERSONNEL_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
+          <label>Appointment type<select value={staffForm.appointmentType} onChange={e => setStaffForm({ ...staffForm, appointmentType: e.target.value })}>{APPOINTMENT_TYPES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
+          <label>Date of appointment<input type="date" value={staffForm.appointmentDate} onChange={e => setStaffForm({ ...staffForm, appointmentDate: e.target.value })} /></label>
+          <label>National ID type<select value={staffForm.nationalIdType} onChange={e => setStaffForm({ ...staffForm, nationalIdType: e.target.value })}>{NATIONAL_ID_TYPES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
+          <label>National ID number<input value={staffForm.nationalIdNumber} onChange={e => setStaffForm({ ...staffForm, nationalIdNumber: e.target.value })} /></label>
+          <label>Contact phone<input value={staffForm.phone} onChange={e => setStaffForm({ ...staffForm, phone: e.target.value })} /></label>
+          <label>Email<input type="email" value={staffForm.email} onChange={e => setStaffForm({ ...staffForm, email: e.target.value })} /></label>
+          <label>Emergency contact<input value={staffForm.emergencyContact} onChange={e => setStaffForm({ ...staffForm, emergencyContact: e.target.value })} placeholder="e.g. Spouse - 0200000000" /></label>
+          <label>Assign position<select value={staffForm.positionId} onChange={e => setStaffForm({ ...staffForm, positionId: e.target.value })}><option value="">— keep current —</option>{positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>
+          <label>Staff file location<input value={staffForm.staffFileLocation} onChange={e => setStaffForm({ ...staffForm, staffFileLocation: e.target.value })} placeholder="e.g. /SECH-LAB-PERSONNEL-FILES/SNO-001/" /></label>
+          <button type="submit">{editingStaffId ? 'Save changes' : 'Create staff record'}</button>
+        </form>
+      </div>
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="section-head"><h3 style={{ margin: 0 }}>Master Personnel Register</h3>
+          <input placeholder="Search name, ID, position…" value={staffSearch} onChange={e => setStaffSearch(e.target.value)} style={{ maxWidth: 280 }} /></div>
+        <table className="data-table"><thead><tr><th>Staff ID</th><th>Name</th><th>Designation</th><th>Position</th><th>Unit</th><th>Category</th><th>Licence</th><th>Experience</th><th></th></tr></thead><tbody>
+          {staff.filter(s => { const q = staffSearch.trim().toLowerCase(); if (!q) return true; return [s.fullName, s.employeeNo, s.jobTitle, s.designation, s.unit].some(v => v?.toLowerCase().includes(q)); }).map(s => {
+            const today = new Date().toISOString().slice(0, 10);
+            const licExpiringSoon = s.licenceExpiryDate && s.licenceExpiryDate <= new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10) && s.licenceExpiryDate >= today;
+            const licExpired = s.licenceExpiryDate && s.licenceExpiryDate < today;
+            return <tr key={s.id}>
+              <td>{s.employeeNo || '—'}</td><td>{s.fullName}{s.initials ? <span className="muted"> ({s.initials})</span> : null}</td>
+              <td>{s.designation || '—'}</td><td>{s.jobTitle || '—'}</td><td>{s.unit || (s.sectionId ? sections.find(x => x.id === s.sectionId)?.name : '') || '—'}</td>
+              <td>{s.personnelCategory ? <span className="badge">{s.personnelCategory}</span> : '—'}</td>
+              <td>{s.professionalLicence || '—'}{licExpired && <span className="badge danger">expired</span>}{licExpiringSoon && <span className="badge warning">expiring</span>}</td>
+              <td>{yearsBetween(s.appointmentDate)}</td>
+              <td><button type="button" onClick={() => editStaff(s)}>Edit</button></td>
+            </tr>;
+          })}
+        </tbody></table>
+      </div>
+    </>}
 
     {tab === 'Staff Documents' && <>
       <form className="form-grid" onSubmit={submitStaffDoc}>
@@ -298,19 +439,54 @@ export function PersonnelManagementPage() {
     </>}
 
     {tab === 'Declarations' && <>
+      <div className="card"><p className="muted" style={{ marginTop: 0 }}>Ethical declarations record each member of staff's commitment to impartiality, confidentiality, disclosure of conflicts of interest, and the code of conduct (ISO 15189:2022 §6.2.2 / §4.1).</p>
       <form className="form-grid" onSubmit={submitDeclaration}>
         <label>Type<select value={declForm.declarationType} onChange={e => setDeclForm({ ...declForm, declarationType: e.target.value })} required>{DECLARATION_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
-        <label>Title<input value={declForm.title} onChange={e => setDeclForm({ ...declForm, title: e.target.value })} required /></label>
-        <label>Description<textarea value={declForm.description} onChange={e => setDeclForm({ ...declForm, description: e.target.value })} /></label>
+        <label>Title<input value={declForm.title} onChange={e => setDeclForm({ ...declForm, title: e.target.value })} required placeholder="e.g. Annual ethics & confidentiality declaration" /></label>
         <label>Assign to staff<select value={declForm.staffId} onChange={e => setDeclForm({ ...declForm, staffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        <label>Conflict of interest<input value={declForm.conflictOfInterest} onChange={e => setDeclForm({ ...declForm, conflictOfInterest: e.target.value })} placeholder="None Declared / details" /></label>
+        <label>Form completed date<input type="date" value={declForm.formCompletedDate} onChange={e => setDeclForm({ ...declForm, formCompletedDate: e.target.value })} /></label>
+        <label>Reviewed by<select value={declForm.reviewedByStaffId} onChange={e => setDeclForm({ ...declForm, reviewedByStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        <label>Next review date<input type="date" value={declForm.nextReviewDate} onChange={e => setDeclForm({ ...declForm, nextReviewDate: e.target.value })} /></label>
+        <label>Description / notes<textarea value={declForm.description} onChange={e => setDeclForm({ ...declForm, description: e.target.value })} /></label>
+        <label className="check-inline"><input type="checkbox" checked={declForm.impartialityConfirmed} onChange={e => setDeclForm({ ...declForm, impartialityConfirmed: e.target.checked })} /> Impartiality confirmed</label>
+        <label className="check-inline"><input type="checkbox" checked={declForm.confidentialityConfirmed} onChange={e => setDeclForm({ ...declForm, confidentialityConfirmed: e.target.checked })} /> Confidentiality confirmed</label>
+        <label className="check-inline"><input type="checkbox" checked={declForm.codeOfConductAck} onChange={e => setDeclForm({ ...declForm, codeOfConductAck: e.target.checked })} /> Code of conduct acknowledged</label>
         <button type="submit">Create declaration</button>
-      </form>
-      <table className="data-table"><thead><tr><th>Number</th><th>Type</th><th>Title</th><th>Staff</th><th>Status</th><th>Signed</th><th></th></tr></thead><tbody>
+      </form></div>
+      <table className="data-table" style={{ marginTop: 16 }}><thead><tr><th>Number</th><th>Type</th><th>Title</th><th>Staff</th><th>Impartiality</th><th>Confidentiality</th><th>COI</th><th>Next review</th><th>Status</th><th></th></tr></thead><tbody>
         {declarations.map(d => <tr key={d.id}>
           <td>{d.declaration_number}</td><td>{d.declaration_type.replace(/_/g, ' ')}</td><td>{d.title}</td>
-          <td>{d.staff_name || staffName(staff, d.staff_id)}</td><td>{formatBadge(d.status)}</td><td>{d.signed_at || '—'}</td>
+          <td>{d.staff_name || staffName(staff, d.staff_id)}</td>
+          <td>{d.impartiality_confirmed == null ? '—' : (d.impartiality_confirmed ? '✓' : '✗')}</td>
+          <td>{d.confidentiality_confirmed == null ? '—' : (d.confidentiality_confirmed ? '✓' : '✗')}</td>
+          <td>{d.conflict_of_interest || '—'}</td>
+          <td>{d.next_review_date || '—'}</td>
+          <td>{formatBadge(d.status)}</td>
           <td>{d.status === 'pending' && <button onClick={() => signDeclaration(d.id)}>Sign</button>}</td>
         </tr>)}
+      </tbody></table>
+    </>}
+
+    {tab === 'Orientation & Induction' && <>
+      <div className="card"><p className="muted" style={{ marginTop: 0 }}>Tracks the structured induction of new staff (ISO 15189:2022 §6.2.3 / WHO LQMS): welcome, safety, ethics, LIS, equipment, SOPs, baseline competency and department induction. Tick each element as it is completed; the record closes automatically when all are done.</p>
+      <form className="form-grid" onSubmit={submitOrientation}>
+        <label>Staff<select value={orientForm.staffId} onChange={e => setOrientForm({ ...orientForm, staffId: e.target.value })} required><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        <label>Hire date<input type="date" value={orientForm.hireDate} onChange={e => setOrientForm({ ...orientForm, hireDate: e.target.value })} /></label>
+        <label>Orientation start<input type="date" value={orientForm.orientationStart} onChange={e => setOrientForm({ ...orientForm, orientationStart: e.target.value })} /></label>
+        <label>Facilitator<select value={orientForm.facilitatorStaffId} onChange={e => setOrientForm({ ...orientForm, facilitatorStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        <label>Notes<input value={orientForm.notes} onChange={e => setOrientForm({ ...orientForm, notes: e.target.value })} /></label>
+        <button type="submit">Start orientation record</button>
+      </form></div>
+      <table className="data-table" style={{ marginTop: 16 }}><thead><tr><th>Staff</th><th>Hire date</th>{ORIENTATION_STEPS.map(s => <th key={s.key} title={s.label} style={{ writingMode: 'vertical-rl', whiteSpace: 'nowrap' }}>{s.label}</th>)}<th>Status</th></tr></thead><tbody>
+        {orientations.map(o => <tr key={o.id}>
+          <td>{o.staff_name}</td><td>{o.hire_date || '—'}</td>
+          {ORIENTATION_STEPS.map(s => { const v = (o as unknown as Record<string, string>)[s.key]; return <td key={s.key} style={{ textAlign: 'center' }}>
+            <button type="button" className="step-toggle" title={`Toggle ${s.label}`} onClick={() => toggleOrientationStep(o, s.key)}>{v === 'completed' ? '✅' : '⬜'}</button>
+          </td>; })}
+          <td>{o.orientation_complete ? <span className="badge approved">complete</span> : formatBadge(o.status)}</td>
+        </tr>)}
+        {orientations.length === 0 && <tr><td colSpan={ORIENTATION_STEPS.length + 3} className="muted">No orientation records yet.</td></tr>}
       </tbody></table>
     </>}
 
