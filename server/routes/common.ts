@@ -231,7 +231,11 @@ export function commonRoutes() {
       plannedTrainingEvents: count("SELECT COUNT(*) count FROM training_events WHERE status = 'planned'"),
       competencyAssessmentsDue: count("SELECT COUNT(*) count FROM competency_assessments WHERE next_assessment_due IS NOT NULL AND next_assessment_due <= ?", expiryCutoff),
       authorizationsDueReview: count("SELECT COUNT(*) count FROM technical_authorizations WHERE expires_at IS NOT NULL AND expires_at <= ? AND is_active = 1", expiryCutoff),
-      rostersThisMonth: count("SELECT COUNT(*) count FROM duty_rosters WHERE roster_start_date <= ? AND roster_end_date >= ?", monthEnd, monthStart)
+      rostersThisMonth: count("SELECT COUNT(*) count FROM duty_rosters WHERE roster_start_date <= ? AND roster_end_date >= ?", monthEnd, monthStart),
+      totalStaff: count("SELECT COUNT(*) count FROM staff WHERE is_active = 1"),
+      licencesExpiringSoon: count("SELECT COUNT(*) count FROM staff WHERE licence_expiry_date IS NOT NULL AND licence_expiry_date <= ? AND licence_expiry_date >= ?", expiryCutoff, todayIso),
+      orientationsInProgress: count("SELECT COUNT(*) count FROM staff_orientations WHERE orientation_complete = 0 AND status != 'cancelled'"),
+      ethicsReviewsDue: count("SELECT COUNT(*) count FROM staff_declarations WHERE next_review_date IS NOT NULL AND next_review_date <= ?", expiryCutoff)
     });
   });
 
@@ -576,6 +580,25 @@ export function commonRoutes() {
     if (idOrNull(req.body.positionId)) getDb().prepare('INSERT INTO staff_position_assignments (staff_id, position_id, assignment_type) VALUES (?, ?, ?)').run(r.lastInsertRowid, idOrNull(req.body.positionId), req.body.assignmentType ?? 'primary');
     audit(req, { action: 'create', entity: 'staff', entityId: r.lastInsertRowid, newValue: req.body });
     res.status(201).json({ id: r.lastInsertRowid });
+  });
+  router.put('/staff/:id', requirePermission('personnel', 'edit'), (req, res) => {
+    const existing = getDb().prepare('SELECT * FROM staff WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Staff not found' });
+    const cols = buildStaffColumns(req.body);
+    const keys = Object.keys(cols);
+    if (keys.length) {
+      getDb().prepare(`UPDATE staff SET ${keys.map(k => `${k} = ?`).join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...keys.map(k => cols[k]), req.params.id);
+    }
+    if (req.body.positionId) {
+      const pid = Number(req.body.positionId);
+      const has = getDb().prepare("SELECT 1 FROM staff_position_assignments WHERE staff_id = ? AND position_id = ? AND is_active = 1").get(req.params.id, pid);
+      if (!has) {
+        getDb().prepare("UPDATE staff_position_assignments SET is_active = 0, ends_at = CURRENT_TIMESTAMP WHERE staff_id = ? AND assignment_type = 'primary' AND is_active = 1").run(req.params.id);
+        getDb().prepare('INSERT INTO staff_position_assignments (staff_id, position_id, assignment_type) VALUES (?, ?, ?)').run(req.params.id, pid, 'primary');
+      }
+    }
+    audit(req, { action: 'edit', entity: 'staff', entityId: Number(req.params.id), oldValue: existing, newValue: req.body });
+    res.json({ ok: true });
   });
 
   // Comprehensive staff registration: creates the staff record, position assignments,

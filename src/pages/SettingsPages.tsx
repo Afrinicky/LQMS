@@ -1128,8 +1128,10 @@ export function ModuleToggles(){
 }
 
 export function DocumentImport(){
-  return <div className="card"><h3>Document Master List Import</h3><p>Upload/import workflow scaffold for SOPs, policies, forms, registers, logs, and trackers. CSV parsing is intentionally deferred.</p>
-    <button onClick={()=>api('/documents/import-master-list',{method:'POST',body:JSON.stringify({source:'mvp-ui'})})}>Run placeholder import</button>
+  return <div className="card"><h3>Document Master List Import</h3>
+    <p>Bulk import of SOPs, policies, forms, registers, logs and trackers now lives in the Documents module, where each uploaded file becomes a controlled document with its first version.</p>
+    <p className="muted">Open <strong>Documents &amp; Records → Bulk Import</strong> to upload multiple files at once, set a shared section, owner and review frequency, and auto-number their document codes.</p>
+    <Link to="/documents"><button>Go to Documents</button></Link>
   </div>;
 }
 
