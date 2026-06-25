@@ -1239,16 +1239,17 @@ function StaffImportExport() {
   const [result, setResult] = useState<{ created: number; updated: number; skipped: number; errors: string[] } | null>(null);
   const [file, setFile] = useState<File | null>(null);
 
-  async function download() {
+  async function download(path: string, fallback: string) {
     setError(null);
     try {
       const token = getToken();
-      const res = await fetch(`${API_BASE}/staff/export`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+      const res = await fetch(`${API_BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
       if (!res.ok) throw new Error((await res.json().catch(() => ({ error: res.statusText }))).error ?? res.statusText);
       const blob = await res.blob();
+      const m = (res.headers.get('Content-Disposition') || '').match(/filename="?([^"]+)"?/);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = `staff-export-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.href = url; a.download = m ? m[1] : fallback;
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     } catch (e) { setError((e as Error).message); }
   }
@@ -1269,13 +1270,16 @@ function StaffImportExport() {
 
   return <div className="grid cols-2">
     <div className="card">
-      <h3>Export staff register</h3>
-      <p>Download all staff as an Excel workbook — names (First, Surname, Other), employee no, email, contact, position, reporting line, assigned unit and status. Edit or append rows and import it back.</p>
-      <button onClick={download}>Download staff (.xlsx)</button>
+      <h3>Master Personnel Register — Export</h3>
+      <p>Download the <strong>Master Personnel Register</strong> workbook (ISO 15189:2022 §6.2). It carries every personnel field — Staff ID, full name parts and initials, date of birth, gender, designation and position, professional regulator, licence and qualifications, unit, personnel category, appointment type and date, years of experience, national ID, emergency contact, phone, email and file location. Use the blank template to prepare a bulk upload, or export the current register.</p>
+      <div className="quick-actions" style={{ marginTop: 8 }}>
+        <button type="button" onClick={() => download('/staff/template', 'Staff_Register_Template.xlsx')}>Download blank template</button>
+        <button type="button" className="secondary" onClick={() => download('/staff/export', 'Master_Personnel_Register.xlsx')}>Export current register</button>
+      </div>
     </div>
     <div className="card">
-      <h3>Import staff register</h3>
-      <p>Upload a completed template. Rows are matched by <strong>Employee No</strong> — existing records are updated, new ones are created. Positions and reporting lines are created and linked automatically.</p>
+      <h3>Master Personnel Register — Import</h3>
+      <p>Upload a completed Master Personnel Register workbook. Rows are matched by <strong>Staff ID</strong> — existing records are updated, new ones are created. Every column maps to its field, the <strong>Unit</strong> links to the matching section, and the <strong>Position</strong> is created in the organogram and assigned automatically.</p>
       {error && <div className="error">{error}</div>}
       <form className="form" onSubmit={upload}>
         <label>Excel file (.xlsx)<input type="file" accept=".xlsx,.xls" onChange={e => setFile(e.target.files?.[0] ?? null)} /></label>
