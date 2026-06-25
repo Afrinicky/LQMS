@@ -1,8 +1,9 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, API_BASE, getToken } from '../services/api';
 import { MODULES, PERMISSION_ACTIONS, TECHNICAL_AUTHORIZATION_LEVELS } from '../../shared/constants/modules';
 import type {
+  OrgTree, OrgTreeNode, ProfessionalRank,
   Position, Staff, SystemModule, ApiUser, Permission, Section, Device,
   Department, PermissionMatrixData, TechnicalAuthorizationRow, StaffProfile,
   SectionConfigRow, SectionConfigDetail,
@@ -418,7 +419,7 @@ export function Positions(){
       </div>
     </div>}
 
-    {view==='organogram' && <Organogram staff={staff} onChanged={load} />}
+    {view==='organogram' && <><Organogram staff={staff} onChanged={load} /><RankConfig /></>}
   </div>;
 }
 
@@ -443,13 +444,61 @@ type OrgCtx = {
 
 // Laboratory organogram — interactive, ISO 15189 / WHO LQMS-style reporting and
 // deputisation chart. Editing happens in place on each node.
+// Configurable professional rank order — drives the automatic within-cadre
+// arrangement of technical staff on the organogram (lower number = higher rank).
+function RankConfig() {
+  const [ranks, setRanks] = useState<ProfessionalRank[]>([]);
+  const [name, setName] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const load = () => api<ProfessionalRank[]>('/professional-ranks').then(setRanks).catch(e => setError((e as Error).message));
+  useEffect(() => { void load(); }, []);
+  async function call(path: string, options: RequestInit) { setError(null); try { await api(path, options); await load(); return true; } catch (e) { setError((e as Error).message); return false; } }
+  async function add(e: FormEvent) { e.preventDefault(); if (!name.trim()) return; if (await call('/professional-ranks', { method: 'POST', body: JSON.stringify({ name: name.trim() }) })) setName(''); }
+  function move(r: ProfessionalRank, dir: -1 | 1) {
+    const sorted = [...ranks].sort((a, b) => a.sortOrder - b.sortOrder);
+    const i = sorted.findIndex(x => x.id === r.id); const j = i + dir;
+    if (j < 0 || j >= sorted.length) return;
+    // swap sort orders
+    void call(`/professional-ranks/${r.id}`, { method: 'PUT', body: JSON.stringify({ sortOrder: sorted[j].sortOrder }) });
+    void call(`/professional-ranks/${sorted[j].id}`, { method: 'PUT', body: JSON.stringify({ sortOrder: sorted[i].sortOrder }) });
+  }
+  return <div className="card" style={{ marginTop: 16 }}>
+    <h3>Professional rank order</h3>
+    <p className="hint">The automatic hierarchy under each Unit Head orders staff of the same cadre by these ranks (top = highest). Staff with no explicit rank are matched against their designation.</p>
+    {error && <div className="error">{error}</div>}
+    <table className="data-table" style={{ maxWidth: 520 }}><thead><tr><th>#</th><th>Rank</th><th>Active</th><th></th></tr></thead><tbody>
+      {[...ranks].sort((a, b) => a.sortOrder - b.sortOrder).map((r, i, arr) => <tr key={r.id} style={{ opacity: r.isActive ? 1 : 0.5 }}>
+        <td>{i + 1}</td><td>{r.name}</td>
+        <td><input type="checkbox" checked={r.isActive === 1} onChange={e => call(`/professional-ranks/${r.id}`, { method: 'PUT', body: JSON.stringify({ isActive: e.target.checked }) })} /></td>
+        <td style={{ whiteSpace: 'nowrap' }}>
+          <button type="button" className="tiny" disabled={i === 0} onClick={() => move(r, -1)} title="Move up">↑</button>
+          <button type="button" className="tiny" disabled={i === arr.length - 1} onClick={() => move(r, 1)} title="Move down">↓</button>
+          <button type="button" className="tiny secondary" onClick={() => { if (window.confirm(`Remove rank "${r.name}"?`)) call(`/professional-ranks/${r.id}`, { method: 'DELETE' }); }}>×</button>
+        </td>
+      </tr>)}
+      {ranks.length === 0 && <tr><td colSpan={4} className="hint">No ranks configured.</td></tr>}
+    </tbody></table>
+    <form className="org-add-root" style={{ marginTop: 10 }} onSubmit={add}>
+      <input placeholder="Add a rank (e.g. Senior Medical Laboratory Scientist)…" value={name} onChange={e => setName(e.target.value)} />
+      <button type="submit">Add rank</button>
+    </form>
+  </div>;
+}
+
 function Organogram({ staff, onChanged }: { staff: Staff[]; onChanged: () => void }) {
-  const [nodes,setNodes]=useState<OrgNodeData[]>([]);
+  const [nodes,setNodes]=useState<OrgNodeData[]>([]);   // flat positions (for editor + reporting-line options)
+  const [tree,setTree]=useState<OrgTreeNode[]>([]);     // computed render tree
   const [selectedId,setSelectedId]=useState<number|null>(null);
   const [error,setError]=useState<string|null>(null);
   const [success,setSuccess]=useState<string|null>(null);
   const [newRoot,setNewRoot]=useState('');
-  const load=()=>api<OrgNodeData[]>('/organogram').then(setNodes).catch(e=>setError((e as Error).message));
+  const [zoom,setZoom]=useState(1);
+  const viewportRef=useRef<HTMLDivElement>(null);
+  const chartRef=useRef<HTMLDivElement>(null);
+  const load=()=>{
+    api<OrgNodeData[]>('/organogram').then(setNodes).catch(e=>setError((e as Error).message));
+    api<OrgTree>('/organogram/tree').then(t=>setTree(t.roots)).catch(e=>setError((e as Error).message));
+  };
   useEffect(()=>{void load()},[]);
 
   function refresh(){ load(); onChanged(); }
@@ -460,19 +509,22 @@ function Organogram({ staff, onChanged }: { staff: Staff[]; onChanged: () => voi
   }
 
   const childrenOf = (id:number|null) => nodes.filter(n => n.reportsToPositionId === id).sort((a,b)=>a.title.localeCompare(b.title));
-  const roots = nodes.filter(n => n.reportsToPositionId === null || !nodes.some(x => x.id === n.reportsToPositionId));
-
   function descendants(id:number): Set<number> {
     const out = new Set<number>(); const stack=[id];
     while(stack.length){ const cur=stack.pop()!; for(const c of nodes.filter(n=>n.reportsToPositionId===cur)){ if(!out.has(c.id)){ out.add(c.id); stack.push(c.id); } } }
     return out;
   }
-
   const ctx: OrgCtx = { nodes, staff, selectedId, onSelect:setSelectedId, childrenOf, descendants, call };
 
   async function applyStandard(){ await call('/organogram/apply-standard',{method:'POST',body:JSON.stringify({})},'Standard laboratory structure applied.'); }
   async function addRoot(e:FormEvent){ e.preventDefault(); if(!newRoot.trim()) return; const ok=await call('/positions',{method:'POST',body:JSON.stringify({ title:newRoot.trim(), reportsToPositionId:null })},'Top-level role added.'); if(ok) setNewRoot(''); }
   function printChart(){ window.print(); }
+  function fitToScreen(){
+    const vp=viewportRef.current, ch=chartRef.current;
+    if(!vp||!ch) return;
+    const w=ch.scrollWidth/(zoom||1); const avail=vp.clientWidth-24;
+    setZoom(w>0 ? Math.max(0.4, Math.min(1, avail/w)) : 1);
+  }
 
   const printedAt = new Date().toLocaleString();
 
@@ -480,17 +532,24 @@ function Organogram({ staff, onChanged }: { staff: Staff[]; onChanged: () => voi
     <div className="panel-head no-print">
       <h3>Laboratory Organogram &amp; Deputisation</h3>
       <div className="org-toolbar">
-        <button onClick={applyStandard}>Apply standard structure</button>
-        <button onClick={printChart}>Print</button>
+        <div className="org-zoom">
+          <button type="button" title="Zoom out" onClick={()=>setZoom(z=>Math.max(0.4, Math.round((z-0.1)*10)/10))}>−</button>
+          <span className="org-zoom-val">{Math.round(zoom*100)}%</span>
+          <button type="button" title="Zoom in" onClick={()=>setZoom(z=>Math.min(1.6, Math.round((z+0.1)*10)/10))}>+</button>
+          <button type="button" title="Fit to screen" onClick={fitToScreen}>Fit</button>
+          <button type="button" title="Reset" onClick={()=>setZoom(1)}>100%</button>
+        </div>
+        <button type="button" onClick={applyStandard}>Apply standard structure</button>
+        <button type="button" onClick={printChart}>Print</button>
       </div>
     </div>
-    <p className="hint no-print">Click any role to edit it in place — rename it, assign or change its <strong>holder</strong> and <strong>deputy</strong> (acting officer), set its reporting line, or add a subordinate. A subordinate always reports to the role directly above it. Every change flows through Positions &amp; Organogram, the Permission Matrix and Personnel.</p>
+    <p className="hint no-print">The appointed roles below the Laboratory Manager are set by hand. Under each <strong>Unit Head</strong>, the unit’s technical staff are arranged automatically by cadre (Scientist → Technician → Assistant) then professional rank — the highest-ranked becomes the next-in-command, and succession flows downward. Click any appointed role to edit it; the automatic chain follows the staff register.</p>
     <div className="org-legend no-print">
       <span className="leg"><span className="org-swatch rt-management" />Management</span>
-      <span className="leg"><span className="org-swatch rt-quality" />Quality function</span>
-      <span className="leg"><span className="org-swatch rt-technical" />Technical / bench</span>
+      <span className="leg"><span className="org-swatch rt-quality" />Quality</span>
+      <span className="leg"><span className="org-swatch rt-technical" />Technical / unit</span>
       <span className="leg"><span className="org-swatch rt-support" />Support / admin</span>
-      <span className="leg"><span className="org-dep-dot" />Deputy shown on node</span>
+      <span className="leg"><span className="org-swatch org-staff-swatch" />Auto staff (by cadre &amp; rank)</span>
     </div>
     <form className="org-add-root no-print" onSubmit={addRoot}>
       <input placeholder="Add a top-level role (e.g. Laboratory Manager)…" value={newRoot} onChange={e=>setNewRoot(e.target.value)} />
@@ -499,29 +558,50 @@ function Organogram({ staff, onChanged }: { staff: Staff[]; onChanged: () => voi
     {error && <div className="error no-print">{error}</div>}
     {success && <div className="notice-ok no-print">{success}</div>}
 
-    <div className="org-print-area">
-      <div className="org-print-head"><strong>SECH_LIMS — Laboratory Organisational Structure &amp; Deputisation</strong><span>Printed {printedAt}</span></div>
-      {nodes.length===0
-        ? <p className="hint">No positions yet. Use “Add top role” or “Apply standard structure”.</p>
-        : <div className="org-chart"><ul className="org-tree">{roots.map(r => <OrgBranch key={r.id} node={r} ctx={ctx} />)}</ul></div>}
+    <div className="org-viewport" ref={viewportRef}>
+      <div className="org-print-area" ref={chartRef} style={{ zoom } as unknown as React.CSSProperties}>
+        <div className="org-print-head"><strong>SECH_LIMS — Laboratory Organisational Structure &amp; Deputisation</strong><span>Printed {printedAt}</span></div>
+        {tree.length===0
+          ? <p className="hint">No positions yet. Use “Add top role” or “Apply standard structure”.</p>
+          : <div className="org-chart"><ul className="org-tree">{tree.map(r => <OrgTreeBranch key={r.key} node={r} ctx={ctx} />)}</ul></div>}
+      </div>
     </div>
   </div>;
 }
 
-function OrgBranch({ node, ctx }: { node: OrgNodeData; ctx: OrgCtx }) {
-  const kids = ctx.childrenOf(node.id);
-  const holder = node.occupants.find(o => o.assignmentType === 'primary');
-  const deputy = node.occupants.find(o => o.assignmentType === 'deputy');
-  const rt = roleType(node.title);
+const avClass = (a?: string | null) => `av-${String(a || 'available').toLowerCase().replace(/[^a-z]+/g,'-')}`;
+
+function OrgTreeBranch({ node, ctx }: { node: OrgTreeNode; ctx: OrgCtx }) {
+  const kids = node.children;
+  if (node.kind === 'staff') {
+    const unavailable = node.availability && node.availability.toLowerCase() !== 'available';
+    return <li>
+      <div className={`org-node org-staff ${avClass(node.availability)}`} title={node.staffName}>
+        <span className="org-title">{node.title}</span>
+        <span className="org-holder">{node.staffName}</span>
+        <span className="org-meta">{node.cadre}{node.rank ? ` · ${node.rank}` : ''}</span>
+        <span className="org-deputy">
+          {unavailable ? <span className="av-flag">{node.availability}</span> : null}
+          {node.nextInCommand ? <span className="muted"> Next: {node.nextInCommand}</span> : null}
+        </span>
+      </div>
+      {kids.length>0 && <ul>{kids.map(k=><OrgTreeBranch key={k.key} node={k} ctx={ctx} />)}</ul>}
+    </li>;
+  }
+  // Position (appointed) node — editable in place.
+  const flat = ctx.nodes.find(n => n.id === node.positionId);
+  const selected = ctx.selectedId === node.positionId;
   return <li>
-    {ctx.selectedId === node.id
-      ? <OrgNodeEditor node={node} ctx={ctx} />
-      : <button type="button" className={`org-node rt-${rt} ${node.isActive ? '' : 'inactive'}`} onClick={()=>ctx.onSelect(node.id)}>
+    {selected && flat
+      ? <OrgNodeEditor node={flat} ctx={ctx} />
+      : <button type="button" className={`org-node rt-${node.roleType} ${node.isActive ? '' : 'inactive'} ${node.unitHead ? 'is-head' : ''}`} onClick={()=>ctx.onSelect(node.positionId!)}>
           <span className="org-title">{node.title}</span>
-          <span className={`org-holder ${holder ? '' : 'vacant'}`}>{holder ? holder.staffName : 'Vacant — click to assign'}</span>
-          <span className="org-deputy">{deputy ? <>Deputy: {deputy.staffName}</> : <span className="muted">Deputy: —</span>}</span>
+          <span className={`org-holder ${node.vacant ? 'vacant' : ''}`}>{node.vacant ? 'Vacant — click to assign' : node.holderName}</span>
+          {node.unitHead
+            ? <span className="org-deputy">{node.deputyName ? <>Next-in-command: {node.deputyName}</> : <span className="muted">No deputy yet</span>}{node.actingName && node.actingName !== node.deputyName ? <span className="muted"> · Acting: {node.actingName}</span> : null}</span>
+            : <span className="org-deputy">{node.deputyName ? <>Deputy: {node.deputyName}</> : <span className="muted">Deputy: —</span>}</span>}
         </button>}
-    {kids.length>0 && <ul>{kids.map(k=><OrgBranch key={k.id} node={k} ctx={ctx} />)}</ul>}
+    {kids.length>0 && <ul>{kids.map(k=><OrgTreeBranch key={k.key} node={k} ctx={ctx} />)}</ul>}
   </li>;
 }
 

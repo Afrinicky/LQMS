@@ -2377,6 +2377,31 @@ CREATE TABLE IF NOT EXISTS section_services (
   addStaffCol('national_id_number', 'national_id_number TEXT');
   addStaffCol('emergency_contact', 'emergency_contact TEXT');
   addStaffCol('staff_file_location', 'staff_file_location TEXT');
+  // Cadre, professional rank and availability drive the automatic unit hierarchy
+  // and acting/succession logic on the organogram (below each Unit Head).
+  addStaffCol('cadre', 'cadre TEXT');                       // Scientist / Technician / Assistant
+  addStaffCol('professional_rank', 'professional_rank TEXT');
+  addStaffCol('availability_status', "availability_status TEXT NOT NULL DEFAULT 'available'");
+
+  // Configurable professional rank order (lower sort_order = higher rank). The
+  // automatic hierarchy within a cadre is ordered by this table.
+  database.exec(`CREATE TABLE IF NOT EXISTS professional_ranks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    sort_order INTEGER NOT NULL DEFAULT 100,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );`);
+  if ((database.prepare('SELECT COUNT(*) c FROM professional_ranks').get() as { c: number }).c === 0) {
+    const seed = database.prepare('INSERT OR IGNORE INTO professional_ranks (name, sort_order) VALUES (?, ?)');
+    // Highest grade first; keyword-matched against a staff member's designation
+    // when no explicit professional rank is set.
+    [
+      ['Chief', 10], ['Deputy Chief', 20], ['Principal', 30], ['Senior', 40],
+      ['Medical Laboratory Scientist', 50], ['Medical Laboratory Technician', 60],
+      ['Senior Technician', 45], ['Technician', 60], ['Laboratory Assistant', 70], ['Intern', 80],
+    ].forEach(([n, o]) => seed.run(n, o));
+  }
 
   // Structured ethics confirmations on staff_declarations (ISO 15189 §6.2.2 / §4.1).
   const declColNames = new Set((database.prepare("PRAGMA table_info(staff_declarations)").all() as Array<{ name: string }>).map(c => c.name));
