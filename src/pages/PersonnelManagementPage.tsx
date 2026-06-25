@@ -2,12 +2,13 @@ import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
 import { ChartCard, BarMeter, BarChart, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
+import { FileDown, FileSpreadsheet } from 'lucide-react';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import type {
   Section, Department, Staff, Position,
   StaffDocument, StaffDeclaration, TrainingEvent, CompetencyAssessment, DutyRoster,
-  PersonnelSummary, MyTasks, MyProfile, RosterCoverage, StaffSuggestionsResponse, StaffOrientation
+  PersonnelSummary, MyTasks, MyProfile, RosterCoverage, StaffSuggestionsResponse, StaffOrientation, RegisterImportResult
 } from '../../shared/types/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
@@ -98,6 +99,9 @@ export function PersonnelManagementPage() {
   const [staffSearch, setStaffSearch] = useState('');
   const [orientations, setOrientations] = useState<StaffOrientation[]>([]);
   const [orientForm, setOrientForm] = useState({ staffId: '', hireDate: '', orientationStart: '', facilitatorStaffId: '', notes: '' });
+  const [regBusy, setRegBusy] = useState('');
+  const [regFile, setRegFile] = useState<File | null>(null);
+  const [regResult, setRegResult] = useState<RegisterImportResult | null>(null);
   const [trainingForm, setTrainingForm] = useState({ title: '', description: '', trainingType: '', sectionId: '', trainerStaffId: '', trainingDate: '', startTime: '', endTime: '', location: '' });
   const [attendanceForm, setAttendanceForm] = useState({ staffId: '', attendanceStatus: 'attended', remarks: '' });
   const [compForm, setCompForm] = useState({ staffId: '', sectionId: '', activity: '', assessmentMethod: 'direct_observation', assessorStaffId: '', assessmentDate: '', findings: '', authorizationRecommendation: '' });
@@ -194,6 +198,36 @@ export function PersonnelManagementPage() {
   async function loadOrientations() {
     try { setOrientations(await api<StaffOrientation[]>('/personnel/orientations')); }
     catch (e) { setError((e as Error).message); }
+  }
+
+  async function downloadRegister(path: string, fallback: string) {
+    setError(null); setRegBusy(path);
+    try {
+      const token = getToken();
+      const res = await fetch(`${API_BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({ error: res.statusText }))).error ?? res.statusText);
+      const blob = await res.blob();
+      const m = (res.headers.get('Content-Disposition') || '').match(/filename="?([^"]+)"?/);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = m ? m[1] : fallback; document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) { setError((e as Error).message); }
+    finally { setRegBusy(''); }
+  }
+
+  async function importRegister() {
+    if (!regFile) { setError('Choose a .xlsx file to import.'); return; }
+    setError(null); setRegResult(null); setRegBusy('import');
+    try {
+      const fd = new FormData(); fd.append('file', regFile);
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/personnel/register/import`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
+      const data = await res.json().catch(() => ({ error: res.statusText }));
+      if (!res.ok) throw new Error(data.error ?? res.statusText);
+      setRegResult(data as RegisterImportResult); setRegFile(null);
+      await reloadStaff();
+    } catch (e) { setError((e as Error).message); }
+    finally { setRegBusy(''); }
   }
 
   async function submitOrientation(e: FormEvent) {
@@ -359,6 +393,19 @@ export function PersonnelManagementPage() {
 
     {tab === 'Staff Register' && <>
       <div className="card">
+        <div className="section-head"><h3 style={{ margin: 0 }}>Master Personnel Register — Excel</h3></div>
+        <p className="muted" style={{ marginTop: 0 }}>Bulk-manage the register with Excel. Download the blank template, export the current register, or import a completed workbook — rows are matched on Staff ID (existing staff updated, new ones created).</p>
+        <div className="quick-actions">
+          <button type="button" className="quick-action" disabled={!!regBusy} onClick={() => downloadRegister('/personnel/register/template', 'Master_Personnel_Register_Template.xlsx')}><span className="qa-ico"><FileDown size={20} /></span><strong>{regBusy === '/personnel/register/template' ? 'Preparing…' : 'Blank template'}</strong></button>
+          <button type="button" className="quick-action" disabled={!!regBusy} onClick={() => downloadRegister('/personnel/register/export', 'Master_Personnel_Register.xlsx')}><span className="qa-ico"><FileSpreadsheet size={20} /></span><strong>{regBusy === '/personnel/register/export' ? 'Preparing…' : 'Export register'}</strong></button>
+        </div>
+        <div className="form-grid" style={{ marginTop: 12 }}>
+          <label>Import workbook (.xlsx)<input type="file" accept=".xlsx,.xls" onChange={e => setRegFile(e.target.files?.[0] ?? null)} /></label>
+          <button type="button" disabled={!!regBusy || !regFile} onClick={importRegister}>{regBusy === 'import' ? 'Importing…' : 'Import register'}</button>
+        </div>
+        {regResult && <div className="success-msg" style={{ marginTop: 10 }}>Imported {regResult.totalRows} row{regResult.totalRows === 1 ? '' : 's'}: <strong>{regResult.created}</strong> created, <strong>{regResult.updated}</strong> updated.{regResult.errors.length > 0 && <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>{regResult.errors.map((er, i) => <li key={i} style={{ fontSize: 12 }}>{er}</li>)}</ul>}</div>}
+      </div>
+      <div className="card" style={{ marginTop: 16 }}>
         <div className="section-head"><h3 style={{ margin: 0 }}>{editingStaffId ? 'Edit staff record' : 'New staff record'}</h3>
           {editingStaffId && <button type="button" className="secondary" onClick={() => { setEditingStaffId(null); setStaffForm(emptyStaffForm); }}>Cancel edit</button>}</div>
         <p className="muted" style={{ marginTop: 0 }}>Maintains the Master Personnel Register (ISO 15189:2022 §6.2.2): identity, professional registration, qualifications, appointment and emergency contact for every member of staff.</p>
