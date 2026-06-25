@@ -43,13 +43,52 @@ function composeFullName(first?: unknown, surname?: unknown, other?: unknown, fa
   return (fallback ?? '').toString().trim();
 }
 
-// Staff Excel template columns and a best-effort splitter for legacy single-field names.
-const STAFF_XLSX_HEADERS = ['Employee No', 'First Name', 'Surname', 'Other Names', 'Email', 'Contact', 'Position', 'Reports To', 'Assigned Unit', 'Status'];
-function splitName(full?: string): { first: string; surname: string; other: string } {
-  const parts = (full ?? '').trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return { first: '', surname: '', other: '' };
-  if (parts.length === 1) return { first: parts[0], surname: '', other: '' };
-  return { first: parts[0], surname: parts[parts.length - 1], other: parts.slice(1, -1).join(' ') };
+// Master Personnel Register (SECHFO003) Excel layout — the exact column order of
+// the People & Access staff import/export template. PROFESSIONAL QUALIFICATION(S)
+// spans 5 columns (L–P) so several qualifications can be listed per staff member.
+// `col` is the staff table column the header maps to (null = layout-only / blank
+// continuation column; `__years` = computed years of experience).
+const REGISTER_COLUMNS: Array<{ header: string; col: string | null }> = [
+  { header: 'STAFF ID', col: 'employee_no' },
+  { header: 'SURNAME', col: 'surname' },
+  { header: 'MIDDLE NAME(S)', col: 'middle_name' },
+  { header: 'FIRSTNAME(S)', col: 'first_name' },
+  { header: 'INITIALS', col: 'initials' },
+  { header: 'DATE OF BIRTH', col: 'date_of_birth' },
+  { header: 'GENDER', col: 'gender' },
+  { header: 'DESIGNATION', col: 'designation' },
+  { header: 'POSITION', col: 'job_title' },
+  { header: 'PRFOFESSIONAL REGULATOR', col: 'professional_regulator' },
+  { header: 'PROFESSIONAL LICENCE', col: 'professional_licence' },
+  { header: 'PROFESSIONAL QUALIFICATION(S)', col: 'qualifications' },
+  { header: '', col: null }, { header: '', col: null }, { header: '', col: null }, { header: '', col: null },
+  { header: 'UNIT', col: 'unit' },
+  { header: 'PERSONNEL CATEGORY', col: 'personnel_category' },
+  { header: 'APPOINTMENT TYPE', col: 'appointment_type' },
+  { header: 'DATE OF APPOINTMENT', col: 'appointment_date' },
+  { header: 'YEARS_OF_EXPERIENCE', col: '__years' },
+  { header: 'TYPE OF NATIONAL ID', col: 'national_id_type' },
+  { header: 'NATIONAL ID NUM', col: 'national_id_number' },
+  { header: 'EMERGENCY CONTACT', col: 'emergency_contact' },
+  { header: 'CONTACT_PHONE', col: 'phone' },
+  { header: 'EMAIL_ADDRESS', col: 'email' },
+  { header: 'STAFF_FILE_LOCATION', col: 'staff_file_location' },
+];
+const REGISTER_HEADER_ROW = REGISTER_COLUMNS.map(c => c.header);
+const QUAL_COL_INDEX = REGISTER_COLUMNS.findIndex(c => c.col === 'qualifications');
+
+// Years of experience from an appointment date (1 decimal place), tolerant of
+// DD/MM/YYYY and ISO formats. Empty when the date is missing/unparseable.
+function yearsOfExperience(dateStr?: string | null, now = new Date()): string {
+  if (!dateStr) return '';
+  let d = new Date(dateStr);
+  if (isNaN(d.getTime())) {
+    const m = String(dateStr).match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})$/);
+    if (m) d = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+  }
+  if (isNaN(d.getTime())) return '';
+  const yrs = (now.getTime() - d.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
+  return yrs >= 0 ? yrs.toFixed(1) : '';
 }
 
 // Master Personnel Register field mapping (ISO 15189 §6.2 personnel records).
@@ -725,29 +764,47 @@ export function commonRoutes() {
   });
 
   // Export the full staff register as an Excel workbook (matches the import template).
-  // Registered before '/staff/:id' so the ":id" param route does not capture "export".
-  router.get('/staff/export', requirePermission('personnel', 'view'), (_req, res) => {
+  // Build the Master Personnel Register workbook (blank template or populated).
+  function buildRegisterWorkbook(includeData: boolean): Buffer {
     const db = getDb();
-    const rows = db.prepare(`
-      SELECT s.employee_no, s.full_name, s.first_name, s.surname, s.other_names, s.email, s.phone, sec.name AS section_name, s.is_active,
-        (SELECT p.title FROM staff_position_assignments spa JOIN positions p ON p.id = spa.position_id WHERE spa.staff_id = s.id AND spa.is_active = 1 ORDER BY CASE spa.assignment_type WHEN 'primary' THEN 0 ELSE 1 END, spa.id LIMIT 1) AS position_title,
-        (SELECT rp.title FROM staff_position_assignments spa JOIN positions p ON p.id = spa.position_id LEFT JOIN positions rp ON rp.id = p.reports_to_position_id WHERE spa.staff_id = s.id AND spa.is_active = 1 ORDER BY CASE spa.assignment_type WHEN 'primary' THEN 0 ELSE 1 END, spa.id LIMIT 1) AS reports_to_title
-      FROM staff s LEFT JOIN sections sec ON sec.id = s.section_id ORDER BY s.full_name`).all() as any[];
-    const data = rows.map(r => {
-      const n = (r.first_name || r.surname) ? { first: r.first_name || '', surname: r.surname || '', other: r.other_names || '' } : splitName(r.full_name);
-      return {
-        'Employee No': r.employee_no || '', 'First Name': n.first, 'Surname': n.surname, 'Other Names': n.other,
-        'Email': r.email || '', 'Contact': r.phone || '', 'Position': r.position_title || '',
-        'Reports To': r.reports_to_title || '', 'Assigned Unit': r.section_name || '', 'Status': r.is_active ? 'Active' : 'Inactive',
-      };
-    });
-    const ws = XLSX.utils.json_to_sheet(data.length ? data : [Object.fromEntries(STAFF_XLSX_HEADERS.map(h => [h, '']))], { header: STAFF_XLSX_HEADERS });
+    const aoa: (string | number)[][] = [REGISTER_HEADER_ROW.slice()];
+    if (includeData) {
+      const rows = db.prepare(`
+        SELECT s.*, sec.name AS section_name,
+          (SELECT p.title FROM staff_position_assignments spa JOIN positions p ON p.id = spa.position_id WHERE spa.staff_id = s.id AND spa.is_active = 1 ORDER BY CASE spa.assignment_type WHEN 'primary' THEN 0 ELSE 1 END, spa.id LIMIT 1) AS position_title
+        FROM staff s LEFT JOIN sections sec ON sec.id = s.section_id ORDER BY s.employee_no, s.full_name`).all() as any[];
+      for (const r of rows) {
+        const row: (string | number)[] = REGISTER_COLUMNS.map(c => {
+          if (c.col === null) return '';
+          if (c.col === '__years') return yearsOfExperience(r.appointment_date);
+          if (c.col === 'qualifications') return '';            // placed below across L–P
+          if (c.col === 'job_title') return r.job_title || r.position_title || '';
+          if (c.col === 'unit') return r.unit || r.section_name || '';
+          return (r as Record<string, unknown>)[c.col] != null ? String((r as Record<string, unknown>)[c.col]) : '';
+        });
+        // Spread up to 5 qualifications across the L–P columns.
+        const quals = String(r.qualifications || '').split('|').map((q: string) => q.trim()).filter(Boolean).slice(0, 5);
+        quals.forEach((q: string, i: number) => { row[QUAL_COL_INDEX + i] = q; });
+        aoa.push(row);
+      }
+    }
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = REGISTER_HEADER_ROW.map(h => ({ wch: Math.max(12, Math.min(40, (h || 'QUALIFICATION').length + 3)) }));
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Staff');
-    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+    XLSX.utils.book_append_sheet(wb, ws, 'MASTER PERSONNEL REGISTER');
+    return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+  }
+
+  // Registered before '/staff/:id' so the ":id" param route does not capture these.
+  router.get('/staff/template', requirePermission('personnel', 'view'), (_req, res) => {
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="staff-export-${new Date().toISOString().slice(0, 10)}.xlsx"`);
-    res.send(buf);
+    res.setHeader('Content-Disposition', 'attachment; filename="Staff_Register_Template.xlsx"');
+    res.send(buildRegisterWorkbook(false));
+  });
+  router.get('/staff/export', requirePermission('personnel', 'view'), (_req, res) => {
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="Master_Personnel_Register-${new Date().toISOString().slice(0, 10)}.xlsx"`);
+    res.send(buildRegisterWorkbook(true));
   });
 
   // Full linkage profile for a staff member — surfaces every place the person is
@@ -823,9 +880,23 @@ export function commonRoutes() {
     } finally {
       try { fs.unlinkSync(req.file.path); } catch { /* ignore */ }
     }
+    // Header lookup tolerant of spacing/underscores/case and the workbook's
+    // "PRFOFESSIONAL" typo. Returns the first non-empty matching cell.
+    const norm = (s: string) => s.trim().toUpperCase().replace(/[_\s]+/g, ' ');
     const get = (row: Record<string, unknown>, ...keys: string[]) => {
-      for (const k of keys) { const hit = Object.keys(row).find(h => h.trim().toLowerCase() === k.toLowerCase()); if (hit && String(row[hit]).trim()) return String(row[hit]).trim(); }
+      for (const k of keys) { const hit = Object.keys(row).find(h => norm(h) === norm(k)); if (hit && String(row[hit]).trim()) return String(row[hit]).trim(); }
       return '';
+    };
+    // PROFESSIONAL QUALIFICATION(S) spans 5 columns (L–P); the blank continuation
+    // headers are read by sheet_to_json as __EMPTY*. Merge them into one value.
+    const qualifications = (row: Record<string, unknown>) => {
+      const parts: string[] = [];
+      const main = get(row, 'PROFESSIONAL QUALIFICATION(S)', 'QUALIFICATIONS', 'QUALIFICATION');
+      if (main) parts.push(main);
+      for (const k of Object.keys(row)) {
+        if (/^__EMPTY/.test(k)) { const v = String(row[k] ?? '').trim(); if (v && !/^\d+(\.\d+)?$/.test(v) && v.length > 2) parts.push(v); }
+      }
+      return parts.length ? Array.from(new Set(parts)).join(' | ') : null;
     };
     const posByTitle = new Map<string, number>();
     for (const p of db.prepare('SELECT id, title FROM positions').all() as any[]) posByTitle.set(String(p.title).toLowerCase(), p.id);
@@ -835,47 +906,52 @@ export function commonRoutes() {
     const result = { created: 0, updated: 0, skipped: 0, errors: [] as string[] };
     const tx = db.transaction(() => {
       rows.forEach((row, idx) => {
-        const first = get(row, 'First Name', 'FirstName', 'First');
-        const surname = get(row, 'Surname', 'Last Name', 'LastName');
-        const other = get(row, 'Other Names', 'OtherNames', 'Middle Name');
-        const fullFromCol = get(row, 'Full Name', 'Name');
-        const fullName = composeFullName(first, surname, other, fullFromCol);
-        if (!fullName) { result.skipped++; return; }
-        const employeeNo = get(row, 'Employee No', 'EmployeeNo', 'Employee Number', 'Staff ID') || null;
-        const email = get(row, 'Email') || null;
-        const phone = get(row, 'Contact', 'Phone', 'Telephone') || null;
-        const positionTitle = get(row, 'Position', 'Role');
-        const unitName = get(row, 'Assigned Unit', 'Unit', 'Section');
-        const status = get(row, 'Status').toLowerCase();
+        const surname = get(row, 'SURNAME', 'LAST NAME');
+        const first = get(row, 'FIRSTNAME(S)', 'FIRSTNAME', 'FIRST NAME', 'FIRST NAME(S)');
+        const middle = get(row, 'MIDDLE NAME(S)', 'MIDDLE NAME', 'MIDDLE NAMES', 'OTHER NAMES');
+        const employeeNo = get(row, 'STAFF ID', 'STAFF_ID', 'EMPLOYEE NO', 'EMPLOYEE NUMBER') || null;
+        const fullName = composeFullName(first, surname, middle, '');
+        if (!fullName && !employeeNo) { result.skipped++; return; }
+        if (!fullName) { result.errors.push(`Row ${idx + 2}: missing name.`); return; }
+        const positionTitle = get(row, 'POSITION', 'JOB TITLE');
+        const unitName = get(row, 'UNIT', 'DEPARTMENT', 'SECTION');
         const sectionId = unitName ? (secByName.get(unitName.toLowerCase()) ?? null) : null;
-        const positionId = positionTitle ? posByTitle.get(positionTitle.toLowerCase()) : undefined;
-        const isActive = status === 'inactive' || status === 'no' || status === '0' ? 0 : 1;
+        // All Master Personnel Register fields → staff columns.
+        const cols: Record<string, string | null> = {
+          employee_no: employeeNo, full_name: fullName, surname: surname || null, middle_name: middle || null, other_names: middle || null,
+          first_name: first || null,
+          initials: get(row, 'INITIALS') || [first, middle, surname].map(p => p ? p[0] : '').join('').toUpperCase() || null,
+          date_of_birth: get(row, 'DATE OF BIRTH', 'DOB') || null, gender: get(row, 'GENDER') || null,
+          designation: get(row, 'DESIGNATION') || null, job_title: positionTitle || null,
+          professional_regulator: get(row, 'PRFOFESSIONAL REGULATOR', 'PROFESSIONAL REGULATOR', 'REGULATOR') || null,
+          professional_licence: get(row, 'PROFESSIONAL LICENCE', 'PROFESSIONAL LICENSE', 'LICENCE') || null,
+          qualifications: qualifications(row), unit: unitName || null,
+          personnel_category: get(row, 'PERSONNEL CATEGORY', 'CATEGORY') || null,
+          appointment_type: get(row, 'APPOINTMENT TYPE') || null, appointment_date: get(row, 'DATE OF APPOINTMENT', 'APPOINTMENT DATE') || null,
+          national_id_type: get(row, 'TYPE OF NATIONAL ID', 'NATIONAL ID TYPE') || null,
+          national_id_number: get(row, 'NATIONAL ID NUM', 'NATIONAL ID NUMBER', 'NATIONAL ID') || null,
+          emergency_contact: get(row, 'EMERGENCY CONTACT') || null, phone: get(row, 'CONTACT PHONE', 'CONTACT_PHONE', 'PHONE') || null,
+          email: get(row, 'EMAIL ADDRESS', 'EMAIL_ADDRESS', 'EMAIL') || null, staff_file_location: get(row, 'STAFF FILE LOCATION', 'STAFF_FILE_LOCATION', 'FILE LOCATION') || null,
+        };
+        if (sectionId) cols.section_id = String(sectionId);
         try {
           const existing = employeeNo ? db.prepare('SELECT id FROM staff WHERE employee_no = ?').get(employeeNo) as any : null;
           let staffId: number;
           if (existing) {
-            db.prepare('UPDATE staff SET full_name = ?, first_name = ?, surname = ?, other_names = ?, email = ?, phone = ?, section_id = COALESCE(?, section_id), is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-              .run(fullName, first || null, surname || null, other || null, email, phone, sectionId, isActive, existing.id);
+            const keys = Object.keys(cols).filter(k => cols[k] !== null);
+            if (keys.length) db.prepare(`UPDATE staff SET ${keys.map(k => `${k} = ?`).join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...keys.map(k => cols[k]), existing.id);
             staffId = existing.id; result.updated++;
           } else {
-            const r = db.prepare('INSERT INTO staff (employee_no, full_name, first_name, surname, other_names, email, phone, section_id, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-              .run(employeeNo, fullName, first || null, surname || null, other || null, email, phone, sectionId, isActive);
+            const keys = Object.keys(cols);
+            const r = db.prepare(`INSERT INTO staff (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`).run(...keys.map(k => cols[k]));
             staffId = Number(r.lastInsertRowid); result.created++;
           }
-          if (positionTitle && positionId == null && !posByTitle.has(positionTitle.toLowerCase())) {
-            const pr = db.prepare('INSERT INTO positions (title, is_active) VALUES (?, 1)').run(positionTitle);
-            posByTitle.set(positionTitle.toLowerCase(), Number(pr.lastInsertRowid));
-          }
-          const resolvedPos = positionTitle ? posByTitle.get(positionTitle.toLowerCase()) : undefined;
-          if (resolvedPos) {
+          // Link POSITION into the positions/organogram and assign it as primary.
+          if (positionTitle) {
+            let resolvedPos = posByTitle.get(positionTitle.toLowerCase());
+            if (resolvedPos == null) { const pr = db.prepare('INSERT INTO positions (title, is_active) VALUES (?, 1)').run(positionTitle); resolvedPos = Number(pr.lastInsertRowid); posByTitle.set(positionTitle.toLowerCase(), resolvedPos); }
             const has = db.prepare("SELECT id FROM staff_position_assignments WHERE staff_id = ? AND position_id = ? AND is_active = 1").get(staffId, resolvedPos);
             if (!has) db.prepare("INSERT INTO staff_position_assignments (staff_id, position_id, assignment_type) VALUES (?, ?, 'primary')").run(staffId, resolvedPos);
-            const reportsTo = get(row, 'Reports To', 'ReportsTo', 'Reporting Line');
-            if (reportsTo) {
-              let rtId = posByTitle.get(reportsTo.toLowerCase());
-              if (rtId == null) { const rr = db.prepare('INSERT INTO positions (title, is_active) VALUES (?, 1)').run(reportsTo); rtId = Number(rr.lastInsertRowid); posByTitle.set(reportsTo.toLowerCase(), rtId); }
-              if (rtId && rtId !== resolvedPos) db.prepare('UPDATE positions SET reports_to_position_id = COALESCE(reports_to_position_id, ?) WHERE id = ?').run(rtId, resolvedPos);
-            }
           }
         } catch (err) {
           result.errors.push(`Row ${idx + 2}: ${err instanceof Error ? err.message : 'failed'}`);
