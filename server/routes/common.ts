@@ -52,6 +52,49 @@ function splitName(full?: string): { first: string; surname: string; other: stri
   return { first: parts[0], surname: parts[parts.length - 1], other: parts.slice(1, -1).join(' ') };
 }
 
+// Master Personnel Register field mapping (ISO 15189 §6.2 personnel records).
+// Maps the camelCase API body to staff table columns and derives full_name /
+// initials from the structured name parts when supplied.
+const STAFF_COLUMN_MAP: Array<[string, string]> = [
+  ['employeeNo', 'employee_no'], ['surname', 'surname'], ['middleName', 'middle_name'],
+  ['firstName', 'first_name'], ['initials', 'initials'], ['dateOfBirth', 'date_of_birth'],
+  ['gender', 'gender'], ['designation', 'designation'], ['jobTitle', 'job_title'],
+  ['professionalRegulator', 'professional_regulator'], ['professionalLicence', 'professional_licence'],
+  ['licenceExpiryDate', 'licence_expiry_date'], ['qualifications', 'qualifications'], ['unit', 'unit'],
+  ['personnelCategory', 'personnel_category'], ['appointmentType', 'appointment_type'],
+  ['appointmentDate', 'appointment_date'], ['nationalIdType', 'national_id_type'],
+  ['nationalIdNumber', 'national_id_number'], ['emergencyContact', 'emergency_contact'],
+  ['email', 'email'], ['phone', 'phone'], ['staffFileLocation', 'staff_file_location'],
+];
+function cleanVal(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim();
+  return s === '' ? null : s;
+}
+function deriveInitials(first?: string | null, middle?: string | null, surname?: string | null): string | null {
+  const letters = [first, middle, surname].map(p => (p ? p.trim()[0] : '')).filter(Boolean).join('').toUpperCase();
+  return letters || null;
+}
+// Build a { column: value } object for INSERT/UPDATE on staff from an API body.
+function buildStaffColumns(body: Record<string, unknown>): Record<string, string | number | null> {
+  const cols: Record<string, string | number | null> = {};
+  for (const [apiKey, col] of STAFF_COLUMN_MAP) {
+    if (apiKey in body) cols[col] = cleanVal(body[apiKey]);
+  }
+  const first = (cols.first_name as string | null) ?? cleanVal(body.firstName);
+  const middle = (cols.middle_name as string | null) ?? cleanVal(body.middleName);
+  const surname = (cols.surname as string | null) ?? cleanVal(body.surname);
+  const composed = [first, middle, surname].filter(Boolean).join(' ');
+  const fullName = cleanVal(body.fullName) || composed || null;
+  if (fullName) cols.full_name = fullName;
+  if (!cols.initials) { const d = deriveInitials(first, middle, surname); if (d) cols.initials = d; }
+  // Keep the other branch's `other_names` column in sync with middle names.
+  if (middle) cols.other_names = middle;
+  if ('sectionId' in body) cols.section_id = idOrNull(body.sectionId);
+  if ('isActive' in body) cols.is_active = body.isActive ? 1 : 0;
+  return cols;
+}
+
 export function commonRoutes() {
   const router = Router();
   router.use(requireAuth);
@@ -567,6 +610,11 @@ export function commonRoutes() {
 
   router.get('/staff', requirePermission('personnel', 'view'), (_req, res) => res.json(getDb().prepare(`
     SELECT s.id, s.employee_no employeeNo, s.full_name fullName, s.email, s.phone, s.section_id sectionId, sec.name sectionName, s.is_active isActive,
+      s.surname, s.middle_name middleName, s.first_name firstName, s.initials, s.date_of_birth dateOfBirth, s.gender,
+      s.designation, s.job_title jobTitle, s.professional_regulator professionalRegulator, s.professional_licence professionalLicence,
+      s.licence_expiry_date licenceExpiryDate, s.qualifications, s.unit, s.personnel_category personnelCategory,
+      s.appointment_type appointmentType, s.appointment_date appointmentDate, s.national_id_type nationalIdType,
+      s.national_id_number nationalIdNumber, s.emergency_contact emergencyContact, s.staff_file_location staffFileLocation,
       (SELECT p.title FROM staff_position_assignments spa JOIN positions p ON p.id = spa.position_id WHERE spa.staff_id = s.id AND spa.is_active = 1 ORDER BY CASE spa.assignment_type WHEN 'primary' THEN 0 ELSE 1 END, spa.id LIMIT 1) primaryPosition,
       u.id userId, u.username, r.name roleName, u.is_active userActive
     FROM staff s
@@ -576,7 +624,10 @@ export function commonRoutes() {
     ORDER BY s.is_active DESC, s.full_name`).all()));
 
   router.post('/staff', requirePermission('personnel', 'create'), (req, res) => {
-    const r = getDb().prepare('INSERT INTO staff (employee_no, full_name, email, phone, section_id) VALUES (?, ?, ?, ?, ?)').run(req.body.employeeNo ?? null, req.body.fullName, req.body.email ?? null, req.body.phone ?? null, idOrNull(req.body.sectionId));
+    const cols = buildStaffColumns(req.body);
+    if (!cols.full_name) return res.status(400).json({ error: 'A full name (or first name + surname) is required.' });
+    const keys = Object.keys(cols);
+    const r = getDb().prepare(`INSERT INTO staff (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`).run(...keys.map(k => cols[k]));
     if (idOrNull(req.body.positionId)) getDb().prepare('INSERT INTO staff_position_assignments (staff_id, position_id, assignment_type) VALUES (?, ?, ?)').run(r.lastInsertRowid, idOrNull(req.body.positionId), req.body.assignmentType ?? 'primary');
     audit(req, { action: 'create', entity: 'staff', entityId: r.lastInsertRowid, newValue: req.body });
     res.status(201).json({ id: r.lastInsertRowid });
@@ -719,16 +770,6 @@ export function commonRoutes() {
       openActions: (db.prepare("SELECT COUNT(*) c FROM actions WHERE assigned_to_staff_id = ? AND status != 'Closed'").get(req.params.id) as any).c,
     };
     res.json({ staff, positions, account, authorizations, activity });
-  });
-
-  router.put('/staff/:id', requirePermission('personnel', 'edit'), (req, res) => {
-    const db = getDb();
-    const oldValue = db.prepare('SELECT * FROM staff WHERE id = ?').get(req.params.id);
-    if (!oldValue) return res.status(404).json({ error: 'Staff record not found' });
-    db.prepare('UPDATE staff SET employee_no = ?, full_name = ?, email = ?, phone = ?, section_id = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-      .run(req.body.employeeNo ?? null, req.body.fullName, req.body.email ?? null, req.body.phone ?? null, idOrNull(req.body.sectionId), req.body.isActive === false ? 0 : 1, req.params.id);
-    audit(req, { action: 'edit', entity: 'staff', entityId: req.params.id, oldValue, newValue: req.body });
-    res.json({ ok: true });
   });
 
   router.post('/staff/:id/positions', requirePermission('personnel', 'edit'), (req, res) => {

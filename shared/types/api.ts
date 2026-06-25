@@ -2,7 +2,21 @@ export type SetupStatus = { setupComplete: boolean; adminExists: boolean; hostMo
 export type ApiUser = { id: number; username: string; fullName: string; roleId: number; roleName?: string; staffId?: number | null; staffName?: string | null; isActive: boolean };
 export type SystemModule = { id: number; key: string; label: string; path: string; enabled: boolean; alertsPaused: boolean };
 export type Position = { id: number; title: string; description?: string; reportsToPositionId?: number | null; isActive: boolean; archivedAt?: string | null };
-export type Staff = { id: number; employeeNo?: string; fullName: string; email?: string; phone?: string; isActive: boolean; sectionId?: number | null; sectionName?: string | null; primaryPosition?: string | null; userId?: number | null; username?: string | null; roleName?: string | null; userActive?: number | null };
+export type Staff = { id: number; employeeNo?: string; fullName: string; email?: string; phone?: string; isActive: boolean; sectionId?: number | null; sectionName?: string | null; primaryPosition?: string | null; userId?: number | null; username?: string | null; roleName?: string | null; userActive?: number | null;
+  surname?: string; middleName?: string; firstName?: string; initials?: string;
+  dateOfBirth?: string; gender?: string; designation?: string; jobTitle?: string;
+  professionalRegulator?: string; professionalLicence?: string; licenceExpiryDate?: string;
+  qualifications?: string; unit?: string; personnelCategory?: string; appointmentType?: string;
+  appointmentDate?: string; nationalIdType?: string; nationalIdNumber?: string;
+  emergencyContact?: string; staffFileLocation?: string };
+export type StaffOrientation = {
+  id: number; staff_id: number; staff_name?: string; hire_date?: string; orientation_start?: string;
+  orientation_complete: number; welcome_orientation: string; safety_training: string; ethics_training: string;
+  lis_training: string; equipment_training: string; sop_review: string; competency_baseline: string;
+  department_induction: string; form_completed_date?: string; facilitator_staff_id?: number; facilitator_name?: string;
+  staff_sign_off?: string; facilitator_sign_off?: string; status: string; notes?: string; created_at: string; updated_at?: string;
+};
+export type RegisterImportResult = { ok: boolean; created: number; updated: number; totalRows: number; errors: string[] };
 export type TechnicalAuthorizationRow = { id: number; staff_id?: number | null; position_id?: number | null; module_key: string; section_id?: number | null; level: string; is_active: number; granted_at?: string; expires_at?: string | null; competency_assessment_id?: number | null; staff_name?: string | null; position_title?: string | null; section_name?: string | null };
 export type PermissionAuditEntry = { id: number; action: string; entity: string; entity_id?: string | null; old_value?: string | null; new_value?: string | null; created_at: string; actor_username?: string | null; actor_name?: string | null };
 export type PermissionMatrixData = { permissions: Permission[]; rolePermissions: Array<{ id: number; role_id: number; permission_id: number; allowed: number; source: string }>; positionPermissions: Array<{ id: number; position_id: number; permission_id: number; allowed: number; source: string }>; userOverrides: Array<{ id: number; user_id: number; permission_id: number; allowed: number; source: string; reason?: string }>; technicalAuthorizations: TechnicalAuthorizationRow[]; auditHistory: PermissionAuditEntry[] };
