@@ -8,7 +8,17 @@ export type Staff = { id: number; employeeNo?: string; fullName: string; email?:
   professionalRegulator?: string; professionalLicence?: string; licenceExpiryDate?: string;
   qualifications?: string; unit?: string; personnelCategory?: string; appointmentType?: string;
   appointmentDate?: string; nationalIdType?: string; nationalIdNumber?: string;
-  emergencyContact?: string; staffFileLocation?: string };
+  emergencyContact?: string; staffFileLocation?: string;
+  cadre?: string; professionalRank?: string; availabilityStatus?: string };
+export type ProfessionalRank = { id: number; name: string; sortOrder: number; isActive: number };
+export type OrgTreeNode = {
+  key: string; kind: 'position' | 'staff'; positionId?: number; staffId?: number;
+  title: string; holderName?: string | null; staffName?: string; vacant?: boolean;
+  deputyName?: string | null; actingName?: string | null; nextInCommand?: string | null;
+  cadre?: string | null; rank?: string | null; availability?: string | null;
+  unitHead?: boolean; roleType: string; isActive: number; children: OrgTreeNode[];
+};
+export type OrgTree = { roots: OrgTreeNode[] };
 export type StaffOrientation = {
   id: number; staff_id: number; staff_name?: string; hire_date?: string; orientation_start?: string;
   orientation_complete: number; welcome_orientation: string; safety_training: string; ethics_training: string;

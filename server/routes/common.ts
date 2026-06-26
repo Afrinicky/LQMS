@@ -104,6 +104,7 @@ const STAFF_COLUMN_MAP: Array<[string, string]> = [
   ['appointmentDate', 'appointment_date'], ['nationalIdType', 'national_id_type'],
   ['nationalIdNumber', 'national_id_number'], ['emergencyContact', 'emergency_contact'],
   ['email', 'email'], ['phone', 'phone'], ['staffFileLocation', 'staff_file_location'],
+  ['cadre', 'cadre'], ['professionalRank', 'professional_rank'], ['availabilityStatus', 'availability_status'],
 ];
 function cleanVal(v: unknown): string | null {
   if (v === null || v === undefined) return null;
@@ -133,6 +134,48 @@ function buildStaffColumns(body: Record<string, unknown>): Record<string, string
   if ('isActive' in body) cols.is_active = body.isActive ? 1 : 0;
   return cols;
 }
+
+/* ── Automatic unit hierarchy helpers (organogram) ──────────────────────────
+ * Cadre and professional rank drive the order of technical staff below a Unit
+ * Head; availability drives acting/succession. Cadre/rank are derived from the
+ * designation when not explicitly set, so imported registers work out of the box.
+ */
+const CADRE_LABELS = ['Scientist', 'Technician', 'Assistant'];
+function deriveCadre(explicit?: unknown, designation?: unknown, jobTitle?: unknown): string {
+  const e = cleanVal(explicit);
+  if (e) { const m = CADRE_LABELS.find(c => c.toLowerCase() === e.toLowerCase()); if (m) return m; if (/scien/i.test(e)) return 'Scientist'; if (/tech/i.test(e)) return 'Technician'; if (/assist/i.test(e)) return 'Assistant'; }
+  const t = `${designation ?? ''} ${jobTitle ?? ''}`.toLowerCase();
+  if (/scientist/.test(t)) return 'Scientist';
+  if (/technician|technologist|technical officer|\btech\b/.test(t)) return 'Technician';
+  if (/assistant|aide|attendant|orderly|phlebotom/.test(t)) return 'Assistant';
+  return 'Other';
+}
+const CADRE_SORT: Record<string, number> = { scientist: 0, technician: 1, assistant: 2, other: 3 };
+function cadreSort(cadre: string): number { return CADRE_SORT[cadre.toLowerCase()] ?? 3; }
+function rankOrderFor(staff: { professional_rank?: unknown; designation?: unknown }, ranks: Array<{ name: string; sort_order: number }>): number {
+  const explicit = cleanVal(staff.professional_rank);
+  if (explicit) { const m = ranks.find(r => r.name.toLowerCase() === explicit.toLowerCase()); if (m) return m.sort_order; }
+  const desig = String(staff.designation ?? '').toLowerCase();
+  let best = 1000;
+  for (const r of ranks) { if (desig.includes(r.name.toLowerCase())) best = Math.min(best, r.sort_order); }
+  return best;
+}
+const SECTION_SYNONYMS: Record<string, string[]> = {
+  biochemistry: ['clinical chemistry', 'chemical pathology', 'chemistry'],
+  haematology: ['hematology'],
+  microbiology: ['micro'],
+  'blood bank': ['transfusion', 'immunohaematology', 'immunohematology'],
+};
+function sectionForUnitHead(title: string, sections: Array<{ id: number; name: string }>): number | null {
+  const t = title.toLowerCase();
+  let best: number | null = null, bestLen = 0;
+  for (const s of sections) {
+    const names = [s.name.toLowerCase(), ...(SECTION_SYNONYMS[s.name.toLowerCase()] ?? [])];
+    for (const n of names) if (t.includes(n) && n.length > bestLen) { best = s.id; bestLen = n.length; }
+  }
+  return best;
+}
+const AVAILABLE = (a?: unknown) => !a || String(a).toLowerCase() === 'available';
 
 export function commonRoutes() {
   const router = Router();
@@ -516,6 +559,8 @@ export function commonRoutes() {
   // staff_position_assignments, so they reflect in Positions & Organogram,
   // the Permission Matrix (position permissions) and Personnel.
   // =====================================================================
+  // Flat position list (+ occupants) — kept for the editor's "reports to" options
+  // and any callers that still expect the legacy flat shape.
   router.get('/organogram', requirePermission('settings', 'view'), (_req, res) => {
     const db = getDb();
     const positions = db.prepare(`
@@ -528,6 +573,80 @@ export function commonRoutes() {
     const byPosition = new Map<number, any[]>();
     for (const o of occupants) { if (!byPosition.has(o.positionId)) byPosition.set(o.positionId, []); byPosition.get(o.positionId)!.push(o); }
     res.json(positions.map(p => ({ ...p, occupants: byPosition.get(p.id) ?? [] })));
+  });
+
+  // Computed organogram TREE: manual position nodes (Laboratory Manager →
+  // appointed administrative roles + Unit Heads) plus, under each Unit Head, an
+  // AUTOMATIC vertical chain of that unit's technical staff ordered by cadre
+  // (Scientist → Technician → Assistant) then professional rank, with
+  // deputy/succession and acting-when-absent logic.
+  router.get('/organogram/tree', requirePermission('settings', 'view'), (_req, res) => {
+    const db = getDb();
+    const positions = db.prepare('SELECT id, title, reports_to_position_id AS reportsTo, is_active AS isActive FROM positions').all() as any[];
+    const occ = db.prepare(`SELECT spa.position_id AS pid, spa.staff_id AS sid, s.full_name AS name, spa.assignment_type AS type
+      FROM staff_position_assignments spa JOIN staff s ON s.id = spa.staff_id WHERE spa.is_active = 1`).all() as any[];
+    const holderOf = new Map<number, any>(); const deputyOf = new Map<number, any>();
+    for (const o of occ) { if (o.type === 'primary' && !holderOf.has(o.pid)) holderOf.set(o.pid, o); if (o.type === 'deputy' && !deputyOf.has(o.pid)) deputyOf.set(o.pid, o); }
+    const sections = db.prepare('SELECT id, name FROM sections').all() as Array<{ id: number; name: string }>;
+    const ranks = db.prepare('SELECT name, sort_order FROM professional_ranks WHERE is_active = 1 ORDER BY sort_order').all() as Array<{ name: string; sort_order: number }>;
+    const staff = db.prepare(`SELECT id, full_name AS name, section_id AS sectionId, designation, job_title AS jobTitle,
+      cadre, professional_rank, availability_status AS availability FROM staff WHERE is_active = 1`).all() as any[];
+
+    const isUnitHead = (title: string) => /unit head|head of|head,|hod\b/i.test(title);
+    const roleType = (title: string): string => {
+      const t = title.toLowerCase();
+      if (/quality/.test(t)) return 'quality';
+      if (/laboratory manager|laboratory director|lab manager|^director|superintend/.test(t)) return 'management';
+      if (isUnitHead(t) || /scientist|technologist|technician|technical officer|biomedical|assistant/.test(t)) return 'technical';
+      return 'support';
+    };
+
+    // Build the auto staff chain for a unit head position.
+    function staffChain(positionId: number, sectionId: number | null): any[] {
+      if (!sectionId) return [];
+      const headIds = new Set<number>();
+      const h = holderOf.get(positionId); if (h) headIds.add(h.sid);
+      const d = deputyOf.get(positionId); if (d) headIds.add(d.sid);
+      const members = staff.filter(s => s.sectionId === sectionId && !headIds.has(s.id)).map(s => {
+        const cadre = deriveCadre(s.cadre, s.designation, s.jobTitle);
+        return { ...s, cadre, _cadre: cadreSort(cadre), _rank: rankOrderFor(s, ranks) };
+      }).sort((a, b) => a._cadre - b._cadre || a._rank - b._rank || String(a.name).localeCompare(b.name));
+      // Chain vertically: each member's child is the next member (succession).
+      const nodes = members.map((m, i) => ({
+        key: `s${m.id}`, kind: 'staff', staffId: m.id, title: m.designation || m.jobTitle || m.cadre || 'Staff',
+        staffName: m.name, cadre: m.cadre, rank: cleanVal(m.professional_rank) || null, availability: m.availability || 'available',
+        nextInCommand: members[i + 1]?.name ?? null, roleType: 'technical', isActive: 1, children: [] as any[],
+      }));
+      for (let i = nodes.length - 1; i > 0; i--) nodes[i - 1].children.push(nodes[i]);
+      return nodes.length ? [nodes[0]] : [];
+    }
+
+    const childPositions = (pid: number | null) => positions
+      .filter(p => (pid === null ? (p.reportsTo == null || !positions.some(x => x.id === p.reportsTo)) : p.reportsTo === pid))
+      .sort((a, b) => a.title.localeCompare(b.title));
+
+    function buildPosition(p: any): any {
+      const head = holderOf.get(p.id); const dep = deputyOf.get(p.id);
+      const unitHead = isUnitHead(p.title);
+      const sectionId = unitHead ? sectionForUnitHead(p.title, sections) : null;
+      const children: any[] = unitHead ? staffChain(p.id, sectionId) : childPositions(p.id).map(buildPosition);
+      // Next-in-command for the unit head = first member of the auto chain;
+      // acting = first AVAILABLE member.
+      let nextInCommand: string | null = dep?.name ?? null;
+      if (unitHead && children.length) {
+        const chain: any[] = []; let cur: any = children[0]; while (cur) { chain.push(cur); cur = cur.children[0]; }
+        nextInCommand = chain[0]?.staffName ?? null;
+        const acting = chain.find(n => AVAILABLE(n.availability));
+        return { key: `p${p.id}`, kind: 'position', positionId: p.id, title: p.title, holderName: head?.name ?? null,
+          vacant: !head, deputyName: nextInCommand, actingName: acting?.staffName ?? null, unitHead: true,
+          roleType: roleType(p.title), isActive: p.isActive, children };
+      }
+      return { key: `p${p.id}`, kind: 'position', positionId: p.id, title: p.title, holderName: head?.name ?? null,
+        vacant: !head, deputyName: nextInCommand, unitHead, roleType: roleType(p.title), isActive: p.isActive, children };
+    }
+
+    const roots = childPositions(null).map(buildPosition);
+    res.json({ roots });
   });
 
   // Assign a staff member to a position.
@@ -603,6 +722,38 @@ export function commonRoutes() {
     res.json({ ok: true, updated });
   });
 
+  // Configurable professional rank order (drives the automatic within-cadre
+  // ordering of staff on the organogram). Lower sort_order = higher rank.
+  router.get('/professional-ranks', requirePermission('settings', 'view'), (_req, res) =>
+    res.json(getDb().prepare('SELECT id, name, sort_order AS sortOrder, is_active AS isActive FROM professional_ranks ORDER BY sort_order, name').all()));
+  router.post('/professional-ranks', requirePermission('settings', 'create'), (req, res) => {
+    const name = cleanVal(req.body.name);
+    if (!name) return res.status(400).json({ error: 'A rank name is required.' });
+    const db = getDb();
+    if (db.prepare('SELECT id FROM professional_ranks WHERE name = ? COLLATE NOCASE').get(name)) return res.status(400).json({ error: 'That rank already exists.' });
+    const max = (db.prepare('SELECT COALESCE(MAX(sort_order), 0) m FROM professional_ranks').get() as { m: number }).m;
+    const r = db.prepare('INSERT INTO professional_ranks (name, sort_order) VALUES (?, ?)').run(name, req.body.sortOrder != null ? Number(req.body.sortOrder) : max + 10);
+    audit(req, { action: 'create', entity: 'professional_ranks', entityId: r.lastInsertRowid, newValue: req.body });
+    res.status(201).json({ id: r.lastInsertRowid });
+  });
+  router.put('/professional-ranks/:id', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const existing = db.prepare('SELECT * FROM professional_ranks WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Rank not found' });
+    const sets: string[] = []; const vals: unknown[] = [];
+    if ('name' in req.body && cleanVal(req.body.name)) { sets.push('name = ?'); vals.push(cleanVal(req.body.name)); }
+    if ('sortOrder' in req.body) { sets.push('sort_order = ?'); vals.push(Number(req.body.sortOrder)); }
+    if ('isActive' in req.body) { sets.push('is_active = ?'); vals.push(req.body.isActive ? 1 : 0); }
+    if (sets.length) db.prepare(`UPDATE professional_ranks SET ${sets.join(', ')} WHERE id = ?`).run(...vals, req.params.id);
+    audit(req, { action: 'edit', entity: 'professional_ranks', entityId: Number(req.params.id), oldValue: existing, newValue: req.body });
+    res.json({ ok: true });
+  });
+  router.delete('/professional-ranks/:id', requirePermission('settings', 'edit'), (req, res) => {
+    getDb().prepare('DELETE FROM professional_ranks WHERE id = ?').run(req.params.id);
+    audit(req, { action: 'delete', entity: 'professional_ranks', entityId: Number(req.params.id) });
+    res.json({ ok: true });
+  });
+
   router.get('/departments', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT id, name, is_active FROM departments ORDER BY name').all()));
   router.post('/departments', requirePermission('settings', 'create'), (req, res) => {
     if (!req.body.name || !String(req.body.name).trim()) return res.status(400).json({ error: 'A department name is required.' });
@@ -654,6 +805,7 @@ export function commonRoutes() {
       s.licence_expiry_date licenceExpiryDate, s.qualifications, s.unit, s.personnel_category personnelCategory,
       s.appointment_type appointmentType, s.appointment_date appointmentDate, s.national_id_type nationalIdType,
       s.national_id_number nationalIdNumber, s.emergency_contact emergencyContact, s.staff_file_location staffFileLocation,
+      s.cadre, s.professional_rank professionalRank, s.availability_status availabilityStatus,
       (SELECT p.title FROM staff_position_assignments spa JOIN positions p ON p.id = spa.position_id WHERE spa.staff_id = s.id AND spa.is_active = 1 ORDER BY CASE spa.assignment_type WHEN 'primary' THEN 0 ELSE 1 END, spa.id LIMIT 1) primaryPosition,
       u.id userId, u.username, r.name roleName, u.is_active userActive
     FROM staff s

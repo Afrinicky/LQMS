@@ -8,7 +8,7 @@ import DisabledModule from '../components/DisabledModule';
 import type {
   Section, Department, Staff, Position,
   StaffDocument, StaffDeclaration, TrainingEvent, CompetencyAssessment, DutyRoster,
-  PersonnelSummary, MyTasks, MyProfile, RosterCoverage, StaffSuggestionsResponse, StaffOrientation, RegisterImportResult
+  PersonnelSummary, MyTasks, MyProfile, RosterCoverage, StaffSuggestionsResponse, StaffOrientation, RegisterImportResult, ProfessionalRank
 } from '../../shared/types/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
@@ -26,6 +26,8 @@ const GENDERS = ['MALE', 'FEMALE', 'OTHER'];
 const PERSONNEL_CATEGORIES = ['STAFF', 'INTERN', 'NSS', 'LOCUM', 'STUDENT', 'CONTRACTOR'];
 const APPOINTMENT_TYPES = ['FULL TIME', 'PART TIME', 'CONTRACT', 'INTERN', 'NSS', 'LOCUM'];
 const NATIONAL_ID_TYPES = ['GHANA CARD', 'PASSPORT', 'VOTER ID', 'DRIVERS LICENCE', 'OTHER'];
+const CADRES = ['Scientist', 'Technician', 'Assistant', 'Other'];
+const AVAILABILITY_STATUSES = ['available', 'on_leave', 'transferred', 'inactive', 'unavailable'];
 const ORIENTATION_STEPS: { key: string; label: string }[] = [
   { key: 'welcome_orientation', label: 'Welcome orientation' },
   { key: 'safety_training', label: 'Safety training' },
@@ -41,7 +43,7 @@ const emptyStaffForm = {
   designation: '', jobTitle: '', professionalRegulator: '', professionalLicence: '', licenceExpiryDate: '',
   qualifications: '', sectionId: '', unit: '', personnelCategory: 'STAFF', appointmentType: 'FULL TIME',
   appointmentDate: '', nationalIdType: 'GHANA CARD', nationalIdNumber: '', emergencyContact: '', phone: '',
-  email: '', staffFileLocation: '', positionId: '',
+  email: '', staffFileLocation: '', positionId: '', cadre: '', professionalRank: '', availabilityStatus: 'available',
 };
 function yearsBetween(dateStr?: string): string {
   if (!dateStr) return '—';
@@ -102,6 +104,8 @@ export function PersonnelManagementPage() {
   const [regBusy, setRegBusy] = useState('');
   const [regFile, setRegFile] = useState<File | null>(null);
   const [regResult, setRegResult] = useState<RegisterImportResult | null>(null);
+  const [ranks, setRanks] = useState<ProfessionalRank[]>([]);
+  useEffect(() => { api<ProfessionalRank[]>('/professional-ranks').then(setRanks).catch(() => setRanks([])); }, []);
   const [trainingForm, setTrainingForm] = useState({ title: '', description: '', trainingType: '', sectionId: '', trainerStaffId: '', trainingDate: '', startTime: '', endTime: '', location: '' });
   const [attendanceForm, setAttendanceForm] = useState({ staffId: '', attendanceStatus: 'attended', remarks: '' });
   const [compForm, setCompForm] = useState({ staffId: '', sectionId: '', activity: '', assessmentMethod: 'direct_observation', assessorStaffId: '', assessmentDate: '', findings: '', authorizationRecommendation: '' });
@@ -180,6 +184,7 @@ export function PersonnelManagementPage() {
       unit: s.unit ?? '', personnelCategory: s.personnelCategory ?? 'STAFF', appointmentType: s.appointmentType ?? 'FULL TIME',
       appointmentDate: s.appointmentDate ?? '', nationalIdType: s.nationalIdType ?? 'GHANA CARD', nationalIdNumber: s.nationalIdNumber ?? '',
       emergencyContact: s.emergencyContact ?? '', phone: s.phone ?? '', email: s.email ?? '', staffFileLocation: s.staffFileLocation ?? '', positionId: '',
+      cadre: s.cadre ?? '', professionalRank: s.professionalRank ?? '', availabilityStatus: s.availabilityStatus ?? 'available',
     });
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -432,6 +437,9 @@ export function PersonnelManagementPage() {
           <label>Contact phone<input value={staffForm.phone} onChange={e => setStaffForm({ ...staffForm, phone: e.target.value })} /></label>
           <label>Email<input type="email" value={staffForm.email} onChange={e => setStaffForm({ ...staffForm, email: e.target.value })} /></label>
           <label>Emergency contact<input value={staffForm.emergencyContact} onChange={e => setStaffForm({ ...staffForm, emergencyContact: e.target.value })} placeholder="e.g. Spouse - 0200000000" /></label>
+          <label>Cadre<select value={staffForm.cadre} onChange={e => setStaffForm({ ...staffForm, cadre: e.target.value })}><option value="">Auto (from designation)</option>{CADRES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
+          <label>Professional rank<select value={staffForm.professionalRank} onChange={e => setStaffForm({ ...staffForm, professionalRank: e.target.value })}><option value="">Auto (from designation)</option>{ranks.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}</select></label>
+          <label>Availability<select value={staffForm.availabilityStatus} onChange={e => setStaffForm({ ...staffForm, availabilityStatus: e.target.value })}>{AVAILABILITY_STATUSES.map(a => <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>)}</select></label>
           <label>Assign position<select value={staffForm.positionId} onChange={e => setStaffForm({ ...staffForm, positionId: e.target.value })}><option value="">— keep current —</option>{positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>
           <label>Staff file location<input value={staffForm.staffFileLocation} onChange={e => setStaffForm({ ...staffForm, staffFileLocation: e.target.value })} placeholder="e.g. /SECH-LAB-PERSONNEL-FILES/SNO-001/" /></label>
           <button type="submit">{editingStaffId ? 'Save changes' : 'Create staff record'}</button>

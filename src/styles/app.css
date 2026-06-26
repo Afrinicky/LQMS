@@ -1259,47 +1259,64 @@ button.tiny { padding: 2px 8px; font-size: 11px; }
 /* ============================================================
    Laboratory Organogram & Deputisation (ISO 15189 / WHO LQMS style)
    ============================================================ */
-.organogram-card .org-toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
+.organogram-card { --org-line: rgba(140, 165, 210, 0.5); }
+.organogram-card .org-toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.org-zoom { display: inline-flex; align-items: center; gap: 4px; padding: 2px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); }
+.org-zoom button { padding: 4px 9px; font-size: 12px; border-radius: var(--radius-pill); background: transparent; color: var(--muted); box-shadow: none; border: 0; }
+.org-zoom button:hover { background: rgba(255,255,255,0.05); color: var(--text); box-shadow: none; }
+.org-zoom-val { font-size: 11.5px; color: var(--muted); min-width: 38px; text-align: center; font-variant-numeric: tabular-nums; }
 .org-legend { display: flex; flex-wrap: wrap; gap: 16px; margin: 6px 0 12px; font-size: 12px; color: var(--muted); }
 .org-legend .leg { display: inline-flex; align-items: center; gap: 6px; }
 .org-swatch { width: 14px; height: 14px; border-radius: 4px; display: inline-block; border: 1px solid var(--border-strong); }
-.org-dep-dot { width: 14px; height: 14px; border-radius: 4px; display: inline-block; border: 1px dashed var(--c3); }
+.org-staff-swatch { background: var(--panel-2); border-left: 4px solid var(--c2); }
 .org-add-root { display: flex; gap: 8px; margin-bottom: 12px; max-width: 520px; }
 .org-add-root input { flex: 1; }
 
-/* Centered top-down tree with orthogonal connectors */
-.org-chart { overflow: auto; padding: 16px 8px 8px; }
-.org-tree, .org-tree ul { display: flex; justify-content: center; list-style: none; padding: 0; margin: 0; }
-.org-tree ul { position: relative; padding-top: 24px; }
-.org-tree li { list-style: none; position: relative; padding: 24px 12px 0; display: flex; flex-direction: column; align-items: center; }
-.org-tree li::before, .org-tree li::after {
-  content: ''; position: absolute; top: 0; right: 50%;
-  border-top: 2px solid var(--border-strong); width: 50%; height: 24px;
-}
-.org-tree li::after { right: auto; left: 50%; border-left: 2px solid var(--border-strong); }
-.org-tree li:only-child::after, .org-tree li:only-child::before { display: none; }
-.org-tree li:only-child { padding-top: 0; }
-.org-tree li:first-child::before, .org-tree li:last-child::after { border: 0 none; }
-.org-tree li:last-child::before { border-right: 2px solid var(--border-strong); border-radius: 0 7px 0 0; }
-.org-tree li:first-child::after { border-radius: 7px 0 0 0; }
-.org-tree ul ul::before { content: ''; position: absolute; top: 0; left: 50%; border-left: 2px solid var(--border-strong); width: 0; height: 24px; }
-.org-tree > li::before, .org-tree > li::after { display: none; }
+/* Scroll viewport — pan large charts; zoom via the CSS `zoom` property so the
+   scroll area tracks the scaled content (works in the Electron/Chromium runtime). */
+.org-viewport { overflow: auto; max-height: 72vh; border: 1px solid var(--border); border-radius: var(--radius); background:
+  radial-gradient(900px 500px at 50% -10%, rgba(47,107,255,0.05), transparent 60%), var(--surface); }
+.org-print-area { padding: 24px 16px 28px; min-width: max-content; }
+.org-chart { display: flex; justify-content: center; }
+
+/* Centered top-down tree with clean orthogonal connectors */
+.org-tree, .org-tree ul { list-style: none; margin: 0; padding: 0; }
+.org-tree { display: flex; justify-content: center; }
+.org-tree ul { display: flex; justify-content: center; position: relative; padding-top: 26px; }
+.org-tree li > ul::before { content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-1px); width: 2px; height: 13px; background: var(--org-line); }
+.org-tree li { position: relative; display: flex; flex-direction: column; align-items: center; padding: 26px 14px 0; }
+.org-tree li::before { content: ''; position: absolute; top: 13px; left: 50%; transform: translateX(-1px); width: 2px; height: 13px; background: var(--org-line); }
+.org-tree li::after { content: ''; position: absolute; top: 13px; left: 0; right: 0; height: 2px; background: var(--org-line); }
+.org-tree li:first-child::after { left: 50%; }
+.org-tree li:last-child::after { right: 50%; }
+.org-tree li:only-child::after { display: none; }
 .org-tree > li { padding-top: 0; }
+.org-tree > li::before, .org-tree > li::after { display: none; }
 
 /* Node card */
 .org-node {
-  display: flex; flex-direction: column; gap: 3px; width: 172px;
+  display: flex; flex-direction: column; gap: 3px; width: 176px;
   padding: 10px 12px 10px 14px; border: 1px solid var(--border-strong); border-left-width: 4px; border-radius: 10px;
-  background: var(--panel); color: var(--text); cursor: pointer; box-shadow: var(--shadow-sm); text-align: left;
-  transition: border-color 0.12s ease, transform 0.12s ease;
+  background: linear-gradient(180deg, var(--panel), var(--card)); color: var(--text); cursor: pointer; box-shadow: var(--shadow-sm); text-align: left;
+  transition: border-color 0.12s ease, transform 0.12s ease, box-shadow 0.12s ease;
 }
-.org-node:hover { transform: translateY(-1px); border-color: var(--accent); }
+.org-node:hover { transform: translateY(-1px); border-color: var(--accent); box-shadow: var(--shadow); }
 .org-node.inactive { opacity: 0.5; }
+.org-node.is-head { width: 188px; box-shadow: 0 0 0 1px rgba(78,141,255,0.25), var(--shadow-sm); }
 .org-title { font-weight: 700; font-size: 12.5px; line-height: 1.25; }
 .org-holder { font-size: 11.5px; color: var(--text); }
 .org-holder.vacant { color: var(--warning); font-style: italic; }
 .org-deputy { font-size: 11px; color: var(--muted); }
 .org-deputy .muted { color: var(--faint); }
+.org-meta { font-size: 10.5px; color: var(--accent-bright); letter-spacing: 0.01em; }
+
+/* Auto staff node (read-only, derived) */
+.org-node.org-staff { cursor: default; width: 168px; background: linear-gradient(180deg, var(--panel-2), var(--surface)); border-left-color: var(--c2); }
+.org-node.org-staff:hover { transform: none; border-color: var(--border-strong); box-shadow: var(--shadow-sm); }
+.org-node.org-staff.av-on-leave { border-left-color: var(--c4); }
+.org-node.org-staff.av-transferred, .org-node.org-staff.av-inactive, .org-node.org-staff.av-unavailable { border-left-color: var(--danger); opacity: 0.78; }
+.av-flag { display: inline-block; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.05em; padding: 1px 6px; border-radius: 999px; background: var(--warning-bg); color: var(--warning); margin-right: 5px; }
+.org-staff.av-transferred .av-flag, .org-staff.av-inactive .av-flag, .org-staff.av-unavailable .av-flag { background: var(--danger-bg); color: var(--danger); }
 
 /* Role-type accents */
 .org-node.rt-management { border-left-color: var(--accent-bright); }
@@ -1334,21 +1351,23 @@ button.tiny { padding: 2px 8px; font-size: 11px; }
 
 @media print {
   body * { visibility: hidden !important; }
+  .org-viewport { max-height: none !important; overflow: visible !important; border: 0 !important; background: #fff !important; }
   .org-print-area, .org-print-area * { visibility: visible !important; }
-  .org-print-area { position: absolute; left: 0; top: 0; width: 100%; padding: 12px; background: #fff; color: #000; }
+  .org-print-area { position: absolute; left: 0; top: 0; width: 100%; padding: 12px; background: #fff; color: #000; zoom: 1 !important; }
   .no-print { display: none !important; }
   .org-print-head { display: flex !important; color: #000; }
   .org-print-head span { color: #333; }
   .org-chart { overflow: visible; }
   .org-node { background: #fff !important; color: #000 !important; border-color: #888 !important; box-shadow: none !important; }
+  .org-node.is-head { box-shadow: 0 0 0 1px #2F6BFF !important; }
   .org-node.rt-management { border-left-color: #2F6BFF !important; }
   .org-node.rt-quality { border-left-color: #C98A12 !important; }
-  .org-node.rt-technical { border-left-color: #0E9F8E !important; }
+  .org-node.rt-technical, .org-node.org-staff { border-left-color: #0E9F8E !important; }
   .org-node.rt-support { border-left-color: #7C5CCB !important; }
   .org-holder { color: #000 !important; }
   .org-holder.vacant { color: #8a6d00 !important; }
-  .org-deputy { color: #333 !important; }
-  .org-tree li::before, .org-tree li::after, .org-tree ul ul::before { border-color: #888 !important; }
+  .org-deputy, .org-meta { color: #333 !important; }
+  .org-tree li::before, .org-tree li::after, .org-tree li > ul::before { background: #888 !important; }
 }
 
 /* Settings merged modules (People & Access, System) */
