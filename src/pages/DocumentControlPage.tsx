@@ -561,6 +561,12 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
 
   return <div style={{ position: 'fixed', inset: 0, background: 'rgba(8,16,32,0.55)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: '3vh 2vw', overflow: 'auto' }} onClick={onClose}>
     <div className="card" style={{ width: 'min(1100px, 96vw)', maxWidth: '96vw', margin: 0 }} onClick={e => e.stopPropagation()}>
+      <style>{`.doc-content table.docx-table,.doc-content table{border-collapse:collapse;width:100%;margin:8px 0;font-size:12px}
+.doc-content table td,.doc-content table th{border:1px solid #c9d2e0;padding:5px 8px;vertical-align:top;text-align:left}
+.doc-content h2{font-size:16px;color:#1B3A6B;margin:14px 0 6px;border-bottom:1px solid #e2e8f0;padding-bottom:3px}
+.doc-content h3{font-size:14px;color:#243b63;margin:12px 0 4px}
+.doc-content h4,.doc-content h5,.doc-content h6{font-size:13px;color:#33415a;margin:10px 0 4px}
+.doc-content p{margin:5px 0}.doc-content ul{margin:6px 0 6px 22px}.doc-content li{margin:2px 0}`}</style>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
         <h3 style={{ margin: 0 }}>{content ? `${content.version_label || content.version_number || 'Version'} · ${content.file_name || 'Controlled content'}` : 'Loading…'}</h3>
         <button className="secondary" onClick={onClose}>Close</button>
@@ -587,7 +593,7 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
           {content.content_sections.map(s => <span key={s.key} className="badge" title={s.heading}>{s.heading}</span>)}
         </div>}
         {editing
-          ? <div ref={editorRef} contentEditable suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: content.content_html || `<p>${(content.content_text || '').replace(/\n/g, '<br/>')}</p>` || '<p>Type the controlled document content here…</p>' }}
+          ? <div ref={editorRef} className="doc-content" contentEditable suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: content.content_html || `<p>${(content.content_text || '').replace(/\n/g, '<br/>')}</p>` || '<p>Type the controlled document content here…</p>' }}
               style={{ border: '1px solid #cbd5e1', borderRadius: 6, padding: 16, minHeight: 320, maxHeight: '58vh', overflow: 'auto', background: '#fff', color: '#111', lineHeight: 1.5 }} />
           : (content.content_html
               ? <div className="doc-content" style={{ border: '1px solid #e2e8f0', borderRadius: 6, padding: 16, maxHeight: '58vh', overflow: 'auto', background: '#fff', color: '#111', lineHeight: 1.5 }} dangerouslySetInnerHTML={{ __html: content.content_html }} />
@@ -596,12 +602,21 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
                   : <p className="muted">No readable content was captured. Use “Edit content” to author it in-app, or open the original file.</p>))}
       </div>}
 
-      {mode === 'original' && <div style={{ height: '64vh', border: '1px solid #e2e8f0', borderRadius: 6, overflow: 'hidden', background: '#525659' }}>
-        {!fileUrl ? <p style={{ color: '#fff', padding: 16 }}>Loading file…</p>
-          : isPdf ? <iframe title="document" src={fileUrl} style={{ width: '100%', height: '100%', border: 'none' }} />
-          : isImage ? <div style={{ height: '100%', overflow: 'auto', textAlign: 'center' }}><img src={fileUrl} alt={content?.file_name} style={{ maxWidth: '100%' }} /></div>
-          : <div style={{ color: '#fff', padding: 24 }}><p>This file type cannot be previewed inline ({content?.file_mime || 'unknown type'}).</p><a className="badge" style={{ cursor: 'pointer' }} onClick={() => { const a = document.createElement('a'); a.href = fileUrl; a.download = content?.file_name || 'document'; a.click(); }}>Download file</a></div>}
-      </div>}
+      {mode === 'original' && (isPdf || isImage
+        ? <div style={{ height: '64vh', border: '1px solid #e2e8f0', borderRadius: 6, overflow: 'hidden', background: '#525659' }}>
+            {!fileUrl ? <p style={{ color: '#fff', padding: 16 }}>Loading file…</p>
+              : isPdf ? <iframe title="document" src={fileUrl} style={{ width: '100%', height: '100%', border: 'none' }} />
+              : <div style={{ height: '100%', overflow: 'auto', textAlign: 'center' }}><img src={fileUrl} alt={content?.file_name} style={{ maxWidth: '100%' }} /></div>}
+          </div>
+        : content?.content_html
+          ? <div>
+              <p className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>Rendered preview of the Word document (tables, headings and formatting preserved). The browser cannot display the raw .docx — use “Download original” to open it in Word, or edit it under “In-app content”.</p>
+              <div className="doc-content" style={{ border: '1px solid #e2e8f0', borderRadius: 6, padding: 20, height: '60vh', overflow: 'auto', background: '#fff', color: '#111', lineHeight: 1.5 }} dangerouslySetInnerHTML={{ __html: content.content_html }} />
+            </div>
+          : <div style={{ height: '40vh', border: '1px solid #e2e8f0', borderRadius: 6, background: '#525659', color: '#fff', padding: 24 }}>
+              <p>This file type cannot be previewed inline ({content?.file_mime || 'unknown type'}) and no readable content was captured.</p>
+              {fileUrl && <a className="badge" style={{ cursor: 'pointer' }} onClick={() => { const a = document.createElement('a'); a.href = fileUrl; a.download = content?.file_name || 'document'; a.click(); }}>Download file</a>}
+            </div>)}
 
       {attestationId && <div style={{ marginTop: 12, padding: 12, background: '#f1f5f9', borderRadius: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
         <span><strong>Attestation:</strong> By signing you confirm you have read and understood this controlled document.</span>
