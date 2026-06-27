@@ -1,12 +1,14 @@
 import { Router } from 'express';
-import { getDb } from '../db/database.js';
+import path from 'node:path';
+import { getDb, uploadRoot, evidenceRoot } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
+import { extractDocument, deriveDocumentCodeFromName } from '../utils/documentExtract.js';
 
-const DOCUMENT_STATUSES = ['draft', 'under_review', 'approved', 'current', 'due_review', 'obsolete', 'archived'];
-const VERSION_STATUSES = ['draft', 'under_review', 'approved', 'current', 'obsolete'];
+const DOCUMENT_STATUSES = ['draft', 'under_review', 'reviewed', 'approved', 'current', 'due_review', 'obsolete', 'archived'];
+const VERSION_STATUSES = ['draft', 'under_review', 'reviewed', 'approved', 'current', 'obsolete'];
 const REVIEW_OUTCOMES = ['no_change', 'minor_revision', 'major_revision', 'obsolete'];
 const ATTESTATION_STATUSES = ['pending', 'signed', 'overdue', 'waived'];
 const DISTRIBUTION_TARGETS = ['staff', 'position', 'section', 'department'];
@@ -31,6 +33,72 @@ function notifyStaff(db: any, staffId: number | null, moduleKey: string, title: 
 }
 
 function htmlEscape(v: unknown) { return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+// Read the file behind a document version and store its extracted content
+// (full text + editable HTML + parsed SOP sections) so the document can be read
+// and edited inside SECH_LIMS. Best-effort: a failure leaves the version usable.
+function extractIntoVersion(db: any, versionId: number, fileId: number) {
+  try {
+    const file = db.prepare('SELECT * FROM files WHERE id = ?').get(fileId) as any;
+    if (!file) return;
+    const root = file.storage_area === 'evidence' ? evidenceRoot : uploadRoot;
+    const fp = path.join(root, file.stored_name);
+    const result = extractDocument(fp, file.original_name, file.mime_type);
+    db.prepare(`UPDATE document_versions SET content_text = ?, content_html = ?, content_sections = ?, page_count = ?, extraction_method = ?, extracted_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(result.text || null, result.html || null, result.sections.length ? JSON.stringify(result.sections) : null, result.pageCount, result.method, versionId);
+    return result;
+  } catch { /* best-effort extraction */ }
+}
+
+// Active staff who should attest to a newly issued controlled document.
+function activeStaffIds(db: any): number[] {
+  return (db.prepare('SELECT id FROM staff WHERE is_active = 1').all() as Array<{ id: number }>).map(r => r.id);
+}
+
+// Assign attestation + distribution to a set of staff for a version, notify them,
+// and skip anyone who already has a live (pending/overdue/signed) attestation for
+// that version. Returns the staff actually newly assigned.
+function distributeToStaff(db: any, doc: any, versionId: number, staffIds: number[], assignedBy: number | null, userId: number, dueDate: string | null): number[] {
+  const notified: number[] = [];
+  const tx = db.transaction(() => {
+    for (const staffId of staffIds) {
+      const existing = db.prepare("SELECT id FROM document_attestations WHERE document_version_id = ? AND staff_id = ? AND status IN ('pending','overdue','signed')").get(versionId, staffId);
+      if (existing) continue;
+      const r = db.prepare(`INSERT INTO document_attestations (document_id, document_version_id, staff_id, assigned_by_staff_id, assigned_at, due_date, status) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, 'pending')`)
+        .run(doc.id, versionId, staffId, assignedBy, dueDate);
+      const attId = Number(r.lastInsertRowid);
+      db.prepare('INSERT INTO document_distribution (document_id, document_version_id, target_type, target_staff_id, assigned_by_staff_id, due_date, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(doc.id, versionId, 'staff', staffId, assignedBy, dueDate, 'pending', userId);
+      db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run('documents', 'documents', String(doc.id), 'documents', 'document_attestations', String(attId), 'Attestation assignment');
+      notified.push(staffId);
+    }
+  });
+  tx();
+  const msg = `Please read and attest: ${doc.document_code ? doc.document_code + ' — ' : ''}${doc.title}${dueDate ? ` (due ${dueDate})` : ''}`;
+  for (const sId of notified) notifyStaff(db, sId, 'documents', 'New controlled document to attest', msg);
+  return notified;
+}
+
+// Build the next SECH document control number for a coding scheme, following the
+// SECH Document Control Procedure (SECHPO026 §5.1.6).
+function nextDocumentCode(db: any, type: string, sectionCode?: string | null): string {
+  const t = (type || '').toLowerCase();
+  const singletons: Record<string, string> = { 'quality manual': 'SECHQM', 'handbook': 'SECHHB', 'laboratory handbook': 'SECHHB', 'safety manual': 'SECHSM' };
+  if (singletons[t]) return singletons[t];
+  let prefix: string;
+  let pad = 3;
+  if (t === 'form') prefix = 'SECHF';
+  else if (t === 'sop') prefix = `SECHSOP${(sectionCode || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3)}`;
+  else if (t === 'register' || t === 'log' || t === 'tracker' || t === 'master list') { prefix = 'SECHML'; pad = 2; }
+  else prefix = 'SECHPO'; // policies, manuals, procedures (management)
+  const rows = db.prepare('SELECT document_code FROM documents WHERE document_code LIKE ?').all(`${prefix}%`) as Array<{ document_code: string }>;
+  let max = 0;
+  for (const r of rows) {
+    const m = r.document_code && r.document_code.slice(prefix.length).match(/^(\d+)/);
+    if (m) { const n = Number(m[1]); if (n > max) max = n; }
+  }
+  return `${prefix}${String(max + 1).padStart(pad, '0')}`;
+}
 
 export function documentControlRoutes() {
   const router = Router();
@@ -69,6 +137,165 @@ export function documentControlRoutes() {
     `).all(staffId));
   });
 
+  // -------- Document number generator (SECHPO026 §5.1.6) --------
+  router.get('/next-code', requirePermission('documents', 'view'), (req, res) => {
+    const db = getDb();
+    const code = nextDocumentCode(db, String(req.query.type || 'SOP'), req.query.sectionCode ? String(req.query.sectionCode) : null);
+    res.json({ code });
+  });
+  // Derive a document code from a file/document name, e.g.
+  // "SECHPO026 Document Control Procedure" -> "SECHPO026".
+  router.get('/derive-code', requirePermission('documents', 'view'), (req, res) => {
+    res.json({ code: deriveDocumentCodeFromName(String(req.query.name || '')) });
+  });
+
+  // ===================================================================
+  // RECORD CONTROL (SECHPO051 — Control of Records Procedure)
+  // Registered before /:id so the path segments never collide with it.
+  // ===================================================================
+  router.get('/records/summary', requirePermission('documents', 'view'), (_req, res) => {
+    const db = getDb();
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const c = (sql: string, ...p: unknown[]) => (db.prepare(sql).get(...p) as { c: number }).c;
+    res.json({
+      activeRecords: c("SELECT COUNT(*) c FROM record_register WHERE status = 'active'"),
+      archivedRecords: c("SELECT COUNT(*) c FROM record_register WHERE status = 'archived'"),
+      disposalDue: c("SELECT COUNT(*) c FROM record_register WHERE status = 'active' AND disposal_due_date IS NOT NULL AND disposal_due_date <= ?", todayIso),
+      retentionRules: c('SELECT COUNT(*) c FROM record_retention_schedule WHERE is_active = 1'),
+      reviewsThisMonth: c("SELECT COUNT(*) c FROM record_review_log WHERE strftime('%Y-%m', review_date) = strftime('%Y-%m','now')"),
+      openReviewActions: c("SELECT COUNT(*) c FROM record_review_log WHERE action_required = 1 AND follow_up_status NOT IN ('completed')"),
+      destructionsThisYear: c("SELECT COUNT(*) c FROM record_destruction_log WHERE strftime('%Y', date_destroyed) = strftime('%Y','now')"),
+      backupsThisMonth: c("SELECT COUNT(*) c FROM record_backup_log WHERE strftime('%Y-%m', backup_date) = strftime('%Y-%m','now')"),
+      failedRestoreTests: c("SELECT COUNT(*) c FROM record_backup_log WHERE restore_test_status = 'failed'"),
+    });
+  });
+
+  // Record register (inventory of controlled records)
+  router.get('/records/register', requirePermission('documents', 'view'), (req, res) => {
+    const db = getDb();
+    const filters: string[] = []; const params: unknown[] = [];
+    if (req.query.status) { filters.push('rr.status = ?'); params.push(String(req.query.status)); }
+    if (req.query.category) { filters.push('rr.record_category = ?'); params.push(String(req.query.category)); }
+    let q = `SELECT rr.*, s.name AS section_name, st.full_name AS responsible_name, d.document_code AS linked_document_code, d.title AS linked_document_title
+             FROM record_register rr LEFT JOIN sections s ON s.id = rr.section_id LEFT JOIN staff st ON st.id = rr.responsible_staff_id LEFT JOIN documents d ON d.id = rr.linked_document_id`;
+    if (filters.length) q += ` WHERE ${filters.join(' AND ')}`;
+    q += ' ORDER BY rr.created_at DESC';
+    res.json(db.prepare(q).all(...params));
+  });
+  router.post('/records/register', requirePermission('documents', 'create'), (req, res) => {
+    if (!req.body.title) return res.status(400).json({ error: 'title is required' });
+    const db = getDb();
+    const code = req.body.recordCode || generateRecordNumber(db, 'record_register', 'SECHREC');
+    const r = db.prepare(`INSERT INTO record_register (record_code, title, record_category, record_format, department_id, section_id, responsible_staff_id, storage_location, storage_medium, retention_schedule_id, retention_period, confidentiality, linked_document_id, date_created, disposal_due_date, status, notes, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      code, req.body.title, req.body.recordCategory ?? null, req.body.recordFormat ?? 'electronic', parseIntNullable(req.body.departmentId), parseIntNullable(req.body.sectionId),
+      parseIntNullable(req.body.responsibleStaffId), req.body.storageLocation ?? null, req.body.storageMedium ?? null, parseIntNullable(req.body.retentionScheduleId),
+      req.body.retentionPeriod ?? null, req.body.confidentiality ?? 'internal', parseIntNullable(req.body.linkedDocumentId), req.body.dateCreated ?? null, req.body.disposalDueDate ?? null,
+      req.body.status ?? 'active', req.body.notes ?? null, req.user!.id);
+    audit(req, { action: 'create', entity: 'record_register', entityId: r.lastInsertRowid, newValue: { code, ...req.body } });
+    res.status(201).json({ id: r.lastInsertRowid, recordCode: code });
+  });
+  router.put('/records/register/:id', requirePermission('documents', 'edit'), (req, res) => {
+    const db = getDb();
+    const old = db.prepare('SELECT * FROM record_register WHERE id = ?').get(req.params.id) as any;
+    if (!old) return res.status(404).json({ error: 'Record not found' });
+    db.prepare(`UPDATE record_register SET title = ?, record_category = ?, record_format = ?, department_id = ?, section_id = ?, responsible_staff_id = ?, storage_location = ?, storage_medium = ?, retention_schedule_id = ?, retention_period = ?, confidentiality = ?, linked_document_id = ?, date_created = ?, disposal_due_date = ?, status = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(
+      req.body.title ?? old.title, req.body.recordCategory ?? old.record_category, req.body.recordFormat ?? old.record_format, parseIntNullable(req.body.departmentId) ?? old.department_id, parseIntNullable(req.body.sectionId) ?? old.section_id,
+      parseIntNullable(req.body.responsibleStaffId) ?? old.responsible_staff_id, req.body.storageLocation ?? old.storage_location, req.body.storageMedium ?? old.storage_medium, parseIntNullable(req.body.retentionScheduleId) ?? old.retention_schedule_id,
+      req.body.retentionPeriod ?? old.retention_period, req.body.confidentiality ?? old.confidentiality, parseIntNullable(req.body.linkedDocumentId) ?? old.linked_document_id, req.body.dateCreated ?? old.date_created, req.body.disposalDueDate ?? old.disposal_due_date,
+      req.body.status ?? old.status, req.body.notes ?? old.notes, req.params.id);
+    audit(req, { action: 'edit', entity: 'record_register', entityId: req.params.id, oldValue: old, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  // Retention schedule (SECHPO051 Appendix A)
+  router.get('/records/retention-schedule', requirePermission('documents', 'view'), (_req, res) => {
+    res.json(getDb().prepare('SELECT * FROM record_retention_schedule ORDER BY sn, id').all());
+  });
+  router.post('/records/retention-schedule', requirePermission('documents', 'create'), (req, res) => {
+    if (!req.body.recordType || !req.body.retentionPeriod) return res.status(400).json({ error: 'recordType and retentionPeriod are required' });
+    const db = getDb();
+    const maxSn = (db.prepare('SELECT MAX(sn) m FROM record_retention_schedule').get() as { m: number | null }).m ?? 0;
+    const r = db.prepare('INSERT INTO record_retention_schedule (sn, record_type, retention_period, storage_medium, responsible_role, extended_retention, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
+      req.body.sn ?? maxSn + 1, req.body.recordType, req.body.retentionPeriod, req.body.storageMedium ?? null, req.body.responsibleRole ?? null, req.body.extendedRetention ? 1 : 0, req.body.notes ?? null, req.user!.id);
+    audit(req, { action: 'create', entity: 'record_retention_schedule', entityId: r.lastInsertRowid, newValue: req.body });
+    res.status(201).json({ id: r.lastInsertRowid });
+  });
+  router.put('/records/retention-schedule/:id', requirePermission('documents', 'edit'), (req, res) => {
+    const db = getDb();
+    const old = db.prepare('SELECT * FROM record_retention_schedule WHERE id = ?').get(req.params.id) as any;
+    if (!old) return res.status(404).json({ error: 'Rule not found' });
+    db.prepare('UPDATE record_retention_schedule SET record_type = ?, retention_period = ?, storage_medium = ?, responsible_role = ?, extended_retention = ?, notes = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+      req.body.recordType ?? old.record_type, req.body.retentionPeriod ?? old.retention_period, req.body.storageMedium ?? old.storage_medium, req.body.responsibleRole ?? old.responsible_role,
+      req.body.extendedRetention !== undefined ? (req.body.extendedRetention ? 1 : 0) : old.extended_retention, req.body.notes ?? old.notes, req.body.isActive !== undefined ? (req.body.isActive ? 1 : 0) : old.is_active, req.params.id);
+    audit(req, { action: 'edit', entity: 'record_retention_schedule', entityId: req.params.id, oldValue: old, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  // Quality & Technical Records Review Log (SECHPO051 §5.7)
+  router.get('/records/review-log', requirePermission('documents', 'view'), (_req, res) => {
+    res.json(getDb().prepare(`SELECT rl.*, s.name AS section_name, st.full_name AS responsible_name, rv.full_name AS reviewer_name
+      FROM record_review_log rl LEFT JOIN sections s ON s.id = rl.section_id LEFT JOIN staff st ON st.id = rl.responsible_staff_id LEFT JOIN staff rv ON rv.id = rl.reviewer_staff_id ORDER BY rl.review_date DESC, rl.id DESC`).all());
+  });
+  router.post('/records/review-log', requirePermission('documents', 'create'), (req, res) => {
+    if (!req.body.reviewDate || !req.body.recordCategory) return res.status(400).json({ error: 'reviewDate and recordCategory are required' });
+    const db = getDb();
+    const num = generateRecordNumber(db, 'record_review_log', 'RECREV', req.body.reviewDate);
+    const reviewer = getStaffIdOrCurrent(req, req.body.reviewerStaffId);
+    const r = db.prepare(`INSERT INTO record_review_log (review_number, review_date, record_category, section_id, records_reviewed, findings, nonconformities_identified, action_required, responsible_staff_id, target_completion_date, follow_up_status, reviewer_staff_id, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      num, req.body.reviewDate, req.body.recordCategory, parseIntNullable(req.body.sectionId), req.body.recordsReviewed ?? null, req.body.findings ?? null, req.body.nonconformitiesIdentified ?? null,
+      req.body.actionRequired ? 1 : 0, parseIntNullable(req.body.responsibleStaffId), req.body.targetCompletionDate ?? null, req.body.followUpStatus ?? 'open', reviewer, req.user!.id);
+    audit(req, { action: 'create', entity: 'record_review_log', entityId: r.lastInsertRowid, newValue: { num, ...req.body } });
+    res.status(201).json({ id: r.lastInsertRowid, reviewNumber: num });
+  });
+  router.put('/records/review-log/:id', requirePermission('documents', 'edit'), (req, res) => {
+    const db = getDb();
+    const old = db.prepare('SELECT * FROM record_review_log WHERE id = ?').get(req.params.id) as any;
+    if (!old) return res.status(404).json({ error: 'Review not found' });
+    db.prepare('UPDATE record_review_log SET findings = ?, nonconformities_identified = ?, action_required = ?, responsible_staff_id = ?, target_completion_date = ?, follow_up_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+      req.body.findings ?? old.findings, req.body.nonconformitiesIdentified ?? old.nonconformities_identified, req.body.actionRequired !== undefined ? (req.body.actionRequired ? 1 : 0) : old.action_required,
+      parseIntNullable(req.body.responsibleStaffId) ?? old.responsible_staff_id, req.body.targetCompletionDate ?? old.target_completion_date, req.body.followUpStatus ?? old.follow_up_status, req.params.id);
+    audit(req, { action: 'edit', entity: 'record_review_log', entityId: req.params.id, oldValue: old, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  // Document & Record Destruction log (SECHF0047, SECHPO051 §5.6)
+  router.get('/records/destruction-log', requirePermission('documents', 'view'), (_req, res) => {
+    res.json(getDb().prepare(`SELECT dl.*, a.full_name AS authorized_by_name, w.full_name AS witness_name
+      FROM record_destruction_log dl LEFT JOIN staff a ON a.id = dl.authorized_by_staff_id LEFT JOIN staff w ON w.id = dl.witness_staff_id ORDER BY dl.date_destroyed DESC, dl.id DESC`).all());
+  });
+  router.post('/records/destruction-log', requirePermission('documents', 'approve'), (req, res) => {
+    if (!req.body.description || !req.body.dateDestroyed) return res.status(400).json({ error: 'description and dateDestroyed are required' });
+    const db = getDb();
+    const num = generateRecordNumber(db, 'record_destruction_log', 'SECHF0047', req.body.dateDestroyed);
+    const auth = getStaffIdOrCurrent(req, req.body.authorizedByStaffId);
+    const r = db.prepare(`INSERT INTO record_destruction_log (destruction_number, item_type, record_register_id, document_id, description, record_category, date_destroyed, method, retention_verified, confidentiality_ensured, authorized_by_staff_id, witness_staff_id, notes, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      num, req.body.itemType ?? 'record', parseIntNullable(req.body.recordRegisterId), parseIntNullable(req.body.documentId), req.body.description, req.body.recordCategory ?? null, req.body.dateDestroyed,
+      req.body.method ?? null, req.body.retentionVerified ? 1 : 0, req.body.confidentialityEnsured === false ? 0 : 1, auth, parseIntNullable(req.body.witnessStaffId), req.body.notes ?? null, req.user!.id);
+    if (parseIntNullable(req.body.recordRegisterId)) db.prepare("UPDATE record_register SET status = 'disposed', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(parseIntNullable(req.body.recordRegisterId));
+    audit(req, { action: 'destroy', entity: 'record_destruction_log', entityId: r.lastInsertRowid, newValue: { num, ...req.body } });
+    res.status(201).json({ id: r.lastInsertRowid, destructionNumber: num });
+  });
+
+  // Backup & Archive log (SECHPO051 §5.4)
+  router.get('/records/backup-log', requirePermission('documents', 'view'), (_req, res) => {
+    res.json(getDb().prepare(`SELECT bl.*, s.full_name AS performed_by_name FROM record_backup_log bl LEFT JOIN staff s ON s.id = bl.performed_by_staff_id ORDER BY bl.backup_date DESC, bl.id DESC`).all());
+  });
+  router.post('/records/backup-log', requirePermission('documents', 'create'), (req, res) => {
+    if (!req.body.backupDate) return res.status(400).json({ error: 'backupDate is required' });
+    const db = getDb();
+    const num = generateRecordNumber(db, 'record_backup_log', 'BKP', req.body.backupDate);
+    const by = getStaffIdOrCurrent(req, req.body.performedByStaffId);
+    const r = db.prepare(`INSERT INTO record_backup_log (backup_number, backup_date, backup_type, scope, storage_location, offsite, performed_by_staff_id, integrity_verified, restore_test_status, restore_test_date, status, notes, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      num, req.body.backupDate, req.body.backupType ?? null, req.body.scope ?? null, req.body.storageLocation ?? null, req.body.offsite ? 1 : 0, by,
+      req.body.integrityVerified ? 1 : 0, req.body.restoreTestStatus ?? null, req.body.restoreTestDate ?? null, req.body.status ?? 'completed', req.body.notes ?? null, req.user!.id);
+    audit(req, { action: 'create', entity: 'record_backup_log', entityId: r.lastInsertRowid, newValue: { num, ...req.body } });
+    res.status(201).json({ id: r.lastInsertRowid, backupNumber: num });
+  });
+
   // -------- Documents CRUD --------
   router.get('/', requirePermission('documents', 'view'), (req, res) => {
     const db = getDb();
@@ -84,18 +311,20 @@ export function documentControlRoutes() {
   });
 
   router.post('/', requirePermission('documents', 'create'), (req, res) => {
-    if (!req.body.documentCode) return res.status(400).json({ error: 'documentCode is required' });
     if (!req.body.title) return res.status(400).json({ error: 'title is required' });
     if (!req.body.documentType) return res.status(400).json({ error: 'documentType is required' });
     const db = getDb();
-    const existing = db.prepare('SELECT id FROM documents WHERE document_code = ?').get(req.body.documentCode);
-    if (existing) return res.status(400).json({ error: 'documentCode already exists' });
+    // Document number: explicit code, else auto-generate per SECHPO026 §5.1.6.
+    let documentCode: string = req.body.documentCode && String(req.body.documentCode).trim();
+    if (!documentCode) documentCode = nextDocumentCode(db, req.body.documentType, req.body.sectionCategory);
+    const existing = db.prepare('SELECT id FROM documents WHERE document_code = ?').get(documentCode);
+    if (existing) return res.status(400).json({ error: `documentCode "${documentCode}" already exists` });
     const reviewFreq = parseIntNullable(req.body.reviewFrequencyMonths);
     const nextReview = req.body.nextReviewDate ?? (reviewFreq ? addMonths(new Date().toISOString(), reviewFreq) : null);
     const status = req.body.status ?? 'draft';
     if (!DOCUMENT_STATUSES.includes(status)) return res.status(400).json({ error: `status must be one of: ${DOCUMENT_STATUSES.join(', ')}` });
-    const result = db.prepare(`INSERT INTO documents (document_code, title, document_type, department_id, section_id, owner_staff_id, owner_position_id, status, review_frequency_months, next_review_date, access_level, is_controlled, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(req.body.documentCode, req.body.title, req.body.documentType, parseIntNullable(req.body.departmentId), parseIntNullable(req.body.sectionId), parseIntNullable(req.body.ownerStaffId), parseIntNullable(req.body.ownerPositionId), status, reviewFreq, nextReview, req.body.accessLevel ?? 'internal', req.body.isControlled === false ? 0 : 1, req.user!.id);
+    const result = db.prepare(`INSERT INTO documents (document_code, title, document_type, section_category, department_id, section_id, owner_staff_id, owner_position_id, status, review_frequency_months, next_review_date, access_level, is_controlled, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(documentCode, req.body.title, req.body.documentType, req.body.sectionCategory ?? null, parseIntNullable(req.body.departmentId), parseIntNullable(req.body.sectionId), parseIntNullable(req.body.ownerStaffId), parseIntNullable(req.body.ownerPositionId), status, reviewFreq, nextReview, req.body.accessLevel ?? 'internal', req.body.isControlled === false ? 0 : 1, req.user!.id);
     const docId = Number(result.lastInsertRowid);
 
     if (parseIntNullable(req.body.fileId)) {
@@ -106,10 +335,12 @@ export function documentControlRoutes() {
       const versionId = Number(versionResult.lastInsertRowid);
       db.prepare('UPDATE documents SET current_version_id = ? WHERE id = ?').run(versionId, docId);
       db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run('documents', 'documents', String(docId), 'documents', 'files', String(fileId), 'Initial document file');
+      // Read the uploaded SOP so its full content is available in-app.
+      extractIntoVersion(db, versionId, fileId);
     }
 
-    audit(req, { action: 'create', entity: 'documents', entityId: docId, newValue: { documentCode: req.body.documentCode, ...req.body } });
-    res.status(201).json({ id: docId });
+    audit(req, { action: 'create', entity: 'documents', entityId: docId, newValue: { documentCode, ...req.body } });
+    res.status(201).json({ id: docId, documentCode });
   });
 
   router.get('/:id', requirePermission('documents', 'view'), (req, res) => {
@@ -130,8 +361,17 @@ export function documentControlRoutes() {
     const oldValue = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Document not found' });
     if (req.body.status && !DOCUMENT_STATUSES.includes(req.body.status)) return res.status(400).json({ error: `status must be one of: ${DOCUMENT_STATUSES.join(', ')}` });
-    db.prepare(`UPDATE documents SET title = ?, document_type = ?, department_id = ?, section_id = ?, owner_staff_id = ?, owner_position_id = ?, status = ?, review_frequency_months = ?, next_review_date = ?, access_level = ?, is_controlled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-      .run(req.body.title ?? oldValue.title, req.body.documentType ?? oldValue.document_type, parseIntNullable(req.body.departmentId) ?? oldValue.department_id, parseIntNullable(req.body.sectionId) ?? oldValue.section_id, parseIntNullable(req.body.ownerStaffId) ?? oldValue.owner_staff_id, parseIntNullable(req.body.ownerPositionId) ?? oldValue.owner_position_id, req.body.status ?? oldValue.status, parseIntNullable(req.body.reviewFrequencyMonths) ?? oldValue.review_frequency_months, req.body.nextReviewDate ?? oldValue.next_review_date, req.body.accessLevel ?? oldValue.access_level, req.body.isControlled !== undefined ? (req.body.isControlled ? 1 : 0) : oldValue.is_controlled, req.params.id);
+    // Document number can be corrected/updated, with a uniqueness guard.
+    let documentCode = oldValue.document_code;
+    if (req.body.documentCode !== undefined && String(req.body.documentCode).trim() !== (oldValue.document_code ?? '')) {
+      documentCode = String(req.body.documentCode).trim() || null;
+      if (documentCode) {
+        const clash = db.prepare('SELECT id FROM documents WHERE document_code = ? AND id != ?').get(documentCode, req.params.id);
+        if (clash) return res.status(400).json({ error: `documentCode "${documentCode}" already exists` });
+      }
+    }
+    db.prepare(`UPDATE documents SET document_code = ?, title = ?, document_type = ?, section_category = ?, department_id = ?, section_id = ?, owner_staff_id = ?, owner_position_id = ?, status = ?, review_frequency_months = ?, next_review_date = ?, access_level = ?, is_controlled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(documentCode, req.body.title ?? oldValue.title, req.body.documentType ?? oldValue.document_type, req.body.sectionCategory ?? oldValue.section_category, parseIntNullable(req.body.departmentId) ?? oldValue.department_id, parseIntNullable(req.body.sectionId) ?? oldValue.section_id, parseIntNullable(req.body.ownerStaffId) ?? oldValue.owner_staff_id, parseIntNullable(req.body.ownerPositionId) ?? oldValue.owner_position_id, req.body.status ?? oldValue.status, parseIntNullable(req.body.reviewFrequencyMonths) ?? oldValue.review_frequency_months, req.body.nextReviewDate ?? oldValue.next_review_date, req.body.accessLevel ?? oldValue.access_level, req.body.isControlled !== undefined ? (req.body.isControlled ? 1 : 0) : oldValue.is_controlled, req.params.id);
     audit(req, { action: 'edit', entity: 'documents', entityId: req.params.id, oldValue, newValue: req.body });
     res.json({ ok: true });
   });
@@ -148,9 +388,58 @@ export function documentControlRoutes() {
     const versionId = Number(result.lastInsertRowid);
     if (parseIntNullable(req.body.fileId)) {
       db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run('documents', 'document_versions', String(versionId), 'documents', 'files', String(req.body.fileId), `Document version ${req.body.versionNumber}`);
+      extractIntoVersion(db, versionId, parseIntNullable(req.body.fileId)!);
     }
     audit(req, { action: 'create', entity: 'document_versions', entityId: versionId, newValue: { documentId: req.params.id, ...req.body } });
     res.status(201).json({ id: versionId });
+  });
+
+  // -------- In-app document content (read / edit the SOP body) --------
+  router.get('/:id/versions/:versionId/content', requirePermission('documents', 'view'), (req, res) => {
+    const db = getDb();
+    const v = db.prepare(`SELECT v.id, v.document_id, v.version_number, v.version_label, v.status, v.file_id, v.content_text, v.content_html, v.content_sections, v.extraction_method, v.page_count, v.extracted_at, v.content_updated_at, v.content_updated_by,
+      f.original_name AS file_name, f.mime_type AS file_mime, f.size_bytes AS file_size, cu.full_name AS content_updated_by_name
+      FROM document_versions v LEFT JOIN files f ON f.id = v.file_id LEFT JOIN staff cu ON cu.id = v.content_updated_by WHERE v.id = ? AND v.document_id = ?`).get(req.params.versionId, req.params.id) as any;
+    if (!v) return res.status(404).json({ error: 'Version not found' });
+    let sections: unknown = [];
+    try { sections = v.content_sections ? JSON.parse(v.content_sections) : []; } catch { sections = []; }
+    res.json({ ...v, content_sections: sections });
+  });
+  // Re-read the attached file and refresh the extracted content.
+  router.post('/:id/versions/:versionId/re-extract', requirePermission('documents', 'edit'), (req, res) => {
+    const db = getDb();
+    const v = db.prepare('SELECT * FROM document_versions WHERE id = ? AND document_id = ?').get(req.params.versionId, req.params.id) as any;
+    if (!v) return res.status(404).json({ error: 'Version not found' });
+    if (!v.file_id) return res.status(400).json({ error: 'This version has no attached file to read.' });
+    const result = extractIntoVersion(db, Number(v.id), Number(v.file_id));
+    audit(req, { action: 'extract', entity: 'document_versions', entityId: v.id, newValue: { method: result?.method, length: result?.text?.length ?? 0 } });
+    res.json({ ok: true, method: result?.method ?? 'none', length: result?.text?.length ?? 0, sections: result?.sections?.length ?? 0 });
+  });
+  // Save an edited document body (controlled content authored inside SECH_LIMS).
+  router.put('/:id/versions/:versionId/content', requirePermission('documents', 'edit'), (req, res) => {
+    const db = getDb();
+    const v = db.prepare('SELECT * FROM document_versions WHERE id = ? AND document_id = ?').get(req.params.versionId, req.params.id) as any;
+    if (!v) return res.status(404).json({ error: 'Version not found' });
+    const staffId = getStaffIdOrCurrent(req, req.body.editedByStaffId);
+    const sections = req.body.contentSections !== undefined ? JSON.stringify(req.body.contentSections) : v.content_sections;
+    db.prepare('UPDATE document_versions SET content_html = ?, content_text = ?, content_sections = ?, content_updated_by = ?, content_updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(req.body.contentHtml ?? v.content_html, req.body.contentText ?? v.content_text, sections, staffId, v.id);
+    audit(req, { action: 'edit_content', entity: 'document_versions', entityId: v.id, newValue: { length: (req.body.contentHtml ?? '').length } });
+    res.json({ ok: true });
+  });
+
+  // Distribute the current version to all active staff for attestation (ISO
+  // 15189 §8.3 — staff must read and acknowledge controlled documents).
+  router.post('/:id/distribute-all', requirePermission('documents', 'edit'), (req, res) => {
+    const db = getDb();
+    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    const versionId = parseIntNullable(req.body.versionId) ?? doc.current_version_id;
+    if (!versionId) return res.status(400).json({ error: 'No current version to distribute. Approve a version first.' });
+    const assignedBy = getStaffIdOrCurrent(req, req.body.assignedByStaffId);
+    const assigned = distributeToStaff(db, doc, versionId, activeStaffIds(db), assignedBy, req.user!.id, req.body.dueDate ?? null);
+    audit(req, { action: 'distribute_all', entity: 'documents', entityId: doc.id, newValue: { versionId, assigned: assigned.length } });
+    res.status(201).json({ ok: true, assigned: assigned.length });
   });
 
   router.post('/:id/submit-review', requirePermission('documents', 'edit'), (req, res) => {
@@ -180,6 +469,15 @@ export function documentControlRoutes() {
       .run(reviewNumber, req.params.id, parseIntNullable(req.body.documentVersionId) ?? doc.current_version_id, req.body.reviewDate, req.body.reviewOutcome, req.body.reviewNotes ?? null, nextReview, reviewedBy, req.body.actionRequired ? 1 : 0, req.user!.id);
     const reviewId = Number(result.lastInsertRowid);
     if (nextReview) db.prepare('UPDATE documents SET next_review_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(nextReview, req.params.id);
+    // Advance the lifecycle: a recorded review marks the document as reviewed and
+    // ready for approval (SECHPO026 §5.3.6 — reviewed by technical staff/QM,
+    // then approved by the Laboratory Director). An 'obsolete' outcome does not.
+    if (req.body.reviewOutcome !== 'obsolete' && ['draft', 'under_review'].includes(doc.status)) {
+      db.prepare("UPDATE documents SET status = 'reviewed', reviewed_by_staff_id = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(reviewedBy, req.params.id);
+      if (doc.current_version_id) db.prepare("UPDATE document_versions SET status = 'reviewed', reviewed_by_staff_id = ?, review_date = ? WHERE id = ? AND status IN ('draft','under_review')").run(reviewedBy, req.body.reviewDate, doc.current_version_id);
+      const owners = db.prepare('SELECT owner_staff_id FROM documents WHERE id = ?').get(req.params.id) as any;
+      notifyStaff(db, owners?.owner_staff_id ?? null, 'documents', 'Document reviewed', `${doc.document_code ? doc.document_code + ' — ' : ''}${doc.title} has been reviewed and is awaiting approval.`);
+    }
     audit(req, { action: 'review', entity: 'documents', entityId: req.params.id, newValue: { reviewId, reviewNumber, ...req.body } });
     res.status(201).json({ id: reviewId, reviewNumber });
   });
@@ -197,9 +495,19 @@ export function documentControlRoutes() {
       db.prepare("UPDATE document_versions SET status = 'obsolete', obsolete_date = CURRENT_TIMESTAMP WHERE id = ?").run(v.id);
     }
     db.prepare("UPDATE document_versions SET status = 'current', approved_by_staff_id = ?, approved_at = CURRENT_TIMESTAMP, effective_date = COALESCE(?, effective_date) WHERE id = ?").run(approvedBy, req.body.effectiveDate ?? null, versionId);
-    db.prepare("UPDATE documents SET status = 'current', current_version_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(versionId, req.params.id);
-    audit(req, { action: 'approve', entity: 'documents', entityId: req.params.id, oldValue: { status: doc.status, currentVersionId: doc.current_version_id }, newValue: { versionId, status: 'current', approvedByStaffId: approvedBy } });
-    res.json({ ok: true, versionId });
+    db.prepare("UPDATE documents SET status = 'current', current_version_id = ?, approved_by_staff_id = ?, approved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(versionId, approvedBy, req.params.id);
+
+    // On issue, distribute the controlled document to all active staff for
+    // attestation and notify them — unless the caller opts out. This is what
+    // makes a newly issued document appear in every staff member's inbox,
+    // notifications and dashboard for reading and sign-off.
+    let distributed = 0;
+    if (req.body.distribute !== false) {
+      const freshDoc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
+      distributed = distributeToStaff(db, freshDoc, versionId, activeStaffIds(db), approvedBy, req.user!.id, req.body.attestationDueDate ?? null).length;
+    }
+    audit(req, { action: 'approve', entity: 'documents', entityId: req.params.id, oldValue: { status: doc.status, currentVersionId: doc.current_version_id }, newValue: { versionId, status: 'current', approvedByStaffId: approvedBy, distributed } });
+    res.json({ ok: true, versionId, distributed });
   });
 
   router.post('/:id/mark-obsolete', requirePermission('documents', 'approve'), (req, res) => {
@@ -306,6 +614,10 @@ export function documentControlRoutes() {
     if (!doc) return res.status(404).json({ error: 'Document not found' });
     const versionId = parseIntNullable(req.query.versionId) ?? doc.current_version_id;
     const version = versionId ? db.prepare('SELECT v.*, f.original_name AS file_name FROM document_versions v LEFT JOIN files f ON f.id = v.file_id WHERE v.id = ?').get(versionId) as any : null;
+    const signedAttestations = versionId ? db.prepare(`SELECT a.attested_at, s.full_name AS staff_name, s.employee_no FROM document_attestations a LEFT JOIN staff s ON s.id = a.staff_id WHERE a.document_version_id = ? AND a.status = 'signed' ORDER BY a.attested_at`).all(versionId) as any[] : [];
+    const ownerName = doc.owner_staff_id ? (db.prepare('SELECT full_name FROM staff WHERE id = ?').get(doc.owner_staff_id) as any)?.full_name : null;
+    const approverName = doc.approved_by_staff_id ? (db.prepare('SELECT full_name FROM staff WHERE id = ?').get(doc.approved_by_staff_id) as any)?.full_name : null;
+    const reviewerName = doc.reviewed_by_staff_id ? (db.prepare('SELECT full_name FROM staff WHERE id = ?').get(doc.reviewed_by_staff_id) as any)?.full_name : null;
     const copyNumber = req.query.copyNumber ? String(req.query.copyNumber) : '';
     const watermark = req.query.watermark ? String(req.query.watermark) : (doc.is_controlled ? 'CONTROLLED COPY' : 'UNCONTROLLED COPY');
     const purpose = req.query.purpose ? String(req.query.purpose) : '';
@@ -317,6 +629,10 @@ body { font-family: 'Times New Roman', serif; color: #111; margin: 0; padding: 0
 .watermark span { font-size: 96px; font-weight: bold; color: rgba(180, 0, 0, 0.12); transform: rotate(-30deg); border: 4px solid rgba(180,0,0,0.12); padding: 8px 24px; letter-spacing: 4px; }
 .page { position: relative; z-index: 1; padding: 18px 24px; }
 h1 { font-size: 18px; border-bottom: 2px solid #1B3A6B; padding-bottom: 6px; margin: 0 0 12px; }
+h2 { font-size: 14px; color: #1B3A6B; margin: 18px 0 6px; border-bottom: 1px solid #ccd; padding-bottom: 3px; }
+.content { font-size: 12px; line-height: 1.4; }
+.content h3 { font-size: 12px; margin: 10px 0 2px; color: #222; }
+.content p { margin: 4px 0; }
 table.meta { border-collapse: collapse; width: 100%; font-size: 12px; margin-bottom: 16px; }
 table.meta th, table.meta td { border: 1px solid #888; padding: 4px 8px; text-align: left; vertical-align: top; }
 table.meta th { background: #eef2f7; width: 22%; }
@@ -334,11 +650,18 @@ table.meta th { background: #eef2f7; width: 22%; }
     <tr><th>Status</th><td>${htmlEscape(doc.status)}</td><th>Effective date</th><td>${htmlEscape(version?.effective_date || '—')}</td></tr>
     <tr><th>Access level</th><td>${htmlEscape(doc.access_level || '—')}</td><th>Controlled</th><td>${doc.is_controlled ? 'Yes' : 'No'}</td></tr>
     <tr><th>Next review</th><td>${htmlEscape(doc.next_review_date || '—')}</td><th>Copy #</th><td>${htmlEscape(copyNumber || '—')}</td></tr>
+    <tr><th>Owner / Author</th><td>${htmlEscape(ownerName || '—')}</td><th>Reviewed by</th><td>${htmlEscape(reviewerName || '—')}</td></tr>
+    <tr><th>Authorised by</th><td>${htmlEscape(approverName || '—')}</td><th>Approved on</th><td>${htmlEscape(doc.approved_at ? String(doc.approved_at).slice(0, 10) : '—')}</td></tr>
     <tr><th>Print purpose</th><td colspan="3">${htmlEscape(purpose || '—')}</td></tr>
     ${version?.revision_summary ? `<tr><th>Revision summary</th><td colspan="3">${htmlEscape(version.revision_summary)}</td></tr>` : ''}
   </table>
-  ${version?.file_name ? `<div class="banner">Attached document file: <strong>${htmlEscape(version.file_name)}</strong>. Open the file from the document detail panel and print alongside this cover sheet.</div>` : '<div class="banner">No file is attached to this version. Print this cover sheet only.</div>'}
-  <div class="footer">SECH_LIMS by Nickland · Generated ${new Date().toISOString()} · Recipient is responsible for verifying that this is the current authorised version before use.</div>
+  ${version?.content_html ? `<div class="content"><h2>Controlled content</h2>${version.content_html}</div>` : (version?.file_name ? `<div class="banner">Attached document file: <strong>${htmlEscape(version.file_name)}</strong>. Open the file from the document viewer and print alongside this cover sheet.</div>` : '<div class="banner">No content has been captured for this version. Print this cover sheet only.</div>')}
+  <h2>Attestation Record</h2>
+  <p style="font-size:11px;color:#555;margin:2px 0 8px;">Staff who have read and attested to this version (ISO 15189 §8.3 controlled-document acknowledgement).</p>
+  <table class="meta"><tr><th style="width:6%;">#</th><th style="width:54%;">Staff name</th><th style="width:20%;">Staff ID</th><th style="width:20%;">Attested on</th></tr>
+  ${signedAttestations.length ? signedAttestations.map((a, i) => `<tr><td>${i + 1}</td><td>${htmlEscape(a.staff_name || '—')}</td><td>${htmlEscape(a.employee_no || '—')}</td><td>${htmlEscape(a.attested_at ? String(a.attested_at).slice(0, 10) : '—')}</td></tr>`).join('') : '<tr><td colspan="4" style="text-align:center;color:#888;">No staff have attested to this version yet.</td></tr>'}
+  </table>
+  <div class="footer">SECH_LIMS by Nickland · Generated ${new Date().toISOString()} · ${signedAttestations.length} staff attestation(s) on record · Recipient is responsible for verifying that this is the current authorised version before use.</div>
 </div>
 </body></html>`;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
