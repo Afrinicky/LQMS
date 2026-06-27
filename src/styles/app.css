@@ -691,6 +691,14 @@ label {
   padding: 12px 14px;
   font-size: 13px;
 }
+/* Clickable user rows + inline staff-link editor (Users & Access) */
+tr.row-click { cursor: pointer; }
+tr.row-click:hover td { background: rgba(255,255,255,0.035); }
+tr.link-editor-row > td { background: var(--surface); border-top: 0; }
+.user-link-editor { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 4px 2px; }
+.user-link-editor .lab { color: var(--muted); font-size: 12.5px; }
+.user-link-editor select { min-width: 240px; }
+
 /* Inline checkbox label (forms) and orientation step toggle */
 .check-inline { display: flex; flex-direction: row; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 .check-inline input { width: auto; }
