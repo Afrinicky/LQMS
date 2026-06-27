@@ -2455,4 +2455,161 @@ CREATE INDEX IF NOT EXISTS idx_staff_orientations_staff ON staff_orientations(st
   ] as const) {
     if (!labColNames.has(col)) database.exec(`ALTER TABLE laboratory_profile ADD COLUMN ${col} ${type}`);
   }
+
+  // ===================================================================
+  // Phase 9: Documents & Records upgrade (ISO 15189 §8.3/§8.4, WHO LQMS)
+  // Faithful to SECH Document Control Procedure (SECHPO026) and Control of
+  // Records Procedure (SECHPO051).
+  // -------------------------------------------------------------------
+  // In-application document content: extracted text + an editable, controlled
+  // body, so a controlled document can be read and edited inside SECH_LIMS
+  // instead of only existing as an opaque attachment.
+  const docCols2 = new Set((database.prepare("PRAGMA table_info(documents)").all() as Array<{ name: string }>).map(c => c.name));
+  if (!docCols2.has('section_category')) database.exec('ALTER TABLE documents ADD COLUMN section_category TEXT');
+  if (!docCols2.has('control_copy_number')) database.exec('ALTER TABLE documents ADD COLUMN control_copy_number TEXT');
+  if (!docCols2.has('reviewed_by_staff_id')) database.exec('ALTER TABLE documents ADD COLUMN reviewed_by_staff_id INTEGER REFERENCES staff(id)');
+  if (!docCols2.has('reviewed_at')) database.exec('ALTER TABLE documents ADD COLUMN reviewed_at TEXT');
+  if (!docCols2.has('approved_by_staff_id')) database.exec('ALTER TABLE documents ADD COLUMN approved_by_staff_id INTEGER REFERENCES staff(id)');
+  if (!docCols2.has('approved_at')) database.exec('ALTER TABLE documents ADD COLUMN approved_at TEXT');
+
+  const verCols2 = new Set((database.prepare("PRAGMA table_info(document_versions)").all() as Array<{ name: string }>).map(c => c.name));
+  if (!verCols2.has('content_text')) database.exec('ALTER TABLE document_versions ADD COLUMN content_text TEXT');
+  if (!verCols2.has('content_html')) database.exec('ALTER TABLE document_versions ADD COLUMN content_html TEXT');
+  if (!verCols2.has('content_sections')) database.exec('ALTER TABLE document_versions ADD COLUMN content_sections TEXT');
+  if (!verCols2.has('extracted_at')) database.exec('ALTER TABLE document_versions ADD COLUMN extracted_at TEXT');
+  if (!verCols2.has('extraction_method')) database.exec('ALTER TABLE document_versions ADD COLUMN extraction_method TEXT');
+  if (!verCols2.has('page_count')) database.exec('ALTER TABLE document_versions ADD COLUMN page_count INTEGER');
+  if (!verCols2.has('content_updated_by')) database.exec('ALTER TABLE document_versions ADD COLUMN content_updated_by INTEGER REFERENCES staff(id)');
+  if (!verCols2.has('content_updated_at')) database.exec('ALTER TABLE document_versions ADD COLUMN content_updated_at TEXT');
+
+  database.exec(`
+-- Master Record Register (SECHPO051 §5.3): inventory of controlled records.
+CREATE TABLE IF NOT EXISTS record_register (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  record_code TEXT,
+  title TEXT NOT NULL,
+  record_category TEXT,              -- pre_examination|examination|post_examination|quality|support|other
+  record_format TEXT DEFAULT 'electronic', -- paper|electronic|both
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  storage_location TEXT,
+  storage_medium TEXT,
+  retention_schedule_id INTEGER,
+  retention_period TEXT,
+  confidentiality TEXT DEFAULT 'internal', -- public|internal|restricted|confidential
+  linked_document_id INTEGER REFERENCES documents(id),
+  date_created TEXT,
+  disposal_due_date TEXT,
+  status TEXT NOT NULL DEFAULT 'active', -- active|archived|disposed
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Record Retention Schedule (SECHPO051 Appendix A): retention rules per record type.
+CREATE TABLE IF NOT EXISTS record_retention_schedule (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sn INTEGER,
+  record_type TEXT NOT NULL,
+  retention_period TEXT NOT NULL,
+  storage_medium TEXT,
+  responsible_role TEXT,
+  extended_retention INTEGER NOT NULL DEFAULT 0,
+  notes TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Quality & Technical Records Review Log (SECHPO051 §5.7).
+CREATE TABLE IF NOT EXISTS record_review_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  review_number TEXT,
+  review_date TEXT NOT NULL,
+  record_category TEXT NOT NULL,
+  section_id INTEGER REFERENCES sections(id),
+  records_reviewed TEXT,
+  findings TEXT,
+  nonconformities_identified TEXT,
+  action_required INTEGER NOT NULL DEFAULT 0,
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  target_completion_date TEXT,
+  follow_up_status TEXT DEFAULT 'open', -- open|in_progress|completed|escalated
+  nc_id INTEGER REFERENCES nonconforming_events(id),
+  reviewer_staff_id INTEGER REFERENCES staff(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Document & Record Destruction Form (SECHF0047) — disposal log (SECHPO051 §5.6).
+CREATE TABLE IF NOT EXISTS record_destruction_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  destruction_number TEXT,
+  item_type TEXT NOT NULL DEFAULT 'record', -- record|document
+  record_register_id INTEGER REFERENCES record_register(id),
+  document_id INTEGER REFERENCES documents(id),
+  description TEXT NOT NULL,
+  record_category TEXT,
+  date_destroyed TEXT NOT NULL,
+  method TEXT,                       -- shredding|incineration|secure_deletion|media_destruction
+  retention_verified INTEGER NOT NULL DEFAULT 0,
+  confidentiality_ensured INTEGER NOT NULL DEFAULT 1,
+  authorized_by_staff_id INTEGER REFERENCES staff(id),
+  witness_staff_id INTEGER REFERENCES staff(id),
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Backup & Archive Log (SECHPO051 §5.4): electronic record backups + restore tests.
+CREATE TABLE IF NOT EXISTS record_backup_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  backup_number TEXT,
+  backup_date TEXT NOT NULL,
+  backup_type TEXT,                  -- incremental|full|archive
+  scope TEXT,
+  storage_location TEXT,
+  offsite INTEGER NOT NULL DEFAULT 0,
+  performed_by_staff_id INTEGER REFERENCES staff(id),
+  integrity_verified INTEGER NOT NULL DEFAULT 0,
+  restore_test_status TEXT,          -- not_tested|passed|failed
+  restore_test_date TEXT,
+  status TEXT NOT NULL DEFAULT 'completed',
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_record_register_section ON record_register(section_id);
+CREATE INDEX IF NOT EXISTS idx_record_review_log_date ON record_review_log(review_date);
+`);
+
+  // Seed the Record Retention Schedule from SECHPO051 Appendix A (idempotent).
+  const retentionSeeded = (database.prepare('SELECT COUNT(*) c FROM record_retention_schedule').get() as { c: number }).c;
+  if (retentionSeeded === 0) {
+    const rows: Array<[number, string, string, string, string, number]> = [
+      [1, 'Examination request forms', '2 years', 'Paper / Electronic', 'Section Head', 0],
+      [2, 'Routine examination results & reports', '5 years', 'LIS / Electronic / Paper', 'Laboratory Manager', 0],
+      [3, 'Critical result records', '5 years', 'Electronic / Paper', 'Quality Manager', 0],
+      [4, 'Histology & cytology reports', '10 years minimum', 'Archive / Secure Storage', 'Section Head', 1],
+      [5, 'Genetic testing records', '10–20 years (high legal risk)', 'Secure Electronic Archive', 'Laboratory Manager', 1],
+      [6, 'Pediatric examination records', 'Until patient is 21 years OR 10 years, whichever is longer', 'Electronic / Archive', 'Quality Manager', 1],
+      [7, 'Blood transfusion & compatibility records', '10 years', 'Paper / Electronic', 'Blood Bank Supervisor', 1],
+      [8, 'Quality control (IQC) records', '2 years', 'Paper / Electronic', 'Section Head', 0],
+      [9, 'External Quality Assessment (EQA/PT)', '5 years', 'Electronic', 'Quality Manager', 0],
+      [10, 'Equipment records', 'Lifetime of equipment + 5 years', 'Paper / Electronic', 'Equipment Officer', 0],
+      [11, 'Reagent & consumable records', '2 years after expiry', 'Paper / Electronic', 'Stores Officer', 0],
+      [12, 'Personnel records', 'Duration of employment + 5 years', 'Confidential File', 'Laboratory Manager', 0],
+      [13, 'Incident & nonconformity records', '5–10 years', 'Electronic / Paper', 'Quality Manager', 0],
+      [14, 'Risk assessment records', '5 years', 'Paper / Electronic', 'Quality Manager', 0],
+      [15, 'Audit & management review records', '5 years', 'Electronic', 'Laboratory Manager', 0],
+      [16, 'Backup & archive logs', '2 years', 'Electronic', 'IT / Quality Officer', 0],
+    ];
+    const stmt = database.prepare('INSERT INTO record_retention_schedule (sn, record_type, retention_period, storage_medium, responsible_role, extended_retention) VALUES (?, ?, ?, ?, ?, ?)');
+    const tx = database.transaction(() => { for (const r of rows) stmt.run(...r); });
+    tx();
+  }
 }

@@ -1143,6 +1143,41 @@ export function commonRoutes() {
     res.status(201).json({ fileId: file.lastInsertRowid, evidenceId: link.lastInsertRowid });
   });
 
+  // Serve an uploaded file's bytes so controlled documents can be viewed and
+  // printed inside the application. `/raw` streams inline (the in-app viewer
+  // embeds PDFs/images directly); `/download` forces a save dialog. This is the
+  // endpoint the document register "Open" button relies on.
+  function resolveFileOnDisk(id: unknown) {
+    const file = getDb().prepare('SELECT * FROM files WHERE id = ?').get(id) as any;
+    if (!file) return null;
+    const root = file.storage_area === 'evidence' ? evidenceRoot : uploadRoot;
+    const fp = path.join(root, file.stored_name);
+    if (!fs.existsSync(fp)) return null;
+    return { file, fp };
+  }
+  router.get('/files/:id/meta', requirePermission('documents', 'view'), (req, res) => {
+    const file = getDb().prepare('SELECT id, original_name, mime_type, size_bytes, storage_area, created_at FROM files WHERE id = ?').get(req.params.id) as any;
+    if (!file) return res.status(404).json({ error: 'File not found' });
+    res.json(file);
+  });
+  router.get('/files/:id/raw', requirePermission('documents', 'view'), (req, res) => {
+    const resolved = resolveFileOnDisk(req.params.id);
+    if (!resolved) return res.status(404).json({ error: 'File not found' });
+    const { file, fp } = resolved;
+    res.setHeader('Content-Type', file.mime_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.original_name)}"`);
+    res.setHeader('Cache-Control', 'private, max-age=60');
+    fs.createReadStream(fp).pipe(res);
+  });
+  router.get('/files/:id/download', requirePermission('documents', 'view'), (req, res) => {
+    const resolved = resolveFileOnDisk(req.params.id);
+    if (!resolved) return res.status(404).json({ error: 'File not found' });
+    const { file, fp } = resolved;
+    res.setHeader('Content-Type', file.mime_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(file.original_name)}"`);
+    fs.createReadStream(fp).pipe(res);
+  });
+
   router.get('/documents', requirePermission('documents', 'view'), (_req, res) => res.json(getDb().prepare('SELECT * FROM documents ORDER BY created_at DESC').all()));
   router.post('/documents/import-master-list', requirePermission('documents', 'create'), (req, res) => { audit(req, { action: 'create', entity: 'documents', newValue: req.body }); res.json({ ok: true, message: 'MVP import placeholder accepted. CSV parsing will be implemented in the next phase.' }); });
 
