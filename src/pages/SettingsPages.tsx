@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, API_BASE, getToken } from '../services/api';
 import { MODULES, PERMISSION_ACTIONS, TECHNICAL_AUTHORIZATION_LEVELS } from '../../shared/constants/modules';
@@ -294,31 +294,70 @@ export function UsersAccess(){
   const [roles,setRoles]=useState<{id:number;name:string}[]>([]);
   const [staff,setStaff]=useState<Staff[]>([]);
   const [error,setError]=useState<string|null>(null);
+  const [success,setSuccess]=useState<string|null>(null);
+  const [openUser,setOpenUser]=useState<number|null>(null);
+  const [linkSel,setLinkSel]=useState<string>('');
   const load=()=>{api<(ApiUser & {staffName?: string})[]>('/users').then(setUsers); api<{id:number;name:string}[]>('/roles').then(setRoles); api<Staff[]>('/staff').then(setStaff).catch(()=>setStaff([]))};
   useEffect(()=>{void load()},[]);
   async function submit(e:FormEvent<HTMLFormElement>){
-    e.preventDefault(); setError(null);
-    const fd=new FormData(e.currentTarget);
+    e.preventDefault(); setError(null); setSuccess(null);
+    const form=e.currentTarget;                       // capture before await (React nulls currentTarget after yielding)
+    const fd=new FormData(form);
     const staffId=fd.get('staffId')?Number(fd.get('staffId')):null;
     try {
       await api('/users',{method:'POST',body:JSON.stringify({username:fd.get('username'),password:fd.get('password'),fullName:fd.get('fullName'),roleId:Number(fd.get('roleId')),staffId})});
-      e.currentTarget.reset();
+      form.reset();
+      setSuccess('User account created.');
       load();
+    } catch (err) { setError((err as Error).message); }
+  }
+  async function linkStaff(userId:number, staffId:number|null){
+    setError(null); setSuccess(null);
+    try {
+      await api(`/users/${userId}`,{method:'PUT',body:JSON.stringify({staffId})});
+      setSuccess(staffId?'Account linked to staff record.':'Account unlinked from staff.');
+      setOpenUser(null); setLinkSel(''); load();
     } catch (err) { setError((err as Error).message); }
   }
   const unlinkedStaff = staff.filter(s => !s.userId);
   return <div className="card"><h3>Users &amp; Access</h3>
-    <p>Create login accounts and link them to staff records. To onboard a whole new person (staff + account + positions) use <Link to="/settings/people">Register New Staff</Link>.</p>
+    <p>Create login accounts and link them to staff records. To onboard a whole new person (staff + account + positions) use <Link to="/settings/people">Register New Staff</Link>. Click any user below to link or change its staff record.</p>
     {error && <div className="error">{error}</div>}
+    {success && <div className="notice-ok">{success}</div>}
     <form className="form" onSubmit={submit}>
       <label>Full name<input name="fullName" required/></label>
       <label>Username<input name="username" required/></label>
       <label>Password<input name="password" type="password" minLength={8} required/></label>
       <label>Role<select name="roleId" required><option value="">Select role…</option>{roles.map(r=><option value={r.id} key={r.id}>{r.name}</option>)}</select></label>
-      <label>Link to Staff Record (Optional)<select name="staffId"><option value="">Not linked</option>{unlinkedStaff.map(s=><option value={s.id} key={s.id}>{s.fullName}</option>)}</select></label>
+      <label>Link to Staff Record (Optional)<select name="staffId"><option value="">Not linked</option>{unlinkedStaff.map(s=><option value={s.id} key={s.id}>{s.fullName}{s.employeeNo?` (${s.employeeNo})`:''}</option>)}</select></label>
       <button>Create user</button>
     </form>
-    <table className="table"><thead><tr><th>Username</th><th>Full Name</th><th>Role</th><th>Linked Staff</th><th>Active</th></tr></thead><tbody>{users.map(u=><tr key={u.id}><td>{u.username}</td><td>{u.fullName}</td><td>{u.roleName}</td><td>{u.staffName || 'Not linked'}</td><td>{u.isActive?'Yes':'No'}</td></tr>)}</tbody></table>
+    <table className="table"><thead><tr><th>Username</th><th>Full Name</th><th>Role</th><th>Linked Staff</th><th>Active</th><th></th></tr></thead><tbody>
+      {users.map(u=>{
+        const linkable = staff.filter(s => !s.userId || s.userId === u.id);
+        const open = openUser===u.id;
+        return <Fragment key={u.id}>
+          <tr className="row-click" onClick={()=>{ setOpenUser(open?null:u.id); setLinkSel(u.staffId?String(u.staffId):''); setError(null); setSuccess(null); }}>
+            <td>{u.username}</td><td>{u.fullName}</td><td>{u.roleName}</td>
+            <td>{u.staffName || <span className="muted">Not linked</span>}</td>
+            <td>{u.isActive?'Yes':'No'}</td>
+            <td><button type="button" className="tiny" onClick={e=>{ e.stopPropagation(); setOpenUser(open?null:u.id); setLinkSel(u.staffId?String(u.staffId):''); setError(null); setSuccess(null); }}>{open?'Close':(u.staffId?'Change link':'Link staff')}</button></td>
+          </tr>
+          {open && <tr className="link-editor-row"><td colSpan={6}>
+            <div className="user-link-editor">
+              <span className="lab">Link <strong>{u.username}</strong> to staff record</span>
+              <select value={linkSel} onChange={e=>setLinkSel(e.target.value)}>
+                <option value="">— none —</option>
+                {linkable.map(s=><option key={s.id} value={s.id}>{s.fullName}{s.employeeNo?` (${s.employeeNo})`:''}</option>)}
+              </select>
+              <button type="button" onClick={()=>linkStaff(u.id, linkSel?Number(linkSel):null)}>Save link</button>
+              {u.staffId && <button type="button" className="secondary" onClick={()=>linkStaff(u.id,null)}>Unlink</button>}
+              {staff.length===0 && <span className="hint">No staff records yet — register staff first.</span>}
+            </div>
+          </td></tr>}
+        </Fragment>;
+      })}
+    </tbody></table>
   </div>;
 }
 

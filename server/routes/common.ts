@@ -492,17 +492,31 @@ export function commonRoutes() {
   router.get('/roles', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT id, name, description, is_system isSystem FROM roles ORDER BY name').all()));
   router.get('/users', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT u.id, u.username, u.full_name fullName, u.role_id roleId, u.staff_id staffId, s.full_name staffName, r.name roleName, u.is_active isActive FROM users u JOIN roles r ON r.id = u.role_id LEFT JOIN staff s ON s.id = u.staff_id ORDER BY u.full_name').all()));
   router.post('/users', requirePermission('settings', 'create'), (req, res) => {
-    const { username, password, fullName, roleId, staffId } = req.body;
+    const { username, password, fullName, roleId } = req.body;
+    const db = getDb();
+    const staffId = idOrNull(req.body.staffId);
+    if (!username || !String(username).trim()) return res.status(400).json({ error: 'A username is required.' });
+    if (!password || String(password).length < 8) return res.status(400).json({ error: 'A password of at least 8 characters is required.' });
+    if (!roleId) return res.status(400).json({ error: 'A role is required.' });
+    if (db.prepare('SELECT id FROM users WHERE username = ? COLLATE NOCASE').get(username)) return res.status(400).json({ error: 'That username is already in use.' });
+    if (staffId && db.prepare('SELECT id, username FROM users WHERE staff_id = ?').get(staffId)) return res.status(400).json({ error: 'That staff record is already linked to another user.' });
     const oldValue = null;
-    const result = getDb().prepare('INSERT INTO users (username, password_hash, full_name, role_id, staff_id) VALUES (?, ?, ?, ?, ?)').run(username, bcrypt.hashSync(password, 12), fullName, roleId, staffId ?? null);
+    const result = db.prepare('INSERT INTO users (username, password_hash, full_name, role_id, staff_id) VALUES (?, ?, ?, ?, ?)').run(username, bcrypt.hashSync(password, 12), fullName, Number(roleId), staffId);
     audit(req, { action: 'create', entity: 'users', entityId: result.lastInsertRowid, oldValue, newValue: { username, fullName, roleId, staffId } });
     res.status(201).json({ id: result.lastInsertRowid });
   });
   router.put('/users/:id', requirePermission('settings', 'edit'), (req, res) => {
-    const { staffId } = req.body;
-    const oldValue = getDb().prepare('SELECT staff_id staffId FROM users WHERE id = ?').get(req.params.id);
-    getDb().prepare('UPDATE users SET staff_id = ? WHERE id = ?').run(staffId ?? null, req.params.id);
-    audit(req, { action: 'link_staff', entity: 'users', entityId: req.params.id, oldValue, newValue: { staffId } });
+    const db = getDb();
+    const sid = idOrNull(req.body.staffId);
+    if (!db.prepare('SELECT id FROM users WHERE id = ?').get(req.params.id)) return res.status(404).json({ error: 'User not found' });
+    if (sid) {
+      if (!db.prepare('SELECT id FROM staff WHERE id = ?').get(sid)) return res.status(400).json({ error: 'Staff record not found.' });
+      const taken = db.prepare('SELECT id, username FROM users WHERE staff_id = ? AND id != ?').get(sid, req.params.id) as { username: string } | undefined;
+      if (taken) return res.status(400).json({ error: `That staff record is already linked to user “${taken.username}”. Unlink it first.` });
+    }
+    const oldValue = db.prepare('SELECT staff_id staffId FROM users WHERE id = ?').get(req.params.id);
+    db.prepare('UPDATE users SET staff_id = ? WHERE id = ?').run(sid, req.params.id);
+    audit(req, { action: 'link_staff', entity: 'users', entityId: req.params.id, oldValue, newValue: { staffId: sid } });
     res.json({ ok: true });
   });
 
