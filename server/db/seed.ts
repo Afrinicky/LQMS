@@ -39,6 +39,8 @@ export function seedDefaults() {
     db.prepare('INSERT OR IGNORE INTO locations (name, description) VALUES (?, ?)').run('Main Laboratory', 'Default local site location.');
     db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('setupComplete', 'false')").run();
     db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('hostMode', 'true')").run();
+    db.prepare("INSERT OR IGNORE INTO dennis_settings (setting_key, setting_value) VALUES ('dennis.mode', 'Offline only')").run();
+    db.prepare("INSERT OR IGNORE INTO dennis_settings (setting_key, setting_value) VALUES ('dennis.online.enabled', 'false')").run();
 
     const rolePermissionsMap: Record<string, Record<string, string[]>> = {
       'Laboratory Manager': {
@@ -261,6 +263,13 @@ export function seedDefaults() {
         measurement_uncertainty: ['view', 'create', 'edit', 'print']
       }
     };
+
+    const dennisFull = ['view', 'create', 'edit', 'approve', 'export', 'print'];
+    for (const roleName of ['Laboratory Manager', 'Quality Manager']) rolePermissionsMap[roleName].dennis = dennisFull;
+    for (const roleName of ['Section Head', 'Quality Team Member']) rolePermissionsMap[roleName].dennis = ['view', 'create', 'edit', 'export', 'print'];
+    rolePermissionsMap['Blood Bank Unit Head'].dennis = ['view', 'create', 'edit', 'print'];
+    rolePermissionsMap['Data Officer'].dennis = ['view', 'export', 'print'];
+    for (const roleName of ['Biomedical Scientist', 'Technician', 'Quality User']) rolePermissionsMap[roleName].dennis = ['view', 'print'];
 
     const adminRole = db.prepare('SELECT id FROM roles WHERE name = ?').get('System Administrator') as { id: number };
     const allPermissions = db.prepare('SELECT id, module_key, action FROM permissions').all() as { id: number; module_key: string; action: string }[];
