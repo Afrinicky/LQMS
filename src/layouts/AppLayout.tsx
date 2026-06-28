@@ -10,7 +10,7 @@ import { moduleIcon } from '../components/ui/moduleIcons';
 /** Logical groups for the sidebar navigation. */
 const NAV_GROUPS: { label: string; keys: string[] }[] = [
   { label: 'Overview', keys: ['dashboard'] },
-  { label: 'Quality & Compliance', keys: ['documents', 'nc_capa', 'complaints', 'risks', 'assessments', 'customer_focus', 'actions'] },
+  { label: 'Quality & Compliance', keys: ['documents', 'dennis', 'nc_capa', 'complaints', 'risks', 'assessments', 'customer_focus', 'actions'] },
   { label: 'Operations', keys: ['equipment', 'monitoring', 'supplier_inventory', 'facilities_safety', 'process_management'] },
   { label: 'Technical Quality', keys: ['iqc', 'eqa', 'verification_validation', 'measurement_uncertainty', 'poct', 'blood_bank_handover'] },
   { label: 'People & Governance', keys: ['personnel', 'organisation', 'meetings', 'management_review', 'quality_indicators', 'continual_improvement'] },

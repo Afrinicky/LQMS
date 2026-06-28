@@ -1382,3 +1382,30 @@ button.tiny { padding: 2px 8px; font-size: 11px; }
 .settings-module-head h2 { margin: 0 0 4px; font-size: 18px; }
 .settings-module-head p { margin: 0 0 6px; color: var(--muted); font-size: 13.5px; }
 .people-tab-body { margin-top: 6px; }
+
+/* Dennis AI Quality Assistant (DENNIS-1 placeholder foundation) */
+.dennis-page .page-header { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; }
+.dennis-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0; }
+.dennis-tabs button { border: 1px solid rgba(148,163,184,.24); background: rgba(15,23,42,.72); color: var(--text); border-radius: 999px; padding: 8px 12px; }
+.dennis-tabs button.active { background: linear-gradient(135deg, rgba(14,165,233,.24), rgba(34,197,94,.18)); border-color: rgba(56,189,248,.65); color: #e0f2fe; }
+.dennis-grid { display: grid; gap: 16px; }
+.dennis-grid.two { grid-template-columns: minmax(0, 2fr) minmax(280px, .8fr); }
+.dennis-page h3 { display: flex; align-items: center; gap: 8px; margin-top: 0; }
+.dennis-chat { display: grid; gap: 14px; }
+.chat-stream { display: grid; gap: 12px; max-height: 52vh; overflow: auto; padding-right: 4px; }
+.chat-bubble { border: 1px solid rgba(148,163,184,.18); border-radius: 16px; padding: 14px; background: rgba(15,23,42,.72); }
+.chat-bubble.user { margin-left: 12%; background: rgba(30,41,59,.9); }
+.chat-bubble.dennis { margin-right: 12%; background: rgba(8,47,73,.46); }
+.dennis-input { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: start; }
+.dennis-input textarea, .dennis-page textarea { min-height: 96px; resize: vertical; }
+.dennis-output { border: 1px solid rgba(56,189,248,.22); border-radius: 14px; padding: 14px; margin-top: 14px; background: rgba(2,6,23,.34); }
+.source-box { margin-top: 10px; border: 1px dashed rgba(148,163,184,.35); color: var(--muted); border-radius: 10px; padding: 10px; font-size: .9rem; }
+.dennis-notice { display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; padding: 6px 9px; border-radius: 999px; color: #fde68a; background: rgba(113,63,18,.28); border: 1px solid rgba(251,191,36,.28); font-size: .86rem; }
+.chip-row, .button-grid, .form-grid { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+.button-grid button { flex: 1 1 190px; }
+.form-grid > * { flex: 1 1 190px; }
+.indicator-grid, .alert-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.alert-card { display: grid; gap: 7px; padding: 14px; border-radius: 14px; background: rgba(15,23,42,.7); border: 1px solid rgba(148,163,184,.18); }
+.warning { display: flex; gap: 10px; align-items: flex-start; margin-top: 14px; padding: 12px; border: 1px solid rgba(248,113,113,.35); background: rgba(127,29,29,.24); color: #fecaca; border-radius: 12px; }
+.safety-rule { border-left: 3px solid rgba(56,189,248,.6); padding-left: 10px; color: var(--muted); }
+@media (max-width: 980px) { .dennis-grid.two, .dennis-input { grid-template-columns: 1fr; } .chat-bubble.user, .chat-bubble.dennis { margin: 0; } }

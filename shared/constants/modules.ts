@@ -10,6 +10,7 @@ export const MODULES: ModuleDefinition[] = [
   { key: 'home', label: 'Home', path: '/home', protected: true },
   { key: 'dashboard', label: 'Main Dashboard', path: '/dashboard', protected: true },
   { key: 'documents', label: 'Documents & Records', path: '/documents', protected: true },
+  { key: 'dennis', label: 'Dennis', path: '/dennis', protected: true },
   { key: 'organisation', label: 'Organisation & Leadership', path: '/organisation', protected: true },
   { key: 'personnel', label: 'Personnel Management', path: '/personnel', protected: true },
   { key: 'actions', label: 'Action Tracker', path: '/actions', protected: true },
