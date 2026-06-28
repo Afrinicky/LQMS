@@ -6,6 +6,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import { moduleIcon } from '../components/ui/moduleIcons';
+import { DennisFloatingWidget } from '../components/DennisFloatingWidget';
 
 /** Logical groups for the sidebar navigation. */
 const NAV_GROUPS: { label: string; keys: string[] }[] = [
@@ -30,7 +31,7 @@ function initials(name?: string) {
 
 export default function AppLayout() {
   const { user, logout } = useAuth();
-  const { modules } = useModules();
+  const { modules, isEnabled } = useModules();
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
@@ -57,7 +58,10 @@ export default function AppLayout() {
   }, [user]);
 
   // The Home route is a full-bleed launchpad with no persistent sidebar.
-  if (location.pathname === '/home') return <Outlet />;
+  if (location.pathname === '/home') return <>
+    <Outlet />
+    <DennisFloatingWidget user={user} dennisEnabled={isEnabled('dennis')} />
+  </>;
 
   return (
     <div className={`app-shell ${collapsed ? 'collapsed' : ''}`}>
@@ -129,6 +133,8 @@ export default function AppLayout() {
         </header>
 
         <section className="content"><Outlet /></section>
+
+        <DennisFloatingWidget user={user} dennisEnabled={isEnabled('dennis')} />
 
         <footer className="statusbar">
           <span className="ok"><Server size={13} /> Local Server · Online</span>
