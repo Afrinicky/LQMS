@@ -2632,4 +2632,57 @@ CREATE INDEX IF NOT EXISTS idx_document_comments_doc ON document_comments(docume
     const tx = database.transaction(() => { for (const r of rows) stmt.run(...r); });
     tx();
   }
+
+  // ===================================================================
+  // Dennis AI Quality Assistant — Phases 2-6 (offline indexing & search,
+  // source-grounded answers, local/online provider prep, activity logging).
+  // Extends the Phase AI-1 dennis_* tables created above.
+  // -------------------------------------------------------------------
+  const dennisDocCols = new Set((database.prepare("PRAGMA table_info(dennis_documents)").all() as Array<{ name: string }>).map(c => c.name));
+  for (const [col, type] of [
+    ['source_document_id', 'INTEGER'], ['source_version_id', 'INTEGER'], ['document_code', 'TEXT'], ['section_id', 'INTEGER'],
+    ['access_level', 'TEXT'], ['approval_status', 'TEXT'], ['searchable_text', 'TEXT'], ['effective_date', 'TEXT'], ['next_review_date', 'TEXT'],
+    ['indexed_by', 'INTEGER'], ['indexed_at', 'TEXT'], ['last_indexed_at', 'TEXT'], ['indexing_status', "TEXT DEFAULT 'not_indexed'"],
+    ['indexing_error', 'TEXT'], ['chunk_count', 'INTEGER'], ['word_count', 'INTEGER'],
+  ] as const) {
+    if (!dennisDocCols.has(col)) database.exec(`ALTER TABLE dennis_documents ADD COLUMN ${col} ${type}`);
+  }
+  const dennisChunkCols = new Set((database.prepare("PRAGMA table_info(dennis_document_chunks)").all() as Array<{ name: string }>).map(c => c.name));
+  for (const [col, type] of [['source_document_id', 'INTEGER'], ['embedding', 'TEXT'], ['word_count', 'INTEGER'], ['embed_model', 'TEXT']] as const) {
+    if (!dennisChunkCols.has(col)) database.exec(`ALTER TABLE dennis_document_chunks ADD COLUMN ${col} ${type}`);
+  }
+  const dennisLogCols = new Set((database.prepare("PRAGMA table_info(dennis_activity_logs)").all() as Array<{ name: string }>).map(c => c.name));
+  for (const [col, type] of [['current_page', 'TEXT'], ['provider', 'TEXT'], ['source_document_ids', 'TEXT'], ['record_id', 'TEXT'], ['error_message', 'TEXT'], ['detail', 'TEXT']] as const) {
+    if (!dennisLogCols.has(col)) database.exec(`ALTER TABLE dennis_activity_logs ADD COLUMN ${col} ${type}`);
+  }
+  // FTS5 index over chunk text for fast offline keyword/relevance search.
+  database.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS dennis_chunk_fts USING fts5(chunk_text, chunk_id UNINDEXED, dennis_document_id UNINDEXED)`);
+  database.exec(`CREATE INDEX IF NOT EXISTS idx_dennis_documents_source ON dennis_documents(source_document_id);
+CREATE INDEX IF NOT EXISTS idx_dennis_chunks_doc ON dennis_document_chunks(document_id);`);
+
+  // Default Dennis settings (offline-first; online disabled). INSERT OR IGNORE so
+  // operator changes are preserved across restarts.
+  const dennisDefaults: Array<[string, string]> = [
+    ['dennis.mode', 'Offline only'],
+    ['dennis.local.enabled', 'false'],
+    ['dennis.local.provider', 'ollama'],
+    ['dennis.local.endpoint', 'http://localhost:11434'],
+    ['dennis.local.chatModel', 'llama3.1'],
+    ['dennis.local.embedModel', 'nomic-embed-text'],
+    ['dennis.online.enabled', 'false'],
+    ['dennis.online.provider', 'anthropic'],
+    ['dennis.online.endpoint', ''],
+    ['dennis.online.model', 'claude-sonnet-4-6'],
+    ['dennis.online.apiKey', ''],
+    ['dennis.online.confirmRequired', 'true'],
+    ['dennis.online.allow.capa', 'false'],
+    ['dennis.online.allow.audit', 'false'],
+    ['dennis.online.allow.managementReview', 'false'],
+    ['dennis.online.allow.training', 'false'],
+    ['dennis.online.allow.indicators', 'false'],
+    ['dennis.online.allow.reports', 'false'],
+    ['dennis.online.allow.docExplain', 'false'],
+  ];
+  const dset = database.prepare('INSERT OR IGNORE INTO dennis_settings (setting_key, setting_value) VALUES (?, ?)');
+  for (const [k, v] of dennisDefaults) dset.run(k, v);
 }

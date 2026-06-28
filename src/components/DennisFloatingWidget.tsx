@@ -4,6 +4,7 @@ import { Bot, GripHorizontal, Send, X } from 'lucide-react';
 import { MODULES } from '../../shared/constants/modules';
 import type { ApiUser } from '../../shared/types/api';
 import { DENNIS_NOTICE, createFloatingDennisResponse } from '../services/dennisService';
+import { api } from '../services/api';
 
 type WidgetPosition = { x: number; y: number };
 type FloatingMessage = { role: 'user' | 'dennis'; content: string };
@@ -121,10 +122,14 @@ export function DennisFloatingWidget({ user, dennisEnabled }: { user: ApiUser | 
 
   const send = (message = input.trim()) => {
     if (!message) return;
-    const response = createFloatingDennisResponse(message, context);
-    setMessages(prev => [...prev, { role: 'user', content: message }, { role: 'dennis', content: response }]);
+    setMessages(prev => [...prev, { role: 'user', content: message }, { role: 'dennis', content: 'Searching approved documents…' }]);
     setInput('');
-    console.info('[Dennis placeholder activity]', { dateTime: new Date().toISOString(), user: user.username, currentPageModule: context.currentModule, userMessage: message, aiMode: 'offline-placeholder', status: 'draft' });
+    // Ask the live Dennis backend with the current page context so answers are
+    // source-grounded and prioritised for the module the user is on. Falls back
+    // to an offline placeholder if the backend is unreachable.
+    api<{ answer: string }>('/dennis/ask', { method: 'POST', body: JSON.stringify({ question: message, context }) })
+      .then(res => setMessages(prev => { const next = [...prev]; next[next.length - 1] = { role: 'dennis', content: res.answer }; return next; }))
+      .catch(() => setMessages(prev => { const next = [...prev]; next[next.length - 1] = { role: 'dennis', content: createFloatingDennisResponse(message, context) }; return next; }));
   };
 
   const style = position ? { left: position.x, top: position.y } : { right: DEFAULT_OFFSET, bottom: DEFAULT_OFFSET };
