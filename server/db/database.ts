@@ -2583,8 +2583,21 @@ CREATE TABLE IF NOT EXISTS record_backup_log (
   created_by INTEGER REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+-- Workflow comments left by drafter/reviewer/approver during the document
+-- lifecycle (ISO 15189 §8.3 — documented review before issue).
+CREATE TABLE IF NOT EXISTS document_comments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  document_id INTEGER NOT NULL REFERENCES documents(id),
+  document_version_id INTEGER REFERENCES document_versions(id),
+  stage TEXT,
+  comment TEXT NOT NULL,
+  author_staff_id INTEGER REFERENCES staff(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE INDEX IF NOT EXISTS idx_record_register_section ON record_register(section_id);
 CREATE INDEX IF NOT EXISTS idx_record_review_log_date ON record_review_log(review_date);
+CREATE INDEX IF NOT EXISTS idx_document_comments_doc ON document_comments(document_id);
 `);
 
   // Seed the Record Retention Schedule from SECHPO051 Appendix A (idempotent).

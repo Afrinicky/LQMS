@@ -42,6 +42,26 @@ function fromPlainText(buf: Buffer): string {
 // A .docx is a ZIP archive. We read the central directory to locate and inflate
 // word/document.xml (and headers), then convert the WordprocessingML run/paragraph
 // markup into clean text and lightweight HTML.
+// List all entry names from the ZIP central directory.
+function zipListNames(buf: Buffer): string[] {
+  const names: string[] = [];
+  const EOCD = 0x06054b50;
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= 0 && i >= buf.length - 22 - 0x10000; i--) { if (buf.readUInt32LE(i) === EOCD) { eocd = i; break; } }
+  if (eocd < 0) return names;
+  const cdCount = buf.readUInt16LE(eocd + 10);
+  let p = buf.readUInt32LE(eocd + 16);
+  for (let n = 0; n < cdCount && p + 46 <= buf.length; n++) {
+    if (buf.readUInt32LE(p) !== 0x02014b50) break;
+    const nameLen = buf.readUInt16LE(p + 28);
+    const extraLen = buf.readUInt16LE(p + 30);
+    const commentLen = buf.readUInt16LE(p + 32);
+    names.push(buf.toString('utf-8', p + 46, p + 46 + nameLen));
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return names;
+}
+
 function zipReadEntry(buf: Buffer, name: string): Buffer | null {
   // Locate End Of Central Directory record (signature 0x06054b50).
   const EOCD = 0x06054b50;
@@ -129,28 +149,97 @@ function descend(node: XmlNode, ...path: string[]): XmlNode | undefined {
 }
 function htmlEsc(s: string): string { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
+// Conversion context shared while walking the document: the source zip (for
+// embedded media), the document relationships (rId -> part), and pre-extracted
+// SmartArt/diagram text for fallback rendering.
+type DocxCtx = { buf: Buffer; rels: Record<string, string>; diagrams: string[]; diagramUsed: number; embeddedBytes: number };
+
+// WordprocessingML highlight colour names -> CSS.
+const HIGHLIGHT: Record<string, string> = {
+  yellow: '#ffff00', green: '#00ff00', cyan: '#00ffff', magenta: '#ff00ff', blue: '#0000ff', red: '#ff0000',
+  darkBlue: '#000080', darkCyan: '#008080', darkGreen: '#008000', darkMagenta: '#800080', darkRed: '#800000',
+  darkYellow: '#808000', darkGray: '#808080', lightGray: '#c0c0c0', black: '#000000', white: '#ffffff',
+};
+function colorVal(v?: string): string | null { return !v || v === 'auto' || !/^[0-9a-fA-F]{6}$/.test(v) ? null : `#${v}`; }
+function deepFind(node: XmlNode, tag: string): XmlNode | undefined {
+  for (const c of node.children) { if (c.tag === tag) return c; const r = deepFind(c, tag); if (r) return r; }
+  return undefined;
+}
+function mimeForExt(name: string): string {
+  const e = (name.match(/\.([a-z0-9]+)$/i)?.[1] || '').toLowerCase();
+  return ({ jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', bmp: 'image/bmp', tif: 'image/tiff', tiff: 'image/tiff', emf: 'image/emf', wmf: 'image/wmf', svg: 'image/svg+xml' } as Record<string, string>)[e] || 'application/octet-stream';
+}
+
+// Inline formatting from a run's <w:rPr>: returns the opening/closing wrappers
+// that carry colour, highlight, shading, size, weight, decoration and sup/sub.
+function runWrappers(rPr?: XmlNode): { open: string; close: string } {
+  if (!rPr) return { open: '', close: '' };
+  const styles: string[] = [];
+  const color = colorVal(find(rPr, 'w:color')?.attrs['w:val']); if (color) styles.push(`color:${color}`);
+  const hl = find(rPr, 'w:highlight')?.attrs['w:val']; if (hl && HIGHLIGHT[hl]) styles.push(`background-color:${HIGHLIGHT[hl]}`);
+  const shd = colorVal(find(rPr, 'w:shd')?.attrs['w:fill']); if (shd) styles.push(`background-color:${shd}`);
+  const sz = find(rPr, 'w:sz')?.attrs['w:val']; if (sz && Number(sz) > 0) styles.push(`font-size:${Number(sz) / 2}pt`);
+  if (find(rPr, 'w:b') || find(rPr, 'w:bCs')) styles.push('font-weight:bold');
+  if (find(rPr, 'w:i') || find(rPr, 'w:iCs')) styles.push('font-style:italic');
+  const fonts = find(rPr, 'w:rFonts')?.attrs; const face = fonts && (fonts['w:ascii'] || fonts['w:hAnsi']); if (face) styles.push(`font-family:'${face}'`);
+  const deco: string[] = [];
+  if (find(rPr, 'w:u') && find(rPr, 'w:u')?.attrs['w:val'] !== 'none') deco.push('underline');
+  if (find(rPr, 'w:strike') || find(rPr, 'w:dstrike')) deco.push('line-through');
+  if (deco.length) styles.push(`text-decoration:${deco.join(' ')}`);
+  let open = '', close = '';
+  const vert = find(rPr, 'w:vertAlign')?.attrs['w:val'];
+  if (vert === 'superscript') { open = '<sup>'; close = '</sup>'; }
+  else if (vert === 'subscript') { open = '<sub>'; close = '</sub>'; }
+  if (styles.length) { open = `<span style="${styles.join(';')}">` + open; close = close + '</span>'; }
+  return { open, close };
+}
+
+// Render an embedded picture (<w:drawing>/<w:pict>) as an inline data-URI <img>,
+// or a SmartArt diagram as its extracted text.
+function imageHtml(node: XmlNode, ctx: DocxCtx): { html: string; text: string } {
+  const blip = deepFind(node, 'a:blip'); const vml = deepFind(node, 'v:imagedata');
+  const embed = blip?.attrs['r:embed'] || blip?.attrs['r:link'] || vml?.attrs['r:id'];
+  if (embed && ctx.rels[embed]) {
+    const target = ctx.rels[embed].replace(/^\/?word\//, '').replace(/^\.\.\//, '');
+    const bytes = zipReadEntry(ctx.buf, `word/${target}`);
+    if (bytes && bytes.length <= 6_000_000 && ctx.embeddedBytes + bytes.length <= 16_000_000) {
+      ctx.embeddedBytes += bytes.length;
+      const mime = mimeForExt(target);
+      if (mime.startsWith('image/') && mime !== 'image/emf' && mime !== 'image/wmf') {
+        return { html: `<p class="docx-img"><img src="data:${mime};base64,${bytes.toString('base64')}" alt="document image" style="max-width:100%;height:auto"/></p>`, text: '[image]\n' };
+      }
+    }
+    return { html: '<p class="docx-img-note">[Embedded image omitted — open the original file to view it.]</p>', text: '[image]\n' };
+  }
+  // SmartArt / diagram: render the pre-extracted diagram text.
+  if (deepFind(node, 'dgm:relIds') || /diagram/i.test(deepFind(node, 'a:graphicData')?.attrs['uri'] || '')) {
+    const dt = ctx.diagrams[ctx.diagramUsed] ?? ctx.diagrams[0] ?? '';
+    ctx.diagramUsed += 1;
+    if (dt.trim()) return { html: `<div class="docx-diagram"><p><em>Diagram (SmartArt):</em></p>${dt.split('\n').filter(Boolean).map(l => `<p>${htmlEsc(l)}</p>`).join('')}</div>`, text: dt + '\n' };
+  }
+  return { html: '', text: '' };
+}
+
 // Collect the formatted inline content of a run container (<w:p>, <w:hyperlink>).
-function runsToHtml(container: XmlNode): { html: string; text: string } {
+function runsToHtml(container: XmlNode, ctx: DocxCtx): { html: string; text: string } {
   let html = ''; let text = '';
   for (const child of container.children) {
     if (child.tag === 'w:r') {
-      const rPr = find(child, 'w:rPr');
-      const bold = rPr && (find(rPr, 'w:b') || find(rPr, 'w:bCs'));
-      const ital = rPr && (find(rPr, 'w:i') || find(rPr, 'w:iCs'));
-      const und = rPr && find(rPr, 'w:u');
+      const { open, close } = runWrappers(find(child, 'w:rPr'));
       for (const rc of child.children) {
         if (rc.tag === 'w:t') {
           const t = rc.children.map(x => x.text || '').join('');
-          let piece = htmlEsc(t);
-          if (und) piece = `<u>${piece}</u>`;
-          if (ital) piece = `<em>${piece}</em>`;
-          if (bold) piece = `<strong>${piece}</strong>`;
-          html += piece; text += t;
-        } else if (rc.tag === 'w:tab') { html += ' '; text += '\t'; }
+          html += open + htmlEsc(t) + close; text += t;
+        } else if (rc.tag === 'w:tab') { html += '&nbsp;&nbsp;&nbsp;'; text += '\t'; }
         else if (rc.tag === 'w:br' || rc.tag === 'w:cr') { html += '<br/>'; text += '\n'; }
+        else if (rc.tag === 'w:drawing' || rc.tag === 'w:pict' || rc.tag === 'mc:AlternateContent' || rc.tag === 'w:object') {
+          const im = imageHtml(rc, ctx); html += im.html; text += im.text;
+        } else if (rc.tag === 'w:sym') { html += '&bull;'; }
       }
-    } else if (child.tag === 'w:hyperlink') {
-      const r = runsToHtml(child); html += r.html; text += r.text;
+    } else if (child.tag === 'w:hyperlink' || child.tag === 'w:smartTag' || child.tag === 'w:ins') {
+      const r = runsToHtml(child, ctx); html += r.html; text += r.text;
+    } else if (child.tag === 'w:drawing' || child.tag === 'w:pict') {
+      const im = imageHtml(child, ctx); html += im.html; text += im.text;
     }
   }
   return { html, text };
@@ -167,12 +256,30 @@ function headingLevel(p: XmlNode): number | null {
 }
 function isListItem(p: XmlNode): boolean { return !!descend(p, 'w:pPr', 'w:numPr'); }
 
-function renderParagraph(p: XmlNode): { html: string; text: string; list: boolean; heading: number | null } {
-  const { html: inner, text } = runsToHtml(p);
-  return { html: inner, text, list: isListItem(p), heading: headingLevel(p) };
+// Block-level style from <w:pPr>: alignment and paragraph shading (fill).
+function paraStyle(p: XmlNode): string {
+  const pPr = find(p, 'w:pPr'); if (!pPr) return '';
+  const styles: string[] = [];
+  const jc = find(pPr, 'w:jc')?.attrs['w:val'];
+  const jcMap: Record<string, string> = { center: 'center', right: 'right', end: 'right', both: 'justify', distribute: 'justify', left: 'left', start: 'left' };
+  if (jc && jcMap[jc]) styles.push(`text-align:${jcMap[jc]}`);
+  const fill = colorVal(find(pPr, 'w:shd')?.attrs['w:fill']); if (fill) styles.push(`background-color:${fill};padding:3px 6px`);
+  return styles.length ? ` style="${styles.join(';')}"` : '';
+}
+function cellStyle(tc: XmlNode): string {
+  const tcPr = find(tc, 'w:tcPr'); if (!tcPr) return '';
+  const styles: string[] = [];
+  const fill = colorVal(find(tcPr, 'w:shd')?.attrs['w:fill']); if (fill) styles.push(`background-color:${fill}`);
+  const va = find(tcPr, 'w:vAlign')?.attrs['w:val']; if (va) styles.push(`vertical-align:${va === 'center' ? 'middle' : va}`);
+  return styles.length ? ` style="${styles.join(';')}"` : '';
 }
 
-function renderTable(tbl: XmlNode): { html: string; text: string } {
+function renderParagraph(p: XmlNode, ctx: DocxCtx): { html: string; text: string; list: boolean; heading: number | null; style: string } {
+  const { html: inner, text } = runsToHtml(p, ctx);
+  return { html: inner, text, list: isListItem(p), heading: headingLevel(p), style: paraStyle(p) };
+}
+
+function renderTable(tbl: XmlNode, ctx: DocxCtx): { html: string; text: string } {
   let html = '<table class="docx-table"><tbody>'; let text = '';
   for (const tr of findAll(tbl, 'w:tr')) {
     html += '<tr>';
@@ -180,11 +287,13 @@ function renderTable(tbl: XmlNode): { html: string; text: string } {
     for (const tc of findAll(tr, 'w:tc')) {
       let cellHtml = ''; const cellTextParts: string[] = [];
       for (const node of tc.children) {
-        if (node.tag === 'w:p') { const r = renderParagraph(node); if (r.html) cellHtml += `<p>${r.html}</p>`; if (r.text.trim()) cellTextParts.push(r.text.trim()); }
-        else if (node.tag === 'w:tbl') { const r = renderTable(node); cellHtml += r.html; cellTextParts.push(r.text); }
+        if (node.tag === 'w:p') { const r = renderParagraph(node, ctx); if (r.html) cellHtml += `<p${r.style}>${r.html}</p>`; if (r.text.trim()) cellTextParts.push(r.text.trim()); }
+        else if (node.tag === 'w:tbl') { const r = renderTable(node, ctx); cellHtml += r.html; cellTextParts.push(r.text); }
       }
       const span = Number(descend(tc, 'w:tcPr', 'w:gridSpan')?.attrs['w:val'] || '1');
-      html += `<td${span > 1 ? ` colspan="${span}"` : ''}>${cellHtml || '&nbsp;'}</td>`;
+      const vMerge = descend(tc, 'w:tcPr', 'w:vMerge'); const continued = vMerge && (vMerge.attrs['w:val'] ?? 'continue') === 'continue';
+      if (continued && !cellHtml.replace(/<[^>]+>|&nbsp;|\s/g, '')) { html += ''; cells.push(''); continue; }
+      html += `<td${span > 1 ? ` colspan="${span}"` : ''}${cellStyle(tc)}>${cellHtml || '&nbsp;'}</td>`;
       cells.push(cellTextParts.join(' '));
     }
     html += '</tr>';
@@ -195,35 +304,59 @@ function renderTable(tbl: XmlNode): { html: string; text: string } {
 }
 
 // Convert a body node (document, header, sdt content) into HTML + plain text,
-// preserving headings, tables and lists.
-function bodyToHtmlText(body: XmlNode): { html: string; text: string } {
+// preserving headings, tables, lists, formatting and embedded images.
+function bodyToHtmlText(body: XmlNode, ctx: DocxCtx): { html: string; text: string } {
   let html = ''; let text = '';
   let listOpen = false;
   const closeList = () => { if (listOpen) { html += '</ul>'; listOpen = false; } };
   for (const node of body.children) {
     if (node.tag === 'w:p') {
-      const r = renderParagraph(node);
+      const r = renderParagraph(node, ctx);
       if (r.list) {
         if (!listOpen) { html += '<ul>'; listOpen = true; }
-        html += `<li>${r.html || '&nbsp;'}</li>`;
+        html += `<li${r.style}>${r.html || '&nbsp;'}</li>`;
         if (r.text.trim()) text += '• ' + r.text + '\n';
         continue;
       }
       closeList();
-      if (r.heading) { html += `<h${r.heading}>${r.html}</h${r.heading}>`; if (r.text.trim()) text += '\n' + r.text + '\n'; }
-      else if (r.html.trim()) { html += `<p>${r.html}</p>`; text += r.text + '\n'; }
+      if (r.heading) { html += `<h${r.heading}${r.style}>${r.html}</h${r.heading}>`; if (r.text.trim()) text += '\n' + r.text + '\n'; }
+      else if (r.html.trim()) { html += `<p${r.style}>${r.html}</p>`; text += r.text + '\n'; }
       else { html += '<p></p>'; text += '\n'; }
     } else if (node.tag === 'w:tbl') {
       closeList();
-      const r = renderTable(node);
+      const r = renderTable(node, ctx);
       html += r.html; text += r.text;
     } else if (node.tag === 'w:sdt') {
       const content = descend(node, 'w:sdtContent');
-      if (content) { const r = bodyToHtmlText(content); html += r.html; text += r.text; }
+      if (content) { const r = bodyToHtmlText(content, ctx); html += r.html; text += r.text; }
     }
   }
   closeList();
   return { html, text };
+}
+
+// Parse word/_rels/document.xml.rels into an { rId: target } map.
+function parseRels(buf: Buffer): Record<string, string> {
+  const rels: Record<string, string> = {};
+  const data = zipReadEntry(buf, 'word/_rels/document.xml.rels');
+  if (!data) return rels;
+  const re = /<Relationship\b[^>]*\bId="([^"]+)"[^>]*\bTarget="([^"]+)"|<Relationship\b[^>]*\bTarget="([^"]+)"[^>]*\bId="([^"]+)"/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(data.toString('utf-8')))) { if (m[1]) rels[m[1]] = m[2]; else if (m[4]) rels[m[4]] = m[3]; }
+  return rels;
+}
+// Pre-extract the text of any SmartArt/diagram data parts (word/diagrams/dataN.xml).
+function extractDiagrams(buf: Buffer): string[] {
+  const out: string[] = [];
+  for (const name of zipListNames(buf)) {
+    if (/^word\/diagrams\/data\d+\.xml$/i.test(name)) {
+      const data = zipReadEntry(buf, name);
+      if (!data) continue;
+      const texts = (data.toString('utf-8').match(/<a:t>([\s\S]*?)<\/a:t>/g) || []).map(t => decodeXmlEntities(t.replace(/<\/?a:t>/g, '')).trim()).filter(Boolean);
+      if (texts.length) out.push(texts.join('\n'));
+    }
+  }
+  return out;
 }
 
 function fromDocx(buf: Buffer): { html: string; text: string } {
@@ -232,7 +365,8 @@ function fromDocx(buf: Buffer): { html: string; text: string } {
   const documentNode = descend(parseXml(main.toString('utf-8')), 'w:document');
   const body = documentNode ? descend(documentNode, 'w:body') : undefined;
   if (!body) return { html: '', text: '' };
-  const { html, text } = bodyToHtmlText(body);
+  const ctx: DocxCtx = { buf, rels: parseRels(buf), diagrams: extractDiagrams(buf), diagramUsed: 0, embeddedBytes: 0 };
+  const { html, text } = bodyToHtmlText(body, ctx);
   return { html: html.replace(/(?:<p><\/p>){2,}/g, '<p></p>'), text: text.replace(/\n{3,}/g, '\n\n').trim() };
 }
 

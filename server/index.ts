@@ -62,7 +62,9 @@ export function createApiServer() {
   seedDefaults();
   const app = express();
   app.use(cors({ origin: true, credentials: true }));
-  app.use(express.json({ limit: '2mb' }));
+  // Controlled-document content can embed images (data URIs) and rich HTML, so
+  // allow large JSON bodies for the document content save endpoints.
+  app.use(express.json({ limit: '50mb' }));
   app.use(optionalAuth);
   app.get('/api/health', (_req, res) => res.json({ ok: true, product: 'SECH_LIMS by Nickland', lanReady: true }));
   app.use('/api/setup', setupRoutes);
