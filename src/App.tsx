@@ -15,6 +15,7 @@ import { WaveBackground } from './components/ui';
 import './styles/app.css';
 
 const DocumentControlPage = lazy(() => import('./pages/DocumentControlPage').then(m => ({ default: m.DocumentControlPage })));
+const DennisPage = lazy(() => import('./pages/DennisPage').then(m => ({ default: m.DennisPage })));
 const PersonnelManagementPage = lazy(() => import('./pages/PersonnelManagementPage').then(m => ({ default: m.PersonnelManagementPage })));
 const AssessmentsPage = lazy(() => import('./pages/Phase8Pages').then(m => ({ default: m.AssessmentsPage })));
 const MeetingsPage = lazy(() => import('./pages/Phase8Pages').then(m => ({ default: m.MeetingsPage })));
@@ -172,6 +173,7 @@ function AppRoutes() {
       <Route path="/home" element={<Home/>}/>
       <Route path="/dashboard" element={<Dashboard/>}/>
       <Route path="/documents" element={<Suspense fallback={<ModuleFallback/>}><DocumentControlPage/></Suspense>}/>
+      <Route path="/dennis" element={<Suspense fallback={<ModuleFallback/>}><DennisPage/></Suspense>}/>
       <Route path="/organisation" element={<Organisation/>}/>
       <Route path="/personnel" element={<Suspense fallback={<ModuleFallback/>}><PersonnelManagementPage/></Suspense>}/>
       <Route path="/nc-capa" element={<NcCapaPage/>}/>

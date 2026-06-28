@@ -33,6 +33,7 @@ import { notificationsRoutes, computeSummary } from './routes/notifications.js';
 import { recordsReportsRoutes } from './routes/recordsReports.js';
 import { processManagementRoutes } from './routes/processManagement.js';
 import { informationManagementRoutes } from './routes/informationManagement.js';
+import { dennisRoutes } from './routes/dennis.js';
 import { optionalAuth } from './middleware/auth.js';
 import { ensureDataDirs } from './db/database.js';
 import { seedDefaults } from './db/seed.js';
@@ -82,6 +83,7 @@ export function createApiServer() {
   app.use('/api/blood-bank-handover', bloodBankHandoverRoutes());
   app.use('/api/monthly-reports', monthlyReportsRoutes());
   app.use('/api/documents', documentControlRoutes());
+  app.use('/api/dennis', dennisRoutes());
   app.use('/api/personnel', personnelRoutes());
   app.use('/api/assessments', assessmentsRoutes());
   app.use('/api/meetings', meetingsRoutes());
