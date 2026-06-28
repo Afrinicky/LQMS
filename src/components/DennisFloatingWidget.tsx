@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { Bot, GripHorizontal, Send, X } from 'lucide-react';
 import { MODULES } from '../../shared/constants/modules';
 import type { ApiUser } from '../../shared/types/api';
-import { DENNIS_NOTICE, placeholderDennisResponse } from '../services/dennisService';
+import { DENNIS_NOTICE, createFloatingDennisResponse } from '../services/dennisService';
 
 type WidgetPosition = { x: number; y: number };
 type FloatingMessage = { role: 'user' | 'dennis'; content: string };
@@ -121,7 +121,7 @@ export function DennisFloatingWidget({ user, dennisEnabled }: { user: ApiUser | 
 
   const send = (message = input.trim()) => {
     if (!message) return;
-    const response = `${placeholderDennisResponse(context.currentModule)} Current placeholder context: ${context.currentModule} (${context.currentRoute}). Your message was received as a draft request: “${message}”.`;
+    const response = createFloatingDennisResponse(message, context);
     setMessages(prev => [...prev, { role: 'user', content: message }, { role: 'dennis', content: response }]);
     setInput('');
     console.info('[Dennis placeholder activity]', { dateTime: new Date().toISOString(), user: user.username, currentPageModule: context.currentModule, userMessage: message, aiMode: 'offline-placeholder', status: 'draft' });
