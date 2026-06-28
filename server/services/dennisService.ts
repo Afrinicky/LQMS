@@ -183,7 +183,7 @@ function ftsQuery(q: string): string {
   if (!tokens.length) return '';
   return tokens.map(t => `"${t}"*`).join(' OR ');
 }
-export type SearchResult = { dennisDocumentId: number; sourceDocumentId: number | null; title: string; documentCode: string | null; documentType: string | null; module: string | null; version: string | null; status: string | null; sectionHeading: string | null; excerpt: string; score: number; indexedAt: string | null };
+export type SearchResult = { dennisDocumentId: number; sourceDocumentId: number | null; chunkId: number; title: string; documentCode: string | null; documentType: string | null; module: string | null; version: string | null; status: string | null; sectionHeading: string | null; excerpt: string; score: number; indexedAt: string | null };
 
 export function searchDennis(db: any, opts: { q: string; module?: string; documentType?: string; status?: string; currentOnly?: boolean; userId: number; limit?: number }): SearchResult[] {
   const match = ftsQuery(opts.q);
@@ -207,7 +207,7 @@ export function searchDennis(db: any, opts: { q: string; module?: string; docume
     if (opts.currentOnly && !['current', 'approved'].includes((d.status || '').toLowerCase())) continue;
     const ch = db.prepare('SELECT section_heading FROM dennis_document_chunks WHERE id = ?').get(best.chunkId) as any;
     out.push({
-      dennisDocumentId: denId, sourceDocumentId: d.source_document_id ?? null, title: d.title, documentCode: d.document_code ?? null,
+      dennisDocumentId: denId, sourceDocumentId: d.source_document_id ?? null, chunkId: best.chunkId, title: d.title, documentCode: d.document_code ?? null,
       documentType: d.document_type ?? null, module: d.module ?? null, version: d.version ?? null, status: d.status ?? null,
       sectionHeading: ch?.section_heading ?? null, excerpt: best.excerpt, score: best.score, indexedAt: d.last_indexed_at ?? d.indexed_at ?? null,
     });
@@ -221,10 +221,64 @@ function citation(r: SearchResult): string {
   return `${r.title}${r.documentCode ? ` (${r.documentCode})` : ''}${r.version ? `, v${r.version}` : ''}${r.sectionHeading ? `, section: ${r.sectionHeading}` : ''}`;
 }
 
+// Common words ignored when scoring relevance / detecting vague queries.
+const STOPWORDS = new Set(['the', 'a', 'an', 'of', 'to', 'in', 'on', 'for', 'and', 'or', 'is', 'are', 'what', 'when', 'how', 'do', 'does', 'i', 'my', 'this', 'that', 'with', 'can', 'you', 'dennis', 'please', 'me', 'it', 'about', 'tell', 'show', 'give', 'need', 'want', 'should']);
+function queryTokens(q: string): string[] {
+  return (q.toLowerCase().match(/[a-z0-9]{2,}/g) || []).filter(t => !STOPWORDS.has(t));
+}
+
+// Friendly conversational intents handled without a document search, so Dennis
+// can greet, explain himself and acknowledge — communicating, not just searching.
+function detectIntent(q: string): 'greeting' | 'thanks' | 'capabilities' | null {
+  const s = q.toLowerCase().trim();
+  if (s.length < 30 && /^(hi|hey|hello|yo|good (morning|afternoon|evening)|greetings)\b/.test(s)) return 'greeting';
+  if (s.length < 40 && /\b(thank you|thanks|thank u|thx|cheers|appreciate (it|that))\b/.test(s)) return 'thanks';
+  if (/\b(what can you do|who are you|what are you|how do you work|what do you do|your capabilities|how can you help)\b/.test(s)) return 'capabilities';
+  return null;
+}
+function intentReply(intent: 'greeting' | 'thanks' | 'capabilities'): string {
+  if (intent === 'greeting') return 'Hello! I’m Dennis, your laboratory quality assistant. Ask me about an SOP, policy or form and I’ll answer from the approved documents with sources. I can also help draft CAPAs, audit notes, risk entries and report summaries. What do you need?';
+  if (intent === 'thanks') return 'You’re welcome — glad to help. Ask me anything else about your quality documents or records.';
+  return 'I can help you:\n• Search approved SOPs, policies, manuals and forms\n• Answer questions with citations from approved documents\n• Draft CAPA, audit, risk, equipment and report text for you to review\n• Summarise quality indicators and surface alerts\n\nI never approve, close or finalise records, and I only show documents you’re permitted to see. Try asking, for example: “What are the sample rejection criteria?”';
+}
+
+// Pick the few sentences from retrieved chunks that best match the question, so
+// the offline answer reads as a focused reply rather than a raw excerpt dump.
+function bestSentences(texts: string[], q: string, max = 3): string {
+  const toks = queryTokens(q);
+  if (!toks.length) return '';
+  const seen = new Set<string>();
+  const scored: Array<{ s: string; score: number }> = [];
+  for (const t of texts) {
+    for (const raw of t.split(/(?<=[.!?])\s+|\n+/)) {
+      const s = raw.trim().replace(/[〔〕]/g, '');
+      if (s.length < 25 || s.length > 340) continue;
+      const low = s.toLowerCase();
+      let score = 0; for (const tk of toks) if (low.includes(tk)) score++;
+      if (score < 1) continue;
+      const key = low.slice(0, 40); if (seen.has(key)) continue; seen.add(key);
+      scored.push({ s, score });
+    }
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, max).map(x => '• ' + x.s).join('\n');
+}
+
 export async function askDennis(db: any, opts: { question: string; context?: any; userId: number; allowOnline?: boolean; confirmed?: boolean }): Promise<{ answer: string; sources: Array<{ title: string; documentCode: string | null; version: string | null; section: string | null; sourceDocumentId: number | null; status: string | null; excerpt: string }>; mode: string; notice: string }> {
   const q = (opts.question || '').trim();
   if (!q) return { answer: 'Please type a question for Dennis.', sources: [], mode: 'none', notice: DENNIS_NOTICE };
-  const results = searchDennis(db, { q, userId: opts.userId, limit: 6, currentOnly: false });
+
+  // Conversational intents (greeting / thanks / capabilities) answered directly.
+  const intent = detectIntent(q);
+  if (intent) {
+    logActivity(db, { userId: opts.userId, module: 'dennis', action: 'ask', status: 'intent', mode: 'assistant', currentPage: opts.context?.currentRoute, detail: intent });
+    return { answer: intentReply(intent), sources: [], mode: 'assistant', notice: DENNIS_NOTICE };
+  }
+
+  // For short/vague questions, bias retrieval toward the module the user is on.
+  const moduleHint = opts.context?.currentModule && opts.context.currentModule !== 'Unknown module' ? String(opts.context.currentModule) : '';
+  const retrievalQ = queryTokens(q).length < 2 && moduleHint ? `${q} ${moduleHint}` : q;
+  const results = searchDennis(db, { q: retrievalQ, userId: opts.userId, limit: 6, currentOnly: false });
   const sources = results.map(r => ({ title: r.title, documentCode: r.documentCode, version: r.version, section: r.sectionHeading, sourceDocumentId: r.sourceDocumentId, status: r.status, excerpt: r.excerpt }));
 
   if (!results.length) {
@@ -233,8 +287,9 @@ export async function askDennis(db: any, opts: { question: string; context?: any
   }
 
   const fullChunks = results.map(r => {
-    const c = db.prepare('SELECT chunk_text FROM dennis_document_chunks WHERE document_id = ? ORDER BY chunk_index LIMIT 1').get(r.dennisDocumentId) as any;
-    return { cite: citation(r), text: (c?.chunk_text || r.excerpt).slice(0, 1200) };
+    // Use the chunk that actually matched the query (not the document's first chunk).
+    const c = db.prepare('SELECT chunk_text FROM dennis_document_chunks WHERE id = ?').get(r.chunkId) as any;
+    return { cite: citation(r), text: (c?.chunk_text || r.excerpt).slice(0, 1400) };
   });
   const contextBlock = fullChunks.map((c, i) => `[${i + 1}] ${c.cite}\n${c.text}`).join('\n\n');
   const settings = providerSettings(db);
@@ -262,10 +317,15 @@ export async function askDennis(db: any, opts: { question: string; context?: any
   }
 
   if (!answerBody.trim()) {
-    answerBody = `Based on the approved documents I found, the most relevant passage is:\n\n“${results[0].excerpt.replace(/[〔〕]/g, '')}”\n\nReview the cited sources below for the full, authoritative text.`;
+    // Offline: select the sentences from the retrieved chunks that best match the
+    // question (focused answer), never inventing beyond the source text.
+    const sentences = bestSentences(fullChunks.map(c => c.text), q, 3);
+    answerBody = sentences
+      ? `Here is what the approved documents say:\n${sentences}\n\nSee the cited sources for the full, authoritative text.`
+      : `I found related approved documents, but not a strong direct passage for “${q}”. Review the cited sources below, or rephrase your question.`;
   }
   const sourceList = results.map((r, i) => `${i + 1}. ${citation(r)} — status: ${r.status ?? 'n/a'}`).join('\n');
-  const answer = `Based on the approved documents I found:\n\n${answerBody.trim()}\n\nSources:\n${sourceList}`;
+  const answer = `${answerBody.trim()}\n\nSources:\n${sourceList}`;
   logActivity(db, { userId: opts.userId, module: 'dennis', action: 'ask', status: 'ok', mode: usedMode, provider, currentPage: opts.context?.currentRoute, sourceDocumentIds: results.map(r => r.sourceDocumentId).filter(Boolean) as number[], detail: q.slice(0, 120) });
   return { answer, sources, mode: usedMode, notice: DENNIS_NOTICE };
 }
