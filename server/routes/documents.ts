@@ -428,6 +428,25 @@ export function documentControlRoutes() {
     res.json({ ok: true });
   });
 
+  // -------- Workflow comments (drafter / reviewer / approver) --------
+  router.get('/:id/comments', requirePermission('documents', 'view'), (req, res) => {
+    const db = getDb();
+    res.json(db.prepare(`SELECT c.*, s.full_name AS author_name FROM document_comments c LEFT JOIN staff s ON s.id = c.author_staff_id WHERE c.document_id = ? ORDER BY c.id DESC`).all(req.params.id));
+  });
+  router.post('/:id/comments', requirePermission('documents', 'view'), (req, res) => {
+    if (!req.body.comment || !String(req.body.comment).trim()) return res.status(400).json({ error: 'comment is required' });
+    const db = getDb();
+    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    const author = getStaffIdOrCurrent(req, req.body.authorStaffId);
+    const r = db.prepare('INSERT INTO document_comments (document_id, document_version_id, stage, comment, author_staff_id, created_by) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(req.params.id, parseIntNullable(req.body.documentVersionId) ?? doc.current_version_id, req.body.stage ?? doc.status, String(req.body.comment).trim(), author, req.user!.id);
+    // Notify the document owner of new review/approval feedback.
+    if (doc.owner_staff_id && doc.owner_staff_id !== author) notifyStaff(db, doc.owner_staff_id, 'documents', 'New comment on document', `${doc.document_code ? doc.document_code + ' — ' : ''}${doc.title}: ${String(req.body.comment).slice(0, 120)}`);
+    audit(req, { action: 'comment', entity: 'documents', entityId: req.params.id, newValue: { commentId: r.lastInsertRowid, stage: req.body.stage } });
+    res.status(201).json({ id: r.lastInsertRowid });
+  });
+
   // Distribute the current version to all active staff for attestation (ISO
   // 15189 §8.3 — staff must read and acknowledge controlled documents).
   router.post('/:id/distribute-all', requirePermission('documents', 'edit'), (req, res) => {

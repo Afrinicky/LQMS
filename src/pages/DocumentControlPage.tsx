@@ -7,7 +7,7 @@ import DisabledModule from '../components/DisabledModule';
 import type {
   Section, Department, Staff, Position,
   DocumentRecord, DocumentAttestation, DocumentControlSummary, DistributionInboxEntry, VersionContent,
-  RecordRegisterEntry, RetentionScheduleRule, RecordReviewLogEntry, RecordDestructionEntry, RecordBackupEntry, RecordControlSummary
+  RecordRegisterEntry, RetentionScheduleRule, RecordReviewLogEntry, RecordDestructionEntry, RecordBackupEntry, RecordControlSummary, DocumentComment
 } from '../../shared/types/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
@@ -77,7 +77,7 @@ export function DocumentControlPage() {
   const [pendingAttestations, setPendingAttestations] = useState<DocumentAttestation[]>([]);
   const [inbox, setInbox] = useState<DistributionInboxEntry[]>([]);
   const [selectedDoc, setSelectedDoc] = useState<DocumentRecord | null>(null);
-  const [viewer, setViewer] = useState<{ docId: number; versionId: number; attestationId?: number } | null>(null);
+  const [viewer, setViewer] = useState<{ docId: number; versionId: number; attestationId?: number; workflowStatus?: string } | null>(null);
   const [registerFilter, setRegisterFilter] = useState('');
 
   const [docForm, setDocForm] = useState(emptyDocForm);
@@ -284,6 +284,27 @@ export function DocumentControlPage() {
     catch (e) { setError((e as Error).message); }
   }
 
+  // Drive a lifecycle transition from the workflow viewer (status-badge click).
+  async function workflowAction(docId: number, action: string) {
+    if (action === 'submit') await api(`/documents/${docId}/submit-review`, { method: 'POST', body: JSON.stringify({}) });
+    else if (action === 'accept') await api(`/documents/${docId}/review`, { method: 'POST', body: JSON.stringify({ reviewDate: new Date().toISOString().slice(0, 10), reviewOutcome: 'no_change' }) });
+    else if (action === 'approve') await api(`/documents/${docId}/approve`, { method: 'POST', body: JSON.stringify({}) });
+    await load();
+    if (selectedDoc?.id === docId) await openDoc(docId);
+    flash(action === 'approve' ? 'Approved and published to all staff for attestation.' : action === 'accept' ? 'Review accepted — the document has moved to approval.' : 'Accepted — the document has moved to review.');
+  }
+
+  // A clickable status badge that opens the stage-aware workflow (preview +
+  // edit + comment + the single transition for that stage).
+  function statusCell(d: DocumentRecord) {
+    if (!['draft', 'under_review', 'reviewed'].includes(d.status)) return formatBadge(d.status);
+    return <button type="button" className={statusBadgeClass(d.status)} title="Open workflow — preview, edit, comment, then accept/approve"
+      style={{ cursor: 'pointer', border: 'none', font: 'inherit' }}
+      onClick={() => setViewer({ docId: d.id, versionId: d.current_version_id || 0, workflowStatus: d.status })}>
+      {d.status.replace(/_/g, ' ')} ▸
+    </button>;
+  }
+
   async function markVersionObsolete(versionId: number) {
     if (!selectedDoc) return;
     const reason = prompt('Reason for marking this version obsolete?');
@@ -328,7 +349,7 @@ export function DocumentControlPage() {
 
   const queueRow = (d: DocumentRecord) => <tr key={d.id}>
     <td>{d.document_code || '—'}</td><td>{d.title}</td><td>{d.document_type || '—'}</td>
-    <td>{staffName(staff, d.owner_staff_id)}</td><td>{formatBadge(d.status)}</td>
+    <td>{staffName(staff, d.owner_staff_id)}</td><td>{statusCell(d)}</td>
     <td><button onClick={() => openDoc(d.id)}>Open</button></td>
   </tr>;
 
@@ -339,6 +360,7 @@ export function DocumentControlPage() {
     {notice && <div className="banner-success" style={{ background: '#e8f6ee', border: '1px solid #58b27a', color: '#1c6b3e', padding: '8px 12px', borderRadius: 6, margin: '8px 0' }}>{notice}</div>}
 
     {viewer && <DocumentViewer key={`${viewer.docId}-${viewer.versionId}`} docId={viewer.docId} versionId={viewer.versionId} attestationId={viewer.attestationId}
+      workflowStatus={viewer.workflowStatus} onWorkflowAction={(action: string) => workflowAction(viewer.docId, action)}
       onClose={() => setViewer(null)} onAttest={signAttestation} onSaved={() => { if (selectedDoc?.id === viewer.docId) openDoc(viewer.docId); }} onError={setError} />}
 
     {tab === 'Dashboard' && (summary ? <>
@@ -382,7 +404,7 @@ export function DocumentControlPage() {
           <td>{d.document_code || '—'}</td><td>{d.title}</td><td>{d.document_type || '—'}</td>
           <td>{sections.find(s => s.id === d.section_id)?.name || '—'}</td>
           <td>{staffName(staff, d.owner_staff_id)}</td>
-          <td>{formatBadge(d.status)}</td><td>{d.next_review_date || '—'}</td>
+          <td>{statusCell(d)}</td><td>{d.next_review_date || '—'}</td>
           <td style={{ whiteSpace: 'nowrap' }}>
             <button onClick={() => openDoc(d.id)}>Open</button>{' '}
             {d.current_version_id && <button className="secondary" onClick={() => setViewer({ docId: d.id, versionId: d.current_version_id! })}>View</button>}
@@ -462,7 +484,7 @@ export function DocumentControlPage() {
       <table className="data-table"><thead><tr><th>Code</th><th>Title</th><th>Type</th><th>Reviewed by</th><th>Status</th><th></th></tr></thead><tbody>
         {approvalQueue.map(d => <tr key={d.id}>
           <td>{d.document_code || '—'}</td><td>{d.title}</td><td>{d.document_type || '—'}</td>
-          <td>{staffName(staff, d.reviewed_by_staff_id)}</td><td>{formatBadge(d.status)}</td>
+          <td>{staffName(staff, d.reviewed_by_staff_id)}</td><td>{statusCell(d)}</td>
           <td><button onClick={() => openDoc(d.id)}>Open</button></td>
         </tr>)}{approvalQueue.length === 0 && <tr><td colSpan={6} className="muted">Nothing awaiting approval.</td></tr>}
       </tbody></table>
@@ -471,7 +493,7 @@ export function DocumentControlPage() {
     {tab === 'Reviews Due' && <table className="data-table"><thead><tr><th>Code</th><th>Title</th><th>Type</th><th>Owner</th><th>Status</th><th>Next review</th><th></th></tr></thead><tbody>
       {reviewsDue.map(d => <tr key={d.id}>
         <td>{d.document_code || '—'}</td><td>{d.title}</td><td>{d.document_type || '—'}</td>
-        <td>{staffName(staff, d.owner_staff_id)}</td><td>{formatBadge(d.status)}</td>
+        <td>{staffName(staff, d.owner_staff_id)}</td><td>{statusCell(d)}</td>
         <td>{d.next_review_date || '—'}</td>
         <td><button onClick={() => openDoc(d.id)}>Open</button></td>
       </tr>)}{reviewsDue.length === 0 && <tr><td colSpan={7} className="muted">No reviews due.</td></tr>}
@@ -520,21 +542,51 @@ export function DocumentControlPage() {
 // ============================================================================
 // In-app document viewer / editor
 // ============================================================================
-function DocumentViewer(props: { docId: number; versionId: number; attestationId?: number; onClose: () => void; onAttest: (attId: number, docId: number) => void; onSaved: () => void; onError: (m: string) => void }) {
-  const { docId, versionId, attestationId, onClose, onAttest, onSaved, onError } = props;
+function DocumentViewer(props: { docId: number; versionId: number; attestationId?: number; workflowStatus?: string; onWorkflowAction?: (action: string) => Promise<void>; onClose: () => void; onAttest: (attId: number, docId: number) => void; onSaved: () => void; onError: (m: string) => void }) {
+  const { docId, versionId, attestationId, workflowStatus, onWorkflowAction, onClose, onAttest, onSaved, onError } = props;
   const [content, setContent] = useState<VersionContent | null>(null);
   const [mode, setMode] = useState<'content' | 'original'>('content');
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
+  const [maximized, setMaximized] = useState(true);
+  const [zoom, setZoom] = useState(1);
+  const [comments, setComments] = useState<DocumentComment[]>([]);
+  const [newComment, setNewComment] = useState('');
   const editorRef = useRef<HTMLDivElement>(null);
+
+  const loadComments = () => api<DocumentComment[]>(`/documents/${docId}/comments`).then(setComments).catch(() => {});
+  useEffect(() => { void loadComments(); }, [docId]);
+
+  async function addComment() {
+    if (!newComment.trim()) return;
+    setBusy(true);
+    try { await api(`/documents/${docId}/comments`, { method: 'POST', body: JSON.stringify({ comment: newComment, stage: workflowStatus, documentVersionId: versionId }) }); setNewComment(''); await loadComments(); }
+    catch (e) { onError((e as Error).message); } finally { setBusy(false); }
+  }
+  async function doWorkflow(action: string) {
+    if (!onWorkflowAction) return;
+    setBusy(true);
+    try { await onWorkflowAction(action); onClose(); }
+    catch (e) { onError((e as Error).message); } finally { setBusy(false); }
+  }
+  const WF: Record<string, { label: string; action: string }> = {
+    draft: { label: 'Accept & submit for review →', action: 'submit' },
+    under_review: { label: 'Accept review & send for approval →', action: 'accept' },
+    reviewed: { label: 'Approve & publish to all staff →', action: 'approve' },
+  };
+  const wf = workflowStatus ? WF[workflowStatus] : undefined;
 
   useEffect(() => {
     let url: string | null = null;
     api<VersionContent>(`/documents/${docId}/versions/${versionId}/content`)
       .then(c => {
         setContent(c);
-        if (!c.content_html && c.file_id) setMode('original');
+        const pdfish = c.file_mime === 'application/pdf' || /\.pdf$/i.test(c.file_name || '');
+        const imgish = (c.file_mime || '').startsWith('image/');
+        // Faithful formats render natively, so open the original by default;
+        // otherwise show the in-app (rich HTML) content.
+        if (c.file_id && (pdfish || imgish || !c.content_html)) setMode('original');
         if (c.file_id) fetchBlobUrl(`/files/${c.file_id}/raw`).then(u => { url = u; setFileUrl(u); }).catch(() => {});
       })
       .catch(e => onError((e as Error).message));
@@ -559,17 +611,34 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
   const isPdf = content?.file_mime === 'application/pdf' || /\.pdf$/i.test(content?.file_name || '');
   const isImage = (content?.file_mime || '').startsWith('image/');
 
-  return <div style={{ position: 'fixed', inset: 0, background: 'rgba(8,16,32,0.55)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: '3vh 2vw', overflow: 'auto' }} onClick={onClose}>
-    <div className="card" style={{ width: 'min(1100px, 96vw)', maxWidth: '96vw', margin: 0 }} onClick={e => e.stopPropagation()}>
+  const contentH = maximized ? '80vh' : '56vh';
+  const originalH = maximized ? '86vh' : '64vh';
+  const zoomPct = Math.round(zoom * 100);
+  const zoomControls = <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+    <button className="secondary" title="Zoom out" onClick={() => setZoom(z => Math.max(0.5, +(z - 0.1).toFixed(2)))}>−</button>
+    <span style={{ minWidth: 44, textAlign: 'center', fontSize: 12 }}>{zoomPct}%</span>
+    <button className="secondary" title="Zoom in" onClick={() => setZoom(z => Math.min(3, +(z + 0.1).toFixed(2)))}>+</button>
+    <button className="secondary" title="Reset zoom" onClick={() => setZoom(1)}>Fit</button>
+  </span>;
+
+  return <div style={{ position: 'fixed', inset: 0, background: 'rgba(8,16,32,0.55)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: maximized ? 'stretch' : 'flex-start', padding: maximized ? '1vh 1vw' : '3vh 2vw', overflow: 'auto' }} onClick={onClose}>
+    <div className="card" style={{ width: maximized ? '98vw' : 'min(1100px, 96vw)', maxWidth: '98vw', margin: 0 }} onClick={e => e.stopPropagation()}>
       <style>{`.doc-content table.docx-table,.doc-content table{border-collapse:collapse;width:100%;margin:8px 0;font-size:12px}
 .doc-content table td,.doc-content table th{border:1px solid #c9d2e0;padding:5px 8px;vertical-align:top;text-align:left}
+.doc-content h1{font-size:18px;margin:14px 0 6px}
 .doc-content h2{font-size:16px;color:#1B3A6B;margin:14px 0 6px;border-bottom:1px solid #e2e8f0;padding-bottom:3px}
 .doc-content h3{font-size:14px;color:#243b63;margin:12px 0 4px}
 .doc-content h4,.doc-content h5,.doc-content h6{font-size:13px;color:#33415a;margin:10px 0 4px}
-.doc-content p{margin:5px 0}.doc-content ul{margin:6px 0 6px 22px}.doc-content li{margin:2px 0}`}</style>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-        <h3 style={{ margin: 0 }}>{content ? `${content.version_label || content.version_number || 'Version'} · ${content.file_name || 'Controlled content'}` : 'Loading…'}</h3>
-        <button className="secondary" onClick={onClose}>Close</button>
+.doc-content p{margin:5px 0}.doc-content ul{margin:6px 0 6px 22px}.doc-content li{margin:2px 0}
+.doc-content img{max-width:100%;height:auto}.doc-content .docx-img{text-align:center;margin:10px 0}
+.doc-content .docx-diagram{border:1px dashed #b9c4d6;border-radius:6px;padding:8px 12px;margin:10px 0;background:#f8fafc}`}</style>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <h3 style={{ margin: 0, fontSize: 15 }}>{content ? `${content.version_label || content.version_number || 'Version'} · ${content.file_name || 'Controlled content'}` : 'Loading…'}</h3>
+        <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+          {zoomControls}
+          <button className="secondary" onClick={() => setMaximized(m => !m)}>{maximized ? 'Restore' : 'Maximize'}</button>
+          <button className="secondary" onClick={onClose}>Close</button>
+        </span>
       </div>
       <div className="tabs" style={{ marginTop: 10 }}>
         <button type="button" className={mode === 'content' ? 'active' : ''} onClick={() => setMode('content')}>In-app content</button>
@@ -594,29 +663,50 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
         </div>}
         {editing
           ? <div ref={editorRef} className="doc-content" contentEditable suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: content.content_html || `<p>${(content.content_text || '').replace(/\n/g, '<br/>')}</p>` || '<p>Type the controlled document content here…</p>' }}
-              style={{ border: '1px solid #cbd5e1', borderRadius: 6, padding: 16, minHeight: 320, maxHeight: '58vh', overflow: 'auto', background: '#fff', color: '#111', lineHeight: 1.5 }} />
+              style={{ border: '1px solid #cbd5e1', borderRadius: 6, padding: 16, minHeight: 320, height: contentH, overflow: 'auto', background: '#fff', color: '#111', lineHeight: 1.5, zoom }} />
           : (content.content_html
-              ? <div className="doc-content" style={{ border: '1px solid #e2e8f0', borderRadius: 6, padding: 16, maxHeight: '58vh', overflow: 'auto', background: '#fff', color: '#111', lineHeight: 1.5 }} dangerouslySetInnerHTML={{ __html: content.content_html }} />
+              ? <div className="doc-content" style={{ border: '1px solid #e2e8f0', borderRadius: 6, padding: 16, height: contentH, overflow: 'auto', background: '#fff', color: '#111', lineHeight: 1.5, zoom }} dangerouslySetInnerHTML={{ __html: content.content_html }} />
               : (content.content_text
-                  ? <pre style={{ whiteSpace: 'pre-wrap', border: '1px solid #e2e8f0', borderRadius: 6, padding: 16, maxHeight: '58vh', overflow: 'auto', background: '#fff', color: '#111' }}>{content.content_text}</pre>
+                  ? <pre style={{ whiteSpace: 'pre-wrap', border: '1px solid #e2e8f0', borderRadius: 6, padding: 16, height: contentH, overflow: 'auto', background: '#fff', color: '#111', zoom }}>{content.content_text}</pre>
                   : <p className="muted">No readable content was captured. Use “Edit content” to author it in-app, or open the original file.</p>))}
       </div>}
 
       {mode === 'original' && (isPdf || isImage
-        ? <div style={{ height: '64vh', border: '1px solid #e2e8f0', borderRadius: 6, overflow: 'hidden', background: '#525659' }}>
+        ? <div style={{ height: originalH, border: '1px solid #e2e8f0', borderRadius: 6, overflow: 'auto', background: '#525659' }}>
             {!fileUrl ? <p style={{ color: '#fff', padding: 16 }}>Loading file…</p>
-              : isPdf ? <iframe title="document" src={fileUrl} style={{ width: '100%', height: '100%', border: 'none' }} />
-              : <div style={{ height: '100%', overflow: 'auto', textAlign: 'center' }}><img src={fileUrl} alt={content?.file_name} style={{ maxWidth: '100%' }} /></div>}
+              : isPdf ? <iframe title="document" src={fileUrl} style={{ width: `${100 / zoom}%`, height: `${100 / zoom}%`, border: 'none', zoom }} />
+              : <div style={{ minHeight: '100%', overflow: 'auto', textAlign: 'center' }}><img src={fileUrl} alt={content?.file_name} style={{ width: `${zoomPct}%`, maxWidth: 'none' }} /></div>}
           </div>
         : content?.content_html
           ? <div>
-              <p className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>Rendered preview of the Word document (tables, headings and formatting preserved). The browser cannot display the raw .docx — use “Download original” to open it in Word, or edit it under “In-app content”.</p>
-              <div className="doc-content" style={{ border: '1px solid #e2e8f0', borderRadius: 6, padding: 20, height: '60vh', overflow: 'auto', background: '#fff', color: '#111', lineHeight: 1.5 }} dangerouslySetInnerHTML={{ __html: content.content_html }} />
+              <p className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>Rendered preview of the Word document (tables, headings, colours, shading and images preserved). The browser cannot display the raw .docx — use “Download original” to open it in Word, or edit it under “In-app content”.</p>
+              <div className="doc-content" style={{ border: '1px solid #e2e8f0', borderRadius: 6, padding: 20, height: originalH, overflow: 'auto', background: '#fff', color: '#111', lineHeight: 1.5, zoom }} dangerouslySetInnerHTML={{ __html: content.content_html }} />
             </div>
           : <div style={{ height: '40vh', border: '1px solid #e2e8f0', borderRadius: 6, background: '#525659', color: '#fff', padding: 24 }}>
               <p>This file type cannot be previewed inline ({content?.file_mime || 'unknown type'}) and no readable content was captured.</p>
               {fileUrl && <a className="badge" style={{ cursor: 'pointer' }} onClick={() => { const a = document.createElement('a'); a.href = fileUrl; a.download = content?.file_name || 'document'; a.click(); }}>Download file</a>}
             </div>)}
+
+      {/* Workflow stage: comments + the single stage-appropriate transition. */}
+      {workflowStatus && <div style={{ marginTop: 12, padding: 12, background: '#0f1830', border: '1px solid #24365e', borderRadius: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <span style={{ color: '#cdd9f0', fontSize: 13 }}>
+            Stage: {formatBadge(workflowStatus)} · {workflowStatus === 'draft' ? 'Preview, edit if needed, then accept to send for review.' : workflowStatus === 'under_review' ? 'Reviewer: preview, edit/comment, then accept to send for approval.' : workflowStatus === 'reviewed' ? 'Approver: preview, edit/comment, then approve to publish to all staff.' : workflowStatus === 'current' ? 'Published — visible to all staff for attestation.' : 'Obsolete.'}
+          </span>
+          {wf && <button onClick={() => doWorkflow(wf.action)} disabled={busy}>{busy ? 'Working…' : wf.label}</button>}
+        </div>
+        <div style={{ marginTop: 10 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input value={newComment} onChange={e => setNewComment(e.target.value)} placeholder="Add a comment for the drafter / reviewer / approver…" style={{ flex: 1 }} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addComment(); } }} />
+            <button className="secondary" onClick={addComment} disabled={busy || !newComment.trim()}>Comment</button>
+          </div>
+          {comments.length > 0 && <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0 0', maxHeight: 140, overflow: 'auto' }}>
+            {comments.map(c => <li key={c.id} style={{ fontSize: 12, color: '#c2cde3', padding: '4px 0', borderBottom: '1px solid #1c2a4a' }}>
+              <strong>{c.author_name || 'Staff'}</strong> <span style={{ color: '#7c8db0' }}>· {c.stage || ''} · {String(c.created_at).slice(0, 16).replace('T', ' ')}</span><br />{c.comment}
+            </li>)}
+          </ul>}
+        </div>
+      </div>}
 
       {attestationId && <div style={{ marginTop: 12, padding: 12, background: '#f1f5f9', borderRadius: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
         <span><strong>Attestation:</strong> By signing you confirm you have read and understood this controlled document.</span>
