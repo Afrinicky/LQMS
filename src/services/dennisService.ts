@@ -10,6 +10,23 @@ export function safeSuggestion(action: string, moduleName: string) {
   return `${placeholderDennisResponse(moduleName)} Suggested ${action.toLowerCase()} text will remain a draft until an authorized user reviews and applies it.`;
 }
 
+// Context the floating Dennis widget passes in from the current route/module.
+export type DennisFloatingContext = {
+  currentRoute: string;
+  currentModule: string;
+  currentUserRole: string;
+  currentRecordId: string | null;
+  currentPageTitle: string;
+};
+
+// Placeholder reply for the floating Dennis chat widget. Stays offline and
+// source-free for Phase AI-1; the "Review before use" notice is rendered by the
+// widget, so it is not repeated here.
+export function createFloatingDennisResponse(message: string, context: DennisFloatingContext) {
+  const focus = context.currentRecordId ? `${context.currentModule} (record #${context.currentRecordId})` : context.currentModule;
+  return `This is a placeholder Dennis response for ${focus}. You asked: “${message.trim()}”. Future versions will use your role (${context.currentUserRole}) and approved documents to provide a source-based answer.`;
+}
+
 export const dennisSafetyRules = [
   'Dennis can suggest, draft, explain, summarize, remind, and search; he does not make final compliance decisions.',
   'Dennis must not approve SOPs, authorize documents, close CAPA records, delete records, or modify permissions.',
