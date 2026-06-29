@@ -6,6 +6,14 @@ import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import { extractDocument, deriveDocumentCodeFromName } from '../utils/documentExtract.js';
+import { indexDocument } from '../services/dennisService.js';
+
+// Make a document readable by the Dennis AI assistant (best-effort). Called after
+// a document's content is extracted so every uploaded document is fully read into
+// the system — search visibility is still enforced per-user at query time.
+function indexForDennis(db: any, docId: number, userId: number) {
+  try { indexDocument(db, docId, userId); } catch { /* AI indexing is best-effort */ }
+}
 
 const DOCUMENT_STATUSES = ['draft', 'under_review', 'reviewed', 'approved', 'current', 'due_review', 'obsolete', 'archived'];
 const VERSION_STATUSES = ['draft', 'under_review', 'reviewed', 'approved', 'current', 'obsolete'];
@@ -147,6 +155,28 @@ export function documentControlRoutes() {
   // "SECHPO026 Document Control Procedure" -> "SECHPO026".
   router.get('/derive-code', requirePermission('documents', 'view'), (req, res) => {
     res.json({ code: deriveDocumentCodeFromName(String(req.query.name || '')) });
+  });
+  // Read an already-uploaded file and return the document title and number guessed
+  // from its content/heading — so "New Document" can auto-fill name and number the
+  // same way bulk import does. Does not persist anything.
+  router.post('/extract-preview', requirePermission('documents', 'create'), (req, res) => {
+    const db = getDb();
+    const fileId = parseIntNullable(req.body.fileId);
+    if (!fileId) return res.status(400).json({ error: 'fileId is required' });
+    const file = db.prepare('SELECT * FROM files WHERE id = ?').get(fileId) as any;
+    if (!file) return res.status(404).json({ error: 'File not found' });
+    const root = file.storage_area === 'evidence' ? evidenceRoot : uploadRoot;
+    const r = extractDocument(path.join(root, file.stored_name), file.original_name, file.mime_type);
+    // Prefer a code found in the content; fall back to one derived from the filename.
+    const codeFromName = deriveDocumentCodeFromName(file.original_name);
+    res.json({
+      titleGuess: r.titleGuess,
+      documentCodeGuess: r.documentCodeGuess || codeFromName,
+      method: r.method,
+      sections: r.sections.length,
+      pageCount: r.pageCount,
+      hasContent: !!(r.text && r.text.trim().length > 20),
+    });
   });
 
   // ===================================================================
@@ -337,6 +367,7 @@ export function documentControlRoutes() {
       db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run('documents', 'documents', String(docId), 'documents', 'files', String(fileId), 'Initial document file');
       // Read the uploaded SOP so its full content is available in-app.
       extractIntoVersion(db, versionId, fileId);
+      indexForDennis(db, docId, req.user!.id);
     }
 
     audit(req, { action: 'create', entity: 'documents', entityId: docId, newValue: { documentCode, ...req.body } });
@@ -389,6 +420,7 @@ export function documentControlRoutes() {
     if (parseIntNullable(req.body.fileId)) {
       db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run('documents', 'document_versions', String(versionId), 'documents', 'files', String(req.body.fileId), `Document version ${req.body.versionNumber}`);
       extractIntoVersion(db, versionId, parseIntNullable(req.body.fileId)!);
+      indexForDennis(db, Number(req.params.id), req.user!.id);
     }
     audit(req, { action: 'create', entity: 'document_versions', entityId: versionId, newValue: { documentId: req.params.id, ...req.body } });
     res.status(201).json({ id: versionId });
@@ -412,6 +444,7 @@ export function documentControlRoutes() {
     if (!v) return res.status(404).json({ error: 'Version not found' });
     if (!v.file_id) return res.status(400).json({ error: 'This version has no attached file to read.' });
     const result = extractIntoVersion(db, Number(v.id), Number(v.file_id));
+    indexForDennis(db, Number(req.params.id), req.user!.id);
     audit(req, { action: 'extract', entity: 'document_versions', entityId: v.id, newValue: { method: result?.method, length: result?.text?.length ?? 0 } });
     res.json({ ok: true, method: result?.method ?? 'none', length: result?.text?.length ?? 0, sections: result?.sections?.length ?? 0 });
   });

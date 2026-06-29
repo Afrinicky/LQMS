@@ -106,6 +106,13 @@ export function DennisFloatingWidget({ user, dennisEnabled }: { user: ApiUser | 
     window.addEventListener('resize', onResize); return () => window.removeEventListener('resize', onResize);
   }, [open]);
   useEffect(() => { msgEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, open]);
+  // Allow other parts of the app (e.g. the document viewer) to open Dennis with a
+  // pre-filled question via window.dispatchEvent(new CustomEvent('dennis:ask', {detail:{question}})).
+  useEffect(() => {
+    const handler = (e: Event) => { const d = (e as CustomEvent).detail as { question?: string } | undefined; setOpen(true); if (d?.question) setInput(String(d.question)); };
+    window.addEventListener('dennis:ask', handler as EventListener);
+    return () => window.removeEventListener('dennis:ask', handler as EventListener);
+  }, []);
 
   if (!user || !dennisEnabled) return null;
 

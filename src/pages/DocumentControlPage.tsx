@@ -134,6 +134,32 @@ export function DocumentControlPage() {
     } catch (e) { setError((e as Error).message); }
   }
 
+  // When a file is chosen for a new document, read its title and number from the
+  // document itself (same behaviour as bulk import) and pre-fill the form. The
+  // file is uploaded once here and reused on submit.
+  async function onPickNewDocFile(file: File | null) {
+    setNewDocFile(file);
+    if (!file) return;
+    const baseName = file.name.replace(/\.[^.]+$/, '');
+    const fnCode = deriveCode(file.name) || '';
+    const fnTitle = baseName.replace(/^\s*SECH[A-Z]*\s?-?\s?\d+[A-Z]?\s*/i, '').replace(/[_-]+/g, ' ').trim() || baseName;
+    // Instant filename-based fill (works even before the content is read).
+    setDocForm(f => ({ ...f, documentCode: f.documentCode || fnCode, title: f.title.trim() ? f.title : fnTitle }));
+    try {
+      const fileId = await uploadFileIfAny(file);
+      if (!fileId) return;
+      const g = await api<{ titleGuess?: string; documentCodeGuess?: string }>('/documents/extract-preview', { method: 'POST', body: JSON.stringify({ fileId }) });
+      setNewDocFile(null); // already uploaded — avoid re-uploading on submit
+      setDocForm(f => ({
+        ...f,
+        fileId,
+        documentCode: (g.documentCodeGuess || f.documentCode || fnCode || '').toString(),
+        title: f.title.trim() && f.title !== fnTitle ? f.title : (g.titleGuess || fnTitle),
+      }));
+      flash('Title and document number read from the uploaded file. Review and adjust if needed.');
+    } catch { /* keep filename-based fill */ }
+  }
+
   async function submitDoc(e: FormEvent) {
     e.preventDefault(); setError(null);
     try {
@@ -444,7 +470,7 @@ export function DocumentControlPage() {
       <label>Initial version number<input value={docForm.versionNumber} onChange={e => setDocForm({ ...docForm, versionNumber: e.target.value })} /></label>
       <label>Revision summary<input value={docForm.revisionSummary} onChange={e => setDocForm({ ...docForm, revisionSummary: e.target.value })} /></label>
       <label>Effective date<input type="date" value={docForm.effectiveDate} onChange={e => setDocForm({ ...docForm, effectiveDate: e.target.value })} /></label>
-      <label>File upload (PDF/Word — content is read automatically)<input type="file" accept=".pdf,.doc,.docx,.txt,.md,.rtf,.odt" onChange={e => setNewDocFile(e.target.files?.[0] ?? null)} /></label>
+      <label>File upload (PDF/Word — title, number &amp; content are read automatically)<input type="file" accept=".pdf,.doc,.docx,.txt,.md,.rtf,.odt" onChange={e => onPickNewDocFile(e.target.files?.[0] ?? null)} /></label>
       <button type="submit">Create document (Draft)</button>
     </form>}
 
@@ -542,6 +568,49 @@ export function DocumentControlPage() {
 // ============================================================================
 // In-app document viewer / editor
 // ============================================================================
+// Word-like reader: a scrollable white "page" plus a functional Table of
+// Contents built from the document's own headings. Clicking a section scrolls
+// to it. Used for both the in-app content and the rendered Word original.
+function DocReader({ html, zoom, height }: { html: string; zoom: number; height: string }) {
+  const pageRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [toc, setToc] = useState<Array<{ id: string; text: string; level: number }>>([]);
+  const [active, setActive] = useState<string>('');
+
+  useEffect(() => {
+    const root = pageRef.current;
+    if (!root) { setToc([]); return; }
+    const hs = Array.from(root.querySelectorAll('h1,h2,h3,h4')) as HTMLElement[];
+    const items = hs.map((h, i) => {
+      const text = (h.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!text) return null;
+      const id = h.id || `doc-h-${i}`;
+      h.id = id;
+      return { id, text: text.slice(0, 90), level: Number(h.tagName[1]) || 2 };
+    }).filter(Boolean) as Array<{ id: string; text: string; level: number }>;
+    setToc(items);
+  }, [html]);
+
+  function go(id: string) {
+    const el = pageRef.current?.querySelector(`#${(window.CSS && CSS.escape) ? CSS.escape(id) : id}`) as HTMLElement | null;
+    const scroller = scrollRef.current;
+    if (el && scroller) { scroller.scrollTo({ top: Math.max(0, el.offsetTop - 12), behavior: 'smooth' }); setActive(id); }
+  }
+
+  return <div className="doc-reader" style={{ height }}>
+    {toc.length > 0 && <nav className="doc-toc">
+      <div className="doc-toc-head">Contents</div>
+      {toc.map(t => <button key={t.id} type="button" className={`doc-toc-item lvl-${Math.min(t.level, 4)}${active === t.id ? ' active' : ''}`} title={t.text} onClick={() => go(t.id)}>{t.text}</button>)}
+    </nav>}
+    <div className="doc-scroll" ref={scrollRef}>
+      <div ref={pageRef} className="doc-content doc-page" style={{ zoom }} dangerouslySetInnerHTML={{ __html: html }} />
+    </div>
+  </div>;
+}
+
+// ============================================================================
+// In-app document viewer / editor
+// ============================================================================
 function DocumentViewer(props: { docId: number; versionId: number; attestationId?: number; workflowStatus?: string; onWorkflowAction?: (action: string) => Promise<void>; onClose: () => void; onAttest: (attId: number, docId: number) => void; onSaved: () => void; onError: (m: string) => void }) {
   const { docId, versionId, attestationId, workflowStatus, onWorkflowAction, onClose, onAttest, onSaved, onError } = props;
   const [content, setContent] = useState<VersionContent | null>(null);
@@ -631,7 +700,17 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
 .doc-content h4,.doc-content h5,.doc-content h6{font-size:13px;color:#33415a;margin:10px 0 4px}
 .doc-content p{margin:5px 0}.doc-content ul{margin:6px 0 6px 22px}.doc-content li{margin:2px 0}
 .doc-content img{max-width:100%;height:auto}.doc-content .docx-img{text-align:center;margin:10px 0}
-.doc-content .docx-diagram{border:1px dashed #b9c4d6;border-radius:6px;padding:8px 12px;margin:10px 0;background:#f8fafc}`}</style>
+.doc-content .docx-diagram{border:1px dashed #b9c4d6;border-radius:6px;padding:8px 12px;margin:10px 0;background:#f8fafc}
+.doc-reader{display:flex;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden}
+.doc-toc{width:236px;flex:none;overflow:auto;background:#0f1830;border-right:1px solid #24365e;padding:10px 8px}
+.doc-toc-head{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:#7c8db0;padding:2px 8px 8px}
+.doc-toc-item{display:block;width:100%;text-align:left;background:none;border:0;box-shadow:none;color:#c2cde3;cursor:pointer;font-size:12.5px;line-height:1.3;padding:5px 8px;border-radius:6px;white-space:normal}
+.doc-toc-item:hover{background:rgba(255,255,255,.06);color:#fff}
+.doc-toc-item.active{background:var(--accent-soft,rgba(47,107,255,.16));color:#fff}
+.doc-toc-item.lvl-1{font-weight:700}.doc-toc-item.lvl-2{padding-left:8px}.doc-toc-item.lvl-3{padding-left:18px;font-size:12px;color:#9fb0cf}.doc-toc-item.lvl-4{padding-left:28px;font-size:11.5px;color:#8295b5}
+.doc-scroll{flex:1;overflow:auto;background:#525659;padding:18px;min-width:0}
+.doc-page{background:#fff;color:#111;max-width:820px;margin:0 auto;padding:34px 44px;box-shadow:0 2px 14px rgba(0,0,0,.45);line-height:1.55;border-radius:2px}
+@media (max-width:760px){.doc-toc{display:none}}`}</style>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <h3 style={{ margin: 0, fontSize: 15 }}>{content ? `${content.version_label || content.version_number || 'Version'} · ${content.file_name || 'Controlled content'}` : 'Loading…'}</h3>
         <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
@@ -656,16 +735,14 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
           {editing && <button onClick={saveContent} disabled={busy}>{busy ? 'Saving…' : 'Save content'}</button>}
           {editing && <button className="secondary" onClick={() => setEditing(false)}>Cancel</button>}
           {content.file_id && <button className="secondary" onClick={reExtract} disabled={busy}>{busy ? 'Reading…' : 'Re-read from file'}</button>}
+          <button className="secondary" title="Ask the Dennis AI assistant about this document" onClick={() => window.dispatchEvent(new CustomEvent('dennis:ask', { detail: { question: `Summarise and explain this document: ${content.file_name || content.version_label || 'the open document'}` } }))}>Ask Dennis</button>
           {content.file_id && <a className="badge" href={`${API_BASE}/files/${content.file_id}/download`} onClick={ev => { ev.preventDefault(); fetchBlobUrl(`/files/${content.file_id}/download`).then(u => { const a = document.createElement('a'); a.href = u; a.download = content.file_name || 'document'; a.click(); }); }} style={{ cursor: 'pointer' }}>Download original</a>}
         </div>
-        {content.content_sections && content.content_sections.length > 0 && !editing && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-          {content.content_sections.map(s => <span key={s.key} className="badge" title={s.heading}>{s.heading}</span>)}
-        </div>}
         {editing
           ? <div ref={editorRef} className="doc-content" contentEditable suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: content.content_html || `<p>${(content.content_text || '').replace(/\n/g, '<br/>')}</p>` || '<p>Type the controlled document content here…</p>' }}
               style={{ border: '1px solid #cbd5e1', borderRadius: 6, padding: 16, minHeight: 320, height: contentH, overflow: 'auto', background: '#fff', color: '#111', lineHeight: 1.5, zoom }} />
           : (content.content_html
-              ? <div className="doc-content" style={{ border: '1px solid #e2e8f0', borderRadius: 6, padding: 16, height: contentH, overflow: 'auto', background: '#fff', color: '#111', lineHeight: 1.5, zoom }} dangerouslySetInnerHTML={{ __html: content.content_html }} />
+              ? <DocReader html={content.content_html} zoom={zoom} height={contentH} />
               : (content.content_text
                   ? <pre style={{ whiteSpace: 'pre-wrap', border: '1px solid #e2e8f0', borderRadius: 6, padding: 16, height: contentH, overflow: 'auto', background: '#fff', color: '#111', zoom }}>{content.content_text}</pre>
                   : <p className="muted">No readable content was captured. Use “Edit content” to author it in-app, or open the original file.</p>))}
@@ -679,8 +756,8 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
           </div>
         : content?.content_html
           ? <div>
-              <p className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>Rendered preview of the Word document (tables, headings, colours, shading and images preserved). The browser cannot display the raw .docx — use “Download original” to open it in Word, or edit it under “In-app content”.</p>
-              <div className="doc-content" style={{ border: '1px solid #e2e8f0', borderRadius: 6, padding: 20, height: originalH, overflow: 'auto', background: '#fff', color: '#111', lineHeight: 1.5, zoom }} dangerouslySetInnerHTML={{ __html: content.content_html }} />
+              <p className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>Faithful rendering of the Word document (headings, tables, colours, shading, lists and images preserved), with a clickable Contents panel. Use “Download original” to open the exact .docx in Word.</p>
+              <DocReader html={content.content_html} zoom={zoom} height={originalH} />
             </div>
           : <div style={{ height: '40vh', border: '1px solid #e2e8f0', borderRadius: 6, background: '#525659', color: '#fff', padding: 24 }}>
               <p>This file type cannot be previewed inline ({content?.file_mime || 'unknown type'}) and no readable content was captured.</p>
