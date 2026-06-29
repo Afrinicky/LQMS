@@ -2652,7 +2652,7 @@ CREATE INDEX IF NOT EXISTS idx_document_comments_doc ON document_comments(docume
     if (!dennisChunkCols.has(col)) database.exec(`ALTER TABLE dennis_document_chunks ADD COLUMN ${col} ${type}`);
   }
   const dennisLogCols = new Set((database.prepare("PRAGMA table_info(dennis_activity_logs)").all() as Array<{ name: string }>).map(c => c.name));
-  for (const [col, type] of [['current_page', 'TEXT'], ['provider', 'TEXT'], ['source_document_ids', 'TEXT'], ['record_id', 'TEXT'], ['error_message', 'TEXT'], ['detail', 'TEXT']] as const) {
+  for (const [col, type] of [['current_page', 'TEXT'], ['provider', 'TEXT'], ['source_document_ids', 'TEXT'], ['record_id', 'TEXT'], ['error_message', 'TEXT'], ['detail', 'TEXT'], ['online_used', 'INTEGER'], ['redaction_applied', 'INTEGER'], ['document_name', 'TEXT'], ['task_type', 'TEXT']] as const) {
     if (!dennisLogCols.has(col)) database.exec(`ALTER TABLE dennis_activity_logs ADD COLUMN ${col} ${type}`);
   }
   // FTS5 index over chunk text for fast offline keyword/relevance search.
@@ -2660,11 +2660,13 @@ CREATE INDEX IF NOT EXISTS idx_document_comments_doc ON document_comments(docume
   database.exec(`CREATE INDEX IF NOT EXISTS idx_dennis_documents_source ON dennis_documents(source_document_id);
 CREATE INDEX IF NOT EXISTS idx_dennis_chunks_doc ON dennis_document_chunks(document_id);`);
 
-  // Default Dennis settings (offline-first; online disabled). INSERT OR IGNORE so
-  // operator changes are preserved across restarts.
+  // Default Dennis settings: strict hybrid policy. Ollama (offline) is the default
+  // runtime and is enabled; online AI is disabled by default and, even once
+  // enabled, is restricted to SOP/document analysis only (never operational data).
+  // INSERT OR IGNORE so operator changes are preserved across restarts.
   const dennisDefaults: Array<[string, string]> = [
-    ['dennis.mode', 'Offline only'],
-    ['dennis.local.enabled', 'false'],
+    ['dennis.mode', 'Hybrid recommended'],
+    ['dennis.local.enabled', 'true'],
     ['dennis.local.provider', 'ollama'],
     ['dennis.local.endpoint', 'http://localhost:11434'],
     ['dennis.local.chatModel', 'llama3.1'],
@@ -2675,14 +2677,24 @@ CREATE INDEX IF NOT EXISTS idx_dennis_chunks_doc ON dennis_document_chunks(docum
     ['dennis.online.model', 'claude-sonnet-4-6'],
     ['dennis.online.apiKey', ''],
     ['dennis.online.confirmRequired', 'true'],
-    ['dennis.online.allow.capa', 'false'],
-    ['dennis.online.allow.audit', 'false'],
-    ['dennis.online.allow.managementReview', 'false'],
-    ['dennis.online.allow.training', 'false'],
-    ['dennis.online.allow.indicators', 'false'],
-    ['dennis.online.allow.reports', 'false'],
-    ['dennis.online.allow.docExplain', 'false'],
   ];
   const dset = database.prepare('INSERT OR IGNORE INTO dennis_settings (setting_key, setting_value) VALUES (?, ?)');
   for (const [k, v] of dennisDefaults) dset.run(k, v);
+
+  // One-time policy enforcement (strict hybrid). Runs once per database so it
+  // does not repeatedly override later operator choices: enable Ollama by
+  // default, migrate the mode vocabulary to the three supported modes, and make
+  // sure online AI starts disabled.
+  const policyApplied = database.prepare("SELECT setting_value FROM dennis_settings WHERE setting_key = 'dennis.policy.v2'").get() as { setting_value: string } | undefined;
+  if (!policyApplied) {
+    const cur = (k: string) => (database.prepare('SELECT setting_value FROM dennis_settings WHERE setting_key = ?').get(k) as { setting_value: string } | undefined)?.setting_value;
+    const put = database.prepare(`INSERT INTO dennis_settings (setting_key, setting_value) VALUES (?, ?)
+      ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value`);
+    const modeMap: Record<string, string> = { 'Offline only': 'Offline only', 'Online only': 'Online drafting only', 'Hybrid': 'Hybrid recommended', 'Hybrid recommended': 'Hybrid recommended', 'Online drafting only': 'Online drafting only' };
+    const oldMode = cur('dennis.mode') || 'Hybrid recommended';
+    put.run('dennis.mode', modeMap[oldMode] || 'Hybrid recommended');
+    put.run('dennis.local.enabled', 'true');
+    put.run('dennis.online.enabled', 'false');
+    put.run('dennis.policy.v2', 'applied');
+  }
 }

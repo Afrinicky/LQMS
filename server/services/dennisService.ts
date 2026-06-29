@@ -12,10 +12,13 @@ import { uploadRoot, evidenceRoot } from '../db/database.js';
 import { resolvePermission } from './permissionResolver.js';
 import { extractDocument } from '../utils/documentExtract.js';
 import {
-  DENNIS_NOTICE, chunkText, cosineSim, redact,
+  DENNIS_NOTICE, chunkText, cosineSim, redact, classifySensitive,
   localChat, localEmbed, onlineChat, testProvider,
   type DennisProviderSettings, type Redaction,
 } from '../utils/dennisEngine.js';
+
+// Online AI is permitted only for SOP/document analysis and only in these modes.
+export const ONLINE_CAPABLE_MODES = ['Hybrid recommended', 'Online drafting only'];
 
 export { DENNIS_NOTICE } from '../utils/dennisEngine.js';
 
@@ -83,12 +86,13 @@ function visibleDoc(doc: { status?: string; access_level?: string }, elevated: b
 }
 
 // ── Activity logging ─────────────────────────────────────────────────────────
-export function logActivity(db: any, e: { userId?: number | null; module?: string; action: string; mode?: string; provider?: string; status?: string; currentPage?: string; recordId?: string | null; sourceDocumentIds?: number[]; error?: string | null; detail?: string }) {
+export function logActivity(db: any, e: { userId?: number | null; module?: string; action: string; mode?: string; provider?: string; status?: string; currentPage?: string; recordId?: string | null; sourceDocumentIds?: number[]; error?: string | null; detail?: string; onlineUsed?: boolean; redactionApplied?: boolean; documentName?: string | null; taskType?: string | null }) {
   try {
-    db.prepare(`INSERT INTO dennis_activity_logs (user_id, module, action, dennis_mode, provider, status, current_page, record_id, source_document_ids, error_message, detail)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    db.prepare(`INSERT INTO dennis_activity_logs (user_id, module, action, dennis_mode, provider, status, current_page, record_id, source_document_ids, error_message, detail, online_used, redaction_applied, document_name, task_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       e.userId ?? null, e.module ?? 'dennis', e.action, e.mode ?? 'offline', e.provider ?? null, e.status ?? 'ok',
-      e.currentPage ?? null, e.recordId ?? null, e.sourceDocumentIds?.length ? JSON.stringify(e.sourceDocumentIds) : null, e.error ?? null, e.detail ?? null);
+      e.currentPage ?? null, e.recordId ?? null, e.sourceDocumentIds?.length ? JSON.stringify(e.sourceDocumentIds) : null, e.error ?? null, e.detail ?? null,
+      e.onlineUsed ? 1 : 0, e.redactionApplied ? 1 : 0, e.documentName ?? null, e.taskType ?? null);
   } catch { /* logging must never break the request */ }
 }
 
@@ -293,21 +297,16 @@ export async function askDennis(db: any, opts: { question: string; context?: any
   });
   const contextBlock = fullChunks.map((c, i) => `[${i + 1}] ${c.cite}\n${c.text}`).join('\n\n');
   const settings = providerSettings(db);
-  const mode = rawSettings(db)['dennis.mode'] || 'Offline only';
   const system = 'You are Dennis, a laboratory quality management assistant for SECH_LIMS. Answer ONLY from the provided approved-document excerpts. If the excerpts do not contain the answer, say you do not have enough source text. Be concise. Never invent facts, never make compliance decisions.';
   const userPrompt = `Question: ${q}\n\nApproved document excerpts:\n${contextBlock}\n\nGive a short answer grounded only in these excerpts.`;
 
+  // STRICT HYBRID POLICY: general chat NEVER uses online AI (it can reference any
+  // operational record). It runs on the local Ollama model, or an extractive
+  // answer if no local model is available. Online AI is reserved for the
+  // dedicated SOP/document-analysis path only (see analyzeSop).
   let answerBody = ''; let usedMode = 'offline-extractive'; let provider = 'none';
-  const wantOnline = !!opts.allowOnline && settings.onlineEnabled && !!settings.onlineApiKey && mode !== 'Offline only';
   try {
-    if (wantOnline) {
-      if (rawSettings(db)['dennis.online.confirmRequired'] === 'true' && !opts.confirmed) {
-        return { answer: 'CONFIRM_ONLINE', sources, mode: 'awaiting-confirmation', notice: DENNIS_NOTICE };
-      }
-      const red = redact(`${q}\n${contextBlock}`);
-      answerBody = await onlineChat(settings, system, `Question: ${q}\n\nApproved document excerpts (redacted):\n${red.redacted}\n\nGive a short answer grounded only in these excerpts.`);
-      usedMode = 'online'; provider = settings.onlineProvider;
-    } else if (settings.localEnabled && mode !== 'Online only') {
+    if (settings.localEnabled) {
       answerBody = await localChat(settings, [{ role: 'system', content: system }, { role: 'user', content: userPrompt }]);
       usedMode = 'local'; provider = settings.localProvider;
     }
@@ -326,7 +325,7 @@ export async function askDennis(db: any, opts: { question: string; context?: any
   }
   const sourceList = results.map((r, i) => `${i + 1}. ${citation(r)} — status: ${r.status ?? 'n/a'}`).join('\n');
   const answer = `${answerBody.trim()}\n\nSources:\n${sourceList}`;
-  logActivity(db, { userId: opts.userId, module: 'dennis', action: 'ask', status: 'ok', mode: usedMode, provider, currentPage: opts.context?.currentRoute, sourceDocumentIds: results.map(r => r.sourceDocumentId).filter(Boolean) as number[], detail: q.slice(0, 120) });
+  logActivity(db, { userId: opts.userId, module: 'dennis', action: 'ask', status: 'ok', mode: usedMode, provider, onlineUsed: false, redactionApplied: false, currentPage: opts.context?.currentRoute, sourceDocumentIds: results.map(r => r.sourceDocumentId).filter(Boolean) as number[], detail: q.slice(0, 120) });
   return { answer, sources, mode: usedMode, notice: DENNIS_NOTICE };
 }
 
@@ -370,19 +369,16 @@ export async function moduleHelper(db: any, opts: { module: string; task: string
   const docs = searchDennis(db, { q: query, userId: opts.userId, limit: 3 });
   const sources = docs.map(r => ({ title: r.title, documentCode: r.documentCode, version: r.version, section: r.sectionHeading, sourceDocumentId: r.sourceDocumentId }));
   const settings = providerSettings(db);
-  const mode = rawSettings(db)['dennis.mode'] || 'Offline only';
   const grounding = docs.map((r, i) => `[${i + 1}] ${citation(r)}: ${r.excerpt.replace(/[〔〕]/g, '')}`).join('\n');
   const system = 'You are Dennis, a SECH_LIMS quality assistant. You draft and suggest only — you never finalise official actions (no approvals, no closing records). Ground suggestions in the provided record and approved documents. Do not invent facts. Do not include patient or donor identifiers.';
   const userPrompt = `Task: ${instruction}\n\nRecord context:\n${recordContext || '(none provided)'}\n\nUser notes:\n${opts.inputText || '(none)'}\n\nRelated approved documents:\n${grounding || '(none indexed)'}`;
 
+  // STRICT HYBRID POLICY: module helpers operate on live operational records
+  // (NC/CAPA, audit, complaints, equipment, risks, …) and therefore NEVER use
+  // online AI. They run locally on Ollama, or fall back to an offline template.
   let draft = ''; let usedMode = 'offline-template'; let provider = 'none';
-  const wantOnline = !!opts.allowOnline && settings.onlineEnabled && !!settings.onlineApiKey && mode !== 'Offline only';
   try {
-    if (wantOnline) {
-      if (rawSettings(db)['dennis.online.confirmRequired'] === 'true' && !opts.confirmed) return { draft: 'CONFIRM_ONLINE', sources, mode: 'awaiting-confirmation', notice: DENNIS_NOTICE };
-      const red = redact(userPrompt);
-      draft = await onlineChat(settings, system, red.redacted); usedMode = 'online'; provider = settings.onlineProvider;
-    } else if (settings.localEnabled && mode !== 'Online only') {
+    if (settings.localEnabled) {
       draft = await localChat(settings, [{ role: 'system', content: system }, { role: 'user', content: userPrompt }]); usedMode = 'local'; provider = settings.localProvider;
     }
   } catch (e) {
@@ -400,8 +396,109 @@ export async function moduleHelper(db: any, opts: { module: string; task: string
     db.prepare('INSERT INTO dennis_suggestions (user_id, module, source_record_id, suggestion_type, input_text, dennis_output, accepted) VALUES (?,?,?,?,?,?,0)')
       .run(opts.userId, opts.module, opts.recordId ?? null, opts.task, opts.inputText ?? null, draft);
   } catch { /* ignore */ }
-  logActivity(db, { userId: opts.userId, module: opts.module, action: `helper_${opts.task}`, status: 'ok', mode: usedMode, provider, recordId: opts.recordId ?? null, sourceDocumentIds: docs.map(d => d.sourceDocumentId).filter(Boolean) as number[] });
+  logActivity(db, { userId: opts.userId, module: opts.module, action: `helper_${opts.task}`, status: 'ok', mode: usedMode, provider, onlineUsed: false, redactionApplied: false, taskType: opts.task, recordId: opts.recordId ?? null, sourceDocumentIds: docs.map(d => d.sourceDocumentId).filter(Boolean) as number[] });
   return { draft, sources, mode: usedMode, notice: DENNIS_NOTICE };
+}
+
+// ── SOP / document analysis (the ONLY online-capable Dennis path) ─────────────
+export const SOP_TASKS: Record<string, { label: string; instruction: string }> = {
+  summarize: { label: 'Summarise SOP', instruction: 'Summarise this SOP in clear plain language: its purpose, scope, the key steps, and any critical safety or quality control points. Stay faithful to the source.' },
+  responsibilities: { label: 'Extract responsibilities', instruction: 'List every role/position named in this SOP and the specific responsibilities assigned to each. Output as "Role — responsibility" bullet points.' },
+  records_forms: { label: 'Extract required records/forms', instruction: 'List all records, forms, logs, registers and evidence this SOP requires to be created, completed or retained. For each, give its name and when it is used.' },
+  missing_sections: { label: 'Identify missing sections', instruction: 'Against a standard ISO 15189 SOP template (Purpose, Scope, Responsibility, Definitions, Materials/Equipment, Procedure, Quality Control/Safety, References, Records), identify which expected sections appear to be missing or weak in this SOP.' },
+  checklist: { label: 'Implementation checklist', instruction: 'Create a practical implementation checklist a laboratory section can use to put this SOP into practice (training, materials, records set-up, QC, verification). Use checkbox bullet points.' },
+  training_notes: { label: 'Staff training notes', instruction: 'Write concise staff training notes from this SOP suitable for a short briefing — what staff must know and must do. Stay faithful to the source.' },
+  quiz: { label: 'Competency questions', instruction: 'Generate 6 competency/quiz questions with model answers, drawn only from this SOP, to assess staff understanding.' },
+  improve_wording: { label: 'Improve SOP wording', instruction: 'Suggest clearer, more precise wording for this SOP without changing its technical meaning. Present suggested improvements; do not invent new requirements.' },
+  compare: { label: 'Compare SOPs', instruction: 'Compare the two SOPs provided. Identify key differences in scope, steps, responsibilities and required records, and flag any conflicting instructions. Note which appears more complete.' },
+};
+
+function resolveSopText(db: any, src: { documentId?: number; versionId?: number; fileId?: number; text?: string; name?: string }): { text: string; name: string } {
+  if (src.text && src.text.trim()) return { text: src.text, name: src.name || 'pasted text' };
+  let versionRow: any = null; let docRow: any = null;
+  if (src.versionId) versionRow = db.prepare('SELECT * FROM document_versions WHERE id = ?').get(src.versionId);
+  if (!versionRow && src.documentId) {
+    docRow = db.prepare('SELECT * FROM documents WHERE id = ?').get(src.documentId);
+    if (docRow?.current_version_id) versionRow = db.prepare('SELECT * FROM document_versions WHERE id = ?').get(docRow.current_version_id);
+  }
+  if (!docRow && versionRow?.document_id) docRow = db.prepare('SELECT * FROM documents WHERE id = ?').get(versionRow.document_id);
+  let text = (versionRow?.content_text as string) || '';
+  let name = docRow ? `${docRow.document_code ? docRow.document_code + ' — ' : ''}${docRow.title}` : '';
+  const fileId = src.fileId || versionRow?.file_id;
+  if ((!text || text.length < 20) && fileId) {
+    const file = db.prepare('SELECT * FROM files WHERE id = ?').get(fileId) as any;
+    if (file) {
+      const root = file.storage_area === 'evidence' ? evidenceRoot : uploadRoot;
+      const r = extractDocument(path.join(root, file.stored_name), file.original_name, file.mime_type);
+      text = r.text; if (!name) name = file.original_name;
+    }
+  }
+  return { text, name: name || 'document' };
+}
+
+function offlineSopFallback(task: string, primary: { text: string; name: string }, compare: { text: string; name: string } | null): string {
+  const t = primary.text;
+  const grab = (re: RegExp) => { const m = t.match(re); return m && m.index != null ? t.slice(m.index, m.index + 1500).trim() : ''; };
+  let body = '';
+  if (task === 'responsibilities') body = grab(/responsibilit(?:y|ies)/i);
+  else if (task === 'records_forms') body = grab(/records?|forms?|registers?|logs?/i);
+  else if (task === 'compare' && compare) body = `SOP A — ${primary.name}\n${primary.text.slice(0, 700)}\n\nSOP B — ${compare.name}\n${compare.text.slice(0, 700)}`;
+  else body = t.slice(0, 1400);
+  return `Offline extract (no AI model responded). Enable the local Ollama model in Dennis Settings for a full ${SOP_TASKS[task]?.label || task}.\n\n${body || t.slice(0, 900)}`;
+}
+
+export type SopAnalysis = { output: string; mode: string; provider: string; onlineUsed: boolean; redactionApplied: boolean; sensitive: boolean; reasons: string[]; warning?: string; documentName: string; notice: string; error?: string };
+
+export async function analyzeSop(db: any, opts: { task: string; documentId?: number; versionId?: number; fileId?: number; text?: string; name?: string; compareDocumentId?: number; compareVersionId?: number; compareFileId?: number; compareText?: string; userId: number; confirmed?: boolean }): Promise<SopAnalysis> {
+  const taskDef = SOP_TASKS[opts.task];
+  const base: SopAnalysis = { output: '', mode: 'none', provider: 'none', onlineUsed: false, redactionApplied: false, sensitive: false, reasons: [], documentName: 'document', notice: DENNIS_NOTICE };
+  if (!taskDef) return { ...base, error: 'Unknown SOP analysis task.' };
+  const primary = resolveSopText(db, opts);
+  base.documentName = primary.name;
+  if (!primary.text || primary.text.trim().length < 20) return { ...base, error: 'No readable document text to analyse. Open the document and use “Re-read from file”, or upload a Word/PDF/text file.' };
+  let compare: { text: string; name: string } | null = null;
+  if (opts.task === 'compare') {
+    compare = resolveSopText(db, { documentId: opts.compareDocumentId, versionId: opts.compareVersionId, fileId: opts.compareFileId, text: opts.compareText });
+    if (!compare.text || compare.text.trim().length < 20) return { ...base, error: 'Select a second document with readable content to compare against.' };
+  }
+
+  const combined = `${primary.text}\n${compare?.text || ''}`;
+  const cls = classifySensitive(combined);
+  const settings = providerSettings(db);
+  const mode = rawSettings(db)['dennis.mode'] || 'Hybrid recommended';
+  const confirmRequired = rawSettings(db)['dennis.online.confirmRequired'] !== 'false';
+  // Online is allowed ONLY for non-sensitive SOP/document content, in an
+  // online-capable mode, with a configured + enabled provider.
+  const onlineAllowed = !cls.sensitive && ONLINE_CAPABLE_MODES.includes(mode) && settings.onlineEnabled && !!settings.onlineApiKey;
+
+  if (onlineAllowed && confirmRequired && !opts.confirmed) {
+    return { ...base, output: 'CONFIRM_ONLINE', mode: 'awaiting-confirmation', provider: settings.onlineProvider, sensitive: cls.sensitive, reasons: cls.reasons };
+  }
+
+  const system = 'You are Dennis, a SECH_LIMS quality assistant analysing a controlled SOP/document. Be accurate and faithful to the provided text. Never invent requirements. Do not include any patient, donor or staff personal identifiers in your answer.';
+  const buildUser = (txt: string, cmp?: string | null) => `Task: ${taskDef.instruction}\n\nSOP TEXT:\n${txt}${cmp ? `\n\nSECOND SOP TEXT:\n${cmp}` : ''}`;
+
+  let output = ''; let usedMode = 'offline'; let provider = 'none'; let onlineUsed = false; let redactionApplied = false;
+  try {
+    if (onlineAllowed) {
+      const r1 = redact(primary.text); const r2 = compare ? redact(compare.text) : null; redactionApplied = true;
+      output = await onlineChat(settings, system, buildUser(r1.redacted, r2?.redacted));
+      usedMode = 'online'; provider = settings.onlineProvider; onlineUsed = true;
+    } else if (settings.localEnabled) {
+      output = await localChat(settings, [{ role: 'system', content: system }, { role: 'user', content: buildUser(primary.text.slice(0, 12000), compare?.text.slice(0, 12000) || null) }]);
+      usedMode = 'local'; provider = settings.localProvider;
+    }
+  } catch (e) {
+    logActivity(db, { userId: opts.userId, module: 'documents', action: `sop_${opts.task}`, status: 'provider_error', provider, onlineUsed, redactionApplied, documentName: primary.name, taskType: opts.task, error: e instanceof Error ? e.message : 'provider error' });
+    output = '';
+  }
+  if (!output.trim()) { output = offlineSopFallback(opts.task, primary, compare); usedMode = 'offline-extractive'; }
+
+  const warning = cls.sensitive
+    ? `This document appears to contain ${cls.reasons.join(', ')}. Online AI was blocked for safety — analysis ran offline on Ollama only.`
+    : undefined;
+  logActivity(db, { userId: opts.userId, module: 'documents', action: `sop_${opts.task}`, status: 'ok', mode: usedMode, provider, onlineUsed, redactionApplied, documentName: primary.name, taskType: opts.task, sourceDocumentIds: opts.documentId ? [opts.documentId] : [] });
+  return { output, mode: usedMode, provider, onlineUsed, redactionApplied, sensitive: cls.sensitive, reasons: cls.reasons, warning, documentName: primary.name, notice: DENNIS_NOTICE };
 }
 
 // ── Real alerts (read-only, computed from existing modules) ───────────────────

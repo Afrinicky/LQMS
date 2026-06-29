@@ -387,6 +387,7 @@ export function DocumentControlPage() {
 
     {viewer && <DocumentViewer key={`${viewer.docId}-${viewer.versionId}`} docId={viewer.docId} versionId={viewer.versionId} attestationId={viewer.attestationId}
       workflowStatus={viewer.workflowStatus} onWorkflowAction={(action: string) => workflowAction(viewer.docId, action)}
+      documents={documents}
       onClose={() => setViewer(null)} onAttest={signAttestation} onSaved={() => { if (selectedDoc?.id === viewer.docId) openDoc(viewer.docId); }} onError={setError} />}
 
     {tab === 'Dashboard' && (summary ? <>
@@ -611,8 +612,78 @@ function DocReader({ html, zoom, height }: { html: string; zoom: number; height:
 // ============================================================================
 // In-app document viewer / editor
 // ============================================================================
-function DocumentViewer(props: { docId: number; versionId: number; attestationId?: number; workflowStatus?: string; onWorkflowAction?: (action: string) => Promise<void>; onClose: () => void; onAttest: (attId: number, docId: number) => void; onSaved: () => void; onError: (m: string) => void }) {
-  const { docId, versionId, attestationId, workflowStatus, onWorkflowAction, onClose, onAttest, onSaved, onError } = props;
+// SOP / document AI analysis tools. These are the ONLY place Dennis may use the
+// online AI provider — and only in Hybrid / Online-drafting mode, after redaction,
+// and only when the content is classified as SOP/document (not patient/operational
+// data). Everything else in the app stays on the offline Ollama model.
+type SopResult = { output: string; mode: string; provider: string; onlineUsed: boolean; redactionApplied: boolean; sensitive: boolean; reasons: string[]; warning?: string; documentName: string; error?: string };
+const SOP_ACTIONS: Array<{ task: string; label: string }> = [
+  { task: 'summarize', label: 'Summarise SOP' },
+  { task: 'responsibilities', label: 'Extract responsibilities' },
+  { task: 'records_forms', label: 'Extract required records/forms' },
+  { task: 'missing_sections', label: 'Identify missing sections' },
+  { task: 'checklist', label: 'Implementation checklist' },
+  { task: 'training_notes', label: 'Staff training notes' },
+  { task: 'quiz', label: 'Competency questions' },
+  { task: 'improve_wording', label: 'Improve SOP wording' },
+  { task: 'compare', label: 'Compare SOPs' },
+];
+function SopTools({ docId, versionId, documents }: { docId: number; versionId: number; documents?: DocumentRecord[] }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [result, setResult] = useState<SopResult | null>(null);
+  const [compareId, setCompareId] = useState('');
+  const [confirm, setConfirm] = useState<{ task: string } | null>(null);
+
+  async function run(task: string, confirmed = false) {
+    if (task === 'compare' && !compareId) { setResult({ output: '', mode: 'none', provider: 'none', onlineUsed: false, redactionApplied: false, sensitive: false, reasons: [], documentName: '', error: 'Choose a second document to compare against.' }); return; }
+    setBusy(task); setConfirm(null);
+    try {
+      const body: Record<string, unknown> = { task, documentId: docId, versionId, confirmed };
+      if (task === 'compare') body.compareDocumentId = Number(compareId);
+      const r = await api<SopResult & { output: string }>('/dennis/sop-analyze', { method: 'POST', body: JSON.stringify(body) });
+      if (r.output === 'CONFIRM_ONLINE') { setConfirm({ task }); setResult(null); }
+      else setResult(r);
+    } catch (e) { setResult({ output: '', mode: 'error', provider: 'none', onlineUsed: false, redactionApplied: false, sensitive: false, reasons: [], documentName: '', error: (e as Error).message }); }
+    finally { setBusy(null); }
+  }
+
+  const others = (documents || []).filter(d => d.id !== docId);
+  return <div style={{ marginTop: 12, padding: 12, background: '#0f1830', border: '1px solid #24365e', borderRadius: 8 }}>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+      <strong style={{ color: '#cdd9f0', fontSize: 13 }}>🤖 SOP analysis with Dennis</strong>
+      <button className="secondary" onClick={() => setOpen(o => !o)}>{open ? 'Hide' : 'Show tools'}</button>
+    </div>
+    {open && <>
+      <p style={{ fontSize: 11.5, color: '#8fa3c8', margin: '6px 0 8px' }}>Offline Ollama runs these by default. If you enable Hybrid mode with an online provider, Dennis may use it for stronger SOP understanding — only after redaction, and never when patient/operational data is detected.</p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+        {SOP_ACTIONS.map(a => <button key={a.task} className="secondary" disabled={!!busy} onClick={() => run(a.task)}>{busy === a.task ? 'Working…' : a.label}</button>)}
+      </div>
+      {others.length > 0 && <label style={{ fontSize: 12, color: '#9fb2d6' }}>Compare with:&nbsp;
+        <select value={compareId} onChange={e => setCompareId(e.target.value)}><option value="">— choose document —</option>{others.map(d => <option key={d.id} value={d.id}>{d.document_code ? `${d.document_code} — ` : ''}{d.title}</option>)}</select>
+      </label>}
+      {confirm && <div style={{ marginTop: 8, padding: 10, background: '#3a2a12', border: '1px solid #6b4e1f', borderRadius: 6, color: '#f3d9a6', fontSize: 12.5 }}>
+        Online AI may send this document's text outside the hospital network. Use only for SOPs and non-patient documents. Continue?
+        <div style={{ marginTop: 6, display: 'flex', gap: 8 }}><button onClick={() => run(confirm.task, true)}>Yes, use online AI</button><button className="secondary" onClick={() => setConfirm(null)}>Cancel</button></div>
+      </div>}
+      {result && <div style={{ marginTop: 8 }}>
+        {result.error ? <div className="error">{result.error}</div> : <>
+          <div style={{ fontSize: 11.5, color: '#9fb2d6', marginBottom: 4, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span className="badge">{result.mode}{result.provider && result.provider !== 'none' ? ` · ${result.provider}` : ''}</span>
+            {result.onlineUsed ? <span className="badge warning">online · redacted</span> : <span className="badge">offline · on-premises</span>}
+            <span>Review before use.</span>
+          </div>
+          {result.warning && <div className="warning" style={{ margin: '4px 0' }}>⚠ {result.warning}</div>}
+          <pre style={{ whiteSpace: 'pre-wrap', background: '#0c1428', border: '1px solid #24365e', borderRadius: 6, padding: 12, color: '#dbe6fb', fontSize: 12.5, maxHeight: '38vh', overflow: 'auto' }}>{result.output}</pre>
+          <button className="secondary" onClick={() => navigator.clipboard?.writeText(result.output)}>Copy</button>
+        </>}
+      </div>}
+    </>}
+  </div>;
+}
+
+function DocumentViewer(props: { docId: number; versionId: number; attestationId?: number; workflowStatus?: string; documents?: DocumentRecord[]; onWorkflowAction?: (action: string) => Promise<void>; onClose: () => void; onAttest: (attId: number, docId: number) => void; onSaved: () => void; onError: (m: string) => void }) {
+  const { docId, versionId, attestationId, workflowStatus, documents, onWorkflowAction, onClose, onAttest, onSaved, onError } = props;
   const [content, setContent] = useState<VersionContent | null>(null);
   const [mode, setMode] = useState<'content' | 'original'>('content');
   const [editing, setEditing] = useState(false);
@@ -763,6 +834,8 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
               <p>This file type cannot be previewed inline ({content?.file_mime || 'unknown type'}) and no readable content was captured.</p>
               {fileUrl && <a className="badge" style={{ cursor: 'pointer' }} onClick={() => { const a = document.createElement('a'); a.href = fileUrl; a.download = content?.file_name || 'document'; a.click(); }}>Download file</a>}
             </div>)}
+
+      {content && <SopTools docId={docId} versionId={versionId} documents={documents} />}
 
       {/* Workflow stage: comments + the single stage-appropriate transition. */}
       {workflowStatus && <div style={{ marginTop: 12, padding: 12, background: '#0f1830', border: '1px solid #24365e', borderRadius: 8 }}>
