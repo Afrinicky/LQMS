@@ -1291,10 +1291,112 @@ export function ActionTracker(){
   </div>;
 }
 
+type BackupEntry = { fileName: string; sizeBytes: number; createdAt: string; source: string; downloadPath: string };
+
+function formatBytes(n: number): string {
+  if (!n) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
+  return `${(n / Math.pow(1024, i)).toFixed(i ? 1 : 0)} ${units[i]}`;
+}
+
 export function BackupRestore(){
-  return <div className="card"><h3>Backup &amp; Restore</h3><p>Backups use the Node archiver ZIP library and include SQLite, uploads, evidence, config, and backup-manifest.json. Restore remains a safe placeholder.</p>
-    <button onClick={()=>api('/backup/create',{method:'POST'}).then(r=>alert(JSON.stringify(r)))}>Create backup package</button>
-    <button className="secondary" onClick={()=>api('/backup/restore-placeholder',{method:'POST'}).then(r=>alert(JSON.stringify(r)))}>Restore placeholder</button>
+  const [backups, setBackups] = useState<BackupEntry[]>([]);
+  const [location, setLocation] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const load = () => api<{ location: string; backups: BackupEntry[] }>('/backup/list')
+    .then(r => { setBackups(r.backups); setLocation(r.location); })
+    .catch(e => setError(e.message));
+  useEffect(() => { void load(); }, []);
+
+  async function createBackup() {
+    setBusy(true); setError(null); setMessage(null);
+    try {
+      const r = await api<{ fileName: string; sizeBytes: number; location: string }>('/backup/create', { method: 'POST' });
+      setMessage(`Backup created: ${r.fileName} (${formatBytes(r.sizeBytes)}). Saved in ${r.location}. Use Download to save a copy anywhere you like.`);
+      await load();
+    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  }
+
+  async function download(entry: BackupEntry) {
+    setError(null);
+    try {
+      const token = getToken();
+      const res = await fetch(`${API_BASE}${entry.downloadPath}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+      if (!res.ok) throw new Error('Download failed.');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = entry.fileName;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  const CONFIRM = 'This REPLACES the current database, uploads, evidence and config with the contents of the backup. A pre-restore safety backup is created automatically first. You may need to sign in again afterwards.\n\nContinue?';
+
+  async function restoreExisting(entry: BackupEntry) {
+    if (!window.confirm(`Restore from "${entry.fileName}"?\n\n${CONFIRM}`)) return;
+    setBusy(true); setError(null); setMessage(null);
+    try {
+      const r = await api<{ message: string; safetyBackup: string }>('/backup/restore', { method: 'POST', body: JSON.stringify({ fileName: entry.fileName }) });
+      setMessage(`${r.message} (Safety snapshot saved as ${r.safetyBackup}.)`);
+      await load();
+    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  }
+
+  async function restoreFromUpload() {
+    if (!restoreFile) return;
+    if (!window.confirm(`Restore from uploaded file "${restoreFile.name}"?\n\n${CONFIRM}`)) return;
+    setBusy(true); setError(null); setMessage(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', restoreFile);
+      const r = await api<{ message: string; safetyBackup: string }>('/backup/restore', { method: 'POST', body: fd });
+      setMessage(`${r.message} (Safety snapshot saved as ${r.safetyBackup}.)`);
+      setRestoreFile(null);
+      if (fileRef.current) fileRef.current.value = '';
+      await load();
+    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  }
+
+  return <div className="card"><h3>Backup &amp; Restore</h3>
+    <p>Backups are ZIP archives that include the SQLite database, uploads, evidence, config, and a backup-manifest.json. They are stored on the server at <code>{location || 'the backups folder'}</code>. Use <strong>Download</strong> to keep a copy anywhere, and restore from an existing backup or from a ZIP file on your computer.</p>
+
+    {error && <p className="error" role="alert">{error}</p>}
+    {message && <p className="hint" role="status">{message}</p>}
+
+    <div className="form-actions">
+      <button onClick={createBackup} disabled={busy}>{busy ? 'Working…' : 'Create backup (ZIP)'}</button>
+    </div>
+
+    <h4>Available backups</h4>
+    {backups.length === 0
+      ? <p className="hint">No backups yet. Create one above.</p>
+      : <table className="table"><thead><tr><th>File</th><th>Size</th><th>Created</th><th>Source</th><th>Actions</th></tr></thead><tbody>
+          {backups.map(b => <tr key={b.fileName}>
+            <td>{b.fileName}</td>
+            <td>{formatBytes(b.sizeBytes)}</td>
+            <td>{new Date(b.createdAt).toLocaleString()}</td>
+            <td>{b.source === 'system' ? 'This system' : 'External'}</td>
+            <td>
+              <button className="secondary" onClick={() => download(b)} disabled={busy}>Download</button>{' '}
+              <button onClick={() => restoreExisting(b)} disabled={busy}>Restore</button>
+            </td>
+          </tr>)}
+        </tbody></table>}
+
+    <h4>Restore from a ZIP file</h4>
+    <p className="hint">Select a backup ZIP saved on your computer (for example one you downloaded earlier) and restore it.</p>
+    <div className="form-actions">
+      <input ref={fileRef} type="file" accept=".zip,application/zip" onChange={e => setRestoreFile(e.target.files?.[0] ?? null)} />
+      <button onClick={restoreFromUpload} disabled={busy || !restoreFile}>{busy ? 'Working…' : 'Restore from selected ZIP'}</button>
+    </div>
   </div>;
 }
 

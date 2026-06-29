@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
-import { getDb, uploadRoot, evidenceRoot, backupRoot, dbPath, configRoot, dataRoot } from '../db/database.js';
+import { getDb, closeDb, ensureDataDirs, uploadRoot, evidenceRoot, backupRoot, dbPath, configRoot, dataRoot } from '../db/database.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
@@ -20,9 +20,66 @@ import * as XLSX from 'xlsx';
 //     ERR_REQUIRE_ESM because archiver-utils is itself ESM.
 // A lazy dynamic import works in dev, production, and packaged modes and
 // keeps the rest of the app bootable even if archiver fails to resolve.
-async function loadArchiver(): Promise<(format: string, options?: unknown) => any> {
+async function loadArchiver(): Promise<(format: string, options?: any) => any> {
   const mod: any = await import('archiver');
-  return (mod.default ?? mod) as (format: string, options?: unknown) => any;
+  const factory = mod.default ?? mod;
+  // archiver <= v7: the module is a callable factory, archiver('zip', opts).
+  if (typeof factory === 'function') return factory as (format: string, options?: any) => any;
+  // archiver >= v8: pure ESM that exports format-specific classes instead of a
+  // factory. Provide a factory shim so the rest of the code is version-agnostic.
+  return (format: string, options?: any) => {
+    switch (format) {
+      case 'tar': return new mod.TarArchive(options);
+      case 'json': return new mod.JsonArchive(options);
+      case 'zip':
+      default: return new mod.ZipArchive(options);
+    }
+  };
+}
+
+// adm-zip is loaded lazily for the same packaging reasons as archiver above:
+// it is a CommonJS module and a top-level static import breaks under app.asar.
+// A dynamic import resolves the default-exported AdmZip class in dev, prod and
+// packaged Electron alike. It is only needed when a restore actually runs.
+async function loadAdmZip(): Promise<any> {
+  const mod: any = await import('adm-zip');
+  return mod.default ?? mod;
+}
+
+// Only allow plain backup file names (no path separators / traversal) when a
+// caller references an existing backup by name for download or restore.
+function isSafeBackupName(name: string): boolean {
+  return typeof name === 'string' && /^[A-Za-z0-9._-]+\.zip$/.test(name) && !name.includes('..');
+}
+
+// Write a backup ZIP of the current deployment (SQLite + uploads + evidence +
+// config + manifest) to targetPath. Shared by the manual "Create backup"
+// endpoint and the automatic pre-restore safety snapshot.
+async function writeBackupZip(targetPath: string, manifest: unknown): Promise<void> {
+  const archiver = await loadArchiver();
+  await new Promise<void>((resolve, reject) => {
+    const output = fs.createWriteStream(targetPath);
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    output.on('close', resolve);
+    archive.on('error', reject);
+    archive.pipe(output);
+    if (fs.existsSync(dbPath)) archive.file(dbPath, { name: 'database/sech_lims.sqlite' });
+    if (fs.existsSync(uploadRoot)) archive.directory(uploadRoot, 'uploads');
+    if (fs.existsSync(evidenceRoot)) archive.directory(evidenceRoot, 'evidence');
+    if (fs.existsSync(configRoot)) archive.directory(configRoot, 'config');
+    archive.append(JSON.stringify(manifest, null, 2), { name: 'backup-manifest.json' });
+    archive.finalize();
+  });
+}
+
+// Replace the contents of a destination directory with an extracted source
+// directory from a backup. A missing source directory leaves the destination
+// untouched (the backup simply had nothing for that area).
+function replaceDirFromBackup(sourceDir: string, destDir: string): void {
+  if (!fs.existsSync(sourceDir)) return;
+  fs.rmSync(destDir, { recursive: true, force: true });
+  fs.mkdirSync(destDir, { recursive: true });
+  fs.cpSync(sourceDir, destDir, { recursive: true });
 }
 
 // Safe foreign-key id coercion: empty string / null / undefined / 0 → null,
@@ -1481,33 +1538,166 @@ export function commonRoutes() {
     res.json({ ok: true });
   });
 
+  // Multer instance for restore uploads: stores the incoming ZIP into the
+  // backups folder under a temporary "._upload-restore-*" name (filtered out of
+  // the backup listing). Generous size limit because a full backup includes all
+  // uploads and evidence.
+  const restoreUpload = multer({
+    storage: multer.diskStorage({
+      destination: (_req, _file, cb) => { ensureDataDirs(); cb(null, backupRoot); },
+      filename: (_req, file, cb) => cb(null, `._upload-restore-${Date.now()}-${safeStoredFilename(file.originalname)}`),
+    }),
+    limits: { fileSize: 1024 * 1024 * 1024 }, // 1 GB
+  });
+
   router.post('/backup/create', requirePermission('settings', 'export'), async (req, res) => {
+    ensureDataDirs();
     const fileName = `sech-lims-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.zip`;
     const fullPath = path.join(backupRoot, fileName);
     const manifest = { product: 'SECH_LIMS by Nickland', createdAt: new Date().toISOString(), includes: ['SQLite database', 'uploads', 'evidence', 'config', 'backup-manifest.json'] };
-    let archiver: (format: string, options?: unknown) => any;
+    // Checkpoint the WAL so the snapshot of the SQLite file is fully up to date.
+    try { getDb().pragma('wal_checkpoint(TRUNCATE)'); } catch { /* best-effort */ }
     try {
-      archiver = await loadArchiver();
-    } catch (err) {
-      console.error('[backup/create] failed to load archiver', err);
-      return res.status(500).json({ error: 'Archive engine failed to load. Please check packaged runtime dependencies.' });
-    }
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const output = fs.createWriteStream(fullPath); const archive = archiver('zip', { zlib: { level: 9 } });
-        output.on('close', resolve); archive.on('error', reject); archive.pipe(output);
-        if (fs.existsSync(dbPath)) archive.file(dbPath, { name: 'database/sech_lims.sqlite' });
-        archive.directory(uploadRoot, 'uploads'); archive.directory(evidenceRoot, 'evidence'); archive.directory(configRoot, 'config'); archive.append(JSON.stringify(manifest, null, 2), { name: 'backup-manifest.json' }); archive.finalize();
-      });
+      await writeBackupZip(fullPath, manifest);
     } catch (err) {
       console.error('[backup/create] archive creation failed', err);
       return res.status(500).json({ error: 'Backup ZIP could not be created. See server log for details.' });
     }
+    const sizeBytes = fs.existsSync(fullPath) ? fs.statSync(fullPath).size : 0;
     getDb().prepare('INSERT INTO backup_logs (file_name, manifest, created_by) VALUES (?, ?, ?)').run(fileName, JSON.stringify(manifest), req.user!.id);
     audit(req, { action: 'create', entity: 'backup', entityId: fileName, newValue: manifest });
-    res.status(201).json({ fileName, manifest });
+    res.status(201).json({ fileName, manifest, sizeBytes, location: backupRoot, downloadPath: `/backup/download/${encodeURIComponent(fileName)}` });
   });
-  router.post('/backup/restore-placeholder', requirePermission('settings', 'approve'), (_req, res) => res.json({ ok: true, message: 'Restore is a guarded placeholder in the foundation MVP.' }));
+
+  // List the backup ZIPs available on disk, newest first, merged with any
+  // metadata recorded in backup_logs so the UI can offer download / restore.
+  router.get('/backup/list', requirePermission('settings', 'view'), (_req, res) => {
+    ensureDataDirs();
+    const logs = getDb().prepare('SELECT file_name, created_at FROM backup_logs ORDER BY id DESC').all() as Array<{ file_name: string; created_at: string }>;
+    const logByName = new Map(logs.map(l => [l.file_name, l.created_at]));
+    const files = fs.readdirSync(backupRoot)
+      .filter(f => f.toLowerCase().endsWith('.zip') && !f.startsWith('.') && !f.startsWith('_'))
+      .map(f => {
+        const stat = fs.statSync(path.join(backupRoot, f));
+        return {
+          fileName: f,
+          sizeBytes: stat.size,
+          createdAt: logByName.get(f) ?? stat.mtime.toISOString(),
+          source: logByName.has(f) ? 'system' : 'external',
+          downloadPath: `/backup/download/${encodeURIComponent(f)}`,
+        };
+      })
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    res.json({ location: backupRoot, backups: files });
+  });
+
+  // Stream a backup ZIP back to the browser for the user to save locally.
+  router.get('/backup/download/:fileName', requirePermission('settings', 'export'), (req, res) => {
+    const name = req.params.fileName;
+    if (!isSafeBackupName(name)) return res.status(400).json({ error: 'Invalid backup file name.' });
+    const full = path.join(backupRoot, name);
+    if (!fs.existsSync(full)) return res.status(404).json({ error: 'Backup not found.' });
+    res.download(full, name);
+  });
+
+  // Restore from either an uploaded ZIP (multipart "file") or an existing backup
+  // referenced by name ({ fileName }). The current deployment is snapshotted to a
+  // pre-restore safety ZIP first, then the SQLite database, uploads, evidence and
+  // config are replaced from the backup.
+  router.post('/backup/restore', requirePermission('settings', 'approve'), restoreUpload.single('file'), async (req, res) => {
+    ensureDataDirs();
+    let sourceZip: string;
+    let uploadedTemp: string | null = null;
+    if (req.file) {
+      sourceZip = req.file.path;
+      uploadedTemp = req.file.path;
+    } else if (req.body && typeof req.body.fileName === 'string' && req.body.fileName) {
+      if (!isSafeBackupName(req.body.fileName)) return res.status(400).json({ error: 'Invalid backup file name.' });
+      sourceZip = path.join(backupRoot, req.body.fileName);
+      if (!fs.existsSync(sourceZip)) return res.status(404).json({ error: 'Selected backup was not found on the server.' });
+    } else {
+      return res.status(400).json({ error: 'No backup provided. Upload a ZIP file or choose an existing backup.' });
+    }
+
+    const cleanupUpload = () => { if (uploadedTemp) { try { fs.rmSync(uploadedTemp, { force: true }); } catch { /* ignore */ } } };
+
+    // Open and validate the ZIP before touching any live data.
+    let AdmZip: any;
+    try {
+      AdmZip = await loadAdmZip();
+    } catch (err) {
+      console.error('[backup/restore] failed to load adm-zip', err);
+      cleanupUpload();
+      return res.status(500).json({ error: 'Archive engine failed to load. Please check packaged runtime dependencies.' });
+    }
+    let entries: Array<{ entryName: string }>;
+    try {
+      const zip = new AdmZip(sourceZip);
+      entries = zip.getEntries();
+      const names = entries.map(e => e.entryName);
+      const looksLikeBackup = names.includes('backup-manifest.json') || names.includes('database/sech_lims.sqlite');
+      if (!looksLikeBackup) {
+        cleanupUpload();
+        return res.status(400).json({ error: 'This ZIP is not a valid SECH_LIMS backup (no database or backup-manifest.json inside).' });
+      }
+    } catch (err) {
+      console.error('[backup/restore] invalid ZIP', err);
+      cleanupUpload();
+      return res.status(400).json({ error: 'The provided file is not a readable ZIP archive.' });
+    }
+
+    // Snapshot current state so a bad restore can be undone.
+    let safetyBackup: string | null = null;
+    try {
+      try { getDb().pragma('wal_checkpoint(TRUNCATE)'); } catch { /* best-effort */ }
+      const safetyName = `pre-restore-${new Date().toISOString().replace(/[:.]/g, '-')}.zip`;
+      const safetyPath = path.join(backupRoot, safetyName);
+      await writeBackupZip(safetyPath, { product: 'SECH_LIMS by Nickland', createdAt: new Date().toISOString(), kind: 'pre-restore-safety-snapshot' });
+      safetyBackup = safetyName;
+    } catch (err) {
+      console.error('[backup/restore] safety snapshot failed', err);
+      cleanupUpload();
+      return res.status(500).json({ error: 'Could not create a pre-restore safety snapshot. Restore aborted; nothing was changed.' });
+    }
+
+    const actorId = req.user!.id;
+    const tmpDir = path.join(backupRoot, `._restore-${Date.now()}`);
+    try {
+      // Extract the backup to a scratch folder.
+      fs.mkdirSync(tmpDir, { recursive: true });
+      new AdmZip(sourceZip).extractAllTo(tmpDir, true);
+
+      // Release the SQLite handles, then swap files into place.
+      closeDb();
+      const restoredDb = path.join(tmpDir, 'database', 'sech_lims.sqlite');
+      if (fs.existsSync(restoredDb)) {
+        for (const ext of ['', '-wal', '-shm']) {
+          const p = dbPath + ext;
+          if (fs.existsSync(p)) fs.rmSync(p, { force: true });
+        }
+        fs.copyFileSync(restoredDb, dbPath);
+      }
+      replaceDirFromBackup(path.join(tmpDir, 'uploads'), uploadRoot);
+      replaceDirFromBackup(path.join(tmpDir, 'evidence'), evidenceRoot);
+      replaceDirFromBackup(path.join(tmpDir, 'config'), configRoot);
+    } catch (err) {
+      console.error('[backup/restore] restore failed', err);
+      try { getDb(); } catch { /* reopen best-effort */ }
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+      cleanupUpload();
+      return res.status(500).json({ error: `Restore failed. A safety snapshot was saved as ${safetyBackup}. See server log for details.` });
+    }
+
+    // Reopen the (now restored) database and record the event.
+    getDb();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanupUpload();
+    try {
+      audit(req, { action: 'restore', entity: 'backup', entityId: req.file ? `upload:${req.file.originalname}` : String(req.body.fileName), newValue: { restoredBy: actorId, safetyBackup } });
+    } catch { /* audit table came from the restored DB; never block on it */ }
+
+    res.json({ ok: true, message: 'Restore completed. The database and files were replaced from the backup. Users may need to sign in again.', safetyBackup });
+  });
   router.get('/audit-log', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 200').all()));
 
   // -------- Phase 15: System health, my-work, setup health, linked records --------
