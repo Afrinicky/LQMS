@@ -115,7 +115,7 @@ Backup creation uses the Node `archiver` ZIP library. Backup packages include:
 - config
 - `backup-manifest.json`
 
-Restore is a guarded placeholder in the foundation MVP.
+Backups are listed in Settings → System → Backup & Restore, where each package can be downloaded to keep an off-server copy. Restore is fully supported: pick an existing backup or upload a backup ZIP from disk. Before any restore the system writes an automatic `pre-restore-*.zip` safety snapshot of the current state, then replaces the SQLite database, uploads, evidence, and config from the backup. Users may need to sign in again afterwards.
 
 ## Build checks
 
@@ -231,6 +231,6 @@ The master dashboard, My Work block on the Home page, and System Health card giv
 - Some export and print layouts are placeholder templates; richer per-report-type designs will follow.
 - PDSA/run-chart designer remains a future improvement.
 - Management review narrative templating remains a future improvement.
-- Restore workflow remains a conservative guarded placeholder.
+- Restore now replaces the database, uploads, evidence, and config from a backup ZIP (existing backup or uploaded file), guarded by an automatic pre-restore safety snapshot.
 - Permissions are wired server-side, but fine-grained UI editing of every permission source is still MVP-level.
 - Installer packaging for Windows needs a final on-target test pass. The Electron shell, Vite build, and host API have been verified through `npm run build`, but a packaged installer should be smoke-tested on the deployment laptop before go-live.
