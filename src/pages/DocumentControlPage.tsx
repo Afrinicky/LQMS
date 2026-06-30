@@ -3,6 +3,7 @@ import PageHeader from '../components/ui/PageHeader';
 import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
+import type { OfficeFileChangedPayload } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import type {
   Section, Department, Staff, Position,
@@ -706,25 +707,25 @@ function WordToolbar({ editorRef }: { editorRef: { current: HTMLDivElement | nul
   const insertLink = () => { const url = prompt('Link URL (https://…):'); if (url) exec('createLink', url); };
   const B = ({ cmd, val, title, children }: { cmd: string; val?: string; title: string; children: React.ReactNode }) =>
     <button type="button" className="wt-btn" title={title} onMouseDown={e => e.preventDefault()} onClick={() => exec(cmd, val)}>{children}</button>;
-  return <div className="word-toolbar" onMouseDown={e => e.preventDefault()}>
+  return <div className="word-toolbar">
     <div className="wt-group">
       <B cmd="undo" title="Undo">↶</B><B cmd="redo" title="Redo">↷</B>
     </div>
     <div className="wt-group">
-      <select className="wt-select" title="Paragraph style" defaultValue="" onChange={e => { block(e.target.value || 'P'); e.target.value = ''; }}>
+      <select className="wt-select" title="Paragraph style" defaultValue="" onMouseDown={e => e.stopPropagation()} onChange={e => { block(e.target.value || 'P'); e.target.value = ''; }}>
         <option value="">Style</option><option value="P">Normal</option><option value="H1">Heading 1</option><option value="H2">Heading 2</option><option value="H3">Heading 3</option><option value="PRE">Preformatted</option>
       </select>
-      <select className="wt-select" title="Font" defaultValue="" onChange={e => { if (e.target.value) exec('fontName', e.target.value); e.target.value = ''; }}>
+      <select className="wt-select" title="Font" defaultValue="" onMouseDown={e => e.stopPropagation()} onChange={e => { if (e.target.value) exec('fontName', e.target.value); e.target.value = ''; }}>
         <option value="">Font</option>{WORD_FONTS.map(f => <option key={f} value={f}>{f}</option>)}
       </select>
-      <select className="wt-select" title="Font size" defaultValue="" onChange={e => { if (e.target.value) exec('fontSize', e.target.value); e.target.value = ''; }}>
+      <select className="wt-select" title="Font size" defaultValue="" onMouseDown={e => e.stopPropagation()} onChange={e => { if (e.target.value) exec('fontSize', e.target.value); e.target.value = ''; }}>
         <option value="">Size</option>{WORD_SIZES.map(([v, pt]) => <option key={v} value={v}>{pt}pt</option>)}
       </select>
     </div>
     <div className="wt-group">
       <B cmd="bold" title="Bold"><b>B</b></B><B cmd="italic" title="Italic"><i>I</i></B><B cmd="underline" title="Underline"><u>U</u></B><B cmd="strikeThrough" title="Strikethrough"><s>S</s></B>
-      <label className="wt-btn" title="Text colour" onMouseDown={e => e.preventDefault()}>A<input type="color" className="wt-color" onChange={e => exec('foreColor', e.target.value)} /></label>
-      <label className="wt-btn" title="Highlight" onMouseDown={e => e.preventDefault()} style={{ background: '#fff3a3' }}>▰<input type="color" className="wt-color" onChange={e => exec('hiliteColor', e.target.value)} /></label>
+      <label className="wt-btn" title="Text colour">A<input type="color" className="wt-color" onMouseDown={e => e.stopPropagation()} onChange={e => exec('foreColor', e.target.value)} /></label>
+      <label className="wt-btn" title="Highlight" style={{ background: '#fff3a3' }}>▰<input type="color" className="wt-color" onMouseDown={e => e.stopPropagation()} onChange={e => exec('hiliteColor', e.target.value)} /></label>
     </div>
     <div className="wt-group">
       <B cmd="insertUnorderedList" title="Bulleted list">•≣</B><B cmd="insertOrderedList" title="Numbered list">1≣</B>
@@ -748,6 +749,9 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
   const [mode, setMode] = useState<'content' | 'original'>('content');
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [exportBusy, setExportBusy] = useState<'download' | 'save' | null>(null);
+  const [officeWatch, setOfficeWatch] = useState<{ watchId: string; fileName: string } | null>(null);
+  const [officeStatus, setOfficeStatus] = useState<string | null>(null);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [maximized, setMaximized] = useState(true);
   const [zoom, setZoom] = useState(1);
@@ -807,6 +811,72 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
       setEditing(false); onSaved();
     } catch (e) { onError((e as Error).message); } finally { setBusy(false); }
   }
+
+  // Build a real .docx from the in-app edited content and download it straight away.
+  async function downloadAsWord() {
+    setExportBusy('download');
+    try {
+      const r = await api<{ fileId: number; originalName: string }>(`/documents/${docId}/versions/${versionId}/export-docx`, { method: 'POST', body: JSON.stringify({}) });
+      const url = await fetchBlobUrl(`/files/${r.fileId}/download`);
+      const a = document.createElement('a'); a.href = url; a.download = r.originalName; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch (e) { onError((e as Error).message); } finally { setExportBusy(null); }
+  }
+  // Build a real .docx and attach it as the document's newest version, so the
+  // in-app edits round-trip into the official record as an openable Word file.
+  async function saveAsWordVersion() {
+    setExportBusy('save');
+    try {
+      await api(`/documents/${docId}/versions/${versionId}/export-docx/save-as-version`, { method: 'POST', body: JSON.stringify({}) });
+      onSaved(); onClose();
+    } catch (e) { onError((e as Error).message); } finally { setExportBusy(null); }
+  }
+
+  // "Open in Microsoft Office" — Electron-only. Opens the stored file with the
+  // OS's default application (Word/Excel/etc.) and watches it for saves; each
+  // save is delivered back here and uploaded as a new document version.
+  async function openInOffice() {
+    if (!content?.file_id || !window.sechLims?.openInOffice) return;
+    setOfficeStatus('Opening…');
+    try {
+      const meta = await api<{ storage_area: string; stored_name: string; original_name: string }>(`/files/${content.file_id}/meta`);
+      const result = await window.sechLims.openInOffice({
+        storageArea: meta.storage_area, storedName: meta.stored_name, originalName: meta.original_name || content.file_name || 'document',
+        docId, versionId,
+      });
+      if (!result.ok) { setOfficeStatus(null); onError(result.error || 'Could not open the file in its default application.'); return; }
+      setOfficeWatch({ watchId: result.watchId!, fileName: meta.original_name || content.file_name || 'document' });
+      setOfficeStatus(`Watching “${meta.original_name || content.file_name}” — saving it in Office will sync it back here automatically as a new version.`);
+    } catch (e) { setOfficeStatus(null); onError((e as Error).message); }
+  }
+  function stopOfficeWatchNow() {
+    if (officeWatch) window.sechLims?.stopOfficeWatch?.(officeWatch.watchId);
+    setOfficeWatch(null); setOfficeStatus(null);
+  }
+  useEffect(() => {
+    if (!window.sechLims?.onOfficeFileChanged) return;
+    const unsubscribe = window.sechLims.onOfficeFileChanged(async (payload: OfficeFileChangedPayload) => {
+      if (!officeWatch || payload.watchId !== officeWatch.watchId) return;
+      setOfficeStatus('Saved in Office — syncing back to SECH_LIMS…');
+      try {
+        const fd = new FormData();
+        fd.append('file', new Blob([new Uint8Array(payload.bytes)], { type: payload.mimeGuess || 'application/octet-stream' }), payload.originalName);
+        const token = getToken();
+        const fr = await fetch(`${API_BASE}/files`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
+        if (!fr.ok) throw new Error((await fr.json().catch(() => ({ error: fr.statusText }))).error ?? fr.statusText);
+        const fdata = await fr.json();
+        const stamp = new Date().toISOString().slice(11, 19).replace(/:/g, '');
+        const nextVersionNumber = `office-sync-${stamp}`;
+        await api(`/documents/${docId}/versions`, { method: 'POST', body: JSON.stringify({ versionNumber: nextVersionNumber, fileId: fdata.id, revisionSummary: 'Synced automatically from Microsoft Office' }) });
+        setOfficeStatus(`Synced as a new version (${nextVersionNumber}). Close and reopen the document to view it.`);
+        onSaved();
+      } catch (e) { setOfficeStatus(null); onError((e as Error).message); }
+    });
+    return unsubscribe;
+  }, [officeWatch, docId]);
+  // Stop watching when the viewer closes, so the main process doesn't keep a
+  // file watcher open for a document the user is no longer looking at.
+  useEffect(() => () => { if (officeWatch) window.sechLims?.stopOfficeWatch?.(officeWatch.watchId); }, [officeWatch]);
 
   const isPdf = content?.file_mime === 'application/pdf' || /\.pdf$/i.test(content?.file_name || '');
   const isImage = (content?.file_mime || '').startsWith('image/');
@@ -870,6 +940,13 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
         {content.content_updated_at && <>Last edited {String(content.content_updated_at).slice(0, 16).replace('T', ' ')}{content.content_updated_by_name ? ` by ${content.content_updated_by_name}` : ''}. </>}
       </div>}
 
+      {content?.file_id && window.sechLims?.openInOffice && <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '0 0 8px', padding: '8px 10px', background: officeWatch ? '#13301f' : '#0f1830', border: `1px solid ${officeWatch ? '#225c3a' : '#24365e'}`, borderRadius: 6 }}>
+        {!officeWatch
+          ? <button className="secondary" onClick={openInOffice} disabled={officeStatus === 'Opening…'} title="Open the stored file in Microsoft Word/Excel/etc. and sync saves back automatically">{officeStatus === 'Opening…' ? 'Opening…' : 'Open in Microsoft Office'}</button>
+          : <button className="secondary" onClick={stopOfficeWatchNow}>Stop watching</button>}
+        {officeStatus && <span style={{ fontSize: 12, color: '#a8c7b6' }}>{officeStatus}</span>}
+      </div>}
+
       {mode === 'content' && content && <div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
           {!editing && <button onClick={() => setEditing(true)}>Edit content</button>}
@@ -878,6 +955,8 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
           {content.file_id && <button className="secondary" onClick={reExtract} disabled={busy}>{busy ? 'Reading…' : 'Re-read from file'}</button>}
           <button className="secondary" title="Ask the Dennis AI assistant about this document" onClick={() => window.dispatchEvent(new CustomEvent('dennis:ask', { detail: { question: `Summarise and explain this document: ${content.file_name || content.version_label || 'the open document'}` } }))}>Ask Dennis</button>
           {content.file_id && <a className="badge" href={`${API_BASE}/files/${content.file_id}/download`} onClick={ev => { ev.preventDefault(); fetchBlobUrl(`/files/${content.file_id}/download`).then(u => { const a = document.createElement('a'); a.href = u; a.download = content.file_name || 'document'; a.click(); }); }} style={{ cursor: 'pointer' }}>Download original</a>}
+          {!!content.content_html && <button className="secondary" title="Build a real .docx from the in-app content and download it" onClick={downloadAsWord} disabled={!!exportBusy}>{exportBusy === 'download' ? 'Building…' : 'Download as Word (.docx)'}</button>}
+          {!!content.content_html && <button className="secondary" title="Build a real .docx and attach it as the document's newest version" onClick={saveAsWordVersion} disabled={!!exportBusy}>{exportBusy === 'save' ? 'Saving…' : 'Save as new Word version'}</button>}
         </div>
         {editing
           ? <div className="word-editor">

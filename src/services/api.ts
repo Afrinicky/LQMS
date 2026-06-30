@@ -1,6 +1,22 @@
 import type { SetupStatus, SystemModule } from '../../shared/types/api';
 
-declare global { interface Window { sechLims?: { apiBaseUrl: string; relaunch?: () => void } } }
+export type OfficeOpenPayload = { storageArea: string; storedName: string; originalName: string; docId: number; versionId: number };
+export type OfficeOpenResult = { ok: boolean; watchId?: string; error?: string };
+export type OfficeFileChangedPayload = { watchId: string; docId: number; versionId: number; originalName: string; mimeGuess: string; bytes: Uint8Array };
+
+declare global {
+  interface Window {
+    sechLims?: {
+      apiBaseUrl: string;
+      relaunch?: () => void;
+      // "Open in Microsoft Office" round-trip — present only inside the packaged
+      // Electron app; absent in the plain browser/dev-server preview.
+      openInOffice?: (payload: OfficeOpenPayload) => Promise<OfficeOpenResult>;
+      stopOfficeWatch?: (watchId: string) => void;
+      onOfficeFileChanged?: (callback: (payload: OfficeFileChangedPayload) => void) => () => void;
+    };
+  }
+}
 
 // Resolve the API base URL, most-authoritative source first:
 //  1. window.sechLims.apiBaseUrl — set by the Electron preload from the actual

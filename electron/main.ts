@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -204,6 +204,110 @@ ipcMain.on('sech-lims:relaunch', () => {
   bootLog('relaunch requested from renderer');
   app.relaunch();
   app.exit(0);
+});
+
+/* ------------------------------------------------------------------ *
+ * "Open in Microsoft Office" round-trip.
+ *
+ * Copies the stored controlled-document file into a scratch folder under the
+ * app's data directory (preserving the real filename/extension, since the OS
+ * uses that to choose the default application — Word for .docx, Excel for
+ * .xlsx, etc.), opens it with shell.openPath (the OS's normal "open with
+ * default app" action), then watches the *directory* (not the file handle —
+ * Word/Office typically saves via temp-file-then-rename, which orphans a
+ * direct file watch) for changes to that filename. Each stabilised change is
+ * read and sent to the renderer, which uploads it as a new document version
+ * through the same /files + /documents/:id/versions endpoints a manual file
+ * picker would use — no extra server-side surface is needed for this.
+ * ------------------------------------------------------------------ */
+type OfficeWatchEntry = { watcher: fs.FSWatcher; scratchPath: string; lastMtimeMs: number; timer: NodeJS.Timeout | null };
+const officeWatchers = new Map<string, OfficeWatchEntry>();
+const MAX_OFFICE_SYNC_BYTES = 60 * 1024 * 1024;
+
+function mimeForExtension(name: string): string {
+  const ext = (name.match(/\.([a-z0-9]+)$/i)?.[1] || '').toLowerCase();
+  const table: Record<string, string> = {
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    doc: 'application/msword',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    xls: 'application/vnd.ms-excel',
+    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    pdf: 'application/pdf', txt: 'text/plain', rtf: 'application/rtf', odt: 'application/vnd.oasis.opendocument.text',
+  };
+  return table[ext] || 'application/octet-stream';
+}
+
+ipcMain.handle('sech-lims:open-in-office', async (_event, payload: { storageArea?: string; storedName?: string; originalName?: string; docId?: number; versionId?: number }) => {
+  try {
+    const dataDir = process.env.SECH_LIMS_DATA_DIR;
+    if (!dataDir) return { ok: false, error: 'Data directory is not configured.' };
+    const storedName = String(payload?.storedName || '');
+    // Stored names are always generated server-side as `${timestamp}-${hex}${ext}`
+    // (see server/utils/safeFilename.ts) — reject anything that doesn't match so
+    // this can never be used to read an arbitrary path.
+    if (!/^[0-9]+-[0-9a-f]+(\.[a-z0-9]{1,8})?$/i.test(storedName)) return { ok: false, error: 'Invalid file reference.' };
+    const root = payload?.storageArea === 'evidence' ? path.join(dataDir, 'evidence') : path.join(dataDir, 'uploads');
+    const sourcePath = path.join(root, storedName);
+    if (path.dirname(sourcePath) !== path.resolve(root)) return { ok: false, error: 'Invalid file path.' };
+    if (!fs.existsSync(sourcePath)) return { ok: false, error: 'File not found on disk.' };
+    const sourceStat = fs.statSync(sourcePath);
+    if (sourceStat.size > MAX_OFFICE_SYNC_BYTES) return { ok: false, error: 'File is too large to sync automatically (60 MB limit). Use Download / Upload instead.' };
+
+    const scratchDir = path.join(dataDir, 'office-edits');
+    fs.mkdirSync(scratchDir, { recursive: true });
+    const safeOriginalName = String(payload?.originalName || storedName).replace(/[\\/:*?"<>|]/g, '_') || storedName;
+    const watchId = `${payload?.docId ?? 0}-${payload?.versionId ?? 0}-${Date.now()}`;
+    const scratchName = `${watchId}-${safeOriginalName}`;
+    const scratchPath = path.join(scratchDir, scratchName);
+    fs.copyFileSync(sourcePath, scratchPath);
+
+    const openErr = await shell.openPath(scratchPath);
+    if (openErr) return { ok: false, error: `Could not open the file in its default application: ${openErr}` };
+
+    const entry: OfficeWatchEntry = { watcher: null as unknown as fs.FSWatcher, scratchPath, lastMtimeMs: fs.statSync(scratchPath).mtimeMs, timer: null };
+    entry.watcher = fs.watch(scratchDir, (_eventType, filename) => {
+      if (filename !== scratchName) return;
+      if (entry.timer) clearTimeout(entry.timer);
+      // Debounce: editors fire several change events per save (truncate, write,
+      // rename); wait for the burst to settle before reading the file back.
+      entry.timer = setTimeout(() => {
+        try {
+          if (!fs.existsSync(scratchPath)) return; // mid-rename transient state
+          const st = fs.statSync(scratchPath);
+          if (st.size === 0 || st.mtimeMs <= entry.lastMtimeMs) return;
+          entry.lastMtimeMs = st.mtimeMs;
+          if (st.size > MAX_OFFICE_SYNC_BYTES) { bootLog('office-edit file exceeded sync size limit', scratchPath); return; }
+          const bytes = fs.readFileSync(scratchPath);
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('sech-lims:office-file-changed', {
+              watchId, docId: payload?.docId, versionId: payload?.versionId,
+              originalName: safeOriginalName, mimeGuess: mimeForExtension(safeOriginalName), bytes,
+            });
+          }
+        } catch (err) { bootLog('office watch read failed', String(err)); }
+      }, 1500);
+    });
+    officeWatchers.set(watchId, entry);
+    bootLog('office-edit watch started', { watchId, scratchPath });
+    return { ok: true, watchId };
+  } catch (err) {
+    bootLog('open-in-office failed', String(err));
+    return { ok: false, error: String(err) };
+  }
+});
+
+ipcMain.on('sech-lims:stop-office-watch', (_event, watchId: string) => {
+  const entry = officeWatchers.get(watchId);
+  if (!entry) return;
+  if (entry.timer) clearTimeout(entry.timer);
+  try { entry.watcher.close(); } catch { /* already closed */ }
+  officeWatchers.delete(watchId);
+  bootLog('office-edit watch stopped', { watchId });
+});
+
+app.on('before-quit', () => {
+  for (const entry of officeWatchers.values()) { if (entry.timer) clearTimeout(entry.timer); try { entry.watcher.close(); } catch { /* ignore */ } }
+  officeWatchers.clear();
 });
 
 app.on('second-instance', () => {

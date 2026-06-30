@@ -194,8 +194,106 @@ function runWrappers(rPr?: XmlNode): { open: string; close: string } {
   return { open, close };
 }
 
+// ── Drawn diagrams (org charts built from shapes + connectors, not SmartArt) ──
+// Word lets authors draw org charts by hand using Insert > Shapes: rectangles
+// (wps:wsp) grouped together (wpg:wgp) and joined by line/arrow connectors
+// (wps:cxnSp). These have no text-bearing "diagram data" part to fall back to
+// (unlike real SmartArt), so without rendering the shapes themselves the whole
+// diagram silently disappears. This renders such groups as an inline SVG —
+// positioned/coloured boxes with connecting lines — built only from the
+// shapes' own offsets/sizes/fills/text, so no extra parsing dependency is
+// needed. Best-effort visual approximation, not pixel-identical to Word.
+const EMU_PER_PX = 9525; // 914400 EMU per inch ÷ 96 px per inch
+function emuToPx(v?: string): number { const n = Number(v); return Number.isFinite(n) ? n / EMU_PER_PX : 0; }
+
+type ShapeXfrm = { x: number; y: number; w: number; h: number; chX: number; chY: number; chW: number; chH: number; flipH: boolean; flipV: boolean };
+function shapeXfrm(parent: XmlNode): ShapeXfrm | null {
+  const xfrm = find(parent, 'a:xfrm');
+  if (!xfrm) return null;
+  const off = find(xfrm, 'a:off'); const ext = find(xfrm, 'a:ext');
+  const chOff = find(xfrm, 'a:chOff'); const chExt = find(xfrm, 'a:chExt');
+  return {
+    x: emuToPx(off?.attrs['x']), y: emuToPx(off?.attrs['y']), w: emuToPx(ext?.attrs['cx']), h: emuToPx(ext?.attrs['cy']),
+    chX: emuToPx(chOff?.attrs['x']), chY: emuToPx(chOff?.attrs['y']), chW: emuToPx(chExt?.attrs['cx']), chH: emuToPx(chExt?.attrs['cy']),
+    flipH: xfrm.attrs['flipH'] === '1', flipV: xfrm.attrs['flipV'] === '1',
+  };
+}
+function shapeSpPr(node: XmlNode): XmlNode | undefined { return find(node, 'wps:spPr') || find(node, 'p:spPr'); }
+function shapeFillColor(node: XmlNode): string | null {
+  const spPr = shapeSpPr(node); if (!spPr) return null;
+  const solid = find(spPr, 'a:solidFill'); if (!solid) return null;
+  return colorVal(find(solid, 'a:srgbClr')?.attrs['val']);
+}
+function shapeLineStyle(node: XmlNode): { color: string | null; dashed: boolean; arrow: boolean } {
+  const spPr = shapeSpPr(node); const ln = spPr ? find(spPr, 'a:ln') : undefined;
+  if (!ln) return { color: null, dashed: false, arrow: false };
+  const solid = find(ln, 'a:solidFill');
+  const dashVal = find(ln, 'a:prstDash')?.attrs['val'];
+  const tailEnd = find(ln, 'a:tailEnd');
+  return { color: colorVal(solid ? find(solid, 'a:srgbClr')?.attrs['val'] : undefined), dashed: !!dashVal && dashVal !== 'solid', arrow: !!tailEnd && tailEnd.attrs['type'] !== 'none' };
+}
+function shapeTextOf(node: XmlNode, ctx: DocxCtx): string {
+  const txbxContent = descend(node, 'wps:txbx', 'w:txbxContent') || descend(node, 'wps:txBody', 'w:txbxContent');
+  if (txbxContent) return bodyToHtmlText(txbxContent, ctx).text.trim();
+  const texts: string[] = [];
+  const walk = (n: XmlNode) => { if (n.tag === 'w:t' || n.tag === 'a:t') texts.push(n.children.map(c => c.text || '').join('')); n.children.forEach(walk); };
+  walk(node);
+  return texts.join(' ').trim();
+}
+type DiagBox = { x: number; y: number; w: number; h: number; fill: string | null; line: string | null; text: string };
+type DiagLine = { x1: number; y1: number; x2: number; y2: number; dashed: boolean; arrow: boolean };
+function collectShapeDiagram(node: XmlNode, ctx: DocxCtx, originX: number, originY: number, scaleX: number, scaleY: number, boxes: DiagBox[], lines: DiagLine[]) {
+  for (const child of node.children) {
+    if (child.tag === 'wpg:wgp' || child.tag === 'wpg:grpSp') {
+      const grpPr = find(child, 'wpg:grpSpPr');
+      const xf = grpPr ? shapeXfrm(grpPr) : null;
+      if (xf && xf.chW > 0 && xf.chH > 0) {
+        const sx = (xf.w / xf.chW) * scaleX; const sy = (xf.h / xf.chH) * scaleY;
+        collectShapeDiagram(child, ctx, originX + xf.x * scaleX - xf.chX * sx, originY + xf.y * scaleY - xf.chY * sy, sx, sy, boxes, lines);
+      } else {
+        collectShapeDiagram(child, ctx, originX, originY, scaleX, scaleY, boxes, lines);
+      }
+    } else if (child.tag === 'wps:wsp') {
+      const spPr = shapeSpPr(child); const xf = spPr ? shapeXfrm(spPr) : null;
+      if (!xf) continue;
+      boxes.push({ x: originX + xf.x * scaleX, y: originY + xf.y * scaleY, w: xf.w * scaleX, h: xf.h * scaleY, fill: shapeFillColor(child), line: shapeLineStyle(child).color, text: shapeTextOf(child, ctx) });
+    } else if (child.tag === 'wps:cxnSp') {
+      const spPr = shapeSpPr(child); const xf = spPr ? shapeXfrm(spPr) : null;
+      if (!xf) continue;
+      let x1 = originX + xf.x * scaleX, y1 = originY + xf.y * scaleY;
+      let x2 = x1 + xf.w * scaleX, y2 = y1 + xf.h * scaleY;
+      if (xf.flipH) { const t = x1; x1 = x2; x2 = t; }
+      if (xf.flipV) { const t = y1; y1 = y2; y2 = t; }
+      const ls = shapeLineStyle(child);
+      lines.push({ x1, y1, x2, y2, dashed: ls.dashed, arrow: ls.arrow });
+    } else {
+      collectShapeDiagram(child, ctx, originX, originY, scaleX, scaleY, boxes, lines);
+    }
+  }
+}
+function renderShapeDiagram(graphicData: XmlNode, ctx: DocxCtx): { html: string; text: string } | null {
+  const boxes: DiagBox[] = []; const lines: DiagLine[] = [];
+  collectShapeDiagram(graphicData, ctx, 0, 0, 1, 1, boxes, lines);
+  if (!boxes.length) return null;
+  const maxX = Math.max(0, ...boxes.map(b => b.x + b.w), ...lines.map(l => Math.max(l.x1, l.x2)));
+  const maxY = Math.max(0, ...boxes.map(b => b.y + b.h), ...lines.map(l => Math.max(l.y1, l.y2)));
+  const W = Math.ceil(maxX + 8); const H = Math.ceil(maxY + 8);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" style="max-width:760px;display:block;margin:10px auto" xmlns="http://www.w3.org/2000/svg">`;
+  svg += '<defs><marker id="docxDiagArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#5b6b8c"/></marker></defs>';
+  for (const l of lines) svg += `<line x1="${l.x1.toFixed(1)}" y1="${l.y1.toFixed(1)}" x2="${l.x2.toFixed(1)}" y2="${l.y2.toFixed(1)}" stroke="#5b6b8c" stroke-width="1.5"${l.dashed ? ' stroke-dasharray="5,4"' : ''}${l.arrow ? ' marker-end="url(#docxDiagArrow)"' : ''}/>`;
+  for (const b of boxes) {
+    const w = Math.max(4, b.w); const h = Math.max(4, b.h);
+    svg += `<rect x="${b.x.toFixed(1)}" y="${b.y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="4" fill="${b.fill || '#eef2f8'}" stroke="${b.line || '#5b6b8c'}" stroke-width="1.2"/>`;
+    if (b.text) svg += `<foreignObject x="${b.x.toFixed(1)}" y="${b.y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}"><div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;text-align:center;font:600 11px/1.25 Calibri,Arial,sans-serif;color:#10213f;padding:2px;box-sizing:border-box;overflow:hidden">${htmlEsc(b.text)}</div></foreignObject>`;
+  }
+  svg += '</svg>';
+  const text = boxes.map(b => b.text).filter(Boolean).join('\n');
+  return { html: `<div class="docx-diagram docx-shape-diagram">${svg}</div>`, text: text ? text + '\n' : '' };
+}
+
 // Render an embedded picture (<w:drawing>/<w:pict>) as an inline data-URI <img>,
-// or a SmartArt diagram as its extracted text.
+// a SmartArt diagram as its extracted text, or a hand-drawn shapes+connectors
+// diagram (e.g. an org chart) as an SVG.
 function imageHtml(node: XmlNode, ctx: DocxCtx): { html: string; text: string } {
   const blip = deepFind(node, 'a:blip'); const vml = deepFind(node, 'v:imagedata');
   const embed = blip?.attrs['r:embed'] || blip?.attrs['r:link'] || vml?.attrs['r:id'];
@@ -216,6 +314,12 @@ function imageHtml(node: XmlNode, ctx: DocxCtx): { html: string; text: string } 
     const dt = ctx.diagrams[ctx.diagramUsed] ?? ctx.diagrams[0] ?? '';
     ctx.diagramUsed += 1;
     if (dt.trim()) return { html: `<div class="docx-diagram"><p><em>Diagram (SmartArt):</em></p>${dt.split('\n').filter(Boolean).map(l => `<p>${htmlEsc(l)}</p>`).join('')}</div>`, text: dt + '\n' };
+  }
+  // Hand-drawn shapes/connectors diagram (e.g. an org chart built from rectangles).
+  const graphicData = deepFind(node, 'a:graphicData');
+  if (graphicData && (deepFind(graphicData, 'wpg:wgp') || deepFind(graphicData, 'wps:wsp') || deepFind(graphicData, 'wps:cxnSp'))) {
+    const rendered = renderShapeDiagram(graphicData, ctx);
+    if (rendered && (rendered.html || rendered.text)) return rendered;
   }
   return { html: '', text: '' };
 }
