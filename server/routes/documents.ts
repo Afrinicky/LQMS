@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import path from 'node:path';
+import fs from 'node:fs';
 import { getDb, uploadRoot, evidenceRoot } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
@@ -7,6 +8,8 @@ import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import { extractDocument, deriveDocumentCodeFromName } from '../utils/documentExtract.js';
 import { indexDocument } from '../services/dennisService.js';
+import { buildDocxFromHtml } from '../utils/documentBuild.js';
+import { safeStoredFilename } from '../utils/safeFilename.js';
 
 // Make a document readable by the Dennis AI assistant (best-effort). Called after
 // a document's content is extracted so every uploaded document is fully read into
@@ -459,6 +462,70 @@ export function documentControlRoutes() {
       .run(req.body.contentHtml ?? v.content_html, req.body.contentText ?? v.content_text, sections, staffId, v.id);
     audit(req, { action: 'edit_content', entity: 'document_versions', entityId: v.id, newValue: { length: (req.body.contentHtml ?? '').length } });
     res.json({ ok: true });
+  });
+
+  // -------- Export the in-app content back out as a real, openable .docx --------
+  // Builds a Word file from the version's content_html (using documentBuild.ts —
+  // the reverse of documentExtract.ts) and registers it in the files table, so the
+  // existing /files/:id/download endpoint serves it. Two flows:
+  //   - export-docx: a one-off download, doesn't touch the document's history.
+  //   - export-docx/save-as-version: the export becomes the document's newest
+  //     version (so edits made in-app round-trip into the official record as a
+  //     real Word file, not just trapped HTML).
+  router.post('/:id/versions/:versionId/export-docx', requirePermission('documents', 'view'), async (req, res) => {
+    const db = getDb();
+    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    const v = db.prepare('SELECT * FROM document_versions WHERE id = ? AND document_id = ?').get(req.params.versionId, req.params.id) as any;
+    if (!v) return res.status(404).json({ error: 'Version not found' });
+    if (!v.content_html || !v.content_html.trim()) return res.status(400).json({ error: 'This version has no in-app content to export. Use "Edit content" or "Re-read from file" first.' });
+    const title = `${doc.document_code ? doc.document_code + ' - ' : ''}${doc.title}`;
+    const originalName = `${title}.docx`.replace(/[\\/:*?"<>|]/g, '_');
+    const storedName = safeStoredFilename(originalName);
+    const fullPath = path.join(uploadRoot, storedName);
+    try {
+      const built = await buildDocxFromHtml(fullPath, v.content_html, title);
+      const stat = fs.statSync(fullPath);
+      const fileResult = db.prepare('INSERT INTO files (original_name, stored_name, mime_type, size_bytes, storage_area, uploaded_by) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(originalName, storedName, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', stat.size, 'uploads', req.user!.id);
+      const fileId = Number(fileResult.lastInsertRowid);
+      audit(req, { action: 'export_docx', entity: 'document_versions', entityId: v.id, newValue: { fileId, mediaCount: built.mediaCount, linkCount: built.linkCount } });
+      res.status(201).json({ fileId, originalName, downloadPath: `/files/${fileId}/download` });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? `Could not build the Word file: ${err.message}` : 'Could not build the Word file.' });
+    }
+  });
+
+  router.post('/:id/versions/:versionId/export-docx/save-as-version', requirePermission('documents', 'edit'), async (req, res) => {
+    const db = getDb();
+    const body = req.body || {};
+    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    const v = db.prepare('SELECT * FROM document_versions WHERE id = ? AND document_id = ?').get(req.params.versionId, req.params.id) as any;
+    if (!v) return res.status(404).json({ error: 'Version not found' });
+    if (!v.content_html || !v.content_html.trim()) return res.status(400).json({ error: 'This version has no in-app content to export. Use "Edit content" or "Re-read from file" first.' });
+    const title = `${doc.document_code ? doc.document_code + ' - ' : ''}${doc.title}`;
+    const originalName = `${title}.docx`.replace(/[\\/:*?"<>|]/g, '_');
+    const storedName = safeStoredFilename(originalName);
+    const fullPath = path.join(uploadRoot, storedName);
+    try {
+      await buildDocxFromHtml(fullPath, v.content_html, title);
+      const stat = fs.statSync(fullPath);
+      const fileResult = db.prepare('INSERT INTO files (original_name, stored_name, mime_type, size_bytes, storage_area, uploaded_by) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(originalName, storedName, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', stat.size, 'uploads', req.user!.id);
+      const fileId = Number(fileResult.lastInsertRowid);
+      const nextVersionNumber = `${v.version_number || '1.0'}-word`;
+      const versionResult = db.prepare(`INSERT INTO document_versions (document_id, version_label, version_number, file_id, revision_summary, status, prepared_by_staff_id, content_html, content_text, content_sections, extraction_method, content_updated_by, content_updated_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`)
+        .run(req.params.id, nextVersionNumber, nextVersionNumber, fileId, 'Saved from in-app edits as a Word file', 'draft', getStaffIdOrCurrent(req, body.preparedByStaffId), v.content_html, v.content_text, v.content_sections, 'in-app-export', getStaffIdOrCurrent(req, null), req.user!.id);
+      const newVersionId = Number(versionResult.lastInsertRowid);
+      db.prepare('UPDATE documents SET current_version_id = ? WHERE id = ?').run(newVersionId, req.params.id);
+      db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run('documents', 'document_versions', String(newVersionId), 'documents', 'files', String(fileId), 'Word export of in-app edits');
+      indexForDennis(db, Number(req.params.id), req.user!.id);
+      audit(req, { action: 'export_docx_save_version', entity: 'document_versions', entityId: newVersionId, newValue: { fileId, sourceVersionId: v.id } });
+      res.status(201).json({ id: newVersionId, fileId, originalName });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? `Could not save as a new Word version: ${err.message}` : 'Could not save as a new Word version.' });
+    }
   });
 
   // -------- Workflow comments (drafter / reviewer / approver) --------

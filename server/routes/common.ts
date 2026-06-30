@@ -11,19 +11,7 @@ import { safeStoredFilename } from '../utils/safeFilename.js';
 import { parseIntNullable } from './routeHelpers.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import * as XLSX from 'xlsx';
-
-// archiver is loaded lazily inside the backup handler. Loading it at module
-// top level breaks the packaged Electron app under app.asar:
-//   - `import archiver from 'archiver'` fails with "does not provide an
-//     export named 'default'" because archiver is CommonJS.
-//   - `createRequire(import.meta.url)('archiver')` then fails with
-//     ERR_REQUIRE_ESM because archiver-utils is itself ESM.
-// A lazy dynamic import works in dev, production, and packaged modes and
-// keeps the rest of the app bootable even if archiver fails to resolve.
-async function loadArchiver(): Promise<(format: string, options?: unknown) => any> {
-  const mod: any = await import('archiver');
-  return (mod.default ?? mod) as (format: string, options?: unknown) => any;
-}
+import { createZipArchive } from '../utils/zipArchive.js';
 
 // Safe foreign-key id coercion: empty string / null / undefined / 0 → null,
 // otherwise the parsed positive integer. parseIntNullable() alone is unsafe
@@ -1485,19 +1473,14 @@ export function commonRoutes() {
     const fileName = `sech-lims-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.zip`;
     const fullPath = path.join(backupRoot, fileName);
     const manifest = { product: 'SECH_LIMS by Nickland', createdAt: new Date().toISOString(), includes: ['SQLite database', 'uploads', 'evidence', 'config', 'backup-manifest.json'] };
-    let archiver: (format: string, options?: unknown) => any;
-    try {
-      archiver = await loadArchiver();
-    } catch (err) {
-      console.error('[backup/create] failed to load archiver', err);
-      return res.status(500).json({ error: 'Archive engine failed to load. Please check packaged runtime dependencies.' });
-    }
     try {
       await new Promise<void>((resolve, reject) => {
-        const output = fs.createWriteStream(fullPath); const archive = archiver('zip', { zlib: { level: 9 } });
-        output.on('close', resolve); archive.on('error', reject); archive.pipe(output);
-        if (fs.existsSync(dbPath)) archive.file(dbPath, { name: 'database/sech_lims.sqlite' });
-        archive.directory(uploadRoot, 'uploads'); archive.directory(evidenceRoot, 'evidence'); archive.directory(configRoot, 'config'); archive.append(JSON.stringify(manifest, null, 2), { name: 'backup-manifest.json' }); archive.finalize();
+        const output = fs.createWriteStream(fullPath);
+        createZipArchive({ zlib: { level: 9 } }).then(archive => {
+          output.on('close', resolve); archive.on('error', reject); archive.pipe(output);
+          if (fs.existsSync(dbPath)) archive.file(dbPath, { name: 'database/sech_lims.sqlite' });
+          archive.directory(uploadRoot, 'uploads'); archive.directory(evidenceRoot, 'evidence'); archive.directory(configRoot, 'config'); archive.append(JSON.stringify(manifest, null, 2), { name: 'backup-manifest.json' }); archive.finalize();
+        }).catch(reject);
       });
     } catch (err) {
       console.error('[backup/create] archive creation failed', err);
