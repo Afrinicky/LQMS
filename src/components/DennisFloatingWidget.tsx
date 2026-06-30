@@ -117,6 +117,10 @@ export function DennisFloatingWidget({ user, dennisEnabled }: { user: ApiUser | 
   if (!user || !dennisEnabled) return null;
 
   const startDrag = (e: PointerEvent<HTMLElement>) => { if (!position) return; dragging.current = true; dragged.current = false; dragOffset.current = { x: e.clientX - position.x, y: e.clientY - position.y }; e.currentTarget.setPointerCapture(e.pointerId); };
+  // Header drag must NOT capture the pointer when the press lands on a control
+  // (close / open-workspace buttons) — otherwise pointer capture swallows the
+  // click and those buttons appear dead.
+  const startHeaderDrag = (e: PointerEvent<HTMLElement>) => { if ((e.target as HTMLElement).closest('button')) return; startDrag(e); };
   const moveDrag = (e: PointerEvent<HTMLElement>) => { if (!dragging.current) return; const w = open ? PANEL_WIDTH : ICON_SIZE, h = open ? PANEL_HEIGHT : ICON_SIZE; if (Math.abs(e.clientX - (dragOffset.current.x + (position?.x ?? 0))) > 3 || Math.abs(e.clientY - (dragOffset.current.y + (position?.y ?? 0))) > 3) dragged.current = true; setPosition(clampPosition({ x: e.clientX - dragOffset.current.x, y: e.clientY - dragOffset.current.y }, w, h)); };
   const stopDrag = (e: PointerEvent<HTMLElement>) => { dragging.current = false; try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* already released */ } };
 
@@ -148,7 +152,7 @@ export function DennisFloatingWidget({ user, dennisEnabled }: { user: ApiUser | 
   return <>
     <style>{FLOAT_CSS}</style>
     <section className="dennis-pop" style={style as any} aria-label="Dennis chat">
-      <div className="hd" onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={stopDrag} onPointerCancel={stopDrag}>
+      <div className="hd" onPointerDown={startHeaderDrag} onPointerMove={moveDrag} onPointerUp={stopDrag} onPointerCancel={stopDrag}>
         <span className="av"><Bot size={20} /></span>
         <span className="ti"><strong>Dennis</strong><small>{context.currentModule} · review before use</small></span>
         <button type="button" className="ic" title="Open full workspace" onClick={() => { setOpen(false); navigate('/dennis'); }}><Maximize2 size={16} /></button>
