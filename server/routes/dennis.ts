@@ -5,6 +5,7 @@ import {
   createDennisPlaceholder, maskedSettings, updateSettings, rawSettings,
   indexDocument, indexAllApproved, indexStats, searchDennis, askDennis,
   moduleHelper, computeAlerts, testConnection, redactPreview, logActivity,
+  analyzeSop,
 } from '../services/dennisService.js';
 
 export function dennisRoutes() {
@@ -13,7 +14,8 @@ export function dennisRoutes() {
   // -------- Activity log --------
   router.get('/activity-log', requirePermission('dennis', 'view'), (_req, res) => {
     const rows = getDb().prepare(`SELECT l.id, l.created_at AS dateTime, l.user_id AS userId, u.full_name AS userName, l.module, l.current_page AS currentPage,
-        l.action, l.dennis_mode AS aiMode, l.provider, l.status, l.record_id AS recordId, l.source_document_ids AS sourceDocumentIds, l.error_message AS errorMessage
+        l.action, l.dennis_mode AS aiMode, l.provider, l.status, l.record_id AS recordId, l.source_document_ids AS sourceDocumentIds, l.error_message AS errorMessage,
+        l.online_used AS onlineUsed, l.redaction_applied AS redactionApplied, l.document_name AS documentName, l.task_type AS taskType
       FROM dennis_activity_logs l LEFT JOIN users u ON u.id = l.user_id ORDER BY l.id DESC LIMIT 200`).all();
     res.json({ rows });
   });
@@ -76,6 +78,28 @@ export function dennisRoutes() {
     db.prepare('UPDATE dennis_suggestions SET accepted = ? WHERE id = ?').run(req.body?.accepted === false ? 0 : 1, req.params.id);
     logActivity(db, { userId: req.user!.id, module: 'dennis', action: req.body?.accepted === false ? 'suggestion_rejected' : 'suggestion_accepted', status: 'ok', recordId: String(req.params.id) });
     res.json({ ok: true });
+  });
+
+  // -------- SOP / document analysis (online-capable, gated) --------
+  router.post('/sop-analyze', requirePermission('dennis', 'view'), async (req, res) => {
+    try {
+      const b = req.body || {};
+      const out = await analyzeSop(getDb(), {
+        task: String(b.task || 'summarize'),
+        documentId: b.documentId != null ? Number(b.documentId) : undefined,
+        versionId: b.versionId != null ? Number(b.versionId) : undefined,
+        fileId: b.fileId != null ? Number(b.fileId) : undefined,
+        text: b.text != null ? String(b.text) : undefined,
+        name: b.name != null ? String(b.name) : undefined,
+        compareDocumentId: b.compareDocumentId != null ? Number(b.compareDocumentId) : undefined,
+        compareVersionId: b.compareVersionId != null ? Number(b.compareVersionId) : undefined,
+        compareFileId: b.compareFileId != null ? Number(b.compareFileId) : undefined,
+        compareText: b.compareText != null ? String(b.compareText) : undefined,
+        userId: req.user!.id,
+        confirmed: !!b.confirmed,
+      });
+      res.json(out);
+    } catch (e) { res.status(500).json({ error: e instanceof Error ? e.message : 'SOP analysis failed' }); }
   });
 
   // -------- Alerts (DENNIS) --------

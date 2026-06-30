@@ -81,6 +81,31 @@ export function redact(input: string): Redaction {
   return { redacted: out, replacements };
 }
 
+// ── Sensitive-data classification (gate before any online SOP analysis) ───────
+// Decide whether a block of text looks like patient-specific or live operational
+// SECH_LIMS data (which must never leave the network) rather than a generic SOP /
+// controlled document. Conservative: any strong signal blocks online use.
+export type SensitiveClassification = { sensitive: boolean; reasons: string[] };
+const OPERATIONAL_SIGNALS: Array<{ reason: string; re: RegExp }> = [
+  { reason: 'patient/donor identifier', re: /\b(?:patient|client|donor|hospital|mrn|folder)\s*(?:name|id|no\.?|number)\s*[:=]/i },
+  { reason: 'date of birth', re: /\b(?:dob|date of birth)\b\s*[:=]?\s*\d/i },
+  { reason: 'NC / CAPA / complaint record number', re: /\b(?:NC|CAPA|COMP|CMP|RISK|INC|SAF|SI)[-\s]?\d{2,}\b/ },
+  { reason: 'operational record number', re: /\b(?:SECHREC|EQP|ITEM|TRN|ROSTER|MR|QI|BBH|HND)[-\s]?\d{2,}\b/i },
+  { reason: 'patient test result', re: /\b(?:result|value|reading)\s*[:=]\s*[<>]?\s*\d/i },
+  { reason: 'specimen / accession', re: /\b(?:specimen|accession|lab\s*no|sample)\s*(?:id|no\.?|number)?\s*[:=]/i },
+];
+export function classifySensitive(text: string): SensitiveClassification {
+  const reasons = new Set<string>();
+  const red = redact(text || '');
+  for (const r of red.replacements) {
+    if (['PATIENT_NAME', 'PATIENT_ID', 'DONOR_ID', 'DOB'].includes(r.type)) reasons.add(r.type.replace(/_/g, ' ').toLowerCase());
+  }
+  for (const s of OPERATIONAL_SIGNALS) if (s.re.test(text || '')) reasons.add(s.reason);
+  // Many long digit runs (MRNs / IDs) strongly suggest record data, not an SOP.
+  if (((text || '').match(/\b\d{6,}\b/g) || []).length >= 4) reasons.add('multiple numeric identifiers');
+  return { sensitive: reasons.size > 0, reasons: [...reasons] };
+}
+
 // ── Provider abstraction ──────────────────────────────────────────────────────
 export type DennisProviderSettings = {
   localEnabled: boolean; localProvider: string; localEndpoint: string; localChatModel: string; localEmbedModel: string;

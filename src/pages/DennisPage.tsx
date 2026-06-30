@@ -215,9 +215,9 @@ function ActivityLog() {
   const [rows, setRows] = useState<any[] | null>(null);
   useEffect(() => { api<{ rows: any[] }>('/dennis/activity-log').then(r=>setRows(r.rows)).catch(()=>setRows([])); }, []);
   return <div className="card"><h3>Dennis Activity Log</h3>
-    <table><thead><tr><th>Date/time</th><th>User</th><th>Module</th><th>Page</th><th>Action</th><th>AI mode</th><th>Provider</th><th>Status</th></tr></thead>
-    <tbody>{(rows ?? []).map((r,i)=><tr key={i}><td>{String(r.dateTime||'').slice(0,19).replace('T',' ')}</td><td>{r.userName||r.userId||'—'}</td><td>{r.module}</td><td>{r.currentPage||'—'}</td><td>{r.action}</td><td>{r.aiMode||'—'}</td><td>{r.provider||'—'}</td><td><span className="badge">{r.status}</span></td></tr>)}
-    {rows && rows.length===0 && <tr><td colSpan={8} className="muted">No Dennis activity yet.</td></tr>}</tbody></table>
+    <table><thead><tr><th>Date/time</th><th>User</th><th>Module</th><th>Task</th><th>Action</th><th>AI mode</th><th>Provider</th><th>Online?</th><th>Redacted?</th><th>Document</th><th>Status</th></tr></thead>
+    <tbody>{(rows ?? []).map((r,i)=><tr key={i}><td>{String(r.dateTime||'').slice(0,19).replace('T',' ')}</td><td>{r.userName||r.userId||'—'}</td><td>{r.module}</td><td>{r.taskType||'—'}</td><td>{r.action}</td><td>{r.aiMode||'—'}</td><td>{r.provider||'—'}</td><td>{r.onlineUsed? <span className="badge warning">online</span> : <span className="badge">offline</span>}</td><td>{r.redactionApplied? 'Yes' : '—'}</td><td>{r.documentName||'—'}</td><td><span className="badge">{r.status}</span></td></tr>)}
+    {rows && rows.length===0 && <tr><td colSpan={11} className="muted">No Dennis activity yet.</td></tr>}</tbody></table>
   </div>;
 }
 
@@ -246,9 +246,13 @@ function Settings() {
     try { const r = await api<{ ok:boolean; detail:string }>('/dennis/test-connection', { method: 'POST', body: JSON.stringify({ which }) }); setTest(t=>({ ...t, [which]: `${r.ok?'✓':'✗'} ${r.detail}` })); }
     catch (e) { setTest(t=>({ ...t, [which]: (e as Error).message })); }
   }
-  const allowTasks: Array<[string,string]> = [['dennis.online.allow.capa','CAPA drafting'],['dennis.online.allow.audit','Audit reports'],['dennis.online.allow.managementReview','Management review summaries'],['dennis.online.allow.training','Training quizzes'],['dennis.online.allow.indicators','Quality indicator summaries'],['dennis.online.allow.reports','Monthly reports'],['dennis.online.allow.docExplain','Document explanations']];
   return <div className="dennis-grid two"><div className="card"><h3>Dennis Settings</h3>
-    <label>Dennis mode<select value={s['dennis.mode']||'Offline only'} onChange={e=>set('dennis.mode', e.target.value)}><option>Offline only</option><option>Online only</option><option>Hybrid</option></select></label>
+    <label>AI mode<select value={s['dennis.mode']||'Hybrid recommended'} onChange={e=>set('dennis.mode', e.target.value)}>
+      <option value="Offline only">Offline only — all Dennis tasks use Ollama</option>
+      <option value="Hybrid recommended">Hybrid (recommended) — Ollama for everything; online AI only for uploaded SOP/document analysis</option>
+      <option value="Online drafting only">Online drafting only — online AI for non-sensitive SOP/document drafting; never patient or operational records</option>
+    </select></label>
+    <p className="muted" style={{ marginTop: 4 }}>Ollama (offline) is the default runtime for normal chat and <strong>all operational records</strong> (NC/CAPA, audit, complaints, blood bank, staff, equipment, inventory, quality indicators, management review). Online AI is used <strong>only</strong> for SOP/document analysis, and only after redaction.</p>
 
     <h4 style={{ marginBottom: 4 }}>Local / offline AI (Phase DENNIS-4)</h4>
     <label><input type="checkbox" checked={bool('dennis.local.enabled')} onChange={e=>set('dennis.local.enabled', String(e.target.checked))}/> Local AI enabled</label>
@@ -266,10 +270,8 @@ function Settings() {
     <label>API key<input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)} placeholder={s['dennis.online.apiKey'] ? `Saved (${s['dennis.online.apiKey']}) — type to replace` : 'Enter API key'}/></label>
     <label><input type="checkbox" checked={s['dennis.online.confirmRequired']!=='false'} onChange={e=>set('dennis.online.confirmRequired', String(e.target.checked))}/> Require confirmation before each online AI use</label>
     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}><button className="secondary" type="button" onClick={()=>testConn('online')}>Test online connection</button><span className="badge">{test.online || 'not tested'}</span></div>
-    <p style={{ fontWeight: 600, margin: '10px 0 4px' }}>Allowed online AI tasks</p>
-    {allowTasks.map(([k,label])=><label key={k}><input type="checkbox" checked={bool(k)} onChange={e=>set(k, String(e.target.checked))}/> {label}</label>)}
 
-    <div className="warning" style={{ marginTop: 10 }}><AlertTriangle size={18}/>Do not send patient names, patient IDs, donor IDs, phone numbers, addresses, or confidential personal information to online Dennis. Dennis redacts common identifiers automatically, but you remain responsible.</div>
+    <div className="warning" style={{ marginTop: 12 }}><AlertTriangle size={18}/>Online AI may send document text outside the hospital network. Use only for SOPs and non-patient documents. Online AI is restricted to the SOP/document analysis tools and is <strong>never</strong> used for patient records, NC/CAPA, audit findings, complaints, blood bank, staff, equipment, inventory, quality indicators, management review or any live operational data. Dennis redacts identifiers before any online call, and blocks online use entirely when patient/operational data is detected.</div>
     <p className="muted">TODO: API keys are stored in the local SECH_LIMS database. Use OS secure storage where available in a later hardening pass.</p>
     <div style={{ display: 'flex', gap: 8, marginTop: 8 }}><button onClick={save} disabled={busy}>{busy?'Saving…':'Save settings'}</button>{msg && <span className="muted" style={{ alignSelf: 'center' }}>{msg}</span>}</div>
   </div><SafetyPanel/></div>;
