@@ -1144,7 +1144,12 @@ export function commonRoutes() {
     return { file, fp };
   }
   router.get('/files/:id/meta', requirePermission('documents', 'view'), (req, res) => {
-    const file = getDb().prepare('SELECT id, original_name, mime_type, size_bytes, storage_area, created_at FROM files WHERE id = ?').get(req.params.id) as any;
+    // stored_name (the on-disk filename) is included alongside storage_area so the
+    // desktop app's "Open in Microsoft Office" feature can ask the Electron main
+    // process (running on the same machine as this embedded API) to locate and
+    // open the exact file. This is safe here: the API only ever listens on
+    // 127.0.0.1, so only an already-authenticated local user can reach this route.
+    const file = getDb().prepare('SELECT id, original_name, stored_name, mime_type, size_bytes, storage_area, created_at FROM files WHERE id = ?').get(req.params.id) as any;
     if (!file) return res.status(404).json({ error: 'File not found' });
     res.json(file);
   });

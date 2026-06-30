@@ -3,6 +3,7 @@ import PageHeader from '../components/ui/PageHeader';
 import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
+import type { OfficeFileChangedPayload } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import type {
   Section, Department, Staff, Position,
@@ -749,6 +750,8 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState<'download' | 'save' | null>(null);
+  const [officeWatch, setOfficeWatch] = useState<{ watchId: string; fileName: string } | null>(null);
+  const [officeStatus, setOfficeStatus] = useState<string | null>(null);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [maximized, setMaximized] = useState(true);
   const [zoom, setZoom] = useState(1);
@@ -829,6 +832,52 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
     } catch (e) { onError((e as Error).message); } finally { setExportBusy(null); }
   }
 
+  // "Open in Microsoft Office" — Electron-only. Opens the stored file with the
+  // OS's default application (Word/Excel/etc.) and watches it for saves; each
+  // save is delivered back here and uploaded as a new document version.
+  async function openInOffice() {
+    if (!content?.file_id || !window.sechLims?.openInOffice) return;
+    setOfficeStatus('Opening…');
+    try {
+      const meta = await api<{ storage_area: string; stored_name: string; original_name: string }>(`/files/${content.file_id}/meta`);
+      const result = await window.sechLims.openInOffice({
+        storageArea: meta.storage_area, storedName: meta.stored_name, originalName: meta.original_name || content.file_name || 'document',
+        docId, versionId,
+      });
+      if (!result.ok) { setOfficeStatus(null); onError(result.error || 'Could not open the file in its default application.'); return; }
+      setOfficeWatch({ watchId: result.watchId!, fileName: meta.original_name || content.file_name || 'document' });
+      setOfficeStatus(`Watching “${meta.original_name || content.file_name}” — saving it in Office will sync it back here automatically as a new version.`);
+    } catch (e) { setOfficeStatus(null); onError((e as Error).message); }
+  }
+  function stopOfficeWatchNow() {
+    if (officeWatch) window.sechLims?.stopOfficeWatch?.(officeWatch.watchId);
+    setOfficeWatch(null); setOfficeStatus(null);
+  }
+  useEffect(() => {
+    if (!window.sechLims?.onOfficeFileChanged) return;
+    const unsubscribe = window.sechLims.onOfficeFileChanged(async (payload: OfficeFileChangedPayload) => {
+      if (!officeWatch || payload.watchId !== officeWatch.watchId) return;
+      setOfficeStatus('Saved in Office — syncing back to SECH_LIMS…');
+      try {
+        const fd = new FormData();
+        fd.append('file', new Blob([new Uint8Array(payload.bytes)], { type: payload.mimeGuess || 'application/octet-stream' }), payload.originalName);
+        const token = getToken();
+        const fr = await fetch(`${API_BASE}/files`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
+        if (!fr.ok) throw new Error((await fr.json().catch(() => ({ error: fr.statusText }))).error ?? fr.statusText);
+        const fdata = await fr.json();
+        const stamp = new Date().toISOString().slice(11, 19).replace(/:/g, '');
+        const nextVersionNumber = `office-sync-${stamp}`;
+        await api(`/documents/${docId}/versions`, { method: 'POST', body: JSON.stringify({ versionNumber: nextVersionNumber, fileId: fdata.id, revisionSummary: 'Synced automatically from Microsoft Office' }) });
+        setOfficeStatus(`Synced as a new version (${nextVersionNumber}). Close and reopen the document to view it.`);
+        onSaved();
+      } catch (e) { setOfficeStatus(null); onError((e as Error).message); }
+    });
+    return unsubscribe;
+  }, [officeWatch, docId]);
+  // Stop watching when the viewer closes, so the main process doesn't keep a
+  // file watcher open for a document the user is no longer looking at.
+  useEffect(() => () => { if (officeWatch) window.sechLims?.stopOfficeWatch?.(officeWatch.watchId); }, [officeWatch]);
+
   const isPdf = content?.file_mime === 'application/pdf' || /\.pdf$/i.test(content?.file_name || '');
   const isImage = (content?.file_mime || '').startsWith('image/');
 
@@ -889,6 +938,13 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
       {content && <div style={{ fontSize: 12, color: '#667', margin: '6px 0' }}>
         {content.extraction_method && content.extraction_method !== 'none' ? <>Read by SECH_LIMS ({content.extraction_method}{content.page_count ? `, ${content.page_count} pages` : ''}). </> : 'No content was automatically read. '}
         {content.content_updated_at && <>Last edited {String(content.content_updated_at).slice(0, 16).replace('T', ' ')}{content.content_updated_by_name ? ` by ${content.content_updated_by_name}` : ''}. </>}
+      </div>}
+
+      {content?.file_id && window.sechLims?.openInOffice && <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '0 0 8px', padding: '8px 10px', background: officeWatch ? '#13301f' : '#0f1830', border: `1px solid ${officeWatch ? '#225c3a' : '#24365e'}`, borderRadius: 6 }}>
+        {!officeWatch
+          ? <button className="secondary" onClick={openInOffice} disabled={officeStatus === 'Opening…'} title="Open the stored file in Microsoft Word/Excel/etc. and sync saves back automatically">{officeStatus === 'Opening…' ? 'Opening…' : 'Open in Microsoft Office'}</button>
+          : <button className="secondary" onClick={stopOfficeWatchNow}>Stop watching</button>}
+        {officeStatus && <span style={{ fontSize: 12, color: '#a8c7b6' }}>{officeStatus}</span>}
       </div>}
 
       {mode === 'content' && content && <div>

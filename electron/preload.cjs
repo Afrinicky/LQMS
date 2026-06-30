@@ -18,4 +18,17 @@ contextBridge.exposeInMainWorld('sechLims', {
   // Used by the themed boot/error screen's "Retry" button to request a clean
   // relaunch of the whole application from the main process.
   relaunch: () => ipcRenderer.send('sech-lims:relaunch'),
+
+  // "Open in Microsoft Office" round-trip — Electron-only (no-op surface in a
+  // plain browser/dev-server context, where window.sechLims is absent entirely).
+  // Opens the stored file with the OS's default app, watches it for saves, and
+  // delivers each saved revision back to the renderer as raw bytes so it can be
+  // uploaded as a new document version through the normal API.
+  openInOffice: (payload) => ipcRenderer.invoke('sech-lims:open-in-office', payload),
+  stopOfficeWatch: (watchId) => ipcRenderer.send('sech-lims:stop-office-watch', watchId),
+  onOfficeFileChanged: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('sech-lims:office-file-changed', handler);
+    return () => ipcRenderer.removeListener('sech-lims:office-file-changed', handler);
+  },
 });
