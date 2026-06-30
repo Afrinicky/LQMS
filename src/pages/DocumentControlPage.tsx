@@ -682,6 +682,66 @@ function SopTools({ docId, versionId, documents }: { docId: number; versionId: n
   </div>;
 }
 
+// Word-style formatting ribbon for the in-app document editor. Uses the browser's
+// rich-text editing (execCommand) on the contentEditable page — no extra deps, and
+// the formatting is saved back into the controlled document HTML.
+const WORD_FONTS = ['Calibri', 'Arial', 'Times New Roman', 'Georgia', 'Verdana', 'Tahoma', 'Cambria', 'Courier New'];
+const WORD_SIZES: Array<[string, string]> = [['1', '8'], ['2', '10'], ['3', '12'], ['4', '14'], ['5', '18'], ['6', '24'], ['7', '36']];
+function WordToolbar({ editorRef }: { editorRef: { current: HTMLDivElement | null } }) {
+  const exec = (cmd: string, value?: string) => {
+    editorRef.current?.focus();
+    try { document.execCommand('styleWithCSS', false, 'true'); } catch { /* not supported */ }
+    try { document.execCommand(cmd, false, value); } catch { /* command unsupported */ }
+  };
+  const block = (tag: string) => exec('formatBlock', tag);
+  const insertTable = () => {
+    const rows = Math.min(40, Math.max(1, Number(prompt('Number of rows?', '2')) || 0));
+    const cols = Math.min(20, Math.max(1, Number(prompt('Number of columns?', '2')) || 0));
+    if (!rows || !cols) return;
+    let html = '<table class="docx-table"><tbody>';
+    for (let r = 0; r < rows; r++) { html += '<tr>'; for (let c = 0; c < cols; c++) html += '<td>&nbsp;</td>'; html += '</tr>'; }
+    html += '</tbody></table><p><br/></p>';
+    exec('insertHTML', html);
+  };
+  const insertLink = () => { const url = prompt('Link URL (https://…):'); if (url) exec('createLink', url); };
+  const B = ({ cmd, val, title, children }: { cmd: string; val?: string; title: string; children: React.ReactNode }) =>
+    <button type="button" className="wt-btn" title={title} onMouseDown={e => e.preventDefault()} onClick={() => exec(cmd, val)}>{children}</button>;
+  return <div className="word-toolbar" onMouseDown={e => e.preventDefault()}>
+    <div className="wt-group">
+      <B cmd="undo" title="Undo">↶</B><B cmd="redo" title="Redo">↷</B>
+    </div>
+    <div className="wt-group">
+      <select className="wt-select" title="Paragraph style" defaultValue="" onChange={e => { block(e.target.value || 'P'); e.target.value = ''; }}>
+        <option value="">Style</option><option value="P">Normal</option><option value="H1">Heading 1</option><option value="H2">Heading 2</option><option value="H3">Heading 3</option><option value="PRE">Preformatted</option>
+      </select>
+      <select className="wt-select" title="Font" defaultValue="" onChange={e => { if (e.target.value) exec('fontName', e.target.value); e.target.value = ''; }}>
+        <option value="">Font</option>{WORD_FONTS.map(f => <option key={f} value={f}>{f}</option>)}
+      </select>
+      <select className="wt-select" title="Font size" defaultValue="" onChange={e => { if (e.target.value) exec('fontSize', e.target.value); e.target.value = ''; }}>
+        <option value="">Size</option>{WORD_SIZES.map(([v, pt]) => <option key={v} value={v}>{pt}pt</option>)}
+      </select>
+    </div>
+    <div className="wt-group">
+      <B cmd="bold" title="Bold"><b>B</b></B><B cmd="italic" title="Italic"><i>I</i></B><B cmd="underline" title="Underline"><u>U</u></B><B cmd="strikeThrough" title="Strikethrough"><s>S</s></B>
+      <label className="wt-btn" title="Text colour" onMouseDown={e => e.preventDefault()}>A<input type="color" className="wt-color" onChange={e => exec('foreColor', e.target.value)} /></label>
+      <label className="wt-btn" title="Highlight" onMouseDown={e => e.preventDefault()} style={{ background: '#fff3a3' }}>▰<input type="color" className="wt-color" onChange={e => exec('hiliteColor', e.target.value)} /></label>
+    </div>
+    <div className="wt-group">
+      <B cmd="insertUnorderedList" title="Bulleted list">•≣</B><B cmd="insertOrderedList" title="Numbered list">1≣</B>
+      <B cmd="outdent" title="Decrease indent">⇤</B><B cmd="indent" title="Increase indent">⇥</B>
+    </div>
+    <div className="wt-group">
+      <B cmd="justifyLeft" title="Align left">⮈</B><B cmd="justifyCenter" title="Centre">≡</B><B cmd="justifyRight" title="Align right">⮊</B><B cmd="justifyFull" title="Justify">☰</B>
+    </div>
+    <div className="wt-group">
+      <button type="button" className="wt-btn" title="Insert table" onMouseDown={e => e.preventDefault()} onClick={insertTable}>▦</button>
+      <button type="button" className="wt-btn" title="Insert link" onMouseDown={e => e.preventDefault()} onClick={insertLink}>🔗</button>
+      <B cmd="insertHorizontalRule" title="Horizontal line">―</B>
+      <B cmd="removeFormat" title="Clear formatting">⌫</B>
+    </div>
+  </div>;
+}
+
 function DocumentViewer(props: { docId: number; versionId: number; attestationId?: number; workflowStatus?: string; documents?: DocumentRecord[]; onWorkflowAction?: (action: string) => Promise<void>; onClose: () => void; onAttest: (attId: number, docId: number) => void; onSaved: () => void; onError: (m: string) => void }) {
   const { docId, versionId, attestationId, workflowStatus, documents, onWorkflowAction, onClose, onAttest, onSaved, onError } = props;
   const [content, setContent] = useState<VersionContent | null>(null);
@@ -781,7 +841,17 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
 .doc-toc-item.lvl-1{font-weight:700}.doc-toc-item.lvl-2{padding-left:8px}.doc-toc-item.lvl-3{padding-left:18px;font-size:12px;color:#9fb0cf}.doc-toc-item.lvl-4{padding-left:28px;font-size:11.5px;color:#8295b5}
 .doc-scroll{flex:1;overflow:auto;background:#525659;padding:18px;min-width:0}
 .doc-page{background:#fff;color:#111;max-width:820px;margin:0 auto;padding:34px 44px;box-shadow:0 2px 14px rgba(0,0,0,.45);line-height:1.55;border-radius:2px}
-@media (max-width:760px){.doc-toc{display:none}}`}</style>
+@media (max-width:760px){.doc-toc{display:none}}
+.word-editor{border:1px solid #24365e;border-radius:6px;overflow:hidden}
+.word-toolbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 8px;background:#16243f;border-bottom:1px solid #24365e}
+.word-toolbar .wt-group{display:flex;align-items:center;gap:2px;padding:0 6px;border-right:1px solid #2a3c63}
+.word-toolbar .wt-group:last-child{border-right:0}
+.wt-btn{position:relative;min-width:26px;height:26px;padding:0 6px;display:inline-flex;align-items:center;justify-content:center;background:#0f1d38;border:1px solid #2c416f;border-radius:5px;color:#dbe6fb;cursor:pointer;font-size:13px;line-height:1;box-shadow:none}
+.wt-btn:hover{background:#1d3257;border-color:#3a5694}
+.wt-color{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.wt-select{height:26px;background:#0f1d38;border:1px solid #2c416f;border-radius:5px;color:#dbe6fb;font-size:12px;padding:0 4px;cursor:pointer}
+.doc-page[contenteditable="true"]{cursor:text}
+.doc-page[contenteditable="true"]:focus{outline:none}`}</style>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <h3 style={{ margin: 0, fontSize: 15 }}>{content ? `${content.version_label || content.version_number || 'Version'} · ${content.file_name || 'Controlled content'}` : 'Loading…'}</h3>
         <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
@@ -810,8 +880,13 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
           {content.file_id && <a className="badge" href={`${API_BASE}/files/${content.file_id}/download`} onClick={ev => { ev.preventDefault(); fetchBlobUrl(`/files/${content.file_id}/download`).then(u => { const a = document.createElement('a'); a.href = u; a.download = content.file_name || 'document'; a.click(); }); }} style={{ cursor: 'pointer' }}>Download original</a>}
         </div>
         {editing
-          ? <div ref={editorRef} className="doc-content" contentEditable suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: content.content_html || `<p>${(content.content_text || '').replace(/\n/g, '<br/>')}</p>` || '<p>Type the controlled document content here…</p>' }}
-              style={{ border: '1px solid #cbd5e1', borderRadius: 6, padding: 16, minHeight: 320, height: contentH, overflow: 'auto', background: '#fff', color: '#111', lineHeight: 1.5, zoom }} />
+          ? <div className="word-editor">
+              <WordToolbar editorRef={editorRef} />
+              <div className="doc-scroll" style={{ height: contentH }}>
+                <div ref={editorRef} className="doc-content doc-page" contentEditable suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: content.content_html || `<p>${(content.content_text || '').replace(/\n/g, '<br/>')}</p>` || '<p>Type the controlled document content here…</p>' }}
+                  style={{ zoom, outline: 'none', minHeight: '60%' }} />
+              </div>
+            </div>
           : (content.content_html
               ? <DocReader html={content.content_html} zoom={zoom} height={contentH} />
               : (content.content_text
