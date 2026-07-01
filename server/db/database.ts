@@ -26,6 +26,21 @@ export function getDb() {
   return db;
 }
 
+// Close the active SQLite connection and release the file handles so the
+// on-disk database file can be safely overwritten (e.g. during a restore).
+// The next getDb() call transparently reopens and re-migrates the database.
+export function closeDb() {
+  if (db) {
+    try {
+      db.pragma('wal_checkpoint(TRUNCATE)');
+    } catch { /* checkpoint is best-effort */ }
+    try {
+      db.close();
+    } catch { /* already closed */ }
+    db = undefined;
+  }
+}
+
 function migrate(database: Database.Database) {
   database.exec(`
 CREATE TABLE IF NOT EXISTS roles (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, description TEXT, is_system INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
