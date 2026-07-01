@@ -15,6 +15,10 @@
  */
 import fs from 'node:fs';
 import zlib from 'node:zlib';
+// `xlsx` is already a project dependency (used server-side by customerFocus.ts
+// and assessments.ts for spreadsheet import), so reusing it here for read-only
+// preview doesn't add a new runtime dependency to the Electron package.
+import * as XLSX from 'xlsx';
 
 export type ExtractedSection = { heading: string; key: string; body: string };
 export type ExtractionResult = {
@@ -277,6 +281,18 @@ function renderShapeDiagram(graphicData: XmlNode, ctx: DocxCtx): { html: string;
   if (!boxes.length) return null;
   const maxX = Math.max(0, ...boxes.map(b => b.x + b.w), ...lines.map(l => Math.max(l.x1, l.x2)));
   const maxY = Math.max(0, ...boxes.map(b => b.y + b.h), ...lines.map(l => Math.max(l.y1, l.y2)));
+  // Defensive fallback: if the computed geometry looks implausible (NaN/negative
+  // sizes from a malformed or unsupported transform chain, or a bounding box so
+  // large it indicates a bad chOff/chExt scale factor), don't risk drawing a
+  // distorted mess of shapes — degrade to a plain text listing of the box labels
+  // instead, same spirit as the SmartArt text fallback above.
+  const geometryPlausible = Number.isFinite(maxX) && Number.isFinite(maxY) && maxX > 0 && maxY > 0 && maxX < 20000 && maxY < 20000 &&
+    boxes.every(b => Number.isFinite(b.x) && Number.isFinite(b.y) && Number.isFinite(b.w) && Number.isFinite(b.h) && b.w >= 0 && b.h >= 0);
+  if (!geometryPlausible) {
+    const text = boxes.map(b => b.text).filter(Boolean).join('\n');
+    if (!text.trim()) return null;
+    return { html: `<div class="docx-diagram"><p><em>Diagram:</em></p>${text.split('\n').filter(Boolean).map(l => `<p>${htmlEsc(l)}</p>`).join('')}</div>`, text: text + '\n' };
+  }
   const W = Math.ceil(maxX + 8); const H = Math.ceil(maxY + 8);
   let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" style="max-width:760px;display:block;margin:10px auto" xmlns="http://www.w3.org/2000/svg">`;
   svg += '<defs><marker id="docxDiagArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#5b6b8c"/></marker></defs>';
@@ -295,6 +311,18 @@ function renderShapeDiagram(graphicData: XmlNode, ctx: DocxCtx): { html: string;
 // a SmartArt diagram as its extracted text, or a hand-drawn shapes+connectors
 // diagram (e.g. an org chart) as an SVG.
 function imageHtml(node: XmlNode, ctx: DocxCtx): { html: string; text: string } {
+  // Hand-drawn shapes/connectors diagram (e.g. an org chart built from rectangles).
+  // This check MUST run before the generic picture-blip check below: a group of
+  // shapes making up a diagram commonly has one or more member shapes filled with
+  // a picture/texture fill (<a:blipFill>), which would otherwise cause
+  // deepFind(node, 'a:blip') to match first and misidentify the *entire* diagram
+  // as a single embedded picture (rendering one stretched/distorted fill image
+  // instead of the actual multi-box diagram).
+  const graphicData = deepFind(node, 'a:graphicData');
+  if (graphicData && (deepFind(graphicData, 'wpg:wgp') || deepFind(graphicData, 'wps:wsp') || deepFind(graphicData, 'wps:cxnSp'))) {
+    const rendered = renderShapeDiagram(graphicData, ctx);
+    if (rendered && (rendered.html || rendered.text)) return rendered;
+  }
   const blip = deepFind(node, 'a:blip'); const vml = deepFind(node, 'v:imagedata');
   const embed = blip?.attrs['r:embed'] || blip?.attrs['r:link'] || vml?.attrs['r:id'];
   if (embed && ctx.rels[embed]) {
@@ -314,12 +342,6 @@ function imageHtml(node: XmlNode, ctx: DocxCtx): { html: string; text: string } 
     const dt = ctx.diagrams[ctx.diagramUsed] ?? ctx.diagrams[0] ?? '';
     ctx.diagramUsed += 1;
     if (dt.trim()) return { html: `<div class="docx-diagram"><p><em>Diagram (SmartArt):</em></p>${dt.split('\n').filter(Boolean).map(l => `<p>${htmlEsc(l)}</p>`).join('')}</div>`, text: dt + '\n' };
-  }
-  // Hand-drawn shapes/connectors diagram (e.g. an org chart built from rectangles).
-  const graphicData = deepFind(node, 'a:graphicData');
-  if (graphicData && (deepFind(graphicData, 'wpg:wgp') || deepFind(graphicData, 'wps:wsp') || deepFind(graphicData, 'wps:cxnSp'))) {
-    const rendered = renderShapeDiagram(graphicData, ctx);
-    if (rendered && (rendered.html || rendered.text)) return rendered;
   }
   return { html: '', text: '' };
 }
@@ -472,6 +494,44 @@ function fromDocx(buf: Buffer): { html: string; text: string } {
   const ctx: DocxCtx = { buf, rels: parseRels(buf), diagrams: extractDiagrams(buf), diagramUsed: 0, embeddedBytes: 0 };
   const { html, text } = bodyToHtmlText(body, ctx);
   return { html: html.replace(/(?:<p><\/p>){2,}/g, '<p></p>'), text: text.replace(/\n{3,}/g, '\n\n').trim() };
+}
+
+// ── Spreadsheets (.xlsx / .xls) ─────────────────────────────────────────────
+// Renders every sheet as a real HTML table (not a garbled binary dump), and a
+// tab-separated plain-text mirror for search/Dennis indexing. Capped per sheet
+// so a huge workbook can't blow up the preview or the stored content_text row.
+const XLSX_MAX_ROWS_PER_SHEET = 500;
+const XLSX_MAX_COLS_PER_SHEET = 60;
+const XLSX_MAX_SHEETS = 20;
+function fromXlsx(buf: Buffer): { html: string; text: string } {
+  let wb: XLSX.WorkBook;
+  // Node's ESM/CJS interop for the `xlsx` package only statically exposes a
+  // handful of top-level members (default, find, parse, read, utils, version,
+  // write, writeFile) via cjs-module-lexer — `readFile`/`readFileSync` are
+  // assigned conditionally inside the bundle and are NOT visible on a
+  // namespace import at runtime (`XLSX.readFile` is undefined even though the
+  // .d.ts declares it, so calling it throws and is silently swallowed by the
+  // caller's try/catch). `read()` on an in-memory buffer *is* a real static
+  // export, so parse the buffer ourselves instead of asking xlsx to open the
+  // path.
+  try { wb = XLSX.read(buf, { type: 'buffer', cellDates: false }); } catch { return { html: '', text: '' }; }
+  let html = ''; let text = '';
+  for (const sheetName of wb.SheetNames.slice(0, XLSX_MAX_SHEETS)) {
+    const sheet = wb.Sheets[sheetName];
+    if (!sheet) continue;
+    const rows = (XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false }) as unknown[][]) || [];
+    if (!rows.length) continue;
+    const shown = rows.slice(0, XLSX_MAX_ROWS_PER_SHEET);
+    html += `<h2>${htmlEscape(sheetName)}</h2><table class="docx-table"><tbody>`;
+    for (const row of shown) {
+      const cells = row.slice(0, XLSX_MAX_COLS_PER_SHEET);
+      html += '<tr>' + cells.map(cell => `<td>${htmlEscape(String(cell ?? ''))}</td>`).join('') + '</tr>';
+    }
+    html += '</tbody></table>';
+    if (rows.length > shown.length) html += `<p class="docx-img-note">[${rows.length - shown.length} more row(s) not shown — open the original file to view them.]</p>`;
+    text += `${sheetName}\n` + shown.map(row => row.slice(0, XLSX_MAX_COLS_PER_SHEET).map(c => String(c ?? '')).join('\t')).join('\n') + '\n\n';
+  }
+  return { html, text: text.trim() };
 }
 
 // ── PDF ──────────────────────────────────────────────────────────────────────
@@ -649,6 +709,8 @@ export function extractDocument(filePath: string, originalName: string, mimeType
       const r = fromPdf(buf); text = r.text; pageCount = r.pageCount; method = 'pdf';
     } else if (ext === 'docx' || mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
       const r = fromDocx(buf); text = r.text; htmlOverride = r.html || null; method = 'docx';
+    } else if (['xlsx', 'xls', 'xlsm'].includes(ext) || mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || mimeType === 'application/vnd.ms-excel') {
+      const r = fromXlsx(buf); text = r.text; htmlOverride = r.html || null; method = 'xlsx';
     } else if (['txt', 'md', 'csv', 'log', 'rtf'].includes(ext) || (mimeType && mimeType.startsWith('text/'))) {
       text = fromPlainText(buf); method = 'text';
       if (ext === 'rtf') text = text.replace(/\\par[d]?/g, '\n').replace(/\{\\[^}]*\}/g, '').replace(/\\[a-z]+-?\d* ?/gi, '').replace(/[{}]/g, '').trim();

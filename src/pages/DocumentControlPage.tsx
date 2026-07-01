@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import PageHeader from '../components/ui/PageHeader';
 import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
@@ -745,6 +745,12 @@ function WordToolbar({ editorRef }: { editorRef: { current: HTMLDivElement | nul
 
 function DocumentViewer(props: { docId: number; versionId: number; attestationId?: number; workflowStatus?: string; documents?: DocumentRecord[]; onWorkflowAction?: (action: string) => Promise<void>; onClose: () => void; onAttest: (attId: number, docId: number) => void; onSaved: () => void; onError: (m: string) => void }) {
   const { docId, versionId, attestationId, workflowStatus, documents, onWorkflowAction, onClose, onAttest, onSaved, onError } = props;
+  // Tracks which version is actually being viewed/edited. Starts at the version
+  // the caller opened, but is advanced in-place when an "Open in Microsoft
+  // Office" sync lands a new version, so the viewer reflects the saved edits
+  // immediately instead of requiring the user to close and reopen the document.
+  const [activeVersionId, setActiveVersionId] = useState(versionId);
+  useEffect(() => setActiveVersionId(versionId), [versionId]);
   const [content, setContent] = useState<VersionContent | null>(null);
   const [mode, setMode] = useState<'content' | 'original'>('content');
   const [editing, setEditing] = useState(false);
@@ -754,10 +760,40 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
   const [officeStatus, setOfficeStatus] = useState<string | null>(null);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [maximized, setMaximized] = useState(true);
+  const [minimized, setMinimized] = useState(false);
+  const [winPos, setWinPos] = useState<{ x: number; y: number } | null>(null);
   const [zoom, setZoom] = useState(1);
   const [comments, setComments] = useState<DocumentComment[]>([]);
   const [newComment, setNewComment] = useState('');
   const editorRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const dragging = useRef(false);
+  const dragOffset = useRef({ x: 0, y: 0 });
+
+  // Drag-to-reposition the viewer window by its header, like any desktop
+  // document/PDF viewer. Disabled while maximized (nowhere to drag to).
+  function startWinDrag(e: ReactPointerEvent<HTMLElement>) {
+    if (maximized) return;
+    if ((e.target as HTMLElement).closest('button,select,input,a')) return;
+    const rect = cardRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    dragging.current = true;
+    dragOffset.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    setWinPos({ x: rect.left, y: rect.top });
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+  function moveWinDrag(e: ReactPointerEvent<HTMLElement>) {
+    if (!dragging.current) return;
+    const w = cardRef.current?.offsetWidth || 600;
+    const h = cardRef.current?.offsetHeight || 400;
+    const x = Math.min(Math.max(0, e.clientX - dragOffset.current.x), Math.max(0, window.innerWidth - Math.min(w, window.innerWidth)));
+    const y = Math.min(Math.max(0, e.clientY - dragOffset.current.y), Math.max(0, window.innerHeight - Math.min(h, window.innerHeight)));
+    setWinPos({ x, y });
+  }
+  function stopWinDrag(e: ReactPointerEvent<HTMLElement>) {
+    dragging.current = false;
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+  }
 
   const loadComments = () => api<DocumentComment[]>(`/documents/${docId}/comments`).then(setComments).catch(() => {});
   useEffect(() => { void loadComments(); }, [docId]);
@@ -765,7 +801,7 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
   async function addComment() {
     if (!newComment.trim()) return;
     setBusy(true);
-    try { await api(`/documents/${docId}/comments`, { method: 'POST', body: JSON.stringify({ comment: newComment, stage: workflowStatus, documentVersionId: versionId }) }); setNewComment(''); await loadComments(); }
+    try { await api(`/documents/${docId}/comments`, { method: 'POST', body: JSON.stringify({ comment: newComment, stage: workflowStatus, documentVersionId: activeVersionId }) }); setNewComment(''); await loadComments(); }
     catch (e) { onError((e as Error).message); } finally { setBusy(false); }
   }
   async function doWorkflow(action: string) {
@@ -783,7 +819,7 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
 
   useEffect(() => {
     let url: string | null = null;
-    api<VersionContent>(`/documents/${docId}/versions/${versionId}/content`)
+    api<VersionContent>(`/documents/${docId}/versions/${activeVersionId}/content`)
       .then(c => {
         setContent(c);
         const pdfish = c.file_mime === 'application/pdf' || /\.pdf$/i.test(c.file_name || '');
@@ -795,19 +831,19 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
       })
       .catch(e => onError((e as Error).message));
     return () => { if (url) URL.revokeObjectURL(url); };
-  }, [docId, versionId]);
+  }, [docId, activeVersionId]);
 
   async function reExtract() {
     setBusy(true);
-    try { await api(`/documents/${docId}/versions/${versionId}/re-extract`, { method: 'POST', body: JSON.stringify({}) }); const c = await api<VersionContent>(`/documents/${docId}/versions/${versionId}/content`); setContent(c); }
+    try { await api(`/documents/${docId}/versions/${activeVersionId}/re-extract`, { method: 'POST', body: JSON.stringify({}) }); const c = await api<VersionContent>(`/documents/${docId}/versions/${activeVersionId}/content`); setContent(c); }
     catch (e) { onError((e as Error).message); } finally { setBusy(false); }
   }
   async function saveContent() {
     if (!editorRef.current) return;
     setBusy(true);
     try {
-      await api(`/documents/${docId}/versions/${versionId}/content`, { method: 'PUT', body: JSON.stringify({ contentHtml: editorRef.current.innerHTML, contentText: editorRef.current.innerText }) });
-      const c = await api<VersionContent>(`/documents/${docId}/versions/${versionId}/content`); setContent(c);
+      await api(`/documents/${docId}/versions/${activeVersionId}/content`, { method: 'PUT', body: JSON.stringify({ contentHtml: editorRef.current.innerHTML, contentText: editorRef.current.innerText }) });
+      const c = await api<VersionContent>(`/documents/${docId}/versions/${activeVersionId}/content`); setContent(c);
       setEditing(false); onSaved();
     } catch (e) { onError((e as Error).message); } finally { setBusy(false); }
   }
@@ -816,7 +852,7 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
   async function downloadAsWord() {
     setExportBusy('download');
     try {
-      const r = await api<{ fileId: number; originalName: string }>(`/documents/${docId}/versions/${versionId}/export-docx`, { method: 'POST', body: JSON.stringify({}) });
+      const r = await api<{ fileId: number; originalName: string }>(`/documents/${docId}/versions/${activeVersionId}/export-docx`, { method: 'POST', body: JSON.stringify({}) });
       const url = await fetchBlobUrl(`/files/${r.fileId}/download`);
       const a = document.createElement('a'); a.href = url; a.download = r.originalName; a.click();
       setTimeout(() => URL.revokeObjectURL(url), 4000);
@@ -827,7 +863,7 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
   async function saveAsWordVersion() {
     setExportBusy('save');
     try {
-      await api(`/documents/${docId}/versions/${versionId}/export-docx/save-as-version`, { method: 'POST', body: JSON.stringify({}) });
+      await api(`/documents/${docId}/versions/${activeVersionId}/export-docx/save-as-version`, { method: 'POST', body: JSON.stringify({}) });
       onSaved(); onClose();
     } catch (e) { onError((e as Error).message); } finally { setExportBusy(null); }
   }
@@ -842,7 +878,7 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
       const meta = await api<{ storage_area: string; stored_name: string; original_name: string }>(`/files/${content.file_id}/meta`);
       const result = await window.sechLims.openInOffice({
         storageArea: meta.storage_area, storedName: meta.stored_name, originalName: meta.original_name || content.file_name || 'document',
-        docId, versionId,
+        docId, versionId: activeVersionId,
       });
       if (!result.ok) { setOfficeStatus(null); onError(result.error || 'Could not open the file in its default application.'); return; }
       setOfficeWatch({ watchId: result.watchId!, fileName: meta.original_name || content.file_name || 'document' });
@@ -852,6 +888,15 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
   function stopOfficeWatchNow() {
     if (officeWatch) window.sechLims?.stopOfficeWatch?.(officeWatch.watchId);
     setOfficeWatch(null); setOfficeStatus(null);
+  }
+  // Manual fallback: forces the main process to re-read the scratch file right
+  // now instead of waiting for the automatic watch/poll, for cases where the
+  // user wants an immediate confirmation that a save landed.
+  async function checkOfficeNow() {
+    if (!officeWatch || !window.sechLims?.checkOfficeNow) return;
+    setOfficeStatus('Checking for a saved change…');
+    const r = await window.sechLims.checkOfficeNow(officeWatch.watchId);
+    if (!r.ok) { setOfficeStatus(r.error || 'Could not check for changes.'); return; }
   }
   useEffect(() => {
     if (!window.sechLims?.onOfficeFileChanged) return;
@@ -867,8 +912,9 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
         const fdata = await fr.json();
         const stamp = new Date().toISOString().slice(11, 19).replace(/:/g, '');
         const nextVersionNumber = `office-sync-${stamp}`;
-        await api(`/documents/${docId}/versions`, { method: 'POST', body: JSON.stringify({ versionNumber: nextVersionNumber, fileId: fdata.id, revisionSummary: 'Synced automatically from Microsoft Office' }) });
-        setOfficeStatus(`Synced as a new version (${nextVersionNumber}). Close and reopen the document to view it.`);
+        const created = await api<{ id: number }>(`/documents/${docId}/versions`, { method: 'POST', body: JSON.stringify({ versionNumber: nextVersionNumber, fileId: fdata.id, revisionSummary: 'Synced automatically from Microsoft Office' }) });
+        setOfficeStatus(`Synced as a new version (${nextVersionNumber}) — now viewing the saved edits.`);
+        setActiveVersionId(created.id);
         onSaved();
       } catch (e) { setOfficeStatus(null); onError((e as Error).message); }
     });
@@ -880,6 +926,14 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
 
   const isPdf = content?.file_mime === 'application/pdf' || /\.pdf$/i.test(content?.file_name || '');
   const isImage = (content?.file_mime || '').startsWith('image/');
+  const WORD_MIMES = ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/msword'];
+  const SPREADSHEET_MIMES = ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'];
+  // The "Download as Word" / "Save as new Word version" export only makes sense
+  // for an actual Word source file, or for content authored in-app with no
+  // original file at all (nothing else to conflict with). Anything else
+  // (spreadsheets, PDFs, images, plain text) keeps its own native format.
+  const isWordSource = !content?.file_id || WORD_MIMES.includes(content?.file_mime || '') || /\.docx?$/i.test(content?.file_name || '');
+  const isSpreadsheet = SPREADSHEET_MIMES.includes(content?.file_mime || '') || /\.xlsx?$|\.xlsm$/i.test(content?.file_name || '');
 
   const contentH = maximized ? '80vh' : '56vh';
   const originalH = maximized ? '86vh' : '64vh';
@@ -891,8 +945,25 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
     <button className="secondary" title="Reset zoom" onClick={() => setZoom(1)}>Fit</button>
   </span>;
 
-  return <div style={{ position: 'fixed', inset: 0, background: 'rgba(8,16,32,0.55)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: maximized ? 'stretch' : 'flex-start', padding: maximized ? '1vh 1vw' : '3vh 2vw', overflow: 'auto' }} onClick={onClose}>
-    <div className="card" style={{ width: maximized ? '98vw' : 'min(1100px, 96vw)', maxWidth: '98vw', margin: 0 }} onClick={e => e.stopPropagation()}>
+  if (minimized) {
+    return <div style={{ position: 'fixed', right: 16, bottom: 16, zIndex: 1000 }}>
+      <button className="secondary" onClick={() => setMinimized(false)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', boxShadow: '0 4px 18px rgba(0,0,0,.4)' }}>
+        📄 {content?.file_name || content?.version_label || 'Document'} — Restore
+      </button>
+    </div>;
+  }
+
+  // Fullscreen (maximized): true edge-to-edge, no backdrop padding, no drag.
+  // Windowed: a normal floating card the header can drag anywhere on screen.
+  const cardStyle: CSSProperties = maximized
+    ? { width: '100vw', height: '100vh', maxWidth: '100vw', margin: 0, borderRadius: 0, position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'auto' }
+    : winPos
+      ? { width: 'min(1100px, 96vw)', maxWidth: '98vw', margin: 0, position: 'fixed', left: winPos.x, top: winPos.y }
+      : { width: 'min(1100px, 96vw)', maxWidth: '98vw', margin: 0 };
+
+  return <div style={{ position: 'fixed', inset: 0, background: maximized ? 'transparent' : 'rgba(8,16,32,0.55)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: maximized ? 'stretch' : (winPos ? 'flex-start' : 'flex-start'), padding: maximized ? 0 : '3vh 2vw', overflow: maximized ? 'hidden' : 'auto', pointerEvents: maximized ? 'none' : 'auto' }} onClick={onClose}>
+    <div ref={cardRef} className="card" style={{ ...cardStyle, pointerEvents: 'auto' }} onClick={e => e.stopPropagation()}
+      onPointerMove={moveWinDrag} onPointerUp={stopWinDrag} onPointerCancel={stopWinDrag}>
       <style>{`.doc-content table.docx-table,.doc-content table{border-collapse:collapse;width:100%;margin:8px 0;font-size:12px}
 .doc-content table td,.doc-content table th{border:1px solid #c9d2e0;padding:5px 8px;vertical-align:top;text-align:left}
 .doc-content h1{font-size:18px;margin:14px 0 6px}
@@ -922,12 +993,14 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
 .wt-select{height:26px;background:#0f1d38;border:1px solid #2c416f;border-radius:5px;color:#dbe6fb;font-size:12px;padding:0 4px;cursor:pointer}
 .doc-page[contenteditable="true"]{cursor:text}
 .doc-page[contenteditable="true"]:focus{outline:none}`}</style>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', cursor: maximized ? 'default' : 'move', touchAction: 'none' }}
+        onPointerDown={startWinDrag} title={maximized ? undefined : 'Drag to move the window'}>
         <h3 style={{ margin: 0, fontSize: 15 }}>{content ? `${content.version_label || content.version_number || 'Version'} · ${content.file_name || 'Controlled content'}` : 'Loading…'}</h3>
         <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
           {zoomControls}
-          <button className="secondary" onClick={() => setMaximized(m => !m)}>{maximized ? 'Restore' : 'Maximize'}</button>
-          <button className="secondary" onClick={onClose}>Close</button>
+          <button className="secondary" title="Minimize" onClick={() => setMinimized(true)}>Minimize</button>
+          <button className="secondary" title={maximized ? 'Restore window' : 'Maximize to fill the screen'} onClick={() => setMaximized(m => !m)}>{maximized ? 'Restore' : 'Maximize'}</button>
+          <button className="secondary" title="Close" onClick={onClose}>Close</button>
         </span>
       </div>
       <div className="tabs" style={{ marginTop: 10 }}>
@@ -943,8 +1016,12 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
       {content?.file_id && window.sechLims?.openInOffice && <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '0 0 8px', padding: '8px 10px', background: officeWatch ? '#13301f' : '#0f1830', border: `1px solid ${officeWatch ? '#225c3a' : '#24365e'}`, borderRadius: 6 }}>
         {!officeWatch
           ? <button className="secondary" onClick={openInOffice} disabled={officeStatus === 'Opening…'} title="Open the stored file in Microsoft Word/Excel/etc. and sync saves back automatically">{officeStatus === 'Opening…' ? 'Opening…' : 'Open in Microsoft Office'}</button>
-          : <button className="secondary" onClick={stopOfficeWatchNow}>Stop watching</button>}
+          : <>
+              <button className="secondary" onClick={checkOfficeNow} title="Force an immediate check for a saved change, instead of waiting for it to be detected automatically">Check now</button>
+              <button className="secondary" onClick={stopOfficeWatchNow}>Stop watching</button>
+            </>}
         {officeStatus && <span style={{ fontSize: 12, color: '#a8c7b6' }}>{officeStatus}</span>}
+        {officeWatch && <span style={{ fontSize: 11.5, color: '#7c8db0' }}>If Word shows “Protected View”, click “Enable Editing” there first — changes can’t be saved until you do.</span>}
       </div>}
 
       {mode === 'content' && content && <div>
@@ -955,12 +1032,12 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
           {content.file_id && <button className="secondary" onClick={reExtract} disabled={busy}>{busy ? 'Reading…' : 'Re-read from file'}</button>}
           <button className="secondary" title="Ask the Dennis AI assistant about this document" onClick={() => window.dispatchEvent(new CustomEvent('dennis:ask', { detail: { question: `Summarise and explain this document: ${content.file_name || content.version_label || 'the open document'}` } }))}>Ask Dennis</button>
           {content.file_id && <a className="badge" href={`${API_BASE}/files/${content.file_id}/download`} onClick={ev => { ev.preventDefault(); fetchBlobUrl(`/files/${content.file_id}/download`).then(u => { const a = document.createElement('a'); a.href = u; a.download = content.file_name || 'document'; a.click(); }); }} style={{ cursor: 'pointer' }}>Download original</a>}
-          {!!content.content_html && <button className="secondary" title="Build a real .docx from the in-app content and download it" onClick={downloadAsWord} disabled={!!exportBusy}>{exportBusy === 'download' ? 'Building…' : 'Download as Word (.docx)'}</button>}
-          {!!content.content_html && <button className="secondary" title="Build a real .docx and attach it as the document's newest version" onClick={saveAsWordVersion} disabled={!!exportBusy}>{exportBusy === 'save' ? 'Saving…' : 'Save as new Word version'}</button>}
+          {!!content.content_html && isWordSource && <button className="secondary" title="Build a real .docx from the in-app content and download it" onClick={downloadAsWord} disabled={!!exportBusy}>{exportBusy === 'download' ? 'Building…' : 'Download as Word (.docx)'}</button>}
+          {!!content.content_html && isWordSource && <button className="secondary" title="Build a real .docx and attach it as the document's newest version" onClick={saveAsWordVersion} disabled={!!exportBusy}>{exportBusy === 'save' ? 'Saving…' : 'Save as new Word version'}</button>}
         </div>
         {editing
           ? <div className="word-editor">
-              <WordToolbar editorRef={editorRef} />
+              {!isSpreadsheet && <WordToolbar editorRef={editorRef} />}
               <div className="doc-scroll" style={{ height: contentH }}>
                 <div ref={editorRef} className="doc-content doc-page" contentEditable suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: content.content_html || `<p>${(content.content_text || '').replace(/\n/g, '<br/>')}</p>` || '<p>Type the controlled document content here…</p>' }}
                   style={{ zoom, outline: 'none', minHeight: '60%' }} />
@@ -981,7 +1058,13 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
           </div>
         : content?.content_html
           ? <div>
-              <p className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>Faithful rendering of the Word document (headings, tables, colours, shading, lists and images preserved), with a clickable Contents panel. Use “Download original” to open the exact .docx in Word.</p>
+              <p className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>
+                {isWordSource
+                  ? 'Faithful rendering of the Word document (headings, tables, colours, shading, lists and images preserved), with a clickable Contents panel. Use “Download original” to open the exact .docx in Word.'
+                  : isSpreadsheet
+                    ? 'Preview of every worksheet as a table. Use “Download original” to open the exact spreadsheet in Excel.'
+                    : 'Best-effort preview of the file’s content. Use “Download original” to open the exact file in its native application.'}
+              </p>
               <DocReader html={content.content_html} zoom={zoom} height={originalH} />
             </div>
           : <div style={{ height: '40vh', border: '1px solid #e2e8f0', borderRadius: 6, background: '#525659', color: '#fff', padding: 24 }}>
@@ -989,7 +1072,7 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
               {fileUrl && <a className="badge" style={{ cursor: 'pointer' }} onClick={() => { const a = document.createElement('a'); a.href = fileUrl; a.download = content?.file_name || 'document'; a.click(); }}>Download file</a>}
             </div>)}
 
-      {content && <SopTools docId={docId} versionId={versionId} documents={documents} />}
+      {content && <SopTools docId={docId} versionId={activeVersionId} documents={documents} />}
 
       {/* Workflow stage: comments + the single stage-appropriate transition. */}
       {workflowStatus && <div style={{ marginTop: 12, padding: 12, background: '#0f1830', border: '1px solid #24365e', borderRadius: 8 }}>

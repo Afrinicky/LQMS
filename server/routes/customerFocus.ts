@@ -676,7 +676,11 @@ export function customerFocusRoutes() {
     try {
       if (ext === '.csv') rows = parseCsvBody(fs.readFileSync(filePath, 'utf-8'));
       else if (ext === '.xlsx' || ext === '.xls') {
-        const wb = XLSX.readFile(filePath, { cellDates: false });
+        // `XLSX.readFile` is not reliably resolvable under Node's ESM/CJS
+        // interop for this package (see documentExtract.ts's fromXlsx for the
+        // full explanation) — read the buffer ourselves and parse it with
+        // `XLSX.read`, which is a real static export.
+        const wb = XLSX.read(fs.readFileSync(filePath), { type: 'buffer', cellDates: false });
         const sheet = wb.Sheets[wb.SheetNames[0]];
         const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '', raw: false });
         rows = raw.map(r => { const o: Record<string, string> = {}; for (const k of Object.keys(r)) o[k] = r[k] === null || r[k] === undefined ? '' : String(r[k]).trim(); return o; });
