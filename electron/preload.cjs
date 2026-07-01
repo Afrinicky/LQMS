@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('sechLims', {
   // uploaded as a new document version through the normal API.
   openInOffice: (payload) => ipcRenderer.invoke('sech-lims:open-in-office', payload),
   stopOfficeWatch: (watchId) => ipcRenderer.send('sech-lims:stop-office-watch', watchId),
+  checkOfficeNow: (watchId) => ipcRenderer.invoke('sech-lims:office-check-now', watchId),
   onOfficeFileChanged: (callback) => {
     const handler = (_event, payload) => callback(payload);
     ipcRenderer.on('sech-lims:office-file-changed', handler);

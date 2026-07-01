@@ -220,9 +220,36 @@ ipcMain.on('sech-lims:relaunch', () => {
  * through the same /files + /documents/:id/versions endpoints a manual file
  * picker would use — no extra server-side surface is needed for this.
  * ------------------------------------------------------------------ */
-type OfficeWatchEntry = { watcher: fs.FSWatcher; scratchPath: string; lastMtimeMs: number; timer: NodeJS.Timeout | null };
+type OfficeWatchEntry = {
+  watcher: fs.FSWatcher; scratchPath: string; scratchName: string; lastMtimeMs: number; timer: NodeJS.Timeout | null;
+  pollTimer: NodeJS.Timeout | null; docId?: number; versionId?: number; safeOriginalName: string;
+};
 const officeWatchers = new Map<string, OfficeWatchEntry>();
 const MAX_OFFICE_SYNC_BYTES = 60 * 1024 * 1024;
+
+// Reads the scratch file back and, if it actually changed since the last sync,
+// pushes it to the renderer as a new version to upload. Shared by the fs.watch
+// event handler, a low-frequency poll (fs.watch is known to be unreliable on
+// some Windows configurations — network drives, some antivirus/OneDrive sync
+// filter drivers can suppress or delay rename events, or report a null
+// `filename`), and the manual "Check now" button as a guaranteed fallback.
+function syncScratchIfChanged(watchId: string, entry: OfficeWatchEntry, force = false) {
+  try {
+    if (!fs.existsSync(entry.scratchPath)) return; // mid-rename transient state
+    const st = fs.statSync(entry.scratchPath);
+    if (st.size === 0) return;
+    if (!force && st.mtimeMs <= entry.lastMtimeMs) return;
+    if (st.size > MAX_OFFICE_SYNC_BYTES) { bootLog('office-edit file exceeded sync size limit', entry.scratchPath); return; }
+    entry.lastMtimeMs = st.mtimeMs;
+    const bytes = fs.readFileSync(entry.scratchPath);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('sech-lims:office-file-changed', {
+        watchId, docId: entry.docId, versionId: entry.versionId,
+        originalName: entry.safeOriginalName, mimeGuess: mimeForExtension(entry.safeOriginalName), bytes,
+      });
+    }
+  } catch (err) { bootLog('office watch read failed', String(err)); }
+}
 
 function mimeForExtension(name: string): string {
   const ext = (name.match(/\.([a-z0-9]+)$/i)?.[1] || '').toLowerCase();
@@ -264,29 +291,29 @@ ipcMain.handle('sech-lims:open-in-office', async (_event, payload: { storageArea
     const openErr = await shell.openPath(scratchPath);
     if (openErr) return { ok: false, error: `Could not open the file in its default application: ${openErr}` };
 
-    const entry: OfficeWatchEntry = { watcher: null as unknown as fs.FSWatcher, scratchPath, lastMtimeMs: fs.statSync(scratchPath).mtimeMs, timer: null };
+    const entry: OfficeWatchEntry = {
+      watcher: null as unknown as fs.FSWatcher, scratchPath, scratchName, lastMtimeMs: fs.statSync(scratchPath).mtimeMs,
+      timer: null, pollTimer: null, docId: payload?.docId, versionId: payload?.versionId, safeOriginalName,
+    };
     entry.watcher = fs.watch(scratchDir, (_eventType, filename) => {
-      if (filename !== scratchName) return;
+      // Node explicitly documents that `filename` is not guaranteed on every
+      // platform/filesystem (e.g. some network shares, or certain Windows
+      // antivirus/sync-filter drivers) — treat a missing filename as "might be
+      // ours" rather than silently dropping the save, which previously made
+      // Office saves appear to do nothing.
+      if (filename && filename !== scratchName) return;
       if (entry.timer) clearTimeout(entry.timer);
       // Debounce: editors fire several change events per save (truncate, write,
       // rename); wait for the burst to settle before reading the file back.
-      entry.timer = setTimeout(() => {
-        try {
-          if (!fs.existsSync(scratchPath)) return; // mid-rename transient state
-          const st = fs.statSync(scratchPath);
-          if (st.size === 0 || st.mtimeMs <= entry.lastMtimeMs) return;
-          entry.lastMtimeMs = st.mtimeMs;
-          if (st.size > MAX_OFFICE_SYNC_BYTES) { bootLog('office-edit file exceeded sync size limit', scratchPath); return; }
-          const bytes = fs.readFileSync(scratchPath);
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('sech-lims:office-file-changed', {
-              watchId, docId: payload?.docId, versionId: payload?.versionId,
-              originalName: safeOriginalName, mimeGuess: mimeForExtension(safeOriginalName), bytes,
-            });
-          }
-        } catch (err) { bootLog('office watch read failed', String(err)); }
-      }, 1500);
+      entry.timer = setTimeout(() => syncScratchIfChanged(watchId, entry), 1500);
     });
+    // Belt-and-braces poll: fs.watch reliably fires in this sandbox and in most
+    // desktop environments, but is a known weak point on Windows with network
+    // drives, some antivirus products, and OneDrive/cloud-sync filter drivers,
+    // where rename events can be delayed, coalesced, or dropped entirely. A
+    // cheap mtime poll every 3s guarantees a save is eventually picked up even
+    // if the native watch never fires.
+    entry.pollTimer = setInterval(() => syncScratchIfChanged(watchId, entry), 3000);
     officeWatchers.set(watchId, entry);
     bootLog('office-edit watch started', { watchId, scratchPath });
     return { ok: true, watchId };
@@ -296,17 +323,32 @@ ipcMain.handle('sech-lims:open-in-office', async (_event, payload: { storageArea
   }
 });
 
+// Manual fallback for when the automatic watch/poll hasn't picked up a save
+// yet (or the user just wants to force a re-check right after saving in
+// Office) — reads the scratch file back unconditionally and re-syncs it.
+ipcMain.handle('sech-lims:office-check-now', (_event, watchId: string) => {
+  const entry = officeWatchers.get(watchId);
+  if (!entry) return { ok: false, error: 'Not watching this file anymore.' };
+  syncScratchIfChanged(watchId, entry, true);
+  return { ok: true };
+});
+
 ipcMain.on('sech-lims:stop-office-watch', (_event, watchId: string) => {
   const entry = officeWatchers.get(watchId);
   if (!entry) return;
   if (entry.timer) clearTimeout(entry.timer);
+  if (entry.pollTimer) clearInterval(entry.pollTimer);
   try { entry.watcher.close(); } catch { /* already closed */ }
   officeWatchers.delete(watchId);
   bootLog('office-edit watch stopped', { watchId });
 });
 
 app.on('before-quit', () => {
-  for (const entry of officeWatchers.values()) { if (entry.timer) clearTimeout(entry.timer); try { entry.watcher.close(); } catch { /* ignore */ } }
+  for (const entry of officeWatchers.values()) {
+    if (entry.timer) clearTimeout(entry.timer);
+    if (entry.pollTimer) clearInterval(entry.pollTimer);
+    try { entry.watcher.close(); } catch { /* ignore */ }
+  }
   officeWatchers.clear();
 });
 

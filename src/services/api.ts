@@ -13,6 +13,7 @@ declare global {
       // Electron app; absent in the plain browser/dev-server preview.
       openInOffice?: (payload: OfficeOpenPayload) => Promise<OfficeOpenResult>;
       stopOfficeWatch?: (watchId: string) => void;
+      checkOfficeNow?: (watchId: string) => Promise<{ ok: boolean; error?: string }>;
       onOfficeFileChanged?: (callback: (payload: OfficeFileChangedPayload) => void) => () => void;
     };
   }
