@@ -629,8 +629,8 @@ const SOP_ACTIONS: Array<{ task: string; label: string }> = [
   { task: 'improve_wording', label: 'Improve SOP wording' },
   { task: 'compare', label: 'Compare SOPs' },
 ];
-function SopTools({ docId, versionId, documents }: { docId: number; versionId: number; documents?: DocumentRecord[] }) {
-  const [open, setOpen] = useState(false);
+function SopTools({ docId, versionId, documents, startOpen }: { docId: number; versionId: number; documents?: DocumentRecord[]; startOpen?: boolean }) {
+  const [open, setOpen] = useState(!!startOpen);
   const [busy, setBusy] = useState<string | null>(null);
   const [result, setResult] = useState<SopResult | null>(null);
   const [compareId, setCompareId] = useState('');
@@ -762,13 +762,17 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
   const [maximized, setMaximized] = useState(true);
   const [minimized, setMinimized] = useState(false);
   const [winPos, setWinPos] = useState<{ x: number; y: number } | null>(null);
+  const [winSize, setWinSize] = useState<{ w: number; h: number } | null>(null);
   const [zoom, setZoom] = useState(1);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [panel, setPanel] = useState<'workflow' | 'dennis' | null>(null);
   const [comments, setComments] = useState<DocumentComment[]>([]);
   const [newComment, setNewComment] = useState('');
   const editorRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
   const dragOffset = useRef({ x: 0, y: 0 });
+  const resizing = useRef<{ dir: string; startX: number; startY: number; startW: number; startH: number; startL: number; startT: number } | null>(null);
 
   // Drag-to-reposition the viewer window by its header, like any desktop
   // document/PDF viewer. Disabled while maximized (nowhere to drag to).
@@ -792,6 +796,39 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
   }
   function stopWinDrag(e: ReactPointerEvent<HTMLElement>) {
     dragging.current = false;
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+  }
+
+  // Resize-by-edge, like a native desktop window: thin invisible handles along
+  // each edge/corner start a resize; W/N edges also shift the window origin so
+  // the opposite edge stays anchored.
+  function startResize(e: ReactPointerEvent<HTMLElement>, dir: string) {
+    if (maximized) return;
+    const rect = cardRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    resizing.current = { dir, startX: e.clientX, startY: e.clientY, startW: rect.width, startH: rect.height, startL: rect.left, startT: rect.top };
+    setWinPos({ x: rect.left, y: rect.top });
+    setWinSize({ w: rect.width, h: rect.height });
+    e.currentTarget.setPointerCapture(e.pointerId);
+    e.preventDefault(); e.stopPropagation();
+  }
+  function moveResize(e: ReactPointerEvent<HTMLElement>) {
+    const r = resizing.current; if (!r) return;
+    const dx = e.clientX - r.startX; const dy = e.clientY - r.startY;
+    let w = r.startW, h = r.startH, x = r.startL, y = r.startT;
+    if (r.dir.includes('e')) w = r.startW + dx;
+    if (r.dir.includes('s')) h = r.startH + dy;
+    if (r.dir.includes('w')) w = r.startW - dx;
+    if (r.dir.includes('n')) h = r.startH - dy;
+    w = Math.min(Math.max(480, w), window.innerWidth);
+    h = Math.min(Math.max(340, h), window.innerHeight);
+    if (r.dir.includes('w')) x = r.startL + (r.startW - w);
+    if (r.dir.includes('n')) y = r.startT + (r.startH - h);
+    setWinPos({ x: Math.max(0, x), y: Math.max(0, y) });
+    setWinSize({ w, h });
+  }
+  function stopResize(e: ReactPointerEvent<HTMLElement>) {
+    resizing.current = null;
     try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* already released */ }
   }
 
@@ -912,7 +949,7 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
         const fdata = await fr.json();
         const stamp = new Date().toISOString().slice(11, 19).replace(/:/g, '');
         const nextVersionNumber = `office-sync-${stamp}`;
-        const created = await api<{ id: number }>(`/documents/${docId}/versions`, { method: 'POST', body: JSON.stringify({ versionNumber: nextVersionNumber, fileId: fdata.id, revisionSummary: 'Synced automatically from Microsoft Office' }) });
+        const created = await api<{ id: number }>(`/documents/${docId}/versions`, { method: 'POST', body: JSON.stringify({ versionNumber: nextVersionNumber, fileId: fdata.id, revisionSummary: 'Synced automatically from Microsoft Office', makeCurrent: true }) });
         setOfficeStatus(`Synced as a new version (${nextVersionNumber}) — now viewing the saved edits.`);
         setActiveVersionId(created.id);
         onSaved();
@@ -935,35 +972,38 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
   const isWordSource = !content?.file_id || WORD_MIMES.includes(content?.file_mime || '') || /\.docx?$/i.test(content?.file_name || '');
   const isSpreadsheet = SPREADSHEET_MIMES.includes(content?.file_mime || '') || /\.xlsx?$|\.xlsm$/i.test(content?.file_name || '');
 
-  const contentH = maximized ? '80vh' : '56vh';
-  const originalH = maximized ? '86vh' : '64vh';
   const zoomPct = Math.round(zoom * 100);
-  const zoomControls = <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-    <button className="secondary" title="Zoom out" onClick={() => setZoom(z => Math.max(0.5, +(z - 0.1).toFixed(2)))}>−</button>
-    <span style={{ minWidth: 44, textAlign: 'center', fontSize: 12 }}>{zoomPct}%</span>
-    <button className="secondary" title="Zoom in" onClick={() => setZoom(z => Math.min(3, +(z + 0.1).toFixed(2)))}>+</button>
-    <button className="secondary" title="Reset zoom" onClick={() => setZoom(1)}>Fit</button>
-  </span>;
+  // The embedded browser PDF viewer ships its own zoom/print/download toolbar,
+  // so our zoom controls would just duplicate (and fight) it there.
+  const showZoom = !(mode === 'original' && (isPdf || isImage)) || isImage;
+  const officeAppName = isSpreadsheet ? 'Microsoft Excel' : isWordSource ? 'Microsoft Word' : 'Microsoft Office';
+  const windowTitle = content ? `${content.version_label || content.version_number || 'Version'} · ${content.file_name || 'Controlled content'}` : 'Loading…';
 
   if (minimized) {
-    return <div style={{ position: 'fixed', right: 16, bottom: 16, zIndex: 1000 }}>
+    // Docked restore pill — kept clear of the Dennis chat bubble that floats
+    // in the bottom-right corner.
+    return <div style={{ position: 'fixed', right: 96, bottom: 24, zIndex: 1000 }}>
       <button className="secondary" onClick={() => setMinimized(false)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', boxShadow: '0 4px 18px rgba(0,0,0,.4)' }}>
         📄 {content?.file_name || content?.version_label || 'Document'} — Restore
       </button>
     </div>;
   }
 
-  // Fullscreen (maximized): true edge-to-edge, no backdrop padding, no drag.
-  // Windowed: a normal floating card the header can drag anywhere on screen.
+  // Fullscreen (maximized): true edge-to-edge. Windowed: a floating window the
+  // title bar drags and the edges resize, like a native document viewer. Either
+  // way the window is a flex column whose content region fills all remaining
+  // height, so the preview expands with the window instead of being pinned to a
+  // fixed vh height.
   const cardStyle: CSSProperties = maximized
-    ? { width: '100vw', height: '100vh', maxWidth: '100vw', margin: 0, borderRadius: 0, position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'auto' }
-    : winPos
-      ? { width: 'min(1100px, 96vw)', maxWidth: '98vw', margin: 0, position: 'fixed', left: winPos.x, top: winPos.y }
-      : { width: 'min(1100px, 96vw)', maxWidth: '98vw', margin: 0 };
+    ? { width: '100vw', height: '100vh', maxWidth: '100vw', margin: 0, borderRadius: 0, position: 'fixed', inset: 0 }
+    : {
+        width: winSize ? winSize.w : 'min(1240px, 94vw)', height: winSize ? winSize.h : '90vh', maxWidth: '100vw', margin: 0,
+        ...(winPos ? { position: 'fixed' as const, left: winPos.x, top: winPos.y } : { position: 'relative' as const }),
+      };
 
-  return <div style={{ position: 'fixed', inset: 0, background: maximized ? 'transparent' : 'rgba(8,16,32,0.55)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: maximized ? 'stretch' : (winPos ? 'flex-start' : 'flex-start'), padding: maximized ? 0 : '3vh 2vw', overflow: maximized ? 'hidden' : 'auto', pointerEvents: maximized ? 'none' : 'auto' }} onClick={onClose}>
-    <div ref={cardRef} className="card" style={{ ...cardStyle, pointerEvents: 'auto' }} onClick={e => e.stopPropagation()}
-      onPointerMove={moveWinDrag} onPointerUp={stopWinDrag} onPointerCancel={stopWinDrag}>
+  return <div style={{ position: 'fixed', inset: 0, background: maximized ? 'transparent' : 'rgba(8,16,32,0.55)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'center', overflow: 'hidden', pointerEvents: maximized ? 'none' : 'auto' }} onClick={onClose}>
+    <div ref={cardRef} className="card dv-window" style={{ ...cardStyle, padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', pointerEvents: 'auto' }} onClick={e => e.stopPropagation()}
+      onPointerMove={e => { moveWinDrag(e); moveResize(e); }} onPointerUp={e => { stopWinDrag(e); stopResize(e); }} onPointerCancel={e => { stopWinDrag(e); stopResize(e); }}>
       <style>{`.doc-content table.docx-table,.doc-content table{border-collapse:collapse;width:100%;margin:8px 0;font-size:12px}
 .doc-content table td,.doc-content table th{border:1px solid #c9d2e0;padding:5px 8px;vertical-align:top;text-align:left}
 .doc-content h1{font-size:18px;margin:14px 0 6px}
@@ -992,113 +1032,182 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
 .wt-color{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
 .wt-select{height:26px;background:#0f1d38;border:1px solid #2c416f;border-radius:5px;color:#dbe6fb;font-size:12px;padding:0 4px;cursor:pointer}
 .doc-page[contenteditable="true"]{cursor:text}
-.doc-page[contenteditable="true"]:focus{outline:none}`}</style>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', cursor: maximized ? 'default' : 'move', touchAction: 'none' }}
-        onPointerDown={startWinDrag} title={maximized ? undefined : 'Drag to move the window'}>
-        <h3 style={{ margin: 0, fontSize: 15 }}>{content ? `${content.version_label || content.version_number || 'Version'} · ${content.file_name || 'Controlled content'}` : 'Loading…'}</h3>
-        <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-          {zoomControls}
-          <button className="secondary" title="Minimize" onClick={() => setMinimized(true)}>Minimize</button>
-          <button className="secondary" title={maximized ? 'Restore window' : 'Maximize to fill the screen'} onClick={() => setMaximized(m => !m)}>{maximized ? 'Restore' : 'Maximize'}</button>
-          <button className="secondary" title="Close" onClick={onClose}>Close</button>
+.doc-page[contenteditable="true"]:focus{outline:none}
+.dv-window{background:#0b1428;border:1px solid #22345c;box-shadow:0 18px 60px rgba(0,0,0,.55)}
+.dv-titlebar{display:flex;align-items:center;gap:10px;padding:4px 4px 4px 14px;background:#101c36;border-bottom:1px solid #22345c;user-select:none;touch-action:none;flex:none}
+.dv-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px;font-weight:600;color:#e7eefc}
+.dv-winbtns{display:flex;gap:2px;flex:none}
+.dv-winbtn{width:40px;height:30px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:0;box-shadow:none;border-radius:6px;color:#c8d4ec;font-size:13px;cursor:pointer;line-height:1;padding:0}
+.dv-winbtn:hover{background:rgba(255,255,255,.09);color:#fff}
+.dv-winbtn.dv-close:hover{background:#c42b1c;color:#fff}
+.dv-toolbar{display:flex;align-items:center;gap:8px;padding:7px 10px;background:#0e1930;border-bottom:1px solid #1d2c4e;flex:none;flex-wrap:wrap}
+.dv-tabs{display:inline-flex;background:#0a1226;border:1px solid #22345c;border-radius:8px;padding:2px;gap:2px;flex:none}
+.dv-tabs button{border:0;background:transparent;box-shadow:none;color:#9fb0d4;font-size:12.5px;font-weight:600;padding:5px 13px;border-radius:6px;cursor:pointer}
+.dv-tabs button.on{background:#1d3257;color:#fff}
+.dv-btn{height:30px;padding:0 12px;display:inline-flex;align-items:center;gap:6px;background:var(--accent,#2f6bff);border:1px solid transparent;border-radius:7px;color:#fff;font-size:12.5px;font-weight:600;cursor:pointer;box-shadow:none;white-space:nowrap}
+.dv-btn:hover{filter:brightness(1.12)}
+.dv-btn:disabled{opacity:.55;cursor:default}
+.dv-ghost{height:30px;padding:0 11px;display:inline-flex;align-items:center;gap:6px;background:transparent;border:1px solid #2c416f;border-radius:7px;color:#dbe6fb;font-size:12.5px;cursor:pointer;box-shadow:none;white-space:nowrap}
+.dv-ghost:hover{background:#1d3257;border-color:#3a5694}
+.dv-ghost:disabled{opacity:.55;cursor:default}
+.dv-zoom{display:inline-flex;align-items:center;gap:2px;background:#0a1226;border:1px solid #22345c;border-radius:7px;padding:2px}
+.dv-zoom button{width:26px;height:24px;border:0;background:transparent;box-shadow:none;color:#dbe6fb;font-size:14px;border-radius:5px;cursor:pointer;padding:0;line-height:1}
+.dv-zoom button:hover{background:#1d3257}
+.dv-zoom span{min-width:42px;text-align:center;font-size:11.5px;color:#9fb0d4}
+.dv-menuwrap{position:relative;flex:none}
+.dv-menu{position:absolute;right:0;top:calc(100% + 4px);z-index:40;min-width:240px;background:#101c36;border:1px solid #2c416f;border-radius:9px;padding:5px;box-shadow:0 12px 34px rgba(0,0,0,.55);display:flex;flex-direction:column}
+.dv-menu button{text-align:left;background:transparent;border:0;box-shadow:none;color:#dbe6fb;font-size:12.5px;padding:8px 10px;border-radius:6px;cursor:pointer;white-space:nowrap}
+.dv-menu button:hover{background:#1d3257}
+.dv-menu button:disabled{opacity:.5;cursor:default}
+.dv-menu .dv-menu-sep{height:1px;background:#22345c;margin:4px 6px}
+.dv-strip{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 10px;background:#12281b;border-bottom:1px solid #1f5334;font-size:12px;color:#a8c7b6;flex:none}
+.dv-content{flex:1;min-height:0;display:flex;flex-direction:column;background:#0b1428;padding:8px}
+.dv-drawer{flex:none;max-height:38%;overflow:auto;border-top:1px solid #22345c;background:#0d1830;padding:10px 12px}
+.dv-footer{display:flex;align-items:center;gap:8px;padding:6px 10px;border-top:1px solid #22345c;background:#0e1930;flex:none;flex-wrap:wrap}
+.dv-meta{font-size:11px;color:#7c8db0;margin-left:auto;text-align:right}
+.dv-rs{position:absolute;z-index:30;touch-action:none}
+.dv-rs-n{top:0;left:12px;right:12px;height:6px;cursor:ns-resize}
+.dv-rs-s{bottom:0;left:12px;right:12px;height:6px;cursor:ns-resize}
+.dv-rs-e{right:0;top:12px;bottom:12px;width:6px;cursor:ew-resize}
+.dv-rs-w{left:0;top:12px;bottom:12px;width:6px;cursor:ew-resize}
+.dv-rs-ne{top:0;right:0;width:14px;height:14px;cursor:nesw-resize}
+.dv-rs-nw{top:0;left:0;width:14px;height:14px;cursor:nwse-resize}
+.dv-rs-se{bottom:0;right:0;width:14px;height:14px;cursor:nwse-resize}
+.dv-rs-sw{bottom:0;left:0;width:14px;height:14px;cursor:nesw-resize}`}</style>
+      {/* Invisible edge/corner handles for native-style window resizing. */}
+      {!maximized && <>
+        <div className="dv-rs dv-rs-n" onPointerDown={e => startResize(e, 'n')} />
+        <div className="dv-rs dv-rs-s" onPointerDown={e => startResize(e, 's')} />
+        <div className="dv-rs dv-rs-e" onPointerDown={e => startResize(e, 'e')} />
+        <div className="dv-rs dv-rs-w" onPointerDown={e => startResize(e, 'w')} />
+        <div className="dv-rs dv-rs-ne" onPointerDown={e => startResize(e, 'ne')} />
+        <div className="dv-rs dv-rs-nw" onPointerDown={e => startResize(e, 'nw')} />
+        <div className="dv-rs dv-rs-se" onPointerDown={e => startResize(e, 'se')} />
+        <div className="dv-rs dv-rs-sw" onPointerDown={e => startResize(e, 'sw')} />
+      </>}
+
+      {/* Title bar: drag to move, double-click to maximize/restore, and the
+          standard ─ ❐ ✕ window controls, like any desktop document viewer. */}
+      <div className="dv-titlebar" style={{ cursor: maximized ? 'default' : 'move' }} onPointerDown={startWinDrag} onDoubleClick={e => { if (!(e.target as HTMLElement).closest('button')) setMaximized(m => !m); }}>
+        <span className="dv-title" title={windowTitle}>{windowTitle}</span>
+        <span className="dv-winbtns">
+          <button className="dv-winbtn" title="Minimize" onClick={() => setMinimized(true)}>─</button>
+          <button className="dv-winbtn" title={maximized ? 'Restore down' : 'Maximize'} onClick={() => setMaximized(m => !m)}>{maximized ? '❐' : '☐'}</button>
+          <button className="dv-winbtn dv-close" title="Close" onClick={onClose}>✕</button>
         </span>
       </div>
-      <div className="tabs" style={{ marginTop: 10 }}>
-        <button type="button" className={mode === 'content' ? 'active' : ''} onClick={() => setMode('content')}>In-app content</button>
-        {content?.file_id && <button type="button" className={mode === 'original' ? 'active' : ''} onClick={() => setMode('original')}>Original file</button>}
+
+      {/* Toolbar: view tabs, the primary open action, then compact controls. */}
+      <div className="dv-toolbar">
+        <div className="dv-tabs">
+          <button type="button" className={mode === 'content' ? 'on' : ''} onClick={() => setMode('content')}>Preview</button>
+          {content?.file_id && <button type="button" className={mode === 'original' ? 'on' : ''} onClick={() => setMode('original')}>Original file</button>}
+        </div>
+        {content?.file_id && !isPdf && !isImage && window.sechLims?.openInOffice && !officeWatch &&
+          <button className="dv-btn" onClick={openInOffice} disabled={officeStatus === 'Opening…'} title="Open in the native application — saved changes sync back automatically as a new version">
+            {officeStatus === 'Opening…' ? 'Opening…' : `Open in ${officeAppName}`}
+          </button>}
+        {mode === 'content' && content && !editing && <button className="dv-ghost" onClick={() => setEditing(true)}>✎ Edit</button>}
+        {mode === 'content' && editing && <button className="dv-btn" onClick={saveContent} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>}
+        {mode === 'content' && editing && <button className="dv-ghost" onClick={() => setEditing(false)}>Cancel</button>}
+        <span style={{ flex: 1 }} />
+        {showZoom && <span className="dv-zoom">
+          <button title="Zoom out" onClick={() => setZoom(z => Math.max(0.5, +(z - 0.1).toFixed(2)))}>−</button>
+          <span>{zoomPct}%</span>
+          <button title="Zoom in" onClick={() => setZoom(z => Math.min(3, +(z + 0.1).toFixed(2)))}>+</button>
+          <button title="Reset zoom" onClick={() => setZoom(1)} style={{ width: 'auto', padding: '0 8px', fontSize: 11.5 }}>Fit</button>
+        </span>}
+        <div className="dv-menuwrap">
+          <button className="dv-ghost" onClick={() => setMenuOpen(o => !o)}>More ▾</button>
+          {menuOpen && <>
+            <div style={{ position: 'fixed', inset: 0, zIndex: 35 }} onClick={() => setMenuOpen(false)} />
+            <div className="dv-menu" onClick={() => setMenuOpen(false)}>
+              {content?.file_id && <button onClick={() => fetchBlobUrl(`/files/${content.file_id}/download`).then(u => { const a = document.createElement('a'); a.href = u; a.download = content.file_name || 'document'; a.click(); })}>⬇ Download original file</button>}
+              {content?.file_id && <button onClick={reExtract} disabled={busy}>{busy ? 'Reading…' : '⟳ Re-read content from file'}</button>}
+              {!!content?.content_html && isWordSource && <div className="dv-menu-sep" />}
+              {!!content?.content_html && isWordSource && <button onClick={downloadAsWord} disabled={!!exportBusy}>{exportBusy === 'download' ? 'Building…' : '⬇ Download as Word (.docx)'}</button>}
+              {!!content?.content_html && isWordSource && <button onClick={saveAsWordVersion} disabled={!!exportBusy}>{exportBusy === 'save' ? 'Saving…' : '＋ Save as new Word version'}</button>}
+              <div className="dv-menu-sep" />
+              <button onClick={() => window.dispatchEvent(new CustomEvent('dennis:ask', { detail: { question: `Summarise and explain this document: ${content?.file_name || content?.version_label || 'the open document'}` } }))}>🤖 Ask Dennis about this document</button>
+            </div>
+          </>}
+        </div>
       </div>
 
-      {content && <div style={{ fontSize: 12, color: '#667', margin: '6px 0' }}>
-        {content.extraction_method && content.extraction_method !== 'none' ? <>Read by SECH_LIMS ({content.extraction_method}{content.page_count ? `, ${content.page_count} pages` : ''}). </> : 'No content was automatically read. '}
-        {content.content_updated_at && <>Last edited {String(content.content_updated_at).slice(0, 16).replace('T', ' ')}{content.content_updated_by_name ? ` by ${content.content_updated_by_name}` : ''}. </>}
+      {/* Office sync status strip — only visible while a round-trip is active. */}
+      {(officeWatch || officeStatus) && <div className="dv-strip">
+        <span>{officeStatus || `Watching “${officeWatch?.fileName}” for saves…`}</span>
+        {officeWatch && <>
+          <button className="dv-ghost" style={{ height: 24, fontSize: 11.5 }} onClick={checkOfficeNow} title="Force an immediate check for a saved change">Check now</button>
+          <button className="dv-ghost" style={{ height: 24, fontSize: 11.5 }} onClick={stopOfficeWatchNow}>Stop watching</button>
+          <span style={{ fontSize: 11, color: '#7c9b88' }}>If Word shows “Protected View”, click “Enable Editing” there first.</span>
+        </>}
       </div>}
 
-      {content?.file_id && window.sechLims?.openInOffice && <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '0 0 8px', padding: '8px 10px', background: officeWatch ? '#13301f' : '#0f1830', border: `1px solid ${officeWatch ? '#225c3a' : '#24365e'}`, borderRadius: 6 }}>
-        {!officeWatch
-          ? <button className="secondary" onClick={openInOffice} disabled={officeStatus === 'Opening…'} title="Open the stored file in Microsoft Word/Excel/etc. and sync saves back automatically">{officeStatus === 'Opening…' ? 'Opening…' : 'Open in Microsoft Office'}</button>
-          : <>
-              <button className="secondary" onClick={checkOfficeNow} title="Force an immediate check for a saved change, instead of waiting for it to be detected automatically">Check now</button>
-              <button className="secondary" onClick={stopOfficeWatchNow}>Stop watching</button>
-            </>}
-        {officeStatus && <span style={{ fontSize: 12, color: '#a8c7b6' }}>{officeStatus}</span>}
-        {officeWatch && <span style={{ fontSize: 11.5, color: '#7c8db0' }}>If Word shows “Protected View”, click “Enable Editing” there first — changes can’t be saved until you do.</span>}
-      </div>}
-
-      {mode === 'content' && content && <div>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-          {!editing && <button onClick={() => setEditing(true)}>Edit content</button>}
-          {editing && <button onClick={saveContent} disabled={busy}>{busy ? 'Saving…' : 'Save content'}</button>}
-          {editing && <button className="secondary" onClick={() => setEditing(false)}>Cancel</button>}
-          {content.file_id && <button className="secondary" onClick={reExtract} disabled={busy}>{busy ? 'Reading…' : 'Re-read from file'}</button>}
-          <button className="secondary" title="Ask the Dennis AI assistant about this document" onClick={() => window.dispatchEvent(new CustomEvent('dennis:ask', { detail: { question: `Summarise and explain this document: ${content.file_name || content.version_label || 'the open document'}` } }))}>Ask Dennis</button>
-          {content.file_id && <a className="badge" href={`${API_BASE}/files/${content.file_id}/download`} onClick={ev => { ev.preventDefault(); fetchBlobUrl(`/files/${content.file_id}/download`).then(u => { const a = document.createElement('a'); a.href = u; a.download = content.file_name || 'document'; a.click(); }); }} style={{ cursor: 'pointer' }}>Download original</a>}
-          {!!content.content_html && isWordSource && <button className="secondary" title="Build a real .docx from the in-app content and download it" onClick={downloadAsWord} disabled={!!exportBusy}>{exportBusy === 'download' ? 'Building…' : 'Download as Word (.docx)'}</button>}
-          {!!content.content_html && isWordSource && <button className="secondary" title="Build a real .docx and attach it as the document's newest version" onClick={saveAsWordVersion} disabled={!!exportBusy}>{exportBusy === 'save' ? 'Saving…' : 'Save as new Word version'}</button>}
-        </div>
-        {editing
-          ? <div className="word-editor">
+      {/* Content — fills all remaining window height. */}
+      <div className="dv-content">
+        {mode === 'content' && content && (editing
+          ? <div className="word-editor" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
               {!isSpreadsheet && <WordToolbar editorRef={editorRef} />}
-              <div className="doc-scroll" style={{ height: contentH }}>
+              <div className="doc-scroll" style={{ flex: 1, minHeight: 0 }}>
                 <div ref={editorRef} className="doc-content doc-page" contentEditable suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: content.content_html || `<p>${(content.content_text || '').replace(/\n/g, '<br/>')}</p>` || '<p>Type the controlled document content here…</p>' }}
                   style={{ zoom, outline: 'none', minHeight: '60%' }} />
               </div>
             </div>
           : (content.content_html
-              ? <DocReader html={content.content_html} zoom={zoom} height={contentH} />
+              ? <DocReader html={content.content_html} zoom={zoom} height="100%" />
               : (content.content_text
-                  ? <pre style={{ whiteSpace: 'pre-wrap', border: '1px solid #e2e8f0', borderRadius: 6, padding: 16, height: contentH, overflow: 'auto', background: '#fff', color: '#111', zoom }}>{content.content_text}</pre>
-                  : <p className="muted">No readable content was captured. Use “Edit content” to author it in-app, or open the original file.</p>))}
-      </div>}
+                  ? <pre style={{ whiteSpace: 'pre-wrap', border: '1px solid #22345c', borderRadius: 8, padding: 16, flex: 1, minHeight: 0, overflow: 'auto', background: '#fff', color: '#111', zoom, margin: 0 }}>{content.content_text}</pre>
+                  : <p className="muted" style={{ padding: 16 }}>No readable content was captured. Use “Edit” to author it in-app, or open the original file.</p>)))}
 
-      {mode === 'original' && (isPdf || isImage
-        ? <div style={{ height: originalH, border: '1px solid #e2e8f0', borderRadius: 6, overflow: 'auto', background: '#525659' }}>
-            {!fileUrl ? <p style={{ color: '#fff', padding: 16 }}>Loading file…</p>
-              : isPdf ? <iframe title="document" src={fileUrl} style={{ width: `${100 / zoom}%`, height: `${100 / zoom}%`, border: 'none', zoom }} />
-              : <div style={{ minHeight: '100%', overflow: 'auto', textAlign: 'center' }}><img src={fileUrl} alt={content?.file_name} style={{ width: `${zoomPct}%`, maxWidth: 'none' }} /></div>}
-          </div>
-        : content?.content_html
-          ? <div>
-              <p className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>
-                {isWordSource
-                  ? 'Faithful rendering of the Word document (headings, tables, colours, shading, lists and images preserved), with a clickable Contents panel. Use “Download original” to open the exact .docx in Word.'
-                  : isSpreadsheet
-                    ? 'Preview of every worksheet as a table. Use “Download original” to open the exact spreadsheet in Excel.'
-                    : 'Best-effort preview of the file’s content. Use “Download original” to open the exact file in its native application.'}
-              </p>
-              <DocReader html={content.content_html} zoom={zoom} height={originalH} />
+        {mode === 'original' && (isPdf || isImage
+          ? <div style={{ flex: 1, minHeight: 0, border: '1px solid #22345c', borderRadius: 8, overflow: 'hidden', background: '#525659' }}>
+              {!fileUrl ? <p style={{ color: '#fff', padding: 16 }}>Loading file…</p>
+                : isPdf ? <iframe title="document" src={fileUrl} style={{ width: '100%', height: '100%', border: 'none', display: 'block' }} />
+                : <div style={{ height: '100%', overflow: 'auto', textAlign: 'center' }}><img src={fileUrl} alt={content?.file_name} style={{ width: `${zoomPct}%`, maxWidth: 'none' }} /></div>}
             </div>
-          : <div style={{ height: '40vh', border: '1px solid #e2e8f0', borderRadius: 6, background: '#525659', color: '#fff', padding: 24 }}>
-              <p>This file type cannot be previewed inline ({content?.file_mime || 'unknown type'}) and no readable content was captured.</p>
-              {fileUrl && <a className="badge" style={{ cursor: 'pointer' }} onClick={() => { const a = document.createElement('a'); a.href = fileUrl; a.download = content?.file_name || 'document'; a.click(); }}>Download file</a>}
-            </div>)}
+          : content?.content_html
+            ? <DocReader html={content.content_html} zoom={zoom} height="100%" />
+            : <div style={{ flex: 1, border: '1px solid #22345c', borderRadius: 8, background: '#525659', color: '#fff', padding: 24 }}>
+                <p>This file type cannot be previewed inline ({content?.file_mime || 'unknown type'}) and no readable content was captured.</p>
+                {fileUrl && <a className="badge" style={{ cursor: 'pointer' }} onClick={() => { const a = document.createElement('a'); a.href = fileUrl; a.download = content?.file_name || 'document'; a.click(); }}>Download file</a>}
+              </div>)}
+      </div>
 
-      {content && <SopTools docId={docId} versionId={activeVersionId} documents={documents} />}
-
-      {/* Workflow stage: comments + the single stage-appropriate transition. */}
-      {workflowStatus && <div style={{ marginTop: 12, padding: 12, background: '#0f1830', border: '1px solid #24365e', borderRadius: 8 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <span style={{ color: '#cdd9f0', fontSize: 13 }}>
-            Stage: {formatBadge(workflowStatus)} · {workflowStatus === 'draft' ? 'Preview, edit if needed, then accept to send for review.' : workflowStatus === 'under_review' ? 'Reviewer: preview, edit/comment, then accept to send for approval.' : workflowStatus === 'reviewed' ? 'Approver: preview, edit/comment, then approve to publish to all staff.' : workflowStatus === 'current' ? 'Published — visible to all staff for attestation.' : 'Obsolete.'}
-          </span>
-          {wf && <button onClick={() => doWorkflow(wf.action)} disabled={busy}>{busy ? 'Working…' : wf.label}</button>}
+      {/* Collapsible drawers keep the preview large until these are needed. */}
+      {panel === 'workflow' && <div className="dv-drawer">
+        {workflowStatus && <div style={{ fontSize: 12.5, color: '#cdd9f0', marginBottom: 8 }}>
+          Stage: {formatBadge(workflowStatus)} · {workflowStatus === 'draft' ? 'Preview, edit if needed, then accept to send for review.' : workflowStatus === 'under_review' ? 'Reviewer: preview, edit/comment, then accept to send for approval.' : workflowStatus === 'reviewed' ? 'Approver: preview, edit/comment, then approve to publish to all staff.' : workflowStatus === 'current' ? 'Published — visible to all staff for attestation.' : 'Obsolete.'}
+        </div>}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input value={newComment} onChange={e => setNewComment(e.target.value)} placeholder="Add a comment for the drafter / reviewer / approver…" style={{ flex: 1 }} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addComment(); } }} />
+          <button className="secondary" onClick={addComment} disabled={busy || !newComment.trim()}>Comment</button>
         </div>
-        <div style={{ marginTop: 10 }}>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input value={newComment} onChange={e => setNewComment(e.target.value)} placeholder="Add a comment for the drafter / reviewer / approver…" style={{ flex: 1 }} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addComment(); } }} />
-            <button className="secondary" onClick={addComment} disabled={busy || !newComment.trim()}>Comment</button>
-          </div>
-          {comments.length > 0 && <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0 0', maxHeight: 140, overflow: 'auto' }}>
-            {comments.map(c => <li key={c.id} style={{ fontSize: 12, color: '#c2cde3', padding: '4px 0', borderBottom: '1px solid #1c2a4a' }}>
-              <strong>{c.author_name || 'Staff'}</strong> <span style={{ color: '#7c8db0' }}>· {c.stage || ''} · {String(c.created_at).slice(0, 16).replace('T', ' ')}</span><br />{c.comment}
-            </li>)}
-          </ul>}
-        </div>
+        {comments.length > 0 && <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0 0' }}>
+          {comments.map(c => <li key={c.id} style={{ fontSize: 12, color: '#c2cde3', padding: '4px 0', borderBottom: '1px solid #1c2a4a' }}>
+            <strong>{c.author_name || 'Staff'}</strong> <span style={{ color: '#7c8db0' }}>· {c.stage || ''} · {String(c.created_at).slice(0, 16).replace('T', ' ')}</span><br />{c.comment}
+          </li>)}
+        </ul>}
+      </div>}
+      {panel === 'dennis' && content && <div className="dv-drawer">
+        <SopTools docId={docId} versionId={activeVersionId} documents={documents} startOpen />
       </div>}
 
-      {attestationId && <div style={{ marginTop: 12, padding: 12, background: '#f1f5f9', borderRadius: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-        <span><strong>Attestation:</strong> By signing you confirm you have read and understood this controlled document.</span>
-        <button onClick={() => { onAttest(attestationId, docId); onClose(); }}>I have read &amp; understood — Attest</button>
-      </div>}
+      {/* Footer: workflow action + panel toggles + attestation + read status. */}
+      <div className="dv-footer">
+        <button className="dv-ghost" onClick={() => setPanel(p => p === 'workflow' ? null : 'workflow')} style={panel === 'workflow' ? { background: '#1d3257', borderColor: '#3a5694' } : undefined}>
+          💬 {workflowStatus ? 'Workflow & comments' : 'Comments'}{comments.length ? ` (${comments.length})` : ''}
+        </button>
+        <button className="dv-ghost" onClick={() => setPanel(p => p === 'dennis' ? null : 'dennis')} style={panel === 'dennis' ? { background: '#1d3257', borderColor: '#3a5694' } : undefined}>
+          🤖 Dennis AI tools
+        </button>
+        {wf && <button className="dv-btn" onClick={() => doWorkflow(wf.action)} disabled={busy}>{busy ? 'Working…' : wf.label}</button>}
+        {attestationId && <button className="dv-btn" title="By signing you confirm you have read and understood this controlled document" onClick={() => { onAttest(attestationId, docId); onClose(); }}>✔ I have read &amp; understood — Attest</button>}
+        {content && <span className="dv-meta">
+          {content.extraction_method && content.extraction_method !== 'none' ? `Read by SECH_LIMS (${content.extraction_method}${content.page_count ? `, ${content.page_count} pages` : ''})` : 'Content not read automatically'}
+          {content.content_updated_at ? ` · edited ${String(content.content_updated_at).slice(0, 16).replace('T', ' ')}${content.content_updated_by_name ? ` by ${content.content_updated_by_name}` : ''}` : ''}
+        </span>}
+      </div>
     </div>
   </div>;
 }

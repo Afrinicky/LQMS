@@ -425,6 +425,12 @@ export function documentControlRoutes() {
       extractIntoVersion(db, versionId, parseIntNullable(req.body.fileId)!);
       indexForDennis(db, Number(req.params.id), req.user!.id);
     }
+    // Used by the "Open in Microsoft Office" auto-sync: without this the synced
+    // version exists in the history but the document keeps pointing at the old
+    // version, so the edits appear to vanish when the viewer is reopened.
+    if (req.body.makeCurrent === true) {
+      db.prepare('UPDATE documents SET current_version_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(versionId, req.params.id);
+    }
     audit(req, { action: 'create', entity: 'document_versions', entityId: versionId, newValue: { documentId: req.params.id, ...req.body } });
     res.status(201).json({ id: versionId });
   });
