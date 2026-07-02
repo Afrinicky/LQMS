@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import path from 'node:path';
 import fs from 'node:fs';
+import * as XLSX from 'xlsx';
 import { getDb, uploadRoot, evidenceRoot } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
@@ -209,8 +210,9 @@ export function documentControlRoutes() {
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.status) { filters.push('rr.status = ?'); params.push(String(req.query.status)); }
     if (req.query.category) { filters.push('rr.record_category = ?'); params.push(String(req.query.category)); }
-    let q = `SELECT rr.*, s.name AS section_name, st.full_name AS responsible_name, d.document_code AS linked_document_code, d.title AS linked_document_title
-             FROM record_register rr LEFT JOIN sections s ON s.id = rr.section_id LEFT JOIN staff st ON st.id = rr.responsible_staff_id LEFT JOIN documents d ON d.id = rr.linked_document_id`;
+    let q = `SELECT rr.*, s.name AS section_name, st.full_name AS responsible_name, d.document_code AS linked_document_code, d.title AS linked_document_title,
+             f.original_name AS file_name, f.mime_type AS file_mime, f.size_bytes AS file_size
+             FROM record_register rr LEFT JOIN sections s ON s.id = rr.section_id LEFT JOIN staff st ON st.id = rr.responsible_staff_id LEFT JOIN documents d ON d.id = rr.linked_document_id LEFT JOIN files f ON f.id = rr.file_id`;
     if (filters.length) q += ` WHERE ${filters.join(' AND ')}`;
     q += ' ORDER BY rr.created_at DESC';
     res.json(db.prepare(q).all(...params));
@@ -219,12 +221,16 @@ export function documentControlRoutes() {
     if (!req.body.title) return res.status(400).json({ error: 'title is required' });
     const db = getDb();
     const code = req.body.recordCode || generateRecordNumber(db, 'record_register', 'SECHREC');
-    const r = db.prepare(`INSERT INTO record_register (record_code, title, record_category, record_format, department_id, section_id, responsible_staff_id, storage_location, storage_medium, retention_schedule_id, retention_period, confidentiality, linked_document_id, date_created, disposal_due_date, status, notes, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    const fileId = parseIntNullable(req.body.fileId);
+    const origin = req.body.origin ?? (fileId ? 'uploaded' : 'manual');
+    const r = db.prepare(`INSERT INTO record_register (record_code, title, record_category, record_format, department_id, section_id, responsible_staff_id, storage_location, storage_medium, retention_schedule_id, retention_period, confidentiality, linked_document_id, date_created, disposal_due_date, disposal_method, file_id, origin, source_module, status, notes, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       code, req.body.title, req.body.recordCategory ?? null, req.body.recordFormat ?? 'electronic', parseIntNullable(req.body.departmentId), parseIntNullable(req.body.sectionId),
       parseIntNullable(req.body.responsibleStaffId), req.body.storageLocation ?? null, req.body.storageMedium ?? null, parseIntNullable(req.body.retentionScheduleId),
       req.body.retentionPeriod ?? null, req.body.confidentiality ?? 'internal', parseIntNullable(req.body.linkedDocumentId), req.body.dateCreated ?? null, req.body.disposalDueDate ?? null,
+      req.body.disposalMethod ?? null, fileId, origin, req.body.sourceModule ?? null,
       req.body.status ?? 'active', req.body.notes ?? null, req.user!.id);
+    if (fileId) db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run('documents', 'record_register', String(r.lastInsertRowid), 'documents', 'files', String(fileId), 'Uploaded record file');
     audit(req, { action: 'create', entity: 'record_register', entityId: r.lastInsertRowid, newValue: { code, ...req.body } });
     res.status(201).json({ id: r.lastInsertRowid, recordCode: code });
   });
@@ -232,10 +238,11 @@ export function documentControlRoutes() {
     const db = getDb();
     const old = db.prepare('SELECT * FROM record_register WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Record not found' });
-    db.prepare(`UPDATE record_register SET title = ?, record_category = ?, record_format = ?, department_id = ?, section_id = ?, responsible_staff_id = ?, storage_location = ?, storage_medium = ?, retention_schedule_id = ?, retention_period = ?, confidentiality = ?, linked_document_id = ?, date_created = ?, disposal_due_date = ?, status = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(
+    db.prepare(`UPDATE record_register SET title = ?, record_category = ?, record_format = ?, department_id = ?, section_id = ?, responsible_staff_id = ?, storage_location = ?, storage_medium = ?, retention_schedule_id = ?, retention_period = ?, confidentiality = ?, linked_document_id = ?, date_created = ?, disposal_due_date = ?, disposal_method = ?, file_id = ?, origin = ?, source_module = ?, status = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(
       req.body.title ?? old.title, req.body.recordCategory ?? old.record_category, req.body.recordFormat ?? old.record_format, parseIntNullable(req.body.departmentId) ?? old.department_id, parseIntNullable(req.body.sectionId) ?? old.section_id,
       parseIntNullable(req.body.responsibleStaffId) ?? old.responsible_staff_id, req.body.storageLocation ?? old.storage_location, req.body.storageMedium ?? old.storage_medium, parseIntNullable(req.body.retentionScheduleId) ?? old.retention_schedule_id,
       req.body.retentionPeriod ?? old.retention_period, req.body.confidentiality ?? old.confidentiality, parseIntNullable(req.body.linkedDocumentId) ?? old.linked_document_id, req.body.dateCreated ?? old.date_created, req.body.disposalDueDate ?? old.disposal_due_date,
+      req.body.disposalMethod ?? old.disposal_method, parseIntNullable(req.body.fileId) ?? old.file_id, req.body.origin ?? old.origin, req.body.sourceModule ?? old.source_module,
       req.body.status ?? old.status, req.body.notes ?? old.notes, req.params.id);
     audit(req, { action: 'edit', entity: 'record_register', entityId: req.params.id, oldValue: old, newValue: req.body });
     res.json({ ok: true });
@@ -329,17 +336,205 @@ export function documentControlRoutes() {
     res.status(201).json({ id: r.lastInsertRowid, backupNumber: num });
   });
 
+  // ===================================================================
+  // DOCUMENT & RECORDS MASTER LIST
+  // On-screen registers and Excel exports that mirror the laboratory's
+  // controlled Document & Records Master List workbook: a Document
+  // Register, a Records Register and an Obsolete Document Register.
+  // ===================================================================
+  const DOC_REGISTER_HEADERS = ['No.', 'Document Code', 'Category', 'Unit / Section', 'Document Title', 'Version', 'Status', 'Format / Medium', 'Effective Date', 'Review Frequency (Yrs)', 'Next Review Due', 'Author (Name & Position)', 'Technical Reviewer', 'Approved By (Authoriser)', 'Controlled Locations / Distribution', 'Retention Period', 'Remarks'];
+  const REC_REGISTER_HEADERS = ['No.', 'Record Type / Title', 'Record Category', 'Source / Generating Document', 'Format / Medium', 'Responsible Owner (Unit)', 'Storage Location', 'Confidentiality / Access Level', 'Retention Period', 'Disposal Method', 'Status', 'Remarks'];
+  const OBS_REGISTER_HEADERS = ['No.', 'Former Document Code', 'Document Title', 'Last Version', 'Reason / Remark', 'Effective Date (Last Active)', 'Date Withdrawn / Discontinued', 'Author', 'Technical Reviewer', 'Authoriser', 'Retention / Destroy Date', 'Archive Location'];
+
+  const DOC_STATUS_LABELS: Record<string, string> = { current: 'Active', approved: 'Active', draft: 'Draft (Not Yet Issued)', under_review: 'Under Review', reviewed: 'Pending Issue', due_review: 'Active - Review Due', obsolete: 'Obsolete', archived: 'Archived' };
+  const docStatusLabel = (s: string) => DOC_STATUS_LABELS[s] || s;
+  const RECORD_FORMAT_LABELS: Record<string, string> = { electronic: 'Electronic', paper: 'Hard Copy', both: 'Electronic + Hard Copy' };
+  const CONFIDENTIALITY_LABELS: Record<string, string> = { public: 'Public', internal: 'Internal - Staff Use Only', restricted: 'Restricted - Authorised Staff Only', confidential: 'Restricted - Confidential (Personal/Patient Data)' };
+  const RECORD_CATEGORY_LABELS: Record<string, string> = { pre_examination: 'Pre-Examination Record', examination: 'Examination / Patient Record', post_examination: 'Post-Examination Record', quality: 'Quality Control / Technical Record', support: 'Operational Record', other: 'Other Record' };
+  const titleCase = (s: string) => s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+  // Master-list "Category": the document type, qualified for section SOPs
+  // (e.g. "SOP - Blood Bank") and normalised for template-type documents.
+  function documentCategory(d: any): string {
+    const type = String(d.document_type || '').trim();
+    const t = type.toLowerCase();
+    if (t === 'sop') return d.section_name ? `SOP - ${d.section_name}` : 'SOP';
+    if (t === 'policy' || t === 'procedure') return 'Policy / Procedure';
+    if (t === 'register' || t === 'log' || t === 'tracker') return 'Log / Register Template';
+    if (t === 'master list') return 'Master List';
+    return type || '—';
+  }
+
+  const person = (name?: string | null, position?: string | null) => (name ? (position ? `${name} (${position})` : name) : '');
+  const yearsFromMonths = (m?: number | null) => (m == null || !isFinite(Number(m)) ? '' : (Number(m) % 12 === 0 ? String(Number(m) / 12) : (Number(m) / 12).toFixed(1)));
+  const dateOnly = (v?: string | null) => (v ? String(v).slice(0, 10) : '');
+
+  function facilityName(db: any): string {
+    const p = db.prepare('SELECT facility_name FROM laboratory_profile WHERE id = 1').get() as any;
+    return String(p?.facility_name || 'Laboratory').toUpperCase();
+  }
+
+  // The master list's own controlled document number (e.g. "SECHML00"), shown
+  // in register titles when the master list is itself a registered document.
+  function masterListCode(db: any): string {
+    const row = db.prepare("SELECT document_code FROM documents WHERE document_code LIKE 'SECHML%' AND status != 'obsolete' ORDER BY document_code LIMIT 1").get() as any;
+    return row?.document_code ? ` (${row.document_code})` : '';
+  }
+
+  // Documents joined with everything the master list needs: unit, current
+  // version, author (name + position), technical reviewer and authoriser.
+  function masterListDocuments(db: any): any[] {
+    return db.prepare(`
+      SELECT d.*, s.name AS section_name,
+             v.version_number AS current_version_number, v.version_label AS current_version_label, v.effective_date AS current_effective_date,
+             lv.version_number AS last_version_number, lv.effective_date AS last_effective_date,
+             ow.full_name AS owner_name, owp.title AS owner_position,
+             rv.full_name AS reviewer_name, ap.full_name AS approver_name
+      FROM documents d
+      LEFT JOIN sections s ON s.id = d.section_id
+      LEFT JOIN document_versions v ON v.id = d.current_version_id
+      LEFT JOIN document_versions lv ON lv.id = (SELECT id FROM document_versions WHERE document_id = d.id ORDER BY id DESC LIMIT 1)
+      LEFT JOIN staff ow ON ow.id = d.owner_staff_id
+      LEFT JOIN (SELECT spa.staff_id, MIN(p.title) AS title FROM staff_position_assignments spa JOIN positions p ON p.id = spa.position_id WHERE spa.is_active = 1 GROUP BY spa.staff_id) owp ON owp.staff_id = d.owner_staff_id
+      LEFT JOIN staff rv ON rv.id = d.reviewed_by_staff_id
+      LEFT JOIN staff ap ON ap.id = d.approved_by_staff_id
+      ORDER BY d.document_code, d.id
+    `).all();
+  }
+
+  function masterListRecords(db: any): any[] {
+    return db.prepare(`
+      SELECT rr.*, s.name AS section_name, st.full_name AS responsible_name,
+             d.document_code AS linked_document_code, d.title AS linked_document_title,
+             f.original_name AS file_name
+      FROM record_register rr
+      LEFT JOIN sections s ON s.id = rr.section_id
+      LEFT JOIN staff st ON st.id = rr.responsible_staff_id
+      LEFT JOIN documents d ON d.id = rr.linked_document_id
+      LEFT JOIN files f ON f.id = rr.file_id
+      ORDER BY rr.record_code, rr.id
+    `).all();
+  }
+
+  function documentRegisterRows(db: any): unknown[][] {
+    return masterListDocuments(db).filter(d => d.status !== 'obsolete').map((d, i) => [
+      i + 1, d.document_code || '', documentCategory(d), d.section_name || 'General / QMS-wide', d.title,
+      d.current_version_number || d.current_version_label || d.last_version_number || '', docStatusLabel(d.status),
+      d.format_medium || (d.current_version_id ? 'Electronic (LIMS)' : ''),
+      dateOnly(d.current_effective_date || d.last_effective_date), yearsFromMonths(d.review_frequency_months), dateOnly(d.next_review_date),
+      person(d.owner_name, d.owner_position), d.reviewer_name || '', d.approver_name || '',
+      d.controlled_locations || '', d.retention_period || '', d.remarks || '',
+    ]);
+  }
+
+  function recordsRegisterRows(db: any): unknown[][] {
+    return masterListRecords(db).map((r, i) => [
+      i + 1, r.title, RECORD_CATEGORY_LABELS[r.record_category] || r.record_category || '',
+      r.linked_document_code || (r.origin === 'system' ? `Generated in ${r.source_module || 'LIMS'}` : ''),
+      r.storage_medium || RECORD_FORMAT_LABELS[r.record_format] || r.record_format || '',
+      r.section_name || 'General / QMS-wide', r.storage_location || '',
+      CONFIDENTIALITY_LABELS[r.confidentiality] || r.confidentiality || '', r.retention_period || '',
+      r.disposal_method || '', titleCase(String(r.status || '')), r.notes || '',
+    ]);
+  }
+
+  function obsoleteRegisterRows(db: any): unknown[][] {
+    return masterListDocuments(db).filter(d => d.status === 'obsolete').map((d, i) => [
+      i + 1, d.document_code || '', d.title, d.last_version_number || d.current_version_number || '',
+      d.obsolete_reason || '', dateOnly(d.last_effective_date), dateOnly(d.withdrawn_at || d.updated_at),
+      person(d.owner_name, d.owner_position), d.reviewer_name || '', d.approver_name || '',
+      dateOnly(d.destroy_due_date), d.archive_location || '',
+    ]);
+  }
+
+  // One register sheet in the master-list layout: merged facility title row,
+  // two spacer rows, the header row, then the data.
+  function registerSheet(title: string, headers: string[], rows: unknown[][]) {
+    const ws = XLSX.utils.aoa_to_sheet([[title], [], [], headers, ...rows]);
+    ws['!merges'] = [
+      { s: { c: 0, r: 0 }, e: { c: headers.length - 1, r: 0 } },
+      { s: { c: 0, r: 1 }, e: { c: headers.length - 1, r: 1 } },
+    ];
+    ws['!cols'] = headers.map(h => ({ wch: Math.max(14, Math.min(48, h.length + 10)) }));
+    return ws;
+  }
+
+  function sendWorkbook(res: any, wb: XLSX.WorkBook, filename: string) {
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buf);
+  }
+
+  // Master list as JSON, for the on-screen Master List view.
+  router.get('/masterlist', requirePermission('documents', 'view'), (_req, res) => {
+    const db = getDb();
+    res.json({
+      facility: facilityName(db),
+      documentRegister: { headers: DOC_REGISTER_HEADERS, rows: documentRegisterRows(db) },
+      recordsRegister: { headers: REC_REGISTER_HEADERS, rows: recordsRegisterRows(db) },
+      obsoleteRegister: { headers: OBS_REGISTER_HEADERS, rows: obsoleteRegisterRows(db) },
+    });
+  });
+
+  // Full master list workbook: all three registers as separate sheets.
+  router.get('/masterlist/export', requirePermission('documents', 'export'), (req, res) => {
+    const db = getDb();
+    const fac = facilityName(db);
+    const code = masterListCode(db);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, registerSheet(`${fac} - LABORATORY DOCUMENT REGISTER${code}`, DOC_REGISTER_HEADERS, documentRegisterRows(db)), 'Document Register');
+    XLSX.utils.book_append_sheet(wb, registerSheet(`${fac} - LABORATORY RECORDS REGISTER${code}`, REC_REGISTER_HEADERS, recordsRegisterRows(db)), 'Records Register');
+    XLSX.utils.book_append_sheet(wb, registerSheet(`${fac} - OBSOLETE DOCUMENT REGISTER`, OBS_REGISTER_HEADERS, obsoleteRegisterRows(db)), 'Obsolete Document Register');
+    audit(req, { action: 'export', entity: 'documents', entityId: 'masterlist', newValue: { export: 'Document_and_Records_Master_List.xlsx' } });
+    sendWorkbook(res, wb, 'Document_and_Records_Master_List.xlsx');
+  });
+
+  router.get('/register/export', requirePermission('documents', 'export'), (req, res) => {
+    const db = getDb();
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, registerSheet(`${facilityName(db)} - LABORATORY DOCUMENT REGISTER${masterListCode(db)}`, DOC_REGISTER_HEADERS, documentRegisterRows(db)), 'Document Register');
+    audit(req, { action: 'export', entity: 'documents', entityId: 'document_register', newValue: { export: 'Document_Register.xlsx' } });
+    sendWorkbook(res, wb, 'Document_Register.xlsx');
+  });
+
+  router.get('/records/register/export', requirePermission('documents', 'export'), (req, res) => {
+    const db = getDb();
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, registerSheet(`${facilityName(db)} - LABORATORY RECORDS REGISTER${masterListCode(db)}`, REC_REGISTER_HEADERS, recordsRegisterRows(db)), 'Records Register');
+    audit(req, { action: 'export', entity: 'record_register', entityId: 'records_register', newValue: { export: 'Records_Register.xlsx' } });
+    sendWorkbook(res, wb, 'Records_Register.xlsx');
+  });
+
+  router.get('/obsolete-register/export', requirePermission('documents', 'export'), (req, res) => {
+    const db = getDb();
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, registerSheet(`${facilityName(db)} - OBSOLETE DOCUMENT REGISTER`, OBS_REGISTER_HEADERS, obsoleteRegisterRows(db)), 'Obsolete Document Register');
+    audit(req, { action: 'export', entity: 'documents', entityId: 'obsolete_register', newValue: { export: 'Obsolete_Document_Register.xlsx' } });
+    sendWorkbook(res, wb, 'Obsolete_Document_Register.xlsx');
+  });
+
   // -------- Documents CRUD --------
   router.get('/', requirePermission('documents', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = [];
     const params: unknown[] = [];
-    if (req.query.status) { filters.push('status = ?'); params.push(String(req.query.status)); }
-    if (req.query.documentType) { filters.push('document_type = ?'); params.push(String(req.query.documentType)); }
-    if (req.query.sectionId) { filters.push('section_id = ?'); params.push(Number(req.query.sectionId)); }
-    let query = 'SELECT * FROM documents';
+    if (req.query.status) { filters.push('d.status = ?'); params.push(String(req.query.status)); }
+    if (req.query.documentType) { filters.push('d.document_type = ?'); params.push(String(req.query.documentType)); }
+    if (req.query.sectionId) { filters.push('d.section_id = ?'); params.push(Number(req.query.sectionId)); }
+    // Register-ready listing: each document carries its unit, current version
+    // and the people on the master list (author / reviewer / authoriser).
+    let query = `SELECT d.*, s.name AS section_name,
+        v.version_number AS current_version_number, v.effective_date AS current_effective_date,
+        ow.full_name AS owner_name, rv.full_name AS reviewer_name, ap.full_name AS approver_name
+      FROM documents d
+      LEFT JOIN sections s ON s.id = d.section_id
+      LEFT JOIN document_versions v ON v.id = d.current_version_id
+      LEFT JOIN staff ow ON ow.id = d.owner_staff_id
+      LEFT JOIN staff rv ON rv.id = d.reviewed_by_staff_id
+      LEFT JOIN staff ap ON ap.id = d.approved_by_staff_id`;
     if (filters.length) query += ` WHERE ${filters.join(' AND ')}`;
-    query += ' ORDER BY created_at DESC';
+    query += ' ORDER BY d.created_at DESC';
     res.json(db.prepare(query).all(...params));
   });
 
@@ -356,8 +551,8 @@ export function documentControlRoutes() {
     const nextReview = req.body.nextReviewDate ?? (reviewFreq ? addMonths(new Date().toISOString(), reviewFreq) : null);
     const status = req.body.status ?? 'draft';
     if (!DOCUMENT_STATUSES.includes(status)) return res.status(400).json({ error: `status must be one of: ${DOCUMENT_STATUSES.join(', ')}` });
-    const result = db.prepare(`INSERT INTO documents (document_code, title, document_type, section_category, department_id, section_id, owner_staff_id, owner_position_id, status, review_frequency_months, next_review_date, access_level, is_controlled, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(documentCode, req.body.title, req.body.documentType, req.body.sectionCategory ?? null, parseIntNullable(req.body.departmentId), parseIntNullable(req.body.sectionId), parseIntNullable(req.body.ownerStaffId), parseIntNullable(req.body.ownerPositionId), status, reviewFreq, nextReview, req.body.accessLevel ?? 'internal', req.body.isControlled === false ? 0 : 1, req.user!.id);
+    const result = db.prepare(`INSERT INTO documents (document_code, title, document_type, section_category, department_id, section_id, owner_staff_id, owner_position_id, status, review_frequency_months, next_review_date, access_level, is_controlled, format_medium, controlled_locations, retention_period, remarks, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(documentCode, req.body.title, req.body.documentType, req.body.sectionCategory ?? null, parseIntNullable(req.body.departmentId), parseIntNullable(req.body.sectionId), parseIntNullable(req.body.ownerStaffId), parseIntNullable(req.body.ownerPositionId), status, reviewFreq, nextReview, req.body.accessLevel ?? 'internal', req.body.isControlled === false ? 0 : 1, req.body.formatMedium ?? null, req.body.controlledLocations ?? null, req.body.retentionPeriod ?? null, req.body.remarks ?? null, req.user!.id);
     const docId = Number(result.lastInsertRowid);
 
     if (parseIntNullable(req.body.fileId)) {
@@ -404,8 +599,8 @@ export function documentControlRoutes() {
         if (clash) return res.status(400).json({ error: `documentCode "${documentCode}" already exists` });
       }
     }
-    db.prepare(`UPDATE documents SET document_code = ?, title = ?, document_type = ?, section_category = ?, department_id = ?, section_id = ?, owner_staff_id = ?, owner_position_id = ?, status = ?, review_frequency_months = ?, next_review_date = ?, access_level = ?, is_controlled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-      .run(documentCode, req.body.title ?? oldValue.title, req.body.documentType ?? oldValue.document_type, req.body.sectionCategory ?? oldValue.section_category, parseIntNullable(req.body.departmentId) ?? oldValue.department_id, parseIntNullable(req.body.sectionId) ?? oldValue.section_id, parseIntNullable(req.body.ownerStaffId) ?? oldValue.owner_staff_id, parseIntNullable(req.body.ownerPositionId) ?? oldValue.owner_position_id, req.body.status ?? oldValue.status, parseIntNullable(req.body.reviewFrequencyMonths) ?? oldValue.review_frequency_months, req.body.nextReviewDate ?? oldValue.next_review_date, req.body.accessLevel ?? oldValue.access_level, req.body.isControlled !== undefined ? (req.body.isControlled ? 1 : 0) : oldValue.is_controlled, req.params.id);
+    db.prepare(`UPDATE documents SET document_code = ?, title = ?, document_type = ?, section_category = ?, department_id = ?, section_id = ?, owner_staff_id = ?, owner_position_id = ?, status = ?, review_frequency_months = ?, next_review_date = ?, access_level = ?, is_controlled = ?, format_medium = ?, controlled_locations = ?, retention_period = ?, remarks = ?, destroy_due_date = ?, archive_location = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(documentCode, req.body.title ?? oldValue.title, req.body.documentType ?? oldValue.document_type, req.body.sectionCategory ?? oldValue.section_category, parseIntNullable(req.body.departmentId) ?? oldValue.department_id, parseIntNullable(req.body.sectionId) ?? oldValue.section_id, parseIntNullable(req.body.ownerStaffId) ?? oldValue.owner_staff_id, parseIntNullable(req.body.ownerPositionId) ?? oldValue.owner_position_id, req.body.status ?? oldValue.status, parseIntNullable(req.body.reviewFrequencyMonths) ?? oldValue.review_frequency_months, req.body.nextReviewDate ?? oldValue.next_review_date, req.body.accessLevel ?? oldValue.access_level, req.body.isControlled !== undefined ? (req.body.isControlled ? 1 : 0) : oldValue.is_controlled, req.body.formatMedium ?? oldValue.format_medium, req.body.controlledLocations ?? oldValue.controlled_locations, req.body.retentionPeriod ?? oldValue.retention_period, req.body.remarks ?? oldValue.remarks, req.body.destroyDueDate ?? oldValue.destroy_due_date, req.body.archiveLocation ?? oldValue.archive_location, req.params.id);
     audit(req, { action: 'edit', entity: 'documents', entityId: req.params.id, oldValue, newValue: req.body });
     res.json({ ok: true });
   });
@@ -640,7 +835,8 @@ export function documentControlRoutes() {
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
     if (!doc) return res.status(404).json({ error: 'Document not found' });
-    db.prepare("UPDATE documents SET status = 'obsolete', obsolete_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.body.obsoleteReason, req.params.id);
+    db.prepare("UPDATE documents SET status = 'obsolete', obsolete_reason = ?, withdrawn_at = COALESCE(?, date('now')), destroy_due_date = COALESCE(?, destroy_due_date), archive_location = COALESCE(?, archive_location), updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .run(req.body.obsoleteReason, req.body.withdrawnDate ?? null, req.body.destroyDueDate ?? null, req.body.archiveLocation ?? null, req.params.id);
     db.prepare("UPDATE document_versions SET status = 'obsolete', obsolete_date = CURRENT_TIMESTAMP, obsolete_reason = COALESCE(obsolete_reason, ?) WHERE document_id = ?").run(req.body.obsoleteReason, req.params.id);
     audit(req, { action: 'mark_obsolete', entity: 'documents', entityId: req.params.id, oldValue: { status: doc.status }, newValue: { status: 'obsolete', obsoleteReason: req.body.obsoleteReason } });
     res.json({ ok: true });
@@ -782,7 +978,7 @@ table.meta th { background: #eef2f7; width: 22%; }
   </table>
   ${version?.content_html ? `<div class="content"><h2>Controlled content</h2>${version.content_html}</div>` : (version?.file_name ? `<div class="banner">Attached document file: <strong>${htmlEscape(version.file_name)}</strong>. Open the file from the document viewer and print alongside this cover sheet.</div>` : '<div class="banner">No content has been captured for this version. Print this cover sheet only.</div>')}
   <h2>Attestation Record</h2>
-  <p style="font-size:11px;color:#555;margin:2px 0 8px;">Staff who have read and attested to this version (ISO 15189 §8.3 controlled-document acknowledgement).</p>
+  <p style="font-size:11px;color:#555;margin:2px 0 8px;">Staff who have read and attested to this version of the controlled document.</p>
   <table class="meta"><tr><th style="width:6%;">#</th><th style="width:54%;">Staff name</th><th style="width:20%;">Staff ID</th><th style="width:20%;">Attested on</th></tr>
   ${signedAttestations.length ? signedAttestations.map((a, i) => `<tr><td>${i + 1}</td><td>${htmlEscape(a.staff_name || '—')}</td><td>${htmlEscape(a.employee_no || '—')}</td><td>${htmlEscape(a.attested_at ? String(a.attested_at).slice(0, 10) : '—')}</td></tr>`).join('') : '<tr><td colspan="4" style="text-align:center;color:#888;">No staff have attested to this version yet.</td></tr>'}
   </table>

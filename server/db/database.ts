@@ -2622,6 +2622,26 @@ CREATE INDEX IF NOT EXISTS idx_record_review_log_date ON record_review_log(revie
 CREATE INDEX IF NOT EXISTS idx_document_comments_doc ON document_comments(document_id);
 `);
 
+  // Document & Records Master List (SECHML00) fields: registers carry the full
+  // master-list columns so on-screen registers and Excel exports mirror the
+  // laboratory's controlled master list workbook.
+  const docCols3 = new Set((database.prepare("PRAGMA table_info(documents)").all() as Array<{ name: string }>).map(c => c.name));
+  if (!docCols3.has('format_medium')) database.exec('ALTER TABLE documents ADD COLUMN format_medium TEXT');
+  if (!docCols3.has('controlled_locations')) database.exec('ALTER TABLE documents ADD COLUMN controlled_locations TEXT');
+  if (!docCols3.has('retention_period')) database.exec('ALTER TABLE documents ADD COLUMN retention_period TEXT');
+  if (!docCols3.has('remarks')) database.exec('ALTER TABLE documents ADD COLUMN remarks TEXT');
+  if (!docCols3.has('withdrawn_at')) database.exec('ALTER TABLE documents ADD COLUMN withdrawn_at TEXT');
+  if (!docCols3.has('destroy_due_date')) database.exec('ALTER TABLE documents ADD COLUMN destroy_due_date TEXT');
+  if (!docCols3.has('archive_location')) database.exec('ALTER TABLE documents ADD COLUMN archive_location TEXT');
+
+  // Records may be uploaded files or generated inside the system; both live in
+  // the record register with their origin and (for uploads) the stored file.
+  const recRegCols = new Set((database.prepare("PRAGMA table_info(record_register)").all() as Array<{ name: string }>).map(c => c.name));
+  if (!recRegCols.has('disposal_method')) database.exec('ALTER TABLE record_register ADD COLUMN disposal_method TEXT');
+  if (!recRegCols.has('file_id')) database.exec('ALTER TABLE record_register ADD COLUMN file_id INTEGER REFERENCES files(id)');
+  if (!recRegCols.has('origin')) database.exec("ALTER TABLE record_register ADD COLUMN origin TEXT DEFAULT 'manual'");
+  if (!recRegCols.has('source_module')) database.exec('ALTER TABLE record_register ADD COLUMN source_module TEXT');
+
   // Seed the Record Retention Schedule from SECHPO051 Appendix A (idempotent).
   const retentionSeeded = (database.prepare('SELECT COUNT(*) c FROM record_retention_schedule').get() as { c: number }).c;
   if (retentionSeeded === 0) {
