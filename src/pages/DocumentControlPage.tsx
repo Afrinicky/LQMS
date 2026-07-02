@@ -8,7 +8,8 @@ import DisabledModule from '../components/DisabledModule';
 import type {
   Section, Department, Staff, Position,
   DocumentRecord, DocumentAttestation, DocumentControlSummary, DistributionInboxEntry, VersionContent,
-  RecordRegisterEntry, RetentionScheduleRule, RecordReviewLogEntry, RecordDestructionEntry, RecordBackupEntry, RecordControlSummary, DocumentComment
+  RecordRegisterEntry, RetentionScheduleRule, RecordReviewLogEntry, RecordDestructionEntry, RecordBackupEntry, RecordControlSummary, DocumentComment,
+  MasterListResponse
 } from '../../shared/types/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
@@ -20,9 +21,19 @@ const DOCUMENT_TYPES = ['SOP', 'Policy', 'Manual', 'Form', 'Register', 'Log', 'T
 const ACCESS_LEVELS = ['public', 'internal', 'restricted', 'confidential'];
 const REVIEW_OUTCOMES = ['no_change', 'minor_revision', 'major_revision', 'obsolete'];
 const TARGET_TYPES = ['staff', 'position', 'section', 'department'];
-// SECHPO026 §5.1.6 — coding schemes the auto-generator understands.
-const RECORD_CATEGORIES = ['pre_examination', 'examination', 'post_examination', 'quality', 'support', 'other'];
+// Record categories aligned with the laboratory's Records Register master list.
+const RECORD_CATEGORIES = [
+  'Pre-Examination Record', 'Examination / Patient Record', 'Post-Examination Record',
+  'Quality Control / Technical Record', 'Document & Records Control Record', 'Personnel Record',
+  'Nonconformity / Corrective Action Record', 'Customer Feedback / Complaint Record',
+  'Equipment / Resource Record', 'Risk Management Record', 'Governance / Ethics Record',
+  'Operational Record', 'Safety / Incident Record', 'Audit / Management Review Record', 'Service Provision Record',
+];
+// Legacy stored codes map onto the master-list category labels.
+const LEGACY_RECORD_CATEGORY: Record<string, string> = { pre_examination: 'Pre-Examination Record', examination: 'Examination / Patient Record', post_examination: 'Post-Examination Record', quality: 'Quality Control / Technical Record', support: 'Operational Record', other: 'Other Record' };
+const recordCategoryLabel = (c?: string | null) => (c ? (LEGACY_RECORD_CATEGORY[c] || c) : '—');
 const RECORD_FORMATS = ['electronic', 'paper', 'both'];
+const RECORD_ORIGINS: Array<[string, string]> = [['manual', 'Manual entry (index only)'], ['uploaded', 'Uploaded record file'], ['system', 'Generated in the system']];
 const CONFIDENTIALITY = ['public', 'internal', 'restricted', 'confidential'];
 const DESTRUCTION_METHODS = ['shredding', 'incineration', 'secure_deletion', 'media_destruction'];
 const BACKUP_TYPES = ['incremental', 'full', 'archive'];
@@ -30,6 +41,38 @@ const RESTORE_STATUSES = ['', 'not_tested', 'passed', 'failed'];
 const FOLLOW_UP_STATUSES = ['open', 'in_progress', 'completed', 'escalated'];
 // Lifecycle order used by the workflow stepper.
 const LIFECYCLE = ['draft', 'under_review', 'reviewed', 'current', 'obsolete'];
+
+// Master-list "Category" for a document (mirrors the register export).
+function documentCategoryLabel(d: DocumentRecord): string {
+  const t = String(d.document_type || '').toLowerCase();
+  if (t === 'sop') return d.section_name ? `SOP - ${d.section_name}` : 'SOP';
+  if (t === 'policy' || t === 'procedure') return 'Policy / Procedure';
+  if (t === 'register' || t === 'log' || t === 'tracker') return 'Log / Register Template';
+  return d.document_type || '—';
+}
+
+// Download a server-generated export (Excel) with the auth token attached.
+async function downloadExport(path: string, fallback: string) {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({ error: res.statusText }))).error ?? res.statusText);
+  const blob = await res.blob();
+  const m = (res.headers.get('Content-Disposition') || '').match(/filename="?([^"]+)"?/);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = m ? m[1] : fallback;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Upload a file to the shared file store; returns the file id as a string.
+async function uploadFile(file: File): Promise<string> {
+  const fd = new FormData();
+  fd.append('file', file);
+  const token = getToken();
+  const response = await fetch(`${API_BASE}/files`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
+  if (!response.ok) throw new Error((await response.json().catch(() => ({ error: response.statusText }))).error ?? response.statusText);
+  return String((await response.json()).id);
+}
 
 function useLookups() {
   const [staff, setStaff] = useState<Staff[]>([]);
@@ -59,20 +102,25 @@ async function fetchBlobUrl(path: string): Promise<string> {
   return URL.createObjectURL(await r.blob());
 }
 
-const emptyDocForm = { documentCode: '', title: '', documentType: 'SOP', sectionCategory: '', departmentId: '', sectionId: '', ownerStaffId: '', reviewFrequencyMonths: '12', nextReviewDate: '', accessLevel: 'internal', isControlled: true, fileId: '', versionNumber: '1.0', revisionSummary: '', effectiveDate: '' };
+const emptyDocForm = { documentCode: '', title: '', documentType: 'SOP', sectionCategory: '', departmentId: '', sectionId: '', ownerStaffId: '', reviewFrequencyMonths: '12', nextReviewDate: '', accessLevel: 'internal', isControlled: true, fileId: '', versionNumber: '1.0', revisionSummary: '', effectiveDate: '', formatMedium: '', controlledLocations: '', retentionPeriod: '', remarks: '' };
 const emptyVersionForm = { versionNumber: '', revisionSummary: '', fileId: '', effectiveDate: '' };
 const emptyReviewForm = { reviewDate: '', reviewOutcome: 'no_change', reviewNotes: '', nextReviewDate: '', actionRequired: false };
 const emptyAttestForm = { targetType: 'staff', staffIds: [] as number[], positionId: '', sectionId: '', departmentId: '', dueDate: '', notes: '' };
 const emptyPrintForm = { printPurpose: '', controlledCopy: false, copyNumber: '', watermark: '' };
 
+const SECTIONS = ['Dashboard', 'Documents', 'Records', 'Master List'] as const;
+
 export function DocumentControlPage() {
   const { isEnabled } = useModules();
   const { staff, sections, departments, positions } = useLookups();
-  const [tab, setTab] = useState('Dashboard');
+  const [section, setSection] = useState<(typeof SECTIONS)[number]>('Dashboard');
+  const [tab, setTab] = useState('Document Register');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [exportBusy, setExportBusy] = useState('');
 
   const [summary, setSummary] = useState<DocumentControlSummary | null>(null);
+  const [recordSummary, setRecordSummary] = useState<RecordControlSummary | null>(null);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [reviewsDue, setReviewsDue] = useState<DocumentRecord[]>([]);
   const [pendingAttestations, setPendingAttestations] = useState<DocumentAttestation[]>([]);
@@ -99,14 +147,16 @@ export function DocumentControlPage() {
 
   async function load() {
     try {
-      const [sum, docs, due, att, ib] = await Promise.all([
+      const [sum, recSum, docs, due, att, ib] = await Promise.all([
         api<DocumentControlSummary>('/dashboard/document-control-summary').catch(() => null),
+        api<RecordControlSummary>('/documents/records/summary').catch(() => null),
         api<DocumentRecord[]>('/documents'),
         api<DocumentRecord[]>('/documents/reviews/due').catch(() => []),
         api<DocumentAttestation[]>('/documents/attestations/pending').catch(() => []),
         api<DistributionInboxEntry[]>('/documents/distribution/inbox').catch(() => [])
       ]);
       if (sum) setSummary(sum);
+      if (recSum) setRecordSummary(recSum);
       setDocuments(docs); setReviewsDue(due); setPendingAttestations(att); setInbox(ib);
     } catch (e) { setError((e as Error).message); }
   }
@@ -116,14 +166,7 @@ export function DocumentControlPage() {
   function flash(msg: string) { setNotice(msg); setError(null); setTimeout(() => setNotice(null), 5000); }
 
   async function uploadFileIfAny(file: File | null): Promise<string | null> {
-    if (!file) return null;
-    const fd = new FormData();
-    fd.append('file', file);
-    const token = getToken();
-    const response = await fetch(`${API_BASE}/files`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
-    if (!response.ok) throw new Error((await response.json().catch(() => ({ error: response.statusText }))).error ?? response.statusText);
-    const data = await response.json();
-    return String(data.id);
+    return file ? uploadFile(file) : null;
   }
 
   async function autoGenerateCode() {
@@ -168,7 +211,7 @@ export function DocumentControlPage() {
       const payload = { ...docForm, fileId: uploadedFileId ?? docForm.fileId };
       const created = await api<{ id: number; documentCode: string }>('/documents', { method: 'POST', body: JSON.stringify(payload) });
       setDocForm(emptyDocForm); setNewDocFile(null);
-      await load(); setTab('Document Register');
+      await load(); setSection('Documents'); setTab('Document Register');
       flash(`Document created as ${created.documentCode}. It is now in Draft — submit it for review when ready.`);
     } catch (e) { setError((e as Error).message); }
   }
@@ -221,8 +264,15 @@ export function DocumentControlPage() {
   }
 
   async function openDoc(id: number) {
-    try { setSelectedDoc(await api<DocumentRecord>(`/documents/${id}`)); setTab('Document Register'); }
+    try { setSelectedDoc(await api<DocumentRecord>(`/documents/${id}`)); setSection('Documents'); setTab('Document Register'); }
     catch (e) { setError((e as Error).message); }
+  }
+
+  async function runExport(path: string, fallback: string) {
+    setError(null); setExportBusy(path);
+    try { await downloadExport(path, fallback); }
+    catch (e) { setError((e as Error).message); }
+    finally { setExportBusy(''); }
   }
 
   async function submitVersion(e: FormEvent) {
@@ -364,7 +414,7 @@ export function DocumentControlPage() {
     }
   }
 
-  const tabs = ['Dashboard', 'Document Register', 'New Document', 'Bulk Import', 'Review Queue', 'Approval Queue', 'Reviews Due', 'Attestations', 'My Inbox', 'Obsolete', 'Record Control'];
+  const docTabs = ['Document Register', 'New Document', 'Bulk Import', 'Review Queue', 'Approval Queue', 'Reviews Due', 'Attestations', 'My Inbox', 'Obsolete Register'];
   const obsoleteDocs = documents.filter(d => d.status === 'obsolete');
   const reviewQueue = documents.filter(d => d.status === 'under_review');
   const approvalQueue = documents.filter(d => d.status === 'reviewed');
@@ -381,8 +431,9 @@ export function DocumentControlPage() {
   </tr>;
 
   return <div className="module-page">
-    <PageHeader eyebrow="Documents &amp; Records" title="Document &amp; Record Control" subtitle="Controlled documents and records — creation, review, approval, attestation, retention and disposal (ISO 15189 §8.3 / §8.4)." />
-    {tabBar(tab, tabs, setTab)}
+    <PageHeader eyebrow="Documents &amp; Records" title="Documents &amp; Records" subtitle="Controlled documents and controlled records — creation, review, approval, distribution, attestation, retention and disposal." />
+    {tabBar(section, SECTIONS as unknown as string[], s => setSection(s as (typeof SECTIONS)[number]))}
+    {section === 'Documents' && tabBar(tab, docTabs, setTab)}
     {error && <div className="error">{error}</div>}
     {notice && <div className="banner-success" style={{ background: '#e8f6ee', border: '1px solid #58b27a', color: '#1c6b3e', padding: '8px 12px', borderRadius: 6, margin: '8px 0' }}>{notice}</div>}
 
@@ -391,9 +442,13 @@ export function DocumentControlPage() {
       documents={documents}
       onClose={() => setViewer(null)} onAttest={signAttestation} onSaved={() => { if (selectedDoc?.id === viewer.docId) openDoc(viewer.docId); }} onError={setError} />}
 
-    {tab === 'Dashboard' && (summary ? <>
+    {section === 'Dashboard' && (summary ? <>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <h3 style={{ margin: '6px 0' }}>Document control</h3>
+        <button className="secondary" disabled={!!exportBusy} onClick={() => runExport('/documents/masterlist/export', 'Document_and_Records_Master_List.xlsx')}>{exportBusy === '/documents/masterlist/export' ? 'Preparing…' : 'Export Master List (Excel)'}</button>
+      </div>
       <div className="cards">
-        <div className="card"><h4>Current documents</h4><p className="metric">{summary.currentDocuments}</p></div>
+        <div className="card"><h4>Active documents</h4><p className="metric">{summary.currentDocuments}</p></div>
         <div className="card"><h4>Drafts</h4><p className="metric">{summary.drafts}</p></div>
         <div className="card"><h4>In review</h4><p className="metric">{reviewQueue.length}</p></div>
         <div className="card"><h4>Awaiting approval</h4><p className="metric">{approvalQueue.length}</p></div>
@@ -402,10 +457,22 @@ export function DocumentControlPage() {
         <div className="card"><h4>Pending attestations</h4><p className="metric">{summary.pendingAttestations}</p></div>
         <div className="card"><h4>Obsolete documents</h4><p className="metric">{summary.obsoleteDocuments}</p></div>
       </div>
+      <h3 style={{ margin: '18px 0 6px' }}>Record control</h3>
+      {recordSummary ? <div className="cards">
+        <div className="card"><h4>Active records</h4><p className="metric">{recordSummary.activeRecords}</p></div>
+        <div className="card"><h4>Archived records</h4><p className="metric">{recordSummary.archivedRecords}</p></div>
+        <div className="card"><h4>Disposal due</h4><p className="metric">{recordSummary.disposalDue}</p></div>
+        <div className="card"><h4>Retention rules</h4><p className="metric">{recordSummary.retentionRules}</p></div>
+        <div className="card"><h4>Record reviews this month</h4><p className="metric">{recordSummary.reviewsThisMonth}</p></div>
+        <div className="card"><h4>Open review actions</h4><p className="metric">{recordSummary.openReviewActions}</p></div>
+        <div className="card"><h4>Destructions this year</h4><p className="metric">{recordSummary.destructionsThisYear}</p></div>
+        <div className="card"><h4>Backups this month</h4><p className="metric">{recordSummary.backupsThisMonth}</p></div>
+        <div className="card"><h4>Failed restore tests</h4><p className="metric">{recordSummary.failedRestoreTests}</p></div>
+      </div> : <p className="muted">Loading record-control summary…</p>}
       <div className="grid cols-2" style={{ marginTop: 18 }}>
         <ChartCard title="Document lifecycle" subtitle="Controlled set by current state">
           <DonutChart centerLabel="Documents" data={[
-            { label: 'Current', value: summary.currentDocuments, color: CHART_COLORS[1] },
+            { label: 'Active', value: summary.currentDocuments, color: CHART_COLORS[1] },
             { label: 'Drafts', value: summary.drafts, color: CHART_COLORS[0] },
             { label: 'In review', value: reviewQueue.length, color: CHART_COLORS[2] },
             { label: 'Awaiting approval', value: approvalQueue.length, color: CHART_COLORS[5] },
@@ -419,26 +486,49 @@ export function DocumentControlPage() {
             { label: 'Pending attestations', value: summary.pendingAttestations, color: CHART_COLORS[4] },
           ]} />
         </ChartCard>
+        {recordSummary && <ChartCard title="Record holdings" subtitle="Registered records by state">
+          <DonutChart centerLabel="Records" data={[
+            { label: 'Active', value: recordSummary.activeRecords, color: CHART_COLORS[1] },
+            { label: 'Archived', value: recordSummary.archivedRecords, color: CHART_COLORS[5] },
+            { label: 'Disposal due', value: recordSummary.disposalDue, color: CHART_COLORS[3] },
+          ]} />
+        </ChartCard>}
+        {recordSummary && <ChartCard title="Records assurance" subtitle="Outstanding record-control actions">
+          <BarMeter data={[
+            { label: 'Disposal due', value: recordSummary.disposalDue, color: CHART_COLORS[3] },
+            { label: 'Open review actions', value: recordSummary.openReviewActions, color: CHART_COLORS[2] },
+            { label: 'Failed restore tests', value: recordSummary.failedRestoreTests, color: CHART_COLORS[7] },
+          ]} />
+        </ChartCard>}
       </div>
     </> : <p>Loading summary…</p>)}
 
-    {tab === 'Document Register' && <>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
+    {section === 'Documents' && tab === 'Document Register' && <>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
         <input placeholder="Search code, title, type, status…" value={registerFilter} onChange={e => setRegisterFilter(e.target.value)} style={{ minWidth: 320 }} />
         <span className="muted">{filteredRegister.length} document(s)</span>
+        <span style={{ flex: 1 }} />
+        <button className="secondary" disabled={!!exportBusy} onClick={() => runExport('/documents/register/export', 'Document_Register.xlsx')}>{exportBusy === '/documents/register/export' ? 'Preparing…' : 'Export register (Excel)'}</button>
       </div>
-      <table className="data-table"><thead><tr><th>Code</th><th>Title</th><th>Type</th><th>Section</th><th>Owner</th><th>Status</th><th>Next review</th><th>Actions</th></tr></thead><tbody>
-        {filteredRegister.map(d => <tr key={d.id}>
-          <td>{d.document_code || '—'}</td><td>{d.title}</td><td>{d.document_type || '—'}</td>
-          <td>{sections.find(s => s.id === d.section_id)?.name || '—'}</td>
-          <td>{staffName(staff, d.owner_staff_id)}</td>
-          <td>{statusCell(d)}</td><td>{d.next_review_date || '—'}</td>
+      <div style={{ overflowX: 'auto' }}>
+      <table className="data-table"><thead><tr><th>No.</th><th>Code</th><th>Category</th><th>Unit / Section</th><th>Title</th><th>Version</th><th>Status</th><th>Effective</th><th>Next review</th><th>Author</th><th>Actions</th></tr></thead><tbody>
+        {filteredRegister.map((d, i) => <tr key={d.id}>
+          <td>{i + 1}</td>
+          <td>{d.document_code || '—'}</td><td>{documentCategoryLabel(d)}</td>
+          <td>{d.section_name || 'General / QMS-wide'}</td>
+          <td>{d.title}</td>
+          <td>{d.current_version_number || '—'}</td>
+          <td>{statusCell(d)}</td>
+          <td>{d.current_effective_date ? String(d.current_effective_date).slice(0, 10) : '—'}</td>
+          <td>{d.next_review_date || '—'}</td>
+          <td>{d.owner_name || staffName(staff, d.owner_staff_id)}</td>
           <td style={{ whiteSpace: 'nowrap' }}>
             <button onClick={() => openDoc(d.id)}>Open</button>{' '}
             {d.current_version_id && <button className="secondary" onClick={() => setViewer({ docId: d.id, versionId: d.current_version_id! })}>View</button>}
           </td>
         </tr>)}
       </tbody></table>
+      </div>
       {selectedDoc && <DocumentDetailPanel doc={selectedDoc} staff={staff} positions={positions} sections={sections} departments={departments}
         versionForm={versionForm} setVersionForm={setVersionForm} versionFile={versionFile} setVersionFile={setVersionFile} submitVersion={submitVersion}
         reviewForm={reviewForm} setReviewForm={setReviewForm} submitReview={submitReview}
@@ -452,7 +542,7 @@ export function DocumentControlPage() {
         onClose={() => setSelectedDoc(null)} />}
     </>}
 
-    {tab === 'New Document' && <form className="form-grid" onSubmit={submitDoc}>
+    {section === 'Documents' && tab === 'New Document' && <form className="form-grid" onSubmit={submitDoc}>
       <label>Document code (leave blank to auto-generate)
         <span style={{ display: 'flex', gap: 6 }}>
           <input value={docForm.documentCode} onChange={e => setDocForm({ ...docForm, documentCode: e.target.value })} placeholder="e.g. SECHPO026 — or Auto-generate" />
@@ -472,11 +562,15 @@ export function DocumentControlPage() {
       <label>Initial version number<input value={docForm.versionNumber} onChange={e => setDocForm({ ...docForm, versionNumber: e.target.value })} /></label>
       <label>Revision summary<input value={docForm.revisionSummary} onChange={e => setDocForm({ ...docForm, revisionSummary: e.target.value })} /></label>
       <label>Effective date<input type="date" value={docForm.effectiveDate} onChange={e => setDocForm({ ...docForm, effectiveDate: e.target.value })} /></label>
+      <label>Format / medium<input value={docForm.formatMedium} onChange={e => setDocForm({ ...docForm, formatMedium: e.target.value })} placeholder="e.g. Electronic (Word) + Printed Master Copy" /></label>
+      <label>Controlled locations / distribution<input value={docForm.controlledLocations} onChange={e => setDocForm({ ...docForm, controlledLocations: e.target.value })} placeholder="e.g. All laboratory computers; QM Master File" /></label>
+      <label>Retention period<input value={docForm.retentionPeriod} onChange={e => setDocForm({ ...docForm, retentionPeriod: e.target.value })} placeholder="e.g. 5 years after obsolescence" /></label>
+      <label>Remarks<input value={docForm.remarks} onChange={e => setDocForm({ ...docForm, remarks: e.target.value })} /></label>
       <label>File upload (PDF/Word — title, number &amp; content are read automatically)<input type="file" accept=".pdf,.doc,.docx,.txt,.md,.rtf,.odt" onChange={e => onPickNewDocFile(e.target.files?.[0] ?? null)} /></label>
       <button type="submit">Create document (Draft)</button>
     </form>}
 
-    {tab === 'Bulk Import' && <div className="card">
+    {section === 'Documents' && tab === 'Bulk Import' && <div className="card">
       <h3 style={{ marginTop: 0 }}>Bulk import documents</h3>
       <p className="muted" style={{ marginTop: 0 }}>Import many SOPs, policies, forms or registers at once. Each file becomes a controlled document (Draft) and its full content is read for in-app viewing. Document numbers are taken from the file name when present (e.g. <em>“SECHPO026 Document Control Procedure”</em> → <strong>SECHPO026</strong>), otherwise auto-numbered from the prefix.</p>
       <form className="form-grid" onSubmit={submitBulk}>
@@ -500,14 +594,14 @@ export function DocumentControlPage() {
       </tbody></table>}
     </div>}
 
-    {tab === 'Review Queue' && <>
+    {section === 'Documents' && tab === 'Review Queue' && <>
       <p className="muted">Documents submitted for review. An authorised reviewer (technical staff / Quality Manager) opens each, reads it, and records a review — which advances it to <em>Reviewed</em> for approval.</p>
       <table className="data-table"><thead><tr><th>Code</th><th>Title</th><th>Type</th><th>Owner</th><th>Status</th><th></th></tr></thead><tbody>
         {reviewQueue.map(queueRow)}{reviewQueue.length === 0 && <tr><td colSpan={6} className="muted">Nothing awaiting review.</td></tr>}
       </tbody></table>
     </>}
 
-    {tab === 'Approval Queue' && <>
+    {section === 'Documents' && tab === 'Approval Queue' && <>
       <p className="muted">Documents that have been reviewed and are awaiting approval by the Laboratory Manager (or authorised approver). Approving issues the document as the current controlled version and distributes it to all staff for attestation.</p>
       <table className="data-table"><thead><tr><th>Code</th><th>Title</th><th>Type</th><th>Reviewed by</th><th>Status</th><th></th></tr></thead><tbody>
         {approvalQueue.map(d => <tr key={d.id}>
@@ -518,7 +612,7 @@ export function DocumentControlPage() {
       </tbody></table>
     </>}
 
-    {tab === 'Reviews Due' && <table className="data-table"><thead><tr><th>Code</th><th>Title</th><th>Type</th><th>Owner</th><th>Status</th><th>Next review</th><th></th></tr></thead><tbody>
+    {section === 'Documents' && tab === 'Reviews Due' && <table className="data-table"><thead><tr><th>Code</th><th>Title</th><th>Type</th><th>Owner</th><th>Status</th><th>Next review</th><th></th></tr></thead><tbody>
       {reviewsDue.map(d => <tr key={d.id}>
         <td>{d.document_code || '—'}</td><td>{d.title}</td><td>{d.document_type || '—'}</td>
         <td>{staffName(staff, d.owner_staff_id)}</td><td>{statusCell(d)}</td>
@@ -527,7 +621,7 @@ export function DocumentControlPage() {
       </tr>)}{reviewsDue.length === 0 && <tr><td colSpan={7} className="muted">No reviews due.</td></tr>}
     </tbody></table>}
 
-    {tab === 'Attestations' && <table className="data-table"><thead><tr><th>Document</th><th>Version</th><th>Staff</th><th>Status</th><th>Due</th><th></th></tr></thead><tbody>
+    {section === 'Documents' && tab === 'Attestations' && <table className="data-table"><thead><tr><th>Document</th><th>Version</th><th>Staff</th><th>Status</th><th>Due</th><th></th></tr></thead><tbody>
       {pendingAttestations.map(a => <tr key={a.id}>
         <td>{a.document_code || '—'} — {a.title}</td>
         <td>{a.version_number || '—'}</td>
@@ -537,7 +631,7 @@ export function DocumentControlPage() {
       </tr>)}{pendingAttestations.length === 0 && <tr><td colSpan={6} className="muted">No pending attestations.</td></tr>}
     </tbody></table>}
 
-    {tab === 'My Inbox' && <>
+    {section === 'Documents' && tab === 'My Inbox' && <>
       <p className="muted">Controlled documents distributed to you. Open each to read it, then attest. Your attestation is recorded against the document and appears on its printed attestation list.</p>
       <table className="data-table"><thead><tr><th>Document</th><th>Version</th><th>Attestation status</th><th>Due</th><th>Signed</th><th>Actions</th></tr></thead><tbody>
         {inbox.map(e => <tr key={e.id}>
@@ -555,15 +649,69 @@ export function DocumentControlPage() {
       {inbox.length === 0 && <p>Your inbox is empty.</p>}
     </>}
 
-    {tab === 'Obsolete' && <table className="data-table"><thead><tr><th>Code</th><th>Title</th><th>Type</th><th>Reason</th><th></th></tr></thead><tbody>
-      {obsoleteDocs.map(d => <tr key={d.id}>
-        <td>{d.document_code || '—'}</td><td>{d.title}</td><td>{d.document_type || '—'}</td>
-        <td>{d.obsolete_reason || '—'}</td>
-        <td><button onClick={() => openDoc(d.id)}>Open</button></td>
-      </tr>)}{obsoleteDocs.length === 0 && <tr><td colSpan={5} className="muted">No obsolete documents.</td></tr>}
-    </tbody></table>}
+    {section === 'Documents' && tab === 'Obsolete Register' && <>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+        <p className="muted" style={{ margin: 0 }}>Documents withdrawn from circulation. Obsolete masters are retained in the archive until their destruction date, clearly separated from current documents.</p>
+        <span style={{ flex: 1 }} />
+        <button className="secondary" disabled={!!exportBusy} onClick={() => runExport('/documents/obsolete-register/export', 'Obsolete_Document_Register.xlsx')}>{exportBusy === '/documents/obsolete-register/export' ? 'Preparing…' : 'Export register (Excel)'}</button>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+      <table className="data-table"><thead><tr><th>No.</th><th>Former code</th><th>Title</th><th>Last version</th><th>Reason / remark</th><th>Effective (last active)</th><th>Withdrawn</th><th>Author</th><th>Reviewer</th><th>Authoriser</th><th>Destroy date</th><th>Archive location</th><th></th></tr></thead><tbody>
+        {obsoleteDocs.map((d, i) => <tr key={d.id}>
+          <td>{i + 1}</td>
+          <td>{d.document_code || '—'}</td><td>{d.title}</td>
+          <td>{d.current_version_number || '—'}</td>
+          <td>{d.obsolete_reason || '—'}</td>
+          <td>{d.current_effective_date ? String(d.current_effective_date).slice(0, 10) : '—'}</td>
+          <td>{d.withdrawn_at ? String(d.withdrawn_at).slice(0, 10) : '—'}</td>
+          <td>{d.owner_name || staffName(staff, d.owner_staff_id)}</td>
+          <td>{d.reviewer_name || staffName(staff, d.reviewed_by_staff_id)}</td>
+          <td>{d.approver_name || staffName(staff, d.approved_by_staff_id)}</td>
+          <td>{d.destroy_due_date || '—'}</td>
+          <td>{d.archive_location || '—'}</td>
+          <td><button onClick={() => openDoc(d.id)}>Open</button></td>
+        </tr>)}{obsoleteDocs.length === 0 && <tr><td colSpan={13} className="muted">No obsolete documents.</td></tr>}
+      </tbody></table>
+      </div>
+    </>}
 
-    {tab === 'Record Control' && <RecordControl staff={staff} sections={sections} departments={departments} documents={documents} onError={setError} />}
+    {section === 'Records' && <RecordControl staff={staff} sections={sections} departments={departments} documents={documents} onError={setError} exportBusy={exportBusy} onExport={runExport} />}
+
+    {section === 'Master List' && <MasterListView exportBusy={exportBusy} onExport={runExport} onError={setError} />}
+  </div>;
+}
+
+// ============================================================================
+// Documents & Records Master List — on-screen mirror of the controlled
+// master-list workbook, one view per register, exportable to Excel.
+// ============================================================================
+function MasterListView({ exportBusy, onExport, onError }: { exportBusy: string; onExport: (path: string, fallback: string) => Promise<void>; onError: (m: string) => void }) {
+  const [data, setData] = useState<MasterListResponse | null>(null);
+  const [sub, setSub] = useState('Document Register');
+  useEffect(() => { api<MasterListResponse>('/documents/masterlist').then(setData).catch(e => onError((e as Error).message)); }, []);
+
+  const subs = ['Document Register', 'Records Register', 'Obsolete Document Register'];
+  if (!data) return <p>Loading master list…</p>;
+  const reg = sub === 'Document Register' ? data.documentRegister : sub === 'Records Register' ? data.recordsRegister : data.obsoleteRegister;
+  const exports: Array<[string, string, string]> = [
+    ['Export full Master List (Excel)', '/documents/masterlist/export', 'Document_and_Records_Master_List.xlsx'],
+    [`Export ${sub} only`, sub === 'Document Register' ? '/documents/register/export' : sub === 'Records Register' ? '/documents/records/register/export' : '/documents/obsolete-register/export',
+      sub === 'Document Register' ? 'Document_Register.xlsx' : sub === 'Records Register' ? 'Records_Register.xlsx' : 'Obsolete_Document_Register.xlsx'],
+  ];
+  return <div>
+    <p className="muted" style={{ marginTop: 0 }}>The controlled Document &amp; Records Master List: the single authoritative index of all controlled documents, controlled records and obsolete documents. The Excel export reproduces this list as a three-register workbook.</p>
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+      {tabBar(sub, subs, setSub)}
+      <span style={{ flex: 1 }} />
+      {exports.map(([label, path, fallback]) => <button key={path} className="secondary" disabled={!!exportBusy} onClick={() => onExport(path, fallback)}>{exportBusy === path ? 'Preparing…' : label}</button>)}
+    </div>
+    <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
+      <div style={{ padding: '10px 14px', fontWeight: 700, borderBottom: '1px solid #e3e8f0' }}>{data.facility} — {sub.toUpperCase()}</div>
+      <table className="data-table"><thead><tr>{reg.headers.map(h => <th key={h}>{h}</th>)}</tr></thead><tbody>
+        {reg.rows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j}>{cell === '' || cell == null ? '—' : String(cell)}</td>)}</tr>)}
+        {reg.rows.length === 0 && <tr><td colSpan={reg.headers.length} className="muted">No entries yet.</td></tr>}
+      </tbody></table>
+    </div>
   </div>;
 }
 
@@ -1226,6 +1374,34 @@ function WorkflowStepper({ status }: { status: string }) {
   </div>;
 }
 
+// Master-list fields kept on the document itself so the on-screen registers
+// and Excel exports carry the full master-list columns.
+function MasterListDetailsForm({ doc, onSaved, onError }: { doc: any; onSaved: () => void; onError: (m: string) => void }) {
+  const fromDoc = () => ({ formatMedium: doc.format_medium || '', controlledLocations: doc.controlled_locations || '', retentionPeriod: doc.retention_period || '', remarks: doc.remarks || '', archiveLocation: doc.archive_location || '', destroyDueDate: doc.destroy_due_date || '' });
+  const [f, setF] = useState(fromDoc);
+  useEffect(() => { setF(fromDoc()); }, [doc.id]);
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    try { await api(`/documents/${doc.id}`, { method: 'PUT', body: JSON.stringify(f) }); onSaved(); }
+    catch (err) { onError((err as Error).message); }
+  }
+  return <details style={{ margin: '8px 0' }}>
+    <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Master-list details — format, distribution, retention, remarks</summary>
+    <form className="form-grid" onSubmit={save} style={{ marginTop: 8 }}>
+      <label>Format / medium<input value={f.formatMedium} onChange={e => setF({ ...f, formatMedium: e.target.value })} placeholder="e.g. Electronic (Word) + Printed Master Copy" /></label>
+      <label>Controlled locations / distribution<input value={f.controlledLocations} onChange={e => setF({ ...f, controlledLocations: e.target.value })} placeholder="e.g. All laboratory computers; QM Master File" /></label>
+      <label>Retention period<input value={f.retentionPeriod} onChange={e => setF({ ...f, retentionPeriod: e.target.value })} placeholder="e.g. 5 years after obsolescence" /></label>
+      <label>Remarks<input value={f.remarks} onChange={e => setF({ ...f, remarks: e.target.value })} /></label>
+      {doc.status === 'obsolete' && <>
+        <label>Archive location<input value={f.archiveLocation} onChange={e => setF({ ...f, archiveLocation: e.target.value })} placeholder="e.g. QM archive cabinet / archive server" /></label>
+        <label>Retention / destroy date<input type="date" value={f.destroyDueDate} onChange={e => setF({ ...f, destroyDueDate: e.target.value })} /></label>
+      </>}
+      <button type="submit">Save master-list details</button>
+    </form>
+  </details>;
+}
+
 function DocumentDetailPanel(props: any) {
   const { doc, staff, positions, sections, departments,
     versionForm, setVersionForm, versionFile, setVersionFile, submitVersion,
@@ -1254,12 +1430,14 @@ function DocumentDetailPanel(props: any) {
     <p style={{ margin: '4px 0' }}>Owner: {staffName(staff, doc.owner_staff_id)} | Section: {sections.find((s: any) => s.id === doc.section_id)?.name || '—'} | Next review: {doc.next_review_date || '—'}</p>
     <p style={{ margin: '4px 0' }}>Reviewed by: {staffName(staff, doc.reviewed_by_staff_id)} | Approved by: {staffName(staff, doc.approved_by_staff_id)} {doc.approved_at ? `on ${String(doc.approved_at).slice(0, 10)}` : ''}</p>
 
-    {/* Update document number (ISO 15189 §8.3 — unique document identification) */}
+    {/* Unique document identification: the number can be corrected here. */}
     <div style={{ display: 'flex', gap: 6, alignItems: 'center', margin: '8px 0' }}>
       <label style={{ margin: 0 }}>Document number</label>
       <input value={codeEdit} onChange={e => setCodeEdit(e.target.value)} style={{ maxWidth: 220 }} />
       <button className="secondary" onClick={saveCode} disabled={codeEdit === (doc.document_code || '')}>Update number</button>
     </div>
+
+    <MasterListDetailsForm doc={doc} onSaved={onCodeSaved} onError={onError} />
 
     {/* Lifecycle actions, shown contextually */}
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
@@ -1345,16 +1523,18 @@ function DocumentDetailPanel(props: any) {
 // ============================================================================
 // RECORD CONTROL (SECHPO051 — Control of Records Procedure)
 // ============================================================================
-function RecordControl({ staff, sections, departments, documents, onError }: { staff: Staff[]; sections: Section[]; departments: Department[]; documents: DocumentRecord[]; onError: (m: string) => void }) {
-  const [sub, setSub] = useState('Dashboard');
-  const [summary, setSummary] = useState<RecordControlSummary | null>(null);
+function RecordControl({ staff, sections, departments, documents, onError, exportBusy, onExport }: { staff: Staff[]; sections: Section[]; departments: Department[]; documents: DocumentRecord[]; onError: (m: string) => void; exportBusy: string; onExport: (path: string, fallback: string) => Promise<void> }) {
+  const [sub, setSub] = useState('Records Register');
   const [register, setRegister] = useState<RecordRegisterEntry[]>([]);
   const [schedule, setSchedule] = useState<RetentionScheduleRule[]>([]);
   const [reviewLog, setReviewLog] = useState<RecordReviewLogEntry[]>([]);
   const [destruction, setDestruction] = useState<RecordDestructionEntry[]>([]);
   const [backups, setBackups] = useState<RecordBackupEntry[]>([]);
+  const [registerSearch, setRegisterSearch] = useState('');
+  const [recordFile, setRecordFile] = useState<File | null>(null);
+  const [savingRecord, setSavingRecord] = useState(false);
 
-  const emptyReg = { title: '', recordCategory: 'examination', recordFormat: 'electronic', sectionId: '', responsibleStaffId: '', storageLocation: '', retentionScheduleId: '', retentionPeriod: '', confidentiality: 'internal', linkedDocumentId: '', dateCreated: '', disposalDueDate: '', notes: '' };
+  const emptyReg = { title: '', recordCategory: 'Examination / Patient Record', recordFormat: 'electronic', origin: 'manual', sectionId: '', responsibleStaffId: '', storageLocation: '', retentionScheduleId: '', retentionPeriod: '', confidentiality: 'internal', linkedDocumentId: '', sourceModule: '', dateCreated: '', disposalDueDate: '', disposalMethod: '', notes: '' };
   const emptyRev = { reviewDate: '', recordCategory: '', sectionId: '', recordsReviewed: '', findings: '', nonconformitiesIdentified: '', actionRequired: false, responsibleStaffId: '', targetCompletionDate: '', followUpStatus: 'open' };
   const emptyDes = { itemType: 'record', recordRegisterId: '', description: '', recordCategory: '', dateDestroyed: '', method: 'shredding', retentionVerified: false, confidentialityEnsured: true, authorizedByStaffId: '', witnessStaffId: '', notes: '' };
   const emptyBkp = { backupDate: '', backupType: 'incremental', scope: '', storageLocation: '', offsite: false, performedByStaffId: '', integrityVerified: false, restoreTestStatus: '', restoreTestDate: '', notes: '' };
@@ -1365,15 +1545,13 @@ function RecordControl({ staff, sections, departments, documents, onError }: { s
 
   async function loadAll() {
     try {
-      const [sm, rg, sc, rl, dl, bl] = await Promise.all([
-        api<RecordControlSummary>('/documents/records/summary').catch(() => null),
+      const [rg, sc, rl, dl, bl] = await Promise.all([
         api<RecordRegisterEntry[]>('/documents/records/register'),
         api<RetentionScheduleRule[]>('/documents/records/retention-schedule'),
         api<RecordReviewLogEntry[]>('/documents/records/review-log'),
         api<RecordDestructionEntry[]>('/documents/records/destruction-log'),
         api<RecordBackupEntry[]>('/documents/records/backup-log'),
       ]);
-      if (sm) setSummary(sm);
       setRegister(rg); setSchedule(sc); setReviewLog(rl); setDestruction(dl); setBackups(bl);
     } catch (e) { onError((e as Error).message); }
   }
@@ -1384,51 +1562,83 @@ function RecordControl({ staff, sections, departments, documents, onError }: { s
     catch (e) { onError((e as Error).message); }
   }
 
-  const subs = ['Dashboard', 'Record Register', 'Retention Schedule', 'Review Log', 'Destruction Log', 'Backup & Archive'];
+  async function submitRecord(e: FormEvent) {
+    e.preventDefault();
+    setSavingRecord(true);
+    try {
+      const fileId = recordFile ? await uploadFile(recordFile) : null;
+      const payload = { ...regForm, fileId, origin: fileId ? 'uploaded' : regForm.origin };
+      await api('/documents/records/register', { method: 'POST', body: JSON.stringify(payload) });
+      setRegForm(emptyReg); setRecordFile(null);
+      await loadAll();
+    } catch (err) { onError((err as Error).message); }
+    finally { setSavingRecord(false); }
+  }
+
+  async function downloadRecordFile(r: RecordRegisterEntry) {
+    if (!r.file_id) return;
+    try { await downloadExport(`/files/${r.file_id}/download`, r.file_name || `record-${r.record_code || r.id}`); }
+    catch (err) { onError((err as Error).message); }
+  }
+
+  const filteredRegister = register.filter(r => {
+    if (!registerSearch.trim()) return true;
+    const q = registerSearch.toLowerCase();
+    return [r.record_code, r.title, r.record_category, r.linked_document_code, r.section_name, r.status].some(v => (v || '').toLowerCase().includes(q));
+  });
+
+  const subs = ['Records Register', 'Retention Schedule', 'Review Log', 'Destruction Log', 'Backup & Archive'];
   return <div>
-    <p className="muted" style={{ marginTop: 0 }}>Control of Records (SECHPO051) — creation, identification, storage, review, retention and disposal of laboratory records (ISO 15189 §8.4).</p>
+    <p className="muted" style={{ marginTop: 0 }}>Control of records — identification, collection, indexing, access, storage, review, retention and safe disposal of quality and technical records. Records may be uploaded (scanned or electronic files), generated inside the system, or indexed here when kept physically.</p>
     {tabBar(sub, subs, setSub)}
 
-    {sub === 'Dashboard' && summary && <div className="cards">
-      <div className="card"><h4>Active records</h4><p className="metric">{summary.activeRecords}</p></div>
-      <div className="card"><h4>Archived</h4><p className="metric">{summary.archivedRecords}</p></div>
-      <div className="card"><h4>Disposal due</h4><p className="metric">{summary.disposalDue}</p></div>
-      <div className="card"><h4>Retention rules</h4><p className="metric">{summary.retentionRules}</p></div>
-      <div className="card"><h4>Reviews this month</h4><p className="metric">{summary.reviewsThisMonth}</p></div>
-      <div className="card"><h4>Open review actions</h4><p className="metric">{summary.openReviewActions}</p></div>
-      <div className="card"><h4>Destructions this year</h4><p className="metric">{summary.destructionsThisYear}</p></div>
-      <div className="card"><h4>Backups this month</h4><p className="metric">{summary.backupsThisMonth}</p></div>
-      <div className="card"><h4>Failed restore tests</h4><p className="metric">{summary.failedRestoreTests}</p></div>
-    </div>}
-
-    {sub === 'Record Register' && <>
-      <table className="data-table"><thead><tr><th>Code</th><th>Title</th><th>Category</th><th>Format</th><th>Section</th><th>Responsible</th><th>Retention</th><th>Confidentiality</th><th>Status</th></tr></thead><tbody>
-        {register.map(r => <tr key={r.id}>
-          <td>{r.record_code || '—'}</td><td>{r.title}</td><td>{(r.record_category || '—').replace(/_/g, ' ')}</td><td>{r.record_format}</td>
-          <td>{r.section_name || '—'}</td><td>{r.responsible_name || '—'}</td><td>{r.retention_period || '—'}</td><td>{formatBadge(r.confidentiality)}</td><td>{formatBadge(r.status)}</td>
-        </tr>)}{register.length === 0 && <tr><td colSpan={9} className="muted">No records registered yet.</td></tr>}
+    {sub === 'Records Register' && <>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+        <input placeholder="Search code, title, category, source, status…" value={registerSearch} onChange={e => setRegisterSearch(e.target.value)} style={{ minWidth: 320 }} />
+        <span className="muted">{filteredRegister.length} record(s)</span>
+        <span style={{ flex: 1 }} />
+        <button className="secondary" disabled={!!exportBusy} onClick={() => onExport('/documents/records/register/export', 'Records_Register.xlsx')}>{exportBusy === '/documents/records/register/export' ? 'Preparing…' : 'Export register (Excel)'}</button>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+      <table className="data-table"><thead><tr><th>No.</th><th>Code</th><th>Record type / title</th><th>Category</th><th>Source document</th><th>Format / medium</th><th>Unit / section</th><th>Storage location</th><th>Access</th><th>Retention</th><th>Disposal method</th><th>Status</th><th>Record file</th></tr></thead><tbody>
+        {filteredRegister.map((r, i) => <tr key={r.id}>
+          <td>{i + 1}</td>
+          <td>{r.record_code || '—'}</td><td>{r.title}</td><td>{recordCategoryLabel(r.record_category)}</td>
+          <td>{r.linked_document_code || (r.origin === 'system' ? `Generated${r.source_module ? ` in ${r.source_module}` : ' in system'}` : '—')}</td>
+          <td>{r.storage_medium || r.record_format || '—'}</td>
+          <td>{r.section_name || 'General / QMS-wide'}</td><td>{r.storage_location || '—'}</td>
+          <td>{formatBadge(r.confidentiality)}</td><td>{r.retention_period || '—'}</td>
+          <td>{r.disposal_method || '—'}</td><td>{formatBadge(r.status)}</td>
+          <td>{r.file_id ? <button className="secondary" onClick={() => downloadRecordFile(r)} title={r.file_name}>Download</button> : '—'}</td>
+        </tr>)}{filteredRegister.length === 0 && <tr><td colSpan={13} className="muted">No records registered yet.</td></tr>}
       </tbody></table>
+      </div>
       <h4>Register a controlled record</h4>
-      <form className="form-grid" onSubmit={e => { e.preventDefault(); submit('register', regForm, () => setRegForm(emptyReg)); }}>
-        <label>Title<input value={regForm.title} onChange={e => setRegForm({ ...regForm, title: e.target.value })} required /></label>
-        <label>Category<select value={regForm.recordCategory} onChange={e => setRegForm({ ...regForm, recordCategory: e.target.value })}>{RECORD_CATEGORIES.map(c => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}</select></label>
+      <p className="muted" style={{ marginTop: 0 }}>Records completed on paper are indexed here; electronic records can be uploaded and stored in the register; records generated inside the system are linked to their source module.</p>
+      <form className="form-grid" onSubmit={submitRecord}>
+        <label>Record type / title<input value={regForm.title} onChange={e => setRegForm({ ...regForm, title: e.target.value })} required /></label>
+        <label>Category<select value={regForm.recordCategory} onChange={e => setRegForm({ ...regForm, recordCategory: e.target.value })}>{RECORD_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
+        <label>Origin<select value={regForm.origin} onChange={e => setRegForm({ ...regForm, origin: e.target.value })}>{RECORD_ORIGINS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
+        {regForm.origin === 'system' && <label>Source module / system<input value={regForm.sourceModule} onChange={e => setRegForm({ ...regForm, sourceModule: e.target.value })} placeholder="e.g. IQC Management, Equipment Management" /></label>}
+        <label>Upload record file (stores the record here)<input type="file" onChange={e => setRecordFile(e.target.files?.[0] ?? null)} /></label>
         <label>Format<select value={regForm.recordFormat} onChange={e => setRegForm({ ...regForm, recordFormat: e.target.value })}>{RECORD_FORMATS.map(f => <option key={f} value={f}>{f}</option>)}</select></label>
         <label>Section<select value={regForm.sectionId} onChange={e => setRegForm({ ...regForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Responsible person<select value={regForm.responsibleStaffId} onChange={e => setRegForm({ ...regForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Retention rule<select value={regForm.retentionScheduleId} onChange={e => { const r = schedule.find(x => String(x.id) === e.target.value); setRegForm({ ...regForm, retentionScheduleId: e.target.value, retentionPeriod: r?.retention_period || regForm.retentionPeriod }); }}><option value="">—</option>{schedule.map(s => <option key={s.id} value={s.id}>{s.record_type} ({s.retention_period})</option>)}</select></label>
         <label>Retention period<input value={regForm.retentionPeriod} onChange={e => setRegForm({ ...regForm, retentionPeriod: e.target.value })} placeholder="e.g. 5 years" /></label>
-        <label>Storage location<input value={regForm.storageLocation} onChange={e => setRegForm({ ...regForm, storageLocation: e.target.value })} /></label>
-        <label>Confidentiality<select value={regForm.confidentiality} onChange={e => setRegForm({ ...regForm, confidentiality: e.target.value })}>{CONFIDENTIALITY.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
-        <label>Linked document<select value={regForm.linkedDocumentId} onChange={e => setRegForm({ ...regForm, linkedDocumentId: e.target.value })}><option value="">—</option>{documents.map(d => <option key={d.id} value={d.id}>{d.document_code || ''} {d.title}</option>)}</select></label>
+        <label>Storage location<input value={regForm.storageLocation} onChange={e => setRegForm({ ...regForm, storageLocation: e.target.value })} placeholder="e.g. Quality Manager Office — Master File" /></label>
+        <label>Confidentiality / access<select value={regForm.confidentiality} onChange={e => setRegForm({ ...regForm, confidentiality: e.target.value })}>{CONFIDENTIALITY.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
+        <label>Source / generating document<select value={regForm.linkedDocumentId} onChange={e => setRegForm({ ...regForm, linkedDocumentId: e.target.value })}><option value="">—</option>{documents.map(d => <option key={d.id} value={d.id}>{d.document_code || ''} {d.title}</option>)}</select></label>
         <label>Date created<input type="date" value={regForm.dateCreated} onChange={e => setRegForm({ ...regForm, dateCreated: e.target.value })} /></label>
         <label>Disposal due date<input type="date" value={regForm.disposalDueDate} onChange={e => setRegForm({ ...regForm, disposalDueDate: e.target.value })} /></label>
-        <label>Notes<input value={regForm.notes} onChange={e => setRegForm({ ...regForm, notes: e.target.value })} /></label>
-        <button type="submit">Add record</button>
+        <label>Disposal method<input value={regForm.disposalMethod} onChange={e => setRegForm({ ...regForm, disposalMethod: e.target.value })} placeholder="e.g. Secure disposal (shred / confidential waste / electronic deletion)" /></label>
+        <label>Remarks<input value={regForm.notes} onChange={e => setRegForm({ ...regForm, notes: e.target.value })} /></label>
+        <button type="submit" disabled={savingRecord}>{savingRecord ? 'Saving…' : 'Add record'}</button>
       </form>
     </>}
 
     {sub === 'Retention Schedule' && <>
-      <p className="muted">Record retention schedule (SECHPO051 Appendix A), GHS / legally aligned. Seeded with the laboratory's standard retention periods.</p>
+      <p className="muted">Retention schedule — how long each record type is kept and on what medium, aligned with national and legal requirements. Seeded with the laboratory's standard retention periods.</p>
       <table className="data-table"><thead><tr><th>S/N</th><th>Record type</th><th>Retention period</th><th>Storage medium</th><th>Responsible</th><th>Extended</th></tr></thead><tbody>
         {schedule.map(s => <tr key={s.id}><td>{s.sn ?? '—'}</td><td>{s.record_type}</td><td>{s.retention_period}</td><td>{s.storage_medium || '—'}</td><td>{s.responsible_role || '—'}</td><td>{s.extended_retention ? 'Yes' : '—'}</td></tr>)}
       </tbody></table>
@@ -1444,7 +1654,7 @@ function RecordControl({ staff, sections, departments, documents, onError }: { s
     </>}
 
     {sub === 'Review Log' && <>
-      <p className="muted">Quality &amp; Technical Records Review Log (SECHPO051 §5.7) — routine documented review of records.</p>
+      <p className="muted">Quality &amp; technical records review log — routine documented review of records, with findings and follow-up actions.</p>
       <table className="data-table"><thead><tr><th>No.</th><th>Date</th><th>Category</th><th>Section</th><th>Findings</th><th>NC</th><th>Action</th><th>Follow-up</th><th>Reviewer</th></tr></thead><tbody>
         {reviewLog.map(r => <tr key={r.id}><td>{r.review_number || '—'}</td><td>{r.review_date}</td><td>{r.record_category}</td><td>{r.section_name || '—'}</td><td>{r.findings || '—'}</td><td>{r.nonconformities_identified || '—'}</td><td>{r.action_required ? 'Yes' : '—'}</td><td>{formatBadge(r.follow_up_status)}</td><td>{r.reviewer_name || '—'}</td></tr>)}
         {reviewLog.length === 0 && <tr><td colSpan={9} className="muted">No reviews logged.</td></tr>}
@@ -1466,7 +1676,7 @@ function RecordControl({ staff, sections, departments, documents, onError }: { s
     </>}
 
     {sub === 'Destruction Log' && <>
-      <p className="muted">Document &amp; Record Destruction Form (SECHF0047, SECHPO051 §5.6) — authorised disposal of records and documents.</p>
+      <p className="muted">Destruction log — authorised, witnessed disposal of records and documents after their retention period, with confidentiality safeguarded.</p>
       <table className="data-table"><thead><tr><th>No.</th><th>Type</th><th>Description</th><th>Date destroyed</th><th>Method</th><th>Authorised by</th><th>Witness</th></tr></thead><tbody>
         {destruction.map(d => <tr key={d.id}><td>{d.destruction_number || '—'}</td><td>{d.item_type}</td><td>{d.description}</td><td>{d.date_destroyed}</td><td>{(d.method || '—').replace(/_/g, ' ')}</td><td>{d.authorized_by_name || '—'}</td><td>{d.witness_name || '—'}</td></tr>)}
         {destruction.length === 0 && <tr><td colSpan={7} className="muted">No destructions recorded.</td></tr>}
@@ -1488,7 +1698,7 @@ function RecordControl({ staff, sections, departments, documents, onError }: { s
     </>}
 
     {sub === 'Backup & Archive' && <>
-      <p className="muted">Backup &amp; Archive Log (SECHPO051 §5.4) — electronic record backups, off-site copies, and restoration testing.</p>
+      <p className="muted">Backup &amp; archive log — electronic record backups, off-site copies, and periodic restoration testing.</p>
       <table className="data-table"><thead><tr><th>No.</th><th>Date</th><th>Type</th><th>Scope</th><th>Location</th><th>Off-site</th><th>Integrity</th><th>Restore test</th></tr></thead><tbody>
         {backups.map(b => <tr key={b.id}><td>{b.backup_number || '—'}</td><td>{b.backup_date}</td><td>{b.backup_type || '—'}</td><td>{b.scope || '—'}</td><td>{b.storage_location || '—'}</td><td>{b.offsite ? 'Yes' : '—'}</td><td>{b.integrity_verified ? 'Verified' : '—'}</td><td>{b.restore_test_status ? formatBadge(b.restore_test_status) : '—'}</td></tr>)}
         {backups.length === 0 && <tr><td colSpan={8} className="muted">No backups logged.</td></tr>}
