@@ -17,7 +17,7 @@ const formatBadge = (status?: string) => <span className={statusBadgeClass(statu
 const tabBar = (active: string, tabs: string[], onChange: (name: string) => void) =>
   <div className="tabs">{tabs.map(name => <button key={name} type="button" className={active === name ? 'active' : ''} onClick={() => onChange(name)}>{name}</button>)}</div>;
 
-const DOCUMENT_TYPES = ['SOP', 'Policy', 'Manual', 'Form', 'Register', 'Log', 'Tracker', 'Job Aid', 'Quality Manual', 'Handbook', 'Safety Manual', 'Other'];
+const DOCUMENT_TYPES = ['SOP', 'Policy', 'Manual', 'Form', 'Register', 'Log', 'Tracker', 'Job Aid', 'Quality Manual', 'Handbook', 'Safety Manual', 'Master List', 'External Document', 'Reference Document', 'Other'];
 const ACCESS_LEVELS = ['public', 'internal', 'restricted', 'confidential'];
 const REVIEW_OUTCOMES = ['no_change', 'minor_revision', 'major_revision', 'obsolete'];
 const TARGET_TYPES = ['staff', 'position', 'section', 'department'];
