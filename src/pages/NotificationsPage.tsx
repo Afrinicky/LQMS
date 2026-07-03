@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -123,18 +123,16 @@ export function NotificationsPage() {
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && (summary ? <>
-      <div className="cards">
-        <div className="card"><h4>Unread notifications</h4><p className="metric">{summary.unreadNotifications}</p></div>
-        <div className="card"><h4>Urgent / high</h4><p className="metric">{summary.urgentNotifications}</p></div>
-        <div className="card"><h4>Due today</h4><p className="metric">{summary.dueToday}</p></div>
-        <div className="card"><h4>Due soon</h4><p className="metric">{summary.dueSoon}</p></div>
-        <div className="card"><h4>Overdue</h4><p className="metric">{summary.overdue}</p></div>
-        <div className="card"><h4>Open tasks</h4><p className="metric">{summary.openTasks}</p></div>
-        <div className="card"><h4>My open tasks</h4><p className="metric">{summary.myOpenTasks}</p></div>
-        <div className="card"><h4>Pending approvals</h4><p className="metric">{summary.pendingApprovals}</p></div>
-        <div className="card"><h4>Follow-ups due</h4><p className="metric">{summary.followUpsDue}</p></div>
-        <div className="card"><h4>Review items due</h4><p className="metric">{summary.reviewItemsDue}</p></div>
-      </div>
+      <KpiStrip items={[
+        { label: 'Unread', value: summary.unreadNotifications },
+        { label: 'Urgent / high', value: summary.urgentNotifications, tone: 'danger' },
+        { label: 'Due today', value: summary.dueToday },
+        { label: 'Overdue', value: summary.overdue, tone: 'warning' },
+        { label: 'Open tasks', value: summary.openTasks },
+        { label: 'My open tasks', value: summary.myOpenTasks },
+        { label: 'Pending approvals', value: summary.pendingApprovals },
+        { label: 'Review items due', value: summary.reviewItemsDue },
+      ]} />
       <div className="grid cols-2" style={{ marginTop: 18 }}>
         <ChartCard title="Timeliness" subtitle="Notifications by due-date pressure">
           <DonutChart centerLabel="Items" data={[

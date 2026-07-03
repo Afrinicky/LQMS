@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -198,16 +198,16 @@ export function RecordsReportsPage() {
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
-    {tab === 'Dashboard' && (summary ? <div className="cards">
-      <div className="card"><h4>Active report templates</h4><p className="metric">{summary.activeReportTemplates}</p></div>
-      <div className="card"><h4>Reports generated this month</h4><p className="metric">{summary.reportsGeneratedThisMonth}</p></div>
-      <div className="card"><h4>Open evidence packs</h4><p className="metric">{summary.openEvidencePacks}</p></div>
-      <div className="card"><h4>Pending approvals</h4><p className="metric">{summary.pendingApprovals}</p></div>
-      <div className="card"><h4>Print jobs this month</h4><p className="metric">{summary.printJobsThisMonth}</p></div>
-      <div className="card"><h4>Retention reviews due</h4><p className="metric">{summary.retentionReviewsDue}</p></div>
-      <div className="card"><h4>Backup checks this month</h4><p className="metric">{summary.backupChecksThisMonth}</p></div>
-      <div className="card"><h4>Integrity issues open</h4><p className="metric">{summary.openIntegrityIssues}</p></div>
-    </div> : <p>Loading…</p>)}
+    {tab === 'Dashboard' && (summary ? <KpiStrip items={[
+      { label: 'Report templates', value: summary.activeReportTemplates },
+      { label: 'Reports (month)', value: summary.reportsGeneratedThisMonth },
+      { label: 'Open evidence packs', value: summary.openEvidencePacks },
+      { label: 'Pending approvals', value: summary.pendingApprovals },
+      { label: 'Print jobs (month)', value: summary.printJobsThisMonth },
+      { label: 'Retention reviews due', value: summary.retentionReviewsDue, tone: 'warning' },
+      { label: 'Backup checks (month)', value: summary.backupChecksThisMonth },
+      { label: 'Integrity issues', value: summary.openIntegrityIssues, tone: 'danger' },
+    ]} /> : <p>Loading…</p>)}
     {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Reporting activity" subtitle="This month's output and assets">
         <DonutChart centerLabel="This month" data={[

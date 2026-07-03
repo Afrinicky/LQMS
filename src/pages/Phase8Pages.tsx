@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -60,7 +60,7 @@ function dashboardCards(s: GovernanceSummary | null, keys: Array<{ label: string
   if (!s) return <p>Loading summary…</p>;
   const series = keys.map((k, i) => ({ label: k.label, value: Number(s[k.value]) || 0, color: CHART_COLORS[i % CHART_COLORS.length] }));
   return <>
-    <div className="cards">{keys.map(k => <div key={k.value} className="card"><h4>{k.label}</h4><p className="metric">{s[k.value]}</p></div>)}</div>
+    <KpiStrip items={keys.map(k => ({ label: k.label, value: s[k.value] as number }))} />
     {keys.length >= 3 && <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Distribution" subtitle="Composition of the current governance counts">
         <DonutChart centerLabel="Total" data={series} />

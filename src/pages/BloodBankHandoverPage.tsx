@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -245,17 +245,16 @@ export function BloodBankHandoverPage() {
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && <>
-      {summary ? <div className="cards">
-        <div className="card"><h4>Units available</h4><p className="metric">{summary.unitsAvailable}</p></div>
-        <div className="card"><h4>Units expiring soon</h4><p className="metric">{summary.unitsExpiringSoon}</p></div>
-        <div className="card"><h4>Expired units</h4><p className="metric">{summary.unitsExpired}</p></div>
-        <div className="card"><h4>Pending handovers</h4><p className="metric">{summary.pendingHandovers}</p></div>
-        <div className="card"><h4>Adverse events open</h4><p className="metric">{summary.openAdverseEvents}</p></div>
-        <div className="card"><h4>Discards this month</h4><p className="metric">{summary.discardsThisMonth}</p></div>
-        <div className="card"><h4>Donor reactions (month)</h4><p className="metric">{summary.donorReactionsThisMonth}</p></div>
-        <div className="card"><h4>Transfusion reactions (month)</h4><p className="metric">{summary.transfusionReactionsThisMonth}</p></div>
-        <div className="card"><h4>NC/CAPA links</h4><p className="metric">{summary.ncCapaLinkedRecords}</p><small>Adverse events + discards linked to NC/CAPA.</small></div>
-      </div> : <p>Loading summary…</p>}
+      {summary ? <KpiStrip items={[
+        { label: 'Units available', value: summary.unitsAvailable },
+        { label: 'Expiring soon', value: summary.unitsExpiringSoon, tone: 'warning' },
+        { label: 'Expired', value: summary.unitsExpired, tone: 'danger' },
+        { label: 'Pending handovers', value: summary.pendingHandovers },
+        { label: 'Open adverse events', value: summary.openAdverseEvents },
+        { label: 'Discards (month)', value: summary.discardsThisMonth },
+        { label: 'Reactions (month)', value: summary.donorReactionsThisMonth + summary.transfusionReactionsThisMonth },
+        { label: 'NC/CAPA links', value: summary.ncCapaLinkedRecords },
+      ]} /> : <p>Loading summary…</p>}
       {summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
         <ChartCard title="Inventory status" subtitle="Available stock vs expiry risk">
           <DonutChart centerLabel="Units" data={[

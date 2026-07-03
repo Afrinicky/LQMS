@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -165,16 +165,16 @@ export function POCTPage() {
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
-    {tab === 'Dashboard' && (summary ? <div className="cards">
-      <div className="card"><h4>Active POCT sites</h4><p className="metric">{summary.activeSites}</p></div>
-      <div className="card"><h4>Active POCT devices</h4><p className="metric">{summary.activeDevices}</p></div>
-      <div className="card"><h4>Authorised operators</h4><p className="metric">{summary.authorizedOperators}</p></div>
-      <div className="card"><h4>Expired authorisations</h4><p className="metric">{summary.expiredAuthorizations}</p></div>
-      <div className="card"><h4>QC failures this month</h4><p className="metric">{summary.qcFailuresThisMonth}</p></div>
-      <div className="card"><h4>Unsatisfactory EQA</h4><p className="metric">{summary.unsatisfactoryEqaEvents}</p></div>
-      <div className="card"><h4>Open POCT incidents</h4><p className="metric">{summary.openIncidents}</p></div>
-      <div className="card"><h4>Maintenance due</h4><p className="metric">{summary.maintenanceDue}</p></div>
-    </div> : <p>Loading summary…</p>)}
+    {tab === 'Dashboard' && (summary ? <KpiStrip items={[
+      { label: 'Active sites', value: summary.activeSites },
+      { label: 'Active devices', value: summary.activeDevices },
+      { label: 'Authorised operators', value: summary.authorizedOperators },
+      { label: 'Expired authorisations', value: summary.expiredAuthorizations, tone: 'warning' },
+      { label: 'QC failures (month)', value: summary.qcFailuresThisMonth, tone: 'danger' },
+      { label: 'Unsatisfactory EQA', value: summary.unsatisfactoryEqaEvents },
+      { label: 'Open incidents', value: summary.openIncidents },
+      { label: 'Maintenance due', value: summary.maintenanceDue },
+    ]} /> : <p>Loading summary…</p>)}
     {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="POCT network" subtitle="Active estate and authorised operators">
         <DonutChart centerLabel="Estate" data={[

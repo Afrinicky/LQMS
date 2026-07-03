@@ -1,22 +1,13 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, Database, Server, LogOut, PanelLeftClose, PanelLeftOpen, Search, FlaskConical } from 'lucide-react';
+import { Bell, ChevronDown, Database, Server, LogOut, PanelLeftClose, PanelLeftOpen, Search, FlaskConical } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { MODULES } from '../../shared/constants/modules';
+import { NAV_SECTIONS } from '../../shared/constants/navigation';
 import { useAuth } from '../hooks/useAuth';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
-import { moduleIcon } from '../components/ui/moduleIcons';
+import { moduleIcon, sectionIcon } from '../components/ui/moduleIcons';
 import { DennisFloatingWidget } from '../components/DennisFloatingWidget';
-
-/** Logical groups for the sidebar navigation. */
-const NAV_GROUPS: { label: string; keys: string[] }[] = [
-  { label: 'Overview', keys: ['dashboard'] },
-  { label: 'Quality & Compliance', keys: ['documents', 'dennis', 'nc_capa', 'complaints', 'risks', 'assessments', 'customer_focus', 'actions'] },
-  { label: 'Operations', keys: ['equipment', 'monitoring', 'supplier_inventory', 'facilities_safety', 'process_management'] },
-  { label: 'Technical Quality', keys: ['iqc', 'eqa', 'verification_validation', 'measurement_uncertainty', 'poct', 'blood_bank_handover'] },
-  { label: 'People & Governance', keys: ['personnel', 'organisation', 'meetings', 'management_review', 'quality_indicators', 'continual_improvement'] },
-  { label: 'Records & System', keys: ['records_reports', 'information_management', 'monthly_reports', 'notifications', 'settings'] },
-];
 
 const API_HOST = (() => {
   try { return new URL((window as any).sechLims?.apiBaseUrl ?? 'http://127.0.0.1:4317/api').host; }
@@ -36,6 +27,7 @@ export default function AppLayout() {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
   const [unread, setUnread] = useState<number | null>(null);
+  const [sectionOverrides, setSectionOverrides] = useState<Record<string, boolean>>({});
 
   const enabled = useMemo(
     () => new Set(modules.filter(m => m.enabled || m.key === 'settings').map(m => m.key)),
@@ -43,6 +35,29 @@ export default function AppLayout() {
   );
   const isVisible = (key: string) => enabled.size === 0 || enabled.has(key) || key === 'settings';
   const moduleByKey = useMemo(() => new Map(MODULES.map(m => [m.key, m])), []);
+
+  // Sidebar sections mirror the Home launchpad 1:1. A section renders as a
+  // single link when only one of its modules is visible, or as a collapsible
+  // group otherwise. The group containing the current route stays expanded.
+  const sections = useMemo(() =>
+    NAV_SECTIONS.map(s => ({
+      ...s,
+      items: s.modules.filter(isVisible).map(k => moduleByKey.get(k)).filter(Boolean) as typeof MODULES,
+    })).filter(s => s.items.length > 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [enabled, moduleByKey]
+  );
+  const activeSectionKey = useMemo(
+    () => sections.find(s => s.items.some(m => location.pathname.startsWith(m.path)))?.key,
+    [sections, location.pathname]
+  );
+  const sectionExpanded = (key: string) => sectionOverrides[key] ?? key === activeSectionKey;
+  const toggleSection = (key: string) =>
+    setSectionOverrides(o => ({ ...o, [key]: !sectionExpanded(key) }));
+
+  // Navigating to another section clears manual overrides so the sidebar
+  // follows the user again (active section open, the rest closed).
+  useEffect(() => { setSectionOverrides({}); }, [activeSectionKey]);
 
   useEffect(() => {
     if (!user) return;
@@ -85,21 +100,45 @@ export default function AppLayout() {
             {(() => { const I = moduleIcon('home'); return <span className="nav-ico"><I size={18} /></span>; })()}
             <span className="nav-label">Home</span>
           </NavLink>
-          {NAV_GROUPS.map(group => {
-            const items = group.keys.filter(isVisible).map(k => moduleByKey.get(k)).filter(Boolean) as typeof MODULES;
-            if (items.length === 0) return null;
+          {sections.map(section => {
+            const Icon = sectionIcon(section.key);
+            // Single-module sections are plain links labelled like the Home card.
+            if (section.items.length === 1) {
+              return (
+                <NavLink key={section.key} to={section.items[0].path} title={section.title}>
+                  <span className="nav-ico"><Icon size={18} /></span>
+                  <span className="nav-label">{section.title}</span>
+                </NavLink>
+              );
+            }
+            const expanded = sectionExpanded(section.key);
+            const active = section.key === activeSectionKey;
             return (
-              <div key={group.label}>
-                <div className="nav-group-label">{group.label}</div>
-                {items.map(m => {
-                  const Icon = moduleIcon(m.key);
-                  return (
-                    <NavLink key={m.key} to={m.path} title={m.label}>
-                      <span className="nav-ico"><Icon size={18} /></span>
-                      <span className="nav-label">{m.label}</span>
-                    </NavLink>
-                  );
-                })}
+              <div key={section.key} className={`nav-section ${expanded ? 'open' : ''}`}>
+                <button
+                  type="button"
+                  className={`nav-section-head ${active ? 'active' : ''}`}
+                  title={section.title}
+                  aria-expanded={expanded}
+                  onClick={() => toggleSection(section.key)}
+                >
+                  <span className="nav-ico"><Icon size={18} /></span>
+                  <span className="nav-label">{section.title}</span>
+                  <span className="nav-caret"><ChevronDown size={14} /></span>
+                </button>
+                {expanded && (
+                  <div className="nav-section-items">
+                    {section.items.map(m => {
+                      const ItemIcon = moduleIcon(m.key);
+                      return (
+                        <NavLink key={m.key} to={m.path} title={m.label}>
+                          <span className="nav-ico"><ItemIcon size={16} /></span>
+                          <span className="nav-label">{m.label}</span>
+                        </NavLink>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             );
           })}

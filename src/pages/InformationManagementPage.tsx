@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -151,17 +151,16 @@ export function InformationManagementPage() {
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
-    {tab === 'Dashboard' && (summary ? <div className="cards">
-      <div className="card"><h4>Active information assets</h4><p className="metric">{summary.activeInformationAssets}</p></div>
-      <div className="card"><h4>Active systems</h4><p className="metric">{summary.activeSystems}</p></div>
-      <div className="card"><h4>Open access reviews</h4><p className="metric">{summary.openAccessReviews}</p></div>
-      <div className="card"><h4>Open security incidents</h4><p className="metric">{summary.openSecurityIncidents}</p></div>
-      <div className="card"><h4>Pending data corrections</h4><p className="metric">{summary.pendingDataCorrections}</p></div>
-      <div className="card"><h4>Open change requests</h4><p className="metric">{summary.openChangeRequests}</p></div>
-      <div className="card"><h4>Validations pending approval</h4><p className="metric">{summary.validationsPendingApproval}</p></div>
-      <div className="card"><h4>Downtime records (month)</h4><p className="metric">{summary.downtimeRecordsThisMonth}</p></div>
-      <div className="card"><h4>Pending information reviews</h4><p className="metric">{summary.pendingInformationReviews}</p></div>
-    </div> : <p>Loading summary…</p>)}
+    {tab === 'Dashboard' && (summary ? <KpiStrip items={[
+      { label: 'Information assets', value: summary.activeInformationAssets },
+      { label: 'Active systems', value: summary.activeSystems },
+      { label: 'Open access reviews', value: summary.openAccessReviews },
+      { label: 'Security incidents', value: summary.openSecurityIncidents, tone: 'danger' },
+      { label: 'Data corrections', value: summary.pendingDataCorrections },
+      { label: 'Change requests', value: summary.openChangeRequests },
+      { label: 'Downtime (month)', value: summary.downtimeRecordsThisMonth },
+      { label: 'Pending reviews', value: summary.pendingInformationReviews },
+    ]} /> : <p>Loading summary…</p>)}
     {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Information estate" subtitle="Managed assets and systems">
         <DonutChart centerLabel="Assets" data={[
