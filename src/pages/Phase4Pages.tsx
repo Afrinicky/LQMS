@@ -165,7 +165,7 @@ export function IqcPage() {
   const failures = results.filter(r => r.status !== 'accepted');
 
   return <div className="module-page">
-    <PageHeader eyebrow="Process control" title="IQC Management" subtitle="Internal quality control materials, results, and review." />
+    <PageHeader eyebrow="Process Control" title="IQC Management" subtitle="Internal quality control materials, results, and review." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
@@ -343,7 +343,7 @@ export function EqaPage() {
   const unsatisfactory = events.filter(ev => ['unsatisfactory', 'poor', 'fail', 'failed'].includes((ev.performance_status || '').toLowerCase()));
 
   return <div className="module-page">
-    <PageHeader eyebrow="Process control" title="EQA Management" subtitle="External quality assessment events, results, and follow-up." />
+    <PageHeader eyebrow="Assessments" title="EQA Management" subtitle="External quality assessment events, results, and follow-up." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
@@ -517,7 +517,7 @@ export function VerificationValidationPage() {
   const tabs = ['Dashboard', 'Method Verification Register', 'New Verification', 'Experiments', 'Equipment Verification', 'Reports'];
 
   return <div className="module-page">
-    <PageHeader eyebrow="Technical quality" title="Verification &amp; Validation" subtitle="Method and equipment verification and validation records." />
+    <PageHeader eyebrow="Process Control" title="Verification &amp; Validation" subtitle="Method and equipment verification and validation records." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
@@ -675,7 +675,7 @@ export function MeasurementUncertaintyPage() {
   const pending = records.filter(r => r.status === 'draft' || r.status === 'in_review');
 
   return <div className="module-page">
-    <PageHeader eyebrow="Technical quality" title="Measurement Uncertainty" subtitle="Measurement uncertainty budgets and periodic review." />
+    <PageHeader eyebrow="Process Control" title="Measurement Uncertainty" subtitle="Measurement uncertainty budgets and periodic review." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 

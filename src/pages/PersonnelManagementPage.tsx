@@ -361,7 +361,7 @@ export function PersonnelManagementPage() {
   const tabs = ['Dashboard', 'Staff Register', 'Staff Documents', 'Orientation & Induction', 'Declarations', 'Training Events', 'Competency Assessments', 'Technical Authorizations', 'Duty Rosters', 'My Profile', 'Reports'];
 
   return <div className="module-page">
-    <PageHeader eyebrow="People" title="Personnel Management" subtitle="ISO 15189 §6.2 personnel records — competence, authorisation, training, induction, and ethics." />
+    <PageHeader eyebrow="Personnel" title="Personnel Management" subtitle="Personnel records — competence, authorisation, training, induction, and ethics." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
@@ -411,7 +411,7 @@ export function PersonnelManagementPage() {
       <div className="card" style={{ marginTop: 16 }}>
         <div className="section-head"><h3 style={{ margin: 0 }}>{editingStaffId ? 'Edit staff record' : 'New staff record'}</h3>
           {editingStaffId && <button type="button" className="secondary" onClick={() => { setEditingStaffId(null); setStaffForm(emptyStaffForm); }}>Cancel edit</button>}</div>
-        <p className="muted" style={{ marginTop: 0 }}>Maintains the Master Personnel Register (ISO 15189:2022 §6.2.2): identity, professional registration, qualifications, appointment and emergency contact for every member of staff.</p>
+        <p className="muted" style={{ marginTop: 0 }}>Maintains the Master Personnel Register: identity, professional registration, qualifications, appointment and emergency contact for every member of staff.</p>
         <form className="form-grid" onSubmit={submitStaff}>
           <label>Staff ID<input value={staffForm.employeeNo} onChange={e => setStaffForm({ ...staffForm, employeeNo: e.target.value })} placeholder="e.g. SNO-001" /></label>
           <label>Surname<input value={staffForm.surname} onChange={e => setStaffForm({ ...staffForm, surname: e.target.value })} /></label>
@@ -492,7 +492,7 @@ export function PersonnelManagementPage() {
     </>}
 
     {tab === 'Declarations' && <>
-      <div className="card"><p className="muted" style={{ marginTop: 0 }}>Ethical declarations record each member of staff's commitment to impartiality, confidentiality, disclosure of conflicts of interest, and the code of conduct (ISO 15189:2022 §6.2.2 / §4.1).</p>
+      <div className="card"><p className="muted" style={{ marginTop: 0 }}>Ethical declarations record each member of staff's commitment to impartiality, confidentiality, disclosure of conflicts of interest, and the code of conduct.</p>
       <form className="form-grid" onSubmit={submitDeclaration}>
         <label>Type<select value={declForm.declarationType} onChange={e => setDeclForm({ ...declForm, declarationType: e.target.value })} required>{DECLARATION_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Title<input value={declForm.title} onChange={e => setDeclForm({ ...declForm, title: e.target.value })} required placeholder="e.g. Annual ethics & confidentiality declaration" /></label>
@@ -522,7 +522,7 @@ export function PersonnelManagementPage() {
     </>}
 
     {tab === 'Orientation & Induction' && <>
-      <div className="card"><p className="muted" style={{ marginTop: 0 }}>Tracks the structured induction of new staff (ISO 15189:2022 §6.2.3 / WHO LQMS): welcome, safety, ethics, LIS, equipment, SOPs, baseline competency and department induction. Tick each element as it is completed; the record closes automatically when all are done.</p>
+      <div className="card"><p className="muted" style={{ marginTop: 0 }}>Tracks the structured induction of new staff: welcome, safety, ethics, LIS, equipment, SOPs, baseline competency and department induction. Tick each element as it is completed; the record closes automatically when all are done.</p>
       <form className="form-grid" onSubmit={submitOrientation}>
         <label>Staff<select value={orientForm.staffId} onChange={e => setOrientForm({ ...orientForm, staffId: e.target.value })} required><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Hire date<input type="date" value={orientForm.hireDate} onChange={e => setOrientForm({ ...orientForm, hireDate: e.target.value })} /></label>

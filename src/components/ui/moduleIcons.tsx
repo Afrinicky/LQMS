@@ -56,19 +56,19 @@ export function moduleIcon(key: string): LucideIcon {
  */
 export const SECTION_ICONS: Record<string, LucideIcon> = {
   dashboard: LayoutDashboard,
-  documents: FileText,
+  organisation: Building2,
   personnel: Users,
   equipment: Wrench,
-  inventory: Boxes,
+  purchasing_inventory: Boxes,
   process_control: Activity,
-  nc_capa: AlertOctagon,
+  information_management: Database,
+  documents_records: FileText,
+  occurrence_management: AlertOctagon,
   assessments: ClipboardCheck,
-  risks: ShieldAlert,
-  customer: MessageSquareWarning,
-  safety: ShieldCheck,
-  improvement: TrendingUp,
-  reports: FolderArchive,
-  notifications: Bell,
+  process_improvement: TrendingUp,
+  customer_service: HeartHandshake,
+  facilities_safety: ShieldCheck,
+  notifications_reports: Bell,
   settings: Settings,
 };
 

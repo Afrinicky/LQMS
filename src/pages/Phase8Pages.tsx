@@ -298,7 +298,7 @@ export function AssessmentsPage() {
 
   const tabs = ['Dashboard', 'Assessment Programmes', 'New Assessment', 'Checklist Library', 'Plan Assessment', 'Assessment Questions', 'Internal Audit Marks', 'Findings', 'Reports'];
   return <div className="module-page">
-    <PageHeader eyebrow="Assessments &amp; audits" title="Internal Assessments" subtitle="Internal audits, assessments, checklists, and findings follow-up." />
+    <PageHeader eyebrow="Assessments" title="Internal Assessments" subtitle="Internal audits, assessments, checklists, and findings follow-up." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
@@ -348,7 +348,7 @@ export function AssessmentsPage() {
     </form>}
 
     {tab === 'Checklist Library' && <>
-      <p><small>Edit, replace, or archive default checklists. Marking is optional per checklist. Internal marks are not GAS/SLIPTA/ISO/accreditation scores.</small></p>
+      <p><small>Edit, replace, or archive default checklists. Marking is optional per checklist. Internal marks are not accreditation or external compliance scores.</small></p>
       <table className="data-table"><thead><tr><th>Code</th><th>Name</th><th>Type</th><th>Status</th><th>Default</th><th>Marking</th><th></th></tr></thead><tbody>
         {checklists.map(c => <tr key={c.id}>
           <td>{c.checklist_code || '—'}</td><td>{c.checklist_name}</td><td>{c.checklist_type.replace(/_/g, ' ')}</td>
@@ -520,7 +520,7 @@ export function AssessmentsPage() {
               <td>{formatBadge(p.status === 'pass' ? 'within-target' : p.status === 'attention' ? 'attention' : 'pending')} <small>({p.status})</small></td>
             </tr>)}
           </tbody></table>
-          <small>Pass/attention labels reflect a laboratory-defined internal threshold only. Not an accreditation/GAS/SLIPTA/ISO grade.</small>
+          <small>Pass/attention labels reflect a laboratory-defined internal threshold only. Not an accreditation or external grade.</small>
         </>}
         <h4>Section Scores</h4>
         <table className="data-table"><thead><tr><th>Section</th><th>Planned</th><th>Assessed</th><th>Possible</th><th>Awarded</th><th>Section Score</th><th>Weight</th></tr></thead><tbody>
@@ -570,7 +570,7 @@ export function MeetingsPage() {
 
   const tabs = ['Dashboard', 'Meetings', 'New Meeting', 'Attendance', 'Action Items', 'Reports'];
   return <div className="module-page">
-    <PageHeader eyebrow="Governance" title="Meetings &amp; Minutes" subtitle="Meeting scheduling, agendas, minutes, and action items." />
+    <PageHeader eyebrow="Organisation" title="Meetings &amp; Minutes" subtitle="Meeting scheduling, agendas, minutes, and action items." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
@@ -657,7 +657,7 @@ export function ManagementReviewPage() {
 
   const tabs = ['Dashboard', 'Review Register', 'New Review', 'Inputs', 'Actions', 'Reports'];
   return <div className="module-page">
-    <PageHeader eyebrow="Governance" title="Management Review" subtitle="Management review inputs, outputs, and resulting actions." />
+    <PageHeader eyebrow="Organisation" title="Management Review" subtitle="Management review inputs, outputs, and resulting actions." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
@@ -741,7 +741,7 @@ export function QualityIndicatorsPage() {
 
   const tabs = ['Dashboard', 'Indicator Register', 'New Indicator', 'Results Entry', 'Trends', 'Reports'];
   return <div className="module-page">
-    <PageHeader eyebrow="Governance" title="Quality Indicators" subtitle="Quality indicators, targets, and result monitoring." />
+    <PageHeader eyebrow="Process Improvement" title="Quality Indicators" subtitle="Quality indicators, targets, and result monitoring." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
@@ -862,7 +862,7 @@ export function ContinualImprovementPage() {
 
   const tabs = ['Dashboard', 'Improvement Projects', 'New Project', 'Updates', 'Reports'];
   return <div className="module-page">
-    <PageHeader eyebrow="Improvement" title="Continual Improvement" subtitle="Improvement projects, indicators, and action tracking." />
+    <PageHeader eyebrow="Process Improvement" title="Continual Improvement" subtitle="Improvement projects, indicators, and action tracking." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 

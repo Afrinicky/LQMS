@@ -665,7 +665,7 @@ ${checklistSummaryHtml}
   <div class="metric-card"><div class="label">Internal Assessment Score</div><div class="value">${rawPct !== null ? rawPct.toFixed(1) + '%' : '—'}</div></div>
   <div class="metric-card"><div class="label">Findings recorded</div><div class="value">${findings.length}</div></div>
 </div>
-<p class="disclaimer">Internal Audit Marks — not an accreditation, GAS/SLIPTA/ISO, or official compliance score.</p>
+<p class="disclaimer">Internal Audit Marks — not an accreditation or official compliance score.</p>
 
 <h3>Response distribution</h3>
 ${responseDistHtml}
@@ -817,7 +817,7 @@ ${orphanBlock}
       response_summary,
       findings_count: findingsCount,
       pass_status_per_checklist: passStatusPerChecklist,
-      label: 'Internal Audit Marks — not an accreditation, GAS/SLIPTA/ISO, or official compliance score.'
+      label: 'Internal Audit Marks — not an accreditation or official compliance score.'
     });
   });
 

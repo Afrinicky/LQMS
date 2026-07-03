@@ -197,7 +197,7 @@ export function MonthlyReportsPage() {
   const tabs = ['Dashboard', 'Raw LHIMS Archive', 'New Import', 'Import Batches', 'Mapping Rules', 'Exceptions', 'Generate Report', 'Monthly Reports', 'TAT Summary', 'Reports/Exports'];
 
   return <div className="module-page">
-    <PageHeader eyebrow="Reports" title="Monthly Reports &amp; LHIMS Archive" subtitle="Monthly report imports, archives, and exception handling." />
+    <PageHeader eyebrow="Notifications &amp; Reports" title="Monthly Reports &amp; LHIMS Archive" subtitle="Monthly report imports, archives, and exception handling." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 

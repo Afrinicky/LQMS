@@ -146,7 +146,7 @@ export function InformationManagementPage() {
   const tabs = ['Dashboard', 'Information Assets', 'Information Systems', 'Access Reviews', 'Security Incidents', 'Data Corrections', 'Change Requests', 'Software Releases', 'System Validations', 'Downtime Records', 'Information Reviews', 'Reports'];
 
   return <div className="module-page">
-    <PageHeader eyebrow="Records &amp; system" title="Information Management" subtitle="Information assets, systems, access reviews, and changes." />
+    <PageHeader eyebrow="Information Management" title="Information Management" subtitle="Information assets, systems, access reviews, and changes." />
     <p className="muted">QMS oversight of laboratory information assets and systems. SECH_LIMS does not replace LHIMS/Lightwave for patient registration, test requests, result entry, verification, dispatch, or reporting.</p>
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}

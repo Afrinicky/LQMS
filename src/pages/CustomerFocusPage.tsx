@@ -217,7 +217,7 @@ export function CustomerFocusPage() {
   const tabs = ['Dashboard', 'Stakeholders', 'New Stakeholder', 'Service Agreements', 'Feedback Intake', 'Satisfaction Surveys', 'Survey Responses', 'Communication Log', 'Imports', 'Reports'];
 
   return <div className="module-page">
-    <PageHeader eyebrow="Customer service" title="Customer Focus" subtitle="Stakeholders, feedback, and satisfaction follow-up." />
+    <PageHeader eyebrow="Customer Service" title="Customer Focus" subtitle="Stakeholders, feedback, and satisfaction follow-up." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 

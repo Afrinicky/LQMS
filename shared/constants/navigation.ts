@@ -5,6 +5,10 @@
  * when a section contains more than one). Keeping both surfaces on this one
  * structure guarantees the left pane always mirrors the homepage features.
  *
+ * The architecture follows the twelve quality essentials of a laboratory
+ * quality management system, book-ended by the software's own features
+ * (dashboard, notifications & reports, settings).
+ *
  * `modules` lists the module keys (from ./modules) that belong to a section,
  * in display order. The first *enabled* module is the section's landing page.
  */
@@ -12,6 +16,8 @@ export type NavSection = {
   key: string;
   title: string;
   desc: string;
+  /** 'overview' and 'system' are software features; 'essential' is one of the 12 quality essentials. */
+  group: 'overview' | 'essential' | 'system';
   modules: string[];
 };
 
@@ -19,99 +25,124 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     key: 'dashboard',
     title: 'Main Dashboard',
-    desc: 'View organization-wide quality overview',
+    desc: 'Organisation-wide quality overview',
+    group: 'overview',
     modules: ['dashboard'],
   },
+
+  /* ---- The twelve quality essentials ---- */
   {
-    key: 'documents',
-    title: 'Documents & SOPs',
-    desc: 'Manage controlled documents and forms',
-    modules: ['documents', 'dennis'],
+    key: 'organisation',
+    title: 'Organisation',
+    desc: 'Leadership, structure, meetings and management review',
+    group: 'essential',
+    modules: ['organisation', 'meetings', 'management_review'],
   },
   {
     key: 'personnel',
     title: 'Personnel',
-    desc: 'Staff records, competency, rosters, training',
-    modules: ['personnel', 'organisation'],
+    desc: 'Staff records, competency, training and rosters',
+    group: 'essential',
+    modules: ['personnel'],
   },
   {
     key: 'equipment',
-    title: 'Equipment & Monitoring',
-    desc: 'Equipment, maintenance, calibration, environment',
-    modules: ['equipment', 'monitoring'],
+    title: 'Equipment',
+    desc: 'Asset register, maintenance, calibration and breakdowns',
+    group: 'essential',
+    modules: ['equipment'],
   },
   {
-    key: 'inventory',
-    title: 'Inventory',
-    desc: 'Reagents, supplies, stock and vendors',
+    key: 'purchasing_inventory',
+    title: 'Purchasing & Inventory',
+    desc: 'Suppliers, reagents, stock and expiry control',
+    group: 'essential',
     modules: ['supplier_inventory'],
   },
   {
     key: 'process_control',
-    title: 'Process Control | IQC-EQA',
-    desc: 'Internal QC, EQA, process monitoring',
+    title: 'Process Control',
+    desc: 'Testing workflows, IQC, verification, POCT and blood bank',
+    group: 'essential',
     modules: [
+      'process_management',
       'iqc',
-      'eqa',
       'verification_validation',
       'measurement_uncertainty',
-      'process_management',
       'poct',
       'blood_bank_handover',
     ],
   },
   {
-    key: 'nc_capa',
-    title: 'Nonconformities & CAPA',
-    desc: 'Incidents, investigations, corrective actions',
+    key: 'information_management',
+    title: 'Information Management',
+    desc: 'Systems, data protection, access and downtime',
+    group: 'essential',
+    modules: ['information_management'],
+  },
+  {
+    key: 'documents_records',
+    title: 'Documents & Records',
+    desc: 'Controlled documents, records and master lists',
+    group: 'essential',
+    modules: ['documents', 'dennis'],
+  },
+  {
+    key: 'occurrence_management',
+    title: 'Occurrence Management',
+    desc: 'Nonconformities, CAPA and action follow-up',
+    group: 'essential',
     modules: ['nc_capa', 'actions'],
   },
   {
     key: 'assessments',
-    title: 'Assessments & Audits',
-    desc: 'Internal audits, assessments, checklists',
-    modules: ['assessments'],
+    title: 'Assessments',
+    desc: 'Internal audits and external quality assessment',
+    group: 'essential',
+    modules: ['assessments', 'eqa'],
   },
   {
-    key: 'risks',
-    title: 'Risk Management',
-    desc: 'Risk register, mitigations, review',
-    modules: ['risks'],
+    key: 'process_improvement',
+    title: 'Process Improvement',
+    desc: 'Improvement projects, quality indicators and risk',
+    group: 'essential',
+    modules: ['continual_improvement', 'quality_indicators', 'risks'],
   },
   {
-    key: 'customer',
-    title: 'Complaints & Customer Service',
-    desc: 'Complaints, feedback, resolution',
+    key: 'customer_service',
+    title: 'Customer Service',
+    desc: 'Complaints, feedback and stakeholder care',
+    group: 'essential',
     modules: ['complaints', 'customer_focus'],
   },
   {
-    key: 'safety',
+    key: 'facilities_safety',
     title: 'Facilities & Safety',
-    desc: 'Safety incidents, inspections, facility checks',
-    modules: ['facilities_safety'],
+    desc: 'Environment, monitoring and safety incidents',
+    group: 'essential',
+    modules: ['facilities_safety', 'monitoring'],
   },
+
+  /* ---- Software features ---- */
   {
-    key: 'improvement',
-    title: 'Continual Improvement',
-    desc: 'Improvement projects, indicators, reviews, meetings',
-    modules: ['continual_improvement', 'quality_indicators', 'management_review', 'meetings'],
-  },
-  {
-    key: 'reports',
-    title: 'Reports',
-    desc: 'Dashboards, summaries, exports',
-    modules: ['records_reports', 'monthly_reports', 'information_management'],
-  },
-  {
-    key: 'notifications',
-    title: 'Notifications',
-    desc: 'Alerts, reminders, announcements',
-    modules: ['notifications'],
+    key: 'notifications_reports',
+    title: 'Notifications & Reports',
+    desc: 'Alerts, review calendar, reports and evidence',
+    group: 'system',
+    modules: ['notifications', 'records_reports', 'monthly_reports'],
   },
   {
     key: 'settings',
     title: 'Settings',
-    desc: 'Users, permissions, configuration',
+    desc: 'Users, permissions and configuration',
+    group: 'system',
     modules: ['settings'],
   },
 ];
+
+/** Display labels for the three navigation bands. */
+export const NAV_GROUP_LABELS: Record<NavSection['group'], string> = {
+  overview: 'Overview',
+  essential: 'Quality essentials',
+  system: 'System',
+};

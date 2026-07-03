@@ -2,7 +2,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Bell, ChevronDown, Database, Server, LogOut, PanelLeftClose, PanelLeftOpen, Search, FlaskConical } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { MODULES } from '../../shared/constants/modules';
-import { NAV_SECTIONS } from '../../shared/constants/navigation';
+import { NAV_SECTIONS, NAV_GROUP_LABELS } from '../../shared/constants/navigation';
 import { useAuth } from '../hooks/useAuth';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
@@ -100,21 +100,28 @@ export default function AppLayout() {
             {(() => { const I = moduleIcon('home'); return <span className="nav-ico"><I size={18} /></span>; })()}
             <span className="nav-label">Home</span>
           </NavLink>
-          {sections.map(section => {
+          {sections.map((section, i) => {
+            const groupLabel = (i === 0 || sections[i - 1].group !== section.group)
+              ? <div className="nav-group-label">{NAV_GROUP_LABELS[section.group]}</div>
+              : null;
             const Icon = sectionIcon(section.key);
             // Single-module sections are plain links labelled like the Home card.
             if (section.items.length === 1) {
               return (
-                <NavLink key={section.key} to={section.items[0].path} title={section.title}>
-                  <span className="nav-ico"><Icon size={18} /></span>
-                  <span className="nav-label">{section.title}</span>
-                </NavLink>
+                <div key={section.key}>
+                  {groupLabel}
+                  <NavLink to={section.items[0].path} title={section.title}>
+                    <span className="nav-ico"><Icon size={18} /></span>
+                    <span className="nav-label">{section.title}</span>
+                  </NavLink>
+                </div>
               );
             }
             const expanded = sectionExpanded(section.key);
             const active = section.key === activeSectionKey;
             return (
               <div key={section.key} className={`nav-section ${expanded ? 'open' : ''}`}>
+                {groupLabel}
                 <button
                   type="button"
                   className={`nav-section-head ${active ? 'active' : ''}`}
