@@ -161,7 +161,7 @@ export function POCTPage() {
   const tabs = ['Dashboard', 'Sites', 'Devices', 'Test Menu', 'Operator Authorizations', 'Reagent Lots', 'QC Monitoring', 'EQA Monitoring', 'Maintenance Logs', 'Incidents', 'Monthly Reviews', 'Reports'];
 
   return <div className="module-page">
-    <PageHeader eyebrow="Technical quality" title="POCT Oversight" subtitle="Point-of-care testing sites, QC, and incident oversight." />
+    <PageHeader eyebrow="Process Control" title="POCT Oversight" subtitle="Point-of-care testing sites, QC, and incident oversight." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 

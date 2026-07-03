@@ -470,7 +470,7 @@ export function personnelRoutes() {
   function registerWorkbook(includeData: boolean) {
     const guide = [
       ['ST. ELIZABETH CATHOLIC HOSPITAL — LABORATORY · MASTER PERSONNEL REGISTER'],
-      ['Import template (ISO 15189:2022 §6.2 personnel records). Fill one row per staff member.'],
+      ['Master Personnel Register import template. Fill one row per staff member.'],
       ['STAFF ID is the unique key — existing rows with the same STAFF ID are updated, new ones are created.'],
       ['Dates may be DD/MM/YYYY or YYYY-MM-DD. PROFESSIONAL QUALIFICATION(S) may list several, separated by " | ".'],
       ['PERSONNEL CATEGORY: STAFF / INTERN / NSS / LOCUM.  APPOINTMENT TYPE: FULL TIME / PART TIME / CONTRACT / INTERN.'],

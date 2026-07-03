@@ -289,6 +289,6 @@ export function DennisPage(){
     if(tab==='Dennis Settings')return <Settings/>;
     return <Helper tab={tab}/>;
   },[tab]);
-  return <div className="page dennis-page"><div className="page-header"><div><p className="eyebrow">AI Quality Assistant</p><h2>Dennis</h2><p>Dennis helps you search approved documents, explain, draft, suggest, summarize and remind — with sources. He is an assistant, not a final decision-maker.</p></div></div>
+  return <div className="page dennis-page"><div className="page-header"><div><p className="eyebrow">Documents &amp; Records</p><h2>Dennis</h2><p>Dennis helps you search approved documents, explain, draft, suggest, summarize and remind — with sources. He is an assistant, not a final decision-maker.</p></div></div>
     <div className="tabbar dennis-tabs">{tabs.map(t=><button className={tab===t?'active':''} key={t} onClick={()=>setTab(t)}>{t}</button>)}</div>{body}</div>;
 }

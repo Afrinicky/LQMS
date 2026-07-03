@@ -120,7 +120,7 @@ export function ProcessManagementPage() {
   const tabs = ['Dashboard', 'Test Directory', 'Acceptance Criteria', 'Specimen Rejections', 'Critical Result Rules', 'Critical Notifications', 'Referral Labs', 'Referral Tests', 'Referral Sendouts', 'Report Amendments', 'Process Reviews'];
 
   return <div className="module-page">
-    <PageHeader eyebrow="Process control" title="Process Management" subtitle="Tests, specimen handling, critical results, and referrals." />
+    <PageHeader eyebrow="Process Control" title="Process Management" subtitle="Tests, specimen handling, critical results, and referrals." />
     <p className="muted">Patient testing and clinical result reporting remain with LHIMS/Lightwave. This module tracks the QMS workflow only — no patient names are required; use request and patient references as identifiers.</p>
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}

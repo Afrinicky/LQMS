@@ -462,7 +462,7 @@ export function Positions(){
   </div>;
 }
 
-// Classify a role for ISO/WHO-style colour coding on the organogram.
+// Classify a role for colour coding on the organogram.
 function roleType(title: string): 'management' | 'quality' | 'technical' | 'support' {
   const t = title.toLowerCase();
   if (/quality/.test(t)) return 'quality';
@@ -481,7 +481,7 @@ type OrgCtx = {
   call: (path: string, options: RequestInit, okMsg?: string) => Promise<boolean>;
 };
 
-// Laboratory organogram — interactive, ISO 15189 / WHO LQMS-style reporting and
+// Laboratory organogram — interactive reporting and
 // deputisation chart. Editing happens in place on each node.
 // Configurable professional rank order — drives the automatic within-cadre
 // arrangement of technical staff on the organogram (lower number = higher rank).
@@ -1492,7 +1492,7 @@ function StaffImportExport() {
   return <div className="grid cols-2">
     <div className="card">
       <h3>Master Personnel Register — Export</h3>
-      <p>Download the <strong>Master Personnel Register</strong> workbook (ISO 15189:2022 §6.2). It carries every personnel field — Staff ID, full name parts and initials, date of birth, gender, designation and position, professional regulator, licence and qualifications, unit, personnel category, appointment type and date, years of experience, national ID, emergency contact, phone, email and file location. Use the blank template to prepare a bulk upload, or export the current register.</p>
+      <p>Download the <strong>Master Personnel Register</strong> workbook. It carries every personnel field — Staff ID, full name parts and initials, date of birth, gender, designation and position, professional regulator, licence and qualifications, unit, personnel category, appointment type and date, years of experience, national ID, emergency contact, phone, email and file location. Use the blank template to prepare a bulk upload, or export the current register.</p>
       <div className="quick-actions" style={{ marginTop: 8 }}>
         <button type="button" onClick={() => download('/staff/template', 'Staff_Register_Template.xlsx')}>Download blank template</button>
         <button type="button" className="secondary" onClick={() => download('/staff/export', 'Master_Personnel_Register.xlsx')}>Export current register</button>
@@ -1578,7 +1578,7 @@ export function MyLaboratory() {
         </fieldset>
         <fieldset className="reg-section"><legend>Accreditation</legend>
           <div className="form-grid">
-            <label>Accreditation body<input value={form.accreditationBody} onChange={e => setForm({ ...form, accreditationBody: e.target.value })} placeholder="e.g. SANAS, KENAS, ISO 15189" /></label>
+            <label>Accreditation body<input value={form.accreditationBody} onChange={e => setForm({ ...form, accreditationBody: e.target.value })} placeholder="e.g. your national accreditation body" /></label>
             <label>Accreditation no<input value={form.accreditationNumber} onChange={e => setForm({ ...form, accreditationNumber: e.target.value })} /></label>
             <label>Status<select value={form.accreditationStatus} onChange={e => setForm({ ...form, accreditationStatus: e.target.value })}><option value="">—</option><option>Accredited</option><option>In progress</option><option>Not accredited</option><option>Suspended</option></select></label>
           </div>

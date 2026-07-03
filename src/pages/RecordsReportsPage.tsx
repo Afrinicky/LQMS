@@ -194,7 +194,7 @@ export function RecordsReportsPage() {
   const tabs = ['Dashboard', 'Report Templates', 'Generate Report', 'Report Requests', 'Print Jobs', 'Evidence Packs', 'Audit Trail', 'Audit Trail Reviews', 'Retention Rules', 'Backup/Restore Checks', 'Data Integrity Checks'];
 
   return <div className="module-page">
-    <PageHeader eyebrow="Reports" title="Records, Reports &amp; Evidence" subtitle="Report templates, generated reports, and evidence packs." />
+    <PageHeader eyebrow="Notifications &amp; Reports" title="Records, Reports &amp; Evidence" subtitle="Report templates, generated reports, and evidence packs." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 

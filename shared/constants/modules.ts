@@ -20,7 +20,7 @@ export const MODULES: ModuleDefinition[] = [
   { key: 'customer_focus', label: 'Customer Focus', path: '/customer-focus' },
   { key: 'equipment', label: 'Equipment Management', path: '/equipment' },
   { key: 'assessments', label: 'Internal Assessments', path: '/assessments' },
-  { key: 'supplier_inventory', label: 'Supplier & Inventory', path: '/supplier-inventory' },
+  { key: 'supplier_inventory', label: 'Purchasing & Inventory', path: '/supplier-inventory' },
   { key: 'process_management', label: 'Process Management', path: '/process-management' },
   { key: 'information_management', label: 'Information Management', path: '/information-management' },
   { key: 'continual_improvement', label: 'Continual Improvement', path: '/continual-improvement' },

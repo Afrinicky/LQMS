@@ -118,7 +118,7 @@ export function NotificationsPage() {
   const tabs = ['Dashboard', 'My Notifications', 'My Tasks', 'Review Calendar', 'Generate Alerts', 'Notification Rules', 'Preferences', 'Reports'];
 
   return <div className="module-page">
-    <PageHeader eyebrow="Alerts" title="Notifications &amp; Review Calendar" subtitle="Alerts, reminders, announcements, and review scheduling." />
+    <PageHeader eyebrow="Notifications &amp; Reports" title="Notifications &amp; Review Calendar" subtitle="Alerts, reminders, announcements, and review scheduling." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 

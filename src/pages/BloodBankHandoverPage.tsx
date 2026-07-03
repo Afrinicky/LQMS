@@ -240,7 +240,7 @@ export function BloodBankHandoverPage() {
   const tabs = ['Dashboard', 'Blood Units', 'New Blood Unit', 'Thursday Handover', 'Handovers', 'Donation Campaigns', 'Adverse Events', 'Discards', 'Monthly Summary', 'Reports'];
 
   return <div className="module-page">
-    <PageHeader eyebrow="Operations" title="Blood Bank Quality &amp; Inventory Handover" subtitle="Blood unit inventory, handovers, and adverse events." />
+    <PageHeader eyebrow="Process Control" title="Blood Bank Quality &amp; Inventory Handover" subtitle="Blood unit inventory, handovers, and adverse events." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 

@@ -88,13 +88,17 @@ export function Home() {
         </section>
 
         <div className="launch-grid">
-          {NAV_SECTIONS.map((section, i) => {
+          {NAV_SECTIONS.map(section => {
             // A section lands on its first enabled module; it is disabled only
             // when none of its modules are enabled (settings is always on).
             const firstEnabled = section.modules.find(k => isEnabled(k) || k === 'settings');
             const to = MODULE_PATHS.get(firstEnabled ?? section.modules[0]) ?? '#';
             const disabled = !firstEnabled;
             const Icon = sectionIcon(section.key);
+            // Only the twelve quality essentials carry an index badge (01–12).
+            const essentialIndex = section.group === 'essential'
+              ? NAV_SECTIONS.filter(s => s.group === 'essential').indexOf(section) + 1
+              : null;
             return (
               <Link
                 key={section.key}
@@ -104,7 +108,7 @@ export function Home() {
                 style={disabled ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
                 aria-disabled={disabled}
               >
-                <span className="launch-index">{String(i + 1).padStart(2, '0')}</span>
+                {essentialIndex !== null && <span className="launch-index">{String(essentialIndex).padStart(2, '0')}</span>}
                 <span className="launch-ico"><Icon size={24} /></span>
                 <h3>{section.title}</h3>
                 <p>{section.desc}</p>
@@ -283,12 +287,12 @@ export function Dashboard() {
 /* ============================================================================
    Generic module page / placeholders
    ========================================================================= */
-export function ModulePage({ moduleKey, title, placeholder = false }: { moduleKey: string; title: string; placeholder?: boolean }) {
+export function ModulePage({ moduleKey, title, eyebrow = 'Module', placeholder = false }: { moduleKey: string; title: string; eyebrow?: string; placeholder?: boolean }) {
   const { isEnabled } = useModules();
   if (!isEnabled(moduleKey)) return <DisabledModule />;
   return (
     <div className="module-page">
-      <PageHeader title={title} eyebrow="Module" subtitle={placeholder
+      <PageHeader title={title} eyebrow={eyebrow} subtitle={placeholder
         ? 'This workspace is part of the SECH_LIMS foundation and will gain full workflows in a later phase.'
         : 'Connected to the host API and the audit-ready data model.'} />
       <div className="card">
@@ -305,5 +309,5 @@ export function ModulePage({ moduleKey, title, placeholder = false }: { moduleKe
 }
 
 export function Documents() { return <ModulePage moduleKey="documents" title="Documents & Records" />; }
-export function Organisation() { return <ModulePage moduleKey="organisation" title="Organisation & Leadership" />; }
+export function Organisation() { return <ModulePage moduleKey="organisation" title="Organisation & Leadership" eyebrow="Organisation" />; }
 export function Personnel() { return <ModulePage moduleKey="personnel" title="Personnel Management" />; }
