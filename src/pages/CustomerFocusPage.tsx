@@ -217,19 +217,19 @@ export function CustomerFocusPage() {
   const tabs = ['Dashboard', 'Stakeholders', 'New Stakeholder', 'Service Agreements', 'Feedback Intake', 'Satisfaction Surveys', 'Survey Responses', 'Communication Log', 'Imports', 'Reports'];
 
   return <div className="module-page">
-    <PageHeader eyebrow="Customer Service" title="Customer Focus" subtitle="Stakeholders, feedback, and satisfaction follow-up." />
+    <PageHeader eyebrow="Customer Focus" title="Customer Focus" subtitle="Stakeholders, feedback, and satisfaction follow-up." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && (summary ? <KpiStrip items={[
-      { label: 'Active stakeholders', value: summary.activeStakeholders },
-      { label: 'Service agreements', value: summary.activeServiceAgreements },
-      { label: 'Feedback (month)', value: summary.feedbackThisMonth },
-      { label: 'Open feedback', value: summary.openFeedback },
-      { label: 'High urgency', value: summary.highUrgencyFeedback, tone: 'danger' },
-      { label: 'Active surveys', value: summary.activeSurveys },
-      { label: 'Responses (month)', value: summary.surveyResponsesThisMonth },
-      { label: 'Follow-ups due', value: summary.followUpsDue, tone: 'warning' },
+      { label: 'Active stakeholders', value: summary.activeStakeholders, onClick: () => setTab('Stakeholders') },
+      { label: 'Service agreements', value: summary.activeServiceAgreements, onClick: () => setTab('Service Agreements') },
+      { label: 'Feedback (month)', value: summary.feedbackThisMonth, onClick: () => setTab('Feedback Intake') },
+      { label: 'Open feedback', value: summary.openFeedback, onClick: () => setTab('Feedback Intake') },
+      { label: 'High urgency', value: summary.highUrgencyFeedback, tone: 'danger', onClick: () => setTab('Feedback Intake') },
+      { label: 'Active surveys', value: summary.activeSurveys, onClick: () => setTab('Satisfaction Surveys') },
+      { label: 'Responses (month)', value: summary.surveyResponsesThisMonth, onClick: () => setTab('Survey Responses') },
+      { label: 'Follow-ups due', value: summary.followUpsDue, tone: 'warning', onClick: () => setTab('Communication Log') },
     ]} /> : <p>Loading summary…</p>)}
     {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Feedback handling" subtitle="This month's feedback by state">

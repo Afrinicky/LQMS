@@ -161,19 +161,19 @@ export function POCTPage() {
   const tabs = ['Dashboard', 'Sites', 'Devices', 'Test Menu', 'Operator Authorizations', 'Reagent Lots', 'QC Monitoring', 'EQA Monitoring', 'Maintenance Logs', 'Incidents', 'Monthly Reviews', 'Reports'];
 
   return <div className="module-page">
-    <PageHeader eyebrow="Process Control" title="POCT Oversight" subtitle="Point-of-care testing sites, QC, and incident oversight." />
+    <PageHeader eyebrow="Process Management" title="POCT Oversight" subtitle="Point-of-care testing sites, QC, and incident oversight." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && (summary ? <KpiStrip items={[
-      { label: 'Active sites', value: summary.activeSites },
-      { label: 'Active devices', value: summary.activeDevices },
-      { label: 'Authorised operators', value: summary.authorizedOperators },
-      { label: 'Expired authorisations', value: summary.expiredAuthorizations, tone: 'warning' },
-      { label: 'QC failures (month)', value: summary.qcFailuresThisMonth, tone: 'danger' },
-      { label: 'Unsatisfactory EQA', value: summary.unsatisfactoryEqaEvents },
-      { label: 'Open incidents', value: summary.openIncidents },
-      { label: 'Maintenance due', value: summary.maintenanceDue },
+      { label: 'Active sites', value: summary.activeSites, onClick: () => setTab('Sites') },
+      { label: 'Active devices', value: summary.activeDevices, onClick: () => setTab('Devices') },
+      { label: 'Authorised operators', value: summary.authorizedOperators, onClick: () => setTab('Operator Authorizations') },
+      { label: 'Expired authorisations', value: summary.expiredAuthorizations, tone: 'warning', onClick: () => setTab('Operator Authorizations') },
+      { label: 'QC failures (month)', value: summary.qcFailuresThisMonth, tone: 'danger', onClick: () => setTab('QC Monitoring') },
+      { label: 'Unsatisfactory EQA', value: summary.unsatisfactoryEqaEvents, onClick: () => setTab('EQA Monitoring') },
+      { label: 'Open incidents', value: summary.openIncidents, onClick: () => setTab('Incidents') },
+      { label: 'Maintenance due', value: summary.maintenanceDue, onClick: () => setTab('Maintenance Logs') },
     ]} /> : <p>Loading summary…</p>)}
     {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="POCT network" subtitle="Active estate and authorised operators">

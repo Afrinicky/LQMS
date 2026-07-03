@@ -431,7 +431,7 @@ export function DocumentControlPage() {
   </tr>;
 
   return <div className="module-page">
-    <PageHeader eyebrow="Documents &amp; Records" title="Documents &amp; Records" subtitle="Controlled documents and controlled records — creation, review, approval, distribution, attestation, retention and disposal." />
+    <PageHeader eyebrow="Documents and Records" title="Documents &amp; Records" subtitle="Controlled documents and controlled records — creation, review, approval, distribution, attestation, retention and disposal." />
     {tabBar(section, SECTIONS as unknown as string[], s => setSection(s as (typeof SECTIONS)[number]))}
     {section === 'Documents' && tabBar(tab, docTabs, setTab)}
     {error && <div className="error">{error}</div>}
@@ -448,25 +448,25 @@ export function DocumentControlPage() {
         <button className="secondary" disabled={!!exportBusy} onClick={() => runExport('/documents/masterlist/export', 'Document_and_Records_Master_List.xlsx')}>{exportBusy === '/documents/masterlist/export' ? 'Preparing…' : 'Export Master List (Excel)'}</button>
       </div>
       <KpiStrip items={[
-        { label: 'Active documents', value: summary.currentDocuments },
-        { label: 'Drafts', value: summary.drafts },
-        { label: 'In review', value: reviewQueue.length },
-        { label: 'Awaiting approval', value: approvalQueue.length },
-        { label: 'Due review (30d)', value: summary.dueReviews, tone: 'warning' },
-        { label: 'Overdue reviews', value: summary.overdueReviews, tone: 'danger' },
-        { label: 'Pending attestations', value: summary.pendingAttestations },
-        { label: 'Obsolete', value: summary.obsoleteDocuments },
+        { label: 'Active documents', value: summary.currentDocuments, onClick: () => setSection('Documents') },
+        { label: 'Drafts', value: summary.drafts, onClick: () => setSection('Documents') },
+        { label: 'In review', value: reviewQueue.length, onClick: () => setSection('Documents') },
+        { label: 'Awaiting approval', value: approvalQueue.length, onClick: () => setSection('Documents') },
+        { label: 'Due review (30d)', value: summary.dueReviews, tone: 'warning', onClick: () => setSection('Documents') },
+        { label: 'Overdue reviews', value: summary.overdueReviews, tone: 'danger', onClick: () => setSection('Documents') },
+        { label: 'Pending attestations', value: summary.pendingAttestations, onClick: () => setSection('Documents') },
+        { label: 'Obsolete', value: summary.obsoleteDocuments, onClick: () => setSection('Documents') },
       ]} />
       <h3 style={{ margin: '18px 0 6px' }}>Record control</h3>
       {recordSummary ? <KpiStrip items={[
-        { label: 'Active records', value: recordSummary.activeRecords },
-        { label: 'Archived', value: recordSummary.archivedRecords },
-        { label: 'Disposal due', value: recordSummary.disposalDue, tone: 'warning' },
-        { label: 'Retention rules', value: recordSummary.retentionRules },
-        { label: 'Reviews (month)', value: recordSummary.reviewsThisMonth },
-        { label: 'Open review actions', value: recordSummary.openReviewActions },
-        { label: 'Backups (month)', value: recordSummary.backupsThisMonth },
-        { label: 'Failed restore tests', value: recordSummary.failedRestoreTests, tone: 'danger' },
+        { label: 'Active records', value: recordSummary.activeRecords, onClick: () => setSection('Records') },
+        { label: 'Archived', value: recordSummary.archivedRecords, onClick: () => setSection('Records') },
+        { label: 'Disposal due', value: recordSummary.disposalDue, tone: 'warning', onClick: () => setSection('Records') },
+        { label: 'Retention rules', value: recordSummary.retentionRules, onClick: () => setSection('Records') },
+        { label: 'Reviews (month)', value: recordSummary.reviewsThisMonth, onClick: () => setSection('Records') },
+        { label: 'Open review actions', value: recordSummary.openReviewActions, onClick: () => setSection('Records') },
+        { label: 'Backups (month)', value: recordSummary.backupsThisMonth, onClick: () => setSection('Records') },
+        { label: 'Failed restore tests', value: recordSummary.failedRestoreTests, tone: 'danger', onClick: () => setSection('Records') },
       ]} /> : <p className="muted">Loading record-control summary…</p>}
       <div className="grid cols-2" style={{ marginTop: 18 }}>
         <ChartCard title="Document lifecycle" subtitle="Controlled set by current state">

@@ -118,15 +118,15 @@ export function EquipmentPage() {
   }
 
   return <div>
-    <PageHeader eyebrow="Equipment" title="Equipment Management" subtitle="Asset register, maintenance, calibration, and breakdown tracking." />
+    <PageHeader eyebrow="Equipment Management" title="Equipment Management" subtitle="Asset register, maintenance, calibration, and breakdown tracking." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
     {tabBar(tab, ['Dashboard', 'Equipment Register', 'New Equipment', 'Maintenance Records', 'Breakdowns', 'Reports placeholder'], setTab)}
 
     {tab === 'Dashboard' && <><KpiStrip items={[
-      { label: 'Equipment items', value: summary?.equipmentTotal ?? equipment.length },
-      { label: 'Maintenance due', value: summary?.equipmentMaintenanceDue },
-      { label: 'Calibration due', value: summary?.equipmentCalibrationDue },
-      { label: 'Out of service', value: summary?.equipmentOutOfService, tone: 'danger' },
+      { label: 'Equipment items', value: summary?.equipmentTotal ?? equipment.length, onClick: () => setTab('Equipment Register') },
+      { label: 'Maintenance due', value: summary?.equipmentMaintenanceDue, onClick: () => setTab('Maintenance Records') },
+      { label: 'Calibration due', value: summary?.equipmentCalibrationDue, onClick: () => setTab('Maintenance Records') },
+      { label: 'Out of service', value: summary?.equipmentOutOfService, tone: 'danger', onClick: () => setTab('Breakdowns') },
     ]} />
     <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Fleet availability" subtitle="Operational vs out-of-service equipment">
@@ -345,15 +345,15 @@ export function InventoryPage() {
   }
 
   return <div>
-    <PageHeader eyebrow="Purchasing &amp; Inventory" title="Purchasing &amp; Inventory" subtitle="Suppliers, reagents, stock levels, batches, and expiry control." />
+    <PageHeader eyebrow="Supplier &amp; Inventory Management" title="Supplier &amp; Inventory Management" subtitle="Suppliers, reagents, stock levels, batches, and expiry control." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
     {tabBar(tab, ['Dashboard', 'Item Register', 'New Item', 'Batches/Lots', 'Stock Movements', 'Suppliers', 'Reports placeholder'], setTab)}
 
     {tab === 'Dashboard' && <><KpiStrip items={[
-      { label: 'Inventory items', value: items.length },
-      { label: 'Low stock', value: summary?.inventoryLowStock ?? items.filter(i => i.low_stock).length, tone: 'warning' },
-      { label: 'Expiring soon', value: summary?.inventoryExpiringSoon },
-      { label: 'Expired', value: summary?.inventoryExpired, tone: 'danger' },
+      { label: 'Inventory items', value: items.length, onClick: () => setTab('Item Register') },
+      { label: 'Low stock', value: summary?.inventoryLowStock ?? items.filter(i => i.low_stock).length, tone: 'warning', onClick: () => setTab('Item Register') },
+      { label: 'Expiring soon', value: summary?.inventoryExpiringSoon, onClick: () => setTab('Batches/Lots') },
+      { label: 'Expired', value: summary?.inventoryExpired, tone: 'danger', onClick: () => setTab('Batches/Lots') },
     ]} />
     <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Stock health" subtitle="Items by supply risk">
@@ -581,15 +581,15 @@ export function MonitoringPage() {
   }
 
   return <div>
-    <PageHeader eyebrow="Facilities &amp; Safety" title="Environmental Monitoring" subtitle="Temperature and environment readings, excursions, and trends." />
+    <PageHeader eyebrow="Facilities and Safety" title="Environmental Monitoring" subtitle="Temperature and environment readings, excursions, and trends." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
     {tabBar(tab, ['Dashboard', 'Monitoring Items', 'New Monitoring Item', 'Enter Reading', 'Excursions', 'Monthly Charts placeholder'], setTab)}
 
     {tab === 'Dashboard' && <><KpiStrip items={[
-      { label: 'Monitoring items', value: items.length },
-      { label: 'Warnings', value: summary?.monitoringWarnings ?? readings.filter(r => r.status === 'warning').length, tone: 'warning' },
-      { label: 'Critical / out-of-range', value: summary?.monitoringCritical ?? excursions.filter(r => r.status !== 'warning').length, tone: 'danger' },
-      { label: 'Legacy records', value: legacyRecords.length },
+      { label: 'Monitoring items', value: items.length, onClick: () => setTab('Monitoring Items') },
+      { label: 'Warnings', value: summary?.monitoringWarnings ?? readings.filter(r => r.status === 'warning').length, tone: 'warning', onClick: () => setTab('Excursions') },
+      { label: 'Critical / out-of-range', value: summary?.monitoringCritical ?? excursions.filter(r => r.status !== 'warning').length, tone: 'danger', onClick: () => setTab('Excursions') },
+      { label: 'Legacy records', value: legacyRecords.length, onClick: () => setTab('Monitoring Items') },
     ]} />
     <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Environmental status" subtitle="Latest reading status mix">
@@ -716,15 +716,15 @@ export function SafetyPage() {
   async function closeIncident(id: number) { try { await api(`/facilities-safety/incidents/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); if (selected) await openDetail(selected.id); await load(); } catch (e) { setError((e as Error).message); } }
 
   return <div>
-    <PageHeader eyebrow="Facilities &amp; Safety" title="Facilities &amp; Safety" subtitle="Safety incidents, inspections, and facility checks." />
+    <PageHeader eyebrow="Facilities and Safety" title="Facilities &amp; Safety" subtitle="Safety incidents, inspections, and facility checks." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
     {tabBar(tab, ['Dashboard', 'Safety Incidents', 'New Incident', 'Safety Actions placeholder', 'Reports placeholder'], setTab)}
 
     {tab === 'Dashboard' && <><KpiStrip items={[
-      { label: 'Incidents', value: incidents.length },
-      { label: 'Open', value: summary?.openSafetyIncidents ?? incidents.filter(i => i.status !== 'closed').length },
-      { label: 'Action required', value: incidents.filter(i => i.status === 'action_required').length, tone: 'warning' },
-      { label: 'Closed', value: incidents.filter(i => i.status === 'closed').length, tone: 'success' },
+      { label: 'Incidents', value: incidents.length, onClick: () => setTab('Safety Incidents') },
+      { label: 'Open', value: summary?.openSafetyIncidents ?? incidents.filter(i => i.status !== 'closed').length, onClick: () => setTab('Safety Incidents') },
+      { label: 'Action required', value: incidents.filter(i => i.status === 'action_required').length, tone: 'warning', onClick: () => setTab('Safety Incidents') },
+      { label: 'Closed', value: incidents.filter(i => i.status === 'closed').length, tone: 'success', onClick: () => setTab('Safety Incidents') },
     ]} />
     <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Incident status" subtitle="Safety incidents by resolution state">

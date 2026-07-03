@@ -120,20 +120,20 @@ export function ProcessManagementPage() {
   const tabs = ['Dashboard', 'Test Directory', 'Acceptance Criteria', 'Specimen Rejections', 'Critical Result Rules', 'Critical Notifications', 'Referral Labs', 'Referral Tests', 'Referral Sendouts', 'Report Amendments', 'Process Reviews'];
 
   return <div className="module-page">
-    <PageHeader eyebrow="Process Control" title="Process Management" subtitle="Tests, specimen handling, critical results, and referrals." />
+    <PageHeader eyebrow="Process Management" title="Process Management" subtitle="Tests, specimen handling, critical results, and referrals." />
     <p className="muted">Patient testing and clinical result reporting remain with LHIMS/Lightwave. This module tracks the QMS workflow only — no patient names are required; use request and patient references as identifiers.</p>
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && (summary ? <KpiStrip items={[
-      { label: 'Active tests', value: summary.activeTests },
-      { label: 'Rejections (month)', value: summary.specimenRejectionsThisMonth },
-      { label: 'Open rejections', value: summary.openSpecimenRejections, tone: 'warning' },
-      { label: 'Critical results (month)', value: summary.criticalResultsThisMonth },
-      { label: 'Delayed critical notifs', value: summary.delayedCriticalNotifications, tone: 'danger' },
-      { label: 'Sendouts pending', value: summary.referralSendoutsPending },
-      { label: 'Amendments (month)', value: summary.reportAmendmentsThisMonth },
-      { label: 'Pending reviews', value: summary.pendingProcessReviews },
+      { label: 'Active tests', value: summary.activeTests, onClick: () => setTab('Test Directory') },
+      { label: 'Rejections (month)', value: summary.specimenRejectionsThisMonth, onClick: () => setTab('Specimen Rejections') },
+      { label: 'Open rejections', value: summary.openSpecimenRejections, tone: 'warning', onClick: () => setTab('Specimen Rejections') },
+      { label: 'Critical results (month)', value: summary.criticalResultsThisMonth, onClick: () => setTab('Critical Notifications') },
+      { label: 'Delayed critical notifs', value: summary.delayedCriticalNotifications, tone: 'danger', onClick: () => setTab('Critical Notifications') },
+      { label: 'Sendouts pending', value: summary.referralSendoutsPending, onClick: () => setTab('Referral Sendouts') },
+      { label: 'Amendments (month)', value: summary.reportAmendmentsThisMonth, onClick: () => setTab('Report Amendments') },
+      { label: 'Pending reviews', value: summary.pendingProcessReviews, onClick: () => setTab('Process Reviews') },
     ]} /> : <p>Loading summary…</p>)}
     {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Pre-analytical quality" subtitle="Specimen rejection handling this month">

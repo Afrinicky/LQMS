@@ -538,6 +538,25 @@ p { line-height: 1.55; }
 .kpi-strip .kpi.t-warning .kpi-value { color: var(--warning); }
 .kpi-strip .kpi.t-success .kpi-value { color: var(--success); }
 
+/* Clickable KPIs — plain buttons that keep the strip's look and drill in */
+button.kpi.kpi-link {
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 10px;
+  font: inherit;
+  cursor: pointer;
+  box-shadow: none;
+  transition: background 0.15s ease;
+}
+button.kpi.kpi-link:first-child { border-left: 0; }
+button.kpi.kpi-link:hover { background: rgba(255, 255, 255, 0.05); box-shadow: none; transform: none; }
+
+/* Clickable chart rows / bars / legend entries */
+.chart-click { cursor: pointer; border-radius: 8px; transition: background 0.15s ease, opacity 0.15s ease; }
+.chart-click:hover { background: rgba(255, 255, 255, 0.05); }
+li.chart-click, ul.chart-meter li.chart-click { padding: 4px 6px; margin: -4px -6px; }
+
 /* Reusable StatCard component */
 .stat-card { position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 10px; padding: 18px 20px; }
 .stat-card .stat-top { display: flex; align-items: center; justify-content: space-between; }

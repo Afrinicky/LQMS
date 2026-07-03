@@ -165,16 +165,16 @@ export function IqcPage() {
   const failures = results.filter(r => r.status !== 'accepted');
 
   return <div className="module-page">
-    <PageHeader eyebrow="Process Control" title="IQC Management" subtitle="Internal quality control materials, results, and review." />
+    <PageHeader eyebrow="Process Management" title="IQC Management" subtitle="Internal quality control materials, results, and review." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && summary && <KpiStrip items={[
-      { label: 'Active materials', value: summary.activeMaterials },
-      { label: 'Results this month', value: summary.resultsThisMonth },
-      { label: 'Failed / out-of-control', value: summary.failedThisMonth, tone: 'danger' },
-      { label: 'Pending review', value: summary.resultsPendingReview },
-      { label: 'Lot changes this year', value: summary.lotChangesThisYear },
+      { label: 'Active materials', value: summary.activeMaterials, onClick: () => setTab('IQC Materials') },
+      { label: 'Results this month', value: summary.resultsThisMonth, onClick: () => setTab('Result Entry') },
+      { label: 'Failed / out-of-control', value: summary.failedThisMonth, tone: 'danger', onClick: () => setTab('QC Failures') },
+      { label: 'Pending review', value: summary.resultsPendingReview, onClick: () => setTab('Result Entry') },
+      { label: 'Lot changes this year', value: summary.lotChangesThisYear, onClick: () => setTab('Lot Changes') },
     ]} />}
     {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="QC outcomes this month" subtitle="In-control vs flagged results">
@@ -343,16 +343,16 @@ export function EqaPage() {
   const unsatisfactory = events.filter(ev => ['unsatisfactory', 'poor', 'fail', 'failed'].includes((ev.performance_status || '').toLowerCase()));
 
   return <div className="module-page">
-    <PageHeader eyebrow="Assessments" title="EQA Management" subtitle="External quality assessment events, results, and follow-up." />
+    <PageHeader eyebrow="Process Management" title="EQA Management" subtitle="External quality assessment events, results, and follow-up." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && summary && <KpiStrip items={[
-      { label: 'Active programs', value: summary.activePrograms },
-      { label: 'Open events', value: summary.openEvents },
-      { label: 'Events due soon', value: summary.eventsDueSoon, tone: 'warning' },
-      { label: 'Unsatisfactory events', value: summary.unsatisfactoryEvents, tone: 'danger' },
-      { label: 'Corrective action needed', value: summary.eventsRequiringCorrectiveAction },
+      { label: 'Active programs', value: summary.activePrograms, onClick: () => setTab('EQA Programs') },
+      { label: 'Open events', value: summary.openEvents, onClick: () => setTab('EQA Events') },
+      { label: 'Events due soon', value: summary.eventsDueSoon, tone: 'warning', onClick: () => setTab('EQA Events') },
+      { label: 'Unsatisfactory events', value: summary.unsatisfactoryEvents, tone: 'danger', onClick: () => setTab('Unsatisfactory Performance') },
+      { label: 'Corrective action needed', value: summary.eventsRequiringCorrectiveAction, onClick: () => setTab('Unsatisfactory Performance') },
     ]} />}
     {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="EQA event status" subtitle="Open events by performance outcome">
@@ -517,16 +517,16 @@ export function VerificationValidationPage() {
   const tabs = ['Dashboard', 'Method Verification Register', 'New Verification', 'Experiments', 'Equipment Verification', 'Reports'];
 
   return <div className="module-page">
-    <PageHeader eyebrow="Process Control" title="Verification &amp; Validation" subtitle="Method and equipment verification and validation records." />
+    <PageHeader eyebrow="Process Management" title="Verification &amp; Validation" subtitle="Method and equipment verification and validation records." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && summary && <KpiStrip items={[
-      { label: 'Open method verifications', value: summary.openMethodVerifications },
-      { label: 'Completed verifications', value: summary.completedVerifications, tone: 'success' },
-      { label: 'Pending approval', value: summary.pendingApproval },
-      { label: 'Equipment verifications (year)', value: summary.equipmentVerificationsThisYear },
-      { label: 'Equipment pending approval', value: summary.equipmentVerificationsPendingApproval },
+      { label: 'Open method verifications', value: summary.openMethodVerifications, onClick: () => setTab('Method Verification Register') },
+      { label: 'Completed verifications', value: summary.completedVerifications, tone: 'success', onClick: () => setTab('Method Verification Register') },
+      { label: 'Pending approval', value: summary.pendingApproval, onClick: () => setTab('Method Verification Register') },
+      { label: 'Equipment verifications (year)', value: summary.equipmentVerificationsThisYear, onClick: () => setTab('Equipment Verification') },
+      { label: 'Equipment pending approval', value: summary.equipmentVerificationsPendingApproval, onClick: () => setTab('Equipment Verification') },
     ]} />}
     {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Method verification status" subtitle="Open vs completed verifications">
@@ -675,16 +675,16 @@ export function MeasurementUncertaintyPage() {
   const pending = records.filter(r => r.status === 'draft' || r.status === 'in_review');
 
   return <div className="module-page">
-    <PageHeader eyebrow="Process Control" title="Measurement Uncertainty" subtitle="Measurement uncertainty budgets and periodic review." />
+    <PageHeader eyebrow="Process Management" title="Measurement Uncertainty" subtitle="Measurement uncertainty budgets and periodic review." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && summary && <KpiStrip items={[
-      { label: 'Active records', value: summary.activeRecords },
-      { label: 'Pending review', value: summary.recordsPendingReview },
-      { label: 'Pending approval', value: summary.recordsPendingApproval },
-      { label: 'Due for review', value: summary.recordsDueForReview, tone: 'warning' },
-      { label: 'Completed this year', value: summary.recordsCompletedThisYear, tone: 'success' },
+      { label: 'Active records', value: summary.activeRecords, onClick: () => setTab('MU Register') },
+      { label: 'Pending review', value: summary.recordsPendingReview, onClick: () => setTab('Review/Approval') },
+      { label: 'Pending approval', value: summary.recordsPendingApproval, onClick: () => setTab('Review/Approval') },
+      { label: 'Due for review', value: summary.recordsDueForReview, tone: 'warning', onClick: () => setTab('MU Register') },
+      { label: 'Completed this year', value: summary.recordsCompletedThisYear, tone: 'success', onClick: () => setTab('MU Register') },
     ]} />}
     {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="MU record status" subtitle="Active records by review stage">

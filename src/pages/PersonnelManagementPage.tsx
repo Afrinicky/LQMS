@@ -361,19 +361,19 @@ export function PersonnelManagementPage() {
   const tabs = ['Dashboard', 'Staff Register', 'Staff Documents', 'Orientation & Induction', 'Declarations', 'Training Events', 'Competency Assessments', 'Technical Authorizations', 'Duty Rosters', 'My Profile', 'Reports'];
 
   return <div className="module-page">
-    <PageHeader eyebrow="Personnel" title="Personnel Management" subtitle="Personnel records — competence, authorisation, training, induction, and ethics." />
+    <PageHeader eyebrow="Personnel Management" title="Personnel Management" subtitle="Personnel records — competence, authorisation, training, induction, and ethics." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && (summary ? <KpiStrip items={[
-      { label: 'Active staff', value: summary.totalStaff ?? staff.length },
-      { label: 'Docs pending verification', value: summary.staffDocumentsPendingVerification },
-      { label: 'Certificates expiring', value: summary.certificatesExpiringSoon, tone: 'warning' },
-      { label: 'Licences expiring', value: summary.licencesExpiringSoon ?? 0, tone: 'warning' },
-      { label: 'Pending declarations', value: summary.pendingDeclarations },
-      { label: 'Orientations in progress', value: summary.orientationsInProgress ?? 0 },
-      { label: 'Competency due', value: summary.competencyAssessmentsDue },
-      { label: 'Authorisations due', value: summary.authorizationsDueReview },
+      { label: 'Active staff', value: summary.totalStaff ?? staff.length, onClick: () => setTab('Staff Register') },
+      { label: 'Docs pending verification', value: summary.staffDocumentsPendingVerification, onClick: () => setTab('Staff Documents') },
+      { label: 'Certificates expiring', value: summary.certificatesExpiringSoon, tone: 'warning', onClick: () => setTab('Staff Documents') },
+      { label: 'Licences expiring', value: summary.licencesExpiringSoon ?? 0, tone: 'warning', onClick: () => setTab('Staff Register') },
+      { label: 'Pending declarations', value: summary.pendingDeclarations, onClick: () => setTab('Declarations') },
+      { label: 'Orientations in progress', value: summary.orientationsInProgress ?? 0, onClick: () => setTab('Orientation & Induction') },
+      { label: 'Competency due', value: summary.competencyAssessmentsDue, onClick: () => setTab('Competency Assessments') },
+      { label: 'Authorisations due', value: summary.authorizationsDueReview, onClick: () => setTab('Technical Authorizations') },
     ]} /> : <p>Loading summary…</p>)}
     {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Compliance backlog" subtitle="Personnel records needing action">

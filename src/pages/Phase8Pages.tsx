@@ -56,11 +56,11 @@ function useGovernanceSummary() {
   return s;
 }
 
-function dashboardCards(s: GovernanceSummary | null, keys: Array<{ label: string; value: keyof GovernanceSummary }>) {
+function dashboardCards(s: GovernanceSummary | null, keys: Array<{ label: string; value: keyof GovernanceSummary; onClick?: () => void }>) {
   if (!s) return <p>Loading summary…</p>;
-  const series = keys.map((k, i) => ({ label: k.label, value: Number(s[k.value]) || 0, color: CHART_COLORS[i % CHART_COLORS.length] }));
+  const series = keys.map((k, i) => ({ label: k.label, value: Number(s[k.value]) || 0, color: CHART_COLORS[i % CHART_COLORS.length], onClick: k.onClick }));
   return <>
-    <KpiStrip items={keys.map(k => ({ label: k.label, value: s[k.value] as number }))} />
+    <KpiStrip items={keys.map(k => ({ label: k.label, value: s[k.value] as number, onClick: k.onClick }))} />
     {keys.length >= 3 && <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Distribution" subtitle="Composition of the current governance counts">
         <DonutChart centerLabel="Total" data={series} />
@@ -303,8 +303,8 @@ export function AssessmentsPage() {
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && dashboardCards(summary, [
-      { label: 'Planned/active assessments', value: 'plannedAssessments' },
-      { label: 'Open findings', value: 'openFindings' }
+      { label: 'Planned/active assessments', value: 'plannedAssessments', onClick: () => setTab('Assessment Programmes') },
+      { label: 'Open findings', value: 'openFindings', onClick: () => setTab('Findings') }
     ])}
 
     {tab === 'Assessment Programmes' && <>
@@ -570,11 +570,11 @@ export function MeetingsPage() {
 
   const tabs = ['Dashboard', 'Meetings', 'New Meeting', 'Attendance', 'Action Items', 'Reports'];
   return <div className="module-page">
-    <PageHeader eyebrow="Organisation" title="Meetings &amp; Minutes" subtitle="Meeting scheduling, agendas, minutes, and action items." />
+    <PageHeader eyebrow="Organisation and Leadership" title="Meetings &amp; Minutes" subtitle="Meeting scheduling, agendas, minutes, and action items." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
-    {tab === 'Dashboard' && dashboardCards(summary, [{ label: 'Open meetings', value: 'openMeetings' }])}
+    {tab === 'Dashboard' && dashboardCards(summary, [{ label: 'Open meetings', value: 'openMeetings', onClick: () => setTab('Meetings') }])}
 
     {tab === 'Meetings' && <>
       <table className="data-table"><thead><tr><th>Number</th><th>Type</th><th>Title</th><th>Date</th><th>Status</th><th></th></tr></thead><tbody>
@@ -657,11 +657,11 @@ export function ManagementReviewPage() {
 
   const tabs = ['Dashboard', 'Review Register', 'New Review', 'Inputs', 'Actions', 'Reports'];
   return <div className="module-page">
-    <PageHeader eyebrow="Organisation" title="Management Review" subtitle="Management review inputs, outputs, and resulting actions." />
+    <PageHeader eyebrow="Organisation and Leadership" title="Management Review" subtitle="Management review inputs, outputs, and resulting actions." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
-    {tab === 'Dashboard' && dashboardCards(summary, [{ label: 'Pending management reviews', value: 'pendingManagementReviews' }])}
+    {tab === 'Dashboard' && dashboardCards(summary, [{ label: 'Pending management reviews', value: 'pendingManagementReviews', onClick: () => setTab('Review Register') }])}
 
     {tab === 'Review Register' && <>
       <table className="data-table"><thead><tr><th>Number</th><th>Period</th><th>Date</th><th>Chair</th><th>Status</th><th></th></tr></thead><tbody>
@@ -741,13 +741,13 @@ export function QualityIndicatorsPage() {
 
   const tabs = ['Dashboard', 'Indicator Register', 'New Indicator', 'Results Entry', 'Trends', 'Reports'];
   return <div className="module-page">
-    <PageHeader eyebrow="Process Improvement" title="Quality Indicators" subtitle="Quality indicators, targets, and result monitoring." />
+    <PageHeader eyebrow="Continual Improvement" title="Quality Indicators" subtitle="Quality indicators, targets, and result monitoring." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && dashboardCards(summary, [
-      { label: 'Active indicators', value: 'activeQualityIndicators' },
-      { label: 'Critical results to action', value: 'criticalQualityIndicatorResults' }
+      { label: 'Active indicators', value: 'activeQualityIndicators', onClick: () => setTab('Indicator Register') },
+      { label: 'Critical results to action', value: 'criticalQualityIndicatorResults', onClick: () => setTab('Results Entry') }
     ])}
 
     {tab === 'Indicator Register' && <table className="data-table"><thead><tr><th>Code</th><th>Name</th><th>Frequency</th><th>Target</th><th>Warning</th><th>Critical</th><th>Active</th></tr></thead><tbody>
@@ -862,13 +862,13 @@ export function ContinualImprovementPage() {
 
   const tabs = ['Dashboard', 'Improvement Projects', 'New Project', 'Updates', 'Reports'];
   return <div className="module-page">
-    <PageHeader eyebrow="Process Improvement" title="Continual Improvement" subtitle="Improvement projects, indicators, and action tracking." />
+    <PageHeader eyebrow="Continual Improvement" title="Continual Improvement" subtitle="Improvement projects, indicators, and action tracking." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && dashboardCards(summary, [
-      { label: 'Active projects', value: 'activeImprovementProjects' },
-      { label: 'Overdue improvement actions', value: 'overdueImprovementActions' }
+      { label: 'Active projects', value: 'activeImprovementProjects', onClick: () => setTab('Improvement Projects') },
+      { label: 'Overdue improvement actions', value: 'overdueImprovementActions', onClick: () => setTab('Improvement Projects') }
     ])}
 
     {tab === 'Improvement Projects' && <>
