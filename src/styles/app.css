@@ -1386,7 +1386,7 @@ button.step-toggle:hover { background: rgba(255,255,255,0.05); box-shadow: none;
 button.tiny { padding: 2px 8px; font-size: 11px; }
 
 /* ============================================================
-   Laboratory Organogram & Deputisation (ISO 15189 / WHO LQMS style)
+   Laboratory Organogram & Deputisation
    ============================================================ */
 .organogram-card { --org-line: rgba(140, 165, 210, 0.5); }
 .organogram-card .org-toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }

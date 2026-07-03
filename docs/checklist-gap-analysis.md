@@ -20,15 +20,19 @@ left-pane feature. For each section I give:
 - Gaps are tagged **[High]** (checklist points at risk now, common audit
   findings), **[Med]**, or **[Low]** (nice-to-have / partial).
 
-A note on the GAS FM7.2-05 checklist: it is not publicly distributed, so I could
-not diff against its exact wording. In practice the Ghana scheme checklist is
-built on the same ISO 15189:2022 clause structure as SLIPTA and adds
-Ghana-specific regulatory items (HEFRA/Allied Health Professions Council
-registration, national biomedical-waste and radiation regulations, local
-data-protection law). Every SLIPTA gap below also applies to GAS; the
-Ghana-specific additions are called out in **§13**. **Please share the
-FM7.2-05 PDF** and I will produce a line-by-line diff and reconcile any wording
-or weighting differences.
+**Design principle — standards are a blueprint, never named in the product.**
+SLIPTA and the GAS checklist are used *only* as the specification for what the
+software must let a laboratory do. The running application names no standard,
+scheme or clause anywhere — no "ISO 15189", no "SLIPTA", no clause numbers in
+page text, help copy, templates or exports. A laboratory that simply uses the
+software the way it is built will produce the records and evidence those
+schemes expect, without the software ever advertising them. (This document is
+an internal engineering blueprint, not part of the product.)
+
+The GAS FM7.2-05 checklist (2022) has now been reconciled — see **§13**. It is a
+clause-by-clause restatement of ISO 15189:2022 (clauses 4–8.9), the same
+backbone SLIPTA is built on, so the two agree section-for-section; GAS adds a
+handful of finer-grained clauses and Ghana-specific regulatory items.
 
 ---
 
@@ -233,21 +237,55 @@ about 7 of 57 points.
 
 ---
 
-## 13. Ghana Accreditation Service (FM7.2-05) — additional considerations
+## 13. Ghana Accreditation Service FM7.2-05 (2022) — reconciliation
 
-Built on the same ISO 15189:2022 structure as SLIPTA, so all gaps above apply.
-Ghana-specific items to add once we diff the exact checklist:
+The GAS checklist is a **clause-by-clause checklist of ISO 15189:2022**
+(clauses 4 General requirements → 8.9 Management reviews), with columns for the
+clause text, where implementation is documented, and remarks. It is the same
+standard SLIPTA operationalises, so it confirms — rather than contradicts — the
+section findings above. Mapping GAS clauses to the software's sections:
 
-- **[High] Regulatory registration records.** Facility licensing (HeFRA) and
-  practitioner registration (Allied Health Professions Council / Medical &
-  Dental Council) — store expiry-tracked, like personnel licences.
-- **[Med] National waste & radiation compliance.** Ghana EPA biomedical-waste
-  and Nuclear Regulatory Authority requirements — fold into the Facilities &
-  Safety build (waste manifests, radiation-source register where relevant).
-- **[Med] Data protection.** Align Information Management access/retention with
-  Ghana's Data Protection Act (consent, data-subject handling).
-- **[Low] Local report/units conventions.** Ensure report templates carry the
-  identifiers GAS assessors expect.
+| GAS / ISO 15189:2022 clause group | Software section(s) | Status |
+|---|---|---|
+| 4 General (impartiality, confidentiality, patients) | Organisation and Leadership; Information Management | Good; **impartiality/COI + confidentiality registers thin** |
+| 5 Structural & governance (legal entity, director, activities, structure, objectives, **5.6 risk**) | Organisation and Leadership; Assessments | Good; **legal-entity doc + advisory activities (5.3.3) missing** |
+| 6.2 Personnel | Personnel Management | Strong |
+| 6.3 Facilities & environmental conditions | Facilities and Safety | **Weak — biggest gap** |
+| 6.4 Equipment · 6.5 Calibration & traceability | Equipment Management | Strong |
+| 6.6 Reagents & consumables · 6.7 Service agreements · 6.8 External providers | Supplier & Inventory; Customer Focus | Strong / Good |
+| 7.1 Risk to patient care | Assessments (risk) | Good |
+| 7.2 Pre-examination | Process Management | **Partial — pre-exam process missing** |
+| 7.3 Examination (verification, validation, MU, reference intervals, IQC, EQA, comparability) | Process Management | Strong; **7.3.5 reference-interval register, 7.3.7.4 comparability thin** |
+| 7.4 Post-examination (reporting, critical results, amendments, sample retention) | Process Management; Information Management | Good; **report-format completeness (7.4.1.6) to verify** |
+| 7.5 Nonconforming work | Nonconforming Event Management | Strong |
+| 7.6 Data & information management (incl. 7.6.4 downtime, 7.6.5 off-site) | Information Management | Strong |
+| 7.7 Complaints | Customer Focus | Strong |
+| **7.8 Continuity & emergency preparedness** | Process Management | **Missing** |
+| 8.2–8.4 Management-system docs & records | Documents and Records | Strong |
+| 8.5 Risks & opportunities · 8.6 Improvement · 8.6.2 feedback | Continual Improvement; Customer Focus | Strong |
+| 8.7 Nonconformities & corrective action | Nonconforming Event Management | Strong |
+| 8.8 Evaluations (quality indicators, internal audits) | Assessments; Continual Improvement | Good |
+| 8.9 Management reviews | Organisation and Leadership | Strong |
+
+**Net:** GAS surfaces the same two priority gaps as SLIPTA — **6.3 Facilities &
+environmental conditions** and **7.2 pre-examination + 7.8 continuity** — plus a
+few finer clauses (5.3.3 advisory activities, 4.1/4.2 impartiality &
+confidentiality records, 7.3.5 reference intervals, 7.3.7.4 comparability)
+already listed in the sections above. No change to the plan's priorities.
+
+GAS-specific (Ghana) items to fold into the relevant builds — **captured as
+ordinary configurable records, with no regulator named in the UI**:
+
+- **[High] Regulatory registration records.** Facility licensing and
+  practitioner registration handled as expiry-tracked credential records
+  (same mechanism as personnel licences), configurable to whatever body a
+  laboratory answers to.
+- **[Med] Waste & radiation compliance.** Waste manifests and (where relevant)
+  a radiation-source register inside the Facilities & Safety build.
+- **[Med] Data protection.** Information Management access/retention already
+  supports consent and data-subject handling; keep it generic.
+- **[Low] Report/units conventions.** Report templates remain fully
+  configurable so a laboratory can match local expectations itself.
 
 ---
 
@@ -281,18 +319,17 @@ records feeding NC/CAPA and Notifications):
 3. Leadership code-of-conduct register; annual budget-projection record.
 
 ### Phase D — Cross-cutting polish  *(protects existing points)*
-1. Report-format conformance checklist covering SLIPTA 9.4 a–r.
-2. Risk-register "area" taxonomy covering the ~21 required domains.
+1. Report-format conformance: ensure report templates capture every required
+   report element (page x-of-y, revision trail, critical flags, referral-lab
+   identification) as configurable template fields.
+2. Risk-register "area" taxonomy covering the full set of required domains.
 3. Cross-link risk & quality indicators into the Assessments view.
 4. Performance-appraisal records; storage-condition inspection; recall handling.
-5. Regulatory-registration records (Ghana) once FM7.2-05 is shared.
+5. Regulatory-registration credential records (generic, configurable per lab).
 
-### Phase E — Accreditation-readiness layer  *(turns the QMS into an audit tool)*
-1. A **self-assessment mode**: enter Y/P/N/NA + comments per checklist item,
-   auto-scored to the SLIPTA five-star bands, exportable as the audit workbook.
-2. Auto-link each checklist item to the live evidence already in the system
-   (e.g. item 5.7 → equipment records) so an assessor clicks straight to proof.
-3. A readiness dashboard: percent-ready per section, trend over time.
+_(No self-assessment / checklist-scoring layer will be built. The software is
+designed so that correct routine use produces conforming records; it does not
+grade the laboratory against a checklist inside the product.)_
 
 ---
 
@@ -302,12 +339,10 @@ The software already covers the **management-system and technical-quality**
 essentials strongly — Documents, Personnel, Equipment, Supplier/Inventory, IQC/
 EQA/verification, Nonconforming events, Information management and Continual
 improvement are audit-ready or close. The two things standing between it and a
-credible high-star SLIPTA/GAS posture are **(1) a real Facilities & Safety
-module** and **(2) the pre-examination and contingency pieces of Process
-Management**. Phase A alone moves the largest block of points. Phase E then
-turns the system from a place that *holds* the evidence into a tool that
-*scores the lab against the checklist and links every answer to its proof* —
-which is the feature a quality manager preparing for an audit actually wants.
+credible conformance posture are **(1) a real Facilities & Safety module** and
+**(2) the pre-examination and continuity pieces of Process Management**. Phase A
+alone closes the largest block of gaps.
 
-Share the **GAS FM7.2-05 (2022)** PDF and I will convert this into a
-line-by-line conformance matrix and adjust the plan to Ghana's exact weighting.
+Both benchmarks — SLIPTA v3:2023 and GAS FM7.2-05 (2022) — have been reconciled
+and agree on these priorities. They serve purely as the build specification;
+the product itself names no standard and includes no self-assessment layer.

@@ -578,7 +578,7 @@ export function personnelRoutes() {
   });
 
   /* ──────────────────────────────────────────────────────────────────────
-   * Orientation / Induction tracking (ISO 15189 §6.2.3, WHO LQMS induction).
+   * Orientation / Induction tracking.
    * ──────────────────────────────────────────────────────────────────────── */
   router.get('/orientations', requirePermission('personnel', 'view'), (_req, res) => {
     res.json(getDb().prepare(`SELECT o.*, s.full_name AS staff_name, f.full_name AS facilitator_name

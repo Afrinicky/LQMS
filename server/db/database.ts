@@ -2378,7 +2378,7 @@ CREATE TABLE IF NOT EXISTS section_services (
   if (!staffColNames.has('surname')) database.exec('ALTER TABLE staff ADD COLUMN surname TEXT');
   if (!staffColNames.has('other_names')) database.exec('ALTER TABLE staff ADD COLUMN other_names TEXT');
 
-  // Master Personnel Register fields (ISO 15189 §6.2 / WHO LQMS / HR): identity,
+  // Master Personnel Register fields (identity, HR):
   // professional registration, qualifications, appointment and contact details.
   const addStaffCol = (name: string, ddl: string) => { if (!staffColNames.has(name)) database.exec(`ALTER TABLE staff ADD COLUMN ${ddl}`); };
   addStaffCol('middle_name', 'middle_name TEXT');
@@ -2425,7 +2425,7 @@ CREATE TABLE IF NOT EXISTS section_services (
     ].forEach(([n, o]) => seed.run(n, o));
   }
 
-  // Structured ethics confirmations on staff_declarations (ISO 15189 §6.2.2 / §4.1).
+  // Structured ethics confirmations on staff_declarations.
   const declColNames = new Set((database.prepare("PRAGMA table_info(staff_declarations)").all() as Array<{ name: string }>).map(c => c.name));
   const addDeclCol = (name: string, ddl: string) => { if (!declColNames.has(name)) database.exec(`ALTER TABLE staff_declarations ADD COLUMN ${ddl}`); };
   addDeclCol('impartiality_confirmed', 'impartiality_confirmed INTEGER');
@@ -2437,7 +2437,7 @@ CREATE TABLE IF NOT EXISTS section_services (
   addDeclCol('review_date', 'review_date TEXT');
   addDeclCol('next_review_date', 'next_review_date TEXT');
 
-  // Orientation / induction tracking (ISO 15189 §6.2.3, WHO LQMS induction).
+  // Orientation / induction tracking.
   database.exec(`
 CREATE TABLE IF NOT EXISTS staff_orientations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2479,7 +2479,7 @@ CREATE INDEX IF NOT EXISTS idx_staff_orientations_staff ON staff_orientations(st
   }
 
   // ===================================================================
-  // Phase 9: Documents & Records upgrade (ISO 15189 §8.3/§8.4, WHO LQMS)
+  // Phase 9: Documents & Records upgrade
   // Faithful to SECH Document Control Procedure (SECHPO026) and Control of
   // Records Procedure (SECHPO051).
   // -------------------------------------------------------------------
@@ -2606,7 +2606,7 @@ CREATE TABLE IF NOT EXISTS record_backup_log (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 -- Workflow comments left by drafter/reviewer/approver during the document
--- lifecycle (ISO 15189 §8.3 — documented review before issue).
+-- lifecycle (documented review before issue).
 CREATE TABLE IF NOT EXISTS document_comments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   document_id INTEGER NOT NULL REFERENCES documents(id),

@@ -148,7 +148,7 @@ function yearsOfExperience(dateStr?: string | null, now = new Date()): string {
   return yrs >= 0 ? yrs.toFixed(1) : '';
 }
 
-// Master Personnel Register field mapping (ISO 15189 §6.2 personnel records).
+// Master Personnel Register field mapping (personnel records).
 // Maps the camelCase API body to staff table columns and derives full_name /
 // initials from the structured name parts when supplied.
 const STAFF_COLUMN_MAP: Array<[string, string]> = [
@@ -722,7 +722,7 @@ export function commonRoutes() {
 
   // Assign a staff member to a position.
   //  - 'primary' (the holder): one per position; any current holder is moved to secondary.
-  //  - 'deputy'  (the designated deputy / acting officer per ISO 15189 §5 continuity):
+  //  - 'deputy'  (the designated deputy / acting officer for continuity):
   //              one per position; any current deputy is moved to secondary.
   //  - 'secondary': an additional non-primary assignment.
   router.post('/positions/:id/occupant', requirePermission('settings', 'edit'), (req, res) => {
