@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { ChartCard, BarMeter, BarChart, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, BarMeter, BarChart, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { FileDown, FileSpreadsheet } from 'lucide-react';
 import { api, API_BASE, getToken } from '../services/api';
@@ -365,19 +365,16 @@ export function PersonnelManagementPage() {
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
-    {tab === 'Dashboard' && (summary ? <div className="cards">
-      <div className="card"><h4>Active staff</h4><p className="metric">{summary.totalStaff ?? staff.length}</p></div>
-      <div className="card"><h4>Staff docs pending verification</h4><p className="metric">{summary.staffDocumentsPendingVerification}</p></div>
-      <div className="card"><h4>Certificates expiring soon</h4><p className="metric">{summary.certificatesExpiringSoon}</p></div>
-      <div className="card"><h4>Licences expiring soon</h4><p className="metric">{summary.licencesExpiringSoon ?? 0}</p></div>
-      <div className="card"><h4>Pending declarations</h4><p className="metric">{summary.pendingDeclarations}</p></div>
-      <div className="card"><h4>Ethics reviews due</h4><p className="metric">{summary.ethicsReviewsDue ?? 0}</p></div>
-      <div className="card"><h4>Orientations in progress</h4><p className="metric">{summary.orientationsInProgress ?? 0}</p></div>
-      <div className="card"><h4>Planned training events</h4><p className="metric">{summary.plannedTrainingEvents}</p></div>
-      <div className="card"><h4>Competency assessments due</h4><p className="metric">{summary.competencyAssessmentsDue}</p></div>
-      <div className="card"><h4>Authorisations due review</h4><p className="metric">{summary.authorizationsDueReview}</p></div>
-      <div className="card"><h4>Rosters this month</h4><p className="metric">{summary.rostersThisMonth}</p></div>
-    </div> : <p>Loading summary…</p>)}
+    {tab === 'Dashboard' && (summary ? <KpiStrip items={[
+      { label: 'Active staff', value: summary.totalStaff ?? staff.length },
+      { label: 'Docs pending verification', value: summary.staffDocumentsPendingVerification },
+      { label: 'Certificates expiring', value: summary.certificatesExpiringSoon, tone: 'warning' },
+      { label: 'Licences expiring', value: summary.licencesExpiringSoon ?? 0, tone: 'warning' },
+      { label: 'Pending declarations', value: summary.pendingDeclarations },
+      { label: 'Orientations in progress', value: summary.orientationsInProgress ?? 0 },
+      { label: 'Competency due', value: summary.competencyAssessmentsDue },
+      { label: 'Authorisations due', value: summary.authorizationsDueReview },
+    ]} /> : <p>Loading summary…</p>)}
     {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Compliance backlog" subtitle="Personnel records needing action">
         <BarMeter data={[
@@ -385,6 +382,7 @@ export function PersonnelManagementPage() {
           { label: 'Certificates expiring', value: summary.certificatesExpiringSoon, color: CHART_COLORS[2] },
           { label: 'Pending declarations', value: summary.pendingDeclarations, color: CHART_COLORS[4] },
           { label: 'Authorisations due', value: summary.authorizationsDueReview, color: CHART_COLORS[3] },
+          { label: 'Ethics reviews due', value: summary.ethicsReviewsDue ?? 0, color: CHART_COLORS[5] },
         ]} />
       </ChartCard>
       <ChartCard title="Training & competency" subtitle="Development and assessment activity">

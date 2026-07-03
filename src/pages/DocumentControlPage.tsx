@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import type { OfficeFileChangedPayload } from '../services/api';
@@ -447,28 +447,27 @@ export function DocumentControlPage() {
         <h3 style={{ margin: '6px 0' }}>Document control</h3>
         <button className="secondary" disabled={!!exportBusy} onClick={() => runExport('/documents/masterlist/export', 'Document_and_Records_Master_List.xlsx')}>{exportBusy === '/documents/masterlist/export' ? 'Preparing…' : 'Export Master List (Excel)'}</button>
       </div>
-      <div className="cards">
-        <div className="card"><h4>Active documents</h4><p className="metric">{summary.currentDocuments}</p></div>
-        <div className="card"><h4>Drafts</h4><p className="metric">{summary.drafts}</p></div>
-        <div className="card"><h4>In review</h4><p className="metric">{reviewQueue.length}</p></div>
-        <div className="card"><h4>Awaiting approval</h4><p className="metric">{approvalQueue.length}</p></div>
-        <div className="card"><h4>Due review (30d)</h4><p className="metric">{summary.dueReviews}</p></div>
-        <div className="card"><h4>Overdue reviews</h4><p className="metric">{summary.overdueReviews}</p></div>
-        <div className="card"><h4>Pending attestations</h4><p className="metric">{summary.pendingAttestations}</p></div>
-        <div className="card"><h4>Obsolete documents</h4><p className="metric">{summary.obsoleteDocuments}</p></div>
-      </div>
+      <KpiStrip items={[
+        { label: 'Active documents', value: summary.currentDocuments },
+        { label: 'Drafts', value: summary.drafts },
+        { label: 'In review', value: reviewQueue.length },
+        { label: 'Awaiting approval', value: approvalQueue.length },
+        { label: 'Due review (30d)', value: summary.dueReviews, tone: 'warning' },
+        { label: 'Overdue reviews', value: summary.overdueReviews, tone: 'danger' },
+        { label: 'Pending attestations', value: summary.pendingAttestations },
+        { label: 'Obsolete', value: summary.obsoleteDocuments },
+      ]} />
       <h3 style={{ margin: '18px 0 6px' }}>Record control</h3>
-      {recordSummary ? <div className="cards">
-        <div className="card"><h4>Active records</h4><p className="metric">{recordSummary.activeRecords}</p></div>
-        <div className="card"><h4>Archived records</h4><p className="metric">{recordSummary.archivedRecords}</p></div>
-        <div className="card"><h4>Disposal due</h4><p className="metric">{recordSummary.disposalDue}</p></div>
-        <div className="card"><h4>Retention rules</h4><p className="metric">{recordSummary.retentionRules}</p></div>
-        <div className="card"><h4>Record reviews this month</h4><p className="metric">{recordSummary.reviewsThisMonth}</p></div>
-        <div className="card"><h4>Open review actions</h4><p className="metric">{recordSummary.openReviewActions}</p></div>
-        <div className="card"><h4>Destructions this year</h4><p className="metric">{recordSummary.destructionsThisYear}</p></div>
-        <div className="card"><h4>Backups this month</h4><p className="metric">{recordSummary.backupsThisMonth}</p></div>
-        <div className="card"><h4>Failed restore tests</h4><p className="metric">{recordSummary.failedRestoreTests}</p></div>
-      </div> : <p className="muted">Loading record-control summary…</p>}
+      {recordSummary ? <KpiStrip items={[
+        { label: 'Active records', value: recordSummary.activeRecords },
+        { label: 'Archived', value: recordSummary.archivedRecords },
+        { label: 'Disposal due', value: recordSummary.disposalDue, tone: 'warning' },
+        { label: 'Retention rules', value: recordSummary.retentionRules },
+        { label: 'Reviews (month)', value: recordSummary.reviewsThisMonth },
+        { label: 'Open review actions', value: recordSummary.openReviewActions },
+        { label: 'Backups (month)', value: recordSummary.backupsThisMonth },
+        { label: 'Failed restore tests', value: recordSummary.failedRestoreTests, tone: 'danger' },
+      ]} /> : <p className="muted">Loading record-control summary…</p>}
       <div className="grid cols-2" style={{ marginTop: 18 }}>
         <ChartCard title="Document lifecycle" subtitle="Controlled set by current state">
           <DonutChart centerLabel="Documents" data={[

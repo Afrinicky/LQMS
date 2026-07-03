@@ -48,3 +48,30 @@ export const MODULE_ICONS: Record<string, LucideIcon> = {
 export function moduleIcon(key: string): LucideIcon {
   return MODULE_ICONS[key] ?? LayoutGrid;
 }
+
+/**
+ * Icons for the top-level NAV_SECTIONS (shared/constants/navigation). Sections
+ * that map 1:1 to a module reuse that module's icon; grouped sections get an
+ * umbrella icon of their own.
+ */
+export const SECTION_ICONS: Record<string, LucideIcon> = {
+  dashboard: LayoutDashboard,
+  documents: FileText,
+  personnel: Users,
+  equipment: Wrench,
+  inventory: Boxes,
+  process_control: Activity,
+  nc_capa: AlertOctagon,
+  assessments: ClipboardCheck,
+  risks: ShieldAlert,
+  customer: MessageSquareWarning,
+  safety: ShieldCheck,
+  improvement: TrendingUp,
+  reports: FolderArchive,
+  notifications: Bell,
+  settings: Settings,
+};
+
+export function sectionIcon(key: string): LucideIcon {
+  return SECTION_ICONS[key] ?? LayoutGrid;
+}

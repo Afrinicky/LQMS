@@ -228,11 +228,51 @@ p { line-height: 1.55; }
 }
 .nav a.active .nav-ico { color: var(--accent-bright); opacity: 1; }
 
+/* Collapsible sections — one per Home launchpad feature */
+.nav-section-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
+  font-weight: 500;
+  margin: 2px 0;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: none;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.nav-section-head:hover { background: rgba(255, 255, 255, 0.04); color: var(--text); box-shadow: none; }
+.nav-section-head.active { color: #fff; }
+.nav-section-head.active .nav-ico { color: var(--accent-bright); }
+.nav-section-head .nav-ico { flex: none; width: 18px; height: 18px; display: grid; place-items: center; color: inherit; opacity: 0.9; }
+.nav-section-head .nav-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.nav-section-head .nav-caret { flex: none; display: grid; place-items: center; color: var(--faint); transition: transform 0.18s ease; }
+.nav-section.open > .nav-section-head .nav-caret { transform: rotate(180deg); }
+.nav-section-items {
+  position: relative;
+  margin: 0 0 4px 20px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+.nav-section-items a { padding: 8px 10px; font-size: 13px; }
+
 .app-shell.collapsed .brand .brand-text,
 .app-shell.collapsed .nav-group-label,
 .app-shell.collapsed .nav a .nav-label,
+.app-shell.collapsed .nav-section-head .nav-label,
+.app-shell.collapsed .nav-section-head .nav-caret,
 .app-shell.collapsed .sidebar-toggle span { display: none; }
 .app-shell.collapsed .nav a { justify-content: center; }
+.app-shell.collapsed .nav-section-head { justify-content: center; }
+.app-shell.collapsed .nav-section-items { margin-left: 0; padding-left: 0; border-left: 0; }
 .app-shell.collapsed .brand { justify-content: center; padding-left: 0; padding-right: 0; }
 
 /* ---- Main column ---- */
@@ -448,6 +488,56 @@ p { line-height: 1.55; }
 }
 .card.metric br, .metric br { display: none; }
 
+/* ---- KPI strip — one slim band of key numbers per dashboard ---- */
+.kpi-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0;
+  padding: 6px 4px;
+}
+.kpi-strip .kpi {
+  flex: 1 1 0;
+  min-width: 118px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  text-align: center;
+  padding: 10px 14px;
+  border-left: 1px solid var(--border);
+}
+.kpi-strip .kpi:first-child { border-left: 0; }
+.kpi-strip .kpi-value {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.kpi-strip .kpi-label {
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+/* Position-cycled tones keep the strip colour-coded like the old tiles… */
+.kpi-strip .kpi:nth-child(8n+1) .kpi-value { color: var(--c1); }
+.kpi-strip .kpi:nth-child(8n+2) .kpi-value { color: var(--c2); }
+.kpi-strip .kpi:nth-child(8n+3) .kpi-value { color: var(--c3); }
+.kpi-strip .kpi:nth-child(8n+4) .kpi-value { color: var(--c4); }
+.kpi-strip .kpi:nth-child(8n+5) .kpi-value { color: var(--c5); }
+.kpi-strip .kpi:nth-child(8n+6) .kpi-value { color: var(--c6); }
+.kpi-strip .kpi:nth-child(8n+7) .kpi-value { color: var(--c7); }
+.kpi-strip .kpi:nth-child(8n+8) .kpi-value { color: var(--c8); }
+/* …but explicit tones win, for numbers with a fixed meaning. */
+.kpi-strip .kpi.t-danger .kpi-value { color: var(--danger); }
+.kpi-strip .kpi.t-warning .kpi-value { color: var(--warning); }
+.kpi-strip .kpi.t-success .kpi-value { color: var(--success); }
+
 /* Reusable StatCard component */
 .stat-card { position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 10px; padding: 18px 20px; }
 .stat-card .stat-top { display: flex; align-items: center; justify-content: space-between; }
@@ -506,6 +596,17 @@ p { line-height: 1.55; }
   border-color: color-mix(in srgb, var(--tone) 40%, var(--border));
   box-shadow: 0 10px 30px color-mix(in srgb, var(--tone) 16%, transparent);
 }
+
+/* Compact chart grid on the Main Dashboard so six charts fit one page */
+.dash-charts { gap: 14px; }
+.dash-charts .chart-card { padding: 14px 16px; gap: 10px; }
+.dash-charts .chart-card-head h3 { font-size: 13.5px; }
+.dash-charts .chart-card-head p { font-size: 11.5px; }
+.dash-charts .chart-meter { gap: 9px; }
+.dash-charts .chart-meter .meter-head { margin-bottom: 4px; }
+.dash-charts .chart-meter .meter-track { height: 6px; }
+.dash-charts .chart-legend { gap: 6px; min-width: 110px; }
+.dash-charts .donut-center strong { font-size: 24px; }
 
 /* Give chart cards a thin coloured top accent so they feel part of the system */
 .chart-card { background-clip: padding-box; }
@@ -1145,6 +1246,7 @@ button.step-toggle:hover { background: rgba(255,255,255,0.05); box-shadow: none;
 @media (max-width: 1200px) {
   .launch-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .grid.cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dash-charts.grid.cols-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 1000px) {
   .app-shell { grid-template-columns: var(--sidebar-w-collapsed) 1fr; }

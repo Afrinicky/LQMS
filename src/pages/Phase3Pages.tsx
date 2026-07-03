@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { ChartCard, DonutChart, BarMeter, BarChart, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, BarChart, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -122,12 +122,12 @@ export function EquipmentPage() {
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
     {tabBar(tab, ['Dashboard', 'Equipment Register', 'New Equipment', 'Maintenance Records', 'Breakdowns', 'Reports placeholder'], setTab)}
 
-    {tab === 'Dashboard' && <><div className="grid cols-4">
-      <div className="card metric"><span>Equipment items</span><br /><strong>{summary?.equipmentTotal ?? equipment.length}</strong></div>
-      <div className="card metric"><span>Maintenance due</span><br /><strong>{summary?.equipmentMaintenanceDue ?? '—'}</strong></div>
-      <div className="card metric"><span>Calibration due</span><br /><strong>{summary?.equipmentCalibrationDue ?? '—'}</strong></div>
-      <div className="card metric"><span>Out of service</span><br /><strong>{summary?.equipmentOutOfService ?? '—'}</strong></div>
-    </div>
+    {tab === 'Dashboard' && <><KpiStrip items={[
+      { label: 'Equipment items', value: summary?.equipmentTotal ?? equipment.length },
+      { label: 'Maintenance due', value: summary?.equipmentMaintenanceDue },
+      { label: 'Calibration due', value: summary?.equipmentCalibrationDue },
+      { label: 'Out of service', value: summary?.equipmentOutOfService, tone: 'danger' },
+    ]} />
     <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Fleet availability" subtitle="Operational vs out-of-service equipment">
         <DonutChart centerLabel="Assets" data={[
@@ -349,12 +349,12 @@ export function InventoryPage() {
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
     {tabBar(tab, ['Dashboard', 'Item Register', 'New Item', 'Batches/Lots', 'Stock Movements', 'Suppliers', 'Reports placeholder'], setTab)}
 
-    {tab === 'Dashboard' && <><div className="grid cols-4">
-      <div className="card metric"><span>Inventory items</span><br /><strong>{items.length}</strong></div>
-      <div className="card metric"><span>Low stock</span><br /><strong>{summary?.inventoryLowStock ?? items.filter(i => i.low_stock).length}</strong></div>
-      <div className="card metric"><span>Expiring soon</span><br /><strong>{summary?.inventoryExpiringSoon ?? '—'}</strong></div>
-      <div className="card metric"><span>Expired</span><br /><strong>{summary?.inventoryExpired ?? '—'}</strong></div>
-    </div>
+    {tab === 'Dashboard' && <><KpiStrip items={[
+      { label: 'Inventory items', value: items.length },
+      { label: 'Low stock', value: summary?.inventoryLowStock ?? items.filter(i => i.low_stock).length, tone: 'warning' },
+      { label: 'Expiring soon', value: summary?.inventoryExpiringSoon },
+      { label: 'Expired', value: summary?.inventoryExpired, tone: 'danger' },
+    ]} />
     <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Stock health" subtitle="Items by supply risk">
         <DonutChart centerLabel="Items" data={[
@@ -585,12 +585,12 @@ export function MonitoringPage() {
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
     {tabBar(tab, ['Dashboard', 'Monitoring Items', 'New Monitoring Item', 'Enter Reading', 'Excursions', 'Monthly Charts placeholder'], setTab)}
 
-    {tab === 'Dashboard' && <><div className="grid cols-4">
-      <div className="card metric"><span>Monitoring items</span><br /><strong>{items.length}</strong></div>
-      <div className="card metric"><span>Warnings</span><br /><strong>{summary?.monitoringWarnings ?? readings.filter(r => r.status === 'warning').length}</strong></div>
-      <div className="card metric"><span>Critical / out-of-range</span><br /><strong>{summary?.monitoringCritical ?? excursions.filter(r => r.status !== 'warning').length}</strong></div>
-      <div className="card metric"><span>Legacy records</span><br /><strong>{legacyRecords.length}</strong></div>
-    </div>
+    {tab === 'Dashboard' && <><KpiStrip items={[
+      { label: 'Monitoring items', value: items.length },
+      { label: 'Warnings', value: summary?.monitoringWarnings ?? readings.filter(r => r.status === 'warning').length, tone: 'warning' },
+      { label: 'Critical / out-of-range', value: summary?.monitoringCritical ?? excursions.filter(r => r.status !== 'warning').length, tone: 'danger' },
+      { label: 'Legacy records', value: legacyRecords.length },
+    ]} />
     <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Environmental status" subtitle="Latest reading status mix">
         <DonutChart centerLabel="Status" data={[
@@ -720,12 +720,12 @@ export function SafetyPage() {
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
     {tabBar(tab, ['Dashboard', 'Safety Incidents', 'New Incident', 'Safety Actions placeholder', 'Reports placeholder'], setTab)}
 
-    {tab === 'Dashboard' && <><div className="grid cols-4">
-      <div className="card metric"><span>Incidents</span><br /><strong>{incidents.length}</strong></div>
-      <div className="card metric"><span>Open</span><br /><strong>{summary?.openSafetyIncidents ?? incidents.filter(i => i.status !== 'closed').length}</strong></div>
-      <div className="card metric"><span>Action required</span><br /><strong>{incidents.filter(i => i.status === 'action_required').length}</strong></div>
-      <div className="card metric"><span>Closed</span><br /><strong>{incidents.filter(i => i.status === 'closed').length}</strong></div>
-    </div>
+    {tab === 'Dashboard' && <><KpiStrip items={[
+      { label: 'Incidents', value: incidents.length },
+      { label: 'Open', value: summary?.openSafetyIncidents ?? incidents.filter(i => i.status !== 'closed').length },
+      { label: 'Action required', value: incidents.filter(i => i.status === 'action_required').length, tone: 'warning' },
+      { label: 'Closed', value: incidents.filter(i => i.status === 'closed').length, tone: 'success' },
+    ]} />
     <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Incident status" subtitle="Safety incidents by resolution state">
         <DonutChart centerLabel="Incidents" data={[

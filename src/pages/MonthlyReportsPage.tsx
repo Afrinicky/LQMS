@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -202,15 +202,15 @@ export function MonthlyReportsPage() {
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && <>
-      {summary ? <div className="cards">
-        <div className="card"><h4>Imports this month</h4><p className="metric">{summary.importsThisMonth}</p></div>
-        <div className="card"><h4>Unprocessed imports</h4><p className="metric">{summary.unprocessedImports}</p></div>
-        <div className="card"><h4>Unresolved exceptions</h4><p className="metric">{summary.unresolvedExceptions}</p></div>
-        <div className="card"><h4>Draft reports</h4><p className="metric">{summary.draftReports}</p></div>
-        <div className="card"><h4>Approved this month</h4><p className="metric">{summary.approvedReportsThisMonth}</p></div>
-        <div className="card"><h4>Delayed TAT records</h4><p className="metric">{summary.delayedTatRecords}</p></div>
-        <div className="card"><h4>Average TAT (min)</h4><p className="metric">{summary.averageTatMinutes ?? '—'}</p></div>
-      </div> : <p>Loading summary…</p>}
+      {summary ? <KpiStrip items={[
+        { label: 'Imports (month)', value: summary.importsThisMonth },
+        { label: 'Unprocessed imports', value: summary.unprocessedImports, tone: 'warning' },
+        { label: 'Unresolved exceptions', value: summary.unresolvedExceptions, tone: 'danger' },
+        { label: 'Draft reports', value: summary.draftReports },
+        { label: 'Approved (month)', value: summary.approvedReportsThisMonth, tone: 'success' },
+        { label: 'Delayed TAT records', value: summary.delayedTatRecords },
+        { label: 'Average TAT (min)', value: summary.averageTatMinutes },
+      ]} /> : <p>Loading summary…</p>}
       {summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
         <ChartCard title="Import pipeline" subtitle="This month's LHIMS processing">
           <DonutChart centerLabel="Imports" data={[

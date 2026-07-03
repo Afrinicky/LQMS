@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -169,13 +169,13 @@ export function IqcPage() {
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
-    {tab === 'Dashboard' && summary && <div className="cards">
-      <div className="card"><h4>Active materials</h4><p className="metric">{summary.activeMaterials}</p></div>
-      <div className="card"><h4>Results this month</h4><p className="metric">{summary.resultsThisMonth}</p></div>
-      <div className="card"><h4>Failed/out-of-control this month</h4><p className="metric">{summary.failedThisMonth}</p></div>
-      <div className="card"><h4>Pending review</h4><p className="metric">{summary.resultsPendingReview}</p></div>
-      <div className="card"><h4>Lot changes this year</h4><p className="metric">{summary.lotChangesThisYear}</p></div>
-    </div>}
+    {tab === 'Dashboard' && summary && <KpiStrip items={[
+      { label: 'Active materials', value: summary.activeMaterials },
+      { label: 'Results this month', value: summary.resultsThisMonth },
+      { label: 'Failed / out-of-control', value: summary.failedThisMonth, tone: 'danger' },
+      { label: 'Pending review', value: summary.resultsPendingReview },
+      { label: 'Lot changes this year', value: summary.lotChangesThisYear },
+    ]} />}
     {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="QC outcomes this month" subtitle="In-control vs flagged results">
         <DonutChart centerLabel="Results" data={[
@@ -347,13 +347,13 @@ export function EqaPage() {
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
-    {tab === 'Dashboard' && summary && <div className="cards">
-      <div className="card"><h4>Active programs</h4><p className="metric">{summary.activePrograms}</p></div>
-      <div className="card"><h4>Open events</h4><p className="metric">{summary.openEvents}</p></div>
-      <div className="card"><h4>Events due soon</h4><p className="metric">{summary.eventsDueSoon}</p></div>
-      <div className="card"><h4>Unsatisfactory events</h4><p className="metric">{summary.unsatisfactoryEvents}</p></div>
-      <div className="card"><h4>Requiring corrective action</h4><p className="metric">{summary.eventsRequiringCorrectiveAction}</p></div>
-    </div>}
+    {tab === 'Dashboard' && summary && <KpiStrip items={[
+      { label: 'Active programs', value: summary.activePrograms },
+      { label: 'Open events', value: summary.openEvents },
+      { label: 'Events due soon', value: summary.eventsDueSoon, tone: 'warning' },
+      { label: 'Unsatisfactory events', value: summary.unsatisfactoryEvents, tone: 'danger' },
+      { label: 'Corrective action needed', value: summary.eventsRequiringCorrectiveAction },
+    ]} />}
     {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="EQA event status" subtitle="Open events by performance outcome">
         <DonutChart centerLabel="Open" data={[
@@ -521,13 +521,13 @@ export function VerificationValidationPage() {
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
-    {tab === 'Dashboard' && summary && <div className="cards">
-      <div className="card"><h4>Open method verifications</h4><p className="metric">{summary.openMethodVerifications}</p></div>
-      <div className="card"><h4>Completed verifications</h4><p className="metric">{summary.completedVerifications}</p></div>
-      <div className="card"><h4>Pending approval</h4><p className="metric">{summary.pendingApproval}</p></div>
-      <div className="card"><h4>Equipment verifications this year</h4><p className="metric">{summary.equipmentVerificationsThisYear}</p></div>
-      <div className="card"><h4>Equipment verifications pending approval</h4><p className="metric">{summary.equipmentVerificationsPendingApproval}</p></div>
-    </div>}
+    {tab === 'Dashboard' && summary && <KpiStrip items={[
+      { label: 'Open method verifications', value: summary.openMethodVerifications },
+      { label: 'Completed verifications', value: summary.completedVerifications, tone: 'success' },
+      { label: 'Pending approval', value: summary.pendingApproval },
+      { label: 'Equipment verifications (year)', value: summary.equipmentVerificationsThisYear },
+      { label: 'Equipment pending approval', value: summary.equipmentVerificationsPendingApproval },
+    ]} />}
     {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Method verification status" subtitle="Open vs completed verifications">
         <DonutChart centerLabel="Methods" data={[
@@ -679,13 +679,13 @@ export function MeasurementUncertaintyPage() {
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
-    {tab === 'Dashboard' && summary && <div className="cards">
-      <div className="card"><h4>Active records</h4><p className="metric">{summary.activeRecords}</p></div>
-      <div className="card"><h4>Pending review</h4><p className="metric">{summary.recordsPendingReview}</p></div>
-      <div className="card"><h4>Pending approval</h4><p className="metric">{summary.recordsPendingApproval}</p></div>
-      <div className="card"><h4>Due for review</h4><p className="metric">{summary.recordsDueForReview}</p></div>
-      <div className="card"><h4>Completed this year</h4><p className="metric">{summary.recordsCompletedThisYear}</p></div>
-    </div>}
+    {tab === 'Dashboard' && summary && <KpiStrip items={[
+      { label: 'Active records', value: summary.activeRecords },
+      { label: 'Pending review', value: summary.recordsPendingReview },
+      { label: 'Pending approval', value: summary.recordsPendingApproval },
+      { label: 'Due for review', value: summary.recordsDueForReview, tone: 'warning' },
+      { label: 'Completed this year', value: summary.recordsCompletedThisYear, tone: 'success' },
+    ]} />}
     {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="MU record status" subtitle="Active records by review stage">
         <DonutChart centerLabel="Active" data={[

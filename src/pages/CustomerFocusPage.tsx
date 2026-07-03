@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -221,16 +221,16 @@ export function CustomerFocusPage() {
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
-    {tab === 'Dashboard' && (summary ? <div className="cards">
-      <div className="card"><h4>Active stakeholders</h4><p className="metric">{summary.activeStakeholders}</p></div>
-      <div className="card"><h4>Active service agreements</h4><p className="metric">{summary.activeServiceAgreements}</p></div>
-      <div className="card"><h4>Feedback this month</h4><p className="metric">{summary.feedbackThisMonth}</p></div>
-      <div className="card"><h4>Open feedback</h4><p className="metric">{summary.openFeedback}</p></div>
-      <div className="card"><h4>High urgency feedback</h4><p className="metric">{summary.highUrgencyFeedback}</p></div>
-      <div className="card"><h4>Active surveys</h4><p className="metric">{summary.activeSurveys}</p></div>
-      <div className="card"><h4>Survey responses this month</h4><p className="metric">{summary.surveyResponsesThisMonth}</p></div>
-      <div className="card"><h4>Follow-ups due</h4><p className="metric">{summary.followUpsDue}</p></div>
-    </div> : <p>Loading summary…</p>)}
+    {tab === 'Dashboard' && (summary ? <KpiStrip items={[
+      { label: 'Active stakeholders', value: summary.activeStakeholders },
+      { label: 'Service agreements', value: summary.activeServiceAgreements },
+      { label: 'Feedback (month)', value: summary.feedbackThisMonth },
+      { label: 'Open feedback', value: summary.openFeedback },
+      { label: 'High urgency', value: summary.highUrgencyFeedback, tone: 'danger' },
+      { label: 'Active surveys', value: summary.activeSurveys },
+      { label: 'Responses (month)', value: summary.surveyResponsesThisMonth },
+      { label: 'Follow-ups due', value: summary.followUpsDue, tone: 'warning' },
+    ]} /> : <p>Loading summary…</p>)}
     {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Feedback handling" subtitle="This month's feedback by state">
         <DonutChart centerLabel="Feedback" data={[

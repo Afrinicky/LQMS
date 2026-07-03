@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -125,18 +125,16 @@ export function ProcessManagementPage() {
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
-    {tab === 'Dashboard' && (summary ? <div className="cards">
-      <div className="card"><h4>Active tests</h4><p className="metric">{summary.activeTests}</p></div>
-      <div className="card"><h4>Active acceptance criteria</h4><p className="metric">{summary.activeAcceptanceCriteria}</p></div>
-      <div className="card"><h4>Specimen rejections (month)</h4><p className="metric">{summary.specimenRejectionsThisMonth}</p></div>
-      <div className="card"><h4>Open rejections</h4><p className="metric">{summary.openSpecimenRejections}</p></div>
-      <div className="card"><h4>Critical results (month)</h4><p className="metric">{summary.criticalResultsThisMonth}</p></div>
-      <div className="card"><h4>Delayed critical notifications</h4><p className="metric">{summary.delayedCriticalNotifications}</p></div>
-      <div className="card"><h4>Referral sendouts pending</h4><p className="metric">{summary.referralSendoutsPending}</p></div>
-      <div className="card"><h4>Delayed referral sendouts</h4><p className="metric">{summary.delayedReferralSendouts}</p></div>
-      <div className="card"><h4>Report amendments (month)</h4><p className="metric">{summary.reportAmendmentsThisMonth}</p></div>
-      <div className="card"><h4>Pending process reviews</h4><p className="metric">{summary.pendingProcessReviews}</p></div>
-    </div> : <p>Loading summary…</p>)}
+    {tab === 'Dashboard' && (summary ? <KpiStrip items={[
+      { label: 'Active tests', value: summary.activeTests },
+      { label: 'Rejections (month)', value: summary.specimenRejectionsThisMonth },
+      { label: 'Open rejections', value: summary.openSpecimenRejections, tone: 'warning' },
+      { label: 'Critical results (month)', value: summary.criticalResultsThisMonth },
+      { label: 'Delayed critical notifs', value: summary.delayedCriticalNotifications, tone: 'danger' },
+      { label: 'Sendouts pending', value: summary.referralSendoutsPending },
+      { label: 'Amendments (month)', value: summary.reportAmendmentsThisMonth },
+      { label: 'Pending reviews', value: summary.pendingProcessReviews },
+    ]} /> : <p>Loading summary…</p>)}
     {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Pre-analytical quality" subtitle="Specimen rejection handling this month">
         <DonutChart centerLabel="Rejections" data={[
