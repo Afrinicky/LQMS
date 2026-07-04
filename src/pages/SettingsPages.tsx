@@ -1,6 +1,7 @@
 import { Fragment, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, API_BASE, getToken } from '../services/api';
+import { useAuth } from '../hooks/useAuth';
 import { MODULES, PERMISSION_ACTIONS, TECHNICAL_AUTHORIZATION_LEVELS } from '../../shared/constants/modules';
 import type {
   OrgTree, OrgTreeNode, ProfessionalRank,
@@ -1301,12 +1302,15 @@ function formatBytes(n: number): string {
 }
 
 export function BackupRestore(){
+  const { user, logout } = useAuth();
+  const isAdmin = user?.roleName === 'System Administrator';
   const [backups, setBackups] = useState<BackupEntry[]>([]);
   const [location, setLocation] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  const [resetConfirm, setResetConfirm] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = () => api<{ location: string; backups: BackupEntry[] }>('/backup/list')
@@ -1365,6 +1369,18 @@ export function BackupRestore(){
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
 
+  async function factoryReset() {
+    if (resetConfirm !== 'RESET') return;
+    if (!window.confirm('FACTORY RESET\n\nThis PERMANENTLY erases ALL data — the database, uploads, evidence and configuration — and returns the system to first-time setup.\n\nA full backup is created automatically first so this can be undone. You will be signed out afterwards.\n\nAre you absolutely sure?')) return;
+    setBusy(true); setError(null); setMessage(null);
+    try {
+      const r = await api<{ message: string; backup: string }>('/backup/factory-reset', { method: 'POST', body: JSON.stringify({ confirm: 'RESET' }) });
+      setResetConfirm('');
+      setMessage(`${r.message} A safety backup was saved as ${r.backup}. Signing out…`);
+      setTimeout(() => { void logout().catch(() => undefined).finally(() => window.location.reload()); }, 1800);
+    } catch (e) { setError((e as Error).message); setBusy(false); }
+  }
+
   return <div className="card"><h3>Backup &amp; Restore</h3>
     <p>Backups are ZIP archives that include the SQLite database, uploads, evidence, config, and a backup-manifest.json. They are stored on the server at <code>{location || 'the backups folder'}</code>. Use <strong>Download</strong> to keep a copy anywhere, and restore from an existing backup or from a ZIP file on your computer.</p>
 
@@ -1397,6 +1413,24 @@ export function BackupRestore(){
       <input ref={fileRef} type="file" accept=".zip,application/zip" onChange={e => setRestoreFile(e.target.files?.[0] ?? null)} />
       <button onClick={restoreFromUpload} disabled={busy || !restoreFile}>{busy ? 'Working…' : 'Restore from selected ZIP'}</button>
     </div>
+
+    {isAdmin && <>
+      <hr />
+      <h4 style={{ color: 'var(--danger)' }}>Factory reset</h4>
+      <p className="hint">Permanently erase <strong>all data</strong> — database, uploads, evidence and configuration — and return the system to first-time setup. A full backup is created automatically first so this can be undone, and existing backups are kept. Only a System Administrator can do this.</p>
+      <p className="hint">To proceed, type <code>RESET</code> below and then confirm.</p>
+      <div className="form-actions">
+        <input
+          type="text"
+          value={resetConfirm}
+          onChange={e => setResetConfirm(e.target.value)}
+          placeholder="Type RESET to confirm"
+          aria-label="Type RESET to confirm factory reset"
+          autoComplete="off"
+        />
+        <button className="danger" onClick={factoryReset} disabled={busy || resetConfirm !== 'RESET'}>{busy ? 'Working…' : 'Reset to factory settings'}</button>
+      </div>
+    </>}
   </div>;
 }
 

@@ -4,6 +4,7 @@ import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
 import { getDb, closeDb, ensureDataDirs, uploadRoot, evidenceRoot, backupRoot, dbPath, configRoot, dataRoot } from '../db/database.js';
+import { seedDefaults } from '../db/seed.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
@@ -1720,6 +1721,77 @@ export function commonRoutes() {
 
     res.json({ ok: true, message: 'Restore completed. The database and files were replaced from the backup. Users may need to sign in again.', safetyBackup });
   });
+
+  // Factory reset: wipe the database and all data (uploads, evidence, config) and
+  // return the deployment to its first-run state (the setup wizard). This is more
+  // destructive than a restore, so it is gated tightly:
+  //   - the caller must be a System Administrator (not just "settings/approve");
+  //   - the request body must contain the exact confirmation phrase { confirm: 'RESET' };
+  //   - a full backup is ALWAYS taken first so the wipe can be undone.
+  // Existing backup ZIPs are preserved (the backups folder is never cleared).
+  router.post('/backup/factory-reset', requirePermission('settings', 'approve'), async (req, res) => {
+    ensureDataDirs();
+
+    // Only a System Administrator may factory-reset the system.
+    const roleRow = getDb().prepare('SELECT r.name FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?').get(req.user!.id) as { name: string } | undefined;
+    if (!roleRow || roleRow.name !== 'System Administrator') {
+      return res.status(403).json({ error: 'Only a System Administrator can perform a factory reset.' });
+    }
+
+    // Require the exact confirmation phrase so a reset can never happen by accident.
+    if (!req.body || req.body.confirm !== 'RESET') {
+      return res.status(400).json({ error: 'Factory reset not confirmed. Type RESET to confirm.' });
+    }
+
+    const actorUsername = req.user!.username;
+
+    // 1) Always take a full backup first so the wipe can be undone.
+    let backupName: string;
+    try {
+      try { getDb().pragma('wal_checkpoint(TRUNCATE)'); } catch { /* best-effort */ }
+      backupName = `pre-factory-reset-${new Date().toISOString().replace(/[:.]/g, '-')}.zip`;
+      await writeBackupZip(path.join(backupRoot, backupName), { product: 'SECH_LIMS by Nickland', createdAt: new Date().toISOString(), kind: 'pre-factory-reset-backup' });
+    } catch (err) {
+      console.error('[backup/factory-reset] pre-reset backup failed', err);
+      return res.status(500).json({ error: 'Could not create a pre-reset backup. Factory reset aborted; nothing was changed.' });
+    }
+
+    // 2) Wipe the database file and all data directories. Backups are preserved.
+    try {
+      closeDb();
+      for (const ext of ['', '-wal', '-shm']) {
+        const p = dbPath + ext;
+        if (fs.existsSync(p)) fs.rmSync(p, { force: true });
+      }
+      for (const dir of [uploadRoot, evidenceRoot, configRoot]) {
+        fs.rmSync(dir, { recursive: true, force: true });
+        fs.mkdirSync(dir, { recursive: true });
+      }
+    } catch (err) {
+      console.error('[backup/factory-reset] wipe failed', err);
+      try { getDb(); } catch { /* reopen best-effort */ }
+      return res.status(500).json({ error: `Factory reset failed while clearing data. A pre-reset backup was saved as ${backupName}. See server log for details.` });
+    }
+
+    // 3) Recreate a fresh, seeded database (schema + default roles/permissions/
+    //    modules). No users are created, so the app returns to first-run setup.
+    try {
+      getDb();        // reopens and re-migrates a blank database
+      seedDefaults(); // re-seed the foundation defaults
+    } catch (err) {
+      console.error('[backup/factory-reset] re-initialisation failed', err);
+      return res.status(500).json({ error: `Factory reset cleared the data but failed to re-initialise. A pre-reset backup was saved as ${backupName}. See server log for details.` });
+    }
+
+    // Record the event directly (the acting user no longer exists after the wipe).
+    try {
+      getDb().prepare('INSERT INTO audit_logs (actor_user_id, action, entity, entity_id, new_value) VALUES (NULL, ?, ?, ?, ?)')
+        .run('factory_reset', 'backup', backupName, JSON.stringify({ backup: backupName, performedBy: actorUsername }));
+    } catch { /* never block on audit */ }
+
+    res.json({ ok: true, message: 'Factory reset complete. All data was cleared and first-time setup is required.', backup: backupName });
+  });
+
   router.get('/audit-log', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 200').all()));
 
   // -------- Phase 15: System health, my-work, setup health, linked records --------
