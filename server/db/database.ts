@@ -2695,6 +2695,129 @@ CREATE INDEX IF NOT EXISTS idx_document_comments_doc ON document_comments(docume
   database.exec(`CREATE INDEX IF NOT EXISTS idx_dennis_documents_source ON dennis_documents(source_document_id);
 CREATE INDEX IF NOT EXISTS idx_dennis_chunks_doc ON dennis_document_chunks(document_id);`);
 
+  // ===================================================================
+  // Facilities & Safety workspace — safety equipment, inspections/drills,
+  // waste disposal, hazardous chemicals and staff immunisation/exposure
+  // records, complementing the existing safety-incident register.
+  // -------------------------------------------------------------------
+  database.exec(`
+-- Safety equipment register: biosafety cabinets, fume hoods, fire
+-- extinguishers, alarms, eyewash stations, showers, spill/first-aid kits, PPE
+-- stations. Tracks inspection and certification due dates.
+CREATE TABLE IF NOT EXISTS safety_equipment (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  equipment_number TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  equipment_type TEXT,               -- biosafety_cabinet|fume_hood|fire_extinguisher|fire_alarm|smoke_detector|eyewash_station|emergency_shower|spill_kit|first_aid_kit|ppe_station|other
+  serial_number TEXT,
+  location_id INTEGER REFERENCES locations(id),
+  section_id INTEGER REFERENCES sections(id),
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  status TEXT NOT NULL DEFAULT 'operational', -- operational|out_of_service|expired|removed
+  inspection_frequency TEXT,
+  last_inspection_date TEXT,
+  next_inspection_due TEXT,
+  certification_frequency TEXT,
+  last_certification_date TEXT,
+  next_certification_due TEXT,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Safety inspections, audits, fire drills, housekeeping and facility
+-- assessments. Findings can escalate to NC/CAPA like safety incidents.
+CREATE TABLE IF NOT EXISTS safety_inspections (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  inspection_number TEXT NOT NULL UNIQUE,
+  inspection_type TEXT,              -- safety_audit|fire_drill|housekeeping|facility_assessment|walkthrough|biosafety
+  inspection_date TEXT NOT NULL,
+  section_id INTEGER REFERENCES sections(id),
+  location_id INTEGER REFERENCES locations(id),
+  conducted_by_staff_id INTEGER REFERENCES staff(id),
+  scope TEXT,
+  findings_summary TEXT,
+  outcome TEXT,                      -- pass|action_required|fail
+  corrective_action TEXT,
+  status TEXT NOT NULL DEFAULT 'open', -- open|under_review|action_required|closed
+  next_due_date TEXT,
+  nc_id INTEGER REFERENCES nonconforming_events(id),
+  capa_id INTEGER REFERENCES capa_records(id),
+  closed_by_staff_id INTEGER REFERENCES staff(id),
+  closed_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Waste disposal log: biohazard, sharps, chemical, pathological and general
+-- waste, with disposal method and manifest reference.
+CREATE TABLE IF NOT EXISTS waste_disposal_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  record_number TEXT NOT NULL UNIQUE,
+  disposal_date TEXT NOT NULL,
+  waste_type TEXT,                   -- infectious|sharps|chemical|pathological|general|radioactive|pharmaceutical
+  quantity TEXT,
+  unit TEXT,
+  disposal_method TEXT,              -- autoclave|incineration|pit|licensed_collector|sewer|other
+  handled_by_staff_id INTEGER REFERENCES staff(id),
+  carrier_or_destination TEXT,
+  manifest_reference TEXT,
+  section_id INTEGER REFERENCES sections(id),
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Hazardous chemical inventory with safety-data-sheet reference, hazard
+-- class, storage and segregation.
+CREATE TABLE IF NOT EXISTS hazardous_chemicals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  chemical_number TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  hazard_class TEXT,                 -- flammable|corrosive|toxic|oxidizer|carcinogen|irritant|radioactive|other
+  cas_number TEXT,
+  sds_reference TEXT,
+  sds_on_file INTEGER DEFAULT 0,
+  storage_location_id INTEGER REFERENCES locations(id),
+  segregation_group TEXT,
+  quantity TEXT,
+  unit TEXT,
+  expiry_date TEXT,
+  spill_measures TEXT,
+  status TEXT NOT NULL DEFAULT 'in_use', -- in_use|in_store|disposed
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Staff immunisation, post-exposure prophylaxis and vaccination-declination
+-- records (occupational health).
+CREATE TABLE IF NOT EXISTS staff_immunizations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  record_number TEXT NOT NULL UNIQUE,
+  staff_id INTEGER REFERENCES staff(id),
+  record_type TEXT NOT NULL DEFAULT 'vaccination', -- vaccination|post_exposure|declination
+  vaccine_or_agent TEXT,
+  dose_or_stage TEXT,
+  date_administered TEXT,
+  next_due_date TEXT,
+  provider TEXT,
+  exposure_date TEXT,
+  exposure_source TEXT,
+  follow_up_summary TEXT,
+  outcome TEXT,
+  declination_signed INTEGER DEFAULT 0,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+`);
+
   // Default Dennis settings: strict hybrid policy. Ollama (offline) is the default
   // runtime and is enabled; online AI is disabled by default and, even once
   // enabled, is restricted to SOP/document analysis only (never operational data).
