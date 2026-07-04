@@ -2474,9 +2474,69 @@ CREATE INDEX IF NOT EXISTS idx_staff_orientations_staff ON staff_orientations(st
     ['address', 'TEXT'], ['city', 'TEXT'], ['country', 'TEXT'], ['phone', 'TEXT'], ['email', 'TEXT'],
     ['website', 'TEXT'], ['registration_number', 'TEXT'], ['accreditation_body', 'TEXT'],
     ['accreditation_number', 'TEXT'], ['accreditation_status', 'TEXT'], ['motto', 'TEXT'], ['logo_file_id', 'INTEGER'],
+    // Legal identity narrative and quality-policy/manual summaries live on the
+    // singleton profile; supporting documents and granular policies/objectives
+    // live in the dedicated tables below.
+    ['legal_status', 'TEXT'], ['legal_identity_notes', 'TEXT'],
+    ['quality_policy', 'TEXT'], ['quality_manual_summary', 'TEXT'],
+    // Set to 1 once the laboratory has been fully registered from My Laboratory,
+    // which retires the first-run "register your laboratory" prompt.
+    ['registration_complete', 'INTEGER NOT NULL DEFAULT 0'],
   ] as const) {
     if (!labColNames.has(col)) database.exec(`ALTER TABLE laboratory_profile ADD COLUMN ${col} ${type}`);
   }
+
+  // My Laboratory: supporting documents (legal identity + quality manual),
+  // quality policies, and quality objectives (standing + annual). Editable only
+  // from Settings → My Laboratory; surfaced read-only elsewhere.
+  database.exec(`
+CREATE TABLE IF NOT EXISTS laboratory_documents (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  category TEXT NOT NULL,            -- 'legal_identity' | 'quality_manual'
+  doc_type TEXT,                     -- e.g. operating licence, incorporation, tax, quality manual
+  title TEXT NOT NULL,
+  file_id INTEGER REFERENCES files(id),
+  reference_number TEXT,
+  issuing_authority TEXT,
+  issue_date TEXT,
+  expiry_date TEXT,
+  version TEXT,
+  effective_date TEXT,
+  notes TEXT,
+  uploaded_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS quality_policies (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  policy_statement TEXT NOT NULL,
+  reference_note TEXT,               -- lab-entered ISO 15189:2022 relationship
+  display_order INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS quality_objectives (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  objective TEXT NOT NULL,
+  target TEXT,
+  measure TEXT,
+  year INTEGER,                      -- NULL = standing objective; a year = annual objective
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  status TEXT NOT NULL DEFAULT 'active',
+  review_notes TEXT,
+  reference_note TEXT,               -- lab-entered ISO 15189:2022 relationship
+  display_order INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_laboratory_documents_category ON laboratory_documents(category);
+CREATE INDEX IF NOT EXISTS idx_quality_objectives_year ON quality_objectives(year);
+`);
 
   // ===================================================================
   // Phase 9: Documents & Records upgrade
