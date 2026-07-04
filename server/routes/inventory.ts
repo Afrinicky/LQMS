@@ -321,14 +321,17 @@ export function inventoryRoutes() {
   });
 
   // Legacy generic item lookup — MUST come AFTER /items, /batches, /suppliers so those specific paths win
-  router.get('/:id', requirePermission('supplier_inventory', 'view'), (req, res) => {
+  // Numeric-guarded so named sub-resources (e.g. storage-inspections) below
+  // are not shadowed; non-numeric ids fall through to the later routes.
+  const numericOnly = (req: any, _res: any, next: any) => /^\d+$/.test(req.params.id) ? next() : next('route');
+  router.get('/:id', numericOnly, requirePermission('supplier_inventory', 'view'), (req, res) => {
     const db = getDb();
     const item = db.prepare('SELECT i.*, s.name AS supplier_name, s.contact AS supplier_contact FROM inventory_items i LEFT JOIN suppliers s ON s.id = i.supplier_id WHERE i.id = ?').get(req.params.id);
     if (!item) return res.status(404).json({ error: 'Inventory item not found' });
     res.json(item);
   });
 
-  router.put('/:id', requirePermission('supplier_inventory', 'edit'), (req, res) => {
+  router.put('/:id', numericOnly, requirePermission('supplier_inventory', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM inventory_items WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Inventory item not found' });
@@ -346,6 +349,32 @@ export function inventoryRoutes() {
         req.params.id
       );
     audit(req, { action: 'edit', entity: 'inventory_items', entityId: req.params.id, oldValue, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  // ============= Storage-area condition inspections =============
+  router.get('/storage-inspections', requirePermission('supplier_inventory', 'view'), (_req, res) => {
+    res.json(getDb().prepare('SELECT * FROM storage_inspections ORDER BY inspection_date DESC, created_at DESC').all());
+  });
+  router.post('/storage-inspections', requirePermission('supplier_inventory', 'create'), (req, res) => {
+    if (!req.body.inspectionDate) return res.status(400).json({ error: 'inspectionDate is required' });
+    const db = getDb();
+    const createdAt = new Date().toISOString();
+    const number = generateRecordNumber(db, 'storage_inspections', 'STI', createdAt);
+    const bit = (v: unknown) => v ? 1 : 0;
+    const r = db.prepare(`INSERT INTO storage_inspections (inspection_number, inspection_date, location_id, storage_area, inspected_by_staff_id, cold_storage_adequate, temperature_monitored, humidity_monitored, ventilation_adequate, access_controlled, organised_fefo, outcome, findings, corrective_action, next_due_date, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(number, req.body.inspectionDate, parseIntNullable(req.body.locationId), req.body.storageArea ?? null, parseIntNullable(req.body.inspectedByStaffId) ?? getStaffIdOrCurrent(req, null), bit(req.body.coldStorageAdequate), bit(req.body.temperatureMonitored), bit(req.body.humidityMonitored), bit(req.body.ventilationAdequate), bit(req.body.accessControlled), bit(req.body.organisedFefo), req.body.outcome ?? null, req.body.findings ?? null, req.body.correctiveAction ?? null, req.body.nextDueDate ?? null, req.body.status ?? 'open', req.user!.id, createdAt);
+    audit(req, { action: 'create', entity: 'storage_inspections', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
+    res.status(201).json({ id: r.lastInsertRowid, inspectionNumber: number });
+  });
+  router.put('/storage-inspections/:id', requirePermission('supplier_inventory', 'edit'), (req, res) => {
+    const db = getDb();
+    const old = db.prepare('SELECT * FROM storage_inspections WHERE id = ?').get(req.params.id) as any;
+    if (!old) return res.status(404).json({ error: 'Storage inspection not found' });
+    const bit = (v: unknown, prev: number) => v === undefined ? prev : (v ? 1 : 0);
+    db.prepare(`UPDATE storage_inspections SET inspection_date = ?, location_id = ?, storage_area = ?, inspected_by_staff_id = ?, cold_storage_adequate = ?, temperature_monitored = ?, humidity_monitored = ?, ventilation_adequate = ?, access_controlled = ?, organised_fefo = ?, outcome = ?, findings = ?, corrective_action = ?, next_due_date = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(req.body.inspectionDate ?? old.inspection_date, parseIntNullable(req.body.locationId) ?? old.location_id, req.body.storageArea ?? old.storage_area, parseIntNullable(req.body.inspectedByStaffId) ?? old.inspected_by_staff_id, bit(req.body.coldStorageAdequate, old.cold_storage_adequate), bit(req.body.temperatureMonitored, old.temperature_monitored), bit(req.body.humidityMonitored, old.humidity_monitored), bit(req.body.ventilationAdequate, old.ventilation_adequate), bit(req.body.accessControlled, old.access_controlled), bit(req.body.organisedFefo, old.organised_fefo), req.body.outcome ?? old.outcome, req.body.findings ?? old.findings, req.body.correctiveAction ?? old.corrective_action, req.body.nextDueDate ?? old.next_due_date, req.body.status ?? old.status, req.params.id);
+    audit(req, { action: 'edit', entity: 'storage_inspections', entityId: req.params.id, oldValue: old, newValue: req.body });
     res.json({ ok: true });
   });
 

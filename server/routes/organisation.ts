@@ -21,6 +21,9 @@ export function organisationRoutes() {
       budgetLinesCurrentYear: count("SELECT COUNT(*) count FROM budget_projections WHERE fiscal_year = ?", year),
       budgetTotalCurrentYear: totalRow.total,
       budgetPendingApproval: count("SELECT COUNT(*) count FROM budget_projections WHERE status IN ('draft','submitted')"),
+      activeRegistrations: count("SELECT COUNT(*) count FROM regulatory_registrations WHERE status = 'active'"),
+      registrationsExpiringSoon: count("SELECT COUNT(*) count FROM regulatory_registrations WHERE status = 'active' AND expiry_date IS NOT NULL AND expiry_date <= date(?, '+60 day')", today),
+      registrationsExpired: count("SELECT COUNT(*) count FROM regulatory_registrations WHERE expiry_date IS NOT NULL AND expiry_date < ? AND status != 'withdrawn'", today),
     });
   });
 
@@ -69,6 +72,30 @@ export function organisationRoutes() {
     db.prepare(`UPDATE budget_projections SET fiscal_year = ?, category = ?, description = ?, projected_amount = ?, currency = ?, responsible_staff_id = ?, status = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
       .run(req.body.fiscalYear ?? old.fiscal_year, req.body.category ?? old.category, req.body.description ?? old.description, amount, req.body.currency ?? old.currency, parseIntNullable(req.body.responsibleStaffId) ?? old.responsible_staff_id, req.body.status ?? old.status, req.body.notes ?? old.notes, req.params.id);
     audit(req, { action: 'edit', entity: 'budget_projections', entityId: req.params.id, oldValue: old, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  // ============= Regulatory registrations & licences =============
+  router.get('/registrations', requirePermission('organisation', 'view'), (_req, res) => {
+    res.json(getDb().prepare('SELECT * FROM regulatory_registrations ORDER BY expiry_date IS NULL, expiry_date ASC, created_at DESC').all());
+  });
+  router.post('/registrations', requirePermission('organisation', 'create'), (req, res) => {
+    if (!req.body.title) return res.status(400).json({ error: 'title is required' });
+    const db = getDb();
+    const createdAt = new Date().toISOString();
+    const number = generateRecordNumber(db, 'regulatory_registrations', 'REG', createdAt);
+    const r = db.prepare(`INSERT INTO regulatory_registrations (registration_number, credential_type, title, issuing_body, reference, issue_date, expiry_date, responsible_staff_id, status, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(number, req.body.credentialType ?? null, req.body.title, req.body.issuingBody ?? null, req.body.reference ?? null, req.body.issueDate ?? null, req.body.expiryDate ?? null, parseIntNullable(req.body.responsibleStaffId), req.body.status ?? 'active', req.body.notes ?? null, req.user!.id, createdAt);
+    audit(req, { action: 'create', entity: 'regulatory_registrations', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
+    res.status(201).json({ id: r.lastInsertRowid, registrationNumber: number });
+  });
+  router.put('/registrations/:id', requirePermission('organisation', 'edit'), (req, res) => {
+    const db = getDb();
+    const old = db.prepare('SELECT * FROM regulatory_registrations WHERE id = ?').get(req.params.id) as any;
+    if (!old) return res.status(404).json({ error: 'Registration not found' });
+    db.prepare(`UPDATE regulatory_registrations SET credential_type = ?, title = ?, issuing_body = ?, reference = ?, issue_date = ?, expiry_date = ?, responsible_staff_id = ?, status = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(req.body.credentialType ?? old.credential_type, req.body.title ?? old.title, req.body.issuingBody ?? old.issuing_body, req.body.reference ?? old.reference, req.body.issueDate ?? old.issue_date, req.body.expiryDate ?? old.expiry_date, parseIntNullable(req.body.responsibleStaffId) ?? old.responsible_staff_id, req.body.status ?? old.status, req.body.notes ?? old.notes, req.params.id);
+    audit(req, { action: 'edit', entity: 'regulatory_registrations', entityId: req.params.id, oldValue: old, newValue: req.body });
     res.json({ ok: true });
   });
 

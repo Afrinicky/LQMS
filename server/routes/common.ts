@@ -267,7 +267,10 @@ export function commonRoutes() {
       inventoryExpired: count('SELECT COUNT(*) count FROM inventory_items WHERE expiry_date IS NOT NULL AND expiry_date < ?', now),
       monitoringWarnings: count("SELECT COUNT(*) count FROM monitoring_readings WHERE status = 'warning'"),
       monitoringCritical: count("SELECT COUNT(*) count FROM monitoring_readings WHERE status IN ('critical','out_of_range')"),
-      openSafetyIncidents: count("SELECT COUNT(*) count FROM safety_incidents WHERE status != 'closed'")
+      openSafetyIncidents: count("SELECT COUNT(*) count FROM safety_incidents WHERE status != 'closed'"),
+      storageInspectionsThisMonth: count("SELECT COUNT(*) count FROM storage_inspections WHERE strftime('%Y-%m', inspection_date) = strftime('%Y-%m','now')"),
+      storageInspectionsDue: count("SELECT COUNT(*) count FROM storage_inspections WHERE next_due_date IS NOT NULL AND next_due_date <= ?", now.slice(0, 10)),
+      openStorageActions: count("SELECT COUNT(*) count FROM storage_inspections WHERE outcome IN ('action_required','fail') AND status != 'closed'")
     });
   });
 
@@ -417,7 +420,9 @@ export function commonRoutes() {
       totalStaff: count("SELECT COUNT(*) count FROM staff WHERE is_active = 1"),
       licencesExpiringSoon: count("SELECT COUNT(*) count FROM staff WHERE licence_expiry_date IS NOT NULL AND licence_expiry_date <= ? AND licence_expiry_date >= ?", expiryCutoff, todayIso),
       orientationsInProgress: count("SELECT COUNT(*) count FROM staff_orientations WHERE orientation_complete = 0 AND status != 'cancelled'"),
-      ethicsReviewsDue: count("SELECT COUNT(*) count FROM staff_declarations WHERE next_review_date IS NOT NULL AND next_review_date <= ?", expiryCutoff)
+      ethicsReviewsDue: count("SELECT COUNT(*) count FROM staff_declarations WHERE next_review_date IS NOT NULL AND next_review_date <= ?", expiryCutoff),
+      appraisalsThisYear: count("SELECT COUNT(*) count FROM performance_appraisals WHERE strftime('%Y', appraisal_date) = strftime('%Y','now')"),
+      appraisalsDue: count("SELECT COUNT(*) count FROM performance_appraisals WHERE next_appraisal_due IS NOT NULL AND next_appraisal_due <= ?", todayIso)
     });
   });
 

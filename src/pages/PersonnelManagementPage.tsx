@@ -8,7 +8,7 @@ import DisabledModule from '../components/DisabledModule';
 import type {
   Section, Department, Staff, Position,
   StaffDocument, StaffDeclaration, TrainingEvent, CompetencyAssessment, DutyRoster,
-  PersonnelSummary, MyTasks, MyProfile, RosterCoverage, StaffSuggestionsResponse, StaffOrientation, RegisterImportResult, ProfessionalRank
+  PersonnelSummary, MyTasks, MyProfile, RosterCoverage, StaffSuggestionsResponse, StaffOrientation, RegisterImportResult, ProfessionalRank, PerformanceAppraisal
 } from '../../shared/types/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
@@ -113,6 +113,8 @@ export function PersonnelManagementPage() {
   const [authForm, setAuthForm] = useState({ moduleKey: 'documents', level: 'Perform', expiresAt: '', positionId: '', notes: '' });
   const [rosterForm, setRosterForm] = useState({ departmentId: '', sectionId: '', rosterStartDate: '', rosterEndDate: '', notes: '' });
   const [assignForm, setAssignForm] = useState({ staffId: '', dutyDate: '', shiftName: '', startTime: '', endTime: '', dutyRole: '', notes: '' });
+  const [appraisals, setAppraisals] = useState<PerformanceAppraisal[]>([]);
+  const [apprForm, setApprForm] = useState({ staffId: '', appraisalDate: '', period: '', appraiserStaffId: '', rating: '', outcome: '', strengths: '', developmentAreas: '', objectives: '', nextAppraisalDue: '' });
 
   async function load() {
     try {
@@ -126,7 +128,13 @@ export function PersonnelManagementPage() {
       ]);
       if (sum) setSummary(sum);
       setStaffDocs(sd); setDeclarations(decl); setTrainings(tr); setCompetencies(comp); setRosters(rs);
+      api<PerformanceAppraisal[]>('/personnel/appraisals').then(setAppraisals).catch(() => setAppraisals([]));
     } catch (e) { setError((e as Error).message); }
+  }
+  async function submitAppraisal(e: FormEvent) {
+    e.preventDefault(); setError(null);
+    try { await api('/personnel/appraisals', { method: 'POST', body: JSON.stringify(apprForm) }); setApprForm({ staffId: '', appraisalDate: '', period: '', appraiserStaffId: '', rating: '', outcome: '', strengths: '', developmentAreas: '', objectives: '', nextAppraisalDue: '' }); await load(); }
+    catch (e) { setError((e as Error).message); }
   }
   useEffect(() => { if (isEnabled('personnel')) void load(); }, [isEnabled]);
   useEffect(() => {
@@ -358,7 +366,8 @@ export function PersonnelManagementPage() {
     catch (e) { setError((e as Error).message); }
   }
 
-  const tabs = ['Dashboard', 'Staff Register', 'Staff Documents', 'Orientation & Induction', 'Declarations', 'Training Events', 'Competency Assessments', 'Technical Authorizations', 'Duty Rosters', 'My Profile', 'Reports'];
+  const tabs = ['Dashboard', 'Staff Register', 'Staff Documents', 'Orientation & Induction', 'Declarations', 'Training Events', 'Competency Assessments', 'Performance Appraisals', 'Technical Authorizations', 'Duty Rosters', 'My Profile', 'Reports'];
+  const staffName2 = (id?: number) => staff.find(s => s.id === id)?.fullName || '—';
 
   return <div className="module-page">
     <PageHeader eyebrow="Personnel Management" title="Personnel Management" subtitle="Personnel records — competence, authorisation, training, induction, and ethics." />
@@ -373,6 +382,7 @@ export function PersonnelManagementPage() {
       { label: 'Pending declarations', value: summary.pendingDeclarations, onClick: () => setTab('Declarations') },
       { label: 'Orientations in progress', value: summary.orientationsInProgress ?? 0, onClick: () => setTab('Orientation & Induction') },
       { label: 'Competency due', value: summary.competencyAssessmentsDue, onClick: () => setTab('Competency Assessments') },
+      { label: 'Appraisals due', value: summary.appraisalsDue ?? 0, tone: (summary.appraisalsDue ?? 0) ? 'warning' : undefined, onClick: () => setTab('Performance Appraisals') },
       { label: 'Authorisations due', value: summary.authorizationsDueReview, onClick: () => setTab('Technical Authorizations') },
     ]} /> : <p>Loading summary…</p>)}
     {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
@@ -630,6 +640,33 @@ export function PersonnelManagementPage() {
         </>}
         <button className="secondary" onClick={() => setSelectedComp(null)}>Close panel</button>
       </div>}
+    </>}
+
+    {tab === 'Performance Appraisals' && <>
+      <div className="card">
+        <h3>Record performance appraisal</h3>
+        <p className="muted" style={{ marginTop: 0 }}>Periodic staff performance review, distinct from competency assessment.</p>
+        <form className="form-grid" onSubmit={submitAppraisal}>
+          <label>Staff<select value={apprForm.staffId} onChange={e => setApprForm({ ...apprForm, staffId: e.target.value })} required><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+          <label>Appraisal date<input type="date" value={apprForm.appraisalDate} onChange={e => setApprForm({ ...apprForm, appraisalDate: e.target.value })} required /></label>
+          <label>Period<input value={apprForm.period} onChange={e => setApprForm({ ...apprForm, period: e.target.value })} placeholder="e.g. 2026 H1" /></label>
+          <label>Appraiser<select value={apprForm.appraiserStaffId} onChange={e => setApprForm({ ...apprForm, appraiserStaffId: e.target.value })}><option value="">Me</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+          <label>Rating<input value={apprForm.rating} onChange={e => setApprForm({ ...apprForm, rating: e.target.value })} /></label>
+          <label>Outcome<input value={apprForm.outcome} onChange={e => setApprForm({ ...apprForm, outcome: e.target.value })} /></label>
+          <label>Next appraisal due<input type="date" value={apprForm.nextAppraisalDue} onChange={e => setApprForm({ ...apprForm, nextAppraisalDue: e.target.value })} /></label>
+          <label>Strengths<textarea value={apprForm.strengths} onChange={e => setApprForm({ ...apprForm, strengths: e.target.value })} /></label>
+          <label>Development areas<textarea value={apprForm.developmentAreas} onChange={e => setApprForm({ ...apprForm, developmentAreas: e.target.value })} /></label>
+          <label>Objectives<textarea value={apprForm.objectives} onChange={e => setApprForm({ ...apprForm, objectives: e.target.value })} /></label>
+          <button type="submit">Record appraisal</button>
+        </form>
+      </div>
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3>Appraisal register</h3>
+        {appraisals.length === 0 ? <p>No appraisals recorded.</p> :
+          <table className="data-table"><thead><tr><th>No.</th><th>Staff</th><th>Date</th><th>Period</th><th>Appraiser</th><th>Rating</th><th>Next due</th></tr></thead><tbody>
+            {appraisals.map(a => <tr key={a.id}><td>{a.record_number}</td><td>{staffName2(a.staff_id)}</td><td>{a.appraisal_date}</td><td>{a.period || '—'}</td><td>{staffName2(a.appraiser_staff_id)}</td><td>{a.rating || '—'}</td><td>{a.next_appraisal_due || '—'}</td></tr>)}
+          </tbody></table>}
+      </div>
     </>}
 
     {tab === 'Technical Authorizations' && <p>Technical authorisations are created from completed competency assessments via the Competency Assessments tab. They appear on each staff member's profile under <em>My Profile</em>.</p>}

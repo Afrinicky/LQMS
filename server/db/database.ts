@@ -3022,6 +3022,77 @@ CREATE TABLE IF NOT EXISTS budget_projections (
 );
 `);
 
+  // ===================================================================
+  // Phase D cross-cutting registers — staff performance appraisals,
+  // storage-area condition inspections, and regulatory registrations /
+  // licences. All are empty registers populated by the laboratory.
+  // -------------------------------------------------------------------
+  database.exec(`
+-- Staff performance appraisals (distinct from competency assessments).
+CREATE TABLE IF NOT EXISTS performance_appraisals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  record_number TEXT NOT NULL UNIQUE,
+  staff_id INTEGER REFERENCES staff(id),
+  appraisal_date TEXT NOT NULL,
+  period TEXT,
+  appraiser_staff_id INTEGER REFERENCES staff(id),
+  rating TEXT,
+  outcome TEXT,
+  strengths TEXT,
+  development_areas TEXT,
+  objectives TEXT,
+  next_appraisal_due TEXT,
+  status TEXT NOT NULL DEFAULT 'completed', -- planned|completed
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Storage-area condition inspections (reagent/consumable/sample storage).
+CREATE TABLE IF NOT EXISTS storage_inspections (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  inspection_number TEXT NOT NULL UNIQUE,
+  inspection_date TEXT NOT NULL,
+  location_id INTEGER REFERENCES locations(id),
+  storage_area TEXT,
+  inspected_by_staff_id INTEGER REFERENCES staff(id),
+  cold_storage_adequate INTEGER DEFAULT 0,
+  temperature_monitored INTEGER DEFAULT 0,
+  humidity_monitored INTEGER DEFAULT 0,
+  ventilation_adequate INTEGER DEFAULT 0,
+  access_controlled INTEGER DEFAULT 0,
+  organised_fefo INTEGER DEFAULT 0,
+  outcome TEXT,                      -- pass|action_required|fail
+  findings TEXT,
+  corrective_action TEXT,
+  next_due_date TEXT,
+  status TEXT NOT NULL DEFAULT 'open', -- open|closed
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Regulatory registrations & licences (facility / organisational). The
+-- issuing body is free text so each laboratory names its own regulators.
+CREATE TABLE IF NOT EXISTS regulatory_registrations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  registration_number TEXT NOT NULL UNIQUE,
+  credential_type TEXT,             -- facility_licence|accreditation|practice_registration|permit|certification|other
+  title TEXT NOT NULL,
+  issuing_body TEXT,
+  reference TEXT,
+  issue_date TEXT,
+  expiry_date TEXT,
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  status TEXT NOT NULL DEFAULT 'active', -- active|expired|pending_renewal|withdrawn
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+`);
+
   // Default Dennis settings: strict hybrid policy. Ollama (offline) is the default
   // runtime and is enabled; online AI is disabled by default and, even once
   // enabled, is restricted to SOP/document analysis only (never operational data).

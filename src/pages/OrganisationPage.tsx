@@ -4,7 +4,7 @@ import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../comp
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
-import type { Staff, CodeOfConductRecord, BudgetProjection, OrganisationSummary } from '../../shared/types/api';
+import type { Staff, CodeOfConductRecord, BudgetProjection, OrganisationSummary, RegulatoryRegistration } from '../../shared/types/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
@@ -23,20 +23,23 @@ export function OrganisationPage() {
   const [summary, setSummary] = useState<OrganisationSummary | null>(null);
   const [conduct, setConduct] = useState<CodeOfConductRecord[]>([]);
   const [budget, setBudget] = useState<BudgetProjection[]>([]);
+  const [registrations, setRegistrations] = useState<RegulatoryRegistration[]>([]);
 
   const [cocForm, setCocForm] = useState({ staffId: '', commitmentType: 'all', statement: '', signedDate: '', reviewDate: '', conflictDeclared: false, conflictDetails: '' });
   const [budForm, setBudForm] = useState({ fiscalYear: String(new Date().getFullYear()), category: '', description: '', projectedAmount: '', currency: 'GHS', responsibleStaffId: '', status: 'draft' });
+  const [regForm, setRegForm] = useState({ credentialType: '', title: '', issuingBody: '', reference: '', issueDate: '', expiryDate: '', responsibleStaffId: '', status: 'active' });
 
   async function load() {
     try {
-      const [sum, coc, bud, stf] = await Promise.all([
+      const [sum, coc, bud, reg, stf] = await Promise.all([
         api<OrganisationSummary>('/organisation/summary').catch(() => null),
         api<CodeOfConductRecord[]>('/organisation/code-of-conduct').catch(() => []),
         api<BudgetProjection[]>('/organisation/budget').catch(() => []),
+        api<RegulatoryRegistration[]>('/organisation/registrations').catch(() => []),
         api<Staff[]>('/staff').catch(() => []),
       ]);
       if (sum) setSummary(sum);
-      setConduct(coc); setBudget(bud); setStaff(stf);
+      setConduct(coc); setBudget(bud); setRegistrations(reg); setStaff(stf);
     } catch (e) { setError((e as Error).message); }
   }
   useEffect(() => { if (isEnabled('organisation')) void load(); }, [isEnabled]);
@@ -54,6 +57,11 @@ export function OrganisationPage() {
     try { await api('/organisation/budget', { method: 'POST', body: JSON.stringify(budForm) }); setBudForm({ fiscalYear: String(new Date().getFullYear()), category: '', description: '', projectedAmount: '', currency: 'GHS', responsibleStaffId: '', status: 'draft' }); await load(); }
     catch (e) { setError((e as Error).message); }
   }
+  async function submitReg(e: FormEvent) {
+    e.preventDefault(); setError(null);
+    try { await api('/organisation/registrations', { method: 'POST', body: JSON.stringify(regForm) }); setRegForm({ credentialType: '', title: '', issuingBody: '', reference: '', issueDate: '', expiryDate: '', responsibleStaffId: '', status: 'active' }); await load(); }
+    catch (e) { setError((e as Error).message); }
+  }
 
   const budgetByCategory = BUDGET_CATEGORIES.map((c, i) => ({
     label: pretty(c),
@@ -64,7 +72,7 @@ export function OrganisationPage() {
 
   return <div className="module-page">
     <PageHeader eyebrow="Organisation and Leadership" title="Organisation &amp; Leadership" subtitle="Leadership commitments, code of conduct, and budget planning." />
-    {tabBar(tab, ['Dashboard', 'Code of Conduct', 'Budget Projection'], setTab)}
+    {tabBar(tab, ['Dashboard', 'Code of Conduct', 'Budget Projection', 'Registrations & Licences'], setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && <><KpiStrip items={[
@@ -73,7 +81,9 @@ export function OrganisationPage() {
       { label: 'Declared conflicts', value: summary?.declaredConflicts ?? 0, tone: (summary?.declaredConflicts ?? 0) ? 'danger' : undefined, onClick: () => setTab('Code of Conduct') },
       { label: 'Budget lines (year)', value: summary?.budgetLinesCurrentYear ?? 0, onClick: () => setTab('Budget Projection') },
       { label: 'Budget total (year)', value: summary ? Math.round(summary.budgetTotalCurrentYear).toLocaleString() : 0, onClick: () => setTab('Budget Projection') },
-      { label: 'Pending approval', value: summary?.budgetPendingApproval ?? 0, onClick: () => setTab('Budget Projection') },
+      { label: 'Registrations', value: summary?.activeRegistrations ?? 0, onClick: () => setTab('Registrations & Licences') },
+      { label: 'Expiring soon', value: summary?.registrationsExpiringSoon ?? 0, tone: (summary?.registrationsExpiringSoon ?? 0) ? 'warning' : undefined, onClick: () => setTab('Registrations & Licences') },
+      { label: 'Expired', value: summary?.registrationsExpired ?? 0, tone: (summary?.registrationsExpired ?? 0) ? 'danger' : undefined, onClick: () => setTab('Registrations & Licences') },
     ]} />
     <div className="grid cols-2 dash-charts" style={{ marginTop: 18 }}>
       <ChartCard title="Budget by category" subtitle="Projected amounts, current fiscal year">
@@ -132,6 +142,31 @@ export function OrganisationPage() {
         {budget.length === 0 ? <p>No budget lines yet.</p> :
           <table className="data-table"><thead><tr><th>No.</th><th>Year</th><th>Category</th><th>Description</th><th>Amount</th><th>Responsible</th><th>Status</th></tr></thead><tbody>
             {budget.map(b => <tr key={b.id}><td>{b.projection_number}</td><td>{b.fiscal_year || '—'}</td><td>{pretty(b.category)}</td><td>{b.description || '—'}</td><td>{b.projected_amount != null ? `${b.currency || ''} ${b.projected_amount.toLocaleString()}` : '—'}</td><td>{staffName(b.responsible_staff_id)}</td><td>{formatBadge(b.status)}</td></tr>)}
+          </tbody></table>}
+      </div>
+    </>}
+
+    {tab === 'Registrations & Licences' && <>
+      <div className="card">
+        <h3>Add registration / licence</h3>
+        <p className="muted" style={{ marginTop: 0 }}>Facility licences, accreditation, practice registrations and permits. Enter the issuing body for your jurisdiction.</p>
+        <form className="form-grid" onSubmit={submitReg}>
+          <label>Type<select value={regForm.credentialType} onChange={e => setRegForm({ ...regForm, credentialType: e.target.value })}><option value="">—</option>{['facility_licence', 'accreditation', 'practice_registration', 'permit', 'certification', 'other'].map(c => <option key={c} value={c}>{pretty(c)}</option>)}</select></label>
+          <label>Title<input value={regForm.title} onChange={e => setRegForm({ ...regForm, title: e.target.value })} required /></label>
+          <label>Issuing body<input value={regForm.issuingBody} onChange={e => setRegForm({ ...regForm, issuingBody: e.target.value })} placeholder="regulator / authority name" /></label>
+          <label>Reference<input value={regForm.reference} onChange={e => setRegForm({ ...regForm, reference: e.target.value })} /></label>
+          <label>Issue date<input type="date" value={regForm.issueDate} onChange={e => setRegForm({ ...regForm, issueDate: e.target.value })} /></label>
+          <label>Expiry date<input type="date" value={regForm.expiryDate} onChange={e => setRegForm({ ...regForm, expiryDate: e.target.value })} /></label>
+          <label>Responsible<select value={regForm.responsibleStaffId} onChange={e => setRegForm({ ...regForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+          <label>Status<select value={regForm.status} onChange={e => setRegForm({ ...regForm, status: e.target.value })}>{['active', 'pending_renewal', 'expired', 'withdrawn'].map(s => <option key={s} value={s}>{pretty(s)}</option>)}</select></label>
+          <button type="submit">Add registration</button>
+        </form>
+      </div>
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3>Registrations & licences register</h3>
+        {registrations.length === 0 ? <p>No registrations recorded.</p> :
+          <table className="data-table"><thead><tr><th>No.</th><th>Type</th><th>Title</th><th>Issuing body</th><th>Reference</th><th>Expiry</th><th>Status</th></tr></thead><tbody>
+            {registrations.map(r => <tr key={r.id}><td>{r.registration_number}</td><td>{pretty(r.credential_type)}</td><td>{r.title}</td><td>{r.issuing_body || '—'}</td><td>{r.reference || '—'}</td><td>{r.expiry_date || '—'}</td><td>{formatBadge(r.status)}</td></tr>)}
           </tbody></table>}
       </div>
     </>}

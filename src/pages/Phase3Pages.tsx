@@ -8,7 +8,8 @@ import type {
   Location, Section, Staff, Supplier, EquipmentItem, InventoryItem, MonitoringRecord, SafetyIncident,
   EquipmentMaintenanceRecord, EquipmentBreakdown, MonitoringItem, MonitoringReading,
   InventoryBatch, OperationsSummary,
-  SafetyEquipment, SafetyInspection, WasteDisposalRecord, HazardousChemical, StaffImmunization, FacilitiesSafetySummary
+  SafetyEquipment, SafetyInspection, WasteDisposalRecord, HazardousChemical, StaffImmunization, FacilitiesSafetySummary,
+  StorageInspection
 } from '../../shared/types/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
@@ -261,6 +262,8 @@ export function InventoryPage() {
   const [movementForm, setMovementForm] = useState({ batchId: '', movementType: 'issue', quantity: 0, movementDate: '', issuedToSectionId: '', receivedByStaffId: '', reason: '' });
   const [supplierForm, setSupplierForm] = useState({ name: '', contactPerson: '', phone: '', email: '', address: '', itemCategory: '', evaluationRequired: false });
   const [evalForm, setEvalForm] = useState({ supplierId: '', evaluationDate: '', rating: '', findings: '', actionRequired: '', nextEvaluationDate: '' });
+  const [storageInspections, setStorageInspections] = useState<StorageInspection[]>([]);
+  const [stiForm, setStiForm] = useState({ inspectionDate: '', locationId: '', storageArea: '', coldStorageAdequate: false, temperatureMonitored: false, humidityMonitored: false, ventilationAdequate: false, accessControlled: false, organisedFefo: false, outcome: '', findings: '', correctiveAction: '', nextDueDate: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -275,8 +278,14 @@ export function InventoryPage() {
       ]);
       setItems(its); setBatches(bts); setSuppliers(sups);
       if (ops) setSummary(ops);
+      api<StorageInspection[]>('/supplier-inventory/storage-inspections').then(setStorageInspections).catch(() => setStorageInspections([]));
     } catch (e) { setError((e as Error).message); }
     finally { setLoading(false); }
+  }
+  async function submitStorageInspection(e: FormEvent) {
+    e.preventDefault(); setError(null);
+    try { await api('/supplier-inventory/storage-inspections', { method: 'POST', body: JSON.stringify(stiForm) }); setStiForm({ inspectionDate: '', locationId: '', storageArea: '', coldStorageAdequate: false, temperatureMonitored: false, humidityMonitored: false, ventilationAdequate: false, accessControlled: false, organisedFefo: false, outcome: '', findings: '', correctiveAction: '', nextDueDate: '' }); await load(); }
+    catch (e) { setError((e as Error).message); }
   }
   useEffect(() => { if (isEnabled('supplier_inventory')) void load(); }, [isEnabled]);
 
@@ -348,7 +357,7 @@ export function InventoryPage() {
   return <div>
     <PageHeader eyebrow="Supplier &amp; Inventory Management" title="Supplier &amp; Inventory Management" subtitle="Suppliers, reagents, stock levels, batches, and expiry control." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
-    {tabBar(tab, ['Dashboard', 'Item Register', 'New Item', 'Batches/Lots', 'Stock Movements', 'Suppliers', 'Reports placeholder'], setTab)}
+    {tabBar(tab, ['Dashboard', 'Item Register', 'New Item', 'Batches/Lots', 'Stock Movements', 'Suppliers', 'Storage Inspections', 'Reports placeholder'], setTab)}
 
     {tab === 'Dashboard' && <><KpiStrip items={[
       { label: 'Inventory items', value: items.length, onClick: () => setTab('Item Register') },
@@ -488,6 +497,35 @@ export function InventoryPage() {
           </tbody></table>}
       </div>
     </div>}
+
+    {tab === 'Storage Inspections' && <>
+      <div className="card">
+        <h3>Record storage-area inspection</h3>
+        <form className="form" onSubmit={submitStorageInspection}>
+          <label>Inspection date<input type="date" value={stiForm.inspectionDate} onChange={e => setStiForm({ ...stiForm, inspectionDate: e.target.value })} required /></label>
+          <label>Location<select value={stiForm.locationId} onChange={e => setStiForm({ ...stiForm, locationId: e.target.value })}><option value="">Select location</option>{locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
+          <label>Storage area<input value={stiForm.storageArea} onChange={e => setStiForm({ ...stiForm, storageArea: e.target.value })} placeholder="e.g. reagent store, cold room" /></label>
+          <label><input type="checkbox" checked={stiForm.coldStorageAdequate} onChange={e => setStiForm({ ...stiForm, coldStorageAdequate: e.target.checked })} /> Cold storage adequate</label>
+          <label><input type="checkbox" checked={stiForm.temperatureMonitored} onChange={e => setStiForm({ ...stiForm, temperatureMonitored: e.target.checked })} /> Temperature monitored</label>
+          <label><input type="checkbox" checked={stiForm.humidityMonitored} onChange={e => setStiForm({ ...stiForm, humidityMonitored: e.target.checked })} /> Humidity monitored</label>
+          <label><input type="checkbox" checked={stiForm.ventilationAdequate} onChange={e => setStiForm({ ...stiForm, ventilationAdequate: e.target.checked })} /> Ventilation adequate</label>
+          <label><input type="checkbox" checked={stiForm.accessControlled} onChange={e => setStiForm({ ...stiForm, accessControlled: e.target.checked })} /> Access controlled</label>
+          <label><input type="checkbox" checked={stiForm.organisedFefo} onChange={e => setStiForm({ ...stiForm, organisedFefo: e.target.checked })} /> Organised / FEFO practised</label>
+          <label>Outcome<select value={stiForm.outcome} onChange={e => setStiForm({ ...stiForm, outcome: e.target.value })}><option value="">Select outcome</option><option value="pass">Pass</option><option value="action_required">Action required</option><option value="fail">Fail</option></select></label>
+          <label>Next due date<input type="date" value={stiForm.nextDueDate} onChange={e => setStiForm({ ...stiForm, nextDueDate: e.target.value })} /></label>
+          <label>Findings<textarea value={stiForm.findings} onChange={e => setStiForm({ ...stiForm, findings: e.target.value })} /></label>
+          <label>Corrective action<textarea value={stiForm.correctiveAction} onChange={e => setStiForm({ ...stiForm, correctiveAction: e.target.value })} /></label>
+          <button type="submit">Record inspection</button>
+        </form>
+      </div>
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3>Storage inspection log</h3>
+        {storageInspections.length === 0 ? <p>No storage inspections recorded.</p> :
+          <table className="table"><thead><tr><th>No.</th><th>Date</th><th>Area</th><th>Cold</th><th>Temp</th><th>Access</th><th>FEFO</th><th>Outcome</th></tr></thead><tbody>
+            {storageInspections.map(s => <tr key={s.id}><td>{s.inspection_number}</td><td>{s.inspection_date}</td><td>{s.storage_area || locations.find(l => l.id === s.location_id)?.name || '—'}</td><td>{s.cold_storage_adequate ? '✓' : '—'}</td><td>{s.temperature_monitored ? '✓' : '—'}</td><td>{s.access_controlled ? '✓' : '—'}</td><td>{s.organised_fefo ? '✓' : '—'}</td><td>{s.outcome ? s.outcome.replace(/_/g, ' ') : '—'}</td></tr>)}
+          </tbody></table>}
+      </div>
+    </>}
 
     {tab === 'Reports placeholder' && <div className="card"><p>Reports for inventory will be added in a later phase.</p></div>}
   </div>;
