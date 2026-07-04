@@ -9,7 +9,7 @@ import type {
   CustomerStakeholder, ServiceAgreement, CustomerFeedback,
   SatisfactionSurvey, SatisfactionSurveyQuestion, SatisfactionSurveyResponse,
   CustomerCommunicationLog, CustomerFocusImportBatch, CustomerFocusSummary,
-  SurveyAnalytics, ServiceAgreementPerformance
+  SurveyAnalytics, ServiceAgreementPerformance, AdvisoryService, LaboratoryHandbookEntry
 } from '../../shared/types/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
@@ -61,6 +61,11 @@ export function CustomerFocusPage() {
   const [analytics, setAnalytics] = useState<SurveyAnalytics | null>(null);
   const [allResponses, setAllResponses] = useState<SatisfactionSurveyResponse[]>([]);
   const [performance, setPerformance] = useState<ServiceAgreementPerformance | null>(null);
+  const [advisory, setAdvisory] = useState<AdvisoryService[]>([]);
+  const [handbook, setHandbook] = useState<LaboratoryHandbookEntry[]>([]);
+
+  const [advForm, setAdvForm] = useState({ serviceDate: '', serviceType: '', requester: '', stakeholderId: '', providedByStaffId: '', subject: '', adviceSummary: '', communicationChannel: '', followUpRequired: false, followUpDueDate: '' });
+  const [hbForm, setHbForm] = useState({ section: '', title: '', content: '', version: '', effectiveDate: '', reviewDate: '', status: 'active', displayOrder: '0' });
 
   const [stakeForm, setStakeForm] = useState({ stakeholderName: '', stakeholderType: 'internal_unit', organisation: '', contactPerson: '', email: '', phone: '', address: '', departmentId: '', sectionId: '', notes: '' });
   const [agreeForm, setAgreeForm] = useState({ stakeholderId: '', agreementTitle: '', serviceScope: '', startDate: '', endDate: '', reviewDueDate: '', responsibleStaffId: '', agreedTurnaround: '', reportingFormat: '', notes: '' });
@@ -84,6 +89,11 @@ export function CustomerFocusPage() {
       ]);
       if (sum) setSummary(sum);
       setStakeholders(st); setAgreements(sa); setFeedback(fb); setSurveys(sv); setCommunications(cm); setImports(im);
+      const [adv, hb] = await Promise.all([
+        api<AdvisoryService[]>('/customer-focus/advisory').catch(() => []),
+        api<LaboratoryHandbookEntry[]>('/customer-focus/handbook').catch(() => []),
+      ]);
+      setAdvisory(adv); setHandbook(hb);
     } catch (e) { setError((e as Error).message); }
   }
   useEffect(() => { if (isEnabled('customer_focus')) void load(); }, [isEnabled]);
@@ -214,7 +224,11 @@ export function CustomerFocusPage() {
   }
   async function processImport(id: number) { try { await api(`/customer-focus/imports/${id}/process`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError((e as Error).message); } }
 
-  const tabs = ['Dashboard', 'Stakeholders', 'New Stakeholder', 'Service Agreements', 'Feedback Intake', 'Satisfaction Surveys', 'Survey Responses', 'Communication Log', 'Imports', 'Reports'];
+  async function submitAdvisory(e: FormEvent) { e.preventDefault(); setError(null); try { await api('/customer-focus/advisory', { method: 'POST', body: JSON.stringify(advForm) }); setAdvForm({ serviceDate: '', serviceType: '', requester: '', stakeholderId: '', providedByStaffId: '', subject: '', adviceSummary: '', communicationChannel: '', followUpRequired: false, followUpDueDate: '' }); await load(); } catch (e) { setError((e as Error).message); } }
+  async function submitHandbook(e: FormEvent) { e.preventDefault(); setError(null); try { await api('/customer-focus/handbook', { method: 'POST', body: JSON.stringify(hbForm) }); setHbForm({ section: '', title: '', content: '', version: '', effectiveDate: '', reviewDate: '', status: 'active', displayOrder: '0' }); await load(); } catch (e) { setError((e as Error).message); } }
+  const pretty = (s?: string) => s ? s.replace(/_/g, ' ') : '—';
+
+  const tabs = ['Dashboard', 'Advisory Services', 'Laboratory Handbook', 'Stakeholders', 'New Stakeholder', 'Service Agreements', 'Feedback Intake', 'Satisfaction Surveys', 'Survey Responses', 'Communication Log', 'Imports', 'Reports'];
 
   return <div className="module-page">
     <PageHeader eyebrow="Customer Focus" title="Customer Focus" subtitle="Stakeholders, feedback, and satisfaction follow-up." />
@@ -228,7 +242,8 @@ export function CustomerFocusPage() {
       { label: 'Open feedback', value: summary.openFeedback, onClick: () => setTab('Feedback Intake') },
       { label: 'High urgency', value: summary.highUrgencyFeedback, tone: 'danger', onClick: () => setTab('Feedback Intake') },
       { label: 'Active surveys', value: summary.activeSurveys, onClick: () => setTab('Satisfaction Surveys') },
-      { label: 'Responses (month)', value: summary.surveyResponsesThisMonth, onClick: () => setTab('Survey Responses') },
+      { label: 'Advisory (month)', value: summary.advisoryThisMonth ?? 0, onClick: () => setTab('Advisory Services') },
+      { label: 'Handbook entries', value: summary.handbookEntries ?? 0, onClick: () => setTab('Laboratory Handbook') },
       { label: 'Follow-ups due', value: summary.followUpsDue, tone: 'warning', onClick: () => setTab('Communication Log') },
     ]} /> : <p>Loading summary…</p>)}
     {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
@@ -248,6 +263,44 @@ export function CustomerFocusPage() {
         ]} />
       </ChartCard>
     </div>}
+
+    {tab === 'Advisory Services' && <>
+      <form className="form-grid" onSubmit={submitAdvisory}>
+        <label>Date<input type="date" value={advForm.serviceDate} onChange={e => setAdvForm({ ...advForm, serviceDate: e.target.value })} required /></label>
+        <label>Type<select value={advForm.serviceType} onChange={e => setAdvForm({ ...advForm, serviceType: e.target.value })}><option value="">—</option>{['test_choice', 'interpretation', 'sample_type', 'frequency', 'clinical_advice', 'utilization', 'other'].map(t => <option key={t} value={t}>{pretty(t)}</option>)}</select></label>
+        <label>Requester<input value={advForm.requester} onChange={e => setAdvForm({ ...advForm, requester: e.target.value })} placeholder="clinician / ward / user" /></label>
+        <label>Stakeholder<select value={advForm.stakeholderId} onChange={e => setAdvForm({ ...advForm, stakeholderId: e.target.value })}><option value="">—</option>{stakeholders.map(s => <option key={s.id} value={s.id}>{s.stakeholder_name}</option>)}</select></label>
+        <label>Provided by<select value={advForm.providedByStaffId} onChange={e => setAdvForm({ ...advForm, providedByStaffId: e.target.value })}><option value="">Me</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        <label>Channel<input value={advForm.communicationChannel} onChange={e => setAdvForm({ ...advForm, communicationChannel: e.target.value })} placeholder="phone / email / ward round" /></label>
+        <label>Subject<input value={advForm.subject} onChange={e => setAdvForm({ ...advForm, subject: e.target.value })} /></label>
+        <label><input type="checkbox" checked={advForm.followUpRequired} onChange={e => setAdvForm({ ...advForm, followUpRequired: e.target.checked })} /> Follow-up required</label>
+        <label>Follow-up due<input type="date" value={advForm.followUpDueDate} onChange={e => setAdvForm({ ...advForm, followUpDueDate: e.target.value })} /></label>
+        <label>Advice summary<textarea value={advForm.adviceSummary} onChange={e => setAdvForm({ ...advForm, adviceSummary: e.target.value })} /></label>
+        <button type="submit">Log advisory</button>
+      </form>
+      <table className="data-table"><thead><tr><th>No.</th><th>Date</th><th>Type</th><th>Requester</th><th>Subject</th><th>By</th><th>Follow-up</th></tr></thead><tbody>
+        {advisory.map(a => <tr key={a.id}><td>{a.record_number}</td><td>{a.service_date}</td><td>{pretty(a.service_type)}</td><td>{a.requester || '—'}</td><td>{a.subject || '—'}</td><td>{staffName(staff, a.provided_by_staff_id)}</td><td>{a.follow_up_required ? (a.follow_up_due_date || 'Yes') : '—'}</td></tr>)}
+        {advisory.length === 0 && <tr><td colSpan={7}>No advisory services logged yet.</td></tr>}
+      </tbody></table>
+    </>}
+
+    {tab === 'Laboratory Handbook' && <>
+      <form className="form-grid" onSubmit={submitHandbook}>
+        <label>Section<select value={hbForm.section} onChange={e => setHbForm({ ...hbForm, section: e.target.value })}><option value="">—</option>{['hours', 'test_menu', 'collection', 'transport', 'turnaround', 'contacts', 'policies', 'other'].map(s => <option key={s} value={s}>{pretty(s)}</option>)}</select></label>
+        <label>Title<input value={hbForm.title} onChange={e => setHbForm({ ...hbForm, title: e.target.value })} required /></label>
+        <label>Version<input value={hbForm.version} onChange={e => setHbForm({ ...hbForm, version: e.target.value })} /></label>
+        <label>Display order<input type="number" value={hbForm.displayOrder} onChange={e => setHbForm({ ...hbForm, displayOrder: e.target.value })} /></label>
+        <label>Effective date<input type="date" value={hbForm.effectiveDate} onChange={e => setHbForm({ ...hbForm, effectiveDate: e.target.value })} /></label>
+        <label>Review date<input type="date" value={hbForm.reviewDate} onChange={e => setHbForm({ ...hbForm, reviewDate: e.target.value })} /></label>
+        <label>Status<select value={hbForm.status} onChange={e => setHbForm({ ...hbForm, status: e.target.value })}>{['draft', 'active', 'under_review', 'archived'].map(s => <option key={s} value={s}>{pretty(s)}</option>)}</select></label>
+        <label>Content<textarea value={hbForm.content} onChange={e => setHbForm({ ...hbForm, content: e.target.value })} /></label>
+        <button type="submit">Add entry</button>
+      </form>
+      <table className="data-table"><thead><tr><th>No.</th><th>Section</th><th>Title</th><th>Version</th><th>Effective</th><th>Review</th><th>Status</th></tr></thead><tbody>
+        {handbook.map(h => <tr key={h.id}><td>{h.entry_number}</td><td>{pretty(h.section)}</td><td>{h.title}</td><td>{h.version || '—'}</td><td>{h.effective_date || '—'}</td><td>{h.review_date || '—'}</td><td>{formatBadge(h.status)}</td></tr>)}
+        {handbook.length === 0 && <tr><td colSpan={7}>No handbook entries yet.</td></tr>}
+      </tbody></table>
+    </>}
 
     {tab === 'Stakeholders' && <table className="data-table"><thead><tr><th>Number</th><th>Name</th><th>Type</th><th>Organisation</th><th>Contact</th><th>Active</th><th></th></tr></thead><tbody>
       {stakeholders.map(s => <tr key={s.id}>

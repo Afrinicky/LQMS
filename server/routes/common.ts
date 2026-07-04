@@ -435,7 +435,11 @@ export function commonRoutes() {
       activeSurveys: count("SELECT COUNT(*) count FROM satisfaction_surveys WHERE status = 'active'"),
       surveyResponsesThisMonth: count('SELECT COUNT(*) count FROM satisfaction_survey_responses WHERE response_date >= ?', monthStart),
       followUpsDue: count("SELECT COUNT(*) count FROM customer_feedback WHERE follow_up_due_date IS NOT NULL AND follow_up_due_date <= ? AND status NOT IN ('resolved','closed')", todayIso)
-        + count("SELECT COUNT(*) count FROM customer_communication_logs WHERE follow_up_due_date IS NOT NULL AND follow_up_due_date <= ? AND status != 'closed'", todayIso)
+        + count("SELECT COUNT(*) count FROM customer_communication_logs WHERE follow_up_due_date IS NOT NULL AND follow_up_due_date <= ? AND status != 'closed'", todayIso),
+      advisoryThisMonth: count('SELECT COUNT(*) count FROM advisory_services WHERE service_date >= ?', monthStart),
+      advisoryFollowUpsDue: count("SELECT COUNT(*) count FROM advisory_services WHERE follow_up_required = 1 AND follow_up_due_date IS NOT NULL AND follow_up_due_date <= ?", todayIso),
+      handbookEntries: count("SELECT COUNT(*) count FROM laboratory_handbook_entries WHERE status = 'active'"),
+      handbookDueReview: count("SELECT COUNT(*) count FROM laboratory_handbook_entries WHERE status = 'active' AND review_date IS NOT NULL AND review_date <= ?", todayIso)
     });
   });
 

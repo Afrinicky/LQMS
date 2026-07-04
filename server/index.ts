@@ -14,6 +14,7 @@ import { equipmentRoutes } from './routes/equipment.js';
 import { inventoryRoutes } from './routes/inventory.js';
 import { monitoringRoutes } from './routes/monitoring.js';
 import { safetyRoutes } from './routes/safety.js';
+import { organisationRoutes } from './routes/organisation.js';
 import { iqcRoutes } from './routes/iqc.js';
 import { eqaRoutes } from './routes/eqa.js';
 import { verificationValidationRoutes } from './routes/verificationValidation.js';
@@ -78,6 +79,7 @@ export function createApiServer() {
   app.use('/api/supplier-inventory', inventoryRoutes());
   app.use('/api/monitoring', monitoringRoutes());
   app.use('/api/facilities-safety', safetyRoutes());
+  app.use('/api/organisation', organisationRoutes());
   app.use('/api/iqc', iqcRoutes());
   app.use('/api/eqa', eqaRoutes());
   app.use('/api/verification-validation', verificationValidationRoutes());

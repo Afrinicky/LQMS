@@ -6,7 +6,7 @@ import { AuthProvider, useAuth } from './hooks/useAuth';
 import { ModuleProvider } from './hooks/useModules';
 import { API_BASE, getSetupStatus } from './services/api';
 import { LoginPage, SetupPage } from './pages/AuthPages';
-import { Dashboard, Home, ModulePage, Organisation } from './pages/CorePages';
+import { Dashboard, Home, ModulePage } from './pages/CorePages';
 import { ActionTracker, DocumentImport, EvidenceUpload, MyLaboratory, PeopleAccess, SectionConfig, SystemSettings } from './pages/SettingsPages';
 import { NcCapaPage, ComplaintsPage, RisksPage, QmsActionTracker } from './pages/QMSPages';
 import { MODULES } from '../shared/constants/modules';
@@ -23,6 +23,7 @@ const ManagementReviewPage = lazy(() => import('./pages/Phase8Pages').then(m => 
 const QualityIndicatorsPage = lazy(() => import('./pages/Phase8Pages').then(m => ({ default: m.QualityIndicatorsPage })));
 const ContinualImprovementPage = lazy(() => import('./pages/Phase8Pages').then(m => ({ default: m.ContinualImprovementPage })));
 const CustomerFocusPage = lazy(() => import('./pages/CustomerFocusPage').then(m => ({ default: m.CustomerFocusPage })));
+const OrganisationPage = lazy(() => import('./pages/OrganisationPage').then(m => ({ default: m.OrganisationPage })));
 const POCTPage = lazy(() => import('./pages/POCTPage').then(m => ({ default: m.POCTPage })));
 const NotificationsPage = lazy(() => import('./pages/NotificationsPage').then(m => ({ default: m.NotificationsPage })));
 const RecordsReportsPage = lazy(() => import('./pages/RecordsReportsPage').then(m => ({ default: m.RecordsReportsPage })));
@@ -174,7 +175,7 @@ function AppRoutes() {
       <Route path="/dashboard" element={<Dashboard/>}/>
       <Route path="/documents" element={<Suspense fallback={<ModuleFallback/>}><DocumentControlPage/></Suspense>}/>
       <Route path="/dennis" element={<Suspense fallback={<ModuleFallback/>}><DennisPage/></Suspense>}/>
-      <Route path="/organisation" element={<Organisation/>}/>
+      <Route path="/organisation" element={<Suspense fallback={<ModuleFallback/>}><OrganisationPage/></Suspense>}/>
       <Route path="/personnel" element={<Suspense fallback={<ModuleFallback/>}><PersonnelManagementPage/></Suspense>}/>
       <Route path="/nc-capa" element={<NcCapaPage/>}/>
       <Route path="/complaints" element={<ComplaintsPage/>}/>

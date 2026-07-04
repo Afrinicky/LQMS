@@ -2935,6 +2935,93 @@ CREATE TABLE IF NOT EXISTS contingency_plans (
 );
 `);
 
+  // ===================================================================
+  // Customer Focus — advisory services and laboratory handbook.
+  // -------------------------------------------------------------------
+  database.exec(`
+-- Advisory-services log: advice given to clinicians/users on test choice,
+-- interpretation, sample type, frequency and utilisation.
+CREATE TABLE IF NOT EXISTS advisory_services (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  record_number TEXT NOT NULL UNIQUE,
+  service_date TEXT NOT NULL,
+  service_type TEXT,                 -- test_choice|interpretation|sample_type|frequency|clinical_advice|utilization|other
+  requester TEXT,
+  stakeholder_id INTEGER REFERENCES customer_stakeholders(id),
+  provided_by_staff_id INTEGER REFERENCES staff(id),
+  subject TEXT,
+  advice_summary TEXT,
+  communication_channel TEXT,
+  follow_up_required INTEGER DEFAULT 0,
+  follow_up_due_date TEXT,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Laboratory handbook / user-information entries (hours, test menu,
+-- collection, transport, turnaround, contacts, policies).
+CREATE TABLE IF NOT EXISTS laboratory_handbook_entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  entry_number TEXT NOT NULL UNIQUE,
+  section TEXT,                       -- hours|test_menu|collection|transport|turnaround|contacts|policies|other
+  title TEXT NOT NULL,
+  content TEXT,
+  version TEXT,
+  effective_date TEXT,
+  review_date TEXT,
+  status TEXT NOT NULL DEFAULT 'active', -- draft|active|under_review|archived
+  display_order INTEGER DEFAULT 0,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+`);
+
+  // ===================================================================
+  // Organisation & Leadership — code-of-conduct adherence and budget
+  // projection registers.
+  // -------------------------------------------------------------------
+  database.exec(`
+-- Code-of-conduct adherence: impartiality, confidentiality, conflict of
+-- interest and code-of-conduct commitments, signed per staff member.
+CREATE TABLE IF NOT EXISTS code_of_conduct_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  record_number TEXT NOT NULL UNIQUE,
+  staff_id INTEGER REFERENCES staff(id),
+  commitment_type TEXT,              -- impartiality|confidentiality|conflict_of_interest|code_adherence|all
+  statement TEXT,
+  signed_date TEXT,
+  review_date TEXT,
+  conflict_declared INTEGER DEFAULT 0,
+  conflict_details TEXT,
+  status TEXT NOT NULL DEFAULT 'active', -- active|due_review|superseded
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Annual budget projections across personnel, equipment, maintenance,
+-- reagents/consumables, quality assurance (IQC/EQA), infrastructure, training.
+CREATE TABLE IF NOT EXISTS budget_projections (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  projection_number TEXT NOT NULL UNIQUE,
+  fiscal_year TEXT,
+  category TEXT,                      -- personnel|equipment|maintenance|reagents_consumables|quality_assurance|infrastructure|training|other
+  description TEXT,
+  projected_amount REAL,
+  currency TEXT DEFAULT 'GHS',
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  status TEXT NOT NULL DEFAULT 'draft', -- draft|submitted|approved|closed
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+`);
+
   // Default Dennis settings: strict hybrid policy. Ollama (offline) is the default
   // runtime and is enabled; online AI is disabled by default and, even once
   // enabled, is restricted to SOP/document analysis only (never operational data).
