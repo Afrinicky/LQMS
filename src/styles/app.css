@@ -979,6 +979,15 @@ button.step-toggle:hover { background: rgba(255,255,255,0.05); box-shadow: none;
 }
 .home-topbar .brand { border: 0; padding: 0; }
 .home-main { position: relative; z-index: 3; flex: 1; overflow: auto; padding: 40px 32px 36px; }
+.register-prompt {
+  display: flex; align-items: center; justify-content: space-between; gap: 20px;
+  margin: 0 0 22px; padding: 18px 22px;
+  border-left: 4px solid var(--accent-bright);
+}
+.register-prompt h2 { margin: 0 0 4px; font-size: 18px; }
+.register-prompt p { margin: 0; color: var(--muted); font-size: 14px; max-width: 70ch; }
+.register-prompt button { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+@media (max-width: 700px) { .register-prompt { flex-direction: column; align-items: flex-start; } }
 .home-hero { text-align: center; margin: 18px 0 38px; }
 .home-hero .eyebrow { font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent-bright); font-weight: 600; }
 .home-hero h1 {

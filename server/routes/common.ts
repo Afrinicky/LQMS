@@ -879,11 +879,109 @@ export function commonRoutes() {
       ['country', 'country'], ['phone', 'phone'], ['email', 'email'], ['website', 'website'],
       ['registration_number', 'registrationNumber'], ['accreditation_body', 'accreditationBody'],
       ['accreditation_number', 'accreditationNumber'], ['accreditation_status', 'accreditationStatus'], ['motto', 'motto'],
+      ['legal_status', 'legalStatus'], ['legal_identity_notes', 'legalIdentityNotes'],
+      ['quality_policy', 'qualityPolicy'], ['quality_manual_summary', 'qualityManualSummary'],
     ];
     for (const [col, key] of fields) {
       if (b[key] !== undefined) db.prepare(`UPDATE laboratory_profile SET ${col} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1`).run(b[key] === '' ? null : b[key]);
     }
+    if (b.registrationComplete !== undefined) db.prepare('UPDATE laboratory_profile SET registration_complete = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1').run(b.registrationComplete ? 1 : 0);
     audit(req, { action: 'edit', entity: 'laboratory_profile', entityId: 1, newValue: b });
+    res.json({ ok: true });
+  });
+
+  // Combined, read-only laboratory configuration for display outside Settings
+  // (e.g. the Organisation module). Any signed-in user may read it; editing is
+  // restricted to Settings routes below.
+  router.get('/laboratory-config', requireAuth, (_req, res) => {
+    const db = getDb();
+    const profile = db.prepare('SELECT * FROM laboratory_profile WHERE id = 1').get() ?? null;
+    const policies = db.prepare('SELECT * FROM quality_policies WHERE is_active = 1 ORDER BY display_order, id').all();
+    const objectives = db.prepare('SELECT * FROM quality_objectives WHERE is_active = 1 ORDER BY (year IS NULL) DESC, year DESC, display_order, id').all();
+    const documents = db.prepare(`SELECT d.*, f.original_name AS file_name, f.mime_type AS file_mime FROM laboratory_documents d LEFT JOIN files f ON f.id = d.file_id ORDER BY d.category, d.created_at DESC`).all();
+    res.json({ profile, policies, objectives, documents });
+  });
+
+  // ---- Laboratory supporting documents (legal identity + quality manual) ----
+  router.get('/laboratory-documents', requireAuth, (req, res) => {
+    const category = typeof req.query.category === 'string' ? req.query.category : null;
+    const sql = `SELECT d.*, f.original_name AS file_name, f.mime_type AS file_mime, f.size_bytes AS file_size FROM laboratory_documents d LEFT JOIN files f ON f.id = d.file_id ${category ? 'WHERE d.category = ?' : ''} ORDER BY d.created_at DESC`;
+    const rows = category ? getDb().prepare(sql).all(category) : getDb().prepare(sql).all();
+    res.json(rows);
+  });
+  router.post('/laboratory-documents', requirePermission('settings', 'edit'), (req, res) => {
+    const b = req.body ?? {};
+    if (!b.category || !b.title) return res.status(400).json({ error: 'Category and title are required.' });
+    const r = getDb().prepare(`INSERT INTO laboratory_documents (category, doc_type, title, file_id, reference_number, issuing_authority, issue_date, expiry_date, version, effective_date, notes, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(b.category, b.docType ?? null, b.title, parseIntNullable(b.fileId), b.referenceNumber ?? null, b.issuingAuthority ?? null, b.issueDate ?? null, b.expiryDate ?? null, b.version ?? null, b.effectiveDate ?? null, b.notes ?? null, req.user!.id);
+    audit(req, { action: 'create', entity: 'laboratory_documents', entityId: r.lastInsertRowid, newValue: b });
+    res.status(201).json({ id: r.lastInsertRowid });
+  });
+  router.put('/laboratory-documents/:id', requirePermission('settings', 'edit'), (req, res) => {
+    const b = req.body ?? {};
+    const fields: Array<[string, string]> = [['doc_type', 'docType'], ['title', 'title'], ['file_id', 'fileId'], ['reference_number', 'referenceNumber'], ['issuing_authority', 'issuingAuthority'], ['issue_date', 'issueDate'], ['expiry_date', 'expiryDate'], ['version', 'version'], ['effective_date', 'effectiveDate'], ['notes', 'notes']];
+    for (const [col, key] of fields) if (b[key] !== undefined) getDb().prepare(`UPDATE laboratory_documents SET ${col} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(col === 'file_id' ? parseIntNullable(b[key]) : (b[key] === '' ? null : b[key]), req.params.id);
+    audit(req, { action: 'edit', entity: 'laboratory_documents', entityId: req.params.id, newValue: b });
+    res.json({ ok: true });
+  });
+  router.delete('/laboratory-documents/:id', requirePermission('settings', 'edit'), (req, res) => {
+    getDb().prepare('DELETE FROM laboratory_documents WHERE id = ?').run(req.params.id);
+    audit(req, { action: 'delete', entity: 'laboratory_documents', entityId: req.params.id });
+    res.json({ ok: true });
+  });
+
+  // ---- Quality policies ----
+  router.get('/quality-policies', requireAuth, (_req, res) => res.json(getDb().prepare('SELECT * FROM quality_policies ORDER BY display_order, id').all()));
+  router.post('/quality-policies', requirePermission('settings', 'edit'), (req, res) => {
+    const b = req.body ?? {};
+    if (!b.title || !b.policyStatement) return res.status(400).json({ error: 'Title and policy statement are required.' });
+    const r = getDb().prepare('INSERT INTO quality_policies (title, policy_statement, reference_note, display_order, created_by) VALUES (?, ?, ?, ?, ?)')
+      .run(b.title, b.policyStatement, b.referenceNote ?? null, parseIntNullable(b.displayOrder) ?? 0, req.user!.id);
+    audit(req, { action: 'create', entity: 'quality_policies', entityId: r.lastInsertRowid, newValue: b });
+    res.status(201).json({ id: r.lastInsertRowid });
+  });
+  router.put('/quality-policies/:id', requirePermission('settings', 'edit'), (req, res) => {
+    const b = req.body ?? {};
+    const fields: Array<[string, string]> = [['title', 'title'], ['policy_statement', 'policyStatement'], ['reference_note', 'referenceNote'], ['display_order', 'displayOrder'], ['is_active', 'isActive']];
+    for (const [col, key] of fields) if (b[key] !== undefined) getDb().prepare(`UPDATE quality_policies SET ${col} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(col === 'is_active' ? (b[key] ? 1 : 0) : (b[key] === '' ? null : b[key]), req.params.id);
+    audit(req, { action: 'edit', entity: 'quality_policies', entityId: req.params.id, newValue: b });
+    res.json({ ok: true });
+  });
+  router.delete('/quality-policies/:id', requirePermission('settings', 'edit'), (req, res) => {
+    getDb().prepare('DELETE FROM quality_policies WHERE id = ?').run(req.params.id);
+    audit(req, { action: 'delete', entity: 'quality_policies', entityId: req.params.id });
+    res.json({ ok: true });
+  });
+
+  // ---- Quality objectives (standing when year is null; annual when set) ----
+  router.get('/quality-objectives', requireAuth, (req, res) => {
+    const year = req.query.year;
+    if (year === 'standing') return res.json(getDb().prepare('SELECT o.*, s.full_name AS responsible_name FROM quality_objectives o LEFT JOIN staff s ON s.id = o.responsible_staff_id WHERE o.year IS NULL ORDER BY o.display_order, o.id').all());
+    if (typeof year === 'string' && /^\d+$/.test(year)) return res.json(getDb().prepare('SELECT o.*, s.full_name AS responsible_name FROM quality_objectives o LEFT JOIN staff s ON s.id = o.responsible_staff_id WHERE o.year = ? ORDER BY o.display_order, o.id').all(Number(year)));
+    res.json(getDb().prepare('SELECT o.*, s.full_name AS responsible_name FROM quality_objectives o LEFT JOIN staff s ON s.id = o.responsible_staff_id ORDER BY (o.year IS NULL) DESC, o.year DESC, o.display_order, o.id').all());
+  });
+  router.post('/quality-objectives', requirePermission('settings', 'edit'), (req, res) => {
+    const b = req.body ?? {};
+    if (!b.objective) return res.status(400).json({ error: 'Objective is required.' });
+    const r = getDb().prepare('INSERT INTO quality_objectives (objective, target, measure, year, responsible_staff_id, status, review_notes, reference_note, display_order, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(b.objective, b.target ?? null, b.measure ?? null, parseIntNullable(b.year), parseIntNullable(b.responsibleStaffId), b.status ?? 'active', b.reviewNotes ?? null, b.referenceNote ?? null, parseIntNullable(b.displayOrder) ?? 0, req.user!.id);
+    audit(req, { action: 'create', entity: 'quality_objectives', entityId: r.lastInsertRowid, newValue: b });
+    res.status(201).json({ id: r.lastInsertRowid });
+  });
+  router.put('/quality-objectives/:id', requirePermission('settings', 'edit'), (req, res) => {
+    const b = req.body ?? {};
+    const fields: Array<[string, string]> = [['objective', 'objective'], ['target', 'target'], ['measure', 'measure'], ['year', 'year'], ['responsible_staff_id', 'responsibleStaffId'], ['status', 'status'], ['review_notes', 'reviewNotes'], ['reference_note', 'referenceNote'], ['display_order', 'displayOrder'], ['is_active', 'isActive']];
+    for (const [col, key] of fields) {
+      if (b[key] === undefined) continue;
+      const val = ['year', 'responsible_staff_id', 'display_order'].includes(col) ? parseIntNullable(b[key]) : col === 'is_active' ? (b[key] ? 1 : 0) : (b[key] === '' ? null : b[key]);
+      getDb().prepare(`UPDATE quality_objectives SET ${col} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(val, req.params.id);
+    }
+    audit(req, { action: 'edit', entity: 'quality_objectives', entityId: req.params.id, newValue: b });
+    res.json({ ok: true });
+  });
+  router.delete('/quality-objectives/:id', requirePermission('settings', 'edit'), (req, res) => {
+    getDb().prepare('DELETE FROM quality_objectives WHERE id = ?').run(req.params.id);
+    audit(req, { action: 'delete', entity: 'quality_objectives', entityId: req.params.id });
     res.json({ ok: true });
   });
 

@@ -5,13 +5,77 @@ import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import { MeetingsPage, ManagementReviewPage } from './Phase8Pages';
-import type { Staff, CodeOfConductRecord, BudgetProjection, OrganisationSummary, RegulatoryRegistration } from '../../shared/types/api';
+import { Link } from 'react-router-dom';
+import type { Staff, CodeOfConductRecord, BudgetProjection, OrganisationSummary, RegulatoryRegistration, LaboratoryConfig } from '../../shared/types/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
 const tabBar = (active: string, tabs: string[], onChange: (name: string) => void) =>
   <div className="tabs">{tabs.map(name => <button key={name} type="button" className={active === name ? 'active' : ''} onClick={() => onChange(name)}>{name}</button>)}</div>;
 const pretty = (s?: string) => s ? s.replace(/_/g, ' ') : '—';
+
+// Read-only display of the laboratory configuration owned by Settings → My
+// Laboratory. Shown here so the whole team can see the legal identity, quality
+// manual, quality policy and objectives; it can only be changed in Settings.
+export function QualityConfigurationView({ config }: { config: LaboratoryConfig | null }) {
+  if (!config) return <div className="card"><p>Loading laboratory configuration…</p></div>;
+  const p = config.profile;
+  const standing = config.objectives.filter(o => o.year === null || o.year === undefined);
+  const annual = config.objectives.filter(o => o.year != null);
+  const years = Array.from(new Set(annual.map(o => o.year as number))).sort((a, b) => b - a);
+  const legalDocs = config.documents.filter(d => d.category === 'legal_identity');
+  const manualDocs = config.documents.filter(d => d.category === 'quality_manual');
+  return <div className="grid" style={{ gap: 16 }}>
+    <div className="card">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
+        <h3 style={{ margin: 0 }}>Laboratory identity</h3>
+        <Link className="hint" to="/settings/laboratory">Edit in Settings → My Laboratory</Link>
+      </div>
+      {p ? <div className="form-grid" style={{ marginTop: 10 }}>
+        <div><span className="hint">Facility</span><div><strong>{p.facility_name}</strong>{p.short_name ? ` (${p.short_name})` : ''}</div></div>
+        <div><span className="hint">Legal status</span><div>{p.legal_status || '—'}</div></div>
+        <div><span className="hint">Registration no</span><div>{p.registration_number || '—'}</div></div>
+        <div><span className="hint">Accreditation</span><div>{p.accreditation_status || '—'}{p.accreditation_body ? ` · ${p.accreditation_body}` : ''}</div></div>
+        <div><span className="hint">Location</span><div>{[p.city, p.country].filter(Boolean).join(', ') || '—'}</div></div>
+        <div><span className="hint">Contact</span><div>{p.phone || p.email || '—'}</div></div>
+      </div> : <p>Not yet registered.</p>}
+      {p?.legal_identity_notes && <p style={{ marginTop: 10 }}>{p.legal_identity_notes}</p>}
+      {legalDocs.length > 0 && <p className="hint" style={{ marginTop: 8 }}>Legal documents on file: {legalDocs.map(d => d.title).join(', ')}.</p>}
+    </div>
+
+    <div className="card">
+      <h3>Quality policy</h3>
+      {p?.quality_policy ? <p style={{ whiteSpace: 'pre-wrap' }}>{p.quality_policy}</p> : <p className="hint">No quality policy recorded yet.</p>}
+      {config.policies.length > 0 && <>
+        <h4>Supporting policies</h4>
+        <ul className="link-list">{config.policies.map(pol => <li key={pol.id}><strong>{pol.title}:</strong> {pol.policy_statement}{pol.reference_note ? <> <span className="hint">({pol.reference_note})</span></> : ''}</li>)}</ul>
+      </>}
+    </div>
+
+    <div className="card">
+      <h3>Quality manual</h3>
+      {p?.quality_manual_summary ? <p style={{ whiteSpace: 'pre-wrap' }}>{p.quality_manual_summary}</p> : <p className="hint">No quality manual summary recorded yet.</p>}
+      {manualDocs.length > 0 && <p className="hint">Manual documents on file: {manualDocs.map(d => `${d.title}${d.version ? ` ${d.version}` : ''}`).join(', ')}.</p>}
+    </div>
+
+    <div className="card">
+      <h3>Quality objectives</h3>
+      {standing.length === 0 && annual.length === 0 && <p className="hint">No quality objectives recorded yet.</p>}
+      {standing.length > 0 && <>
+        <h4>Standing objectives</h4>
+        <table className="data-table"><thead><tr><th>Objective</th><th>Target</th><th>Measure</th><th>Owner</th></tr></thead><tbody>
+          {standing.map(o => <tr key={o.id}><td>{o.objective}</td><td>{o.target || '—'}</td><td>{o.measure || '—'}</td><td>{o.responsible_name || '—'}</td></tr>)}
+        </tbody></table>
+      </>}
+      {years.map(y => <div key={y} style={{ marginTop: 12 }}>
+        <h4>{y} objectives</h4>
+        <table className="data-table"><thead><tr><th>Objective</th><th>Target</th><th>Measure</th><th>Owner</th><th>Status</th></tr></thead><tbody>
+          {annual.filter(o => o.year === y).map(o => <tr key={o.id}><td>{o.objective}</td><td>{o.target || '—'}</td><td>{o.measure || '—'}</td><td>{o.responsible_name || '—'}</td><td>{formatBadge(o.status)}</td></tr>)}
+        </tbody></table>
+      </div>)}
+    </div>
+  </div>;
+}
 
 const COMMITMENT_TYPES = ['all', 'impartiality', 'confidentiality', 'conflict_of_interest', 'code_adherence'];
 const BUDGET_CATEGORIES = ['personnel', 'equipment', 'maintenance', 'reagents_consumables', 'quality_assurance', 'infrastructure', 'training', 'other'];
@@ -25,6 +89,7 @@ export function OrganisationPage() {
   const [conduct, setConduct] = useState<CodeOfConductRecord[]>([]);
   const [budget, setBudget] = useState<BudgetProjection[]>([]);
   const [registrations, setRegistrations] = useState<RegulatoryRegistration[]>([]);
+  const [config, setConfig] = useState<LaboratoryConfig | null>(null);
 
   const [cocForm, setCocForm] = useState({ staffId: '', commitmentType: 'all', statement: '', signedDate: '', reviewDate: '', conflictDeclared: false, conflictDetails: '' });
   const [budForm, setBudForm] = useState({ fiscalYear: String(new Date().getFullYear()), category: '', description: '', projectedAmount: '', currency: 'GHS', responsibleStaffId: '', status: 'draft' });
@@ -41,6 +106,7 @@ export function OrganisationPage() {
       ]);
       if (sum) setSummary(sum);
       setConduct(coc); setBudget(bud); setRegistrations(reg); setStaff(stf);
+      api<LaboratoryConfig>('/laboratory-config').then(setConfig).catch(() => setConfig(null));
     } catch (e) { setError((e as Error).message); }
   }
   useEffect(() => { if (isEnabled('organisation')) void load(); }, [isEnabled]);
@@ -73,9 +139,11 @@ export function OrganisationPage() {
 
   return <div className="module-page">
     <PageHeader eyebrow="Organisation and Leadership" title="Organisation &amp; Leadership" subtitle="Leadership commitments, code of conduct, and budget planning." />
-    {tabBar(tab, ['Dashboard', 'Code of Conduct', 'Budget Projection', 'Registrations & Licences',
+    {tabBar(tab, ['Dashboard', 'Quality Configuration', 'Code of Conduct', 'Budget Projection', 'Registrations & Licences',
       ...(isEnabled('meetings') ? ['Meetings'] : []), ...(isEnabled('management_review') ? ['Management Review'] : [])], setTab)}
     {error && <div className="error">{error}</div>}
+
+    {tab === 'Quality Configuration' && <QualityConfigurationView config={config} />}
 
     {tab === 'Dashboard' && <><KpiStrip items={[
       { label: 'Code-of-conduct records', value: summary?.codeOfConductRecords ?? conduct.length, onClick: () => setTab('Code of Conduct') },

@@ -37,9 +37,13 @@ export function Home() {
   const navigate = useNavigate();
   const { isEnabled } = useModules();
   const [unread, setUnread] = useState<number | null>(null);
+  const [needsRegistration, setNeedsRegistration] = useState(false);
 
   useEffect(() => {
     safeGet<{ unreadNotifications: number }>('/dashboard/notifications-summary').then(d => setUnread(d?.unreadNotifications ?? null));
+    // First-run: prompt the user to register the laboratory until the profile is
+    // marked complete under Settings → My Laboratory.
+    safeGet<{ registration_complete?: number } | null>('/laboratory-profile').then(p => setNeedsRegistration(!p || Number(p.registration_complete ?? 0) !== 1));
   }, []);
 
   const firstName = user?.fullName?.trim().split(/\s+/)[0] ?? 'there';
@@ -81,6 +85,15 @@ export function Home() {
       </header>
 
       <main className="home-main">
+        {needsRegistration && (
+          <section className="register-prompt card" role="alert">
+            <div>
+              <h2>Register your laboratory</h2>
+              <p>Welcome! Before you begin, register your laboratory — its legal identity and documents, quality manual, and the quality policy and objectives for ISO 15189:2022. This is a one-time step you can revisit any time.</p>
+            </div>
+            <button type="button" onClick={() => navigate('/settings/laboratory')}>Register laboratory <ArrowRight size={16} /></button>
+          </section>
+        )}
         <section className="home-hero">
           <div className="eyebrow">Laboratory Quality Management</div>
           <h1>Welcome, <span className="accent">{firstName}!</span></h1>

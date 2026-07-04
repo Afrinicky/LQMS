@@ -8,6 +8,7 @@ import type {
   Position, Staff, SystemModule, ApiUser, Permission, Section, Device,
   Department, PermissionMatrixData, TechnicalAuthorizationRow, StaffProfile,
   SectionConfigRow, SectionConfigDetail,
+  LaboratoryDocument, QualityPolicy, QualityObjective,
 } from '../../shared/types/api';
 
 // Maps an organogram position title to the lab role(s) whose default permissions
@@ -1548,13 +1549,110 @@ function StaffImportExport() {
 // ---------------------------------------------------------------------------
 // My Laboratory  (laboratory identity / profile + departments)
 // ---------------------------------------------------------------------------
-export function MyLaboratory() {
-  const blank = { facilityName: '', shortName: '', motto: '', registrationNumber: '', address: '', city: '', country: '', phone: '', email: '', website: '', accreditationBody: '', accreditationNumber: '', accreditationStatus: '' };
+// Upload a file to the shared file store; returns the numeric file id.
+async function uploadLabFile(file: File): Promise<number> {
+  const fd = new FormData();
+  fd.append('file', file);
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/files`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({ error: res.statusText }))).error ?? res.statusText);
+  return Number((await res.json()).id);
+}
+
+async function openLabFile(fileId: number) {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/files/${fileId}/raw`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+  if (!res.ok) return;
+  const url = URL.createObjectURL(await res.blob());
+  window.open(url, '_blank');
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+const LAB_TABS = ['Identity & Legal', 'Quality Manual', 'Quality Policy & Objectives', 'Annual Objectives', 'Departments'] as const;
+type LabTab = typeof LAB_TABS[number];
+
+// A small register that uploads and lists supporting documents for one category
+// (legal identity or the quality manual). Editing is confined to Settings.
+function LabDocuments({ category, docTypes, onChanged }: { category: string; docTypes: string[]; onChanged?: () => void }) {
+  const blank = { docType: docTypes[0] ?? '', title: '', referenceNumber: '', issuingAuthority: '', issueDate: '', expiryDate: '', version: '', effectiveDate: '', notes: '' };
+  const [rows, setRows] = useState<LaboratoryDocument[]>([]);
   const [form, setForm] = useState(blank);
+  const [file, setFile] = useState<File | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const isManual = category === 'quality_manual';
+
+  function load() { api<LaboratoryDocument[]>(`/laboratory-documents?category=${category}`).then(setRows).catch(() => setRows([])); }
+  useEffect(() => { load(); }, [category]);
+
+  async function add(e: FormEvent) {
+    e.preventDefault(); setError(null); setBusy(true);
+    try {
+      let fileId: number | undefined;
+      if (file) fileId = await uploadLabFile(file);
+      await api('/laboratory-documents', { method: 'POST', body: JSON.stringify({ category, ...form, fileId }) });
+      setForm(blank); setFile(null); if (fileRef.current) fileRef.current.value = '';
+      load(); onChanged?.();
+    } catch (err) { setError((err as Error).message); } finally { setBusy(false); }
+  }
+  async function remove(id: number) {
+    if (!confirm('Remove this document entry? The uploaded file remains in the file store.')) return;
+    try { await api(`/laboratory-documents/${id}`, { method: 'DELETE' }); load(); onChanged?.(); }
+    catch (err) { setError((err as Error).message); }
+  }
+
+  return <>
+    {error && <div className="error">{error}</div>}
+    <form className="form" onSubmit={add}>
+      <div className="form-grid">
+        <label>Document type<select value={form.docType} onChange={e => setForm({ ...form, docType: e.target.value })}>{docTypes.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
+        <label>Title<input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required placeholder={isManual ? 'e.g. Laboratory Quality Manual' : 'e.g. Operating licence 2026'} /></label>
+        <label>Reference no<input value={form.referenceNumber} onChange={e => setForm({ ...form, referenceNumber: e.target.value })} /></label>
+        {!isManual && <label>Issuing authority<input value={form.issuingAuthority} onChange={e => setForm({ ...form, issuingAuthority: e.target.value })} /></label>}
+        {isManual && <label>Version<input value={form.version} onChange={e => setForm({ ...form, version: e.target.value })} placeholder="e.g. v3.0" /></label>}
+        {isManual
+          ? <label>Effective date<input type="date" value={form.effectiveDate} onChange={e => setForm({ ...form, effectiveDate: e.target.value })} /></label>
+          : <label>Issue date<input type="date" value={form.issueDate} onChange={e => setForm({ ...form, issueDate: e.target.value })} /></label>}
+        {!isManual && <label>Expiry date<input type="date" value={form.expiryDate} onChange={e => setForm({ ...form, expiryDate: e.target.value })} /></label>}
+        <label>Attachment<input ref={fileRef} type="file" onChange={e => setFile(e.target.files?.[0] ?? null)} /></label>
+      </div>
+      <label>Notes<textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
+      <button disabled={busy}>{busy ? 'Uploading…' : 'Add document'}</button>
+    </form>
+    <table className="data-table"><thead><tr><th>Type</th><th>Title</th><th>Ref</th><th>{isManual ? 'Version' : 'Issuer'}</th><th>{isManual ? 'Effective' : 'Issued'}</th><th>{isManual ? '' : 'Expiry'}</th><th>File</th><th></th></tr></thead><tbody>
+      {rows.map(r => <tr key={r.id}>
+        <td>{r.doc_type || '—'}</td><td>{r.title}</td><td>{r.reference_number || '—'}</td>
+        <td>{isManual ? (r.version || '—') : (r.issuing_authority || '—')}</td>
+        <td>{(isManual ? r.effective_date : r.issue_date) || '—'}</td>
+        <td>{isManual ? '' : (r.expiry_date || '—')}</td>
+        <td>{r.file_id ? <button type="button" className="secondary" onClick={() => openLabFile(r.file_id!)}>Open {r.file_name ? `(${r.file_name})` : ''}</button> : '—'}</td>
+        <td><button type="button" className="secondary" onClick={() => remove(r.id)}>Remove</button></td>
+      </tr>)}
+      {rows.length === 0 && <tr><td colSpan={8} className="hint">No documents uploaded yet.</td></tr>}
+    </tbody></table>
+  </>;
+}
+
+export function MyLaboratory() {
+  const blank = { facilityName: '', shortName: '', motto: '', registrationNumber: '', address: '', city: '', country: '', phone: '', email: '', website: '', accreditationBody: '', accreditationNumber: '', accreditationStatus: '', legalStatus: '', legalIdentityNotes: '', qualityPolicy: '', qualityManualSummary: '' };
+  const [tab, setTab] = useState<LabTab>('Identity & Legal');
+  const [form, setForm] = useState(blank);
+  const [registrationComplete, setRegistrationComplete] = useState(false);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [staff, setStaff] = useState<Staff[]>([]);
+  const [policies, setPolicies] = useState<QualityPolicy[]>([]);
+  const [objectives, setObjectives] = useState<QualityObjective[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  const [policyForm, setPolicyForm] = useState({ title: '', policyStatement: '', referenceNote: '' });
+  const thisYear = new Date().getFullYear();
+  const [objForm, setObjForm] = useState({ objective: '', target: '', measure: '', responsibleStaffId: '', referenceNote: '' });
+  const [annualForm, setAnnualForm] = useState({ objective: '', target: '', measure: '', year: String(thisYear), responsibleStaffId: '', status: 'active' });
+
+  function loadPolicies() { api<QualityPolicy[]>('/quality-policies').then(setPolicies).catch(() => setPolicies([])); }
+  function loadObjectives() { api<QualityObjective[]>('/quality-objectives').then(setObjectives).catch(() => setObjectives([])); }
   function load() {
     api<Record<string, unknown> | null>('/laboratory-profile').then(p => {
       if (!p) return;
@@ -1563,15 +1661,25 @@ export function MyLaboratory() {
         registrationNumber: String(p.registration_number ?? ''), address: String(p.address ?? ''), city: String(p.city ?? ''),
         country: String(p.country ?? ''), phone: String(p.phone ?? ''), email: String(p.email ?? ''), website: String(p.website ?? ''),
         accreditationBody: String(p.accreditation_body ?? ''), accreditationNumber: String(p.accreditation_number ?? ''), accreditationStatus: String(p.accreditation_status ?? ''),
+        legalStatus: String(p.legal_status ?? ''), legalIdentityNotes: String(p.legal_identity_notes ?? ''),
+        qualityPolicy: String(p.quality_policy ?? ''), qualityManualSummary: String(p.quality_manual_summary ?? ''),
       });
+      setRegistrationComplete(Number(p.registration_complete ?? 0) === 1);
     }).catch(() => undefined);
     api<Department[]>('/departments').then(setDepartments).catch(() => setDepartments([]));
+    api<Staff[]>('/staff').then(setStaff).catch(() => setStaff([]));
+    loadPolicies(); loadObjectives();
   }
   useEffect(() => { load(); }, []);
 
-  async function save(e: FormEvent) {
-    e.preventDefault(); setError(null); setSuccess(null);
-    try { await api('/laboratory-profile', { method: 'PUT', body: JSON.stringify(form) }); setSuccess('Laboratory profile saved.'); }
+  async function saveProfile(extra: Record<string, unknown> = {}) {
+    setError(null); setSuccess(null);
+    try { await api('/laboratory-profile', { method: 'PUT', body: JSON.stringify({ ...form, ...extra }) }); setSuccess('Saved.'); }
+    catch (err) { setError((err as Error).message); }
+  }
+  async function completeRegistration() {
+    setError(null); setSuccess(null);
+    try { await api('/laboratory-profile', { method: 'PUT', body: JSON.stringify({ ...form, registrationComplete: true }) }); setRegistrationComplete(true); setSuccess('Laboratory registration marked complete.'); }
     catch (err) { setError((err as Error).message); }
   }
   async function addDepartment(e: FormEvent<HTMLFormElement>) {
@@ -1584,43 +1692,156 @@ export function MyLaboratory() {
     try { await api(`/departments/${d.id}`, { method: 'PUT', body: JSON.stringify({ isActive: d.is_active ? false : true }) }); load(); }
     catch (err) { setError((err as Error).message); }
   }
+  async function addPolicy(e: FormEvent) {
+    e.preventDefault(); setError(null);
+    try { await api('/quality-policies', { method: 'POST', body: JSON.stringify(policyForm) }); setPolicyForm({ title: '', policyStatement: '', referenceNote: '' }); loadPolicies(); }
+    catch (err) { setError((err as Error).message); }
+  }
+  async function removePolicy(id: number) { if (!confirm('Delete this policy?')) return; try { await api(`/quality-policies/${id}`, { method: 'DELETE' }); loadPolicies(); } catch (err) { setError((err as Error).message); } }
+  async function addObjective(e: FormEvent) {
+    e.preventDefault(); setError(null);
+    try { await api('/quality-objectives', { method: 'POST', body: JSON.stringify({ ...objForm, year: null }) }); setObjForm({ objective: '', target: '', measure: '', responsibleStaffId: '', referenceNote: '' }); loadObjectives(); }
+    catch (err) { setError((err as Error).message); }
+  }
+  async function addAnnual(e: FormEvent) {
+    e.preventDefault(); setError(null);
+    try { await api('/quality-objectives', { method: 'POST', body: JSON.stringify(annualForm) }); setAnnualForm({ objective: '', target: '', measure: '', year: String(thisYear), responsibleStaffId: '', status: 'active' }); loadObjectives(); }
+    catch (err) { setError((err as Error).message); }
+  }
+  async function removeObjective(id: number) { if (!confirm('Delete this objective?')) return; try { await api(`/quality-objectives/${id}`, { method: 'DELETE' }); loadObjectives(); } catch (err) { setError((err as Error).message); } }
 
-  return <div className="grid cols-2">
-    <div className="card">
+  const standingObjectives = objectives.filter(o => o.year === null || o.year === undefined);
+  const annualObjectives = objectives.filter(o => o.year != null);
+  const years = Array.from(new Set(annualObjectives.map(o => o.year as number))).sort((a, b) => b - a);
+
+  return <div>
+    <div className="card" style={{ marginBottom: 16 }}>
       <h3>My Laboratory</h3>
-      <p>Your laboratory's identity and accreditation details. This is where each laboratory configures its own profile so the software can be used by any facility.</p>
+      <p>Register and configure your laboratory here. Everything on this page is the single source of truth for the laboratory's legal identity, quality manual, quality policy and objectives — these are shown read-only elsewhere in the system and can only be changed here.</p>
+      <div className="tabs">{LAB_TABS.map(t => <button key={t} type="button" className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>)}</div>
       {error && <div className="error">{error}</div>}
       {success && <div className="notice-ok">{success}</div>}
-      <form className="form" onSubmit={save}>
-        <fieldset className="reg-section"><legend>Identity</legend>
-          <div className="form-grid">
-            <label>Facility name<input value={form.facilityName} onChange={e => setForm({ ...form, facilityName: e.target.value })} required /></label>
-            <label>Short name<input value={form.shortName} onChange={e => setForm({ ...form, shortName: e.target.value })} /></label>
-            <label>Motto / tagline<input value={form.motto} onChange={e => setForm({ ...form, motto: e.target.value })} /></label>
-            <label>Registration no<input value={form.registrationNumber} onChange={e => setForm({ ...form, registrationNumber: e.target.value })} /></label>
-          </div>
-        </fieldset>
-        <fieldset className="reg-section"><legend>Contact</legend>
-          <div className="form-grid">
-            <label>Address<input value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} /></label>
-            <label>City / town<input value={form.city} onChange={e => setForm({ ...form, city: e.target.value })} /></label>
-            <label>Country<input value={form.country} onChange={e => setForm({ ...form, country: e.target.value })} /></label>
-            <label>Phone<input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></label>
-            <label>Email<input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></label>
-            <label>Website<input value={form.website} onChange={e => setForm({ ...form, website: e.target.value })} /></label>
-          </div>
-        </fieldset>
-        <fieldset className="reg-section"><legend>Accreditation</legend>
-          <div className="form-grid">
-            <label>Accreditation body<input value={form.accreditationBody} onChange={e => setForm({ ...form, accreditationBody: e.target.value })} placeholder="e.g. your national accreditation body" /></label>
-            <label>Accreditation no<input value={form.accreditationNumber} onChange={e => setForm({ ...form, accreditationNumber: e.target.value })} /></label>
-            <label>Status<select value={form.accreditationStatus} onChange={e => setForm({ ...form, accreditationStatus: e.target.value })}><option value="">—</option><option>Accredited</option><option>In progress</option><option>Not accredited</option><option>Suspended</option></select></label>
-          </div>
-        </fieldset>
-        <button type="submit">Save laboratory profile</button>
-      </form>
+      {!registrationComplete && <div className="notice" style={{ marginTop: 10 }}>Laboratory registration is not yet marked complete. Fill in the identity, quality manual, and quality policy &amp; objectives, then use <strong>Mark registration complete</strong> below.</div>}
     </div>
-    <div className="card">
+
+    {tab === 'Identity & Legal' && <div className="grid cols-2">
+      <div className="card">
+        <h3>Identity &amp; legal status</h3>
+        <p>Your laboratory's legal identity and accreditation details, so the software can be used by any facility.</p>
+        <form className="form" onSubmit={e => { e.preventDefault(); saveProfile(); }}>
+          <fieldset className="reg-section"><legend>Identity</legend>
+            <div className="form-grid">
+              <label>Facility name<input value={form.facilityName} onChange={e => setForm({ ...form, facilityName: e.target.value })} required /></label>
+              <label>Short name<input value={form.shortName} onChange={e => setForm({ ...form, shortName: e.target.value })} /></label>
+              <label>Motto / tagline<input value={form.motto} onChange={e => setForm({ ...form, motto: e.target.value })} /></label>
+              <label>Registration no<input value={form.registrationNumber} onChange={e => setForm({ ...form, registrationNumber: e.target.value })} /></label>
+              <label>Legal status / entity type<input value={form.legalStatus} onChange={e => setForm({ ...form, legalStatus: e.target.value })} placeholder="e.g. faith-based hospital laboratory, private company" /></label>
+            </div>
+          </fieldset>
+          <fieldset className="reg-section"><legend>Contact</legend>
+            <div className="form-grid">
+              <label>Address<input value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} /></label>
+              <label>City / town<input value={form.city} onChange={e => setForm({ ...form, city: e.target.value })} /></label>
+              <label>Country<input value={form.country} onChange={e => setForm({ ...form, country: e.target.value })} /></label>
+              <label>Phone<input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></label>
+              <label>Email<input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></label>
+              <label>Website<input value={form.website} onChange={e => setForm({ ...form, website: e.target.value })} /></label>
+            </div>
+          </fieldset>
+          <fieldset className="reg-section"><legend>Accreditation</legend>
+            <div className="form-grid">
+              <label>Accreditation body<input value={form.accreditationBody} onChange={e => setForm({ ...form, accreditationBody: e.target.value })} placeholder="e.g. your national accreditation body" /></label>
+              <label>Accreditation no<input value={form.accreditationNumber} onChange={e => setForm({ ...form, accreditationNumber: e.target.value })} /></label>
+              <label>Status<select value={form.accreditationStatus} onChange={e => setForm({ ...form, accreditationStatus: e.target.value })}><option value="">—</option><option>Accredited</option><option>In progress</option><option>Not accredited</option><option>Suspended</option></select></label>
+            </div>
+          </fieldset>
+          <label>Legal identity notes<textarea value={form.legalIdentityNotes} onChange={e => setForm({ ...form, legalIdentityNotes: e.target.value })} placeholder="Ownership, governing body, licences held, etc." /></label>
+          <button type="submit">Save identity</button>
+        </form>
+      </div>
+      <div className="card">
+        <h3>Legal identity documents</h3>
+        <p>Upload documentation that establishes the laboratory's legal identity — certificates, licences, registrations.</p>
+        <LabDocuments category="legal_identity" docTypes={['Operating licence', 'Certificate of incorporation', 'Business registration', 'Tax registration', 'Ownership / governance', 'Other']} />
+      </div>
+    </div>}
+
+    {tab === 'Quality Manual' && <div className="card">
+      <h3>Quality Manual</h3>
+      <p>Summarise the quality manual and upload the controlled document(s). The manual describes the laboratory's quality management system.</p>
+      <form className="form" onSubmit={e => { e.preventDefault(); saveProfile(); }}>
+        <label>Quality manual summary<textarea value={form.qualityManualSummary} onChange={e => setForm({ ...form, qualityManualSummary: e.target.value })} placeholder="Scope, structure and references of the quality manual." /></label>
+        <button type="submit">Save summary</button>
+      </form>
+      <h4 style={{ marginTop: 18 }}>Quality manual documents</h4>
+      <LabDocuments category="quality_manual" docTypes={['Quality Manual', 'Manual appendix', 'Other']} />
+    </div>}
+
+    {tab === 'Quality Policy & Objectives' && <div className="grid cols-2">
+      <div className="card">
+        <h3>Quality policy</h3>
+        <p>The laboratory's overarching quality policy statement, established to fulfil the requirements of ISO 15189:2022.</p>
+        <form className="form" onSubmit={e => { e.preventDefault(); saveProfile(); }}>
+          <label>Quality policy statement<textarea rows={6} value={form.qualityPolicy} onChange={e => setForm({ ...form, qualityPolicy: e.target.value })} placeholder="Management's commitment to quality, good professional practice, and continual improvement…" /></label>
+          <button type="submit">Save quality policy</button>
+        </form>
+        <h4 style={{ marginTop: 18 }}>Supporting policies</h4>
+        <p className="hint">Add specific policies that support the quality policy.</p>
+        <form className="form" onSubmit={addPolicy}>
+          <label>Title<input value={policyForm.title} onChange={e => setPolicyForm({ ...policyForm, title: e.target.value })} required /></label>
+          <label>Policy statement<textarea value={policyForm.policyStatement} onChange={e => setPolicyForm({ ...policyForm, policyStatement: e.target.value })} required /></label>
+          <label>ISO 15189:2022 relationship (optional)<input value={policyForm.referenceNote} onChange={e => setPolicyForm({ ...policyForm, referenceNote: e.target.value })} placeholder="How this policy relates to the standard" /></label>
+          <button>Add policy</button>
+        </form>
+        <table className="data-table"><thead><tr><th>Title</th><th>Statement</th><th></th></tr></thead><tbody>
+          {policies.map(p => <tr key={p.id}><td>{p.title}</td><td>{p.policy_statement}{p.reference_note ? <><br /><span className="hint">{p.reference_note}</span></> : ''}</td><td><button type="button" className="secondary" onClick={() => removePolicy(p.id)}>Remove</button></td></tr>)}
+          {policies.length === 0 && <tr><td colSpan={3} className="hint">No supporting policies yet.</td></tr>}
+        </tbody></table>
+      </div>
+      <div className="card">
+        <h3>Standing quality objectives</h3>
+        <p>Continuous quality objectives, in relation to ISO 15189:2022. Year-specific targets are set under <strong>Annual Objectives</strong>.</p>
+        <form className="form" onSubmit={addObjective}>
+          <label>Objective<textarea value={objForm.objective} onChange={e => setObjForm({ ...objForm, objective: e.target.value })} required /></label>
+          <div className="form-grid">
+            <label>Target<input value={objForm.target} onChange={e => setObjForm({ ...objForm, target: e.target.value })} placeholder="e.g. ≥ 95%" /></label>
+            <label>Measure / indicator<input value={objForm.measure} onChange={e => setObjForm({ ...objForm, measure: e.target.value })} /></label>
+            <label>Responsible<select value={objForm.responsibleStaffId} onChange={e => setObjForm({ ...objForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+          </div>
+          <label>ISO 15189:2022 relationship (optional)<input value={objForm.referenceNote} onChange={e => setObjForm({ ...objForm, referenceNote: e.target.value })} /></label>
+          <button>Add objective</button>
+        </form>
+        <table className="data-table"><thead><tr><th>Objective</th><th>Target</th><th>Measure</th><th>Owner</th><th></th></tr></thead><tbody>
+          {standingObjectives.map(o => <tr key={o.id}><td>{o.objective}{o.reference_note ? <><br /><span className="hint">{o.reference_note}</span></> : ''}</td><td>{o.target || '—'}</td><td>{o.measure || '—'}</td><td>{o.responsible_name || '—'}</td><td><button type="button" className="secondary" onClick={() => removeObjective(o.id)}>Remove</button></td></tr>)}
+          {standingObjectives.length === 0 && <tr><td colSpan={5} className="hint">No standing objectives yet.</td></tr>}
+        </tbody></table>
+      </div>
+    </div>}
+
+    {tab === 'Annual Objectives' && <div className="card">
+      <h3>Annual quality objectives</h3>
+      <p>Set measurable objectives for each year. The laboratory is expected to establish objectives every year.</p>
+      <form className="form" onSubmit={addAnnual}>
+        <div className="form-grid">
+          <label>Year<input type="number" min={2000} max={2100} value={annualForm.year} onChange={e => setAnnualForm({ ...annualForm, year: e.target.value })} required /></label>
+          <label>Target<input value={annualForm.target} onChange={e => setAnnualForm({ ...annualForm, target: e.target.value })} placeholder="e.g. ≥ 98%" /></label>
+          <label>Measure / indicator<input value={annualForm.measure} onChange={e => setAnnualForm({ ...annualForm, measure: e.target.value })} /></label>
+          <label>Responsible<select value={annualForm.responsibleStaffId} onChange={e => setAnnualForm({ ...annualForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+          <label>Status<select value={annualForm.status} onChange={e => setAnnualForm({ ...annualForm, status: e.target.value })}>{['active', 'on_track', 'at_risk', 'achieved', 'not_achieved', 'carried_over'].map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select></label>
+        </div>
+        <label>Objective<textarea value={annualForm.objective} onChange={e => setAnnualForm({ ...annualForm, objective: e.target.value })} required /></label>
+        <button>Add annual objective</button>
+      </form>
+      {years.length === 0 && <p className="hint">No annual objectives yet.</p>}
+      {years.map(y => <div key={y} style={{ marginTop: 16 }}>
+        <h4>{y}</h4>
+        <table className="data-table"><thead><tr><th>Objective</th><th>Target</th><th>Measure</th><th>Owner</th><th>Status</th><th></th></tr></thead><tbody>
+          {annualObjectives.filter(o => o.year === y).map(o => <tr key={o.id}><td>{o.objective}</td><td>{o.target || '—'}</td><td>{o.measure || '—'}</td><td>{o.responsible_name || '—'}</td><td><span className="badge">{(o.status || '').replace(/_/g, ' ')}</span></td><td><button type="button" className="secondary" onClick={() => removeObjective(o.id)}>Remove</button></td></tr>)}
+        </tbody></table>
+      </div>)}
+    </div>}
+
+    {tab === 'Departments' && <div className="card">
       <h3>Departments</h3>
       <p>Top-level departments. Sections/units (configured under Section/Unit Configuration) belong to a department.</p>
       <form className="form" onSubmit={addDepartment}>
@@ -1631,6 +1852,12 @@ export function MyLaboratory() {
         {departments.map(d => <tr key={d.id}><td>{d.name}</td><td>{d.is_active ? <span className="badge active">active</span> : <span className="badge inactive">inactive</span>}</td><td><button className="secondary" onClick={() => toggleDepartment(d)}>{d.is_active ? 'Deactivate' : 'Activate'}</button></td></tr>)}
         {departments.length === 0 && <tr><td colSpan={3} className="hint">No departments yet.</td></tr>}
       </tbody></table>
+    </div>}
+
+    <div className="card" style={{ marginTop: 16 }}>
+      {registrationComplete
+        ? <p className="notice-ok">Laboratory registration is complete. You can keep updating any section above at any time.</p>
+        : <button onClick={completeRegistration}>Mark registration complete</button>}
     </div>
   </div>;
 }
