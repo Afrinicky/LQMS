@@ -83,17 +83,11 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     key: 'process_management',
     title: 'Process Management',
-    desc: 'Testing workflows, IQC, EQA, verification, POCT and blood bank',
+    // IQC, EQA, verification, measurement uncertainty, POCT and blood banking
+    // are now phase tabs inside the single Process Management workspace.
+    desc: 'Pre-examination, examination, post-examination and blood banking',
     group: 'essential',
-    modules: [
-      'process_management',
-      'iqc',
-      'eqa',
-      'verification_validation',
-      'measurement_uncertainty',
-      'poct',
-      'blood_bank_handover',
-    ],
+    modules: ['process_management'],
   },
   {
     key: 'information_management',

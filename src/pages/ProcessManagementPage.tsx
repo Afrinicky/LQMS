@@ -4,6 +4,9 @@ import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../comp
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
+import { IqcPage, EqaPage, VerificationValidationPage, MeasurementUncertaintyPage } from './Phase4Pages';
+import { POCTPage } from './POCTPage';
+import { BloodBankHandoverPage } from './BloodBankHandoverPage';
 import type {
   Section, Department, Staff,
   LabTestCatalog, SpecimenAcceptanceCriteria, SpecimenRejectionRecord,
@@ -146,14 +149,47 @@ export function ProcessManagementPage() {
   async function submitCmp(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/comparability', cmpForm); setCmpForm({ studyDate: '', testName: '', analyte: '', methodA: '', methodB: '', sampleCount: '', acceptanceCriteria: '', outcome: '', findings: '', actionTaken: '', nextDueDate: '', status: 'open' }); await load(); } catch (e) { setError((e as Error).message); } }
   async function submitCtp(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/contingency-plans', ctpForm); setCtpForm({ scenarioType: '', title: '', triggerDescription: '', responseActions: '', backupArrangement: '', responsibleStaffId: '', lastTestedDate: '', testOutcome: '', nextTestDue: '', status: 'active', notes: '' }); await load(); } catch (e) { setError((e as Error).message); } }
 
-  const tabs = ['Dashboard', 'Pre-Examination', 'Sample Receipt', 'Test Directory', 'Acceptance Criteria', 'Specimen Rejections', 'Reference Intervals', 'Comparability', 'Critical Result Rules', 'Critical Notifications', 'Referral Labs', 'Referral Tests', 'Referral Sendouts', 'Report Amendments', 'Contingency Plan', 'Process Reviews'];
   const testName = (id?: number) => tests.find(t => t.id === id)?.test_name;
 
+  // Process phases group the workflow the way the laboratory experiences it:
+  // pre-examination (before testing), examination (the test itself and its
+  // quality controls), post-examination (results, referrals, reporting), and
+  // the specialised blood-banking service.
+  const PRE_EXAM_TABS = ['Pre-Examination', 'Sample Receipt', 'Test Directory', 'Acceptance Criteria', 'Specimen Rejections'];
+  const EXAM_TABS = ['Reference Intervals', 'Comparability',
+    ...(isEnabled('iqc') ? ['IQC'] : []),
+    ...(isEnabled('eqa') ? ['EQA'] : []),
+    ...(isEnabled('verification_validation') ? ['Method Verification'] : []),
+    ...(isEnabled('measurement_uncertainty') ? ['Measurement Uncertainty'] : []),
+    ...(isEnabled('poct') ? ['POCT'] : []),
+  ];
+  const POST_EXAM_TABS = ['Critical Result Rules', 'Critical Notifications', 'Referral Labs', 'Referral Tests', 'Referral Sendouts', 'Report Amendments', 'Process Reviews', 'Contingency Plan'];
+  const inPreExam = PRE_EXAM_TABS.includes(tab);
+  const inExam = EXAM_TABS.includes(tab);
+  const inPostExam = POST_EXAM_TABS.includes(tab);
+  const topTabs: { key: string; active: boolean; go: () => void }[] = [
+    { key: 'Dashboard', active: tab === 'Dashboard', go: () => setTab('Dashboard') },
+    { key: 'Pre-examination', active: inPreExam, go: () => setTab(PRE_EXAM_TABS[0]) },
+    { key: 'Examination', active: inExam, go: () => setTab(EXAM_TABS[0]) },
+    { key: 'Post-examination', active: inPostExam, go: () => setTab(POST_EXAM_TABS[0]) },
+    ...(isEnabled('blood_bank_handover') ? [{ key: 'Blood banking', active: tab === 'Blood banking', go: () => setTab('Blood banking') }] : []),
+  ];
+
   return <div className="module-page">
-    <PageHeader eyebrow="Process Management" title="Process Management" subtitle="Tests, specimen handling, critical results, and referrals." />
-    <p className="muted">Patient testing and clinical result reporting remain with LHIMS/Lightwave. This module tracks the QMS workflow only — no patient names are required; use request and patient references as identifiers.</p>
-    {tabBar(tab, tabs, setTab)}
+    <PageHeader eyebrow="Process Management" title="Process Management" subtitle="Pre-examination, examination, post-examination, and blood banking." />
+    <p className="muted">Patient testing and clinical result reporting stay in the primary information system. This module tracks the QMS workflow only — no patient names are required; use request and patient references as identifiers.</p>
+    <div className="tabs">{topTabs.map(t => <button key={t.key} type="button" className={t.active ? 'active' : ''} onClick={t.go}>{t.key}</button>)}</div>
+    {inPreExam && tabBar(tab, PRE_EXAM_TABS, setTab)}
+    {inExam && tabBar(tab, EXAM_TABS, setTab)}
+    {inPostExam && tabBar(tab, POST_EXAM_TABS, setTab)}
     {error && <div className="error">{error}</div>}
+
+    {tab === 'IQC' && <IqcPage embedded />}
+    {tab === 'EQA' && <EqaPage embedded />}
+    {tab === 'Method Verification' && <VerificationValidationPage embedded />}
+    {tab === 'Measurement Uncertainty' && <MeasurementUncertaintyPage embedded />}
+    {tab === 'POCT' && <POCTPage embedded />}
+    {tab === 'Blood banking' && <BloodBankHandoverPage embedded />}
 
     {tab === 'Dashboard' && (summary ? <KpiStrip items={[
       { label: 'Active tests', value: summary.activeTests, onClick: () => setTab('Test Directory') },

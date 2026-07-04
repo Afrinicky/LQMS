@@ -49,10 +49,10 @@ const emptyHandoverForm = { handoverDate: '', periodStart: '', periodEnd: '', ou
 const emptyCampaignForm = { campaignDate: '', location: '', organizer: '', totalScreened: '', totalCollected: '', familyDonorCount: '', voluntaryDonorCount: '', commercialPaidDonorCount: '', rejectedOrDeferredCount: '', responsibleStaffId: '', remarks: '' };
 const emptyAdverseForm = { eventDate: '', eventType: 'donor_reaction', relatedUnitId: '', bloodGroup: '', donorType: '', sectionId: '', locationId: '', title: '', description: '', immediateAction: '', severity: 'medium', outcome: '' };
 
-export function BloodBankHandoverPage() {
+export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { isEnabled } = useModules();
   const { staff, sections, locations, monitoringItems } = useLookups();
-  const [tab, setTab] = useState('Dashboard');
+  const [tab, setTab] = useState(embedded ? 'Blood Units' : 'Dashboard');
   const [error, setError] = useState<string | null>(null);
 
   const [summary, setSummary] = useState<BloodBankSummary | null>(null);
@@ -89,8 +89,8 @@ export function BloodBankHandoverPage() {
       setUnits(u); setHandovers(h); setCampaigns(c); setAdverseEvents(ae); setDiscards(d);
     } catch (e) { setError((e as Error).message); }
   }
-  useEffect(() => { if (isEnabled('blood_bank_handover')) void load(); }, [isEnabled]);
-  if (!isEnabled('blood_bank_handover')) return <DisabledModule />;
+  useEffect(() => { if (embedded || isEnabled('blood_bank_handover')) void load(); }, [isEnabled]);
+  if (!embedded && !isEnabled('blood_bank_handover')) return <DisabledModule />;
 
   async function openHandover(id: number) {
     try { setSelectedHandover(await api<BloodBankHandover>(`/blood-bank-handover/handovers/${id}`)); }
@@ -235,12 +235,12 @@ export function BloodBankHandoverPage() {
     try { setReports(await api<BloodBankReports>('/blood-bank-handover/reports')); }
     catch (e) { setError((e as Error).message); }
   }
-  useEffect(() => { if (tab === 'Reports' && isEnabled('blood_bank_handover') && !reports) void loadReports(); }, [tab, isEnabled, reports]);
+  useEffect(() => { if (tab === 'Reports' && (embedded || isEnabled('blood_bank_handover')) && !reports) void loadReports(); }, [tab, isEnabled, reports]);
 
-  const tabs = ['Dashboard', 'Blood Units', 'New Blood Unit', 'Thursday Handover', 'Handovers', 'Donation Campaigns', 'Adverse Events', 'Discards', 'Monthly Summary', 'Reports'];
+  const tabs = ['Dashboard', 'Blood Units', 'New Blood Unit', 'Thursday Handover', 'Handovers', 'Donation Campaigns', 'Adverse Events', 'Discards', 'Monthly Summary', 'Reports'].filter(name => !embedded || name !== 'Dashboard');
 
   return <div className="module-page">
-    <PageHeader eyebrow="Process Management" title="Blood Bank Quality &amp; Inventory Handover" subtitle="Blood unit inventory, handovers, and adverse events." />
+    {!embedded && <PageHeader eyebrow="Process Management" title="Blood Bank Quality &amp; Inventory Handover" subtitle="Blood unit inventory, handovers, and adverse events." />}
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
