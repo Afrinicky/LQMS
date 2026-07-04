@@ -60,7 +60,15 @@ export function processManagementRoutes() {
       referralSendoutsPending: count("SELECT COUNT(*) count FROM referral_sendouts WHERE status IN ('sent','pending_result')"),
       delayedReferralSendouts: count("SELECT COUNT(*) count FROM referral_sendouts WHERE expected_return_date IS NOT NULL AND expected_return_date < ? AND result_received_date IS NULL AND status NOT IN ('closed','result_received')", today),
       reportAmendmentsThisMonth: count('SELECT COUNT(*) count FROM report_amendment_logs WHERE amendment_date >= ?', monthStart),
-      pendingProcessReviews: count("SELECT COUNT(*) count FROM process_review_records WHERE status IN ('draft','reviewed')")
+      pendingProcessReviews: count("SELECT COUNT(*) count FROM process_review_records WHERE status IN ('draft','reviewed')"),
+      preExaminationInstructions: count("SELECT COUNT(*) count FROM pre_examination_instructions WHERE status = 'active'"),
+      sampleReceiptsThisMonth: count('SELECT COUNT(*) count FROM sample_receipt_records WHERE receipt_date >= ?', monthStart),
+      suboptimalReceipts: count("SELECT COUNT(*) count FROM sample_receipt_records WHERE condition = 'suboptimal' AND receipt_date >= ?", monthStart),
+      referenceIntervalsDueReview: count("SELECT COUNT(*) count FROM reference_interval_records WHERE status = 'active' AND review_date IS NOT NULL AND review_date <= ?", today),
+      comparabilityStudiesDue: count('SELECT COUNT(*) count FROM result_comparability_studies WHERE next_due_date IS NOT NULL AND next_due_date <= ?', today),
+      openComparabilityIssues: count("SELECT COUNT(*) count FROM result_comparability_studies WHERE outcome = 'significant_difference' AND status != 'closed'"),
+      activeContingencyPlans: count("SELECT COUNT(*) count FROM contingency_plans WHERE status = 'active'"),
+      contingencyTestsDue: count("SELECT COUNT(*) count FROM contingency_plans WHERE status = 'active' AND next_test_due IS NOT NULL AND next_test_due <= ?", today)
     });
   });
 
@@ -711,6 +719,132 @@ export function processManagementRoutes() {
     if (!r) return res.status(404).json({ error: 'Process review not found' });
     db.prepare("UPDATE process_review_records SET status = 'closed', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
     audit(req, { action: 'close', entity: 'process_review_records', entityId: req.params.id, oldValue: { status: r.status }, newValue: { status: 'closed' } });
+    res.json({ ok: true });
+  });
+
+  // ============= Pre-examination instructions =============
+  router.get('/pre-examination', requirePermission('process_management', 'view'), (_req, res) => {
+    res.json(getDb().prepare('SELECT * FROM pre_examination_instructions ORDER BY created_at DESC').all());
+  });
+  router.post('/pre-examination', requirePermission('process_management', 'create'), (req, res) => {
+    if (!req.body.title) return res.status(400).json({ error: 'title is required' });
+    const db = getDb();
+    const createdAt = new Date().toISOString();
+    const number = generateRecordNumber(db, 'pre_examination_instructions', 'PXI', createdAt);
+    const r = db.prepare(`INSERT INTO pre_examination_instructions (instruction_number, title, test_catalog_id, sample_type, container_additive, patient_preparation, collection_instructions, transport_condition, stability_summary, storage_condition, status, section_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(number, req.body.title, parseIntNullable(req.body.testCatalogId), req.body.sampleType ?? null, req.body.containerAdditive ?? null, req.body.patientPreparation ?? null, req.body.collectionInstructions ?? null, req.body.transportCondition ?? null, req.body.stabilitySummary ?? null, req.body.storageCondition ?? null, req.body.status ?? 'active', parseIntNullable(req.body.sectionId), req.user!.id, createdAt);
+    audit(req, { action: 'create', entity: 'pre_examination_instructions', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
+    res.status(201).json({ id: r.lastInsertRowid, instructionNumber: number });
+  });
+  router.put('/pre-examination/:id', requirePermission('process_management', 'edit'), (req, res) => {
+    const db = getDb();
+    const old = db.prepare('SELECT * FROM pre_examination_instructions WHERE id = ?').get(req.params.id) as any;
+    if (!old) return res.status(404).json({ error: 'Instruction not found' });
+    db.prepare(`UPDATE pre_examination_instructions SET title = ?, test_catalog_id = ?, sample_type = ?, container_additive = ?, patient_preparation = ?, collection_instructions = ?, transport_condition = ?, stability_summary = ?, storage_condition = ?, status = ?, section_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(req.body.title ?? old.title, parseIntNullable(req.body.testCatalogId) ?? old.test_catalog_id, req.body.sampleType ?? old.sample_type, req.body.containerAdditive ?? old.container_additive, req.body.patientPreparation ?? old.patient_preparation, req.body.collectionInstructions ?? old.collection_instructions, req.body.transportCondition ?? old.transport_condition, req.body.stabilitySummary ?? old.stability_summary, req.body.storageCondition ?? old.storage_condition, req.body.status ?? old.status, parseIntNullable(req.body.sectionId) ?? old.section_id, req.params.id);
+    audit(req, { action: 'edit', entity: 'pre_examination_instructions', entityId: req.params.id, oldValue: old, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  // ============= Sample receipt & condition log =============
+  router.get('/sample-receipts', requirePermission('process_management', 'view'), (_req, res) => {
+    res.json(getDb().prepare('SELECT * FROM sample_receipt_records ORDER BY receipt_date DESC, created_at DESC').all());
+  });
+  router.post('/sample-receipts', requirePermission('process_management', 'create'), (req, res) => {
+    if (!req.body.receiptDate) return res.status(400).json({ error: 'receiptDate is required' });
+    const db = getDb();
+    const createdAt = new Date().toISOString();
+    const number = generateRecordNumber(db, 'sample_receipt_records', 'RCP', createdAt);
+    const r = db.prepare(`INSERT INTO sample_receipt_records (receipt_number, receipt_date, receipt_time, request_reference, patient_reference, patient_type, sample_type, section_id, test_catalog_id, received_by_staff_id, condition, condition_notes, temperature, request_complete, urgent, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(number, req.body.receiptDate, req.body.receiptTime ?? null, req.body.requestReference ?? null, req.body.patientReference ?? null, req.body.patientType ?? null, req.body.sampleType ?? null, parseIntNullable(req.body.sectionId), parseIntNullable(req.body.testCatalogId), parseIntNullable(req.body.receivedByStaffId) ?? getStaffIdOrCurrent(req, null), req.body.condition ?? 'acceptable', req.body.conditionNotes ?? null, req.body.temperature ?? null, req.body.requestComplete === false ? 0 : 1, req.body.urgent ? 1 : 0, req.user!.id, createdAt);
+    audit(req, { action: 'create', entity: 'sample_receipt_records', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
+    res.status(201).json({ id: r.lastInsertRowid, receiptNumber: number });
+  });
+  // Escalate a received sample to the specimen-rejection register.
+  router.post('/sample-receipts/:id/reject', requirePermission('process_management', 'create'), (req, res) => {
+    const db = getDb();
+    const rec = db.prepare('SELECT * FROM sample_receipt_records WHERE id = ?').get(req.params.id) as any;
+    if (!rec) return res.status(404).json({ error: 'Sample receipt not found' });
+    const createdAt = new Date().toISOString();
+    const rejNumber = generateRecordNumber(db, 'specimen_rejection_records', 'REJ', createdAt);
+    const rej = db.prepare(`INSERT INTO specimen_rejection_records (rejection_number, rejection_date, request_reference, patient_reference, patient_type, section_id, test_catalog_id, test_name, sample_type, rejection_reason, immediate_action, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`)
+      .run(rejNumber, rec.receipt_date, rec.request_reference, rec.patient_reference, rec.patient_type, rec.section_id, rec.test_catalog_id, req.body.testName ?? null, rec.sample_type, req.body.rejectionReason ?? rec.condition_notes ?? 'Rejected at receipt', req.body.immediateAction ?? null, req.user!.id, createdAt);
+    const rejId = Number(rej.lastInsertRowid);
+    db.prepare("UPDATE sample_receipt_records SET condition = 'rejected', rejection_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(rejId, req.params.id);
+    insertLink(db, { module: 'process_management', type: 'sample_receipt_records', id: req.params.id }, { module: 'process_management', type: 'specimen_rejection_records', id: rejId }, 'Rejection from sample receipt');
+    audit(req, { action: 'create', entity: 'specimen_rejection_records', entityId: rejId, newValue: { rejNumber, fromReceipt: req.params.id } });
+    res.status(201).json({ id: rejId, rejectionNumber: rejNumber });
+  });
+
+  // ============= Biological reference intervals =============
+  router.get('/reference-intervals', requirePermission('process_management', 'view'), (_req, res) => {
+    res.json(getDb().prepare('SELECT * FROM reference_interval_records ORDER BY created_at DESC').all());
+  });
+  router.post('/reference-intervals', requirePermission('process_management', 'create'), (req, res) => {
+    if (!req.body.analyte) return res.status(400).json({ error: 'analyte is required' });
+    const db = getDb();
+    const createdAt = new Date().toISOString();
+    const number = generateRecordNumber(db, 'reference_interval_records', 'RIV', createdAt);
+    const r = db.prepare(`INSERT INTO reference_interval_records (record_number, test_catalog_id, analyte, sample_type, population, lower_limit, upper_limit, unit, clinical_decision_limit, source, effective_date, review_date, status, communicated_to_users, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(number, parseIntNullable(req.body.testCatalogId), req.body.analyte, req.body.sampleType ?? null, req.body.population ?? null, req.body.lowerLimit ?? null, req.body.upperLimit ?? null, req.body.unit ?? null, req.body.clinicalDecisionLimit ?? null, req.body.source ?? null, req.body.effectiveDate ?? null, req.body.reviewDate ?? null, req.body.status ?? 'active', req.body.communicatedToUsers ? 1 : 0, req.body.notes ?? null, req.user!.id, createdAt);
+    audit(req, { action: 'create', entity: 'reference_interval_records', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
+    res.status(201).json({ id: r.lastInsertRowid, recordNumber: number });
+  });
+  router.put('/reference-intervals/:id', requirePermission('process_management', 'edit'), (req, res) => {
+    const db = getDb();
+    const old = db.prepare('SELECT * FROM reference_interval_records WHERE id = ?').get(req.params.id) as any;
+    if (!old) return res.status(404).json({ error: 'Reference interval not found' });
+    db.prepare(`UPDATE reference_interval_records SET test_catalog_id = ?, analyte = ?, sample_type = ?, population = ?, lower_limit = ?, upper_limit = ?, unit = ?, clinical_decision_limit = ?, source = ?, effective_date = ?, review_date = ?, status = ?, communicated_to_users = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(parseIntNullable(req.body.testCatalogId) ?? old.test_catalog_id, req.body.analyte ?? old.analyte, req.body.sampleType ?? old.sample_type, req.body.population ?? old.population, req.body.lowerLimit ?? old.lower_limit, req.body.upperLimit ?? old.upper_limit, req.body.unit ?? old.unit, req.body.clinicalDecisionLimit ?? old.clinical_decision_limit, req.body.source ?? old.source, req.body.effectiveDate ?? old.effective_date, req.body.reviewDate ?? old.review_date, req.body.status ?? old.status, req.body.communicatedToUsers === undefined ? old.communicated_to_users : (req.body.communicatedToUsers ? 1 : 0), req.body.notes ?? old.notes, req.params.id);
+    audit(req, { action: 'edit', entity: 'reference_interval_records', entityId: req.params.id, oldValue: old, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  // ============= Result comparability studies =============
+  router.get('/comparability', requirePermission('process_management', 'view'), (_req, res) => {
+    res.json(getDb().prepare('SELECT * FROM result_comparability_studies ORDER BY study_date DESC, created_at DESC').all());
+  });
+  router.post('/comparability', requirePermission('process_management', 'create'), (req, res) => {
+    if (!req.body.studyDate) return res.status(400).json({ error: 'studyDate is required' });
+    const db = getDb();
+    const createdAt = new Date().toISOString();
+    const number = generateRecordNumber(db, 'result_comparability_studies', 'CMP', createdAt);
+    const r = db.prepare(`INSERT INTO result_comparability_studies (study_number, study_date, test_name, analyte, method_a, method_b, sample_count, acceptance_criteria, outcome, findings, action_taken, conducted_by_staff_id, next_due_date, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(number, req.body.studyDate, req.body.testName ?? null, req.body.analyte ?? null, req.body.methodA ?? null, req.body.methodB ?? null, parseIntNullable(req.body.sampleCount), req.body.acceptanceCriteria ?? null, req.body.outcome ?? null, req.body.findings ?? null, req.body.actionTaken ?? null, parseIntNullable(req.body.conductedByStaffId) ?? getStaffIdOrCurrent(req, null), req.body.nextDueDate ?? null, req.body.status ?? 'open', req.user!.id, createdAt);
+    audit(req, { action: 'create', entity: 'result_comparability_studies', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
+    res.status(201).json({ id: r.lastInsertRowid, studyNumber: number });
+  });
+  router.put('/comparability/:id', requirePermission('process_management', 'edit'), (req, res) => {
+    const db = getDb();
+    const old = db.prepare('SELECT * FROM result_comparability_studies WHERE id = ?').get(req.params.id) as any;
+    if (!old) return res.status(404).json({ error: 'Comparability study not found' });
+    db.prepare(`UPDATE result_comparability_studies SET study_date = ?, test_name = ?, analyte = ?, method_a = ?, method_b = ?, sample_count = ?, acceptance_criteria = ?, outcome = ?, findings = ?, action_taken = ?, conducted_by_staff_id = ?, next_due_date = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(req.body.studyDate ?? old.study_date, req.body.testName ?? old.test_name, req.body.analyte ?? old.analyte, req.body.methodA ?? old.method_a, req.body.methodB ?? old.method_b, parseIntNullable(req.body.sampleCount) ?? old.sample_count, req.body.acceptanceCriteria ?? old.acceptance_criteria, req.body.outcome ?? old.outcome, req.body.findings ?? old.findings, req.body.actionTaken ?? old.action_taken, parseIntNullable(req.body.conductedByStaffId) ?? old.conducted_by_staff_id, req.body.nextDueDate ?? old.next_due_date, req.body.status ?? old.status, req.params.id);
+    audit(req, { action: 'edit', entity: 'result_comparability_studies', entityId: req.params.id, oldValue: old, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  // ============= Contingency / continuity plans =============
+  router.get('/contingency-plans', requirePermission('process_management', 'view'), (_req, res) => {
+    res.json(getDb().prepare('SELECT * FROM contingency_plans ORDER BY created_at DESC').all());
+  });
+  router.post('/contingency-plans', requirePermission('process_management', 'create'), (req, res) => {
+    if (!req.body.title) return res.status(400).json({ error: 'title is required' });
+    const db = getDb();
+    const createdAt = new Date().toISOString();
+    const number = generateRecordNumber(db, 'contingency_plans', 'CTP', createdAt);
+    const r = db.prepare(`INSERT INTO contingency_plans (plan_number, scenario_type, title, trigger_description, response_actions, backup_arrangement, responsible_staff_id, last_tested_date, test_outcome, next_test_due, status, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(number, req.body.scenarioType ?? null, req.body.title, req.body.triggerDescription ?? null, req.body.responseActions ?? null, req.body.backupArrangement ?? null, parseIntNullable(req.body.responsibleStaffId), req.body.lastTestedDate ?? null, req.body.testOutcome ?? null, req.body.nextTestDue ?? null, req.body.status ?? 'active', req.body.notes ?? null, req.user!.id, createdAt);
+    audit(req, { action: 'create', entity: 'contingency_plans', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
+    res.status(201).json({ id: r.lastInsertRowid, planNumber: number });
+  });
+  router.put('/contingency-plans/:id', requirePermission('process_management', 'edit'), (req, res) => {
+    const db = getDb();
+    const old = db.prepare('SELECT * FROM contingency_plans WHERE id = ?').get(req.params.id) as any;
+    if (!old) return res.status(404).json({ error: 'Contingency plan not found' });
+    db.prepare(`UPDATE contingency_plans SET scenario_type = ?, title = ?, trigger_description = ?, response_actions = ?, backup_arrangement = ?, responsible_staff_id = ?, last_tested_date = ?, test_outcome = ?, next_test_due = ?, status = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(req.body.scenarioType ?? old.scenario_type, req.body.title ?? old.title, req.body.triggerDescription ?? old.trigger_description, req.body.responseActions ?? old.response_actions, req.body.backupArrangement ?? old.backup_arrangement, parseIntNullable(req.body.responsibleStaffId) ?? old.responsible_staff_id, req.body.lastTestedDate ?? old.last_tested_date, req.body.testOutcome ?? old.test_outcome, req.body.nextTestDue ?? old.next_test_due, req.body.status ?? old.status, req.body.notes ?? old.notes, req.params.id);
+    audit(req, { action: 'edit', entity: 'contingency_plans', entityId: req.params.id, oldValue: old, newValue: req.body });
     res.json({ ok: true });
   });
 

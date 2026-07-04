@@ -510,7 +510,15 @@ export function commonRoutes() {
       referralSendoutsPending: count("SELECT COUNT(*) count FROM referral_sendouts WHERE status IN ('sent','pending_result')"),
       delayedReferralSendouts: count("SELECT COUNT(*) count FROM referral_sendouts WHERE expected_return_date IS NOT NULL AND expected_return_date < ? AND result_received_date IS NULL AND status NOT IN ('closed','result_received')", today),
       reportAmendmentsThisMonth: count("SELECT COUNT(*) count FROM report_amendment_logs WHERE amendment_date >= ?", monthStart),
-      pendingProcessReviews: count("SELECT COUNT(*) count FROM process_review_records WHERE status IN ('draft','reviewed')")
+      pendingProcessReviews: count("SELECT COUNT(*) count FROM process_review_records WHERE status IN ('draft','reviewed')"),
+      preExaminationInstructions: count("SELECT COUNT(*) count FROM pre_examination_instructions WHERE status = 'active'"),
+      sampleReceiptsThisMonth: count("SELECT COUNT(*) count FROM sample_receipt_records WHERE receipt_date >= ?", monthStart),
+      suboptimalReceipts: count("SELECT COUNT(*) count FROM sample_receipt_records WHERE condition = 'suboptimal' AND receipt_date >= ?", monthStart),
+      referenceIntervalsDueReview: count("SELECT COUNT(*) count FROM reference_interval_records WHERE status = 'active' AND review_date IS NOT NULL AND review_date <= ?", today),
+      comparabilityStudiesDue: count("SELECT COUNT(*) count FROM result_comparability_studies WHERE next_due_date IS NOT NULL AND next_due_date <= ?", today),
+      openComparabilityIssues: count("SELECT COUNT(*) count FROM result_comparability_studies WHERE outcome = 'significant_difference' AND status != 'closed'"),
+      activeContingencyPlans: count("SELECT COUNT(*) count FROM contingency_plans WHERE status = 'active'"),
+      contingencyTestsDue: count("SELECT COUNT(*) count FROM contingency_plans WHERE status = 'active' AND next_test_due IS NOT NULL AND next_test_due <= ?", today)
     });
   });
 

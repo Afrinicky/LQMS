@@ -2818,6 +2818,123 @@ CREATE TABLE IF NOT EXISTS staff_immunizations (
 );
 `);
 
+  // ===================================================================
+  // Process Management — pre-examination, continuity and result-validity
+  // registers: collection instructions, sample receipt/condition log,
+  // biological reference intervals, result-comparability studies and a
+  // scenario-based contingency / continuity plan.
+  // -------------------------------------------------------------------
+  database.exec(`
+-- Pre-examination collection & handling instructions, per test / sample type.
+CREATE TABLE IF NOT EXISTS pre_examination_instructions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  instruction_number TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  test_catalog_id INTEGER REFERENCES lab_test_catalog(id),
+  sample_type TEXT,
+  container_additive TEXT,
+  patient_preparation TEXT,
+  collection_instructions TEXT,
+  transport_condition TEXT,
+  stability_summary TEXT,
+  storage_condition TEXT,
+  status TEXT NOT NULL DEFAULT 'active', -- active|under_review|archived
+  section_id INTEGER REFERENCES sections(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Primary-sample receipt & condition log (feeds the rejection register).
+CREATE TABLE IF NOT EXISTS sample_receipt_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  receipt_number TEXT NOT NULL UNIQUE,
+  receipt_date TEXT NOT NULL,
+  receipt_time TEXT,
+  request_reference TEXT,
+  patient_reference TEXT,
+  patient_type TEXT,
+  sample_type TEXT,
+  section_id INTEGER REFERENCES sections(id),
+  test_catalog_id INTEGER REFERENCES lab_test_catalog(id),
+  received_by_staff_id INTEGER REFERENCES staff(id),
+  condition TEXT NOT NULL DEFAULT 'acceptable', -- acceptable|suboptimal|rejected
+  condition_notes TEXT,
+  temperature TEXT,
+  request_complete INTEGER DEFAULT 1,
+  urgent INTEGER DEFAULT 0,
+  rejection_id INTEGER REFERENCES specimen_rejection_records(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Biological reference intervals & clinical decision limits register.
+CREATE TABLE IF NOT EXISTS reference_interval_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  record_number TEXT NOT NULL UNIQUE,
+  test_catalog_id INTEGER REFERENCES lab_test_catalog(id),
+  analyte TEXT NOT NULL,
+  sample_type TEXT,
+  population TEXT,                    -- e.g. adult male, paediatric, pregnancy
+  lower_limit TEXT,
+  upper_limit TEXT,
+  unit TEXT,
+  clinical_decision_limit TEXT,
+  source TEXT,                        -- manufacturer|literature|in-house study
+  effective_date TEXT,
+  review_date TEXT,
+  status TEXT NOT NULL DEFAULT 'active', -- active|under_review|superseded
+  communicated_to_users INTEGER DEFAULT 0,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Result comparability studies across methods / analysers / POCT.
+CREATE TABLE IF NOT EXISTS result_comparability_studies (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  study_number TEXT NOT NULL UNIQUE,
+  study_date TEXT NOT NULL,
+  test_name TEXT,
+  analyte TEXT,
+  method_a TEXT,
+  method_b TEXT,
+  sample_count INTEGER,
+  acceptance_criteria TEXT,
+  outcome TEXT,                       -- comparable|significant_difference|inconclusive
+  findings TEXT,
+  action_taken TEXT,
+  conducted_by_staff_id INTEGER REFERENCES staff(id),
+  next_due_date TEXT,
+  status TEXT NOT NULL DEFAULT 'open', -- open|reviewed|closed
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Scenario-based contingency / continuity & emergency-preparedness plans.
+CREATE TABLE IF NOT EXISTS contingency_plans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  plan_number TEXT NOT NULL UNIQUE,
+  scenario_type TEXT,                -- personnel|equipment|power|reagent_stockout|fire_disaster|lis_downtime|other
+  title TEXT NOT NULL,
+  trigger_description TEXT,
+  response_actions TEXT,
+  backup_arrangement TEXT,
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  last_tested_date TEXT,
+  test_outcome TEXT,
+  next_test_due TEXT,
+  status TEXT NOT NULL DEFAULT 'active', -- draft|active|under_review|retired
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+`);
+
   // Default Dennis settings: strict hybrid policy. Ollama (offline) is the default
   // runtime and is enabled; online AI is disabled by default and, even once
   // enabled, is restricted to SOP/document analysis only (never operational data).
