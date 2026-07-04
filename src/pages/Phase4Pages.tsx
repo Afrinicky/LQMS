@@ -84,10 +84,10 @@ function LeveyJenningsChart({ data }: { data: LeveyJenningsData }) {
 }
 
 // ============= IQC =============
-export function IqcPage() {
+export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { isEnabled } = useModules();
   const { staff, sections, equipment } = useLookups();
-  const [tab, setTab] = useState('Dashboard');
+  const [tab, setTab] = useState(embedded ? 'IQC Materials' : 'Dashboard');
   const [materials, setMaterials] = useState<IqcMaterial[]>([]);
   const [results, setResults] = useState<IqcResult[]>([]);
   const [lotChanges, setLotChanges] = useState<IqcLotChange[]>([]);
@@ -111,8 +111,8 @@ export function IqcPage() {
       if (sum) setSummary(sum);
     } catch (e) { setError((e as Error).message); }
   }
-  useEffect(() => { if (isEnabled('iqc')) void load(); }, [isEnabled]);
-  if (!isEnabled('iqc')) return <DisabledModule />;
+  useEffect(() => { if (embedded || isEnabled('iqc')) void load(); }, [isEnabled]);
+  if (!embedded && !isEnabled('iqc')) return <DisabledModule />;
 
   async function loadLj(id: string) {
     if (!id) { setLj(null); return; }
@@ -161,11 +161,11 @@ export function IqcPage() {
     catch (e) { setError((e as Error).message); }
   }
 
-  const tabs = ['Dashboard', 'IQC Materials', 'New Material', 'Result Entry', 'QC Failures', 'Levey-Jennings', 'Lot Changes', 'Reports'];
+  const tabs = ['Dashboard', 'IQC Materials', 'New Material', 'Result Entry', 'QC Failures', 'Levey-Jennings', 'Lot Changes', 'Reports'].filter(name => !embedded || name !== 'Dashboard');
   const failures = results.filter(r => r.status !== 'accepted');
 
   return <div className="module-page">
-    <PageHeader eyebrow="Process Management" title="IQC Management" subtitle="Internal quality control materials, results, and review." />
+    {!embedded && <PageHeader eyebrow="Process Management" title="IQC Management" subtitle="Internal quality control materials, results, and review." />}
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
@@ -269,10 +269,10 @@ export function IqcPage() {
 }
 
 // ============= EQA =============
-export function EqaPage() {
+export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { isEnabled } = useModules();
   const { staff, sections } = useLookups();
-  const [tab, setTab] = useState('Dashboard');
+  const [tab, setTab] = useState(embedded ? 'EQA Programs' : 'Dashboard');
   const [programs, setPrograms] = useState<EqaProgram[]>([]);
   const [events, setEvents] = useState<EqaEvent[]>([]);
   const [summary, setSummary] = useState<EqaSummary | null>(null);
@@ -293,8 +293,8 @@ export function EqaPage() {
       if (sum) setSummary(sum);
     } catch (e) { setError((e as Error).message); }
   }
-  useEffect(() => { if (isEnabled('eqa')) void load(); }, [isEnabled]);
-  if (!isEnabled('eqa')) return <DisabledModule />;
+  useEffect(() => { if (embedded || isEnabled('eqa')) void load(); }, [isEnabled]);
+  if (!embedded && !isEnabled('eqa')) return <DisabledModule />;
 
   async function submitProgram(e: FormEvent) {
     e.preventDefault(); setError(null);
@@ -339,11 +339,11 @@ export function EqaPage() {
     catch (e) { setError((e as Error).message); }
   }
 
-  const tabs = ['Dashboard', 'EQA Programs', 'New Program', 'EQA Events', 'Results', 'Unsatisfactory Performance', 'Reports'];
+  const tabs = ['Dashboard', 'EQA Programs', 'New Program', 'EQA Events', 'Results', 'Unsatisfactory Performance', 'Reports'].filter(name => !embedded || name !== 'Dashboard');
   const unsatisfactory = events.filter(ev => ['unsatisfactory', 'poor', 'fail', 'failed'].includes((ev.performance_status || '').toLowerCase()));
 
   return <div className="module-page">
-    <PageHeader eyebrow="Process Management" title="EQA Management" subtitle="External quality assessment events, results, and follow-up." />
+    {!embedded && <PageHeader eyebrow="Process Management" title="EQA Management" subtitle="External quality assessment events, results, and follow-up." />}
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
@@ -437,10 +437,10 @@ export function EqaPage() {
 }
 
 // ============= Verification & Validation =============
-export function VerificationValidationPage() {
+export function VerificationValidationPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { isEnabled } = useModules();
   const { staff, equipment } = useLookups();
-  const [tab, setTab] = useState('Dashboard');
+  const [tab, setTab] = useState(embedded ? 'Method Verification Register' : 'Dashboard');
   const [methods, setMethods] = useState<MethodVerification[]>([]);
   const [equipVerifs, setEquipVerifs] = useState<EquipmentVerification[]>([]);
   const [summary, setSummary] = useState<VerificationSummary | null>(null);
@@ -462,8 +462,8 @@ export function VerificationValidationPage() {
       if (sum) setSummary(sum);
     } catch (e) { setError((e as Error).message); }
   }
-  useEffect(() => { if (isEnabled('verification_validation')) void load(); }, [isEnabled]);
-  if (!isEnabled('verification_validation')) return <DisabledModule />;
+  useEffect(() => { if (embedded || isEnabled('verification_validation')) void load(); }, [isEnabled]);
+  if (!embedded && !isEnabled('verification_validation')) return <DisabledModule />;
 
   async function submitMethod(e: FormEvent) {
     e.preventDefault(); setError(null);
@@ -514,10 +514,10 @@ export function VerificationValidationPage() {
     catch (e) { setError((e as Error).message); }
   }
 
-  const tabs = ['Dashboard', 'Method Verification Register', 'New Verification', 'Experiments', 'Equipment Verification', 'Reports'];
+  const tabs = ['Dashboard', 'Method Verification Register', 'New Verification', 'Experiments', 'Equipment Verification', 'Reports'].filter(name => !embedded || name !== 'Dashboard');
 
   return <div className="module-page">
-    <PageHeader eyebrow="Process Management" title="Verification &amp; Validation" subtitle="Method and equipment verification and validation records." />
+    {!embedded && <PageHeader eyebrow="Process Management" title="Verification &amp; Validation" subtitle="Method and equipment verification and validation records." />}
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
@@ -631,10 +631,10 @@ export function VerificationValidationPage() {
 }
 
 // ============= Measurement Uncertainty =============
-export function MeasurementUncertaintyPage() {
+export function MeasurementUncertaintyPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { isEnabled } = useModules();
   const { equipment } = useLookups();
-  const [tab, setTab] = useState('Dashboard');
+  const [tab, setTab] = useState(embedded ? 'MU Register' : 'Dashboard');
   const [records, setRecords] = useState<MeasurementUncertaintyRecord[]>([]);
   const [summary, setSummary] = useState<MeasurementUncertaintySummary | null>(null);
   const [form, setForm] = useState({ testName: '', analyte: '', methodName: '', equipmentId: '', calculationDate: '', dataPeriodStart: '', dataPeriodEnd: '', sourceData: '', meanValue: '', sdValue: '', cvPercent: '', uncertaintyValue: '', expandedUncertainty: '', coverageFactor: '2', interpretation: '', status: 'draft' });
@@ -650,8 +650,8 @@ export function MeasurementUncertaintyPage() {
       if (sum) setSummary(sum);
     } catch (e) { setError((e as Error).message); }
   }
-  useEffect(() => { if (isEnabled('measurement_uncertainty')) void load(); }, [isEnabled]);
-  if (!isEnabled('measurement_uncertainty')) return <DisabledModule />;
+  useEffect(() => { if (embedded || isEnabled('measurement_uncertainty')) void load(); }, [isEnabled]);
+  if (!embedded && !isEnabled('measurement_uncertainty')) return <DisabledModule />;
 
   async function submit(e: FormEvent) {
     e.preventDefault(); setError(null);
@@ -671,11 +671,11 @@ export function MeasurementUncertaintyPage() {
     catch (e) { setError((e as Error).message); }
   }
 
-  const tabs = ['Dashboard', 'MU Register', 'New MU Record', 'Review/Approval', 'Reports'];
+  const tabs = ['Dashboard', 'MU Register', 'New MU Record', 'Review/Approval', 'Reports'].filter(name => !embedded || name !== 'Dashboard');
   const pending = records.filter(r => r.status === 'draft' || r.status === 'in_review');
 
   return <div className="module-page">
-    <PageHeader eyebrow="Process Management" title="Measurement Uncertainty" subtitle="Measurement uncertainty budgets and periodic review." />
+    {!embedded && <PageHeader eyebrow="Process Management" title="Measurement Uncertainty" subtitle="Measurement uncertainty budgets and periodic review." />}
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 

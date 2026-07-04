@@ -42,10 +42,10 @@ function staffName(staffList: Staff[], id?: number | null) {
   return staffList.find(s => s.id === id)?.fullName || `Staff #${id}`;
 }
 
-export function POCTPage() {
+export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { isEnabled } = useModules();
   const { staff, sections, departments, locations } = useLookups();
-  const [tab, setTab] = useState('Dashboard');
+  const [tab, setTab] = useState(embedded ? 'Sites' : 'Dashboard');
   const [error, setError] = useState<string | null>(null);
 
   const [summary, setSummary] = useState<PoctSummary | null>(null);
@@ -97,8 +97,8 @@ export function POCTPage() {
       setQcMaterials(qm); setQcResults(qr); setEqaEvents(eq); setMaintenance(mn); setIncidents(inc); setReviews(rv);
     } catch (e) { setError((e as Error).message); }
   }
-  useEffect(() => { if (isEnabled('poct')) void load(); }, [isEnabled]);
-  if (!isEnabled('poct')) return <DisabledModule />;
+  useEffect(() => { if (embedded || isEnabled('poct')) void load(); }, [isEnabled]);
+  if (!embedded && !isEnabled('poct')) return <DisabledModule />;
 
   async function post(path: string, body: any) { return api(path, { method: 'POST', body: JSON.stringify(body) }); }
 
@@ -124,7 +124,7 @@ export function POCTPage() {
   }
 
   async function loadActions() { try { setPoctActions(await api<any[]>('/poct/actions')); } catch (e) { setError((e as Error).message); } }
-  useEffect(() => { if (tab === 'Reports' && isEnabled('poct')) void loadActions(); }, [tab, isEnabled]);
+  useEffect(() => { if (tab === 'Reports' && (embedded || isEnabled('poct'))) void loadActions(); }, [tab, isEnabled]);
 
   async function submitSite(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/poct/sites', siteForm); setSiteForm({ siteCode: '', siteName: '', departmentId: '', sectionId: '', locationId: '', serviceArea: '', responsibleStaffId: '', contactPerson: '', notes: '' }); await load(); } catch (e) { setError((e as Error).message); } }
   async function toggleSite(id: number) { try { await post(`/poct/sites/${id}/toggle`, {}); await load(); } catch (e) { setError((e as Error).message); } }
@@ -158,10 +158,10 @@ export function POCTPage() {
   async function approveReview(id: number) { try { await post(`/poct/monthly-reviews/${id}/approve`, {}); await load(); } catch (e) { setError((e as Error).message); } }
   async function closeReview(id: number) { try { await post(`/poct/monthly-reviews/${id}/close`, {}); await load(); } catch (e) { setError((e as Error).message); } }
 
-  const tabs = ['Dashboard', 'Sites', 'Devices', 'Test Menu', 'Operator Authorizations', 'Reagent Lots', 'QC Monitoring', 'EQA Monitoring', 'Maintenance Logs', 'Incidents', 'Monthly Reviews', 'Reports'];
+  const tabs = ['Dashboard', 'Sites', 'Devices', 'Test Menu', 'Operator Authorizations', 'Reagent Lots', 'QC Monitoring', 'EQA Monitoring', 'Maintenance Logs', 'Incidents', 'Monthly Reviews', 'Reports'].filter(name => !embedded || name !== 'Dashboard');
 
   return <div className="module-page">
-    <PageHeader eyebrow="Process Management" title="POCT Oversight" subtitle="Point-of-care testing sites, QC, and incident oversight." />
+    {!embedded && <PageHeader eyebrow="Process Management" title="POCT Oversight" subtitle="Point-of-care testing sites, QC, and incident oversight." />}
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
