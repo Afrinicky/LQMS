@@ -164,51 +164,53 @@ export function Dashboard() {
   const n = (x: unknown): number => { const v = c(x); return typeof v === 'number' ? v : (typeof v === 'string' && v !== '' ? Number(v) || 0 : 0); };
   const firstName = user?.fullName?.trim().split(/\s+/)[0];
 
-  // Chart series derived entirely from the real summary counts above.
+  // Chart series derived entirely from the real summary counts above. Every
+  // entry carries an onClick that opens the module where the data lives.
+  const go = (path: string) => () => navigate(path);
   const qualityWorkload = [
-    { label: 'Open NCs', value: n(qms?.openNCs), color: CHART_COLORS[3] },
-    { label: 'Open CAPAs', value: n(qms?.openCAPAs), color: CHART_COLORS[0] },
-    { label: 'Pending complaints', value: n(qms?.pendingComplaints), color: CHART_COLORS[2] },
-    { label: 'High/critical risks', value: n(qms?.highRisks), color: CHART_COLORS[4] },
+    { label: 'Open NCs', value: n(qms?.openNCs), color: CHART_COLORS[3], onClick: go('/nc-capa') },
+    { label: 'Open CAPAs', value: n(qms?.openCAPAs), color: CHART_COLORS[0], onClick: go('/nc-capa') },
+    { label: 'Pending complaints', value: n(qms?.pendingComplaints), color: CHART_COLORS[2], onClick: go('/complaints') },
+    { label: 'High/critical risks', value: n(qms?.highRisks), color: CHART_COLORS[4], onClick: go('/risks') },
   ];
   const operationalReadiness = [
-    { label: 'Maintenance due', value: n(ops?.equipmentMaintenanceDue), color: CHART_COLORS[0] },
-    { label: 'Calibration due', value: n(ops?.equipmentCalibrationDue), color: CHART_COLORS[5] },
-    { label: 'Out of service', value: n(ops?.equipmentOutOfService), color: CHART_COLORS[3] },
-    { label: 'Low stock', value: n(ops?.inventoryLowStock), color: CHART_COLORS[2] },
-    { label: 'Expiring soon', value: n(ops?.inventoryExpiringSoon), color: CHART_COLORS[1] },
-    { label: 'Expired stock', value: n(ops?.inventoryExpired), color: CHART_COLORS[6] },
+    { label: 'Maintenance due', value: n(ops?.equipmentMaintenanceDue), color: CHART_COLORS[0], onClick: go('/equipment') },
+    { label: 'Calibration due', value: n(ops?.equipmentCalibrationDue), color: CHART_COLORS[5], onClick: go('/equipment') },
+    { label: 'Out of service', value: n(ops?.equipmentOutOfService), color: CHART_COLORS[3], onClick: go('/equipment') },
+    { label: 'Low stock', value: n(ops?.inventoryLowStock), color: CHART_COLORS[2], onClick: go('/supplier-inventory') },
+    { label: 'Expiring soon', value: n(ops?.inventoryExpiringSoon), color: CHART_COLORS[1], onClick: go('/supplier-inventory') },
+    { label: 'Expired stock', value: n(ops?.inventoryExpired), color: CHART_COLORS[6], onClick: go('/supplier-inventory') },
   ];
   const alertsBreakdown = [
-    { label: 'Due today', value: n(notifs?.dueToday), color: CHART_COLORS[2] },
-    { label: 'Due soon', value: n(notifs?.dueSoon), color: CHART_COLORS[0] },
-    { label: 'Overdue', value: n(notifs?.overdue), color: CHART_COLORS[3] },
-    { label: 'Open tasks', value: n(notifs?.openTasks), color: CHART_COLORS[5] },
-    { label: 'Approvals', value: n(notifs?.pendingApprovals), color: CHART_COLORS[4] },
+    { label: 'Due today', value: n(notifs?.dueToday), color: CHART_COLORS[2], onClick: go('/notifications') },
+    { label: 'Due soon', value: n(notifs?.dueSoon), color: CHART_COLORS[0], onClick: go('/notifications') },
+    { label: 'Overdue', value: n(notifs?.overdue), color: CHART_COLORS[3], onClick: go('/notifications') },
+    { label: 'Open tasks', value: n(notifs?.openTasks), color: CHART_COLORS[5], onClick: go('/notifications') },
+    { label: 'Approvals', value: n(notifs?.pendingApprovals), color: CHART_COLORS[4], onClick: go('/notifications') },
   ];
   const technicalQuality = [
-    { label: 'IQC failures (month)', value: n(tech?.iqcFailuresThisMonth), color: CHART_COLORS[3] },
-    { label: 'IQC pending review', value: n(tech?.iqcResultsPendingReview), color: CHART_COLORS[0] },
-    { label: 'EQA events due', value: n(tech?.eqaEventsDue), color: CHART_COLORS[5] },
-    { label: 'Unsatisfactory EQA', value: n(tech?.eqaUnsatisfactoryEvents), color: CHART_COLORS[2] },
-    { label: 'Open verifications', value: n(tech?.openVerifications), color: CHART_COLORS[1] },
-    { label: 'MU records due', value: n(tech?.muRecordsDueForReview), color: CHART_COLORS[4] },
+    { label: 'IQC failures (month)', value: n(tech?.iqcFailuresThisMonth), color: CHART_COLORS[3], onClick: go('/iqc') },
+    { label: 'IQC pending review', value: n(tech?.iqcResultsPendingReview), color: CHART_COLORS[0], onClick: go('/iqc') },
+    { label: 'EQA events due', value: n(tech?.eqaEventsDue), color: CHART_COLORS[5], onClick: go('/eqa') },
+    { label: 'Unsatisfactory EQA', value: n(tech?.eqaUnsatisfactoryEvents), color: CHART_COLORS[2], onClick: go('/eqa') },
+    { label: 'Open verifications', value: n(tech?.openVerifications), color: CHART_COLORS[1], onClick: go('/verification-validation') },
+    { label: 'MU records due', value: n(tech?.muRecordsDueForReview), color: CHART_COLORS[4], onClick: go('/measurement-uncertainty') },
   ];
   const peopleAndDocuments = [
-    { label: 'Doc reviews due', value: n(docs?.dueReviews), color: CHART_COLORS[0] },
-    { label: 'Doc reviews overdue', value: n(docs?.overdueReviews), color: CHART_COLORS[3] },
-    { label: 'Pending attestations', value: n(docs?.pendingAttestations), color: CHART_COLORS[5] },
-    { label: 'Certificates expiring', value: n(people?.certificatesExpiringSoon), color: CHART_COLORS[2] },
-    { label: 'Competency due', value: n(people?.competencyAssessmentsDue), color: CHART_COLORS[4] },
-    { label: 'Authorisations due', value: n(people?.authorizationsDueReview), color: CHART_COLORS[1] },
+    { label: 'Doc reviews due', value: n(docs?.dueReviews), color: CHART_COLORS[0], onClick: go('/documents') },
+    { label: 'Doc reviews overdue', value: n(docs?.overdueReviews), color: CHART_COLORS[3], onClick: go('/documents') },
+    { label: 'Pending attestations', value: n(docs?.pendingAttestations), color: CHART_COLORS[5], onClick: go('/documents') },
+    { label: 'Certificates expiring', value: n(people?.certificatesExpiringSoon), color: CHART_COLORS[2], onClick: go('/personnel') },
+    { label: 'Competency due', value: n(people?.competencyAssessmentsDue), color: CHART_COLORS[4], onClick: go('/personnel') },
+    { label: 'Authorisations due', value: n(people?.authorizationsDueReview), color: CHART_COLORS[1], onClick: go('/personnel') },
   ];
   const governance = [
-    { label: 'Planned assessments', value: n(gov?.plannedAssessments), color: CHART_COLORS[0] },
-    { label: 'Open findings', value: n(gov?.openFindings), color: CHART_COLORS[3] },
-    { label: 'Pending mgmt reviews', value: n(gov?.pendingManagementReviews), color: CHART_COLORS[2] },
-    { label: 'Critical QI results', value: n(gov?.criticalQualityIndicatorResults), color: CHART_COLORS[6] },
-    { label: 'Improvement projects', value: n(gov?.activeImprovementProjects), color: CHART_COLORS[1] },
-    { label: 'Overdue improvements', value: n(gov?.overdueImprovementActions), color: CHART_COLORS[4] },
+    { label: 'Planned assessments', value: n(gov?.plannedAssessments), color: CHART_COLORS[0], onClick: go('/assessments') },
+    { label: 'Open findings', value: n(gov?.openFindings), color: CHART_COLORS[3], onClick: go('/assessments') },
+    { label: 'Pending mgmt reviews', value: n(gov?.pendingManagementReviews), color: CHART_COLORS[2], onClick: go('/management-review') },
+    { label: 'Critical QI results', value: n(gov?.criticalQualityIndicatorResults), color: CHART_COLORS[6], onClick: go('/quality-indicators') },
+    { label: 'Improvement projects', value: n(gov?.activeImprovementProjects), color: CHART_COLORS[1], onClick: go('/continual-improvement') },
+    { label: 'Overdue improvements', value: n(gov?.overdueImprovementActions), color: CHART_COLORS[4], onClick: go('/continual-improvement') },
   ];
 
   return (
@@ -220,14 +222,14 @@ export function Dashboard() {
         actions={<button className="secondary" type="button" onClick={() => navigate('/notifications')}><Bell size={16} /> Review Calendar</button>}
       />
 
-      {/* One slim KPI band — the headline numbers, nothing more */}
+      {/* One slim KPI band — the headline numbers, each opening its module */}
       <KpiStrip items={[
-        { label: 'Open NCs', value: c(qms?.openNCs) },
-        { label: 'Open CAPAs', value: c(qms?.openCAPAs) },
-        { label: 'Overdue actions', value: health?.overdueActions ?? c(qms?.overdueActions), tone: 'danger' },
-        { label: 'Docs due review', value: docs?.dueReviews },
-        { label: 'Training due', value: people?.competencyAssessmentsDue },
-        { label: 'Unread alerts', value: notifs?.unreadNotifications },
+        { label: 'Open NCs', value: c(qms?.openNCs), onClick: go('/nc-capa') },
+        { label: 'Open CAPAs', value: c(qms?.openCAPAs), onClick: go('/nc-capa') },
+        { label: 'Overdue actions', value: health?.overdueActions ?? c(qms?.overdueActions), tone: 'danger', onClick: go('/actions') },
+        { label: 'Docs due review', value: docs?.dueReviews, onClick: go('/documents') },
+        { label: 'Training due', value: people?.competencyAssessmentsDue, onClick: go('/personnel') },
+        { label: 'Unread alerts', value: notifs?.unreadNotifications, onClick: go('/notifications') },
       ]} />
 
       {/* Six compact charts cover the whole management system */}
@@ -257,12 +259,12 @@ export function Dashboard() {
         <div className="card">
           <div className="section-head"><h3>My Work</h3><Link to="/actions">Open tracker <ArrowRight size={13} /></Link></div>
           <KpiStrip flat items={[
-            { label: 'Open tasks', value: myWork?.myOpenTasks },
-            { label: 'Due today', value: myWork?.myDueToday },
-            { label: 'Overdue', value: myWork?.myOverdueItems, tone: 'danger' },
-            { label: 'Open actions', value: myWork?.myOpenActions },
-            { label: 'Approvals', value: myWork?.myPendingApprovals },
-            { label: 'Unread alerts', value: myWork?.myUnreadNotifications },
+            { label: 'Open tasks', value: myWork?.myOpenTasks, onClick: go('/notifications') },
+            { label: 'Due today', value: myWork?.myDueToday, onClick: go('/notifications') },
+            { label: 'Overdue', value: myWork?.myOverdueItems, tone: 'danger', onClick: go('/notifications') },
+            { label: 'Open actions', value: myWork?.myOpenActions, onClick: go('/actions') },
+            { label: 'Approvals', value: myWork?.myPendingApprovals, onClick: go('/notifications') },
+            { label: 'Unread alerts', value: myWork?.myUnreadNotifications, onClick: go('/notifications') },
           ]} />
         </div>
         <div className="card">
@@ -309,5 +311,5 @@ export function ModulePage({ moduleKey, title, eyebrow = 'Module', placeholder =
 }
 
 export function Documents() { return <ModulePage moduleKey="documents" title="Documents & Records" />; }
-export function Organisation() { return <ModulePage moduleKey="organisation" title="Organisation & Leadership" eyebrow="Organisation" />; }
+export function Organisation() { return <ModulePage moduleKey="organisation" title="Organisation & Leadership" eyebrow="Organisation and Leadership" />; }
 export function Personnel() { return <ModulePage moduleKey="personnel" title="Personnel Management" />; }

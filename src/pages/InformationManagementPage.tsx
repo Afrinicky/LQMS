@@ -152,14 +152,14 @@ export function InformationManagementPage() {
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && (summary ? <KpiStrip items={[
-      { label: 'Information assets', value: summary.activeInformationAssets },
-      { label: 'Active systems', value: summary.activeSystems },
-      { label: 'Open access reviews', value: summary.openAccessReviews },
-      { label: 'Security incidents', value: summary.openSecurityIncidents, tone: 'danger' },
-      { label: 'Data corrections', value: summary.pendingDataCorrections },
-      { label: 'Change requests', value: summary.openChangeRequests },
-      { label: 'Downtime (month)', value: summary.downtimeRecordsThisMonth },
-      { label: 'Pending reviews', value: summary.pendingInformationReviews },
+      { label: 'Information assets', value: summary.activeInformationAssets, onClick: () => setTab('Information Assets') },
+      { label: 'Active systems', value: summary.activeSystems, onClick: () => setTab('Information Systems') },
+      { label: 'Open access reviews', value: summary.openAccessReviews, onClick: () => setTab('Access Reviews') },
+      { label: 'Security incidents', value: summary.openSecurityIncidents, tone: 'danger', onClick: () => setTab('Security Incidents') },
+      { label: 'Data corrections', value: summary.pendingDataCorrections, onClick: () => setTab('Data Corrections') },
+      { label: 'Change requests', value: summary.openChangeRequests, onClick: () => setTab('Change Requests') },
+      { label: 'Downtime (month)', value: summary.downtimeRecordsThisMonth, onClick: () => setTab('Downtime Records') },
+      { label: 'Pending reviews', value: summary.pendingInformationReviews, onClick: () => setTab('Information Reviews') },
     ]} /> : <p>Loading summary…</p>)}
     {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Information estate" subtitle="Managed assets and systems">

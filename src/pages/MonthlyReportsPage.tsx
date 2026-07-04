@@ -203,13 +203,13 @@ export function MonthlyReportsPage() {
 
     {tab === 'Dashboard' && <>
       {summary ? <KpiStrip items={[
-        { label: 'Imports (month)', value: summary.importsThisMonth },
-        { label: 'Unprocessed imports', value: summary.unprocessedImports, tone: 'warning' },
-        { label: 'Unresolved exceptions', value: summary.unresolvedExceptions, tone: 'danger' },
-        { label: 'Draft reports', value: summary.draftReports },
-        { label: 'Approved (month)', value: summary.approvedReportsThisMonth, tone: 'success' },
-        { label: 'Delayed TAT records', value: summary.delayedTatRecords },
-        { label: 'Average TAT (min)', value: summary.averageTatMinutes },
+        { label: 'Imports (month)', value: summary.importsThisMonth, onClick: () => setTab('Import Batches') },
+        { label: 'Unprocessed imports', value: summary.unprocessedImports, tone: 'warning', onClick: () => setTab('Import Batches') },
+        { label: 'Unresolved exceptions', value: summary.unresolvedExceptions, tone: 'danger', onClick: () => setTab('Exceptions') },
+        { label: 'Draft reports', value: summary.draftReports, onClick: () => setTab('Monthly Reports') },
+        { label: 'Approved (month)', value: summary.approvedReportsThisMonth, tone: 'success', onClick: () => setTab('Monthly Reports') },
+        { label: 'Delayed TAT records', value: summary.delayedTatRecords, onClick: () => setTab('TAT Summary') },
+        { label: 'Average TAT (min)', value: summary.averageTatMinutes, onClick: () => setTab('TAT Summary') },
       ]} /> : <p>Loading summary…</p>}
       {summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
         <ChartCard title="Import pipeline" subtitle="This month's LHIMS processing">

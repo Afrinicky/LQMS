@@ -578,7 +578,7 @@ export function personnelRoutes() {
   });
 
   /* ──────────────────────────────────────────────────────────────────────
-   * Orientation / Induction tracking (ISO 15189 §6.2.3, WHO LQMS induction).
+   * Orientation / Induction tracking.
    * ──────────────────────────────────────────────────────────────────────── */
   router.get('/orientations', requirePermission('personnel', 'view'), (_req, res) => {
     res.json(getDb().prepare(`SELECT o.*, s.full_name AS staff_name, f.full_name AS facilitator_name
@@ -620,6 +620,30 @@ export function personnelRoutes() {
     sets.push('updated_at = CURRENT_TIMESTAMP');
     db.prepare(`UPDATE staff_orientations SET ${sets.join(', ')} WHERE id = ?`).run(...vals, req.params.id);
     audit(req, { action: 'edit', entity: 'staff_orientations', entityId: Number(req.params.id), oldValue: existing, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  // ============= Performance appraisals =============
+  router.get('/appraisals', requirePermission('personnel', 'view'), (_req, res) => {
+    res.json(getDb().prepare('SELECT * FROM performance_appraisals ORDER BY appraisal_date DESC, created_at DESC').all());
+  });
+  router.post('/appraisals', requirePermission('personnel', 'create'), (req, res) => {
+    if (!req.body.appraisalDate) return res.status(400).json({ error: 'appraisalDate is required' });
+    const db = getDb();
+    const createdAt = new Date().toISOString();
+    const number = generateRecordNumber(db, 'performance_appraisals', 'APR', createdAt);
+    const r = db.prepare(`INSERT INTO performance_appraisals (record_number, staff_id, appraisal_date, period, appraiser_staff_id, rating, outcome, strengths, development_areas, objectives, next_appraisal_due, status, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(number, parseIntNullable(req.body.staffId), req.body.appraisalDate, req.body.period ?? null, parseIntNullable(req.body.appraiserStaffId) ?? getStaffIdOrCurrent(req, null), req.body.rating ?? null, req.body.outcome ?? null, req.body.strengths ?? null, req.body.developmentAreas ?? null, req.body.objectives ?? null, req.body.nextAppraisalDue ?? null, req.body.status ?? 'completed', req.body.notes ?? null, req.user!.id, createdAt);
+    audit(req, { action: 'create', entity: 'performance_appraisals', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
+    res.status(201).json({ id: r.lastInsertRowid, recordNumber: number });
+  });
+  router.put('/appraisals/:id', requirePermission('personnel', 'edit'), (req, res) => {
+    const db = getDb();
+    const old = db.prepare('SELECT * FROM performance_appraisals WHERE id = ?').get(req.params.id) as any;
+    if (!old) return res.status(404).json({ error: 'Appraisal not found' });
+    db.prepare(`UPDATE performance_appraisals SET staff_id = ?, appraisal_date = ?, period = ?, appraiser_staff_id = ?, rating = ?, outcome = ?, strengths = ?, development_areas = ?, objectives = ?, next_appraisal_due = ?, status = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(parseIntNullable(req.body.staffId) ?? old.staff_id, req.body.appraisalDate ?? old.appraisal_date, req.body.period ?? old.period, parseIntNullable(req.body.appraiserStaffId) ?? old.appraiser_staff_id, req.body.rating ?? old.rating, req.body.outcome ?? old.outcome, req.body.strengths ?? old.strengths, req.body.developmentAreas ?? old.development_areas, req.body.objectives ?? old.objectives, req.body.nextAppraisalDue ?? old.next_appraisal_due, req.body.status ?? old.status, req.body.notes ?? old.notes, req.params.id);
+    audit(req, { action: 'edit', entity: 'performance_appraisals', entityId: req.params.id, oldValue: old, newValue: req.body });
     res.json({ ok: true });
   });
 

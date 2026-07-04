@@ -18,7 +18,13 @@ export const CHART_COLORS = [
   '#60A5FA', // sky
 ];
 
-type Datum = { label: string; value: number | null | undefined; color?: string };
+type Datum = {
+  label: string;
+  value: number | null | undefined;
+  color?: string;
+  /** When set, the row/segment/legend entry is clickable and opens its source data. */
+  onClick?: () => void;
+};
 
 const num = (v: number | null | undefined): number =>
   typeof v === 'number' && Number.isFinite(v) ? v : 0;
@@ -97,7 +103,8 @@ export function DonutChart({
       {legend && (
         <ul className="chart-legend">
           {items.map((d, i) => (
-            <li key={i}>
+            <li key={i} className={d.onClick ? 'chart-click' : undefined} onClick={d.onClick}
+              role={d.onClick ? 'button' : undefined} title={d.onClick ? `Open ${d.label}` : undefined}>
               <span className="lg-dot" style={{ background: d.color }} />
               <span className="lg-label">{d.label}</span>
               <span className="lg-val">{d.value}</span>
@@ -123,7 +130,8 @@ export function BarChart({ data, height = 168 }: { data: Datum[]; height?: numbe
       {items.map((d, i) => {
         const h = Math.max(2, (d.value / max) * 100);
         return (
-          <div className="bar-col" key={i}>
+          <div className={`bar-col ${d.onClick ? 'chart-click' : ''}`} key={i} onClick={d.onClick}
+            role={d.onClick ? 'button' : undefined} title={d.onClick ? `Open ${d.label}` : d.label}>
             <span className="bar-val">{d.value}</span>
             <div className="bar-track">
               <div className="bar-fill" style={{ height: `${h}%`, background: `linear-gradient(180deg, ${d.color}, ${d.color}99)` }} />
@@ -146,7 +154,8 @@ export function BarMeter({ data }: { data: Datum[] }) {
   return (
     <ul className="chart-meter">
       {items.map((d, i) => (
-        <li key={i}>
+        <li key={i} className={d.onClick ? 'chart-click' : undefined} onClick={d.onClick}
+          role={d.onClick ? 'button' : undefined} title={d.onClick ? `Open ${d.label}` : undefined}>
           <div className="meter-head">
             <span className="meter-label">{d.label}</span>
             <span className="meter-val">{d.value}</span>

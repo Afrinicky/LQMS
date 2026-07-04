@@ -199,14 +199,14 @@ export function RecordsReportsPage() {
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && (summary ? <KpiStrip items={[
-      { label: 'Report templates', value: summary.activeReportTemplates },
-      { label: 'Reports (month)', value: summary.reportsGeneratedThisMonth },
-      { label: 'Open evidence packs', value: summary.openEvidencePacks },
-      { label: 'Pending approvals', value: summary.pendingApprovals },
-      { label: 'Print jobs (month)', value: summary.printJobsThisMonth },
-      { label: 'Retention reviews due', value: summary.retentionReviewsDue, tone: 'warning' },
-      { label: 'Backup checks (month)', value: summary.backupChecksThisMonth },
-      { label: 'Integrity issues', value: summary.openIntegrityIssues, tone: 'danger' },
+      { label: 'Report templates', value: summary.activeReportTemplates, onClick: () => setTab('Report Templates') },
+      { label: 'Reports (month)', value: summary.reportsGeneratedThisMonth, onClick: () => setTab('Report Requests') },
+      { label: 'Open evidence packs', value: summary.openEvidencePacks, onClick: () => setTab('Evidence Packs') },
+      { label: 'Pending approvals', value: summary.pendingApprovals, onClick: () => setTab('Report Requests') },
+      { label: 'Print jobs (month)', value: summary.printJobsThisMonth, onClick: () => setTab('Print Jobs') },
+      { label: 'Retention reviews due', value: summary.retentionReviewsDue, tone: 'warning', onClick: () => setTab('Retention Rules') },
+      { label: 'Backup checks (month)', value: summary.backupChecksThisMonth, onClick: () => setTab('Backup/Restore Checks') },
+      { label: 'Integrity issues', value: summary.openIntegrityIssues, tone: 'danger', onClick: () => setTab('Data Integrity Checks') },
     ]} /> : <p>Loading…</p>)}
     {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Reporting activity" subtitle="This month's output and assets">

@@ -240,20 +240,20 @@ export function BloodBankHandoverPage() {
   const tabs = ['Dashboard', 'Blood Units', 'New Blood Unit', 'Thursday Handover', 'Handovers', 'Donation Campaigns', 'Adverse Events', 'Discards', 'Monthly Summary', 'Reports'];
 
   return <div className="module-page">
-    <PageHeader eyebrow="Process Control" title="Blood Bank Quality &amp; Inventory Handover" subtitle="Blood unit inventory, handovers, and adverse events." />
+    <PageHeader eyebrow="Process Management" title="Blood Bank Quality &amp; Inventory Handover" subtitle="Blood unit inventory, handovers, and adverse events." />
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && <>
       {summary ? <KpiStrip items={[
-        { label: 'Units available', value: summary.unitsAvailable },
-        { label: 'Expiring soon', value: summary.unitsExpiringSoon, tone: 'warning' },
-        { label: 'Expired', value: summary.unitsExpired, tone: 'danger' },
-        { label: 'Pending handovers', value: summary.pendingHandovers },
-        { label: 'Open adverse events', value: summary.openAdverseEvents },
-        { label: 'Discards (month)', value: summary.discardsThisMonth },
-        { label: 'Reactions (month)', value: summary.donorReactionsThisMonth + summary.transfusionReactionsThisMonth },
-        { label: 'NC/CAPA links', value: summary.ncCapaLinkedRecords },
+        { label: 'Units available', value: summary.unitsAvailable, onClick: () => setTab('Blood Units') },
+        { label: 'Expiring soon', value: summary.unitsExpiringSoon, tone: 'warning', onClick: () => setTab('Blood Units') },
+        { label: 'Expired', value: summary.unitsExpired, tone: 'danger', onClick: () => setTab('Blood Units') },
+        { label: 'Pending handovers', value: summary.pendingHandovers, onClick: () => setTab('Handovers') },
+        { label: 'Open adverse events', value: summary.openAdverseEvents, onClick: () => setTab('Adverse Events') },
+        { label: 'Discards (month)', value: summary.discardsThisMonth, onClick: () => setTab('Discards') },
+        { label: 'Reactions (month)', value: summary.donorReactionsThisMonth + summary.transfusionReactionsThisMonth, onClick: () => setTab('Adverse Events') },
+        { label: 'NC/CAPA links', value: summary.ncCapaLinkedRecords, onClick: () => setTab('Adverse Events') },
       ]} /> : <p>Loading summary…</p>}
       {summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
         <ChartCard title="Inventory status" subtitle="Available stock vs expiry risk">

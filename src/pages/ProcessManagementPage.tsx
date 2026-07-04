@@ -5,11 +5,12 @@ import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import type {
-  Section, Department,
+  Section, Department, Staff,
   LabTestCatalog, SpecimenAcceptanceCriteria, SpecimenRejectionRecord,
   CriticalResultRule, CriticalResultNotification,
   ReferralLaboratory, ReferralTest, ReferralSendout,
-  ReportAmendmentLog, ProcessReviewRecord, ProcessManagementSummary
+  ReportAmendmentLog, ProcessReviewRecord, ProcessManagementSummary,
+  PreExaminationInstruction, SampleReceiptRecord, ReferenceIntervalRecord, ResultComparabilityStudy, ContingencyPlan
 } from '../../shared/types/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
@@ -23,16 +24,18 @@ const LAB_STATUSES = ['active', 'inactive', 'suspended', 'archived'];
 function useLookups() {
   const [sections, setSections] = useState<Section[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [staff, setStaff] = useState<Staff[]>([]);
   useEffect(() => {
     api<Section[]>('/sections').then(setSections).catch(() => setSections([]));
     api<Department[]>('/departments').then(setDepartments).catch(() => setDepartments([]));
+    api<Staff[]>('/staff').then(setStaff).catch(() => setStaff([]));
   }, []);
-  return { sections, departments };
+  return { sections, departments, staff };
 }
 
 export function ProcessManagementPage() {
   const { isEnabled } = useModules();
-  const { sections, departments } = useLookups();
+  const { sections, departments, staff } = useLookups();
   const [tab, setTab] = useState('Dashboard');
   const [error, setError] = useState<string | null>(null);
 
@@ -47,6 +50,17 @@ export function ProcessManagementPage() {
   const [sendouts, setSendouts] = useState<ReferralSendout[]>([]);
   const [amendments, setAmendments] = useState<ReportAmendmentLog[]>([]);
   const [reviews, setReviews] = useState<ProcessReviewRecord[]>([]);
+  const [preExam, setPreExam] = useState<PreExaminationInstruction[]>([]);
+  const [receipts, setReceipts] = useState<SampleReceiptRecord[]>([]);
+  const [refIntervals, setRefIntervals] = useState<ReferenceIntervalRecord[]>([]);
+  const [comparability, setComparability] = useState<ResultComparabilityStudy[]>([]);
+  const [contingency, setContingency] = useState<ContingencyPlan[]>([]);
+
+  const [preExamForm, setPreExamForm] = useState({ title: '', testCatalogId: '', sampleType: '', containerAdditive: '', patientPreparation: '', collectionInstructions: '', transportCondition: '', stabilitySummary: '', storageCondition: '', status: 'active', sectionId: '' });
+  const [receiptForm, setReceiptForm] = useState({ receiptDate: '', receiptTime: '', requestReference: '', patientReference: '', patientType: '', sampleType: '', sectionId: '', testCatalogId: '', receivedByStaffId: '', condition: 'acceptable', conditionNotes: '', temperature: '', requestComplete: true, urgent: false });
+  const [riForm, setRiForm] = useState({ testCatalogId: '', analyte: '', sampleType: '', population: '', lowerLimit: '', upperLimit: '', unit: '', clinicalDecisionLimit: '', source: '', effectiveDate: '', reviewDate: '', status: 'active', communicatedToUsers: false });
+  const [cmpForm, setCmpForm] = useState({ studyDate: '', testName: '', analyte: '', methodA: '', methodB: '', sampleCount: '', acceptanceCriteria: '', outcome: '', findings: '', actionTaken: '', nextDueDate: '', status: 'open' });
+  const [ctpForm, setCtpForm] = useState({ scenarioType: '', title: '', triggerDescription: '', responseActions: '', backupArrangement: '', responsibleStaffId: '', lastTestedDate: '', testOutcome: '', nextTestDue: '', status: 'active', notes: '' });
 
   const [testForm, setTestForm] = useState({ testCode: '', testName: '', departmentId: '', sectionId: '', sampleType: '', containerType: '', minimumVolume: '', methodName: '', methodSummary: '', tatTargetMinutes: '', reportableRange: '', referenceIntervalSummary: '', criticalResultApplicable: false, status: 'active' });
   const [criteriaForm, setCriteriaForm] = useState({ criteriaCode: '', testCatalogId: '', sampleType: '', containerType: '', acceptanceCriteria: '', rejectionCriteria: '', transportCondition: '', stabilitySummary: '' });
@@ -77,6 +91,14 @@ export function ProcessManagementPage() {
       if (sum) setSummary(sum);
       setTests(t); setCriteria(c); setRejections(rj); setRules(ru); setCriticals(cr);
       setLabs(lb); setRefTests(rt); setSendouts(so); setAmendments(am); setReviews(rv);
+      const [px, rcp, ri, cmp, ctp] = await Promise.all([
+        api<PreExaminationInstruction[]>('/process-management/pre-examination').catch(() => []),
+        api<SampleReceiptRecord[]>('/process-management/sample-receipts').catch(() => []),
+        api<ReferenceIntervalRecord[]>('/process-management/reference-intervals').catch(() => []),
+        api<ResultComparabilityStudy[]>('/process-management/comparability').catch(() => []),
+        api<ContingencyPlan[]>('/process-management/contingency-plans').catch(() => []),
+      ]);
+      setPreExam(px); setReceipts(rcp); setRefIntervals(ri); setComparability(cmp); setContingency(ctp);
     } catch (e) { setError((e as Error).message); }
   }
   useEffect(() => { if (isEnabled('process_management')) void load(); }, [isEnabled]);
@@ -117,40 +139,162 @@ export function ProcessManagementPage() {
   async function approveReview(id: number) { try { await post(`/process-management/process-reviews/${id}/approve`, {}); await load(); } catch (e) { setError((e as Error).message); } }
   async function closeReview(id: number) { try { await post(`/process-management/process-reviews/${id}/close`, {}); await load(); } catch (e) { setError((e as Error).message); } }
 
-  const tabs = ['Dashboard', 'Test Directory', 'Acceptance Criteria', 'Specimen Rejections', 'Critical Result Rules', 'Critical Notifications', 'Referral Labs', 'Referral Tests', 'Referral Sendouts', 'Report Amendments', 'Process Reviews'];
+  async function submitPreExam(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/pre-examination', preExamForm); setPreExamForm({ title: '', testCatalogId: '', sampleType: '', containerAdditive: '', patientPreparation: '', collectionInstructions: '', transportCondition: '', stabilitySummary: '', storageCondition: '', status: 'active', sectionId: '' }); await load(); } catch (e) { setError((e as Error).message); } }
+  async function submitReceipt(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/sample-receipts', receiptForm); setReceiptForm({ receiptDate: '', receiptTime: '', requestReference: '', patientReference: '', patientType: '', sampleType: '', sectionId: '', testCatalogId: '', receivedByStaffId: '', condition: 'acceptable', conditionNotes: '', temperature: '', requestComplete: true, urgent: false }); await load(); } catch (e) { setError((e as Error).message); } }
+  async function rejectReceipt(id: number) { const reason = prompt('Rejection reason?'); if (!reason) return; try { await post(`/process-management/sample-receipts/${id}/reject`, { rejectionReason: reason }); await load(); setTab('Specimen Rejections'); } catch (e) { setError((e as Error).message); } }
+  async function submitRi(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/reference-intervals', riForm); setRiForm({ testCatalogId: '', analyte: '', sampleType: '', population: '', lowerLimit: '', upperLimit: '', unit: '', clinicalDecisionLimit: '', source: '', effectiveDate: '', reviewDate: '', status: 'active', communicatedToUsers: false }); await load(); } catch (e) { setError((e as Error).message); } }
+  async function submitCmp(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/comparability', cmpForm); setCmpForm({ studyDate: '', testName: '', analyte: '', methodA: '', methodB: '', sampleCount: '', acceptanceCriteria: '', outcome: '', findings: '', actionTaken: '', nextDueDate: '', status: 'open' }); await load(); } catch (e) { setError((e as Error).message); } }
+  async function submitCtp(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/contingency-plans', ctpForm); setCtpForm({ scenarioType: '', title: '', triggerDescription: '', responseActions: '', backupArrangement: '', responsibleStaffId: '', lastTestedDate: '', testOutcome: '', nextTestDue: '', status: 'active', notes: '' }); await load(); } catch (e) { setError((e as Error).message); } }
+
+  const tabs = ['Dashboard', 'Pre-Examination', 'Sample Receipt', 'Test Directory', 'Acceptance Criteria', 'Specimen Rejections', 'Reference Intervals', 'Comparability', 'Critical Result Rules', 'Critical Notifications', 'Referral Labs', 'Referral Tests', 'Referral Sendouts', 'Report Amendments', 'Contingency Plan', 'Process Reviews'];
+  const testName = (id?: number) => tests.find(t => t.id === id)?.test_name;
 
   return <div className="module-page">
-    <PageHeader eyebrow="Process Control" title="Process Management" subtitle="Tests, specimen handling, critical results, and referrals." />
+    <PageHeader eyebrow="Process Management" title="Process Management" subtitle="Tests, specimen handling, critical results, and referrals." />
     <p className="muted">Patient testing and clinical result reporting remain with LHIMS/Lightwave. This module tracks the QMS workflow only — no patient names are required; use request and patient references as identifiers.</p>
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && (summary ? <KpiStrip items={[
-      { label: 'Active tests', value: summary.activeTests },
-      { label: 'Rejections (month)', value: summary.specimenRejectionsThisMonth },
-      { label: 'Open rejections', value: summary.openSpecimenRejections, tone: 'warning' },
-      { label: 'Critical results (month)', value: summary.criticalResultsThisMonth },
-      { label: 'Delayed critical notifs', value: summary.delayedCriticalNotifications, tone: 'danger' },
-      { label: 'Sendouts pending', value: summary.referralSendoutsPending },
-      { label: 'Amendments (month)', value: summary.reportAmendmentsThisMonth },
-      { label: 'Pending reviews', value: summary.pendingProcessReviews },
+      { label: 'Active tests', value: summary.activeTests, onClick: () => setTab('Test Directory') },
+      { label: 'Sample receipts (month)', value: summary.sampleReceiptsThisMonth ?? 0, onClick: () => setTab('Sample Receipt') },
+      { label: 'Open rejections', value: summary.openSpecimenRejections, tone: 'warning', onClick: () => setTab('Specimen Rejections') },
+      { label: 'Delayed critical notifs', value: summary.delayedCriticalNotifications, tone: 'danger', onClick: () => setTab('Critical Notifications') },
+      { label: 'Ref. intervals due', value: summary.referenceIntervalsDueReview ?? 0, onClick: () => setTab('Reference Intervals') },
+      { label: 'Comparability due', value: summary.comparabilityStudiesDue ?? 0, onClick: () => setTab('Comparability') },
+      { label: 'Contingency tests due', value: summary.contingencyTestsDue ?? 0, tone: (summary.contingencyTestsDue ?? 0) ? 'warning' : undefined, onClick: () => setTab('Contingency Plan') },
+      { label: 'Pending reviews', value: summary.pendingProcessReviews, onClick: () => setTab('Process Reviews') },
     ]} /> : <p>Loading summary…</p>)}
-    {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
+    {tab === 'Dashboard' && summary && <div className="grid cols-3 dash-charts" style={{ marginTop: 18 }}>
       <ChartCard title="Pre-analytical quality" subtitle="Specimen rejection handling this month">
         <DonutChart centerLabel="Rejections" data={[
-          { label: 'Resolved', value: Math.max(0, summary.specimenRejectionsThisMonth - summary.openSpecimenRejections), color: CHART_COLORS[1] },
-          { label: 'Open', value: summary.openSpecimenRejections, color: CHART_COLORS[3] },
+          { label: 'Resolved', value: Math.max(0, summary.specimenRejectionsThisMonth - summary.openSpecimenRejections), color: CHART_COLORS[1], onClick: () => setTab('Specimen Rejections') },
+          { label: 'Open', value: summary.openSpecimenRejections, color: CHART_COLORS[3], onClick: () => setTab('Specimen Rejections') },
         ]} />
       </ChartCard>
       <ChartCard title="Turnaround risks" subtitle="Critical results, referrals and amendments">
         <BarMeter data={[
-          { label: 'Delayed critical notifs', value: summary.delayedCriticalNotifications, color: CHART_COLORS[3] },
-          { label: 'Referral sendouts pending', value: summary.referralSendoutsPending, color: CHART_COLORS[0] },
-          { label: 'Delayed sendouts', value: summary.delayedReferralSendouts, color: CHART_COLORS[2] },
-          { label: 'Report amendments (month)', value: summary.reportAmendmentsThisMonth, color: CHART_COLORS[4] },
+          { label: 'Delayed critical notifs', value: summary.delayedCriticalNotifications, color: CHART_COLORS[3], onClick: () => setTab('Critical Notifications') },
+          { label: 'Referral sendouts pending', value: summary.referralSendoutsPending, color: CHART_COLORS[0], onClick: () => setTab('Referral Sendouts') },
+          { label: 'Delayed sendouts', value: summary.delayedReferralSendouts, color: CHART_COLORS[2], onClick: () => setTab('Referral Sendouts') },
+          { label: 'Report amendments (month)', value: summary.reportAmendmentsThisMonth, color: CHART_COLORS[4], onClick: () => setTab('Report Amendments') },
+        ]} />
+      </ChartCard>
+      <ChartCard title="Result validity & continuity" subtitle="Reference intervals, comparability, contingency">
+        <BarMeter data={[
+          { label: 'Ref. intervals due review', value: summary.referenceIntervalsDueReview ?? 0, color: CHART_COLORS[2], onClick: () => setTab('Reference Intervals') },
+          { label: 'Comparability due', value: summary.comparabilityStudiesDue ?? 0, color: CHART_COLORS[0], onClick: () => setTab('Comparability') },
+          { label: 'Comparability issues', value: summary.openComparabilityIssues ?? 0, color: CHART_COLORS[3], onClick: () => setTab('Comparability') },
+          { label: 'Contingency tests due', value: summary.contingencyTestsDue ?? 0, color: CHART_COLORS[4], onClick: () => setTab('Contingency Plan') },
         ]} />
       </ChartCard>
     </div>}
+
+    {tab === 'Pre-Examination' && <>
+      <form className="form-grid" onSubmit={submitPreExam}>
+        <label>Title<input value={preExamForm.title} onChange={e => setPreExamForm({ ...preExamForm, title: e.target.value })} required /></label>
+        <label>Test<select value={preExamForm.testCatalogId} onChange={e => setPreExamForm({ ...preExamForm, testCatalogId: e.target.value })}><option value="">—</option>{tests.map(t => <option key={t.id} value={t.id}>{t.test_name}</option>)}</select></label>
+        <label>Sample type<input value={preExamForm.sampleType} onChange={e => setPreExamForm({ ...preExamForm, sampleType: e.target.value })} /></label>
+        <label>Container / additive<input value={preExamForm.containerAdditive} onChange={e => setPreExamForm({ ...preExamForm, containerAdditive: e.target.value })} /></label>
+        <label>Transport condition<input value={preExamForm.transportCondition} onChange={e => setPreExamForm({ ...preExamForm, transportCondition: e.target.value })} /></label>
+        <label>Storage condition<input value={preExamForm.storageCondition} onChange={e => setPreExamForm({ ...preExamForm, storageCondition: e.target.value })} /></label>
+        <label>Section<select value={preExamForm.sectionId} onChange={e => setPreExamForm({ ...preExamForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+        <label>Status<select value={preExamForm.status} onChange={e => setPreExamForm({ ...preExamForm, status: e.target.value })}>{['active', 'under_review', 'archived'].map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select></label>
+        <label>Patient preparation<textarea value={preExamForm.patientPreparation} onChange={e => setPreExamForm({ ...preExamForm, patientPreparation: e.target.value })} /></label>
+        <label>Collection instructions<textarea value={preExamForm.collectionInstructions} onChange={e => setPreExamForm({ ...preExamForm, collectionInstructions: e.target.value })} /></label>
+        <label>Stability summary<textarea value={preExamForm.stabilitySummary} onChange={e => setPreExamForm({ ...preExamForm, stabilitySummary: e.target.value })} /></label>
+        <button type="submit">Add instruction</button>
+      </form>
+      <table className="data-table"><thead><tr><th>No.</th><th>Title</th><th>Test</th><th>Sample</th><th>Container</th><th>Transport</th><th>Status</th></tr></thead><tbody>
+        {preExam.map(p => <tr key={p.id}><td>{p.instruction_number}</td><td>{p.title}</td><td>{testName(p.test_catalog_id) || '—'}</td><td>{p.sample_type || '—'}</td><td>{p.container_additive || '—'}</td><td>{p.transport_condition || '—'}</td><td>{formatBadge(p.status)}</td></tr>)}
+        {preExam.length === 0 && <tr><td colSpan={7}>No collection instructions yet.</td></tr>}
+      </tbody></table>
+    </>}
+
+    {tab === 'Sample Receipt' && <>
+      <form className="form-grid" onSubmit={submitReceipt}>
+        <label>Receipt date<input type="date" value={receiptForm.receiptDate} onChange={e => setReceiptForm({ ...receiptForm, receiptDate: e.target.value })} required /></label>
+        <label>Time<input type="time" value={receiptForm.receiptTime} onChange={e => setReceiptForm({ ...receiptForm, receiptTime: e.target.value })} /></label>
+        <label>Request reference<input value={receiptForm.requestReference} onChange={e => setReceiptForm({ ...receiptForm, requestReference: e.target.value })} /></label>
+        <label>Patient reference<input value={receiptForm.patientReference} onChange={e => setReceiptForm({ ...receiptForm, patientReference: e.target.value })} /></label>
+        <label>Sample type<input value={receiptForm.sampleType} onChange={e => setReceiptForm({ ...receiptForm, sampleType: e.target.value })} /></label>
+        <label>Section<select value={receiptForm.sectionId} onChange={e => setReceiptForm({ ...receiptForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+        <label>Received by<select value={receiptForm.receivedByStaffId} onChange={e => setReceiptForm({ ...receiptForm, receivedByStaffId: e.target.value })}><option value="">Me</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        <label>Condition<select value={receiptForm.condition} onChange={e => setReceiptForm({ ...receiptForm, condition: e.target.value })}>{['acceptable', 'suboptimal', 'rejected'].map(c => <option key={c} value={c}>{c}</option>)}</select></label>
+        <label>Temperature<input value={receiptForm.temperature} onChange={e => setReceiptForm({ ...receiptForm, temperature: e.target.value })} /></label>
+        <label><input type="checkbox" checked={receiptForm.requestComplete} onChange={e => setReceiptForm({ ...receiptForm, requestComplete: e.target.checked })} /> Request form complete</label>
+        <label><input type="checkbox" checked={receiptForm.urgent} onChange={e => setReceiptForm({ ...receiptForm, urgent: e.target.checked })} /> Urgent</label>
+        <label>Condition notes<textarea value={receiptForm.conditionNotes} onChange={e => setReceiptForm({ ...receiptForm, conditionNotes: e.target.value })} /></label>
+        <button type="submit">Log receipt</button>
+      </form>
+      <table className="data-table"><thead><tr><th>No.</th><th>Date</th><th>Request</th><th>Sample</th><th>Condition</th><th>Complete?</th><th></th></tr></thead><tbody>
+        {receipts.map(r => <tr key={r.id}><td>{r.receipt_number}</td><td>{r.receipt_date}</td><td>{r.request_reference || '—'}</td><td>{r.sample_type || '—'}</td><td>{formatBadge(r.condition)}</td><td>{r.request_complete ? 'Yes' : 'No'}</td><td>{r.condition !== 'rejected' && !r.rejection_id && <button onClick={() => rejectReceipt(r.id)}>Reject</button>}</td></tr>)}
+        {receipts.length === 0 && <tr><td colSpan={7}>No sample receipts logged.</td></tr>}
+      </tbody></table>
+    </>}
+
+    {tab === 'Reference Intervals' && <>
+      <form className="form-grid" onSubmit={submitRi}>
+        <label>Test<select value={riForm.testCatalogId} onChange={e => setRiForm({ ...riForm, testCatalogId: e.target.value })}><option value="">—</option>{tests.map(t => <option key={t.id} value={t.id}>{t.test_name}</option>)}</select></label>
+        <label>Analyte<input value={riForm.analyte} onChange={e => setRiForm({ ...riForm, analyte: e.target.value })} required /></label>
+        <label>Sample type<input value={riForm.sampleType} onChange={e => setRiForm({ ...riForm, sampleType: e.target.value })} /></label>
+        <label>Population<input value={riForm.population} onChange={e => setRiForm({ ...riForm, population: e.target.value })} placeholder="e.g. adult male" /></label>
+        <label>Lower limit<input value={riForm.lowerLimit} onChange={e => setRiForm({ ...riForm, lowerLimit: e.target.value })} /></label>
+        <label>Upper limit<input value={riForm.upperLimit} onChange={e => setRiForm({ ...riForm, upperLimit: e.target.value })} /></label>
+        <label>Unit<input value={riForm.unit} onChange={e => setRiForm({ ...riForm, unit: e.target.value })} /></label>
+        <label>Clinical decision limit<input value={riForm.clinicalDecisionLimit} onChange={e => setRiForm({ ...riForm, clinicalDecisionLimit: e.target.value })} /></label>
+        <label>Source<input value={riForm.source} onChange={e => setRiForm({ ...riForm, source: e.target.value })} placeholder="manufacturer / literature / in-house" /></label>
+        <label>Effective date<input type="date" value={riForm.effectiveDate} onChange={e => setRiForm({ ...riForm, effectiveDate: e.target.value })} /></label>
+        <label>Review date<input type="date" value={riForm.reviewDate} onChange={e => setRiForm({ ...riForm, reviewDate: e.target.value })} /></label>
+        <label><input type="checkbox" checked={riForm.communicatedToUsers} onChange={e => setRiForm({ ...riForm, communicatedToUsers: e.target.checked })} /> Communicated to users</label>
+        <button type="submit">Add reference interval</button>
+      </form>
+      <table className="data-table"><thead><tr><th>No.</th><th>Analyte</th><th>Population</th><th>Range</th><th>Unit</th><th>Source</th><th>Review</th><th>Status</th></tr></thead><tbody>
+        {refIntervals.map(r => <tr key={r.id}><td>{r.record_number}</td><td>{r.analyte}</td><td>{r.population || '—'}</td><td>{(r.lower_limit || '') + ' – ' + (r.upper_limit || '')}</td><td>{r.unit || '—'}</td><td>{r.source || '—'}</td><td>{r.review_date || '—'}</td><td>{formatBadge(r.status)}</td></tr>)}
+        {refIntervals.length === 0 && <tr><td colSpan={8}>No reference intervals recorded.</td></tr>}
+      </tbody></table>
+    </>}
+
+    {tab === 'Comparability' && <>
+      <form className="form-grid" onSubmit={submitCmp}>
+        <label>Study date<input type="date" value={cmpForm.studyDate} onChange={e => setCmpForm({ ...cmpForm, studyDate: e.target.value })} required /></label>
+        <label>Test name<input value={cmpForm.testName} onChange={e => setCmpForm({ ...cmpForm, testName: e.target.value })} /></label>
+        <label>Analyte<input value={cmpForm.analyte} onChange={e => setCmpForm({ ...cmpForm, analyte: e.target.value })} /></label>
+        <label>Method / analyser A<input value={cmpForm.methodA} onChange={e => setCmpForm({ ...cmpForm, methodA: e.target.value })} /></label>
+        <label>Method / analyser B<input value={cmpForm.methodB} onChange={e => setCmpForm({ ...cmpForm, methodB: e.target.value })} /></label>
+        <label>Sample count<input type="number" value={cmpForm.sampleCount} onChange={e => setCmpForm({ ...cmpForm, sampleCount: e.target.value })} /></label>
+        <label>Outcome<select value={cmpForm.outcome} onChange={e => setCmpForm({ ...cmpForm, outcome: e.target.value })}><option value="">—</option><option value="comparable">Comparable</option><option value="significant_difference">Significant difference</option><option value="inconclusive">Inconclusive</option></select></label>
+        <label>Next due date<input type="date" value={cmpForm.nextDueDate} onChange={e => setCmpForm({ ...cmpForm, nextDueDate: e.target.value })} /></label>
+        <label>Acceptance criteria<textarea value={cmpForm.acceptanceCriteria} onChange={e => setCmpForm({ ...cmpForm, acceptanceCriteria: e.target.value })} /></label>
+        <label>Findings<textarea value={cmpForm.findings} onChange={e => setCmpForm({ ...cmpForm, findings: e.target.value })} /></label>
+        <label>Action taken<textarea value={cmpForm.actionTaken} onChange={e => setCmpForm({ ...cmpForm, actionTaken: e.target.value })} /></label>
+        <button type="submit">Record study</button>
+      </form>
+      <table className="data-table"><thead><tr><th>No.</th><th>Date</th><th>Test</th><th>A vs B</th><th>Samples</th><th>Outcome</th><th>Next due</th><th>Status</th></tr></thead><tbody>
+        {comparability.map(c => <tr key={c.id}><td>{c.study_number}</td><td>{c.study_date}</td><td>{c.test_name || c.analyte || '—'}</td><td>{(c.method_a || '?') + ' vs ' + (c.method_b || '?')}</td><td>{c.sample_count ?? '—'}</td><td>{c.outcome ? c.outcome.replace(/_/g, ' ') : '—'}</td><td>{c.next_due_date || '—'}</td><td>{formatBadge(c.status)}</td></tr>)}
+        {comparability.length === 0 && <tr><td colSpan={8}>No comparability studies recorded.</td></tr>}
+      </tbody></table>
+    </>}
+
+    {tab === 'Contingency Plan' && <>
+      <form className="form-grid" onSubmit={submitCtp}>
+        <label>Scenario<select value={ctpForm.scenarioType} onChange={e => setCtpForm({ ...ctpForm, scenarioType: e.target.value })}><option value="">—</option>{['personnel', 'equipment', 'power', 'reagent_stockout', 'fire_disaster', 'lis_downtime', 'other'].map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select></label>
+        <label>Title<input value={ctpForm.title} onChange={e => setCtpForm({ ...ctpForm, title: e.target.value })} required /></label>
+        <label>Responsible staff<select value={ctpForm.responsibleStaffId} onChange={e => setCtpForm({ ...ctpForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        <label>Status<select value={ctpForm.status} onChange={e => setCtpForm({ ...ctpForm, status: e.target.value })}>{['draft', 'active', 'under_review', 'retired'].map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select></label>
+        <label>Last tested<input type="date" value={ctpForm.lastTestedDate} onChange={e => setCtpForm({ ...ctpForm, lastTestedDate: e.target.value })} /></label>
+        <label>Next test due<input type="date" value={ctpForm.nextTestDue} onChange={e => setCtpForm({ ...ctpForm, nextTestDue: e.target.value })} /></label>
+        <label>Trigger description<textarea value={ctpForm.triggerDescription} onChange={e => setCtpForm({ ...ctpForm, triggerDescription: e.target.value })} /></label>
+        <label>Response actions<textarea value={ctpForm.responseActions} onChange={e => setCtpForm({ ...ctpForm, responseActions: e.target.value })} /></label>
+        <label>Backup arrangement<textarea value={ctpForm.backupArrangement} onChange={e => setCtpForm({ ...ctpForm, backupArrangement: e.target.value })} /></label>
+        <label>Test outcome<textarea value={ctpForm.testOutcome} onChange={e => setCtpForm({ ...ctpForm, testOutcome: e.target.value })} /></label>
+        <button type="submit">Add plan</button>
+      </form>
+      <table className="data-table"><thead><tr><th>No.</th><th>Scenario</th><th>Title</th><th>Responsible</th><th>Last tested</th><th>Next test</th><th>Status</th></tr></thead><tbody>
+        {contingency.map(c => <tr key={c.id}><td>{c.plan_number}</td><td>{c.scenario_type ? c.scenario_type.replace(/_/g, ' ') : '—'}</td><td>{c.title}</td><td>{staff.find(s => s.id === c.responsible_staff_id)?.fullName || '—'}</td><td>{c.last_tested_date || '—'}</td><td>{c.next_test_due || '—'}</td><td>{formatBadge(c.status)}</td></tr>)}
+        {contingency.length === 0 && <tr><td colSpan={7}>No contingency plans recorded.</td></tr>}
+      </tbody></table>
+    </>}
 
     {tab === 'Test Directory' && <>
       <form className="form-grid" onSubmit={submitTest}>

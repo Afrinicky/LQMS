@@ -148,7 +148,7 @@ function yearsOfExperience(dateStr?: string | null, now = new Date()): string {
   return yrs >= 0 ? yrs.toFixed(1) : '';
 }
 
-// Master Personnel Register field mapping (ISO 15189 §6.2 personnel records).
+// Master Personnel Register field mapping (personnel records).
 // Maps the camelCase API body to staff table columns and derives full_name /
 // initials from the structured name parts when supplied.
 const STAFF_COLUMN_MAP: Array<[string, string]> = [
@@ -267,7 +267,10 @@ export function commonRoutes() {
       inventoryExpired: count('SELECT COUNT(*) count FROM inventory_items WHERE expiry_date IS NOT NULL AND expiry_date < ?', now),
       monitoringWarnings: count("SELECT COUNT(*) count FROM monitoring_readings WHERE status = 'warning'"),
       monitoringCritical: count("SELECT COUNT(*) count FROM monitoring_readings WHERE status IN ('critical','out_of_range')"),
-      openSafetyIncidents: count("SELECT COUNT(*) count FROM safety_incidents WHERE status != 'closed'")
+      openSafetyIncidents: count("SELECT COUNT(*) count FROM safety_incidents WHERE status != 'closed'"),
+      storageInspectionsThisMonth: count("SELECT COUNT(*) count FROM storage_inspections WHERE strftime('%Y-%m', inspection_date) = strftime('%Y-%m','now')"),
+      storageInspectionsDue: count("SELECT COUNT(*) count FROM storage_inspections WHERE next_due_date IS NOT NULL AND next_due_date <= ?", now.slice(0, 10)),
+      openStorageActions: count("SELECT COUNT(*) count FROM storage_inspections WHERE outcome IN ('action_required','fail') AND status != 'closed'")
     });
   });
 
@@ -417,7 +420,9 @@ export function commonRoutes() {
       totalStaff: count("SELECT COUNT(*) count FROM staff WHERE is_active = 1"),
       licencesExpiringSoon: count("SELECT COUNT(*) count FROM staff WHERE licence_expiry_date IS NOT NULL AND licence_expiry_date <= ? AND licence_expiry_date >= ?", expiryCutoff, todayIso),
       orientationsInProgress: count("SELECT COUNT(*) count FROM staff_orientations WHERE orientation_complete = 0 AND status != 'cancelled'"),
-      ethicsReviewsDue: count("SELECT COUNT(*) count FROM staff_declarations WHERE next_review_date IS NOT NULL AND next_review_date <= ?", expiryCutoff)
+      ethicsReviewsDue: count("SELECT COUNT(*) count FROM staff_declarations WHERE next_review_date IS NOT NULL AND next_review_date <= ?", expiryCutoff),
+      appraisalsThisYear: count("SELECT COUNT(*) count FROM performance_appraisals WHERE strftime('%Y', appraisal_date) = strftime('%Y','now')"),
+      appraisalsDue: count("SELECT COUNT(*) count FROM performance_appraisals WHERE next_appraisal_due IS NOT NULL AND next_appraisal_due <= ?", todayIso)
     });
   });
 
@@ -435,7 +440,11 @@ export function commonRoutes() {
       activeSurveys: count("SELECT COUNT(*) count FROM satisfaction_surveys WHERE status = 'active'"),
       surveyResponsesThisMonth: count('SELECT COUNT(*) count FROM satisfaction_survey_responses WHERE response_date >= ?', monthStart),
       followUpsDue: count("SELECT COUNT(*) count FROM customer_feedback WHERE follow_up_due_date IS NOT NULL AND follow_up_due_date <= ? AND status NOT IN ('resolved','closed')", todayIso)
-        + count("SELECT COUNT(*) count FROM customer_communication_logs WHERE follow_up_due_date IS NOT NULL AND follow_up_due_date <= ? AND status != 'closed'", todayIso)
+        + count("SELECT COUNT(*) count FROM customer_communication_logs WHERE follow_up_due_date IS NOT NULL AND follow_up_due_date <= ? AND status != 'closed'", todayIso),
+      advisoryThisMonth: count('SELECT COUNT(*) count FROM advisory_services WHERE service_date >= ?', monthStart),
+      advisoryFollowUpsDue: count("SELECT COUNT(*) count FROM advisory_services WHERE follow_up_required = 1 AND follow_up_due_date IS NOT NULL AND follow_up_due_date <= ?", todayIso),
+      handbookEntries: count("SELECT COUNT(*) count FROM laboratory_handbook_entries WHERE status = 'active'"),
+      handbookDueReview: count("SELECT COUNT(*) count FROM laboratory_handbook_entries WHERE status = 'active' AND review_date IS NOT NULL AND review_date <= ?", todayIso)
     });
   });
 
@@ -510,7 +519,15 @@ export function commonRoutes() {
       referralSendoutsPending: count("SELECT COUNT(*) count FROM referral_sendouts WHERE status IN ('sent','pending_result')"),
       delayedReferralSendouts: count("SELECT COUNT(*) count FROM referral_sendouts WHERE expected_return_date IS NOT NULL AND expected_return_date < ? AND result_received_date IS NULL AND status NOT IN ('closed','result_received')", today),
       reportAmendmentsThisMonth: count("SELECT COUNT(*) count FROM report_amendment_logs WHERE amendment_date >= ?", monthStart),
-      pendingProcessReviews: count("SELECT COUNT(*) count FROM process_review_records WHERE status IN ('draft','reviewed')")
+      pendingProcessReviews: count("SELECT COUNT(*) count FROM process_review_records WHERE status IN ('draft','reviewed')"),
+      preExaminationInstructions: count("SELECT COUNT(*) count FROM pre_examination_instructions WHERE status = 'active'"),
+      sampleReceiptsThisMonth: count("SELECT COUNT(*) count FROM sample_receipt_records WHERE receipt_date >= ?", monthStart),
+      suboptimalReceipts: count("SELECT COUNT(*) count FROM sample_receipt_records WHERE condition = 'suboptimal' AND receipt_date >= ?", monthStart),
+      referenceIntervalsDueReview: count("SELECT COUNT(*) count FROM reference_interval_records WHERE status = 'active' AND review_date IS NOT NULL AND review_date <= ?", today),
+      comparabilityStudiesDue: count("SELECT COUNT(*) count FROM result_comparability_studies WHERE next_due_date IS NOT NULL AND next_due_date <= ?", today),
+      openComparabilityIssues: count("SELECT COUNT(*) count FROM result_comparability_studies WHERE outcome = 'significant_difference' AND status != 'closed'"),
+      activeContingencyPlans: count("SELECT COUNT(*) count FROM contingency_plans WHERE status = 'active'"),
+      contingencyTestsDue: count("SELECT COUNT(*) count FROM contingency_plans WHERE status = 'active' AND next_test_due IS NOT NULL AND next_test_due <= ?", today)
     });
   });
 
@@ -722,7 +739,7 @@ export function commonRoutes() {
 
   // Assign a staff member to a position.
   //  - 'primary' (the holder): one per position; any current holder is moved to secondary.
-  //  - 'deputy'  (the designated deputy / acting officer per ISO 15189 §5 continuity):
+  //  - 'deputy'  (the designated deputy / acting officer for continuity):
   //              one per position; any current deputy is moved to secondary.
   //  - 'secondary': an additional non-primary assignment.
   router.post('/positions/:id/occupant', requirePermission('settings', 'edit'), (req, res) => {

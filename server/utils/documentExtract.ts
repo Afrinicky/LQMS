@@ -590,7 +590,7 @@ function extractPdfTextOperators(content: string): string {
 }
 
 // ── Section parsing (SOP structure) ──────────────────────────────────────────
-// Recognised controlled-document section headings (ISO 15189 SOP template).
+// Recognised controlled-document section headings (standard SOP template).
 const SECTION_PATTERNS: Array<{ key: string; label: string; re: RegExp }> = [
   { key: 'purpose', label: 'Purpose', re: /^\s*(?:\d+(?:\.\d+)*\.?\s*)?(purpose|objective)\b/i },
   { key: 'scope', label: 'Scope', re: /^\s*(?:\d+(?:\.\d+)*\.?\s*)?(scope)\b/i },

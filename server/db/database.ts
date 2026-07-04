@@ -2378,7 +2378,7 @@ CREATE TABLE IF NOT EXISTS section_services (
   if (!staffColNames.has('surname')) database.exec('ALTER TABLE staff ADD COLUMN surname TEXT');
   if (!staffColNames.has('other_names')) database.exec('ALTER TABLE staff ADD COLUMN other_names TEXT');
 
-  // Master Personnel Register fields (ISO 15189 §6.2 / WHO LQMS / HR): identity,
+  // Master Personnel Register fields (identity, HR):
   // professional registration, qualifications, appointment and contact details.
   const addStaffCol = (name: string, ddl: string) => { if (!staffColNames.has(name)) database.exec(`ALTER TABLE staff ADD COLUMN ${ddl}`); };
   addStaffCol('middle_name', 'middle_name TEXT');
@@ -2425,7 +2425,7 @@ CREATE TABLE IF NOT EXISTS section_services (
     ].forEach(([n, o]) => seed.run(n, o));
   }
 
-  // Structured ethics confirmations on staff_declarations (ISO 15189 §6.2.2 / §4.1).
+  // Structured ethics confirmations on staff_declarations.
   const declColNames = new Set((database.prepare("PRAGMA table_info(staff_declarations)").all() as Array<{ name: string }>).map(c => c.name));
   const addDeclCol = (name: string, ddl: string) => { if (!declColNames.has(name)) database.exec(`ALTER TABLE staff_declarations ADD COLUMN ${ddl}`); };
   addDeclCol('impartiality_confirmed', 'impartiality_confirmed INTEGER');
@@ -2437,7 +2437,7 @@ CREATE TABLE IF NOT EXISTS section_services (
   addDeclCol('review_date', 'review_date TEXT');
   addDeclCol('next_review_date', 'next_review_date TEXT');
 
-  // Orientation / induction tracking (ISO 15189 §6.2.3, WHO LQMS induction).
+  // Orientation / induction tracking.
   database.exec(`
 CREATE TABLE IF NOT EXISTS staff_orientations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2479,7 +2479,7 @@ CREATE INDEX IF NOT EXISTS idx_staff_orientations_staff ON staff_orientations(st
   }
 
   // ===================================================================
-  // Phase 9: Documents & Records upgrade (ISO 15189 §8.3/§8.4, WHO LQMS)
+  // Phase 9: Documents & Records upgrade
   // Faithful to SECH Document Control Procedure (SECHPO026) and Control of
   // Records Procedure (SECHPO051).
   // -------------------------------------------------------------------
@@ -2606,7 +2606,7 @@ CREATE TABLE IF NOT EXISTS record_backup_log (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 -- Workflow comments left by drafter/reviewer/approver during the document
--- lifecycle (ISO 15189 §8.3 — documented review before issue).
+-- lifecycle (documented review before issue).
 CREATE TABLE IF NOT EXISTS document_comments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   document_id INTEGER NOT NULL REFERENCES documents(id),
@@ -2694,6 +2694,404 @@ CREATE INDEX IF NOT EXISTS idx_document_comments_doc ON document_comments(docume
   database.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS dennis_chunk_fts USING fts5(chunk_text, chunk_id UNINDEXED, dennis_document_id UNINDEXED)`);
   database.exec(`CREATE INDEX IF NOT EXISTS idx_dennis_documents_source ON dennis_documents(source_document_id);
 CREATE INDEX IF NOT EXISTS idx_dennis_chunks_doc ON dennis_document_chunks(document_id);`);
+
+  // ===================================================================
+  // Facilities & Safety workspace — safety equipment, inspections/drills,
+  // waste disposal, hazardous chemicals and staff immunisation/exposure
+  // records, complementing the existing safety-incident register.
+  // -------------------------------------------------------------------
+  database.exec(`
+-- Safety equipment register: biosafety cabinets, fume hoods, fire
+-- extinguishers, alarms, eyewash stations, showers, spill/first-aid kits, PPE
+-- stations. Tracks inspection and certification due dates.
+CREATE TABLE IF NOT EXISTS safety_equipment (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  equipment_number TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  equipment_type TEXT,               -- biosafety_cabinet|fume_hood|fire_extinguisher|fire_alarm|smoke_detector|eyewash_station|emergency_shower|spill_kit|first_aid_kit|ppe_station|other
+  serial_number TEXT,
+  location_id INTEGER REFERENCES locations(id),
+  section_id INTEGER REFERENCES sections(id),
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  status TEXT NOT NULL DEFAULT 'operational', -- operational|out_of_service|expired|removed
+  inspection_frequency TEXT,
+  last_inspection_date TEXT,
+  next_inspection_due TEXT,
+  certification_frequency TEXT,
+  last_certification_date TEXT,
+  next_certification_due TEXT,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Safety inspections, audits, fire drills, housekeeping and facility
+-- assessments. Findings can escalate to NC/CAPA like safety incidents.
+CREATE TABLE IF NOT EXISTS safety_inspections (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  inspection_number TEXT NOT NULL UNIQUE,
+  inspection_type TEXT,              -- safety_audit|fire_drill|housekeeping|facility_assessment|walkthrough|biosafety
+  inspection_date TEXT NOT NULL,
+  section_id INTEGER REFERENCES sections(id),
+  location_id INTEGER REFERENCES locations(id),
+  conducted_by_staff_id INTEGER REFERENCES staff(id),
+  scope TEXT,
+  findings_summary TEXT,
+  outcome TEXT,                      -- pass|action_required|fail
+  corrective_action TEXT,
+  status TEXT NOT NULL DEFAULT 'open', -- open|under_review|action_required|closed
+  next_due_date TEXT,
+  nc_id INTEGER REFERENCES nonconforming_events(id),
+  capa_id INTEGER REFERENCES capa_records(id),
+  closed_by_staff_id INTEGER REFERENCES staff(id),
+  closed_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Waste disposal log: biohazard, sharps, chemical, pathological and general
+-- waste, with disposal method and manifest reference.
+CREATE TABLE IF NOT EXISTS waste_disposal_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  record_number TEXT NOT NULL UNIQUE,
+  disposal_date TEXT NOT NULL,
+  waste_type TEXT,                   -- infectious|sharps|chemical|pathological|general|radioactive|pharmaceutical
+  quantity TEXT,
+  unit TEXT,
+  disposal_method TEXT,              -- autoclave|incineration|pit|licensed_collector|sewer|other
+  handled_by_staff_id INTEGER REFERENCES staff(id),
+  carrier_or_destination TEXT,
+  manifest_reference TEXT,
+  section_id INTEGER REFERENCES sections(id),
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Hazardous chemical inventory with safety-data-sheet reference, hazard
+-- class, storage and segregation.
+CREATE TABLE IF NOT EXISTS hazardous_chemicals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  chemical_number TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  hazard_class TEXT,                 -- flammable|corrosive|toxic|oxidizer|carcinogen|irritant|radioactive|other
+  cas_number TEXT,
+  sds_reference TEXT,
+  sds_on_file INTEGER DEFAULT 0,
+  storage_location_id INTEGER REFERENCES locations(id),
+  segregation_group TEXT,
+  quantity TEXT,
+  unit TEXT,
+  expiry_date TEXT,
+  spill_measures TEXT,
+  status TEXT NOT NULL DEFAULT 'in_use', -- in_use|in_store|disposed
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Staff immunisation, post-exposure prophylaxis and vaccination-declination
+-- records (occupational health).
+CREATE TABLE IF NOT EXISTS staff_immunizations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  record_number TEXT NOT NULL UNIQUE,
+  staff_id INTEGER REFERENCES staff(id),
+  record_type TEXT NOT NULL DEFAULT 'vaccination', -- vaccination|post_exposure|declination
+  vaccine_or_agent TEXT,
+  dose_or_stage TEXT,
+  date_administered TEXT,
+  next_due_date TEXT,
+  provider TEXT,
+  exposure_date TEXT,
+  exposure_source TEXT,
+  follow_up_summary TEXT,
+  outcome TEXT,
+  declination_signed INTEGER DEFAULT 0,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+`);
+
+  // ===================================================================
+  // Process Management — pre-examination, continuity and result-validity
+  // registers: collection instructions, sample receipt/condition log,
+  // biological reference intervals, result-comparability studies and a
+  // scenario-based contingency / continuity plan.
+  // -------------------------------------------------------------------
+  database.exec(`
+-- Pre-examination collection & handling instructions, per test / sample type.
+CREATE TABLE IF NOT EXISTS pre_examination_instructions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  instruction_number TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  test_catalog_id INTEGER REFERENCES lab_test_catalog(id),
+  sample_type TEXT,
+  container_additive TEXT,
+  patient_preparation TEXT,
+  collection_instructions TEXT,
+  transport_condition TEXT,
+  stability_summary TEXT,
+  storage_condition TEXT,
+  status TEXT NOT NULL DEFAULT 'active', -- active|under_review|archived
+  section_id INTEGER REFERENCES sections(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Primary-sample receipt & condition log (feeds the rejection register).
+CREATE TABLE IF NOT EXISTS sample_receipt_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  receipt_number TEXT NOT NULL UNIQUE,
+  receipt_date TEXT NOT NULL,
+  receipt_time TEXT,
+  request_reference TEXT,
+  patient_reference TEXT,
+  patient_type TEXT,
+  sample_type TEXT,
+  section_id INTEGER REFERENCES sections(id),
+  test_catalog_id INTEGER REFERENCES lab_test_catalog(id),
+  received_by_staff_id INTEGER REFERENCES staff(id),
+  condition TEXT NOT NULL DEFAULT 'acceptable', -- acceptable|suboptimal|rejected
+  condition_notes TEXT,
+  temperature TEXT,
+  request_complete INTEGER DEFAULT 1,
+  urgent INTEGER DEFAULT 0,
+  rejection_id INTEGER REFERENCES specimen_rejection_records(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Biological reference intervals & clinical decision limits register.
+CREATE TABLE IF NOT EXISTS reference_interval_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  record_number TEXT NOT NULL UNIQUE,
+  test_catalog_id INTEGER REFERENCES lab_test_catalog(id),
+  analyte TEXT NOT NULL,
+  sample_type TEXT,
+  population TEXT,                    -- e.g. adult male, paediatric, pregnancy
+  lower_limit TEXT,
+  upper_limit TEXT,
+  unit TEXT,
+  clinical_decision_limit TEXT,
+  source TEXT,                        -- manufacturer|literature|in-house study
+  effective_date TEXT,
+  review_date TEXT,
+  status TEXT NOT NULL DEFAULT 'active', -- active|under_review|superseded
+  communicated_to_users INTEGER DEFAULT 0,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Result comparability studies across methods / analysers / POCT.
+CREATE TABLE IF NOT EXISTS result_comparability_studies (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  study_number TEXT NOT NULL UNIQUE,
+  study_date TEXT NOT NULL,
+  test_name TEXT,
+  analyte TEXT,
+  method_a TEXT,
+  method_b TEXT,
+  sample_count INTEGER,
+  acceptance_criteria TEXT,
+  outcome TEXT,                       -- comparable|significant_difference|inconclusive
+  findings TEXT,
+  action_taken TEXT,
+  conducted_by_staff_id INTEGER REFERENCES staff(id),
+  next_due_date TEXT,
+  status TEXT NOT NULL DEFAULT 'open', -- open|reviewed|closed
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Scenario-based contingency / continuity & emergency-preparedness plans.
+CREATE TABLE IF NOT EXISTS contingency_plans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  plan_number TEXT NOT NULL UNIQUE,
+  scenario_type TEXT,                -- personnel|equipment|power|reagent_stockout|fire_disaster|lis_downtime|other
+  title TEXT NOT NULL,
+  trigger_description TEXT,
+  response_actions TEXT,
+  backup_arrangement TEXT,
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  last_tested_date TEXT,
+  test_outcome TEXT,
+  next_test_due TEXT,
+  status TEXT NOT NULL DEFAULT 'active', -- draft|active|under_review|retired
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+`);
+
+  // ===================================================================
+  // Customer Focus — advisory services and laboratory handbook.
+  // -------------------------------------------------------------------
+  database.exec(`
+-- Advisory-services log: advice given to clinicians/users on test choice,
+-- interpretation, sample type, frequency and utilisation.
+CREATE TABLE IF NOT EXISTS advisory_services (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  record_number TEXT NOT NULL UNIQUE,
+  service_date TEXT NOT NULL,
+  service_type TEXT,                 -- test_choice|interpretation|sample_type|frequency|clinical_advice|utilization|other
+  requester TEXT,
+  stakeholder_id INTEGER REFERENCES customer_stakeholders(id),
+  provided_by_staff_id INTEGER REFERENCES staff(id),
+  subject TEXT,
+  advice_summary TEXT,
+  communication_channel TEXT,
+  follow_up_required INTEGER DEFAULT 0,
+  follow_up_due_date TEXT,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Laboratory handbook / user-information entries (hours, test menu,
+-- collection, transport, turnaround, contacts, policies).
+CREATE TABLE IF NOT EXISTS laboratory_handbook_entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  entry_number TEXT NOT NULL UNIQUE,
+  section TEXT,                       -- hours|test_menu|collection|transport|turnaround|contacts|policies|other
+  title TEXT NOT NULL,
+  content TEXT,
+  version TEXT,
+  effective_date TEXT,
+  review_date TEXT,
+  status TEXT NOT NULL DEFAULT 'active', -- draft|active|under_review|archived
+  display_order INTEGER DEFAULT 0,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+`);
+
+  // ===================================================================
+  // Organisation & Leadership — code-of-conduct adherence and budget
+  // projection registers.
+  // -------------------------------------------------------------------
+  database.exec(`
+-- Code-of-conduct adherence: impartiality, confidentiality, conflict of
+-- interest and code-of-conduct commitments, signed per staff member.
+CREATE TABLE IF NOT EXISTS code_of_conduct_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  record_number TEXT NOT NULL UNIQUE,
+  staff_id INTEGER REFERENCES staff(id),
+  commitment_type TEXT,              -- impartiality|confidentiality|conflict_of_interest|code_adherence|all
+  statement TEXT,
+  signed_date TEXT,
+  review_date TEXT,
+  conflict_declared INTEGER DEFAULT 0,
+  conflict_details TEXT,
+  status TEXT NOT NULL DEFAULT 'active', -- active|due_review|superseded
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Annual budget projections across personnel, equipment, maintenance,
+-- reagents/consumables, quality assurance (IQC/EQA), infrastructure, training.
+CREATE TABLE IF NOT EXISTS budget_projections (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  projection_number TEXT NOT NULL UNIQUE,
+  fiscal_year TEXT,
+  category TEXT,                      -- personnel|equipment|maintenance|reagents_consumables|quality_assurance|infrastructure|training|other
+  description TEXT,
+  projected_amount REAL,
+  currency TEXT DEFAULT 'GHS',
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  status TEXT NOT NULL DEFAULT 'draft', -- draft|submitted|approved|closed
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+`);
+
+  // ===================================================================
+  // Phase D cross-cutting registers — staff performance appraisals,
+  // storage-area condition inspections, and regulatory registrations /
+  // licences. All are empty registers populated by the laboratory.
+  // -------------------------------------------------------------------
+  database.exec(`
+-- Staff performance appraisals (distinct from competency assessments).
+CREATE TABLE IF NOT EXISTS performance_appraisals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  record_number TEXT NOT NULL UNIQUE,
+  staff_id INTEGER REFERENCES staff(id),
+  appraisal_date TEXT NOT NULL,
+  period TEXT,
+  appraiser_staff_id INTEGER REFERENCES staff(id),
+  rating TEXT,
+  outcome TEXT,
+  strengths TEXT,
+  development_areas TEXT,
+  objectives TEXT,
+  next_appraisal_due TEXT,
+  status TEXT NOT NULL DEFAULT 'completed', -- planned|completed
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Storage-area condition inspections (reagent/consumable/sample storage).
+CREATE TABLE IF NOT EXISTS storage_inspections (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  inspection_number TEXT NOT NULL UNIQUE,
+  inspection_date TEXT NOT NULL,
+  location_id INTEGER REFERENCES locations(id),
+  storage_area TEXT,
+  inspected_by_staff_id INTEGER REFERENCES staff(id),
+  cold_storage_adequate INTEGER DEFAULT 0,
+  temperature_monitored INTEGER DEFAULT 0,
+  humidity_monitored INTEGER DEFAULT 0,
+  ventilation_adequate INTEGER DEFAULT 0,
+  access_controlled INTEGER DEFAULT 0,
+  organised_fefo INTEGER DEFAULT 0,
+  outcome TEXT,                      -- pass|action_required|fail
+  findings TEXT,
+  corrective_action TEXT,
+  next_due_date TEXT,
+  status TEXT NOT NULL DEFAULT 'open', -- open|closed
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Regulatory registrations & licences (facility / organisational). The
+-- issuing body is free text so each laboratory names its own regulators.
+CREATE TABLE IF NOT EXISTS regulatory_registrations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  registration_number TEXT NOT NULL UNIQUE,
+  credential_type TEXT,             -- facility_licence|accreditation|practice_registration|permit|certification|other
+  title TEXT NOT NULL,
+  issuing_body TEXT,
+  reference TEXT,
+  issue_date TEXT,
+  expiry_date TEXT,
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  status TEXT NOT NULL DEFAULT 'active', -- active|expired|pending_renewal|withdrawn
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+`);
 
   // Default Dennis settings: strict hybrid policy. Ollama (offline) is the default
   // runtime and is enabled; online AI is disabled by default and, even once

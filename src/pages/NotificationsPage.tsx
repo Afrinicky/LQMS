@@ -124,14 +124,14 @@ export function NotificationsPage() {
 
     {tab === 'Dashboard' && (summary ? <>
       <KpiStrip items={[
-        { label: 'Unread', value: summary.unreadNotifications },
-        { label: 'Urgent / high', value: summary.urgentNotifications, tone: 'danger' },
-        { label: 'Due today', value: summary.dueToday },
-        { label: 'Overdue', value: summary.overdue, tone: 'warning' },
-        { label: 'Open tasks', value: summary.openTasks },
-        { label: 'My open tasks', value: summary.myOpenTasks },
-        { label: 'Pending approvals', value: summary.pendingApprovals },
-        { label: 'Review items due', value: summary.reviewItemsDue },
+        { label: 'Unread', value: summary.unreadNotifications, onClick: () => setTab('My Notifications') },
+        { label: 'Urgent / high', value: summary.urgentNotifications, tone: 'danger', onClick: () => setTab('My Notifications') },
+        { label: 'Due today', value: summary.dueToday, onClick: () => setTab('Review Calendar') },
+        { label: 'Overdue', value: summary.overdue, tone: 'warning', onClick: () => setTab('Review Calendar') },
+        { label: 'Open tasks', value: summary.openTasks, onClick: () => setTab('My Tasks') },
+        { label: 'My open tasks', value: summary.myOpenTasks, onClick: () => setTab('My Tasks') },
+        { label: 'Pending approvals', value: summary.pendingApprovals, onClick: () => setTab('My Tasks') },
+        { label: 'Review items due', value: summary.reviewItemsDue, onClick: () => setTab('Review Calendar') },
       ]} />
       <div className="grid cols-2" style={{ marginTop: 18 }}>
         <ChartCard title="Timeliness" subtitle="Notifications by due-date pressure">

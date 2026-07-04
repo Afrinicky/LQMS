@@ -803,6 +803,54 @@ ${links.length ? `<h3>Linked records</h3><ul>${links.map(l => `<li>${esc(l.targe
     res.send(html);
   });
 
+  // ============= Advisory services =============
+  router.get('/advisory', requirePermission('customer_focus', 'view'), (_req, res) => {
+    res.json(getDb().prepare('SELECT * FROM advisory_services ORDER BY service_date DESC, created_at DESC').all());
+  });
+  router.post('/advisory', requirePermission('customer_focus', 'create'), (req, res) => {
+    if (!req.body.serviceDate) return res.status(400).json({ error: 'serviceDate is required' });
+    const db = getDb();
+    const createdAt = new Date().toISOString();
+    const number = generateRecordNumber(db, 'advisory_services', 'ADV', createdAt);
+    const r = db.prepare(`INSERT INTO advisory_services (record_number, service_date, service_type, requester, stakeholder_id, provided_by_staff_id, subject, advice_summary, communication_channel, follow_up_required, follow_up_due_date, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(number, req.body.serviceDate, req.body.serviceType ?? null, req.body.requester ?? null, parseIntNullable(req.body.stakeholderId), parseIntNullable(req.body.providedByStaffId) ?? getStaffIdOrCurrent(req, null), req.body.subject ?? null, req.body.adviceSummary ?? null, req.body.communicationChannel ?? null, req.body.followUpRequired ? 1 : 0, req.body.followUpDueDate ?? null, req.body.notes ?? null, req.user!.id, createdAt);
+    audit(req, { action: 'create', entity: 'advisory_services', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
+    res.status(201).json({ id: r.lastInsertRowid, recordNumber: number });
+  });
+  router.put('/advisory/:id', requirePermission('customer_focus', 'edit'), (req, res) => {
+    const db = getDb();
+    const old = db.prepare('SELECT * FROM advisory_services WHERE id = ?').get(req.params.id) as any;
+    if (!old) return res.status(404).json({ error: 'Advisory record not found' });
+    db.prepare(`UPDATE advisory_services SET service_date = ?, service_type = ?, requester = ?, stakeholder_id = ?, provided_by_staff_id = ?, subject = ?, advice_summary = ?, communication_channel = ?, follow_up_required = ?, follow_up_due_date = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(req.body.serviceDate ?? old.service_date, req.body.serviceType ?? old.service_type, req.body.requester ?? old.requester, parseIntNullable(req.body.stakeholderId) ?? old.stakeholder_id, parseIntNullable(req.body.providedByStaffId) ?? old.provided_by_staff_id, req.body.subject ?? old.subject, req.body.adviceSummary ?? old.advice_summary, req.body.communicationChannel ?? old.communication_channel, req.body.followUpRequired === undefined ? old.follow_up_required : (req.body.followUpRequired ? 1 : 0), req.body.followUpDueDate ?? old.follow_up_due_date, req.body.notes ?? old.notes, req.params.id);
+    audit(req, { action: 'edit', entity: 'advisory_services', entityId: req.params.id, oldValue: old, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  // ============= Laboratory handbook =============
+  router.get('/handbook', requirePermission('customer_focus', 'view'), (_req, res) => {
+    res.json(getDb().prepare('SELECT * FROM laboratory_handbook_entries ORDER BY display_order ASC, created_at DESC').all());
+  });
+  router.post('/handbook', requirePermission('customer_focus', 'create'), (req, res) => {
+    if (!req.body.title) return res.status(400).json({ error: 'title is required' });
+    const db = getDb();
+    const createdAt = new Date().toISOString();
+    const number = generateRecordNumber(db, 'laboratory_handbook_entries', 'LHB', createdAt);
+    const r = db.prepare(`INSERT INTO laboratory_handbook_entries (entry_number, section, title, content, version, effective_date, review_date, status, display_order, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(number, req.body.section ?? null, req.body.title, req.body.content ?? null, req.body.version ?? null, req.body.effectiveDate ?? null, req.body.reviewDate ?? null, req.body.status ?? 'active', parseIntNullable(req.body.displayOrder) ?? 0, req.user!.id, createdAt);
+    audit(req, { action: 'create', entity: 'laboratory_handbook_entries', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
+    res.status(201).json({ id: r.lastInsertRowid, entryNumber: number });
+  });
+  router.put('/handbook/:id', requirePermission('customer_focus', 'edit'), (req, res) => {
+    const db = getDb();
+    const old = db.prepare('SELECT * FROM laboratory_handbook_entries WHERE id = ?').get(req.params.id) as any;
+    if (!old) return res.status(404).json({ error: 'Handbook entry not found' });
+    db.prepare(`UPDATE laboratory_handbook_entries SET section = ?, title = ?, content = ?, version = ?, effective_date = ?, review_date = ?, status = ?, display_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(req.body.section ?? old.section, req.body.title ?? old.title, req.body.content ?? old.content, req.body.version ?? old.version, req.body.effectiveDate ?? old.effective_date, req.body.reviewDate ?? old.review_date, req.body.status ?? old.status, parseIntNullable(req.body.displayOrder) ?? old.display_order, req.params.id);
+    audit(req, { action: 'edit', entity: 'laboratory_handbook_entries', entityId: req.params.id, oldValue: old, newValue: req.body });
+    res.json({ ok: true });
+  });
+
   return router;
 }
 

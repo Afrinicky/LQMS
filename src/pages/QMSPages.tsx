@@ -291,17 +291,17 @@ export function NcCapaPage() {
   if (!isEnabled('nc_capa')) return <DisabledModule />;
 
   return <div>
-    <PageHeader eyebrow="Occurrence Management" title="Nonconforming Events &amp; CAPA" subtitle="Incidents, investigations, and corrective/preventive actions." />
+    <PageHeader eyebrow="Nonconforming Event Management" title="Nonconforming Events &amp; CAPA" subtitle="Incidents, investigations, and corrective/preventive actions." />
     <div className="tabs">{['Dashboard', 'Nonconforming Events', 'New Event', 'CAPA Register', 'Overdue CAPAs', 'Effectiveness Reviews', 'Reports placeholder'].map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
     {loadState.error && <div className="card"><strong>Error:</strong> {loadState.error}</div>}
     {loadState.loading && <div className="card"><em>Loading QMS data…</em></div>}
     {tab === 'Dashboard' && <><KpiStrip items={[
-      { label: 'Open NCs', value: summary?.openNCs.count ?? ncList.filter(n => n.status !== 'closed').length },
-      { label: 'NCs pending review', value: ncList.filter(n => n.status === 'open').length },
-      { label: 'Open CAPAs', value: summary?.openCAPAs.count ?? capaList.filter(c => c.status !== 'closed').length },
-      { label: 'Overdue CAPAs', value: overdueCAPAs.length, tone: 'danger' },
-      { label: 'Effectiveness reviews due', value: effectivenessDue.length },
-      { label: 'High risk CAPAs', value: summary?.highRisks.count ?? 0 },
+      { label: 'Open NCs', value: summary?.openNCs.count ?? ncList.filter(n => n.status !== 'closed').length, onClick: () => setTab('Nonconforming Events') },
+      { label: 'NCs pending review', value: ncList.filter(n => n.status === 'open').length, onClick: () => setTab('Nonconforming Events') },
+      { label: 'Open CAPAs', value: summary?.openCAPAs.count ?? capaList.filter(c => c.status !== 'closed').length, onClick: () => setTab('CAPA Register') },
+      { label: 'Overdue CAPAs', value: overdueCAPAs.length, tone: 'danger', onClick: () => setTab('Overdue CAPAs') },
+      { label: 'Effectiveness reviews due', value: effectivenessDue.length, onClick: () => setTab('Effectiveness Reviews') },
+      { label: 'High risk CAPAs', value: summary?.highRisks.count ?? 0, onClick: () => setTab('CAPA Register') },
     ]} />
     <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Open quality items" subtitle="Composition of active NCs and CAPAs">
@@ -547,16 +547,16 @@ export function ComplaintsPage() {
   if (!isEnabled('complaints')) return <DisabledModule />;
 
   return <div>
-    <PageHeader eyebrow="Customer Service" title="Complaints Register" subtitle="Complaints intake, investigation, and resolution." />
+    <PageHeader eyebrow="Customer Focus" title="Complaints Register" subtitle="Complaints intake, investigation, and resolution." />
     <div className="tabs">{['Dashboard', 'Complaints Register', 'New Complaint', 'Investigation', 'Trends placeholder', 'Reports placeholder'].map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
     {loadState.error && <div className="card"><strong>Error:</strong> {loadState.error}</div>}
     {loadState.loading && <div className="card"><em>Loading complaints…</em></div>}
     {tab === 'Dashboard' && <><KpiStrip items={[
-      { label: 'Open complaints', value: complaints.filter(c => c.status !== 'closed').length },
-      { label: 'Under investigation', value: complaints.filter(c => c.status === 'investigating').length },
-      { label: 'Overdue', value: complaints.filter(c => c.status !== 'closed' && c.received_date && new Date(c.received_date).getTime() + 1000 * 60 * 60 * 24 * 30 < Date.now()).length, tone: 'danger' },
-      { label: 'Closed', value: complaints.filter(c => c.status === 'closed').length },
-      { label: 'Linked CAPAs', value: complaints.filter(c => c.capa_required === 1).length },
+      { label: 'Open complaints', value: complaints.filter(c => c.status !== 'closed').length, onClick: () => setTab('Complaints Register') },
+      { label: 'Under investigation', value: complaints.filter(c => c.status === 'investigating').length, onClick: () => setTab('Investigation') },
+      { label: 'Overdue', value: complaints.filter(c => c.status !== 'closed' && c.received_date && new Date(c.received_date).getTime() + 1000 * 60 * 60 * 24 * 30 < Date.now()).length, tone: 'danger', onClick: () => setTab('Complaints Register') },
+      { label: 'Closed', value: complaints.filter(c => c.status === 'closed').length, onClick: () => setTab('Complaints Register') },
+      { label: 'Linked CAPAs', value: complaints.filter(c => c.capa_required === 1).length, onClick: () => setTab('Complaints Register') },
     ]} />
     <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Complaint status mix" subtitle="Distribution across the resolution lifecycle">
@@ -730,16 +730,16 @@ export function RisksPage() {
   if (!isEnabled('risks')) return <DisabledModule />;
 
   return <div>
-    <PageHeader eyebrow="Process Improvement" title="Risk Register" subtitle="Risk identification, mitigation, and periodic review." />
+    <PageHeader eyebrow="Continual Improvement" title="Risk Register" subtitle="Risk identification, mitigation, and periodic review." />
     <div className="tabs">{['Dashboard', 'Risk Register', 'New Risk', 'Reviews Due', 'Reports placeholder'].map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
     {loadState.error && <div className="card"><strong>Error:</strong> {loadState.error}</div>}
     {loadState.loading && <div className="card"><em>Loading risk register…</em></div>}
     {tab === 'Dashboard' && <><KpiStrip items={[
-      { label: 'Active risks', value: risks.filter(r => r.status !== 'closed').length },
-      { label: 'High / critical risks', value: high, tone: 'warning' },
-      { label: 'Reviews due', value: reviewsDue },
-      { label: 'Mitigation overdue', value: mitigationOverdue, tone: 'danger' },
-      { label: 'Critical risk flags', value: risks.filter(r => r.risk_level === 'Critical').length },
+      { label: 'Active risks', value: risks.filter(r => r.status !== 'closed').length, onClick: () => setTab('Risk Register') },
+      { label: 'High / critical risks', value: high, tone: 'warning', onClick: () => setTab('Risk Register') },
+      { label: 'Reviews due', value: reviewsDue, onClick: () => setTab('Reviews Due') },
+      { label: 'Mitigation overdue', value: mitigationOverdue, tone: 'danger', onClick: () => setTab('Risk Register') },
+      { label: 'Critical risk flags', value: risks.filter(r => r.risk_level === 'Critical').length, onClick: () => setTab('Risk Register') },
     ]} />
     <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Risk severity profile" subtitle="Active register grouped by rated level">
@@ -875,7 +875,7 @@ export function QmsActionTracker() {
   if (!isEnabled('actions')) return <DisabledModule />;
 
   return <div>
-    <PageHeader eyebrow="Occurrence Management" title="Action Tracker" subtitle="Centralized actions, owners, due dates, and status." />
+    <PageHeader eyebrow="Nonconforming Event Management" title="Action Tracker" subtitle="Centralized actions, owners, due dates, and status." />
     {loadState.error && <div className="card"><strong>Error:</strong> {loadState.error}</div>}
     {loadState.loading && <div className="card"><em>Loading actions…</em></div>}
     <div className="card"><h3>Filters</h3><div className="form" style={{ gridTemplateColumns: '1fr auto auto', alignItems: 'end' }}><label>Status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All</option>{statusOptions.map(s => <option key={s} value={s}>{s}</option>)}</select></label><label>Assigned staff<select value={staffFilter} onChange={e => setStaffFilter(e.target.value)}><option value="">All</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label><label><input type="checkbox" checked={overdueFilter} onChange={e => setOverdueFilter(e.target.checked)} /> Overdue only</label><button onClick={load}>Refresh</button></div></div>
