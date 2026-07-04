@@ -4,6 +4,7 @@ import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../comp
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
+import { ComplaintsPage } from './QMSPages';
 import type {
   Section, Department, Staff,
   CustomerStakeholder, ServiceAgreement, CustomerFeedback,
@@ -228,7 +229,7 @@ export function CustomerFocusPage() {
   async function submitHandbook(e: FormEvent) { e.preventDefault(); setError(null); try { await api('/customer-focus/handbook', { method: 'POST', body: JSON.stringify(hbForm) }); setHbForm({ section: '', title: '', content: '', version: '', effectiveDate: '', reviewDate: '', status: 'active', displayOrder: '0' }); await load(); } catch (e) { setError((e as Error).message); } }
   const pretty = (s?: string) => s ? s.replace(/_/g, ' ') : '—';
 
-  const tabs = ['Dashboard', 'Advisory Services', 'Laboratory Handbook', 'Stakeholders', 'New Stakeholder', 'Service Agreements', 'Feedback Intake', 'Satisfaction Surveys', 'Survey Responses', 'Communication Log', 'Imports', 'Reports'];
+  const tabs = ['Dashboard', ...(isEnabled('complaints') ? ['Complaints'] : []), 'Advisory Services', 'Laboratory Handbook', 'Stakeholders', 'New Stakeholder', 'Service Agreements', 'Feedback Intake', 'Satisfaction Surveys', 'Survey Responses', 'Communication Log', 'Imports', 'Reports'];
 
   return <div className="module-page">
     <PageHeader eyebrow="Customer Focus" title="Customer Focus" subtitle="Stakeholders, feedback, and satisfaction follow-up." />
@@ -263,6 +264,8 @@ export function CustomerFocusPage() {
         ]} />
       </ChartCard>
     </div>}
+
+    {tab === 'Complaints' && <ComplaintsPage embedded />}
 
     {tab === 'Advisory Services' && <>
       <form className="form-grid" onSubmit={submitAdvisory}>

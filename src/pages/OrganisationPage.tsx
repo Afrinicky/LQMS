@@ -4,6 +4,7 @@ import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../comp
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
+import { MeetingsPage, ManagementReviewPage } from './Phase8Pages';
 import type { Staff, CodeOfConductRecord, BudgetProjection, OrganisationSummary, RegulatoryRegistration } from '../../shared/types/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
@@ -72,7 +73,8 @@ export function OrganisationPage() {
 
   return <div className="module-page">
     <PageHeader eyebrow="Organisation and Leadership" title="Organisation &amp; Leadership" subtitle="Leadership commitments, code of conduct, and budget planning." />
-    {tabBar(tab, ['Dashboard', 'Code of Conduct', 'Budget Projection', 'Registrations & Licences'], setTab)}
+    {tabBar(tab, ['Dashboard', 'Code of Conduct', 'Budget Projection', 'Registrations & Licences',
+      ...(isEnabled('meetings') ? ['Meetings'] : []), ...(isEnabled('management_review') ? ['Management Review'] : [])], setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && <><KpiStrip items={[
@@ -170,5 +172,8 @@ export function OrganisationPage() {
           </tbody></table>}
       </div>
     </>}
+
+    {tab === 'Meetings' && <MeetingsPage embedded />}
+    {tab === 'Management Review' && <ManagementReviewPage embedded />}
   </div>;
 }

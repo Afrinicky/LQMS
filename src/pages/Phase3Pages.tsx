@@ -554,10 +554,10 @@ function InventoryDetailPanel({ item, staff, onClose, acceptBatch, createBatchNc
 }
 
 // ============= MONITORING =============
-export function MonitoringPage() {
+export function MonitoringPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { isEnabled } = useModules();
   const { staff, sections, locations } = useLookups();
-  const [tab, setTab] = useState('Dashboard');
+  const [tab, setTab] = useState(embedded ? 'Monitoring Items' : 'Dashboard');
   const [items, setItems] = useState<MonitoringItem[]>([]);
   const [readings, setReadings] = useState<MonitoringReading[]>([]);
   const [summary, setSummary] = useState<OperationsSummary | null>(null);
@@ -581,9 +581,9 @@ export function MonitoringPage() {
     } catch (e) { setError((e as Error).message); }
     finally { setLoading(false); }
   }
-  useEffect(() => { if (isEnabled('monitoring')) void load(); }, [isEnabled]);
+  useEffect(() => { if (embedded || isEnabled('monitoring')) void load(); }, [isEnabled]);
 
-  if (!isEnabled('monitoring')) return <DisabledModule />;
+  if (!embedded && !isEnabled('monitoring')) return <DisabledModule />;
 
   const excursions = useMemo(() => readings.filter(r => r.status !== 'normal'), [readings]);
 
@@ -620,9 +620,9 @@ export function MonitoringPage() {
   }
 
   return <div>
-    <PageHeader eyebrow="Facilities and Safety" title="Environmental Monitoring" subtitle="Temperature and environment readings, excursions, and trends." />
+    {!embedded && <PageHeader eyebrow="Facilities and Safety" title="Environmental Monitoring" subtitle="Temperature and environment readings, excursions, and trends." />}
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
-    {tabBar(tab, ['Dashboard', 'Monitoring Items', 'New Monitoring Item', 'Enter Reading', 'Excursions', 'Monthly Charts placeholder'], setTab)}
+    {tabBar(tab, ['Dashboard', 'Monitoring Items', 'New Monitoring Item', 'Enter Reading', 'Excursions', 'Monthly Charts placeholder'].filter(t => !embedded || t !== 'Dashboard'), setTab)}
 
     {tab === 'Dashboard' && <><KpiStrip items={[
       { label: 'Monitoring items', value: items.length, onClick: () => setTab('Monitoring Items') },
@@ -830,7 +830,7 @@ export function SafetyPage() {
   return <div>
     <PageHeader eyebrow="Facilities and Safety" title="Facilities &amp; Safety" subtitle="Safety incidents, equipment, inspections, waste, chemicals and occupational health." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
-    {tabBar(tab, ['Dashboard', 'Safety Incidents', 'New Incident', 'Safety Equipment', 'Inspections & Drills', 'Waste Disposal', 'Hazardous Chemicals', 'Immunisation & Exposure'], setTab)}
+    {tabBar(tab, ['Dashboard', 'Safety Incidents', 'New Incident', 'Safety Equipment', 'Inspections & Drills', 'Waste Disposal', 'Hazardous Chemicals', 'Immunisation & Exposure', ...(isEnabled('monitoring') ? ['Environmental Monitoring'] : [])], setTab)}
 
     {tab === 'Dashboard' && <><KpiStrip items={[
       { label: 'Open incidents', value: openIncidents, tone: openIncidents ? 'warning' : undefined, onClick: () => setTab('Safety Incidents') },
@@ -1027,6 +1027,8 @@ export function SafetyPage() {
           </tbody></table>}
       </div>
     </>}
+
+    {tab === 'Environmental Monitoring' && <MonitoringPage embedded />}
   </div>;
 }
 

@@ -4,6 +4,8 @@ import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../comp
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
+import { RecordsReportsPage } from './RecordsReportsPage';
+import { MonthlyReportsPage } from './MonthlyReportsPage';
 import type {
   NotificationRecord, NotificationRule, ReviewCalendarItem, UserTaskQueueItem,
   NotificationPreference, NotificationsSummary, Staff
@@ -115,12 +117,23 @@ export function NotificationsPage() {
     });
   }
 
-  const tabs = ['Dashboard', 'My Notifications', 'My Tasks', 'Review Calendar', 'Generate Alerts', 'Notification Rules', 'Preferences', 'Reports'];
+  const NOTIF_TABS = ['My Notifications', 'My Tasks', 'Review Calendar', 'Generate Alerts', 'Notification Rules', 'Preferences', 'Reports'];
+  const inNotifications = NOTIF_TABS.includes(tab);
+  const topTabs: { key: string; active: boolean; go: () => void }[] = [
+    { key: 'Dashboard', active: tab === 'Dashboard', go: () => setTab('Dashboard') },
+    { key: 'Notifications & Review Calendar', active: inNotifications, go: () => setTab('My Notifications') },
+    ...(isEnabled('records_reports') ? [{ key: 'Records, Reports & Evidence', active: tab === 'Records, Reports & Evidence', go: () => setTab('Records, Reports & Evidence') }] : []),
+    ...(isEnabled('monthly_reports') ? [{ key: 'Monthly Reports & Archives', active: tab === 'Monthly Reports & Archives', go: () => setTab('Monthly Reports & Archives') }] : []),
+  ];
 
   return <div className="module-page">
-    <PageHeader eyebrow="Notifications &amp; Reports" title="Notifications &amp; Review Calendar" subtitle="Alerts, reminders, announcements, and review scheduling." />
-    {tabBar(tab, tabs, setTab)}
+    <PageHeader eyebrow="Notifications &amp; Reports" title="Notifications &amp; Reports" subtitle="Alerts, review calendar, reports, evidence, and monthly archives." />
+    <div className="tabs">{topTabs.map(t => <button key={t.key} type="button" className={t.active ? 'active' : ''} onClick={t.go}>{t.key}</button>)}</div>
+    {inNotifications && tabBar(tab, NOTIF_TABS, setTab)}
     {error && <div className="error">{error}</div>}
+
+    {tab === 'Records, Reports & Evidence' && <RecordsReportsPage embedded />}
+    {tab === 'Monthly Reports & Archives' && <MonthlyReportsPage embedded />}
 
     {tab === 'Dashboard' && (summary ? <>
       <KpiStrip items={[

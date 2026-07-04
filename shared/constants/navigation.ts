@@ -43,7 +43,7 @@ export const NAV_SECTIONS: NavSection[] = [
     title: 'Organisation and Leadership',
     desc: 'Leadership, structure, meetings and management review',
     group: 'essential',
-    modules: ['organisation', 'meetings', 'management_review'],
+    modules: ['organisation'],
   },
   {
     key: 'personnel',
@@ -57,7 +57,7 @@ export const NAV_SECTIONS: NavSection[] = [
     title: 'Customer Focus',
     desc: 'Complaints, feedback and stakeholder care',
     group: 'essential',
-    modules: ['customer_focus', 'complaints'],
+    modules: ['customer_focus'],
   },
   {
     key: 'equipment',
@@ -107,21 +107,22 @@ export const NAV_SECTIONS: NavSection[] = [
     title: 'Nonconforming Event Management',
     desc: 'Nonconformities, CAPA and action follow-up',
     group: 'essential',
-    modules: ['nc_capa', 'actions'],
+    modules: ['nc_capa'],
   },
   {
     key: 'continual_improvement',
+    // risk register and quality indicators now live under Assessments
     title: 'Continual Improvement',
     desc: 'Improvement projects, quality indicators and risk',
     group: 'essential',
-    modules: ['continual_improvement', 'quality_indicators', 'risks'],
+    modules: ['continual_improvement'],
   },
   {
     key: 'facilities_safety',
     title: 'Facilities and Safety',
     desc: 'Environment, monitoring and safety incidents',
     group: 'essential',
-    modules: ['facilities_safety', 'monitoring'],
+    modules: ['facilities_safety'],
   },
 
   /* ---- Software features ---- */
@@ -130,7 +131,7 @@ export const NAV_SECTIONS: NavSection[] = [
     title: 'Notifications & Reports',
     desc: 'Alerts, review calendar, reports and evidence',
     group: 'system',
-    modules: ['notifications', 'records_reports', 'monthly_reports'],
+    modules: ['notifications'],
   },
   {
     key: 'settings',

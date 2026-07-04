@@ -4,6 +4,7 @@ import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../comp
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
+import { RisksPage } from './QMSPages';
 import type {
   Section, Department, Staff,
   AssessmentProgram, AssessmentFinding,
@@ -296,11 +297,22 @@ export function AssessmentsPage() {
   async function createCapa(id: number) { try { await api(`/assessments/findings/${id}/create-capa`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selected) await open(selected.id); } catch (e) { setError((e as Error).message); } }
   async function closeFinding(id: number) { try { await api(`/assessments/findings/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selected) await open(selected.id); } catch (e) { setError((e as Error).message); } }
 
-  const tabs = ['Dashboard', 'Assessment Programmes', 'New Assessment', 'Checklist Library', 'Plan Assessment', 'Assessment Questions', 'Internal Audit Marks', 'Findings', 'Reports'];
+  const INTERNAL_AUDIT_TABS = ['Assessment Programmes', 'New Assessment', 'Checklist Library', 'Plan Assessment', 'Assessment Questions', 'Internal Audit Marks', 'Findings', 'Reports'];
+  const inInternalAudit = INTERNAL_AUDIT_TABS.includes(tab);
+  const topTabs: { key: string; active: boolean; go: () => void }[] = [
+    { key: 'Dashboard', active: tab === 'Dashboard', go: () => setTab('Dashboard') },
+    { key: 'Internal Audit', active: inInternalAudit, go: () => setTab('Assessment Programmes') },
+    ...(isEnabled('risks') ? [{ key: 'Risk Management', active: tab === 'Risk Management', go: () => setTab('Risk Management') }] : []),
+    ...(isEnabled('quality_indicators') ? [{ key: 'Quality Indicator Monitoring', active: tab === 'Quality Indicator Monitoring', go: () => setTab('Quality Indicator Monitoring') }] : []),
+  ];
   return <div className="module-page">
-    <PageHeader eyebrow="Assessments" title="Internal Assessments" subtitle="Internal audits, assessments, checklists, and findings follow-up." />
-    {tabBar(tab, tabs, setTab)}
+    <PageHeader eyebrow="Assessments" title="Assessments" subtitle="Internal audits, risk management, and quality indicator monitoring." />
+    <div className="tabs">{topTabs.map(t => <button key={t.key} type="button" className={t.active ? 'active' : ''} onClick={t.go}>{t.key}</button>)}</div>
+    {inInternalAudit && tabBar(tab, INTERNAL_AUDIT_TABS, setTab)}
     {error && <div className="error">{error}</div>}
+
+    {tab === 'Risk Management' && <RisksPage embedded />}
+    {tab === 'Quality Indicator Monitoring' && <QualityIndicatorsPage embedded />}
 
     {tab === 'Dashboard' && dashboardCards(summary, [
       { label: 'Planned/active assessments', value: 'plannedAssessments', onClick: () => setTab('Assessment Programmes') },
@@ -542,11 +554,11 @@ export function AssessmentsPage() {
 }
 
 // ============= Meetings =============
-export function MeetingsPage() {
+export function MeetingsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { isEnabled } = useModules();
   const { staff } = useLookups();
   const summary = useGovernanceSummary();
-  const [tab, setTab] = useState('Dashboard');
+  const [tab, setTab] = useState(embedded ? 'Meetings' : 'Dashboard');
   const [error, setError] = useState<string | null>(null);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [selected, setSelected] = useState<Meeting | null>(null);
@@ -555,8 +567,8 @@ export function MeetingsPage() {
   const [actForm, setActForm] = useState({ title: '', description: '', assignedToStaffId: '', dueDate: '', priority: 'normal' });
 
   async function load() { try { setMeetings(await api<Meeting[]>('/meetings')); } catch (e) { setError((e as Error).message); } }
-  useEffect(() => { if (isEnabled('meetings')) void load(); }, [isEnabled]);
-  if (!isEnabled('meetings')) return <DisabledModule />;
+  useEffect(() => { if (embedded || isEnabled('meetings')) void load(); }, [isEnabled]);
+  if (!embedded && !isEnabled('meetings')) return <DisabledModule />;
 
   async function submit(e: FormEvent) {
     e.preventDefault(); setError(null);
@@ -569,9 +581,9 @@ export function MeetingsPage() {
   async function closeMtg(id: number) { try { await api(`/meetings/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selected) await open(id); } catch (e) { setError((e as Error).message); } }
 
   const tabs = ['Dashboard', 'Meetings', 'New Meeting', 'Attendance', 'Action Items', 'Reports'];
-  return <div className="module-page">
-    <PageHeader eyebrow="Organisation and Leadership" title="Meetings &amp; Minutes" subtitle="Meeting scheduling, agendas, minutes, and action items." />
-    {tabBar(tab, tabs, setTab)}
+  return <div className={embedded ? '' : 'module-page'}>
+    {!embedded && <PageHeader eyebrow="Organisation and Leadership" title="Meetings &amp; Minutes" subtitle="Meeting scheduling, agendas, minutes, and action items." />}
+    {tabBar(tab, embedded ? tabs.filter(t => t !== 'Dashboard') : tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && dashboardCards(summary, [{ label: 'Open meetings', value: 'openMeetings', onClick: () => setTab('Meetings') }])}
@@ -631,11 +643,11 @@ export function MeetingsPage() {
 }
 
 // ============= Management Review =============
-export function ManagementReviewPage() {
+export function ManagementReviewPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { isEnabled } = useModules();
   const { staff } = useLookups();
   const summary = useGovernanceSummary();
-  const [tab, setTab] = useState('Dashboard');
+  const [tab, setTab] = useState(embedded ? 'Review Register' : 'Dashboard');
   const [error, setError] = useState<string | null>(null);
   const [reviews, setReviews] = useState<ManagementReview[]>([]);
   const [selected, setSelected] = useState<ManagementReview | null>(null);
@@ -644,8 +656,8 @@ export function ManagementReviewPage() {
   const [actForm, setActForm] = useState({ title: '', description: '', assignedToStaffId: '', dueDate: '', priority: 'normal' });
 
   async function load() { try { setReviews(await api<ManagementReview[]>('/management-review')); } catch (e) { setError((e as Error).message); } }
-  useEffect(() => { if (isEnabled('management_review')) void load(); }, [isEnabled]);
-  if (!isEnabled('management_review')) return <DisabledModule />;
+  useEffect(() => { if (embedded || isEnabled('management_review')) void load(); }, [isEnabled]);
+  if (!embedded && !isEnabled('management_review')) return <DisabledModule />;
 
   async function submit(e: FormEvent) { e.preventDefault(); setError(null); try { await api('/management-review', { method: 'POST', body: JSON.stringify(form) }); setForm({ reviewPeriodStart: '', reviewPeriodEnd: '', reviewDate: '', chairStaffId: '', secretaryStaffId: '', summary: '', conclusions: '', decisions: '' }); await load(); setTab('Review Register'); } catch (e) { setError((e as Error).message); } }
   async function open(id: number) { try { setSelected(await api<ManagementReview>(`/management-review/${id}`)); } catch (e) { setError((e as Error).message); } }
@@ -656,9 +668,9 @@ export function ManagementReviewPage() {
   async function closeReview(id: number) { try { await api(`/management-review/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selected) await open(id); } catch (e) { setError((e as Error).message); } }
 
   const tabs = ['Dashboard', 'Review Register', 'New Review', 'Inputs', 'Actions', 'Reports'];
-  return <div className="module-page">
-    <PageHeader eyebrow="Organisation and Leadership" title="Management Review" subtitle="Management review inputs, outputs, and resulting actions." />
-    {tabBar(tab, tabs, setTab)}
+  return <div className={embedded ? '' : 'module-page'}>
+    {!embedded && <PageHeader eyebrow="Organisation and Leadership" title="Management Review" subtitle="Management review inputs, outputs, and resulting actions." />}
+    {tabBar(tab, embedded ? tabs.filter(t => t !== 'Dashboard') : tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && dashboardCards(summary, [{ label: 'Pending management reviews', value: 'pendingManagementReviews', onClick: () => setTab('Review Register') }])}
@@ -716,11 +728,11 @@ export function ManagementReviewPage() {
 }
 
 // ============= Quality Indicators =============
-export function QualityIndicatorsPage() {
+export function QualityIndicatorsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { isEnabled } = useModules();
   const { staff, sections } = useLookups();
   const summary = useGovernanceSummary();
-  const [tab, setTab] = useState('Dashboard');
+  const [tab, setTab] = useState(embedded ? 'Indicator Register' : 'Dashboard');
   const [error, setError] = useState<string | null>(null);
   const [indicators, setIndicators] = useState<QualityIndicator[]>([]);
   const [results, setResults] = useState<QualityIndicatorResult[]>([]);
@@ -730,8 +742,8 @@ export function QualityIndicatorsPage() {
 
   async function load() { try { setIndicators(await api<QualityIndicator[]>('/quality-indicators')); } catch (e) { setError((e as Error).message); } }
   async function loadResults(id: string) { if (!id) { setResults([]); return; } try { setResults(await api<QualityIndicatorResult[]>(`/quality-indicators/${id}/results`)); } catch (e) { setError((e as Error).message); } }
-  useEffect(() => { if (isEnabled('quality_indicators')) void load(); }, [isEnabled]);
-  if (!isEnabled('quality_indicators')) return <DisabledModule />;
+  useEffect(() => { if (embedded || isEnabled('quality_indicators')) void load(); }, [isEnabled]);
+  if (!embedded && !isEnabled('quality_indicators')) return <DisabledModule />;
 
   async function submit(e: FormEvent) { e.preventDefault(); setError(null); try { await api('/quality-indicators', { method: 'POST', body: JSON.stringify(form) }); setForm({ indicatorCode: '', indicatorName: '', sectionId: '', description: '', numeratorDefinition: '', denominatorDefinition: '', targetValue: '', warningThreshold: '', criticalThreshold: '', frequency: 'monthly', responsibleStaffId: '', reviewerStaffId: '' }); await load(); setTab('Indicator Register'); } catch (e) { setError((e as Error).message); } }
   async function submitResult(e: FormEvent) { e.preventDefault(); setError(null); if (!selectedId) return setError('Select an indicator'); try { await api(`/quality-indicators/${selectedId}/results`, { method: 'POST', body: JSON.stringify(resForm) }); setResForm({ periodStart: '', periodEnd: '', numeratorValue: '', denominatorValue: '', interpretation: '' }); await loadResults(selectedId); } catch (e) { setError((e as Error).message); } }
@@ -740,9 +752,9 @@ export function QualityIndicatorsPage() {
   async function createCapa(id: number) { try { await api(`/quality-indicators/results/${id}/create-capa`, { method: 'POST', body: JSON.stringify({}) }); await loadResults(selectedId); } catch (e) { setError((e as Error).message); } }
 
   const tabs = ['Dashboard', 'Indicator Register', 'New Indicator', 'Results Entry', 'Trends', 'Reports'];
-  return <div className="module-page">
-    <PageHeader eyebrow="Continual Improvement" title="Quality Indicators" subtitle="Quality indicators, targets, and result monitoring." />
-    {tabBar(tab, tabs, setTab)}
+  return <div className={embedded ? '' : 'module-page'}>
+    {!embedded && <PageHeader eyebrow="Continual Improvement" title="Quality Indicators" subtitle="Quality indicators, targets, and result monitoring." />}
+    {tabBar(tab, embedded ? tabs.filter(t => t !== 'Dashboard') : tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && dashboardCards(summary, [

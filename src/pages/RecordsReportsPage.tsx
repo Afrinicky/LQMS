@@ -21,9 +21,9 @@ const OUTPUT_FORMATS = ['html', 'csv', 'json', 'print_view'];
 const REPORT_MODULES = ['nc_capa', 'complaints', 'risks', 'actions', 'equipment', 'supplier_inventory', 'monitoring', 'iqc', 'eqa', 'blood_bank_handover', 'monthly_reports', 'assessments', 'quality_indicators', 'customer_focus', 'poct', 'notifications'];
 const ARCHIVE_ACTIONS = ['flag_for_review', 'move_to_archive', 'retain_with_review_note', 'do_not_archive'];
 
-export function RecordsReportsPage() {
+export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { isEnabled } = useModules();
-  const [tab, setTab] = useState('Dashboard');
+  const [tab, setTab] = useState(embedded ? 'Report Templates' : 'Dashboard');
   const [error, setError] = useState<string | null>(null);
 
   const [summary, setSummary] = useState<RecordsReportsSummary | null>(null);
@@ -72,8 +72,8 @@ export function RecordsReportsPage() {
       setRetentionRules(rl); setRetentionReviews(rr); setBackupChecks(bc); setIntegrityChecks(ic); setStaff(s);
     } catch (e) { setError((e as Error).message); }
   }
-  useEffect(() => { if (isEnabled('records_reports')) void load(); }, [isEnabled]);
-  if (!isEnabled('records_reports')) return <DisabledModule />;
+  useEffect(() => { if (embedded || isEnabled('records_reports')) void load(); }, [isEnabled]);
+  if (!embedded && !isEnabled('records_reports')) return <DisabledModule />;
 
   async function loadAudit() {
     const params = new URLSearchParams();
@@ -193,9 +193,9 @@ export function RecordsReportsPage() {
 
   const tabs = ['Dashboard', 'Report Templates', 'Generate Report', 'Report Requests', 'Print Jobs', 'Evidence Packs', 'Audit Trail', 'Audit Trail Reviews', 'Retention Rules', 'Backup/Restore Checks', 'Data Integrity Checks'];
 
-  return <div className="module-page">
-    <PageHeader eyebrow="Notifications &amp; Reports" title="Records, Reports &amp; Evidence" subtitle="Report templates, generated reports, and evidence packs." />
-    {tabBar(tab, tabs, setTab)}
+  return <div className={embedded ? '' : 'module-page'}>
+    {!embedded && <PageHeader eyebrow="Notifications &amp; Reports" title="Records, Reports &amp; Evidence" subtitle="Report templates, generated reports, and evidence packs." />}
+    {tabBar(tab, embedded ? tabs.filter(t => t !== 'Dashboard') : tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && (summary ? <KpiStrip items={[

@@ -37,10 +37,10 @@ const now = new Date();
 const initialMonth = now.getMonth() + 1;
 const initialYear = now.getFullYear();
 
-export function MonthlyReportsPage() {
+export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { isEnabled } = useModules();
   const { staff, sections, departments } = useLookups();
-  const [tab, setTab] = useState('Dashboard');
+  const [tab, setTab] = useState(embedded ? 'Import Batches' : 'Dashboard');
   const [error, setError] = useState<string | null>(null);
 
   const [summary, setSummary] = useState<MonthlyReportsSummary | null>(null);
@@ -74,8 +74,8 @@ export function MonthlyReportsPage() {
       setImports(imp); setRules(mr); setExceptions(ex); setReports(rep); setTatRecords(tats);
     } catch (e) { setError((e as Error).message); }
   }
-  useEffect(() => { if (isEnabled('monthly_reports')) void load(); }, [isEnabled]);
-  if (!isEnabled('monthly_reports')) return <DisabledModule />;
+  useEffect(() => { if (embedded || isEnabled('monthly_reports')) void load(); }, [isEnabled]);
+  if (!embedded && !isEnabled('monthly_reports')) return <DisabledModule />;
 
   async function submitImport(e: FormEvent) {
     e.preventDefault(); setError(null);
@@ -194,10 +194,10 @@ export function MonthlyReportsPage() {
     catch (e) { setError((e as Error).message); }
   }
 
-  const tabs = ['Dashboard', 'Raw LHIMS Archive', 'New Import', 'Import Batches', 'Mapping Rules', 'Exceptions', 'Generate Report', 'Monthly Reports', 'TAT Summary', 'Reports/Exports'];
+  const tabs = ['Dashboard', 'Raw Archive', 'New Import', 'Import Batches', 'Mapping Rules', 'Exceptions', 'Generate Report', 'Monthly Reports', 'TAT Summary', 'Reports/Exports'];
 
-  return <div className="module-page">
-    <PageHeader eyebrow="Notifications &amp; Reports" title="Monthly Reports &amp; LHIMS Archive" subtitle="Monthly report imports, archives, and exception handling." />
+  return <div className={embedded ? '' : 'module-page'}>
+    {!embedded && <PageHeader eyebrow="Notifications &amp; Reports" title="Monthly Reports &amp; Archives" subtitle="Monthly report imports, archives, and exception handling." />}
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
@@ -212,7 +212,7 @@ export function MonthlyReportsPage() {
         { label: 'Average TAT (min)', value: summary.averageTatMinutes, onClick: () => setTab('TAT Summary') },
       ]} /> : <p>Loading summary…</p>}
       {summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
-        <ChartCard title="Import pipeline" subtitle="This month's LHIMS processing">
+        <ChartCard title="Import pipeline" subtitle="This month's import processing">
           <DonutChart centerLabel="Imports" data={[
             { label: 'Processed', value: Math.max(0, summary.importsThisMonth - summary.unprocessedImports), color: CHART_COLORS[1] },
             { label: 'Unprocessed', value: summary.unprocessedImports, color: CHART_COLORS[2] },
@@ -229,7 +229,7 @@ export function MonthlyReportsPage() {
       </div>}
     </>}
 
-    {tab === 'Raw LHIMS Archive' && <table className="data-table"><thead><tr><th>Batch #</th><th>Period</th><th>Type</th><th>File</th><th>Imported by</th><th>Status</th><th>Rows</th><th>Exceptions</th><th>Actions</th></tr></thead><tbody>
+    {tab === 'Raw Archive' && <table className="data-table"><thead><tr><th>Batch #</th><th>Period</th><th>Type</th><th>File</th><th>Imported by</th><th>Status</th><th>Rows</th><th>Exceptions</th><th>Actions</th></tr></thead><tbody>
       {imports.map(b => <tr key={b.id}>
         <td>{b.batch_number}</td><td>{b.report_year}-{String(b.report_month).padStart(2, '0')}</td>
         <td>{b.import_type.replace(/_/g, ' ')}</td><td>{b.original_filename || '—'}</td>
@@ -250,7 +250,7 @@ export function MonthlyReportsPage() {
       <label>Source file<input type="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={e => setImportForm({ ...importForm, file: e.target.files?.[0] ?? null })} required /></label>
       <label>Notes<textarea value={importForm.notes} onChange={e => setImportForm({ ...importForm, notes: e.target.value })} /></label>
       <button type="submit">Upload import batch</button>
-      <p><em>CSV (.csv) and Excel (.xlsx, .xls) imports are parsed. The uploaded file is retained as raw LHIMS archive evidence and included in backups.</em></p>
+      <p><em>CSV (.csv) and Excel (.xlsx, .xls) imports are parsed. The uploaded file is retained as raw archive evidence and included in backups.</em></p>
     </form>}
 
     {tab === 'Import Batches' && <>

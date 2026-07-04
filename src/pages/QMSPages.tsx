@@ -292,7 +292,7 @@ export function NcCapaPage() {
 
   return <div>
     <PageHeader eyebrow="Nonconforming Event Management" title="Nonconforming Events &amp; CAPA" subtitle="Incidents, investigations, and corrective/preventive actions." />
-    <div className="tabs">{['Dashboard', 'Nonconforming Events', 'New Event', 'CAPA Register', 'Overdue CAPAs', 'Effectiveness Reviews', 'Reports placeholder'].map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
+    <div className="tabs">{['Dashboard', 'Nonconforming Events', 'New Event', 'CAPA Register', 'Overdue CAPAs', 'Effectiveness Reviews', ...(isEnabled('actions') ? ['Action Tracker'] : []), 'Reports placeholder'].map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
     {loadState.error && <div className="card"><strong>Error:</strong> {loadState.error}</div>}
     {loadState.loading && <div className="card"><em>Loading QMS data…</em></div>}
     {tab === 'Dashboard' && <><KpiStrip items={[
@@ -358,6 +358,8 @@ export function NcCapaPage() {
 
     {tab === 'Reports placeholder' && <div className="card"><h3>Reports placeholder</h3><p>This section is reserved for future CAPA and NC analytics. Core QMS workflows remain focused on event tracking and linked record visibility.</p></div>}
 
+    {tab === 'Action Tracker' && <QmsActionTracker embedded />}
+
     {selectedNc && <div className="card"><h3>NC detail: {selectedNc.nc_number}</h3>
       <p><strong>Event date:</strong> {selectedNc.event_date}</p>
       <p><strong>Detected by:</strong> {staff.find(s => s.id === selectedNc.detected_by_staff_id)?.fullName || toDisplay(selectedNc.detected_by_staff_id)}</p>
@@ -408,10 +410,10 @@ export function NcCapaPage() {
   </div>;
 }
 
-export function ComplaintsPage() {
+export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { isEnabled } = useModules();
   const { staff, sections } = useLookupData();
-  const [tab, setTab] = useState('Dashboard');
+  const [tab, setTab] = useState(embedded ? 'Complaints Register' : 'Dashboard');
   const [complaints, setComplaints] = useState<ComplaintRecord[]>([]);
   const [selected, setSelected] = useState<ComplaintDetail | null>(null);
   const [formState, setFormState] = useState({ receivedDate: '', source: '', complainantType: '', complainantName: '', contact: '', sectionId: '', category: '', title: '', description: '', assignedToStaffId: '' });
@@ -420,7 +422,7 @@ export function ComplaintsPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
 
-  useEffect(() => { if (!isEnabled('complaints')) return; void load(); }, [isEnabled]);
+  useEffect(() => { if (!embedded && !isEnabled('complaints')) return; void load(); }, [isEnabled]);
 
   async function load() {
     setLoadState({ loading: true, error: null });
@@ -544,11 +546,11 @@ export function ComplaintsPage() {
     return matchesSearch && matchesStatus;
   }), [complaints, search, statusFilter]);
 
-  if (!isEnabled('complaints')) return <DisabledModule />;
+  if (!embedded && !isEnabled('complaints')) return <DisabledModule />;
 
   return <div>
-    <PageHeader eyebrow="Customer Focus" title="Complaints Register" subtitle="Complaints intake, investigation, and resolution." />
-    <div className="tabs">{['Dashboard', 'Complaints Register', 'New Complaint', 'Investigation', 'Trends placeholder', 'Reports placeholder'].map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
+    {!embedded && <PageHeader eyebrow="Customer Focus" title="Complaints Register" subtitle="Complaints intake, investigation, and resolution." />}
+    <div className="tabs">{['Dashboard', 'Complaints Register', 'New Complaint', 'Investigation', 'Trends placeholder', 'Reports placeholder'].filter(name => !embedded || name !== 'Dashboard').map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
     {loadState.error && <div className="card"><strong>Error:</strong> {loadState.error}</div>}
     {loadState.loading && <div className="card"><em>Loading complaints…</em></div>}
     {tab === 'Dashboard' && <><KpiStrip items={[
@@ -604,10 +606,10 @@ export function ComplaintsPage() {
   </div>;
 }
 
-export function RisksPage() {
+export function RisksPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { isEnabled } = useModules();
   const { staff, sections } = useLookupData();
-  const [tab, setTab] = useState('Dashboard');
+  const [tab, setTab] = useState(embedded ? 'Risk Register' : 'Dashboard');
   const [risks, setRisks] = useState<RiskRecord[]>([]);
   const [selected, setSelected] = useState<RiskDetail | null>(null);
   const [formState, setFormState] = useState({ sectionId: '', riskArea: '', riskDescription: '', cause: '', consequence: '', existingControls: '', likelihood: '1', severity: '1', detectability: '1', mitigationPlan: '', responsibleStaffId: '', reviewDueDate: '' });
@@ -616,7 +618,7 @@ export function RisksPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
 
-  useEffect(() => { if (!isEnabled('risks')) return; void load(); }, [isEnabled]);
+  useEffect(() => { if (!embedded && !isEnabled('risks')) return; void load(); }, [isEnabled]);
 
   async function load() {
     setLoadState({ loading: true, error: null });
@@ -727,11 +729,11 @@ export function RisksPage() {
   const reviewsDue = risks.filter(r => r.review_due_date && new Date(r.review_due_date) <= new Date()).length;
   const mitigationOverdue = risks.filter(r => r.status !== 'closed' && r.review_due_date && new Date(r.review_due_date) < new Date()).length;
 
-  if (!isEnabled('risks')) return <DisabledModule />;
+  if (!embedded && !isEnabled('risks')) return <DisabledModule />;
 
   return <div>
-    <PageHeader eyebrow="Continual Improvement" title="Risk Register" subtitle="Risk identification, mitigation, and periodic review." />
-    <div className="tabs">{['Dashboard', 'Risk Register', 'New Risk', 'Reviews Due', 'Reports placeholder'].map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
+    {!embedded && <PageHeader eyebrow="Continual Improvement" title="Risk Register" subtitle="Risk identification, mitigation, and periodic review." />}
+    <div className="tabs">{['Dashboard', 'Risk Register', 'New Risk', 'Reviews Due', 'Reports placeholder'].filter(name => !embedded || name !== 'Dashboard').map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
     {loadState.error && <div className="card"><strong>Error:</strong> {loadState.error}</div>}
     {loadState.loading && <div className="card"><em>Loading risk register…</em></div>}
     {tab === 'Dashboard' && <><KpiStrip items={[
@@ -811,7 +813,7 @@ export function RisksPage() {
   </div>;
 }
 
-export function QmsActionTracker() {
+export function QmsActionTracker({ embedded = false }: { embedded?: boolean } = {}) {
   const { isEnabled } = useModules();
   const { staff } = useLookupData();
   const [actions, setActions] = useState<ActionRecord[]>([]);
@@ -822,7 +824,7 @@ export function QmsActionTracker() {
   const [formState, setFormState] = useState({ title: '', moduleKey: 'nc_capa', sourceModule: '', sourceRecordId: '', description: '', assignedToStaffId: '', dueDate: '', priority: 'normal', status: 'Not started', evidenceRequired: false, completionNotes: '' });
   const [loadState, setLoadState] = useState<LoadState>({ loading: false, error: null });
 
-  useEffect(() => { if (!isEnabled('actions')) return; void load(); }, [isEnabled]);
+  useEffect(() => { if (!embedded && !isEnabled('actions')) return; void load(); }, [isEnabled]);
 
   async function load() {
     setLoadState({ loading: true, error: null });
@@ -872,10 +874,10 @@ export function QmsActionTracker() {
 
   const statusOptions = ['Not started', 'In progress', 'Waiting for evidence', 'Submitted for review', 'Completed', 'Verified', 'Closed', 'Reopened', 'Overdue'];
 
-  if (!isEnabled('actions')) return <DisabledModule />;
+  if (!embedded && !isEnabled('actions')) return <DisabledModule />;
 
   return <div>
-    <PageHeader eyebrow="Nonconforming Event Management" title="Action Tracker" subtitle="Centralized actions, owners, due dates, and status." />
+    {!embedded && <PageHeader eyebrow="Nonconforming Event Management" title="Action Tracker" subtitle="Centralized actions, owners, due dates, and status." />}
     {loadState.error && <div className="card"><strong>Error:</strong> {loadState.error}</div>}
     {loadState.loading && <div className="card"><em>Loading actions…</em></div>}
     <div className="card"><h3>Filters</h3><div className="form" style={{ gridTemplateColumns: '1fr auto auto', alignItems: 'end' }}><label>Status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All</option>{statusOptions.map(s => <option key={s} value={s}>{s}</option>)}</select></label><label>Assigned staff<select value={staffFilter} onChange={e => setStaffFilter(e.target.value)}><option value="">All</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label><label><input type="checkbox" checked={overdueFilter} onChange={e => setOverdueFilter(e.target.checked)} /> Overdue only</label><button onClick={load}>Refresh</button></div></div>
