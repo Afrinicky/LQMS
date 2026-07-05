@@ -1,5 +1,5 @@
 import { Fragment, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api, API_BASE, getToken } from '../services/api';
 import { MODULES, PERMISSION_ACTIONS, TECHNICAL_AUTHORIZATION_LEVELS } from '../../shared/constants/modules';
 import type {
@@ -1600,6 +1600,42 @@ function LabDocuments({ category, docTypes, onChanged }: { category: string; doc
   </>;
 }
 
+// Core documents are registered through the full Documents & Records workflow so
+// they carry complete controlled-document metadata. This tab shows their status
+// and launches the New Document form (pre-set to the right type).
+const CORE_DOC_LAUNCH = [
+  { label: 'Quality Manual', type: 'Quality Manual' },
+  { label: 'Laboratory Handbook', type: 'Handbook' },
+  { label: 'Safety Manual', type: 'Safety Manual' },
+];
+function CoreDocumentsTab({ qualityManualSummary, onSummaryChange, onSaveSummary }: { qualityManualSummary: string; onSummaryChange: (v: string) => void; onSaveSummary: () => void }) {
+  const nav = useNavigate();
+  const [docs, setDocs] = useState<Array<{ id: number; document_code?: string; title: string; document_type?: string; status: string; current_version_number?: string }>>([]);
+  useEffect(() => { api<typeof docs>('/documents').then(setDocs).catch(() => setDocs([])); }, []);
+  return <div>
+    <div className="card">
+      <h3>Core laboratory documents</h3>
+      <p>Register your three foundational controlled documents — <strong>Quality Manual</strong>, <strong>Laboratory Handbook</strong> and <strong>Safety Manual</strong> — through Documents &amp; Records so each carries full controlled-document detail (owner, section, review schedule, versions, attestations). They then appear in the register and on the Laboratory Profile.</p>
+      <label className="form"><span>Quality manual summary</span><textarea value={qualityManualSummary} onChange={e => onSummaryChange(e.target.value)} placeholder="Scope, structure and references of the quality manual." /></label>
+      <div style={{ marginTop: 8 }}><button type="button" onClick={onSaveSummary}>Save summary</button></div>
+    </div>
+    {CORE_DOC_LAUNCH.map(ct => {
+      const existing = docs.filter(d => (d.document_type || '') === ct.type && d.status !== 'obsolete');
+      return <div className="card" key={ct.type} style={{ marginTop: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <h3 style={{ margin: 0 }}>{ct.label}</h3>
+          <button type="button" onClick={() => nav(`/documents?new=${encodeURIComponent(ct.type)}`)}>{existing.length ? 'Register another' : 'Register in Documents & Records'}</button>
+        </div>
+        {existing.length === 0
+          ? <p className="hint" style={{ marginBottom: 0 }}>Not registered yet.</p>
+          : <table className="data-table" style={{ marginTop: 10 }}><thead><tr><th>Code</th><th>Title</th><th>Version</th><th>Status</th><th></th></tr></thead><tbody>
+              {existing.map(d => <tr key={d.id}><td>{d.document_code || '—'}</td><td>{d.title}</td><td>{d.current_version_number || '—'}</td><td><span className="badge">{d.status}</span></td><td><Link className="hint" to="/documents">Open in Documents &amp; Records</Link></td></tr>)}
+            </tbody></table>}
+      </div>;
+    })}
+  </div>;
+}
+
 export function MyLaboratory() {
   const blank = { facilityName: '', shortName: '', motto: '', registrationNumber: '', address: '', city: '', country: '', phone: '', email: '', website: '', accreditationBody: '', accreditationNumber: '', accreditationStatus: '', legalStatus: '', legalIdentityNotes: '', qualityPolicy: '', qualityManualSummary: '', mission: '', vision: '' };
   const [tab, setTab] = useState<LabTab>('Identity & Legal');
@@ -1744,26 +1780,7 @@ export function MyLaboratory() {
       </form>
     </div>}
 
-    {tab === 'Core Documents' && <div>
-      <div className="card">
-        <h3>Core laboratory documents</h3>
-        <p>Upload the laboratory's three foundational controlled documents. Once uploaded, each one <strong>automatically appears in the Documents &amp; Records register</strong> and on the Laboratory Profile — no need to re-upload there.</p>
-        <label className="form"><span>Quality manual summary</span><textarea value={form.qualityManualSummary} onChange={e => setForm({ ...form, qualityManualSummary: e.target.value })} placeholder="Scope, structure and references of the quality manual." /></label>
-        <div style={{ marginTop: 8 }}><button type="button" onClick={() => saveProfile()}>Save summary</button></div>
-      </div>
-      <div className="card" style={{ marginTop: 16 }}>
-        <h3>Quality Manual</h3>
-        <LabDocuments category="quality_manual" docTypes={['Quality Manual', 'Manual appendix', 'Other']} />
-      </div>
-      <div className="card" style={{ marginTop: 16 }}>
-        <h3>Laboratory Handbook</h3>
-        <LabDocuments category="laboratory_handbook" docTypes={['Laboratory Handbook', 'User guide', 'Service directory', 'Other']} />
-      </div>
-      <div className="card" style={{ marginTop: 16 }}>
-        <h3>Safety Manual</h3>
-        <LabDocuments category="safety_manual" docTypes={['Safety Manual', 'Biosafety manual', 'Chemical safety', 'Other']} />
-      </div>
-    </div>}
+    {tab === 'Core Documents' && <CoreDocumentsTab qualityManualSummary={form.qualityManualSummary} onSummaryChange={v => setForm({ ...form, qualityManualSummary: v })} onSaveSummary={() => saveProfile()} />}
 
     {tab === 'Quality Policy & Objectives' && <div className="grid cols-2">
       <div className="card">

@@ -1023,6 +1023,8 @@ button.step-toggle:hover { background: rgba(255,255,255,0.05); box-shadow: none;
 }
 .drawer-close:hover { color: var(--text); background: rgba(255,255,255,0.05); }
 .link-btn { padding: 5px 14px; }
+tr.clickable-row { cursor: pointer; }
+tr.clickable-row:hover td { background: var(--accent-soft); }
 
 /* ---- Laboratory Profile (Documents & Records) ---- */
 .lab-profile-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
