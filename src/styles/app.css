@@ -989,6 +989,61 @@ button.step-toggle:hover { background: rgba(255,255,255,0.05); box-shadow: none;
 .register-prompt button { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 @media (max-width: 700px) { .register-prompt { flex-direction: column; align-items: flex-start; } }
 .home-hero { text-align: center; margin: 18px 0 38px; }
+
+/* ---- Document register: slide-in detail drawer ---- */
+.doc-drawer-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(4, 8, 16, 0.55);
+  display: flex; justify-content: flex-end;
+  animation: drawer-fade 0.15s ease;
+}
+@keyframes drawer-fade { from { opacity: 0; } to { opacity: 1; } }
+.doc-drawer {
+  width: min(720px, 94vw); height: 100%;
+  background: linear-gradient(180deg, var(--card), var(--surface));
+  border-left: 1px solid var(--border);
+  box-shadow: -18px 0 48px rgba(0, 0, 0, 0.4);
+  display: flex; flex-direction: column;
+  animation: drawer-slide 0.2s ease;
+}
+@keyframes drawer-slide { from { transform: translateX(40px); opacity: 0.4; } to { transform: none; opacity: 1; } }
+.doc-drawer-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.doc-drawer-head {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+  padding: 18px 22px; border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; background: var(--panel); z-index: 1;
+}
+.doc-drawer-head h3 { font-size: 18px; line-height: 1.3; }
+.doc-drawer-body { padding: 18px 22px 28px; overflow-y: auto; flex: 1; min-height: 0; }
+.doc-drawer-body h4 { margin: 18px 0 8px; }
+.drawer-close {
+  flex: none; width: 34px; height: 34px; border-radius: 8px;
+  font-size: 22px; line-height: 1; padding: 0;
+  background: transparent; color: var(--muted); border: 1px solid var(--border);
+}
+.drawer-close:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+.link-btn { padding: 5px 14px; }
+
+/* ---- Laboratory Profile (Documents & Records) ---- */
+.lab-profile-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.lab-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-top: 14px; }
+.lab-facts .hint { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+.doc-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 12px; }
+.doc-card {
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 14px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--panel-2);
+}
+.doc-card.missing { opacity: 0.72; border-style: dashed; }
+.doc-card-ico {
+  flex: none; width: 38px; height: 38px; border-radius: 9px;
+  display: grid; place-items: center; color: var(--accent-bright);
+  background: var(--accent-soft);
+}
+.doc-card-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.doc-card-body strong { font-size: 14px; }
+.doc-card-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.doc-card-actions button { padding: 4px 12px; font-size: 13px; }
 .home-hero .eyebrow { font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent-bright); font-weight: 600; }
 .home-hero h1 {
   font-size: 44px;

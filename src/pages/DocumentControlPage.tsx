@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { Link } from 'react-router-dom';
+import { FileText } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
@@ -108,7 +110,7 @@ const emptyReviewForm = { reviewDate: '', reviewOutcome: 'no_change', reviewNote
 const emptyAttestForm = { targetType: 'staff', staffIds: [] as number[], positionId: '', sectionId: '', departmentId: '', dueDate: '', notes: '' };
 const emptyPrintForm = { printPurpose: '', controlledCopy: false, copyNumber: '', watermark: '' };
 
-const SECTIONS = ['Dashboard', 'Documents', 'Records', 'Master List'] as const;
+const SECTIONS = ['Dashboard', 'Documents', 'Records', 'Master List', 'Laboratory Profile'] as const;
 
 export function DocumentControlPage() {
   const { isEnabled } = useModules();
@@ -522,13 +524,14 @@ export function DocumentControlPage() {
           <td>{d.next_review_date || '—'}</td>
           <td>{d.owner_name || staffName(staff, d.owner_staff_id)}</td>
           <td style={{ whiteSpace: 'nowrap' }}>
-            <button onClick={() => openDoc(d.id)}>Open</button>{' '}
-            {d.current_version_id && <button className="secondary" onClick={() => setViewer({ docId: d.id, versionId: d.current_version_id! })}>View</button>}
+            <button className="link-btn" onClick={() => openDoc(d.id)}>Open</button>
           </td>
         </tr>)}
       </tbody></table>
       </div>
-      {selectedDoc && <DocumentDetailPanel doc={selectedDoc} staff={staff} positions={positions} sections={sections} departments={departments}
+      {selectedDoc && <div className="doc-drawer-overlay" onClick={() => setSelectedDoc(null)}>
+      <div className="doc-drawer" onClick={e => e.stopPropagation()}>
+      <DocumentDetailPanel doc={selectedDoc} staff={staff} positions={positions} sections={sections} departments={departments}
         versionForm={versionForm} setVersionForm={setVersionForm} versionFile={versionFile} setVersionFile={setVersionFile} submitVersion={submitVersion}
         reviewForm={reviewForm} setReviewForm={setReviewForm} submitReview={submitReview}
         attestForm={attestForm} setAttestForm={setAttestForm} submitAttest={submitAttest}
@@ -538,7 +541,8 @@ export function DocumentControlPage() {
         onSignAttestation={signAttestation} onMarkVersionObsolete={markVersionObsolete} onPrintPreview={openPrintPreview}
         onView={(vid: number) => setViewer({ docId: selectedDoc.id, versionId: vid })}
         onCodeSaved={() => openDoc(selectedDoc.id)} onError={setError}
-        onClose={() => setSelectedDoc(null)} />}
+        onClose={() => setSelectedDoc(null)} />
+      </div></div>}
     </>}
 
     {section === 'Documents' && tab === 'New Document' && <form className="form-grid" onSubmit={submitDoc}>
@@ -677,7 +681,122 @@ export function DocumentControlPage() {
     {section === 'Records' && <RecordControl staff={staff} sections={sections} departments={departments} documents={documents} onError={setError} exportBusy={exportBusy} onExport={runExport} />}
 
     {section === 'Master List' && <MasterListView exportBusy={exportBusy} onExport={runExport} onError={setError} />}
+
+    {section === 'Laboratory Profile' && <LaboratoryProfileView staff={staff} onOpenDoc={openDoc} onError={setError} />}
   </div>;
+}
+
+// ============================================================================
+// Laboratory Profile — a designated place in Documents & Records for the
+// laboratory's identity, mission/vision, objectives, leadership, the three core
+// documents (auto-registered from Settings → My Laboratory) and registration
+// documents. Everything is read-only here; it is maintained in Settings.
+// ============================================================================
+function LaboratoryProfileView({ staff, onOpenDoc, onError }: { staff: Staff[]; onOpenDoc: (id: number) => void; onError: (m: string) => void }) {
+  const [config, setConfig] = useState<import('../../shared/types/api').LaboratoryConfig | null>(null);
+  useEffect(() => { api<import('../../shared/types/api').LaboratoryConfig>('/laboratory-config').then(setConfig).catch(e => onError((e as Error).message)); }, []);
+  if (!config) return <div className="card"><p>Loading laboratory profile…</p></div>;
+  const p = config.profile;
+  const core = config.documents.filter(d => ['quality_manual', 'laboratory_handbook', 'safety_manual'].includes(d.category));
+  const legal = config.documents.filter(d => d.category === 'legal_identity');
+  const standing = config.objectives.filter(o => o.year === null || o.year === undefined);
+  const annual = config.objectives.filter(o => o.year != null);
+  const years = Array.from(new Set(annual.map(o => o.year as number))).sort((a, b) => b - a);
+  const leaders = staff.filter(s => s.isActive !== false && (s as any).primaryPosition);
+  const coreLabel: Record<string, string> = { quality_manual: 'Quality Manual', laboratory_handbook: 'Laboratory Handbook', safety_manual: 'Safety Manual' };
+
+  return <div className="lab-profile">
+    <div className="card">
+      <div className="lab-profile-head">
+        <div>
+          <h2 style={{ margin: 0 }}>{p?.facility_name || 'Laboratory not yet registered'}</h2>
+          {p?.motto && <p className="muted" style={{ margin: '2px 0 0' }}><em>{p.motto}</em></p>}
+        </div>
+        <Link className="hint" to="/settings/laboratory">Maintained in Settings → My Laboratory</Link>
+      </div>
+      {p && <div className="lab-facts">
+        <div><span className="hint">Legal status</span><div>{p.legal_status || '—'}</div></div>
+        <div><span className="hint">Registration no</span><div>{p.registration_number || '—'}</div></div>
+        <div><span className="hint">Accreditation</span><div>{p.accreditation_status || '—'}{p.accreditation_body ? ` · ${p.accreditation_body}` : ''}</div></div>
+        <div><span className="hint">Location</span><div>{[p.address, p.city, p.country].filter(Boolean).join(', ') || '—'}</div></div>
+        <div><span className="hint">Contact</span><div>{[p.phone, p.email].filter(Boolean).join(' · ') || '—'}</div></div>
+        <div><span className="hint">Website</span><div>{p.website || '—'}</div></div>
+      </div>}
+    </div>
+
+    {(p?.mission || p?.vision) && <div className="grid cols-2" style={{ marginTop: 16 }}>
+      <div className="card"><h3>Mission</h3><p style={{ whiteSpace: 'pre-wrap' }}>{p?.mission || '—'}</p></div>
+      <div className="card"><h3>Vision</h3><p style={{ whiteSpace: 'pre-wrap' }}>{p?.vision || '—'}</p></div>
+    </div>}
+
+    <div className="card" style={{ marginTop: 16 }}>
+      <h3>Core documents</h3>
+      <p className="muted" style={{ marginTop: 0 }}>The laboratory's foundational controlled documents, registered from Settings → My Laboratory.</p>
+      <div className="doc-cards">
+        {(['quality_manual', 'laboratory_handbook', 'safety_manual'] as const).map(cat => {
+          const d = core.find(x => x.category === cat);
+          return <div key={cat} className={`doc-card${d ? '' : ' missing'}`}>
+            <div className="doc-card-ico"><FileText size={20} /></div>
+            <div className="doc-card-body">
+              <strong>{coreLabel[cat]}</strong>
+              {d ? <>
+                <span className="hint">{d.title}{d.version ? ` · ${d.version}` : ''}</span>
+                <div className="doc-card-actions">
+                  {d.linked_document_id && <button type="button" onClick={() => onOpenDoc(d.linked_document_id!)}>Open in register</button>}
+                  {d.file_id && <button type="button" className="secondary" onClick={() => openLabDocFile(d.file_id!)}>Open file</button>}
+                </div>
+              </> : <span className="hint">Not uploaded yet — add it in Settings → My Laboratory.</span>}
+            </div>
+          </div>;
+        })}
+      </div>
+    </div>
+
+    <div className="card" style={{ marginTop: 16 }}>
+      <h3>Quality policy &amp; objectives</h3>
+      {p?.quality_policy ? <p style={{ whiteSpace: 'pre-wrap' }}>{p.quality_policy}</p> : <p className="hint">No quality policy recorded yet.</p>}
+      {standing.length > 0 && <>
+        <h4>Standing objectives</h4>
+        <table className="data-table"><thead><tr><th>Objective</th><th>Target</th><th>Measure</th></tr></thead><tbody>
+          {standing.map(o => <tr key={o.id}><td>{o.objective}</td><td>{o.target || '—'}</td><td>{o.measure || '—'}</td></tr>)}
+        </tbody></table>
+      </>}
+      {years.map(y => <div key={y} style={{ marginTop: 12 }}>
+        <h4>{y} objectives</h4>
+        <table className="data-table"><thead><tr><th>Objective</th><th>Target</th><th>Measure</th><th>Status</th></tr></thead><tbody>
+          {annual.filter(o => o.year === y).map(o => <tr key={o.id}><td>{o.objective}</td><td>{o.target || '—'}</td><td>{o.measure || '—'}</td><td>{formatBadge(o.status)}</td></tr>)}
+        </tbody></table>
+      </div>)}
+      {standing.length === 0 && years.length === 0 && <p className="hint">No quality objectives recorded yet.</p>}
+    </div>
+
+    <div className="card" style={{ marginTop: 16 }}>
+      <h3>Leadership &amp; organization</h3>
+      {leaders.length === 0 ? <p className="hint">No positions assigned yet. Configure the organogram in Settings → People &amp; Access.</p> :
+        <table className="data-table"><thead><tr><th>Name</th><th>Position</th><th>Unit / Section</th></tr></thead><tbody>
+          {leaders.map(s => <tr key={s.id}><td>{s.fullName}</td><td>{(s as any).primaryPosition || '—'}</td><td>{s.sectionName || '—'}</td></tr>)}
+        </tbody></table>}
+    </div>
+
+    <div className="card" style={{ marginTop: 16 }}>
+      <h3>Registration &amp; legal documents</h3>
+      {p?.legal_identity_notes && <p>{p.legal_identity_notes}</p>}
+      {legal.length === 0 ? <p className="hint">No legal identity documents uploaded yet.</p> :
+        <table className="data-table"><thead><tr><th>Type</th><th>Title</th><th>Reference</th><th>Issuer</th><th>Expiry</th><th>File</th></tr></thead><tbody>
+          {legal.map(d => <tr key={d.id}><td>{d.doc_type || '—'}</td><td>{d.title}</td><td>{d.reference_number || '—'}</td><td>{d.issuing_authority || '—'}</td><td>{d.expiry_date || '—'}</td><td>{d.file_id ? <button type="button" className="secondary" onClick={() => openLabDocFile(d.file_id!)}>Open</button> : '—'}</td></tr>)}
+        </tbody></table>}
+    </div>
+  </div>;
+}
+
+// Open an uploaded file's bytes in a new tab (auth-aware blob fetch).
+async function openLabDocFile(fileId: number) {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/files/${fileId}/raw`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+  if (!res.ok) return;
+  const url = URL.createObjectURL(await res.blob());
+  window.open(url, '_blank');
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
 // ============================================================================
@@ -1419,11 +1538,15 @@ function DocumentDetailPanel(props: any) {
   const signedCount = (doc.attestations || []).filter((a: any) => a.status === 'signed').length;
   const pendingCount = (doc.attestations || []).filter((a: any) => a.status !== 'signed').length;
 
-  return <div className="card" style={{ marginTop: 16 }}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-      <h3 style={{ margin: 0 }}>{doc.document_code || '—'} — {doc.title}</h3>
-      <button className="secondary" onClick={onClose}>Close panel</button>
+  return <div className="doc-drawer-panel">
+    <div className="doc-drawer-head">
+      <div>
+        <span className="hint">{doc.document_code || 'No number'} · {doc.document_type || 'Document'}</span>
+        <h3 style={{ margin: '2px 0 0' }}>{doc.title}</h3>
+      </div>
+      <button className="drawer-close" aria-label="Close" onClick={onClose}>×</button>
     </div>
+    <div className="doc-drawer-body">
     <WorkflowStepper status={doc.status} />
     <p style={{ margin: '4px 0' }}>Type: {doc.document_type || '—'} | Status: {formatBadge(doc.status)} | Access: {doc.access_level || '—'} | Controlled: {doc.is_controlled ? 'Yes' : 'No'}</p>
     <p style={{ margin: '4px 0' }}>Owner: {staffName(staff, doc.owner_staff_id)} | Section: {sections.find((s: any) => s.id === doc.section_id)?.name || '—'} | Next review: {doc.next_review_date || '—'}</p>
@@ -1440,7 +1563,7 @@ function DocumentDetailPanel(props: any) {
 
     {/* Lifecycle actions, shown contextually */}
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-      {doc.current_version_id && <button onClick={() => onView(doc.current_version_id)}>View / edit content</button>}
+      {doc.current_version_id && <button onClick={() => onView(doc.current_version_id)}>Open document</button>}
       {doc.status === 'draft' && <button onClick={submitForReview}>Submit for review →</button>}
       {(doc.status === 'reviewed' || doc.status === 'under_review') && <button onClick={approveDoc}>Approve &amp; issue →</button>}
       {(doc.status === 'current' || doc.status === 'approved') && <button onClick={distributeAll}>Distribute to all staff for attestation</button>}
@@ -1454,7 +1577,7 @@ function DocumentDetailPanel(props: any) {
         <td>{v.version_number || v.version_label}{doc.current_version_id === v.id ? ' (current)' : ''}</td>
         <td>{formatBadge(v.status)}</td><td>{v.effective_date || '—'}</td><td>{v.approved_at ? String(v.approved_at).slice(0, 10) : '—'}</td><td>{v.revision_summary || '—'}</td>
         <td style={{ whiteSpace: 'nowrap' }}>
-          <button onClick={() => onView(v.id)}>View</button>{' '}
+          <button onClick={() => onView(v.id)}>Open</button>{' '}
           <button className="secondary" onClick={() => onPrintPreview(v.id)}>Print</button>{' '}
           {v.status !== 'obsolete' && <button className="secondary" onClick={() => onMarkVersionObsolete(v.id)}>Obsolete</button>}
         </td>
@@ -1516,6 +1639,7 @@ function DocumentDetailPanel(props: any) {
       <label>Reason<input value={obsoleteReason} onChange={(e: any) => setObsoleteReason(e.target.value)} /></label>{' '}
       <button onClick={submitObsolete}>Mark obsolete</button>
     </div>}
+    </div>
   </div>;
 }
 
