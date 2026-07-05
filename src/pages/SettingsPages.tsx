@@ -1534,7 +1534,7 @@ async function openLabFile(fileId: number) {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
-const LAB_TABS = ['Identity & Legal', 'Quality Manual', 'Quality Policy & Objectives', 'Annual Objectives', 'Departments'] as const;
+const LAB_TABS = ['Identity & Legal', 'Mission & Vision', 'Core Documents', 'Quality Policy & Objectives', 'Annual Objectives', 'Departments'] as const;
 type LabTab = typeof LAB_TABS[number];
 
 // A small register that uploads and lists supporting documents for one category
@@ -1601,7 +1601,7 @@ function LabDocuments({ category, docTypes, onChanged }: { category: string; doc
 }
 
 export function MyLaboratory() {
-  const blank = { facilityName: '', shortName: '', motto: '', registrationNumber: '', address: '', city: '', country: '', phone: '', email: '', website: '', accreditationBody: '', accreditationNumber: '', accreditationStatus: '', legalStatus: '', legalIdentityNotes: '', qualityPolicy: '', qualityManualSummary: '' };
+  const blank = { facilityName: '', shortName: '', motto: '', registrationNumber: '', address: '', city: '', country: '', phone: '', email: '', website: '', accreditationBody: '', accreditationNumber: '', accreditationStatus: '', legalStatus: '', legalIdentityNotes: '', qualityPolicy: '', qualityManualSummary: '', mission: '', vision: '' };
   const [tab, setTab] = useState<LabTab>('Identity & Legal');
   const [form, setForm] = useState(blank);
   const [registrationComplete, setRegistrationComplete] = useState(false);
@@ -1629,6 +1629,7 @@ export function MyLaboratory() {
         accreditationBody: String(p.accreditation_body ?? ''), accreditationNumber: String(p.accreditation_number ?? ''), accreditationStatus: String(p.accreditation_status ?? ''),
         legalStatus: String(p.legal_status ?? ''), legalIdentityNotes: String(p.legal_identity_notes ?? ''),
         qualityPolicy: String(p.quality_policy ?? ''), qualityManualSummary: String(p.quality_manual_summary ?? ''),
+        mission: String(p.mission ?? ''), vision: String(p.vision ?? ''),
       });
       setRegistrationComplete(Number(p.registration_complete ?? 0) === 1);
     }).catch(() => undefined);
@@ -1732,15 +1733,36 @@ export function MyLaboratory() {
       </div>
     </div>}
 
-    {tab === 'Quality Manual' && <div className="card">
-      <h3>Quality Manual</h3>
-      <p>Summarise the quality manual and upload the controlled document(s). The manual describes the laboratory's quality management system.</p>
+    {tab === 'Mission & Vision' && <div className="card">
+      <h3>Mission &amp; vision</h3>
+      <p>The laboratory's mission and vision statements. These appear on the Laboratory Profile in Documents &amp; Records.</p>
       <form className="form" onSubmit={e => { e.preventDefault(); saveProfile(); }}>
-        <label>Quality manual summary<textarea value={form.qualityManualSummary} onChange={e => setForm({ ...form, qualityManualSummary: e.target.value })} placeholder="Scope, structure and references of the quality manual." /></label>
-        <button type="submit">Save summary</button>
+        <label>Mission<textarea rows={3} value={form.mission} onChange={e => setForm({ ...form, mission: e.target.value })} placeholder="Why the laboratory exists and who it serves." /></label>
+        <label>Vision<textarea rows={3} value={form.vision} onChange={e => setForm({ ...form, vision: e.target.value })} placeholder="What the laboratory aspires to become." /></label>
+        <label>Motto / tagline<input value={form.motto} onChange={e => setForm({ ...form, motto: e.target.value })} /></label>
+        <button type="submit">Save mission &amp; vision</button>
       </form>
-      <h4 style={{ marginTop: 18 }}>Quality manual documents</h4>
-      <LabDocuments category="quality_manual" docTypes={['Quality Manual', 'Manual appendix', 'Other']} />
+    </div>}
+
+    {tab === 'Core Documents' && <div>
+      <div className="card">
+        <h3>Core laboratory documents</h3>
+        <p>Upload the laboratory's three foundational controlled documents. Once uploaded, each one <strong>automatically appears in the Documents &amp; Records register</strong> and on the Laboratory Profile — no need to re-upload there.</p>
+        <label className="form"><span>Quality manual summary</span><textarea value={form.qualityManualSummary} onChange={e => setForm({ ...form, qualityManualSummary: e.target.value })} placeholder="Scope, structure and references of the quality manual." /></label>
+        <div style={{ marginTop: 8 }}><button type="button" onClick={() => saveProfile()}>Save summary</button></div>
+      </div>
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3>Quality Manual</h3>
+        <LabDocuments category="quality_manual" docTypes={['Quality Manual', 'Manual appendix', 'Other']} />
+      </div>
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3>Laboratory Handbook</h3>
+        <LabDocuments category="laboratory_handbook" docTypes={['Laboratory Handbook', 'User guide', 'Service directory', 'Other']} />
+      </div>
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3>Safety Manual</h3>
+        <LabDocuments category="safety_manual" docTypes={['Safety Manual', 'Biosafety manual', 'Chemical safety', 'Other']} />
+      </div>
     </div>}
 
     {tab === 'Quality Policy & Objectives' && <div className="grid cols-2">

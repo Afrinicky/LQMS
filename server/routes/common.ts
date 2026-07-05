@@ -880,6 +880,7 @@ export function commonRoutes() {
       ['accreditation_number', 'accreditationNumber'], ['accreditation_status', 'accreditationStatus'], ['motto', 'motto'],
       ['legal_status', 'legalStatus'], ['legal_identity_notes', 'legalIdentityNotes'],
       ['quality_policy', 'qualityPolicy'], ['quality_manual_summary', 'qualityManualSummary'],
+      ['mission', 'mission'], ['vision', 'vision'],
     ];
     for (const [col, key] of fields) {
       if (b[key] !== undefined) db.prepare(`UPDATE laboratory_profile SET ${col} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1`).run(b[key] === '' ? null : b[key]);
@@ -901,7 +902,40 @@ export function commonRoutes() {
     res.json({ profile, policies, objectives, documents });
   });
 
-  // ---- Laboratory supporting documents (legal identity + quality manual) ----
+  // ---- Laboratory supporting documents (legal identity + core documents) ----
+  // The three core documents are auto-registered as controlled documents so they
+  // appear in the Documents & Records register without re-uploading.
+  const CORE_DOC_MAP: Record<string, { type: string; prefix: string }> = {
+    quality_manual: { type: 'Quality Manual', prefix: 'QM' },
+    laboratory_handbook: { type: 'Handbook', prefix: 'LH' },
+    safety_manual: { type: 'Safety Manual', prefix: 'SM' },
+  };
+  function autoRegisterCoreDocument(labDocId: number | bigint, userId: number) {
+    const db = getDb();
+    const d = db.prepare('SELECT * FROM laboratory_documents WHERE id = ?').get(labDocId) as any;
+    if (!d) return;
+    const map = CORE_DOC_MAP[d.category];
+    if (!map || !d.file_id) return; // only core categories with an attached file
+    const today = new Date().toISOString().slice(0, 10);
+    if (d.linked_document_id) {
+      const vr = db.prepare(`INSERT INTO document_versions (document_id, version_label, version_number, file_id, revision_summary, status, effective_date, created_by) VALUES (?, ?, ?, ?, 'Updated from My Laboratory', 'current', ?, ?)`)
+        .run(d.linked_document_id, d.version || 'updated', d.version || 'updated', d.file_id, d.effective_date || today, userId);
+      db.prepare("UPDATE documents SET current_version_id = ?, status = 'current', title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(Number(vr.lastInsertRowid), d.title, d.linked_document_id);
+      return d.linked_document_id;
+    }
+    const rows = db.prepare('SELECT document_code FROM documents WHERE document_code LIKE ?').all(`${map.prefix}-%`) as Array<{ document_code: string }>;
+    let max = 0; for (const r of rows) { const m = /(\d+)\s*$/.exec(r.document_code || ''); if (m) max = Math.max(max, Number(m[1])); }
+    const code = `${map.prefix}-${String(max + 1).padStart(3, '0')}`;
+    const dr = db.prepare(`INSERT INTO documents (document_code, title, document_type, status, access_level, is_controlled, created_by) VALUES (?, ?, ?, 'current', 'internal', 1, ?)`).run(code, d.title, map.type, userId);
+    const docId = Number(dr.lastInsertRowid);
+    const vr = db.prepare(`INSERT INTO document_versions (document_id, version_label, version_number, file_id, revision_summary, status, effective_date, created_by) VALUES (?, ?, ?, ?, 'Initial version', 'current', ?, ?)`)
+      .run(docId, d.version || '1.0', d.version || '1.0', d.file_id, d.effective_date || today, userId);
+    db.prepare('UPDATE documents SET current_version_id = ? WHERE id = ?').run(Number(vr.lastInsertRowid), docId);
+    db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run('documents', 'documents', String(docId), 'documents', 'files', String(d.file_id), 'Core laboratory document from My Laboratory');
+    db.prepare('UPDATE laboratory_documents SET linked_document_id = ? WHERE id = ?').run(docId, labDocId);
+    return docId;
+  }
+
   router.get('/laboratory-documents', requireAuth, (req, res) => {
     const category = typeof req.query.category === 'string' ? req.query.category : null;
     const sql = `SELECT d.*, f.original_name AS file_name, f.mime_type AS file_mime, f.size_bytes AS file_size FROM laboratory_documents d LEFT JOIN files f ON f.id = d.file_id ${category ? 'WHERE d.category = ?' : ''} ORDER BY d.created_at DESC`;
@@ -913,13 +947,16 @@ export function commonRoutes() {
     if (!b.category || !b.title) return res.status(400).json({ error: 'Category and title are required.' });
     const r = getDb().prepare(`INSERT INTO laboratory_documents (category, doc_type, title, file_id, reference_number, issuing_authority, issue_date, expiry_date, version, effective_date, notes, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(b.category, b.docType ?? null, b.title, parseIntNullable(b.fileId), b.referenceNumber ?? null, b.issuingAuthority ?? null, b.issueDate ?? null, b.expiryDate ?? null, b.version ?? null, b.effectiveDate ?? null, b.notes ?? null, req.user!.id);
+    const linkedDocumentId = autoRegisterCoreDocument(r.lastInsertRowid, req.user!.id);
     audit(req, { action: 'create', entity: 'laboratory_documents', entityId: r.lastInsertRowid, newValue: b });
-    res.status(201).json({ id: r.lastInsertRowid });
+    res.status(201).json({ id: r.lastInsertRowid, linkedDocumentId });
   });
   router.put('/laboratory-documents/:id', requirePermission('settings', 'edit'), (req, res) => {
     const b = req.body ?? {};
     const fields: Array<[string, string]> = [['doc_type', 'docType'], ['title', 'title'], ['file_id', 'fileId'], ['reference_number', 'referenceNumber'], ['issuing_authority', 'issuingAuthority'], ['issue_date', 'issueDate'], ['expiry_date', 'expiryDate'], ['version', 'version'], ['effective_date', 'effectiveDate'], ['notes', 'notes']];
     for (const [col, key] of fields) if (b[key] !== undefined) getDb().prepare(`UPDATE laboratory_documents SET ${col} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(col === 'file_id' ? parseIntNullable(b[key]) : (b[key] === '' ? null : b[key]), req.params.id);
+    // Keep the auto-registered controlled document in step (new version on file change / title update).
+    if (b.fileId !== undefined || b.title !== undefined || b.version !== undefined) autoRegisterCoreDocument(Number(req.params.id), req.user!.id);
     audit(req, { action: 'edit', entity: 'laboratory_documents', entityId: req.params.id, newValue: b });
     res.json({ ok: true });
   });

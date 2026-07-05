@@ -2479,6 +2479,7 @@ CREATE INDEX IF NOT EXISTS idx_staff_orientations_staff ON staff_orientations(st
     // live in the dedicated tables below.
     ['legal_status', 'TEXT'], ['legal_identity_notes', 'TEXT'],
     ['quality_policy', 'TEXT'], ['quality_manual_summary', 'TEXT'],
+    ['mission', 'TEXT'], ['vision', 'TEXT'],
     // Set to 1 once the laboratory has been fully registered from My Laboratory,
     // which retires the first-run "register your laboratory" prompt.
     ['registration_complete', 'INTEGER NOT NULL DEFAULT 0'],
@@ -2503,6 +2504,9 @@ CREATE TABLE IF NOT EXISTS laboratory_documents (
   version TEXT,
   effective_date TEXT,
   notes TEXT,
+  -- When a core document (quality manual / handbook / safety manual) is
+  -- uploaded, it is auto-registered as a controlled document; this links back.
+  linked_document_id INTEGER REFERENCES documents(id),
   uploaded_by INTEGER REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT
@@ -2537,6 +2541,9 @@ CREATE TABLE IF NOT EXISTS quality_objectives (
 CREATE INDEX IF NOT EXISTS idx_laboratory_documents_category ON laboratory_documents(category);
 CREATE INDEX IF NOT EXISTS idx_quality_objectives_year ON quality_objectives(year);
 `);
+  // laboratory_documents may pre-date the linked_document_id column on upgraded installs.
+  const labDocCols = new Set((database.prepare("PRAGMA table_info(laboratory_documents)").all() as Array<{ name: string }>).map(c => c.name));
+  if (!labDocCols.has('linked_document_id')) database.exec('ALTER TABLE laboratory_documents ADD COLUMN linked_document_id INTEGER REFERENCES documents(id)');
 
   // ===================================================================
   // Phase 9: Documents & Records upgrade
