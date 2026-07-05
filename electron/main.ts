@@ -281,11 +281,15 @@ ipcMain.handle('sech-lims:open-in-office', async (_event, payload: { storageArea
     if (sourceStat.size > MAX_OFFICE_SYNC_BYTES) return { ok: false, error: 'File is too large to sync automatically (60 MB limit). Use Download / Upload instead.' };
 
     const scratchDir = path.join(dataDir, 'office-edits');
-    fs.mkdirSync(scratchDir, { recursive: true });
     const safeOriginalName = String(payload?.originalName || storedName).replace(/[\\/:*?"<>|]/g, '_') || storedName;
     const watchId = `${payload?.docId ?? 0}-${payload?.versionId ?? 0}-${Date.now()}`;
-    const scratchName = `${watchId}-${safeOriginalName}`;
-    const scratchPath = path.join(scratchDir, scratchName);
+    // Keep the file's own name intact (Word shows it verbatim in its title bar).
+    // Uniqueness comes from a per-open subfolder, NOT a filename prefix — the old
+    // `${watchId}-${name}` scheme made Word display "12345-Quality Manual.docx".
+    const scratchSubdir = path.join(scratchDir, watchId);
+    fs.mkdirSync(scratchSubdir, { recursive: true });
+    const scratchName = safeOriginalName;
+    const scratchPath = path.join(scratchSubdir, scratchName);
     fs.copyFileSync(sourcePath, scratchPath);
 
     const openErr = await shell.openPath(scratchPath);

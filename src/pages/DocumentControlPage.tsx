@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { FileText } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
@@ -115,6 +115,7 @@ const SECTIONS = ['Dashboard', 'Documents', 'Records', 'Master List', 'Laborator
 export function DocumentControlPage() {
   const { isEnabled } = useModules();
   const { staff, sections, departments, positions } = useLookups();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [section, setSection] = useState<(typeof SECTIONS)[number]>('Dashboard');
   const [tab, setTab] = useState('Document Register');
   const [error, setError] = useState<string | null>(null);
@@ -163,6 +164,13 @@ export function DocumentControlPage() {
     } catch (e) { setError((e as Error).message); }
   }
   useEffect(() => { if (isEnabled('documents')) void load(); }, [isEnabled]);
+  // Deep link from Settings → My Laboratory: open the New Document form with the
+  // core document type preset, so core documents are registered through the full
+  // controlled-document workflow (owner, section, review schedule, versions).
+  useEffect(() => {
+    const nt = searchParams.get('new');
+    if (nt) { setSection('Documents'); setTab('New Document'); setDocForm(f => ({ ...f, documentType: nt })); setSearchParams({}, { replace: true }); }
+  }, [searchParams]);
   if (!isEnabled('documents')) return <DisabledModule />;
 
   function flash(msg: string) { setNotice(msg); setError(null); setTimeout(() => setNotice(null), 5000); }
@@ -513,7 +521,9 @@ export function DocumentControlPage() {
       </div>
       <div style={{ overflowX: 'auto' }}>
       <table className="data-table"><thead><tr><th>No.</th><th>Code</th><th>Category</th><th>Unit / Section</th><th>Title</th><th>Version</th><th>Status</th><th>Effective</th><th>Next review</th><th>Author</th><th>Actions</th></tr></thead><tbody>
-        {filteredRegister.map((d, i) => <tr key={d.id}>
+        {filteredRegister.map((d, i) => <tr key={d.id} className="clickable-row"
+          onClick={() => d.current_version_id ? setViewer({ docId: d.id, versionId: d.current_version_id!, workflowStatus: d.status }) : openDoc(d.id)}
+          title="Click to preview">
           <td>{i + 1}</td>
           <td>{d.document_code || '—'}</td><td>{documentCategoryLabel(d)}</td>
           <td>{d.section_name || 'General / QMS-wide'}</td>
@@ -523,8 +533,9 @@ export function DocumentControlPage() {
           <td>{d.current_effective_date ? String(d.current_effective_date).slice(0, 10) : '—'}</td>
           <td>{d.next_review_date || '—'}</td>
           <td>{d.owner_name || staffName(staff, d.owner_staff_id)}</td>
-          <td style={{ whiteSpace: 'nowrap' }}>
-            <button className="link-btn" onClick={() => openDoc(d.id)}>Open</button>
+          <td style={{ whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+            {d.current_version_id && <button className="link-btn" onClick={() => setViewer({ docId: d.id, versionId: d.current_version_id!, workflowStatus: d.status })}>Preview</button>}{' '}
+            <button className="secondary" onClick={() => openDoc(d.id)}>Manage</button>
           </td>
         </tr>)}
       </tbody></table>
@@ -680,9 +691,11 @@ export function DocumentControlPage() {
 
     {section === 'Records' && <RecordControl staff={staff} sections={sections} departments={departments} documents={documents} onError={setError} exportBusy={exportBusy} onExport={runExport} />}
 
-    {section === 'Master List' && <MasterListView exportBusy={exportBusy} onExport={runExport} onError={setError} />}
+    {section === 'Master List' && <MasterListView exportBusy={exportBusy} onExport={runExport} onError={setError}
+      documents={documents} onPreview={d => setViewer({ docId: d.id, versionId: d.current_version_id || 0, workflowStatus: d.status })} />}
 
-    {section === 'Laboratory Profile' && <LaboratoryProfileView staff={staff} onOpenDoc={openDoc} onError={setError} />}
+    {section === 'Laboratory Profile' && <LaboratoryProfileView staff={staff} documents={documents} onOpenDoc={openDoc}
+      onPreview={d => setViewer({ docId: d.id, versionId: d.current_version_id || 0, workflowStatus: d.status })} onError={setError} />}
   </div>;
 }
 
@@ -692,12 +705,15 @@ export function DocumentControlPage() {
 // documents (auto-registered from Settings → My Laboratory) and registration
 // documents. Everything is read-only here; it is maintained in Settings.
 // ============================================================================
-function LaboratoryProfileView({ staff, onOpenDoc, onError }: { staff: Staff[]; onOpenDoc: (id: number) => void; onError: (m: string) => void }) {
+function LaboratoryProfileView({ staff, documents, onOpenDoc, onPreview, onError }: { staff: Staff[]; documents: DocumentRecord[]; onOpenDoc: (id: number) => void; onPreview: (d: DocumentRecord) => void; onError: (m: string) => void }) {
   const [config, setConfig] = useState<import('../../shared/types/api').LaboratoryConfig | null>(null);
   useEffect(() => { api<import('../../shared/types/api').LaboratoryConfig>('/laboratory-config').then(setConfig).catch(e => onError((e as Error).message)); }, []);
   if (!config) return <div className="card"><p>Loading laboratory profile…</p></div>;
   const p = config.profile;
-  const core = config.documents.filter(d => ['quality_manual', 'laboratory_handbook', 'safety_manual'].includes(d.category));
+  // Core documents are the controlled documents in the register (full metadata),
+  // matched by document type — registered from Settings → My Laboratory.
+  const CORE_TYPE: Record<string, string> = { quality_manual: 'Quality Manual', laboratory_handbook: 'Handbook', safety_manual: 'Safety Manual' };
+  const coreByType = (type: string) => documents.find(d => (d.document_type || '') === type && d.status !== 'obsolete');
   const legal = config.documents.filter(d => d.category === 'legal_identity');
   const standing = config.objectives.filter(o => o.year === null || o.year === undefined);
   const annual = config.objectives.filter(o => o.year != null);
@@ -734,18 +750,18 @@ function LaboratoryProfileView({ staff, onOpenDoc, onError }: { staff: Staff[]; 
       <p className="muted" style={{ marginTop: 0 }}>The laboratory's foundational controlled documents, registered from Settings → My Laboratory.</p>
       <div className="doc-cards">
         {(['quality_manual', 'laboratory_handbook', 'safety_manual'] as const).map(cat => {
-          const d = core.find(x => x.category === cat);
+          const d = coreByType(CORE_TYPE[cat]);
           return <div key={cat} className={`doc-card${d ? '' : ' missing'}`}>
             <div className="doc-card-ico"><FileText size={20} /></div>
             <div className="doc-card-body">
               <strong>{coreLabel[cat]}</strong>
               {d ? <>
-                <span className="hint">{d.title}{d.version ? ` · ${d.version}` : ''}</span>
+                <span className="hint">{d.document_code || '—'} · {d.title}{d.current_version_number ? ` · v${d.current_version_number}` : ''}</span>
                 <div className="doc-card-actions">
-                  {d.linked_document_id && <button type="button" onClick={() => onOpenDoc(d.linked_document_id!)}>Open in register</button>}
-                  {d.file_id && <button type="button" className="secondary" onClick={() => openLabDocFile(d.file_id!)}>Open file</button>}
+                  {d.current_version_id && <button type="button" onClick={() => onPreview(d)}>Preview</button>}
+                  <button type="button" className="secondary" onClick={() => onOpenDoc(d.id)}>Manage</button>
                 </div>
-              </> : <span className="hint">Not uploaded yet — add it in Settings → My Laboratory.</span>}
+              </> : <span className="hint">Not registered yet — add it in Settings → My Laboratory.</span>}
             </div>
           </div>;
         })}
@@ -803,7 +819,7 @@ async function openLabDocFile(fileId: number) {
 // Documents & Records Master List — on-screen mirror of the controlled
 // master-list workbook, one view per register, exportable to Excel.
 // ============================================================================
-function MasterListView({ exportBusy, onExport, onError }: { exportBusy: string; onExport: (path: string, fallback: string) => Promise<void>; onError: (m: string) => void }) {
+function MasterListView({ exportBusy, onExport, onError, documents, onPreview }: { exportBusy: string; onExport: (path: string, fallback: string) => Promise<void>; onError: (m: string) => void; documents: DocumentRecord[]; onPreview: (d: DocumentRecord) => void }) {
   const [data, setData] = useState<MasterListResponse | null>(null);
   const [sub, setSub] = useState('Document Register');
   useEffect(() => { api<MasterListResponse>('/documents/masterlist').then(setData).catch(e => onError((e as Error).message)); }, []);
@@ -826,7 +842,13 @@ function MasterListView({ exportBusy, onExport, onError }: { exportBusy: string;
     <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
       <div style={{ padding: '10px 14px', fontWeight: 700, borderBottom: '1px solid #e3e8f0' }}>{data.facility} — {sub.toUpperCase()}</div>
       <table className="data-table"><thead><tr>{reg.headers.map(h => <th key={h}>{h}</th>)}</tr></thead><tbody>
-        {reg.rows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j}>{cell === '' || cell == null ? '—' : String(cell)}</td>)}</tr>)}
+        {reg.rows.map((row, i) => {
+          const codeStr = row.map(c => String(c ?? '')).join('  ');
+          const doc = sub !== 'Records Register' ? documents.find(d => d.document_code && codeStr.includes(d.document_code)) : undefined;
+          const clickable = !!doc?.current_version_id;
+          return <tr key={i} className={clickable ? 'clickable-row' : ''} title={clickable ? 'Click to preview' : undefined}
+            onClick={clickable ? () => onPreview(doc!) : undefined}>{row.map((cell, j) => <td key={j}>{cell === '' || cell == null ? '—' : String(cell)}</td>)}</tr>;
+        })}
         {reg.rows.length === 0 && <tr><td colSpan={reg.headers.length} className="muted">No entries yet.</td></tr>}
       </tbody></table>
     </div>
@@ -1328,6 +1350,8 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
 .dv-menu .dv-menu-sep{height:1px;background:#22345c;margin:4px 6px}
 .dv-strip{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 10px;background:#12281b;border-bottom:1px solid #1f5334;font-size:12px;color:#a8c7b6;flex:none}
 .dv-content{flex:1;min-height:0;display:flex;flex-direction:column;background:#0b1428;padding:8px}
+.dv-fidelity{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;margin-bottom:8px;background:#12233f;border:1px solid #294066;border-radius:8px;color:#b9cbe8;font-size:12px;flex:none}
+.dv-fidelity span{flex:1;min-width:220px}
 .dv-drawer{flex:none;max-height:38%;overflow:auto;border-top:1px solid #22345c;background:#0d1830;padding:10px 12px}
 .dv-footer{display:flex;align-items:center;gap:8px;padding:6px 10px;border-top:1px solid #22345c;background:#0e1930;flex:none;flex-wrap:wrap}
 .dv-meta{font-size:11px;color:#7c8db0;margin-left:auto;text-align:right}
@@ -1412,6 +1436,12 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
 
       {/* Content — fills all remaining window height. */}
       <div className="dv-content">
+        {isWordSource && content?.file_id && !editing && !officeWatch && <div className="dv-fidelity">
+          <span>ℹ This is a Word document. The in-app preview shows the text and tables but may not reproduce diagrams, drawings or exact formatting.{isPdf ? '' : ' For the exact document, open it in Microsoft Word.'}</span>
+          {window.sechLims?.openInOffice
+            ? <button className="dv-ghost" onClick={openInOffice} disabled={officeStatus === 'Opening…'}>{officeStatus === 'Opening…' ? 'Opening…' : `Open in ${officeAppName}`}</button>
+            : content.file_id && <button className="dv-ghost" onClick={() => fetchBlobUrl(`/files/${content.file_id}/download`).then(u => { const a = document.createElement('a'); a.href = u; a.download = content.file_name || 'document'; a.click(); })}>Download original</button>}
+        </div>}
         {mode === 'content' && content && (editing
           ? <div className="word-editor" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
               {!isSpreadsheet && <WordToolbar editorRef={editorRef} />}
