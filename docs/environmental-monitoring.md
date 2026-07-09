@@ -42,13 +42,36 @@ Facilities & Safety channel. Every change is written to the shared audit log.
 **Integration**: excursions link to NC/CAPA via `record_links`; assets can link
 to Equipment; alerts surface through the existing notification/audit spine.
 
+## Delivered (Phase 2) — notifications & escalation
+
+**Channels** (`server/services/environmental/notifications.ts`): a
+`NotificationChannel` registry mirroring the driver pattern. Working now:
+`in_app` (writes to the shared notifications feed) and `webhook`
+(Teams/Slack incoming webhook via `environmental_settings.webhook_url`).
+Registered-but-pending: `email`, `sms`, `whatsapp`, `teams` — queue and report
+"not configured" until a relay is installed.
+
+**Escalation** (`environmental_escalation_rules`): each rule targets a severity
+and a `delay_minutes`; when a matching alert stays active and unacknowledged
+past the delay, one queue entry (`environmental_notification_queue`, unique per
+alert×rule) is created and delivered by the worker. Delay 0 = immediate; larger
+delays form the ladder. Two default rules are seeded (immediate in-app for all;
+escalate unacknowledged criticals after 30 min). The poller runs the escalation
+sweep + delivery every tick regardless of automated polling, so manual-reading
+alerts escalate too.
+
+**API**: `/environmental/channels`, `/environmental/escalation-rules` (CRUD),
+`/environmental/notification-queue`, `/environmental/channels/:key/test`.
+**UI**: a Notifications tab (channel status + test send, escalation-rule editor,
+notification log) plus a webhook URL field in Settings.
+
 ## Roadmap (architected for, not yet built)
 
 - **Interactive floor plan** — schema ready (`floor_plan_x/y`,
   `environmental_settings.floor_plan_file_id`); upload a plan and drop live
   asset indicators onto it.
-- **Notification channels** — email/SMS/WhatsApp/Teams + escalation rules
-  (settings has `email_enabled`; a `NotificationQueue` worker plugs in here).
+- **Email/SMS/WhatsApp relays** — implement the pending channel adapters against
+  the `NotificationChannel` interface (webhook already works for Teams/Slack).
 - **Dennis AI analysis** — recurring pattern detection over
   `environmental_readings` ("exceeded upper limit 3× this month"); recommend
   only, never auto-change.

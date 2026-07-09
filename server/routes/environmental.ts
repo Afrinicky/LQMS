@@ -6,6 +6,7 @@ import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable } from './routeHelpers.js';
 import { recordReading } from '../services/environmental/monitorService.js';
 import { getDriver, listDrivers, COMMUNICATION_METHODS } from '../services/environmental/drivers.js';
+import { listChannels, getChannels, processQueue } from '../services/environmental/notifications.js';
 
 const numericOnly = (req: any, _res: any, next: any) => (/^\d+$/.test(req.params.id) ? next() : next('route'));
 const MODULE = 'facilities_safety'; // Environmental Monitoring lives under Facilities & Safety RBAC.
@@ -27,11 +28,57 @@ export function environmentalRoutes() {
       ['polling_enabled', 'pollingEnabled'], ['default_poll_interval_seconds', 'defaultPollIntervalSeconds'],
       ['excursion_nc_minutes', 'excursionNcMinutes'], ['battery_low_threshold', 'batteryLowThreshold'],
       ['no_comm_minutes', 'noCommMinutes'], ['prevent_expired_devices', 'preventExpiredDevices'], ['email_enabled', 'emailEnabled'],
+      ['webhook_url', 'webhookUrl'],
     ];
     for (const [col, key] of fields) if (b[key] !== undefined) getDb().prepare(`UPDATE environmental_settings SET ${col} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1`).run(typeof b[key] === 'boolean' ? (b[key] ? 1 : 0) : b[key], );
     audit(req, { action: 'edit', entity: 'environmental_settings', entityId: 1, newValue: b });
     res.json({ ok: true });
   });
+
+  // ---- Notification channels & escalation ----
+  router.get('/channels', requirePermission(MODULE, 'view'), (_req, res) => {
+    const settings = getDb().prepare('SELECT * FROM environmental_settings WHERE id = 1').get();
+    res.json(listChannels(settings));
+  });
+  router.get('/escalation-rules', requirePermission(MODULE, 'view'), (_req, res) => {
+    res.json(getDb().prepare('SELECT * FROM environmental_escalation_rules ORDER BY severity, delay_minutes, id').all());
+  });
+  router.post('/escalation-rules', requirePermission(MODULE, 'edit'), (req, res) => {
+    const b = req.body ?? {};
+    if (!b.name || !b.channel) return res.status(400).json({ error: 'Name and channel are required.' });
+    const r = getDb().prepare('INSERT INTO environmental_escalation_rules (name, severity, delay_minutes, channel, recipients, created_by) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(b.name, b.severity ?? 'critical', parseIntNullable(b.delayMinutes) ?? 0, b.channel, b.recipients ?? null, req.user!.id);
+    audit(req, { action: 'create', entity: 'environmental_escalation_rules', entityId: r.lastInsertRowid, newValue: b });
+    res.status(201).json({ id: r.lastInsertRowid });
+  });
+  router.put('/escalation-rules/:id', numericOnly, requirePermission(MODULE, 'edit'), (req, res) => {
+    const b = req.body ?? {};
+    const fields: Array<[string, string]> = [['name', 'name'], ['severity', 'severity'], ['delay_minutes', 'delayMinutes'], ['channel', 'channel'], ['recipients', 'recipients'], ['is_active', 'isActive']];
+    for (const [col, key] of fields) if (b[key] !== undefined) getDb().prepare(`UPDATE environmental_escalation_rules SET ${col} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(col === 'is_active' ? (b[key] ? 1 : 0) : col === 'delay_minutes' ? (parseIntNullable(b[key]) ?? 0) : b[key], req.params.id);
+    audit(req, { action: 'edit', entity: 'environmental_escalation_rules', entityId: req.params.id, newValue: b });
+    res.json({ ok: true });
+  });
+  router.delete('/escalation-rules/:id', numericOnly, requirePermission(MODULE, 'edit'), (req, res) => {
+    getDb().prepare('DELETE FROM environmental_escalation_rules WHERE id = ?').run(req.params.id);
+    audit(req, { action: 'delete', entity: 'environmental_escalation_rules', entityId: req.params.id });
+    res.json({ ok: true });
+  });
+  router.get('/notification-queue', requirePermission(MODULE, 'view'), (req, res) => {
+    const status = typeof req.query.status === 'string' ? req.query.status : null;
+    const sql = `SELECT q.*, r.name AS rule_name FROM environmental_notification_queue q LEFT JOIN environmental_escalation_rules r ON r.id = q.rule_id ${status ? 'WHERE q.status = ?' : ''} ORDER BY q.id DESC LIMIT 300`;
+    res.json(status ? getDb().prepare(sql).all(status) : getDb().prepare(sql).all());
+  });
+  // Send a test message through a channel to confirm configuration.
+  router.post('/channels/:key/test', requirePermission(MODULE, 'edit'), async (req, res) => {
+    const db = getDb();
+    const settings = db.prepare('SELECT * FROM environmental_settings WHERE id = 1').get() as any;
+    const channel = getChannels().get(req.params.key);
+    if (!channel) return res.status(404).json({ error: 'Unknown channel' });
+    const r = await channel.send(db, { channel: req.params.key, recipients: req.body?.recipients ?? null, subject: 'SECH_LIMS test notification', body: 'This is a test of the environmental notification channel.', severity: 'information' }, settings);
+    res.json(r);
+  });
+  // Force the delivery worker (useful after enabling a channel).
+  router.post('/notification-queue/process', requirePermission(MODULE, 'edit'), (_req, res) => { processQueue(getDb()); res.json({ ok: true }); });
 
   // ---- Assets ----
   router.get('/assets', requirePermission(MODULE, 'view'), (_req, res) => {

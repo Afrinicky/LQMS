@@ -7,6 +7,7 @@ import DisabledModule from '../components/DisabledModule';
 import type {
   Department, Section, Location, Staff, EquipmentItem,
   EnvAsset, EnvDevice, EnvReading, EnvAlert, EnvExcursion, EnvDashboard, EnvSettings,
+  EnvEscalationRule, EnvNotificationQueueItem, EnvChannel,
 } from '../../shared/types/api';
 
 const tabBar = (active: string, tabs: string[], onChange: (n: string) => void) =>
@@ -112,7 +113,7 @@ export function EnvironmentalMonitoringPage({ embedded = false }: { embedded?: b
 
   if (!enabled) return <DisabledModule />;
 
-  const TABS = ['Live Dashboard', 'Assets', 'Devices', 'Manual Entry', 'Alerts', 'Excursions', 'Charts', 'Settings'];
+  const TABS = ['Live Dashboard', 'Assets', 'Devices', 'Manual Entry', 'Alerts', 'Excursions', 'Notifications', 'Charts', 'Settings'];
 
   return <div className="module-page env-mon">
     {!embedded && <PageHeader eyebrow="Facilities and Safety" title="Environmental Monitoring" subtitle="Manual and automated temperature/humidity monitoring, alarms and excursions." />}
@@ -131,6 +132,8 @@ export function EnvironmentalMonitoringPage({ embedded = false }: { embedded?: b
     {tab === 'Alerts' && <AlertsTab alerts={alerts} onChanged={() => { loadAlerts(); loadDashboard(); }} onError={setError} />}
 
     {tab === 'Excursions' && <ExcursionsTab excursions={excursions} onChanged={() => { loadExcursions(); loadDashboard(); }} onError={setError} onFlash={flash} />}
+
+    {tab === 'Notifications' && <NotificationsTab onError={setError} onFlash={flash} />}
 
     {tab === 'Charts' && <div>
       <div className="form-grid" style={{ marginBottom: 12 }}>
@@ -355,7 +358,7 @@ function ExcursionsTab({ excursions, onChanged, onError, onFlash }: any) {
 
 function SettingsTab({ settings, onSaved, onError, onFlash }: any) {
   const [f, setF] = useState<any>(null);
-  useEffect(() => { if (settings) setF({ pollingEnabled: !!settings.polling_enabled, defaultPollIntervalSeconds: settings.default_poll_interval_seconds, excursionNcMinutes: settings.excursion_nc_minutes, batteryLowThreshold: settings.battery_low_threshold, noCommMinutes: settings.no_comm_minutes, preventExpiredDevices: !!settings.prevent_expired_devices }); }, [settings]);
+  useEffect(() => { if (settings) setF({ pollingEnabled: !!settings.polling_enabled, defaultPollIntervalSeconds: settings.default_poll_interval_seconds, excursionNcMinutes: settings.excursion_nc_minutes, batteryLowThreshold: settings.battery_low_threshold, noCommMinutes: settings.no_comm_minutes, preventExpiredDevices: !!settings.prevent_expired_devices, webhookUrl: (settings as any).webhook_url ?? '' }); }, [settings]);
   if (!f) return <p>Loading settings…</p>;
   async function save(e: FormEvent) { e.preventDefault(); onError(null); try { await api('/environmental/settings', { method: 'PUT', body: JSON.stringify(f) }); onFlash('Settings saved.'); onSaved(); } catch (err) { onError((err as Error).message); } }
   return <div className="card">
@@ -367,8 +370,60 @@ function SettingsTab({ settings, onSaved, onError, onFlash }: any) {
       <label>Battery low threshold (%)<input type="number" value={f.batteryLowThreshold} onChange={e => setF({ ...f, batteryLowThreshold: Number(e.target.value) })} /></label>
       <label>No-communication alert after (minutes)<input type="number" value={f.noCommMinutes} onChange={e => setF({ ...f, noCommMinutes: Number(e.target.value) })} /></label>
       <label><input type="checkbox" checked={f.preventExpiredDevices} onChange={e => setF({ ...f, preventExpiredDevices: e.target.checked })} /> Prevent use of calibration-expired devices</label>
+      <label>Webhook URL (Teams/Slack incoming webhook)<input value={f.webhookUrl} onChange={e => setF({ ...f, webhookUrl: e.target.value })} placeholder="https://…" /></label>
       <button type="submit">Save settings</button>
     </form>
-    <p className="muted" style={{ marginTop: 12 }}>Notification channels (email/SMS/WhatsApp/Teams), the interactive floor plan, predictive maintenance and Dennis analysis are architected for and will build on this data in later phases.</p>
+    <p className="muted" style={{ marginTop: 12 }}>Configure who gets notified under the <strong>Notifications</strong> tab. The interactive floor plan, predictive maintenance and Dennis analysis build on this data in later phases.</p>
   </div>;
+}
+
+function NotificationsTab({ onError, onFlash }: any) {
+  const [channels, setChannels] = useState<EnvChannel[]>([]);
+  const [rules, setRules] = useState<EnvEscalationRule[]>([]);
+  const [queue, setQueue] = useState<EnvNotificationQueueItem[]>([]);
+  const blank = { name: '', severity: 'critical', delayMinutes: '0', channel: 'in_app', recipients: '' };
+  const [form, setForm] = useState(blank);
+  function load() {
+    api<EnvChannel[]>('/environmental/channels').then(setChannels).catch(() => {});
+    api<EnvEscalationRule[]>('/environmental/escalation-rules').then(setRules).catch(() => {});
+    api<EnvNotificationQueueItem[]>('/environmental/notification-queue').then(setQueue).catch(() => {});
+  }
+  useEffect(() => { load(); }, []);
+  async function addRule(e: FormEvent) { e.preventDefault(); onError(null); try { await api('/environmental/escalation-rules', { method: 'POST', body: JSON.stringify(form) }); setForm(blank); load(); onFlash('Escalation rule added.'); } catch (err) { onError((err as Error).message); } }
+  async function removeRule(id: number) { if (!confirm('Delete this rule?')) return; try { await api(`/environmental/escalation-rules/${id}`, { method: 'DELETE' }); load(); } catch (e) { onError((e as Error).message); } }
+  async function toggleRule(r: EnvEscalationRule) { try { await api(`/environmental/escalation-rules/${r.id}`, { method: 'PUT', body: JSON.stringify({ isActive: !r.is_active }) }); load(); } catch (e) { onError((e as Error).message); } }
+  async function test(key: string) { onError(null); try { const r = await api<{ ok: boolean; error?: string }>(`/environmental/channels/${key}/test`, { method: 'POST', body: JSON.stringify({}) }); onFlash(r.ok ? `Test sent via ${key}.` : `Test not sent: ${r.error}`); load(); } catch (e) { onError((e as Error).message); } }
+  return <>
+    <div className="card">
+      <h3>Notification channels</h3>
+      <p className="muted" style={{ marginTop: 0 }}>In-app is always on. The Webhook channel posts to a Teams/Slack incoming webhook (set the URL under Settings). Email/SMS/WhatsApp are ready to plug in once a relay is configured on the host.</p>
+      <table className="data-table"><thead><tr><th>Channel</th><th>Status</th><th></th></tr></thead><tbody>
+        {channels.map(c => <tr key={c.key}><td>{c.label}</td><td>{c.ready ? <span className="badge active">ready</span> : <span className="badge">not configured</span>}</td><td><button className="secondary" onClick={() => test(c.key)}>Send test</button></td></tr>)}
+      </tbody></table>
+    </div>
+    <div className="card" style={{ marginTop: 16 }}>
+      <h3>Escalation rules</h3>
+      <p className="muted" style={{ marginTop: 0 }}>Each rule notifies a channel when a matching alert has gone unacknowledged for the delay. Delay 0 = notify immediately; larger delays form the escalation ladder.</p>
+      <form className="form-grid" onSubmit={addRule}>
+        <label>Name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></label>
+        <label>Severity<select value={form.severity} onChange={e => setForm({ ...form, severity: e.target.value })}>{['any', 'information', 'warning', 'critical'].map(s => <option key={s} value={s}>{s}</option>)}</select></label>
+        <label>Delay (minutes)<input type="number" min={0} value={form.delayMinutes} onChange={e => setForm({ ...form, delayMinutes: e.target.value })} /></label>
+        <label>Channel<select value={form.channel} onChange={e => setForm({ ...form, channel: e.target.value })}>{channels.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}</select></label>
+        <label>Recipients<input value={form.recipients} onChange={e => setForm({ ...form, recipients: e.target.value })} placeholder="emails / phones / role (optional)" /></label>
+        <button type="submit">Add rule</button>
+      </form>
+      <table className="data-table" style={{ marginTop: 10 }}><thead><tr><th>Name</th><th>Severity</th><th>Delay</th><th>Channel</th><th>Recipients</th><th>Active</th><th></th></tr></thead><tbody>
+        {rules.map(r => <tr key={r.id}><td>{r.name}</td><td>{badge(r.severity)}</td><td>{r.delay_minutes}m</td><td>{r.channel}</td><td>{r.recipients || '—'}</td><td>{r.is_active ? 'Yes' : 'No'}</td>
+          <td style={{ whiteSpace: 'nowrap' }}><button className="secondary" onClick={() => toggleRule(r)}>{r.is_active ? 'Disable' : 'Enable'}</button>{' '}<button className="secondary" onClick={() => removeRule(r.id)}>Delete</button></td></tr>)}
+        {rules.length === 0 && <tr><td colSpan={7} className="muted">No rules yet.</td></tr>}
+      </tbody></table>
+    </div>
+    <div className="card" style={{ marginTop: 16 }}>
+      <h3>Notification log</h3>
+      <table className="data-table"><thead><tr><th>When</th><th>Channel</th><th>Subject</th><th>Rule</th><th>Status</th><th>Detail</th></tr></thead><tbody>
+        {queue.map(q => <tr key={q.id}><td>{fmtTime(q.created_at)}</td><td>{q.channel}</td><td>{q.subject || '—'}</td><td>{q.rule_name || '—'}</td><td>{badge(q.status)}</td><td>{q.error || (q.sent_at ? 'delivered' : '—')}</td></tr>)}
+        {queue.length === 0 && <tr><td colSpan={6} className="muted">No notifications dispatched yet.</td></tr>}
+      </tbody></table>
+    </div>
+  </>;
 }

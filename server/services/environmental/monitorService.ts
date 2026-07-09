@@ -12,6 +12,7 @@
  */
 import { generateRecordNumber } from '../../utils/recordNumber.js';
 import { getDriver } from './drivers.js';
+import { enqueueForAlert, escalationSweep } from './notifications.js';
 
 type DB = any;
 
@@ -41,10 +42,11 @@ function upsertAlert(db: DB, assetId: number, deviceId: number | null, type: str
   }
   const r = db.prepare('INSERT INTO environmental_alerts (asset_id, device_id, alert_type, severity, message, value, status, excursion_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
     .run(assetId, deviceId, type, severity, message, value, 'active', excursionId ?? null);
-  // Surface as an in-app notification for the Facilities & Safety module.
-  db.prepare('INSERT INTO notifications (user_id, module_key, title, message, status) VALUES (NULL, ?, ?, ?, ?)')
-    .run('facilities_safety', `Environmental alert: ${type.replace(/_/g, ' ')}`, message, 'unread');
-  return Number(r.lastInsertRowid);
+  const alertId = Number(r.lastInsertRowid);
+  // Dispatch through the escalation/notification engine (in-app is always on;
+  // additional channels fire per the configured escalation rules).
+  try { enqueueForAlert(db, alertId); } catch { /* notification failure must not break ingest */ }
+  return alertId;
 }
 
 function resolveAlerts(db: DB, assetId: number, types: string[]) {
@@ -178,6 +180,9 @@ export class EnvironmentalPoller {
   private tick() {
     const db = this.getDb();
     const settings = getSettings(db);
+    // Escalation + delivery run every tick regardless of automated polling, so
+    // alerts from manual readings also escalate and get delivered.
+    try { escalationSweep(db); } catch { /* keep the loop alive */ }
     if (!settings.polling_enabled) return;
     const getAsset = (id: number) => db.prepare('SELECT * FROM environmental_assets WHERE id = ?').get(id);
     const devices = db.prepare("SELECT * FROM environmental_devices WHERE is_active = 1 AND asset_id IS NOT NULL").all() as any[];
