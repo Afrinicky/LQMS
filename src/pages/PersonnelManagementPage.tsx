@@ -1,14 +1,14 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, BarMeter, BarChart, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
-import { FileDown, FileSpreadsheet } from 'lucide-react';
+import { Download, Upload } from 'lucide-react';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import type {
   Section, Department, Staff, Position,
   StaffDocument, StaffDeclaration, TrainingEvent, CompetencyAssessment, DutyRoster,
-  PersonnelSummary, MyTasks, MyProfile, RosterCoverage, StaffSuggestionsResponse, StaffOrientation, RegisterImportResult, ProfessionalRank, PerformanceAppraisal
+  PersonnelSummary, MyTasks, MyProfile, RosterCoverage, StaffSuggestionsResponse, StaffOrientation, ProfessionalRank, PerformanceAppraisal
 } from '../../shared/types/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
@@ -102,8 +102,8 @@ export function PersonnelManagementPage() {
   const [orientations, setOrientations] = useState<StaffOrientation[]>([]);
   const [orientForm, setOrientForm] = useState({ staffId: '', hireDate: '', orientationStart: '', facilitatorStaffId: '', notes: '' });
   const [regBusy, setRegBusy] = useState('');
-  const [regFile, setRegFile] = useState<File | null>(null);
-  const [regResult, setRegResult] = useState<RegisterImportResult | null>(null);
+  const [regResult, setRegResult] = useState<{ created: number; updated: number; skipped?: number; errors: string[] } | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
   const [ranks, setRanks] = useState<ProfessionalRank[]>([]);
   useEffect(() => { api<ProfessionalRank[]>('/professional-ranks').then(setRanks).catch(() => setRanks([])); }, []);
   const [trainingForm, setTrainingForm] = useState({ title: '', description: '', trainingType: '', sectionId: '', trainerStaffId: '', trainingDate: '', startTime: '', endTime: '', location: '' });
@@ -183,6 +183,7 @@ export function PersonnelManagementPage() {
   }
 
   function editStaff(s: Staff) {
+    setTab('Add Staff');
     setEditingStaffId(s.id);
     setStaffForm({
       employeeNo: s.employeeNo ?? '', surname: s.surname ?? '', middleName: s.middleName ?? '', firstName: s.firstName ?? '',
@@ -205,6 +206,7 @@ export function PersonnelManagementPage() {
       else await api('/staff', { method: 'POST', body: JSON.stringify(staffForm) });
       setStaffForm(emptyStaffForm); setEditingStaffId(null);
       await reloadStaff();
+      setTab('Master Personnel Register');
     } catch (e) { setError((e as Error).message); }
   }
 
@@ -228,19 +230,20 @@ export function PersonnelManagementPage() {
     finally { setRegBusy(''); }
   }
 
-  async function importRegister() {
-    if (!regFile) { setError('Choose a .xlsx file to import.'); return; }
+  // Import routes through the single approved Master Personnel Register workbook
+  // (Settings → People & Access → Import / Export) so there is one Excel structure.
+  async function importRegister(file: File) {
     setError(null); setRegResult(null); setRegBusy('import');
     try {
-      const fd = new FormData(); fd.append('file', regFile);
+      const fd = new FormData(); fd.append('file', file);
       const token = getToken();
-      const res = await fetch(`${API_BASE}/personnel/register/import`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
+      const res = await fetch(`${API_BASE}/staff/import`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
       const data = await res.json().catch(() => ({ error: res.statusText }));
       if (!res.ok) throw new Error(data.error ?? res.statusText);
-      setRegResult(data as RegisterImportResult); setRegFile(null);
+      setRegResult(data as { created: number; updated: number; skipped?: number; errors: string[] });
       await reloadStaff();
     } catch (e) { setError((e as Error).message); }
-    finally { setRegBusy(''); }
+    finally { setRegBusy(''); if (importInputRef.current) importInputRef.current.value = ''; }
   }
 
   async function submitOrientation(e: FormEvent) {
@@ -366,7 +369,7 @@ export function PersonnelManagementPage() {
     catch (e) { setError((e as Error).message); }
   }
 
-  const tabs = ['Dashboard', 'Staff Register', 'Staff Documents', 'Orientation & Induction', 'Declarations', 'Training Events', 'Competency Assessments', 'Performance Appraisals', 'Technical Authorizations', 'Duty Rosters', 'My Profile', 'Reports'];
+  const tabs = ['Dashboard', 'Master Personnel Register', 'Add Staff', 'Staff Documents', 'Orientation & Induction', 'Declarations', 'Training Events', 'Competency Assessments', 'Performance Appraisals', 'Technical Authorizations', 'Duty Rosters', 'My Profile', 'Reports'];
   const staffName2 = (id?: number) => staff.find(s => s.id === id)?.fullName || '—';
 
   return <div className="module-page">
@@ -375,10 +378,10 @@ export function PersonnelManagementPage() {
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && (summary ? <KpiStrip items={[
-      { label: 'Active staff', value: summary.totalStaff ?? staff.length, onClick: () => setTab('Staff Register') },
+      { label: 'Active staff', value: summary.totalStaff ?? staff.length, onClick: () => setTab('Master Personnel Register') },
       { label: 'Docs pending verification', value: summary.staffDocumentsPendingVerification, onClick: () => setTab('Staff Documents') },
       { label: 'Certificates expiring', value: summary.certificatesExpiringSoon, tone: 'warning', onClick: () => setTab('Staff Documents') },
-      { label: 'Licences expiring', value: summary.licencesExpiringSoon ?? 0, tone: 'warning', onClick: () => setTab('Staff Register') },
+      { label: 'Licences expiring', value: summary.licencesExpiringSoon ?? 0, tone: 'warning', onClick: () => setTab('Master Personnel Register') },
       { label: 'Pending declarations', value: summary.pendingDeclarations, onClick: () => setTab('Declarations') },
       { label: 'Orientations in progress', value: summary.orientationsInProgress ?? 0, onClick: () => setTab('Orientation & Induction') },
       { label: 'Competency due', value: summary.competencyAssessmentsDue, onClick: () => setTab('Competency Assessments') },
@@ -404,24 +407,43 @@ export function PersonnelManagementPage() {
       </ChartCard>
     </div>}
 
-    {tab === 'Staff Register' && <>
+    {tab === 'Master Personnel Register' && <>
       <div className="card">
-        <div className="section-head"><h3 style={{ margin: 0 }}>Master Personnel Register — Excel</h3></div>
-        <p className="muted" style={{ marginTop: 0 }}>Bulk-manage the register with Excel. Download the blank template, export the current register, or import a completed workbook — rows are matched on Staff ID (existing staff updated, new ones created).</p>
-        <div className="quick-actions">
-          <button type="button" className="quick-action" disabled={!!regBusy} onClick={() => downloadRegister('/personnel/register/template', 'Master_Personnel_Register_Template.xlsx')}><span className="qa-ico"><FileDown size={20} /></span><strong>{regBusy === '/personnel/register/template' ? 'Preparing…' : 'Blank template'}</strong></button>
-          <button type="button" className="quick-action" disabled={!!regBusy} onClick={() => downloadRegister('/personnel/register/export', 'Master_Personnel_Register.xlsx')}><span className="qa-ico"><FileSpreadsheet size={20} /></span><strong>{regBusy === '/personnel/register/export' ? 'Preparing…' : 'Export register'}</strong></button>
+        <div className="section-head" style={{ alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <h3 style={{ margin: 0 }}>Master Personnel Register</h3>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <button type="button" className="secondary" disabled={!!regBusy} title="Download the register as an Excel workbook" onClick={() => downloadRegister('/staff/export', 'Master_Personnel_Register.xlsx')}><Download size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />{regBusy === '/staff/export' ? 'Exporting…' : 'Export'}</button>
+            <button type="button" className="secondary" disabled={!!regBusy} title="Upload a completed register workbook" onClick={() => importInputRef.current?.click()}><Upload size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />{regBusy === 'import' ? 'Importing…' : 'Import'}</button>
+            <input ref={importInputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) void importRegister(f); }} />
+            <input placeholder="Search name, ID, position…" value={staffSearch} onChange={e => setStaffSearch(e.target.value)} style={{ maxWidth: 240 }} />
+          </div>
         </div>
-        <div className="form-grid" style={{ marginTop: 12 }}>
-          <label>Import workbook (.xlsx)<input type="file" accept=".xlsx,.xls" onChange={e => setRegFile(e.target.files?.[0] ?? null)} /></label>
-          <button type="button" disabled={!!regBusy || !regFile} onClick={importRegister}>{regBusy === 'import' ? 'Importing…' : 'Import register'}</button>
-        </div>
-        {regResult && <div className="success-msg" style={{ marginTop: 10 }}>Imported {regResult.totalRows} row{regResult.totalRows === 1 ? '' : 's'}: <strong>{regResult.created}</strong> created, <strong>{regResult.updated}</strong> updated.{regResult.errors.length > 0 && <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>{regResult.errors.map((er, i) => <li key={i} style={{ fontSize: 12 }}>{er}</li>)}</ul>}</div>}
+        <p className="muted" style={{ marginTop: 0 }}>The complete register of laboratory personnel. Export or import uses the single approved workbook — rows are matched on Staff ID, so existing staff are updated and new ones created.</p>
+        {regResult && <div className="success-msg" style={{ marginTop: 4, marginBottom: 12 }}><strong>{regResult.created}</strong> created, <strong>{regResult.updated}</strong> updated{typeof regResult.skipped === 'number' ? <>, <strong>{regResult.skipped}</strong> skipped</> : null}.{regResult.errors.length > 0 && <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>{regResult.errors.map((er, i) => <li key={i} style={{ fontSize: 12 }}>{er}</li>)}</ul>}</div>}
+        <table className="data-table"><thead><tr><th>Staff ID</th><th>Name</th><th>Designation</th><th>Position</th><th>Unit</th><th>Category</th><th>Licence</th><th>Experience</th><th></th></tr></thead><tbody>
+          {staff.filter(s => { const q = staffSearch.trim().toLowerCase(); if (!q) return true; return [s.fullName, s.employeeNo, s.jobTitle, s.designation, s.unit].some(v => v?.toLowerCase().includes(q)); }).map(s => {
+            const today = new Date().toISOString().slice(0, 10);
+            const licExpiringSoon = s.licenceExpiryDate && s.licenceExpiryDate <= new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10) && s.licenceExpiryDate >= today;
+            const licExpired = s.licenceExpiryDate && s.licenceExpiryDate < today;
+            return <tr key={s.id}>
+              <td>{s.employeeNo || '—'}</td><td>{s.fullName}{s.initials ? <span className="muted"> ({s.initials})</span> : null}</td>
+              <td>{s.designation || '—'}</td><td>{s.jobTitle || '—'}</td><td>{s.unit || (s.sectionId ? sections.find(x => x.id === s.sectionId)?.name : '') || '—'}</td>
+              <td>{s.personnelCategory ? <span className="badge">{s.personnelCategory}</span> : '—'}</td>
+              <td>{s.professionalLicence || '—'}{licExpired && <span className="badge danger">expired</span>}{licExpiringSoon && <span className="badge warning">expiring</span>}</td>
+              <td>{yearsBetween(s.appointmentDate)}</td>
+              <td><button type="button" onClick={() => editStaff(s)}>Edit</button></td>
+            </tr>;
+          })}
+          {staff.length === 0 && <tr><td colSpan={9} className="muted">No staff records yet — add one from the <strong>Add Staff</strong> tab, or import the register above.</td></tr>}
+        </tbody></table>
       </div>
-      <div className="card" style={{ marginTop: 16 }}>
-        <div className="section-head"><h3 style={{ margin: 0 }}>{editingStaffId ? 'Edit staff record' : 'New staff record'}</h3>
+    </>}
+
+    {tab === 'Add Staff' && <>
+      <div className="card">
+        <div className="section-head"><h3 style={{ margin: 0 }}>{editingStaffId ? 'Edit staff record' : 'Add staff'}</h3>
           {editingStaffId && <button type="button" className="secondary" onClick={() => { setEditingStaffId(null); setStaffForm(emptyStaffForm); }}>Cancel edit</button>}</div>
-        <p className="muted" style={{ marginTop: 0 }}>Maintains the Master Personnel Register: identity, professional registration, qualifications, appointment and emergency contact for every member of staff.</p>
+        <p className="muted" style={{ marginTop: 0 }}>Adds a member of staff to the Master Personnel Register: identity, professional registration, qualifications, appointment and emergency contact.</p>
         <form className="form-grid" onSubmit={submitStaff}>
           <label>Staff ID<input value={staffForm.employeeNo} onChange={e => setStaffForm({ ...staffForm, employeeNo: e.target.value })} placeholder="e.g. SNO-001" /></label>
           <label>Surname<input value={staffForm.surname} onChange={e => setStaffForm({ ...staffForm, surname: e.target.value })} /></label>
@@ -452,25 +474,6 @@ export function PersonnelManagementPage() {
           <label>Staff file location<input value={staffForm.staffFileLocation} onChange={e => setStaffForm({ ...staffForm, staffFileLocation: e.target.value })} placeholder="e.g. /SECH-LAB-PERSONNEL-FILES/SNO-001/" /></label>
           <button type="submit">{editingStaffId ? 'Save changes' : 'Create staff record'}</button>
         </form>
-      </div>
-      <div className="card" style={{ marginTop: 16 }}>
-        <div className="section-head"><h3 style={{ margin: 0 }}>Master Personnel Register</h3>
-          <input placeholder="Search name, ID, position…" value={staffSearch} onChange={e => setStaffSearch(e.target.value)} style={{ maxWidth: 280 }} /></div>
-        <table className="data-table"><thead><tr><th>Staff ID</th><th>Name</th><th>Designation</th><th>Position</th><th>Unit</th><th>Category</th><th>Licence</th><th>Experience</th><th></th></tr></thead><tbody>
-          {staff.filter(s => { const q = staffSearch.trim().toLowerCase(); if (!q) return true; return [s.fullName, s.employeeNo, s.jobTitle, s.designation, s.unit].some(v => v?.toLowerCase().includes(q)); }).map(s => {
-            const today = new Date().toISOString().slice(0, 10);
-            const licExpiringSoon = s.licenceExpiryDate && s.licenceExpiryDate <= new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10) && s.licenceExpiryDate >= today;
-            const licExpired = s.licenceExpiryDate && s.licenceExpiryDate < today;
-            return <tr key={s.id}>
-              <td>{s.employeeNo || '—'}</td><td>{s.fullName}{s.initials ? <span className="muted"> ({s.initials})</span> : null}</td>
-              <td>{s.designation || '—'}</td><td>{s.jobTitle || '—'}</td><td>{s.unit || (s.sectionId ? sections.find(x => x.id === s.sectionId)?.name : '') || '—'}</td>
-              <td>{s.personnelCategory ? <span className="badge">{s.personnelCategory}</span> : '—'}</td>
-              <td>{s.professionalLicence || '—'}{licExpired && <span className="badge danger">expired</span>}{licExpiringSoon && <span className="badge warning">expiring</span>}</td>
-              <td>{yearsBetween(s.appointmentDate)}</td>
-              <td><button type="button" onClick={() => editStaff(s)}>Edit</button></td>
-            </tr>;
-          })}
-        </tbody></table>
       </div>
     </>}
 
