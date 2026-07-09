@@ -7,6 +7,8 @@ import { parseIntNullable } from './routeHelpers.js';
 import { recordReading } from '../services/environmental/monitorService.js';
 import { getDriver, listDrivers, COMMUNICATION_METHODS } from '../services/environmental/drivers.js';
 import { listChannels, getChannels, processQueue } from '../services/environmental/notifications.js';
+import { computeInsights } from '../services/environmental/insights.js';
+import { buildReport, reportToWorkbook, reportToHtml, REPORT_TYPES } from '../services/environmental/reports.js';
 
 const numericOnly = (req: any, _res: any, next: any) => (/^\d+$/.test(req.params.id) ? next() : next('route'));
 const MODULE = 'facilities_safety'; // Environmental Monitoring lives under Facilities & Safety RBAC.
@@ -79,6 +81,37 @@ export function environmentalRoutes() {
   });
   // Force the delivery worker (useful after enabling a channel).
   router.post('/notification-queue/process', requirePermission(MODULE, 'edit'), (_req, res) => { processQueue(getDb()); res.json({ ok: true }); });
+
+  // ---- Insights & predictive maintenance (advisory only) ----
+  router.get('/insights', requirePermission(MODULE, 'view'), (_req, res) => {
+    res.json(computeInsights(getDb()));
+  });
+  // Turn a recommendation into an action for someone to own (user-approved).
+  router.post('/insights/create-action', requirePermission(MODULE, 'create'), (req, res) => {
+    const b = req.body ?? {};
+    if (!b.title) return res.status(400).json({ error: 'Title is required.' });
+    const r = getDb().prepare('INSERT INTO actions (title, module_key, source_module, source_record_id, description, status, priority, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(b.title, 'facilities_safety', 'environmental', b.assetId ? String(b.assetId) : null, b.description ?? null, 'Not started', b.priority ?? 'normal', req.user!.id);
+    audit(req, { action: 'create', entity: 'actions', entityId: r.lastInsertRowid, newValue: { source: 'environmental_insight', ...b } });
+    res.status(201).json({ id: r.lastInsertRowid });
+  });
+
+  // ---- Reports (Excel + printable/PDF) ----
+  router.get('/reports', requirePermission(MODULE, 'view'), (_req, res) => res.json(REPORT_TYPES));
+  router.get('/reports/:type/export', requirePermission(MODULE, 'view'), (req, res) => {
+    const report = buildReport(getDb(), req.params.type, req.query.from as string, req.query.to as string);
+    const buf = reportToWorkbook(report);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="Environmental_${req.params.type}.xlsx"`);
+    res.send(buf);
+    audit(req, { action: 'export', entity: 'environmental_report', entityId: req.params.type });
+  });
+  router.get('/reports/:type/print', requirePermission(MODULE, 'view'), (req, res) => {
+    const report = buildReport(getDb(), req.params.type, req.query.from as string, req.query.to as string);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(reportToHtml(report, req.query.autoprint !== '0'));
+    audit(req, { action: 'print', entity: 'environmental_report', entityId: req.params.type });
+  });
 
   // ---- Assets ----
   router.get('/assets', requirePermission(MODULE, 'view'), (_req, res) => {

@@ -1052,6 +1052,12 @@ tr.clickable-row:hover td { background: var(--accent-soft); }
 .env-card.tone-off { border-left-color: var(--faint); opacity: 0.82; }
 .env-card.tone-off .env-dot { background: var(--faint); }
 @keyframes env-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(210,58,42,0.5); } 50% { box-shadow: 0 0 0 6px rgba(210,58,42,0); } }
+.insight-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-left-width: 4px; border-radius: 10px; margin-top: 10px; background: var(--panel-2); }
+.insight-row .insight-main { min-width: 0; }
+.insight-row.sev-critical { border-left-color: var(--danger); }
+.insight-row.sev-warning { border-left-color: var(--warning); }
+.insight-row.sev-information { border-left-color: var(--accent-bright); }
+.insight-row button { flex: none; }
 
 /* ---- Laboratory Profile (Documents & Records) ---- */
 .lab-profile-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }

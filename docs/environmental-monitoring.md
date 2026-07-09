@@ -65,6 +65,26 @@ alerts escalate too.
 **UI**: a Notifications tab (channel status + test send, escalation-rule editor,
 notification log) plus a webhook URL field in Settings.
 
+## Delivered (Phase 3) — insights, predictive maintenance & reports
+
+**Insights engine** (`server/services/environmental/insights.ts`): a
+deterministic, offline analysis over the last 30 days of readings/alerts/
+excursions that produces plain-language observations and preventive-maintenance
+recommendations — excursion frequency, afternoon/time-of-day drift, reading
+instability (possible sensor drift), humidity patterns, battery decline,
+intermittent communication, and calibration due/overdue. It recommends only;
+`POST /environmental/insights/create-action` turns a recommendation into an
+Action Tracker item on user approval. Surfaced in the **Insights** tab (Dennis
+observations + predictive maintenance). An LLM layer can later enrich the same
+findings.
+
+**Reports** (`server/services/environmental/reports.ts`): one data model, two
+renderers — Excel (`xlsx`) and printable HTML (browser → Save as PDF). Types:
+summary, readings/trend, excursions, alarms, calibration, asset register,
+device register, insights, audit — with a date range for time-based reports.
+`GET /environmental/reports`, `/reports/:type/export`, `/reports/:type/print`.
+Surfaced in the **Reports** tab.
+
 ## Roadmap (architected for, not yet built)
 
 - **Interactive floor plan** — schema ready (`floor_plan_x/y`,
@@ -72,6 +92,8 @@ notification log) plus a webhook URL field in Settings.
   asset indicators onto it.
 - **Email/SMS/WhatsApp relays** — implement the pending channel adapters against
   the `NotificationChannel` interface (webhook already works for Teams/Slack).
+- **LLM-enriched Dennis** — layer the conversational assistant over the
+  deterministic insights for narrative summaries.
 - **Dennis AI analysis** — recurring pattern detection over
   `environmental_readings` ("exceeded upper limit 3× this month"); recommend
   only, never auto-change.
