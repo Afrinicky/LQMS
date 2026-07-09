@@ -34,9 +34,11 @@ import { notificationsRoutes, computeSummary } from './routes/notifications.js';
 import { recordsReportsRoutes } from './routes/recordsReports.js';
 import { processManagementRoutes } from './routes/processManagement.js';
 import { informationManagementRoutes } from './routes/informationManagement.js';
+import { environmentalRoutes } from './routes/environmental.js';
+import { EnvironmentalPoller } from './services/environmental/monitorService.js';
 import { dennisRoutes } from './routes/dennis.js';
 import { optionalAuth } from './middleware/auth.js';
-import { ensureDataDirs } from './db/database.js';
+import { ensureDataDirs, getDb } from './db/database.js';
 import { seedDefaults } from './db/seed.js';
 
 /**
@@ -100,6 +102,7 @@ export function createApiServer() {
   app.use('/api/records-reports', recordsReportsRoutes());
   app.use('/api/process-management', processManagementRoutes());
   app.use('/api/information-management', informationManagementRoutes());
+  app.use('/api/environmental', environmentalRoutes());
   app.use('/api', commonRoutes());
 
   // Serve the built single-page renderer so the packaged Electron window can
@@ -130,5 +133,10 @@ export function createApiServer() {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.env.API_PORT ?? 4317);
   const host = process.env.SECH_LIMS_API_HOST ?? '127.0.0.1';
-  createApiServer().listen(port, host, () => console.log(`SECH_LIMS host API listening on http://${host}:${port}`));
+  createApiServer().listen(port, host, () => {
+    console.log(`SECH_LIMS host API listening on http://${host}:${port}`);
+    // Background environmental poller. It self-gates on environmental_settings
+    // (polling_enabled), so it is idle until a lab turns automated polling on.
+    try { new EnvironmentalPoller(getDb).start(); } catch (e) { console.error('Environmental poller failed to start', e); }
+  });
 }
