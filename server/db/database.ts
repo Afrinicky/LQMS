@@ -2546,6 +2546,176 @@ CREATE INDEX IF NOT EXISTS idx_quality_objectives_year ON quality_objectives(yea
   if (!labDocCols.has('linked_document_id')) database.exec('ALTER TABLE laboratory_documents ADD COLUMN linked_document_id INTEGER REFERENCES documents(id)');
 
   // ===================================================================
+  // Environmental Monitoring — manual + automated real-time monitoring.
+  // Assets are monitored locations/equipment; devices are the sensors/loggers
+  // (each bound to a communication driver); readings flow from manual entry or
+  // automated polling and are evaluated into alerts, excursions and auto-NCs.
+  // Floor-plan coordinates and a config_json/driver_key give room to grow
+  // (floor plan overlay, new protocols, new parameters) without refactoring.
+  // -------------------------------------------------------------------
+  database.exec(`
+CREATE TABLE IF NOT EXISTS environmental_assets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  asset_code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  asset_type TEXT,
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  location_id INTEGER REFERENCES locations(id),
+  responsible_section_id INTEGER REFERENCES sections(id),
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  equipment_id INTEGER REFERENCES equipment_items(id),
+  temp_min REAL, temp_max REAL,
+  humidity_min REAL, humidity_max REAL,
+  monitoring_frequency TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  is_active INTEGER NOT NULL DEFAULT 1,
+  installation_date TEXT,
+  calibration_due_date TEXT,
+  device_id INTEGER,
+  floor_plan_x REAL, floor_plan_y REAL,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS environmental_devices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  device_code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  manufacturer TEXT, model TEXT, serial_number TEXT,
+  device_type TEXT,
+  communication_method TEXT NOT NULL DEFAULT 'manual',
+  driver_key TEXT NOT NULL DEFAULT 'manual',
+  firmware_version TEXT,
+  calibration_status TEXT,
+  calibration_certificate_file_id INTEGER REFERENCES files(id),
+  calibration_due_date TEXT,
+  battery_status TEXT,
+  battery_level REAL,
+  signal_strength REAL,
+  last_communication_at TEXT,
+  location_id INTEGER REFERENCES locations(id),
+  asset_id INTEGER REFERENCES environmental_assets(id),
+  poll_interval_seconds INTEGER,
+  config_json TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS environmental_excursions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  asset_id INTEGER NOT NULL REFERENCES environmental_assets(id),
+  device_id INTEGER REFERENCES environmental_devices(id),
+  parameter TEXT NOT NULL DEFAULT 'temperature',
+  acceptable_min REAL, acceptable_max REAL,
+  started_at TEXT NOT NULL,
+  ended_at TEXT,
+  max_value REAL, min_value REAL,
+  duration_minutes INTEGER,
+  status TEXT NOT NULL DEFAULT 'open',
+  investigation_status TEXT DEFAULT 'pending',
+  acknowledged_by_staff_id INTEGER REFERENCES staff(id),
+  nc_id INTEGER REFERENCES nonconforming_events(id),
+  capa_id INTEGER REFERENCES capa_records(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS environmental_readings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  asset_id INTEGER NOT NULL REFERENCES environmental_assets(id),
+  device_id INTEGER REFERENCES environmental_devices(id),
+  source TEXT NOT NULL DEFAULT 'manual',
+  temperature REAL, humidity REAL,
+  battery_level REAL, signal_strength REAL,
+  recorded_at TEXT NOT NULL,
+  recorded_by_staff_id INTEGER REFERENCES staff(id),
+  status TEXT NOT NULL DEFAULT 'normal',
+  observation TEXT, corrective_action TEXT, manual_reason TEXT, signature TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS environmental_alerts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  asset_id INTEGER REFERENCES environmental_assets(id),
+  device_id INTEGER REFERENCES environmental_devices(id),
+  alert_type TEXT NOT NULL,
+  severity TEXT NOT NULL DEFAULT 'warning',
+  message TEXT,
+  value REAL,
+  status TEXT NOT NULL DEFAULT 'active',
+  triggered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  acknowledged_by_staff_id INTEGER REFERENCES staff(id),
+  acknowledged_at TEXT,
+  resolved_at TEXT,
+  excursion_id INTEGER REFERENCES environmental_excursions(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS environmental_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  polling_enabled INTEGER NOT NULL DEFAULT 0,
+  default_poll_interval_seconds INTEGER NOT NULL DEFAULT 300,
+  excursion_nc_minutes INTEGER NOT NULL DEFAULT 30,
+  battery_low_threshold REAL NOT NULL DEFAULT 20,
+  no_comm_minutes INTEGER NOT NULL DEFAULT 15,
+  prevent_expired_devices INTEGER NOT NULL DEFAULT 0,
+  floor_plan_file_id INTEGER REFERENCES files(id),
+  email_enabled INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT
+);
+INSERT OR IGNORE INTO environmental_settings (id) VALUES (1);
+CREATE INDEX IF NOT EXISTS idx_env_readings_asset_time ON environmental_readings(asset_id, recorded_at);
+CREATE INDEX IF NOT EXISTS idx_env_alerts_status ON environmental_alerts(status);
+CREATE INDEX IF NOT EXISTS idx_env_excursions_status ON environmental_excursions(status);
+
+-- Escalation ladder: each rule fires a channel after delay_minutes if a matching
+-- alert is still unacknowledged. delay 0 = notify immediately.
+CREATE TABLE IF NOT EXISTS environmental_escalation_rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  severity TEXT NOT NULL DEFAULT 'critical',
+  delay_minutes INTEGER NOT NULL DEFAULT 0,
+  channel TEXT NOT NULL DEFAULT 'in_app',
+  recipients TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+-- Outbound notification queue (one row per alert × rule); a worker delivers it.
+CREATE TABLE IF NOT EXISTS environmental_notification_queue (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  alert_id INTEGER REFERENCES environmental_alerts(id),
+  rule_id INTEGER REFERENCES environmental_escalation_rules(id),
+  channel TEXT NOT NULL,
+  recipients TEXT,
+  subject TEXT,
+  body TEXT,
+  severity TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  scheduled_at TEXT,
+  sent_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_env_notif_status ON environmental_notification_queue(status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_env_notif_alert_rule ON environmental_notification_queue(alert_id, rule_id);
+`);
+  // environmental_settings may pre-date the webhook column on upgraded installs.
+  const envSetCols = new Set((database.prepare("PRAGMA table_info(environmental_settings)").all() as Array<{ name: string }>).map(c => c.name));
+  if (!envSetCols.has('webhook_url')) database.exec('ALTER TABLE environmental_settings ADD COLUMN webhook_url TEXT');
+  // Seed a sensible default escalation ladder once, so in-app alerts work out of
+  // the box: notify in-app immediately, and escalate criticals after 30 minutes.
+  const ruleCount = (database.prepare('SELECT COUNT(*) c FROM environmental_escalation_rules').get() as { c: number }).c;
+  if (ruleCount === 0) {
+    database.prepare("INSERT INTO environmental_escalation_rules (name, severity, delay_minutes, channel) VALUES (?, 'any', 0, 'in_app')").run('In-app — all alerts');
+    database.prepare("INSERT INTO environmental_escalation_rules (name, severity, delay_minutes, channel) VALUES (?, 'critical', 30, 'in_app')").run('Escalate unacknowledged criticals (30m)');
+  }
+
+  // ===================================================================
   // Phase 9: Documents & Records upgrade
   // Faithful to SECH Document Control Procedure (SECHPO026) and Control of
   // Records Procedure (SECHPO051).

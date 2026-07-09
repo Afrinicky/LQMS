@@ -1,5 +1,7 @@
 import type { Server } from 'node:http';
 import { createApiServer } from '../server/index.js';
+import { getDb } from '../server/db/database.js';
+import { EnvironmentalPoller } from '../server/services/environmental/monitorService.js';
 
 export type ApiState = { host: string; port: number; baseUrl: string; reused: boolean };
 
@@ -74,6 +76,8 @@ export function startLocalApi(): Promise<ApiState> {
         process.env.SECH_LIMS_API_URL = resolved.baseUrl;
         process.env.SECH_LIMS_API_PORT = String(port);
         console.log('[boot] startLocalApi listening', resolved);
+        // Start the environmental poller (idle until polling is enabled in settings).
+        try { new EnvironmentalPoller(getDb).start(); } catch (e) { console.error('[boot] environmental poller start failed', e); }
         return resolved;
       } catch (err) {
         lastErr = err;

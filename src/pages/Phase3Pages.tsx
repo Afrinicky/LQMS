@@ -4,6 +4,7 @@ import { KpiStrip, ChartCard, DonutChart, BarMeter, BarChart, CHART_COLORS } fro
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
+import { EnvironmentalMonitoringPage } from './EnvironmentalMonitoringPage';
 import type {
   Location, Section, Staff, Supplier, EquipmentItem, InventoryItem, MonitoringRecord, SafetyIncident,
   EquipmentMaintenanceRecord, EquipmentBreakdown, MonitoringItem, MonitoringReading,
@@ -1028,7 +1029,7 @@ export function SafetyPage() {
       </div>
     </>}
 
-    {tab === 'Environmental Monitoring' && <MonitoringPage embedded />}
+    {tab === 'Environmental Monitoring' && <EnvironmentalMonitoringPage embedded />}
   </div>;
 }
 

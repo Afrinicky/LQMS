@@ -1026,6 +1026,33 @@ button.step-toggle:hover { background: rgba(255,255,255,0.05); box-shadow: none;
 tr.clickable-row { cursor: pointer; }
 tr.clickable-row:hover td { background: var(--accent-soft); }
 
+/* ---- Environmental Monitoring live dashboard ---- */
+.env-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+.env-card {
+  text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 6px;
+  padding: 14px 16px; border-radius: var(--radius); border: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--card), var(--surface)); color: var(--text);
+  box-shadow: var(--shadow-sm); border-left-width: 4px; transition: transform .08s ease;
+}
+.env-card:hover { transform: translateY(-2px); }
+.env-card .env-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.env-card-name { font-weight: 600; font-size: 14px; }
+.env-card-temp { font-size: 30px; font-weight: 700; line-height: 1.1; letter-spacing: -0.02em; }
+.env-trend { font-size: 14px; color: var(--muted); }
+.env-card-sub { font-size: 12px; color: var(--muted); }
+.env-card-meta { display: flex; align-items: center; gap: 10px; font-size: 12px; margin-top: 2px; }
+.env-card-foot { font-size: 11px; color: var(--faint); margin-top: auto; }
+.env-dot { width: 12px; height: 12px; border-radius: 50%; flex: none; box-shadow: 0 0 0 3px rgba(255,255,255,0.04); }
+.env-card.tone-ok { border-left-color: var(--success); }
+.env-card.tone-ok .env-dot { background: var(--success); }
+.env-card.tone-warn { border-left-color: var(--warning); }
+.env-card.tone-warn .env-dot { background: var(--warning); }
+.env-card.tone-crit { border-left-color: var(--danger); }
+.env-card.tone-crit .env-dot { background: var(--danger); animation: env-pulse 1.4s ease-in-out infinite; }
+.env-card.tone-off { border-left-color: var(--faint); opacity: 0.82; }
+.env-card.tone-off .env-dot { background: var(--faint); }
+@keyframes env-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(210,58,42,0.5); } 50% { box-shadow: 0 0 0 6px rgba(210,58,42,0); } }
+
 /* ---- Laboratory Profile (Documents & Records) ---- */
 .lab-profile-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
 .lab-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-top: 14px; }
