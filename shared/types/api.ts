@@ -262,3 +262,5 @@ export type EnvSettings = { id:number; polling_enabled:number; default_poll_inte
 export type EnvEscalationRule = { id:number; name:string; severity:string; delay_minutes:number; channel:string; recipients?:string; is_active:number; created_at:string; updated_at?:string };
 export type EnvNotificationQueueItem = { id:number; alert_id?:number|null; rule_id?:number|null; rule_name?:string; channel:string; recipients?:string; subject?:string; body?:string; severity?:string; status:string; attempts:number; error?:string; scheduled_at?:string; sent_at?:string; created_at:string };
 export type EnvChannel = { key:string; label:string; ready:boolean };
+export type EnvInsight = { asset_id:number|null; asset_name:string; category:string; severity:string; message:string; recommendation?:string; maintenance:boolean };
+export type EnvReportType = { key:string; label:string };

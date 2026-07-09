@@ -2,12 +2,12 @@ import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip } from '../components/ui';
 import { useModules } from '../hooks/useModules';
-import { api } from '../services/api';
+import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import type {
   Department, Section, Location, Staff, EquipmentItem,
   EnvAsset, EnvDevice, EnvReading, EnvAlert, EnvExcursion, EnvDashboard, EnvSettings,
-  EnvEscalationRule, EnvNotificationQueueItem, EnvChannel,
+  EnvEscalationRule, EnvNotificationQueueItem, EnvChannel, EnvInsight, EnvReportType,
 } from '../../shared/types/api';
 
 const tabBar = (active: string, tabs: string[], onChange: (n: string) => void) =>
@@ -113,7 +113,7 @@ export function EnvironmentalMonitoringPage({ embedded = false }: { embedded?: b
 
   if (!enabled) return <DisabledModule />;
 
-  const TABS = ['Live Dashboard', 'Assets', 'Devices', 'Manual Entry', 'Alerts', 'Excursions', 'Notifications', 'Charts', 'Settings'];
+  const TABS = ['Live Dashboard', 'Assets', 'Devices', 'Manual Entry', 'Alerts', 'Excursions', 'Insights', 'Notifications', 'Charts', 'Reports', 'Settings'];
 
   return <div className="module-page env-mon">
     {!embedded && <PageHeader eyebrow="Facilities and Safety" title="Environmental Monitoring" subtitle="Manual and automated temperature/humidity monitoring, alarms and excursions." />}
@@ -133,7 +133,11 @@ export function EnvironmentalMonitoringPage({ embedded = false }: { embedded?: b
 
     {tab === 'Excursions' && <ExcursionsTab excursions={excursions} onChanged={() => { loadExcursions(); loadDashboard(); }} onError={setError} onFlash={flash} />}
 
+    {tab === 'Insights' && <InsightsTab onError={setError} onFlash={flash} />}
+
     {tab === 'Notifications' && <NotificationsTab onError={setError} onFlash={flash} />}
+
+    {tab === 'Reports' && <ReportsTab onError={setError} />}
 
     {tab === 'Charts' && <div>
       <div className="form-grid" style={{ marginBottom: 12 }}>
@@ -426,4 +430,75 @@ function NotificationsTab({ onError, onFlash }: any) {
       </tbody></table>
     </div>
   </>;
+}
+
+function InsightsTab({ onError, onFlash }: any) {
+  const [insights, setInsights] = useState<EnvInsight[]>([]);
+  const [loading, setLoading] = useState(true);
+  function load() { setLoading(true); api<EnvInsight[]>('/environmental/insights').then(setInsights).catch(() => setInsights([])).finally(() => setLoading(false)); }
+  useEffect(() => { load(); }, []);
+  async function createAction(i: EnvInsight) {
+    onError(null);
+    try { await api('/environmental/insights/create-action', { method: 'POST', body: JSON.stringify({ assetId: i.asset_id, title: `${i.asset_name}: ${i.category} follow-up`, description: `${i.message}${i.recommendation ? '\n\nRecommendation: ' + i.recommendation : ''}`, priority: i.severity === 'critical' ? 'high' : 'normal' }) }); onFlash('Action created in the Action Tracker.'); }
+    catch (e) { onError((e as Error).message); }
+  }
+  const maintenance = insights.filter(i => i.maintenance);
+  const observations = insights.filter(i => !i.maintenance);
+  const row = (i: EnvInsight, k: number) => <div key={k} className={`insight-row sev-${i.severity}`}>
+    <div className="insight-main"><strong>{i.asset_name}</strong> <span className="badge">{i.category}</span> {badge(i.severity)}<div>{i.message}</div>{i.recommendation && <div className="muted" style={{ marginTop: 2 }}>→ {i.recommendation}</div>}</div>
+    <button type="button" className="secondary" onClick={() => createAction(i)}>Create action</button>
+  </div>;
+  return <>
+    <div className="card">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><h3 style={{ margin: 0 }}>Dennis observations</h3><button className="secondary" onClick={load}>Re-analyse</button></div>
+      <p className="muted" style={{ marginTop: 4 }}>Automatic analysis of the last 30 days. These are recommendations only — nothing is changed automatically; you approve any action.</p>
+      {loading ? <p>Analysing…</p> : observations.length ? observations.map(row) : <p className="muted">No noteworthy patterns detected.</p>}
+    </div>
+    <div className="card" style={{ marginTop: 16 }}>
+      <h3>Predictive maintenance</h3>
+      <p className="muted" style={{ marginTop: 4 }}>Signals that suggest servicing before failure (recurrent excursions, unstable readings, battery, communication, calibration).</p>
+      {loading ? <p>Analysing…</p> : maintenance.length ? maintenance.map(row) : <p className="muted">No maintenance signals detected.</p>}
+    </div>
+  </>;
+}
+
+async function fetchAuthedBlob(path: string): Promise<Blob | null> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+  if (!res.ok) return null;
+  return res.blob();
+}
+
+function ReportsTab({ onError }: any) {
+  const [types, setTypes] = useState<EnvReportType[]>([]);
+  const [type, setType] = useState('summary');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  useEffect(() => { api<EnvReportType[]>('/environmental/reports').then(setTypes).catch(() => {}); }, []);
+  const qs = () => { const p = new URLSearchParams(); if (from) p.set('from', from); if (to) p.set('to', to); return p.toString() ? `?${p.toString()}` : ''; };
+  async function exportExcel() {
+    onError(null);
+    const blob = await fetchAuthedBlob(`/environmental/reports/${type}/export${qs()}`);
+    if (!blob) return onError('Could not generate the report.');
+    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `Environmental_${type}.xlsx`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+  async function printPdf() {
+    onError(null);
+    const blob = await fetchAuthedBlob(`/environmental/reports/${type}/print${qs()}`);
+    if (!blob) return onError('Could not generate the report.');
+    const url = URL.createObjectURL(blob); window.open(url, '_blank'); setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+  return <div className="card">
+    <h3>Reports</h3>
+    <p className="muted" style={{ marginTop: 0 }}>Generate environmental reports as Excel or printable PDF. Date range applies to time-based reports (readings, excursions, alarms, audit, summary).</p>
+    <div className="form-grid">
+      <label>Report<select value={type} onChange={e => setType(e.target.value)}>{types.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}</select></label>
+      <label>From<input type="date" value={from} onChange={e => setFrom(e.target.value)} /></label>
+      <label>To<input type="date" value={to} onChange={e => setTo(e.target.value)} /></label>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+        <button type="button" onClick={exportExcel}>Export Excel</button>
+        <button type="button" className="secondary" onClick={printPdf}>Print / PDF</button>
+      </div>
+    </div>
+  </div>;
 }
