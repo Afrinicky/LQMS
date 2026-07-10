@@ -9,6 +9,7 @@ import type {
   Department, PermissionMatrixData, TechnicalAuthorizationRow, StaffProfile,
   SectionConfigRow, SectionConfigDetail,
   LaboratoryDocument, QualityPolicy, QualityObjective,
+  EquipmentPattern, EquipmentSegment,
 } from '../../shared/types/api';
 
 // Maps an organogram position title to the lab role(s) whose default permissions
@@ -1568,8 +1569,109 @@ async function openLabFile(fileId: number) {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
-const LAB_TABS = ['Identity & Legal', 'Mission & Vision', 'Core Documents', 'Quality Policy & Objectives', 'Annual Objectives', 'Departments'] as const;
+const LAB_TABS = ['Identity & Legal', 'Mission & Vision', 'Core Documents', 'Quality Policy & Objectives', 'Annual Objectives', 'Departments', 'Equipment Numbering'] as const;
 type LabTab = typeof LAB_TABS[number];
+
+// ---------------------------------------------------------------------------
+// Equipment identifier pattern (laboratory configuration)
+// ---------------------------------------------------------------------------
+function renderPatternPreview(pattern: EquipmentPattern, year: number, seq: number): string {
+  return pattern.segments.map(seg => {
+    if (seg.type === 'text') return seg.value;
+    if (seg.type === 'year') return seg.digits === 2 ? String(year).slice(-2) : String(year);
+    return String(seq).padStart(seg.padding, '0');
+  }).join(pattern.separator);
+}
+
+function EquipmentNumbering() {
+  const [pattern, setPattern] = useState<EquipmentPattern>({ separator: '/', segments: [{ type: 'text', value: 'EQP' }, { type: 'year', digits: 4 }, { type: 'sequence', padding: 4 }] });
+  const [serverPreview, setServerPreview] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api<{ pattern: EquipmentPattern; preview: string }>('/equipment/config/id-pattern')
+      .then(r => { if (r.pattern?.segments?.length) setPattern(r.pattern); setServerPreview(r.preview); })
+      .catch(() => undefined);
+  }, []);
+
+  function update(next: EquipmentPattern) { setPattern(next); setSuccess(null); }
+  function setSeg(i: number, seg: EquipmentSegment) { update({ ...pattern, segments: pattern.segments.map((s, idx) => idx === i ? seg : s) }); }
+  function addSeg(type: EquipmentSegment['type']) {
+    const seg: EquipmentSegment = type === 'text' ? { type: 'text', value: '' } : type === 'year' ? { type: 'year', digits: 4 } : { type: 'sequence', padding: 4 };
+    update({ ...pattern, segments: [...pattern.segments, seg] });
+  }
+  function removeSeg(i: number) { update({ ...pattern, segments: pattern.segments.filter((_, idx) => idx !== i) }); }
+  function moveSeg(i: number, dir: -1 | 1) {
+    const j = i + dir; if (j < 0 || j >= pattern.segments.length) return;
+    const segs = [...pattern.segments]; [segs[i], segs[j]] = [segs[j], segs[i]]; update({ ...pattern, segments: segs });
+  }
+
+  const hasSequence = pattern.segments.some(s => s.type === 'sequence');
+  const livePreview = renderPatternPreview(pattern, new Date().getFullYear(), 1);
+
+  async function save() {
+    setError(null); setSuccess(null);
+    if (!hasSequence) { setError('The pattern must include a Sequence segment so every identifier stays unique.'); return; }
+    if (pattern.segments.some(s => s.type === 'text' && !s.value.trim())) { setError('Give every Text segment a value, or remove it.'); return; }
+    setBusy(true);
+    try {
+      const r = await api<{ pattern: EquipmentPattern; preview: string }>('/equipment/config/id-pattern', { method: 'PUT', body: JSON.stringify({ pattern }) });
+      setPattern(r.pattern); setServerPreview(r.preview); setSuccess('Saved. New equipment will use this pattern.');
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  return <div className="card">
+    <h3>Equipment identifier</h3>
+    <p>Define how each equipment's unique identifier is built. Add segments in order, choose a separator, and place the year wherever you like. The <strong>Sequence</strong> counter restarts at 1 each calendar year. Every new equipment gets the next identifier automatically; it can still be overridden on an individual equipment profile.</p>
+    {error && <div className="error">{error}</div>}
+    {success && <div className="notice-ok">{success}</div>}
+
+    <div className="form-grid" style={{ maxWidth: 320 }}>
+      <label>Separator<input value={pattern.separator} maxLength={3} onChange={e => update({ ...pattern, separator: e.target.value })} placeholder="/" /></label>
+    </div>
+
+    <table className="data-table" style={{ marginTop: 12 }}>
+      <thead><tr><th>#</th><th>Segment type</th><th>Value</th><th>Order</th><th></th></tr></thead>
+      <tbody>
+        {pattern.segments.map((seg, i) => <tr key={i}>
+          <td>{i + 1}</td>
+          <td>
+            <select value={seg.type} onChange={e => {
+              const t = e.target.value as EquipmentSegment['type'];
+              setSeg(i, t === 'text' ? { type: 'text', value: seg.type === 'text' ? seg.value : '' } : t === 'year' ? { type: 'year', digits: 4 } : { type: 'sequence', padding: 4 });
+            }}>
+              <option value="text">Text</option><option value="year">Year</option><option value="sequence">Sequence</option>
+            </select>
+          </td>
+          <td>
+            {seg.type === 'text' && <input value={seg.value} onChange={e => setSeg(i, { type: 'text', value: e.target.value })} placeholder="e.g. SECH" style={{ maxWidth: 160 }} />}
+            {seg.type === 'year' && <select value={seg.digits} onChange={e => setSeg(i, { type: 'year', digits: Number(e.target.value) === 2 ? 2 : 4 })}><option value={4}>4-digit (2026)</option><option value={2}>2-digit (26)</option></select>}
+            {seg.type === 'sequence' && <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>Padding <input type="number" min={1} max={8} value={seg.padding} onChange={e => setSeg(i, { type: 'sequence', padding: Math.min(8, Math.max(1, Number(e.target.value) || 1)) })} style={{ width: 64 }} /></label>}
+          </td>
+          <td>
+            <button type="button" className="secondary" disabled={i === 0} onClick={() => moveSeg(i, -1)} title="Move up">↑</button>{' '}
+            <button type="button" className="secondary" disabled={i === pattern.segments.length - 1} onClick={() => moveSeg(i, 1)} title="Move down">↓</button>
+          </td>
+          <td><button type="button" className="secondary" onClick={() => removeSeg(i)}>Remove</button></td>
+        </tr>)}
+      </tbody>
+    </table>
+    <div className="quick-actions" style={{ marginTop: 8 }}>
+      <button type="button" className="secondary" onClick={() => addSeg('text')}>+ Text</button>
+      <button type="button" className="secondary" onClick={() => addSeg('year')}>+ Year</button>
+      <button type="button" className="secondary" onClick={() => addSeg('sequence')}>+ Sequence</button>
+    </div>
+
+    <div className="notice" style={{ marginTop: 14 }}>
+      Preview (first item this year): <strong style={{ fontFamily: 'ui-monospace, monospace' }}>{livePreview || '—'}</strong>
+      {serverPreview && <> · next actual identifier: <strong style={{ fontFamily: 'ui-monospace, monospace' }}>{serverPreview}</strong></>}
+    </div>
+    <div style={{ marginTop: 12 }}><button type="button" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save pattern'}</button></div>
+  </div>;
+}
 
 // A small register that uploads and lists supporting documents for one category
 // (legal identity or the quality manual). Editing is confined to Settings.
@@ -1892,6 +1994,8 @@ export function MyLaboratory() {
         {departments.length === 0 && <tr><td colSpan={3} className="hint">No departments yet.</td></tr>}
       </tbody></table>
     </div>}
+
+    {tab === 'Equipment Numbering' && <EquipmentNumbering />}
 
     <div className="card" style={{ marginTop: 16 }}>
       {registrationComplete

@@ -1499,7 +1499,7 @@ export function commonRoutes() {
     audit(req, { action: 'deactivate', entity: 'technical_authorizations', entityId: req.params.id, oldValue: existing, newValue: { is_active: 0 } });
     res.json({ ok: true });
   });
-  router.get('/sections', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT id, name FROM sections WHERE is_active = 1 ORDER BY name').all()));
+  router.get('/sections', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT id, name, department_id FROM sections WHERE is_active = 1 ORDER BY name').all()));
 
   // =====================================================================
   // Section / Unit Configuration
