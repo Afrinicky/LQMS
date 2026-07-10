@@ -235,16 +235,19 @@ export function EquipmentPage() {
     </div></>}
 
     {tab === 'Equipment Register' && <div className="card">
-      <h3>Equipment register</h3>
+      <div className="section-head"><h3 style={{ margin: 0 }}>Equipment register</h3><span className="muted" style={{ fontSize: 13 }}>Click a row to open its profile.</span></div>
       {loading ? <p>Loading…</p> : equipment.length === 0 ? <p>No equipment items have been recorded yet.</p> :
-        <table className="table"><thead><tr><th>Identifier</th><th>Name</th><th>Category</th><th>Supplier</th><th>Status</th><th>Location</th><th>Maint. due</th><th>Cal. due</th></tr></thead><tbody>
+        <div style={{ overflowX: 'auto' }}>
+        <table className="table"><thead><tr><th>Identifier</th><th>Name</th><th>Serial no.</th><th>Model</th><th>Manufacturer</th><th>Supplier</th><th>Country</th><th>Condition</th><th>Received</th><th>In service</th><th>Location</th><th>Out of service</th><th>Status</th></tr></thead><tbody>
           {equipment.map(item => <tr key={item.id} className="row-clickable" style={{ cursor: 'pointer' }} onClick={() => openDetail(item.id)} title="Open equipment profile">
-            <td>{item.equipment_number}</td><td>{item.name}</td><td>{item.category || '—'}</td><td>{item.supplier_name || '—'}</td><td>{formatBadge(item.status)}</td>
+            <td>{item.equipment_number}</td><td>{item.name}</td><td>{item.serial_number || '—'}</td><td>{item.model || '—'}</td><td>{item.manufacturer || '—'}</td>
+            <td>{item.supplier_name || '—'}</td><td>{item.country_of_origin || '—'}</td><td>{item.condition_received || '—'}</td>
+            <td>{item.date_received || '—'}</td><td>{item.date_commissioned || '—'}</td>
             <td>{locations.find(l => l.id === item.location_id)?.name || '—'}</td>
-            <td>{item.next_maintenance_due || item.next_service_due || '—'}</td>
-            <td>{item.next_calibration_due || item.calibration_due_date || '—'}</td>
+            <td>{item.date_out_of_service || '—'}</td><td>{formatBadge(item.status)}</td>
           </tr>)}
-        </tbody></table>}
+        </tbody></table>
+        </div>}
     </div>}
 
     {tab === 'Equipment Profile' && (selected
