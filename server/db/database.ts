@@ -304,6 +304,42 @@ CREATE TABLE IF NOT EXISTS equipment_schedules (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT
 );
+-- Equipment adverse events (Phase 5): reportable incidents with investigation,
+-- corrective action, follow-up, retrospective impact and external reporting,
+-- linked into the nonconforming events & CAPA module.
+CREATE TABLE IF NOT EXISTS equipment_adverse_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  adverse_event_number TEXT NOT NULL UNIQUE,
+  equipment_id INTEGER NOT NULL REFERENCES equipment_items(id),
+  event_date TEXT NOT NULL,
+  reported_by_staff_id INTEGER REFERENCES staff(id),
+  event_type TEXT NOT NULL,
+  severity TEXT,
+  patient_harm TEXT,                        -- actual | potential | none
+  description TEXT NOT NULL,
+  immediate_action TEXT,
+  investigation TEXT,
+  investigated_by_staff_id INTEGER REFERENCES staff(id),
+  investigation_date TEXT,
+  corrective_action TEXT,
+  follow_up TEXT,
+  follow_up_date TEXT,
+  retrospective_impact_required INTEGER NOT NULL DEFAULT 0,
+  results_affected INTEGER NOT NULL DEFAULT 0,
+  affected_period_from TEXT,
+  affected_period_to TEXT,
+  retrospective_impact_summary TEXT,
+  reported_to_manufacturer INTEGER NOT NULL DEFAULT 0,
+  reported_to_authority INTEGER NOT NULL DEFAULT 0,
+  report_reference TEXT,
+  report_date TEXT,
+  nc_id INTEGER REFERENCES nonconforming_events(id),
+  capa_id INTEGER REFERENCES capa_records(id),
+  status TEXT NOT NULL DEFAULT 'open',       -- open | under_investigation | action_required | closed
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
 CREATE TABLE IF NOT EXISTS monitoring_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   item_code TEXT NOT NULL UNIQUE,
