@@ -2,12 +2,13 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, BarChart, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
-import { api } from '../services/api';
+import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import { EnvironmentalMonitoringPage } from './EnvironmentalMonitoringPage';
 import type {
   Location, Section, Department, Staff, Supplier, EquipmentItem, InventoryItem, MonitoringRecord, SafetyIncident,
   EquipmentMaintenanceRecord, EquipmentBreakdown, MonitoringItem, MonitoringReading,
+  EquipmentChecklistItem, EquipmentVerificationRecord, EquipmentCalibrationRecord, ReferenceStandard,
   InventoryBatch, OperationsSummary,
   SafetyEquipment, SafetyInspection, WasteDisposalRecord, HazardousChemical, StaffImmunization, FacilitiesSafetySummary,
   StorageInspection
@@ -37,7 +38,18 @@ function staffName(staffList: Staff[], id?: number | null) {
 }
 
 // ============= EQUIPMENT =============
-type EquipmentDetail = EquipmentItem & { maintenance?: EquipmentMaintenanceRecord[]; breakdowns?: EquipmentBreakdown[]; links?: any[] };
+type EquipmentDetail = EquipmentItem & { maintenance?: EquipmentMaintenanceRecord[]; breakdowns?: EquipmentBreakdown[]; verifications?: EquipmentVerificationRecord[]; calibrations?: EquipmentCalibrationRecord[]; links?: any[] };
+
+// Upload a file to the shared store; returns its numeric id as a string, or null.
+async function uploadEquipFile(file: File | null): Promise<string | null> {
+  if (!file) return null;
+  const fd = new FormData(); fd.append('file', file);
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/files`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({ error: res.statusText }))).error ?? res.statusText);
+  return String((await res.json()).id);
+}
+const RESPONSE_OPTIONS = [{ v: 'yes', l: 'Yes' }, { v: 'no', l: 'No' }, { v: 'na', l: 'N/A' }];
 
 const emptyEquipForm = {
   equipmentNumber: '', name: '', category: '', equipmentType: '', manufacturer: '', model: '', serialNumber: '',
@@ -190,7 +202,7 @@ export function EquipmentPage() {
   return <div>
     <PageHeader eyebrow="Equipment Management" title="Equipment Management" subtitle="Asset register, maintenance, calibration, and breakdown tracking." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
-    {tabBar(tab, ['Dashboard', 'Equipment Register', 'Equipment Profile', 'New Equipment', 'Maintenance Records', 'Breakdowns', 'Reports placeholder'], setTab)}
+    {tabBar(tab, ['Dashboard', 'Equipment Register', 'Equipment Profile', 'New Equipment', 'Verification & Validation', 'Calibration', 'Maintenance Records', 'Breakdowns', 'Reports placeholder'], setTab)}
 
     {tab === 'Dashboard' && <><KpiStrip items={[
       { label: 'Equipment items', value: summary?.equipmentTotal ?? equipment.length, onClick: () => setTab('Equipment Register') },
@@ -266,6 +278,10 @@ export function EquipmentPage() {
         <button type="submit">Save equipment</button>
       </form>
     </div>}
+
+    {tab === 'Verification & Validation' && <EquipmentLifecycleTab kind="verification" equipment={equipment} staff={staff} setError={setError} onChanged={reloadSelected} />}
+
+    {tab === 'Calibration' && <><EquipmentLifecycleTab kind="calibration" equipment={equipment} staff={staff} setError={setError} onChanged={reloadSelected} /><ReferenceStandardsPanel staff={staff} setError={setError} /></>}
 
     {tab === 'Maintenance Records' && <div className="card">
       <h3>Add maintenance record</h3>
@@ -465,8 +481,217 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
           {b.status !== 'returned_to_service' && b.status !== 'closed' && <button type="button" className="secondary" onClick={() => returnToService(b.id)}>Return to service</button>}
         </td></tr>)}
     </tbody></table>}
+    <h4>Verification &amp; validation</h4>
+    {!item.verifications?.length ? <p className="muted">No verification or validation records.</p> : <table className="table"><thead><tr><th>No.</th><th>Type</th><th>Date</th><th>Outcome</th><th>Reviewed</th><th>Status</th></tr></thead><tbody>
+      {item.verifications.map(v => <tr key={v.id}><td>{v.verification_number}</td><td>{v.verification_type}</td><td>{v.performed_date}</td><td>{v.outcome ? formatBadge(v.outcome) : '—'}</td><td>{v.review_outcome || '—'}</td><td>{formatBadge(v.status)}</td></tr>)}
+    </tbody></table>}
+    <h4>Calibration</h4>
+    {!item.calibrations?.length ? <p className="muted">No calibration records.</p> : <table className="table"><thead><tr><th>No.</th><th>Date</th><th>Mode</th><th>Result</th><th>Next due</th><th>Status</th></tr></thead><tbody>
+      {item.calibrations.map(c => <tr key={c.id}><td>{c.calibration_number}</td><td>{c.calibration_date}</td><td>{c.calibration_mode || '—'}</td><td>{c.result ? formatBadge(c.result) : '—'}</td><td>{c.next_due_date || '—'}</td><td>{formatBadge(c.status)}</td></tr>)}
+    </tbody></table>}
     <h4>Linked records</h4>
     {!item.links?.length ? <p className="muted">No linked records.</p> : <ul>{item.links.map((l: any) => <li key={l.id}>{l.source_module_key}/{l.source_record_type}#{l.source_record_id} → {l.target_module_key}/{l.target_record_type}#{l.target_record_id}{l.notes ? ` (${l.notes})` : ''}</li>)}</ul>}
+  </div>;
+}
+
+// Verification/validation and calibration share one workflow: pick an item, run
+// an editable checklist with evidence, record structured detail, then review.
+function EquipmentLifecycleTab({ kind, equipment, staff, setError, onChanged }: { kind: 'verification' | 'calibration'; equipment: EquipmentItem[]; staff: Staff[]; setError: (m: string | null) => void; onChanged: () => void }) {
+  const isVer = kind === 'verification';
+  const checklistType = isVer ? 'verification_validation' : 'calibration';
+  const recordsPath = isVer ? 'verifications' : 'calibrations';
+  const [items, setItems] = useState<EquipmentChecklistItem[]>([]);
+  const [equipId, setEquipId] = useState('');
+  const [records, setRecords] = useState<any[]>([]);
+  const [responses, setResponses] = useState<Record<number, { response: string; notes: string; file: File | null }>>({});
+  const [recordFile, setRecordFile] = useState<File | null>(null);
+  const [refStandards, setRefStandards] = useState<ReferenceStandard[]>([]);
+  const [openRecord, setOpenRecord] = useState<any | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [showConfig, setShowConfig] = useState(false);
+  const [newPrompt, setNewPrompt] = useState('');
+  const blankForm = { verificationType: 'verification', performedDate: '', performedByStaffId: '', outcome: '', conclusion: '', calibrationDate: '', calibrationMode: 'internal', provider: '', certificateNumber: '', traceabilityReference: '', referenceStandardId: '', result: '', nextDueDate: '', verifiedBeforeUse: false, notes: '' };
+  const [form, setForm] = useState(blankForm);
+
+  function loadItems() { api<EquipmentChecklistItem[]>(`/equipment/checklists/${checklistType}`).then(setItems).catch(() => setItems([])); }
+  useEffect(() => { loadItems(); if (!isVer) api<ReferenceStandard[]>('/equipment/reference-standards').then(setRefStandards).catch(() => setRefStandards([])); }, [kind]);
+  useEffect(() => { if (equipId) api<any[]>(`/equipment/${equipId}/${recordsPath}`).then(setRecords).catch(() => setRecords([])); else setRecords([]); }, [equipId, kind]);
+
+  function setResp(itemId: number, patch: Partial<{ response: string; notes: string; file: File | null }>) {
+    setResponses(prev => ({ ...prev, [itemId]: { response: '', notes: '', file: null, ...prev[itemId], ...patch } }));
+  }
+
+  async function submit(e: FormEvent) {
+    e.preventDefault(); setError(null);
+    if (!equipId) { setError('Select an equipment item.'); return; }
+    if (isVer ? !form.performedDate : !form.calibrationDate) { setError('Enter the date.'); return; }
+    setBusy(true);
+    try {
+      const evidenceFileId = await uploadEquipFile(recordFile);
+      const responseList = [];
+      for (const it of items) {
+        const r = responses[it.id];
+        const fid = await uploadEquipFile(r?.file ?? null);
+        responseList.push({ itemId: it.id, prompt: it.prompt, response: r?.response || null, notes: r?.notes || null, evidenceFileId: fid });
+      }
+      const payload = isVer
+        ? { verificationType: form.verificationType, performedDate: form.performedDate, performedByStaffId: form.performedByStaffId, outcome: form.outcome, conclusion: form.conclusion, notes: form.notes, evidenceFileId, responses: responseList }
+        : { calibrationDate: form.calibrationDate, calibrationMode: form.calibrationMode, provider: form.provider, certificateNumber: form.certificateNumber, traceabilityReference: form.traceabilityReference, referenceStandardId: form.referenceStandardId, result: form.result, nextDueDate: form.nextDueDate, verifiedBeforeUse: form.verifiedBeforeUse, performedByStaffId: form.performedByStaffId, notes: form.notes, evidenceFileId, responses: responseList };
+      await api(`/equipment/${equipId}/${recordsPath}`, { method: 'POST', body: JSON.stringify(payload) });
+      setForm(blankForm); setResponses({}); setRecordFile(null);
+      const list = await api<any[]>(`/equipment/${equipId}/${recordsPath}`); setRecords(list);
+      onChanged();
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  async function openDetail(id: number) {
+    try { setOpenRecord(await api<any>(`/equipment/${recordsPath}/${id}`)); }
+    catch (e) { setError((e as Error).message); }
+  }
+  async function review(id: number, outcome: string) {
+    try {
+      await api(`/equipment/${recordsPath}/${id}/review`, { method: 'POST', body: JSON.stringify({ reviewOutcome: outcome }) });
+      const list = await api<any[]>(`/equipment/${equipId}/${recordsPath}`); setRecords(list);
+      if (openRecord?.id === id) await openDetail(id);
+    } catch (e) { setError((e as Error).message); }
+  }
+  async function addItem() {
+    if (!newPrompt.trim()) return;
+    try { await api(`/equipment/checklists/${checklistType}`, { method: 'POST', body: JSON.stringify({ prompt: newPrompt.trim() }) }); setNewPrompt(''); loadItems(); }
+    catch (e) { setError((e as Error).message); }
+  }
+  async function retireItem(it: EquipmentChecklistItem) {
+    try { await api(`/equipment/checklists/items/${it.id}`, { method: 'PUT', body: JSON.stringify({ isActive: 0 }) }); loadItems(); }
+    catch (e) { setError((e as Error).message); }
+  }
+  async function saveItemPrompt(it: EquipmentChecklistItem, prompt: string) {
+    try { await api(`/equipment/checklists/items/${it.id}`, { method: 'PUT', body: JSON.stringify({ prompt }) }); loadItems(); }
+    catch (e) { setError((e as Error).message); }
+  }
+
+  return <div className="card">
+    <div className="section-head" style={{ alignItems: 'center' }}>
+      <h3 style={{ margin: 0 }}>{isVer ? 'Verification & validation' : 'Calibration'}</h3>
+      <button type="button" className="secondary" style={{ marginLeft: 'auto' }} onClick={() => setShowConfig(v => !v)}>{showConfig ? 'Done configuring' : 'Configure checklist'}</button>
+    </div>
+    <p className="muted" style={{ marginTop: 0 }}>{isVer
+      ? 'Record verification or validation before use, answering the review checklist and attaching evidence. Records are reviewed and approved by an authorised person.'
+      : 'Record calibration (internal or external), capture metrological traceability, answer the review checklist with evidence, and review before the item returns to use.'}</p>
+
+    {showConfig && <div className="card" style={{ background: 'var(--surface-2, #f6f8f9)' }}>
+      <h4 style={{ marginTop: 0 }}>Checklist questions</h4>
+      <p className="muted" style={{ marginTop: 0 }}>These questions are yours to edit — change the wording, add your own, or retire ones you don't use. They are starter content only.</p>
+      <table className="data-table"><thead><tr><th>#</th><th>Question</th><th></th></tr></thead><tbody>
+        {items.map((it, i) => <tr key={it.id}>
+          <td>{i + 1}</td>
+          <td><input defaultValue={it.prompt} style={{ width: '100%' }} onBlur={e => { if (e.target.value.trim() && e.target.value !== it.prompt) saveItemPrompt(it, e.target.value.trim()); }} /></td>
+          <td><button type="button" className="secondary" onClick={() => retireItem(it)}>Retire</button></td>
+        </tr>)}
+        {items.length === 0 && <tr><td colSpan={3} className="muted">No active questions.</td></tr>}
+      </tbody></table>
+      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        <input placeholder="Add a question…" value={newPrompt} onChange={e => setNewPrompt(e.target.value)} style={{ flex: 1 }} />
+        <button type="button" onClick={addItem}>Add</button>
+      </div>
+    </div>}
+
+    <form className="form" onSubmit={submit} style={{ marginTop: 12 }}>
+      <label>Equipment<select value={equipId} onChange={e => setEquipId(e.target.value)} required><option value="">Select equipment</option>{equipment.map(e2 => <option key={e2.id} value={e2.id}>{e2.equipment_number} — {e2.name}</option>)}</select></label>
+      {isVer ? <>
+        <label>Type<select value={form.verificationType} onChange={e => setForm({ ...form, verificationType: e.target.value })}><option value="verification">Verification</option><option value="validation">Validation</option></select></label>
+        <label>Date performed<input type="date" value={form.performedDate} onChange={e => setForm({ ...form, performedDate: e.target.value })} required /></label>
+        <label>Performed by<select value={form.performedByStaffId} onChange={e => setForm({ ...form, performedByStaffId: e.target.value })}><option value="">Select staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        <label>Outcome<select value={form.outcome} onChange={e => setForm({ ...form, outcome: e.target.value })}><option value="">—</option><option value="pass">Pass</option><option value="conditional">Conditional</option><option value="fail">Fail</option></select></label>
+        <label>Conclusion<textarea value={form.conclusion} onChange={e => setForm({ ...form, conclusion: e.target.value })} /></label>
+      </> : <>
+        <label>Calibration date<input type="date" value={form.calibrationDate} onChange={e => setForm({ ...form, calibrationDate: e.target.value })} required /></label>
+        <label>Mode<select value={form.calibrationMode} onChange={e => setForm({ ...form, calibrationMode: e.target.value })}><option value="internal">Internal (in-house)</option><option value="external">External (offsite)</option></select></label>
+        <label>Provider<input value={form.provider} onChange={e => setForm({ ...form, provider: e.target.value })} placeholder="Calibration provider" /></label>
+        <label>Certificate number<input value={form.certificateNumber} onChange={e => setForm({ ...form, certificateNumber: e.target.value })} /></label>
+        <label>Traceability reference<input value={form.traceabilityReference} onChange={e => setForm({ ...form, traceabilityReference: e.target.value })} placeholder="e.g. national standard / CRM" /></label>
+        <label>Reference standard used<select value={form.referenceStandardId} onChange={e => setForm({ ...form, referenceStandardId: e.target.value })}><option value="">—</option>{refStandards.map(r => <option key={r.id} value={r.id}>{r.reference_number} — {r.name}</option>)}</select></label>
+        <label>Result<select value={form.result} onChange={e => setForm({ ...form, result: e.target.value })}><option value="">—</option><option value="pass">Pass</option><option value="fail">Fail</option><option value="adjusted">Adjusted</option></select></label>
+        <label>Next calibration due<input type="date" value={form.nextDueDate} onChange={e => setForm({ ...form, nextDueDate: e.target.value })} /></label>
+        <label>Performed by<select value={form.performedByStaffId} onChange={e => setForm({ ...form, performedByStaffId: e.target.value })}><option value="">Select staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        <label className="check-inline"><input type="checkbox" checked={form.verifiedBeforeUse} onChange={e => setForm({ ...form, verifiedBeforeUse: e.target.checked })} /> Verified before use (external calibration)</label>
+      </>}
+
+      {items.length > 0 && <div style={{ gridColumn: '1 / -1' }}>
+        <h4>Review checklist</h4>
+        {items.map(it => <div key={it.id} className="checklist-row" style={{ borderTop: '1px solid var(--line, #e7ebed)', padding: '10px 0' }}>
+          <div style={{ fontSize: 14, marginBottom: 6 }}>{it.prompt}</div>
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 10 }}>{RESPONSE_OPTIONS.map(o => <label key={o.v} className="check-inline" style={{ fontSize: 13 }}><input type="radio" name={`resp-${kind}-${it.id}`} checked={responses[it.id]?.response === o.v} onChange={() => setResp(it.id, { response: o.v })} /> {o.l}</label>)}</div>
+            <input placeholder="Notes" value={responses[it.id]?.notes ?? ''} onChange={e => setResp(it.id, { notes: e.target.value })} style={{ flex: 1, minWidth: 160 }} />
+            <label style={{ fontSize: 12 }} className="muted">Evidence <input type="file" onChange={e => setResp(it.id, { file: e.target.files?.[0] ?? null })} /></label>
+          </div>
+        </div>)}
+      </div>}
+
+      <label>Overall evidence / report<input type="file" onChange={e => setRecordFile(e.target.files?.[0] ?? null)} /></label>
+      <label>Notes<textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
+      <button type="submit" disabled={busy}>{busy ? 'Saving…' : `Record ${isVer ? 'verification' : 'calibration'}`}</button>
+    </form>
+
+    {equipId && <div style={{ marginTop: 16 }}>
+      <h4>Records for this equipment</h4>
+      {records.length === 0 ? <p className="muted">No records yet.</p> : <table className="table"><thead><tr><th>No.</th><th>Date</th><th>{isVer ? 'Outcome' : 'Result'}</th><th>Review</th><th>Status</th><th></th></tr></thead><tbody>
+        {records.map(r => <tr key={r.id}>
+          <td>{r.verification_number || r.calibration_number}</td>
+          <td>{r.performed_date || r.calibration_date}</td>
+          <td>{(r.outcome || r.result) ? formatBadge(r.outcome || r.result) : '—'}</td>
+          <td>{r.review_outcome || '—'}</td>
+          <td>{formatBadge(r.status)}</td>
+          <td>
+            <button type="button" className="secondary" onClick={() => openDetail(r.id)}>Open</button>{' '}
+            {r.status !== 'reviewed' && <button type="button" className="secondary" onClick={() => review(r.id, isVer ? 'approved' : 'accepted')}>Review &amp; {isVer ? 'approve' : 'accept'}</button>}
+          </td>
+        </tr>)}
+      </tbody></table>}
+    </div>}
+
+    {openRecord && <div className="card" style={{ marginTop: 14, background: 'var(--surface-2, #f6f8f9)' }}>
+      <div className="section-head"><h4 style={{ margin: 0 }}>{openRecord.verification_number || openRecord.calibration_number}</h4><button type="button" className="secondary" onClick={() => setOpenRecord(null)}>Close</button></div>
+      <table className="table"><thead><tr><th>Question</th><th>Response</th><th>Notes</th><th>Evidence</th></tr></thead><tbody>
+        {(openRecord.responses || []).map((r: any) => <tr key={r.id}><td>{r.prompt}</td><td>{r.response ? formatBadge(r.response) : '—'}</td><td>{r.notes || '—'}</td><td>{r.evidence_file_id ? <a href={`${API_BASE}/files/${r.evidence_file_id}/raw`} target="_blank" rel="noreferrer">file</a> : '—'}</td></tr>)}
+        {(!openRecord.responses || openRecord.responses.length === 0) && <tr><td colSpan={4} className="muted">No checklist responses recorded.</td></tr>}
+      </tbody></table>
+    </div>}
+  </div>;
+}
+
+function ReferenceStandardsPanel({ staff, setError }: { staff: Staff[]; setError: (m: string | null) => void }) {
+  const [rows, setRows] = useState<ReferenceStandard[]>([]);
+  const blank = { name: '', standardType: 'certified_reference_material', identifier: '', certificateNumber: '', traceableTo: '', validFrom: '', validUntil: '', custodianStaffId: '', notes: '' };
+  const [form, setForm] = useState(blank);
+  function load() { api<ReferenceStandard[]>('/equipment/reference-standards').then(setRows).catch(() => setRows([])); }
+  useEffect(() => { load(); }, []);
+  async function submit(e: FormEvent) {
+    e.preventDefault(); setError(null);
+    if (!form.name) { setError('Enter a name.'); return; }
+    try { await api('/equipment/reference-standards', { method: 'POST', body: JSON.stringify(form) }); setForm(blank); load(); }
+    catch (e) { setError((e as Error).message); }
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  return <div className="card" style={{ marginTop: 16 }}>
+    <h3>Reference standards &amp; certified reference materials</h3>
+    <p className="muted" style={{ marginTop: 0 }}>The reference materials and instruments (certified thermometer, tachometer, CRMs) that underpin in-house calibration and metrological traceability.</p>
+    <form className="form" onSubmit={submit}>
+      <label>Name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></label>
+      <label>Type<select value={form.standardType} onChange={e => setForm({ ...form, standardType: e.target.value })}><option value="certified_reference_material">Certified reference material</option><option value="reference_instrument">Reference instrument</option><option value="other">Other</option></select></label>
+      <label>Identifier / serial<input value={form.identifier} onChange={e => setForm({ ...form, identifier: e.target.value })} /></label>
+      <label>Certificate number<input value={form.certificateNumber} onChange={e => setForm({ ...form, certificateNumber: e.target.value })} /></label>
+      <label>Traceable to<input value={form.traceableTo} onChange={e => setForm({ ...form, traceableTo: e.target.value })} placeholder="e.g. national metrology institute" /></label>
+      <label>Valid from<input type="date" value={form.validFrom} onChange={e => setForm({ ...form, validFrom: e.target.value })} /></label>
+      <label>Valid until<input type="date" value={form.validUntil} onChange={e => setForm({ ...form, validUntil: e.target.value })} /></label>
+      <label>Custodian<select value={form.custodianStaffId} onChange={e => setForm({ ...form, custodianStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+      <button type="submit">Add reference standard</button>
+    </form>
+    <table className="table" style={{ marginTop: 12 }}><thead><tr><th>No.</th><th>Name</th><th>Type</th><th>Certificate</th><th>Traceable to</th><th>Valid until</th></tr></thead><tbody>
+      {rows.map(r => { const expired = r.valid_until && r.valid_until < today; return <tr key={r.id}><td>{r.reference_number}</td><td>{r.name}</td><td>{(r.standard_type || '').replace(/_/g, ' ')}</td><td>{r.certificate_number || '—'}</td><td>{r.traceable_to || '—'}</td><td>{r.valid_until || '—'}{expired && <span className="badge danger">expired</span>}</td></tr>; })}
+      {rows.length === 0 && <tr><td colSpan={6} className="muted">No reference standards recorded.</td></tr>}
+    </tbody></table>
   </div>;
 }
 

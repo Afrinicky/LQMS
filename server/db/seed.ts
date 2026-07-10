@@ -380,6 +380,31 @@ export function seedDefaults() {
       }
     }
 
+    // Equipment lifecycle checklist starter questions. Seeded once per type and
+    // never overwritten — the laboratory edits, adds to, or retires them freely.
+    const equipmentChecklists: Array<{ type: string; prompts: string[] }> = [
+      { type: 'verification_validation', prompts: [
+        'Has validation information been obtained from the manufacturer as part of the verification?',
+        'Have performance characteristics been appropriately selected and evaluated as per intended use?',
+        'Were the verification studies appropriate and adequate?',
+        'Was the analysis of data appropriate for the selected performance characteristics?',
+        'Have the verification results and reports been reviewed and approved by an authorised person?',
+      ] },
+      { type: 'calibration', prompts: [
+        'Is routine calibration of laboratory measuring equipment scheduled, at minimum following the manufacturer’s recommendations?',
+        'When routine calibration is performed offsite (externally), are there records of verification before use?',
+        'Is information on metrological traceability (e.g. reference materials, certified thermometer, tachometer) available?',
+        'Is there evidence of review of calibration records by the laboratory before acceptance back into use?',
+        'Where traceability using an accredited calibration laboratory is not possible, are certified reference materials, examination/calibration by another procedure, or mutual-consent standards used for in-house calibrations?',
+      ] },
+    ];
+    const equipItemCount = db.prepare('SELECT COUNT(*) AS c FROM equipment_checklist_items WHERE checklist_type = ?');
+    const insertEquipItem = db.prepare('INSERT INTO equipment_checklist_items (checklist_type, prompt, sort_order, is_active, created_by) VALUES (?, ?, ?, 1, NULL)');
+    for (const c of equipmentChecklists) {
+      if ((equipItemCount.get(c.type) as { c: number }).c > 0) continue; // already seeded — keep editor changes
+      c.prompts.forEach((p, i) => insertEquipItem.run(c.type, p, i));
+    }
+
     const defaultTemplates: Array<{ code: string; name: string; type: string; module: string; format: string; description: string }> = [
       { code: 'RPTT-NCCAPA-OPEN', name: 'Open NC/CAPA register', type: 'register', module: 'nc_capa', format: 'csv', description: 'Open NC events list for the period.' },
       { code: 'RPTT-COMPLAINTS-PERIOD', name: 'Complaints in period', type: 'register', module: 'complaints', format: 'html', description: 'Complaints received within the period.' },

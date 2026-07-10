@@ -197,6 +197,91 @@ CREATE TABLE IF NOT EXISTS equipment_breakdowns (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT
 );
+-- Equipment lifecycle: verification/validation, calibration and their editable
+-- checklist question bank (Phase 3). No standard clause is hard-coded; the
+-- question bank is seeded once with starter prompts the laboratory can edit.
+CREATE TABLE IF NOT EXISTS equipment_checklist_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  checklist_type TEXT NOT NULL,            -- 'verification_validation' | 'calibration' (extensible)
+  prompt TEXT NOT NULL,
+  guidance TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS equipment_checklist_responses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  record_type TEXT NOT NULL,               -- 'verification' | 'calibration'
+  record_id INTEGER NOT NULL,
+  item_id INTEGER REFERENCES equipment_checklist_items(id),
+  prompt TEXT NOT NULL,                     -- prompt snapshot so later edits don't rewrite history
+  response TEXT,                            -- 'yes' | 'no' | 'na'
+  notes TEXT,
+  evidence_file_id INTEGER REFERENCES files(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS equipment_verifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  verification_number TEXT NOT NULL UNIQUE,
+  equipment_id INTEGER NOT NULL REFERENCES equipment_items(id),
+  verification_type TEXT NOT NULL DEFAULT 'verification',   -- verification | validation
+  performed_by_staff_id INTEGER REFERENCES staff(id),
+  performed_date TEXT NOT NULL,
+  conclusion TEXT,
+  outcome TEXT,                             -- pass | conditional | fail
+  reviewed_by_staff_id INTEGER REFERENCES staff(id),
+  reviewed_at TEXT,
+  review_outcome TEXT,                      -- approved | rejected
+  status TEXT NOT NULL DEFAULT 'completed', -- completed | reviewed
+  evidence_file_id INTEGER REFERENCES files(id),
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS reference_standards (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  reference_number TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  standard_type TEXT,                       -- certified_reference_material | reference_instrument | other
+  identifier TEXT,
+  certificate_number TEXT,
+  traceable_to TEXT,
+  valid_from TEXT,
+  valid_until TEXT,
+  custodian_staff_id INTEGER REFERENCES staff(id),
+  status TEXT NOT NULL DEFAULT 'active',
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS equipment_calibrations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  calibration_number TEXT NOT NULL UNIQUE,
+  equipment_id INTEGER NOT NULL REFERENCES equipment_items(id),
+  calibration_date TEXT NOT NULL,
+  calibration_mode TEXT,                    -- internal | external
+  provider TEXT,
+  certificate_number TEXT,
+  traceability_reference TEXT,
+  reference_standard_id INTEGER REFERENCES reference_standards(id),
+  result TEXT,                              -- pass | fail | adjusted
+  next_due_date TEXT,
+  verified_before_use INTEGER,              -- for externally-calibrated items returned to use
+  performed_by_staff_id INTEGER REFERENCES staff(id),
+  reviewed_by_staff_id INTEGER REFERENCES staff(id),
+  reviewed_at TEXT,
+  review_outcome TEXT,                      -- accepted | rejected
+  status TEXT NOT NULL DEFAULT 'completed', -- completed | reviewed
+  evidence_file_id INTEGER REFERENCES files(id),
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
 CREATE TABLE IF NOT EXISTS monitoring_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   item_code TEXT NOT NULL UNIQUE,
