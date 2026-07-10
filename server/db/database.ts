@@ -120,6 +120,14 @@ CREATE TABLE IF NOT EXISTS dennis_settings (id INTEGER PRIMARY KEY AUTOINCREMENT
   if (!equipmentNames.has('date_commissioned')) database.exec('ALTER TABLE equipment_items ADD COLUMN date_commissioned TEXT');
   if (!equipmentNames.has('calibration_required')) database.exec('ALTER TABLE equipment_items ADD COLUMN calibration_required INTEGER NOT NULL DEFAULT 0');
   if (!equipmentNames.has('notes')) database.exec('ALTER TABLE equipment_items ADD COLUMN notes TEXT');
+  // Phase 2 upgrade: fuller equipment records (supplier, provenance, service dates, criticality)
+  if (!equipmentNames.has('supplier_name')) database.exec('ALTER TABLE equipment_items ADD COLUMN supplier_name TEXT');
+  if (!equipmentNames.has('supplier_location')) database.exec('ALTER TABLE equipment_items ADD COLUMN supplier_location TEXT');
+  if (!equipmentNames.has('supplier_contact')) database.exec('ALTER TABLE equipment_items ADD COLUMN supplier_contact TEXT');
+  if (!equipmentNames.has('country_of_origin')) database.exec('ALTER TABLE equipment_items ADD COLUMN country_of_origin TEXT');
+  if (!equipmentNames.has('condition_received')) database.exec('ALTER TABLE equipment_items ADD COLUMN condition_received TEXT');
+  if (!equipmentNames.has('date_out_of_service')) database.exec('ALTER TABLE equipment_items ADD COLUMN date_out_of_service TEXT');
+  if (!equipmentNames.has('criticality')) database.exec('ALTER TABLE equipment_items ADD COLUMN criticality TEXT');
 
   // Phase 3: extend inventory_items
   const inventoryColumns = database.prepare("PRAGMA table_info(inventory_items)").all() as Array<{ name: string }>;

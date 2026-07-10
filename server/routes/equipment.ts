@@ -3,6 +3,7 @@ import { getDb } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
+import { generateEquipmentNumber, previewEquipmentNumber, getEquipmentPattern, saveEquipmentPattern } from '../utils/equipmentNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 
 const BREAKDOWN_STATUSES = ['open', 'under_repair', 'action_required', 'returned_to_service', 'closed'];
@@ -14,6 +15,28 @@ export function equipmentRoutes() {
   router.get('/', requirePermission('equipment', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT * FROM equipment_items ORDER BY created_at DESC').all());
+  });
+
+  // --- Configurable unique-identifier pattern (registered before '/:id') ---
+  router.get('/config/id-pattern', requirePermission('equipment', 'view'), (_req, res) => {
+    const db = getDb();
+    res.json({ pattern: getEquipmentPattern(db), preview: previewEquipmentNumber(db) });
+  });
+
+  router.put('/config/id-pattern', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    try {
+      const saved = saveEquipmentPattern(db, req.body?.pattern ?? req.body);
+      audit(req, { action: 'edit', entity: 'settings', entityId: 'equipment_id_pattern', newValue: saved });
+      res.json({ pattern: saved, preview: previewEquipmentNumber(db) });
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+
+  // Preview the identifier the next new item would receive.
+  router.get('/config/next-number', requirePermission('equipment', 'view'), (_req, res) => {
+    res.json({ number: previewEquipmentNumber(getDb()) });
   });
 
   router.get('/:id', requirePermission('equipment', 'view'), (req, res) => {
@@ -33,10 +56,17 @@ export function equipmentRoutes() {
     if (!EQUIPMENT_STATUSES.includes(req.body.status)) return res.status(400).json({ error: `status must be one of: ${EQUIPMENT_STATUSES.join(', ')}` });
     const db = getDb();
     const createdAt = new Date().toISOString();
-    const equipmentNumber = generateRecordNumber(db, 'equipment_items', 'EQP', createdAt);
+    // Use the caller's identifier when supplied (manual override), otherwise
+    // generate the next one from the configured pattern.
+    const equipmentNumber = (typeof req.body.equipmentNumber === 'string' && req.body.equipmentNumber.trim())
+      ? req.body.equipmentNumber.trim()
+      : generateEquipmentNumber(db, createdAt);
+    if (db.prepare('SELECT 1 FROM equipment_items WHERE equipment_number = ?').get(equipmentNumber)) {
+      return res.status(409).json({ error: `Equipment identifier ${equipmentNumber} is already in use.` });
+    }
     const responsibleStaffId = parseIntNullable(req.body.responsibleStaffId ?? req.body.assignedToStaffId);
     const nextMaintenanceDue = req.body.nextMaintenanceDue ?? req.body.nextServiceDue ?? null;
-    const result = db.prepare(`INSERT INTO equipment_items (equipment_number, name, category, manufacturer, model, serial_number, location_id, department_id, section_id, status, calibration_due_date, last_service_date, next_service_due, assigned_to_staff_id, equipment_type, maintenance_frequency, calibration_frequency, next_maintenance_due, next_calibration_due, responsible_staff_id, date_received, date_commissioned, calibration_required, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    const result = db.prepare(`INSERT INTO equipment_items (equipment_number, name, category, manufacturer, model, serial_number, location_id, department_id, section_id, status, calibration_due_date, last_service_date, next_service_due, assigned_to_staff_id, equipment_type, maintenance_frequency, calibration_frequency, next_maintenance_due, next_calibration_due, responsible_staff_id, date_received, date_commissioned, calibration_required, notes, supplier_name, supplier_location, supplier_contact, country_of_origin, condition_received, date_out_of_service, criticality, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(
         equipmentNumber,
         req.body.name,
@@ -59,9 +89,16 @@ export function equipmentRoutes() {
         req.body.nextCalibrationDue ?? req.body.calibrationDueDate ?? null,
         responsibleStaffId,
         req.body.dateReceived ?? null,
-        req.body.dateCommissioned ?? null,
+        req.body.dateCommissioned ?? req.body.dateInService ?? null,
         req.body.calibrationRequired ? 1 : 0,
         req.body.notes ?? null,
+        req.body.supplierName ?? null,
+        req.body.supplierLocation ?? null,
+        req.body.supplierContact ?? null,
+        req.body.countryOfOrigin ?? null,
+        req.body.conditionReceived ?? null,
+        req.body.dateOutOfService ?? null,
+        req.body.criticality ?? null,
         req.user!.id,
         createdAt
       );
@@ -77,8 +114,17 @@ export function equipmentRoutes() {
       return res.status(400).json({ error: `status must be one of: ${EQUIPMENT_STATUSES.join(', ')}` });
     }
     const responsibleStaffId = parseIntNullable(req.body.responsibleStaffId ?? req.body.assignedToStaffId) ?? oldValue.responsible_staff_id ?? oldValue.assigned_to_staff_id;
-    db.prepare(`UPDATE equipment_items SET name = ?, category = ?, manufacturer = ?, model = ?, serial_number = ?, location_id = ?, department_id = ?, section_id = ?, status = ?, calibration_due_date = ?, last_service_date = ?, next_service_due = ?, assigned_to_staff_id = ?, equipment_type = ?, maintenance_frequency = ?, calibration_frequency = ?, next_maintenance_due = ?, next_calibration_due = ?, responsible_staff_id = ?, date_received = ?, date_commissioned = ?, calibration_required = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+    // Allow a manual identifier override, but keep it unique.
+    let equipmentNumber = oldValue.equipment_number;
+    if (typeof req.body.equipmentNumber === 'string' && req.body.equipmentNumber.trim() && req.body.equipmentNumber.trim() !== oldValue.equipment_number) {
+      equipmentNumber = req.body.equipmentNumber.trim();
+      if (db.prepare('SELECT 1 FROM equipment_items WHERE equipment_number = ? AND id <> ?').get(equipmentNumber, req.params.id)) {
+        return res.status(409).json({ error: `Equipment identifier ${equipmentNumber} is already in use.` });
+      }
+    }
+    db.prepare(`UPDATE equipment_items SET equipment_number = ?, name = ?, category = ?, manufacturer = ?, model = ?, serial_number = ?, location_id = ?, department_id = ?, section_id = ?, status = ?, calibration_due_date = ?, last_service_date = ?, next_service_due = ?, assigned_to_staff_id = ?, equipment_type = ?, maintenance_frequency = ?, calibration_frequency = ?, next_maintenance_due = ?, next_calibration_due = ?, responsible_staff_id = ?, date_received = ?, date_commissioned = ?, calibration_required = ?, notes = ?, supplier_name = ?, supplier_location = ?, supplier_contact = ?, country_of_origin = ?, condition_received = ?, date_out_of_service = ?, criticality = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
       .run(
+        equipmentNumber,
         req.body.name ?? oldValue.name,
         req.body.category ?? oldValue.category,
         req.body.manufacturer ?? oldValue.manufacturer,
@@ -99,9 +145,16 @@ export function equipmentRoutes() {
         req.body.nextCalibrationDue ?? oldValue.next_calibration_due,
         responsibleStaffId,
         req.body.dateReceived ?? oldValue.date_received,
-        req.body.dateCommissioned ?? oldValue.date_commissioned,
+        req.body.dateCommissioned ?? req.body.dateInService ?? oldValue.date_commissioned,
         req.body.calibrationRequired !== undefined ? (req.body.calibrationRequired ? 1 : 0) : oldValue.calibration_required,
         req.body.notes ?? oldValue.notes,
+        req.body.supplierName ?? oldValue.supplier_name,
+        req.body.supplierLocation ?? oldValue.supplier_location,
+        req.body.supplierContact ?? oldValue.supplier_contact,
+        req.body.countryOfOrigin ?? oldValue.country_of_origin,
+        req.body.conditionReceived ?? oldValue.condition_received,
+        req.body.dateOutOfService ?? oldValue.date_out_of_service,
+        req.body.criticality ?? oldValue.criticality,
         req.params.id
       );
     audit(req, { action: 'edit', entity: 'equipment_items', entityId: req.params.id, oldValue, newValue: req.body });

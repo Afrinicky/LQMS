@@ -6,7 +6,7 @@ import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import { EnvironmentalMonitoringPage } from './EnvironmentalMonitoringPage';
 import type {
-  Location, Section, Staff, Supplier, EquipmentItem, InventoryItem, MonitoringRecord, SafetyIncident,
+  Location, Section, Department, Staff, Supplier, EquipmentItem, InventoryItem, MonitoringRecord, SafetyIncident,
   EquipmentMaintenanceRecord, EquipmentBreakdown, MonitoringItem, MonitoringReading,
   InventoryBatch, OperationsSummary,
   SafetyEquipment, SafetyInspection, WasteDisposalRecord, HazardousChemical, StaffImmunization, FacilitiesSafetySummary,
@@ -39,14 +39,66 @@ function staffName(staffList: Staff[], id?: number | null) {
 // ============= EQUIPMENT =============
 type EquipmentDetail = EquipmentItem & { maintenance?: EquipmentMaintenanceRecord[]; breakdowns?: EquipmentBreakdown[]; links?: any[] };
 
+const emptyEquipForm = {
+  equipmentNumber: '', name: '', category: '', equipmentType: '', manufacturer: '', model: '', serialNumber: '',
+  supplierName: '', supplierLocation: '', supplierContact: '', countryOfOrigin: '', conditionReceived: '',
+  locationId: '', departmentId: '', sectionId: '', status: 'operational', criticality: '',
+  maintenanceFrequency: '', calibrationFrequency: '', nextMaintenanceDue: '', nextCalibrationDue: '',
+  responsibleStaffId: '', dateReceived: '', dateInService: '', dateOutOfService: '', calibrationRequired: false, notes: '',
+};
+const CONDITION_OPTIONS = ['new', 'used', 'reconditioned'];
+const CRITICALITY_OPTIONS = [{ value: 'critical', label: 'Critical' }, { value: 'non_critical', label: 'Non-critical' }];
+
+// Components that can appear on a printed equipment label.
+const LABEL_FIELDS: { key: string; label: string }[] = [
+  { key: 'identifier', label: 'Unique identifier' },
+  { key: 'name', label: 'Name' },
+  { key: 'serial', label: 'Serial number' },
+  { key: 'model', label: 'Model' },
+  { key: 'manufacturer', label: 'Manufacturer' },
+  { key: 'location', label: 'Location' },
+  { key: 'custodian', label: 'Custodian' },
+  { key: 'nextCalibration', label: 'Next calibration' },
+  { key: 'nextMaintenance', label: 'Next maintenance' },
+];
+const LABEL_SIZES: { key: string; label: string; w: number; h: number }[] = [
+  { key: 'small', label: 'Small (50 × 25 mm)', w: 50, h: 25 },
+  { key: 'medium', label: 'Medium (70 × 40 mm)', w: 70, h: 40 },
+  { key: 'large', label: 'Large (100 × 60 mm)', w: 100, h: 60 },
+];
+
+function esc(v: unknown): string {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+}
+
+function printHtml(title: string, bodyHtml: string, extraCss = '') {
+  const win = window.open('', '_blank', 'width=900,height=700');
+  if (!win) return;
+  win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>
+    * { box-sizing: border-box; } body { font-family: 'Segoe UI', system-ui, sans-serif; color: #16232a; margin: 24px; }
+    h1 { font-size: 20px; margin: 0 0 2px; } h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: #4a6b74; border-bottom: 1px solid #d6e0e3; padding-bottom: 4px; margin: 22px 0 10px; }
+    .meta { color: #5a6f77; font-size: 12px; margin-bottom: 14px; }
+    table { border-collapse: collapse; width: 100%; font-size: 12.5px; } td, th { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e5ebed; vertical-align: top; }
+    .kv { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 28px; font-size: 13px; }
+    .kv div { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; border-bottom: 1px solid #eef2f3; }
+    .kv span:first-child { color: #5a6f77; } .kv span:last-child { font-weight: 600; text-align: right; }
+    ${extraCss}
+  </style></head><body>${bodyHtml}</body></html>`);
+  win.document.close();
+  win.focus();
+  setTimeout(() => { win.print(); }, 250);
+}
+
 export function EquipmentPage() {
   const { isEnabled } = useModules();
   const { staff, sections, locations } = useLookups();
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [tab, setTab] = useState('Dashboard');
   const [equipment, setEquipment] = useState<EquipmentItem[]>([]);
   const [summary, setSummary] = useState<OperationsSummary | null>(null);
   const [selected, setSelected] = useState<EquipmentDetail | null>(null);
-  const [equipForm, setEquipForm] = useState({ name: '', category: '', equipmentType: '', manufacturer: '', model: '', serialNumber: '', locationId: '', sectionId: '', status: 'operational', maintenanceFrequency: '', calibrationFrequency: '', nextMaintenanceDue: '', nextCalibrationDue: '', responsibleStaffId: '', dateReceived: '', calibrationRequired: false, notes: '' });
+  const [nextNumber, setNextNumber] = useState('');
+  const [equipForm, setEquipForm] = useState({ ...emptyEquipForm });
   const [maintForm, setMaintForm] = useState({ equipmentId: '', maintenanceDate: '', maintenanceType: 'preventive', performedByStaffId: '', findings: '', actionTaken: '', nextDueDate: '', status: 'completed' });
   const [breakdownForm, setBreakdownForm] = useState({ equipmentId: '', breakdownDate: '', reportedByStaffId: '', description: '', serviceImpact: '', immediateAction: '', equipmentStatus: 'out_of_service', repairAction: '', serviceProvider: '' });
   const [loading, setLoading] = useState(false);
@@ -61,16 +113,31 @@ export function EquipmentPage() {
       ]);
       setEquipment(list);
       if (ops) setSummary(ops);
+      api<Department[]>('/departments').then(setDepartments).catch(() => setDepartments([]));
+      api<{ number: string }>('/equipment/config/next-number').then(r => setNextNumber(r.number)).catch(() => setNextNumber(''));
     } catch (e) { setError((e as Error).message); }
     finally { setLoading(false); }
   }
 
   useEffect(() => { if (isEnabled('equipment')) void load(); }, [isEnabled]);
+  // Suggest the next identifier when opening the New Equipment tab (still editable).
+  useEffect(() => {
+    if (tab === 'New Equipment' && nextNumber && !equipForm.equipmentNumber) {
+      setEquipForm(f => ({ ...f, equipmentNumber: nextNumber }));
+    }
+  }, [tab, nextNumber]);
 
   if (!isEnabled('equipment')) return <DisabledModule />;
 
+  // Opening an item shows its full profile on the dedicated tab.
   async function openDetail(id: number) {
-    try { setSelected(await api<EquipmentDetail>(`/equipment/${id}`)); }
+    setError(null);
+    try { setSelected(await api<EquipmentDetail>(`/equipment/${id}`)); setTab('Equipment Profile'); }
+    catch (e) { setError((e as Error).message); }
+  }
+  async function reloadSelected() {
+    if (!selected) return;
+    try { setSelected(await api<EquipmentDetail>(`/equipment/${selected.id}`)); await load(); }
     catch (e) { setError((e as Error).message); }
   }
 
@@ -79,7 +146,7 @@ export function EquipmentPage() {
     setError(null);
     try {
       await api('/equipment', { method: 'POST', body: JSON.stringify(equipForm) });
-      setEquipForm({ name: '', category: '', equipmentType: '', manufacturer: '', model: '', serialNumber: '', locationId: '', sectionId: '', status: 'operational', maintenanceFrequency: '', calibrationFrequency: '', nextMaintenanceDue: '', nextCalibrationDue: '', responsibleStaffId: '', dateReceived: '', calibrationRequired: false, notes: '' });
+      setEquipForm({ ...emptyEquipForm });
       await load();
       setTab('Equipment Register');
     } catch (e) { setError((e as Error).message); }
@@ -123,7 +190,7 @@ export function EquipmentPage() {
   return <div>
     <PageHeader eyebrow="Equipment Management" title="Equipment Management" subtitle="Asset register, maintenance, calibration, and breakdown tracking." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
-    {tabBar(tab, ['Dashboard', 'Equipment Register', 'New Equipment', 'Maintenance Records', 'Breakdowns', 'Reports placeholder'], setTab)}
+    {tabBar(tab, ['Dashboard', 'Equipment Register', 'Equipment Profile', 'New Equipment', 'Maintenance Records', 'Breakdowns', 'Reports placeholder'], setTab)}
 
     {tab === 'Dashboard' && <><KpiStrip items={[
       { label: 'Equipment items', value: summary?.equipmentTotal ?? equipment.length, onClick: () => setTab('Equipment Register') },
@@ -150,36 +217,50 @@ export function EquipmentPage() {
     {tab === 'Equipment Register' && <div className="card">
       <h3>Equipment register</h3>
       {loading ? <p>Loading…</p> : equipment.length === 0 ? <p>No equipment items have been recorded yet.</p> :
-        <table className="table"><thead><tr><th>No.</th><th>Name</th><th>Category</th><th>Status</th><th>Location</th><th>Maint. due</th><th>Cal. due</th><th></th></tr></thead><tbody>
-          {equipment.map(item => <tr key={item.id}>
-            <td>{item.equipment_number}</td><td>{item.name}</td><td>{item.category || '—'}</td><td>{formatBadge(item.status)}</td>
+        <table className="table"><thead><tr><th>Identifier</th><th>Name</th><th>Category</th><th>Supplier</th><th>Status</th><th>Location</th><th>Maint. due</th><th>Cal. due</th></tr></thead><tbody>
+          {equipment.map(item => <tr key={item.id} className="row-clickable" style={{ cursor: 'pointer' }} onClick={() => openDetail(item.id)} title="Open equipment profile">
+            <td>{item.equipment_number}</td><td>{item.name}</td><td>{item.category || '—'}</td><td>{item.supplier_name || '—'}</td><td>{formatBadge(item.status)}</td>
             <td>{locations.find(l => l.id === item.location_id)?.name || '—'}</td>
             <td>{item.next_maintenance_due || item.next_service_due || '—'}</td>
             <td>{item.next_calibration_due || item.calibration_due_date || '—'}</td>
-            <td><button className="secondary" type="button" onClick={() => openDetail(item.id)}>Open</button></td>
           </tr>)}
         </tbody></table>}
-      {selected && <EquipmentDetailPanel item={selected} staff={staff} onClose={() => setSelected(null)} createBreakdownNc={createBreakdownNc} createBreakdownCapa={createBreakdownCapa} returnToService={returnToService} />}
     </div>}
+
+    {tab === 'Equipment Profile' && (selected
+      ? <EquipmentProfile item={selected} staff={staff} sections={sections} departments={departments} locations={locations}
+          onBack={() => setTab('Equipment Register')} onSaved={reloadSelected}
+          createBreakdownNc={createBreakdownNc} createBreakdownCapa={createBreakdownCapa} returnToService={returnToService} setError={setError} />
+      : <div className="card"><p>Open an item from the <button type="button" className="linklike" onClick={() => setTab('Equipment Register')}>Equipment Register</button> to view its complete profile.</p></div>)}
 
     {tab === 'New Equipment' && <div className="card">
       <h3>New equipment</h3>
       <form className="form" onSubmit={submitEquipment}>
+        <label>Unique identifier<input value={equipForm.equipmentNumber} onChange={e => setEquipForm({ ...equipForm, equipmentNumber: e.target.value })} placeholder={nextNumber || 'auto'} /><small className="muted">Follows the configured pattern; edit only for items with their own identifier.</small></label>
         <label>Name<input value={equipForm.name} onChange={e => setEquipForm({ ...equipForm, name: e.target.value })} required /></label>
         <label>Category<input value={equipForm.category} onChange={e => setEquipForm({ ...equipForm, category: e.target.value })} /></label>
         <label>Equipment type<input value={equipForm.equipmentType} onChange={e => setEquipForm({ ...equipForm, equipmentType: e.target.value })} /></label>
         <label>Manufacturer<input value={equipForm.manufacturer} onChange={e => setEquipForm({ ...equipForm, manufacturer: e.target.value })} /></label>
         <label>Model<input value={equipForm.model} onChange={e => setEquipForm({ ...equipForm, model: e.target.value })} /></label>
         <label>Serial number<input value={equipForm.serialNumber} onChange={e => setEquipForm({ ...equipForm, serialNumber: e.target.value })} /></label>
+        <label>Country of origin<input value={equipForm.countryOfOrigin} onChange={e => setEquipForm({ ...equipForm, countryOfOrigin: e.target.value })} /></label>
+        <label>Condition received<select value={equipForm.conditionReceived} onChange={e => setEquipForm({ ...equipForm, conditionReceived: e.target.value })}><option value="">—</option>{CONDITION_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
+        <label>Criticality<select value={equipForm.criticality} onChange={e => setEquipForm({ ...equipForm, criticality: e.target.value })}><option value="">—</option>{CRITICALITY_OPTIONS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></label>
+        <label>Supplier name<input value={equipForm.supplierName} onChange={e => setEquipForm({ ...equipForm, supplierName: e.target.value })} /></label>
+        <label>Supplier location<input value={equipForm.supplierLocation} onChange={e => setEquipForm({ ...equipForm, supplierLocation: e.target.value })} /></label>
+        <label>Supplier contact<input value={equipForm.supplierContact} onChange={e => setEquipForm({ ...equipForm, supplierContact: e.target.value })} placeholder="phone / email" /></label>
+        <label>Department<select value={equipForm.departmentId} onChange={e => setEquipForm({ ...equipForm, departmentId: e.target.value })}><option value="">Select department</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
+        <label>Section<select value={equipForm.sectionId} onChange={e => setEquipForm({ ...equipForm, sectionId: e.target.value })}><option value="">Select section</option>{sections.filter(s => !equipForm.departmentId || String(s.department_id) === equipForm.departmentId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Location<select value={equipForm.locationId} onChange={e => setEquipForm({ ...equipForm, locationId: e.target.value })}><option value="">Select location</option>{locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
-        <label>Section<select value={equipForm.sectionId} onChange={e => setEquipForm({ ...equipForm, sectionId: e.target.value })}><option value="">Select section</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-        <label>Responsible staff<select value={equipForm.responsibleStaffId} onChange={e => setEquipForm({ ...equipForm, responsibleStaffId: e.target.value })}><option value="">Select staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        <label>Custodian (responsible staff)<select value={equipForm.responsibleStaffId} onChange={e => setEquipForm({ ...equipForm, responsibleStaffId: e.target.value })}><option value="">Select staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Status<select value={equipForm.status} onChange={e => setEquipForm({ ...equipForm, status: e.target.value })}>{['active', 'operational', 'out_of_service', 'under_repair', 'restricted_use', 'retired'].map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select></label>
+        <label>Date received<input type="date" value={equipForm.dateReceived} onChange={e => setEquipForm({ ...equipForm, dateReceived: e.target.value })} /></label>
+        <label>Date of entry into service<input type="date" value={equipForm.dateInService} onChange={e => setEquipForm({ ...equipForm, dateInService: e.target.value })} /></label>
+        <label>Date out of service<input type="date" value={equipForm.dateOutOfService} onChange={e => setEquipForm({ ...equipForm, dateOutOfService: e.target.value })} /></label>
         <label>Maintenance frequency<input value={equipForm.maintenanceFrequency} onChange={e => setEquipForm({ ...equipForm, maintenanceFrequency: e.target.value })} placeholder="e.g. monthly" /></label>
         <label>Next maintenance due<input type="date" value={equipForm.nextMaintenanceDue} onChange={e => setEquipForm({ ...equipForm, nextMaintenanceDue: e.target.value })} /></label>
         <label>Calibration frequency<input value={equipForm.calibrationFrequency} onChange={e => setEquipForm({ ...equipForm, calibrationFrequency: e.target.value })} /></label>
         <label>Next calibration due<input type="date" value={equipForm.nextCalibrationDue} onChange={e => setEquipForm({ ...equipForm, nextCalibrationDue: e.target.value })} /></label>
-        <label>Date received<input type="date" value={equipForm.dateReceived} onChange={e => setEquipForm({ ...equipForm, dateReceived: e.target.value })} /></label>
         <label><input type="checkbox" checked={equipForm.calibrationRequired} onChange={e => setEquipForm({ ...equipForm, calibrationRequired: e.target.checked })} /> Calibration required</label>
         <label>Notes<textarea value={equipForm.notes} onChange={e => setEquipForm({ ...equipForm, notes: e.target.value })} /></label>
         <button type="submit">Save equipment</button>
@@ -221,19 +302,162 @@ export function EquipmentPage() {
   </div>;
 }
 
-function EquipmentDetailPanel({ item, staff, onClose, createBreakdownNc, createBreakdownCapa, returnToService }: { item: EquipmentDetail; staff: Staff[]; onClose: () => void; createBreakdownNc: (id: number) => void; createBreakdownCapa: (id: number) => void; returnToService: (id: number) => void }) {
-  return <div className="card" style={{ marginTop: 16 }}>
-    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-      <h3>{item.equipment_number} — {item.name}</h3>
-      <button type="button" className="secondary" onClick={onClose}>Close</button>
+type ProfileProps = {
+  item: EquipmentDetail; staff: Staff[]; sections: Section[]; departments: Department[]; locations: Location[];
+  onBack: () => void; onSaved: () => void; setError: (m: string | null) => void;
+  createBreakdownNc: (id: number) => void; createBreakdownCapa: (id: number) => void; returnToService: (id: number) => void;
+};
+
+function EquipmentProfile({ item, staff, sections, departments, locations, onBack, onSaved, setError, createBreakdownNc, createBreakdownCapa, returnToService }: ProfileProps) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [showLabel, setShowLabel] = useState(false);
+  const [labelSize, setLabelSize] = useState(LABEL_SIZES[1].key);
+  const [labelFields, setLabelFields] = useState<string[]>(['identifier', 'name', 'serial', 'nextCalibration']);
+  const toForm = (it: EquipmentItem) => ({
+    equipmentNumber: it.equipment_number ?? '', name: it.name ?? '', category: it.category ?? '', equipmentType: it.equipment_type ?? '',
+    manufacturer: it.manufacturer ?? '', model: it.model ?? '', serialNumber: it.serial_number ?? '',
+    supplierName: it.supplier_name ?? '', supplierLocation: it.supplier_location ?? '', supplierContact: it.supplier_contact ?? '',
+    countryOfOrigin: it.country_of_origin ?? '', conditionReceived: it.condition_received ?? '', criticality: it.criticality ?? '',
+    departmentId: it.department_id ? String(it.department_id) : '', sectionId: it.section_id ? String(it.section_id) : '', locationId: it.location_id ? String(it.location_id) : '',
+    responsibleStaffId: (it.responsible_staff_id ?? it.assigned_to_staff_id) ? String(it.responsible_staff_id ?? it.assigned_to_staff_id) : '',
+    status: it.status ?? 'operational', dateReceived: it.date_received ?? '', dateInService: it.date_commissioned ?? '', dateOutOfService: it.date_out_of_service ?? '',
+    maintenanceFrequency: it.maintenance_frequency ?? '', nextMaintenanceDue: it.next_maintenance_due ?? it.next_service_due ?? '',
+    calibrationFrequency: it.calibration_frequency ?? '', nextCalibrationDue: it.next_calibration_due ?? it.calibration_due_date ?? '',
+    calibrationRequired: !!it.calibration_required, notes: it.notes ?? '',
+  });
+  const [form, setForm] = useState(toForm(item));
+  useEffect(() => { setForm(toForm(item)); setEditing(false); }, [item.id]);
+
+  const deptName = departments.find(d => d.id === item.department_id)?.name || '—';
+  const secName = sections.find(s => s.id === item.section_id)?.name || '—';
+  const locName = locations.find(l => l.id === item.location_id)?.name || '—';
+  const custodian = staffName(staff, item.responsible_staff_id || item.assigned_to_staff_id);
+
+  async function save() {
+    setSaving(true); setError(null);
+    try { await api(`/equipment/${item.id}`, { method: 'PUT', body: JSON.stringify(form) }); onSaved(); setEditing(false); }
+    catch (e) { setError((e as Error).message); }
+    finally { setSaving(false); }
+  }
+
+  function printProfile() {
+    const row = (l: string, v: unknown) => `<div><span>${esc(l)}</span><span>${esc(v && String(v).trim() ? v : '—')}</span></div>`;
+    const maint = item.maintenance?.length
+      ? `<table><thead><tr><th>Date</th><th>Type</th><th>Performed by</th><th>Findings</th><th>Next due</th><th>Status</th></tr></thead><tbody>${item.maintenance.map(m => `<tr><td>${esc(m.maintenance_date)}</td><td>${esc(m.maintenance_type)}</td><td>${esc(staffName(staff, m.performed_by_staff_id))}</td><td>${esc(m.findings || '—')}</td><td>${esc(m.next_due_date || '—')}</td><td>${esc(m.status)}</td></tr>`).join('')}</tbody></table>`
+      : '<p>No maintenance recorded.</p>';
+    const bd = item.breakdowns?.length
+      ? `<table><thead><tr><th>Date</th><th>Description</th><th>Status</th><th>NC</th><th>CAPA</th></tr></thead><tbody>${item.breakdowns.map(b => `<tr><td>${esc(b.breakdown_date)}</td><td>${esc(b.description)}</td><td>${esc(b.status)}</td><td>${esc(b.nc_id || '—')}</td><td>${esc(b.capa_id || '—')}</td></tr>`).join('')}</tbody></table>`
+      : '<p>No breakdowns recorded.</p>';
+    const body = `
+      <h1>${esc(item.name)}</h1>
+      <div class="meta">Equipment identifier <strong>${esc(item.equipment_number)}</strong> · printed ${esc(new Date().toLocaleString())}</div>
+      <h2>Identity</h2><div class="kv">
+        ${row('Unique identifier', item.equipment_number)}${row('Name', item.name)}${row('Category', item.category)}${row('Type', item.equipment_type)}
+        ${row('Manufacturer', item.manufacturer)}${row('Model', item.model)}${row('Serial number', item.serial_number)}${row('Country of origin', item.country_of_origin)}
+        ${row('Condition received', item.condition_received)}${row('Criticality', item.criticality)}</div>
+      <h2>Supplier</h2><div class="kv">${row('Name', item.supplier_name)}${row('Location', item.supplier_location)}${row('Contact', item.supplier_contact)}</div>
+      <h2>Placement &amp; responsibility</h2><div class="kv">${row('Department', deptName)}${row('Section', secName)}${row('Location', locName)}${row('Custodian', custodian)}${row('Status', item.status)}</div>
+      <h2>Lifecycle</h2><div class="kv">${row('Date received', item.date_received)}${row('Date into service', item.date_commissioned)}${row('Date out of service', item.date_out_of_service)}</div>
+      <h2>Service &amp; calibration</h2><div class="kv">${row('Maintenance frequency', item.maintenance_frequency)}${row('Next maintenance', item.next_maintenance_due || item.next_service_due)}${row('Calibration required', item.calibration_required ? 'Yes' : 'No')}${row('Calibration frequency', item.calibration_frequency)}${row('Next calibration', item.next_calibration_due || item.calibration_due_date)}</div>
+      ${item.notes ? `<h2>Notes</h2><p>${esc(item.notes)}</p>` : ''}
+      <h2>Maintenance history</h2>${maint}
+      <h2>Malfunctions &amp; repairs</h2>${bd}`;
+    printHtml(`Equipment profile — ${item.equipment_number}`, body);
+  }
+
+  function printLabel() {
+    const size = LABEL_SIZES.find(s => s.key === labelSize) || LABEL_SIZES[1];
+    const val: Record<string, string> = {
+      identifier: item.equipment_number, name: item.name, serial: item.serial_number || '', model: item.model || '',
+      manufacturer: item.manufacturer || '', location: locName, custodian, nextCalibration: item.next_calibration_due || item.calibration_due_date || '', nextMaintenance: item.next_maintenance_due || item.next_service_due || '',
+    };
+    const lines = LABEL_FIELDS.filter(f => labelFields.includes(f.key)).map(f => {
+      const isId = f.key === 'identifier';
+      return `<div class="line ${isId ? 'idline' : ''}"><span class="lbl">${esc(f.label)}</span><span class="v">${esc(val[f.key] || '—')}</span></div>`;
+    }).join('');
+    const css = `
+      .label { width: ${size.w}mm; height: ${size.h}mm; border: 1px solid #111; padding: 3mm; overflow: hidden; page-break-after: always; }
+      .label .line { display: flex; justify-content: space-between; gap: 4mm; font-size: ${size.w < 60 ? 8 : 10}px; padding: 0.6mm 0; border-bottom: 0.2mm dotted #bbb; }
+      .label .lbl { color: #444; text-transform: uppercase; letter-spacing: .04em; } .label .v { font-weight: 700; text-align: right; }
+      .label .idline .v { font-size: ${size.w < 60 ? 11 : 14}px; }
+      @page { margin: 6mm; } body { margin: 0; }`;
+    printHtml(`Label — ${item.equipment_number}`, `<div class="label">${lines || '<div class="line"><span class="v">' + esc(item.equipment_number) + '</span></div>'}</div>`, css);
+  }
+
+  const dv = (l: string, v: string | number | null | undefined) => <div className="kv-row"><span className="kv-k">{l}</span><span className="kv-v">{v != null && String(v).trim() !== '' ? v : '—'}</span></div>;
+
+  return <div className="card">
+    <div className="section-head" style={{ alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+      <div><h3 style={{ margin: 0 }}>{item.name}</h3><div className="muted" style={{ fontSize: 13 }}>{item.equipment_number} · {formatBadge(item.status)}{item.criticality ? <> · <span className="badge">{item.criticality.replace(/_/g, ' ')}</span></> : null}</div></div>
+      <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button type="button" className="secondary" onClick={onBack}>← Register</button>
+        <button type="button" className="secondary" onClick={printProfile}>Print profile</button>
+        <button type="button" className="secondary" onClick={() => setShowLabel(v => !v)}>Print label</button>
+        {!editing && <button type="button" onClick={() => setEditing(true)}>Edit</button>}
+      </div>
     </div>
-    <p>Status: {formatBadge(item.status)} | Responsible: {staffName(staff, item.responsible_staff_id || item.assigned_to_staff_id)} | Next maintenance: {item.next_maintenance_due || item.next_service_due || '—'} | Next calibration: {item.next_calibration_due || item.calibration_due_date || '—'}</p>
-    <h4>Maintenance history</h4>
-    {!item.maintenance?.length ? <p>No maintenance recorded.</p> : <table className="table"><thead><tr><th>Date</th><th>Type</th><th>Performed by</th><th>Findings</th><th>Next due</th><th>Status</th></tr></thead><tbody>
+
+    {showLabel && <div className="card" style={{ marginTop: 12, background: 'var(--surface-2, #f6f8f9)' }}>
+      <h4 style={{ marginTop: 0 }}>Print label</h4>
+      <div className="form-grid">
+        <label>Label size<select value={labelSize} onChange={e => setLabelSize(e.target.value)}>{LABEL_SIZES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}</select></label>
+      </div>
+      <p className="muted" style={{ margin: '8px 0 4px' }}>Components</p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
+        {LABEL_FIELDS.map(f => <label key={f.key} className="check-inline" style={{ fontSize: 13 }}><input type="checkbox" checked={labelFields.includes(f.key)} onChange={e => setLabelFields(prev => e.target.checked ? [...prev, f.key] : prev.filter(k => k !== f.key))} /> {f.label}</label>)}
+      </div>
+      <div style={{ marginTop: 10 }}><button type="button" onClick={printLabel}>Print label</button></div>
+    </div>}
+
+    {editing
+      ? <form className="form" style={{ marginTop: 14 }} onSubmit={e => { e.preventDefault(); void save(); }}>
+          <label>Unique identifier<input value={form.equipmentNumber} onChange={e => setForm({ ...form, equipmentNumber: e.target.value })} /></label>
+          <label>Name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></label>
+          <label>Category<input value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} /></label>
+          <label>Equipment type<input value={form.equipmentType} onChange={e => setForm({ ...form, equipmentType: e.target.value })} /></label>
+          <label>Manufacturer<input value={form.manufacturer} onChange={e => setForm({ ...form, manufacturer: e.target.value })} /></label>
+          <label>Model<input value={form.model} onChange={e => setForm({ ...form, model: e.target.value })} /></label>
+          <label>Serial number<input value={form.serialNumber} onChange={e => setForm({ ...form, serialNumber: e.target.value })} /></label>
+          <label>Country of origin<input value={form.countryOfOrigin} onChange={e => setForm({ ...form, countryOfOrigin: e.target.value })} /></label>
+          <label>Condition received<select value={form.conditionReceived} onChange={e => setForm({ ...form, conditionReceived: e.target.value })}><option value="">—</option>{CONDITION_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
+          <label>Criticality<select value={form.criticality} onChange={e => setForm({ ...form, criticality: e.target.value })}><option value="">—</option>{CRITICALITY_OPTIONS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></label>
+          <label>Supplier name<input value={form.supplierName} onChange={e => setForm({ ...form, supplierName: e.target.value })} /></label>
+          <label>Supplier location<input value={form.supplierLocation} onChange={e => setForm({ ...form, supplierLocation: e.target.value })} /></label>
+          <label>Supplier contact<input value={form.supplierContact} onChange={e => setForm({ ...form, supplierContact: e.target.value })} /></label>
+          <label>Department<select value={form.departmentId} onChange={e => setForm({ ...form, departmentId: e.target.value })}><option value="">—</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
+          <label>Section<select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })}><option value="">—</option>{sections.filter(s => !form.departmentId || String(s.department_id) === form.departmentId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+          <label>Location<select value={form.locationId} onChange={e => setForm({ ...form, locationId: e.target.value })}><option value="">—</option>{locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
+          <label>Custodian<select value={form.responsibleStaffId} onChange={e => setForm({ ...form, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+          <label>Status<select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>{['active', 'operational', 'out_of_service', 'under_repair', 'restricted_use', 'retired'].map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select></label>
+          <label>Date received<input type="date" value={form.dateReceived} onChange={e => setForm({ ...form, dateReceived: e.target.value })} /></label>
+          <label>Date into service<input type="date" value={form.dateInService} onChange={e => setForm({ ...form, dateInService: e.target.value })} /></label>
+          <label>Date out of service<input type="date" value={form.dateOutOfService} onChange={e => setForm({ ...form, dateOutOfService: e.target.value })} /></label>
+          <label>Maintenance frequency<input value={form.maintenanceFrequency} onChange={e => setForm({ ...form, maintenanceFrequency: e.target.value })} /></label>
+          <label>Next maintenance due<input type="date" value={form.nextMaintenanceDue} onChange={e => setForm({ ...form, nextMaintenanceDue: e.target.value })} /></label>
+          <label>Calibration frequency<input value={form.calibrationFrequency} onChange={e => setForm({ ...form, calibrationFrequency: e.target.value })} /></label>
+          <label>Next calibration due<input type="date" value={form.nextCalibrationDue} onChange={e => setForm({ ...form, nextCalibrationDue: e.target.value })} /></label>
+          <label className="check-inline"><input type="checkbox" checked={form.calibrationRequired} onChange={e => setForm({ ...form, calibrationRequired: e.target.checked })} /> Calibration required</label>
+          <label>Notes<textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
+          <div style={{ display: 'flex', gap: 8 }}><button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button><button type="button" className="secondary" onClick={() => { setForm(toForm(item)); setEditing(false); }}>Cancel</button></div>
+        </form>
+      : <>
+        <div className="profile-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 18, marginTop: 14 }}>
+          <div><h4>Identity</h4>{dv('Unique identifier', item.equipment_number)}{dv('Category', item.category)}{dv('Type', item.equipment_type)}{dv('Manufacturer', item.manufacturer)}{dv('Model', item.model)}{dv('Serial number', item.serial_number)}{dv('Country of origin', item.country_of_origin)}{dv('Condition received', item.condition_received)}{dv('Criticality', item.criticality?.replace(/_/g, ' '))}</div>
+          <div><h4>Supplier</h4>{dv('Name', item.supplier_name)}{dv('Location', item.supplier_location)}{dv('Contact', item.supplier_contact)}
+            <h4 style={{ marginTop: 16 }}>Placement</h4>{dv('Department', deptName)}{dv('Section', secName)}{dv('Location', locName)}{dv('Custodian', custodian)}</div>
+          <div><h4>Lifecycle</h4>{dv('Date received', item.date_received)}{dv('Date into service', item.date_commissioned)}{dv('Date out of service', item.date_out_of_service)}
+            <h4 style={{ marginTop: 16 }}>Service &amp; calibration</h4>{dv('Maintenance frequency', item.maintenance_frequency)}{dv('Next maintenance', item.next_maintenance_due || item.next_service_due)}{dv('Calibration required', item.calibration_required ? 'Yes' : 'No')}{dv('Calibration frequency', item.calibration_frequency)}{dv('Next calibration', item.next_calibration_due || item.calibration_due_date)}</div>
+        </div>
+        {item.notes && <><h4>Notes</h4><p className="muted">{item.notes}</p></>}
+      </>}
+
+    <h4 style={{ marginTop: 22 }}>Maintenance history</h4>
+    {!item.maintenance?.length ? <p className="muted">No maintenance recorded.</p> : <table className="table"><thead><tr><th>Date</th><th>Type</th><th>Performed by</th><th>Findings</th><th>Next due</th><th>Status</th></tr></thead><tbody>
       {item.maintenance.map(m => <tr key={m.id}><td>{m.maintenance_date}</td><td>{m.maintenance_type}</td><td>{staffName(staff, m.performed_by_staff_id)}</td><td>{m.findings || '—'}</td><td>{m.next_due_date || '—'}</td><td>{formatBadge(m.status)}</td></tr>)}
     </tbody></table>}
-    <h4>Breakdowns</h4>
-    {!item.breakdowns?.length ? <p>No breakdowns recorded.</p> : <table className="table"><thead><tr><th>Date</th><th>Description</th><th>Status</th><th>NC</th><th>CAPA</th><th>Actions</th></tr></thead><tbody>
+    <h4>Malfunctions, repairs &amp; breakdowns</h4>
+    {!item.breakdowns?.length ? <p className="muted">No breakdowns recorded.</p> : <table className="table"><thead><tr><th>Date</th><th>Description</th><th>Status</th><th>NC</th><th>CAPA</th><th>Actions</th></tr></thead><tbody>
       {item.breakdowns.map(b => <tr key={b.id}><td>{b.breakdown_date}</td><td>{b.description}</td><td>{formatBadge(b.status)}</td><td>{b.nc_id || '—'}</td><td>{b.capa_id || '—'}</td>
         <td>
           {!b.nc_id && <button type="button" className="secondary" onClick={() => createBreakdownNc(b.id)}>Create NC</button>}{' '}
@@ -242,7 +466,7 @@ function EquipmentDetailPanel({ item, staff, onClose, createBreakdownNc, createB
         </td></tr>)}
     </tbody></table>}
     <h4>Linked records</h4>
-    {!item.links?.length ? <p>No linked records.</p> : <ul>{item.links.map((l: any) => <li key={l.id}>{l.source_module_key}/{l.source_record_type}#{l.source_record_id} → {l.target_module_key}/{l.target_record_type}#{l.target_record_id}{l.notes ? ` (${l.notes})` : ''}</li>)}</ul>}
+    {!item.links?.length ? <p className="muted">No linked records.</p> : <ul>{item.links.map((l: any) => <li key={l.id}>{l.source_module_key}/{l.source_record_type}#{l.source_record_id} → {l.target_module_key}/{l.target_record_type}#{l.target_record_id}{l.notes ? ` (${l.notes})` : ''}</li>)}</ul>}
   </div>;
 }
 
