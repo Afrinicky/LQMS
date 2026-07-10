@@ -8,7 +8,7 @@ import { EnvironmentalMonitoringPage } from './EnvironmentalMonitoringPage';
 import type {
   Location, Section, Department, Staff, Supplier, EquipmentItem, InventoryItem, MonitoringRecord, SafetyIncident,
   EquipmentMaintenanceRecord, EquipmentBreakdown, MonitoringItem, MonitoringReading,
-  EquipmentChecklistItem, EquipmentVerificationRecord, EquipmentCalibrationRecord, ReferenceStandard, EquipmentSchedule,
+  EquipmentChecklistItem, EquipmentVerificationRecord, EquipmentCalibrationRecord, ReferenceStandard, EquipmentSchedule, EquipmentAdverseEvent,
   InventoryBatch, OperationsSummary,
   SafetyEquipment, SafetyInspection, WasteDisposalRecord, HazardousChemical, StaffImmunization, FacilitiesSafetySummary,
   StorageInspection
@@ -38,9 +38,19 @@ function staffName(staffList: Staff[], id?: number | null) {
 }
 
 // ============= EQUIPMENT =============
-type EquipmentDetail = EquipmentItem & { maintenance?: EquipmentMaintenanceRecord[]; breakdowns?: EquipmentBreakdown[]; verifications?: EquipmentVerificationRecord[]; calibrations?: EquipmentCalibrationRecord[]; schedules?: EquipmentSchedule[]; links?: any[] };
+type EquipmentDetail = EquipmentItem & { maintenance?: EquipmentMaintenanceRecord[]; breakdowns?: EquipmentBreakdown[]; verifications?: EquipmentVerificationRecord[]; calibrations?: EquipmentCalibrationRecord[]; schedules?: EquipmentSchedule[]; adverseEvents?: EquipmentAdverseEvent[]; links?: any[] };
 const SCHEDULE_FREQUENCIES = ['daily', 'weekly', 'monthly', 'quarterly', 'biannual', 'annual', 'custom'];
 const MAINTENANCE_TYPES = ['preventive', 'corrective', 'service', 'calibration', 'verification'];
+// The reportable equipment adverse-incident categories.
+const ADVERSE_EVENT_TYPES: { value: string; label: string }[] = [
+  { value: 'malfunction_patient_harm', label: 'Malfunction causing actual/potential patient harm' },
+  { value: 'erroneous_results_reported', label: 'Failure leading to erroneous results that were reported' },
+  { value: 'staff_injury', label: 'Physical injury to staff from equipment failure' },
+  { value: 'safety_feature_failure', label: 'Safety feature failure (e-stop, alarm, interlock)' },
+  { value: 'electrical_mechanical_hazard', label: 'Electrical or mechanical hazard identified' },
+  { value: 'recurrent_systematic_failure', label: 'Recurrent or systematic failure (e.g. IQC failure)' },
+];
+const adverseTypeLabel = (v?: string) => ADVERSE_EVENT_TYPES.find(t => t.value === v)?.label || v || '—';
 
 // Upload a file to the shared store; returns its numeric id as a string, or null.
 async function uploadEquipFile(file: File | null): Promise<string | null> {
@@ -113,6 +123,7 @@ export function EquipmentPage() {
   const [selected, setSelected] = useState<EquipmentDetail | null>(null);
   const [nextNumber, setNextNumber] = useState('');
   const [scheduleDueCount, setScheduleDueCount] = useState(0);
+  const [openAdverseCount, setOpenAdverseCount] = useState(0);
   const [equipForm, setEquipForm] = useState({ ...emptyEquipForm });
   const [breakdownForm, setBreakdownForm] = useState({ equipmentId: '', breakdownDate: '', reportedByStaffId: '', description: '', serviceImpact: '', immediateAction: '', equipmentStatus: 'out_of_service', repairAction: '', serviceProvider: '' });
   const [loading, setLoading] = useState(false);
@@ -130,6 +141,7 @@ export function EquipmentPage() {
       api<Department[]>('/departments').then(setDepartments).catch(() => setDepartments([]));
       api<{ number: string }>('/equipment/config/next-number').then(r => setNextNumber(r.number)).catch(() => setNextNumber(''));
       api<EquipmentSchedule[]>('/equipment/schedules/due').then(r => setScheduleDueCount(r.length)).catch(() => setScheduleDueCount(0));
+      api<EquipmentAdverseEvent[]>('/equipment/adverse-events').then(r => setOpenAdverseCount(r.filter(a => a.status !== 'closed').length)).catch(() => setOpenAdverseCount(0));
     } catch (e) { setError((e as Error).message); }
     finally { setLoading(false); }
   }
@@ -194,7 +206,7 @@ export function EquipmentPage() {
   return <div>
     <PageHeader eyebrow="Equipment Management" title="Equipment Management" subtitle="Asset register, maintenance, calibration, and breakdown tracking." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
-    {tabBar(tab, ['Dashboard', 'Equipment Register', 'Equipment Profile', 'New Equipment', 'Verification & Validation', 'Calibration', 'Maintenance Records', 'Breakdowns', 'Reports placeholder'], setTab)}
+    {tabBar(tab, ['Dashboard', 'Equipment Register', 'Equipment Profile', 'New Equipment', 'Verification & Validation', 'Calibration', 'Maintenance Records', 'Breakdowns', 'Adverse Events', 'Reports placeholder'], setTab)}
 
     {tab === 'Dashboard' && <><KpiStrip items={[
       { label: 'Equipment items', value: summary?.equipmentTotal ?? equipment.length, onClick: () => setTab('Equipment Register') },
@@ -202,6 +214,7 @@ export function EquipmentPage() {
       { label: 'Schedules due/overdue', value: scheduleDueCount, tone: scheduleDueCount ? 'warning' : undefined, onClick: () => setTab('Maintenance Records') },
       { label: 'Calibration due', value: summary?.equipmentCalibrationDue, onClick: () => setTab('Calibration') },
       { label: 'Out of service', value: summary?.equipmentOutOfService, tone: 'danger', onClick: () => setTab('Breakdowns') },
+      { label: 'Adverse events (open)', value: openAdverseCount, tone: openAdverseCount ? 'danger' : undefined, onClick: () => setTab('Adverse Events') },
     ]} />
     <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Fleet availability" subtitle="Operational vs out-of-service equipment">
@@ -293,6 +306,8 @@ export function EquipmentPage() {
         <button type="submit">Report breakdown</button>
       </form>
     </div>}
+
+    {tab === 'Adverse Events' && <EquipmentAdverseEventsTab equipment={equipment} staff={staff} setError={setError} onChanged={() => { void load(); void reloadSelected(); }} />}
 
     {tab === 'Reports placeholder' && <div className="card"><p>Reporting and exports for equipment will be added in a later phase.</p></div>}
   </div>;
@@ -464,6 +479,10 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
           {!b.capa_id && <button type="button" className="secondary" onClick={() => createBreakdownCapa(b.id)}>Create CAPA</button>}{' '}
           {b.status !== 'returned_to_service' && b.status !== 'closed' && <button type="button" className="secondary" onClick={() => returnToService(b.id)}>Return to service</button>}
         </td></tr>)}
+    </tbody></table>}
+    <h4>Adverse events</h4>
+    {!item.adverseEvents?.length ? <p className="muted">No adverse events.</p> : <table className="table"><thead><tr><th>No.</th><th>Date</th><th>Type</th><th>Severity</th><th>NC</th><th>CAPA</th><th>Status</th></tr></thead><tbody>
+      {item.adverseEvents.map(a => <tr key={a.id}><td>{a.adverse_event_number}</td><td>{a.event_date}</td><td>{adverseTypeLabel(a.event_type)}</td><td>{a.severity ? formatBadge(a.severity) : '—'}</td><td>{a.nc_id || '—'}</td><td>{a.capa_id || '—'}</td><td>{formatBadge(a.status)}</td></tr>)}
     </tbody></table>}
     <h4>Verification &amp; validation</h4>
     {!item.verifications?.length ? <p className="muted">No verification or validation records.</p> : <table className="table"><thead><tr><th>No.</th><th>Type</th><th>Date</th><th>Outcome</th><th>Reviewed</th><th>Status</th></tr></thead><tbody>
@@ -804,6 +823,125 @@ function EquipmentMaintenanceTab({ equipment, staff, sections, setError, onChang
         </tbody></table>}
       </>}
     </div>
+  </div>;
+}
+
+// Equipment adverse events: report → auto-raised NC → investigate, correct,
+// follow up, assess retrospective impact and report externally.
+function EquipmentAdverseEventsTab({ equipment, staff, setError, onChanged }: { equipment: EquipmentItem[]; staff: Staff[]; setError: (m: string | null) => void; onChanged: () => void }) {
+  const [list, setList] = useState<EquipmentAdverseEvent[]>([]);
+  const [open, setOpen] = useState<EquipmentAdverseEvent | null>(null);
+  const blank = { equipmentId: '', eventDate: '', reportedByStaffId: '', eventType: ADVERSE_EVENT_TYPES[0].value, severity: 'high', patientHarm: 'none', description: '', immediateAction: '', retrospectiveImpactRequired: false, resultsAffected: false, affectedPeriodFrom: '', affectedPeriodTo: '', retrospectiveImpactSummary: '', reportedToManufacturer: false, reportedToAuthority: false, reportReference: '', reportDate: '', raiseNc: true };
+  const [form, setForm] = useState(blank);
+  const [edit, setEdit] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+
+  function load() { api<EquipmentAdverseEvent[]>('/equipment/adverse-events').then(setList).catch(() => setList([])); }
+  useEffect(() => { load(); }, []);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault(); setError(null);
+    if (!form.equipmentId) { setError('Select an equipment item.'); return; }
+    if (!form.eventDate || !form.description) { setError('Enter the date and a description.'); return; }
+    setBusy(true);
+    try {
+      await api(`/equipment/${form.equipmentId}/adverse-events`, { method: 'POST', body: JSON.stringify(form) });
+      setForm(blank); load(); onChanged();
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  async function openDetail(id: number) {
+    try {
+      const rec = await api<EquipmentAdverseEvent>(`/equipment/adverse-events/${id}`);
+      setOpen(rec);
+      setEdit({ severity: rec.severity ?? '', patientHarm: rec.patient_harm ?? '', investigation: rec.investigation ?? '', investigatedByStaffId: rec.investigated_by_staff_id ? String(rec.investigated_by_staff_id) : '', investigationDate: rec.investigation_date ?? '', correctiveAction: rec.corrective_action ?? '', followUp: rec.follow_up ?? '', followUpDate: rec.follow_up_date ?? '', retrospectiveImpactRequired: !!rec.retrospective_impact_required, resultsAffected: !!rec.results_affected, affectedPeriodFrom: rec.affected_period_from ?? '', affectedPeriodTo: rec.affected_period_to ?? '', retrospectiveImpactSummary: rec.retrospective_impact_summary ?? '', reportedToManufacturer: !!rec.reported_to_manufacturer, reportedToAuthority: !!rec.reported_to_authority, reportReference: rec.report_reference ?? '', reportDate: rec.report_date ?? '', status: rec.status });
+    } catch (e) { setError((e as Error).message); }
+  }
+  async function saveDetail() {
+    if (!open) return; setError(null); setBusy(true);
+    try { await api(`/equipment/adverse-events/${open.id}`, { method: 'PUT', body: JSON.stringify(edit) }); await openDetail(open.id); load(); onChanged(); }
+    catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  }
+  async function createCapa() {
+    if (!open) return;
+    try { await api(`/equipment/adverse-events/${open.id}/create-capa`, { method: 'POST', body: JSON.stringify({}) }); await openDetail(open.id); load(); }
+    catch (e) { setError((e as Error).message); }
+  }
+  async function createNc() {
+    if (!open) return;
+    try { await api(`/equipment/adverse-events/${open.id}/create-nc`, { method: 'POST', body: JSON.stringify({}) }); await openDetail(open.id); load(); }
+    catch (e) { setError((e as Error).message); }
+  }
+
+  return <div>
+    <div className="card">
+      <h3>Report an equipment adverse event</h3>
+      <p className="muted" style={{ marginTop: 0 }}>Reportable incidents are nonconformities: a linked NC is raised automatically. Investigation, corrective action, follow-up, retrospective impact and external reporting are captured on the record.</p>
+      <form className="form" onSubmit={submit}>
+        <label>Equipment<select value={form.equipmentId} onChange={e => setForm({ ...form, equipmentId: e.target.value })} required><option value="">Select equipment</option>{equipment.map(e2 => <option key={e2.id} value={e2.id}>{e2.equipment_number} — {e2.name}</option>)}</select></label>
+        <label>Event date<input type="date" value={form.eventDate} onChange={e => setForm({ ...form, eventDate: e.target.value })} required /></label>
+        <label>Reported by<select value={form.reportedByStaffId} onChange={e => setForm({ ...form, reportedByStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        <label>Event type<select value={form.eventType} onChange={e => setForm({ ...form, eventType: e.target.value })}>{ADVERSE_EVENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}</select></label>
+        <label>Severity<select value={form.severity} onChange={e => setForm({ ...form, severity: e.target.value })}>{['low', 'medium', 'high', 'critical'].map(s => <option key={s} value={s}>{s}</option>)}</select></label>
+        <label>Patient harm<select value={form.patientHarm} onChange={e => setForm({ ...form, patientHarm: e.target.value })}>{['none', 'potential', 'actual'].map(s => <option key={s} value={s}>{s}</option>)}</select></label>
+        <label style={{ gridColumn: '1 / -1' }}>Description<textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} required /></label>
+        <label style={{ gridColumn: '1 / -1' }}>Immediate action<textarea value={form.immediateAction} onChange={e => setForm({ ...form, immediateAction: e.target.value })} /></label>
+        <label className="check-inline"><input type="checkbox" checked={form.retrospectiveImpactRequired} onChange={e => setForm({ ...form, retrospectiveImpactRequired: e.target.checked })} /> Retrospective impact review needed</label>
+        <label className="check-inline"><input type="checkbox" checked={form.resultsAffected} onChange={e => setForm({ ...form, resultsAffected: e.target.checked })} /> Previously reported results affected</label>
+        {form.resultsAffected && <>
+          <label>Affected from<input type="date" value={form.affectedPeriodFrom} onChange={e => setForm({ ...form, affectedPeriodFrom: e.target.value })} /></label>
+          <label>Affected to<input type="date" value={form.affectedPeriodTo} onChange={e => setForm({ ...form, affectedPeriodTo: e.target.value })} /></label>
+          <label style={{ gridColumn: '1 / -1' }}>Impact summary<textarea value={form.retrospectiveImpactSummary} onChange={e => setForm({ ...form, retrospectiveImpactSummary: e.target.value })} /></label>
+        </>}
+        <label className="check-inline"><input type="checkbox" checked={form.reportedToManufacturer} onChange={e => setForm({ ...form, reportedToManufacturer: e.target.checked })} /> Reported to manufacturer/supplier</label>
+        <label className="check-inline"><input type="checkbox" checked={form.reportedToAuthority} onChange={e => setForm({ ...form, reportedToAuthority: e.target.checked })} /> Reported to authority</label>
+        <label>Report reference<input value={form.reportReference} onChange={e => setForm({ ...form, reportReference: e.target.value })} /></label>
+        <label>Report date<input type="date" value={form.reportDate} onChange={e => setForm({ ...form, reportDate: e.target.value })} /></label>
+        <label className="check-inline"><input type="checkbox" checked={form.raiseNc} onChange={e => setForm({ ...form, raiseNc: e.target.checked })} /> Automatically raise a nonconformity</label>
+        <button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Report adverse event'}</button>
+      </form>
+    </div>
+
+    <div className="card" style={{ marginTop: 16 }}>
+      <h3>Adverse event register</h3>
+      {list.length === 0 ? <p className="muted">No adverse events recorded.</p> : <table className="table"><thead><tr><th>No.</th><th>Equipment</th><th>Date</th><th>Type</th><th>Severity</th><th>NC</th><th>CAPA</th><th>Status</th><th></th></tr></thead><tbody>
+        {list.map(a => <tr key={a.id}><td>{a.adverse_event_number}</td><td>{a.equipment_number} — {a.equipment_name}</td><td>{a.event_date}</td><td>{adverseTypeLabel(a.event_type)}</td><td>{a.severity ? formatBadge(a.severity) : '—'}</td><td>{a.nc_id || '—'}</td><td>{a.capa_id || '—'}</td><td>{formatBadge(a.status)}</td><td><button type="button" className="secondary" onClick={() => openDetail(a.id)}>Open</button></td></tr>)}
+      </tbody></table>}
+    </div>
+
+    {open && edit && <div className="card" style={{ marginTop: 16 }}>
+      <div className="section-head"><h3 style={{ margin: 0 }}>{open.adverse_event_number} — {adverseTypeLabel(open.event_type)}</h3><button type="button" className="secondary" onClick={() => setOpen(null)}>Close</button></div>
+      <p className="muted" style={{ marginTop: 0 }}>{open.equipment_number} — {open.equipment_name} · {open.event_date} · {open.description}
+        {open.nc_id ? <> · linked NC #{open.nc_id}</> : null}{open.capa_id ? <> · linked CAPA #{open.capa_id}</> : null}</p>
+      <div className="form">
+        <h4>Investigation</h4>
+        <label>Investigation<textarea value={edit.investigation} onChange={e => setEdit({ ...edit, investigation: e.target.value })} /></label>
+        <label>Investigated by<select value={edit.investigatedByStaffId} onChange={e => setEdit({ ...edit, investigatedByStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        <label>Investigation date<input type="date" value={edit.investigationDate} onChange={e => setEdit({ ...edit, investigationDate: e.target.value })} /></label>
+        <h4>Corrective action &amp; follow-up</h4>
+        <label>Corrective action<textarea value={edit.correctiveAction} onChange={e => setEdit({ ...edit, correctiveAction: e.target.value })} /></label>
+        <label>Follow-up<textarea value={edit.followUp} onChange={e => setEdit({ ...edit, followUp: e.target.value })} /></label>
+        <label>Follow-up date<input type="date" value={edit.followUpDate} onChange={e => setEdit({ ...edit, followUpDate: e.target.value })} /></label>
+        <h4>Retrospective impact on results</h4>
+        <label className="check-inline"><input type="checkbox" checked={edit.resultsAffected} onChange={e => setEdit({ ...edit, resultsAffected: e.target.checked })} /> Previously reported results affected</label>
+        <label>Affected from<input type="date" value={edit.affectedPeriodFrom} onChange={e => setEdit({ ...edit, affectedPeriodFrom: e.target.value })} /></label>
+        <label>Affected to<input type="date" value={edit.affectedPeriodTo} onChange={e => setEdit({ ...edit, affectedPeriodTo: e.target.value })} /></label>
+        <label>Impact summary<textarea value={edit.retrospectiveImpactSummary} onChange={e => setEdit({ ...edit, retrospectiveImpactSummary: e.target.value })} /></label>
+        <h4>External reporting</h4>
+        <label className="check-inline"><input type="checkbox" checked={edit.reportedToManufacturer} onChange={e => setEdit({ ...edit, reportedToManufacturer: e.target.checked })} /> Reported to manufacturer/supplier</label>
+        <label className="check-inline"><input type="checkbox" checked={edit.reportedToAuthority} onChange={e => setEdit({ ...edit, reportedToAuthority: e.target.checked })} /> Reported to authority</label>
+        <label>Report reference<input value={edit.reportReference} onChange={e => setEdit({ ...edit, reportReference: e.target.value })} /></label>
+        <label>Report date<input type="date" value={edit.reportDate} onChange={e => setEdit({ ...edit, reportDate: e.target.value })} /></label>
+        <label>Status<select value={edit.status} onChange={e => setEdit({ ...edit, status: e.target.value })}>{['open', 'under_investigation', 'action_required', 'closed'].map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select></label>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button type="button" onClick={saveDetail} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+          {!open.nc_id && <button type="button" className="secondary" onClick={createNc}>Raise NC</button>}
+          {!open.capa_id && <button type="button" className="secondary" onClick={createCapa}>Raise CAPA</button>}
+        </div>
+      </div>
+    </div>}
   </div>;
 }
 

@@ -263,6 +263,118 @@ export function equipmentRoutes() {
     res.json({ ok: true });
   });
 
+  // ===================== Equipment adverse events =====================
+  // Raise a nonconformity for an adverse event and link them both ways.
+  function raiseNcForAdverseEvent(db: any, req: any, ae: any): number {
+    const createdAt = new Date().toISOString();
+    const ncNumber = generateRecordNumber(db, 'nonconforming_events', 'NC', createdAt);
+    const detectedBy = getStaffIdOrCurrent(req, ae.reported_by_staff_id);
+    const ncResult = db.prepare(`INSERT INTO nonconforming_events (nc_number, event_date, detected_by_staff_id, source_module, source_record_id, title, description, category, severity, impact_level, immediate_correction, patient_or_service_impact, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(ncNumber, ae.event_date, detectedBy, 'equipment', String(ae.id), `Equipment adverse event: ${ae.event_type}`, ae.description, 'equipment', ae.severity ?? 'high', ae.patient_harm ?? null, ae.immediate_action ?? null, ae.patient_harm ? `Patient harm: ${ae.patient_harm}` : null, 'open', req.user!.id, createdAt);
+    const ncId = Number(ncResult.lastInsertRowid);
+    db.prepare('UPDATE equipment_adverse_events SET nc_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(ncId, ae.id);
+    db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run('equipment', 'equipment_adverse_events', String(ae.id), 'nc_capa', 'nonconforming_events', String(ncId), 'NC raised from equipment adverse event');
+    return ncId;
+  }
+
+  router.get('/adverse-events', requirePermission('equipment', 'view'), (_req, res) => {
+    const db = getDb();
+    res.json(db.prepare('SELECT a.*, e.name AS equipment_name, e.equipment_number FROM equipment_adverse_events a JOIN equipment_items e ON e.id = a.equipment_id ORDER BY a.event_date DESC, a.id DESC').all());
+  });
+
+  router.get('/:id/adverse-events', requirePermission('equipment', 'view'), (req, res) => {
+    const db = getDb();
+    res.json(db.prepare('SELECT * FROM equipment_adverse_events WHERE equipment_id = ? ORDER BY event_date DESC, id DESC').all(req.params.id));
+  });
+
+  router.post('/:id/adverse-events', requirePermission('equipment', 'create'), (req, res) => {
+    if (!req.body.eventDate) return res.status(400).json({ error: 'eventDate is required' });
+    if (!req.body.eventType) return res.status(400).json({ error: 'eventType is required' });
+    if (!req.body.description) return res.status(400).json({ error: 'description is required' });
+    const db = getDb();
+    const equipment = db.prepare('SELECT id FROM equipment_items WHERE id = ?').get(req.params.id);
+    if (!equipment) return res.status(404).json({ error: 'Equipment item not found' });
+    const createdAt = new Date().toISOString();
+    const number = generateRecordNumber(db, 'equipment_adverse_events', 'EAE', createdAt);
+    const reportedBy = getStaffIdOrCurrent(req, req.body.reportedByStaffId);
+    const result = db.prepare(`INSERT INTO equipment_adverse_events (adverse_event_number, equipment_id, event_date, reported_by_staff_id, event_type, severity, patient_harm, description, immediate_action, retrospective_impact_required, results_affected, affected_period_from, affected_period_to, retrospective_impact_summary, reported_to_manufacturer, reported_to_authority, report_reference, report_date, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(number, req.params.id, req.body.eventDate, reportedBy, req.body.eventType, req.body.severity ?? null, req.body.patientHarm ?? null, req.body.description, req.body.immediateAction ?? null, req.body.retrospectiveImpactRequired ? 1 : 0, req.body.resultsAffected ? 1 : 0, req.body.affectedPeriodFrom ?? null, req.body.affectedPeriodTo ?? null, req.body.retrospectiveImpactSummary ?? null, req.body.reportedToManufacturer ? 1 : 0, req.body.reportedToAuthority ? 1 : 0, req.body.reportReference ?? null, req.body.reportDate ?? null, 'open', req.user!.id, createdAt);
+    const id = Number(result.lastInsertRowid);
+    // A reportable adverse event is a nonconformity by definition — auto-raise
+    // and link one unless the caller explicitly opts out.
+    let ncId: number | null = null;
+    if (req.body.raiseNc !== false) {
+      const ae = db.prepare('SELECT * FROM equipment_adverse_events WHERE id = ?').get(id) as any;
+      ncId = raiseNcForAdverseEvent(db, req, ae);
+    }
+    audit(req, { action: 'create', entity: 'equipment_adverse_events', entityId: id, newValue: { number, equipmentId: req.params.id, ncId } });
+    res.status(201).json({ id, adverseEventNumber: number, ncId });
+  });
+
+  router.get('/adverse-events/:aid', requirePermission('equipment', 'view'), (req, res) => {
+    const db = getDb();
+    const record = db.prepare('SELECT a.*, e.name AS equipment_name, e.equipment_number FROM equipment_adverse_events a JOIN equipment_items e ON e.id = a.equipment_id WHERE a.id = ?').get(req.params.aid);
+    if (!record) return res.status(404).json({ error: 'Adverse event not found' });
+    res.json(record);
+  });
+
+  router.put('/adverse-events/:aid', requirePermission('equipment', 'edit'), (req, res) => {
+    const db = getDb();
+    const old = db.prepare('SELECT * FROM equipment_adverse_events WHERE id = ?').get(req.params.aid) as any;
+    if (!old) return res.status(404).json({ error: 'Adverse event not found' });
+    const b = req.body;
+    db.prepare(`UPDATE equipment_adverse_events SET severity = ?, patient_harm = ?, immediate_action = ?, investigation = ?, investigated_by_staff_id = ?, investigation_date = ?, corrective_action = ?, follow_up = ?, follow_up_date = ?, retrospective_impact_required = ?, results_affected = ?, affected_period_from = ?, affected_period_to = ?, retrospective_impact_summary = ?, reported_to_manufacturer = ?, reported_to_authority = ?, report_reference = ?, report_date = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(
+        b.severity ?? old.severity,
+        b.patientHarm ?? old.patient_harm,
+        b.immediateAction ?? old.immediate_action,
+        b.investigation ?? old.investigation,
+        b.investigatedByStaffId !== undefined ? parseIntNullable(b.investigatedByStaffId) : old.investigated_by_staff_id,
+        b.investigationDate ?? old.investigation_date,
+        b.correctiveAction ?? old.corrective_action,
+        b.followUp ?? old.follow_up,
+        b.followUpDate ?? old.follow_up_date,
+        b.retrospectiveImpactRequired !== undefined ? (b.retrospectiveImpactRequired ? 1 : 0) : old.retrospective_impact_required,
+        b.resultsAffected !== undefined ? (b.resultsAffected ? 1 : 0) : old.results_affected,
+        b.affectedPeriodFrom ?? old.affected_period_from,
+        b.affectedPeriodTo ?? old.affected_period_to,
+        b.retrospectiveImpactSummary ?? old.retrospective_impact_summary,
+        b.reportedToManufacturer !== undefined ? (b.reportedToManufacturer ? 1 : 0) : old.reported_to_manufacturer,
+        b.reportedToAuthority !== undefined ? (b.reportedToAuthority ? 1 : 0) : old.reported_to_authority,
+        b.reportReference ?? old.report_reference,
+        b.reportDate ?? old.report_date,
+        b.status ?? old.status,
+        req.params.aid
+      );
+    audit(req, { action: 'edit', entity: 'equipment_adverse_events', entityId: req.params.aid, oldValue: old, newValue: b });
+    res.json({ ok: true });
+  });
+
+  router.post('/adverse-events/:aid/create-nc', requirePermission('nc_capa', 'create'), (req, res) => {
+    const db = getDb();
+    const ae = db.prepare('SELECT * FROM equipment_adverse_events WHERE id = ?').get(req.params.aid) as any;
+    if (!ae) return res.status(404).json({ error: 'Adverse event not found' });
+    if (ae.nc_id) return res.status(409).json({ error: 'A nonconformity is already linked.' });
+    const ncId = raiseNcForAdverseEvent(db, req, ae);
+    res.status(201).json({ ncId });
+  });
+
+  router.post('/adverse-events/:aid/create-capa', requirePermission('nc_capa', 'create'), (req, res) => {
+    const db = getDb();
+    const ae = db.prepare('SELECT * FROM equipment_adverse_events WHERE id = ?').get(req.params.aid) as any;
+    if (!ae) return res.status(404).json({ error: 'Adverse event not found' });
+    if (ae.capa_id) return res.status(409).json({ error: 'A CAPA is already linked.' });
+    const createdAt = new Date().toISOString();
+    const capaNumber = generateRecordNumber(db, 'capa_records', 'CAPA', createdAt);
+    const result = db.prepare(`INSERT INTO capa_records (capa_number, source_module, source_record_id, nc_id, title, problem_summary, corrective_action, responsible_staff_id, due_date, priority, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(capaNumber, 'equipment', String(ae.id), ae.nc_id ?? null, req.body.title ?? `CAPA for equipment adverse event ${ae.adverse_event_number}`, req.body.problemSummary ?? ae.description, req.body.correctiveAction ?? ae.corrective_action ?? null, parseIntNullable(req.body.responsibleStaffId), req.body.dueDate ?? null, req.body.priority ?? 'high', 'open', req.user!.id, createdAt);
+    const capaId = Number(result.lastInsertRowid);
+    db.prepare('UPDATE equipment_adverse_events SET capa_id = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(capaId, 'action_required', req.params.aid);
+    db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run('equipment', 'equipment_adverse_events', String(ae.id), 'nc_capa', 'capa_records', String(capaId), 'CAPA from equipment adverse event');
+    audit(req, { action: 'create', entity: 'capa_records', entityId: capaId, newValue: { capaNumber, sourceModule: 'equipment', sourceRecordId: ae.id } });
+    res.status(201).json({ capaId, capaNumber });
+  });
+
   router.get('/:id', requirePermission('equipment', 'view'), (req, res) => {
     const db = getDb();
     const item = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(req.params.id);
@@ -272,9 +384,10 @@ export function equipmentRoutes() {
     const verifications = db.prepare('SELECT * FROM equipment_verifications WHERE equipment_id = ? ORDER BY performed_date DESC, id DESC').all(req.params.id);
     const calibrations = db.prepare('SELECT * FROM equipment_calibrations WHERE equipment_id = ? ORDER BY calibration_date DESC, id DESC').all(req.params.id);
     const schedules = db.prepare('SELECT * FROM equipment_schedules WHERE equipment_id = ? ORDER BY is_active DESC, next_due_date').all(req.params.id);
+    const adverseEvents = db.prepare('SELECT * FROM equipment_adverse_events WHERE equipment_id = ? ORDER BY event_date DESC, id DESC').all(req.params.id);
     const links = db.prepare('SELECT * FROM record_links WHERE (source_module_key = ? AND source_record_type = ? AND source_record_id = ?) OR (target_module_key = ? AND target_record_type = ? AND target_record_id = ?)')
       .all('equipment', 'equipment_items', String(req.params.id), 'equipment', 'equipment_items', String(req.params.id));
-    res.json({ ...item, maintenance, breakdowns, verifications, calibrations, schedules, links });
+    res.json({ ...item, maintenance, breakdowns, verifications, calibrations, schedules, adverseEvents, links });
   });
 
   router.post('/', requirePermission('equipment', 'create'), (req, res) => {
