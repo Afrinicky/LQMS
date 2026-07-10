@@ -195,6 +195,74 @@ export function equipmentRoutes() {
     res.json({ ok: true });
   });
 
+  // ===================== Maintenance & servicing schedules =====================
+  const SCHEDULE_FREQUENCIES = ['daily', 'weekly', 'monthly', 'quarterly', 'biannual', 'annual', 'custom'];
+
+  function advanceDate(dateStr: string, freq: string, intervalDays?: number | null): string | null {
+    const d = new Date(dateStr + 'T00:00:00Z');
+    if (isNaN(d.getTime())) return null;
+    switch (freq) {
+      case 'daily': d.setUTCDate(d.getUTCDate() + 1); break;
+      case 'weekly': d.setUTCDate(d.getUTCDate() + 7); break;
+      case 'monthly': d.setUTCMonth(d.getUTCMonth() + 1); break;
+      case 'quarterly': d.setUTCMonth(d.getUTCMonth() + 3); break;
+      case 'biannual': d.setUTCMonth(d.getUTCMonth() + 6); break;
+      case 'annual': d.setUTCMonth(d.getUTCMonth() + 12); break;
+      case 'custom': d.setUTCDate(d.getUTCDate() + (intervalDays && intervalDays > 0 ? intervalDays : 30)); break;
+      default: return null;
+    }
+    return d.toISOString().slice(0, 10);
+  }
+
+  // All schedules that are due within 30 days or overdue, newest-due first.
+  router.get('/schedules/due', requirePermission('equipment', 'view'), (_req, res) => {
+    const db = getDb();
+    const soon = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    res.json(db.prepare(`SELECT s.*, e.name AS equipment_name, e.equipment_number FROM equipment_schedules s JOIN equipment_items e ON e.id = s.equipment_id WHERE s.is_active = 1 AND s.next_due_date IS NOT NULL AND s.next_due_date <= ? ORDER BY s.next_due_date`).all(soon));
+  });
+
+  router.get('/:id/schedules', requirePermission('equipment', 'view'), (req, res) => {
+    const db = getDb();
+    res.json(db.prepare('SELECT * FROM equipment_schedules WHERE equipment_id = ? ORDER BY is_active DESC, next_due_date').all(req.params.id));
+  });
+
+  router.post('/:id/schedules', requirePermission('equipment', 'create'), (req, res) => {
+    if (!req.body.frequency || !SCHEDULE_FREQUENCIES.includes(req.body.frequency)) return res.status(400).json({ error: `frequency must be one of: ${SCHEDULE_FREQUENCIES.join(', ')}` });
+    const db = getDb();
+    const equipment = db.prepare('SELECT id FROM equipment_items WHERE id = ?').get(req.params.id);
+    if (!equipment) return res.status(404).json({ error: 'Equipment item not found' });
+    // Seed the first due date: use the supplied one, otherwise compute from today.
+    const nextDue = req.body.nextDueDate || advanceDate(new Date().toISOString().slice(0, 10), req.body.frequency, parseIntNullable(req.body.intervalDays));
+    const result = db.prepare('INSERT INTO equipment_schedules (equipment_id, schedule_type, frequency, interval_days, provider_type, provider_name, responsible_staff_id, section_id, task_description, last_done_date, next_due_date, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(req.params.id, req.body.scheduleType ?? 'preventive_maintenance', req.body.frequency, parseIntNullable(req.body.intervalDays), req.body.providerType ?? null, req.body.providerName ?? null, parseIntNullable(req.body.responsibleStaffId), parseIntNullable(req.body.sectionId), req.body.taskDescription ?? null, req.body.lastDoneDate ?? null, nextDue, req.body.notes ?? null, req.user!.id);
+    audit(req, { action: 'create', entity: 'equipment_schedules', entityId: result.lastInsertRowid, newValue: { equipmentId: req.params.id, ...req.body } });
+    res.status(201).json({ id: result.lastInsertRowid, nextDueDate: nextDue });
+  });
+
+  router.put('/schedules/:sid', requirePermission('equipment', 'edit'), (req, res) => {
+    const db = getDb();
+    const old = db.prepare('SELECT * FROM equipment_schedules WHERE id = ?').get(req.params.sid) as any;
+    if (!old) return res.status(404).json({ error: 'Schedule not found' });
+    if (req.body.frequency && !SCHEDULE_FREQUENCIES.includes(req.body.frequency)) return res.status(400).json({ error: 'Invalid frequency' });
+    db.prepare('UPDATE equipment_schedules SET schedule_type = ?, frequency = ?, interval_days = ?, provider_type = ?, provider_name = ?, responsible_staff_id = ?, section_id = ?, task_description = ?, next_due_date = ?, is_active = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(
+        req.body.scheduleType ?? old.schedule_type,
+        req.body.frequency ?? old.frequency,
+        req.body.intervalDays !== undefined ? parseIntNullable(req.body.intervalDays) : old.interval_days,
+        req.body.providerType ?? old.provider_type,
+        req.body.providerName ?? old.provider_name,
+        req.body.responsibleStaffId !== undefined ? parseIntNullable(req.body.responsibleStaffId) : old.responsible_staff_id,
+        req.body.sectionId !== undefined ? parseIntNullable(req.body.sectionId) : old.section_id,
+        req.body.taskDescription ?? old.task_description,
+        req.body.nextDueDate ?? old.next_due_date,
+        req.body.isActive !== undefined ? (req.body.isActive ? 1 : 0) : old.is_active,
+        req.body.notes ?? old.notes,
+        req.params.sid
+      );
+    audit(req, { action: 'edit', entity: 'equipment_schedules', entityId: req.params.sid, oldValue: old, newValue: req.body });
+    res.json({ ok: true });
+  });
+
   router.get('/:id', requirePermission('equipment', 'view'), (req, res) => {
     const db = getDb();
     const item = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(req.params.id);
@@ -203,9 +271,10 @@ export function equipmentRoutes() {
     const breakdowns = db.prepare('SELECT * FROM equipment_breakdowns WHERE equipment_id = ? ORDER BY breakdown_date DESC').all(req.params.id);
     const verifications = db.prepare('SELECT * FROM equipment_verifications WHERE equipment_id = ? ORDER BY performed_date DESC, id DESC').all(req.params.id);
     const calibrations = db.prepare('SELECT * FROM equipment_calibrations WHERE equipment_id = ? ORDER BY calibration_date DESC, id DESC').all(req.params.id);
+    const schedules = db.prepare('SELECT * FROM equipment_schedules WHERE equipment_id = ? ORDER BY is_active DESC, next_due_date').all(req.params.id);
     const links = db.prepare('SELECT * FROM record_links WHERE (source_module_key = ? AND source_record_type = ? AND source_record_id = ?) OR (target_module_key = ? AND target_record_type = ? AND target_record_id = ?)')
       .all('equipment', 'equipment_items', String(req.params.id), 'equipment', 'equipment_items', String(req.params.id));
-    res.json({ ...item, maintenance, breakdowns, verifications, calibrations, links });
+    res.json({ ...item, maintenance, breakdowns, verifications, calibrations, schedules, links });
   });
 
   router.post('/', requirePermission('equipment', 'create'), (req, res) => {
@@ -332,7 +401,8 @@ export function equipmentRoutes() {
     const equipment = db.prepare('SELECT id FROM equipment_items WHERE id = ?').get(req.params.id);
     if (!equipment) return res.status(404).json({ error: 'Equipment item not found' });
     const performedBy = getStaffIdOrCurrent(req, req.body.performedByStaffId);
-    const result = db.prepare(`INSERT INTO equipment_maintenance_records (equipment_id, maintenance_date, maintenance_type, performed_by_staff_id, findings, action_taken, next_due_date, status, evidence_file_id, reviewed_by_staff_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    const scheduleId = parseIntNullable(req.body.scheduleId);
+    const result = db.prepare(`INSERT INTO equipment_maintenance_records (equipment_id, maintenance_date, maintenance_type, performed_by_staff_id, findings, action_taken, next_due_date, status, evidence_file_id, reviewed_by_staff_id, schedule_id, service_provider, provider_type, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(
         req.params.id,
         req.body.maintenanceDate,
@@ -344,6 +414,9 @@ export function equipmentRoutes() {
         req.body.status ?? 'completed',
         parseIntNullable(req.body.evidenceFileId),
         parseIntNullable(req.body.reviewedByStaffId),
+        scheduleId,
+        req.body.serviceProvider ?? null,
+        req.body.providerType ?? null,
         req.user!.id
       );
     if (req.body.nextDueDate) {
@@ -351,6 +424,14 @@ export function equipmentRoutes() {
         .run(req.body.maintenanceDate, req.body.nextDueDate, req.body.nextDueDate, req.params.id);
     } else {
       db.prepare('UPDATE equipment_items SET last_service_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(req.body.maintenanceDate, req.params.id);
+    }
+    // Logging against a schedule rolls it forward from the date it was done.
+    if (scheduleId) {
+      const sched = db.prepare('SELECT * FROM equipment_schedules WHERE id = ? AND equipment_id = ?').get(scheduleId, req.params.id) as any;
+      if (sched) {
+        const nextDue = req.body.nextDueDate || advanceDate(req.body.maintenanceDate, sched.frequency, sched.interval_days);
+        db.prepare('UPDATE equipment_schedules SET last_done_date = ?, next_due_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(req.body.maintenanceDate, nextDue, scheduleId);
+      }
     }
     audit(req, { action: 'create', entity: 'equipment_maintenance_records', entityId: result.lastInsertRowid, newValue: { equipmentId: req.params.id, ...req.body } });
     res.status(201).json({ id: result.lastInsertRowid });

@@ -282,6 +282,28 @@ CREATE TABLE IF NOT EXISTS equipment_calibrations (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT
 );
+-- Equipment maintenance/servicing programme (Phase 4): each equipment can carry
+-- one or more schedules that generate due/overdue states and roll forward when a
+-- maintenance record is logged against them.
+CREATE TABLE IF NOT EXISTS equipment_schedules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  equipment_id INTEGER NOT NULL REFERENCES equipment_items(id),
+  schedule_type TEXT NOT NULL DEFAULT 'preventive_maintenance',  -- preventive_maintenance | servicing
+  frequency TEXT NOT NULL,                 -- daily | weekly | monthly | quarterly | biannual | annual | custom
+  interval_days INTEGER,                    -- used when frequency = custom
+  provider_type TEXT,                       -- internal | external
+  provider_name TEXT,
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  section_id INTEGER REFERENCES sections(id),
+  task_description TEXT,
+  last_done_date TEXT,
+  next_due_date TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
 CREATE TABLE IF NOT EXISTS monitoring_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   item_code TEXT NOT NULL UNIQUE,
@@ -3460,4 +3482,12 @@ CREATE TABLE IF NOT EXISTS regulatory_registrations (
     put.run('dennis.online.enabled', 'false');
     put.run('dennis.policy.v2', 'applied');
   }
+
+  // Phase 4: link maintenance records to a schedule and capture the servicer.
+  // Placed at the end of migrate() so equipment_maintenance_records (created in a
+  // later schema block) already exists.
+  const maintCols = new Set((database.prepare("PRAGMA table_info(equipment_maintenance_records)").all() as Array<{ name: string }>).map(c => c.name));
+  if (!maintCols.has('schedule_id')) database.exec('ALTER TABLE equipment_maintenance_records ADD COLUMN schedule_id INTEGER REFERENCES equipment_schedules(id)');
+  if (!maintCols.has('service_provider')) database.exec('ALTER TABLE equipment_maintenance_records ADD COLUMN service_provider TEXT');
+  if (!maintCols.has('provider_type')) database.exec('ALTER TABLE equipment_maintenance_records ADD COLUMN provider_type TEXT');
 }
