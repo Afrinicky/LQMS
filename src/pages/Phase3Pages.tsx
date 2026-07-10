@@ -126,6 +126,9 @@ export function EquipmentPage() {
   const [nextNumber, setNextNumber] = useState('');
   const [scheduleDueCount, setScheduleDueCount] = useState(0);
   const [openAdverseCount, setOpenAdverseCount] = useState(0);
+  const [regBusy, setRegBusy] = useState('');
+  const [regResult, setRegResult] = useState<{ created: number; updated: number; totalRows: number; errors: string[] } | null>(null);
+  const equipImportRef = useRef<HTMLInputElement>(null);
   const [equipForm, setEquipForm] = useState({ ...emptyEquipForm });
   const [newIfuFile, setNewIfuFile] = useState<File | null>(null);
   const [breakdownForm, setBreakdownForm] = useState({ equipmentId: '', breakdownDate: '', reportedByStaffId: '', description: '', serviceImpact: '', immediateAction: '', equipmentStatus: 'out_of_service', repairAction: '', serviceProvider: '' });
@@ -169,6 +172,33 @@ export function EquipmentPage() {
     if (!selected) return;
     try { setSelected(await api<EquipmentDetail>(`/equipment/${selected.id}`)); await load(); }
     catch (e) { setError((e as Error).message); }
+  }
+
+  async function downloadEquipmentRegister(path: string, fallback: string) {
+    setError(null); setRegBusy(path);
+    try {
+      const token = getToken();
+      const res = await fetch(`${API_BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({ error: res.statusText }))).error ?? res.statusText);
+      const blob = await res.blob();
+      const m = (res.headers.get('Content-Disposition') || '').match(/filename="?([^"]+)"?/);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = m ? m[1] : fallback; document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) { setError((e as Error).message); }
+    finally { setRegBusy(''); }
+  }
+  async function importEquipmentRegister(file: File) {
+    setError(null); setRegResult(null); setRegBusy('import');
+    try {
+      const fd = new FormData(); fd.append('file', file);
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/equipment/register/import`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
+      const data = await res.json().catch(() => ({ error: res.statusText }));
+      if (!res.ok) throw new Error(data.error ?? res.statusText);
+      setRegResult(data); await load();
+    } catch (e) { setError((e as Error).message); }
+    finally { setRegBusy(''); if (equipImportRef.current) equipImportRef.current.value = ''; }
   }
 
   async function submitEquipment(e: FormEvent) {
@@ -237,7 +267,16 @@ export function EquipmentPage() {
     </div></>}
 
     {tab === 'Equipment Register' && <div className="card">
-      <div className="section-head"><h3 style={{ margin: 0 }}>Equipment register</h3><span className="muted" style={{ fontSize: 13 }}>Click a row to open its profile.</span></div>
+      <div className="section-head" style={{ alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <h3 style={{ margin: 0 }}>Equipment register</h3>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span className="muted" style={{ fontSize: 13 }}>Click a row to open its profile.</span>
+          <button type="button" className="secondary" disabled={!!regBusy} title="Download the equipment register as an Excel workbook" onClick={() => downloadEquipmentRegister('/equipment/register/export', 'Equipment_Register.xlsx')}>{regBusy === '/equipment/register/export' ? 'Exporting…' : 'Export'}</button>
+          <button type="button" className="secondary" disabled={!!regBusy} title="Upload a completed equipment register workbook" onClick={() => equipImportRef.current?.click()}>{regBusy === 'import' ? 'Importing…' : 'Import'}</button>
+          <input ref={equipImportRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) void importEquipmentRegister(f); }} />
+        </div>
+      </div>
+      {regResult && <div className="success-msg" style={{ marginTop: 8 }}><strong>{regResult.created}</strong> created, <strong>{regResult.updated}</strong> updated ({regResult.totalRows} rows).{regResult.errors.length > 0 && <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>{regResult.errors.slice(0, 8).map((er, i) => <li key={i} style={{ fontSize: 12 }}>{er}</li>)}</ul>}</div>}
       {loading ? <p>Loading…</p> : equipment.length === 0 ? <p>No equipment items have been recorded yet.</p> :
         <div style={{ overflowX: 'auto' }}>
         <table className="table"><thead><tr><th>Identifier</th><th>Name</th><th>Serial no.</th><th>Model</th><th>Manufacturer</th><th>Supplier</th><th>Country</th><th>Condition</th><th>Received</th><th>In service</th><th>Location</th><th>Out of service</th><th>Status</th></tr></thead><tbody>
@@ -245,7 +284,7 @@ export function EquipmentPage() {
             <td>{item.equipment_number}</td><td>{item.name}</td><td>{item.serial_number || '—'}</td><td>{item.model || '—'}</td><td>{item.manufacturer || '—'}</td>
             <td>{item.supplier_name || '—'}</td><td>{item.country_of_origin || '—'}</td><td>{item.condition_received || '—'}</td>
             <td>{item.date_received || '—'}</td><td>{item.date_commissioned || '—'}</td>
-            <td>{locations.find(l => l.id === item.location_id)?.name || '—'}</td>
+            <td>{sections.find(s => s.id === item.section_id)?.name || '—'}</td>
             <td>{item.date_out_of_service || '—'}</td><td>{formatBadge(item.status)}</td>
           </tr>)}
         </tbody></table>
@@ -275,8 +314,7 @@ export function EquipmentPage() {
         <label>Supplier location<input value={equipForm.supplierLocation} onChange={e => setEquipForm({ ...equipForm, supplierLocation: e.target.value })} /></label>
         <label>Supplier contact<input value={equipForm.supplierContact} onChange={e => setEquipForm({ ...equipForm, supplierContact: e.target.value })} placeholder="phone / email" /></label>
         <label>Department<select value={equipForm.departmentId} onChange={e => setEquipForm({ ...equipForm, departmentId: e.target.value })}><option value="">Select department</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
-        <label>Section<select value={equipForm.sectionId} onChange={e => setEquipForm({ ...equipForm, sectionId: e.target.value })}><option value="">Select section</option>{sections.filter(s => !equipForm.departmentId || String(s.department_id) === equipForm.departmentId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-        <label>Location<select value={equipForm.locationId} onChange={e => setEquipForm({ ...equipForm, locationId: e.target.value })}><option value="">Select location</option>{locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
+        <label>Section (location)<select value={equipForm.sectionId} onChange={e => setEquipForm({ ...equipForm, sectionId: e.target.value })}><option value="">Select section</option>{sections.filter(s => !equipForm.departmentId || String(s.department_id) === equipForm.departmentId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select><small className="muted">The equipment's location is the section it belongs to.</small></label>
         <label>Custodian (responsible staff)<select value={equipForm.responsibleStaffId} onChange={e => setEquipForm({ ...equipForm, responsibleStaffId: e.target.value })}><option value="">Select staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Status<select value={equipForm.status} onChange={e => setEquipForm({ ...equipForm, status: e.target.value })}>{['active', 'operational', 'out_of_service', 'under_repair', 'restricted_use', 'retired'].map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Date received<input type="date" value={equipForm.dateReceived} onChange={e => setEquipForm({ ...equipForm, dateReceived: e.target.value })} /></label>
@@ -359,7 +397,8 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
 
   const deptName = departments.find(d => d.id === item.department_id)?.name || '—';
   const secName = sections.find(s => s.id === item.section_id)?.name || '—';
-  const locName = locations.find(l => l.id === item.location_id)?.name || '—';
+  // Per lab convention, the equipment's location is its section.
+  const locName = sections.find(s => s.id === item.section_id)?.name || '—';
   const custodian = staffName(staff, item.responsible_staff_id || item.assigned_to_staff_id);
 
   async function save() {
@@ -500,8 +539,7 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
           <label>Supplier location<input value={form.supplierLocation} onChange={e => setForm({ ...form, supplierLocation: e.target.value })} /></label>
           <label>Supplier contact<input value={form.supplierContact} onChange={e => setForm({ ...form, supplierContact: e.target.value })} /></label>
           <label>Department<select value={form.departmentId} onChange={e => setForm({ ...form, departmentId: e.target.value })}><option value="">—</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
-          <label>Section<select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })}><option value="">—</option>{sections.filter(s => !form.departmentId || String(s.department_id) === form.departmentId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-          <label>Location<select value={form.locationId} onChange={e => setForm({ ...form, locationId: e.target.value })}><option value="">—</option>{locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
+          <label>Section (location)<select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })}><option value="">—</option>{sections.filter(s => !form.departmentId || String(s.department_id) === form.departmentId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
           <label>Custodian<select value={form.responsibleStaffId} onChange={e => setForm({ ...form, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           <label>Status<select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>{['active', 'operational', 'out_of_service', 'under_repair', 'restricted_use', 'retired'].map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select></label>
           <label>Date received<input type="date" value={form.dateReceived} onChange={e => setForm({ ...form, dateReceived: e.target.value })} /></label>
