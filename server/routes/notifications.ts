@@ -125,6 +125,15 @@ function collectScanCandidates(db: any): ScanCandidate[] {
     const rows = db.prepare("SELECT id, breakdown_date, description FROM equipment_breakdowns WHERE status = 'open'").all() as any[];
     for (const r of rows) out.push({ moduleKey: 'equipment', recordType: 'equipment_breakdowns', recordId: String(r.id), title: `Open equipment breakdown #${r.id}`, message: r.description || 'Open breakdown', dueDate: null, severity: 'high', notificationType: 'follow_up', itemType: 'breakdown_open' });
   }
+  // Equipment maintenance/servicing schedules due or overdue
+  if (tableExists(db, 'equipment_schedules')) {
+    const rows = db.prepare("SELECT s.id, s.schedule_type, s.next_due_date, s.responsible_staff_id, e.name AS equipment_name FROM equipment_schedules s JOIN equipment_items e ON e.id = s.equipment_id WHERE s.is_active = 1 AND s.next_due_date IS NOT NULL AND s.next_due_date <= ?").all(soonIso) as any[];
+    for (const r of rows) {
+      const overdue = r.next_due_date < today;
+      const label = r.schedule_type === 'servicing' ? 'servicing' : 'preventive maintenance';
+      out.push({ moduleKey: 'equipment', recordType: 'equipment_schedules', recordId: String(r.id), title: `Equipment ${label} ${overdue ? 'overdue' : 'due'}: ${r.equipment_name}`, message: `${label} due ${r.next_due_date}`, dueDate: r.next_due_date, severity: overdue ? 'high' : 'medium', notificationType: overdue ? 'overdue' : 'due_soon', itemType: 'equipment_schedule', responsibleStaffId: r.responsible_staff_id });
+    }
+  }
 
   // Inventory batches expiring
   if (tableExists(db, 'inventory_batches')) {

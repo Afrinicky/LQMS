@@ -8,7 +8,7 @@ import { EnvironmentalMonitoringPage } from './EnvironmentalMonitoringPage';
 import type {
   Location, Section, Department, Staff, Supplier, EquipmentItem, InventoryItem, MonitoringRecord, SafetyIncident,
   EquipmentMaintenanceRecord, EquipmentBreakdown, MonitoringItem, MonitoringReading,
-  EquipmentChecklistItem, EquipmentVerificationRecord, EquipmentCalibrationRecord, ReferenceStandard,
+  EquipmentChecklistItem, EquipmentVerificationRecord, EquipmentCalibrationRecord, ReferenceStandard, EquipmentSchedule,
   InventoryBatch, OperationsSummary,
   SafetyEquipment, SafetyInspection, WasteDisposalRecord, HazardousChemical, StaffImmunization, FacilitiesSafetySummary,
   StorageInspection
@@ -38,7 +38,9 @@ function staffName(staffList: Staff[], id?: number | null) {
 }
 
 // ============= EQUIPMENT =============
-type EquipmentDetail = EquipmentItem & { maintenance?: EquipmentMaintenanceRecord[]; breakdowns?: EquipmentBreakdown[]; verifications?: EquipmentVerificationRecord[]; calibrations?: EquipmentCalibrationRecord[]; links?: any[] };
+type EquipmentDetail = EquipmentItem & { maintenance?: EquipmentMaintenanceRecord[]; breakdowns?: EquipmentBreakdown[]; verifications?: EquipmentVerificationRecord[]; calibrations?: EquipmentCalibrationRecord[]; schedules?: EquipmentSchedule[]; links?: any[] };
+const SCHEDULE_FREQUENCIES = ['daily', 'weekly', 'monthly', 'quarterly', 'biannual', 'annual', 'custom'];
+const MAINTENANCE_TYPES = ['preventive', 'corrective', 'service', 'calibration', 'verification'];
 
 // Upload a file to the shared store; returns its numeric id as a string, or null.
 async function uploadEquipFile(file: File | null): Promise<string | null> {
@@ -110,8 +112,8 @@ export function EquipmentPage() {
   const [summary, setSummary] = useState<OperationsSummary | null>(null);
   const [selected, setSelected] = useState<EquipmentDetail | null>(null);
   const [nextNumber, setNextNumber] = useState('');
+  const [scheduleDueCount, setScheduleDueCount] = useState(0);
   const [equipForm, setEquipForm] = useState({ ...emptyEquipForm });
-  const [maintForm, setMaintForm] = useState({ equipmentId: '', maintenanceDate: '', maintenanceType: 'preventive', performedByStaffId: '', findings: '', actionTaken: '', nextDueDate: '', status: 'completed' });
   const [breakdownForm, setBreakdownForm] = useState({ equipmentId: '', breakdownDate: '', reportedByStaffId: '', description: '', serviceImpact: '', immediateAction: '', equipmentStatus: 'out_of_service', repairAction: '', serviceProvider: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -127,6 +129,7 @@ export function EquipmentPage() {
       if (ops) setSummary(ops);
       api<Department[]>('/departments').then(setDepartments).catch(() => setDepartments([]));
       api<{ number: string }>('/equipment/config/next-number').then(r => setNextNumber(r.number)).catch(() => setNextNumber(''));
+      api<EquipmentSchedule[]>('/equipment/schedules/due').then(r => setScheduleDueCount(r.length)).catch(() => setScheduleDueCount(0));
     } catch (e) { setError((e as Error).message); }
     finally { setLoading(false); }
   }
@@ -164,17 +167,6 @@ export function EquipmentPage() {
     } catch (e) { setError((e as Error).message); }
   }
 
-  async function submitMaintenance(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    if (!maintForm.equipmentId) return setError('Select an equipment item');
-    try {
-      await api(`/equipment/${maintForm.equipmentId}/maintenance`, { method: 'POST', body: JSON.stringify(maintForm) });
-      setMaintForm({ equipmentId: '', maintenanceDate: '', maintenanceType: 'preventive', performedByStaffId: '', findings: '', actionTaken: '', nextDueDate: '', status: 'completed' });
-      await load();
-    } catch (e) { setError((e as Error).message); }
-  }
-
   async function submitBreakdown(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -207,7 +199,8 @@ export function EquipmentPage() {
     {tab === 'Dashboard' && <><KpiStrip items={[
       { label: 'Equipment items', value: summary?.equipmentTotal ?? equipment.length, onClick: () => setTab('Equipment Register') },
       { label: 'Maintenance due', value: summary?.equipmentMaintenanceDue, onClick: () => setTab('Maintenance Records') },
-      { label: 'Calibration due', value: summary?.equipmentCalibrationDue, onClick: () => setTab('Maintenance Records') },
+      { label: 'Schedules due/overdue', value: scheduleDueCount, tone: scheduleDueCount ? 'warning' : undefined, onClick: () => setTab('Maintenance Records') },
+      { label: 'Calibration due', value: summary?.equipmentCalibrationDue, onClick: () => setTab('Calibration') },
       { label: 'Out of service', value: summary?.equipmentOutOfService, tone: 'danger', onClick: () => setTab('Breakdowns') },
     ]} />
     <div className="grid cols-2" style={{ marginTop: 18 }}>
@@ -283,20 +276,7 @@ export function EquipmentPage() {
 
     {tab === 'Calibration' && <><EquipmentLifecycleTab kind="calibration" equipment={equipment} staff={staff} setError={setError} onChanged={reloadSelected} /><ReferenceStandardsPanel staff={staff} setError={setError} /></>}
 
-    {tab === 'Maintenance Records' && <div className="card">
-      <h3>Add maintenance record</h3>
-      <form className="form" onSubmit={submitMaintenance}>
-        <label>Equipment<select value={maintForm.equipmentId} onChange={e => setMaintForm({ ...maintForm, equipmentId: e.target.value })} required><option value="">Select equipment</option>{equipment.map(e2 => <option key={e2.id} value={e2.id}>{e2.equipment_number} — {e2.name}</option>)}</select></label>
-        <label>Maintenance date<input type="date" value={maintForm.maintenanceDate} onChange={e => setMaintForm({ ...maintForm, maintenanceDate: e.target.value })} required /></label>
-        <label>Maintenance type<select value={maintForm.maintenanceType} onChange={e => setMaintForm({ ...maintForm, maintenanceType: e.target.value })} required>{['preventive', 'corrective', 'calibration', 'verification', 'service'].map(t => <option key={t} value={t}>{t}</option>)}</select></label>
-        <label>Performed by<select value={maintForm.performedByStaffId} onChange={e => setMaintForm({ ...maintForm, performedByStaffId: e.target.value })}><option value="">Select staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-        <label>Findings<textarea value={maintForm.findings} onChange={e => setMaintForm({ ...maintForm, findings: e.target.value })} /></label>
-        <label>Action taken<textarea value={maintForm.actionTaken} onChange={e => setMaintForm({ ...maintForm, actionTaken: e.target.value })} /></label>
-        <label>Next due date<input type="date" value={maintForm.nextDueDate} onChange={e => setMaintForm({ ...maintForm, nextDueDate: e.target.value })} /></label>
-        <label>Status<select value={maintForm.status} onChange={e => setMaintForm({ ...maintForm, status: e.target.value })}>{['completed', 'pending', 'verified'].map(s => <option key={s} value={s}>{s}</option>)}</select></label>
-        <button type="submit">Save maintenance</button>
-      </form>
-    </div>}
+    {tab === 'Maintenance Records' && <EquipmentMaintenanceTab equipment={equipment} staff={staff} sections={sections} setError={setError} onChanged={() => { void load(); void reloadSelected(); }} />}
 
     {tab === 'Breakdowns' && <div className="card">
       <h3>Report breakdown</h3>
@@ -468,6 +448,10 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
         {item.notes && <><h4>Notes</h4><p className="muted">{item.notes}</p></>}
       </>}
 
+    <h4 style={{ marginTop: 22 }}>Maintenance &amp; servicing schedules</h4>
+    {!item.schedules?.length ? <p className="muted">No schedules set.</p> : <table className="table"><thead><tr><th>Type</th><th>Frequency</th><th>Provider</th><th>Last done</th><th>Next due</th><th>Active</th></tr></thead><tbody>
+      {item.schedules.map(s => { const overdue = s.next_due_date && s.next_due_date < new Date().toISOString().slice(0, 10); return <tr key={s.id}><td>{(s.schedule_type || '').replace(/_/g, ' ')}</td><td>{s.frequency}{s.frequency === 'custom' && s.interval_days ? ` (${s.interval_days}d)` : ''}</td><td>{s.provider_name || (s.provider_type ? s.provider_type : '—')}</td><td>{s.last_done_date || '—'}</td><td>{s.next_due_date || '—'}{overdue && s.is_active ? <span className="badge danger">overdue</span> : null}</td><td>{s.is_active ? '✓' : '—'}</td></tr>; })}
+    </tbody></table>}
     <h4 style={{ marginTop: 22 }}>Maintenance history</h4>
     {!item.maintenance?.length ? <p className="muted">No maintenance recorded.</p> : <table className="table"><thead><tr><th>Date</th><th>Type</th><th>Performed by</th><th>Findings</th><th>Next due</th><th>Status</th></tr></thead><tbody>
       {item.maintenance.map(m => <tr key={m.id}><td>{m.maintenance_date}</td><td>{m.maintenance_type}</td><td>{staffName(staff, m.performed_by_staff_id)}</td><td>{m.findings || '—'}</td><td>{m.next_due_date || '—'}</td><td>{formatBadge(m.status)}</td></tr>)}
@@ -692,6 +676,134 @@ function ReferenceStandardsPanel({ staff, setError }: { staff: Staff[]; setError
       {rows.map(r => { const expired = r.valid_until && r.valid_until < today; return <tr key={r.id}><td>{r.reference_number}</td><td>{r.name}</td><td>{(r.standard_type || '').replace(/_/g, ' ')}</td><td>{r.certificate_number || '—'}</td><td>{r.traceable_to || '—'}</td><td>{r.valid_until || '—'}{expired && <span className="badge danger">expired</span>}</td></tr>; })}
       {rows.length === 0 && <tr><td colSpan={6} className="muted">No reference standards recorded.</td></tr>}
     </tbody></table>
+  </div>;
+}
+
+// Maintenance as a programme: a due/overdue worklist, per-equipment schedules
+// (routine user PM and provider servicing), and the maintenance log.
+function EquipmentMaintenanceTab({ equipment, staff, sections, setError, onChanged }: { equipment: EquipmentItem[]; staff: Staff[]; sections: Section[]; setError: (m: string | null) => void; onChanged: () => void }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [due, setDue] = useState<EquipmentSchedule[]>([]);
+  const [equipId, setEquipId] = useState('');
+  const [schedules, setSchedules] = useState<EquipmentSchedule[]>([]);
+  const [records, setRecords] = useState<EquipmentMaintenanceRecord[]>([]);
+  const blankSched = { scheduleType: 'preventive_maintenance', frequency: 'monthly', intervalDays: '', providerType: 'internal', providerName: '', responsibleStaffId: '', sectionId: '', taskDescription: '', nextDueDate: '' };
+  const [schedForm, setSchedForm] = useState(blankSched);
+  const blankMaint = { maintenanceDate: today, maintenanceType: 'preventive', performedByStaffId: '', findings: '', actionTaken: '', nextDueDate: '', status: 'completed', scheduleId: '', serviceProvider: '', providerType: '' };
+  const [maintForm, setMaintForm] = useState(blankMaint);
+  const [maintFile, setMaintFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  function loadDue() { api<EquipmentSchedule[]>('/equipment/schedules/due').then(setDue).catch(() => setDue([])); }
+  useEffect(() => { loadDue(); }, []);
+  function loadForEquip(id: string) {
+    if (!id) { setSchedules([]); setRecords([]); return; }
+    api<EquipmentSchedule[]>(`/equipment/${id}/schedules`).then(setSchedules).catch(() => setSchedules([]));
+    api<EquipmentMaintenanceRecord[]>(`/equipment/${id}/maintenance`).then(setRecords).catch(() => setRecords([]));
+  }
+  useEffect(() => { loadForEquip(equipId); }, [equipId]);
+
+  async function addSchedule(e: FormEvent) {
+    e.preventDefault(); setError(null);
+    if (!equipId) { setError('Select an equipment item first.'); return; }
+    try {
+      await api(`/equipment/${equipId}/schedules`, { method: 'POST', body: JSON.stringify(schedForm) });
+      setSchedForm(blankSched); loadForEquip(equipId); loadDue(); onChanged();
+    } catch (e) { setError((e as Error).message); }
+  }
+  async function toggleSchedule(s: EquipmentSchedule) {
+    try { await api(`/equipment/schedules/${s.id}`, { method: 'PUT', body: JSON.stringify({ isActive: s.is_active ? 0 : 1 }) }); loadForEquip(equipId); loadDue(); }
+    catch (e) { setError((e as Error).message); }
+  }
+
+  async function submitMaintenance(e: FormEvent) {
+    e.preventDefault(); setError(null);
+    if (!equipId) { setError('Select an equipment item first.'); return; }
+    setBusy(true);
+    try {
+      const evidenceFileId = await uploadEquipFile(maintFile);
+      await api(`/equipment/${equipId}/maintenance`, { method: 'POST', body: JSON.stringify({ ...maintForm, evidenceFileId }) });
+      setMaintForm(blankMaint); setMaintFile(null); loadForEquip(equipId); loadDue(); onChanged();
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  // Quick "done today" against a due schedule, straight from the worklist.
+  async function logDue(s: EquipmentSchedule) {
+    setError(null);
+    try {
+      await api(`/equipment/${s.equipment_id}/maintenance`, { method: 'POST', body: JSON.stringify({ maintenanceDate: today, maintenanceType: s.schedule_type === 'servicing' ? 'service' : 'preventive', scheduleId: s.id, status: 'completed', providerType: s.provider_type ?? null, serviceProvider: s.provider_name ?? null }) });
+      loadDue(); if (String(s.equipment_id) === equipId) loadForEquip(equipId); onChanged();
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  return <div>
+    <div className="card">
+      <h3>Due &amp; overdue</h3>
+      <p className="muted" style={{ marginTop: 0 }}>Every routine maintenance and servicing schedule that is due within 30 days or overdue. Log it done in one click.</p>
+      {due.length === 0 ? <p className="muted">Nothing due.</p> : <table className="table"><thead><tr><th>Equipment</th><th>Type</th><th>Frequency</th><th>Due</th><th></th></tr></thead><tbody>
+        {due.map(s => { const overdue = s.next_due_date && s.next_due_date < today; return <tr key={s.id}>
+          <td>{s.equipment_number} — {s.equipment_name}</td>
+          <td>{(s.schedule_type || '').replace(/_/g, ' ')}</td>
+          <td>{s.frequency}</td>
+          <td>{s.next_due_date || '—'} {overdue ? <span className="badge danger">overdue</span> : <span className="badge warning">due soon</span>}</td>
+          <td><button type="button" className="secondary" onClick={() => logDue(s)}>Log done today</button></td>
+        </tr>; })}
+      </tbody></table>}
+    </div>
+
+    <div className="card" style={{ marginTop: 16 }}>
+      <div className="section-head"><h3 style={{ margin: 0 }}>Equipment</h3>
+        <select value={equipId} onChange={e => setEquipId(e.target.value)} style={{ maxWidth: 320 }}><option value="">Select equipment…</option>{equipment.map(e2 => <option key={e2.id} value={e2.id}>{e2.equipment_number} — {e2.name}</option>)}</select>
+      </div>
+      {!equipId ? <p className="muted">Select an equipment item to manage its schedules and log maintenance.</p> : <>
+        <h4>Schedules</h4>
+        {schedules.length === 0 ? <p className="muted">No schedules yet — every equipment should carry at least its routine maintenance schedule.</p> : <table className="table"><thead><tr><th>Type</th><th>Frequency</th><th>Provider</th><th>Responsible</th><th>Last done</th><th>Next due</th><th>Active</th><th></th></tr></thead><tbody>
+          {schedules.map(s => { const overdue = s.next_due_date && s.next_due_date < today; return <tr key={s.id}>
+            <td>{(s.schedule_type || '').replace(/_/g, ' ')}</td>
+            <td>{s.frequency}{s.frequency === 'custom' && s.interval_days ? ` (${s.interval_days}d)` : ''}</td>
+            <td>{s.provider_name || (s.provider_type || '—')}</td>
+            <td>{staffName(staff, s.responsible_staff_id)}</td>
+            <td>{s.last_done_date || '—'}</td>
+            <td>{s.next_due_date || '—'}{overdue && s.is_active ? <span className="badge danger">overdue</span> : null}</td>
+            <td>{s.is_active ? '✓' : '—'}</td>
+            <td><button type="button" className="secondary" onClick={() => toggleSchedule(s)}>{s.is_active ? 'Deactivate' : 'Activate'}</button></td>
+          </tr>; })}
+        </tbody></table>}
+        <form className="form" onSubmit={addSchedule} style={{ marginTop: 10 }}>
+          <label>Schedule type<select value={schedForm.scheduleType} onChange={e => setSchedForm({ ...schedForm, scheduleType: e.target.value })}><option value="preventive_maintenance">Routine preventive maintenance</option><option value="servicing">Servicing (provider)</option></select></label>
+          <label>Frequency<select value={schedForm.frequency} onChange={e => setSchedForm({ ...schedForm, frequency: e.target.value })}>{SCHEDULE_FREQUENCIES.map(f => <option key={f} value={f}>{f}</option>)}</select></label>
+          {schedForm.frequency === 'custom' && <label>Interval (days)<input type="number" min={1} value={schedForm.intervalDays} onChange={e => setSchedForm({ ...schedForm, intervalDays: e.target.value })} /></label>}
+          <label>Provider type<select value={schedForm.providerType} onChange={e => setSchedForm({ ...schedForm, providerType: e.target.value })}><option value="internal">Internal</option><option value="external">External</option></select></label>
+          <label>Provider name<input value={schedForm.providerName} onChange={e => setSchedForm({ ...schedForm, providerName: e.target.value })} placeholder="Service engineer / unit" /></label>
+          <label>Responsible staff<select value={schedForm.responsibleStaffId} onChange={e => setSchedForm({ ...schedForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+          <label>Responsible unit<select value={schedForm.sectionId} onChange={e => setSchedForm({ ...schedForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+          <label>Task description<input value={schedForm.taskDescription} onChange={e => setSchedForm({ ...schedForm, taskDescription: e.target.value })} placeholder="e.g. clean rotor, check seals" /></label>
+          <label>First due date<input type="date" value={schedForm.nextDueDate} onChange={e => setSchedForm({ ...schedForm, nextDueDate: e.target.value })} /></label>
+          <button type="submit">Add schedule</button>
+        </form>
+
+        <h4 style={{ marginTop: 20 }}>Log maintenance</h4>
+        <form className="form" onSubmit={submitMaintenance}>
+          <label>Date<input type="date" value={maintForm.maintenanceDate} onChange={e => setMaintForm({ ...maintForm, maintenanceDate: e.target.value })} required /></label>
+          <label>Type<select value={maintForm.maintenanceType} onChange={e => setMaintForm({ ...maintForm, maintenanceType: e.target.value })}>{MAINTENANCE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
+          <label>Against schedule<select value={maintForm.scheduleId} onChange={e => setMaintForm({ ...maintForm, scheduleId: e.target.value })}><option value="">— none —</option>{schedules.filter(s => s.is_active).map(s => <option key={s.id} value={s.id}>{(s.schedule_type || '').replace(/_/g, ' ')} · {s.frequency}</option>)}</select></label>
+          <label>Performed by<select value={maintForm.performedByStaffId} onChange={e => setMaintForm({ ...maintForm, performedByStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+          <label>Provider type<select value={maintForm.providerType} onChange={e => setMaintForm({ ...maintForm, providerType: e.target.value })}><option value="">—</option><option value="internal">Internal</option><option value="external">External</option></select></label>
+          <label>Service provider<input value={maintForm.serviceProvider} onChange={e => setMaintForm({ ...maintForm, serviceProvider: e.target.value })} placeholder="Engineer / company" /></label>
+          <label>Findings<textarea value={maintForm.findings} onChange={e => setMaintForm({ ...maintForm, findings: e.target.value })} /></label>
+          <label>Action taken<textarea value={maintForm.actionTaken} onChange={e => setMaintForm({ ...maintForm, actionTaken: e.target.value })} /></label>
+          <label>Next due (override)<input type="date" value={maintForm.nextDueDate} onChange={e => setMaintForm({ ...maintForm, nextDueDate: e.target.value })} /></label>
+          <label>Evidence<input type="file" onChange={e => setMaintFile(e.target.files?.[0] ?? null)} /></label>
+          <button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Log maintenance'}</button>
+        </form>
+
+        <h4 style={{ marginTop: 20 }}>Recent maintenance</h4>
+        {records.length === 0 ? <p className="muted">No maintenance recorded.</p> : <table className="table"><thead><tr><th>Date</th><th>Type</th><th>Provider</th><th>Performed by</th><th>Findings</th><th>Next due</th></tr></thead><tbody>
+          {records.map(m => <tr key={m.id}><td>{m.maintenance_date}</td><td>{m.maintenance_type}</td><td>{(m as any).service_provider || '—'}</td><td>{staffName(staff, m.performed_by_staff_id)}</td><td>{m.findings || '—'}</td><td>{m.next_due_date || '—'}</td></tr>)}
+        </tbody></table>}
+      </>}
+    </div>
   </div>;
 }
 
