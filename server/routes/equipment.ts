@@ -493,7 +493,7 @@ export function equipmentRoutes() {
     }
     const responsibleStaffId = parseIntNullable(req.body.responsibleStaffId ?? req.body.assignedToStaffId);
     const nextMaintenanceDue = req.body.nextMaintenanceDue ?? req.body.nextServiceDue ?? null;
-    const result = db.prepare(`INSERT INTO equipment_items (equipment_number, name, category, manufacturer, model, serial_number, location_id, department_id, section_id, status, calibration_due_date, last_service_date, next_service_due, assigned_to_staff_id, equipment_type, maintenance_frequency, calibration_frequency, next_maintenance_due, next_calibration_due, responsible_staff_id, date_received, date_commissioned, calibration_required, notes, supplier_name, supplier_location, supplier_contact, country_of_origin, condition_received, date_out_of_service, criticality, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    const result = db.prepare(`INSERT INTO equipment_items (equipment_number, name, category, manufacturer, model, serial_number, location_id, department_id, section_id, status, calibration_due_date, last_service_date, next_service_due, assigned_to_staff_id, equipment_type, maintenance_frequency, calibration_frequency, next_maintenance_due, next_calibration_due, responsible_staff_id, date_received, date_commissioned, calibration_required, notes, supplier_name, supplier_location, supplier_contact, country_of_origin, condition_received, date_out_of_service, criticality, ifu_file_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(
         equipmentNumber,
         req.body.name,
@@ -526,6 +526,7 @@ export function equipmentRoutes() {
         req.body.conditionReceived ?? null,
         req.body.dateOutOfService ?? null,
         req.body.criticality ?? null,
+        parseIntNullable(req.body.ifuFileId),
         req.user!.id,
         createdAt
       );
@@ -549,7 +550,7 @@ export function equipmentRoutes() {
         return res.status(409).json({ error: `Equipment identifier ${equipmentNumber} is already in use.` });
       }
     }
-    db.prepare(`UPDATE equipment_items SET equipment_number = ?, name = ?, category = ?, manufacturer = ?, model = ?, serial_number = ?, location_id = ?, department_id = ?, section_id = ?, status = ?, calibration_due_date = ?, last_service_date = ?, next_service_due = ?, assigned_to_staff_id = ?, equipment_type = ?, maintenance_frequency = ?, calibration_frequency = ?, next_maintenance_due = ?, next_calibration_due = ?, responsible_staff_id = ?, date_received = ?, date_commissioned = ?, calibration_required = ?, notes = ?, supplier_name = ?, supplier_location = ?, supplier_contact = ?, country_of_origin = ?, condition_received = ?, date_out_of_service = ?, criticality = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+    db.prepare(`UPDATE equipment_items SET equipment_number = ?, name = ?, category = ?, manufacturer = ?, model = ?, serial_number = ?, location_id = ?, department_id = ?, section_id = ?, status = ?, calibration_due_date = ?, last_service_date = ?, next_service_due = ?, assigned_to_staff_id = ?, equipment_type = ?, maintenance_frequency = ?, calibration_frequency = ?, next_maintenance_due = ?, next_calibration_due = ?, responsible_staff_id = ?, date_received = ?, date_commissioned = ?, calibration_required = ?, notes = ?, supplier_name = ?, supplier_location = ?, supplier_contact = ?, country_of_origin = ?, condition_received = ?, date_out_of_service = ?, criticality = ?, ifu_file_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
       .run(
         equipmentNumber,
         req.body.name ?? oldValue.name,
@@ -582,9 +583,37 @@ export function equipmentRoutes() {
         req.body.conditionReceived ?? oldValue.condition_received,
         req.body.dateOutOfService ?? oldValue.date_out_of_service,
         req.body.criticality ?? oldValue.criticality,
+        req.body.ifuFileId !== undefined ? parseIntNullable(req.body.ifuFileId) : oldValue.ifu_file_id,
         req.params.id
       );
     audit(req, { action: 'edit', entity: 'equipment_items', entityId: req.params.id, oldValue, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  // Decommissioning & safe disposal. One record per item; sets status to retired
+  // and captures decontamination confirmation + disposal method as a safety and
+  // traceability trail.
+  router.post('/:id/decommission', requirePermission('equipment', 'edit'), (req, res) => {
+    const db = getDb();
+    const old = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(req.params.id) as any;
+    if (!old) return res.status(404).json({ error: 'Equipment item not found' });
+    if (!req.body.decommissionedAt) return res.status(400).json({ error: 'decommissionedAt is required' });
+    if (!req.body.decontaminationConfirmed) return res.status(400).json({ error: 'Decontamination must be confirmed before decommissioning' });
+    db.prepare(`UPDATE equipment_items SET decommissioned = 1, decommissioned_at = ?, decommissioned_by_staff_id = ?, decommission_reason = ?, decontamination_confirmed = 1, decontamination_method = ?, decontamination_confirmed_by_staff_id = ?, disposal_method = ?, disposal_date = ?, disposal_reference = ?, disposal_evidence_file_id = ?, date_out_of_service = COALESCE(date_out_of_service, ?), status = 'retired', updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(
+        req.body.decommissionedAt,
+        getStaffIdOrCurrent(req, req.body.decommissionedByStaffId),
+        req.body.decommissionReason ?? null,
+        req.body.decontaminationMethod ?? null,
+        getStaffIdOrCurrent(req, req.body.decontaminationConfirmedByStaffId),
+        req.body.disposalMethod ?? null,
+        req.body.disposalDate ?? null,
+        req.body.disposalReference ?? null,
+        parseIntNullable(req.body.disposalEvidenceFileId),
+        req.body.decommissionedAt,
+        req.params.id
+      );
+    audit(req, { action: 'decommission', entity: 'equipment_items', entityId: req.params.id, oldValue: old, newValue: req.body });
     res.json({ ok: true });
   });
 

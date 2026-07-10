@@ -127,6 +127,7 @@ export function EquipmentPage() {
   const [scheduleDueCount, setScheduleDueCount] = useState(0);
   const [openAdverseCount, setOpenAdverseCount] = useState(0);
   const [equipForm, setEquipForm] = useState({ ...emptyEquipForm });
+  const [newIfuFile, setNewIfuFile] = useState<File | null>(null);
   const [breakdownForm, setBreakdownForm] = useState({ equipmentId: '', breakdownDate: '', reportedByStaffId: '', description: '', serviceImpact: '', immediateAction: '', equipmentStatus: 'out_of_service', repairAction: '', serviceProvider: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -174,8 +175,9 @@ export function EquipmentPage() {
     e.preventDefault();
     setError(null);
     try {
-      await api('/equipment', { method: 'POST', body: JSON.stringify(equipForm) });
-      setEquipForm({ ...emptyEquipForm });
+      const ifuFileId = await uploadEquipFile(newIfuFile);
+      await api('/equipment', { method: 'POST', body: JSON.stringify({ ...equipForm, ifuFileId }) });
+      setEquipForm({ ...emptyEquipForm }); setNewIfuFile(null);
       await load();
       setTab('Equipment Register');
     } catch (e) { setError((e as Error).message); }
@@ -285,6 +287,7 @@ export function EquipmentPage() {
         <label>Calibration frequency<input value={equipForm.calibrationFrequency} onChange={e => setEquipForm({ ...equipForm, calibrationFrequency: e.target.value })} /></label>
         <label>Next calibration due<input type="date" value={equipForm.nextCalibrationDue} onChange={e => setEquipForm({ ...equipForm, nextCalibrationDue: e.target.value })} /></label>
         <label><input type="checkbox" checked={equipForm.calibrationRequired} onChange={e => setEquipForm({ ...equipForm, calibrationRequired: e.target.checked })} /> Calibration required</label>
+        <label>Manufacturer's instructions / IFU<input type="file" onChange={e => setNewIfuFile(e.target.files?.[0] ?? null)} /><small className="muted">Attached to the profile as the manufacturer's manual.</small></label>
         <label>Notes<textarea value={equipForm.notes} onChange={e => setEquipForm({ ...equipForm, notes: e.target.value })} /></label>
         <button type="submit">Save equipment</button>
       </form>
@@ -332,6 +335,11 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showLabel, setShowLabel] = useState(false);
+  const [showDecommission, setShowDecommission] = useState(false);
+  const [ifuFile, setIfuFile] = useState<File | null>(null);
+  const emptyDecom = { decommissionedAt: new Date().toISOString().slice(0, 10), decommissionedByStaffId: '', decommissionReason: '', decontaminationConfirmed: false, decontaminationMethod: '', decontaminationConfirmedByStaffId: '', disposalMethod: '', disposalDate: '', disposalReference: '' };
+  const [decomForm, setDecomForm] = useState(emptyDecom);
+  const [decomFile, setDecomFile] = useState<File | null>(null);
   const [labelSize, setLabelSize] = useState(LABEL_SIZES[1].key);
   const [labelFields, setLabelFields] = useState<string[]>(['identifier', 'name', 'serial', 'nextCalibration']);
   const toForm = (it: EquipmentItem) => ({
@@ -356,8 +364,22 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
 
   async function save() {
     setSaving(true); setError(null);
-    try { await api(`/equipment/${item.id}`, { method: 'PUT', body: JSON.stringify(form) }); onSaved(); setEditing(false); }
-    catch (e) { setError((e as Error).message); }
+    try {
+      const payload: any = { ...form };
+      if (ifuFile) payload.ifuFileId = await uploadEquipFile(ifuFile);
+      await api(`/equipment/${item.id}`, { method: 'PUT', body: JSON.stringify(payload) });
+      setIfuFile(null); onSaved(); setEditing(false);
+    } catch (e) { setError((e as Error).message); }
+    finally { setSaving(false); }
+  }
+  async function submitDecommission() {
+    if (!decomForm.decontaminationConfirmed) { setError('Confirm decontamination before decommissioning.'); return; }
+    setSaving(true); setError(null);
+    try {
+      const disposalEvidenceFileId = await uploadEquipFile(decomFile);
+      await api(`/equipment/${item.id}/decommission`, { method: 'POST', body: JSON.stringify({ ...decomForm, disposalEvidenceFileId }) });
+      setDecomForm(emptyDecom); setDecomFile(null); setShowDecommission(false); onSaved();
+    } catch (e) { setError((e as Error).message); }
     finally { setSaving(false); }
   }
 
@@ -409,11 +431,13 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
 
   return <div className="card">
     <div className="section-head" style={{ alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-      <div><h3 style={{ margin: 0 }}>{item.name}</h3><div className="muted" style={{ fontSize: 13 }}>{item.equipment_number} · {formatBadge(item.status)}{item.criticality ? <> · <span className="badge">{item.criticality.replace(/_/g, ' ')}</span></> : null}</div></div>
+      <div><h3 style={{ margin: 0 }}>{item.name}</h3><div className="muted" style={{ fontSize: 13 }}>{item.equipment_number} · {formatBadge(item.status)}{item.criticality ? <> · <span className="badge">{item.criticality.replace(/_/g, ' ')}</span></> : null}{item.decommissioned ? <> · <span className="badge danger">decommissioned</span></> : null}</div></div>
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button type="button" className="secondary" onClick={onBack}>← Register</button>
+        {item.ifu_file_id ? <a className="secondary" href={`${API_BASE}/files/${item.ifu_file_id}/raw`} target="_blank" rel="noreferrer" style={{ padding: '6px 10px', borderRadius: 6, display: 'inline-block' }}>Manufacturer's IFU</a> : null}
         <button type="button" className="secondary" onClick={printProfile}>Print profile</button>
         <button type="button" className="secondary" onClick={() => setShowLabel(v => !v)}>Print label</button>
+        {!editing && !item.decommissioned && <button type="button" className="secondary" onClick={() => setShowDecommission(v => !v)}>Decommission</button>}
         {!editing && <button type="button" onClick={() => setEditing(true)}>Edit</button>}
       </div>
     </div>
@@ -429,6 +453,36 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
       </div>
       <div style={{ marginTop: 10 }}><button type="button" onClick={printLabel}>Print label</button></div>
     </div>}
+
+    {showDecommission && !item.decommissioned && <div className="card" style={{ marginTop: 12, background: 'var(--surface-2, #f6f8f9)' }}>
+      <h4 style={{ marginTop: 0 }}>Decommission &amp; safe disposal</h4>
+      <p className="muted" style={{ marginTop: 0 }}>Confirms decontamination and captures the disposal method. On save the item is retired and the record appears at the top of the profile.</p>
+      <div className="form-grid">
+        <label>Date decommissioned<input type="date" value={decomForm.decommissionedAt} onChange={e => setDecomForm({ ...decomForm, decommissionedAt: e.target.value })} required /></label>
+        <label>Decommissioned by<select value={decomForm.decommissionedByStaffId} onChange={e => setDecomForm({ ...decomForm, decommissionedByStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        <label style={{ gridColumn: '1 / -1' }}>Reason<textarea value={decomForm.decommissionReason} onChange={e => setDecomForm({ ...decomForm, decommissionReason: e.target.value })} /></label>
+        <label className="check-inline" style={{ gridColumn: '1 / -1' }}><input type="checkbox" checked={decomForm.decontaminationConfirmed} onChange={e => setDecomForm({ ...decomForm, decontaminationConfirmed: e.target.checked })} /> Decontamination confirmed</label>
+        <label>Decontamination method<input value={decomForm.decontaminationMethod} onChange={e => setDecomForm({ ...decomForm, decontaminationMethod: e.target.value })} placeholder="e.g. 1% NaOCl, autoclave, wipe-down" /></label>
+        <label>Confirmed by<select value={decomForm.decontaminationConfirmedByStaffId} onChange={e => setDecomForm({ ...decomForm, decontaminationConfirmedByStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        <label>Disposal method<input value={decomForm.disposalMethod} onChange={e => setDecomForm({ ...decomForm, disposalMethod: e.target.value })} placeholder="e.g. e-waste vendor, returned to supplier" /></label>
+        <label>Disposal date<input type="date" value={decomForm.disposalDate} onChange={e => setDecomForm({ ...decomForm, disposalDate: e.target.value })} /></label>
+        <label>Disposal reference<input value={decomForm.disposalReference} onChange={e => setDecomForm({ ...decomForm, disposalReference: e.target.value })} placeholder="Certificate / waybill no." /></label>
+        <label>Evidence<input type="file" onChange={e => setDecomFile(e.target.files?.[0] ?? null)} /></label>
+      </div>
+      <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
+        <button type="button" onClick={submitDecommission} disabled={saving || !decomForm.decontaminationConfirmed}>{saving ? 'Saving…' : 'Decommission item'}</button>
+        <button type="button" className="secondary" onClick={() => { setShowDecommission(false); setDecomForm(emptyDecom); setDecomFile(null); }}>Cancel</button>
+      </div>
+    </div>}
+
+    {item.decommissioned ? <div className="card" style={{ marginTop: 12, borderLeft: '3px solid var(--crit, #a63d34)' }}>
+      <h4 style={{ marginTop: 0 }}>Decommissioned &amp; disposed</h4>
+      <div className="profile-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
+        <div>{dv('Decommissioned on', item.decommissioned_at)}{dv('By', staffName(staff, item.decommissioned_by_staff_id))}{dv('Reason', item.decommission_reason)}</div>
+        <div>{dv('Decontamination confirmed', item.decontamination_confirmed ? 'Yes' : 'No')}{dv('Method', item.decontamination_method)}{dv('Confirmed by', staffName(staff, item.decontamination_confirmed_by_staff_id))}</div>
+        <div>{dv('Disposal method', item.disposal_method)}{dv('Disposal date', item.disposal_date)}{dv('Reference', item.disposal_reference)}{item.disposal_evidence_file_id ? <div className="kv-row"><span className="kv-k">Evidence</span><span className="kv-v"><a href={`${API_BASE}/files/${item.disposal_evidence_file_id}/raw`} target="_blank" rel="noreferrer">open</a></span></div> : null}</div>
+      </div>
+    </div> : null}
 
     {editing
       ? <form className="form" style={{ marginTop: 14 }} onSubmit={e => { e.preventDefault(); void save(); }}>
@@ -459,6 +513,7 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
           <label>Next calibration due<input type="date" value={form.nextCalibrationDue} onChange={e => setForm({ ...form, nextCalibrationDue: e.target.value })} /></label>
           <label className="check-inline"><input type="checkbox" checked={form.calibrationRequired} onChange={e => setForm({ ...form, calibrationRequired: e.target.checked })} /> Calibration required</label>
           <label>Notes<textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
+          <label>Manufacturer's IFU {item.ifu_file_id ? <>· <a href={`${API_BASE}/files/${item.ifu_file_id}/raw`} target="_blank" rel="noreferrer">current</a></> : null}<input type="file" onChange={e => setIfuFile(e.target.files?.[0] ?? null)} /><small className="muted">Upload to replace the current IFU.</small></label>
           <div style={{ display: 'flex', gap: 8 }}><button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button><button type="button" className="secondary" onClick={() => { setForm(toForm(item)); setEditing(false); }}>Cancel</button></div>
         </form>
       : <>
