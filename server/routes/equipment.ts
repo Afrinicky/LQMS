@@ -1,10 +1,20 @@
 import { Router } from 'express';
+import multer from 'multer';
+import * as XLSX from 'xlsx';
 import { getDb } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { generateEquipmentNumber, previewEquipmentNumber, getEquipmentPattern, saveEquipmentPattern } from '../utils/equipmentNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
+
+const EQUIPMENT_REGISTER_HEADERS = [
+  'Identifier', 'Name', 'Category', 'Type', 'Manufacturer', 'Model', 'Serial No.', 'Country of origin', 'Condition received',
+  'Criticality', 'Supplier name', 'Supplier location', 'Supplier contact', 'Department', 'Section', 'Custodian (employee no.)',
+  'Status', 'Date received', 'Date in service', 'Date out of service', 'Maintenance frequency', 'Next maintenance due',
+  'Calibration required', 'Calibration frequency', 'Next calibration due', 'Notes',
+] as const;
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
 const BREAKDOWN_STATUSES = ['open', 'under_repair', 'action_required', 'returned_to_service', 'closed'];
 const EQUIPMENT_STATUSES = ['active', 'operational', 'out_of_service', 'under_repair', 'restricted_use', 'retired'];
@@ -37,6 +47,108 @@ export function equipmentRoutes() {
   // Preview the identifier the next new item would receive.
   router.get('/config/next-number', requirePermission('equipment', 'view'), (_req, res) => {
     res.json({ number: previewEquipmentNumber(getDb()) });
+  });
+
+  // ===================== Excel export / import =====================
+  function sendWorkbook(res: any, buf: Buffer, filename: string) {
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.end(buf);
+  }
+  function buildEquipmentWorkbook(withData: boolean): Buffer {
+    const db = getDb();
+    const rows: any[][] = [];
+    if (withData) {
+      const items = db.prepare(`SELECT e.*, d.name AS dept_name, sec.name AS sec_name, st.employee_no AS staff_no FROM equipment_items e LEFT JOIN departments d ON d.id = e.department_id LEFT JOIN sections sec ON sec.id = e.section_id LEFT JOIN staff st ON st.id = COALESCE(e.responsible_staff_id, e.assigned_to_staff_id) ORDER BY e.equipment_number`).all() as any[];
+      for (const i of items) {
+        rows.push([
+          i.equipment_number, i.name, i.category ?? '', i.equipment_type ?? '', i.manufacturer ?? '', i.model ?? '', i.serial_number ?? '', i.country_of_origin ?? '', i.condition_received ?? '',
+          i.criticality ?? '', i.supplier_name ?? '', i.supplier_location ?? '', i.supplier_contact ?? '', i.dept_name ?? '', i.sec_name ?? '', i.staff_no ?? '',
+          i.status ?? '', i.date_received ?? '', i.date_commissioned ?? '', i.date_out_of_service ?? '', i.maintenance_frequency ?? '', i.next_maintenance_due ?? '',
+          i.calibration_required ? 'Yes' : 'No', i.calibration_frequency ?? '', i.next_calibration_due ?? '', i.notes ?? '',
+        ]);
+      }
+    }
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([EQUIPMENT_REGISTER_HEADERS as unknown as string[], ...rows]);
+    ws['!cols'] = EQUIPMENT_REGISTER_HEADERS.map(h => ({ wch: Math.min(28, Math.max(12, h.length + 2)) }));
+    XLSX.utils.book_append_sheet(wb, ws, 'EQUIPMENT REGISTER');
+    return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+  }
+
+  router.get('/register/template', requirePermission('equipment', 'view'), (_req, res) => {
+    sendWorkbook(res, buildEquipmentWorkbook(false), 'Equipment_Register_Template.xlsx');
+  });
+  router.get('/register/export', requirePermission('equipment', 'view'), (_req, res) => {
+    sendWorkbook(res, buildEquipmentWorkbook(true), 'Equipment_Register.xlsx');
+  });
+
+  // Rows are matched by Identifier: existing items are updated, new ones created.
+  router.post('/register/import', requirePermission('equipment', 'create'), upload.single('file'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the Equipment Register .xlsx file.' });
+    try {
+      const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+      const sheet = wb.SheetNames.find(n => n.toUpperCase().includes('EQUIPMENT')) || wb.SheetNames[0];
+      const ws = wb.Sheets[sheet];
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '', raw: false });
+      const db = getDb();
+      const deptByName = new Map<string, number>();
+      for (const d of db.prepare('SELECT id, name FROM departments').all() as any[]) deptByName.set(String(d.name).toLowerCase(), d.id);
+      const secByName = new Map<string, number>();
+      for (const s of db.prepare('SELECT id, name FROM sections').all() as any[]) secByName.set(String(s.name).toLowerCase(), s.id);
+      const staffByNo = new Map<string, number>();
+      for (const s of db.prepare('SELECT id, employee_no FROM staff WHERE employee_no IS NOT NULL').all() as any[]) staffByNo.set(String(s.employee_no).toLowerCase(), s.id);
+      const norm = (v: unknown) => { const s = String(v ?? '').trim(); return s === '' ? null : s; };
+      const yn = (v: unknown) => { const s = String(v ?? '').trim().toLowerCase(); return s === 'yes' || s === 'y' || s === 'true' || s === '1' ? 1 : 0; };
+
+      const errors: string[] = [];
+      let created = 0, updated = 0;
+      const tx = db.transaction(() => {
+        rows.forEach((r, idx) => {
+          const rowNo = idx + 2; // human-friendly (header on row 1)
+          const identifier = norm(r['Identifier']);
+          const name = norm(r['Name']);
+          if (!name) { errors.push(`Row ${rowNo}: Name is required.`); return; }
+          const deptId = norm(r['Department']) ? (deptByName.get(String(r['Department']).toLowerCase()) ?? null) : null;
+          const secId = norm(r['Section']) ? (secByName.get(String(r['Section']).toLowerCase()) ?? null) : null;
+          const staffId = norm(r['Custodian (employee no.)']) ? (staffByNo.get(String(r['Custodian (employee no.)']).toLowerCase()) ?? null) : null;
+          const status = (norm(r['Status']) ?? 'operational').toLowerCase();
+          const finalStatus = EQUIPMENT_STATUSES.includes(status) ? status : 'operational';
+          const values = {
+            name, category: norm(r['Category']), equipmentType: norm(r['Type']), manufacturer: norm(r['Manufacturer']), model: norm(r['Model']),
+            serialNumber: norm(r['Serial No.']), countryOfOrigin: norm(r['Country of origin']), conditionReceived: norm(r['Condition received']),
+            criticality: norm(r['Criticality']), supplierName: norm(r['Supplier name']), supplierLocation: norm(r['Supplier location']), supplierContact: norm(r['Supplier contact']),
+            departmentId: deptId, sectionId: secId, responsibleStaffId: staffId, status: finalStatus,
+            dateReceived: norm(r['Date received']), dateCommissioned: norm(r['Date in service']), dateOutOfService: norm(r['Date out of service']),
+            maintenanceFrequency: norm(r['Maintenance frequency']), nextMaintenanceDue: norm(r['Next maintenance due']),
+            calibrationRequired: yn(r['Calibration required']), calibrationFrequency: norm(r['Calibration frequency']), nextCalibrationDue: norm(r['Next calibration due']),
+            notes: norm(r['Notes']),
+          };
+          try {
+            const existing = identifier ? db.prepare('SELECT id FROM equipment_items WHERE equipment_number = ?').get(identifier) as any : null;
+            if (existing) {
+              db.prepare(`UPDATE equipment_items SET name = ?, category = ?, equipment_type = ?, manufacturer = ?, model = ?, serial_number = ?, country_of_origin = ?, condition_received = ?, criticality = ?, supplier_name = ?, supplier_location = ?, supplier_contact = ?, department_id = ?, section_id = ?, responsible_staff_id = ?, status = ?, date_received = ?, date_commissioned = ?, date_out_of_service = ?, maintenance_frequency = ?, next_maintenance_due = ?, calibration_required = ?, calibration_frequency = ?, next_calibration_due = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+                .run(values.name, values.category, values.equipmentType, values.manufacturer, values.model, values.serialNumber, values.countryOfOrigin, values.conditionReceived, values.criticality, values.supplierName, values.supplierLocation, values.supplierContact, values.departmentId, values.sectionId, values.responsibleStaffId, values.status, values.dateReceived, values.dateCommissioned, values.dateOutOfService, values.maintenanceFrequency, values.nextMaintenanceDue, values.calibrationRequired, values.calibrationFrequency, values.nextCalibrationDue, values.notes, existing.id);
+              updated++;
+            } else {
+              const createdAt = new Date().toISOString();
+              const equipmentNumber = identifier || generateEquipmentNumber(db, createdAt);
+              if (db.prepare('SELECT 1 FROM equipment_items WHERE equipment_number = ?').get(equipmentNumber)) { errors.push(`Row ${rowNo}: identifier ${equipmentNumber} already in use.`); return; }
+              db.prepare(`INSERT INTO equipment_items (equipment_number, name, category, equipment_type, manufacturer, model, serial_number, country_of_origin, condition_received, criticality, supplier_name, supplier_location, supplier_contact, department_id, section_id, responsible_staff_id, status, date_received, date_commissioned, date_out_of_service, maintenance_frequency, next_maintenance_due, calibration_required, calibration_frequency, next_calibration_due, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+                .run(equipmentNumber, values.name, values.category, values.equipmentType, values.manufacturer, values.model, values.serialNumber, values.countryOfOrigin, values.conditionReceived, values.criticality, values.supplierName, values.supplierLocation, values.supplierContact, values.departmentId, values.sectionId, values.responsibleStaffId, values.status, values.dateReceived, values.dateCommissioned, values.dateOutOfService, values.maintenanceFrequency, values.nextMaintenanceDue, values.calibrationRequired, values.calibrationFrequency, values.nextCalibrationDue, values.notes, req.user!.id, createdAt);
+              created++;
+            }
+          } catch (e) {
+            errors.push(`Row ${rowNo}: ${(e as Error).message}`);
+          }
+        });
+      });
+      tx();
+      audit(req, { action: 'import', entity: 'equipment_items', entityId: null, newValue: { created, updated, errors: errors.length } });
+      res.json({ totalRows: rows.length, created, updated, errors });
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
   });
 
   // ===================== Editable checklist question bank =====================
