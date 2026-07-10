@@ -6,11 +6,12 @@ import { getDb, uploadRoot, evidenceRoot } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
-import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
+import { parseIntNullable, getStaffIdOrCurrent, getCurrentStaffId } from './routeHelpers.js';
 import { extractDocument, deriveDocumentCodeFromName } from '../utils/documentExtract.js';
 import { indexDocument } from '../services/dennisService.js';
 import { buildDocxFromHtml } from '../utils/documentBuild.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
+import { recordCentralArchive } from './archives.js';
 
 // Make a document readable by the Dennis AI assistant (best-effort). Called after
 // a document's content is extracted so every uploaded document is fully read into
@@ -36,11 +37,23 @@ function flipOverdueAttestations(db: any) {
   db.prepare("UPDATE document_attestations SET status = 'overdue' WHERE status = 'pending' AND due_date IS NOT NULL AND due_date < date('now')").run();
 }
 
-function notifyStaff(db: any, staffId: number | null, moduleKey: string, title: string, message: string) {
+function notifyStaff(db: any, staffId: number | null, moduleKey: string, title: string, message: string, opts?: { recordType?: string; recordId?: string | number; actionUrl?: string; actionLabel?: string; severity?: string; notificationType?: string; dueDate?: string | null }) {
   if (!staffId) return;
   const users = db.prepare('SELECT id FROM users WHERE staff_id = ? AND is_active = 1').all(staffId) as Array<{ id: number }>;
+  const type = opts?.notificationType || 'follow_up';
+  const severity = opts?.severity || 'medium';
+  const rt = opts?.recordType || null;
+  const rid = opts?.recordId != null ? String(opts.recordId) : null;
+  const url = opts?.actionUrl || null;
+  const label = opts?.actionLabel || null;
+  const due = opts?.dueDate || null;
   for (const u of users) {
-    db.prepare('INSERT INTO notifications (user_id, module_key, title, message, status) VALUES (?, ?, ?, ?, ?)').run(u.id, moduleKey, title, message, 'unread');
+    // Rich, actionable notification: title + message + a link to the source
+    // record, so the inbox and dashboard can navigate the user straight to the
+    // action they need to take (and auto-resolve once completed).
+    db.prepare(`INSERT INTO notifications (user_id, module_key, title, message, status, severity, notification_type, record_type, record_id, assigned_to_staff_id, action_url, action_label, due_date, created_by)
+      VALUES (?, ?, ?, ?, 'unread', ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(u.id, moduleKey, title, message, severity, type, rt, rid, staffId, url, label, due, u.id);
   }
 }
 
@@ -87,7 +100,19 @@ function distributeToStaff(db: any, doc: any, versionId: number, staffIds: numbe
   });
   tx();
   const msg = `Please read and attest: ${doc.document_code ? doc.document_code + ' — ' : ''}${doc.title}${dueDate ? ` (due ${dueDate})` : ''}`;
-  for (const sId of notified) notifyStaff(db, sId, 'documents', 'New controlled document to attest', msg);
+  // Each notification carries the attestation id so the inbox can auto-clear it
+  // once the staff signs, and an action URL so clicking opens the document
+  // viewer with the attestation prompt shown.
+  for (const sId of notified) {
+    const att = db.prepare('SELECT id FROM document_attestations WHERE document_version_id = ? AND staff_id = ?').get(versionId, sId) as { id: number } | undefined;
+    notifyStaff(db, sId, 'documents', 'New controlled document to attest', msg, {
+      recordType: 'document_attestations', recordId: att?.id, dueDate,
+      actionUrl: `/documents?open=${doc.id}&attest=${att?.id ?? ''}`,
+      actionLabel: 'Read & attest',
+      notificationType: 'follow_up',
+      severity: 'medium',
+    });
+  }
   return notified;
 }
 
@@ -121,6 +146,110 @@ export function documentControlRoutes() {
     const horizonDays = Math.min(Math.max(Number(req.query.days) || 30, 1), 365);
     const cutoff = new Date(Date.now() + horizonDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     res.json(db.prepare(`SELECT id, document_code, title, document_type, status, next_review_date, owner_staff_id FROM documents WHERE next_review_date IS NOT NULL AND next_review_date <= ? AND status != 'obsolete' ORDER BY next_review_date`).all(cutoff));
+  });
+
+  // Every attestation ever assigned or signed — filterable by document code,
+  // title, staff name, status. Powers the redesigned Attestation List tab.
+  router.get('/attestations/list', requirePermission('documents', 'view'), (req, res) => {
+    const db = getDb();
+    flipOverdueAttestations(db);
+    const filters: string[] = [];
+    const params: unknown[] = [];
+    const docId = parseIntNullable(req.query.documentId);
+    if (docId) { filters.push('(a.document_id = ? OR a.document_version_id IN (SELECT id FROM document_versions WHERE document_id = ?))'); params.push(docId, docId); }
+    if (req.query.status) { filters.push('a.status = ?'); params.push(String(req.query.status)); }
+    const q = String(req.query.q || '').trim();
+    if (q) { filters.push('(LOWER(COALESCE(d.document_code, \'\')) LIKE ? OR LOWER(d.title) LIKE ? OR LOWER(COALESCE(s.full_name, \'\')) LIKE ?)'); const like = `%${q.toLowerCase()}%`; params.push(like, like, like); }
+    const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+    const rows = db.prepare(`
+      SELECT a.*, d.document_code, d.title, d.document_type, v.version_number, s.full_name AS staff_name, s.employee_no AS staff_employee_no,
+             sec.name AS section_name, ab.full_name AS assigned_by_name
+      FROM document_attestations a
+      LEFT JOIN documents d ON d.id = COALESCE(a.document_id, (SELECT document_id FROM document_versions WHERE id = a.document_version_id))
+      LEFT JOIN document_versions v ON v.id = a.document_version_id
+      LEFT JOIN staff s ON s.id = a.staff_id
+      LEFT JOIN sections sec ON sec.id = s.section_id
+      LEFT JOIN staff ab ON ab.id = a.assigned_by_staff_id
+      ${where}
+      ORDER BY CASE a.status WHEN 'signed' THEN 0 ELSE 1 END, a.attested_at DESC, a.id DESC
+      LIMIT 2000
+    `).all(...params);
+    res.json(rows);
+  });
+
+  // Documents that have at least one attestation (for the "pick a document"
+  // search on the Attestation List tab).
+  router.get('/attestations/documents', requirePermission('documents', 'view'), (_req, res) => {
+    const db = getDb();
+    res.json(db.prepare(`
+      SELECT d.id, d.document_code, d.title, d.document_type, d.status,
+             COUNT(a.id) AS attestations_total,
+             SUM(CASE WHEN a.status = 'signed' THEN 1 ELSE 0 END) AS attestations_signed,
+             SUM(CASE WHEN a.status IN ('pending','overdue') THEN 1 ELSE 0 END) AS attestations_pending
+      FROM documents d
+      JOIN document_attestations a ON a.document_id = d.id OR a.document_version_id IN (SELECT id FROM document_versions WHERE document_id = d.id)
+      GROUP BY d.id
+      ORDER BY d.document_code, d.title
+    `).all());
+  });
+
+  // Renders a printable Attestation List for a document (all signed staff).
+  // Independent of the document body — used for auditors and hard-copy records.
+  router.get('/:id/attestations/print', requirePermission('documents', 'print'), (req, res) => {
+    const db = getDb();
+    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    const versionId = parseIntNullable(req.query.versionId) ?? doc.current_version_id;
+    const version = versionId ? db.prepare('SELECT * FROM document_versions WHERE id = ?').get(versionId) as any : null;
+    const rows = db.prepare(`
+      SELECT a.*, s.full_name AS staff_name, s.employee_no, sec.name AS section_name,
+             p.title AS position_title
+      FROM document_attestations a
+      LEFT JOIN staff s ON s.id = a.staff_id
+      LEFT JOIN sections sec ON sec.id = s.section_id
+      LEFT JOIN staff_position_assignments spa ON spa.staff_id = s.id AND spa.is_active = 1 AND spa.assignment_type = 'primary'
+      LEFT JOIN positions p ON p.id = spa.position_id
+      WHERE (a.document_id = ? OR a.document_version_id IN (SELECT id FROM document_versions WHERE document_id = ?))
+      ${versionId ? 'AND a.document_version_id = ?' : ''}
+      ORDER BY CASE a.status WHEN 'signed' THEN 0 ELSE 1 END, a.attested_at, s.full_name
+    `).all(...(versionId ? [req.params.id, req.params.id, versionId] : [req.params.id, req.params.id])) as any[];
+    const lab = db.prepare("SELECT facility_name FROM laboratory_profile WHERE id = 1").get() as any;
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Attestation List — ${htmlEscape(doc.document_code || doc.title)}</title>
+<style>@page { size: A4; margin: 14mm; }
+body { font-family: 'Segoe UI', Arial, sans-serif; color: #111; margin: 0; padding: 24px; }
+h1 { font-size: 16px; margin: 0 0 4px; color: #1B3A6B; }
+h2 { font-size: 13px; margin: 0 0 12px; color: #4a5568; font-weight: 500; }
+table { border-collapse: collapse; width: 100%; font-size: 11.5px; margin-top: 12px; }
+th, td { border: 1px solid #a0aec0; padding: 5px 8px; text-align: left; vertical-align: top; }
+th { background: #edf2f7; font-weight: 600; }
+tr.pending td { color: #9b2c2c; background: #fff5f5; }
+.meta { font-size: 11px; color: #555; margin: 8px 0 10px; display: flex; flex-wrap: wrap; gap: 18px; }
+.meta div { min-width: 140px; }
+.meta strong { color: #2d3748; }
+.footer { font-size: 10px; color: #666; margin-top: 22px; border-top: 1px solid #cbd5e0; padding-top: 6px; display: flex; justify-content: space-between; }
+.no-print { background: #f0f4fa; padding: 6px 10px; margin-bottom: 12px; border-radius: 4px; font-size: 11px; color: #234; }
+@media print { .no-print { display: none; } }
+</style></head><body>
+<div class="no-print">Use your browser's Print (Ctrl+P) to print or save this Attestation List as PDF.</div>
+<h1>Attestation List</h1>
+<h2>${htmlEscape(lab?.facility_name || 'Laboratory')} · ${htmlEscape(doc.document_code || '')}${doc.document_code ? ' — ' : ''}${htmlEscape(doc.title)}</h2>
+<div class="meta">
+  <div><strong>Version</strong><br/>${htmlEscape(version?.version_number || version?.version_label || '—')}</div>
+  <div><strong>Effective</strong><br/>${htmlEscape(version?.effective_date || '—')}</div>
+  <div><strong>Document type</strong><br/>${htmlEscape(doc.document_type || '—')}</div>
+  <div><strong>Signed</strong><br/>${rows.filter((r: any) => r.status === 'signed').length} of ${rows.length}</div>
+  <div><strong>Printed</strong><br/>${new Date().toISOString().slice(0, 19).replace('T', ' ')}</div>
+</div>
+<table>
+  <thead><tr><th style="width:5%;">#</th><th style="width:32%;">Staff name</th><th style="width:14%;">Staff ID</th><th style="width:16%;">Position</th><th style="width:15%;">Section / unit</th><th style="width:9%;">Status</th><th style="width:9%;">Signed on</th></tr></thead>
+  <tbody>
+  ${rows.length ? rows.map((r: any, i: number) => `<tr class="${r.status !== 'signed' ? 'pending' : ''}"><td>${i + 1}</td><td>${htmlEscape(r.staff_name || '—')}</td><td>${htmlEscape(r.employee_no || '—')}</td><td>${htmlEscape(r.position_title || '—')}</td><td>${htmlEscape(r.section_name || '—')}</td><td>${htmlEscape(r.status)}</td><td>${htmlEscape(r.attested_at ? String(r.attested_at).slice(0, 10) : '—')}</td></tr>`).join('') : `<tr><td colspan="7" style="text-align:center; color:#888;">No attestations have been assigned for this document yet.</td></tr>`}
+  </tbody>
+</table>
+<div class="footer"><span>SECH_LIMS by Nickland — Attestation List</span><span>Personally signed by each staff member; signatures are non-transferable.</span></div>
+</body></html>`;
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
   });
 
   router.get('/attestations/pending', requirePermission('documents', 'view'), (req, res) => {
@@ -332,6 +461,20 @@ export function documentControlRoutes() {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       num, req.body.backupDate, req.body.backupType ?? null, req.body.scope ?? null, req.body.storageLocation ?? null, req.body.offsite ? 1 : 0, by,
       req.body.integrityVerified ? 1 : 0, req.body.restoreTestStatus ?? null, req.body.restoreTestDate ?? null, req.body.status ?? 'completed', req.body.notes ?? null, req.user!.id);
+    // Mirror into the central archive register so every backup is visible in
+    // Documents & Records → Archives alongside every other archived record.
+    recordCentralArchive(db, {
+      title: `Backup ${num} — ${req.body.scope || 'system data'}`,
+      description: `${req.body.backupType || 'backup'} on ${req.body.backupDate}${req.body.storageLocation ? ` (stored: ${req.body.storageLocation})` : ''}${req.body.offsite ? ' — off-site' : ''}`,
+      archiveType: 'backup',
+      sourceModule: 'documents', sourceRecordType: 'record_backup_log', sourceRecordId: r.lastInsertRowid,
+      periodStart: req.body.backupDate, periodEnd: req.body.backupDate,
+      fileId: parseIntNullable(req.body.fileId),
+      cloudUrl: req.body.cloudUrl ?? null, cloudProvider: req.body.cloudProvider ?? null,
+      storageLocation: req.body.storageLocation ?? null,
+      archivedByStaffId: by, isAutomatic: true,
+      createdBy: req.user!.id,
+    });
     audit(req, { action: 'create', entity: 'record_backup_log', entityId: r.lastInsertRowid, newValue: { num, ...req.body } });
     res.status(201).json({ id: r.lastInsertRowid, backupNumber: num });
   });
@@ -885,7 +1028,16 @@ export function documentControlRoutes() {
     });
     tx();
     const msg = `Please review and sign: ${doc.document_code ? doc.document_code + ' — ' : ''}${doc.title}${dueDate ? ` (due ${dueDate})` : ''}`;
-    for (const sId of notifiedStaffIds) notifyStaff(db, sId, 'documents', 'Attestation assigned', msg);
+    for (const sId of notifiedStaffIds) {
+      const att = db.prepare('SELECT id FROM document_attestations WHERE document_version_id = ? AND staff_id = ?').get(versionId, sId) as { id: number } | undefined;
+      notifyStaff(db, sId, 'documents', 'Attestation assigned', msg, {
+        recordType: 'document_attestations', recordId: att?.id, dueDate,
+        actionUrl: `/documents?open=${req.params.id}&attest=${att?.id ?? ''}`,
+        actionLabel: 'Read & attest',
+        notificationType: 'follow_up',
+        severity: 'medium',
+      });
+    }
     audit(req, { action: 'assign_attestation', entity: 'documents', entityId: req.params.id, newValue: { versionId, targetType, staffCount: created.length, dueDate } });
     res.status(201).json({ ok: true, assigned: created.length, attestationIds: created });
   });
@@ -895,21 +1047,34 @@ export function documentControlRoutes() {
     res.json(db.prepare('SELECT a.*, s.full_name AS staff_name, v.version_number FROM document_attestations a LEFT JOIN staff s ON s.id = a.staff_id LEFT JOIN document_versions v ON v.id = a.document_version_id WHERE a.document_id = ? OR a.document_version_id IN (SELECT id FROM document_versions WHERE document_id = ?) ORDER BY a.id DESC').all(req.params.id, req.params.id));
   });
 
+  // Sign an attestation. Signatures are strictly bound to the AUTHENTICATED user
+  // — a staff member may NEVER sign an attestation on behalf of another. Any
+  // `staffId` sent in the body is ignored; the signer is always the current user.
   router.post('/:id/attest', requirePermission('documents', 'view'), (req, res) => {
     const db = getDb();
     const attestationId = parseIntNullable(req.body.attestationId);
-    const staffId = getStaffIdOrCurrent(req, req.body.staffId);
-    if (staffId === null) return res.status(400).json({ error: 'This action requires the logged-in user to be linked to a staff record.' });
+    // Signer is always the caller — never accept a body-provided staff id.
+    const staffId = getCurrentStaffId(req);
+    if (staffId === null) return res.status(400).json({ error: 'Your login is not linked to a staff record; personal attestations cannot be signed. Ask an administrator to link your account to your staff record.' });
     let attestation: any;
     if (attestationId) {
       attestation = db.prepare('SELECT * FROM document_attestations WHERE id = ?').get(attestationId);
+      // Enforce ownership: refuse to sign an attestation assigned to someone else.
+      if (attestation && Number(attestation.staff_id) !== Number(staffId)) {
+        return res.status(403).json({ error: 'You can only sign your own attestation. Attestations must be signed personally by each staff member — you may not sign for another person.' });
+      }
     } else {
+      // No attestation id → resolve the caller's own pending attestation for this document.
       attestation = db.prepare("SELECT * FROM document_attestations WHERE (document_id = ? OR document_version_id IN (SELECT id FROM document_versions WHERE document_id = ?)) AND staff_id = ? AND status IN ('pending','overdue') ORDER BY id DESC LIMIT 1").get(req.params.id, req.params.id, staffId);
     }
-    if (!attestation) return res.status(404).json({ error: 'No pending attestation found for this staff/document' });
-    db.prepare("UPDATE document_attestations SET status = 'signed', attested_at = CURRENT_TIMESTAMP, signature_file_id = ?, notes = COALESCE(?, notes) WHERE id = ?")
-      .run(parseIntNullable(req.body.signatureFileId), req.body.notes ?? null, attestation.id);
+    if (!attestation) return res.status(404).json({ error: 'No pending attestation was found for you on this document.' });
+    if (attestation.status === 'signed') return res.status(400).json({ error: 'This attestation has already been signed.' });
+    db.prepare("UPDATE document_attestations SET status = 'signed', attested_at = CURRENT_TIMESTAMP, signed_by_user_id = ?, signature_file_id = ?, notes = COALESCE(?, notes) WHERE id = ?")
+      .run(req.user!.id, parseIntNullable(req.body.signatureFileId), req.body.notes ?? null, attestation.id);
     db.prepare("UPDATE document_distribution SET status = 'completed' WHERE document_id = ? AND target_staff_id = ? AND status = 'pending'").run(req.params.id, staffId);
+    // Auto-resolve the "sign this document" notifications for the caller so the
+    // inbox and dashboard clear the moment the required action is completed.
+    db.prepare("UPDATE notifications SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP, resolved_by_staff_id = ? WHERE assigned_to_staff_id = ? AND module_key = 'documents' AND record_type = 'document_attestations' AND record_id = ? AND status NOT IN ('resolved','dismissed')").run(staffId, staffId, String(attestation.id));
     audit(req, { action: 'attest_sign', entity: 'document_attestations', entityId: attestation.id, oldValue: { status: attestation.status }, newValue: { status: 'signed', staffId } });
     res.json({ ok: true, attestationId: attestation.id });
   });

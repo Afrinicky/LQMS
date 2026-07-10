@@ -22,6 +22,8 @@ import { measurementUncertaintyRoutes } from './routes/measurementUncertainty.js
 import { bloodBankHandoverRoutes } from './routes/bloodBankHandover.js';
 import { monthlyReportsRoutes } from './routes/monthlyReports.js';
 import { documentControlRoutes } from './routes/documents.js';
+import { centralArchivesRoutes } from './routes/archives.js';
+import { organisationExtendedRoutes } from './routes/organisationExtended.js';
 import { personnelRoutes } from './routes/personnel.js';
 import { assessmentsRoutes } from './routes/assessments.js';
 import { meetingsRoutes } from './routes/meetings.js';
@@ -89,6 +91,15 @@ export function createApiServer() {
   app.use('/api/blood-bank-handover', bloodBankHandoverRoutes());
   app.use('/api/monthly-reports', monthlyReportsRoutes());
   app.use('/api/documents', documentControlRoutes());
+  // Central Archive — a single register of every archived record no matter
+  // which module produced it. Mounted under /api/archives (searchable) and
+  // also as /api/documents/archives so it appears inside Documents & Records.
+  app.use('/api/archives', centralArchivesRoutes());
+  app.use('/api/documents/archives', centralArchivesRoutes());
+  // Organisation & Leadership extended tabs — ethical declarations, organogram
+  // continuity plans, budget projections (enriched), quality & technical
+  // records review workspace.
+  app.use('/api/organisation', organisationExtendedRoutes());
   app.use('/api/dennis', dennisRoutes());
   app.use('/api/personnel', personnelRoutes());
   app.use('/api/assessments', assessmentsRoutes());
