@@ -128,6 +128,20 @@ CREATE TABLE IF NOT EXISTS dennis_settings (id INTEGER PRIMARY KEY AUTOINCREMENT
   if (!equipmentNames.has('condition_received')) database.exec('ALTER TABLE equipment_items ADD COLUMN condition_received TEXT');
   if (!equipmentNames.has('date_out_of_service')) database.exec('ALTER TABLE equipment_items ADD COLUMN date_out_of_service TEXT');
   if (!equipmentNames.has('criticality')) database.exec('ALTER TABLE equipment_items ADD COLUMN criticality TEXT');
+  // Phase 6+: manufacturer's IFU as a first-class profile attachment.
+  if (!equipmentNames.has('ifu_file_id')) database.exec('ALTER TABLE equipment_items ADD COLUMN ifu_file_id INTEGER REFERENCES files(id)');
+  // Decommissioning & safe disposal record.
+  if (!equipmentNames.has('decommissioned')) database.exec('ALTER TABLE equipment_items ADD COLUMN decommissioned INTEGER NOT NULL DEFAULT 0');
+  if (!equipmentNames.has('decommissioned_at')) database.exec('ALTER TABLE equipment_items ADD COLUMN decommissioned_at TEXT');
+  if (!equipmentNames.has('decommissioned_by_staff_id')) database.exec('ALTER TABLE equipment_items ADD COLUMN decommissioned_by_staff_id INTEGER REFERENCES staff(id)');
+  if (!equipmentNames.has('decommission_reason')) database.exec('ALTER TABLE equipment_items ADD COLUMN decommission_reason TEXT');
+  if (!equipmentNames.has('decontamination_confirmed')) database.exec('ALTER TABLE equipment_items ADD COLUMN decontamination_confirmed INTEGER NOT NULL DEFAULT 0');
+  if (!equipmentNames.has('decontamination_method')) database.exec('ALTER TABLE equipment_items ADD COLUMN decontamination_method TEXT');
+  if (!equipmentNames.has('decontamination_confirmed_by_staff_id')) database.exec('ALTER TABLE equipment_items ADD COLUMN decontamination_confirmed_by_staff_id INTEGER REFERENCES staff(id)');
+  if (!equipmentNames.has('disposal_method')) database.exec('ALTER TABLE equipment_items ADD COLUMN disposal_method TEXT');
+  if (!equipmentNames.has('disposal_date')) database.exec('ALTER TABLE equipment_items ADD COLUMN disposal_date TEXT');
+  if (!equipmentNames.has('disposal_reference')) database.exec('ALTER TABLE equipment_items ADD COLUMN disposal_reference TEXT');
+  if (!equipmentNames.has('disposal_evidence_file_id')) database.exec('ALTER TABLE equipment_items ADD COLUMN disposal_evidence_file_id INTEGER REFERENCES files(id)');
 
   // Phase 3: extend inventory_items
   const inventoryColumns = database.prepare("PRAGMA table_info(inventory_items)").all() as Array<{ name: string }>;
