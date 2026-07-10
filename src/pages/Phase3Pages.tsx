@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, BarChart, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
@@ -8,7 +8,7 @@ import { EnvironmentalMonitoringPage } from './EnvironmentalMonitoringPage';
 import type {
   Location, Section, Department, Staff, Supplier, EquipmentItem, InventoryItem, MonitoringRecord, SafetyIncident,
   EquipmentMaintenanceRecord, EquipmentBreakdown, MonitoringItem, MonitoringReading,
-  EquipmentChecklistItem, EquipmentVerificationRecord, EquipmentCalibrationRecord, ReferenceStandard, EquipmentSchedule, EquipmentAdverseEvent,
+  EquipmentChecklistItem, EquipmentVerificationRecord, EquipmentCalibrationRecord, ReferenceStandard, EquipmentSchedule, EquipmentAdverseEvent, EquipmentCompetency, EquipmentDocumentLink,
   InventoryBatch, OperationsSummary,
   SafetyEquipment, SafetyInspection, WasteDisposalRecord, HazardousChemical, StaffImmunization, FacilitiesSafetySummary,
   StorageInspection
@@ -38,7 +38,9 @@ function staffName(staffList: Staff[], id?: number | null) {
 }
 
 // ============= EQUIPMENT =============
-type EquipmentDetail = EquipmentItem & { maintenance?: EquipmentMaintenanceRecord[]; breakdowns?: EquipmentBreakdown[]; verifications?: EquipmentVerificationRecord[]; calibrations?: EquipmentCalibrationRecord[]; schedules?: EquipmentSchedule[]; adverseEvents?: EquipmentAdverseEvent[]; links?: any[] };
+type EquipmentDetail = EquipmentItem & { maintenance?: EquipmentMaintenanceRecord[]; breakdowns?: EquipmentBreakdown[]; verifications?: EquipmentVerificationRecord[]; calibrations?: EquipmentCalibrationRecord[]; schedules?: EquipmentSchedule[]; adverseEvents?: EquipmentAdverseEvent[]; competencies?: EquipmentCompetency[]; documents?: EquipmentDocumentLink[]; links?: any[] };
+const COMPETENCY_OUTCOMES = [{ v: 'competent', l: 'Competent' }, { v: 'competent_with_supervision', l: 'Competent with supervision' }, { v: 'not_yet_competent', l: 'Not yet competent' }];
+const EQUIP_DOC_TYPES = ['Manual / IFU', 'SOP', 'Calibration certificate', 'Verification report', 'Maintenance record', 'Service report', 'Acceptance testing', 'Certificate', 'Other'];
 const SCHEDULE_FREQUENCIES = ['daily', 'weekly', 'monthly', 'quarterly', 'biannual', 'annual', 'custom'];
 const MAINTENANCE_TYPES = ['preventive', 'corrective', 'service', 'calibration', 'verification'];
 // The reportable equipment adverse-incident categories.
@@ -206,7 +208,7 @@ export function EquipmentPage() {
   return <div>
     <PageHeader eyebrow="Equipment Management" title="Equipment Management" subtitle="Asset register, maintenance, calibration, and breakdown tracking." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
-    {tabBar(tab, ['Dashboard', 'Equipment Register', 'Equipment Profile', 'New Equipment', 'Verification & Validation', 'Calibration', 'Maintenance Records', 'Breakdowns', 'Adverse Events', 'Reports placeholder'], setTab)}
+    {tabBar(tab, ['Dashboard', 'Equipment Register', 'Equipment Profile', 'New Equipment', 'Verification & Validation', 'Calibration', 'Maintenance Records', 'Breakdowns', 'Adverse Events', 'Training & Competency', 'Equipment Files', 'Reports placeholder'], setTab)}
 
     {tab === 'Dashboard' && <><KpiStrip items={[
       { label: 'Equipment items', value: summary?.equipmentTotal ?? equipment.length, onClick: () => setTab('Equipment Register') },
@@ -308,6 +310,10 @@ export function EquipmentPage() {
     </div>}
 
     {tab === 'Adverse Events' && <EquipmentAdverseEventsTab equipment={equipment} staff={staff} setError={setError} onChanged={() => { void load(); void reloadSelected(); }} />}
+
+    {tab === 'Training & Competency' && <EquipmentCompetencyTab equipment={equipment} staff={staff} setError={setError} onChanged={() => { void reloadSelected(); }} />}
+
+    {tab === 'Equipment Files' && <EquipmentFilesTab equipment={equipment} sections={sections} departments={departments} setError={setError} onChanged={() => { void reloadSelected(); }} />}
 
     {tab === 'Reports placeholder' && <div className="card"><p>Reporting and exports for equipment will be added in a later phase.</p></div>}
   </div>;
@@ -491,6 +497,14 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
     <h4>Calibration</h4>
     {!item.calibrations?.length ? <p className="muted">No calibration records.</p> : <table className="table"><thead><tr><th>No.</th><th>Date</th><th>Mode</th><th>Result</th><th>Next due</th><th>Status</th></tr></thead><tbody>
       {item.calibrations.map(c => <tr key={c.id}><td>{c.calibration_number}</td><td>{c.calibration_date}</td><td>{c.calibration_mode || '—'}</td><td>{c.result ? formatBadge(c.result) : '—'}</td><td>{c.next_due_date || '—'}</td><td>{formatBadge(c.status)}</td></tr>)}
+    </tbody></table>}
+    <h4>Trained &amp; competent staff</h4>
+    {!item.competencies?.length ? <p className="muted">No trained staff recorded.</p> : <table className="table"><thead><tr><th>Staff</th><th>Assessed</th><th>Outcome</th><th>Authorised</th><th>Personnel records</th></tr></thead><tbody>
+      {item.competencies.map(c => <tr key={c.id}><td>{c.staff_name}</td><td>{c.assessment_date || c.training_date || '—'}</td><td>{c.outcome ? formatBadge(c.outcome) : '—'}</td><td>{c.authorized ? `✓ ${c.authorization_level || ''}` : '—'}</td><td>{c.competency_assessment_id ? `COMP #${c.competency_assessment_id}` : '—'}{c.technical_authorization_id ? ` · AUTH #${c.technical_authorization_id}` : ''}</td></tr>)}
+    </tbody></table>}
+    <h4>Equipment files</h4>
+    {!item.documents?.length ? <p className="muted">No documents linked.</p> : <table className="table"><thead><tr><th>Code</th><th>Title</th><th>Type</th><th>Status</th><th>File</th></tr></thead><tbody>
+      {item.documents.map(d => <tr key={d.id}><td>{d.document_code || '—'}</td><td>{d.title}</td><td>{d.document_type || '—'}</td><td>{formatBadge(d.status)}</td><td>{d.file_id ? <a href={`${API_BASE}/files/${d.file_id}/raw`} target="_blank" rel="noreferrer">open</a> : '—'}</td></tr>)}
     </tbody></table>}
     <h4>Linked records</h4>
     {!item.links?.length ? <p className="muted">No linked records.</p> : <ul>{item.links.map((l: any) => <li key={l.id}>{l.source_module_key}/{l.source_record_type}#{l.source_record_id} → {l.target_module_key}/{l.target_record_type}#{l.target_record_id}{l.notes ? ` (${l.notes})` : ''}</li>)}</ul>}
@@ -942,6 +956,109 @@ function EquipmentAdverseEventsTab({ equipment, staff, setError, onChanged }: { 
         </div>
       </div>
     </div>}
+  </div>;
+}
+
+// Staff training & competence on a specific equipment. Competent + authorised
+// records flow into the personnel competency and technical-authorisation files.
+function EquipmentCompetencyTab({ equipment, staff, setError, onChanged }: { equipment: EquipmentItem[]; staff: Staff[]; setError: (m: string | null) => void; onChanged: () => void }) {
+  const [list, setList] = useState<EquipmentCompetency[]>([]);
+  const blank = { equipmentId: '', staffId: '', trainingDate: '', trainerStaffId: '', assessmentMethod: 'direct_observation', assessmentDate: '', assessorStaffId: '', outcome: 'competent', authorized: true, authorizationLevel: 'Perform', notes: '' };
+  const [form, setForm] = useState(blank);
+  const [busy, setBusy] = useState(false);
+  function load() { api<EquipmentCompetency[]>('/equipment/competencies').then(setList).catch(() => setList([])); }
+  useEffect(() => { load(); }, []);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault(); setError(null);
+    if (!form.equipmentId || !form.staffId) { setError('Select equipment and staff.'); return; }
+    setBusy(true);
+    try {
+      await api(`/equipment/${form.equipmentId}/competencies`, { method: 'POST', body: JSON.stringify(form) });
+      setForm(blank); load(); onChanged();
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  return <div>
+    <div className="card">
+      <h3>Record training &amp; competence on equipment</h3>
+      <p className="muted" style={{ marginTop: 0 }}>When a staff member is competent and authorised, a competency assessment and technical authorisation are created automatically in Personnel Management, so the training file is populated in one place.</p>
+      <form className="form" onSubmit={submit}>
+        <label>Equipment<select value={form.equipmentId} onChange={e => setForm({ ...form, equipmentId: e.target.value })} required><option value="">Select equipment</option>{equipment.map(e2 => <option key={e2.id} value={e2.id}>{e2.equipment_number} — {e2.name}</option>)}</select></label>
+        <label>Staff<select value={form.staffId} onChange={e => setForm({ ...form, staffId: e.target.value })} required><option value="">Select staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        <label>Training date<input type="date" value={form.trainingDate} onChange={e => setForm({ ...form, trainingDate: e.target.value })} /></label>
+        <label>Trainer<select value={form.trainerStaffId} onChange={e => setForm({ ...form, trainerStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        <label>Assessment method<select value={form.assessmentMethod} onChange={e => setForm({ ...form, assessmentMethod: e.target.value })}>{['direct_observation', 'record_review', 'blind_sample', 'split_sample', 'problem_solving', 'result_interpretation', 'interview', 'other'].map(m => <option key={m} value={m}>{m.replace(/_/g, ' ')}</option>)}</select></label>
+        <label>Assessment date<input type="date" value={form.assessmentDate} onChange={e => setForm({ ...form, assessmentDate: e.target.value })} /></label>
+        <label>Assessor<select value={form.assessorStaffId} onChange={e => setForm({ ...form, assessorStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        <label>Outcome<select value={form.outcome} onChange={e => setForm({ ...form, outcome: e.target.value })}>{COMPETENCY_OUTCOMES.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}</select></label>
+        <label className="check-inline"><input type="checkbox" checked={form.authorized} onChange={e => setForm({ ...form, authorized: e.target.checked })} /> Authorise to operate</label>
+        {form.authorized && <label>Authorisation level<select value={form.authorizationLevel} onChange={e => setForm({ ...form, authorizationLevel: e.target.value })}>{['View only', 'Perform', 'Review', 'Verify', 'Approve', 'Supervise', 'Train others'].map(l => <option key={l} value={l}>{l}</option>)}</select></label>}
+        <label style={{ gridColumn: '1 / -1' }}>Notes<textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
+        <button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Record competence'}</button>
+      </form>
+    </div>
+    <div className="card" style={{ marginTop: 16 }}>
+      <h3>Equipment competence register</h3>
+      {list.length === 0 ? <p className="muted">No records yet.</p> : <table className="table"><thead><tr><th>Staff</th><th>Equipment</th><th>Assessed</th><th>Outcome</th><th>Authorised</th><th>Personnel records</th><th>Status</th></tr></thead><tbody>
+        {list.map(c => <tr key={c.id}><td>{c.staff_name}</td><td>{c.equipment_number} — {c.equipment_name}</td><td>{c.assessment_date || c.training_date || '—'}</td><td>{c.outcome ? formatBadge(c.outcome) : '—'}</td><td>{c.authorized ? `✓ ${c.authorization_level || ''}` : '—'}</td><td>{c.competency_assessment_id ? `COMP #${c.competency_assessment_id}` : '—'}{c.technical_authorization_id ? ` · AUTH #${c.technical_authorization_id}` : ''}</td><td>{formatBadge(c.status)}</td></tr>)}
+      </tbody></table>}
+    </div>
+  </div>;
+}
+
+// Equipment files: uploads create a controlled document via the Documents module
+// and link it to the equipment, so it appears in both places.
+function EquipmentFilesTab({ equipment, sections, departments, setError, onChanged }: { equipment: EquipmentItem[]; sections: Section[]; departments: Department[]; setError: (m: string | null) => void; onChanged: () => void }) {
+  const [equipId, setEquipId] = useState('');
+  const [docs, setDocs] = useState<EquipmentDocumentLink[]>([]);
+  const blank = { title: '', documentType: EQUIP_DOC_TYPES[0], sectionId: '', departmentId: '' };
+  const [form, setForm] = useState(blank);
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  function load(id: string) { if (id) api<EquipmentDocumentLink[]>(`/equipment/${id}/documents`).then(setDocs).catch(() => setDocs([])); else setDocs([]); }
+  useEffect(() => { load(equipId); }, [equipId]);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault(); setError(null);
+    if (!equipId) { setError('Select an equipment item.'); return; }
+    if (!form.title) { setError('Enter a document title.'); return; }
+    if (!file) { setError('Choose a file to upload.'); return; }
+    setBusy(true);
+    try {
+      const fileId = await uploadEquipFile(file);
+      // Create the controlled document through the Documents module…
+      const created = await api<{ id: number; documentCode: string }>('/documents', { method: 'POST', body: JSON.stringify({ title: form.title, documentType: form.documentType, sectionId: form.sectionId || null, departmentId: form.departmentId || null, fileId }) });
+      // …then link it to this equipment so it shows in both places.
+      await api(`/equipment/${equipId}/documents`, { method: 'POST', body: JSON.stringify({ documentId: created.id }) });
+      setForm(blank); setFile(null); if (fileRef.current) fileRef.current.value = '';
+      load(equipId); onChanged();
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  return <div className="card">
+    <div className="section-head"><h3 style={{ margin: 0 }}>Equipment files</h3>
+      <select value={equipId} onChange={e => setEquipId(e.target.value)} style={{ maxWidth: 320 }}><option value="">Select equipment…</option>{equipment.map(e2 => <option key={e2.id} value={e2.id}>{e2.equipment_number} — {e2.name}</option>)}</select>
+    </div>
+    <p className="muted" style={{ marginTop: 0 }}>Documents added here are created as controlled documents in <strong>Documents &amp; Records</strong> and linked to the equipment, so an update in either module is reflected in both.</p>
+    {!equipId ? <p className="muted">Select an equipment item to view and add its files.</p> : <>
+      <form className="form" onSubmit={submit}>
+        <label>Title<input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required /></label>
+        <label>Document type<select value={form.documentType} onChange={e => setForm({ ...form, documentType: e.target.value })}>{EQUIP_DOC_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
+        <label>Department<select value={form.departmentId} onChange={e => setForm({ ...form, departmentId: e.target.value })}><option value="">—</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
+        <label>Section<select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+        <label>File<input ref={fileRef} type="file" onChange={e => setFile(e.target.files?.[0] ?? null)} /></label>
+        <button type="submit" disabled={busy}>{busy ? 'Uploading…' : 'Add document'}</button>
+      </form>
+      <table className="table" style={{ marginTop: 12 }}><thead><tr><th>Code</th><th>Title</th><th>Type</th><th>Status</th><th>File</th></tr></thead><tbody>
+        {docs.map(d => <tr key={d.id}><td>{d.document_code || '—'}</td><td>{d.title}</td><td>{d.document_type || '—'}</td><td>{formatBadge(d.status)}</td><td>{d.file_id ? <a href={`${API_BASE}/files/${d.file_id}/raw`} target="_blank" rel="noreferrer">open</a> : '—'}</td></tr>)}
+        {docs.length === 0 && <tr><td colSpan={5} className="muted">No documents linked yet.</td></tr>}
+      </tbody></table>
+    </>}
   </div>;
 }
 

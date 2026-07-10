@@ -375,6 +375,87 @@ export function equipmentRoutes() {
     res.status(201).json({ capaId, capaNumber });
   });
 
+  // ===================== Equipment training & competence =====================
+  router.get('/competencies', requirePermission('equipment', 'view'), (_req, res) => {
+    const db = getDb();
+    res.json(db.prepare(`SELECT c.*, e.name AS equipment_name, e.equipment_number, s.full_name AS staff_name FROM equipment_competencies c JOIN equipment_items e ON e.id = c.equipment_id JOIN staff s ON s.id = c.staff_id ORDER BY c.created_at DESC`).all());
+  });
+
+  router.get('/:id/competencies', requirePermission('equipment', 'view'), (req, res) => {
+    const db = getDb();
+    res.json(db.prepare('SELECT c.*, s.full_name AS staff_name FROM equipment_competencies c JOIN staff s ON s.id = c.staff_id WHERE c.equipment_id = ? ORDER BY c.created_at DESC').all(req.params.id));
+  });
+
+  router.post('/:id/competencies', requirePermission('equipment', 'create'), (req, res) => {
+    if (!req.body.staffId) return res.status(400).json({ error: 'staffId is required' });
+    const db = getDb();
+    const equipment = db.prepare('SELECT id, name, equipment_number, section_id, department_id FROM equipment_items WHERE id = ?').get(req.params.id) as any;
+    if (!equipment) return res.status(404).json({ error: 'Equipment item not found' });
+    const staffId = parseIntNullable(req.body.staffId);
+    const outcome = req.body.outcome ?? 'competent';
+    const authorized = req.body.authorized ? 1 : 0;
+    const assessmentDate = req.body.assessmentDate ?? req.body.trainingDate ?? new Date().toISOString().slice(0, 10);
+    const activity = `Operate equipment ${equipment.equipment_number} — ${equipment.name}`;
+
+    const tx = db.transaction(() => {
+      const result = db.prepare(`INSERT INTO equipment_competencies (equipment_id, staff_id, training_date, trainer_staff_id, assessment_method, assessment_date, assessor_staff_id, outcome, authorized, authorization_level, notes, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(req.params.id, staffId, req.body.trainingDate ?? null, parseIntNullable(req.body.trainerStaffId), req.body.assessmentMethod ?? null, assessmentDate, parseIntNullable(req.body.assessorStaffId), outcome, authorized, req.body.authorizationLevel ?? null, req.body.notes ?? null, 'recorded', req.user!.id);
+      const ecId = Number(result.lastInsertRowid);
+
+      let competencyAssessmentId: number | null = null;
+      let technicalAuthorizationId: number | null = null;
+      // Competent staff get a personnel competency assessment; authorised ones
+      // also get a technical authorization — both appear in Personnel Management.
+      if (outcome === 'competent' || outcome === 'competent_with_supervision') {
+        const createdAt = new Date().toISOString();
+        const competencyNumber = generateRecordNumber(db, 'competency_assessments', 'COMP', createdAt);
+        const compRes = db.prepare(`INSERT INTO competency_assessments (competency_number, staff_id, department_id, section_id, activity, assessment_method, assessor_staff_id, assessment_date, outcome, findings, retraining_required, next_assessment_due, authorization_recommendation, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(competencyNumber, staffId, equipment.department_id ?? null, equipment.section_id ?? null, activity, req.body.assessmentMethod ?? 'direct_observation', parseIntNullable(req.body.assessorStaffId), assessmentDate, outcome, req.body.notes ?? null, 0, req.body.nextAssessmentDue ?? null, authorized ? `Authorise to operate: ${req.body.authorizationLevel ?? 'Perform'}` : null, 'completed', req.user!.id, createdAt);
+        competencyAssessmentId = Number(compRes.lastInsertRowid);
+        db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run('equipment', 'equipment_items', String(req.params.id), 'personnel', 'competency_assessments', String(competencyAssessmentId), `Equipment competence: ${activity}`);
+
+        if (authorized) {
+          const authRes = db.prepare('INSERT INTO technical_authorizations (staff_id, module_key, section_id, level, is_active, expires_at, competency_assessment_id, created_by, notes) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)')
+            .run(staffId, 'equipment', equipment.section_id ?? null, req.body.authorizationLevel ?? 'Perform', req.body.authorizationExpiry ?? null, competencyAssessmentId, req.user!.id, `Authorised to operate ${equipment.equipment_number} — ${equipment.name}`);
+          technicalAuthorizationId = Number(authRes.lastInsertRowid);
+        }
+        db.prepare('UPDATE equipment_competencies SET competency_assessment_id = ?, technical_authorization_id = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+          .run(competencyAssessmentId, technicalAuthorizationId, authorized ? 'authorised' : 'competent', ecId);
+      }
+      return { ecId, competencyAssessmentId, technicalAuthorizationId };
+    });
+    const out = tx();
+    audit(req, { action: 'create', entity: 'equipment_competencies', entityId: out.ecId, newValue: { equipmentId: req.params.id, staffId, outcome, authorized } });
+    res.status(201).json(out);
+  });
+
+  // ===================== Equipment documents (via Documents module) =====================
+  router.get('/:id/documents', requirePermission('equipment', 'view'), (req, res) => {
+    const db = getDb();
+    res.json(db.prepare(`SELECT d.id, d.document_code, d.title, d.document_type, d.status,
+        (SELECT file_id FROM document_versions WHERE document_id = d.id AND file_id IS NOT NULL ORDER BY id DESC LIMIT 1) AS file_id
+      FROM record_links rl JOIN documents d ON d.id = CAST(rl.target_record_id AS INTEGER)
+      WHERE rl.source_module_key = 'equipment' AND rl.source_record_type = 'equipment_items' AND rl.source_record_id = ? AND rl.target_module_key = 'documents' AND rl.target_record_type = 'documents'
+      ORDER BY d.id DESC`).all(req.params.id));
+  });
+
+  // Link an already-created controlled document (from the Documents module) to
+  // this equipment so it appears in both places.
+  router.post('/:id/documents', requirePermission('equipment', 'edit'), (req, res) => {
+    if (!req.body.documentId) return res.status(400).json({ error: 'documentId is required' });
+    const db = getDb();
+    const equipment = db.prepare('SELECT id FROM equipment_items WHERE id = ?').get(req.params.id);
+    if (!equipment) return res.status(404).json({ error: 'Equipment item not found' });
+    const doc = db.prepare('SELECT id FROM documents WHERE id = ?').get(req.body.documentId);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    const exists = db.prepare("SELECT 1 FROM record_links WHERE source_module_key='equipment' AND source_record_type='equipment_items' AND source_record_id=? AND target_module_key='documents' AND target_record_type='documents' AND target_record_id=?").get(String(req.params.id), String(req.body.documentId));
+    if (!exists) {
+      db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run('equipment', 'equipment_items', String(req.params.id), 'documents', 'documents', String(req.body.documentId), req.body.notes ?? 'Equipment document');
+    }
+    audit(req, { action: 'link', entity: 'equipment_items', entityId: req.params.id, newValue: { documentId: req.body.documentId } });
+    res.status(201).json({ ok: true });
+  });
+
   router.get('/:id', requirePermission('equipment', 'view'), (req, res) => {
     const db = getDb();
     const item = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(req.params.id);
@@ -385,9 +466,15 @@ export function equipmentRoutes() {
     const calibrations = db.prepare('SELECT * FROM equipment_calibrations WHERE equipment_id = ? ORDER BY calibration_date DESC, id DESC').all(req.params.id);
     const schedules = db.prepare('SELECT * FROM equipment_schedules WHERE equipment_id = ? ORDER BY is_active DESC, next_due_date').all(req.params.id);
     const adverseEvents = db.prepare('SELECT * FROM equipment_adverse_events WHERE equipment_id = ? ORDER BY event_date DESC, id DESC').all(req.params.id);
+    const competencies = db.prepare('SELECT c.*, s.full_name AS staff_name FROM equipment_competencies c JOIN staff s ON s.id = c.staff_id WHERE c.equipment_id = ? ORDER BY c.created_at DESC').all(req.params.id);
+    const documents = db.prepare(`SELECT d.id, d.document_code, d.title, d.document_type, d.status,
+        (SELECT file_id FROM document_versions WHERE document_id = d.id AND file_id IS NOT NULL ORDER BY id DESC LIMIT 1) AS file_id
+      FROM record_links rl JOIN documents d ON d.id = CAST(rl.target_record_id AS INTEGER)
+      WHERE rl.source_module_key = 'equipment' AND rl.source_record_type = 'equipment_items' AND rl.source_record_id = ? AND rl.target_module_key = 'documents' AND rl.target_record_type = 'documents'
+      ORDER BY d.id DESC`).all(req.params.id);
     const links = db.prepare('SELECT * FROM record_links WHERE (source_module_key = ? AND source_record_type = ? AND source_record_id = ?) OR (target_module_key = ? AND target_record_type = ? AND target_record_id = ?)')
       .all('equipment', 'equipment_items', String(req.params.id), 'equipment', 'equipment_items', String(req.params.id));
-    res.json({ ...item, maintenance, breakdowns, verifications, calibrations, schedules, adverseEvents, links });
+    res.json({ ...item, maintenance, breakdowns, verifications, calibrations, schedules, adverseEvents, competencies, documents, links });
   });
 
   router.post('/', requirePermission('equipment', 'create'), (req, res) => {

@@ -340,6 +340,29 @@ CREATE TABLE IF NOT EXISTS equipment_adverse_events (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT
 );
+-- Staff training & competence on a specific equipment (Phase 6). When competent
+-- and authorised, this auto-populates the personnel competency assessment and
+-- technical authorization records (linked by id below).
+CREATE TABLE IF NOT EXISTS equipment_competencies (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  equipment_id INTEGER NOT NULL REFERENCES equipment_items(id),
+  staff_id INTEGER NOT NULL REFERENCES staff(id),
+  training_date TEXT,
+  trainer_staff_id INTEGER REFERENCES staff(id),
+  assessment_method TEXT,
+  assessment_date TEXT,
+  assessor_staff_id INTEGER REFERENCES staff(id),
+  outcome TEXT,                             -- competent | competent_with_supervision | not_yet_competent
+  authorized INTEGER NOT NULL DEFAULT 0,
+  authorization_level TEXT,
+  competency_assessment_id INTEGER,
+  technical_authorization_id INTEGER,
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'recorded',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
 CREATE TABLE IF NOT EXISTS monitoring_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   item_code TEXT NOT NULL UNIQUE,
