@@ -90,7 +90,7 @@ export function equipmentRoutes() {
   // ===================== Verification & validation =====================
   router.get('/:id/verifications', requirePermission('equipment', 'view'), (req, res) => {
     const db = getDb();
-    res.json(db.prepare('SELECT * FROM equipment_verifications WHERE equipment_id = ? ORDER BY performed_date DESC, id DESC').all(req.params.id));
+    res.json(db.prepare('SELECT * FROM equipment_verification_records WHERE equipment_id = ? ORDER BY performed_date DESC, id DESC').all(req.params.id));
   });
 
   router.post('/:id/verifications', requirePermission('equipment', 'create'), (req, res) => {
@@ -99,22 +99,22 @@ export function equipmentRoutes() {
     const equipment = db.prepare('SELECT id FROM equipment_items WHERE id = ?').get(req.params.id);
     if (!equipment) return res.status(404).json({ error: 'Equipment item not found' });
     const createdAt = new Date().toISOString();
-    const number = generateRecordNumber(db, 'equipment_verifications', 'VER', createdAt);
+    const number = generateRecordNumber(db, 'equipment_verification_records', 'VER', createdAt);
     const performedBy = getStaffIdOrCurrent(req, req.body.performedByStaffId);
     const tx = db.transaction(() => {
-      const result = db.prepare('INSERT INTO equipment_verifications (verification_number, equipment_id, verification_type, performed_by_staff_id, performed_date, conclusion, outcome, status, evidence_file_id, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      const result = db.prepare('INSERT INTO equipment_verification_records (verification_number, equipment_id, verification_type, performed_by_staff_id, performed_date, conclusion, outcome, status, evidence_file_id, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
         .run(number, req.params.id, req.body.verificationType ?? 'verification', performedBy, req.body.performedDate, req.body.conclusion ?? null, req.body.outcome ?? null, 'completed', parseIntNullable(req.body.evidenceFileId), req.body.notes ?? null, req.user!.id, createdAt);
       saveResponses(db, 'verification', Number(result.lastInsertRowid), req.body.responses);
       return result.lastInsertRowid;
     });
     const id = tx();
-    audit(req, { action: 'create', entity: 'equipment_verifications', entityId: id, newValue: { number, equipmentId: req.params.id } });
+    audit(req, { action: 'create', entity: 'equipment_verification_records', entityId: id, newValue: { number, equipmentId: req.params.id } });
     res.status(201).json({ id, verificationNumber: number });
   });
 
   router.get('/verifications/:vid', requirePermission('equipment', 'view'), (req, res) => {
     const db = getDb();
-    const record = db.prepare('SELECT * FROM equipment_verifications WHERE id = ?').get(req.params.vid);
+    const record = db.prepare('SELECT * FROM equipment_verification_records WHERE id = ?').get(req.params.vid);
     if (!record) return res.status(404).json({ error: 'Verification not found' });
     const responses = db.prepare('SELECT * FROM equipment_checklist_responses WHERE record_type = ? AND record_id = ? ORDER BY id').all('verification', req.params.vid);
     res.json({ ...record, responses });
@@ -122,12 +122,12 @@ export function equipmentRoutes() {
 
   router.post('/verifications/:vid/review', requirePermission('equipment', 'edit'), (req, res) => {
     const db = getDb();
-    const record = db.prepare('SELECT * FROM equipment_verifications WHERE id = ?').get(req.params.vid) as any;
+    const record = db.prepare('SELECT * FROM equipment_verification_records WHERE id = ?').get(req.params.vid) as any;
     if (!record) return res.status(404).json({ error: 'Verification not found' });
     const reviewedBy = getStaffIdOrCurrent(req, req.body.reviewedByStaffId);
-    db.prepare('UPDATE equipment_verifications SET reviewed_by_staff_id = ?, reviewed_at = ?, review_outcome = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    db.prepare('UPDATE equipment_verification_records SET reviewed_by_staff_id = ?, reviewed_at = ?, review_outcome = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
       .run(reviewedBy, new Date().toISOString(), req.body.reviewOutcome ?? 'approved', 'reviewed', req.params.vid);
-    audit(req, { action: 'edit', entity: 'equipment_verifications', entityId: req.params.vid, oldValue: record, newValue: { reviewOutcome: req.body.reviewOutcome ?? 'approved' } });
+    audit(req, { action: 'edit', entity: 'equipment_verification_records', entityId: req.params.vid, oldValue: record, newValue: { reviewOutcome: req.body.reviewOutcome ?? 'approved' } });
     res.json({ ok: true });
   });
 
@@ -150,7 +150,7 @@ export function equipmentRoutes() {
   // ===================== Calibration =====================
   router.get('/:id/calibrations', requirePermission('equipment', 'view'), (req, res) => {
     const db = getDb();
-    res.json(db.prepare('SELECT * FROM equipment_calibrations WHERE equipment_id = ? ORDER BY calibration_date DESC, id DESC').all(req.params.id));
+    res.json(db.prepare('SELECT * FROM equipment_calibration_records WHERE equipment_id = ? ORDER BY calibration_date DESC, id DESC').all(req.params.id));
   });
 
   router.post('/:id/calibrations', requirePermission('equipment', 'create'), (req, res) => {
@@ -159,10 +159,10 @@ export function equipmentRoutes() {
     const equipment = db.prepare('SELECT id FROM equipment_items WHERE id = ?').get(req.params.id);
     if (!equipment) return res.status(404).json({ error: 'Equipment item not found' });
     const createdAt = new Date().toISOString();
-    const number = generateRecordNumber(db, 'equipment_calibrations', 'CAL', createdAt);
+    const number = generateRecordNumber(db, 'equipment_calibration_records', 'CAL', createdAt);
     const performedBy = getStaffIdOrCurrent(req, req.body.performedByStaffId);
     const tx = db.transaction(() => {
-      const result = db.prepare('INSERT INTO equipment_calibrations (calibration_number, equipment_id, calibration_date, calibration_mode, provider, certificate_number, traceability_reference, reference_standard_id, result, next_due_date, verified_before_use, performed_by_staff_id, status, evidence_file_id, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      const result = db.prepare('INSERT INTO equipment_calibration_records (calibration_number, equipment_id, calibration_date, calibration_mode, provider, certificate_number, traceability_reference, reference_standard_id, result, next_due_date, verified_before_use, performed_by_staff_id, status, evidence_file_id, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
         .run(number, req.params.id, req.body.calibrationDate, req.body.calibrationMode ?? null, req.body.provider ?? null, req.body.certificateNumber ?? null, req.body.traceabilityReference ?? null, parseIntNullable(req.body.referenceStandardId), req.body.result ?? null, req.body.nextDueDate ?? null, req.body.verifiedBeforeUse ? 1 : 0, performedBy, 'completed', parseIntNullable(req.body.evidenceFileId), req.body.notes ?? null, req.user!.id, createdAt);
       saveResponses(db, 'calibration', Number(result.lastInsertRowid), req.body.responses);
       return result.lastInsertRowid;
@@ -172,13 +172,13 @@ export function equipmentRoutes() {
     if (req.body.nextDueDate) {
       db.prepare('UPDATE equipment_items SET next_calibration_due = ?, calibration_due_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(req.body.nextDueDate, req.body.nextDueDate, req.params.id);
     }
-    audit(req, { action: 'create', entity: 'equipment_calibrations', entityId: id, newValue: { number, equipmentId: req.params.id } });
+    audit(req, { action: 'create', entity: 'equipment_calibration_records', entityId: id, newValue: { number, equipmentId: req.params.id } });
     res.status(201).json({ id, calibrationNumber: number });
   });
 
   router.get('/calibrations/:cid', requirePermission('equipment', 'view'), (req, res) => {
     const db = getDb();
-    const record = db.prepare('SELECT * FROM equipment_calibrations WHERE id = ?').get(req.params.cid);
+    const record = db.prepare('SELECT * FROM equipment_calibration_records WHERE id = ?').get(req.params.cid);
     if (!record) return res.status(404).json({ error: 'Calibration not found' });
     const responses = db.prepare('SELECT * FROM equipment_checklist_responses WHERE record_type = ? AND record_id = ? ORDER BY id').all('calibration', req.params.cid);
     res.json({ ...record, responses });
@@ -186,12 +186,12 @@ export function equipmentRoutes() {
 
   router.post('/calibrations/:cid/review', requirePermission('equipment', 'edit'), (req, res) => {
     const db = getDb();
-    const record = db.prepare('SELECT * FROM equipment_calibrations WHERE id = ?').get(req.params.cid) as any;
+    const record = db.prepare('SELECT * FROM equipment_calibration_records WHERE id = ?').get(req.params.cid) as any;
     if (!record) return res.status(404).json({ error: 'Calibration not found' });
     const reviewedBy = getStaffIdOrCurrent(req, req.body.reviewedByStaffId);
-    db.prepare('UPDATE equipment_calibrations SET reviewed_by_staff_id = ?, reviewed_at = ?, review_outcome = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    db.prepare('UPDATE equipment_calibration_records SET reviewed_by_staff_id = ?, reviewed_at = ?, review_outcome = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
       .run(reviewedBy, new Date().toISOString(), req.body.reviewOutcome ?? 'accepted', 'reviewed', req.params.cid);
-    audit(req, { action: 'edit', entity: 'equipment_calibrations', entityId: req.params.cid, oldValue: record, newValue: { reviewOutcome: req.body.reviewOutcome ?? 'accepted' } });
+    audit(req, { action: 'edit', entity: 'equipment_calibration_records', entityId: req.params.cid, oldValue: record, newValue: { reviewOutcome: req.body.reviewOutcome ?? 'accepted' } });
     res.json({ ok: true });
   });
 
@@ -462,8 +462,8 @@ export function equipmentRoutes() {
     if (!item) return res.status(404).json({ error: 'Equipment item not found' });
     const maintenance = db.prepare('SELECT * FROM equipment_maintenance_records WHERE equipment_id = ? ORDER BY maintenance_date DESC').all(req.params.id);
     const breakdowns = db.prepare('SELECT * FROM equipment_breakdowns WHERE equipment_id = ? ORDER BY breakdown_date DESC').all(req.params.id);
-    const verifications = db.prepare('SELECT * FROM equipment_verifications WHERE equipment_id = ? ORDER BY performed_date DESC, id DESC').all(req.params.id);
-    const calibrations = db.prepare('SELECT * FROM equipment_calibrations WHERE equipment_id = ? ORDER BY calibration_date DESC, id DESC').all(req.params.id);
+    const verifications = db.prepare('SELECT * FROM equipment_verification_records WHERE equipment_id = ? ORDER BY performed_date DESC, id DESC').all(req.params.id);
+    const calibrations = db.prepare('SELECT * FROM equipment_calibration_records WHERE equipment_id = ? ORDER BY calibration_date DESC, id DESC').all(req.params.id);
     const schedules = db.prepare('SELECT * FROM equipment_schedules WHERE equipment_id = ? ORDER BY is_active DESC, next_due_date').all(req.params.id);
     const adverseEvents = db.prepare('SELECT * FROM equipment_adverse_events WHERE equipment_id = ? ORDER BY event_date DESC, id DESC').all(req.params.id);
     const competencies = db.prepare('SELECT c.*, s.full_name AS staff_name FROM equipment_competencies c JOIN staff s ON s.id = c.staff_id WHERE c.equipment_id = ? ORDER BY c.created_at DESC').all(req.params.id);

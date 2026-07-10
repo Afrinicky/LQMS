@@ -222,7 +222,7 @@ CREATE TABLE IF NOT EXISTS equipment_checklist_responses (
   evidence_file_id INTEGER REFERENCES files(id),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE TABLE IF NOT EXISTS equipment_verifications (
+CREATE TABLE IF NOT EXISTS equipment_verification_records (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   verification_number TEXT NOT NULL UNIQUE,
   equipment_id INTEGER NOT NULL REFERENCES equipment_items(id),
@@ -258,7 +258,7 @@ CREATE TABLE IF NOT EXISTS reference_standards (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT
 );
-CREATE TABLE IF NOT EXISTS equipment_calibrations (
+CREATE TABLE IF NOT EXISTS equipment_calibration_records (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   calibration_number TEXT NOT NULL UNIQUE,
   equipment_id INTEGER NOT NULL REFERENCES equipment_items(id),
