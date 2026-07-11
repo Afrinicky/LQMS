@@ -78,7 +78,7 @@ export function Home() {
             <span className="user-avatar">{initials(user?.fullName)}</span>
             <span className="user-meta">
               <strong>{user?.fullName ?? 'User'}</strong>
-              <span>{(user as any)?.role ?? (user as any)?.position ?? 'Member'}</span>
+              <span>{user?.roleName ?? 'Member'}</span>
             </span>
           </button>
         </div>

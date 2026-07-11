@@ -171,7 +171,7 @@ export default function AppLayout() {
               <span className="user-avatar">{initials(user?.fullName)}</span>
               <span className="user-meta">
                 <strong>{user?.fullName ?? 'User'}</strong>
-                <span>{(user as any)?.role ?? (user as any)?.position ?? 'Member'}</span>
+                <span>{user?.roleName ?? 'Member'}</span>
               </span>
             </button>
             <button className="icon-btn" type="button" aria-label="Logout" onClick={logout}><LogOut size={18} /></button>
