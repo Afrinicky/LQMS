@@ -3,7 +3,6 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   Bell, Search, FlaskConical, FileText, AlertOctagon, ClipboardCheck,
   ArrowRight, ClipboardList, CalendarClock, FolderArchive, PackageSearch,
-  AlertTriangle, Clock, CheckCircle2, Inbox,
 } from 'lucide-react';
 import type { NotificationRecord } from '../../shared/types/api';
 import { api } from '../services/api';
@@ -13,7 +12,7 @@ import { useModules } from '../hooks/useModules';
 import { MODULES } from '../../shared/constants/modules';
 import { NAV_SECTIONS } from '../../shared/constants/navigation';
 import { sectionIcon } from '../components/ui/moduleIcons';
-import { WaveBackground, MedicalLabBackgroundMarks, PageHeader, KpiStrip, ChartCard, DonutChart, BarChart, BarMeter, CHART_COLORS, AlertSummary } from '../components/ui';
+import { WaveBackground, MedicalLabBackgroundMarks, PageHeader, KpiStrip, ChartCard, DonutChart, BarChart, BarMeter, CHART_COLORS, AttentionCenter, AlertsByModule } from '../components/ui';
 
 type CountRow = { count: number };
 type AnyRec = Record<string, any>;
@@ -182,6 +181,7 @@ export function Dashboard() {
   }, []);
 
   const openInbox = useMemo(() => (inbox || []).filter(n => n.status !== 'resolved' && n.status !== 'dismissed'), [inbox]);
+  const resolvedCount = useMemo(() => (inbox || []).filter(n => n.status === 'resolved' || n.status === 'dismissed').length, [inbox]);
 
   async function openNotification(n: NotificationRecord) {
     try {
@@ -191,9 +191,9 @@ export function Dashboard() {
       void reloadInbox();
     } catch { navigate('/notifications'); }
   }
-  async function resolveNotification(n: NotificationRecord) {
-    try { await api(`/notifications/${n.id}/resolve`, { method: 'POST', body: JSON.stringify({}) }); void reloadInbox(); }
-    catch { /* ignore */ }
+  // Open the full inbox, optionally pre-filtered to a triage view.
+  function openInboxView(view?: 'active' | 'urgent' | 'today' | 'all') {
+    navigate(view ? `/notifications?view=${view}` : '/notifications');
   }
 
   const c = (x: unknown): number | string | undefined =>
@@ -259,7 +259,9 @@ export function Dashboard() {
         actions={<button className="secondary" type="button" onClick={() => navigate('/notifications')}><Bell size={16} /> Open inbox</button>}
       />
 
-      <DashboardNotificationStrip inbox={openInbox} onOpen={openNotification} onResolve={resolveNotification} onOpenInbox={() => navigate('/notifications')} />
+      {/* Unified triage: severity ring + health meter + a short priority queue.
+          Stays calm and compact no matter how many notifications there are. */}
+      <AttentionCenter inbox={openInbox} resolvedCount={resolvedCount} onOpen={openNotification} onOpenInbox={openInboxView} />
 
       {/* One slim KPI band — the headline numbers, each opening its module */}
       <KpiStrip items={[
@@ -271,10 +273,8 @@ export function Dashboard() {
         { label: 'Unread alerts', value: notifs?.unreadNotifications, onClick: go('/notifications') },
       ]} />
 
-      {/* Consolidated live alerts across every module — env-monitoring style */}
-      <AlertSummary onOpenAlert={a => navigate(a.actionUrl)} />
-
       {/* Six compact charts cover the whole management system */}
+      <div className="section-title"><h3>Quality management overview</h3></div>
       <div className="grid cols-3 dash-charts">
         <ChartCard title="Quality workload" subtitle="Open quality items">
           <DonutChart data={qualityWorkload} centerLabel="Open items" size={132} thickness={15} />
@@ -295,6 +295,9 @@ export function Dashboard() {
           <BarMeter data={governance} />
         </ChartCard>
       </div>
+
+      {/* Whole-laboratory alert picture as one ranked, stacked-severity chart */}
+      <AlertsByModule />
 
       {/* My Work + Quick Actions */}
       <div className="grid cols-2">
@@ -355,69 +358,3 @@ export function ModulePage({ moduleKey, title, eyebrow = 'Module', placeholder =
 export function Documents() { return <ModulePage moduleKey="documents" title="Documents & Records" />; }
 export function Organisation() { return <ModulePage moduleKey="organisation" title="Organisation & Leadership" eyebrow="Organisation and Leadership" />; }
 export function Personnel() { return <ModulePage moduleKey="personnel" title="Personnel Management" />; }
-
-// ============================================================================
-// DashboardNotificationStrip — a compact but unmissable inbox ribbon on the
-// main dashboard. Theme-aware (uses the shared inbox-strip CSS). Clicking a
-// card opens its action; completing the action clears it automatically.
-// ============================================================================
-const SEV_TONE: Record<string, string> = { urgent: 'crit', high: 'crit', medium: 'warn', low: 'ok', info: 'info' };
-function DashboardNotificationStrip({ inbox, onOpen, onResolve, onOpenInbox }: {
-  inbox: NotificationRecord[];
-  onOpen: (n: NotificationRecord) => void;
-  onResolve: (n: NotificationRecord) => void;
-  onOpenInbox: () => void;
-}) {
-  const [showAll, setShowAll] = useState(false);
-  if (!inbox || inbox.length === 0) return (
-    <div className="inbox-all-clear">
-      <CheckCircle2 size={18} />
-      <span><strong>You're all caught up.</strong> No notifications need your attention right now.</span>
-    </div>
-  );
-
-  const now = new Date().toISOString().slice(0, 10);
-  const urgent = inbox.filter(n => n.severity === 'urgent' || n.severity === 'high').length;
-  const today = inbox.filter(n => n.due_date === now).length;
-  const overdue = inbox.filter(n => n.due_date && n.due_date < now).length;
-  const visible = showAll ? inbox : inbox.slice(0, 6);
-
-  return (
-    <div className="inbox-strip">
-      <div className="inbox-strip-head">
-        <Inbox size={17} style={{ color: 'var(--accent-bright)' }} />
-        <strong>Your inbox — {inbox.length} pending</strong>
-        {urgent > 0 && <span className="alert-chip crit"><AlertTriangle size={11} />{urgent} urgent</span>}
-        {overdue > 0 && <span className="alert-chip warn"><Clock size={11} />{overdue} overdue</span>}
-        {today > 0 && <span className="alert-chip muted">{today} due today</span>}
-        <span style={{ flex: 1 }} />
-        {inbox.length > 6 && <button className="alert-more" onClick={() => setShowAll(v => !v)}>{showAll ? 'Collapse' : `Show all ${inbox.length}`}</button>}
-        <button className="alert-more" onClick={onOpenInbox}>Open inbox <ArrowRight size={12} /></button>
-      </div>
-      <div className="inbox-strip-grid">
-        {visible.map(n => {
-          const tone = SEV_TONE[n.severity] || 'info';
-          const isOverdue = n.due_date && n.due_date < now;
-          const isToday = n.due_date === now;
-          return (
-            <div key={n.id} className={`inbox-item sev-${tone} ${n.status !== 'unread' ? 'is-read' : ''}`} onClick={() => onOpen(n)}>
-              <Bell size={13} style={{ marginTop: 3, color: 'var(--muted)' }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="inbox-item-title">{n.title}</div>
-                {n.message && <div className="inbox-item-msg">{n.message}</div>}
-                <div className="inbox-item-meta">
-                  <span className="badge">{n.module_key}</span>
-                  {n.due_date && <span style={{ color: isOverdue ? 'var(--danger)' : isToday ? 'var(--warning)' : 'var(--faint)', fontWeight: 600 }}>
-                    {isOverdue ? `Overdue ${n.due_date}` : isToday ? 'Due today' : n.due_date}
-                  </span>}
-                  {n.action_label && <span style={{ color: 'var(--accent-bright)', fontWeight: 600 }}>{n.action_label} →</span>}
-                </div>
-              </div>
-              <button className="inbox-item-x" title="Mark resolved" onClick={e => { e.stopPropagation(); onResolve(n); }}>✓</button>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}

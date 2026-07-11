@@ -8,3 +8,4 @@ export { default as EmptyState } from './EmptyState';
 export { MODULE_ICONS, moduleIcon, SECTION_ICONS, sectionIcon } from './moduleIcons';
 export { DonutChart, BarChart, BarMeter, RadialGauge, Sparkline, ChartCard, CHART_COLORS } from './Charts';
 export { AlertCard, AlertGrid, ModuleAlerts, AlertSummary } from './AlertCard';
+export { AttentionCenter, AlertsByModule } from './AttentionCenter';

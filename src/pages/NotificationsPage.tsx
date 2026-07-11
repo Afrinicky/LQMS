@@ -1,8 +1,8 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Bell, CheckCircle2, Clock, AlertTriangle, ArrowRight, Inbox } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, AlertSummary } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, AlertsByModule } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -27,6 +27,7 @@ const SEV_TONE: Record<string, string> = { urgent: 'crit', high: 'crit', medium:
 export function NotificationsPage() {
   const { isEnabled } = useModules();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [tab, setTab] = useState('Dashboard');
   const [error, setError] = useState<string | null>(null);
 
@@ -63,6 +64,17 @@ export function NotificationsPage() {
     } catch (e) { setError((e as Error).message); }
   }
   useEffect(() => { if (isEnabled('notifications')) void load(); }, [isEnabled]);
+
+  // Deep-link support: a dashboard triage click arrives as ?view=urgent|today|
+  // all|active and opens the full inbox pre-filtered to that slice.
+  useEffect(() => {
+    const view = searchParams.get('view');
+    if (view && ['active', 'all', 'urgent', 'today', 'resolved'].includes(view)) {
+      setInboxFilter(view as typeof inboxFilter);
+      setTab('Full Inbox');
+    }
+  }, [searchParams]);
+
   if (!isEnabled('notifications')) return <DisabledModule />;
 
   async function transition(id: number, action: 'read' | 'acknowledge' | 'resolve' | 'dismiss') {
@@ -190,8 +202,8 @@ export function NotificationsPage() {
         onTransition={transition}
       />
 
-      {/* Consolidated live alerts across the whole system, env-monitoring style */}
-      <AlertSummary onOpenAlert={a => navigate(a.actionUrl)} />
+      {/* Consolidated live alerts across the whole system as one compact chart */}
+      <AlertsByModule />
 
       <div className="grid cols-2" style={{ marginTop: 18 }}>
         <ChartCard title="Timeliness" subtitle="Notifications by due-date pressure">

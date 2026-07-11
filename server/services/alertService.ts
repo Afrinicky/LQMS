@@ -79,8 +79,13 @@ function relTime(dueDate: string | null): string {
 
 function actionUrlFor(c: ScanCandidate): string {
   const base = MODULE_ROUTES[c.moduleKey] || '/notifications';
-  // Documents attestations already have a rich viewer deep-link elsewhere; the
-  // scan candidates simply land on the module and let the user act.
+  // Carry the exact record identity so the destination page can scroll to and
+  // highlight the offending record (see useFocusTarget on the client). Pages
+  // that don't yet consume `focus` simply land on the correct module — the
+  // param is inert, so this is always safe.
+  if (c.recordType && c.recordId) {
+    return `${base}?focus=${encodeURIComponent(`${c.recordType}:${c.recordId}`)}`;
+  }
   return base;
 }
 
