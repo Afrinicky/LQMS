@@ -3563,4 +3563,229 @@ CREATE TABLE IF NOT EXISTS regulatory_registrations (
   if (!maintCols.has('schedule_id')) database.exec('ALTER TABLE equipment_maintenance_records ADD COLUMN schedule_id INTEGER REFERENCES equipment_schedules(id)');
   if (!maintCols.has('service_provider')) database.exec('ALTER TABLE equipment_maintenance_records ADD COLUMN service_provider TEXT');
   if (!maintCols.has('provider_type')) database.exec('ALTER TABLE equipment_maintenance_records ADD COLUMN provider_type TEXT');
+
+  // -------------------------------------------------------------------
+  // Attestation: bind each signature to the authenticated user account so
+  // one staff can never sign on behalf of another (ISO 15189:2022 §8.3.3).
+  // -------------------------------------------------------------------
+  const attestCols = new Set((database.prepare("PRAGMA table_info(document_attestations)").all() as Array<{ name: string }>).map(c => c.name));
+  if (!attestCols.has('signed_by_user_id')) database.exec('ALTER TABLE document_attestations ADD COLUMN signed_by_user_id INTEGER REFERENCES users(id)');
+
+  // -------------------------------------------------------------------
+  // Central archive of records (SECHPO051 §5.4/§5.5): a single register of
+  // every archived record/report/backup no matter which module produced it.
+  // Any module (documents, monthly reports, equipment, results, backup) can
+  // insert here; retrieval is done from Documents & Records.
+  // -------------------------------------------------------------------
+  database.exec(`
+CREATE TABLE IF NOT EXISTS central_archives (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  archive_number TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  description TEXT,
+  archive_type TEXT NOT NULL,          -- record | report | patient_results | backup | evidence | other
+  source_module TEXT,                  -- documents | monthly_reports | equipment | records_reports | records | information_management | ...
+  source_record_type TEXT,             -- table name in the source module
+  source_record_id TEXT,               -- id in the source module (as text)
+  period_start TEXT,                   -- start of the period the archive covers (patient results / reports)
+  period_end TEXT,                     -- end of the period covered
+  retention_period_months INTEGER,     -- retention in months (nullable)
+  retention_until TEXT,                -- explicit retention expiry date
+  file_id INTEGER REFERENCES files(id),-- local uploaded archive file (excel/csv/zip/pdf/…)
+  cloud_url TEXT,                      -- link to an off-site / cloud copy
+  cloud_provider TEXT,                 -- e.g. Google Drive, OneDrive, S3, network share
+  storage_location TEXT,               -- free-text physical / logical storage location
+  format TEXT,                         -- excel | csv | pdf | zip | xml | image | multi | other
+  size_bytes INTEGER,
+  archived_by_staff_id INTEGER REFERENCES staff(id),
+  archived_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  status TEXT NOT NULL DEFAULT 'archived', -- archived | retrieved | superseded | destroyed
+  is_automatic INTEGER NOT NULL DEFAULT 0, -- 1 = archive_type was created automatically by the system
+  linked_record_id INTEGER REFERENCES record_register(id),
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_central_archives_module ON central_archives(source_module);
+CREATE INDEX IF NOT EXISTS idx_central_archives_type ON central_archives(archive_type);
+CREATE INDEX IF NOT EXISTS idx_central_archives_date ON central_archives(archived_at);
+
+CREATE TABLE IF NOT EXISTS central_archive_schedules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  schedule_key TEXT NOT NULL UNIQUE,   -- e.g. patient_results, monthly_reports
+  title TEXT NOT NULL,
+  archive_type TEXT NOT NULL,
+  frequency TEXT NOT NULL,             -- weekly | monthly | quarterly | biannual | annual
+  retention_period_months INTEGER,
+  format TEXT,                         -- excel | csv | zip
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  cloud_url_template TEXT,
+  last_run_at TEXT,
+  next_run_at TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+`);
+
+  // -------------------------------------------------------------------
+  // Ethical Declaration Forms (Code of Conduct upload flow).
+  // Quality/Lab Manager/Admin uploads master declaration forms; every
+  // active staff is expected to read and sign each form; signatures are
+  // strictly personal (bound to authenticated user, like attestations).
+  // -------------------------------------------------------------------
+  database.exec(`
+CREATE TABLE IF NOT EXISTS ethical_declaration_forms (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  form_number TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  form_type TEXT NOT NULL,            -- code_of_conduct | impartiality | confidentiality | conflict_of_interest | adherence | other
+  description TEXT,
+  version TEXT,
+  effective_date TEXT,
+  review_frequency_months INTEGER,
+  next_review_date TEXT,
+  file_id INTEGER REFERENCES files(id),
+  linked_document_id INTEGER REFERENCES documents(id),
+  requires_annual_reaffirmation INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'active', -- draft | active | obsolete
+  uploaded_by_staff_id INTEGER REFERENCES staff(id),
+  uploaded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS ethical_declaration_signatures (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  form_id INTEGER NOT NULL REFERENCES ethical_declaration_forms(id),
+  staff_id INTEGER NOT NULL REFERENCES staff(id),
+  signed_by_user_id INTEGER REFERENCES users(id),
+  signed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  conflict_declared INTEGER NOT NULL DEFAULT 0,
+  conflict_details TEXT,
+  affirmation_text TEXT,
+  notes TEXT,
+  UNIQUE (form_id, staff_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ethical_signatures_staff ON ethical_declaration_signatures(staff_id);
+`);
+
+  // -------------------------------------------------------------------
+  // Organogram — laboratory continuity plan for the absence of key
+  // personnel (ISO 15189:2022 §5.1.6 / §6.2). Each key position is
+  // linked to a documented continuity arrangement. The organogram/
+  // deputisation itself remains in the positions + assignments tables.
+  // -------------------------------------------------------------------
+  database.exec(`
+CREATE TABLE IF NOT EXISTS continuity_plans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  plan_number TEXT NOT NULL UNIQUE,
+  position_id INTEGER REFERENCES positions(id),
+  key_role TEXT NOT NULL,             -- Laboratory Manager | Quality Manager | Section Head | Blood Bank Supervisor | ...
+  deputy_position_id INTEGER REFERENCES positions(id),
+  deputy_staff_id INTEGER REFERENCES staff(id),
+  acting_arrangement TEXT,            -- Description of who acts and how
+  authority_scope TEXT,               -- What decisions the acting person can make
+  handover_procedure TEXT,            -- Handover / brief procedure summary
+  activation_trigger TEXT,            -- Circumstances that trigger the continuity plan
+  training_status TEXT,               -- ready | in_progress | not_ready
+  last_tested_date TEXT,              -- Last time this plan was simulated / tested
+  next_review_date TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+`);
+
+  // -------------------------------------------------------------------
+  // Quality & Technical Records Review (Organisation & Leadership).
+  // The lab configures a review frequency per record area; a review
+  // pulls indicators from every module and connects findings to NC/CAPA.
+  // -------------------------------------------------------------------
+  database.exec(`
+CREATE TABLE IF NOT EXISTS qt_review_configs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  area_key TEXT NOT NULL UNIQUE,          -- previous_actions | corrective_actions | personnel_reports | environmental | sample_rejection | equipment | iqc | eqa | quality_indicators | complaints | improvement | routine_review
+  area_label TEXT NOT NULL,
+  frequency TEXT NOT NULL,                -- daily | weekly | monthly | quarterly | biannual | annual
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  next_review_date TEXT,
+  last_review_date TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS qt_reviews (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  review_number TEXT NOT NULL UNIQUE,
+  area_key TEXT NOT NULL,
+  period_start TEXT NOT NULL,
+  period_end TEXT NOT NULL,
+  reviewed_by_staff_id INTEGER REFERENCES staff(id),
+  reviewed_at TEXT,
+  data_snapshot TEXT,                     -- JSON snapshot of aggregated data used for the review
+  findings TEXT,
+  recurrent_problems TEXT,
+  actions_planned TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',   -- draft | in_progress | completed | followed_up
+  linked_nc_id INTEGER REFERENCES nonconforming_events(id),
+  linked_capa_id INTEGER REFERENCES capa_records(id),
+  follow_up_due_date TEXT,
+  follow_up_status TEXT NOT NULL DEFAULT 'not_required', -- not_required | pending | in_progress | completed
+  next_review_due TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_qt_reviews_area ON qt_reviews(area_key);
+CREATE INDEX IF NOT EXISTS idx_qt_reviews_period ON qt_reviews(period_start, period_end);
+`);
+
+  // Seed the QT-review areas the ISO clause enumerates (idempotent).
+  const qtSeeded = (database.prepare('SELECT COUNT(*) c FROM qt_review_configs').get() as { c: number }).c;
+  if (qtSeeded === 0) {
+    const rows: Array<[string, string, string]> = [
+      ['previous_actions', 'Follow-up of actions from previous reviews', 'monthly'],
+      ['corrective_actions', 'Corrective actions & risk mitigation status', 'monthly'],
+      ['personnel_reports', 'Reports from personnel', 'monthly'],
+      ['environmental', 'Environmental monitoring logs', 'monthly'],
+      ['sample_rejection', 'Sample rejection records', 'monthly'],
+      ['equipment', 'Equipment calibration & maintenance records', 'monthly'],
+      ['iqc', 'Internal quality control (IQC) records', 'monthly'],
+      ['eqa', 'EQA / inter-laboratory comparisons', 'quarterly'],
+      ['quality_indicators', 'Quality indicators', 'monthly'],
+      ['complaints', 'Customer complaints & feedback', 'monthly'],
+      ['improvement', 'Improvement project outcomes', 'quarterly'],
+      ['routine_review', 'Routine review action planning & follow-up', 'monthly'],
+    ];
+    const stmt = database.prepare('INSERT INTO qt_review_configs (area_key, area_label, frequency, is_active) VALUES (?, ?, ?, 1)');
+    for (const [k, l, f] of rows) stmt.run(k, l, f);
+  }
+
+  // -------------------------------------------------------------------
+  // Budget projections — enriched breakdown that mirrors the ISO scope.
+  // -------------------------------------------------------------------
+  const budgetCols = new Set((database.prepare("PRAGMA table_info(budget_projections)").all() as Array<{ name: string }>).map(c => c.name));
+  const addBudgetCol = (name: string, ddl: string) => { if (!budgetCols.has(name)) database.exec(`ALTER TABLE budget_projections ADD COLUMN ${ddl}`); };
+  addBudgetCol('scope', 'scope TEXT');                                 // personnel | scope_of_test | infrastructure | equipment | service_maintenance | quality_assurance | iqc_eqa | materials | other
+  addBudgetCol('quantity', 'quantity REAL');
+  addBudgetCol('unit_cost', 'unit_cost REAL');
+  addBudgetCol('justification', 'justification TEXT');
+  addBudgetCol('review_status', "review_status TEXT DEFAULT 'pending'"); // pending | reviewed | approved | rejected
+  addBudgetCol('reviewed_by_staff_id', 'reviewed_by_staff_id INTEGER REFERENCES staff(id)');
+  addBudgetCol('reviewed_at', 'reviewed_at TEXT');
+
+  // -------------------------------------------------------------------
+  // Notifications — richer actionable metadata so clicking a notification
+  // can open its source and auto-resolve when the action completes.
+  // -------------------------------------------------------------------
+  const nnCols = new Set((database.prepare("PRAGMA table_info(notifications)").all() as Array<{ name: string }>).map(c => c.name));
+  if (!nnCols.has('action_url')) database.exec('ALTER TABLE notifications ADD COLUMN action_url TEXT');
+  if (!nnCols.has('action_label')) database.exec('ALTER TABLE notifications ADD COLUMN action_label TEXT');
+  if (!nnCols.has('auto_resolve_key')) database.exec('ALTER TABLE notifications ADD COLUMN auto_resolve_key TEXT');
 }

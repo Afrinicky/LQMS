@@ -8,6 +8,7 @@ import { getDb, uploadRoot } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
+import { recordCentralArchive } from './archives.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 
@@ -712,6 +713,18 @@ export function monthlyReportsRoutes() {
       .run('monthly_reports', 'monthly_report_batches', String(req.params.id), 'documents', 'files', String(fileId), `Exported monthly report (${format})`);
     db.prepare('INSERT INTO evidence_files (file_id, module_key, record_type, record_id, notes, linked_by) VALUES (?, ?, ?, ?, ?, ?)')
       .run(fileId, 'monthly_reports', 'monthly_report_batches', String(req.params.id), `Final exported monthly report (${format})`, req.user!.id);
+    // Mirror into the central archive so this exported monthly report shows up
+    // in Documents & Records → Archives beside every other archived record.
+    recordCentralArchive(db, {
+      title: `Monthly Report ${report.report_number}`,
+      description: `${report.report_type} for ${String(report.report_month).padStart(2, '0')}/${report.report_year} exported as ${format.toUpperCase()}`,
+      archiveType: 'report',
+      sourceModule: 'monthly_reports', sourceRecordType: 'monthly_report_batches', sourceRecordId: req.params.id,
+      fileId, format, sizeBytes: Buffer.byteLength(body, 'utf-8'),
+      periodStart: `${report.report_year}-${String(report.report_month).padStart(2, '0')}-01`,
+      periodEnd: `${report.report_year}-${String(report.report_month).padStart(2, '0')}-28`,
+      isAutomatic: true, createdBy: req.user!.id,
+    });
     audit(req, { action: 'export', entity: 'monthly_report_batches', entityId: req.params.id, newValue: { fileId, fileName, format } });
     res.json({ ok: true, fileId, fileName, format });
   });

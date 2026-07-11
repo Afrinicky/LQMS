@@ -1,18 +1,37 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
 import { useModules } from '../hooks/useModules';
-import { api } from '../services/api';
+import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import { MeetingsPage, ManagementReviewPage } from './Phase8Pages';
-import { Link } from 'react-router-dom';
-import type { Staff, CodeOfConductRecord, BudgetProjection, OrganisationSummary, RegulatoryRegistration, LaboratoryConfig } from '../../shared/types/api';
+import { Link, useSearchParams } from 'react-router-dom';
+import type {
+  Staff, CodeOfConductRecord, BudgetProjection, OrganisationSummary, RegulatoryRegistration, LaboratoryConfig,
+  EthicalDeclarationForm, EthicalDeclarationSignature, ContinuityPlan, QtReviewConfig, QtReview, Position, OrgTree,
+} from '../../shared/types/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
 const tabBar = (active: string, tabs: string[], onChange: (name: string) => void) =>
   <div className="tabs">{tabs.map(name => <button key={name} type="button" className={active === name ? 'active' : ''} onClick={() => onChange(name)}>{name}</button>)}</div>;
 const pretty = (s?: string) => s ? s.replace(/_/g, ' ') : '—';
+
+async function uploadFileToServer(file: File): Promise<string> {
+  const fd = new FormData();
+  fd.append('file', file);
+  const token = getToken();
+  const r = await fetch(`${API_BASE}/files`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({ error: r.statusText }))).error ?? r.statusText);
+  return String((await r.json()).id);
+}
+
+async function fetchBlobUrl(path: string): Promise<string> {
+  const token = getToken();
+  const r = await fetch(`${API_BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+  if (!r.ok) throw new Error('Could not load the file.');
+  return URL.createObjectURL(await r.blob());
+}
 
 // Read-only display of the laboratory configuration owned by Settings → My
 // Laboratory. Shown here so the whole team can see the legal identity, quality
@@ -77,13 +96,35 @@ export function QualityConfigurationView({ config }: { config: LaboratoryConfig 
   </div>;
 }
 
-const COMMITMENT_TYPES = ['all', 'impartiality', 'confidentiality', 'conflict_of_interest', 'code_adherence'];
-const BUDGET_CATEGORIES = ['personnel', 'equipment', 'maintenance', 'reagents_consumables', 'quality_assurance', 'infrastructure', 'training', 'other'];
+const FORM_TYPES: Array<{ key: string; label: string }> = [
+  { key: 'code_of_conduct', label: 'Code of Conduct' },
+  { key: 'adherence', label: 'Adherence to Organisational Policies & Procedures' },
+  { key: 'impartiality', label: 'Declaration of Impartiality' },
+  { key: 'confidentiality', label: 'Declaration of Confidentiality' },
+  { key: 'conflict_of_interest', label: 'Declaration of Conflict of Interest' },
+  { key: 'other', label: 'Other declaration' },
+];
+
+const BUDGET_SCOPES: Array<{ key: string; label: string }> = [
+  { key: 'personnel', label: 'Personnel needs' },
+  { key: 'scope_of_test', label: 'Scope of tests' },
+  { key: 'infrastructure', label: 'Infrastructure' },
+  { key: 'equipment', label: 'Equipment needs' },
+  { key: 'service_maintenance', label: 'Service & maintenance' },
+  { key: 'quality_assurance', label: 'Quality assurance process' },
+  { key: 'iqc_eqa', label: 'IQC & EQA materials' },
+  { key: 'materials', label: 'Consumables / materials' },
+  { key: 'other', label: 'Other' },
+];
+
+const TABS = ['Dashboard', 'Quality Configuration', 'Code of Conduct', 'Organogram & Deputisation', 'Budgetary Projection', 'Quality & Technical Records Review', 'Registrations & Licences', 'Meetings', 'Management Review'];
 
 export function OrganisationPage() {
   const { isEnabled } = useModules();
-  const [tab, setTab] = useState('Dashboard');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [tab, setTab] = useState<string>(searchParams.get('tab') || 'Dashboard');
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [summary, setSummary] = useState<OrganisationSummary | null>(null);
   const [conduct, setConduct] = useState<CodeOfConductRecord[]>([]);
@@ -91,8 +132,6 @@ export function OrganisationPage() {
   const [registrations, setRegistrations] = useState<RegulatoryRegistration[]>([]);
   const [config, setConfig] = useState<LaboratoryConfig | null>(null);
 
-  const [cocForm, setCocForm] = useState({ staffId: '', commitmentType: 'all', statement: '', signedDate: '', reviewDate: '', conflictDeclared: false, conflictDetails: '' });
-  const [budForm, setBudForm] = useState({ fiscalYear: String(new Date().getFullYear()), category: '', description: '', projectedAmount: '', currency: 'GHS', responsibleStaffId: '', status: 'draft' });
   const [regForm, setRegForm] = useState({ credentialType: '', title: '', issuingBody: '', reference: '', issueDate: '', expiryDate: '', responsibleStaffId: '', status: 'active' });
 
   async function load() {
@@ -110,38 +149,34 @@ export function OrganisationPage() {
     } catch (e) { setError((e as Error).message); }
   }
   useEffect(() => { if (isEnabled('organisation')) void load(); }, [isEnabled]);
+  useEffect(() => { const t = searchParams.get('tab'); if (t && t !== tab) setTab(t); }, [searchParams]);
+
+  function flash(msg: string) { setNotice(msg); setError(null); setTimeout(() => setNotice(null), 5000); }
+
   if (!isEnabled('organisation')) return <DisabledModule />;
 
-  const staffName = (id?: number) => staff.find(s => s.id === id)?.fullName || '—';
+  const staffName = (id?: number | null) => staff.find(s => s.id === id)?.fullName || '—';
 
-  async function submitCoc(e: FormEvent) {
-    e.preventDefault(); setError(null);
-    try { await api('/organisation/code-of-conduct', { method: 'POST', body: JSON.stringify(cocForm) }); setCocForm({ staffId: '', commitmentType: 'all', statement: '', signedDate: '', reviewDate: '', conflictDeclared: false, conflictDetails: '' }); await load(); }
-    catch (e) { setError((e as Error).message); }
-  }
-  async function submitBud(e: FormEvent) {
-    e.preventDefault(); setError(null);
-    try { await api('/organisation/budget', { method: 'POST', body: JSON.stringify(budForm) }); setBudForm({ fiscalYear: String(new Date().getFullYear()), category: '', description: '', projectedAmount: '', currency: 'GHS', responsibleStaffId: '', status: 'draft' }); await load(); }
-    catch (e) { setError((e as Error).message); }
-  }
   async function submitReg(e: FormEvent) {
     e.preventDefault(); setError(null);
     try { await api('/organisation/registrations', { method: 'POST', body: JSON.stringify(regForm) }); setRegForm({ credentialType: '', title: '', issuingBody: '', reference: '', issueDate: '', expiryDate: '', responsibleStaffId: '', status: 'active' }); await load(); }
     catch (e) { setError((e as Error).message); }
   }
 
-  const budgetByCategory = BUDGET_CATEGORIES.map((c, i) => ({
-    label: pretty(c),
-    value: budget.filter(b => b.category === c).reduce((s, b) => s + (b.projected_amount || 0), 0),
+  const budgetByScope = BUDGET_SCOPES.map((c, i) => ({
+    label: c.label,
+    value: budget.filter(b => (b as any).scope === c.key).reduce((s, b) => s + (b.projected_amount || 0), 0),
     color: CHART_COLORS[i % CHART_COLORS.length],
-    onClick: () => setTab('Budget Projection'),
+    onClick: () => setTab('Budgetary Projection'),
   })).filter(d => d.value > 0);
 
+  const enabledTabs = TABS.filter(t => (t === 'Meetings' ? isEnabled('meetings') : t === 'Management Review' ? isEnabled('management_review') : true));
+
   return <div className="module-page">
-    <PageHeader eyebrow="Organisation and Leadership" title="Organisation &amp; Leadership" subtitle="Leadership commitments, code of conduct, and budget planning." />
-    {tabBar(tab, ['Dashboard', 'Quality Configuration', 'Code of Conduct', 'Budget Projection', 'Registrations & Licences',
-      ...(isEnabled('meetings') ? ['Meetings'] : []), ...(isEnabled('management_review') ? ['Management Review'] : [])], setTab)}
+    <PageHeader eyebrow="Organisation and Leadership" title="Organisation &amp; Leadership" subtitle="Leadership commitments, ethical declarations, organogram, budgetary projections and routine record reviews." />
+    {tabBar(tab, enabledTabs, t => { setTab(t); setSearchParams(prev => { prev.set('tab', t); return prev; }); })}
     {error && <div className="error">{error}</div>}
+    {notice && <div className="banner-success" style={{ background: '#e8f6ee', border: '1px solid #58b27a', color: '#1c6b3e', padding: '8px 12px', borderRadius: 6, margin: '8px 0' }}>{notice}</div>}
 
     {tab === 'Quality Configuration' && <QualityConfigurationView config={config} />}
 
@@ -149,15 +184,15 @@ export function OrganisationPage() {
       { label: 'Code-of-conduct records', value: summary?.codeOfConductRecords ?? conduct.length, onClick: () => setTab('Code of Conduct') },
       { label: 'Due review', value: summary?.codeOfConductDueReview ?? 0, tone: (summary?.codeOfConductDueReview ?? 0) ? 'warning' : undefined, onClick: () => setTab('Code of Conduct') },
       { label: 'Declared conflicts', value: summary?.declaredConflicts ?? 0, tone: (summary?.declaredConflicts ?? 0) ? 'danger' : undefined, onClick: () => setTab('Code of Conduct') },
-      { label: 'Budget lines (year)', value: summary?.budgetLinesCurrentYear ?? 0, onClick: () => setTab('Budget Projection') },
-      { label: 'Budget total (year)', value: summary ? Math.round(summary.budgetTotalCurrentYear).toLocaleString() : 0, onClick: () => setTab('Budget Projection') },
+      { label: 'Budget lines (year)', value: summary?.budgetLinesCurrentYear ?? 0, onClick: () => setTab('Budgetary Projection') },
+      { label: 'Budget total (year)', value: summary ? Math.round(summary.budgetTotalCurrentYear).toLocaleString() : 0, onClick: () => setTab('Budgetary Projection') },
       { label: 'Registrations', value: summary?.activeRegistrations ?? 0, onClick: () => setTab('Registrations & Licences') },
       { label: 'Expiring soon', value: summary?.registrationsExpiringSoon ?? 0, tone: (summary?.registrationsExpiringSoon ?? 0) ? 'warning' : undefined, onClick: () => setTab('Registrations & Licences') },
       { label: 'Expired', value: summary?.registrationsExpired ?? 0, tone: (summary?.registrationsExpired ?? 0) ? 'danger' : undefined, onClick: () => setTab('Registrations & Licences') },
     ]} />
     <div className="grid cols-2 dash-charts" style={{ marginTop: 18 }}>
-      <ChartCard title="Budget by category" subtitle="Projected amounts, current fiscal year">
-        <DonutChart centerLabel="Categories" data={budgetByCategory} />
+      <ChartCard title="Budget by scope" subtitle="Projected amounts, current fiscal year">
+        <DonutChart centerLabel="Scopes" data={budgetByScope} />
       </ChartCard>
       <ChartCard title="Code of conduct" subtitle="Adherence and conflict declarations">
         <BarMeter data={[
@@ -168,53 +203,10 @@ export function OrganisationPage() {
       </ChartCard>
     </div></>}
 
-    {tab === 'Code of Conduct' && <>
-      <div className="card">
-        <h3>Record code-of-conduct commitment</h3>
-        <p className="muted" style={{ marginTop: 0 }}>Captures each member's commitment to impartiality, confidentiality, conflict-of-interest disclosure and the code of conduct.</p>
-        <form className="form-grid" onSubmit={submitCoc}>
-          <label>Staff<select value={cocForm.staffId} onChange={e => setCocForm({ ...cocForm, staffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-          <label>Commitment<select value={cocForm.commitmentType} onChange={e => setCocForm({ ...cocForm, commitmentType: e.target.value })}>{COMMITMENT_TYPES.map(c => <option key={c} value={c}>{pretty(c)}</option>)}</select></label>
-          <label>Signed date<input type="date" value={cocForm.signedDate} onChange={e => setCocForm({ ...cocForm, signedDate: e.target.value })} /></label>
-          <label>Review date<input type="date" value={cocForm.reviewDate} onChange={e => setCocForm({ ...cocForm, reviewDate: e.target.value })} /></label>
-          <label><input type="checkbox" checked={cocForm.conflictDeclared} onChange={e => setCocForm({ ...cocForm, conflictDeclared: e.target.checked })} /> Conflict of interest declared</label>
-          <label>Conflict details<input value={cocForm.conflictDetails} onChange={e => setCocForm({ ...cocForm, conflictDetails: e.target.value })} /></label>
-          <label>Statement<textarea value={cocForm.statement} onChange={e => setCocForm({ ...cocForm, statement: e.target.value })} /></label>
-          <button type="submit">Add record</button>
-        </form>
-      </div>
-      <div className="card" style={{ marginTop: 16 }}>
-        <h3>Code-of-conduct register</h3>
-        {conduct.length === 0 ? <p>No records yet.</p> :
-          <table className="data-table"><thead><tr><th>No.</th><th>Staff</th><th>Commitment</th><th>Signed</th><th>Review</th><th>Conflict</th><th>Status</th></tr></thead><tbody>
-            {conduct.map(c => <tr key={c.id}><td>{c.record_number}</td><td>{staffName(c.staff_id)}</td><td>{pretty(c.commitment_type)}</td><td>{c.signed_date || '—'}</td><td>{c.review_date || '—'}</td><td>{c.conflict_declared ? <span style={{ color: 'var(--danger)' }}>Declared</span> : 'None'}</td><td>{formatBadge(c.status)}</td></tr>)}
-          </tbody></table>}
-      </div>
-    </>}
-
-    {tab === 'Budget Projection' && <>
-      <div className="card">
-        <h3>Add budget projection line</h3>
-        <p className="muted" style={{ marginTop: 0 }}>Plan across personnel, equipment, maintenance, reagents &amp; consumables, quality assurance (IQC/EQA), infrastructure and training.</p>
-        <form className="form-grid" onSubmit={submitBud}>
-          <label>Fiscal year<input value={budForm.fiscalYear} onChange={e => setBudForm({ ...budForm, fiscalYear: e.target.value })} /></label>
-          <label>Category<select value={budForm.category} onChange={e => setBudForm({ ...budForm, category: e.target.value })}><option value="">—</option>{BUDGET_CATEGORIES.map(c => <option key={c} value={c}>{pretty(c)}</option>)}</select></label>
-          <label>Projected amount<input type="number" value={budForm.projectedAmount} onChange={e => setBudForm({ ...budForm, projectedAmount: e.target.value })} /></label>
-          <label>Currency<input value={budForm.currency} onChange={e => setBudForm({ ...budForm, currency: e.target.value })} /></label>
-          <label>Responsible<select value={budForm.responsibleStaffId} onChange={e => setBudForm({ ...budForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-          <label>Status<select value={budForm.status} onChange={e => setBudForm({ ...budForm, status: e.target.value })}>{['draft', 'submitted', 'approved', 'closed'].map(s => <option key={s} value={s}>{pretty(s)}</option>)}</select></label>
-          <label>Description<textarea value={budForm.description} onChange={e => setBudForm({ ...budForm, description: e.target.value })} /></label>
-          <button type="submit">Add line</button>
-        </form>
-      </div>
-      <div className="card" style={{ marginTop: 16 }}>
-        <h3>Budget register</h3>
-        {budget.length === 0 ? <p>No budget lines yet.</p> :
-          <table className="data-table"><thead><tr><th>No.</th><th>Year</th><th>Category</th><th>Description</th><th>Amount</th><th>Responsible</th><th>Status</th></tr></thead><tbody>
-            {budget.map(b => <tr key={b.id}><td>{b.projection_number}</td><td>{b.fiscal_year || '—'}</td><td>{pretty(b.category)}</td><td>{b.description || '—'}</td><td>{b.projected_amount != null ? `${b.currency || ''} ${b.projected_amount.toLocaleString()}` : '—'}</td><td>{staffName(b.responsible_staff_id)}</td><td>{formatBadge(b.status)}</td></tr>)}
-          </tbody></table>}
-      </div>
-    </>}
+    {tab === 'Code of Conduct' && <CodeOfConductView staff={staff} onError={setError} onNotice={flash} />}
+    {tab === 'Organogram & Deputisation' && <OrganogramContinuityView staff={staff} onError={setError} onNotice={flash} />}
+    {tab === 'Budgetary Projection' && <BudgetProjectionView staff={staff} onError={setError} onNotice={flash} />}
+    {tab === 'Quality & Technical Records Review' && <QtRecordsReviewView staff={staff} onError={setError} onNotice={flash} />}
 
     {tab === 'Registrations & Licences' && <>
       <div className="card">
@@ -244,4 +236,661 @@ export function OrganisationPage() {
     {tab === 'Meetings' && <MeetingsPage embedded />}
     {tab === 'Management Review' && <ManagementReviewPage embedded />}
   </div>;
+}
+
+// ============================================================================
+// Code of Conduct — upload ethical declaration forms then let each staff read
+// and sign them. Signing is strictly personal (server binds to the caller's
+// user id) and can never be done on someone else's behalf.
+// ============================================================================
+function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onError: (m: string) => void; onNotice: (m: string) => void }) {
+  const staffName = (id?: number | null) => staff.find(s => s.id === id)?.fullName || '—';
+  const [searchParams] = useSearchParams();
+  const focusForm = searchParams.get('form');
+  const [forms, setForms] = useState<EthicalDeclarationForm[]>([]);
+  const [selected, setSelected] = useState<EthicalDeclarationForm | null>(null);
+  const [signatures, setSignatures] = useState<EthicalDeclarationSignature[]>([]);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [signForm, setSignForm] = useState({ conflictDeclared: false, conflictDetails: '', affirmationText: '', notes: '' });
+  const [uploadForm, setUploadForm] = useState({ title: '', formType: 'code_of_conduct', description: '', version: '1.0', effectiveDate: '', reviewFrequencyMonths: '12', nextReviewDate: '', requiresAnnualReaffirmation: true, status: 'active' });
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [showUpload, setShowUpload] = useState(false);
+
+  async function load() {
+    try {
+      const list = await api<EthicalDeclarationForm[]>('/organisation/ethical-forms');
+      setForms(list);
+      if (focusForm) {
+        const focus = list.find(f => String(f.id) === focusForm);
+        if (focus) void openForm(focus);
+      }
+    } catch (e) { onError((e as Error).message); }
+  }
+  useEffect(() => { void load(); }, []);
+
+  async function openForm(f: EthicalDeclarationForm) {
+    setSelected(f);
+    setSignatures([]);
+    setPreviewUrl(null);
+    try {
+      const detail = await api<EthicalDeclarationForm & { signatures: EthicalDeclarationSignature[] }>(`/organisation/ethical-forms/${f.id}`);
+      setSignatures(detail.signatures || []);
+      if (f.file_id) fetchBlobUrl(`/files/${f.file_id}/raw`).then(setPreviewUrl).catch(() => setPreviewUrl(null));
+    } catch (e) { onError((e as Error).message); }
+  }
+
+  async function submitUpload(e: FormEvent) {
+    e.preventDefault(); onError('');
+    if (!uploadFile) { onError('Choose the ethical declaration form file to upload.'); return; }
+    try {
+      const fileId = await uploadFileToServer(uploadFile);
+      await api('/organisation/ethical-forms', { method: 'POST', body: JSON.stringify({ ...uploadForm, fileId }) });
+      setUploadForm({ title: '', formType: 'code_of_conduct', description: '', version: '1.0', effectiveDate: '', reviewFrequencyMonths: '12', nextReviewDate: '', requiresAnnualReaffirmation: true, status: 'active' });
+      setUploadFile(null);
+      setShowUpload(false);
+      await load();
+      onNotice('Form uploaded. Every active staff has been notified in their inbox to open, read and sign it.');
+    } catch (e) { onError((e as Error).message); }
+  }
+
+  async function signSelected(e: FormEvent) {
+    e.preventDefault();
+    if (!selected) return;
+    try {
+      await api(`/organisation/ethical-forms/${selected.id}/sign`, { method: 'POST', body: JSON.stringify(signForm) });
+      setSignForm({ conflictDeclared: false, conflictDetails: '', affirmationText: '', notes: '' });
+      await load();
+      const fresh = await api<EthicalDeclarationForm & { signatures: EthicalDeclarationSignature[] }>(`/organisation/ethical-forms/${selected.id}`);
+      setSelected(fresh); setSignatures(fresh.signatures || []);
+      onNotice('Your acknowledgement has been signed and recorded. Thank you.');
+    } catch (e) { onError((e as Error).message); }
+  }
+
+  const canUpload = true; // Server enforces permissions
+
+  return <div>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+      <div>
+        <h3 style={{ margin: 0 }}>Code of Conduct &amp; Ethical Declarations</h3>
+        <p className="muted" style={{ margin: 0, fontSize: 12 }}>Upload each declaration once; every staff opens it, reads it, and signs their own acknowledgement. Signatures are personal and non-transferable.</p>
+      </div>
+      {canUpload && <button onClick={() => setShowUpload(v => !v)}>{showUpload ? 'Cancel' : '＋ Upload declaration form'}</button>}
+    </div>
+
+    {showUpload && <div className="card" style={{ marginTop: 10 }}>
+      <h4 style={{ marginTop: 0 }}>Upload declaration form</h4>
+      <p className="muted" style={{ marginTop: 0 }}>Add the master declaration form (PDF/Word). All active staff will be notified in their inbox to open, read, and sign this form.</p>
+      <form className="form-grid" onSubmit={submitUpload}>
+        <label>Title<input value={uploadForm.title} onChange={e => setUploadForm({ ...uploadForm, title: e.target.value })} required placeholder="e.g. Declaration of Impartiality (2026)" /></label>
+        <label>Type<select value={uploadForm.formType} onChange={e => setUploadForm({ ...uploadForm, formType: e.target.value })}>{FORM_TYPES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}</select></label>
+        <label>Version<input value={uploadForm.version} onChange={e => setUploadForm({ ...uploadForm, version: e.target.value })} /></label>
+        <label>Effective date<input type="date" value={uploadForm.effectiveDate} onChange={e => setUploadForm({ ...uploadForm, effectiveDate: e.target.value })} /></label>
+        <label>Review frequency (months)<input type="number" min={0} value={uploadForm.reviewFrequencyMonths} onChange={e => setUploadForm({ ...uploadForm, reviewFrequencyMonths: e.target.value })} /></label>
+        <label>Next review date<input type="date" value={uploadForm.nextReviewDate} onChange={e => setUploadForm({ ...uploadForm, nextReviewDate: e.target.value })} /></label>
+        <label>Description<textarea value={uploadForm.description} onChange={e => setUploadForm({ ...uploadForm, description: e.target.value })} placeholder="What this form covers…" /></label>
+        <label><input type="checkbox" checked={uploadForm.requiresAnnualReaffirmation} onChange={e => setUploadForm({ ...uploadForm, requiresAnnualReaffirmation: e.target.checked })} /> Requires annual re-affirmation</label>
+        <label>File (PDF, Word)<input type="file" accept=".pdf,.doc,.docx,.rtf,.odt,.txt" onChange={e => setUploadFile(e.target.files?.[0] ?? null)} required /></label>
+        <button type="submit">Upload &amp; notify all staff</button>
+      </form>
+    </div>}
+
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 380px) 1fr', gap: 16, alignItems: 'start', marginTop: 12 }}>
+      <div>
+        <div className="card" style={{ padding: 12 }}>
+          <h4 style={{ marginTop: 0 }}>Declaration forms</h4>
+          {forms.length === 0 ? <p className="muted">No declaration forms uploaded yet.</p> :
+            <div style={{ maxHeight: '58vh', overflowY: 'auto', borderTop: '1px solid #e2e8f0' }}>
+              {forms.map(f => {
+                const isSelected = selected?.id === f.id;
+                const signedByMe = !!f.my_signature;
+                const total = f.total_staff || 1;
+                const pct = Math.round((100 * (f.signature_count || 0)) / total);
+                return <button key={f.id} type="button" onClick={() => openForm(f)}
+                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px', border: 'none', borderBottom: '1px solid #eef0f4', background: isSelected ? 'var(--accent-soft, #eef4ff)' : 'transparent', cursor: 'pointer' }}>
+                  <div style={{ fontWeight: 600 }}>{f.title}</div>
+                  <div style={{ fontSize: 11, color: '#64748b', marginTop: 3 }}>
+                    {FORM_TYPES.find(t => t.key === f.form_type)?.label || f.form_type} · v{f.version || '—'}
+                    {signedByMe ? <span className="badge" style={{ marginLeft: 6, background: '#dcfce7', color: '#166534' }}>signed</span> : <span className="badge" style={{ marginLeft: 6, background: '#fef3c7', color: '#92400e' }}>to sign</span>}
+                  </div>
+                  <div style={{ marginTop: 5, height: 5, background: '#e5e7eb', borderRadius: 3, overflow: 'hidden' }}>
+                    <div style={{ width: `${pct}%`, height: '100%', background: pct >= 80 ? '#16a34a' : pct >= 40 ? '#f59e0b' : '#dc2626' }} />
+                  </div>
+                  <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>{f.signature_count} of {f.total_staff} signed ({pct}%)</div>
+                </button>;
+              })}
+            </div>}
+        </div>
+      </div>
+
+      <div>
+        {!selected ? <div className="card" style={{ padding: 20 }}>
+          <p className="muted">Select a declaration on the left to open, read and sign it.</p>
+        </div> : <>
+          <div className="card">
+            <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: 220 }}>
+                <span className="hint">{FORM_TYPES.find(t => t.key === selected.form_type)?.label || selected.form_type}</span>
+                <h3 style={{ margin: '2px 0 0' }}>{selected.title}</h3>
+                <p className="muted" style={{ margin: 0, fontSize: 12 }}>v{selected.version || '—'} · effective {selected.effective_date || '—'} · uploaded by {selected.uploaded_by_name || '—'} on {String(selected.uploaded_at).slice(0, 10)}</p>
+              </div>
+              {selected.file_id && <a className="badge" onClick={async () => {
+                const url = await fetchBlobUrl(`/files/${selected.file_id}/download`);
+                const a = document.createElement('a'); a.href = url; a.download = selected.file_name || 'declaration'; a.click();
+                setTimeout(() => URL.revokeObjectURL(url), 4000);
+              }} style={{ cursor: 'pointer' }}>⬇ Download</a>}
+            </div>
+            {selected.description && <p style={{ marginTop: 8 }}>{selected.description}</p>}
+            {previewUrl && (selected.file_mime === 'application/pdf' || /\.pdf$/i.test(selected.file_name || '')
+              ? <iframe title="declaration" src={previewUrl} style={{ width: '100%', height: '60vh', border: '1px solid #cbd5e0', borderRadius: 6, marginTop: 10 }} />
+              : <p className="muted" style={{ marginTop: 10 }}>Preview not available — download the form to read it.</p>)}
+          </div>
+
+          {selected.my_signature ? <div className="card" style={{ marginTop: 12 }}>
+            <h4 style={{ marginTop: 0 }}>Your acknowledgement</h4>
+            <p>Signed on {String(selected.my_signature.signed_at).slice(0, 19).replace('T', ' ')}. {selected.my_signature.conflict_declared ? <strong style={{ color: '#dc2626' }}>Conflict declared.</strong> : 'No conflict declared.'}</p>
+            {selected.my_signature.conflict_details && <p className="muted">Conflict details: {selected.my_signature.conflict_details}</p>}
+          </div> : <div className="card" style={{ marginTop: 12 }}>
+            <h4 style={{ marginTop: 0 }}>Read &amp; sign your acknowledgement</h4>
+            <p className="muted" style={{ marginTop: 0 }}>By signing you confirm you have read and understood this declaration and agree to be bound by it. Your signature is personal and cannot be delegated.</p>
+            <form onSubmit={signSelected}>
+              <label style={{ display: 'block', margin: '6px 0' }}>Affirmation (optional)<textarea value={signForm.affirmationText} onChange={e => setSignForm({ ...signForm, affirmationText: e.target.value })} placeholder="I have read, understood and agree to be bound by the terms of this declaration…" style={{ width: '100%' }} /></label>
+              <label><input type="checkbox" checked={signForm.conflictDeclared} onChange={e => setSignForm({ ...signForm, conflictDeclared: e.target.checked })} /> I have a conflict of interest to declare</label>
+              {signForm.conflictDeclared && <label style={{ display: 'block', margin: '6px 0' }}>Conflict details<textarea value={signForm.conflictDetails} onChange={e => setSignForm({ ...signForm, conflictDetails: e.target.value })} required style={{ width: '100%' }} /></label>}
+              <label style={{ display: 'block', margin: '6px 0' }}>Notes (optional)<input value={signForm.notes} onChange={e => setSignForm({ ...signForm, notes: e.target.value })} /></label>
+              <button type="submit">✔ I have read &amp; understood — Sign</button>
+            </form>
+          </div>}
+
+          <div className="card" style={{ marginTop: 12 }}>
+            <h4 style={{ marginTop: 0 }}>Signatures ({signatures.length})</h4>
+            {signatures.length === 0 ? <p className="muted">No signatures yet.</p> :
+              <table className="data-table"><thead><tr><th>#</th><th>Staff</th><th>Staff ID</th><th>Section</th><th>Signed on</th><th>Conflict</th></tr></thead><tbody>
+                {signatures.map((s, i) => <tr key={s.id}><td>{i + 1}</td><td>{s.staff_name || staffName(s.staff_id)}</td><td>{s.employee_no || '—'}</td><td>{s.section_name || '—'}</td><td>{String(s.signed_at).slice(0, 19).replace('T', ' ')}</td><td>{s.conflict_declared ? <span style={{ color: '#dc2626' }}>Declared</span> : '—'}</td></tr>)}
+              </tbody></table>}
+          </div>
+        </>}
+      </div>
+    </div>
+  </div>;
+}
+
+// ============================================================================
+// Organogram & Deputisation — reads the shared /organogram tree (owned by
+// Settings → People & Access), then adds a documented continuity plan for
+// every key position so absences never break the management system.
+// ============================================================================
+function OrganogramContinuityView({ staff, onError, onNotice }: { staff: Staff[]; onError: (m: string) => void; onNotice: (m: string) => void }) {
+  const [tree, setTree] = useState<OrgTree | null>(null);
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [plans, setPlans] = useState<ContinuityPlan[]>([]);
+  const [editingId, setEditingId] = useState<number | 'new' | null>(null);
+  const emptyPlan = { positionId: '', keyRole: '', deputyPositionId: '', deputyStaffId: '', actingArrangement: '', authorityScope: '', handoverProcedure: '', activationTrigger: '', trainingStatus: 'in_progress', lastTestedDate: '', nextReviewDate: '', status: 'active', notes: '' };
+  const [form, setForm] = useState(emptyPlan);
+
+  async function load() {
+    try {
+      const [t, p, pl] = await Promise.all([
+        api<OrgTree>('/organogram/tree').catch(() => ({ roots: [] })),
+        api<Position[]>('/positions').catch(() => []),
+        api<ContinuityPlan[]>('/organisation/continuity-plans').catch(() => []),
+      ]);
+      setTree(t); setPositions(p); setPlans(pl);
+    } catch (e) { onError((e as Error).message); }
+  }
+  useEffect(() => { void load(); }, []);
+
+  function startNew() { setForm(emptyPlan); setEditingId('new'); }
+  function startEdit(plan: ContinuityPlan) {
+    setForm({
+      positionId: plan.position_id ? String(plan.position_id) : '',
+      keyRole: plan.key_role, deputyPositionId: plan.deputy_position_id ? String(plan.deputy_position_id) : '',
+      deputyStaffId: plan.deputy_staff_id ? String(plan.deputy_staff_id) : '',
+      actingArrangement: plan.acting_arrangement || '', authorityScope: plan.authority_scope || '',
+      handoverProcedure: plan.handover_procedure || '', activationTrigger: plan.activation_trigger || '',
+      trainingStatus: plan.training_status || 'in_progress', lastTestedDate: plan.last_tested_date || '',
+      nextReviewDate: plan.next_review_date || '', status: plan.status || 'active', notes: plan.notes || '',
+    });
+    setEditingId(plan.id);
+  }
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    try {
+      if (editingId === 'new') await api('/organisation/continuity-plans', { method: 'POST', body: JSON.stringify(form) });
+      else if (editingId) await api(`/organisation/continuity-plans/${editingId}`, { method: 'PUT', body: JSON.stringify(form) });
+      setEditingId(null); setForm(emptyPlan);
+      await load(); onNotice('Continuity plan saved.');
+    } catch (err) { onError((err as Error).message); }
+  }
+
+  async function removePlan(id: number) {
+    if (!confirm('Delete this continuity plan?')) return;
+    try { await api(`/organisation/continuity-plans/${id}`, { method: 'DELETE' }); await load(); onNotice('Plan deleted.'); }
+    catch (err) { onError((err as Error).message); }
+  }
+
+  const staffName = (id?: number | null) => staff.find(s => s.id === id)?.fullName || '—';
+  const positionTitle = (id?: number | null) => positions.find(p => p.id === id)?.title || '—';
+
+  // Flatten the org tree into a simple list of position rows with deputies.
+  const flatten = (nodes: any[]): Array<{ id: number; title: string; holderName?: string; deputyName?: string | null; actingName?: string | null; roleType?: string }> => {
+    const out: any[] = [];
+    const walk = (list: any[]) => { for (const n of list) { if (n.kind === 'position') out.push(n); if (n.children) walk(n.children); } };
+    walk(nodes || []);
+    return out;
+  };
+  const positionsList = tree ? flatten(tree.roots) : [];
+
+  return <div>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <div>
+        <h3 style={{ margin: 0 }}>Organogram &amp; Deputisation</h3>
+        <p className="muted" style={{ margin: 0, fontSize: 12 }}>Reads live from Settings → People &amp; Access. Any organogram or deputy change made there appears here (and vice versa). Continuity plans below cover the absence of key personnel so the management system keeps running.</p>
+      </div>
+      <Link to="/settings/people" className="secondary" style={{ padding: '6px 10px', borderRadius: 6, background: '#f1f5f9', color: '#334155', textDecoration: 'none' }}>Edit organogram in Settings →</Link>
+    </div>
+
+    <div className="card" style={{ marginTop: 12 }}>
+      <h4 style={{ marginTop: 0 }}>Current organogram &amp; deputies</h4>
+      {positionsList.length === 0 ? <p className="muted">No positions on the organogram yet. Add positions in Settings → People &amp; Access.</p> :
+        <table className="data-table">
+          <thead><tr><th>Position</th><th>Holder</th><th>Deputy</th><th>Acting (next in command)</th><th>Continuity plan</th></tr></thead>
+          <tbody>
+            {positionsList.map(p => {
+              const plan = plans.find(pl => pl.position_id === p.id);
+              return <tr key={p.id}>
+                <td>{p.title}</td>
+                <td>{p.holderName || <span className="muted">Vacant</span>}</td>
+                <td>{p.deputyName || <span className="muted">—</span>}</td>
+                <td>{p.actingName || p.deputyName || <span className="muted">—</span>}</td>
+                <td>{plan ? <span className="badge" style={{ background: '#dcfce7', color: '#166534' }}>Documented</span> : <button className="secondary" onClick={() => { setForm({ ...emptyPlan, positionId: String(p.id), keyRole: p.title }); setEditingId('new'); }}>Document</button>}</td>
+              </tr>;
+            })}
+          </tbody>
+        </table>}
+    </div>
+
+    <div className="card" style={{ marginTop: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <h4 style={{ margin: 0 }}>Continuity plans</h4>
+        <button onClick={startNew}>＋ Add continuity plan</button>
+      </div>
+      <p className="muted" style={{ marginTop: 6, fontSize: 12 }}>Document how the laboratory continues to operate if a key member of staff is absent. Each plan identifies the deputy, their authority, and the handover procedure.</p>
+      {plans.length === 0 ? <p className="muted">No continuity plans documented yet.</p> :
+        <table className="data-table">
+          <thead><tr><th>Plan #</th><th>Key role</th><th>Position</th><th>Deputy position</th><th>Deputy staff</th><th>Training</th><th>Last tested</th><th>Next review</th><th></th></tr></thead>
+          <tbody>
+            {plans.map(p => <tr key={p.id}>
+              <td>{p.plan_number}</td>
+              <td>{p.key_role}</td>
+              <td>{p.position_title || positionTitle(p.position_id)}</td>
+              <td>{p.deputy_position_title || positionTitle(p.deputy_position_id)}</td>
+              <td>{p.deputy_name || staffName(p.deputy_staff_id)}</td>
+              <td>{formatBadge(p.training_status)}</td>
+              <td>{p.last_tested_date || '—'}</td>
+              <td>{p.next_review_date || '—'}</td>
+              <td>
+                <button className="link-btn" onClick={() => startEdit(p)}>Edit</button>{' '}
+                <button className="link-btn" style={{ color: '#dc2626' }} onClick={() => removePlan(p.id)}>Delete</button>
+              </td>
+            </tr>)}
+          </tbody>
+        </table>}
+    </div>
+
+    {editingId !== null && <div className="doc-drawer-overlay" onClick={() => setEditingId(null)}>
+      <div className="doc-drawer" onClick={e => e.stopPropagation()}>
+        <div className="doc-drawer-panel">
+          <div className="doc-drawer-head">
+            <h3 style={{ margin: 0 }}>{editingId === 'new' ? 'New continuity plan' : `Edit continuity plan`}</h3>
+            <button className="drawer-close" onClick={() => setEditingId(null)}>×</button>
+          </div>
+          <div className="doc-drawer-body">
+            <form className="form-grid" onSubmit={submit}>
+              <label>Key role<input value={form.keyRole} onChange={e => setForm({ ...form, keyRole: e.target.value })} required placeholder="e.g. Laboratory Manager" /></label>
+              <label>Position<select value={form.positionId} onChange={e => setForm({ ...form, positionId: e.target.value })}><option value="">—</option>{positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>
+              <label>Deputy position<select value={form.deputyPositionId} onChange={e => setForm({ ...form, deputyPositionId: e.target.value })}><option value="">—</option>{positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>
+              <label>Deputy staff (specific person)<select value={form.deputyStaffId} onChange={e => setForm({ ...form, deputyStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+              <label>Activation trigger<textarea value={form.activationTrigger} onChange={e => setForm({ ...form, activationTrigger: e.target.value })} placeholder="Circumstances that trigger the plan (planned leave, illness, emergency)" /></label>
+              <label>Acting arrangement<textarea value={form.actingArrangement} onChange={e => setForm({ ...form, actingArrangement: e.target.value })} placeholder="Who acts, how they are informed, expected duration…" /></label>
+              <label>Authority scope<textarea value={form.authorityScope} onChange={e => setForm({ ...form, authorityScope: e.target.value })} placeholder="Which decisions the acting person may make, and which must escalate" /></label>
+              <label>Handover procedure<textarea value={form.handoverProcedure} onChange={e => setForm({ ...form, handoverProcedure: e.target.value })} placeholder="Briefing steps, key documents, ongoing NCs / risks, active reviews" /></label>
+              <label>Training status<select value={form.trainingStatus} onChange={e => setForm({ ...form, trainingStatus: e.target.value })}><option value="ready">Ready</option><option value="in_progress">In progress</option><option value="not_ready">Not ready</option></select></label>
+              <label>Last tested date<input type="date" value={form.lastTestedDate} onChange={e => setForm({ ...form, lastTestedDate: e.target.value })} /></label>
+              <label>Next review date<input type="date" value={form.nextReviewDate} onChange={e => setForm({ ...form, nextReviewDate: e.target.value })} /></label>
+              <label>Status<select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}><option value="active">Active</option><option value="retired">Retired</option></select></label>
+              <label>Notes<textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
+              <button type="submit">Save plan</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>}
+  </div>;
+}
+
+// ============================================================================
+// Budgetary Projection — plans across personnel, scope of test, infrastructure,
+// equipment, service & maintenance, quality assurance and materials (IQC/EQA).
+// ============================================================================
+function BudgetProjectionView({ staff, onError, onNotice }: { staff: Staff[]; onError: (m: string) => void; onNotice: (m: string) => void }) {
+  const currentYear = String(new Date().getFullYear());
+  const [year, setYear] = useState(currentYear);
+  const [rows, setRows] = useState<BudgetProjection[]>([]);
+  const [breakdown, setBreakdown] = useState<{ totals: Record<string, number>; grand: number } | null>(null);
+  const emptyForm = { fiscalYear: currentYear, scope: 'personnel', category: '', description: '', quantity: '', unitCost: '', projectedAmount: '', currency: 'GHS', responsibleStaffId: '', justification: '', status: 'draft' };
+  const [form, setForm] = useState(emptyForm);
+  const [editingId, setEditingId] = useState<number | null>(null);
+
+  async function load() {
+    try {
+      const [b, br] = await Promise.all([
+        api<BudgetProjection[]>('/organisation/budget'),
+        api<{ rows: any[]; totals: Record<string, number>; grand: number }>(`/organisation/budget/breakdown?year=${year}`).catch(() => null),
+      ]);
+      setRows(b);
+      if (br) setBreakdown({ totals: br.totals, grand: br.grand });
+    } catch (e) { onError((e as Error).message); }
+  }
+  useEffect(() => { void load(); }, [year]);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    const qty = form.quantity ? Number(form.quantity) : null;
+    const unit = form.unitCost ? Number(form.unitCost) : null;
+    const total = form.projectedAmount ? Number(form.projectedAmount) : (qty && unit ? qty * unit : null);
+    const payload = { ...form, projectedAmount: total };
+    try {
+      if (editingId) await api(`/organisation/budget/${editingId}`, { method: 'PUT', body: JSON.stringify(payload) });
+      else await api('/organisation/budget', { method: 'POST', body: JSON.stringify(payload) });
+      setForm({ ...emptyForm, fiscalYear: year });
+      setEditingId(null);
+      await load();
+      onNotice('Budget line saved.');
+    } catch (err) { onError((err as Error).message); }
+  }
+
+  function edit(r: BudgetProjection) {
+    setForm({
+      fiscalYear: r.fiscal_year || year,
+      scope: (r as any).scope || 'personnel',
+      category: r.category || '', description: r.description || '',
+      quantity: (r as any).quantity != null ? String((r as any).quantity) : '',
+      unitCost: (r as any).unit_cost != null ? String((r as any).unit_cost) : '',
+      projectedAmount: r.projected_amount != null ? String(r.projected_amount) : '',
+      currency: r.currency || 'GHS',
+      responsibleStaffId: r.responsible_staff_id ? String(r.responsible_staff_id) : '',
+      justification: (r as any).justification || '',
+      status: r.status,
+    });
+    setEditingId(r.id);
+  }
+
+  const yearRows = rows.filter(r => r.fiscal_year === year);
+  const grand = breakdown?.grand ?? yearRows.reduce((s, r) => s + (r.projected_amount || 0), 0);
+  const years = Array.from(new Set(rows.map(r => r.fiscal_year).filter(Boolean))).sort().reverse();
+
+  const staffName = (id?: number | null) => staff.find(s => s.id === id)?.fullName || '—';
+
+  return <div>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <div>
+        <h3 style={{ margin: 0 }}>Budgetary Projection</h3>
+        <p className="muted" style={{ margin: 0, fontSize: 12 }}>Plan across personnel needs, scope of tests, infrastructure, equipment, service &amp; maintenance, quality assurance (IQC / EQA) and materials.</p>
+      </div>
+      <label>Fiscal year&nbsp;<input type="number" value={year} onChange={e => setYear(e.target.value)} style={{ width: 100 }} />&nbsp;
+        {years.length > 0 && <select value={year} onChange={e => setYear(e.target.value)}><option value={currentYear}>{currentYear}</option>{years.map(y => <option key={y} value={y}>{y}</option>)}</select>}
+      </label>
+    </div>
+
+    {breakdown && <div style={{ marginTop: 10 }}>
+      <KpiStrip items={BUDGET_SCOPES.filter(s => (breakdown.totals[s.key] || 0) > 0).map(s => ({
+        label: s.label, value: Math.round(breakdown.totals[s.key] || 0).toLocaleString(),
+      }))} />
+    </div>}
+
+    <div className="card" style={{ marginTop: 12 }}>
+      <h4 style={{ marginTop: 0 }}>{editingId ? 'Edit budget line' : 'Add budget line'}</h4>
+      <form className="form-grid" onSubmit={submit}>
+        <label>Fiscal year<input value={form.fiscalYear} onChange={e => setForm({ ...form, fiscalYear: e.target.value })} required /></label>
+        <label>Scope<select value={form.scope} onChange={e => setForm({ ...form, scope: e.target.value })}>{BUDGET_SCOPES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}</select></label>
+        <label>Category / line item<input value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} placeholder="e.g. Full-Time Scientist, Analyzer maintenance" /></label>
+        <label>Quantity<input type="number" step="0.01" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} /></label>
+        <label>Unit cost<input type="number" step="0.01" value={form.unitCost} onChange={e => setForm({ ...form, unitCost: e.target.value })} /></label>
+        <label>Projected total<input type="number" step="0.01" value={form.projectedAmount} onChange={e => setForm({ ...form, projectedAmount: e.target.value })} /></label>
+        <label>Currency<input value={form.currency} onChange={e => setForm({ ...form, currency: e.target.value })} /></label>
+        <label>Responsible<select value={form.responsibleStaffId} onChange={e => setForm({ ...form, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        <label>Status<select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>{['draft', 'submitted', 'approved', 'closed', 'rejected'].map(s => <option key={s} value={s}>{pretty(s)}</option>)}</select></label>
+        <label>Description<textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></label>
+        <label>Justification<textarea value={form.justification} onChange={e => setForm({ ...form, justification: e.target.value })} placeholder="ISO-aligned justification — why the item is needed" /></label>
+        <button type="submit">{editingId ? 'Save changes' : 'Add line'}</button>
+        {editingId && <button type="button" className="secondary" onClick={() => { setEditingId(null); setForm({ ...emptyForm, fiscalYear: year }); }}>Cancel</button>}
+      </form>
+    </div>
+
+    <div className="card" style={{ marginTop: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h4 style={{ margin: 0 }}>Register for {year}</h4>
+        <div style={{ fontWeight: 700 }}>Grand total: {form.currency} {Math.round(grand).toLocaleString()}</div>
+      </div>
+      {yearRows.length === 0 ? <p className="muted">No budget lines for {year} yet.</p> :
+        <div style={{ overflowX: 'auto' }}>
+          <table className="data-table">
+            <thead><tr><th>No.</th><th>Scope</th><th>Category</th><th>Description</th><th>Qty</th><th>Unit cost</th><th>Total</th><th>Responsible</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+              {BUDGET_SCOPES.map(s => {
+                const scopeRows = yearRows.filter(r => ((r as any).scope || 'other') === s.key);
+                if (scopeRows.length === 0) return null;
+                const scopeTotal = scopeRows.reduce((n, r) => n + (r.projected_amount || 0), 0);
+                return [
+                  <tr key={`h-${s.key}`} style={{ background: '#f8fafc' }}>
+                    <td colSpan={6} style={{ fontWeight: 700, color: '#1B3A6B' }}>{s.label}</td>
+                    <td style={{ fontWeight: 700 }}>{Math.round(scopeTotal).toLocaleString()}</td>
+                    <td colSpan={3} />
+                  </tr>,
+                  ...scopeRows.map(r => <tr key={r.id}>
+                    <td>{r.projection_number}</td>
+                    <td>{s.label}</td>
+                    <td>{r.category || '—'}</td>
+                    <td>{r.description || '—'}</td>
+                    <td>{(r as any).quantity != null ? (r as any).quantity : '—'}</td>
+                    <td>{(r as any).unit_cost != null ? (r as any).unit_cost : '—'}</td>
+                    <td>{r.projected_amount != null ? `${r.currency || ''} ${r.projected_amount.toLocaleString()}` : '—'}</td>
+                    <td>{staffName(r.responsible_staff_id)}</td>
+                    <td>{formatBadge(r.status)}</td>
+                    <td><button className="link-btn" onClick={() => edit(r)}>Edit</button></td>
+                  </tr>),
+                ];
+              })}
+            </tbody>
+          </table>
+        </div>}
+    </div>
+  </div>;
+}
+
+// ============================================================================
+// Quality & Technical Records Review — a mini-audit workspace pulling data
+// from every quality/technical module in the system for the configured review
+// frequency, letting the reviewer document findings and raise NC / CAPA.
+// ============================================================================
+function QtRecordsReviewView({ staff, onError, onNotice }: { staff: Staff[]; onError: (m: string) => void; onNotice: (m: string) => void }) {
+  const [sub, setSub] = useState('Configuration');
+  const [configs, setConfigs] = useState<QtReviewConfig[]>([]);
+  const [reviews, setReviews] = useState<QtReview[]>([]);
+  const [selectedArea, setSelectedArea] = useState<string>('previous_actions');
+  const [period, setPeriod] = useState({ start: new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) });
+  const [data, setData] = useState<any>(null);
+  const [dataBusy, setDataBusy] = useState(false);
+  const [reviewForm, setReviewForm] = useState({ findings: '', recurrentProblems: '', actionsPlanned: '', followUpDueDate: '', followUpStatus: 'pending', nextReviewDue: '', status: 'draft' });
+
+  async function load() {
+    try {
+      const [c, r] = await Promise.all([
+        api<QtReviewConfig[]>('/organisation/qt-reviews/configs'),
+        api<QtReview[]>('/organisation/qt-reviews'),
+      ]);
+      setConfigs(c); setReviews(r);
+    } catch (e) { onError((e as Error).message); }
+  }
+  useEffect(() => { void load(); }, []);
+
+  async function fetchArea() {
+    setDataBusy(true);
+    try {
+      const d = await api(`/organisation/qt-reviews/data/${selectedArea}?periodStart=${period.start}&periodEnd=${period.end}`);
+      setData(d);
+    } catch (e) { onError((e as Error).message); }
+    finally { setDataBusy(false); }
+  }
+  useEffect(() => { if (sub === 'Run Review') void fetchArea(); }, [selectedArea, period.start, period.end, sub]);
+
+  async function updateConfig(cfg: QtReviewConfig, patch: Partial<QtReviewConfig>) {
+    try {
+      await api(`/organisation/qt-reviews/configs/${cfg.area_key}`, { method: 'PUT', body: JSON.stringify(patch) });
+      await load(); onNotice('Frequency updated.');
+    } catch (err) { onError((err as Error).message); }
+  }
+
+  async function submitReview(e: FormEvent) {
+    e.preventDefault();
+    try {
+      await api('/organisation/qt-reviews', {
+        method: 'POST',
+        body: JSON.stringify({
+          areaKey: selectedArea, periodStart: period.start, periodEnd: period.end,
+          dataSnapshot: data ?? null, ...reviewForm,
+        }),
+      });
+      setReviewForm({ findings: '', recurrentProblems: '', actionsPlanned: '', followUpDueDate: '', followUpStatus: 'pending', nextReviewDue: '', status: 'draft' });
+      await load(); onNotice('Review recorded.');
+    } catch (err) { onError((err as Error).message); }
+  }
+
+  async function raiseNc() {
+    if (!reviewForm.findings) { onError('Enter the finding first, then raise the NC.'); return; }
+    try {
+      const area = configs.find(c => c.area_key === selectedArea)?.area_label || selectedArea;
+      await api('/nonconformities', {
+        method: 'POST',
+        body: JSON.stringify({
+          eventDate: new Date().toISOString().slice(0, 10), title: `QT Review — ${area}`,
+          description: reviewForm.findings, sourceModule: 'organisation',
+          category: 'system_review', severity: 'medium',
+        }),
+      });
+      onNotice('Nonconforming event raised from this review. Head to NC/CAPA to assign and follow up.');
+    } catch (err) { onError((err as Error).message); }
+  }
+
+  const staffName = (id?: number | null) => staff.find(s => s.id === id)?.fullName || '—';
+  const areaConfig = configs.find(c => c.area_key === selectedArea);
+
+  return <div>
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+      <div>
+        <h3 style={{ margin: 0 }}>Quality &amp; Technical Records Review</h3>
+        <p className="muted" style={{ margin: 0, fontSize: 12 }}>Routine documented review of every quality &amp; technical record — pulls live data from all modules, records findings, and raises follow-up actions.</p>
+      </div>
+    </div>
+
+    {tabBar(sub, ['Configuration', 'Run Review', 'Review History'], setSub)}
+
+    {sub === 'Configuration' && <div className="card">
+      <h4 style={{ marginTop: 0 }}>Review frequencies</h4>
+      <p className="muted" style={{ marginTop: 0 }}>Configure how often each area is reviewed. The schedule drives the &ldquo;Next review&rdquo; column and the review calendar.</p>
+      <table className="data-table">
+        <thead><tr><th>Area</th><th>Frequency</th><th>Responsible</th><th>Last review</th><th>Next review</th><th>Active</th></tr></thead>
+        <tbody>
+          {configs.map(c => <tr key={c.id}>
+            <td>{c.area_label}</td>
+            <td><select value={c.frequency} onChange={e => updateConfig(c, { frequency: e.target.value })}>
+              {['daily', 'weekly', 'monthly', 'quarterly', 'biannual', 'annual'].map(f => <option key={f} value={f}>{f}</option>)}
+            </select></td>
+            <td><select value={c.responsible_staff_id || ''} onChange={e => updateConfig(c, { responsible_staff_id: e.target.value ? Number(e.target.value) : null })}>
+              <option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
+            </select></td>
+            <td>{c.last_review_date || '—'}</td>
+            <td><input type="date" value={c.next_review_date || ''} onChange={e => updateConfig(c, { next_review_date: e.target.value })} /></td>
+            <td><input type="checkbox" checked={!!c.is_active} onChange={e => updateConfig(c, { is_active: e.target.checked ? 1 : 0 })} /></td>
+          </tr>)}
+        </tbody>
+      </table>
+    </div>}
+
+    {sub === 'Run Review' && <>
+      <div className="card">
+        <div className="form-grid">
+          <label>Area to review<select value={selectedArea} onChange={e => setSelectedArea(e.target.value)}>
+            {configs.map(c => <option key={c.area_key} value={c.area_key}>{c.area_label}</option>)}
+          </select></label>
+          <label>Period start<input type="date" value={period.start} onChange={e => setPeriod({ ...period, start: e.target.value })} /></label>
+          <label>Period end<input type="date" value={period.end} onChange={e => setPeriod({ ...period, end: e.target.value })} /></label>
+        </div>
+        {areaConfig && <p className="muted" style={{ marginTop: 6, fontSize: 12 }}>Reviewed {areaConfig.frequency}{areaConfig.responsible_name ? ` by ${areaConfig.responsible_name}` : ''} · Last review: {areaConfig.last_review_date || '—'}</p>}
+      </div>
+
+      <div className="card" style={{ marginTop: 10 }}>
+        <h4 style={{ marginTop: 0 }}>Live data</h4>
+        {dataBusy ? <p className="muted">Loading data…</p> : data ? <QtReviewData areaKey={selectedArea} data={data} /> : <p className="muted">No data pulled yet.</p>}
+      </div>
+
+      <div className="card" style={{ marginTop: 10 }}>
+        <h4 style={{ marginTop: 0 }}>Document the review</h4>
+        <form onSubmit={submitReview}>
+          <div className="form-grid">
+            <label>Findings<textarea value={reviewForm.findings} onChange={e => setReviewForm({ ...reviewForm, findings: e.target.value })} placeholder="What did the review find?" required /></label>
+            <label>Recurrent problems<textarea value={reviewForm.recurrentProblems} onChange={e => setReviewForm({ ...reviewForm, recurrentProblems: e.target.value })} placeholder="Any recurring issues?" /></label>
+            <label>Actions planned<textarea value={reviewForm.actionsPlanned} onChange={e => setReviewForm({ ...reviewForm, actionsPlanned: e.target.value })} placeholder="What will you do about it?" /></label>
+            <label>Follow-up due<input type="date" value={reviewForm.followUpDueDate} onChange={e => setReviewForm({ ...reviewForm, followUpDueDate: e.target.value })} /></label>
+            <label>Follow-up status<select value={reviewForm.followUpStatus} onChange={e => setReviewForm({ ...reviewForm, followUpStatus: e.target.value })}><option value="not_required">Not required</option><option value="pending">Pending</option><option value="in_progress">In progress</option><option value="completed">Completed</option></select></label>
+            <label>Next review due<input type="date" value={reviewForm.nextReviewDue} onChange={e => setReviewForm({ ...reviewForm, nextReviewDue: e.target.value })} /></label>
+            <label>Status<select value={reviewForm.status} onChange={e => setReviewForm({ ...reviewForm, status: e.target.value })}><option value="draft">Draft</option><option value="completed">Completed</option><option value="followed_up">Followed up</option></select></label>
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+            <button type="submit">Save review</button>
+            <button type="button" className="secondary" onClick={raiseNc}>Raise NC from finding</button>
+          </div>
+        </form>
+      </div>
+    </>}
+
+    {sub === 'Review History' && <div className="card">
+      <h4 style={{ marginTop: 0 }}>Review history</h4>
+      {reviews.length === 0 ? <p className="muted">No reviews recorded yet.</p> :
+        <table className="data-table">
+          <thead><tr><th>Review #</th><th>Area</th><th>Period</th><th>Status</th><th>Follow-up</th><th>Reviewer</th><th>Recorded</th></tr></thead>
+          <tbody>
+            {reviews.map(r => <tr key={r.id}>
+              <td>{r.review_number}</td>
+              <td>{configs.find(c => c.area_key === r.area_key)?.area_label || r.area_key}</td>
+              <td>{r.period_start} → {r.period_end}</td>
+              <td>{formatBadge(r.status)}</td>
+              <td>{formatBadge(r.follow_up_status)}{r.follow_up_due_date ? ` · ${r.follow_up_due_date}` : ''}</td>
+              <td>{r.reviewer_name || staffName(r.reviewed_by_staff_id)}</td>
+              <td>{String(r.created_at).slice(0, 10)}</td>
+            </tr>)}
+          </tbody>
+        </table>}
+    </div>}
+  </div>;
+}
+
+function QtReviewData({ areaKey, data }: { areaKey: string; data: any }) {
+  const dataAreas = useMemo(() => Object.keys(data || {}).filter(k => Array.isArray(data[k])), [data]);
+  if (dataAreas.length === 0) return <p className="muted">No records were found in this period.</p>;
+  return <>
+    {dataAreas.map(key => <div key={key} style={{ marginBottom: 10 }}>
+      <h5 style={{ margin: '6px 0' }}>{key.replace(/_/g, ' ')} — {data[key].length} record(s)</h5>
+      {data[key].length > 0 && <div style={{ overflowX: 'auto' }}>
+        <table className="data-table">
+          <thead><tr>{Object.keys(data[key][0]).slice(0, 8).map(k => <th key={k}>{k}</th>)}</tr></thead>
+          <tbody>
+            {data[key].slice(0, 30).map((row: any, i: number) => <tr key={i}>{Object.keys(data[key][0]).slice(0, 8).map(k => <td key={k} style={{ fontSize: 11 }}>{row[k] == null ? '—' : String(row[k])}</td>)}</tr>)}
+          </tbody>
+        </table>
+        {data[key].length > 30 && <div className="muted" style={{ fontSize: 11 }}>Showing first 30 of {data[key].length}.</div>}
+      </div>}
+    </div>)}
+  </>;
 }

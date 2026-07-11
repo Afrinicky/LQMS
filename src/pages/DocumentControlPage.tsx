@@ -110,7 +110,7 @@ const emptyReviewForm = { reviewDate: '', reviewOutcome: 'no_change', reviewNote
 const emptyAttestForm = { targetType: 'staff', staffIds: [] as number[], positionId: '', sectionId: '', departmentId: '', dueDate: '', notes: '' };
 const emptyPrintForm = { printPurpose: '', controlledCopy: false, copyNumber: '', watermark: '' };
 
-const SECTIONS = ['Dashboard', 'Documents', 'Records', 'Master List', 'Laboratory Profile'] as const;
+const SECTIONS = ['Dashboard', 'Documents', 'Records', 'Central Archive', 'Master List', 'Laboratory Profile'] as const;
 
 export function DocumentControlPage() {
   const { isEnabled } = useModules();
@@ -635,15 +635,7 @@ export function DocumentControlPage() {
       </tr>)}{reviewsDue.length === 0 && <tr><td colSpan={7} className="muted">No reviews due.</td></tr>}
     </tbody></table>}
 
-    {section === 'Documents' && tab === 'Attestations' && <table className="data-table"><thead><tr><th>Document</th><th>Version</th><th>Staff</th><th>Status</th><th>Due</th><th></th></tr></thead><tbody>
-      {pendingAttestations.map(a => <tr key={a.id}>
-        <td>{a.document_code || '—'} — {a.title}</td>
-        <td>{a.version_number || '—'}</td>
-        <td>{a.staff_name || staffName(staff, a.staff_id)}</td>
-        <td>{formatBadge(a.status)}</td><td>{a.due_date || '—'}</td>
-        <td><button onClick={() => signAttestation(a.id, a.document_id!)}>Sign</button></td>
-      </tr>)}{pendingAttestations.length === 0 && <tr><td colSpan={6} className="muted">No pending attestations.</td></tr>}
-    </tbody></table>}
+    {section === 'Documents' && tab === 'Attestations' && <AttestationsTabView pending={pendingAttestations} staff={staff} documents={documents} onSignAttestation={signAttestation} onOpenDoc={(docId, versionId, attId) => setViewer({ docId, versionId: versionId || 0, attestationId: attId, workflowStatus: undefined })} onError={setError} />}
 
     {section === 'Documents' && tab === 'My Inbox' && <>
       <p className="muted">Controlled documents distributed to you. Open each to read it, then attest. Your attestation is recorded against the document and appears on its printed attestation list.</p>
@@ -691,6 +683,8 @@ export function DocumentControlPage() {
 
     {section === 'Records' && <RecordControl staff={staff} sections={sections} departments={departments} documents={documents} onError={setError} exportBusy={exportBusy} onExport={runExport} />}
 
+    {section === 'Central Archive' && <CentralArchiveView staff={staff} onError={setError} onNotice={flash} />}
+
     {section === 'Master List' && <MasterListView exportBusy={exportBusy} onExport={runExport} onError={setError}
       documents={documents} onPreview={d => setViewer({ docId: d.id, versionId: d.current_version_id || 0, workflowStatus: d.status })} />}
 
@@ -717,7 +711,7 @@ function LaboratoryProfileView({ staff, documents, onOpenDoc, onPreview, onError
   const legal = config.documents.filter(d => d.category === 'legal_identity');
   const standing = config.objectives.filter(o => o.year === null || o.year === undefined);
   const annual = config.objectives.filter(o => o.year != null);
-  const years = Array.from(new Set(annual.map(o => o.year as number))).sort((a, b) => b - a);
+  const years = Array.from(new Set(annual.map(o => o.year as number))).sort((a: number, b: number) => b - a);
   const leaders = staff.filter(s => s.isActive !== false && (s as any).primaryPosition);
   const coreLabel: Record<string, string> = { quality_manual: 'Quality Manual', laboratory_handbook: 'Laboratory Handbook', safety_manual: 'Safety Manual' };
 
@@ -1873,3 +1867,436 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
     </>}
   </div>;
 }
+
+// ============================================================================
+// Attestation List — searchable per-document register with a printable list of
+// every staff member who has attested to a document. Redesigned to make it
+// easy to find a document, see who signed (and when), and print for auditors.
+// ============================================================================
+type AttestationDocRow = { id: number; document_code?: string | null; title: string; document_type?: string | null; status: string; attestations_total: number; attestations_signed: number; attestations_pending: number };
+type AttestationListRow = DocumentAttestation & { staff_employee_no?: string | null; section_name?: string | null; assigned_by_name?: string | null };
+
+function AttestationsTabView({ pending, staff, documents, onSignAttestation, onOpenDoc, onError }: {
+  pending: DocumentAttestation[]; staff: Staff[]; documents: DocumentRecord[];
+  onSignAttestation: (id: number, docId: number) => void;
+  onOpenDoc: (docId: number, versionId: number | undefined, attestationId?: number) => void;
+  onError: (m: string) => void;
+}) {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedDocId, setSelectedDocId] = useState<number | null>(null);
+  const [docList, setDocList] = useState<AttestationDocRow[]>([]);
+  const [rows, setRows] = useState<AttestationListRow[]>([]);
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api<AttestationDocRow[]>('/documents/attestations/documents').then(setDocList).catch(() => setDocList([]));
+  }, [pending.length]);
+
+  const loadForDoc = async (docId: number | null) => {
+    setBusy(true);
+    try {
+      const q = new URLSearchParams();
+      if (docId) q.set('documentId', String(docId));
+      if (searchTerm.trim()) q.set('q', searchTerm.trim());
+      const list = await api<AttestationListRow[]>(`/documents/attestations/list?${q.toString()}`);
+      setRows(list);
+    } catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  useEffect(() => { loadForDoc(selectedDocId); }, [selectedDocId]);
+
+  const filteredDocs = docList.filter(d => {
+    const q = searchTerm.trim().toLowerCase();
+    if (!q) return true;
+    return (d.document_code || '').toLowerCase().includes(q) || d.title.toLowerCase().includes(q) || (d.document_type || '').toLowerCase().includes(q);
+  });
+
+  const filteredRows = rows.filter(r => statusFilter === 'all' ? true : r.status === statusFilter);
+  const signedCount = rows.filter(r => r.status === 'signed').length;
+  const pendingCount = rows.filter(r => r.status !== 'signed').length;
+
+  async function printList() {
+    if (!selectedDocId) return;
+    try {
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/documents/${selectedDocId}/attestations/print`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+      if (!res.ok) throw new Error(await res.text());
+      const html = await res.text();
+      const w = window.open('', '_blank');
+      if (w) { w.document.write(html); w.document.close(); setTimeout(() => { try { w.focus(); w.print(); } catch { /* pop-up may be blocked */ } }, 400); }
+    } catch (e) { onError((e as Error).message); }
+  }
+
+  const selectedDoc = docList.find(d => d.id === selectedDocId);
+
+  return <div>
+    <p className="muted" style={{ marginTop: 0 }}>
+      Search for a controlled document to see the full attestation list. Every staff member signs their own attestation; no-one can sign for another. Use <strong>Print list</strong> for a hard-copy audit-ready record.
+    </p>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 360px) 1fr', gap: 16, alignItems: 'start' }}>
+      <div className="card" style={{ padding: 12 }}>
+        <h4 style={{ margin: '0 0 8px' }}>1 · Choose a document</h4>
+        <input placeholder="Search document code, title or type…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={{ width: '100%', marginBottom: 8 }} />
+        <div style={{ maxHeight: '52vh', overflowY: 'auto', border: '1px solid var(--border, #e2e8f0)', borderRadius: 6 }}>
+          {filteredDocs.length === 0 && <p className="muted" style={{ padding: 12 }}>No documents with attestations found.</p>}
+          {filteredDocs.map(d => {
+            const isSelected = selectedDocId === d.id;
+            return <button key={d.id} type="button" onClick={() => setSelectedDocId(d.id)}
+              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px', border: 'none', borderBottom: '1px solid #e2e8f0', background: isSelected ? 'var(--accent-soft, #eef4ff)' : 'transparent', cursor: 'pointer' }}>
+              <div style={{ fontWeight: 600 }}>{d.document_code || '—'} {d.title}</div>
+              <div style={{ fontSize: 11, color: '#64748b', marginTop: 3 }}>
+                {d.document_type || 'Document'} · <span style={{ color: '#16a34a' }}>{d.attestations_signed} signed</span>{d.attestations_pending ? <> · <span style={{ color: '#dc2626' }}>{d.attestations_pending} pending</span></> : null}
+              </div>
+            </button>;
+          })}
+        </div>
+      </div>
+
+      <div>
+        {selectedDoc ? <div className="card" style={{ padding: 14 }}>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 240 }}>
+              <span className="hint" style={{ fontSize: 11, letterSpacing: 0.2 }}>ATTESTATION LIST</span>
+              <h3 style={{ margin: '2px 0 4px' }}>{selectedDoc.document_code || '—'} — {selectedDoc.title}</h3>
+              <p className="muted" style={{ margin: 0, fontSize: 12 }}>{selectedDoc.document_type || 'Document'} · <span style={{ color: '#16a34a' }}>{signedCount} signed</span>{pendingCount ? <> · <span style={{ color: '#dc2626' }}>{pendingCount} pending</span></> : null}</p>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="secondary" onClick={() => onOpenDoc(selectedDoc.id, documents.find(d => d.id === selectedDoc.id)?.current_version_id, undefined)}>Open document</button>
+              <button onClick={printList} disabled={busy}>Print list</button>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            {['all', 'signed', 'pending', 'overdue'].map(s => <button key={s} type="button" className={statusFilter === s ? '' : 'secondary'} onClick={() => setStatusFilter(s)}>{s}</button>)}
+            <span style={{ flex: 1 }} />
+            <span className="muted" style={{ fontSize: 12 }}>Showing {filteredRows.length} of {rows.length}</span>
+          </div>
+
+          <div style={{ overflowX: 'auto', marginTop: 8 }}>
+            <table className="data-table">
+              <thead><tr><th>#</th><th>Staff name</th><th>Staff ID</th><th>Section</th><th>Version</th><th>Status</th><th>Assigned</th><th>Signed on</th><th></th></tr></thead>
+              <tbody>
+                {filteredRows.map((r, i) => <tr key={r.id}>
+                  <td>{i + 1}</td>
+                  <td>{r.staff_name || staffName(staff, r.staff_id)}</td>
+                  <td>{r.staff_employee_no || '—'}</td>
+                  <td>{r.section_name || '—'}</td>
+                  <td>{r.version_number || '—'}</td>
+                  <td>{formatBadge(r.status)}</td>
+                  <td>{r.assigned_at ? String(r.assigned_at).slice(0, 10) : '—'}</td>
+                  <td>{r.attested_at ? String(r.attested_at).slice(0, 10) : '—'}</td>
+                  <td>{r.status !== 'signed' && <button className="secondary" onClick={() => onOpenDoc(r.document_id!, r.document_version_id, r.id)}>Open</button>}</td>
+                </tr>)}
+                {filteredRows.length === 0 && <tr><td colSpan={9} className="muted" style={{ textAlign: 'center' }}>{busy ? 'Loading…' : 'No attestations for the current filter.'}</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div> : <div className="card" style={{ padding: 20 }}>
+          <h4 style={{ margin: '0 0 8px' }}>2 · Attestation list</h4>
+          <p className="muted" style={{ margin: 0 }}>Select a document on the left to see everyone who has attested to it.</p>
+        </div>}
+
+        {pending.length > 0 && !selectedDocId && <div className="card" style={{ padding: 14, marginTop: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <h4 style={{ margin: '0 0 4px' }}>Awaiting your attention</h4>
+              <p className="muted" style={{ margin: 0, fontSize: 12 }}>Pending attestations across all documents.</p>
+            </div>
+          </div>
+          <table className="data-table" style={{ marginTop: 8 }}>
+            <thead><tr><th>Document</th><th>Version</th><th>Staff</th><th>Status</th><th>Due</th><th></th></tr></thead>
+            <tbody>
+              {pending.slice(0, 20).map(a => <tr key={a.id}>
+                <td>{a.document_code || '—'} — {a.title}</td>
+                <td>{a.version_number || '—'}</td>
+                <td>{a.staff_name || staffName(staff, a.staff_id)}</td>
+                <td>{formatBadge(a.status)}</td>
+                <td>{a.due_date || '—'}</td>
+                <td><button onClick={() => onSignAttestation(a.id, a.document_id!)}>Sign</button></td>
+              </tr>)}
+            </tbody>
+          </table>
+        </div>}
+      </div>
+    </div>
+  </div>;
+}
+
+// ============================================================================
+// Central Archive — one place that lists every archive created anywhere in the
+// system. Backups, monthly reports, patient-result exports, equipment records,
+// evidence packs — all flow into `central_archives` through the shared
+// `recordCentralArchive` helper. This tab lets the lab search, upload manual
+// archives, retrieve local/cloud copies, and configure periodic archiving.
+// ============================================================================
+type CentralArchiveRow = {
+  id: number; archive_number: string; title: string; description?: string | null; archive_type: string;
+  source_module?: string | null; source_record_type?: string | null; source_record_id?: string | null;
+  period_start?: string | null; period_end?: string | null;
+  retention_period_months?: number | null; retention_until?: string | null;
+  file_id?: number | null; file_name?: string | null; file_mime?: string | null; file_size?: number | null;
+  cloud_url?: string | null; cloud_provider?: string | null; storage_location?: string | null;
+  format?: string | null; size_bytes?: number | null;
+  archived_by_staff_id?: number | null; archived_by_name?: string | null; archived_at: string;
+  status: string; is_automatic: number; notes?: string | null;
+};
+type CentralArchiveSummaryLocal = { totalArchives: number; archivedThisMonth: number; withCloudCopy: number; dueForDestruction: number; byType: Array<{ archive_type: string; c: number }>; byModule: Array<{ source_module: string | null; c: number }> };
+type CentralArchiveScheduleRow = { id: number; schedule_key: string; title: string; archive_type: string; frequency: string; retention_period_months?: number | null; format?: string | null; responsible_staff_id?: number | null; responsible_name?: string | null; cloud_url_template?: string | null; last_run_at?: string | null; next_run_at?: string | null; is_active: number; notes?: string | null };
+
+const ARCHIVE_TYPES_UI = [
+  { key: 'record', label: 'Record' },
+  { key: 'report', label: 'Report' },
+  { key: 'patient_results', label: 'Patient Results' },
+  { key: 'backup', label: 'Backup' },
+  { key: 'evidence', label: 'Evidence' },
+  { key: 'other', label: 'Other' },
+];
+const ARCHIVE_FREQUENCIES = ['weekly', 'monthly', 'quarterly', 'biannual', 'annual'];
+
+function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onError: (m: string) => void; onNotice: (m: string) => void }) {
+  const [sub, setSub] = useState('Register');
+  const [rows, setRows] = useState<CentralArchiveRow[]>([]);
+  const [summary, setSummary] = useState<CentralArchiveSummaryLocal | null>(null);
+  const [schedules, setSchedules] = useState<CentralArchiveScheduleRow[]>([]);
+  const [search, setSearch] = useState({ q: '', type: '', module: '', from: '', to: '' });
+  const [uploadForm, setUploadForm] = useState({ title: '', description: '', archiveType: 'record', sourceModule: 'documents', sourceRecordType: '', sourceRecordId: '', periodStart: '', periodEnd: '', retentionPeriodMonths: '60', cloudUrl: '', cloudProvider: '', storageLocation: '', notes: '' });
+  const [archiveFile, setArchiveFile] = useState<File | null>(null);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [patientForm, setPatientForm] = useState({ title: '', periodStart: '', periodEnd: '', format: 'excel', retentionPeriodMonths: '60', cloudUrl: '', cloudProvider: '', storageLocation: '', notes: '' });
+  const [patientBusy, setPatientBusy] = useState(false);
+  const [selected, setSelected] = useState<CentralArchiveRow | null>(null);
+  const [scheduleForm, setScheduleForm] = useState({ scheduleKey: 'patient_results', title: 'Patient Results Archive', archiveType: 'patient_results', frequency: 'monthly', retentionPeriodMonths: '60', format: 'excel', responsibleStaffId: '', cloudUrlTemplate: '', nextRunAt: '', notes: '' });
+
+  async function load() {
+    try {
+      const params = new URLSearchParams();
+      if (search.q) params.set('q', search.q);
+      if (search.type) params.set('type', search.type);
+      if (search.module) params.set('module', search.module);
+      if (search.from) params.set('from', search.from);
+      if (search.to) params.set('to', search.to);
+      const [s, r, sch] = await Promise.all([
+        api<CentralArchiveSummaryLocal>('/archives/summary').catch(() => null),
+        api<CentralArchiveRow[]>(`/archives?${params.toString()}`),
+        api<CentralArchiveScheduleRow[]>('/archives/schedules/list').catch(() => []),
+      ]);
+      if (s) setSummary(s);
+      setRows(r); setSchedules(sch);
+    } catch (e) { onError((e as Error).message); }
+  }
+  useEffect(() => { void load(); }, []);
+
+  async function applyFilters() { await load(); }
+
+  async function submitUpload(e: FormEvent) {
+    e.preventDefault();
+    setUploadBusy(true);
+    try {
+      let fileId: string | null = null;
+      if (archiveFile) fileId = await uploadFileToServer(archiveFile);
+      await api('/archives', { method: 'POST', body: JSON.stringify({ ...uploadForm, fileId }) });
+      setUploadForm({ title: '', description: '', archiveType: 'record', sourceModule: 'documents', sourceRecordType: '', sourceRecordId: '', periodStart: '', periodEnd: '', retentionPeriodMonths: '60', cloudUrl: '', cloudProvider: '', storageLocation: '', notes: '' });
+      setArchiveFile(null);
+      await load();
+      onNotice('Archive uploaded and registered in the central archive.');
+    } catch (err) { onError((err as Error).message); }
+    finally { setUploadBusy(false); }
+  }
+
+  async function submitPatientArchive(e: FormEvent) {
+    e.preventDefault();
+    setPatientBusy(true);
+    try {
+      const r = await api<{ id: number; rows: number }>('/archives/patient-results', { method: 'POST', body: JSON.stringify(patientForm) });
+      onNotice(`Patient results archive created with ${r.rows} row(s).`);
+      setPatientForm({ title: '', periodStart: '', periodEnd: '', format: 'excel', retentionPeriodMonths: '60', cloudUrl: '', cloudProvider: '', storageLocation: '', notes: '' });
+      await load();
+    } catch (err) { onError((err as Error).message); }
+    finally { setPatientBusy(false); }
+  }
+
+  async function submitSchedule(e: FormEvent) {
+    e.preventDefault();
+    try {
+      await api('/archives/schedules', { method: 'POST', body: JSON.stringify(scheduleForm) });
+      await load();
+      onNotice('Archive schedule saved.');
+    } catch (err) { onError((err as Error).message); }
+  }
+
+  async function downloadArchive(row: CentralArchiveRow) {
+    if (!row.file_id) return;
+    try {
+      const url = await fetchBlobUrl(`/files/${row.file_id}/download`);
+      const a = document.createElement('a'); a.href = url; a.download = row.file_name || `archive-${row.archive_number}`; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      await api(`/archives/${row.id}/retrieve`, { method: 'POST', body: JSON.stringify({ reason: 'Downloaded from Documents & Records' }) }).catch(() => {});
+    } catch (err) { onError((err as Error).message); }
+  }
+
+  const totalBytes = rows.reduce((s, r) => s + (r.size_bytes || 0), 0);
+  function fmtBytes(n?: number | null) { if (!n) return '—'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; let v = n; while (v > 1024 && i < u.length - 1) { v /= 1024; i++; } return `${v.toFixed(1)} ${u[i]}`; }
+
+  const subs = ['Register', 'Upload / Add', 'Periodic Patient Results', 'Automation Schedules'];
+  return <div>
+    <p className="muted" style={{ marginTop: 0 }}>
+      A single, ISO-aligned register of every archive created anywhere in the system: documents, records, equipment history, monthly reports, patient results and system backups. New archives created in any module land here automatically, and can also be uploaded manually.
+    </p>
+
+    {summary && <KpiStrip items={[
+      { label: 'Total archives', value: summary.totalArchives },
+      { label: 'This month', value: summary.archivedThisMonth },
+      { label: 'With cloud copy', value: summary.withCloudCopy },
+      { label: 'Retention due', value: summary.dueForDestruction, tone: summary.dueForDestruction ? 'warning' : undefined },
+      { label: 'Total size', value: fmtBytes(totalBytes) },
+    ]} />}
+
+    {tabBar(sub, subs, setSub)}
+
+    {sub === 'Register' && <>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '10px 0' }}>
+        <input placeholder="Search title / description / archive number…" value={search.q} onChange={e => setSearch({ ...search, q: e.target.value })} style={{ minWidth: 260 }} />
+        <select value={search.type} onChange={e => setSearch({ ...search, type: e.target.value })}><option value="">All types</option>{ARCHIVE_TYPES_UI.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}</select>
+        <input placeholder="Source module" value={search.module} onChange={e => setSearch({ ...search, module: e.target.value })} style={{ width: 140 }} />
+        <input type="date" value={search.from} onChange={e => setSearch({ ...search, from: e.target.value })} />
+        <input type="date" value={search.to} onChange={e => setSearch({ ...search, to: e.target.value })} />
+        <button type="button" onClick={applyFilters}>Apply</button>
+        <span style={{ flex: 1 }} />
+        <span className="muted">{rows.length} archive(s)</span>
+      </div>
+
+      <div style={{ overflowX: 'auto' }}>
+        <table className="data-table">
+          <thead><tr><th>Archive #</th><th>Title</th><th>Type</th><th>Source module</th><th>Period</th><th>Archived</th><th>By</th><th>Retention</th><th>Local</th><th>Cloud</th><th>Actions</th></tr></thead>
+          <tbody>
+            {rows.map(r => <tr key={r.id} className="clickable-row" onClick={() => setSelected(r)}>
+              <td>{r.archive_number}</td>
+              <td>{r.title}{r.is_automatic ? <span className="badge" style={{ marginLeft: 6, fontSize: 10 }}>auto</span> : null}</td>
+              <td>{r.archive_type.replace(/_/g, ' ')}</td>
+              <td>{r.source_module || '—'}</td>
+              <td style={{ fontSize: 11 }}>{r.period_start && r.period_end ? `${r.period_start} → ${r.period_end}` : (r.period_start || r.period_end || '—')}</td>
+              <td>{String(r.archived_at).slice(0, 10)}</td>
+              <td>{r.archived_by_name || staffName(staff, r.archived_by_staff_id)}</td>
+              <td style={{ fontSize: 11 }}>{r.retention_until || (r.retention_period_months ? `${r.retention_period_months} mo` : '—')}</td>
+              <td>{r.file_id ? <button className="link-btn" onClick={e => { e.stopPropagation(); void downloadArchive(r); }}>Download</button> : '—'}</td>
+              <td>{r.cloud_url ? <a href={r.cloud_url} onClick={e => e.stopPropagation()} target="_blank" rel="noopener noreferrer">Open</a> : '—'}</td>
+              <td onClick={e => e.stopPropagation()}><button className="secondary" onClick={() => setSelected(r)}>Details</button></td>
+            </tr>)}
+            {rows.length === 0 && <tr><td colSpan={11} className="muted" style={{ textAlign: 'center' }}>No archives found for the current filters.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+
+      {selected && <div className="doc-drawer-overlay" onClick={() => setSelected(null)}>
+        <div className="doc-drawer" onClick={e => e.stopPropagation()}>
+          <div className="doc-drawer-panel">
+            <div className="doc-drawer-head">
+              <div>
+                <span className="hint">{selected.archive_number}</span>
+                <h3 style={{ margin: '2px 0 0' }}>{selected.title}</h3>
+              </div>
+              <button className="drawer-close" aria-label="Close" onClick={() => setSelected(null)}>×</button>
+            </div>
+            <div className="doc-drawer-body">
+              <p style={{ margin: '4px 0' }}><strong>Type:</strong> {selected.archive_type} · <strong>Status:</strong> {formatBadge(selected.status)} {selected.is_automatic ? '· auto' : ''}</p>
+              <p style={{ margin: '4px 0' }}><strong>Source:</strong> {selected.source_module || '—'}{selected.source_record_type ? ` / ${selected.source_record_type}` : ''}{selected.source_record_id ? ` (#${selected.source_record_id})` : ''}</p>
+              <p style={{ margin: '4px 0' }}><strong>Period:</strong> {selected.period_start ? `${selected.period_start} → ${selected.period_end || '—'}` : '—'}</p>
+              <p style={{ margin: '4px 0' }}><strong>Retention:</strong> {selected.retention_until || (selected.retention_period_months ? `${selected.retention_period_months} months` : '—')}</p>
+              <p style={{ margin: '4px 0' }}><strong>Storage location:</strong> {selected.storage_location || '—'}</p>
+              <p style={{ margin: '4px 0' }}><strong>Archived on:</strong> {String(selected.archived_at).slice(0, 19).replace('T', ' ')}</p>
+              <p style={{ margin: '4px 0' }}><strong>Archived by:</strong> {selected.archived_by_name || staffName(staff, selected.archived_by_staff_id)}</p>
+              {selected.description && <p style={{ margin: '4px 0' }}>{selected.description}</p>}
+              {selected.notes && <p className="muted" style={{ margin: '4px 0' }}>{selected.notes}</p>}
+              <hr />
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {selected.file_id && <button onClick={() => downloadArchive(selected)}>⬇ Download local copy</button>}
+                {selected.cloud_url && <a className="badge" href={selected.cloud_url} target="_blank" rel="noopener noreferrer">☁ Open cloud copy</a>}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>}
+    </>}
+
+    {sub === 'Upload / Add' && <div className="card">
+      <h4 style={{ marginTop: 0 }}>Upload an archived document / record</h4>
+      <p className="muted" style={{ marginTop: 0 }}>Register an archive here for records held physically or already prepared as a file. Every archive becomes searchable from this tab and is linked back to its source module.</p>
+      <form className="form-grid" onSubmit={submitUpload}>
+        <label>Title<input value={uploadForm.title} onChange={e => setUploadForm({ ...uploadForm, title: e.target.value })} required /></label>
+        <label>Archive type<select value={uploadForm.archiveType} onChange={e => setUploadForm({ ...uploadForm, archiveType: e.target.value })}>{ARCHIVE_TYPES_UI.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}</select></label>
+        <label>Source module<input value={uploadForm.sourceModule} onChange={e => setUploadForm({ ...uploadForm, sourceModule: e.target.value })} placeholder="documents | equipment | monthly_reports …" /></label>
+        <label>Source record type<input value={uploadForm.sourceRecordType} onChange={e => setUploadForm({ ...uploadForm, sourceRecordType: e.target.value })} placeholder="optional" /></label>
+        <label>Source record id<input value={uploadForm.sourceRecordId} onChange={e => setUploadForm({ ...uploadForm, sourceRecordId: e.target.value })} placeholder="optional" /></label>
+        <label>Period start<input type="date" value={uploadForm.periodStart} onChange={e => setUploadForm({ ...uploadForm, periodStart: e.target.value })} /></label>
+        <label>Period end<input type="date" value={uploadForm.periodEnd} onChange={e => setUploadForm({ ...uploadForm, periodEnd: e.target.value })} /></label>
+        <label>Retention (months)<input type="number" min={0} value={uploadForm.retentionPeriodMonths} onChange={e => setUploadForm({ ...uploadForm, retentionPeriodMonths: e.target.value })} /></label>
+        <label>Storage location<input value={uploadForm.storageLocation} onChange={e => setUploadForm({ ...uploadForm, storageLocation: e.target.value })} placeholder="e.g. archive cabinet / server folder" /></label>
+        <label>Cloud provider<input value={uploadForm.cloudProvider} onChange={e => setUploadForm({ ...uploadForm, cloudProvider: e.target.value })} placeholder="Google Drive / OneDrive / …" /></label>
+        <label>Cloud link<input value={uploadForm.cloudUrl} onChange={e => setUploadForm({ ...uploadForm, cloudUrl: e.target.value })} placeholder="https://…" /></label>
+        <label>Description<textarea value={uploadForm.description} onChange={e => setUploadForm({ ...uploadForm, description: e.target.value })} /></label>
+        <label>Notes / remarks<input value={uploadForm.notes} onChange={e => setUploadForm({ ...uploadForm, notes: e.target.value })} /></label>
+        <label>File to archive (local copy)<input type="file" onChange={e => setArchiveFile(e.target.files?.[0] ?? null)} /></label>
+        <button type="submit" disabled={uploadBusy}>{uploadBusy ? 'Uploading…' : 'Register archive'}</button>
+      </form>
+    </div>}
+
+    {sub === 'Periodic Patient Results' && <div className="card">
+      <h4 style={{ marginTop: 0 }}>Archive patient results for a period (Excel / CSV)</h4>
+      <p className="muted" style={{ marginTop: 0 }}>Generates an Excel or CSV file of every processed patient result within the chosen period and registers it as an archive. Requires LHIMS data for the period to be imported.</p>
+      <form className="form-grid" onSubmit={submitPatientArchive}>
+        <label>Title (optional)<input value={patientForm.title} onChange={e => setPatientForm({ ...patientForm, title: e.target.value })} placeholder="e.g. Patient Results — Q3 2026" /></label>
+        <label>Period start<input type="date" value={patientForm.periodStart} onChange={e => setPatientForm({ ...patientForm, periodStart: e.target.value })} required /></label>
+        <label>Period end<input type="date" value={patientForm.periodEnd} onChange={e => setPatientForm({ ...patientForm, periodEnd: e.target.value })} required /></label>
+        <label>Format<select value={patientForm.format} onChange={e => setPatientForm({ ...patientForm, format: e.target.value })}><option value="excel">Excel (.xlsx)</option><option value="csv">CSV (.csv)</option></select></label>
+        <label>Retention (months)<input type="number" min={0} value={patientForm.retentionPeriodMonths} onChange={e => setPatientForm({ ...patientForm, retentionPeriodMonths: e.target.value })} /></label>
+        <label>Cloud provider<input value={patientForm.cloudProvider} onChange={e => setPatientForm({ ...patientForm, cloudProvider: e.target.value })} placeholder="optional" /></label>
+        <label>Cloud link<input value={patientForm.cloudUrl} onChange={e => setPatientForm({ ...patientForm, cloudUrl: e.target.value })} placeholder="optional" /></label>
+        <label>Storage location<input value={patientForm.storageLocation} onChange={e => setPatientForm({ ...patientForm, storageLocation: e.target.value })} placeholder="e.g. patient archive drive" /></label>
+        <label>Notes<input value={patientForm.notes} onChange={e => setPatientForm({ ...patientForm, notes: e.target.value })} /></label>
+        <button type="submit" disabled={patientBusy}>{patientBusy ? 'Building archive…' : 'Create archive'}</button>
+      </form>
+    </div>}
+
+    {sub === 'Automation Schedules' && <>
+      <div className="card">
+        <h4 style={{ marginTop: 0 }}>Configure a periodic archive schedule</h4>
+        <p className="muted" style={{ marginTop: 0 }}>Define when an archive should be generated (e.g. weekly / monthly patient results). The schedule is stored and displayed on the dashboard; an operator triggers each archive from the &ldquo;Periodic Patient Results&rdquo; tab or an automated job.</p>
+        <form className="form-grid" onSubmit={submitSchedule}>
+          <label>Key<input value={scheduleForm.scheduleKey} onChange={e => setScheduleForm({ ...scheduleForm, scheduleKey: e.target.value })} placeholder="e.g. patient_results" required /></label>
+          <label>Title<input value={scheduleForm.title} onChange={e => setScheduleForm({ ...scheduleForm, title: e.target.value })} required /></label>
+          <label>Archive type<select value={scheduleForm.archiveType} onChange={e => setScheduleForm({ ...scheduleForm, archiveType: e.target.value })}>{ARCHIVE_TYPES_UI.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}</select></label>
+          <label>Frequency<select value={scheduleForm.frequency} onChange={e => setScheduleForm({ ...scheduleForm, frequency: e.target.value })}>{ARCHIVE_FREQUENCIES.map(f => <option key={f} value={f}>{f}</option>)}</select></label>
+          <label>Format<select value={scheduleForm.format} onChange={e => setScheduleForm({ ...scheduleForm, format: e.target.value })}><option value="excel">Excel</option><option value="csv">CSV</option><option value="zip">ZIP</option></select></label>
+          <label>Retention (months)<input type="number" value={scheduleForm.retentionPeriodMonths} onChange={e => setScheduleForm({ ...scheduleForm, retentionPeriodMonths: e.target.value })} /></label>
+          <label>Responsible<select value={scheduleForm.responsibleStaffId} onChange={e => setScheduleForm({ ...scheduleForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+          <label>Next run at<input type="date" value={scheduleForm.nextRunAt} onChange={e => setScheduleForm({ ...scheduleForm, nextRunAt: e.target.value })} /></label>
+          <label>Cloud URL template<input value={scheduleForm.cloudUrlTemplate} onChange={e => setScheduleForm({ ...scheduleForm, cloudUrlTemplate: e.target.value })} /></label>
+          <label>Notes<input value={scheduleForm.notes} onChange={e => setScheduleForm({ ...scheduleForm, notes: e.target.value })} /></label>
+          <button type="submit">Save schedule</button>
+        </form>
+      </div>
+      <div className="card" style={{ marginTop: 12 }}>
+        <h4 style={{ marginTop: 0 }}>Existing schedules</h4>
+        {schedules.length === 0 ? <p className="muted">No schedules configured yet.</p> :
+          <table className="data-table">
+            <thead><tr><th>Key</th><th>Title</th><th>Type</th><th>Frequency</th><th>Retention</th><th>Format</th><th>Next run</th><th>Responsible</th><th>Active</th></tr></thead>
+            <tbody>
+              {schedules.map(s => <tr key={s.id}>
+                <td>{s.schedule_key}</td><td>{s.title}</td><td>{s.archive_type}</td><td>{s.frequency}</td>
+                <td>{s.retention_period_months ? `${s.retention_period_months} mo` : '—'}</td>
+                <td>{s.format || '—'}</td>
+                <td>{s.next_run_at || '—'}</td>
+                <td>{s.responsible_name || '—'}</td>
+                <td>{s.is_active ? 'Yes' : 'No'}</td>
+              </tr>)}
+            </tbody>
+          </table>}
+      </div>
+    </>}
+  </div>;
+}
+
+// Convenience wrapper around the shared uploadFile helper so consumers inside this file
+// keep the same short call site. Renamed to avoid clashing with the local `uploadFile` in scope.
+async function uploadFileToServer(f: File): Promise<string> { return uploadFile(f); }

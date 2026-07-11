@@ -540,7 +540,16 @@ export function notificationsRoutes() {
     if (req.query.status) { filters.push('status = ?'); params.push(String(req.query.status)); }
     if (req.query.moduleKey) { filters.push('module_key = ?'); params.push(String(req.query.moduleKey)); }
     if (req.query.severity) { filters.push('severity = ?'); params.push(String(req.query.severity)); }
-    if (req.query.mine === 'true' && req.user?.staffId) { filters.push('(assigned_to_staff_id = ? OR assigned_to_staff_id IS NULL)'); params.push(req.user.staffId); }
+    if (req.query.mine === 'true') {
+      // Show everything routed to the current user: rows assigned to the caller's
+      // staff id, rows explicitly linked to their user account, or rows created
+      // with just user_id (older code path). Excludes rows for other people.
+      const parts: string[] = [];
+      const pp: unknown[] = [];
+      if (req.user?.staffId) { parts.push('assigned_to_staff_id = ?'); pp.push(req.user.staffId); }
+      if (req.user?.id) { parts.push('user_id = ?'); pp.push(req.user.id); parts.push('assigned_to_user_id = ?'); pp.push(req.user.id); }
+      if (parts.length) { filters.push(`(${parts.join(' OR ')})`); params.push(...pp); }
+    }
     let query = 'SELECT * FROM notifications';
     if (filters.length) query += ` WHERE ${filters.join(' AND ')}`;
     query += " ORDER BY CASE status WHEN 'unread' THEN 0 WHEN 'read' THEN 1 ELSE 2 END, CASE severity WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, due_date NULLS LAST, id DESC LIMIT 500";
