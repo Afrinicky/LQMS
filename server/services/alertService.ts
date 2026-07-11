@@ -163,6 +163,19 @@ function staffByPositionKeywords(db: any, keywords: string[]): number[] {
   } catch { return []; }
 }
 
+// Staff linked to a user account whose ROLE matches one of the given keywords
+// (e.g. Manager, Administrator). This is the delivery-guarantee fallback: it
+// works even when the organogram has no matching position titles, because the
+// managerial/admin roles are always seeded.
+function staffByUserRoleKeywords(db: any, keywords: string[]): number[] {
+  const like = keywords.map(() => 'LOWER(r.name) LIKE ?').join(' OR ');
+  const params = keywords.map(k => `%${k.toLowerCase()}%`);
+  try {
+    const rows = db.prepare(`SELECT DISTINCT u.staff_id AS id FROM users u JOIN roles r ON r.id = u.role_id JOIN staff s ON s.id = u.staff_id WHERE u.is_active = 1 AND s.is_active = 1 AND u.staff_id IS NOT NULL AND (${like})`).all(...params) as any[];
+    return rows.map(r => r.id);
+  } catch { return []; }
+}
+
 export function resolveRecipients(db: any, c: ScanCandidate): number[] {
   const set = new Set<number>();
   // 1. The explicitly responsible person.
@@ -183,9 +196,18 @@ export function resolveRecipients(db: any, c: ScanCandidate): number[] {
   if (sev === 'urgent') {
     for (const id of staffByPositionKeywords(db, ['quality manager', 'laboratory manager'])) set.add(id);
   }
-  // 4. Absolute fallback so an alert is never routed to nobody.
+  // 4. Delivery-guarantee fallback so an alert is never routed to nobody:
+  // try managerial/supervisor position titles, then staff whose USER ROLE is
+  // managerial/admin (always seeded), then any active administrator. This
+  // reaches an accountable authority without spamming every staff member.
   if (set.size === 0) {
-    for (const id of staffByPositionKeywords(db, ['quality manager', 'laboratory manager', 'manager', 'supervisor'])) set.add(id);
+    for (const id of staffByPositionKeywords(db, ['quality manager', 'laboratory manager', 'manager', 'supervisor', 'head'])) set.add(id);
+  }
+  if (set.size === 0) {
+    for (const id of staffByUserRoleKeywords(db, ['quality manager', 'laboratory manager', 'manager', 'administrator'])) set.add(id);
+  }
+  if (set.size === 0) {
+    for (const id of staffByUserRoleKeywords(db, ['administrator', 'admin'])) set.add(id);
   }
   return [...set];
 }
