@@ -2,107 +2,122 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CheckCircle2, ArrowRight, ChevronRight } from 'lucide-react';
 import { api } from '../../services/api';
-import type { NotificationRecord, LiveAlertsGrouped } from '../../../shared/types/api';
-import { DonutChart } from './Charts';
+import type { LiveAlert, LiveAlertsGrouped } from '../../../shared/types/api';
 
 // ==========================================================================
 // AttentionCenter — the redesigned, chart-forward triage surface that opens
-// every dashboard. It collapses an unbounded pile of notifications into one
-// calm, professional summary:
+// every dashboard. It is driven by the always-current, system-wide live-alert
+// feed (not a single user's inbox), so it faithfully reflects everything that
+// needs attention across the laboratory, for every role.
+//
+// It collapses an unbounded pile of alerts into one calm summary:
 //   • a severity ring (how much needs attention, by urgency)
 //   • a quality-health meter (share of open work that is on track)
 //   • a short, ranked "top priorities" queue (never a wall of cards)
-// Everything is clickable and drills into the exact record / module it comes
-// from, so the summary is a launch-pad, not a dead end.
+// Everything is clickable and drills into the exact record it comes from.
 // ==========================================================================
 
 const TODAY = () => new Date().toISOString().slice(0, 10);
 
 type Bucket = 'crit' | 'overdue' | 'today' | 'info';
+const RAIL_CLASS: Record<Bucket, string> = { crit: 'crit', overdue: 'warn', today: 'ok', info: 'info' };
 
-// Classify one notification into a single, mutually-exclusive priority bucket
-// so the ring segments always add up to the number of open items.
-function bucketOf(n: NotificationRecord, today: string): Bucket {
-  if (n.severity === 'urgent' || n.severity === 'high') return 'crit';
-  if (n.due_date && n.due_date < today) return 'overdue';
-  if (n.due_date === today) return 'today';
+// Classify one live alert into a single, mutually-exclusive priority bucket
+// so the ring segments always add up to the number of active alerts.
+function bucketOf(a: LiveAlert, today: string): Bucket {
+  if (a.tone === 'crit') return 'crit';
+  if (a.dueDate && a.dueDate < today) return 'overdue';
+  if (a.dueDate === today) return 'today';
   return 'info';
 }
 
-const BUCKET_RANK: Record<Bucket, number> = { crit: 0, overdue: 1, today: 2, info: 3 };
-const RAIL_CLASS: Record<Bucket, string> = { crit: 'crit', overdue: 'warn', today: 'ok', info: 'info' };
-
-function dueText(n: NotificationRecord, today: string): { text: string; tone: 'crit' | 'warn' | 'muted' } {
-  if (n.due_date && n.due_date < today) {
-    const days = Math.max(1, Math.round((new Date(today).getTime() - new Date(n.due_date).getTime()) / 86400000));
+function dueChip(a: LiveAlert, today: string): { text: string; tone: 'crit' | 'warn' | 'muted' } {
+  if (a.dueDate && a.dueDate < today) {
+    const days = Math.max(1, Math.round((new Date(today).getTime() - new Date(a.dueDate).getTime()) / 86400000));
     return { text: `${days}d overdue`, tone: 'crit' };
   }
-  if (n.due_date === today) return { text: 'Today', tone: 'warn' };
-  if (n.due_date) return { text: n.due_date, tone: 'muted' };
-  if (n.severity === 'urgent' || n.severity === 'high') return { text: 'Urgent', tone: 'crit' };
-  return { text: (n.notification_type || 'open').replace(/_/g, ' '), tone: 'muted' };
+  if (a.dueDate === today) return { text: 'Today', tone: 'warn' };
+  if (a.tone === 'crit') return { text: 'Critical', tone: 'crit' };
+  if (a.value) return { text: a.value, tone: 'muted' };
+  if (a.dueDate) return { text: a.dueDate, tone: 'muted' };
+  return { text: (a.notificationType || 'open').replace(/_/g, ' '), tone: 'muted' };
 }
 
-export function AttentionCenter({
-  inbox,
-  resolvedCount = 0,
-  onOpen,
-  onOpenInbox,
-}: {
-  /** Open (unresolved) notifications for the current user. */
-  inbox: NotificationRecord[];
-  /** How many of this user's notifications are already resolved/dismissed. */
-  resolvedCount?: number;
-  /** Open one notification — should mark read and navigate to its source. */
-  onOpen: (n: NotificationRecord) => void;
-  /** Open the full inbox, optionally pre-filtered to a view. */
-  onOpenInbox: (view?: 'active' | 'urgent' | 'today' | 'all') => void;
-}) {
-  const today = TODAY();
+// Small dependency-free donut for the severity ring.
+function Ring({ segments, total }: { segments: { value: number; color: string }[]; total: number }) {
+  const size = 150, thickness = 15, r = (size - thickness) / 2, cx = size / 2, c = 2 * Math.PI * r;
+  let offset = 0;
+  return (
+    <div className="donut-svg" style={{ width: size, height: size }}>
+      <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size}>
+        <circle cx={cx} cy={cx} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={thickness} />
+        {total > 0 && (
+          <g transform={`rotate(-90 ${cx} ${cx})`}>
+            {segments.map((s, i) => {
+              if (s.value <= 0) return null;
+              const len = (s.value / total) * c;
+              const el = <circle key={i} cx={cx} cy={cx} r={r} fill="none" stroke={s.color} strokeWidth={thickness} strokeDasharray={`${len} ${c - len}`} strokeDashoffset={-offset} strokeLinecap="butt" />;
+              offset += len;
+              return el;
+            })}
+          </g>
+        )}
+      </svg>
+      <div className="donut-center"><strong>{total}</strong><span>Active</span></div>
+    </div>
+  );
+}
 
-  const { counts, open, ranked } = useMemo(() => {
+export function AttentionCenter() {
+  const navigate = useNavigate();
+  const today = TODAY();
+  const [alerts, setAlerts] = useState<LiveAlert[] | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    api<LiveAlert[]>('/notifications/live-alerts')
+      .then(a => { if (live) setAlerts(a); })
+      .catch(() => { if (live) setAlerts([]); });
+    return () => { live = false; };
+  }, []);
+
+  const { counts, total } = useMemo(() => {
     const counts = { crit: 0, overdue: 0, today: 0, info: 0 } as Record<Bucket, number>;
-    for (const n of inbox) counts[bucketOf(n, today)]++;
-    const open = inbox.length;
-    // Rank by bucket, then by how overdue (older due date first), then newest.
-    const ranked = [...inbox].sort((a, b) => {
-      const ba = bucketOf(a, today), bb = bucketOf(b, today);
-      if (BUCKET_RANK[ba] !== BUCKET_RANK[bb]) return BUCKET_RANK[ba] - BUCKET_RANK[bb];
-      const ad = a.due_date || '9999-99-99', bd = b.due_date || '9999-99-99';
-      return ad < bd ? -1 : ad > bd ? 1 : 0;
-    });
-    return { counts, open, ranked };
-  }, [inbox, today]);
+    for (const a of alerts || []) counts[bucketOf(a, today)]++;
+    return { counts, total: (alerts || []).length };
+  }, [alerts, today]);
+
+  if (alerts === null) return null; // still loading — keep the layout calm
 
   // Empty state — clean and reassuring, no charts needed.
-  if (open === 0) {
+  if (total === 0) {
     return (
       <div className="attn-clear card">
         <span className="attn-clear-ico"><CheckCircle2 size={22} /></span>
         <div>
           <strong>You're all caught up.</strong>
-          <p>No notifications need your attention right now.{resolvedCount > 0 ? ` ${resolvedCount} recently cleared.` : ''}</p>
+          <p>No active alerts across the laboratory right now. Everything is up to date.</p>
         </div>
-        <button type="button" className="pq-link" onClick={() => onOpenInbox('all')}>Open inbox <ArrowRight size={13} /></button>
+        <button type="button" className="pq-link" onClick={() => navigate('/notifications')}>Open inbox <ArrowRight size={13} /></button>
       </div>
     );
   }
 
   const needAttention = counts.crit + counts.overdue;
-  const onTrack = open > 0 ? Math.round(((open - needAttention) / open) * 100) : 100;
+  const onTrack = total > 0 ? Math.round(((total - needAttention) / total) * 100) : 100;
+  const grade = onTrack >= 70 ? 'good' : onTrack >= 40 ? 'warn' : 'bad';
 
-  const ringData = [
-    { label: 'Critical', value: counts.crit, color: 'var(--danger)', onClick: () => onOpenInbox('urgent') },
-    { label: 'Overdue', value: counts.overdue, color: 'var(--warning)', onClick: () => onOpenInbox('all') },
-    { label: 'Due today', value: counts.today, color: 'var(--accent-bright)', onClick: () => onOpenInbox('today') },
-    { label: 'Info / later', value: counts.info, color: 'var(--faint)', onClick: () => onOpenInbox('active') },
+  const ringSegments = [
+    { value: counts.crit, color: 'var(--danger)' },
+    { value: counts.overdue, color: 'var(--warning)' },
+    { value: counts.today, color: 'var(--accent-bright)' },
+    { value: counts.info, color: 'var(--faint)' },
   ];
-
-  const legend: { label: string; value: number; color: string; view: 'urgent' | 'all' | 'today' | 'active' }[] = [
-    { label: 'Critical', value: counts.crit, color: 'var(--danger)', view: 'urgent' },
-    { label: 'Overdue', value: counts.overdue, color: 'var(--warning)', view: 'all' },
-    { label: 'Due today', value: counts.today, color: 'var(--accent-bright)', view: 'today' },
-    { label: 'Info / later', value: counts.info, color: 'var(--faint)', view: 'active' },
+  const legend: { label: string; value: number; color: string }[] = [
+    { label: 'Critical', value: counts.crit, color: 'var(--danger)' },
+    { label: 'Overdue', value: counts.overdue, color: 'var(--warning)' },
+    { label: 'Due today', value: counts.today, color: 'var(--accent-bright)' },
+    { label: 'Info / later', value: counts.info, color: 'var(--faint)' },
   ];
 
   return (
@@ -111,12 +126,10 @@ export function AttentionCenter({
       <div className="card attn-ring-card">
         <div className="attn-ring-head"><h3>Attention required</h3></div>
         <div className="attn-ring-body">
-          <div className="attn-ring">
-            <DonutChart data={ringData} legend={false} size={150} thickness={15} centerValue={open} centerLabel="Open" />
-          </div>
+          <div className="attn-ring"><Ring segments={ringSegments} total={total} /></div>
           <ul className="attn-legend">
             {legend.map(l => (
-              <li key={l.label} onClick={() => onOpenInbox(l.view)} role="button" title={`Show ${l.label.toLowerCase()}`}>
+              <li key={l.label} onClick={() => navigate('/notifications')} role="button" title="Open the inbox">
                 <span className="d" style={{ background: l.color }} />
                 <span className="l">{l.label}</span>
                 <span className="v" style={{ color: l.color === 'var(--faint)' ? 'var(--text)' : l.color }}>{l.value}</span>
@@ -125,36 +138,37 @@ export function AttentionCenter({
           </ul>
         </div>
         <div className="attn-health">
-          <div className="ah-head"><span>Items on track</span><strong className={onTrack >= 70 ? 'good' : onTrack >= 40 ? 'warn' : 'bad'}>{onTrack}%</strong></div>
-          <div className="ah-track"><div className={`ah-fill ${onTrack >= 70 ? 'good' : onTrack >= 40 ? 'warn' : 'bad'}`} style={{ width: `${onTrack}%` }} /></div>
+          <div className="ah-head"><span>Items on track</span><strong className={grade}>{onTrack}%</strong></div>
+          <div className="ah-track"><div className={`ah-fill ${grade}`} style={{ width: `${onTrack}%` }} /></div>
           <div className="ah-note">
-            {needAttention > 0 ? `${needAttention} of ${open} need urgent action` : `All ${open} open items are on schedule`}
-            {resolvedCount > 0 ? ` · ${resolvedCount} recently cleared` : ''}
+            {needAttention > 0 ? `${needAttention} of ${total} need urgent action` : `All ${total} active items are on schedule`}
           </div>
         </div>
       </div>
 
-      {/* Ranked priority queue — short by design */}
+      {/* Ranked priority queue — short by design. Server returns alerts already
+          ordered crit → warn → info, then by due date, so the top slice is the
+          right work to do next. */}
       <div className="card pq-card">
         <div className="pq-head">
-          <h3>Top priorities for you</h3>
-          <button type="button" className="pq-link" onClick={() => onOpenInbox('active')}>View all {open} <ArrowRight size={13} /></button>
+          <h3>Top priorities</h3>
+          <button type="button" className="pq-link" onClick={() => navigate('/notifications')}>View all {total} <ArrowRight size={13} /></button>
         </div>
         <ul className="pq-list">
-          {ranked.slice(0, 5).map(n => {
-            const b = bucketOf(n, today);
-            const due = dueText(n, today);
+          {(alerts || []).slice(0, 5).map(a => {
+            const b = bucketOf(a, today);
+            const chip = dueChip(a, today);
             return (
-              <li key={n.id} className="pq-item" onClick={() => onOpen(n)} role="button" title="Open the record">
+              <li key={a.key} className="pq-item" onClick={() => navigate(a.actionUrl)} role="button" title="Open the record">
                 <span className={`pq-rail ${RAIL_CLASS[b]}`} />
                 <div className="pq-main">
-                  <div className="pq-title">{n.title}</div>
+                  <div className="pq-title">{a.title}</div>
                   <div className="pq-meta">
-                    <span className="badge">{(n.module_key || '').replace(/_/g, ' ')}</span>
-                    <span>{(n.notification_type || '').replace(/_/g, ' ')}</span>
+                    <span className="badge">{a.moduleLabel}</span>
+                    {a.sectionName && <span>{a.sectionName}</span>}
                   </div>
                 </div>
-                <span className={`pq-due ${due.tone}`}>{due.text}</span>
+                <span className={`pq-due ${chip.tone}`}>{chip.text}</span>
                 <ArrowRight size={15} className="pq-go" />
               </li>
             );
@@ -167,8 +181,8 @@ export function AttentionCenter({
 
 // AlertsByModule — the whole-laboratory alert picture as one compact chart:
 // a ranked, stacked severity bar per module. Replaces the old wall of module
-// cards; each row opens that module. Renders nothing when there is nothing to
-// show, so a healthy lab shows a clean "all clear" line instead.
+// cards; each row opens that module. Renders nothing while loading and a clean
+// "all clear" line when there is nothing to show.
 export function AlertsByModule({ limit = 8 }: { limit?: number }) {
   const navigate = useNavigate();
   const [data, setData] = useState<LiveAlertsGrouped | null>(null);
