@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Bell, Search, FlaskConical, FileText, AlertOctagon, ClipboardCheck,
   ArrowRight, ClipboardList, CalendarClock, FolderArchive, PackageSearch,
 } from 'lucide-react';
-import type { NotificationRecord } from '../../shared/types/api';
 import { api } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import DisabledModule from '../components/DisabledModule';
@@ -160,12 +159,6 @@ export function Dashboard() {
   const [notifs, setNotifs] = useState<AnyRec | null>(null);
   const [health, setHealth] = useState<AnyRec | null>(null);
   const [myWork, setMyWork] = useState<AnyRec | null>(null);
-  const [inbox, setInbox] = useState<NotificationRecord[] | null>(null);
-
-  async function reloadInbox() {
-    try { setInbox(await api<NotificationRecord[]>('/notifications?mine=true')); }
-    catch { setInbox([]); }
-  }
 
   useEffect(() => {
     safeGet('/dashboard/qms-summary').then(setQms);
@@ -177,24 +170,7 @@ export function Dashboard() {
     safeGet('/dashboard/notifications-summary').then(setNotifs);
     safeGet('/dashboard/system-health-summary').then(setHealth);
     safeGet('/dashboard/my-work-summary').then(setMyWork);
-    void reloadInbox();
   }, []);
-
-  const openInbox = useMemo(() => (inbox || []).filter(n => n.status !== 'resolved' && n.status !== 'dismissed'), [inbox]);
-  const resolvedCount = useMemo(() => (inbox || []).filter(n => n.status === 'resolved' || n.status === 'dismissed').length, [inbox]);
-
-  async function openNotification(n: NotificationRecord) {
-    try {
-      if (n.status === 'unread') await api(`/notifications/${n.id}/read`, { method: 'POST', body: JSON.stringify({}) });
-      if (n.action_url) navigate(n.action_url);
-      else navigate('/notifications');
-      void reloadInbox();
-    } catch { navigate('/notifications'); }
-  }
-  // Open the full inbox, optionally pre-filtered to a triage view.
-  function openInboxView(view?: 'active' | 'urgent' | 'today' | 'all') {
-    navigate(view ? `/notifications?view=${view}` : '/notifications');
-  }
 
   const c = (x: unknown): number | string | undefined =>
     (x && typeof x === 'object' && 'count' in (x as any)) ? (x as CountRow).count : (x as number | string | undefined);
@@ -259,9 +235,13 @@ export function Dashboard() {
         actions={<button className="secondary" type="button" onClick={() => navigate('/notifications')}><Bell size={16} /> Open inbox</button>}
       />
 
-      {/* Unified triage: severity ring + health meter + a short priority queue.
-          Stays calm and compact no matter how many notifications there are. */}
-      <AttentionCenter inbox={openInbox} resolvedCount={resolvedCount} onOpen={openNotification} onOpenInbox={openInboxView} />
+      {/* Unified triage: severity ring + health meter + a short priority queue,
+          driven by the live system-wide alert feed so it always reflects what
+          needs attention. Stays calm and compact no matter the volume. */}
+      <AttentionCenter />
+
+      {/* Whole-laboratory alert picture as one ranked, stacked-severity chart */}
+      <AlertsByModule />
 
       {/* One slim KPI band — the headline numbers, each opening its module */}
       <KpiStrip items={[
@@ -295,9 +275,6 @@ export function Dashboard() {
           <BarMeter data={governance} />
         </ChartCard>
       </div>
-
-      {/* Whole-laboratory alert picture as one ranked, stacked-severity chart */}
-      <AlertsByModule />
 
       {/* My Work + Quick Actions */}
       <div className="grid cols-2">
