@@ -1110,6 +1110,103 @@ tr.clickable-row:hover td { background: var(--accent-soft); }
 .alert-module-counts { display: flex; gap: 6px; flex-wrap: wrap; }
 .alert-module-detail { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
 
+/* ============================================================================
+   ATTENTION CENTER — unified triage surface that opens every dashboard.
+   Severity ring + quality-health meter on the left, a short ranked priority
+   queue on the right. Designed to stay calm and compact no matter how many
+   notifications exist, and to keep every element clickable.
+   ========================================================================= */
+.attn-hero { display: grid; grid-template-columns: minmax(280px, 350px) 1fr; gap: 18px; align-items: stretch; }
+.attn-hero .card { padding: 18px 20px; }
+
+.attn-ring-card { display: flex; flex-direction: column; gap: 14px; }
+.attn-ring-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.attn-ring-head h3 { margin: 0; font-size: 15px; }
+.attn-ring-body { display: flex; align-items: center; gap: 18px; }
+.attn-ring { flex: none; }
+.attn-ring .chart-donut { gap: 0; }
+.attn-ring .donut-center strong { font-size: 32px; }
+.attn-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+.attn-legend li { display: flex; align-items: center; gap: 9px; cursor: pointer; padding: 5px 8px; margin: 0 -8px; border-radius: 9px; transition: background .15s ease; }
+.attn-legend li:hover { background: rgba(255,255,255,.05); }
+.attn-legend .d { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.attn-legend .l { font-size: 12.5px; color: var(--muted); flex: 1; }
+.attn-legend .v { font-size: 15px; font-weight: 750; font-variant-numeric: tabular-nums; }
+
+.attn-health { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--border); }
+.ah-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 7px; }
+.ah-head span { font-size: 12px; color: var(--muted); }
+.ah-head strong { font-size: 18px; font-weight: 750; letter-spacing: -.01em; }
+.ah-head strong.good { color: var(--success); } .ah-head strong.warn { color: var(--warning); } .ah-head strong.bad { color: var(--danger); }
+.ah-track { height: 7px; border-radius: 99px; background: rgba(255,255,255,.06); overflow: hidden; }
+.ah-fill { height: 100%; border-radius: 99px; transition: width .6s ease; }
+.ah-fill.good { background: linear-gradient(90deg, var(--success), #2DD4BF); }
+.ah-fill.warn { background: linear-gradient(90deg, var(--warning), #F59E0B); }
+.ah-fill.bad { background: linear-gradient(90deg, var(--danger), #F87171); }
+.ah-note { margin-top: 8px; font-size: 11px; color: var(--faint); }
+
+/* Priority queue — ranked, short-by-design list of what to do next */
+.pq-card { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pq-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.pq-head h3 { margin: 0; font-size: 15px; }
+.pq-link { background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 5px 11px; border-radius: 8px; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; box-shadow: none; }
+.pq-link:hover { color: var(--text); border-color: var(--border-strong); background: rgba(255,255,255,.03); }
+.pq-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.pq-item { display: flex; align-items: center; gap: 12px; padding: 11px 8px; border-top: 1px solid var(--border); cursor: pointer; transition: background .12s ease; border-radius: 8px; }
+.pq-item:first-child { border-top: 0; }
+.pq-item:hover { background: rgba(255,255,255,.04); }
+.pq-rail { width: 4px; align-self: stretch; min-height: 30px; border-radius: 99px; flex: none; }
+.pq-rail.crit { background: var(--danger); } .pq-rail.warn { background: var(--warning); } .pq-rail.ok { background: var(--accent-bright); } .pq-rail.info { background: var(--faint); }
+.pq-main { flex: 1; min-width: 0; }
+.pq-title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pq-meta { display: flex; align-items: center; gap: 8px; margin-top: 3px; font-size: 11px; color: var(--faint); text-transform: capitalize; }
+.pq-meta .badge { font-size: 10px; }
+.pq-due { font-size: 11px; font-weight: 650; padding: 3px 9px; border-radius: 99px; white-space: nowrap; flex: none; }
+.pq-due.crit { color: var(--danger); background: var(--danger-bg); }
+.pq-due.warn { color: var(--warning); background: var(--warning-bg); }
+.pq-due.muted { color: var(--faint); background: var(--panel-2); }
+.pq-go { color: var(--faint); flex: none; }
+
+/* All-clear state for the attention center */
+.attn-clear { display: flex; align-items: center; gap: 14px; padding: 16px 20px; }
+.attn-clear-ico { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: var(--success-bg); color: var(--success); flex: none; }
+.attn-clear strong { font-size: 15px; }
+.attn-clear p { margin: 2px 0 0; font-size: 12.5px; color: var(--muted); }
+.attn-clear .pq-link { margin-left: auto; }
+
+/* Alerts-by-module — whole-lab picture as one ranked, stacked-severity chart */
+.abm-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.abm-head h3 { margin: 0; font-size: 15px; }
+.abm-head p { margin: 3px 0 0; font-size: 12px; color: var(--muted); }
+.abm-key { display: flex; gap: 12px; font-size: 11px; color: var(--faint); white-space: nowrap; }
+.abm-key i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+.abm-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.abm-row { display: grid; grid-template-columns: 150px 1fr auto auto; align-items: center; gap: 12px; cursor: pointer; padding: 4px 6px; margin: 0 -6px; border-radius: 8px; transition: background .12s ease; }
+.abm-row:hover { background: rgba(255,255,255,.04); }
+.abm-name { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.abm-track { height: 9px; border-radius: 99px; background: rgba(255,255,255,.05); overflow: hidden; display: flex; min-width: 40px; }
+.abm-seg { height: 100%; }
+.abm-seg.crit { background: var(--danger); } .abm-seg.warn { background: var(--warning); } .abm-seg.info { background: var(--accent-bright); }
+.abm-total { font-size: 13px; font-weight: 750; font-variant-numeric: tabular-nums; min-width: 22px; text-align: right; }
+.abm-go { color: var(--faint); }
+
+/* Focus flash — highlights the exact record a dashboard alert points to */
+.focus-flash { animation: focus-flash 2.6s ease-out; }
+@keyframes focus-flash {
+  0%, 18% { box-shadow: 0 0 0 2px var(--accent), 0 0 0 6px var(--accent-soft); background-color: var(--accent-soft); }
+  100% { box-shadow: 0 0 0 0 transparent; background-color: transparent; }
+}
+tr.focus-flash > td { background-color: var(--accent-soft); transition: background-color 2.6s ease-out; }
+
+/* Section title used between dashboard bands */
+.section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 8px 0 -2px; }
+.section-title h3 { margin: 0; font-size: 15px; }
+
+@media (max-width: 900px) {
+  .attn-hero { grid-template-columns: 1fr; }
+  .abm-row { grid-template-columns: 110px 1fr auto auto; }
+}
+
 /* ---- Dashboard inbox strip (theme-aware) ---- */
 .inbox-strip { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin: 14px 0; background: var(--card); }
 .inbox-strip-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--border); }

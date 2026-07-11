@@ -4,6 +4,7 @@ import { FileText } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
 import { useModules } from '../hooks/useModules';
+import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import { api, API_BASE, getToken } from '../services/api';
 import type { OfficeFileChangedPayload } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -171,6 +172,13 @@ export function DocumentControlPage() {
     const nt = searchParams.get('new');
     if (nt) { setSection('Documents'); setTab('New Document'); setDocForm(f => ({ ...f, documentType: nt })); setSearchParams({}, { replace: true }); }
   }, [searchParams]);
+  // Deep link from a dashboard alert: ?focus=documents:<id> opens the register
+  // on the right tab; useFocusTarget then scrolls to and flashes the row.
+  useEffect(() => {
+    const focus = searchParams.get('focus');
+    if (focus && focus.startsWith('documents:')) { setSection('Documents'); setTab('Document Register'); }
+  }, [searchParams]);
+  useFocusTarget(documents);
   if (!isEnabled('documents')) return <DisabledModule />;
 
   function flash(msg: string) { setNotice(msg); setError(null); setTimeout(() => setNotice(null), 5000); }
@@ -522,7 +530,7 @@ export function DocumentControlPage() {
       </div>
       <div style={{ overflowX: 'auto' }}>
       <table className="data-table"><thead><tr><th>No.</th><th>Code</th><th>Category</th><th>Unit / Section</th><th>Title</th><th>Version</th><th>Status</th><th>Effective</th><th>Next review</th><th>Author</th><th>Actions</th></tr></thead><tbody>
-        {filteredRegister.map((d, i) => <tr key={d.id} className="clickable-row"
+        {filteredRegister.map((d, i) => <tr key={d.id} className="clickable-row" {...focusAttr('documents', d.id)}
           onClick={() => d.current_version_id ? setViewer({ docId: d.id, versionId: d.current_version_id!, workflowStatus: d.status }) : openDoc(d.id)}
           title="Click to preview">
           <td>{i + 1}</td>
