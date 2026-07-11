@@ -164,6 +164,46 @@ function exportCsv(readings: EnvReading[], name: string) {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
+// Compact, self-loading environmental live cards for embedding on another
+// module's dashboard (e.g. Facilities & Safety). Renders the same excursion
+// cards as the full Live Dashboard, with a small status line and auto-refresh.
+export function EnvLiveCards({ onOpenFull }: { onOpenFull?: () => void }) {
+  const [dashboard, setDashboard] = useState<EnvDashboard | null>(null);
+  useEffect(() => {
+    const load = () => api<EnvDashboard>('/environmental/dashboard').then(setDashboard).catch(() => setDashboard(null));
+    load();
+    const id = setInterval(load, 30000);
+    return () => clearInterval(id);
+  }, []);
+  if (!dashboard) return null;
+  const s = dashboard.summary;
+  if (s.totalAssets === 0) return null;
+  return <section className="alert-section">
+    <div className="alert-section-head">
+      <h3>Environmental monitoring — live</h3>
+      <div className="alert-section-counts">
+        {s.critical > 0 && <span className="alert-chip crit">{s.critical} critical</span>}
+        {s.warning > 0 && <span className="alert-chip warn">{s.warning} warning</span>}
+        {s.openExcursions > 0 && <span className="alert-chip crit">{s.openExcursions} excursion{s.openExcursions === 1 ? '' : 's'}</span>}
+        <span className="alert-chip muted">{s.totalAssets} assets</span>
+        {onOpenFull && <button type="button" className="alert-more" onClick={onOpenFull}>Open monitoring →</button>}
+      </div>
+    </div>
+    <div className="env-cards">
+      {dashboard.cards.map(c => <div key={c.id} className={`env-card tone-${CARD_TONE[c.status] || 'off'}`} style={{ cursor: 'default' }}>
+        <div className="env-card-top">
+          <span className="env-card-name">{c.name}</span>
+          <span className="env-dot" />
+        </div>
+        <div className="env-card-temp">{c.temperature != null ? `${c.temperature}°C` : '—'} <span className="env-trend">{TREND_ICON[c.trend] || ''}</span></div>
+        <div className="env-card-sub">{c.temp_min != null || c.temp_max != null ? `Range ${c.temp_min ?? '−'}–${c.temp_max ?? '−'}°C` : 'No range set'}{c.humidity != null ? ` · ${c.humidity}% RH` : ''}</div>
+        <div className="env-card-meta"><span>{badge(c.status)}</span></div>
+        <div className="env-card-foot">{c.location_name || c.section_name || '—'} · {c.source === 'automated' ? 'auto' : c.source === 'manual' ? 'manual' : '—'} · {ago(c.last_updated)}</div>
+      </div>)}
+    </div>
+  </section>;
+}
+
 function LiveDashboard({ dashboard, onOpenChart, onRefresh }: { dashboard: EnvDashboard | null; onOpenChart: (id: number) => void; onRefresh: () => void }) {
   if (!dashboard) return <p>Loading live dashboard…</p>;
   const s = dashboard.summary;

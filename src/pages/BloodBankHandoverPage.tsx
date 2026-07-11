@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -245,6 +245,7 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && <>
+      <ModuleAlerts moduleKey="blood_bank_handover" />
       {summary ? <KpiStrip items={[
         { label: 'Units available', value: summary.unitsAvailable, onClick: () => setTab('Blood Units') },
         { label: 'Expiring soon', value: summary.unitsExpiringSoon, tone: 'warning', onClick: () => setTab('Blood Units') },

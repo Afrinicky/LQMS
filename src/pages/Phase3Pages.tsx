@@ -1,10 +1,10 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, BarChart, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, BarChart, CHART_COLORS, ModuleAlerts } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
-import { EnvironmentalMonitoringPage } from './EnvironmentalMonitoringPage';
+import { EnvironmentalMonitoringPage, EnvLiveCards } from './EnvironmentalMonitoringPage';
 import type {
   Location, Section, Department, Staff, Supplier, EquipmentItem, InventoryItem, MonitoringRecord, SafetyIncident,
   EquipmentMaintenanceRecord, EquipmentBreakdown, MonitoringItem, MonitoringReading,
@@ -242,7 +242,7 @@ export function EquipmentPage() {
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
     {tabBar(tab, ['Dashboard', 'Equipment Register', 'Equipment Profile', 'New Equipment', 'Verification & Validation', 'Calibration', 'Maintenance Records', 'Breakdowns', 'Adverse Events', 'Training & Competency', 'Equipment Files', 'Reports placeholder'], setTab)}
 
-    {tab === 'Dashboard' && <><KpiStrip items={[
+    {tab === 'Dashboard' && <><ModuleAlerts moduleKey="equipment" /><KpiStrip items={[
       { label: 'Equipment items', value: summary?.equipmentTotal ?? equipment.length, onClick: () => setTab('Equipment Register') },
       { label: 'Maintenance due', value: summary?.equipmentMaintenanceDue, onClick: () => setTab('Maintenance Records') },
       { label: 'Schedules due/overdue', value: scheduleDueCount, tone: scheduleDueCount ? 'warning' : undefined, onClick: () => setTab('Maintenance Records') },
@@ -1272,7 +1272,7 @@ export function InventoryPage() {
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
     {tabBar(tab, ['Dashboard', 'Item Register', 'New Item', 'Batches/Lots', 'Stock Movements', 'Suppliers', 'Storage Inspections', 'Reports placeholder'], setTab)}
 
-    {tab === 'Dashboard' && <><KpiStrip items={[
+    {tab === 'Dashboard' && <><ModuleAlerts moduleKey="supplier_inventory" /><KpiStrip items={[
       { label: 'Inventory items', value: items.length, onClick: () => setTab('Item Register') },
       { label: 'Low stock', value: summary?.inventoryLowStock ?? items.filter(i => i.low_stock).length, tone: 'warning', onClick: () => setTab('Item Register') },
       { label: 'Expiring soon', value: summary?.inventoryExpiringSoon, onClick: () => setTab('Batches/Lots') },
@@ -1537,7 +1537,7 @@ export function MonitoringPage({ embedded = false }: { embedded?: boolean } = {}
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
     {tabBar(tab, ['Dashboard', 'Monitoring Items', 'New Monitoring Item', 'Enter Reading', 'Excursions', 'Monthly Charts placeholder'].filter(t => !embedded || t !== 'Dashboard'), setTab)}
 
-    {tab === 'Dashboard' && <><KpiStrip items={[
+    {tab === 'Dashboard' && <><ModuleAlerts moduleKey="monitoring" /><KpiStrip items={[
       { label: 'Monitoring items', value: items.length, onClick: () => setTab('Monitoring Items') },
       { label: 'Warnings', value: summary?.monitoringWarnings ?? readings.filter(r => r.status === 'warning').length, tone: 'warning', onClick: () => setTab('Excursions') },
       { label: 'Critical / out-of-range', value: summary?.monitoringCritical ?? excursions.filter(r => r.status !== 'warning').length, tone: 'danger', onClick: () => setTab('Excursions') },
@@ -1743,7 +1743,7 @@ export function SafetyPage() {
   return <div>
     <PageHeader eyebrow="Facilities and Safety" title="Facilities &amp; Safety" subtitle="Safety incidents, equipment, inspections, waste, chemicals and occupational health." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
-    {tabBar(tab, ['Dashboard', 'Safety Incidents', 'New Incident', 'Safety Equipment', 'Inspections & Drills', 'Waste Disposal', 'Hazardous Chemicals', 'Immunisation & Exposure', ...(isEnabled('monitoring') ? ['Environmental Monitoring'] : [])], setTab)}
+    {tabBar(tab, ['Dashboard', 'Safety Incidents', 'New Incident', 'Safety Equipment', 'Inspections & Drills', 'Waste Disposal', 'Hazardous Chemicals', 'Immunisation & Exposure', 'Environmental Monitoring'], setTab)}
 
     {tab === 'Dashboard' && <><KpiStrip items={[
       { label: 'Open incidents', value: openIncidents, tone: openIncidents ? 'warning' : undefined, onClick: () => setTab('Safety Incidents') },
@@ -1755,6 +1755,10 @@ export function SafetyPage() {
       { label: 'Immunisations due', value: summary?.immunizationsDue ?? 0, onClick: () => setTab('Immunisation & Exposure') },
       { label: 'Open exposures', value: summary?.openPostExposure ?? 0, tone: (summary?.openPostExposure ?? 0) ? 'danger' : undefined, onClick: () => setTab('Immunisation & Exposure') },
     ]} />
+    {/* Live alerts for this module + the environmental monitoring live cards,
+        merged straight into the dashboard. */}
+    <ModuleAlerts moduleKey="facilities_safety" title="Safety alerts & attention" />
+    <EnvLiveCards onOpenFull={() => setTab('Environmental Monitoring')} />
     <div className="grid cols-3 dash-charts" style={{ marginTop: 18 }}>
       <ChartCard title="Safety equipment" subtitle="Fleet readiness">
         <DonutChart centerLabel="Items" data={[

@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useRef, useState, type CSSProperties, type Pointe
 import { Link, useSearchParams } from 'react-router-dom';
 import { FileText } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import type { OfficeFileChangedPayload } from '../services/api';
@@ -452,6 +452,7 @@ export function DocumentControlPage() {
       documents={documents}
       onClose={() => setViewer(null)} onAttest={signAttestation} onSaved={() => { if (selectedDoc?.id === viewer.docId) openDoc(viewer.docId); }} onError={setError} />}
 
+    {section === 'Dashboard' && <ModuleAlerts moduleKey="documents" />}
     {section === 'Dashboard' && (summary ? <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <h3 style={{ margin: '6px 0' }}>Document control</h3>

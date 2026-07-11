@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -169,6 +169,7 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
+    {tab === 'Dashboard' && <ModuleAlerts moduleKey="iqc" />}
     {tab === 'Dashboard' && summary && <KpiStrip items={[
       { label: 'Active materials', value: summary.activeMaterials, onClick: () => setTab('IQC Materials') },
       { label: 'Results this month', value: summary.resultsThisMonth, onClick: () => setTab('Result Entry') },
@@ -347,6 +348,7 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
+    {tab === 'Dashboard' && <ModuleAlerts moduleKey="eqa" />}
     {tab === 'Dashboard' && summary && <KpiStrip items={[
       { label: 'Active programs', value: summary.activePrograms, onClick: () => setTab('EQA Programs') },
       { label: 'Open events', value: summary.openEvents, onClick: () => setTab('EQA Events') },
@@ -521,6 +523,7 @@ export function VerificationValidationPage({ embedded = false }: { embedded?: bo
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
+    {tab === 'Dashboard' && <ModuleAlerts moduleKey="verification_validation" />}
     {tab === 'Dashboard' && summary && <KpiStrip items={[
       { label: 'Open method verifications', value: summary.openMethodVerifications, onClick: () => setTab('Method Verification Register') },
       { label: 'Completed verifications', value: summary.completedVerifications, tone: 'success', onClick: () => setTab('Method Verification Register') },
@@ -679,6 +682,7 @@ export function MeasurementUncertaintyPage({ embedded = false }: { embedded?: bo
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
+    {tab === 'Dashboard' && <ModuleAlerts moduleKey="measurement_uncertainty" />}
     {tab === 'Dashboard' && summary && <KpiStrip items={[
       { label: 'Active records', value: summary.activeRecords, onClick: () => setTab('MU Register') },
       { label: 'Pending review', value: summary.recordsPendingReview, onClick: () => setTab('Review/Approval') },

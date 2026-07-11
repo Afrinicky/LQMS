@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -236,6 +236,7 @@ export function CustomerFocusPage() {
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
+    {tab === 'Dashboard' && <ModuleAlerts moduleKey="customer_focus" />}
     {tab === 'Dashboard' && (summary ? <KpiStrip items={[
       { label: 'Active stakeholders', value: summary.activeStakeholders, onClick: () => setTab('Stakeholders') },
       { label: 'Service agreements', value: summary.activeServiceAgreements, onClick: () => setTab('Service Agreements') },

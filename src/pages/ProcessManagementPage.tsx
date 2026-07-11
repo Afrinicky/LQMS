@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -191,6 +191,7 @@ export function ProcessManagementPage() {
     {tab === 'POCT' && <POCTPage embedded />}
     {tab === 'Blood banking' && <BloodBankHandoverPage embedded />}
 
+    {tab === 'Dashboard' && <ModuleAlerts moduleKey="process_management" />}
     {tab === 'Dashboard' && (summary ? <KpiStrip items={[
       { label: 'Active tests', value: summary.activeTests, onClick: () => setTab('Test Directory') },
       { label: 'Sample receipts (month)', value: summary.sampleReceiptsThisMonth ?? 0, onClick: () => setTab('Sample Receipt') },

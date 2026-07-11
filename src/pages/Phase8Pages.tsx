@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -314,6 +314,7 @@ export function AssessmentsPage() {
     {tab === 'Risk Management' && <RisksPage embedded />}
     {tab === 'Quality Indicator Monitoring' && <QualityIndicatorsPage embedded />}
 
+    {tab === 'Dashboard' && <ModuleAlerts moduleKey="assessments" />}
     {tab === 'Dashboard' && dashboardCards(summary, [
       { label: 'Planned/active assessments', value: 'plannedAssessments', onClick: () => setTab('Assessment Programmes') },
       { label: 'Open findings', value: 'openFindings', onClick: () => setTab('Findings') }
@@ -586,6 +587,7 @@ export function MeetingsPage({ embedded = false }: { embedded?: boolean } = {}) 
     {tabBar(tab, embedded ? tabs.filter(t => t !== 'Dashboard') : tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
+    {tab === 'Dashboard' && <ModuleAlerts moduleKey="meetings" />}
     {tab === 'Dashboard' && dashboardCards(summary, [{ label: 'Open meetings', value: 'openMeetings', onClick: () => setTab('Meetings') }])}
 
     {tab === 'Meetings' && <>
@@ -673,6 +675,7 @@ export function ManagementReviewPage({ embedded = false }: { embedded?: boolean 
     {tabBar(tab, embedded ? tabs.filter(t => t !== 'Dashboard') : tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
+    {tab === 'Dashboard' && <ModuleAlerts moduleKey="management_review" />}
     {tab === 'Dashboard' && dashboardCards(summary, [{ label: 'Pending management reviews', value: 'pendingManagementReviews', onClick: () => setTab('Review Register') }])}
 
     {tab === 'Review Register' && <>
@@ -757,6 +760,7 @@ export function QualityIndicatorsPage({ embedded = false }: { embedded?: boolean
     {tabBar(tab, embedded ? tabs.filter(t => t !== 'Dashboard') : tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
+    {tab === 'Dashboard' && <ModuleAlerts moduleKey="quality_indicators" />}
     {tab === 'Dashboard' && dashboardCards(summary, [
       { label: 'Active indicators', value: 'activeQualityIndicators', onClick: () => setTab('Indicator Register') },
       { label: 'Critical results to action', value: 'criticalQualityIndicatorResults', onClick: () => setTab('Results Entry') }
@@ -878,6 +882,7 @@ export function ContinualImprovementPage() {
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
+    {tab === 'Dashboard' && <ModuleAlerts moduleKey="continual_improvement" />}
     {tab === 'Dashboard' && dashboardCards(summary, [
       { label: 'Active projects', value: 'activeImprovementProjects', onClick: () => setTab('Improvement Projects') },
       { label: 'Overdue improvement actions', value: 'overdueImprovementActions', onClick: () => setTab('Improvement Projects') }

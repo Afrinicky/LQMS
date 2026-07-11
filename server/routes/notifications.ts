@@ -38,6 +38,9 @@ type ScanCandidate = {
   notificationType: string;
   itemType: string;
   responsibleStaffId?: number | null;
+  sectionId?: number | null;
+  // Optional short value shown on the alert card (e.g. "50°C", "3 days overdue").
+  value?: string | null;
 };
 
 function classifyDue(dueIso: string | null): { isDue: boolean; isOverdue: boolean; isDueSoon: boolean } {
@@ -286,6 +289,125 @@ function collectScanCandidates(db: any): ScanCandidate[] {
     const rows = db.prepare("SELECT id, risk_number, review_due_date FROM risks WHERE review_due_date IS NOT NULL AND review_due_date <= ? AND status = 'active'").all(soonIso) as any[];
     for (const r of rows) out.push({ moduleKey: 'risks', recordType: 'risks', recordId: String(r.id), title: `Risk review due: ${r.risk_number}`, message: `Review by ${r.review_due_date}`, dueDate: r.review_due_date, severity: 'medium', notificationType: 'review_required', itemType: 'risk_review' });
   }
+  // Open nonconforming events awaiting review/closure.
+  if (tableExists(db, 'nonconforming_events')) {
+    const rows = db.prepare("SELECT id, nc_number, title, severity, section_id FROM nonconforming_events WHERE status NOT IN ('closed','cancelled')").all() as any[];
+    for (const r of rows) out.push({ moduleKey: 'nc_capa', recordType: 'nonconforming_events', recordId: String(r.id), title: `Open nonconformity: ${r.nc_number}`, message: r.title || 'Awaiting investigation / closure', dueDate: null, severity: r.severity === 'high' || r.severity === 'critical' ? 'high' : 'medium', notificationType: 'follow_up', itemType: 'nc_open', sectionId: r.section_id });
+  }
+  // Open complaints.
+  if (tableExists(db, 'complaints')) {
+    const rows = db.prepare("SELECT id, complaint_number, title, section_id FROM complaints WHERE status NOT IN ('closed','resolved')").all() as any[];
+    for (const r of rows) out.push({ moduleKey: 'complaints', recordType: 'complaints', recordId: String(r.id), title: `Open complaint: ${r.complaint_number}`, message: r.title || 'Open complaint requires handling', dueDate: null, severity: 'medium', notificationType: 'follow_up', itemType: 'complaint_open', sectionId: r.section_id });
+  }
+
+  // --- Facilities & Safety ---
+  if (tableExists(db, 'safety_incidents')) {
+    const rows = db.prepare("SELECT id, incident_number, description, severity, section_id FROM safety_incidents WHERE status NOT IN ('closed')").all() as any[];
+    for (const r of rows) out.push({ moduleKey: 'facilities_safety', recordType: 'safety_incidents', recordId: String(r.id), title: `Open safety incident: ${r.incident_number}`, message: r.description || 'Open safety incident', dueDate: null, severity: r.severity === 'high' || r.severity === 'critical' ? 'high' : 'medium', notificationType: 'follow_up', itemType: 'safety_incident_open', sectionId: r.section_id });
+  }
+  if (tableExists(db, 'safety_equipment')) {
+    const rows = db.prepare("SELECT id, name, next_inspection_due, next_certification_due, section_id, responsible_staff_id FROM safety_equipment WHERE status = 'active'").all() as any[];
+    for (const r of rows) {
+      const insp = r.next_inspection_due, cert = r.next_certification_due;
+      if (insp && insp <= soonIso) { const o = insp < today; out.push({ moduleKey: 'facilities_safety', recordType: 'safety_equipment', recordId: String(r.id), title: `Safety equipment inspection ${o ? 'overdue' : 'due'}: ${r.name}`, message: `Inspection due ${insp}`, dueDate: insp, severity: o ? 'high' : 'medium', notificationType: 'expiry_alert', itemType: 'safety_equipment_inspection', sectionId: r.section_id, responsibleStaffId: r.responsible_staff_id }); }
+      if (cert && cert <= soonIso) { const o = cert < today; out.push({ moduleKey: 'facilities_safety', recordType: 'safety_equipment', recordId: String(r.id), title: `Safety equipment certification ${o ? 'overdue' : 'due'}: ${r.name}`, message: `Certification due ${cert}`, dueDate: cert, severity: o ? 'high' : 'medium', notificationType: 'expiry_alert', itemType: 'safety_equipment_certification', sectionId: r.section_id, responsibleStaffId: r.responsible_staff_id }); }
+    }
+  }
+  if (tableExists(db, 'safety_inspections')) {
+    const rows = db.prepare("SELECT id, inspection_number, next_due_date, section_id FROM safety_inspections WHERE next_due_date IS NOT NULL AND next_due_date <= ? AND status NOT IN ('closed')").all(soonIso) as any[];
+    for (const r of rows) { const o = r.next_due_date < today; out.push({ moduleKey: 'facilities_safety', recordType: 'safety_inspections', recordId: String(r.id), title: `Safety inspection ${o ? 'overdue' : 'due'}: ${r.inspection_number}`, message: `Due ${r.next_due_date}`, dueDate: r.next_due_date, severity: o ? 'high' : 'medium', notificationType: o ? 'overdue' : 'due_soon', itemType: 'safety_inspection_due', sectionId: r.section_id }); }
+  }
+  if (tableExists(db, 'storage_inspections')) {
+    const rows = db.prepare("SELECT id, inspection_number, next_due_date FROM storage_inspections WHERE next_due_date IS NOT NULL AND next_due_date <= ? AND status = 'open'").all(soonIso) as any[];
+    for (const r of rows) { const o = r.next_due_date < today; out.push({ moduleKey: 'facilities_safety', recordType: 'storage_inspections', recordId: String(r.id), title: `Storage inspection ${o ? 'overdue' : 'due'}: ${r.inspection_number}`, message: `Due ${r.next_due_date}`, dueDate: r.next_due_date, severity: o ? 'high' : 'medium', notificationType: o ? 'overdue' : 'due_soon', itemType: 'storage_inspection_due' }); }
+  }
+  if (tableExists(db, 'hazardous_chemicals')) {
+    const rows = db.prepare("SELECT id, name, expiry_date, sds_on_file FROM hazardous_chemicals WHERE status = 'active'").all() as any[];
+    for (const r of rows) {
+      if (r.expiry_date && r.expiry_date <= soonIso) { const o = r.expiry_date < today; out.push({ moduleKey: 'facilities_safety', recordType: 'hazardous_chemicals', recordId: String(r.id), title: `Chemical ${o ? 'expired' : 'expiring'}: ${r.name}`, message: `Expiry ${r.expiry_date}`, dueDate: r.expiry_date, severity: o ? 'high' : 'medium', notificationType: 'expiry_alert', itemType: 'chemical_expiry' }); }
+      if (!r.sds_on_file) out.push({ moduleKey: 'facilities_safety', recordType: 'hazardous_chemicals', recordId: String(r.id), title: `Missing SDS: ${r.name}`, message: 'No safety data sheet on file', dueDate: null, severity: 'medium', notificationType: 'follow_up', itemType: 'chemical_missing_sds' });
+    }
+  }
+  if (tableExists(db, 'staff_immunizations')) {
+    const rows = db.prepare("SELECT id, staff_id, record_type, vaccine_or_agent, next_due_date FROM staff_immunizations WHERE next_due_date IS NOT NULL AND next_due_date <= ?").all(soonIso) as any[];
+    for (const r of rows) { const o = r.next_due_date < today; out.push({ moduleKey: 'facilities_safety', recordType: 'staff_immunizations', recordId: String(r.id), title: `Immunisation/${r.record_type} ${o ? 'overdue' : 'due'}: ${r.vaccine_or_agent || ''}`.trim(), message: `Due ${r.next_due_date}`, dueDate: r.next_due_date, severity: 'medium', notificationType: 'expiry_alert', itemType: 'immunization_due', responsibleStaffId: r.staff_id }); }
+  }
+
+  // --- Environmental monitoring (surface excursions & active alerts here too) ---
+  if (tableExists(db, 'environmental_excursions')) {
+    const rows = db.prepare("SELECT e.id, e.asset_id, e.parameter, e.max_value, e.min_value, a.name AS asset_name, a.section_id, a.responsible_staff_id FROM environmental_excursions e LEFT JOIN environmental_assets a ON a.id = e.asset_id WHERE e.status = 'open'").all() as any[];
+    for (const r of rows) out.push({ moduleKey: 'facilities_safety', recordType: 'environmental_excursions', recordId: String(r.id), title: `Temperature excursion: ${r.asset_name || 'asset'}`, message: `${r.parameter || 'temperature'} out of range (min ${r.min_value ?? '−'} / max ${r.max_value ?? '−'})`, dueDate: null, severity: 'urgent', notificationType: 'follow_up', itemType: 'env_excursion_open', sectionId: r.section_id, responsibleStaffId: r.responsible_staff_id, value: r.max_value != null ? `${r.max_value}°` : (r.min_value != null ? `${r.min_value}°` : null) });
+  }
+  if (tableExists(db, 'environmental_alerts')) {
+    const rows = db.prepare("SELECT al.id, al.alert_type, al.severity, al.message, a.name AS asset_name, a.section_id FROM environmental_alerts al LEFT JOIN environmental_assets a ON a.id = al.asset_id WHERE al.status = 'active'").all() as any[];
+    for (const r of rows) out.push({ moduleKey: 'facilities_safety', recordType: 'environmental_alerts', recordId: String(r.id), title: `Environmental alert: ${r.asset_name || (r.alert_type || '').replace(/_/g, ' ')}`, message: r.message || (r.alert_type || '').replace(/_/g, ' '), dueDate: null, severity: r.severity === 'critical' ? 'urgent' : r.severity === 'warning' ? 'high' : 'medium', notificationType: 'follow_up', itemType: 'env_alert_active', sectionId: r.section_id });
+  }
+
+  // --- Process management ---
+  if (tableExists(db, 'specimen_rejection_records')) {
+    const rows = db.prepare("SELECT id, rejection_number, sample_type, section_id FROM specimen_rejection_records WHERE status NOT IN ('closed','resolved')").all() as any[];
+    for (const r of rows) out.push({ moduleKey: 'process_management', recordType: 'specimen_rejection_records', recordId: String(r.id), title: `Sample rejection open: ${r.rejection_number}`, message: `${r.sample_type || 'Sample'} rejection requires follow-up`, dueDate: null, severity: 'medium', notificationType: 'follow_up', itemType: 'specimen_rejection_open', sectionId: r.section_id });
+  }
+  if (tableExists(db, 'critical_result_notifications')) {
+    const rows = db.prepare("SELECT id, notification_number, analyte_name, acknowledgement_status, section_id FROM critical_result_notifications WHERE acknowledgement_status NOT IN ('acknowledged','closed')").all() as any[];
+    for (const r of rows) out.push({ moduleKey: 'process_management', recordType: 'critical_result_notifications', recordId: String(r.id), title: `Critical result pending acknowledgement: ${r.notification_number}`, message: `${r.analyte_name || 'Critical result'} not yet acknowledged`, dueDate: null, severity: 'urgent', notificationType: 'follow_up', itemType: 'critical_result_pending', sectionId: r.section_id });
+  }
+  if (tableExists(db, 'referral_sendouts')) {
+    const rows = db.prepare("SELECT id, sendout_number, expected_return_date FROM referral_sendouts WHERE result_received_date IS NULL AND expected_return_date IS NOT NULL AND expected_return_date < ? AND status NOT IN ('cancelled')").all(today) as any[];
+    for (const r of rows) out.push({ moduleKey: 'process_management', recordType: 'referral_sendouts', recordId: String(r.id), title: `Referral result overdue: ${r.sendout_number}`, message: `Expected back ${r.expected_return_date}`, dueDate: r.expected_return_date, severity: 'high', notificationType: 'overdue', itemType: 'referral_overdue' });
+  }
+
+  // --- Supplier evaluations ---
+  if (tableExists(db, 'suppliers')) {
+    const rows = db.prepare("SELECT id, name, next_evaluation_due FROM suppliers WHERE next_evaluation_due IS NOT NULL AND next_evaluation_due <= ? AND status = 'active'").all(soonIso) as any[];
+    for (const r of rows) { const o = r.next_evaluation_due < today; out.push({ moduleKey: 'supplier_inventory', recordType: 'suppliers', recordId: String(r.id), title: `Supplier evaluation ${o ? 'overdue' : 'due'}: ${r.name}`, message: `Evaluation due ${r.next_evaluation_due}`, dueDate: r.next_evaluation_due, severity: o ? 'high' : 'low', notificationType: o ? 'overdue' : 'due_soon', itemType: 'supplier_evaluation_due' }); }
+  }
+
+  // --- Organisation & Leadership ---
+  if (tableExists(db, 'regulatory_registrations')) {
+    const rows = db.prepare("SELECT id, title, expiry_date, responsible_staff_id FROM regulatory_registrations WHERE expiry_date IS NOT NULL AND expiry_date <= ? AND status != 'withdrawn'").all(new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10)) as any[];
+    for (const r of rows) { const o = r.expiry_date < today; out.push({ moduleKey: 'organisation', recordType: 'regulatory_registrations', recordId: String(r.id), title: `Registration ${o ? 'expired' : 'expiring'}: ${r.title}`, message: `Expiry ${r.expiry_date}`, dueDate: r.expiry_date, severity: o ? 'urgent' : 'high', notificationType: 'expiry_alert', itemType: 'registration_expiry', responsibleStaffId: r.responsible_staff_id }); }
+  }
+  if (tableExists(db, 'budget_projections')) {
+    const rows = db.prepare("SELECT id, projection_number, fiscal_year FROM budget_projections WHERE status IN ('draft','submitted')").all() as any[];
+    for (const r of rows) out.push({ moduleKey: 'organisation', recordType: 'budget_projections', recordId: String(r.id), title: `Budget line awaiting approval: ${r.projection_number}`, message: `Fiscal year ${r.fiscal_year || '—'}`, dueDate: null, severity: 'low', notificationType: 'approval_required', itemType: 'budget_pending' });
+  }
+  if (tableExists(db, 'ethical_declaration_forms') && tableExists(db, 'ethical_declaration_signatures')) {
+    // Each active form: notify staff who have not yet signed it.
+    const forms = db.prepare("SELECT id, title FROM ethical_declaration_forms WHERE status = 'active'").all() as any[];
+    for (const f of forms) {
+      const unsigned = db.prepare("SELECT id, section_id FROM staff WHERE is_active = 1 AND id NOT IN (SELECT staff_id FROM ethical_declaration_signatures WHERE form_id = ?)").all(f.id) as any[];
+      for (const s of unsigned) out.push({ moduleKey: 'organisation', recordType: 'ethical_declaration_forms', recordId: String(f.id), title: `Declaration to sign: ${f.title}`, message: 'Open, read and sign this ethical declaration', dueDate: null, severity: 'medium', notificationType: 'follow_up', itemType: 'ethical_declaration_unsigned', responsibleStaffId: s.id, sectionId: s.section_id });
+    }
+  }
+  if (tableExists(db, 'qt_review_configs')) {
+    const rows = db.prepare("SELECT area_key, area_label, next_review_date, responsible_staff_id FROM qt_review_configs WHERE is_active = 1 AND next_review_date IS NOT NULL AND next_review_date <= ?").all(soonIso) as any[];
+    for (const r of rows) { const o = r.next_review_date < today; out.push({ moduleKey: 'organisation', recordType: 'qt_review_configs', recordId: r.area_key, title: `Records review ${o ? 'overdue' : 'due'}: ${r.area_label}`, message: `Scheduled review due ${r.next_review_date}`, dueDate: r.next_review_date, severity: o ? 'high' : 'medium', notificationType: 'review_required', itemType: 'qt_review_due', responsibleStaffId: r.responsible_staff_id }); }
+  }
+  if (tableExists(db, 'qt_reviews')) {
+    const rows = db.prepare("SELECT id, review_number, area_key, follow_up_due_date, reviewed_by_staff_id FROM qt_reviews WHERE follow_up_status IN ('pending','in_progress') AND follow_up_due_date IS NOT NULL AND follow_up_due_date <= ?").all(soonIso) as any[];
+    for (const r of rows) { const o = r.follow_up_due_date < today; out.push({ moduleKey: 'organisation', recordType: 'qt_reviews', recordId: String(r.id), title: `Review follow-up ${o ? 'overdue' : 'due'}: ${r.review_number}`, message: `Follow-up due ${r.follow_up_due_date}`, dueDate: r.follow_up_due_date, severity: o ? 'high' : 'medium', notificationType: 'follow_up', itemType: 'qt_review_followup', responsibleStaffId: r.reviewed_by_staff_id }); }
+  }
+  if (tableExists(db, 'continuity_plans')) {
+    const rows = db.prepare("SELECT id, plan_number, key_role, next_review_date, deputy_staff_id FROM continuity_plans WHERE status = 'active' AND next_review_date IS NOT NULL AND next_review_date <= ?").all(soonIso) as any[];
+    for (const r of rows) { const o = r.next_review_date < today; out.push({ moduleKey: 'organisation', recordType: 'continuity_plans', recordId: String(r.id), title: `Continuity plan review ${o ? 'overdue' : 'due'}: ${r.key_role}`, message: `Review due ${r.next_review_date}`, dueDate: r.next_review_date, severity: 'medium', notificationType: 'review_required', itemType: 'continuity_review_due' }); }
+  }
+
+  // --- Central archive retention due for destruction/review ---
+  if (tableExists(db, 'central_archives')) {
+    const rows = db.prepare("SELECT id, archive_number, title, retention_until FROM central_archives WHERE retention_until IS NOT NULL AND retention_until <= ? AND status = 'archived'").all(today) as any[];
+    for (const r of rows) out.push({ moduleKey: 'documents', recordType: 'central_archives', recordId: String(r.id), title: `Archive retention reached: ${r.archive_number}`, message: `${r.title} — retention ended ${r.retention_until}; review for disposal`, dueDate: r.retention_until, severity: 'low', notificationType: 'review_required', itemType: 'archive_retention_due' });
+  }
+
+  // --- Information management ---
+  if (tableExists(db, 'information_security_incidents')) {
+    const rows = db.prepare("SELECT id, incident_number, title, severity FROM information_security_incidents WHERE status NOT IN ('closed')").all() as any[];
+    for (const r of rows) out.push({ moduleKey: 'information_management', recordType: 'information_security_incidents', recordId: String(r.id), title: `Info-security incident open: ${r.incident_number}`, message: r.title || 'Open security incident', dueDate: null, severity: r.severity === 'critical' || r.severity === 'high' ? 'high' : 'medium', notificationType: 'follow_up', itemType: 'infosec_incident_open' });
+  }
+  if (tableExists(db, 'data_correction_requests')) {
+    const rows = db.prepare("SELECT id, request_number FROM data_correction_requests WHERE status IN ('draft','submitted','under_review')").all() as any[];
+    for (const r of rows) out.push({ moduleKey: 'information_management', recordType: 'data_correction_requests', recordId: String(r.id), title: `Data correction pending: ${r.request_number}`, message: 'Awaiting review/approval', dueDate: null, severity: 'low', notificationType: 'approval_required', itemType: 'data_correction_pending' });
+  }
 
   return out;
 }
@@ -296,6 +418,33 @@ export function notificationsRoutes() {
   // -------- Summary --------
   router.get('/summary', requirePermission('notifications', 'view'), (req, res) => {
     res.json(computeSummary(req));
+  });
+
+  // -------- Live alerts (computed, always current) --------
+  // Powers the alert cards on every dashboard. `module` filters to one module;
+  // `scope=mine` limits to the caller's section + items they are responsible
+  // for. `grouped=true` returns per-module groups for the main dashboard.
+  router.get('/live-alerts', requirePermission('notifications', 'view'), async (req, res) => {
+    const db = getDb();
+    const { computeLiveAlerts, groupLiveAlerts, throttledAutoScan } = await import('../services/alertService.js');
+    // Opportunistically persist routed notifications (throttled) so alerts also
+    // reach inboxes automatically as people use the app.
+    throttledAutoScan(db);
+    const module = req.query.module ? String(req.query.module) : undefined;
+    const scope = req.query.scope === 'mine' ? 'mine' : 'all';
+    const staffId = req.user?.staffId ?? null;
+    const alerts = computeLiveAlerts(db, { module, scope, staffId });
+    if (req.query.grouped === 'true') return res.json({ total: alerts.length, groups: groupLiveAlerts(alerts) });
+    res.json(alerts);
+  });
+
+  // -------- Run the routed scan now (manual trigger) --------
+  router.post('/auto-scan', requirePermission('notifications', 'create'), async (req, res) => {
+    const db = getDb();
+    const { runAlertScanAndRoute } = await import('../services/alertService.js');
+    const result = runAlertScanAndRoute(db, req.user?.id ?? null);
+    audit(req, { action: 'auto_scan', entity: 'notifications', entityId: 'routed', newValue: result });
+    res.json({ ok: true, ...result });
   });
 
   // -------- Rules --------
@@ -630,4 +779,5 @@ function computeSummary(req: any) {
   };
 }
 
-export { computeSummary, NOTIFICATION_STATUSES, NOTIFICATION_SEVERITIES, NOTIFICATION_TYPES, CALENDAR_STATUSES, TASK_STATUSES, RULE_TRIGGER_TYPES };
+export { computeSummary, collectScanCandidates, classifyDue, severityForCandidate, NOTIFICATION_STATUSES, NOTIFICATION_SEVERITIES, NOTIFICATION_TYPES, CALENDAR_STATUSES, TASK_STATUSES, RULE_TRIGGER_TYPES };
+export type { ScanCandidate };

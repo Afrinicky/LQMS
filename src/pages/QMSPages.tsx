@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
 import { api } from '../services/api';
 import { useModules } from '../hooks/useModules';
 import DisabledModule from '../components/DisabledModule';
@@ -295,7 +295,7 @@ export function NcCapaPage() {
     <div className="tabs">{['Dashboard', 'Nonconforming Events', 'New Event', 'CAPA Register', 'Overdue CAPAs', 'Effectiveness Reviews', ...(isEnabled('actions') ? ['Action Tracker'] : []), 'Reports placeholder'].map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
     {loadState.error && <div className="card"><strong>Error:</strong> {loadState.error}</div>}
     {loadState.loading && <div className="card"><em>Loading QMS data…</em></div>}
-    {tab === 'Dashboard' && <><KpiStrip items={[
+    {tab === 'Dashboard' && <><ModuleAlerts moduleKey="nc_capa" /><KpiStrip items={[
       { label: 'Open NCs', value: summary?.openNCs.count ?? ncList.filter(n => n.status !== 'closed').length, onClick: () => setTab('Nonconforming Events') },
       { label: 'NCs pending review', value: ncList.filter(n => n.status === 'open').length, onClick: () => setTab('Nonconforming Events') },
       { label: 'Open CAPAs', value: summary?.openCAPAs.count ?? capaList.filter(c => c.status !== 'closed').length, onClick: () => setTab('CAPA Register') },
@@ -553,7 +553,7 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
     <div className="tabs">{['Dashboard', 'Complaints Register', 'New Complaint', 'Investigation', 'Trends placeholder', 'Reports placeholder'].filter(name => !embedded || name !== 'Dashboard').map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
     {loadState.error && <div className="card"><strong>Error:</strong> {loadState.error}</div>}
     {loadState.loading && <div className="card"><em>Loading complaints…</em></div>}
-    {tab === 'Dashboard' && <><KpiStrip items={[
+    {tab === 'Dashboard' && <><ModuleAlerts moduleKey="complaints" /><KpiStrip items={[
       { label: 'Open complaints', value: complaints.filter(c => c.status !== 'closed').length, onClick: () => setTab('Complaints Register') },
       { label: 'Under investigation', value: complaints.filter(c => c.status === 'investigating').length, onClick: () => setTab('Investigation') },
       { label: 'Overdue', value: complaints.filter(c => c.status !== 'closed' && c.received_date && new Date(c.received_date).getTime() + 1000 * 60 * 60 * 24 * 30 < Date.now()).length, tone: 'danger', onClick: () => setTab('Complaints Register') },
@@ -736,7 +736,7 @@ export function RisksPage({ embedded = false }: { embedded?: boolean } = {}) {
     <div className="tabs">{['Dashboard', 'Risk Register', 'New Risk', 'Reviews Due', 'Reports placeholder'].filter(name => !embedded || name !== 'Dashboard').map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
     {loadState.error && <div className="card"><strong>Error:</strong> {loadState.error}</div>}
     {loadState.loading && <div className="card"><em>Loading risk register…</em></div>}
-    {tab === 'Dashboard' && <><KpiStrip items={[
+    {tab === 'Dashboard' && <><ModuleAlerts moduleKey="risks" /><KpiStrip items={[
       { label: 'Active risks', value: risks.filter(r => r.status !== 'closed').length, onClick: () => setTab('Risk Register') },
       { label: 'High / critical risks', value: high, tone: 'warning', onClick: () => setTab('Risk Register') },
       { label: 'Reviews due', value: reviewsDue, onClick: () => setTab('Reviews Due') },

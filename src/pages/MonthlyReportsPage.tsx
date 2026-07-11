@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -202,6 +202,7 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && <>
+      <ModuleAlerts moduleKey="monthly_reports" />
       {summary ? <KpiStrip items={[
         { label: 'Imports (month)', value: summary.importsThisMonth, onClick: () => setTab('Import Batches') },
         { label: 'Unprocessed imports', value: summary.unprocessedImports, tone: 'warning', onClick: () => setTab('Import Batches') },

@@ -149,5 +149,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     // Background environmental poller. It self-gates on environmental_settings
     // (polling_enabled), so it is idle until a lab turns automated polling on.
     try { new EnvironmentalPoller(getDb).start(); } catch (e) { console.error('Environmental poller failed to start', e); }
+    // Background alert scheduler: automatically scans every module for due,
+    // overdue, expiring, excursion and pending items and routes notifications
+    // to the right staff by section + role. Runs shortly after boot and then
+    // every 15 minutes (the routed scan itself is idempotent/deduplicated).
+    import('./services/alertService.js').then(({ runAlertScanAndRoute }) => {
+      const tick = () => { try { runAlertScanAndRoute(getDb(), null); } catch (e) { console.error('Alert scan failed', e); } };
+      setTimeout(tick, 20000);
+      setInterval(tick, 15 * 60 * 1000);
+    }).catch(e => console.error('Alert scheduler failed to start', e));
   });
 }
