@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -151,6 +151,7 @@ export function InformationManagementPage() {
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
+    {tab === 'Dashboard' && <ModuleAlerts moduleKey="information_management" />}
     {tab === 'Dashboard' && (summary ? <KpiStrip items={[
       { label: 'Information assets', value: summary.activeInformationAssets, onClick: () => setTab('Information Assets') },
       { label: 'Active systems', value: summary.activeSystems, onClick: () => setTab('Information Systems') },

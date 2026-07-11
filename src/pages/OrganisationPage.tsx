@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -180,7 +180,7 @@ export function OrganisationPage() {
 
     {tab === 'Quality Configuration' && <QualityConfigurationView config={config} />}
 
-    {tab === 'Dashboard' && <><KpiStrip items={[
+    {tab === 'Dashboard' && <><ModuleAlerts moduleKey="organisation" /><KpiStrip items={[
       { label: 'Code-of-conduct records', value: summary?.codeOfConductRecords ?? conduct.length, onClick: () => setTab('Code of Conduct') },
       { label: 'Due review', value: summary?.codeOfConductDueReview ?? 0, tone: (summary?.codeOfConductDueReview ?? 0) ? 'warning' : undefined, onClick: () => setTab('Code of Conduct') },
       { label: 'Declared conflicts', value: summary?.declaredConflicts ?? 0, tone: (summary?.declaredConflicts ?? 0) ? 'danger' : undefined, onClick: () => setTab('Code of Conduct') },

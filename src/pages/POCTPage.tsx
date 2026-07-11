@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -165,6 +165,7 @@ export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
+    {tab === 'Dashboard' && <ModuleAlerts moduleKey="poct" />}
     {tab === 'Dashboard' && (summary ? <KpiStrip items={[
       { label: 'Active sites', value: summary.activeSites, onClick: () => setTab('Sites') },
       { label: 'Active devices', value: summary.activeDevices, onClick: () => setTab('Devices') },

@@ -451,7 +451,10 @@ export function commonRoutes() {
 
   router.get('/dashboard/notifications-summary', (req, res) => {
     // Reuse the central summary computation to keep numbers identical.
-    // Defer the import to avoid a circular module load.
+    // Defer the import to avoid a circular module load. Also opportunistically
+    // run the throttled routed alert scan so notifications stay current as the
+    // dashboards are used.
+    import('../services/alertService.js').then(a => { try { a.throttledAutoScan(getDb()); } catch { /* best-effort */ } }).catch(() => {});
     import('./notifications.js').then(m => res.json(m.computeSummary(req))).catch(e => res.status(500).json({ error: (e as Error).message }));
   });
 

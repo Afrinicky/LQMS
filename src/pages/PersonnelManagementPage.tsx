@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, BarMeter, BarChart, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, BarMeter, BarChart, CHART_COLORS, ModuleAlerts } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { Download, Upload } from 'lucide-react';
 import { api, API_BASE, getToken } from '../services/api';
@@ -377,6 +377,7 @@ export function PersonnelManagementPage() {
     {tabBar(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
+    {tab === 'Dashboard' && <ModuleAlerts moduleKey="personnel" />}
     {tab === 'Dashboard' && (summary ? <KpiStrip items={[
       { label: 'Active staff', value: summary.totalStaff ?? staff.length, onClick: () => setTab('Master Personnel Register') },
       { label: 'Docs pending verification', value: summary.staffDocumentsPendingVerification, onClick: () => setTab('Staff Documents') },

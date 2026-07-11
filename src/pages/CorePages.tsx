@@ -13,7 +13,7 @@ import { useModules } from '../hooks/useModules';
 import { MODULES } from '../../shared/constants/modules';
 import { NAV_SECTIONS } from '../../shared/constants/navigation';
 import { sectionIcon } from '../components/ui/moduleIcons';
-import { WaveBackground, MedicalLabBackgroundMarks, PageHeader, KpiStrip, ChartCard, DonutChart, BarChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { WaveBackground, MedicalLabBackgroundMarks, PageHeader, KpiStrip, ChartCard, DonutChart, BarChart, BarMeter, CHART_COLORS, AlertSummary } from '../components/ui';
 
 type CountRow = { count: number };
 type AnyRec = Record<string, any>;
@@ -271,6 +271,9 @@ export function Dashboard() {
         { label: 'Unread alerts', value: notifs?.unreadNotifications, onClick: go('/notifications') },
       ]} />
 
+      {/* Consolidated live alerts across every module — env-monitoring style */}
+      <AlertSummary onOpenAlert={a => navigate(a.actionUrl)} />
+
       {/* Six compact charts cover the whole management system */}
       <div className="grid cols-3 dash-charts">
         <ChartCard title="Quality workload" subtitle="Open quality items">
@@ -354,11 +357,11 @@ export function Organisation() { return <ModulePage moduleKey="organisation" tit
 export function Personnel() { return <ModulePage moduleKey="personnel" title="Personnel Management" />; }
 
 // ============================================================================
-// DashboardNotificationStrip — a compact but unmissable ribbon that surfaces
-// pending notifications right on the main dashboard. Clicking a card opens its
-// action (or the inbox); completing the action removes the card automatically.
+// DashboardNotificationStrip — a compact but unmissable inbox ribbon on the
+// main dashboard. Theme-aware (uses the shared inbox-strip CSS). Clicking a
+// card opens its action; completing the action clears it automatically.
 // ============================================================================
-const SEV_COLOR: Record<string, string> = { urgent: '#dc2626', high: '#ea580c', medium: '#0ea5e9', low: '#64748b', info: '#94a3b8' };
+const SEV_TONE: Record<string, string> = { urgent: 'crit', high: 'crit', medium: 'warn', low: 'ok', info: 'info' };
 function DashboardNotificationStrip({ inbox, onOpen, onResolve, onOpenInbox }: {
   inbox: NotificationRecord[];
   onOpen: (n: NotificationRecord) => void;
@@ -366,56 +369,55 @@ function DashboardNotificationStrip({ inbox, onOpen, onResolve, onOpenInbox }: {
   onOpenInbox: () => void;
 }) {
   const [showAll, setShowAll] = useState(false);
-  if (!inbox || inbox.length === 0) return <div className="card" style={{ padding: '10px 14px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10, background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
-    <CheckCircle2 size={18} style={{ color: '#16a34a' }} />
-    <div style={{ flex: 1 }}>
-      <strong style={{ color: '#166534' }}>You're all caught up.</strong>
-      <span style={{ color: '#166534', opacity: 0.75, marginLeft: 6 }}>No pending notifications need your attention.</span>
+  if (!inbox || inbox.length === 0) return (
+    <div className="inbox-all-clear">
+      <CheckCircle2 size={18} />
+      <span><strong>You're all caught up.</strong> No notifications need your attention right now.</span>
     </div>
-  </div>;
+  );
 
   const now = new Date().toISOString().slice(0, 10);
   const urgent = inbox.filter(n => n.severity === 'urgent' || n.severity === 'high').length;
   const today = inbox.filter(n => n.due_date === now).length;
   const overdue = inbox.filter(n => n.due_date && n.due_date < now).length;
+  const visible = showAll ? inbox : inbox.slice(0, 6);
 
-  const visible = showAll ? inbox : inbox.slice(0, 4);
-
-  return <div className="card" style={{ padding: 0, marginBottom: 14, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
-    <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10, background: '#f8fafc', borderBottom: '1px solid #e2e8f0', flexWrap: 'wrap' }}>
-      <Inbox size={18} style={{ color: '#0ea5e9' }} />
-      <strong style={{ fontSize: 14, color: '#0f172a' }}>Your inbox — {inbox.length} pending</strong>
-      {urgent > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#fee2e2', color: '#991b1b', padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 700 }}><AlertTriangle size={11} />{urgent} urgent</span>}
-      {overdue > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#ffedd5', color: '#9a3412', padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 700 }}><Clock size={11} />{overdue} overdue</span>}
-      {today > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#fef3c7', color: '#92400e', padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 700 }}>{today} due today</span>}
-      <span style={{ flex: 1 }} />
-      {inbox.length > 4 && <button className="link-btn" onClick={() => setShowAll(v => !v)}>{showAll ? 'Collapse' : `Show all ${inbox.length}`}</button>}
-      <button className="link-btn" onClick={onOpenInbox}>Open inbox <ArrowRight size={12} /></button>
-    </div>
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8, padding: 10 }}>
-      {visible.map(n => {
-        const color = SEV_COLOR[n.severity] || '#94a3b8';
-        const isOverdue = n.due_date && n.due_date < now;
-        const isToday = n.due_date === now;
-        return <div key={n.id} onClick={() => onOpen(n)} style={{
-          padding: 10, borderRadius: 8, border: '1px solid #e2e8f0', borderLeft: `4px solid ${color}`,
-          background: n.status === 'unread' ? '#fff' : '#fbfcfe', cursor: 'pointer',
-          display: 'flex', gap: 8, alignItems: 'flex-start',
-        }}>
-          <Bell size={13} style={{ color, marginTop: 3 }} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: n.status === 'unread' ? 700 : 500, fontSize: 12.5, color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.title}</div>
-            <div style={{ fontSize: 11, color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', marginTop: 2 }}>{n.message}</div>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4, fontSize: 10.5, color: '#64748b' }}>
-              <span className="badge" style={{ fontSize: 10 }}>{n.module_key}</span>
-              {n.due_date && <span style={{ color: isOverdue ? '#dc2626' : isToday ? '#f59e0b' : '#64748b', fontWeight: 500 }}>
-                {isOverdue ? `Overdue ${n.due_date}` : isToday ? 'Today' : n.due_date}
-              </span>}
+  return (
+    <div className="inbox-strip">
+      <div className="inbox-strip-head">
+        <Inbox size={17} style={{ color: 'var(--accent-bright)' }} />
+        <strong>Your inbox — {inbox.length} pending</strong>
+        {urgent > 0 && <span className="alert-chip crit"><AlertTriangle size={11} />{urgent} urgent</span>}
+        {overdue > 0 && <span className="alert-chip warn"><Clock size={11} />{overdue} overdue</span>}
+        {today > 0 && <span className="alert-chip muted">{today} due today</span>}
+        <span style={{ flex: 1 }} />
+        {inbox.length > 6 && <button className="alert-more" onClick={() => setShowAll(v => !v)}>{showAll ? 'Collapse' : `Show all ${inbox.length}`}</button>}
+        <button className="alert-more" onClick={onOpenInbox}>Open inbox <ArrowRight size={12} /></button>
+      </div>
+      <div className="inbox-strip-grid">
+        {visible.map(n => {
+          const tone = SEV_TONE[n.severity] || 'info';
+          const isOverdue = n.due_date && n.due_date < now;
+          const isToday = n.due_date === now;
+          return (
+            <div key={n.id} className={`inbox-item sev-${tone} ${n.status !== 'unread' ? 'is-read' : ''}`} onClick={() => onOpen(n)}>
+              <Bell size={13} style={{ marginTop: 3, color: 'var(--muted)' }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="inbox-item-title">{n.title}</div>
+                {n.message && <div className="inbox-item-msg">{n.message}</div>}
+                <div className="inbox-item-meta">
+                  <span className="badge">{n.module_key}</span>
+                  {n.due_date && <span style={{ color: isOverdue ? 'var(--danger)' : isToday ? 'var(--warning)' : 'var(--faint)', fontWeight: 600 }}>
+                    {isOverdue ? `Overdue ${n.due_date}` : isToday ? 'Due today' : n.due_date}
+                  </span>}
+                  {n.action_label && <span style={{ color: 'var(--accent-bright)', fontWeight: 600 }}>{n.action_label} →</span>}
+                </div>
+              </div>
+              <button className="inbox-item-x" title="Mark resolved" onClick={e => { e.stopPropagation(); onResolve(n); }}>✓</button>
             </div>
-          </div>
-          <button className="link-btn" style={{ fontSize: 12, color: '#94a3b8', padding: '0 4px' }} title="Mark resolved" onClick={e => { e.stopPropagation(); onResolve(n); }}>✓</button>
-        </div>;
-      })}
+          );
+        })}
+      </div>
     </div>
-  </div>;
+  );
 }

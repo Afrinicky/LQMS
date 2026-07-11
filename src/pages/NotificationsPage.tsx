@@ -1,8 +1,8 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, CheckCircle2, Clock, AlertTriangle, ArrowRight, Inbox, Archive, Filter } from 'lucide-react';
+import { Bell, CheckCircle2, Clock, AlertTriangle, ArrowRight, Inbox } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, AlertSummary } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -18,20 +18,16 @@ const formatBadge = (status?: string) => <span className={statusBadgeClass(statu
 const tabBar = (active: string, tabs: string[], onChange: (name: string) => void) =>
   <div className="tabs">{tabs.map(name => <button key={name} type="button" className={active === name ? 'active' : ''} onClick={() => onChange(name)}>{name}</button>)}</div>;
 
-const NOTIFICATION_TYPES = ['due_soon', 'overdue', 'review_required', 'approval_required', 'follow_up', 'expiry_alert', 'task_assigned', 'system_notice'];
-const SEVERITIES = ['info', 'low', 'medium', 'high', 'urgent'];
 const RULE_TRIGGERS = ['due_soon', 'overdue', 'expiry_alert', 'review_required', 'approval_required', 'follow_up', 'custom'];
 const CALENDAR_STATUSES = ['pending', 'due_soon', 'overdue', 'completed', 'cancelled'];
-const MODULES_FOR_PREFS = ['actions', 'documents', 'personnel', 'equipment', 'supplier_inventory', 'monitoring', 'iqc', 'eqa', 'verification_validation', 'measurement_uncertainty', 'blood_bank_handover', 'monthly_reports', 'assessments', 'meetings', 'management_review', 'quality_indicators', 'continual_improvement', 'customer_focus', 'poct', 'nc_capa', 'risks', 'complaints'];
+const MODULES_FOR_PREFS = ['actions', 'documents', 'personnel', 'equipment', 'supplier_inventory', 'monitoring', 'iqc', 'eqa', 'verification_validation', 'measurement_uncertainty', 'blood_bank_handover', 'monthly_reports', 'assessments', 'meetings', 'management_review', 'quality_indicators', 'continual_improvement', 'customer_focus', 'poct', 'nc_capa', 'risks', 'complaints', 'facilities_safety', 'process_management', 'information_management', 'organisation'];
 
-const SEVERITY_COLOR: Record<string, string> = {
-  urgent: '#dc2626', high: '#ea580c', medium: '#0ea5e9', low: '#64748b', info: '#94a3b8',
-};
+const SEV_TONE: Record<string, string> = { urgent: 'crit', high: 'crit', medium: 'warn', low: 'ok', info: 'info' };
 
 export function NotificationsPage() {
   const { isEnabled } = useModules();
   const navigate = useNavigate();
-  const [tab, setTab] = useState('Inbox');
+  const [tab, setTab] = useState('Dashboard');
   const [error, setError] = useState<string | null>(null);
 
   const [summary, setSummary] = useState<NotificationsSummary | null>(null);
@@ -41,7 +37,7 @@ export function NotificationsPage() {
   const [rules, setRules] = useState<NotificationRule[]>([]);
   const [prefs, setPrefs] = useState<NotificationPreference[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
-  const [generateResult, setGenerateResult] = useState<{ candidates: number; notificationsCreated: number; calendarItemsCreated: number; skipped: number } | null>(null);
+  const [generateResult, setGenerateResult] = useState<{ candidates: number; created?: number; skipped: number; recipients?: number } | null>(null);
 
   const [calFilter, setCalFilter] = useState({ moduleKey: '', itemType: '', status: '', from: '', to: '' });
   const [taskForm, setTaskForm] = useState({ title: '', description: '', moduleKey: '', priority: 'normal', dueDate: '', assignedToStaffId: '' });
@@ -74,9 +70,6 @@ export function NotificationsPage() {
     catch (e) { setError((e as Error).message); }
   }
 
-  // Open a notification: mark it read, navigate to the action URL if present,
-  // and let the target page auto-resolve the notification when the required
-  // work is done. If no action URL, show the details drawer instead.
   async function openNotification(n: NotificationRecord) {
     try {
       if (n.status === 'unread') await api(`/notifications/${n.id}/read`, { method: 'POST', body: JSON.stringify({}) });
@@ -87,7 +80,7 @@ export function NotificationsPage() {
   }
 
   async function generateAlerts() {
-    try { setGenerateResult(await api(`/notifications/calendar/generate`, { method: 'POST', body: JSON.stringify({}) })); await load(); }
+    try { setGenerateResult(await api(`/notifications/auto-scan`, { method: 'POST', body: JSON.stringify({}) })); await load(); }
     catch (e) { setError((e as Error).message); }
   }
 
@@ -159,17 +152,16 @@ export function NotificationsPage() {
   const overdueCount = notifications.filter(n => n.due_date && n.due_date < now && n.status !== 'resolved' && n.status !== 'dismissed').length;
   const todayCount = notifications.filter(n => n.due_date === now && n.status !== 'resolved' && n.status !== 'dismissed').length;
 
-  const NOTIF_TABS = ['Inbox', 'My Tasks', 'Review Calendar', 'Generate Alerts', 'Notification Rules', 'Preferences', 'Reports'];
+  const NOTIF_TABS = ['Dashboard', 'Full Inbox', 'My Tasks', 'Review Calendar', 'Generate Alerts', 'Notification Rules', 'Preferences'];
   const inNotifications = NOTIF_TABS.includes(tab);
   const topTabs: { key: string; active: boolean; go: () => void }[] = [
-    { key: 'Dashboard', active: tab === 'Dashboard', go: () => setTab('Dashboard') },
-    { key: 'Notifications & Review Calendar', active: inNotifications, go: () => setTab('Inbox') },
+    { key: 'Notifications & Alerts', active: inNotifications, go: () => setTab('Dashboard') },
     ...(isEnabled('records_reports') ? [{ key: 'Records, Reports & Evidence', active: tab === 'Records, Reports & Evidence', go: () => setTab('Records, Reports & Evidence') }] : []),
     ...(isEnabled('monthly_reports') ? [{ key: 'Monthly Reports & Archives', active: tab === 'Monthly Reports & Archives', go: () => setTab('Monthly Reports & Archives') }] : []),
   ];
 
   return <div className="module-page">
-    <PageHeader eyebrow="Notifications &amp; Reports" title="Notifications &amp; Reports" subtitle="A professional inbox that never lets you miss an action. Every notification opens the record it points to, and clears itself once the work is done." />
+    <PageHeader eyebrow="Notifications &amp; Reports" title="Notifications &amp; Reports" subtitle="A professional inbox that never lets you miss an action. Every notification opens the record it points to and clears itself once the work is done." />
     <div className="tabs">{topTabs.map(t => <button key={t.key} type="button" className={t.active ? 'active' : ''} onClick={t.go}>{t.key}</button>)}</div>
     {inNotifications && tabBar(tab, NOTIF_TABS, setTab)}
     {error && <div className="error">{error}</div>}
@@ -177,17 +169,30 @@ export function NotificationsPage() {
     {tab === 'Records, Reports & Evidence' && <RecordsReportsPage embedded />}
     {tab === 'Monthly Reports & Archives' && <MonthlyReportsPage embedded />}
 
-    {tab === 'Dashboard' && (summary ? <>
-      <KpiStrip items={[
-        { label: 'Active in inbox', value: activeCount, onClick: () => setTab('Inbox') },
-        { label: 'Urgent / high', value: urgentCount, tone: urgentCount ? 'danger' : undefined, onClick: () => { setInboxFilter('urgent'); setTab('Inbox'); } },
-        { label: 'Due today', value: todayCount, tone: todayCount ? 'warning' : undefined, onClick: () => { setInboxFilter('today'); setTab('Inbox'); } },
-        { label: 'Overdue', value: overdueCount, tone: overdueCount ? 'danger' : undefined, onClick: () => setTab('Inbox') },
-        { label: 'Open tasks', value: summary.openTasks, onClick: () => setTab('My Tasks') },
-        { label: 'My tasks', value: summary.myOpenTasks, onClick: () => setTab('My Tasks') },
-        { label: 'Approvals', value: summary.pendingApprovals, onClick: () => setTab('Inbox') },
-        { label: 'Reviews due', value: summary.reviewItemsDue, onClick: () => setTab('Review Calendar') },
-      ]} />
+    {/* Dashboard now merges the inbox, live alerts and metrics into one view. */}
+    {tab === 'Dashboard' && summary && <>
+      <div className="inbox-summary-band">
+        <SummaryTile icon={<Inbox size={18} />} tone="accent" label="Active in inbox" value={activeCount} onClick={() => setInboxFilter('active')} active={inboxFilter === 'active'} />
+        <SummaryTile icon={<AlertTriangle size={18} />} tone="crit" label="Urgent / high" value={urgentCount} onClick={() => setInboxFilter('urgent')} active={inboxFilter === 'urgent'} />
+        <SummaryTile icon={<Clock size={18} />} tone="warn" label="Due today" value={todayCount} onClick={() => setInboxFilter('today')} active={inboxFilter === 'today'} />
+        <SummaryTile icon={<Clock size={18} />} tone="crit" label="Overdue" value={overdueCount} onClick={() => setInboxFilter('all')} active={false} />
+        <SummaryTile icon={<CheckCircle2 size={18} />} tone="ok" label="Resolved" value={notifications.length - activeCount} onClick={() => setInboxFilter('resolved')} active={inboxFilter === 'resolved'} />
+      </div>
+
+      <InboxPanel
+        title="Your inbox"
+        list={filteredInbox}
+        filter={inboxFilter}
+        onFilterChange={setInboxFilter}
+        search={inboxSearch}
+        onSearchChange={setInboxSearch}
+        onOpen={openNotification}
+        onTransition={transition}
+      />
+
+      {/* Consolidated live alerts across the whole system, env-monitoring style */}
+      <AlertSummary onOpenAlert={a => navigate(a.actionUrl)} />
+
       <div className="grid cols-2" style={{ marginTop: 18 }}>
         <ChartCard title="Timeliness" subtitle="Notifications by due-date pressure">
           <DonutChart centerLabel="Items" data={[
@@ -205,23 +210,18 @@ export function NotificationsPage() {
           ]} />
         </ChartCard>
       </div>
-    </> : <p>Loading…</p>)}
+    </>}
 
-    {tab === 'Inbox' && <InboxView
+    {tab === 'Full Inbox' && <InboxPanel
+      title="Full inbox"
       list={filteredInbox}
-      total={notifications.length}
-      activeCount={activeCount}
-      urgentCount={urgentCount}
-      todayCount={todayCount}
-      overdueCount={overdueCount}
       filter={inboxFilter}
       onFilterChange={setInboxFilter}
       search={inboxSearch}
       onSearchChange={setInboxSearch}
       onOpen={openNotification}
       onTransition={transition}
-      selected={selected}
-      onCloseSelected={() => setSelected(null)}
+      showFilters
     />}
 
     {tab === 'My Tasks' && <>
@@ -260,9 +260,10 @@ export function NotificationsPage() {
     </>}
 
     {tab === 'Generate Alerts' && <>
-      <p>Run the internal reminder scan. This walks every module's due/expiry/review fields and creates unread notifications + review-calendar items for new findings only — existing open notifications and calendar entries for the same record/type/due-date are skipped to avoid duplicates.</p>
-      <button type="button" onClick={generateAlerts}>Run scan now</button>
-      {generateResult && <p style={{ marginTop: 12 }}>Scanned {generateResult.candidates} candidate(s) · created {generateResult.notificationsCreated} notification(s) · {generateResult.calendarItemsCreated} calendar item(s) · skipped {generateResult.skipped} duplicate(s).</p>}
+      <p>Run the routed alert scan now. This walks every module for due, overdue, expiring, excursion, pending-review and pending-approval items, then routes a notification to each responsible person, section head/staff, and the relevant managers — deduplicated against existing open notifications.</p>
+      <p className="muted">This scan also runs automatically in the background every 15 minutes and opportunistically as the dashboards are used, so alerts appear without anyone pressing this button.</p>
+      <button type="button" onClick={generateAlerts}>Run routed scan now</button>
+      {generateResult && <p style={{ marginTop: 12 }}>Scanned {generateResult.candidates} condition(s) · routed {generateResult.created ?? 0} new notification(s) to {generateResult.recipients ?? 0} recipient slot(s) · skipped {generateResult.skipped} existing.</p>}
     </>}
 
     {tab === 'Notification Rules' && <>
@@ -286,7 +287,7 @@ export function NotificationsPage() {
         {MODULES_FOR_PREFS.map(m => {
           const cur = prefs.find(p => p.module_key === m);
           return <tr key={m}>
-            <td>{m}</td>
+            <td>{m.replace(/_/g, ' ')}</td>
             <td><input type="checkbox" checked={cur ? !!cur.in_app_enabled : true} onChange={e => setPrefField(m, 'in_app_enabled', e.target.checked)} /></td>
             <td><input type="checkbox" checked={cur ? !!cur.digest_enabled : false} onChange={e => setPrefField(m, 'digest_enabled', e.target.checked)} /></td>
             <td><input type="checkbox" checked={cur ? !!cur.email_enabled : false} onChange={e => setPrefField(m, 'email_enabled', e.target.checked)} /></td>
@@ -297,101 +298,7 @@ export function NotificationsPage() {
       <button type="button" onClick={savePrefs}>Save preferences</button>
     </>}
 
-    {tab === 'Reports' && <ul>
-      <li>Overdue items report — filter the Review Calendar by status=overdue today.</li>
-      <li>Staff task report — use My Tasks today.</li>
-      <li>Module alerts report — placeholder. Future per-module breakdown export.</li>
-    </ul>}
-  </div>;
-}
-
-// ============================================================================
-// InboxView — a professional secretarial inbox. Every notification opens the
-// record it points to; completing the required action auto-clears it.
-// ============================================================================
-function InboxView({ list, total, activeCount, urgentCount, todayCount, overdueCount, filter, onFilterChange, search, onSearchChange, onOpen, onTransition, selected, onCloseSelected }: {
-  list: NotificationRecord[]; total: number;
-  activeCount: number; urgentCount: number; todayCount: number; overdueCount: number;
-  filter: string; onFilterChange: (f: any) => void;
-  search: string; onSearchChange: (s: string) => void;
-  onOpen: (n: NotificationRecord) => void;
-  onTransition: (id: number, action: 'read' | 'acknowledge' | 'resolve' | 'dismiss') => void;
-  selected: NotificationRecord | null; onCloseSelected: () => void;
-}) {
-  const now = new Date().toISOString().slice(0, 10);
-  return <div>
-    <div style={{ display: 'flex', gap: 16, alignItems: 'stretch', flexWrap: 'wrap', marginBottom: 12 }}>
-      <div style={{ flex: 1, minWidth: 260, display: 'flex', gap: 8, background: 'var(--card-bg, #fff)', border: '1px solid #e2e8f0', borderRadius: 10, padding: '10px 14px', alignItems: 'center' }}>
-        <Inbox size={22} style={{ color: '#0ea5e9' }} />
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 12, color: '#64748b' }}>Inbox</div>
-          <div style={{ fontWeight: 700, fontSize: 15 }}>{activeCount} active · <span style={{ color: '#94a3b8', fontWeight: 500 }}>{total} total</span></div>
-        </div>
-      </div>
-      <FilterChip color="#dc2626" label="Urgent" count={urgentCount} active={filter === 'urgent'} onClick={() => onFilterChange('urgent')} />
-      <FilterChip color="#f59e0b" label="Due today" count={todayCount} active={filter === 'today'} onClick={() => onFilterChange('today')} />
-      <FilterChip color="#ea580c" label="Overdue" count={overdueCount} active={filter === 'all'} onClick={() => onFilterChange('all')} />
-      <FilterChip color="#16a34a" label="Resolved" count={total - activeCount} active={filter === 'resolved'} onClick={() => onFilterChange('resolved')} />
-    </div>
-
-    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
-      <div style={{ position: 'relative', flex: 1, minWidth: 260 }}>
-        <input value={search} onChange={e => onSearchChange(e.target.value)} placeholder="Search notifications by title, message, module…" style={{ width: '100%', paddingLeft: 34 }} />
-        <Filter size={14} style={{ position: 'absolute', left: 12, top: 10, color: '#94a3b8' }} />
-      </div>
-      <div className="tabs" style={{ marginBottom: 0 }}>
-        {[
-          { k: 'active', l: 'Active' }, { k: 'all', l: 'All' }, { k: 'urgent', l: 'Urgent' },
-          { k: 'today', l: 'Today' }, { k: 'resolved', l: 'Resolved' },
-        ].map(f => <button key={f.k} type="button" className={filter === f.k ? 'active' : ''} onClick={() => onFilterChange(f.k)}>{f.l}</button>)}
-      </div>
-    </div>
-
-    {list.length === 0 ? <div className="card" style={{ padding: 32, textAlign: 'center' }}>
-      <CheckCircle2 size={48} style={{ color: '#22c55e', margin: '0 auto 12px', display: 'block' }} />
-      <h3 style={{ margin: 0 }}>Your inbox is clear</h3>
-      <p className="muted" style={{ marginTop: 6 }}>No matching notifications. New alerts appear here when the system needs your attention.</p>
-    </div> : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 10 }}>
-      {list.map(n => {
-        const isOverdue = n.due_date && n.due_date < now;
-        const isToday = n.due_date === now;
-        const color = SEVERITY_COLOR[n.severity] || '#94a3b8';
-        return <div key={n.id} className="card" style={{
-          padding: 14, cursor: 'pointer', borderLeft: `4px solid ${color}`,
-          background: n.status === 'unread' ? '#fff' : n.status === 'resolved' ? '#f8fafc' : '#fdfdfe',
-          opacity: n.status === 'resolved' || n.status === 'dismissed' ? 0.65 : 1,
-        }} onClick={() => onOpen(n)}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-            <div style={{ marginTop: 2 }}>
-              {n.severity === 'urgent' || n.severity === 'high' ? <AlertTriangle size={16} style={{ color }} /> :
-               n.notification_type === 'approval_required' ? <CheckCircle2 size={16} style={{ color }} /> :
-               <Bell size={16} style={{ color }} />}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: n.status === 'unread' ? 700 : 500, fontSize: 13.5, color: '#0f172a' }}>{n.title}</div>
-              {n.message && <div style={{ fontSize: 12, color: '#64748b', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{n.message}</div>}
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6, flexWrap: 'wrap', fontSize: 11 }}>
-                <span className="badge">{n.module_key}</span>
-                {n.due_date && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: isOverdue ? '#dc2626' : isToday ? '#f59e0b' : '#64748b', fontWeight: 500 }}>
-                  <Clock size={11} />{isOverdue ? `Overdue ${n.due_date}` : isToday ? 'Today' : `Due ${n.due_date}`}
-                </span>}
-                <span style={{ color: '#94a3b8' }}>{String(n.created_at).slice(0, 10)}</span>
-              </div>
-              {n.action_url && n.status !== 'resolved' && <div style={{ marginTop: 8, display: 'flex', gap: 6, alignItems: 'center' }}>
-                <span style={{ color: '#0ea5e9', fontSize: 12, fontWeight: 600 }}>{n.action_label || 'Open'}</span>
-                <ArrowRight size={13} style={{ color: '#0ea5e9' }} />
-              </div>}
-            </div>
-            {n.status !== 'resolved' && n.status !== 'dismissed' && <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }} onClick={e => e.stopPropagation()}>
-              <button className="link-btn" title="Mark resolved" onClick={() => onTransition(n.id, 'resolve')} style={{ fontSize: 11 }}>✓</button>
-              <button className="link-btn" title="Dismiss" onClick={() => onTransition(n.id, 'dismiss')} style={{ fontSize: 11, color: '#64748b' }}>×</button>
-            </div>}
-          </div>
-        </div>;
-      })}
-    </div>}
-
-    {selected && <div className="doc-drawer-overlay" onClick={onCloseSelected}>
+    {selected && <div className="doc-drawer-overlay" onClick={() => setSelected(null)}>
       <div className="doc-drawer" onClick={e => e.stopPropagation()}>
         <div className="doc-drawer-panel">
           <div className="doc-drawer-head">
@@ -399,16 +306,17 @@ function InboxView({ list, total, activeCount, urgentCount, todayCount, overdueC
               <span className="hint">{selected.notification_number || '—'} · {selected.module_key}</span>
               <h3 style={{ margin: '2px 0 0' }}>{selected.title}</h3>
             </div>
-            <button className="drawer-close" onClick={onCloseSelected}>×</button>
+            <button className="drawer-close" onClick={() => setSelected(null)}>×</button>
           </div>
           <div className="doc-drawer-body">
             <p>{selected.message}</p>
             <p style={{ margin: '4px 0' }}><strong>Severity:</strong> {formatBadge(selected.severity)} · <strong>Type:</strong> {selected.notification_type.replace(/_/g, ' ')} · <strong>Status:</strong> {formatBadge(selected.status)}</p>
             <p style={{ margin: '4px 0' }}><strong>Due:</strong> {selected.due_date || '—'} · <strong>Created:</strong> {String(selected.created_at).slice(0, 10)}</p>
             <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {selected.status !== 'acknowledged' && <button onClick={() => onTransition(selected.id, 'acknowledge')}>Acknowledge</button>}
-              {selected.status !== 'resolved' && <button onClick={() => onTransition(selected.id, 'resolve')}>Mark resolved</button>}
-              {selected.status !== 'dismissed' && <button className="secondary" onClick={() => onTransition(selected.id, 'dismiss')}>Dismiss</button>}
+              {selected.action_url && <button onClick={() => { navigate(selected.action_url!); setSelected(null); }}>{selected.action_label || 'Open'}</button>}
+              {selected.status !== 'acknowledged' && <button className="secondary" onClick={() => transition(selected.id, 'acknowledge')}>Acknowledge</button>}
+              {selected.status !== 'resolved' && <button className="secondary" onClick={() => transition(selected.id, 'resolve')}>Mark resolved</button>}
+              {selected.status !== 'dismissed' && <button className="secondary" onClick={() => transition(selected.id, 'dismiss')}>Dismiss</button>}
             </div>
           </div>
         </div>
@@ -417,13 +325,78 @@ function InboxView({ list, total, activeCount, urgentCount, todayCount, overdueC
   </div>;
 }
 
-function FilterChip({ color, label, count, active, onClick }: { color: string; label: string; count: number; active?: boolean; onClick: () => void }) {
-  return <button type="button" onClick={onClick} style={{
-    border: `1px solid ${active ? color : '#e2e8f0'}`, background: active ? color : '#fff', color: active ? '#fff' : color,
-    padding: '10px 14px', borderRadius: 10, display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
-    fontWeight: 600, gap: 2, cursor: 'pointer', minWidth: 100,
-  }}>
-    <span style={{ fontSize: 11.5, textTransform: 'uppercase', letterSpacing: 0.3, opacity: active ? 0.9 : 1 }}>{label}</span>
-    <span style={{ fontSize: 20, lineHeight: 1 }}>{count}</span>
-  </button>;
+function SummaryTile({ icon, tone, label, value, onClick, active }: { icon: React.ReactNode; tone: string; label: string; value: number; onClick: () => void; active: boolean }) {
+  return (
+    <button type="button" className={`inbox-tile tone-${tone} ${active ? 'is-active' : ''}`} onClick={onClick}>
+      <span className="inbox-tile-ico">{icon}</span>
+      <span className="inbox-tile-body">
+        <span className="inbox-tile-value">{value}</span>
+        <span className="inbox-tile-label">{label}</span>
+      </span>
+    </button>
+  );
+}
+
+// InboxPanel — the professional, theme-aware inbox surface used on the module
+// dashboard and the Full Inbox tab.
+function InboxPanel({ title, list, filter, onFilterChange, search, onSearchChange, onOpen, onTransition, showFilters }: {
+  title: string;
+  list: NotificationRecord[];
+  filter: string; onFilterChange: (f: any) => void;
+  search: string; onSearchChange: (s: string) => void;
+  onOpen: (n: NotificationRecord) => void;
+  onTransition: (id: number, action: 'read' | 'acknowledge' | 'resolve' | 'dismiss') => void;
+  showFilters?: boolean;
+}) {
+  const now = new Date().toISOString().slice(0, 10);
+  return (
+    <section className="alert-section">
+      <div className="alert-section-head">
+        <h3>{title}</h3>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input value={search} onChange={e => onSearchChange(e.target.value)} placeholder="Search notifications…" style={{ minWidth: 200 }} />
+          <div className="tabs" style={{ marginBottom: 0 }}>
+            {[{ k: 'active', l: 'Active' }, { k: 'all', l: 'All' }, { k: 'urgent', l: 'Urgent' }, { k: 'today', l: 'Today' }, { k: 'resolved', l: 'Resolved' }].map(f =>
+              <button key={f.k} type="button" className={filter === f.k ? 'active' : ''} onClick={() => onFilterChange(f.k)}>{f.l}</button>)}
+          </div>
+        </div>
+      </div>
+
+      {list.length === 0 ? (
+        <div className="alert-empty big"><CheckCircle2 size={20} /> <span>Nothing here. New notifications appear when the system needs your attention.</span></div>
+      ) : (
+        <div className="inbox-strip-grid" style={{ padding: 0 }}>
+          {list.map(n => {
+            const tone = SEV_TONE[n.severity] || 'info';
+            const isOverdue = n.due_date && n.due_date < now;
+            const isToday = n.due_date === now;
+            return (
+              <div key={n.id} className={`inbox-item sev-${tone} ${n.status !== 'unread' ? 'is-read' : ''}`} onClick={() => onOpen(n)}>
+                <div style={{ marginTop: 2 }}>
+                  {(n.severity === 'urgent' || n.severity === 'high') ? <AlertTriangle size={14} style={{ color: 'var(--danger)' }} /> : <Bell size={14} style={{ color: 'var(--muted)' }} />}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="inbox-item-title">{n.title}</div>
+                  {n.message && <div className="inbox-item-msg">{n.message}</div>}
+                  <div className="inbox-item-meta">
+                    <span className="badge">{n.module_key}</span>
+                    {n.due_date && <span style={{ color: isOverdue ? 'var(--danger)' : isToday ? 'var(--warning)' : 'var(--faint)', fontWeight: 600 }}>
+                      {isOverdue ? `Overdue ${n.due_date}` : isToday ? 'Due today' : n.due_date}
+                    </span>}
+                    {n.action_label && n.status !== 'resolved' && <span style={{ color: 'var(--accent-bright)', fontWeight: 600 }}>{n.action_label} <ArrowRight size={11} style={{ verticalAlign: 'middle' }} /></span>}
+                  </div>
+                </div>
+                {n.status !== 'resolved' && n.status !== 'dismissed' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }} onClick={e => e.stopPropagation()}>
+                    <button className="inbox-item-x" title="Mark resolved" onClick={() => onTransition(n.id, 'resolve')}>✓</button>
+                    <button className="inbox-item-x" title="Dismiss" onClick={() => onTransition(n.id, 'dismiss')}>×</button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
 }
