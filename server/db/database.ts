@@ -3791,4 +3791,75 @@ CREATE INDEX IF NOT EXISTS idx_qt_reviews_period ON qt_reviews(period_start, per
   if (!nnCols.has('action_url')) database.exec('ALTER TABLE notifications ADD COLUMN action_url TEXT');
   if (!nnCols.has('action_label')) database.exec('ALTER TABLE notifications ADD COLUMN action_label TEXT');
   if (!nnCols.has('auto_resolve_key')) database.exec('ALTER TABLE notifications ADD COLUMN auto_resolve_key TEXT');
+
+  // -------------------------------------------------------------------
+  // Sync-ready schema (offline-first hybrid architecture, Phase 3).
+  //
+  // DORMANT scaffolding — nothing here changes application behaviour today.
+  // It equips core record tables with the fields a future multi-node / cloud
+  // synchronization engine needs (a globally-unique id, updated_at, and a
+  // soft-delete marker), plus a change-log table (sync_outbox) and a stable
+  // per-host node id. No code reads or writes the outbox yet; sync stays off
+  // until it is built. See docs/HYBRID_ARCHITECTURE_PLAN.md and
+  // docs/SYNC_READY_SCHEMA.md.
+  // -------------------------------------------------------------------
+
+  // Change-log / outbox. Empty and unused until synchronization is switched on.
+  database.exec(`
+CREATE TABLE IF NOT EXISTS sync_outbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  entity_table TEXT NOT NULL,
+  entity_uuid TEXT,
+  entity_id INTEGER,
+  operation TEXT NOT NULL,                        -- insert | update | delete
+  payload TEXT,                                   -- optional JSON snapshot
+  origin_node TEXT,                               -- node id that produced the change
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  synced_at TEXT,
+  sync_status TEXT NOT NULL DEFAULT 'pending'     -- pending | synced | failed
+);
+CREATE INDEX IF NOT EXISTS idx_sync_outbox_status ON sync_outbox(sync_status);
+`);
+
+  // A single SQL expression that produces an RFC 4122 v4 UUID. Used to backfill
+  // existing rows and (via a trigger) auto-assign new ones, so a non-constant
+  // default is not required (SQLite disallows those in ALTER ADD COLUMN).
+  const UUID_V4 =
+    "lower(substr(hex(randomblob(4)),1,8)||'-'||substr(hex(randomblob(2)),1,4)||'-4'||" +
+    "substr(hex(randomblob(2)),2,3)||'-'||substr('89ab',1+(abs(random())%4),1)||" +
+    "substr(hex(randomblob(2)),2,3)||'-'||hex(randomblob(6)))";
+
+  // Stable identity for this host/node. Seeded once; attributes changes later.
+  database.exec(`INSERT OR IGNORE INTO settings (key, value) VALUES ('syncNodeId', ${UUID_V4})`);
+
+  // Core operational record tables that a sync engine would replicate. Config
+  // singletons, append-only logs and auth tables are intentionally excluded.
+  // Extend this list as more record streams are brought into scope.
+  const SYNCABLE_TABLES = [
+    'nonconforming_events', 'capa_records', 'complaints', 'risks',
+    'equipment_items', 'equipment_maintenance_records', 'equipment_calibration_records',
+    'inventory_items', 'inventory_batches', 'suppliers',
+    'monitoring_items', 'monitoring_readings', 'safety_incidents',
+    'actions', 'documents', 'document_versions',
+    'iqc_materials', 'iqc_results', 'eqa_programs', 'eqa_events',
+    'staff',
+  ];
+  for (const table of SYNCABLE_TABLES) {
+    const cols = new Set((database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(c => c.name));
+    if (cols.size === 0) continue; // table absent in this build — skip safely
+    if (!cols.has('uuid')) {
+      database.exec(`ALTER TABLE ${table} ADD COLUMN uuid TEXT`);
+      // Backfill before the unique index so every existing row is populated.
+      database.exec(`UPDATE ${table} SET uuid = ${UUID_V4} WHERE uuid IS NULL`);
+    }
+    if (!cols.has('updated_at')) database.exec(`ALTER TABLE ${table} ADD COLUMN updated_at TEXT`);
+    if (!cols.has('deleted_at')) database.exec(`ALTER TABLE ${table} ADD COLUMN deleted_at TEXT`);
+    database.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_${table}_uuid ON ${table}(uuid)`);
+    // Keep readiness continuous while sync is dormant: any future row inserted
+    // by existing (unmodified) code still receives a uuid, transparently.
+    database.exec(
+      `CREATE TRIGGER IF NOT EXISTS trg_${table}_uuid AFTER INSERT ON ${table} ` +
+      `WHEN NEW.uuid IS NULL BEGIN UPDATE ${table} SET uuid = ${UUID_V4} WHERE rowid = NEW.rowid; END`
+    );
+  }
 }
