@@ -10,6 +10,7 @@ import type {
   SectionConfigRow, SectionConfigDetail,
   LaboratoryDocument, QualityPolicy, QualityObjective,
   EquipmentPattern, EquipmentSegment,
+  SystemConnectivity, AppMode,
 } from '../../shared/types/api';
 
 // Maps an organogram position title to the lab role(s) whose default permissions
@@ -2008,7 +2009,7 @@ export function MyLaboratory() {
 // ---------------------------------------------------------------------------
 // System  (system-level settings: modules, backups, devices)
 // ---------------------------------------------------------------------------
-const SYSTEM_TABS = ['Overview', 'System Modules', 'Backup & Restore', 'Device Access / Pairing'] as const;
+const SYSTEM_TABS = ['Overview', 'Connectivity & Mode', 'System Modules', 'Backup & Restore', 'Device Access / Pairing'] as const;
 type SystemTab = typeof SYSTEM_TABS[number];
 
 export function SystemSettings() {
@@ -2021,6 +2022,7 @@ export function SystemSettings() {
     <div className="tabs">{SYSTEM_TABS.map(t => <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>)}</div>
     <div className="people-tab-body">
       {tab === 'Overview' && <SystemOverview />}
+      {tab === 'Connectivity & Mode' && <ConnectivityMode />}
       {tab === 'System Modules' && <ModuleToggles />}
       {tab === 'Backup & Restore' && <BackupRestore />}
       {tab === 'Device Access / Pairing' && <Devices />}
@@ -2040,5 +2042,85 @@ function SystemOverview() {
       <div className="card mini"><h4>Data</h4><p>Local SQLite host</p></div>
     </div>
     <p className="hint">Use the tabs above to enable/disable modules, run backups, and manage LAN device pairing.</p>
+  </div>;
+}
+
+// ---------------------------------------------------------------------------
+// Connectivity & Mode  (offline-first hybrid architecture, Phase 1)
+//
+// Surfaces the deployment mode (Local vs Hybrid), whether the host API is
+// reachable on the LAN, the URLs remote-in-the-building clients (desktop
+// browsers and mobile PWA) should use, and the planned — not yet active —
+// cloud synchronization status. Switching mode never affects instruments,
+// monitoring, printers or workflows; the host stays fully functional offline.
+// ---------------------------------------------------------------------------
+export function ConnectivityMode() {
+  const { user } = useAuth();
+  const canEdit = user?.roleName === 'System Administrator' || user?.roleName === 'Laboratory Manager';
+  const [info, setInfo] = useState<SystemConnectivity | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const load = () => api<SystemConnectivity>('/system/connectivity').then(setInfo).catch(e => setError((e as Error).message));
+  useEffect(() => { void load(); }, []);
+
+  async function setMode(mode: AppMode) {
+    if (!info || info.mode === mode) return;
+    setBusy(true); setError(null); setMessage(null);
+    try {
+      await api('/system/mode', { method: 'PUT', body: JSON.stringify({ mode }) });
+      setMessage(mode === 'hybrid'
+        ? 'Hybrid mode enabled. LAN clients can connect; cloud sync remains planned and stays off until it is built.'
+        : 'Local mode enabled. The host runs fully offline.');
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!info) return <div className="card"><h3>Connectivity &amp; Mode</h3>{error ? <p className="error">{error}</p> : <p className="muted">Loading…</p>}</div>;
+
+  return <div>
+    <div className="card">
+      <h3>Deployment mode</h3>
+      <p>Choose how this host operates. Both modes run the full laboratory offline — instruments, environmental monitoring, printers and workflows are never affected by connectivity.</p>
+      <div className="tabs" style={{ marginTop: 8 }}>
+        <button disabled={!canEdit || busy} className={info.mode === 'local' ? 'active' : ''} onClick={() => setMode('local')}>Local Mode</button>
+        <button disabled={!canEdit || busy} className={info.mode === 'hybrid' ? 'active' : ''} onClick={() => setMode('hybrid')}>Hybrid Mode</button>
+      </div>
+      <p className="hint" style={{ marginTop: 8 }}>
+        Current: <strong>{info.mode === 'hybrid' ? 'Hybrid' : 'Local'}</strong>{' '}
+        ({info.modeSource === 'override' ? 'set here' : `default from environment (${info.envDefaultMode})`}).
+        {' '}<em>Local</em> = single-PC offline. <em>Hybrid</em> = LAN clients now, secure remote access later.
+      </p>
+      {!canEdit && <p className="muted">Only a System Administrator or Laboratory Manager can change the mode.</p>}
+      {message && <p className="notice-ok">{message}</p>}
+      {error && <p className="error">{error}</p>}
+    </div>
+
+    <div className="card">
+      <h3>LAN access</h3>
+      {info.lanExposed
+        ? <p className="notice-ok">The host API is bound to the LAN. Desktop browsers and the mobile PWA on this network can connect using the addresses below.</p>
+        : <p className="hint">The host API is bound to loopback only (private to this PC). To serve desktop and mobile clients over the LAN, start the host with <code>SECH_LIMS_API_HOST=0.0.0.0</code> and allow the port through the Windows firewall.</p>}
+      <table className="table" style={{ maxWidth: 640 }}><tbody>
+        <tr><td>Bind address</td><td><code>{info.api.host}</code></td></tr>
+        <tr><td>Port</td><td><code>{info.api.port}</code></td></tr>
+        {info.lanUrls.length > 0 && <tr><td>LAN client URLs</td><td>{info.lanUrls.map(u => <div key={u}><code>{u}</code></div>)}</td></tr>}
+        {info.api.publicUrl && <tr><td>Public URL (remote)</td><td><code>{info.api.publicUrl}</code></td></tr>}
+      </tbody></table>
+    </div>
+
+    <div className="card">
+      <h3>Cloud synchronization</h3>
+      <p className="hint">
+        Status: <strong>{info.sync.status === 'planned' ? 'Planned (not yet available)' : info.sync.status}</strong>.
+        The architecture is prepared for a future cloud database and web frontend, but no synchronization runs today.
+        The active data store is <code>{info.database.driver}</code> on this host.
+      </p>
+    </div>
   </div>;
 }

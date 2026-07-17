@@ -1,4 +1,17 @@
 export type SetupStatus = { setupComplete: boolean; adminExists: boolean; hostMode: boolean };
+export type AppMode = 'local' | 'hybrid';
+export type SystemConnectivity = {
+  mode: AppMode;
+  modeSource: 'override' | 'default';
+  envDefaultMode: AppMode;
+  api: { host: string; port: number; publicUrl: string | null };
+  lanExposed: boolean;
+  lanReady: boolean;
+  lanUrls: string[];
+  database: { driver: 'sqlite' | 'postgres' };
+  sync: { enabled: boolean; status: 'planned' | 'active' | 'disabled' };
+  generatedAt: string;
+};
 export type ApiUser = { id: number; username: string; fullName: string; roleId: number; roleName?: string; staffId?: number | null; staffName?: string | null; isActive: boolean };
 export type SystemModule = { id: number; key: string; label: string; path: string; enabled: boolean; alertsPaused: boolean };
 export type Position = { id: number; title: string; description?: string; reportsToPositionId?: number | null; isActive: boolean; archivedAt?: string | null };

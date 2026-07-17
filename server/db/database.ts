@@ -1,13 +1,16 @@
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
+import { config } from '../config/index.js';
 
-export const dataRoot = process.env.SECH_LIMS_DATA_DIR ?? path.join(process.cwd(), 'local-data');
+// Filesystem layout is sourced from the centralized config module so every path
+// is env-configurable (SECH_LIMS_DATA_DIR / SECH_LIMS_DB_PATH) from one place.
+export const dataRoot = config.db.dataDir;
 export const uploadRoot = path.join(dataRoot, 'uploads');
 export const evidenceRoot = path.join(dataRoot, 'evidence');
 export const backupRoot = path.join(dataRoot, 'backups');
 export const configRoot = path.join(dataRoot, 'config');
-export const dbPath = path.join(dataRoot, 'sech_lims.sqlite');
+export const dbPath = config.db.sqlitePath;
 
 let db: Database.Database | undefined;
 

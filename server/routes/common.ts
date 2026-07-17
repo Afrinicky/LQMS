@@ -3,7 +3,9 @@ import bcrypt from 'bcryptjs';
 import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import { getDb, closeDb, ensureDataDirs, uploadRoot, evidenceRoot, backupRoot, dbPath, configRoot, dataRoot } from '../db/database.js';
+import { config, isLanExposed, type AppMode } from '../config/index.js';
 import { seedDefaults } from '../db/seed.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
@@ -1954,6 +1956,63 @@ export function commonRoutes() {
       lanReady: true,
       generatedAt: new Date().toISOString()
     });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Connectivity & deployment mode (Phase 1 — offline-first hybrid architecture).
+  //
+  // Effective mode = runtime override in `settings.systemMode` (admin-settable)
+  // falling back to the SECH_LIMS_MODE env deployment default. `local` keeps the
+  // host fully offline; `hybrid` marks it LAN/remote-capable. Neither mode
+  // affects instruments, monitoring, printers or workflows — those always run.
+  // Cloud synchronization is not implemented yet; it is reported as planned.
+  // ---------------------------------------------------------------------------
+  function resolveMode(): { mode: AppMode; source: 'override' | 'default' } {
+    const row = getDb().prepare("SELECT value FROM settings WHERE key = 'systemMode'").get() as { value: string } | undefined;
+    const raw = row?.value?.toLowerCase();
+    if (raw === 'local' || raw === 'hybrid') return { mode: raw, source: 'override' };
+    return { mode: config.mode, source: 'default' };
+  }
+
+  function lanUrls(): string[] {
+    if (!isLanExposed()) return [];
+    const urls: string[] = [];
+    const ifaces = os.networkInterfaces();
+    for (const name of Object.keys(ifaces)) {
+      for (const net of ifaces[name] ?? []) {
+        if (net.family === 'IPv4' && !net.internal) urls.push(`http://${net.address}:${config.api.port}/`);
+      }
+    }
+    return urls;
+  }
+
+  router.get('/system/connectivity', (_req, res) => {
+    const { mode, source } = resolveMode();
+    res.json({
+      mode,
+      modeSource: source,
+      envDefaultMode: config.mode,
+      api: { host: config.api.host, port: config.api.port, publicUrl: config.api.publicUrl },
+      lanExposed: isLanExposed(),
+      lanReady: true,
+      lanUrls: lanUrls(),
+      database: { driver: config.db.driver },
+      sync: { enabled: config.sync.enabled, status: 'planned' },
+      generatedAt: new Date().toISOString()
+    });
+  });
+
+  router.put('/system/mode', requirePermission('settings', 'edit'), (req, res) => {
+    const requested = String((req.body ?? {}).mode ?? '').toLowerCase();
+    if (requested !== 'local' && requested !== 'hybrid') {
+      return res.status(400).json({ error: "mode must be 'local' or 'hybrid'" });
+    }
+    const before = resolveMode().mode;
+    getDb().prepare(
+      "INSERT INTO settings (key, value, updated_at) VALUES ('systemMode', ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP"
+    ).run(requested);
+    audit(req, { action: 'edit', entity: 'system_mode', entityId: 'systemMode', oldValue: before, newValue: requested });
+    res.json({ ok: true, mode: requested });
   });
 
   router.get('/dashboard/system-health-summary', (_req, res) => {
