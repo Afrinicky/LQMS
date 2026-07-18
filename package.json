@@ -29,6 +29,7 @@
     "express": "latest",
     "lucide-react": "latest",
     "multer": "latest",
+    "pg": "^8.22.0",
     "react": "latest",
     "react-dom": "latest",
     "react-router-dom": "latest",
@@ -49,7 +50,8 @@
     "tsx": "latest",
     "typescript": "latest",
     "vite": "latest",
-    "wait-on": "latest"
+    "wait-on": "latest",
+    "@types/pg": "^8.20.0"
   },
   "build": {
     "appId": "com.nickland.sechlims",

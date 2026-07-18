@@ -73,14 +73,17 @@ checkFile('server/db/dataStore.ts');
 checkFile('server/db/sqliteStore.ts');
 checkFile('server/db/postgresStore.ts');
 checkFile('server/db/store.ts');
+checkFile('server/db/syncableTables.ts');
 checkFile('server/sync/syncEngine.ts');
 checkFile('server/routes/sync.ts');
 checkFile('server/utils/uuid.ts');
 checkFile('.env.example');
+checkFile('vercel.json');
 checkFile('docs/HYBRID_ARCHITECTURE_PLAN.md');
 checkFile('docs/DATA_ACCESS_LAYER.md');
 checkFile('docs/SYNC_READY_SCHEMA.md');
 checkFile('docs/SYNC_ENGINE_STUB.md');
+checkFile('docs/CLOUD_SYNC.md');
 checkFile('docs/CLIENTS_LAN_AND_PWA.md');
 
 // PWA assets (installable mobile/desktop client)
