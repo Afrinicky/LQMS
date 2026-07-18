@@ -15,10 +15,16 @@ function argvValue(prefix) {
   const hit = (process.argv || []).find((a) => typeof a === 'string' && a.startsWith(prefix));
   return hit ? hit.slice(prefix.length) : '';
 }
-const apiBaseUrl =
+// A bind host of 0.0.0.0 / :: exposes the API to the LAN but is not itself
+// connectable — the local renderer must call the API over loopback.
+const envHost = process.env.SECH_LIMS_API_HOST || '127.0.0.1';
+const clientHost = envHost === '0.0.0.0' || envHost === '::' ? '127.0.0.1' : envHost;
+let apiBaseUrl =
   argvValue('--sech-api-base=') ||
   process.env.SECH_LIMS_API_URL ||
-  `http://${process.env.SECH_LIMS_API_HOST || '127.0.0.1'}:${process.env.SECH_LIMS_API_PORT || process.env.API_PORT || '4317'}/api`;
+  `http://${clientHost}:${process.env.SECH_LIMS_API_PORT || process.env.API_PORT || '4317'}/api`;
+// Final safety net: never hand the renderer an unconnectable bind address.
+apiBaseUrl = apiBaseUrl.replace('://0.0.0.0:', '://127.0.0.1:').replace('://[::]:', '://127.0.0.1:');
 
 contextBridge.exposeInMainWorld('sechLims', {
   apiBaseUrl,
