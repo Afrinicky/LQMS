@@ -67,6 +67,52 @@ checkFile('docs/WINDOWS_INSTALLER_AND_LAN_DEPLOYMENT.md');
 checkFile('docs/RELEASE_CANDIDATE_CHECKLIST.md');
 checkFile('docs/MODULE_ROUTE_SMOKE_TEST.md');
 
+// Offline-first hybrid architecture (config, data-access seam, sync)
+checkFile('server/config/index.ts');
+checkFile('server/db/dataStore.ts');
+checkFile('server/db/sqliteStore.ts');
+checkFile('server/db/postgresStore.ts');
+checkFile('server/db/store.ts');
+checkFile('server/sync/syncEngine.ts');
+checkFile('server/routes/sync.ts');
+checkFile('server/utils/uuid.ts');
+checkFile('.env.example');
+checkFile('docs/HYBRID_ARCHITECTURE_PLAN.md');
+checkFile('docs/DATA_ACCESS_LAYER.md');
+checkFile('docs/SYNC_READY_SCHEMA.md');
+checkFile('docs/SYNC_ENGINE_STUB.md');
+checkFile('docs/CLIENTS_LAN_AND_PWA.md');
+
+// PWA assets (installable mobile/desktop client)
+checkFile('public/manifest.webmanifest');
+checkFile('public/sw.js');
+checkFile('public/icon-192.png');
+checkFile('public/icon-512.png');
+checkFile('public/icon-maskable-512.png');
+checkFile('public/apple-touch-icon.png');
+
+// Lightweight content assertions for the hybrid seams
+try {
+  const manifest = JSON.parse(readFileSync(path.join(root, 'public/manifest.webmanifest'), 'utf-8'));
+  check('manifest.webmanifest parses and is standalone', manifest.display === 'standalone', manifest.display ?? 'missing');
+  check('manifest.webmanifest declares icons', Array.isArray(manifest.icons) && manifest.icons.length > 0);
+} catch (e) {
+  check('manifest.webmanifest parses cleanly', false, String(e));
+}
+try {
+  const sw = readFileSync(path.join(root, 'public/sw.js'), 'utf-8');
+  // The service worker must never cache API responses (data stays live).
+  check('service worker bypasses /api (no stale data cache)', /\/api/.test(sw) && /startsWith\('\/api'\)/.test(sw));
+} catch (e) {
+  check('service worker readable', false, String(e));
+}
+try {
+  const html = readFileSync(path.join(root, 'index.html'), 'utf-8');
+  check('index.html links the PWA manifest', /rel="manifest"/.test(html));
+} catch (e) {
+  check('index.html readable', false, String(e));
+}
+
 // package.json scripts
 try {
   const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf-8'));

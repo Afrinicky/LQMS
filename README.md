@@ -39,7 +39,7 @@ Default host API:
 http://127.0.0.1:4317/api
 ```
 
-The API binds to `0.0.0.0` so the host desktop can later serve desktop clients or mobile LAN clients. Only the host process should access SQLite directly; clients should use the REST API.
+By default the API binds to `127.0.0.1` (private to the host PC). To serve desktop and mobile clients over the LAN, start the host with `SECH_LIMS_API_HOST=0.0.0.0` and `SECH_LIMS_MODE=hybrid`, then allow the port through the firewall. Only the host process accesses SQLite directly; clients use the REST API. See the offline-first hybrid architecture below.
 
 ## First-time setup
 
@@ -212,17 +212,40 @@ Phase 15 is an integration/hardening pass — not a new QMS domain. It pulls the
 
 The master dashboard, My Work block on the Home page, and System Health card give a single landing surface for daily QMS oversight without rebuilding any of the per-module pages.
 
+## Offline-first hybrid architecture
+
+SECH_LIMS runs fully offline on the host PC and can also serve clients over the
+local network, with a clean, dormant path to future cloud synchronization. Every
+new capability is off by default, so an existing single-PC install is unchanged.
+
+- **Local vs Hybrid mode** — `SECH_LIMS_MODE` (env default) plus an admin toggle in
+  **Settings → System → Connectivity & Mode**. Mode never affects instruments,
+  monitoring, printers or workflows — those always run offline.
+- **Clients** — desktop over LAN (plain browser or an Electron thin client via
+  `SECH_LIMS_HOST_URL`) and mobile as an installable PWA. See
+  [`docs/CLIENTS_LAN_AND_PWA.md`](docs/CLIENTS_LAN_AND_PWA.md).
+- **Data-access seam** — routes can move onto a `DataStore` abstraction so a cloud
+  PostgreSQL driver can be added later without rewriting business logic. See
+  [`docs/DATA_ACCESS_LAYER.md`](docs/DATA_ACCESS_LAYER.md).
+- **Sync-ready & dormant** — sync-ready columns, a change-capture outbox, and a
+  stubbed sync-engine contract (`GET /api/sync/status`) exist but perform no
+  synchronization. See [`docs/SYNC_READY_SCHEMA.md`](docs/SYNC_READY_SCHEMA.md) and
+  [`docs/SYNC_ENGINE_STUB.md`](docs/SYNC_ENGINE_STUB.md).
+- **Configuration** — all URLs, database connections, mode and sync settings are
+  environment variables; see [`.env.example`](.env.example). Full plan in
+  [`docs/HYBRID_ARCHITECTURE_PLAN.md`](docs/HYBRID_ARCHITECTURE_PLAN.md).
+
 ## Known limitations
 
 - All modules are foundation-level and require real-world testing before production use.
 - Assessment checklist library supports JSON and CSV/XLSX imports, flexible question selection, optional internal audit marking, weighted section scoring, laboratory-defined internal pass thresholds, history-safe delete (only unused checklists/sections/questions), and per-response edit history. Sophisticated audit reporting templates and official accreditation scoring remain out of scope.
 - Internal audit marking is supported as a configurable internal assessment tool.
 - Official accreditation scoring, star ratings, and GAS/SLIPTA/ISO compliance grading are not included.
-- No mobile application yet.
+- Mobile access is delivered as an installable Progressive Web App (PWA) served by the host over the LAN; there is no separate native app store build yet.
 - No advanced AI SOP conversion yet.
 - POCT Oversight foundation exists for sites, devices, operators, authorisations, QC, EQA, maintenance, incidents, and monthly reviews. The clinical result-reporting workflow itself is not built in SECH_LIMS — patient testing and reporting remain with LHIMS/Lightwave.
 - No advanced report designer yet (CSV/HTML/DOC exports exist on key modules; rich PDF templating is pending).
-- No cloud/internet sync yet.
+- No cloud/internet sync yet. The architecture is prepared for it (see the offline-first hybrid architecture section) — a data-access seam, sync-ready schema, a dormant change-capture outbox, and a stubbed sync-engine contract are in place — but no synchronization runs and no data leaves the host. Cloud PostgreSQL (e.g. Neon) and a hosted web frontend are a future phase.
 - No live Google Forms / Google Sheets / Gmail integration yet. CSV/XLSX import is the supported intake path; outbound email communications can be drafted via the operating system's default mail client through a mailto link, but no SMTP/Gmail API is wired.
 - No live POCT device or result interfacing yet. POCT Oversight captures the quality-management workflow (sites, devices, operators, QC, EQA, maintenance, incidents, monthly reviews) plus inline QC trend chart, auto-flip of expired operator authorisations, multi-section monthly review summary generation, and printable site / authorisation roster / QC / monthly review reports through the OS print dialog. Patient result reporting remains with LHIMS/Lightwave and direct device communication has not been added.
 - No live SMS, email, or calendar invite delivery yet. The Notifications & Review Calendar module records in-app notifications, tasks, and calendar items derived from a cross-module scan, and the topbar shows an unread count badge. Email and SMS preference toggles exist but are placeholders until a delivery integration is wired.
