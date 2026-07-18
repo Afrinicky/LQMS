@@ -5,11 +5,18 @@
 // conflict and guarantees a CommonJS file in the asar.
 const { contextBridge, ipcRenderer } = require('electron');
 
-// process.env.SECH_LIMS_API_URL is set by electron/main.ts after the embedded
-// API has bound a port. The packaged renderer is now served *by* that API over
-// http://127.0.0.1:<port>/, so the renderer is same-origin with the API and can
-// fall back to location.origin if this value is ever missing.
+// Thin-client mode passes the Host API base via a renderer argv flag, because a
+// value written to process.env in the main process after the renderer has been
+// spawned does not propagate into this (already-running) renderer process. The
+// host (embedded-API) mode continues to use process.env.SECH_LIMS_API_URL, set
+// by electron/main.ts once the local API has bound a port; the renderer is then
+// served same-origin by that API.
+function argvValue(prefix) {
+  const hit = (process.argv || []).find((a) => typeof a === 'string' && a.startsWith(prefix));
+  return hit ? hit.slice(prefix.length) : '';
+}
 const apiBaseUrl =
+  argvValue('--sech-api-base=') ||
   process.env.SECH_LIMS_API_URL ||
   `http://${process.env.SECH_LIMS_API_HOST || '127.0.0.1'}:${process.env.SECH_LIMS_API_PORT || process.env.API_PORT || '4317'}/api`;
 

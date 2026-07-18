@@ -39,9 +39,12 @@ import { informationManagementRoutes } from './routes/informationManagement.js';
 import { environmentalRoutes } from './routes/environmental.js';
 import { EnvironmentalPoller } from './services/environmental/monitorService.js';
 import { dennisRoutes } from './routes/dennis.js';
+import { syncRoutes } from './routes/sync.js';
+import { getSyncEngine } from './sync/syncEngine.js';
 import { optionalAuth } from './middleware/auth.js';
 import { ensureDataDirs, getDb } from './db/database.js';
 import { seedDefaults } from './db/seed.js';
+import { config } from './config/index.js';
 
 /**
  * Resolve the directory that holds the built renderer (dist/index.html).
@@ -114,6 +117,7 @@ export function createApiServer() {
   app.use('/api/process-management', processManagementRoutes());
   app.use('/api/information-management', informationManagementRoutes());
   app.use('/api/environmental', environmentalRoutes());
+  app.use('/api/sync', syncRoutes());
   app.use('/api', commonRoutes());
 
   // Serve the built single-page renderer so the packaged Electron window can
@@ -142,13 +146,16 @@ export function createApiServer() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const port = Number(process.env.API_PORT ?? 4317);
-  const host = process.env.SECH_LIMS_API_HOST ?? '127.0.0.1';
+  const port = config.api.port;
+  const host = config.api.host;
   createApiServer().listen(port, host, () => {
     console.log(`SECH_LIMS host API listening on http://${host}:${port}`);
     // Background environmental poller. It self-gates on environmental_settings
     // (polling_enabled), so it is idle until a lab turns automated polling on.
     try { new EnvironmentalPoller(getDb).start(); } catch (e) { console.error('Environmental poller failed to start', e); }
+    // Synchronization engine (stub). Self-gates on SECH_LIMS_SYNC_ENABLED and
+    // does nothing while sync is disabled — reserved for the future cloud phase.
+    try { getSyncEngine().start(); } catch (e) { console.error('Sync engine failed to start', e); }
     // Background alert scheduler: automatically scans every module for due,
     // overdue, expiring, excursion and pending items and routes notifications
     // to the right staff by section + role. Runs shortly after boot and then

@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { DEFAULT_POSITIONS, MODULES, PERMISSION_ACTIONS } from '../../shared/constants/modules.js';
 import { getDb } from './database.js';
+import { config } from '../config/index.js';
 
 export function seedDefaults() {
   const db = getDb();
@@ -39,6 +40,9 @@ export function seedDefaults() {
     db.prepare('INSERT OR IGNORE INTO locations (name, description) VALUES (?, ?)').run('Main Laboratory', 'Default local site location.');
     db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('setupComplete', 'false')").run();
     db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('hostMode', 'true')").run();
+    // Deployment mode override (offline-first hybrid architecture, Phase 1).
+    // Seeded from the SECH_LIMS_MODE env default; admin-settable at runtime.
+    db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('systemMode', ?)").run(config.mode);
     db.prepare("INSERT OR IGNORE INTO dennis_settings (setting_key, setting_value) VALUES ('dennis.mode', 'Offline only')").run();
     db.prepare("INSERT OR IGNORE INTO dennis_settings (setting_key, setting_value) VALUES ('dennis.online.enabled', 'false')").run();
 

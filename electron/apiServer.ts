@@ -2,6 +2,7 @@ import type { Server } from 'node:http';
 import { createApiServer } from '../server/index.js';
 import { getDb } from '../server/db/database.js';
 import { EnvironmentalPoller } from '../server/services/environmental/monitorService.js';
+import { config } from '../server/config/index.js';
 
 export type ApiState = { host: string; port: number; baseUrl: string; reused: boolean };
 
@@ -57,8 +58,8 @@ export function startLocalApi(): Promise<ApiState> {
   }
 
   console.log('[boot] startLocalApi called');
-  const requestedPort = Number(process.env.API_PORT ?? 4317);
-  const host = process.env.SECH_LIMS_API_HOST ?? '127.0.0.1';
+  const requestedPort = config.api.port;
+  const host = config.api.host;
   const candidates = [requestedPort, requestedPort + 1, requestedPort + 2, requestedPort + 3, requestedPort + 4];
   console.log('[boot] startLocalApi candidates', { host, candidates });
 
@@ -78,6 +79,8 @@ export function startLocalApi(): Promise<ApiState> {
         console.log('[boot] startLocalApi listening', resolved);
         // Start the environmental poller (idle until polling is enabled in settings).
         try { new EnvironmentalPoller(getDb).start(); } catch (e) { console.error('[boot] environmental poller start failed', e); }
+        // Start the sync engine stub (self-gates on SECH_LIMS_SYNC_ENABLED; a no-op while disabled).
+        try { import('../server/sync/syncEngine.js').then(({ getSyncEngine }) => getSyncEngine().start()).catch(() => {}); } catch (e) { console.error('[boot] sync engine start failed', e); }
         return resolved;
       } catch (err) {
         lastErr = err;
