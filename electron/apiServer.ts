@@ -59,9 +59,14 @@ export function startLocalApi(): Promise<ApiState> {
 
   console.log('[boot] startLocalApi called');
   const requestedPort = config.api.port;
+  // The bind host may be 0.0.0.0 (or ::) to expose the API to the LAN, but that
+  // is NOT a connectable address — the local Electron window and preload must
+  // reach the API over loopback. The API listening on 0.0.0.0 also answers on
+  // 127.0.0.1, so we bind on `host` yet advertise `clientHost` to the renderer.
   const host = config.api.host;
+  const clientHost = host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host;
   const candidates = [requestedPort, requestedPort + 1, requestedPort + 2, requestedPort + 3, requestedPort + 4];
-  console.log('[boot] startLocalApi candidates', { host, candidates });
+  console.log('[boot] startLocalApi candidates', { host, clientHost, candidates });
 
   startPromise = (async () => {
     const app = createApiServer();
@@ -73,7 +78,7 @@ export function startLocalApi(): Promise<ApiState> {
         console.log(`[boot] startLocalApi trying ${host}:${port}${isFallback ? ' (fallback)' : ''}`);
         const s = await listenAsync(app, port, host);
         server = s;
-        resolved = { host, port, baseUrl: `http://${host}:${port}/api`, reused: false };
+        resolved = { host: clientHost, port, baseUrl: `http://${clientHost}:${port}/api`, reused: false };
         process.env.SECH_LIMS_API_URL = resolved.baseUrl;
         process.env.SECH_LIMS_API_PORT = String(port);
         console.log('[boot] startLocalApi listening', resolved);
@@ -87,9 +92,9 @@ export function startLocalApi(): Promise<ApiState> {
         const code = (err as NodeJS.ErrnoException)?.code;
         console.warn(`[boot] startLocalApi listen failed on ${host}:${port}`, code, String(err));
         if (code === 'EADDRINUSE') {
-          const isSechLims = await pingSechLimsHealth(host, port);
+          const isSechLims = await pingSechLimsHealth(clientHost, port);
           if (isSechLims) {
-            resolved = { host, port, baseUrl: `http://${host}:${port}/api`, reused: true };
+            resolved = { host: clientHost, port, baseUrl: `http://${clientHost}:${port}/api`, reused: true };
             process.env.SECH_LIMS_API_URL = resolved.baseUrl;
             process.env.SECH_LIMS_API_PORT = String(port);
             console.log('[boot] startLocalApi reusing existing SECH_LIMS API on', resolved);

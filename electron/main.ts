@@ -202,7 +202,11 @@ async function loadRenderer(state: { host: string; port: number }) {
       bootLog('loading dev URL', devUrl);
       await mainWindow.loadURL(devUrl);
     } else {
-      const url = `http://${state.host}:${state.port}/`;
+      // 0.0.0.0 / :: are bind addresses, not connectable ones — the local window
+      // must load over loopback (the API also answers there). Guards against a
+      // "ERR_ADDRESS_INVALID loading http://0.0.0.0:<port>/" blank/error screen.
+      const connectHost = state.host === '0.0.0.0' || state.host === '::' ? '127.0.0.1' : state.host;
+      const url = `http://${connectHost}:${state.port}/`;
       bootLog('loading renderer over http', url);
       await mainWindow.loadURL(url);
     }
