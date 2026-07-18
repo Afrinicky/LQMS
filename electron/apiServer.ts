@@ -79,6 +79,8 @@ export function startLocalApi(): Promise<ApiState> {
         console.log('[boot] startLocalApi listening', resolved);
         // Start the environmental poller (idle until polling is enabled in settings).
         try { new EnvironmentalPoller(getDb).start(); } catch (e) { console.error('[boot] environmental poller start failed', e); }
+        // Start the sync engine stub (self-gates on SECH_LIMS_SYNC_ENABLED; a no-op while disabled).
+        try { import('../server/sync/syncEngine.js').then(({ getSyncEngine }) => getSyncEngine().start()).catch(() => {}); } catch (e) { console.error('[boot] sync engine start failed', e); }
         return resolved;
       } catch (err) {
         lastErr = err;

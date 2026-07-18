@@ -10,7 +10,7 @@ import type {
   SectionConfigRow, SectionConfigDetail,
   LaboratoryDocument, QualityPolicy, QualityObjective,
   EquipmentPattern, EquipmentSegment,
-  SystemConnectivity, AppMode,
+  SystemConnectivity, AppMode, SyncStatus,
 } from '../../shared/types/api';
 
 // Maps an organogram position title to the lab role(s) whose default permissions
@@ -2058,11 +2058,15 @@ export function ConnectivityMode() {
   const { user } = useAuth();
   const canEdit = user?.roleName === 'System Administrator' || user?.roleName === 'Laboratory Manager';
   const [info, setInfo] = useState<SystemConnectivity | null>(null);
+  const [sync, setSync] = useState<SyncStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  const load = () => api<SystemConnectivity>('/system/connectivity').then(setInfo).catch(e => setError((e as Error).message));
+  const load = () => {
+    api<SystemConnectivity>('/system/connectivity').then(setInfo).catch(e => setError((e as Error).message));
+    api<SyncStatus>('/sync/status').then(setSync).catch(() => setSync(null));
+  };
   useEffect(() => { void load(); }, []);
 
   async function setMode(mode: AppMode) {
@@ -2117,10 +2121,16 @@ export function ConnectivityMode() {
     <div className="card">
       <h3>Cloud synchronization</h3>
       <p className="hint">
-        Status: <strong>{info.sync.status === 'planned' ? 'Planned (not yet available)' : info.sync.status}</strong>.
+        Status: <strong>{sync ? (sync.enabled ? sync.state : 'Planned (not yet available)') : (info.sync.status === 'planned' ? 'Planned (not yet available)' : info.sync.status)}</strong>.
         The architecture is prepared for a future cloud database and web frontend, but no synchronization runs today.
         The active data store is <code>{info.database.driver}</code> on this host.
       </p>
+      {sync && <table className="table" style={{ maxWidth: 640 }}><tbody>
+        <tr><td>This host node id</td><td><code>{sync.nodeId ?? '—'}</code></td></tr>
+        <tr><td>Cloud endpoint configured</td><td>{sync.cloudConfigured ? 'Yes' : 'No'}</td></tr>
+        <tr><td>Pending changes (outbox)</td><td>{sync.pendingOutbox}</td></tr>
+        <tr><td>Last synchronized</td><td>{sync.lastSyncAt ?? 'Never'}</td></tr>
+      </tbody></table>}
     </div>
   </div>;
 }

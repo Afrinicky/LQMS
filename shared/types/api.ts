@@ -12,6 +12,16 @@ export type SystemConnectivity = {
   sync: { enabled: boolean; status: 'planned' | 'active' | 'disabled' };
   generatedAt: string;
 };
+export type SyncStatus = {
+  enabled: boolean;
+  state: 'disabled' | 'idle' | 'syncing' | 'error';
+  nodeId: string | null;
+  cloudConfigured: boolean;
+  pendingOutbox: number;
+  lastSyncAt: string | null;
+  lastError: string | null;
+  message: string;
+};
 export type ApiUser = { id: number; username: string; fullName: string; roleId: number; roleName?: string; staffId?: number | null; staffName?: string | null; isActive: boolean };
 export type SystemModule = { id: number; key: string; label: string; path: string; enabled: boolean; alertsPaused: boolean };
 export type Position = { id: number; title: string; description?: string; reportsToPositionId?: number | null; isActive: boolean; archivedAt?: string | null };
