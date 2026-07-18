@@ -55,7 +55,20 @@ track which have been pushed to the cloud:
 | `created_at`, `synced_at` | When recorded / when pushed. |
 | `sync_status` | `pending` \| `synced` \| `failed`. |
 
-**No code writes to it yet.** It stays empty until synchronization is built.
+**Capture is gated on `SECH_LIMS_SYNC_ENABLED`.** While sync is off (the
+default) the outbox stays empty and has zero overhead. When the flag is enabled,
+`migrate()` installs capture triggers on the syncable tables that record each
+change into `sync_outbox` (entity, uuid, operation, origin node); turning the
+flag off again drops those triggers.
+
+Because SQLite has no `BEFORE INSERT` way to assign `NEW.uuid` and does not
+guarantee trigger fire-order, capture keys off `UPDATE` rather than a separate
+`INSERT` trigger: the uuid-backfill's own update (uuid moving from NULL to set)
+is recorded as the `insert` event with a guaranteed uuid, genuine edits as
+`update`, and hard deletes via an `AFTER DELETE` trigger. This yields exactly one
+outbox row per logical change, each carrying the record's uuid. Writing an outbox
+row is purely local — it sends nothing anywhere. The rows are drained by the sync
+engine (a stub today; see `docs/SYNC_ENGINE_STUB.md`).
 
 ### 3. Node identity — `settings.syncNodeId`
 

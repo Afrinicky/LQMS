@@ -29,7 +29,8 @@ export class SqliteStore implements DataStore {
 
   async run(sql: string, params: SqlParams = []): Promise<RunResult> {
     const info = this.db.prepare(sql).run(...params);
-    return { changes: info.changes, lastInsertRowid: info.lastInsertRowid };
+    // safeIntegers is not enabled, so lastInsertRowid is a JS number at runtime.
+    return { changes: info.changes, lastInsertRowid: Number(info.lastInsertRowid) };
   }
 
   async exec(sql: string): Promise<void> {

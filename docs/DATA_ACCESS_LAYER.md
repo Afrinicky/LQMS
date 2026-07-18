@@ -97,6 +97,14 @@ prerequisite that makes that reconciliation localized rather than global.
 
 - [x] Seam built: interface, SQLite driver, Postgres stub, factory.
 - [x] `server/routes/setup.ts` migrated (reference implementation).
+- [x] `server/routes/risks.ts` migrated (shows the raw-`getDb()` shim for legacy
+      synchronous helpers such as `generateRecordNumber`).
 - [ ] Remaining route modules — migrate incrementally; each is independent.
 
 Not-yet-migrated modules keep using `getDb()` and continue to work unchanged.
+
+> Note on offline-first: the Host always runs on its local SQLite database — even
+> after the cloud phase, only the sync engine bridges to cloud Postgres, not the
+> route handlers. So this migration improves testability and consistency; it is
+> not a prerequisite for cloud sync. Convert modules deliberately, in verified
+> batches, rather than in one large mechanical pass.
