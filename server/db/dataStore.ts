@@ -23,9 +23,10 @@ export type SqlParams = ReadonlyArray<unknown>;
 export interface RunResult {
   /** Number of rows affected. */
   changes: number;
-  /** Auto-generated id of an INSERT. SQLite-native; a Postgres driver populates
-   *  it from a RETURNING clause. May be 0 when not applicable. */
-  lastInsertRowid: number | bigint;
+  /** Auto-generated id of an INSERT. SQLite-native (a plain JS number here — the
+   *  app does not enable better-sqlite3 safeIntegers); a Postgres driver will
+   *  populate it from a RETURNING clause. May be 0 when not applicable. */
+  lastInsertRowid: number;
 }
 
 export type StoreDriver = 'sqlite' | 'postgres';

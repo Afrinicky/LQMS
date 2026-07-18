@@ -3862,4 +3862,42 @@ CREATE INDEX IF NOT EXISTS idx_sync_outbox_status ON sync_outbox(sync_status);
       `WHEN NEW.uuid IS NULL BEGIN UPDATE ${table} SET uuid = ${UUID_V4} WHERE rowid = NEW.rowid; END`
     );
   }
+
+  // Change-data-capture into sync_outbox. Installed ONLY when synchronization is
+  // enabled (SECH_LIMS_SYNC_ENABLED) so there is zero write overhead or table
+  // growth while sync is off; toggling the flag off cleanly drops the triggers.
+  // Writing an outbox row is purely local — it sends nothing anywhere. The
+  // outbox is drained by the sync engine, which is a stub today. When enabled, a
+  // fresh insert also produces an 'update' entry from the uuid-backfill trigger;
+  // that is harmless because the engine reconciles by uuid.
+  const nodeExpr = "(SELECT value FROM settings WHERE key = 'syncNodeId')";
+  for (const table of SYNCABLE_TABLES) {
+    const present = (database.prepare(`PRAGMA table_info(${table})`).all() as Array<unknown>).length > 0;
+    if (!present) continue;
+    const ai = `trg_${table}_outbox_ai`, au = `trg_${table}_outbox_au`, ad = `trg_${table}_outbox_ad`;
+    if (config.sync.enabled) {
+      // SQLite does not guarantee the fire order of multiple AFTER INSERT
+      // triggers, and NEW.uuid always reflects the inserted (null) value — so a
+      // separate insert-capture trigger cannot reliably see the uuid the backfill
+      // assigns. Instead, capture on UPDATE: the uuid-backfill trigger's own
+      // UPDATE (OLD.uuid NULL -> NEW.uuid set) is recorded as the 'insert' event
+      // with a guaranteed uuid, and every genuine edit (OLD.uuid already set) as
+      // an 'update'. This yields exactly one outbox row per logical change.
+      database.exec(`DROP TRIGGER IF EXISTS ${ai}`);
+      database.exec(
+        `CREATE TRIGGER IF NOT EXISTS ${au} AFTER UPDATE ON ${table} BEGIN ` +
+        `INSERT INTO sync_outbox (entity_table, entity_uuid, entity_id, operation, origin_node) ` +
+        `VALUES ('${table}', NEW.uuid, NEW.id, CASE WHEN OLD.uuid IS NULL THEN 'insert' ELSE 'update' END, ${nodeExpr}); END`
+      );
+      database.exec(
+        `CREATE TRIGGER IF NOT EXISTS ${ad} AFTER DELETE ON ${table} BEGIN ` +
+        `INSERT INTO sync_outbox (entity_table, entity_uuid, entity_id, operation, origin_node) ` +
+        `VALUES ('${table}', OLD.uuid, OLD.id, 'delete', ${nodeExpr}); END`
+      );
+    } else {
+      database.exec(`DROP TRIGGER IF EXISTS ${ai}`);
+      database.exec(`DROP TRIGGER IF EXISTS ${au}`);
+      database.exec(`DROP TRIGGER IF EXISTS ${ad}`);
+    }
+  }
 }
