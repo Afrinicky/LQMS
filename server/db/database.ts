@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config/index.js';
+import { SYNCABLE_TABLES } from './syncableTables.js';
 
 // Filesystem layout is sourced from the centralized config module so every path
 // is env-configurable (SECH_LIMS_DATA_DIR / SECH_LIMS_DB_PATH) from one place.
@@ -3832,18 +3833,12 @@ CREATE INDEX IF NOT EXISTS idx_sync_outbox_status ON sync_outbox(sync_status);
   // Stable identity for this host/node. Seeded once; attributes changes later.
   database.exec(`INSERT OR IGNORE INTO settings (key, value) VALUES ('syncNodeId', ${UUID_V4})`);
 
-  // Core operational record tables that a sync engine would replicate. Config
-  // singletons, append-only logs and auth tables are intentionally excluded.
-  // Extend this list as more record streams are brought into scope.
-  const SYNCABLE_TABLES = [
-    'nonconforming_events', 'capa_records', 'complaints', 'risks',
-    'equipment_items', 'equipment_maintenance_records', 'equipment_calibration_records',
-    'inventory_items', 'inventory_batches', 'suppliers',
-    'monitoring_items', 'monitoring_readings', 'safety_incidents',
-    'actions', 'documents', 'document_versions',
-    'iqc_materials', 'iqc_results', 'eqa_programs', 'eqa_events',
-    'staff',
-  ];
+  // Capture switch: a single-row flag the sync engine flips off while it applies
+  // pulled cloud changes, so those writes are not re-captured into the outbox and
+  // echoed back. Default on. (SYNCABLE_TABLES is shared with the sync engine.)
+  database.exec(`CREATE TABLE IF NOT EXISTS sync_control (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
+  database.exec(`INSERT OR IGNORE INTO sync_control (key, value) VALUES ('capture', '1')`);
+
   for (const table of SYNCABLE_TABLES) {
     const cols = new Set((database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(c => c.name));
     if (cols.size === 0) continue; // table absent in this build — skip safely
@@ -3883,14 +3878,17 @@ CREATE INDEX IF NOT EXISTS idx_sync_outbox_status ON sync_outbox(sync_status);
       // UPDATE (OLD.uuid NULL -> NEW.uuid set) is recorded as the 'insert' event
       // with a guaranteed uuid, and every genuine edit (OLD.uuid already set) as
       // an 'update'. This yields exactly one outbox row per logical change.
+      // The WHEN guard lets the sync engine suppress capture while applying
+      // pulled changes (sync_control.capture = '0'), preventing echo loops.
+      const captureOn = `(SELECT value FROM sync_control WHERE key = 'capture') = '1'`;
       database.exec(`DROP TRIGGER IF EXISTS ${ai}`);
       database.exec(
-        `CREATE TRIGGER IF NOT EXISTS ${au} AFTER UPDATE ON ${table} BEGIN ` +
+        `CREATE TRIGGER IF NOT EXISTS ${au} AFTER UPDATE ON ${table} WHEN ${captureOn} BEGIN ` +
         `INSERT INTO sync_outbox (entity_table, entity_uuid, entity_id, operation, origin_node) ` +
         `VALUES ('${table}', NEW.uuid, NEW.id, CASE WHEN OLD.uuid IS NULL THEN 'insert' ELSE 'update' END, ${nodeExpr}); END`
       );
       database.exec(
-        `CREATE TRIGGER IF NOT EXISTS ${ad} AFTER DELETE ON ${table} BEGIN ` +
+        `CREATE TRIGGER IF NOT EXISTS ${ad} AFTER DELETE ON ${table} WHEN ${captureOn} BEGIN ` +
         `INSERT INTO sync_outbox (entity_table, entity_uuid, entity_id, operation, origin_node) ` +
         `VALUES ('${table}', OLD.uuid, OLD.id, 'delete', ${nodeExpr}); END`
       );

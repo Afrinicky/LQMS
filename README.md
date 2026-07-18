@@ -227,10 +227,11 @@ new capability is off by default, so an existing single-PC install is unchanged.
 - **Data-access seam** — routes can move onto a `DataStore` abstraction so a cloud
   PostgreSQL driver can be added later without rewriting business logic. See
   [`docs/DATA_ACCESS_LAYER.md`](docs/DATA_ACCESS_LAYER.md).
-- **Sync-ready & dormant** — sync-ready columns, a change-capture outbox, and a
-  stubbed sync-engine contract (`GET /api/sync/status`) exist but perform no
-  synchronization. See [`docs/SYNC_READY_SCHEMA.md`](docs/SYNC_READY_SCHEMA.md) and
-  [`docs/SYNC_ENGINE_STUB.md`](docs/SYNC_ENGINE_STUB.md).
+- **Cloud sync (opt-in, off by default)** — sync-ready columns, a change-capture
+  outbox, a `PostgresStore` driver, and a real push/pull sync engine
+  (`GET /api/sync/status`) replicate syncable records to a cloud PostgreSQL (e.g.
+  Neon) when enabled. See [`docs/SYNC_READY_SCHEMA.md`](docs/SYNC_READY_SCHEMA.md)
+  and [`docs/CLOUD_SYNC.md`](docs/CLOUD_SYNC.md).
 - **Configuration** — all URLs, database connections, mode and sync settings are
   environment variables; see [`.env.example`](.env.example). Full plan in
   [`docs/HYBRID_ARCHITECTURE_PLAN.md`](docs/HYBRID_ARCHITECTURE_PLAN.md).
@@ -245,7 +246,7 @@ new capability is off by default, so an existing single-PC install is unchanged.
 - No advanced AI SOP conversion yet.
 - POCT Oversight foundation exists for sites, devices, operators, authorisations, QC, EQA, maintenance, incidents, and monthly reviews. The clinical result-reporting workflow itself is not built in SECH_LIMS — patient testing and reporting remain with LHIMS/Lightwave.
 - No advanced report designer yet (CSV/HTML/DOC exports exist on key modules; rich PDF templating is pending).
-- No cloud/internet sync yet. The architecture is prepared for it (see the offline-first hybrid architecture section) — a data-access seam, sync-ready schema, a dormant change-capture outbox, and a stubbed sync-engine contract are in place — but no synchronization runs and no data leaves the host. Cloud PostgreSQL (e.g. Neon) and a hosted web frontend are a future phase.
+- Cloud synchronization is implemented but **opt-in and off by default**: with it disabled the host runs fully offline and no data leaves the machine. When `SECH_LIMS_SYNC_ENABLED=true` and a cloud PostgreSQL URL (e.g. Neon) are set, the host replicates syncable records to the cloud and merges cloud changes back (last-writer-wins). See [`docs/CLOUD_SYNC.md`](docs/CLOUD_SYNC.md). Provisioning the Neon database and deploying the Vercel web frontend are done in your own accounts with live credentials.
 - No live Google Forms / Google Sheets / Gmail integration yet. CSV/XLSX import is the supported intake path; outbound email communications can be drafted via the operating system's default mail client through a mailto link, but no SMTP/Gmail API is wired.
 - No live POCT device or result interfacing yet. POCT Oversight captures the quality-management workflow (sites, devices, operators, QC, EQA, maintenance, incidents, monthly reviews) plus inline QC trend chart, auto-flip of expired operator authorisations, multi-section monthly review summary generation, and printable site / authorisation roster / QC / monthly review reports through the OS print dialog. Patient result reporting remains with LHIMS/Lightwave and direct device communication has not been added.
 - No live SMS, email, or calendar invite delivery yet. The Notifications & Review Calendar module records in-app notifications, tasks, and calendar items derived from a cross-module scan, and the topbar shows an unread count badge. Email and SMS preference toggles exist but are placeholders until a delivery integration is wired.
