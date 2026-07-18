@@ -48,3 +48,21 @@ window.addEventListener('error', (e) => {
 window.addEventListener('unhandledrejection', (e) => {
   console.error('[renderer] unhandledrejection', e.reason);
 });
+
+// Register the PWA service worker for browser and mobile clients so the app is
+// installable and its shell loads offline. Skipped inside the Electron host
+// window (window.sechLims is injected by the preload there) and in dev, where it
+// would conflict with Vite HMR. The worker never caches /api — data stays live.
+if (
+  import.meta.env.PROD &&
+  'serviceWorker' in navigator &&
+  !window.sechLims &&
+  typeof location !== 'undefined' &&
+  /^https?:$/.test(location.protocol)
+) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((err) => {
+      console.warn('[pwa] service worker registration failed', err);
+    });
+  });
+}

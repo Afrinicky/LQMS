@@ -83,6 +83,12 @@ export interface AppConfig {
     readonly cloudUrl: string | null;
     readonly intervalMs: number;
   };
+  readonly client: {
+    /** When set, this build runs as a thin client that connects to a remote
+     *  Host instead of embedding its own API. Consumed by the Electron shell.
+     *  e.g. http://192.168.1.50:4317 */
+    readonly hostUrl: string | null;
+  };
 }
 
 export const config: AppConfig = Object.freeze({
@@ -102,6 +108,9 @@ export const config: AppConfig = Object.freeze({
     enabled: envBool('SECH_LIMS_SYNC_ENABLED', false),
     cloudUrl: envOptional('SECH_LIMS_CLOUD_URL'),
     intervalMs: envNumber('SECH_LIMS_SYNC_INTERVAL_MS', 60000),
+  }),
+  client: Object.freeze({
+    hostUrl: envOptional('SECH_LIMS_HOST_URL'),
   }),
 });
 

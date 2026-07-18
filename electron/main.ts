@@ -40,6 +40,14 @@ const isPackaged = app.isPackaged;
 const preloadPath = path.join(__dirname, 'preload.cjs');
 const indexHtmlPath = path.join(rendererDir, 'index.html');
 
+// Thin-client mode: when SECH_LIMS_HOST_URL is set, this build does NOT embed
+// its own API. It connects to a remote Host over the LAN (or a secure remote URL
+// later) and loads the UI from there. Read straight from the environment — a
+// static `import` of the config module here would evaluate it before
+// SECH_LIMS_DATA_DIR is set above, so we keep this a plain env read.
+const clientHostUrl = (process.env.SECH_LIMS_HOST_URL || '').trim().replace(/\/+$/, '');
+const clientApiBase = clientHostUrl ? `${clientHostUrl}/api` : '';
+
 bootLog('main starting');
 bootLog('singleInstanceLock', gotSingleInstanceLock);
 bootLog('app.isPackaged', isPackaged);
@@ -148,7 +156,14 @@ async function createWindow() {
     backgroundColor: '#080D1A',
     title: 'SECH_LIMS by Nickland',
     show: false,
-    webPreferences: { preload: preloadPath, contextIsolation: true, nodeIntegration: false }
+    webPreferences: {
+      preload: preloadPath,
+      contextIsolation: true,
+      nodeIntegration: false,
+      // In thin-client mode, hand the renderer the remote Host API base via argv
+      // (see preload.cjs) so it targets the Host rather than a local API.
+      ...(clientApiBase ? { additionalArguments: [`--sech-api-base=${clientApiBase}`] } : {}),
+    }
   });
   mainWindow = win;
 
@@ -377,10 +392,37 @@ process.on('unhandledRejection', (reason) => {
   bootLog('unhandledRejection', String(reason));
 });
 
+async function loadRemote(url: string) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    bootLog('thin-client: loading remote Host UI', url);
+    await mainWindow.loadURL(url);
+    bootLog('thin-client: remote Host UI load completed');
+  } catch (err) {
+    bootLog('thin-client: remote Host UI load failed', String(err));
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      await mainWindow.loadURL(errorDataUrl(
+        `Could not reach the SECH_LIMS Host at ${url}\n${String(err)}\n\n` +
+        `Check that the Host PC is on and reachable on the network, that the Host ` +
+        `API is exposed to the LAN (SECH_LIMS_API_HOST=0.0.0.0) with its port ` +
+        `allowed through the firewall, and that SECH_LIMS_HOST_URL is correct.`
+      ));
+    }
+  }
+}
+
 async function bootSequence() {
   // 1. Open the window with a themed splash so the user immediately sees a
   //    branded loading screen (never a blank or white window).
   await createWindow();
+
+  // Thin-client mode: skip the embedded API entirely and load the remote Host UI.
+  if (clientHostUrl) {
+    bootLog('thin-client mode enabled → Host', clientHostUrl);
+    process.env.SECH_LIMS_API_URL = clientApiBase; // best-effort for same-process readers
+    await loadRemote(`${clientHostUrl}/`);
+    return;
+  }
 
   // 2. Start the embedded API (which also serves the renderer), with retry.
   const result = await bootApiWithRetry();
