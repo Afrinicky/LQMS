@@ -146,4 +146,24 @@ export const APPLY_HANDLERS: Record<string, ApplyHandler> = {
     ).run(s.actor_staff_id, type, start, end, reason, s.decided_by_staff_id ?? null);
     return { ok: true, message: `Leave approved (${start} → ${end}).` };
   },
+
+  // Inventory request (approval tier): runs only when approved. Records the
+  // request as approved; may reference an existing inventory item by uuid.
+  'inventory.request': (db, s) => {
+    const p = s.payload ?? {};
+    let inventoryItemId: number | null = null;
+    let itemName = p.itemName === undefined ? null : String(p.itemName);
+    if (s.target_uuid) {
+      const inv = db.prepare('SELECT id, name FROM inventory_items WHERE uuid = ?').get(s.target_uuid) as { id: number; name: string } | undefined;
+      if (inv) { inventoryItemId = inv.id; if (!itemName) itemName = inv.name; }
+    }
+    if (!itemName) return { ok: false, message: 'An item name is required.' };
+    const qty = p.quantity === undefined || p.quantity === '' ? null : Number(p.quantity);
+    db.prepare(
+      `INSERT INTO inventory_requests (staff_id, item_name, inventory_item_id, quantity, unit, justification, status, approved_by_staff_id, decided_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'approved', ?, CURRENT_TIMESTAMP)`
+    ).run(s.actor_staff_id, itemName, inventoryItemId, Number.isFinite(qty as number) ? qty : null,
+      p.unit === undefined ? null : String(p.unit), p.justification === undefined ? null : String(p.justification), s.decided_by_staff_id ?? null);
+    return { ok: true, message: `Inventory request approved: ${itemName}${qty ? ' ×' + qty : ''}.` };
+  },
 };

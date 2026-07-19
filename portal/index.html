@@ -272,6 +272,7 @@
     function actLabel(k) { return ACT_LABELS[k] || k; }
     function summarizePayload(pl) {
       if (pl && (pl.startDate || pl.endDate)) return 'Leave ' + (pl.type || '') + ': ' + (pl.startDate || '?') + ' → ' + (pl.endDate || '?') + (pl.reason ? ' — ' + pl.reason : '');
+      if (pl && pl.itemName) return 'Inventory: ' + (pl.quantity ? pl.quantity + ' ' : '') + (pl.unit ? pl.unit + ' ' : '') + pl.itemName + (pl.justification ? ' — ' + pl.justification : '');
       try { return JSON.stringify(pl); } catch { return ''; }
     }
 
@@ -350,7 +351,17 @@
             + '<label class="muted" style="font-size:12px;margin-top:8px;display:block;">Reason</label><textarea id="lvReason" rows="2"></textarea>'
             + '<div style="margin-top:10px;"><button id="lvSave">Submit leave request</button> <span id="lvMsg" class="muted" style="margin-left:8px;font-size:12.5px;"></span></div></div>';
         }
+        if (canDo('inventory.request')) {
+          html += '<h3 style="margin:18px 0 8px;">Request inventory</h3><div style="max-width:460px;">'
+            + '<label class="muted" style="font-size:12px;">Item</label><input id="ivItem" placeholder="e.g. Nitrile gloves (M)"/>'
+            + '<label class="muted" style="font-size:12px;margin-top:8px;display:block;">Quantity</label><input id="ivQty" type="number" step="any"/>'
+            + '<label class="muted" style="font-size:12px;margin-top:8px;display:block;">Unit</label><input id="ivUnit" placeholder="box / pack / each"/>'
+            + '<label class="muted" style="font-size:12px;margin-top:8px;display:block;">Justification</label><textarea id="ivJust" rows="2"></textarea>'
+            + '<div style="margin-top:10px;"><button id="ivSave">Submit inventory request</button> <span id="ivMsg" class="muted" style="margin-left:8px;font-size:12.5px;"></span></div></div>';
+        }
         $('work').innerHTML = html;
+        const ivSave = document.getElementById('ivSave');
+        if (ivSave) ivSave.onclick = () => { const item = $('ivItem').value; const m = $('ivMsg'); if (!item) { m.textContent = 'Enter an item.'; return; } submitActivity('inventory.request', null, null, { itemName: item, quantity: $('ivQty').value, unit: $('ivUnit').value, justification: $('ivJust').value }, m); };
         const lvSave = document.getElementById('lvSave');
         if (lvSave) lvSave.onclick = () => {
           const start = $('lvStart').value, end = $('lvEnd').value, msg = $('lvMsg');

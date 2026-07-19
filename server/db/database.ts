@@ -3919,5 +3919,19 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   approved_by_staff_id INTEGER REFERENCES staff(id),
   decided_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS inventory_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  staff_id INTEGER NOT NULL REFERENCES staff(id),
+  item_name TEXT,
+  inventory_item_id INTEGER REFERENCES inventory_items(id),
+  quantity REAL,
+  unit TEXT,
+  section_id INTEGER REFERENCES sections(id),
+  justification TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  approved_by_staff_id INTEGER REFERENCES staff(id),
+  decided_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );`);
 }
