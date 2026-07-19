@@ -132,6 +132,13 @@ Shipped self-service (auto-apply, ownership enforced on the Host): **SOP/documen
 acknowledgement**, **own-profile update** (contact fields), and **assigned-task
 update** (only the assignee, via "My work").
 
+**Field capture (R6):** permitted staff can record **environmental readings**
+(classified against the item's limits), **equipment maintenance logs**, and
+**equipment breakdown reports** from a "Field capture" view. Submissions made
+without connectivity are queued in the browser (an offline outbox) and flushed
+automatically on reconnect — so readings taken in a dead zone still reach the
+Host. The header shows a "queued offline" badge while items are pending.
+
 **Approval workflow (R4):** approval-tier activities are parked as
 `awaiting_approval`. An authorized approver (a staff member with the `approve`
 permission on the activity's module, remote-enabled) sees them under **Approvals**

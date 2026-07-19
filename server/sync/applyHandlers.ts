@@ -80,6 +80,57 @@ export const APPLY_HANDLERS: Record<string, ApplyHandler> = {
     return { ok: true, message: `Updated "${action.title}".` };
   },
 
+  // Environmental reading capture: record a value against a monitoring item and
+  // classify it against the item's limits.
+  'env.reading': (db, s) => {
+    if (!s.target_uuid) return { ok: false, message: 'No monitoring item specified.' };
+    const item = db.prepare('SELECT id, name, lower_limit, upper_limit, warning_lower_limit, warning_upper_limit, critical_lower_limit, critical_upper_limit FROM monitoring_items WHERE uuid = ?').get(s.target_uuid) as
+      { id: number; name: string; lower_limit: number | null; upper_limit: number | null; warning_lower_limit: number | null; warning_upper_limit: number | null; critical_lower_limit: number | null; critical_upper_limit: number | null } | undefined;
+    if (!item) return { ok: false, message: 'Monitoring item not found on Host.' };
+    const p = s.payload ?? {};
+    const value = Number(p.value);
+    if (!Number.isFinite(value)) return { ok: false, message: 'A numeric reading value is required.' };
+    const below = (lim: number | null) => lim !== null && value < lim;
+    const above = (lim: number | null) => lim !== null && value > lim;
+    let status = 'normal';
+    if (below(item.critical_lower_limit) || above(item.critical_upper_limit) || below(item.lower_limit) || above(item.upper_limit)) status = 'critical';
+    else if (below(item.warning_lower_limit) || above(item.warning_upper_limit)) status = 'warning';
+    db.prepare(
+      `INSERT INTO monitoring_readings (monitoring_item_id, reading_date, value, entered_by_staff_id, status, comment)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(item.id, new Date().toISOString().slice(0, 10), value, s.actor_staff_id, status, p.comment === undefined ? null : String(p.comment));
+    return { ok: true, message: `Reading recorded for "${item.name}" (${status}).` };
+  },
+
+  // Equipment maintenance log.
+  'equipment.maintenance_log': (db, s) => {
+    if (!s.target_uuid) return { ok: false, message: 'No equipment specified.' };
+    const eq = db.prepare('SELECT id, name FROM equipment_items WHERE uuid = ?').get(s.target_uuid) as { id: number; name: string } | undefined;
+    if (!eq) return { ok: false, message: 'Equipment not found on Host.' };
+    const p = s.payload ?? {};
+    db.prepare(
+      `INSERT INTO equipment_maintenance_records (equipment_id, maintenance_date, maintenance_type, performed_by_staff_id, findings, action_taken, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'completed')`
+    ).run(eq.id, new Date().toISOString().slice(0, 10), p.maintenanceType === undefined ? 'routine' : String(p.maintenanceType), s.actor_staff_id,
+      p.findings === undefined ? null : String(p.findings), p.actionTaken === undefined ? null : String(p.actionTaken));
+    return { ok: true, message: `Maintenance logged for "${eq.name}".` };
+  },
+
+  // Equipment breakdown report.
+  'equipment.breakdown_report': (db, s) => {
+    if (!s.target_uuid) return { ok: false, message: 'No equipment specified.' };
+    const eq = db.prepare('SELECT id, name FROM equipment_items WHERE uuid = ?').get(s.target_uuid) as { id: number; name: string } | undefined;
+    if (!eq) return { ok: false, message: 'Equipment not found on Host.' };
+    const p = s.payload ?? {};
+    if (!p.description) return { ok: false, message: 'A description of the breakdown is required.' };
+    db.prepare(
+      `INSERT INTO equipment_breakdowns (equipment_id, breakdown_date, reported_by_staff_id, description, service_impact, immediate_action, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'open')`
+    ).run(eq.id, new Date().toISOString().slice(0, 10), s.actor_staff_id, String(p.description),
+      p.serviceImpact === undefined ? null : String(p.serviceImpact), p.immediateAction === undefined ? null : String(p.immediateAction));
+    return { ok: true, message: `Breakdown reported for "${eq.name}".` };
+  },
+
   // Leave request (approval tier): runs only when an authorized approver approves.
   // Creates the leave record as approved, attributed to the deciding approver.
   'leave.request': (db, s) => {
