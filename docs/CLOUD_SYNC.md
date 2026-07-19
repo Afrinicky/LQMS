@@ -93,16 +93,38 @@ Pieces (all in this repo):
 | `portal/index.html` | Self-contained read-only portal UI (no build step). |
 | `vercel.json` | Serves `portal/` as the site and `api/cloud/*` as serverless functions. |
 
+### Authentication (R1 — per-staff accounts)
+
+The portal uses per-staff cloud accounts (not a shared token):
+
+- Accounts live in Neon `cloud_users` and are **provisioned from the Host** —
+  `POST /api/remote-access/users` (Settings permission), which hashes a
+  cloud-specific password and writes it to Neon. Host login hashes are never
+  copied. Manage/disable via `GET /api/remote-access/users` and
+  `POST /api/remote-access/users/:id/status`.
+- Staff sign in at the portal with email + password (`POST /api/portal/login`),
+  receive a short-lived JWT (signed with `CLOUD_JWT_SECRET`), and must replace
+  their temporary password on first login (`POST /api/portal/change-password`).
+- All portal reads require a valid JWT. `CLOUD_API_TOKEN`, if set, remains a
+  legacy read-only fallback; prefer per-staff accounts and leave it unset.
+
+> This is R1 (identity & authentication) of `docs/REMOTE_STAFF_PORTAL_PLAN.md`.
+> Remote editing (submissions, approvals, RBAC scoping) is later phases; the
+> portal is still read-only today.
+
 ### Deploy
 
 1. Import this repo into **Vercel** (it uses `vercel.json` — static `portal/` +
    `api/` functions; no framework build).
-2. In the Vercel project, set two **Environment Variables**:
+2. In the Vercel project, set **Environment Variables**:
    - `DATABASE_URL` — your Neon connection string (the same database the Host
      replicates into).
-   - `CLOUD_API_TOKEN` — a long random secret you share with remote staff.
-3. Deploy. Remote staff open the Vercel URL, enter the token, and browse the
-   synced data (dashboards → lists → record detail), read-only.
+   - `CLOUD_JWT_SECRET` — a long random secret for signing login tokens.
+   - `CLOUD_API_TOKEN` — optional legacy shared read token (can be omitted).
+3. On the Host (with `SECH_LIMS_CLOUD_URL` set), provision staff accounts via
+   `/api/remote-access/users`.
+4. Deploy. Remote staff open the Vercel URL, sign in with their email + password,
+   set a new password, and browse the synced data (read-only).
 
 ### Notes
 

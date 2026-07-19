@@ -64,15 +64,32 @@
   </header>
 
   <main>
-    <!-- Connect gate -->
+    <!-- Sign-in gate -->
     <section id="gate" class="card" style="max-width:460px;margin:40px auto;">
       <h2 style="margin:0 0 6px;font-size:18px;">Sign in</h2>
-      <p class="muted" style="margin:0 0 14px;font-size:13px;">Enter the portal access token provided by your laboratory administrator. This view is read-only; changes are made on the laboratory Host.</p>
-      <input id="token" type="password" placeholder="Portal access token" autocomplete="off" />
+      <p class="muted" style="margin:0 0 14px;font-size:13px;">Sign in with the remote-access account your laboratory administrator created for you. This is a read-only view; changes are made on the laboratory Host.</p>
+      <label class="muted" style="font-size:12px;">Email</label>
+      <input id="email" type="email" placeholder="you@example.com" autocomplete="username" />
+      <label class="muted" style="font-size:12px;margin-top:8px;display:block;">Password</label>
+      <input id="password" type="password" placeholder="Password" autocomplete="current-password" />
       <div style="display:flex;gap:10px;margin-top:12px;">
-        <button id="connect">Connect</button>
+        <button id="signin">Sign in</button>
       </div>
       <p id="gateErr" class="err hidden" style="font-size:13px;margin-top:10px;"></p>
+    </section>
+
+    <!-- First-login / change password -->
+    <section id="pwgate" class="card hidden" style="max-width:460px;margin:40px auto;">
+      <h2 style="margin:0 0 6px;font-size:18px;">Set a new password</h2>
+      <p class="muted" style="margin:0 0 14px;font-size:13px;">Please replace the temporary password provided by your administrator.</p>
+      <label class="muted" style="font-size:12px;">Current (temporary) password</label>
+      <input id="pwCurrent" type="password" autocomplete="current-password" />
+      <label class="muted" style="font-size:12px;margin-top:8px;display:block;">New password (min 8 characters)</label>
+      <input id="pwNew" type="password" autocomplete="new-password" />
+      <div style="display:flex;gap:10px;margin-top:12px;">
+        <button id="pwSave">Update password</button>
+      </div>
+      <p id="pwErr" class="err hidden" style="font-size:13px;margin-top:10px;"></p>
     </section>
 
     <!-- App -->
@@ -114,13 +131,21 @@
 
     const $ = (id) => document.getElementById(id);
     const label = (e) => LABELS[e] || e;
-    let token = localStorage.getItem('sech_lims_cloud_token') || '';
+    let jwt = localStorage.getItem('sech_lims_portal_jwt') || '';
 
     async function api(path) {
-      const res = await fetch(path, { headers: { Authorization: 'Bearer ' + token } });
-      if (res.status === 401) { throw Object.assign(new Error('Invalid or expired token.'), { code: 401 }); }
+      const res = await fetch(path, { headers: { Authorization: 'Bearer ' + jwt } });
+      if (res.status === 401) { throw Object.assign(new Error('Session ended.'), { code: 401 }); }
       if (!res.ok) { const b = await res.json().catch(()=>({})); throw new Error(b.error || ('Request failed ('+res.status+')')); }
       return res.json();
+    }
+    async function postJson(path, body, withAuth) {
+      const headers = { 'Content-Type': 'application/json' };
+      if (withAuth) headers.Authorization = 'Bearer ' + jwt;
+      const res = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || ('Request failed (' + res.status + ')'));
+      return data;
     }
     const loading = (on) => $('loading').classList.toggle('hidden', !on);
 
@@ -191,25 +216,53 @@
       $('appErr').textContent = e.message; $('appErr').classList.remove('hidden');
     }
 
-    function connect() {
-      const t = $('token').value.trim();
-      if (!t) return;
-      token = t; localStorage.setItem('sech_lims_cloud_token', t);
-      $('gateErr').classList.add('hidden');
-      $('gate').classList.add('hidden'); $('app').classList.remove('hidden');
-      showOverview();
+    function enterApp() {
+      $('gate').classList.add('hidden'); $('pwgate').classList.add('hidden');
+      $('app').classList.remove('hidden'); showOverview();
     }
-    function disconnect(msg) {
-      token = ''; localStorage.removeItem('sech_lims_cloud_token');
-      $('app').classList.add('hidden'); $('gate').classList.remove('hidden'); $('token').value = '';
-      if (msg) { $('gateErr').textContent = msg; $('gateErr').classList.remove('hidden'); }
+    function showPwGate() {
+      $('gate').classList.add('hidden'); $('app').classList.add('hidden');
+      $('pwErr').classList.add('hidden'); $('pwgate').classList.remove('hidden');
     }
 
-    $('connect').onclick = connect;
-    $('token').addEventListener('keydown', e => { if (e.key === 'Enter') connect(); });
+    async function signIn() {
+      const email = $('email').value.trim(); const password = $('password').value;
+      if (!email || !password) return;
+      $('gateErr').classList.add('hidden');
+      try {
+        const { token, user } = await postJson('/api/portal/login', { email, password }, false);
+        jwt = token; localStorage.setItem('sech_lims_portal_jwt', token);
+        $('password').value = '';
+        if (user && user.mustChangePassword) { $('pwCurrent').value = password; showPwGate(); }
+        else enterApp();
+      } catch (e) { $('gateErr').textContent = e.message; $('gateErr').classList.remove('hidden'); }
+    }
+
+    async function changePassword() {
+      const currentPassword = $('pwCurrent').value; const newPassword = $('pwNew').value;
+      if (newPassword.length < 8) { $('pwErr').textContent = 'New password must be at least 8 characters.'; $('pwErr').classList.remove('hidden'); return; }
+      try {
+        await postJson('/api/portal/change-password', { currentPassword, newPassword }, true);
+        $('pwCurrent').value = ''; $('pwNew').value = '';
+        enterApp();
+      } catch (e) { $('pwErr').textContent = e.message; $('pwErr').classList.remove('hidden'); }
+    }
+
+    function logout(msg) {
+      jwt = ''; localStorage.removeItem('sech_lims_portal_jwt');
+      $('app').classList.add('hidden'); $('pwgate').classList.add('hidden'); $('gate').classList.remove('hidden');
+      if (msg) { $('gateErr').textContent = msg; $('gateErr').classList.remove('hidden'); }
+    }
+    // handleErr() calls disconnect on 401 — alias to logout.
+    const disconnect = logout;
+
+    $('signin').onclick = signIn;
+    $('password').addEventListener('keydown', e => { if (e.key === 'Enter') signIn(); });
+    $('pwSave').onclick = changePassword;
+    $('pwNew').addEventListener('keydown', e => { if (e.key === 'Enter') changePassword(); });
     $('home').onclick = showOverview;
-    $('disconnect').onclick = () => disconnect();
-    if (token) { $('gate').classList.add('hidden'); $('app').classList.remove('hidden'); showOverview(); }
+    $('disconnect').onclick = () => logout();
+    if (jwt) { enterApp(); }
   </script>
 </body>
 </html>

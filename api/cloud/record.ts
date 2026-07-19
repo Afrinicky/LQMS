@@ -1,10 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getRecord, READABLE_ENTITIES } from '../_lib/cloudDb.js';
-import { requireToken } from '../_lib/auth.js';
+import { requireUser } from '../_lib/auth.js';
 
 /** GET /api/cloud/record?entity=risks&uuid=... → one record (with tombstone flag). */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (!requireToken(req, res)) return;
+  if (!requireUser(req, res)) return;
   const entity = String(req.query.entity ?? '');
   const uuid = String(req.query.uuid ?? '');
   if (!READABLE_ENTITIES.has(entity)) {
