@@ -183,6 +183,37 @@ export async function insertSubmission(s: NewSubmission): Promise<void> {
   );
 }
 
+/** The signed-in staff member's own profile record (from the replicated staff data). */
+export async function getOwnStaffRecord(staffId: number): Promise<SyncedRow | null> {
+  try {
+    const r = await getPool().query(
+      `SELECT uuid, data, updated_at, deleted_at FROM synced_records
+        WHERE entity_table = 'staff' AND (data->>'id')::int = $1 AND deleted_at IS NULL LIMIT 1`,
+      [staffId]
+    );
+    return (r.rows[0] as SyncedRow) ?? null;
+  } catch (err) {
+    if (isUndefinedTable(err)) return null;
+    throw err;
+  }
+}
+
+/** Actions assigned to the signed-in staff member. */
+export async function getAssignedTasks(staffId: number, limit = 100): Promise<SyncedRow[]> {
+  try {
+    const r = await getPool().query(
+      `SELECT uuid, data, updated_at, deleted_at FROM synced_records
+        WHERE entity_table = 'actions' AND (data->>'assigned_to_staff_id')::int = $1 AND deleted_at IS NULL
+        ORDER BY updated_at DESC NULLS LAST LIMIT $2`,
+      [staffId, Math.min(Math.max(limit, 1), 500)]
+    );
+    return r.rows as SyncedRow[];
+  } catch (err) {
+    if (isUndefinedTable(err)) return [];
+    throw err;
+  }
+}
+
 export async function listSubmissionsForStaff(actorStaffId: number, limit = 50): Promise<unknown[]> {
   try {
     const r = await getPool().query(

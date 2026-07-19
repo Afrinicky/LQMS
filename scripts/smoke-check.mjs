@@ -108,6 +108,8 @@ checkFile('docs/REMOTE_STAFF_PORTAL_PLAN.md');
 // Remote Staff Portal — R3 submissions + reconciler
 checkFile('api/portal/submit.ts');
 checkFile('api/portal/submissions.ts');
+checkFile('api/portal/profile.ts');
+checkFile('api/portal/my-tasks.ts');
 checkFile('server/sync/applyHandlers.ts');
 
 // PWA assets (installable mobile/desktop client)

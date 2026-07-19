@@ -22,8 +22,9 @@
     main { max-width:1100px; margin:0 auto; padding:22px; }
     .card { background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:18px; }
     .muted { color:var(--muted); } .err { color:#FF6B7D; }
-    input { width:100%; padding:11px 12px; border-radius:9px; border:1px solid var(--border);
-            background:var(--panel2); color:var(--text); font-size:14px; }
+    input, select, textarea { width:100%; padding:10px 12px; border-radius:9px; border:1px solid var(--border);
+            background:var(--panel2); color:var(--text); font-size:14px; font-family:inherit; }
+    textarea { resize:vertical; }
     button { background:var(--blue); color:#fff; border:0; border-radius:9px; padding:10px 16px;
              font-weight:600; cursor:pointer; font-size:13.5px; }
     button.ghost { background:transparent; border:1px solid var(--border); color:var(--muted); }
@@ -99,6 +100,7 @@
         <span id="loading" class="hidden"><span class="spin"></span></span>
         <div style="margin-left:auto;display:flex;gap:8px;">
           <button id="home" class="ghost hidden">← Overview</button>
+          <button id="workBtn" class="ghost">My work</button>
           <button id="subsBtn" class="ghost">My submissions</button>
           <button id="disconnect" class="ghost">Disconnect</button>
         </div>
@@ -114,6 +116,7 @@
       <div id="list" class="card hidden"></div>
       <div id="detail" class="card hidden"></div>
       <div id="subs" class="card hidden"></div>
+      <div id="work" class="card hidden"></div>
     </section>
   </main>
 
@@ -175,18 +178,66 @@
 
     function canDo(key) { return !!(caps && (caps.activities || []).some(a => a.key === key && a.allowed)); }
 
-    async function submitActivity(activity, targetTable, targetUuid, msgEl) {
+    async function submitActivity(activity, targetTable, targetUuid, payload, msgEl) {
       try {
         msgEl.textContent = 'Submitting…';
-        const r = await postJson('/api/portal/submit', { activity, targetTable, targetUuid }, true);
+        const r = await postJson('/api/portal/submit', { activity, targetTable, targetUuid, payload: payload || {} }, true);
         msgEl.textContent = r.tier === 'approval'
           ? 'Submitted — pending approval on the Host.'
           : 'Submitted — pending Host processing. Track it under “My submissions”.';
       } catch (e) { if (e.code === 401) { logout('Session ended.'); return; } msgEl.textContent = e.message; }
     }
 
+    async function showWork() {
+      ['overview', 'list', 'detail', 'subs'].forEach(id => $(id).classList.add('hidden'));
+      $('work').classList.remove('hidden'); $('home').classList.remove('hidden'); $('viewTitle').textContent = 'My work';
+      loading(true); $('appErr').classList.add('hidden');
+      try {
+        const prof = await api('/api/portal/profile');
+        const { tasks } = await api('/api/portal/my-tasks');
+        const pd = prof.profile ? prof.profile.data : {};
+        let html = '';
+        if (canDo('profile.update')) {
+          html += '<h3 style="margin:0 0 8px;">My profile</h3><div style="max-width:420px;">'
+            + '<label class="muted" style="font-size:12px;">Phone</label><input id="pfPhone" value="' + esc(pd.phone || '') + '"/>'
+            + '<label class="muted" style="font-size:12px;margin-top:8px;display:block;">Email</label><input id="pfEmail" value="' + esc(pd.email || '') + '"/>'
+            + '<div style="margin-top:10px;"><button id="pfSave">Save profile</button> <span id="pfMsg" class="muted" style="margin-left:8px;font-size:12.5px;"></span></div></div>';
+        }
+        html += '<h3 style="margin:18px 0 8px;">My tasks</h3>';
+        if (!canDo('task.update')) html += '<p class="muted">Remote task updates are not enabled for you.</p>';
+        else if (!tasks.length) html += '<p class="muted">No tasks assigned to you.</p>';
+        else {
+          for (const t of tasks) {
+            const d = t.data || {}; const u = esc(t.uuid);
+            html += '<div style="background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px;">'
+              + '<div style="font-weight:600;">' + esc(d.title || 'Task') + '</div>'
+              + '<div class="muted" style="font-size:12px;margin:4px 0;">Current status: ' + esc(d.status || '') + '</div>'
+              + '<label class="muted" style="font-size:12px;">Update status</label>'
+              + '<select class="tkStatus" data-uuid="' + u + '"><option value="">— keep —</option>'
+              + ['Not started', 'In progress', 'Completed', 'Blocked'].map(o => '<option' + (d.status === o ? ' selected' : '') + '>' + o + '</option>').join('') + '</select>'
+              + '<label class="muted" style="font-size:12px;margin-top:6px;display:block;">Notes</label>'
+              + '<textarea class="tkNotes" data-uuid="' + u + '" rows="2">' + esc(d.completion_notes || '') + '</textarea>'
+              + '<div style="margin-top:8px;"><button class="tkSave" data-uuid="' + u + '">Update task</button> <span class="tkMsg muted" data-uuid="' + u + '" style="margin-left:8px;font-size:12.5px;"></span></div></div>';
+          }
+        }
+        $('work').innerHTML = html;
+        const pfSave = document.getElementById('pfSave');
+        if (pfSave) pfSave.onclick = () => submitActivity('profile.update', 'staff', prof.profile ? prof.profile.uuid : null, { phone: $('pfPhone').value, email: $('pfEmail').value }, $('pfMsg'));
+        $('work').querySelectorAll('.tkSave').forEach(btn => {
+          const uuid = btn.getAttribute('data-uuid');
+          btn.onclick = () => {
+            const status = $('work').querySelector('.tkStatus[data-uuid="' + uuid + '"]').value;
+            const notes = $('work').querySelector('.tkNotes[data-uuid="' + uuid + '"]').value;
+            const msg = $('work').querySelector('.tkMsg[data-uuid="' + uuid + '"]');
+            const payload = { completionNotes: notes }; if (status) payload.status = status;
+            submitActivity('task.update', 'actions', uuid, payload, msg);
+          };
+        });
+      } catch (e) { handleErr(e); } finally { loading(false); }
+    }
+
     async function showSubmissions() {
-      $('overview').classList.add('hidden'); $('list').classList.add('hidden'); $('detail').classList.add('hidden');
+      $('overview').classList.add('hidden'); $('list').classList.add('hidden'); $('detail').classList.add('hidden'); $('work').classList.add('hidden');
       $('subs').classList.remove('hidden'); $('home').classList.remove('hidden'); $('viewTitle').textContent = 'My submissions';
       loading(true); $('appErr').classList.add('hidden');
       try {
@@ -204,7 +255,7 @@
     }
 
     async function showOverview() {
-      $('home').classList.add('hidden'); $('list').classList.add('hidden'); $('detail').classList.add('hidden'); $('subs').classList.add('hidden');
+      $('home').classList.add('hidden'); $('list').classList.add('hidden'); $('detail').classList.add('hidden'); $('subs').classList.add('hidden'); $('work').classList.add('hidden');
       $('overview').classList.remove('hidden'); $('viewTitle').textContent = 'Overview';
       loading(true); $('appErr').classList.add('hidden');
       try {
@@ -221,7 +272,7 @@
     }
 
     async function showList(entity) {
-      $('overview').classList.add('hidden'); $('detail').classList.add('hidden'); $('subs').classList.add('hidden');
+      $('overview').classList.add('hidden'); $('detail').classList.add('hidden'); $('subs').classList.add('hidden'); $('work').classList.add('hidden');
       $('list').classList.remove('hidden'); $('home').classList.remove('hidden');
       $('viewTitle').textContent = label(entity); loading(true); $('appErr').classList.add('hidden');
       try {
@@ -243,7 +294,7 @@
     }
 
     async function showDetail(entity, uuid) {
-      $('list').classList.add('hidden'); $('subs').classList.add('hidden'); $('detail').classList.remove('hidden'); loading(true); $('appErr').classList.add('hidden');
+      $('list').classList.add('hidden'); $('subs').classList.add('hidden'); $('work').classList.add('hidden'); $('detail').classList.remove('hidden'); loading(true); $('appErr').classList.add('hidden');
       try {
         const { record } = await api('/api/cloud/record?entity=' + encodeURIComponent(entity) + '&uuid=' + encodeURIComponent(uuid));
         const d = record.data || {};
@@ -265,7 +316,7 @@
         $('detail').innerHTML = html;
         $('back').onclick = () => showList(entity);
         const ackBtn = document.getElementById('ackBtn');
-        if (ackBtn) ackBtn.onclick = () => submitActivity('sop.acknowledge', 'documents', uuid, document.getElementById('ackMsg'));
+        if (ackBtn) ackBtn.onclick = () => submitActivity('sop.acknowledge', 'documents', uuid, {}, document.getElementById('ackMsg'));
       } catch (e) { handleErr(e); } finally { loading(false); }
     }
 
@@ -325,6 +376,7 @@
     $('pwNew').addEventListener('keydown', e => { if (e.key === 'Enter') changePassword(); });
     $('home').onclick = showOverview;
     $('subsBtn').onclick = showSubmissions;
+    $('workBtn').onclick = showWork;
     $('disconnect').onclick = () => logout();
     if (jwt) { enterApp(); }
   </script>

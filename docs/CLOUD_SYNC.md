@@ -126,10 +126,13 @@ authoritative data directly:
 3. The outcome is written back; staff see it under **My submissions** in the
    portal (`GET /api/portal/submissions`).
 
-The first shipped activity is **SOP/document acknowledgement**; profile updates,
-task updates, notifications and the rest of the catalog follow in subsequent
-phases. The Host never trusts the client for identity or permission — it
-re-checks everything.
+Shipped self-service activities (auto-apply, ownership enforced on the Host):
+**SOP/document acknowledgement**, **own-profile update** (contact fields), and
+**assigned-task update** (status/notes — only the task's assignee may update it,
+via the "My work" view). Notification acknowledgement is deferred until
+notifications are replicated to the cloud; approval-tier activities (incidents,
+CAPA closure, leave, inventory) arrive with R4/R5. The Host never trusts the
+client for identity, permission, or ownership — it re-checks everything.
 
 ### Deploy
 

@@ -41,4 +41,40 @@ export const APPLY_HANDLERS: Record<string, ApplyHandler> = {
     }
     return { ok: true, message: `Acknowledged "${doc.title}".` };
   },
+
+  // Own-profile update: a staff member may change only their own contact fields.
+  'profile.update': (db, s) => {
+    const p = s.payload ?? {};
+    const phone = p.phone === undefined ? undefined : (p.phone === null ? null : String(p.phone));
+    const email = p.email === undefined ? undefined : (p.email === null ? null : String(p.email));
+    if (phone === undefined && email === undefined) return { ok: false, message: 'Nothing to update.' };
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    if (phone !== undefined) { sets.push('phone = ?'); vals.push(phone); }
+    if (email !== undefined) { sets.push('email = ?'); vals.push(email); }
+    vals.push(s.actor_staff_id);
+    const info = db.prepare(`UPDATE staff SET ${sets.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...vals);
+    if (info.changes === 0) return { ok: false, message: 'Staff record not found.' };
+    return { ok: true, message: 'Profile updated.' };
+  },
+
+  // Assigned-task update: only the staff the action is assigned to may update it,
+  // and only its status / completion notes.
+  'task.update': (db, s) => {
+    if (!s.target_uuid) return { ok: false, message: 'No task specified.' };
+    const action = db.prepare('SELECT id, assigned_to_staff_id, title FROM actions WHERE uuid = ?').get(s.target_uuid) as { id: number; assigned_to_staff_id: number | null; title: string } | undefined;
+    if (!action) return { ok: false, message: 'Task not found on Host.' };
+    if (action.assigned_to_staff_id !== s.actor_staff_id) return { ok: false, message: 'This task is not assigned to you.' };
+    const p = s.payload ?? {};
+    const status = p.status === undefined ? undefined : String(p.status);
+    const notes = p.completionNotes === undefined ? undefined : String(p.completionNotes);
+    if (status === undefined && notes === undefined) return { ok: false, message: 'Nothing to update.' };
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    if (status !== undefined) { sets.push('status = ?'); vals.push(status); }
+    if (notes !== undefined) { sets.push('completion_notes = ?'); vals.push(notes); }
+    vals.push(action.id);
+    db.prepare(`UPDATE actions SET ${sets.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...vals);
+    return { ok: true, message: `Updated "${action.title}".` };
+  },
 };
