@@ -19,6 +19,8 @@ export interface Submission {
   target_uuid: string | null;
   base_version: string | null;
   payload: Record<string, unknown> | null;
+  /** Set on approval-tier submissions once decided (R4); the approving staff id. */
+  decided_by_staff_id?: number | null;
 }
 
 export interface ApplyResult { ok: boolean; message: string; }
@@ -76,5 +78,21 @@ export const APPLY_HANDLERS: Record<string, ApplyHandler> = {
     vals.push(action.id);
     db.prepare(`UPDATE actions SET ${sets.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...vals);
     return { ok: true, message: `Updated "${action.title}".` };
+  },
+
+  // Leave request (approval tier): runs only when an authorized approver approves.
+  // Creates the leave record as approved, attributed to the deciding approver.
+  'leave.request': (db, s) => {
+    const p = s.payload ?? {};
+    const type = p.type === undefined ? null : String(p.type);
+    const start = p.startDate === undefined ? null : String(p.startDate);
+    const end = p.endDate === undefined ? null : String(p.endDate);
+    const reason = p.reason === undefined ? null : String(p.reason);
+    if (!start || !end) return { ok: false, message: 'Leave start and end dates are required.' };
+    db.prepare(
+      `INSERT INTO leave_requests (staff_id, leave_type, start_date, end_date, reason, status, approved_by_staff_id, decided_at)
+       VALUES (?, ?, ?, ?, ?, 'approved', ?, CURRENT_TIMESTAMP)`
+    ).run(s.actor_staff_id, type, start, end, reason, s.decided_by_staff_id ?? null);
+    return { ok: true, message: `Leave approved (${start} → ${end}).` };
   },
 };

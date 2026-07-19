@@ -101,6 +101,7 @@
         <div style="margin-left:auto;display:flex;gap:8px;">
           <button id="home" class="ghost hidden">← Overview</button>
           <button id="workBtn" class="ghost">My work</button>
+          <button id="apprBtn" class="ghost hidden">Approvals</button>
           <button id="subsBtn" class="ghost">My submissions</button>
           <button id="disconnect" class="ghost">Disconnect</button>
         </div>
@@ -117,6 +118,7 @@
       <div id="detail" class="card hidden"></div>
       <div id="subs" class="card hidden"></div>
       <div id="work" class="card hidden"></div>
+      <div id="appr" class="card hidden"></div>
     </section>
   </main>
 
@@ -154,8 +156,10 @@
         + (allowed.length ? '<div style="margin-top:8px;">' + allowed.map(a =>
             '<span class="pill" style="margin:0 6px 6px 0;display:inline-block;">' + esc(a.label) + (a.tier === 'approval' ? ' · approval' : '') + '</span>'
           ).join('') + '</div>' : '')
-        + '<div class="muted" style="font-size:11px;margin-top:6px;">Remote actions are enabled progressively; the portal is read-only today.</div>'
+        + '<div class="muted" style="font-size:11px;margin-top:6px;">Remote actions are enabled progressively.</div>'
         + '</div>';
+      const canApprove = !!(caps && (caps.approvals || []).some(a => a.allowed));
+      $('apprBtn').classList.toggle('hidden', !canApprove);
     }
 
     async function api(path) {
@@ -188,8 +192,50 @@
       } catch (e) { if (e.code === 401) { logout('Session ended.'); return; } msgEl.textContent = e.message; }
     }
 
+    const ACT_LABELS = { 'leave.request': 'Leave request', 'inventory.request': 'Inventory request' };
+    function actLabel(k) { return ACT_LABELS[k] || k; }
+    function summarizePayload(pl) {
+      if (pl && (pl.startDate || pl.endDate)) return 'Leave ' + (pl.type || '') + ': ' + (pl.startDate || '?') + ' → ' + (pl.endDate || '?') + (pl.reason ? ' — ' + pl.reason : '');
+      try { return JSON.stringify(pl); } catch { return ''; }
+    }
+
+    async function showApprovals() {
+      ['overview', 'list', 'detail', 'subs', 'work'].forEach(id => $(id).classList.add('hidden'));
+      $('appr').classList.remove('hidden'); $('home').classList.remove('hidden'); $('viewTitle').textContent = 'Approvals';
+      loading(true); $('appErr').classList.add('hidden');
+      try {
+        const { approvals } = await api('/api/portal/approvals');
+        let html = '';
+        if (!approvals.length) html = '<p class="muted">No pending approvals.</p>';
+        for (const a of approvals) {
+          const u = esc(a.submission_uuid);
+          html += '<div style="background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px;">'
+            + '<div style="font-weight:600;">' + esc(actLabel(a.activity)) + '</div>'
+            + '<div class="muted" style="font-size:12px;margin:4px 0;">From: ' + esc(a.actor_email || ('staff #' + a.actor_staff_id)) + ' · ' + (a.created_at ? new Date(a.created_at).toLocaleString() : '') + '</div>'
+            + '<div style="font-size:12.5px;margin:6px 0;">' + esc(summarizePayload(a.payload)) + '</div>'
+            + '<input class="apReason" data-u="' + u + '" placeholder="Reason (optional)"/>'
+            + '<div style="margin-top:8px;"><button class="apOk" data-u="' + u + '">Approve</button> '
+            + '<button class="ghost apNo" data-u="' + u + '">Reject</button> '
+            + '<span class="apMsg muted" data-u="' + u + '" style="margin-left:8px;font-size:12.5px;"></span></div></div>';
+        }
+        $('appr').innerHTML = html;
+        $('appr').querySelectorAll('.apOk').forEach(b => b.onclick = () => decide(b.getAttribute('data-u'), 'approve'));
+        $('appr').querySelectorAll('.apNo').forEach(b => b.onclick = () => decide(b.getAttribute('data-u'), 'reject'));
+      } catch (e) { handleErr(e); } finally { loading(false); }
+    }
+    async function decide(uuid, decision) {
+      const reason = $('appr').querySelector('.apReason[data-u="' + uuid + '"]').value;
+      const msg = $('appr').querySelector('.apMsg[data-u="' + uuid + '"]');
+      try {
+        msg.textContent = 'Submitting…';
+        await postJson('/api/portal/approve', { submissionUuid: uuid, decision, reason }, true);
+        msg.textContent = decision === 'approve' ? 'Approved — the Host will finalize.' : 'Rejected.';
+        setTimeout(showApprovals, 900);
+      } catch (e) { if (e.code === 401) { logout('Session ended.'); return; } msg.textContent = e.message; }
+    }
+
     async function showWork() {
-      ['overview', 'list', 'detail', 'subs'].forEach(id => $(id).classList.add('hidden'));
+      ['overview', 'list', 'detail', 'subs', 'appr'].forEach(id => $(id).classList.add('hidden'));
       $('work').classList.remove('hidden'); $('home').classList.remove('hidden'); $('viewTitle').textContent = 'My work';
       loading(true); $('appErr').classList.add('hidden');
       try {
@@ -220,7 +266,21 @@
               + '<div style="margin-top:8px;"><button class="tkSave" data-uuid="' + u + '">Update task</button> <span class="tkMsg muted" data-uuid="' + u + '" style="margin-left:8px;font-size:12.5px;"></span></div></div>';
           }
         }
+        if (canDo('leave.request')) {
+          html += '<h3 style="margin:18px 0 8px;">Request leave</h3><div style="max-width:460px;">'
+            + '<label class="muted" style="font-size:12px;">Type</label><select id="lvType"><option>Annual</option><option>Sick</option><option>Compassionate</option><option>Other</option></select>'
+            + '<label class="muted" style="font-size:12px;margin-top:8px;display:block;">From</label><input id="lvStart" type="date"/>'
+            + '<label class="muted" style="font-size:12px;margin-top:8px;display:block;">To</label><input id="lvEnd" type="date"/>'
+            + '<label class="muted" style="font-size:12px;margin-top:8px;display:block;">Reason</label><textarea id="lvReason" rows="2"></textarea>'
+            + '<div style="margin-top:10px;"><button id="lvSave">Submit leave request</button> <span id="lvMsg" class="muted" style="margin-left:8px;font-size:12.5px;"></span></div></div>';
+        }
         $('work').innerHTML = html;
+        const lvSave = document.getElementById('lvSave');
+        if (lvSave) lvSave.onclick = () => {
+          const start = $('lvStart').value, end = $('lvEnd').value, msg = $('lvMsg');
+          if (!start || !end) { msg.textContent = 'Start and end dates are required.'; return; }
+          submitActivity('leave.request', null, null, { type: $('lvType').value, startDate: start, endDate: end, reason: $('lvReason').value }, msg);
+        };
         const pfSave = document.getElementById('pfSave');
         if (pfSave) pfSave.onclick = () => submitActivity('profile.update', 'staff', prof.profile ? prof.profile.uuid : null, { phone: $('pfPhone').value, email: $('pfEmail').value }, $('pfMsg'));
         $('work').querySelectorAll('.tkSave').forEach(btn => {
@@ -237,7 +297,7 @@
     }
 
     async function showSubmissions() {
-      $('overview').classList.add('hidden'); $('list').classList.add('hidden'); $('detail').classList.add('hidden'); $('work').classList.add('hidden');
+      $('overview').classList.add('hidden'); $('list').classList.add('hidden'); $('detail').classList.add('hidden'); $('work').classList.add('hidden'); $('appr').classList.add('hidden');
       $('subs').classList.remove('hidden'); $('home').classList.remove('hidden'); $('viewTitle').textContent = 'My submissions';
       loading(true); $('appErr').classList.add('hidden');
       try {
@@ -255,7 +315,7 @@
     }
 
     async function showOverview() {
-      $('home').classList.add('hidden'); $('list').classList.add('hidden'); $('detail').classList.add('hidden'); $('subs').classList.add('hidden'); $('work').classList.add('hidden');
+      $('home').classList.add('hidden'); $('list').classList.add('hidden'); $('detail').classList.add('hidden'); $('subs').classList.add('hidden'); $('work').classList.add('hidden'); $('appr').classList.add('hidden');
       $('overview').classList.remove('hidden'); $('viewTitle').textContent = 'Overview';
       loading(true); $('appErr').classList.add('hidden');
       try {
@@ -272,7 +332,7 @@
     }
 
     async function showList(entity) {
-      $('overview').classList.add('hidden'); $('detail').classList.add('hidden'); $('subs').classList.add('hidden'); $('work').classList.add('hidden');
+      $('overview').classList.add('hidden'); $('detail').classList.add('hidden'); $('subs').classList.add('hidden'); $('work').classList.add('hidden'); $('appr').classList.add('hidden');
       $('list').classList.remove('hidden'); $('home').classList.remove('hidden');
       $('viewTitle').textContent = label(entity); loading(true); $('appErr').classList.add('hidden');
       try {
@@ -294,7 +354,7 @@
     }
 
     async function showDetail(entity, uuid) {
-      $('list').classList.add('hidden'); $('subs').classList.add('hidden'); $('work').classList.add('hidden'); $('detail').classList.remove('hidden'); loading(true); $('appErr').classList.add('hidden');
+      $('list').classList.add('hidden'); $('subs').classList.add('hidden'); $('work').classList.add('hidden'); $('appr').classList.add('hidden'); $('detail').classList.remove('hidden'); loading(true); $('appErr').classList.add('hidden');
       try {
         const { record } = await api('/api/cloud/record?entity=' + encodeURIComponent(entity) + '&uuid=' + encodeURIComponent(uuid));
         const d = record.data || {};
@@ -377,6 +437,7 @@
     $('home').onclick = showOverview;
     $('subsBtn').onclick = showSubmissions;
     $('workBtn').onclick = showWork;
+    $('apprBtn').onclick = showApprovals;
     $('disconnect').onclick = () => logout();
     if (jwt) { enterApp(); }
   </script>

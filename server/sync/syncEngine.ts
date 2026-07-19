@@ -22,7 +22,7 @@ import { getStore } from '../db/store.js';
 import { getDb } from '../db/database.js';
 import { PostgresStore } from '../db/postgresStore.js';
 import { SYNCABLE_TABLES, isSyncableTable } from '../db/syncableTables.js';
-import { canRemoteActivity } from '../services/remoteCapabilities.js';
+import { canRemoteActivity, canApproveActivity } from '../services/remoteCapabilities.js';
 import { findActivity } from '../../shared/constants/remoteAccess.js';
 import { APPLY_HANDLERS, type Submission } from './applyHandlers.js';
 import { audit } from '../services/auditService.js';
@@ -279,7 +279,29 @@ class CloudSyncEngine implements SyncEngine {
         processed_at timestamptz
       );
       CREATE INDEX IF NOT EXISTS idx_remote_submissions_status ON remote_submissions (status);
+      ALTER TABLE remote_submissions ADD COLUMN IF NOT EXISTS decision text;
+      ALTER TABLE remote_submissions ADD COLUMN IF NOT EXISTS decided_by_staff_id integer;
+      ALTER TABLE remote_submissions ADD COLUMN IF NOT EXISTS decided_by_email text;
+      ALTER TABLE remote_submissions ADD COLUMN IF NOT EXISTS decision_reason text;
+      ALTER TABLE remote_submissions ADD COLUMN IF NOT EXISTS decided_at timestamptz;
     `);
+  }
+
+  /** Run an activity's apply handler in a transaction. Capture is left ON so
+   *  changes to syncable tables replicate back and the portal reflects them. */
+  private runApply(db: ReturnType<typeof getDb>, s: Submission): { status: string; message: string } {
+    const handler = APPLY_HANDLERS[s.activity];
+    if (!handler) return { status: 'rejected', message: 'No apply handler for this activity yet.' };
+    try {
+      const result = db.transaction(() => handler(db, s))();
+      if (result.ok) {
+        audit(undefined, { action: 'remote_apply', entity: 'remote_submission', entityId: s.submission_uuid, newValue: { activity: s.activity, actorStaffId: s.actor_staff_id, message: result.message } });
+        return { status: 'applied', message: result.message };
+      }
+      return { status: 'rejected', message: result.message };
+    } catch (err) {
+      return { status: 'rejected', message: err instanceof Error ? err.message : 'Apply failed.' };
+    }
   }
 
   async processSubmissions(): Promise<{ processed: number }> {
@@ -288,43 +310,46 @@ class CloudSyncEngine implements SyncEngine {
     await this.ensureSubmissionsSchema();
     const cloud = this.cloudStore();
     const db = getDb();
+    let processed = 0;
+
+    // Pass 1: newly-submitted proposals. Validate the requester first, then
+    // auto-apply, or park approval-tier activities for a decision.
     const pending = await cloud.all<Submission>(
       `SELECT id, submission_uuid, actor_staff_id, actor_email, activity, target_table, target_uuid, base_version, payload
          FROM remote_submissions WHERE status = 'pending_sync' ORDER BY id`
     );
-    let processed = 0;
     for (const s of pending) {
       let status = 'rejected';
       let message = '';
       const def = findActivity(s.activity);
-      if (!def) {
-        message = 'Unknown activity.';
-      } else if (def.tier === 'approval') {
-        // R4 handles approvals; park it for now (authoritative decision on Host).
-        status = 'awaiting_approval';
-        message = 'Awaiting approval on the Host.';
+      if (!def) message = 'Unknown activity.';
+      else if (!canRemoteActivity(s.actor_staff_id, s.activity)) message = 'Not permitted for this staff member.';
+      else if (def.tier === 'approval') { status = 'awaiting_approval'; message = 'Awaiting approval.'; }
+      else { const r = this.runApply(db, s); status = r.status; message = r.message; }
+      await cloud.run(
+        `UPDATE remote_submissions SET status = ?, result = ?, processed_at = CASE WHEN ? = 'awaiting_approval' THEN NULL ELSE now() END WHERE id = ?`,
+        [status, message, status, s.id]
+      );
+      processed++;
+    }
+
+    // Pass 2: decided approvals. Re-validate the approver's authority (and that
+    // the requester is still permitted), then apply or reject — all on the Host.
+    const decided = await cloud.all<Submission & { decision: string | null; decision_reason: string | null }>(
+      `SELECT id, submission_uuid, actor_staff_id, actor_email, activity, target_table, target_uuid, base_version, payload, decided_by_staff_id, decision, decision_reason
+         FROM remote_submissions WHERE status = 'awaiting_approval' AND decision IS NOT NULL AND processed_at IS NULL ORDER BY id`
+    );
+    for (const s of decided) {
+      let status = 'rejected';
+      let message = '';
+      if (!s.decided_by_staff_id || !canApproveActivity(s.decided_by_staff_id, s.activity)) {
+        message = 'Approver is not authorized.';
+      } else if (s.decision === 'reject') {
+        message = s.decision_reason || 'Rejected by approver.';
       } else if (!canRemoteActivity(s.actor_staff_id, s.activity)) {
-        message = 'Not permitted for this staff member.';
+        message = 'Requester is no longer permitted.';
       } else {
-        const handler = APPLY_HANDLERS[s.activity];
-        if (!handler) {
-          message = 'No apply handler for this activity yet.';
-        } else {
-          try {
-            // Capture is left ON: changes to syncable tables replicate back so the
-            // portal reflects the applied result on the next push.
-            const result = db.transaction(() => handler(db, s))();
-            if (result.ok) {
-              status = 'applied';
-              message = result.message;
-              audit(undefined, { action: 'remote_apply', entity: 'remote_submission', entityId: s.submission_uuid, newValue: { activity: s.activity, actorStaffId: s.actor_staff_id, message } });
-            } else {
-              message = result.message;
-            }
-          } catch (err) {
-            message = err instanceof Error ? err.message : 'Apply failed.';
-          }
-        }
+        const r = this.runApply(db, s); status = r.status; message = r.message;
       }
       await cloud.run(`UPDATE remote_submissions SET status = ?, result = ?, processed_at = now() WHERE id = ?`, [status, message, s.id]);
       processed++;

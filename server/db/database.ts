@@ -3904,4 +3904,20 @@ CREATE INDEX IF NOT EXISTS idx_sync_outbox_status ON sync_outbox(sync_status);
   const staffRemoteCols = new Set((database.prepare('PRAGMA table_info(staff)').all() as Array<{ name: string }>).map(c => c.name));
   if (!staffRemoteCols.has('remote_enabled')) database.exec('ALTER TABLE staff ADD COLUMN remote_enabled INTEGER NOT NULL DEFAULT 0');
   if (!staffRemoteCols.has('remote_scope')) database.exec('ALTER TABLE staff ADD COLUMN remote_scope TEXT');
+
+  // Leave requests (R4/R5): created when a remote leave.request submission is
+  // approved. A minimal Host record; a fuller leave module can build on it later.
+  database.exec(`
+CREATE TABLE IF NOT EXISTS leave_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  staff_id INTEGER NOT NULL REFERENCES staff(id),
+  leave_type TEXT,
+  start_date TEXT,
+  end_date TEXT,
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  approved_by_staff_id INTEGER REFERENCES staff(id),
+  decided_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);`);
 }

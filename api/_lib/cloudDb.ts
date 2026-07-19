@@ -227,3 +227,53 @@ export async function listSubmissionsForStaff(actorStaffId: number, limit = 50):
     throw err;
   }
 }
+
+// --- Approvals (R4) --------------------------------------------------------
+
+/** Undecided approval-tier submissions for the given activities, excluding the
+ *  approver's own submissions. */
+export async function listApprovableSubmissions(activityKeys: string[], approverStaffId: number): Promise<unknown[]> {
+  if (!activityKeys.length) return [];
+  try {
+    const r = await getPool().query(
+      `SELECT submission_uuid, actor_staff_id, actor_email, activity, payload, created_at
+         FROM remote_submissions
+        WHERE status = 'awaiting_approval' AND decision IS NULL
+          AND activity = ANY($1) AND actor_staff_id <> $2
+        ORDER BY created_at ASC LIMIT 200`,
+      [activityKeys, approverStaffId]
+    );
+    return r.rows;
+  } catch (err) {
+    if (isUndefinedTable(err)) return [];
+    throw err;
+  }
+}
+
+export async function getSubmissionByUuid(submissionUuid: string): Promise<{ activity: string; actor_staff_id: number } | null> {
+  try {
+    const r = await getPool().query(
+      `SELECT activity, actor_staff_id FROM remote_submissions WHERE submission_uuid = $1`,
+      [submissionUuid]
+    );
+    return (r.rows[0] as { activity: string; actor_staff_id: number }) ?? null;
+  } catch (err) {
+    if (isUndefinedTable(err)) return null;
+    throw err;
+  }
+}
+
+/** Record an approver's decision on an undecided, awaiting_approval submission
+ *  that is not the approver's own. Returns rows affected (0 = nothing recorded). */
+export async function recordDecision(
+  submissionUuid: string, decision: 'approve' | 'reject',
+  deciderStaffId: number, deciderEmail: string | null, reason: string | null
+): Promise<number> {
+  const r = await getPool().query(
+    `UPDATE remote_submissions
+        SET decision = $1, decided_by_staff_id = $2, decided_by_email = $3, decision_reason = $4, decided_at = now()
+      WHERE submission_uuid = $5 AND status = 'awaiting_approval' AND decision IS NULL AND actor_staff_id <> $2`,
+    [decision, deciderStaffId, deciderEmail, reason, submissionUuid]
+  );
+  return r.rowCount ?? 0;
+}

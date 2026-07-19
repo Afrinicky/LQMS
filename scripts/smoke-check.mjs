@@ -110,6 +110,8 @@ checkFile('api/portal/submit.ts');
 checkFile('api/portal/submissions.ts');
 checkFile('api/portal/profile.ts');
 checkFile('api/portal/my-tasks.ts');
+checkFile('api/portal/approvals.ts');
+checkFile('api/portal/approve.ts');
 checkFile('server/sync/applyHandlers.ts');
 
 // PWA assets (installable mobile/desktop client)

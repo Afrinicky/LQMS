@@ -13,7 +13,7 @@
 import { getDb } from '../db/database.js';
 import { resolvePermission } from './permissionResolver.js';
 import {
-  REMOTE_VIEW_MODULES, REMOTE_ACTIVITIES, type RemoteCapabilities,
+  REMOTE_VIEW_MODULES, REMOTE_ACTIVITIES, findActivity, type RemoteCapabilities,
 } from '../../shared/constants/remoteAccess.js';
 
 interface StaffRow { id: number; remote_enabled: number; remote_scope: string | null; }
@@ -48,6 +48,7 @@ export function computeRemoteCapabilities(staffId: number): RemoteCapabilities {
 
   const viewModules: string[] = [];
   const activities: RemoteCapabilities['activities'] = [];
+  const approvals: RemoteCapabilities['approvals'] = [];
 
   if (remoteEnabled && userId) {
     for (const moduleKey of REMOTE_VIEW_MODULES) {
@@ -61,22 +62,37 @@ export function computeRemoteCapabilities(staffId: number): RemoteCapabilities {
         ? true
         : !!act.requires && resolvePermission(userId, act.requires.module, act.requires.action).allowed;
       activities.push({ key: act.key, label: act.label, tier: act.tier, allowed: remoteEnabled && inScope && permitted });
+      // Approval-tier activities: can this staff member approve them?
+      if (act.tier === 'approval') {
+        approvals.push({ key: act.key, label: act.label, allowed: resolvePermission(userId, act.module, 'approve').allowed });
+      }
     }
   } else {
-    // Not enabled or no linked user → everything denied, but still list activities
-    // so the portal can render them as unavailable.
     for (const act of REMOTE_ACTIVITIES) {
       activities.push({ key: act.key, label: act.label, tier: act.tier, allowed: false });
+      if (act.tier === 'approval') approvals.push({ key: act.key, label: act.label, allowed: false });
     }
   }
 
-  return { remoteEnabled, viewModules, activities, computedAt: new Date().toISOString() };
+  return { remoteEnabled, viewModules, activities, approvals, computedAt: new Date().toISOString() };
 }
 
 /** Authoritative single-activity check used by the write path (R3). */
 export function canRemoteActivity(staffId: number, activityKey: string): boolean {
   const caps = computeRemoteCapabilities(staffId);
   return caps.activities.some((a) => a.key === activityKey && a.allowed);
+}
+
+/** Authoritative approval check used by the approval path (R4): the approver must
+ *  be remote-enabled and hold the 'approve' permission on the activity's module. */
+export function canApproveActivity(approverStaffId: number, activityKey: string): boolean {
+  const act = findActivity(activityKey);
+  if (!act || act.tier !== 'approval') return false;
+  const staff = getDb().prepare('SELECT remote_enabled FROM staff WHERE id = ?').get(approverStaffId) as { remote_enabled: number } | undefined;
+  if (!staff || staff.remote_enabled !== 1) return false;
+  const userId = findUserIdForStaff(approverStaffId);
+  if (!userId) return false;
+  return resolvePermission(userId, act.module, 'approve').allowed;
 }
 
 /** Set the per-staff remote-access flag on the Host. */
