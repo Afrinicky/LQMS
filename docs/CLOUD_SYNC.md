@@ -108,9 +108,31 @@ The portal uses per-staff cloud accounts (not a shared token):
 - All portal reads require a valid JWT. `CLOUD_API_TOKEN`, if set, remains a
   legacy read-only fallback; prefer per-staff accounts and leave it unset.
 
-> This is R1 (identity & authentication) of `docs/REMOTE_STAFF_PORTAL_PLAN.md`.
-> Remote editing (submissions, approvals, RBAC scoping) is later phases; the
-> portal is still read-only today.
+> R1 (identity & auth) and R2 (RBAC + tier engine) of
+> `docs/REMOTE_STAFF_PORTAL_PLAN.md` are implemented, plus R3's first slice.
+
+### Remote editing (R3 — propose → validate → apply)
+
+Beyond viewing, permitted staff can submit changes without ever writing to
+authoritative data directly:
+
+1. The portal calls `POST /api/portal/submit` (JWT); the actor is taken from the
+   token, and the proposal is queued in the cloud `remote_submissions` table.
+2. The Host sync engine pulls pending submissions each cycle, **re-validates**
+   them against its authoritative permissions (`canRemoteActivity`), and applies
+   auto-tier activities via a handler registry (`server/sync/applyHandlers.ts`);
+   approval-tier activities are parked as `awaiting_approval` (R4). Every apply is
+   audited.
+3. The outcome is written back; staff see it under **My submissions** in the
+   portal (`GET /api/portal/submissions`).
+
+Shipped self-service activities (auto-apply, ownership enforced on the Host):
+**SOP/document acknowledgement**, **own-profile update** (contact fields), and
+**assigned-task update** (status/notes — only the task's assignee may update it,
+via the "My work" view). Notification acknowledgement is deferred until
+notifications are replicated to the cloud; approval-tier activities (incidents,
+CAPA closure, leave, inventory) arrive with R4/R5. The Host never trusts the
+client for identity, permission, or ownership — it re-checks everything.
 
 ### Deploy
 
