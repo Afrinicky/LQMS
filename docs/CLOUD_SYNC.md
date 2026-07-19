@@ -97,11 +97,13 @@ Pieces (all in this repo):
 
 The portal uses per-staff cloud accounts (not a shared token):
 
-- Accounts live in Neon `cloud_users` and are **provisioned from the Host** —
-  `POST /api/remote-access/users` (Settings permission), which hashes a
-  cloud-specific password and writes it to Neon. Host login hashes are never
-  copied. Manage/disable via `GET /api/remote-access/users` and
-  `POST /api/remote-access/users/:id/status`.
+- Accounts live in Neon `cloud_users` and are **provisioned and managed from the
+  Host** in **Settings → System → Remote Staff Access** (which wraps the
+  `/api/remote-access/*` endpoints, Settings permission). Provisioning hashes a
+  cloud-specific password and writes it to Neon — Host login hashes are never
+  copied — enables remote access for that staff member, and snapshots their
+  capabilities. The console lists accounts and supports enable/disable and
+  “refresh access” (recompute after Host permission changes).
 - Staff sign in at the portal with email + password (`POST /api/portal/login`),
   receive a short-lived JWT (signed with `CLOUD_JWT_SECRET`), and must replace
   their temporary password on first login (`POST /api/portal/change-password`).
