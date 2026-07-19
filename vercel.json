@@ -1,9 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "vite build",
-  "outputDirectory": "dist",
-  "framework": "vite",
-  "rewrites": [
-    { "source": "/((?!assets/|.*\\.[a-zA-Z0-9]+$).*)", "destination": "/index.html" }
-  ]
+  "framework": null,
+  "buildCommand": null,
+  "outputDirectory": "portal",
+  "functions": {
+    "api/cloud/*.ts": { "memory": 256, "maxDuration": 15 }
+  }
 }

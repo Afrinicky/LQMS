@@ -232,6 +232,10 @@ new capability is off by default, so an existing single-PC install is unchanged.
   (`GET /api/sync/status`) replicate syncable records to a cloud PostgreSQL (e.g.
   Neon) when enabled. See [`docs/SYNC_READY_SCHEMA.md`](docs/SYNC_READY_SCHEMA.md)
   and [`docs/CLOUD_SYNC.md`](docs/CLOUD_SYNC.md).
+- **Remote read-only portal** — an optional Vercel-hosted portal (`portal/` +
+  `api/cloud/`) lets fully-remote staff view the synced data from anywhere, even
+  when the Host is off. Read-only; the Host stays the sole writer. See
+  [`docs/CLOUD_SYNC.md`](docs/CLOUD_SYNC.md).
 - **Configuration** — all URLs, database connections, mode and sync settings are
   environment variables; see [`.env.example`](.env.example). Full plan in
   [`docs/HYBRID_ARCHITECTURE_PLAN.md`](docs/HYBRID_ARCHITECTURE_PLAN.md).

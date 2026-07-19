@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SECH_LIMS — Cloud Portal (read-only)</title>
+  <style>
+    :root { --bg:#060A14; --panel:#0e1626; --panel2:#122038; --border:rgba(255,255,255,0.08);
+            --text:#F5F8FF; --muted:#A8B3C7; --blue:#2F6BFF; --blue2:#4E8DFF; }
+    * { box-sizing: border-box; }
+    html, body { margin:0; min-height:100vh; }
+    body { background: radial-gradient(1000px 640px at 50% -12%, rgba(47,107,255,0.16), transparent 60%),
+            linear-gradient(160deg,#0A1322,#060A14); color:var(--text);
+            font-family:Inter,"Segoe UI",system-ui,Arial,sans-serif; }
+    header { display:flex; align-items:center; gap:12px; padding:16px 22px; border-bottom:1px solid var(--border); }
+    .mark { width:38px; height:38px; border-radius:11px; display:grid; place-items:center;
+            background:linear-gradient(140deg,#2F6BFF,#1B49C0); box-shadow:0 8px 22px rgba(47,107,255,0.4); }
+    header h1 { font-size:16px; margin:0; font-weight:700; letter-spacing:.02em; }
+    header .sub { font-size:11.5px; color:var(--muted); }
+    .ro { margin-left:auto; font-size:11.5px; color:#8fa3c8; border:1px solid var(--border);
+          padding:5px 10px; border-radius:999px; }
+    main { max-width:1100px; margin:0 auto; padding:22px; }
+    .card { background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:18px; }
+    .muted { color:var(--muted); } .err { color:#FF6B7D; }
+    input { width:100%; padding:11px 12px; border-radius:9px; border:1px solid var(--border);
+            background:var(--panel2); color:var(--text); font-size:14px; }
+    button { background:var(--blue); color:#fff; border:0; border-radius:9px; padding:10px 16px;
+             font-weight:600; cursor:pointer; font-size:13.5px; }
+    button.ghost { background:transparent; border:1px solid var(--border); color:var(--muted); }
+    button:hover { filter:brightness(1.08); }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:12px; margin-top:14px; }
+    .tile { background:var(--panel2); border:1px solid var(--border); border-radius:12px; padding:14px; cursor:pointer; }
+    .tile:hover { border-color:var(--blue2); }
+    .tile h3 { margin:0 0 4px; font-size:13px; color:var(--muted); font-weight:600; }
+    .tile .n { font-size:26px; font-weight:700; }
+    table { width:100%; border-collapse:collapse; margin-top:12px; font-size:13px; }
+    th, td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+    th { color:var(--muted); font-weight:600; }
+    tr.row { cursor:pointer; } tr.row:hover td { background:rgba(78,141,255,0.06); }
+    .bar { display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap; }
+    .bar h2 { font-size:17px; margin:0; }
+    .kv { display:grid; grid-template-columns:220px 1fr; gap:2px 14px; font-size:13px; }
+    .kv .k { color:var(--muted); padding:6px 0; border-bottom:1px solid var(--border); }
+    .kv .v { padding:6px 0; border-bottom:1px solid var(--border); word-break:break-word; }
+    .pill { font-size:11px; padding:2px 8px; border-radius:999px; background:var(--panel2); border:1px solid var(--border); }
+    .hidden { display:none; }
+    .spin { display:inline-block; width:16px; height:16px; border:2px solid rgba(78,141,255,.25);
+            border-top-color:var(--blue2); border-radius:50%; animation:spin .8s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="mark">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 3h6"/><path d="M10 3v6.5L5.2 17a2 2 0 0 0 1.7 3h10.2a2 2 0 0 0 1.7-3L14 9.5V3"/><path d="M7.5 14h9"/>
+      </svg>
+    </div>
+    <div>
+      <h1>SECH_LIMS Cloud Portal</h1>
+      <div class="sub">by Nickland</div>
+    </div>
+    <span class="ro">Read-only cloud view</span>
+  </header>
+
+  <main>
+    <!-- Connect gate -->
+    <section id="gate" class="card" style="max-width:460px;margin:40px auto;">
+      <h2 style="margin:0 0 6px;font-size:18px;">Sign in</h2>
+      <p class="muted" style="margin:0 0 14px;font-size:13px;">Enter the portal access token provided by your laboratory administrator. This view is read-only; changes are made on the laboratory Host.</p>
+      <input id="token" type="password" placeholder="Portal access token" autocomplete="off" />
+      <div style="display:flex;gap:10px;margin-top:12px;">
+        <button id="connect">Connect</button>
+      </div>
+      <p id="gateErr" class="err hidden" style="font-size:13px;margin-top:10px;"></p>
+    </section>
+
+    <!-- App -->
+    <section id="app" class="hidden">
+      <div class="bar">
+        <h2 id="viewTitle">Overview</h2>
+        <span id="loading" class="hidden"><span class="spin"></span></span>
+        <div style="margin-left:auto;display:flex;gap:8px;">
+          <button id="home" class="ghost hidden">← Overview</button>
+          <button id="disconnect" class="ghost">Disconnect</button>
+        </div>
+      </div>
+      <p id="appErr" class="err hidden"></p>
+
+      <div id="overview" class="card">
+        <p class="muted" style="margin:0;font-size:13px;">Live records replicated from the laboratory Host. Select a category to browse.</p>
+        <div id="tiles" class="grid"></div>
+      </div>
+
+      <div id="list" class="card hidden"></div>
+      <div id="detail" class="card hidden"></div>
+    </section>
+  </main>
+
+  <script>
+    const LABELS = {
+      nonconforming_events:'Nonconformities', capa_records:'CAPA', complaints:'Complaints', risks:'Risks',
+      equipment_items:'Equipment', equipment_maintenance_records:'Equipment maintenance',
+      equipment_calibration_records:'Equipment calibration', inventory_items:'Inventory',
+      inventory_batches:'Inventory batches', suppliers:'Suppliers', monitoring_items:'Monitoring items',
+      monitoring_readings:'Monitoring readings', safety_incidents:'Safety incidents', actions:'Actions',
+      documents:'Documents', document_versions:'Document versions', iqc_materials:'IQC materials',
+      iqc_results:'IQC results', eqa_programs:'EQA programs', eqa_events:'EQA events', staff:'Staff'
+    };
+    const ID_KEYS = ['risk_number','capa_number','nc_number','complaint_number','equipment_number','item_code',
+      'supplier_code','monitoring_number','incident_number','document_code','verification_number',
+      'calibration_number','adverse_event_number','employee_no','program_code','material_code'];
+    const NAME_KEYS = ['title','name','full_name','risk_area','parameter','method_name','program_name','material_name'];
+
+    const $ = (id) => document.getElementById(id);
+    const label = (e) => LABELS[e] || e;
+    let token = localStorage.getItem('sech_lims_cloud_token') || '';
+
+    async function api(path) {
+      const res = await fetch(path, { headers: { Authorization: 'Bearer ' + token } });
+      if (res.status === 401) { throw Object.assign(new Error('Invalid or expired token.'), { code: 401 }); }
+      if (!res.ok) { const b = await res.json().catch(()=>({})); throw new Error(b.error || ('Request failed ('+res.status+')')); }
+      return res.json();
+    }
+    const loading = (on) => $('loading').classList.toggle('hidden', !on);
+
+    function firstKey(data, keys) { for (const k of keys) if (data[k]) return String(data[k]); return ''; }
+
+    async function showOverview() {
+      $('home').classList.add('hidden'); $('list').classList.add('hidden'); $('detail').classList.add('hidden');
+      $('overview').classList.remove('hidden'); $('viewTitle').textContent = 'Overview';
+      loading(true); $('appErr').classList.add('hidden');
+      try {
+        const { entities } = await api('/api/cloud/summary');
+        const tiles = $('tiles'); tiles.innerHTML = '';
+        if (!entities.length) tiles.innerHTML = '<p class="muted">No records have synced yet.</p>';
+        for (const e of entities) {
+          const d = document.createElement('div'); d.className = 'tile';
+          d.innerHTML = '<h3>'+label(e.entity_table)+'</h3><div class="n">'+e.total+'</div>';
+          d.onclick = () => showList(e.entity_table);
+          tiles.appendChild(d);
+        }
+      } catch (e) { handleErr(e); } finally { loading(false); }
+    }
+
+    async function showList(entity) {
+      $('overview').classList.add('hidden'); $('detail').classList.add('hidden');
+      $('list').classList.remove('hidden'); $('home').classList.remove('hidden');
+      $('viewTitle').textContent = label(entity); loading(true); $('appErr').classList.add('hidden');
+      try {
+        const { records } = await api('/api/cloud/records?entity=' + encodeURIComponent(entity) + '&limit=500');
+        let html = '<table><thead><tr><th>Reference</th><th>Description</th><th>Status</th><th>Updated</th><th></th></tr></thead><tbody>';
+        if (!records.length) html += '<tr><td colspan="5" class="muted">No records.</td></tr>';
+        for (const r of records) {
+          const d = r.data || {};
+          const ref = firstKey(d, ID_KEYS) || r.uuid.slice(0, 8);
+          const name = firstKey(d, NAME_KEYS) || '';
+          const status = d.status ? '<span class="pill">'+esc(String(d.status))+'</span>' : '';
+          const upd = r.updated_at ? new Date(r.updated_at).toLocaleString() : '';
+          html += '<tr class="row" data-uuid="'+esc(r.uuid)+'"><td>'+esc(ref)+'</td><td>'+esc(name)+'</td><td>'+status+'</td><td class="muted">'+esc(upd)+'</td><td class="muted">View →</td></tr>';
+        }
+        html += '</tbody></table>';
+        $('list').innerHTML = html;
+        $('list').querySelectorAll('tr.row').forEach(tr => tr.onclick = () => showDetail(entity, tr.getAttribute('data-uuid')));
+      } catch (e) { handleErr(e); } finally { loading(false); }
+    }
+
+    async function showDetail(entity, uuid) {
+      $('list').classList.add('hidden'); $('detail').classList.remove('hidden'); loading(true); $('appErr').classList.add('hidden');
+      try {
+        const { record } = await api('/api/cloud/record?entity=' + encodeURIComponent(entity) + '&uuid=' + encodeURIComponent(uuid));
+        const d = record.data || {};
+        let html = '<div class="bar"><button class="ghost" id="back">← ' + esc(label(entity)) + '</button>';
+        if (record.deleted_at) html += '<span class="pill" style="color:#FF6B7D;border-color:#FF6B7D;">Deleted</span>';
+        html += '</div><div class="kv">';
+        for (const k of Object.keys(d).sort()) {
+          if (k === 'id') continue;
+          let v = d[k]; if (v === null || v === undefined) v = '';
+          html += '<div class="k">'+esc(k)+'</div><div class="v">'+esc(String(v))+'</div>';
+        }
+        html += '</div>';
+        $('detail').innerHTML = html;
+        $('back').onclick = () => showList(entity);
+      } catch (e) { handleErr(e); } finally { loading(false); }
+    }
+
+    function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+    function handleErr(e) {
+      if (e.code === 401) { disconnect('Session ended — please sign in again.'); return; }
+      $('appErr').textContent = e.message; $('appErr').classList.remove('hidden');
+    }
+
+    function connect() {
+      const t = $('token').value.trim();
+      if (!t) return;
+      token = t; localStorage.setItem('sech_lims_cloud_token', t);
+      $('gateErr').classList.add('hidden');
+      $('gate').classList.add('hidden'); $('app').classList.remove('hidden');
+      showOverview();
+    }
+    function disconnect(msg) {
+      token = ''; localStorage.removeItem('sech_lims_cloud_token');
+      $('app').classList.add('hidden'); $('gate').classList.remove('hidden'); $('token').value = '';
+      if (msg) { $('gateErr').textContent = msg; $('gateErr').classList.remove('hidden'); }
+    }
+
+    $('connect').onclick = connect;
+    $('token').addEventListener('keydown', e => { if (e.key === 'Enter') connect(); });
+    $('home').onclick = showOverview;
+    $('disconnect').onclick = () => disconnect();
+    if (token) { $('gate').classList.add('hidden'); $('app').classList.remove('hidden'); showOverview(); }
+  </script>
+</body>
+</html>

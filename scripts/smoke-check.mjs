@@ -86,6 +86,14 @@ checkFile('docs/SYNC_ENGINE_STUB.md');
 checkFile('docs/CLOUD_SYNC.md');
 checkFile('docs/CLIENTS_LAN_AND_PWA.md');
 
+// Cloud read-only portal (Vercel + Neon)
+checkFile('api/cloud/summary.ts');
+checkFile('api/cloud/records.ts');
+checkFile('api/cloud/record.ts');
+checkFile('api/_lib/cloudDb.ts');
+checkFile('api/_lib/auth.ts');
+checkFile('portal/index.html');
+
 // PWA assets (installable mobile/desktop client)
 checkFile('public/manifest.webmanifest');
 checkFile('public/sw.js');
@@ -114,6 +122,19 @@ try {
   check('index.html links the PWA manifest', /rel="manifest"/.test(html));
 } catch (e) {
   check('index.html readable', false, String(e));
+}
+try {
+  const portal = readFileSync(path.join(root, 'portal/index.html'), 'utf-8');
+  // The cloud portal must call the read API and be self-contained (no build).
+  check('cloud portal calls the read API', /\/api\/cloud\/summary/.test(portal));
+} catch (e) {
+  check('cloud portal readable', false, String(e));
+}
+try {
+  const vj = JSON.parse(readFileSync(path.join(root, 'vercel.json'), 'utf-8'));
+  check('vercel.json serves the portal', vj.outputDirectory === 'portal');
+} catch (e) {
+  check('vercel.json parses cleanly', false, String(e));
 }
 
 // package.json scripts

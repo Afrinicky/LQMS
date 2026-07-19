@@ -41,8 +41,10 @@
     "@types/express": "latest",
     "@types/multer": "latest",
     "@types/node": "latest",
+    "@types/pg": "^8.20.0",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "@vercel/node": "^5.8.26",
     "concurrently": "latest",
     "cross-env": "latest",
     "electron": "32.3.3",
@@ -50,8 +52,7 @@
     "tsx": "latest",
     "typescript": "latest",
     "vite": "latest",
-    "wait-on": "latest",
-    "@types/pg": "^8.20.0"
+    "wait-on": "latest"
   },
   "build": {
     "appId": "com.nickland.sechlims",
