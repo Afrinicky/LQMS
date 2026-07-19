@@ -24,6 +24,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(200).json({
       token,
       user: { email: user.email, fullName: user.full_name, role: user.role, mustChangePassword: user.must_change_password },
+      capabilities: user.remote_scope ?? null,
     });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Login failed' });

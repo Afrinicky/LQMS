@@ -9,6 +9,8 @@
 import bcrypt from 'bcryptjs';
 import { config } from '../config/index.js';
 import { PostgresStore } from '../db/postgresStore.js';
+import { computeRemoteCapabilities, setStaffRemoteEnabled } from './remoteCapabilities.js';
+import type { RemoteCapabilities } from '../../shared/constants/remoteAccess.js';
 
 let store: PostgresStore | undefined;
 
@@ -55,16 +57,36 @@ export interface ProvisionInput {
 /** Create or re-provision a cloud account for a staff member (idempotent by email). */
 export async function provisionUser(input: ProvisionInput): Promise<void> {
   await ensureCloudUsers();
+  // Enable remote access on the Host first, then snapshot the resulting
+  // capabilities into the cloud account so the portal knows what is permitted.
+  setStaffRemoteEnabled(input.staffId, true);
+  const caps = computeRemoteCapabilities(input.staffId);
   const hash = bcrypt.hashSync(input.password, 12);
   await cloud().run(
-    `INSERT INTO cloud_users (staff_id, email, password_hash, full_name, role, status, must_change_password)
-     VALUES (?, ?, ?, ?, ?, 'active', true)
+    `INSERT INTO cloud_users (staff_id, email, password_hash, full_name, role, remote_scope, status, must_change_password)
+     VALUES (?, ?, ?, ?, ?, ?::jsonb, 'active', true)
      ON CONFLICT (email) DO UPDATE SET
        staff_id = EXCLUDED.staff_id, password_hash = EXCLUDED.password_hash,
-       full_name = EXCLUDED.full_name, role = EXCLUDED.role,
+       full_name = EXCLUDED.full_name, role = EXCLUDED.role, remote_scope = EXCLUDED.remote_scope,
        status = 'active', must_change_password = true, updated_at = now()`,
-    [input.staffId, input.email.trim().toLowerCase(), hash, input.fullName ?? null, input.role ?? null]
+    [input.staffId, input.email.trim().toLowerCase(), hash, input.fullName ?? null, input.role ?? null, JSON.stringify(caps)]
   );
+}
+
+/** Recompute and re-snapshot a staff member's capabilities (after permission or
+ *  scope changes on the Host). */
+export async function refreshScope(staffId: number): Promise<RemoteCapabilities> {
+  await ensureCloudUsers();
+  const caps = computeRemoteCapabilities(staffId);
+  await cloud().run(`UPDATE cloud_users SET remote_scope = ?::jsonb, updated_at = now() WHERE staff_id = ?`, [JSON.stringify(caps), staffId]);
+  return caps;
+}
+
+/** Refresh by cloud user id (looks up the linked staff). */
+export async function refreshUser(id: number): Promise<RemoteCapabilities> {
+  const row = await cloud().get<{ staff_id: number }>(`SELECT staff_id FROM cloud_users WHERE id = ?`, [id]);
+  if (!row) throw new Error('Cloud user not found.');
+  return refreshScope(Number(row.staff_id));
 }
 
 export interface CloudUserRow {
@@ -80,5 +102,11 @@ export async function listUsers(): Promise<CloudUserRow[]> {
 }
 
 export async function setStatus(id: number, status: 'active' | 'disabled'): Promise<void> {
+  const row = await cloud().get<{ staff_id: number }>(`SELECT staff_id FROM cloud_users WHERE id = ?`, [id]);
   await cloud().run(`UPDATE cloud_users SET status = ?, updated_at = now() WHERE id = ?`, [status, id]);
+  // Keep the Host remote-enabled flag and the snapshot in step with the account.
+  if (row?.staff_id != null) {
+    setStaffRemoteEnabled(Number(row.staff_id), status === 'active');
+    await refreshScope(Number(row.staff_id));
+  }
 }

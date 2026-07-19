@@ -106,6 +106,7 @@
 
       <div id="overview" class="card">
         <p class="muted" style="margin:0;font-size:13px;">Live records replicated from the laboratory Host. Select a category to browse.</p>
+        <div id="access" class="hidden" style="margin:12px 0 2px;"></div>
         <div id="tiles" class="grid"></div>
       </div>
 
@@ -132,6 +133,25 @@
     const $ = (id) => document.getElementById(id);
     const label = (e) => LABELS[e] || e;
     let jwt = localStorage.getItem('sech_lims_portal_jwt') || '';
+    let caps = null;
+
+    function renderAccess() {
+      const el = $('access');
+      if (!caps) { el.classList.add('hidden'); return; }
+      const allowed = (caps.activities || []).filter(a => a.allowed);
+      el.classList.remove('hidden');
+      el.innerHTML =
+        '<div style="background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:12px;">'
+        + '<div style="font-size:12.5px;color:var(--muted);">Your remote access — '
+        + '<strong style="color:var(--text);">' + (caps.viewModules || []).length + '</strong> categories viewable · '
+        + '<strong style="color:var(--text);">' + allowed.length + '</strong> action(s) available'
+        + (caps.remoteEnabled ? '' : ' (disabled)') + '</div>'
+        + (allowed.length ? '<div style="margin-top:8px;">' + allowed.map(a =>
+            '<span class="pill" style="margin:0 6px 6px 0;display:inline-block;">' + esc(a.label) + (a.tier === 'approval' ? ' · approval' : '') + '</span>'
+          ).join('') + '</div>' : '')
+        + '<div class="muted" style="font-size:11px;margin-top:6px;">Remote actions are enabled progressively; the portal is read-only today.</div>'
+        + '</div>';
+    }
 
     async function api(path) {
       const res = await fetch(path, { headers: { Authorization: 'Bearer ' + jwt } });
@@ -216,9 +236,12 @@
       $('appErr').textContent = e.message; $('appErr').classList.remove('hidden');
     }
 
-    function enterApp() {
+    async function enterApp() {
       $('gate').classList.add('hidden'); $('pwgate').classList.add('hidden');
-      $('app').classList.remove('hidden'); showOverview();
+      $('app').classList.remove('hidden');
+      if (!caps) { try { const me = await api('/api/portal/me'); caps = me.capabilities; } catch (e) { if (e.code === 401) { logout('Session ended — please sign in again.'); return; } } }
+      renderAccess();
+      showOverview();
     }
     function showPwGate() {
       $('gate').classList.add('hidden'); $('app').classList.add('hidden');
@@ -230,8 +253,8 @@
       if (!email || !password) return;
       $('gateErr').classList.add('hidden');
       try {
-        const { token, user } = await postJson('/api/portal/login', { email, password }, false);
-        jwt = token; localStorage.setItem('sech_lims_portal_jwt', token);
+        const { token, user, capabilities } = await postJson('/api/portal/login', { email, password }, false);
+        jwt = token; localStorage.setItem('sech_lims_portal_jwt', token); caps = capabilities;
         $('password').value = '';
         if (user && user.mustChangePassword) { $('pwCurrent').value = password; showPwGate(); }
         else enterApp();

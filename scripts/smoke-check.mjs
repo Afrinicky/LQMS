@@ -101,6 +101,8 @@ checkFile('api/portal/me.ts');
 checkFile('api/portal/change-password.ts');
 checkFile('server/services/remoteAccess.ts');
 checkFile('server/routes/remoteAccess.ts');
+checkFile('server/services/remoteCapabilities.ts');
+checkFile('shared/constants/remoteAccess.ts');
 checkFile('docs/REMOTE_STAFF_PORTAL_PLAN.md');
 
 // PWA assets (installable mobile/desktop client)

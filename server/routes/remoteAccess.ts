@@ -7,7 +7,7 @@ import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
-import { cloudConfigured, provisionUser, listUsers, setStatus } from '../services/remoteAccess.js';
+import { cloudConfigured, provisionUser, listUsers, setStatus, refreshUser } from '../services/remoteAccess.js';
 
 function requireCloud(_req: Request, res: Response, next: NextFunction) {
   if (!cloudConfigured()) {
@@ -39,6 +39,14 @@ export function remoteAccessRoutes() {
       await provisionUser({ staffId: Number(b.staffId), email: String(b.email), fullName: b.fullName ?? null, role: b.role ?? null, password: String(b.password) });
       audit(req, { action: 'provision', entity: 'cloud_user', entityId: String(b.email), newValue: { staffId: b.staffId, email: b.email, role: b.role } });
       res.status(201).json({ ok: true });
+    } catch (err) { next(err); }
+  });
+
+  router.post('/users/:id/refresh', requirePermission('settings', 'edit'), requireCloud, async (req, res, next) => {
+    try {
+      const caps = await refreshUser(Number(req.params.id));
+      audit(req, { action: 'edit', entity: 'cloud_user', entityId: req.params.id, newValue: { refreshedScope: true } });
+      res.json({ ok: true, capabilities: caps });
     } catch (err) { next(err); }
   });
 
