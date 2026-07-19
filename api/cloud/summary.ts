@@ -1,10 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { summary } from '../_lib/cloudDb.js';
-import { requireToken } from '../_lib/auth.js';
+import { requireUser } from '../_lib/auth.js';
 
 /** GET /api/cloud/summary → live record counts per entity type. */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (!requireToken(req, res)) return;
+  if (!requireUser(req, res)) return;
   try {
     res.status(200).json({ entities: await summary() });
   } catch (err) {

@@ -1,10 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { listRecords, READABLE_ENTITIES } from '../_lib/cloudDb.js';
-import { requireToken } from '../_lib/auth.js';
+import { requireUser } from '../_lib/auth.js';
 
 /** GET /api/cloud/records?entity=risks&limit=&offset= → live records of a type. */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (!requireToken(req, res)) return;
+  if (!requireUser(req, res)) return;
   const entity = String(req.query.entity ?? '');
   if (!READABLE_ENTITIES.has(entity)) {
     res.status(400).json({ error: 'Unknown or unsupported entity type.' });

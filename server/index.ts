@@ -41,6 +41,7 @@ import { EnvironmentalPoller } from './services/environmental/monitorService.js'
 import { dennisRoutes } from './routes/dennis.js';
 import { syncRoutes } from './routes/sync.js';
 import { getSyncEngine } from './sync/syncEngine.js';
+import { remoteAccessRoutes } from './routes/remoteAccess.js';
 import { optionalAuth } from './middleware/auth.js';
 import { ensureDataDirs, getDb } from './db/database.js';
 import { seedDefaults } from './db/seed.js';
@@ -118,6 +119,7 @@ export function createApiServer() {
   app.use('/api/information-management', informationManagementRoutes());
   app.use('/api/environmental', environmentalRoutes());
   app.use('/api/sync', syncRoutes());
+  app.use('/api/remote-access', remoteAccessRoutes());
   app.use('/api', commonRoutes());
 
   // Serve the built single-page renderer so the packaged Electron window can

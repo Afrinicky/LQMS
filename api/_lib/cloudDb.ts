@@ -76,3 +76,63 @@ export async function getRecord(entity: string, uuid: string): Promise<SyncedRow
   );
   return (r.rows[0] as SyncedRow) ?? null;
 }
+
+// --- Remote Staff Portal accounts (R1) -------------------------------------
+// cloud_users is provisioned/written by the Host (server/services/remoteAccess);
+// the portal auth endpoints read it here. Password hashes are cloud-specific.
+
+export interface CloudUser {
+  id: number;
+  staff_id: number;
+  email: string;
+  password_hash: string;
+  full_name: string | null;
+  role: string | null;
+  remote_scope: unknown;
+  status: string;
+  must_change_password: boolean;
+}
+
+/** Missing-table code so auth can respond cleanly before any user is provisioned. */
+function isUndefinedTable(err: unknown): boolean {
+  return (err as { code?: string })?.code === '42P01';
+}
+
+export async function getUserByEmail(email: string): Promise<CloudUser | null> {
+  try {
+    const r = await getPool().query(
+      `SELECT id, staff_id, email, password_hash, full_name, role, remote_scope, status, must_change_password
+         FROM cloud_users WHERE lower(email) = lower($1)`,
+      [email]
+    );
+    return (r.rows[0] as CloudUser) ?? null;
+  } catch (err) {
+    if (isUndefinedTable(err)) return null;
+    throw err;
+  }
+}
+
+export async function getUserById(id: number): Promise<CloudUser | null> {
+  try {
+    const r = await getPool().query(
+      `SELECT id, staff_id, email, password_hash, full_name, role, remote_scope, status, must_change_password
+         FROM cloud_users WHERE id = $1`,
+      [id]
+    );
+    return (r.rows[0] as CloudUser) ?? null;
+  } catch (err) {
+    if (isUndefinedTable(err)) return null;
+    throw err;
+  }
+}
+
+export async function touchLastLogin(id: number): Promise<void> {
+  await getPool().query(`UPDATE cloud_users SET last_login_at = now() WHERE id = $1`, [id]);
+}
+
+export async function updatePassword(id: number, passwordHash: string): Promise<void> {
+  await getPool().query(
+    `UPDATE cloud_users SET password_hash = $1, must_change_password = false, updated_at = now() WHERE id = $2`,
+    [passwordHash, id]
+  );
+}

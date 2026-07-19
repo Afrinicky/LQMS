@@ -94,6 +94,17 @@ checkFile('api/_lib/cloudDb.ts');
 checkFile('api/_lib/auth.ts');
 checkFile('portal/index.html');
 
+// Remote Staff Portal — R1 identity & auth
+checkFile('api/_lib/jwt.ts');
+checkFile('api/portal/login.ts');
+checkFile('api/portal/me.ts');
+checkFile('api/portal/change-password.ts');
+checkFile('server/services/remoteAccess.ts');
+checkFile('server/routes/remoteAccess.ts');
+checkFile('server/services/remoteCapabilities.ts');
+checkFile('shared/constants/remoteAccess.ts');
+checkFile('docs/REMOTE_STAFF_PORTAL_PLAN.md');
+
 // PWA assets (installable mobile/desktop client)
 checkFile('public/manifest.webmanifest');
 checkFile('public/sw.js');

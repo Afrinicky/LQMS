@@ -3898,4 +3898,10 @@ CREATE INDEX IF NOT EXISTS idx_sync_outbox_status ON sync_outbox(sync_status);
       database.exec(`DROP TRIGGER IF EXISTS ${ad}`);
     }
   }
+
+  // Remote Staff Portal (R2): per-staff remote-access flag + optional scope
+  // (a JSON allowlist of module keys; null = all the tier/permission allow).
+  const staffRemoteCols = new Set((database.prepare('PRAGMA table_info(staff)').all() as Array<{ name: string }>).map(c => c.name));
+  if (!staffRemoteCols.has('remote_enabled')) database.exec('ALTER TABLE staff ADD COLUMN remote_enabled INTEGER NOT NULL DEFAULT 0');
+  if (!staffRemoteCols.has('remote_scope')) database.exec('ALTER TABLE staff ADD COLUMN remote_scope TEXT');
 }
