@@ -74,19 +74,46 @@ Surfaced in **Settings → System → Connectivity & Mode**.
 that points the DataStore itself at PostgreSQL (via `PostgresStore`); the normal
 hybrid deployment keeps the host on SQLite and only *replicates* to the cloud.
 
-## Vercel web frontend (deployment scaffolding)
+## Remote read-only portal (Vercel + Neon)
 
-`vercel.json` builds the SPA and serves it with SPA-history rewrites. The hosted
-frontend reaches its data by pointing `VITE_API_BASE_URL` at a reachable API:
+For staff who are fully remote from the Host — even when the Host PC is off —
+there is a **read-only cloud portal** hosted on Vercel and backed directly by
+Neon. Writes still happen only on the Host (offline-first authority); the portal
+is a view of the replicated data.
 
-- **Near term:** the Host API over secure remote access (VPN/tunnel/reverse
-  proxy), reusing everything that already works on the LAN.
-- **Later:** a thin cloud read-API over `synced_records` deployed alongside the
-  frontend, for staff who are fully remote from the Host.
+Pieces (all in this repo):
 
-Deploying the frontend and provisioning Neon require live credentials and are
-performed in your Vercel/Neon accounts; the app code and config here are ready
-for it.
+| Path | Role |
+|---|---|
+| `api/cloud/summary.ts` | `GET /api/cloud/summary` — live record counts per entity type. |
+| `api/cloud/records.ts` | `GET /api/cloud/records?entity=risks` — records of a type (deleted excluded). |
+| `api/cloud/record.ts` | `GET /api/cloud/record?entity=risks&uuid=…` — one record. |
+| `api/_lib/cloudDb.ts` | Read-only queries over `synced_records` (via `pg`). |
+| `api/_lib/auth.ts` | Shared-token gate (`CLOUD_API_TOKEN`), fails closed. |
+| `portal/index.html` | Self-contained read-only portal UI (no build step). |
+| `vercel.json` | Serves `portal/` as the site and `api/cloud/*` as serverless functions. |
+
+### Deploy
+
+1. Import this repo into **Vercel** (it uses `vercel.json` — static `portal/` +
+   `api/` functions; no framework build).
+2. In the Vercel project, set two **Environment Variables**:
+   - `DATABASE_URL` — your Neon connection string (the same database the Host
+     replicates into).
+   - `CLOUD_API_TOKEN` — a long random secret you share with remote staff.
+3. Deploy. Remote staff open the Vercel URL, enter the token, and browse the
+   synced data (dashboards → lists → record detail), read-only.
+
+### Notes
+
+- The portal reads only `synced_records`, so it shows exactly what the Host has
+  replicated — keep the Host syncing to keep the portal current.
+- The shared token is intentionally simple for a read-only view. Per-user cloud
+  authentication is a future enhancement; the Host remains the system of record
+  with full role-based access control.
+- The **full, editable** application is the Host app, reached over the LAN or via
+  secure remote access (VPN/tunnel such as Tailscale). The Vercel portal
+  complements it for lightweight, always-available remote viewing.
 
 ## Security notes
 

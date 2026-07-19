@@ -121,6 +121,35 @@ class CloudSyncEngine implements SyncEngine {
     return cols;
   }
 
+  /**
+   * One-time initial replication of everything already in the database. The
+   * change-capture outbox only records changes made *after* sync is enabled, so
+   * without this an existing lab's data would never reach the cloud. Runs once
+   * (guarded by settings.syncBackfillDone) at the start of the first push.
+   */
+  private async backfillIfNeeded(local: ReturnType<typeof getStore>, cloud: PostgresStore, node: string | null): Promise<number> {
+    if ((await this.getSetting('syncBackfillDone')) === '1') return 0;
+    let count = 0;
+    for (const table of SYNCABLE_TABLES) {
+      let rows: Record<string, unknown>[];
+      try {
+        rows = await local.all<Record<string, unknown>>(`SELECT * FROM ${table} WHERE uuid IS NOT NULL`);
+      } catch {
+        continue; // table absent in this build
+      }
+      for (const rec of rows) {
+        const updatedAt = toIso(rec.updated_at) ?? toIso(rec.created_at) ?? new Date().toISOString();
+        const deletedAt = rec.deleted_at ? toIso(rec.deleted_at) : null;
+        await this.upsertCloud(cloud, table, String(rec.uuid), rec, updatedAt, deletedAt, node);
+        count++;
+      }
+    }
+    await this.setSetting('syncBackfillDone', '1');
+    if (count) await this.setSetting('syncLastAt', new Date().toISOString());
+    console.log(`[sync] initial backfill pushed ${count} existing record(s) to the cloud`);
+    return count;
+  }
+
   // ---- push: local -> cloud -------------------------------------------------
   async push(): Promise<SyncResult> {
     if (!this.enabledAndConfigured()) return { ok: false, skipped: true, pushed: 0, pulled: 0, message: DISABLED_MESSAGE };
@@ -128,10 +157,10 @@ class CloudSyncEngine implements SyncEngine {
     const local = getStore();
     const cloud = this.cloudStore();
     const node = await this.nodeId();
+    let pushed = await this.backfillIfNeeded(local, cloud, node);
     const pending = await local.all<{ id: number; entity_table: string; entity_uuid: string | null; entity_id: number; operation: string }>(
       "SELECT id, entity_table, entity_uuid, entity_id, operation FROM sync_outbox WHERE sync_status = 'pending' ORDER BY id"
     );
-    let pushed = 0;
     for (const row of pending) {
       if (!isSyncableTable(row.entity_table) || !row.entity_uuid) {
         await local.run("UPDATE sync_outbox SET sync_status = 'synced', synced_at = CURRENT_TIMESTAMP WHERE id = ?", [row.id]);
