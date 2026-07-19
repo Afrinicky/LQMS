@@ -10,7 +10,7 @@ import type {
   SectionConfigRow, SectionConfigDetail,
   LaboratoryDocument, QualityPolicy, QualityObjective,
   EquipmentPattern, EquipmentSegment,
-  SystemConnectivity, AppMode, SyncStatus,
+  SystemConnectivity, AppMode, SyncStatus, RemoteCloudUser,
 } from '../../shared/types/api';
 
 // Maps an organogram position title to the lab role(s) whose default permissions
@@ -2007,9 +2007,120 @@ export function MyLaboratory() {
 }
 
 // ---------------------------------------------------------------------------
+// Remote Staff Access — provision & manage cloud portal accounts (R7).
+// Wires the Settings UI to /api/remote-access/*. Requires the cloud to be
+// configured on the Host (SECH_LIMS_CLOUD_URL). Remote permissions are always a
+// subset of the staff member's Host permissions.
+// ---------------------------------------------------------------------------
+export function RemoteStaffAccess() {
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [users, setUsers] = useState<RemoteCloudUser[]>([]);
+  const [staff, setStaff] = useState<Staff[]>([]);
+  const [form, setForm] = useState({ staffId: '', email: '', role: '', password: '' });
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const loadUsers = () => api<RemoteCloudUser[]>('/remote-access/users').then(setUsers).catch(e => setError((e as Error).message));
+  const load = () => {
+    api<{ cloudConfigured: boolean }>('/remote-access/status')
+      .then(s => { setConfigured(s.cloudConfigured); if (s.cloudConfigured) loadUsers(); })
+      .catch(() => setConfigured(false));
+    api<Staff[]>('/staff').then(setStaff).catch(() => setStaff([]));
+  };
+  useEffect(() => { void load(); }, []);
+
+  const selectedStaff = staff.find(s => String(s.id) === form.staffId);
+
+  function pickStaff(id: string) {
+    const s = staff.find(x => String(x.id) === id);
+    setForm(f => ({ ...f, staffId: id, email: s?.email ?? f.email, role: s?.roleName ?? f.role }));
+  }
+  function genPassword() {
+    const p = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6).toUpperCase();
+    setForm(f => ({ ...f, password: p }));
+  }
+
+  async function provision(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault(); setError(null); setMessage(null);
+    if (!form.staffId || !form.email || !form.password) { setError('Staff, email and temporary password are required.'); return; }
+    if (form.password.length < 8) { setError('Temporary password must be at least 8 characters.'); return; }
+    setBusy(true);
+    try {
+      await api('/remote-access/users', { method: 'POST', body: JSON.stringify({ staffId: Number(form.staffId), email: form.email, fullName: selectedStaff?.fullName, role: form.role, password: form.password }) });
+      setMessage(`Remote access created for ${form.email}. Share this temporary password securely (they must change it on first sign-in): ${form.password}`);
+      setForm({ staffId: '', email: '', role: '', password: '' });
+      load();
+    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  }
+  async function changeStatus(u: RemoteCloudUser, status: 'active' | 'disabled') {
+    setError(null); setMessage(null);
+    try { await api(`/remote-access/users/${u.id}/status`, { method: 'POST', body: JSON.stringify({ status }) }); loadUsers(); }
+    catch (e) { setError((e as Error).message); }
+  }
+  async function refresh(u: RemoteCloudUser) {
+    setError(null); setMessage(null);
+    try { await api(`/remote-access/users/${u.id}/refresh`, { method: 'POST' }); setMessage(`Recomputed remote access for ${u.email}.`); }
+    catch (e) { setError((e as Error).message); }
+  }
+
+  if (configured === null) return <div className="card"><h3>Remote Staff Access</h3><p className="muted">Loading…</p></div>;
+  if (!configured) return <div className="card"><h3>Remote Staff Access</h3>
+    <p className="hint">The cloud is not configured on this Host. Set <code>SECH_LIMS_CLOUD_URL</code> (and enable Hybrid mode / sync) to provision remote staff portal accounts. See <code>docs/CLOUD_SYNC.md</code>.</p>
+  </div>;
+
+  return <div>
+    <div className="card">
+      <h3>Provision remote access</h3>
+      <p className="muted" style={{ fontSize: 13 }}>Create a cloud portal account for a staff member. They sign in at the portal with this email and the temporary password, then set their own. Remote permissions are always a subset of their Host permissions.</p>
+      <form className="form" onSubmit={provision}>
+        <label>Staff member
+          <select value={form.staffId} onChange={e => pickStaff(e.target.value)} required>
+            <option value="">Select staff…</option>
+            {staff.filter(s => s.isActive).map(s => <option key={s.id} value={s.id}>{s.fullName}{s.username ? '' : ' — no login (limited)'}</option>)}
+          </select>
+        </label>
+        {selectedStaff && !selectedStaff.username && <p className="hint">This staff member has no Host login, so they can sign in but will have no module permissions until a login/role is assigned.</p>}
+        <label>Portal email<input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} required /></label>
+        <label>Role label (optional)<input value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))} /></label>
+        <label>Temporary password
+          <span style={{ display: 'flex', gap: 8 }}>
+            <input value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} required />
+            <button type="button" onClick={genPassword}>Generate</button>
+          </span>
+        </label>
+        <button disabled={busy}>Create remote access</button>
+      </form>
+      {message && <p className="notice-ok">{message}</p>}
+      {error && <p className="error">{error}</p>}
+    </div>
+
+    <div className="card">
+      <h3>Remote staff accounts</h3>
+      {users.length === 0 ? <p className="muted">No remote accounts yet.</p> :
+        <table className="data-table"><thead><tr><th>Email</th><th>Staff</th><th>Role</th><th>Status</th><th>Last sign-in</th><th></th></tr></thead><tbody>
+          {users.map(u => { const s = staff.find(x => x.id === u.staff_id); return <tr key={u.id}>
+            <td>{u.email}</td>
+            <td>{u.full_name ?? s?.fullName ?? `#${u.staff_id}`}</td>
+            <td>{u.role ?? ''}</td>
+            <td>{u.status === 'active' ? 'Active' : 'Disabled'}</td>
+            <td>{u.last_login_at ? new Date(u.last_login_at).toLocaleString() : '—'}</td>
+            <td style={{ whiteSpace: 'nowrap' }}>
+              {u.status === 'active'
+                ? <button onClick={() => changeStatus(u, 'disabled')}>Disable</button>
+                : <button onClick={() => changeStatus(u, 'active')}>Enable</button>}
+              {' '}<button onClick={() => refresh(u)}>Refresh access</button>
+            </td>
+          </tr>; })}
+        </tbody></table>}
+    </div>
+  </div>;
+}
+
+// ---------------------------------------------------------------------------
 // System  (system-level settings: modules, backups, devices)
 // ---------------------------------------------------------------------------
-const SYSTEM_TABS = ['Overview', 'Connectivity & Mode', 'System Modules', 'Backup & Restore', 'Device Access / Pairing'] as const;
+const SYSTEM_TABS = ['Overview', 'Connectivity & Mode', 'Remote Staff Access', 'System Modules', 'Backup & Restore', 'Device Access / Pairing'] as const;
 type SystemTab = typeof SYSTEM_TABS[number];
 
 export function SystemSettings() {
@@ -2023,6 +2134,7 @@ export function SystemSettings() {
     <div className="people-tab-body">
       {tab === 'Overview' && <SystemOverview />}
       {tab === 'Connectivity & Mode' && <ConnectivityMode />}
+      {tab === 'Remote Staff Access' && <RemoteStaffAccess />}
       {tab === 'System Modules' && <ModuleToggles />}
       {tab === 'Backup & Restore' && <BackupRestore />}
       {tab === 'Device Access / Pairing' && <Devices />}

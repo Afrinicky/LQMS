@@ -22,6 +22,15 @@ export type SyncStatus = {
   lastError: string | null;
   message: string;
 };
+export type RemoteCloudUser = {
+  id: number;
+  staff_id: number;
+  email: string;
+  full_name: string | null;
+  role: string | null;
+  status: string;
+  last_login_at: string | null;
+};
 export type ApiUser = { id: number; username: string; fullName: string; roleId: number; roleName?: string; staffId?: number | null; staffName?: string | null; isActive: boolean };
 export type SystemModule = { id: number; key: string; label: string; path: string; enabled: boolean; alertsPaused: boolean };
 export type Position = { id: number; title: string; description?: string; reportsToPositionId?: number | null; isActive: boolean; archivedAt?: string | null };
