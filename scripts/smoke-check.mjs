@@ -84,6 +84,7 @@ checkFile('docs/DATA_ACCESS_LAYER.md');
 checkFile('docs/SYNC_READY_SCHEMA.md');
 checkFile('docs/SYNC_ENGINE_STUB.md');
 checkFile('docs/CLOUD_SYNC.md');
+checkFile('docs/CLOUD_SECURITY.md');
 checkFile('docs/CLIENTS_LAN_AND_PWA.md');
 
 // Cloud read-only portal (Vercel + Neon)

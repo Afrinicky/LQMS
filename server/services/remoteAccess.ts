@@ -43,6 +43,8 @@ export async function ensureCloudUsers(): Promise<void> {
       updated_at timestamptz,
       last_login_at timestamptz
     );
+    ALTER TABLE cloud_users ADD COLUMN IF NOT EXISTS failed_attempts integer NOT NULL DEFAULT 0;
+    ALTER TABLE cloud_users ADD COLUMN IF NOT EXISTS locked_until timestamptz;
   `);
 }
 

@@ -77,6 +77,22 @@ function toIso(value: unknown): string | null {
   return e ? new Date(e).toISOString() : null;
 }
 
+// PII minimization (R8): only these staff fields are replicated to the cloud.
+// Internal flags (remote_enabled/remote_scope) and any other personnel fields
+// stay on the Host. Contact fields are kept so the portal's own-profile view
+// works. See docs/CLOUD_SECURITY.md.
+const STAFF_SYNC_FIELDS = new Set([
+  'id', 'uuid', 'full_name', 'email', 'phone', 'section_id', 'employee_no',
+  'is_active', 'created_at', 'updated_at', 'deleted_at',
+]);
+
+function redactForSync(table: string, data: Record<string, unknown>): Record<string, unknown> {
+  if (table !== 'staff') return data;
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(data)) if (STAFF_SYNC_FIELDS.has(k)) out[k] = data[k];
+  return out;
+}
+
 class CloudSyncEngine implements SyncEngine {
   private cloud: PostgresStore | null = null;
   private schemaReady = false;
@@ -190,6 +206,7 @@ class CloudSyncEngine implements SyncEngine {
   }
 
   private async upsertCloud(cloud: PostgresStore, table: string, uuid: string, data: Record<string, unknown>, updatedAt: string, deletedAt: string | null, node: string | null): Promise<void> {
+    data = redactForSync(table, data);
     await cloud.run(
       `INSERT INTO synced_records (entity_table, uuid, data, updated_at, deleted_at, origin_node, cloud_seq)
        VALUES (?, ?, ?::jsonb, ?, ?, ?, nextval('synced_records_seq'))
