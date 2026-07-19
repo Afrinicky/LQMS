@@ -136,3 +136,63 @@ export async function updatePassword(id: number, passwordHash: string): Promise<
     [passwordHash, id]
   );
 }
+
+// --- Remote submissions (R3) — the inbound write queue ---------------------
+// The portal proposes changes here; the Host pulls, re-validates, and applies.
+
+export async function ensureSubmissionsTable(): Promise<void> {
+  await getPool().query(`
+    CREATE TABLE IF NOT EXISTS remote_submissions (
+      id bigserial PRIMARY KEY,
+      submission_uuid text UNIQUE NOT NULL,
+      actor_staff_id integer NOT NULL,
+      actor_email text,
+      activity text NOT NULL,
+      target_table text,
+      target_uuid text,
+      base_version text,
+      payload jsonb,
+      status text NOT NULL DEFAULT 'pending_sync',
+      result text,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      processed_at timestamptz
+    );
+    CREATE INDEX IF NOT EXISTS idx_remote_submissions_status ON remote_submissions (status);
+    CREATE INDEX IF NOT EXISTS idx_remote_submissions_actor ON remote_submissions (actor_staff_id);
+  `);
+}
+
+export interface NewSubmission {
+  submissionUuid: string;
+  actorStaffId: number;
+  actorEmail: string | null;
+  activity: string;
+  targetTable: string | null;
+  targetUuid: string | null;
+  baseVersion: string | null;
+  payload: unknown;
+}
+
+export async function insertSubmission(s: NewSubmission): Promise<void> {
+  await ensureSubmissionsTable();
+  await getPool().query(
+    `INSERT INTO remote_submissions
+       (submission_uuid, actor_staff_id, actor_email, activity, target_table, target_uuid, base_version, payload)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+    [s.submissionUuid, s.actorStaffId, s.actorEmail, s.activity, s.targetTable, s.targetUuid, s.baseVersion, JSON.stringify(s.payload ?? {})]
+  );
+}
+
+export async function listSubmissionsForStaff(actorStaffId: number, limit = 50): Promise<unknown[]> {
+  try {
+    const r = await getPool().query(
+      `SELECT submission_uuid, activity, target_table, target_uuid, status, result, created_at, processed_at
+         FROM remote_submissions WHERE actor_staff_id = $1 ORDER BY created_at DESC LIMIT $2`,
+      [actorStaffId, Math.min(Math.max(limit, 1), 200)]
+    );
+    return r.rows;
+  } catch (err) {
+    if (isUndefinedTable(err)) return [];
+    throw err;
+  }
+}

@@ -29,14 +29,19 @@ export function syncRoutes() {
       let result;
       if (direction === 'push') result = await engine.push();
       else if (direction === 'pull') result = await engine.pull();
-      else {
-        const [push, pull] = await Promise.all([engine.push(), engine.pull()]);
+      else if (direction === 'submissions') {
+        const { processed } = await engine.processSubmissions();
+        result = { ok: true, skipped: false, pushed: 0, pulled: 0, message: `Processed ${processed} submission(s).` };
+      } else {
+        const subs = await engine.processSubmissions();
+        const push = await engine.push();
+        const pull = await engine.pull();
         result = {
           ok: push.ok && pull.ok,
           skipped: push.skipped || pull.skipped,
           pushed: push.pushed,
           pulled: pull.pulled,
-          message: push.message,
+          message: `Processed ${subs.processed} submission(s); pushed ${push.pushed}; pulled ${pull.pulled}.`,
         };
       }
       res.json(result);

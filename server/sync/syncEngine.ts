@@ -19,8 +19,13 @@
  */
 import { config } from '../config/index.js';
 import { getStore } from '../db/store.js';
+import { getDb } from '../db/database.js';
 import { PostgresStore } from '../db/postgresStore.js';
 import { SYNCABLE_TABLES, isSyncableTable } from '../db/syncableTables.js';
+import { canRemoteActivity } from '../services/remoteCapabilities.js';
+import { findActivity } from '../../shared/constants/remoteAccess.js';
+import { APPLY_HANDLERS, type Submission } from './applyHandlers.js';
+import { audit } from '../services/auditService.js';
 
 export type SyncState = 'disabled' | 'idle' | 'syncing' | 'error';
 
@@ -51,6 +56,7 @@ export interface SyncEngine {
   status(): Promise<SyncStatus>;
   push(): Promise<SyncResult>;
   pull(): Promise<SyncResult>;
+  processSubmissions(): Promise<{ processed: number }>;
   start(): void;
   stop(): void;
 }
@@ -254,6 +260,78 @@ class CloudSyncEngine implements SyncEngine {
     }
   }
 
+  // ---- inbound submissions (R3): cloud -> Host apply ------------------------
+  private async ensureSubmissionsSchema(): Promise<void> {
+    await this.cloudStore().exec(`
+      CREATE TABLE IF NOT EXISTS remote_submissions (
+        id bigserial PRIMARY KEY,
+        submission_uuid text UNIQUE NOT NULL,
+        actor_staff_id integer NOT NULL,
+        actor_email text,
+        activity text NOT NULL,
+        target_table text,
+        target_uuid text,
+        base_version text,
+        payload jsonb,
+        status text NOT NULL DEFAULT 'pending_sync',
+        result text,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        processed_at timestamptz
+      );
+      CREATE INDEX IF NOT EXISTS idx_remote_submissions_status ON remote_submissions (status);
+    `);
+  }
+
+  async processSubmissions(): Promise<{ processed: number }> {
+    if (!this.enabledAndConfigured()) return { processed: 0 };
+    await this.ensureSchema();
+    await this.ensureSubmissionsSchema();
+    const cloud = this.cloudStore();
+    const db = getDb();
+    const pending = await cloud.all<Submission>(
+      `SELECT id, submission_uuid, actor_staff_id, actor_email, activity, target_table, target_uuid, base_version, payload
+         FROM remote_submissions WHERE status = 'pending_sync' ORDER BY id`
+    );
+    let processed = 0;
+    for (const s of pending) {
+      let status = 'rejected';
+      let message = '';
+      const def = findActivity(s.activity);
+      if (!def) {
+        message = 'Unknown activity.';
+      } else if (def.tier === 'approval') {
+        // R4 handles approvals; park it for now (authoritative decision on Host).
+        status = 'awaiting_approval';
+        message = 'Awaiting approval on the Host.';
+      } else if (!canRemoteActivity(s.actor_staff_id, s.activity)) {
+        message = 'Not permitted for this staff member.';
+      } else {
+        const handler = APPLY_HANDLERS[s.activity];
+        if (!handler) {
+          message = 'No apply handler for this activity yet.';
+        } else {
+          try {
+            // Capture is left ON: changes to syncable tables replicate back so the
+            // portal reflects the applied result on the next push.
+            const result = db.transaction(() => handler(db, s))();
+            if (result.ok) {
+              status = 'applied';
+              message = result.message;
+              audit(undefined, { action: 'remote_apply', entity: 'remote_submission', entityId: s.submission_uuid, newValue: { activity: s.activity, actorStaffId: s.actor_staff_id, message } });
+            } else {
+              message = result.message;
+            }
+          } catch (err) {
+            message = err instanceof Error ? err.message : 'Apply failed.';
+          }
+        }
+      }
+      await cloud.run(`UPDATE remote_submissions SET status = ?, result = ?, processed_at = now() WHERE id = ?`, [status, message, s.id]);
+      processed++;
+    }
+    return { processed };
+  }
+
   // ---- settings helpers -----------------------------------------------------
   private async getSetting(key: string): Promise<string | null> {
     const row = await getStore().get<{ value: string }>('SELECT value FROM settings WHERE key = ?', [key]);
@@ -296,6 +374,7 @@ class CloudSyncEngine implements SyncEngine {
     if (this.running) return;
     this.running = true;
     try {
+      await this.processSubmissions();
       await this.push();
       await this.pull();
       this.lastError = null;

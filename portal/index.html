@@ -99,6 +99,7 @@
         <span id="loading" class="hidden"><span class="spin"></span></span>
         <div style="margin-left:auto;display:flex;gap:8px;">
           <button id="home" class="ghost hidden">← Overview</button>
+          <button id="subsBtn" class="ghost">My submissions</button>
           <button id="disconnect" class="ghost">Disconnect</button>
         </div>
       </div>
@@ -112,6 +113,7 @@
 
       <div id="list" class="card hidden"></div>
       <div id="detail" class="card hidden"></div>
+      <div id="subs" class="card hidden"></div>
     </section>
   </main>
 
@@ -171,8 +173,38 @@
 
     function firstKey(data, keys) { for (const k of keys) if (data[k]) return String(data[k]); return ''; }
 
+    function canDo(key) { return !!(caps && (caps.activities || []).some(a => a.key === key && a.allowed)); }
+
+    async function submitActivity(activity, targetTable, targetUuid, msgEl) {
+      try {
+        msgEl.textContent = 'Submitting…';
+        const r = await postJson('/api/portal/submit', { activity, targetTable, targetUuid }, true);
+        msgEl.textContent = r.tier === 'approval'
+          ? 'Submitted — pending approval on the Host.'
+          : 'Submitted — pending Host processing. Track it under “My submissions”.';
+      } catch (e) { if (e.code === 401) { logout('Session ended.'); return; } msgEl.textContent = e.message; }
+    }
+
+    async function showSubmissions() {
+      $('overview').classList.add('hidden'); $('list').classList.add('hidden'); $('detail').classList.add('hidden');
+      $('subs').classList.remove('hidden'); $('home').classList.remove('hidden'); $('viewTitle').textContent = 'My submissions';
+      loading(true); $('appErr').classList.add('hidden');
+      try {
+        const { submissions } = await api('/api/portal/submissions');
+        let html = '<table><thead><tr><th>Activity</th><th>Status</th><th>Result</th><th>When</th></tr></thead><tbody>';
+        if (!submissions.length) html += '<tr><td colspan="4" class="muted">No submissions yet.</td></tr>';
+        for (const s of submissions) {
+          const color = s.status === 'applied' ? '#3ecf8e' : s.status === 'rejected' ? '#FF6B7D' : '';
+          const st = '<span class="pill"' + (color ? ' style="border-color:' + color + ';color:' + color + ';"' : '') + '>' + esc(s.status) + '</span>';
+          html += '<tr><td>' + esc(s.activity) + '</td><td>' + st + '</td><td class="muted">' + esc(s.result || '') + '</td><td class="muted">' + (s.created_at ? new Date(s.created_at).toLocaleString() : '') + '</td></tr>';
+        }
+        html += '</tbody></table>';
+        $('subs').innerHTML = html;
+      } catch (e) { handleErr(e); } finally { loading(false); }
+    }
+
     async function showOverview() {
-      $('home').classList.add('hidden'); $('list').classList.add('hidden'); $('detail').classList.add('hidden');
+      $('home').classList.add('hidden'); $('list').classList.add('hidden'); $('detail').classList.add('hidden'); $('subs').classList.add('hidden');
       $('overview').classList.remove('hidden'); $('viewTitle').textContent = 'Overview';
       loading(true); $('appErr').classList.add('hidden');
       try {
@@ -189,7 +221,7 @@
     }
 
     async function showList(entity) {
-      $('overview').classList.add('hidden'); $('detail').classList.add('hidden');
+      $('overview').classList.add('hidden'); $('detail').classList.add('hidden'); $('subs').classList.add('hidden');
       $('list').classList.remove('hidden'); $('home').classList.remove('hidden');
       $('viewTitle').textContent = label(entity); loading(true); $('appErr').classList.add('hidden');
       try {
@@ -211,7 +243,7 @@
     }
 
     async function showDetail(entity, uuid) {
-      $('list').classList.add('hidden'); $('detail').classList.remove('hidden'); loading(true); $('appErr').classList.add('hidden');
+      $('list').classList.add('hidden'); $('subs').classList.add('hidden'); $('detail').classList.remove('hidden'); loading(true); $('appErr').classList.add('hidden');
       try {
         const { record } = await api('/api/cloud/record?entity=' + encodeURIComponent(entity) + '&uuid=' + encodeURIComponent(uuid));
         const d = record.data || {};
@@ -224,8 +256,16 @@
           html += '<div class="k">'+esc(k)+'</div><div class="v">'+esc(String(v))+'</div>';
         }
         html += '</div>';
+        // Remote action: acknowledge an SOP/document (R3), if permitted.
+        if (entity === 'documents' && canDo('sop.acknowledge') && !record.deleted_at) {
+          html += '<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);">'
+            + '<button id="ackBtn">Acknowledge this SOP</button>'
+            + '<span id="ackMsg" class="muted" style="margin-left:10px;font-size:12.5px;"></span></div>';
+        }
         $('detail').innerHTML = html;
         $('back').onclick = () => showList(entity);
+        const ackBtn = document.getElementById('ackBtn');
+        if (ackBtn) ackBtn.onclick = () => submitActivity('sop.acknowledge', 'documents', uuid, document.getElementById('ackMsg'));
       } catch (e) { handleErr(e); } finally { loading(false); }
     }
 
@@ -284,6 +324,7 @@
     $('pwSave').onclick = changePassword;
     $('pwNew').addEventListener('keydown', e => { if (e.key === 'Enter') changePassword(); });
     $('home').onclick = showOverview;
+    $('subsBtn').onclick = showSubmissions;
     $('disconnect').onclick = () => logout();
     if (jwt) { enterApp(); }
   </script>
