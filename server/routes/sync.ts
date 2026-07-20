@@ -29,6 +29,7 @@ export function syncRoutes() {
       let result;
       if (direction === 'push') result = await engine.push();
       else if (direction === 'pull') result = await engine.pull();
+      else if (direction === 'resync') result = await engine.resyncAll();
       else if (direction === 'submissions') {
         const { processed } = await engine.processSubmissions();
         result = { ok: true, skipped: false, pushed: 0, pulled: 0, message: `Processed ${processed} submission(s).` };
