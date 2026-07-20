@@ -12,6 +12,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       staffId: p.staffId,
       email: p.email,
       role: p.role,
+      fullName: user?.full_name ?? null,
       capabilities: user?.remote_scope ?? null,
     });
   } catch (err) {
