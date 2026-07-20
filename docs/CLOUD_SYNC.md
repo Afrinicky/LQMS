@@ -128,13 +128,27 @@ authoritative data directly:
 3. The outcome is written back; staff see it under **My submissions** in the
    portal (`GET /api/portal/submissions`).
 
-Shipped self-service activities (auto-apply, ownership enforced on the Host):
-**SOP/document acknowledgement**, **own-profile update** (contact fields), and
-**assigned-task update** (status/notes — only the task's assignee may update it,
-via the "My work" view). Notification acknowledgement is deferred until
-notifications are replicated to the cloud; approval-tier activities (incidents,
-CAPA closure, leave, inventory) arrive with R4/R5. The Host never trusts the
-client for identity, permission, or ownership — it re-checks everything.
+Shipped self-service (auto-apply, ownership enforced on the Host): **SOP/document
+acknowledgement**, **own-profile update** (contact fields), and **assigned-task
+update** (only the assignee, via "My work").
+
+**Field capture (R6):** permitted staff can record **environmental readings**
+(classified against the item's limits), **equipment maintenance logs**, and
+**equipment breakdown reports** from a "Field capture" view. Submissions made
+without connectivity are queued in the browser (an offline outbox) and flushed
+automatically on reconnect — so readings taken in a dead zone still reach the
+Host. The header shows a "queued offline" badge while items are pending.
+
+**Approval workflow (R4):** approval-tier activities are parked as
+`awaiting_approval`. An authorized approver (a staff member with the `approve`
+permission on the activity's module, remote-enabled) sees them under **Approvals**
+in the portal and approves/rejects. The Host re-validates the approver's authority
+(and the requester's) before applying — you cannot approve your own submission.
+The first approval activity is **leave requests** (`My work → Request leave` →
+`leave_requests` on approval); inventory requests and other approval activities
+follow. Notification acknowledgement is deferred until notifications are
+replicated. The Host never trusts the client for identity, permission, ownership,
+or approval authority — it re-checks everything.
 
 ### Deploy
 

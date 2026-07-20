@@ -98,9 +98,12 @@
       <div class="bar">
         <h2 id="viewTitle">Overview</h2>
         <span id="loading" class="hidden"><span class="spin"></span></span>
-        <div style="margin-left:auto;display:flex;gap:8px;">
+        <span id="offBadge" class="pill hidden" style="border-color:#f5a623;color:#f5a623;margin-left:6px;"></span>
+        <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;">
           <button id="home" class="ghost hidden">← Overview</button>
           <button id="workBtn" class="ghost">My work</button>
+          <button id="fcBtn" class="ghost hidden">Field capture</button>
+          <button id="apprBtn" class="ghost hidden">Approvals</button>
           <button id="subsBtn" class="ghost">My submissions</button>
           <button id="disconnect" class="ghost">Disconnect</button>
         </div>
@@ -117,6 +120,8 @@
       <div id="detail" class="card hidden"></div>
       <div id="subs" class="card hidden"></div>
       <div id="work" class="card hidden"></div>
+      <div id="appr" class="card hidden"></div>
+      <div id="fieldcap" class="card hidden"></div>
     </section>
   </main>
 
@@ -154,8 +159,11 @@
         + (allowed.length ? '<div style="margin-top:8px;">' + allowed.map(a =>
             '<span class="pill" style="margin:0 6px 6px 0;display:inline-block;">' + esc(a.label) + (a.tier === 'approval' ? ' · approval' : '') + '</span>'
           ).join('') + '</div>' : '')
-        + '<div class="muted" style="font-size:11px;margin-top:6px;">Remote actions are enabled progressively; the portal is read-only today.</div>'
+        + '<div class="muted" style="font-size:11px;margin-top:6px;">Remote actions are enabled progressively.</div>'
         + '</div>';
+      const canApprove = !!(caps && (caps.approvals || []).some(a => a.allowed));
+      $('apprBtn').classList.toggle('hidden', !canApprove);
+      $('fcBtn').classList.toggle('hidden', !fcAvailable());
     }
 
     async function api(path) {
@@ -178,18 +186,133 @@
 
     function canDo(key) { return !!(caps && (caps.activities || []).some(a => a.key === key && a.allowed)); }
 
+    // --- Offline outbox: queue submissions made without connectivity and flush
+    //     them when back online (field staff can capture readings in dead zones).
+    const OUTBOX_KEY = 'sech_portal_outbox';
+    function readOutbox() { try { return JSON.parse(localStorage.getItem(OUTBOX_KEY) || '[]'); } catch { return []; } }
+    function writeOutbox(a) { localStorage.setItem(OUTBOX_KEY, JSON.stringify(a)); }
+    function enqueueOffline(body) { const q = readOutbox(); q.push({ id: Date.now() + '-' + Math.random().toString(36).slice(2, 6), body }); writeOutbox(q); updateOfflineBadge(); }
+    function updateOfflineBadge() { const n = readOutbox().length; const el = $('offBadge'); if (!el) return; el.textContent = n ? (n + ' queued offline') : ''; el.classList.toggle('hidden', n === 0); }
+    async function flushOffline() {
+      if (!navigator.onLine || !jwt) return;
+      const q = readOutbox(); if (!q.length) return;
+      const remaining = [];
+      for (const item of q) {
+        try { await postJson('/api/portal/submit', item.body, true); }
+        catch (e) { if (e.code === 401) return; remaining.push(item); }
+      }
+      writeOutbox(remaining); updateOfflineBadge();
+    }
+    window.addEventListener('online', () => { flushOffline(); });
+
     async function submitActivity(activity, targetTable, targetUuid, payload, msgEl) {
+      const body = { activity, targetTable, targetUuid, payload: payload || {} };
+      if (!navigator.onLine) { enqueueOffline(body); msgEl.textContent = 'Saved offline — will submit automatically when back online.'; return; }
       try {
         msgEl.textContent = 'Submitting…';
-        const r = await postJson('/api/portal/submit', { activity, targetTable, targetUuid, payload: payload || {} }, true);
+        const r = await postJson('/api/portal/submit', body, true);
         msgEl.textContent = r.tier === 'approval'
           ? 'Submitted — pending approval on the Host.'
           : 'Submitted — pending Host processing. Track it under “My submissions”.';
-      } catch (e) { if (e.code === 401) { logout('Session ended.'); return; } msgEl.textContent = e.message; }
+      } catch (e) {
+        if (e.code === 401) { logout('Session ended.'); return; }
+        if (e.name === 'TypeError' || !navigator.onLine) { enqueueOffline(body); msgEl.textContent = 'Saved offline — will submit automatically when back online.'; return; }
+        msgEl.textContent = e.message;
+      }
+    }
+
+    function fcAvailable() { return canDo('env.reading') || canDo('equipment.maintenance_log') || canDo('equipment.breakdown_report'); }
+    async function showFieldCapture() {
+      ['overview', 'list', 'detail', 'subs', 'work', 'appr'].forEach(id => $(id).classList.add('hidden'));
+      $('fieldcap').classList.remove('hidden'); $('home').classList.remove('hidden'); $('viewTitle').textContent = 'Field capture';
+      loading(true); $('appErr').classList.add('hidden');
+      try {
+        let mon = [], eq = [];
+        if (canDo('env.reading')) mon = (await api('/api/cloud/records?entity=monitoring_items&limit=500')).records;
+        if (canDo('equipment.maintenance_log') || canDo('equipment.breakdown_report')) eq = (await api('/api/cloud/records?entity=equipment_items&limit=500')).records;
+        const opts = (rows) => rows.map(r => '<option value="' + esc(r.uuid) + '">' + esc(r.data.name || r.data.item_code || r.data.equipment_number || r.uuid) + '</option>').join('');
+        let html = '';
+        if (canDo('env.reading')) {
+          html += '<h3 style="margin:0 0 8px;">Environmental reading</h3><div style="max-width:460px;margin-bottom:18px;">'
+            + (mon.length
+              ? '<label class="muted" style="font-size:12px;">Monitoring item</label><select id="erItem">' + opts(mon) + '</select>'
+                + '<label class="muted" style="font-size:12px;margin-top:8px;display:block;">Value</label><input id="erVal" type="number" step="any"/>'
+                + '<label class="muted" style="font-size:12px;margin-top:8px;display:block;">Comment</label><input id="erComment"/>'
+                + '<div style="margin-top:10px;"><button id="erSave">Record reading</button> <span id="erMsg" class="muted" style="margin-left:8px;font-size:12.5px;"></span></div>'
+              : '<p class="muted">No monitoring items available.</p>') + '</div>';
+        }
+        if (canDo('equipment.maintenance_log')) {
+          html += '<h3 style="margin:0 0 8px;">Equipment maintenance</h3><div style="max-width:460px;margin-bottom:18px;">'
+            + (eq.length
+              ? '<label class="muted" style="font-size:12px;">Equipment</label><select id="emItem">' + opts(eq) + '</select>'
+                + '<label class="muted" style="font-size:12px;margin-top:8px;display:block;">Type</label><select id="emType"><option>routine</option><option>preventive</option><option>corrective</option></select>'
+                + '<label class="muted" style="font-size:12px;margin-top:8px;display:block;">Findings</label><textarea id="emFindings" rows="2"></textarea>'
+                + '<label class="muted" style="font-size:12px;margin-top:8px;display:block;">Action taken</label><textarea id="emAction" rows="2"></textarea>'
+                + '<div style="margin-top:10px;"><button id="emSave">Log maintenance</button> <span id="emMsg" class="muted" style="margin-left:8px;font-size:12.5px;"></span></div>'
+              : '<p class="muted">No equipment available.</p>') + '</div>';
+        }
+        if (canDo('equipment.breakdown_report')) {
+          html += '<h3 style="margin:0 0 8px;">Report equipment breakdown</h3><div style="max-width:460px;">'
+            + (eq.length
+              ? '<label class="muted" style="font-size:12px;">Equipment</label><select id="ebItem">' + opts(eq) + '</select>'
+                + '<label class="muted" style="font-size:12px;margin-top:8px;display:block;">Description</label><textarea id="ebDesc" rows="2"></textarea>'
+                + '<label class="muted" style="font-size:12px;margin-top:8px;display:block;">Service impact</label><input id="ebImpact"/>'
+                + '<label class="muted" style="font-size:12px;margin-top:8px;display:block;">Immediate action</label><input id="ebAction"/>'
+                + '<div style="margin-top:10px;"><button id="ebSave">Report breakdown</button> <span id="ebMsg" class="muted" style="margin-left:8px;font-size:12.5px;"></span></div>'
+              : '<p class="muted">No equipment available.</p>') + '</div>';
+        }
+        $('fieldcap').innerHTML = html || '<p class="muted">No field-capture actions are enabled for you.</p>';
+        const er = $('erSave'); if (er) er.onclick = () => { const v = $('erVal').value; const m = $('erMsg'); if (v === '') { m.textContent = 'Enter a value.'; return; } submitActivity('env.reading', 'monitoring_items', $('erItem').value, { value: v, comment: $('erComment').value }, m); };
+        const em = $('emSave'); if (em) em.onclick = () => submitActivity('equipment.maintenance_log', 'equipment_items', $('emItem').value, { maintenanceType: $('emType').value, findings: $('emFindings').value, actionTaken: $('emAction').value }, $('emMsg'));
+        const eb = $('ebSave'); if (eb) eb.onclick = () => { const d = $('ebDesc').value; const m = $('ebMsg'); if (!d) { m.textContent = 'Enter a description.'; return; } submitActivity('equipment.breakdown_report', 'equipment_items', $('ebItem').value, { description: d, serviceImpact: $('ebImpact').value, immediateAction: $('ebAction').value }, m); };
+      } catch (e) { handleErr(e); } finally { loading(false); }
+    }
+
+    const ACT_LABELS = { 'leave.request': 'Leave request', 'inventory.request': 'Inventory request' };
+    function actLabel(k) { return ACT_LABELS[k] || k; }
+    function summarizePayload(pl) {
+      if (pl && (pl.startDate || pl.endDate)) return 'Leave ' + (pl.type || '') + ': ' + (pl.startDate || '?') + ' → ' + (pl.endDate || '?') + (pl.reason ? ' — ' + pl.reason : '');
+      if (pl && pl.itemName) return 'Inventory: ' + (pl.quantity ? pl.quantity + ' ' : '') + (pl.unit ? pl.unit + ' ' : '') + pl.itemName + (pl.justification ? ' — ' + pl.justification : '');
+      try { return JSON.stringify(pl); } catch { return ''; }
+    }
+
+    async function showApprovals() {
+      ['overview', 'list', 'detail', 'subs', 'work', 'fieldcap'].forEach(id => $(id).classList.add('hidden'));
+      $('appr').classList.remove('hidden'); $('home').classList.remove('hidden'); $('viewTitle').textContent = 'Approvals';
+      loading(true); $('appErr').classList.add('hidden');
+      try {
+        const { approvals } = await api('/api/portal/approvals');
+        let html = '';
+        if (!approvals.length) html = '<p class="muted">No pending approvals.</p>';
+        for (const a of approvals) {
+          const u = esc(a.submission_uuid);
+          html += '<div style="background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px;">'
+            + '<div style="font-weight:600;">' + esc(actLabel(a.activity)) + '</div>'
+            + '<div class="muted" style="font-size:12px;margin:4px 0;">From: ' + esc(a.actor_email || ('staff #' + a.actor_staff_id)) + ' · ' + (a.created_at ? new Date(a.created_at).toLocaleString() : '') + '</div>'
+            + '<div style="font-size:12.5px;margin:6px 0;">' + esc(summarizePayload(a.payload)) + '</div>'
+            + '<input class="apReason" data-u="' + u + '" placeholder="Reason (optional)"/>'
+            + '<div style="margin-top:8px;"><button class="apOk" data-u="' + u + '">Approve</button> '
+            + '<button class="ghost apNo" data-u="' + u + '">Reject</button> '
+            + '<span class="apMsg muted" data-u="' + u + '" style="margin-left:8px;font-size:12.5px;"></span></div></div>';
+        }
+        $('appr').innerHTML = html;
+        $('appr').querySelectorAll('.apOk').forEach(b => b.onclick = () => decide(b.getAttribute('data-u'), 'approve'));
+        $('appr').querySelectorAll('.apNo').forEach(b => b.onclick = () => decide(b.getAttribute('data-u'), 'reject'));
+      } catch (e) { handleErr(e); } finally { loading(false); }
+    }
+    async function decide(uuid, decision) {
+      const reason = $('appr').querySelector('.apReason[data-u="' + uuid + '"]').value;
+      const msg = $('appr').querySelector('.apMsg[data-u="' + uuid + '"]');
+      try {
+        msg.textContent = 'Submitting…';
+        await postJson('/api/portal/approve', { submissionUuid: uuid, decision, reason }, true);
+        msg.textContent = decision === 'approve' ? 'Approved — the Host will finalize.' : 'Rejected.';
+        setTimeout(showApprovals, 900);
+      } catch (e) { if (e.code === 401) { logout('Session ended.'); return; } msg.textContent = e.message; }
     }
 
     async function showWork() {
-      ['overview', 'list', 'detail', 'subs'].forEach(id => $(id).classList.add('hidden'));
+      ['overview', 'list', 'detail', 'subs', 'appr', 'fieldcap'].forEach(id => $(id).classList.add('hidden'));
       $('work').classList.remove('hidden'); $('home').classList.remove('hidden'); $('viewTitle').textContent = 'My work';
       loading(true); $('appErr').classList.add('hidden');
       try {
@@ -220,7 +343,31 @@
               + '<div style="margin-top:8px;"><button class="tkSave" data-uuid="' + u + '">Update task</button> <span class="tkMsg muted" data-uuid="' + u + '" style="margin-left:8px;font-size:12.5px;"></span></div></div>';
           }
         }
+        if (canDo('leave.request')) {
+          html += '<h3 style="margin:18px 0 8px;">Request leave</h3><div style="max-width:460px;">'
+            + '<label class="muted" style="font-size:12px;">Type</label><select id="lvType"><option>Annual</option><option>Sick</option><option>Compassionate</option><option>Other</option></select>'
+            + '<label class="muted" style="font-size:12px;margin-top:8px;display:block;">From</label><input id="lvStart" type="date"/>'
+            + '<label class="muted" style="font-size:12px;margin-top:8px;display:block;">To</label><input id="lvEnd" type="date"/>'
+            + '<label class="muted" style="font-size:12px;margin-top:8px;display:block;">Reason</label><textarea id="lvReason" rows="2"></textarea>'
+            + '<div style="margin-top:10px;"><button id="lvSave">Submit leave request</button> <span id="lvMsg" class="muted" style="margin-left:8px;font-size:12.5px;"></span></div></div>';
+        }
+        if (canDo('inventory.request')) {
+          html += '<h3 style="margin:18px 0 8px;">Request inventory</h3><div style="max-width:460px;">'
+            + '<label class="muted" style="font-size:12px;">Item</label><input id="ivItem" placeholder="e.g. Nitrile gloves (M)"/>'
+            + '<label class="muted" style="font-size:12px;margin-top:8px;display:block;">Quantity</label><input id="ivQty" type="number" step="any"/>'
+            + '<label class="muted" style="font-size:12px;margin-top:8px;display:block;">Unit</label><input id="ivUnit" placeholder="box / pack / each"/>'
+            + '<label class="muted" style="font-size:12px;margin-top:8px;display:block;">Justification</label><textarea id="ivJust" rows="2"></textarea>'
+            + '<div style="margin-top:10px;"><button id="ivSave">Submit inventory request</button> <span id="ivMsg" class="muted" style="margin-left:8px;font-size:12.5px;"></span></div></div>';
+        }
         $('work').innerHTML = html;
+        const ivSave = document.getElementById('ivSave');
+        if (ivSave) ivSave.onclick = () => { const item = $('ivItem').value; const m = $('ivMsg'); if (!item) { m.textContent = 'Enter an item.'; return; } submitActivity('inventory.request', null, null, { itemName: item, quantity: $('ivQty').value, unit: $('ivUnit').value, justification: $('ivJust').value }, m); };
+        const lvSave = document.getElementById('lvSave');
+        if (lvSave) lvSave.onclick = () => {
+          const start = $('lvStart').value, end = $('lvEnd').value, msg = $('lvMsg');
+          if (!start || !end) { msg.textContent = 'Start and end dates are required.'; return; }
+          submitActivity('leave.request', null, null, { type: $('lvType').value, startDate: start, endDate: end, reason: $('lvReason').value }, msg);
+        };
         const pfSave = document.getElementById('pfSave');
         if (pfSave) pfSave.onclick = () => submitActivity('profile.update', 'staff', prof.profile ? prof.profile.uuid : null, { phone: $('pfPhone').value, email: $('pfEmail').value }, $('pfMsg'));
         $('work').querySelectorAll('.tkSave').forEach(btn => {
@@ -237,7 +384,7 @@
     }
 
     async function showSubmissions() {
-      $('overview').classList.add('hidden'); $('list').classList.add('hidden'); $('detail').classList.add('hidden'); $('work').classList.add('hidden');
+      $('overview').classList.add('hidden'); $('list').classList.add('hidden'); $('detail').classList.add('hidden'); $('work').classList.add('hidden'); $('appr').classList.add('hidden'); $('fieldcap').classList.add('hidden');
       $('subs').classList.remove('hidden'); $('home').classList.remove('hidden'); $('viewTitle').textContent = 'My submissions';
       loading(true); $('appErr').classList.add('hidden');
       try {
@@ -255,7 +402,7 @@
     }
 
     async function showOverview() {
-      $('home').classList.add('hidden'); $('list').classList.add('hidden'); $('detail').classList.add('hidden'); $('subs').classList.add('hidden'); $('work').classList.add('hidden');
+      $('home').classList.add('hidden'); $('list').classList.add('hidden'); $('detail').classList.add('hidden'); $('subs').classList.add('hidden'); $('work').classList.add('hidden'); $('appr').classList.add('hidden'); $('fieldcap').classList.add('hidden');
       $('overview').classList.remove('hidden'); $('viewTitle').textContent = 'Overview';
       loading(true); $('appErr').classList.add('hidden');
       try {
@@ -272,7 +419,7 @@
     }
 
     async function showList(entity) {
-      $('overview').classList.add('hidden'); $('detail').classList.add('hidden'); $('subs').classList.add('hidden'); $('work').classList.add('hidden');
+      $('overview').classList.add('hidden'); $('detail').classList.add('hidden'); $('subs').classList.add('hidden'); $('work').classList.add('hidden'); $('appr').classList.add('hidden'); $('fieldcap').classList.add('hidden');
       $('list').classList.remove('hidden'); $('home').classList.remove('hidden');
       $('viewTitle').textContent = label(entity); loading(true); $('appErr').classList.add('hidden');
       try {
@@ -294,7 +441,7 @@
     }
 
     async function showDetail(entity, uuid) {
-      $('list').classList.add('hidden'); $('subs').classList.add('hidden'); $('work').classList.add('hidden'); $('detail').classList.remove('hidden'); loading(true); $('appErr').classList.add('hidden');
+      $('list').classList.add('hidden'); $('subs').classList.add('hidden'); $('work').classList.add('hidden'); $('appr').classList.add('hidden'); $('fieldcap').classList.add('hidden'); $('detail').classList.remove('hidden'); loading(true); $('appErr').classList.add('hidden');
       try {
         const { record } = await api('/api/cloud/record?entity=' + encodeURIComponent(entity) + '&uuid=' + encodeURIComponent(uuid));
         const d = record.data || {};
@@ -332,6 +479,7 @@
       $('app').classList.remove('hidden');
       if (!caps) { try { const me = await api('/api/portal/me'); caps = me.capabilities; } catch (e) { if (e.code === 401) { logout('Session ended — please sign in again.'); return; } } }
       renderAccess();
+      updateOfflineBadge(); flushOffline();
       showOverview();
     }
     function showPwGate() {
@@ -377,6 +525,8 @@
     $('home').onclick = showOverview;
     $('subsBtn').onclick = showSubmissions;
     $('workBtn').onclick = showWork;
+    $('apprBtn').onclick = showApprovals;
+    $('fcBtn').onclick = showFieldCapture;
     $('disconnect').onclick = () => logout();
     if (jwt) { enterApp(); }
   </script>

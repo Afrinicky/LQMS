@@ -66,5 +66,7 @@ export interface RemoteCapabilities {
   remoteEnabled: boolean;
   viewModules: string[];
   activities: Array<{ key: string; label: string; tier: RemoteTier; allowed: boolean }>;
+  /** Approval-tier activities this staff member may approve (has 'approve' on the module). */
+  approvals: Array<{ key: string; label: string; allowed: boolean }>;
   computedAt: string;
 }

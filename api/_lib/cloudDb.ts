@@ -10,7 +10,9 @@ let pool: Pool | undefined;
 
 function getPool(): Pool {
   if (!pool) {
-    const url = process.env.DATABASE_URL || process.env.SECH_LIMS_CLOUD_URL;
+    // Prefer a least-privilege portal role (PORTAL_DATABASE_URL) when provided;
+    // fall back to DATABASE_URL. See docs/CLOUD_SECURITY.md for the role grants.
+    const url = process.env.PORTAL_DATABASE_URL || process.env.DATABASE_URL || process.env.SECH_LIMS_CLOUD_URL;
     if (!url) throw new Error('DATABASE_URL (Neon connection string) is not set');
     pool = new Pool({
       connectionString: url,
@@ -91,6 +93,8 @@ export interface CloudUser {
   remote_scope: unknown;
   status: string;
   must_change_password: boolean;
+  failed_attempts: number;
+  locked_until: string | null;
 }
 
 /** Missing-table code so auth can respond cleanly before any user is provisioned. */
@@ -98,13 +102,12 @@ function isUndefinedTable(err: unknown): boolean {
   return (err as { code?: string })?.code === '42P01';
 }
 
+const USER_COLS = `id, staff_id, email, password_hash, full_name, role, remote_scope, status, must_change_password,
+  COALESCE(failed_attempts, 0) AS failed_attempts, locked_until`;
+
 export async function getUserByEmail(email: string): Promise<CloudUser | null> {
   try {
-    const r = await getPool().query(
-      `SELECT id, staff_id, email, password_hash, full_name, role, remote_scope, status, must_change_password
-         FROM cloud_users WHERE lower(email) = lower($1)`,
-      [email]
-    );
+    const r = await getPool().query(`SELECT ${USER_COLS} FROM cloud_users WHERE lower(email) = lower($1)`, [email]);
     return (r.rows[0] as CloudUser) ?? null;
   } catch (err) {
     if (isUndefinedTable(err)) return null;
@@ -112,13 +115,25 @@ export async function getUserByEmail(email: string): Promise<CloudUser | null> {
   }
 }
 
+/** Rate-limiting helpers (R8). Columns are provisioned by the Host. */
+export async function registerFailedLogin(id: number, threshold: number, lockMs: number): Promise<void> {
+  await getPool().query(
+    `UPDATE cloud_users
+        SET failed_attempts = COALESCE(failed_attempts, 0) + 1,
+            locked_until = CASE WHEN COALESCE(failed_attempts, 0) + 1 >= $2
+                                THEN now() + ($3 || ' milliseconds')::interval ELSE locked_until END
+      WHERE id = $1`,
+    [id, threshold, String(lockMs)]
+  );
+}
+
+export async function clearLoginAttempts(id: number): Promise<void> {
+  await getPool().query(`UPDATE cloud_users SET failed_attempts = 0, locked_until = NULL WHERE id = $1`, [id]);
+}
+
 export async function getUserById(id: number): Promise<CloudUser | null> {
   try {
-    const r = await getPool().query(
-      `SELECT id, staff_id, email, password_hash, full_name, role, remote_scope, status, must_change_password
-         FROM cloud_users WHERE id = $1`,
-      [id]
-    );
+    const r = await getPool().query(`SELECT ${USER_COLS} FROM cloud_users WHERE id = $1`, [id]);
     return (r.rows[0] as CloudUser) ?? null;
   } catch (err) {
     if (isUndefinedTable(err)) return null;
@@ -226,4 +241,54 @@ export async function listSubmissionsForStaff(actorStaffId: number, limit = 50):
     if (isUndefinedTable(err)) return [];
     throw err;
   }
+}
+
+// --- Approvals (R4) --------------------------------------------------------
+
+/** Undecided approval-tier submissions for the given activities, excluding the
+ *  approver's own submissions. */
+export async function listApprovableSubmissions(activityKeys: string[], approverStaffId: number): Promise<unknown[]> {
+  if (!activityKeys.length) return [];
+  try {
+    const r = await getPool().query(
+      `SELECT submission_uuid, actor_staff_id, actor_email, activity, payload, created_at
+         FROM remote_submissions
+        WHERE status = 'awaiting_approval' AND decision IS NULL
+          AND activity = ANY($1) AND actor_staff_id <> $2
+        ORDER BY created_at ASC LIMIT 200`,
+      [activityKeys, approverStaffId]
+    );
+    return r.rows;
+  } catch (err) {
+    if (isUndefinedTable(err)) return [];
+    throw err;
+  }
+}
+
+export async function getSubmissionByUuid(submissionUuid: string): Promise<{ activity: string; actor_staff_id: number } | null> {
+  try {
+    const r = await getPool().query(
+      `SELECT activity, actor_staff_id FROM remote_submissions WHERE submission_uuid = $1`,
+      [submissionUuid]
+    );
+    return (r.rows[0] as { activity: string; actor_staff_id: number }) ?? null;
+  } catch (err) {
+    if (isUndefinedTable(err)) return null;
+    throw err;
+  }
+}
+
+/** Record an approver's decision on an undecided, awaiting_approval submission
+ *  that is not the approver's own. Returns rows affected (0 = nothing recorded). */
+export async function recordDecision(
+  submissionUuid: string, decision: 'approve' | 'reject',
+  deciderStaffId: number, deciderEmail: string | null, reason: string | null
+): Promise<number> {
+  const r = await getPool().query(
+    `UPDATE remote_submissions
+        SET decision = $1, decided_by_staff_id = $2, decided_by_email = $3, decision_reason = $4, decided_at = now()
+      WHERE submission_uuid = $5 AND status = 'awaiting_approval' AND decision IS NULL AND actor_staff_id <> $2`,
+    [decision, deciderStaffId, deciderEmail, reason, submissionUuid]
+  );
+  return r.rowCount ?? 0;
 }
