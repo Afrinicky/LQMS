@@ -56,6 +56,7 @@ export interface SyncEngine {
   status(): Promise<SyncStatus>;
   push(): Promise<SyncResult>;
   pull(): Promise<SyncResult>;
+  resyncAll(): Promise<SyncResult>;
   processSubmissions(): Promise<{ processed: number }>;
   start(): void;
   stop(): void;
@@ -203,6 +204,22 @@ class CloudSyncEngine implements SyncEngine {
     }
     if (pushed) await this.setSetting('syncLastAt', new Date().toISOString());
     return { ok: true, skipped: false, pushed, pulled: 0, message: `Pushed ${pushed} change(s) to the cloud.` };
+  }
+
+  /**
+   * Force a full re-seed of the cloud from local state. Clears the one-time
+   * backfill guard (settings.syncBackfillDone) so the next push re-uploads every
+   * existing syncable row via the idempotent upsert. This is the recovery path
+   * for when the host is re-pointed at a different/fresh cloud database: the
+   * previous backfill was recorded against the old database, so without this the
+   * new one would only ever receive incremental changes and stay near-empty.
+   * Safe to run repeatedly.
+   */
+  async resyncAll(): Promise<SyncResult> {
+    if (!this.enabledAndConfigured()) return { ok: false, skipped: true, pushed: 0, pulled: 0, message: DISABLED_MESSAGE };
+    await this.setSetting('syncBackfillDone', '0');
+    const result = await this.push();
+    return { ...result, message: `Full re-sync complete — ${result.message}` };
   }
 
   private async upsertCloud(cloud: PostgresStore, table: string, uuid: string, data: Record<string, unknown>, updatedAt: string, deletedAt: string | null, node: string | null): Promise<void> {

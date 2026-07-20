@@ -10,7 +10,7 @@ import type {
   SectionConfigRow, SectionConfigDetail,
   LaboratoryDocument, QualityPolicy, QualityObjective,
   EquipmentPattern, EquipmentSegment,
-  SystemConnectivity, AppMode, SyncStatus, RemoteCloudUser,
+  SystemConnectivity, AppMode, SyncStatus, SyncResult, RemoteCloudUser,
 } from '../../shared/types/api';
 
 // Maps an organogram position title to the lab role(s) whose default permissions
@@ -2197,6 +2197,19 @@ export function ConnectivityMode() {
     }
   }
 
+  async function forceResync() {
+    setBusy(true); setError(null); setMessage(null);
+    try {
+      const r = await api<SyncResult>('/sync/run', { method: 'POST', body: JSON.stringify({ direction: 'resync' }) });
+      setMessage(r.message || 'Full re-sync complete.');
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!info) return <div className="card"><h3>Connectivity &amp; Mode</h3>{error ? <p className="error">{error}</p> : <p className="muted">Loading…</p>}</div>;
 
   return <div>
@@ -2243,6 +2256,17 @@ export function ConnectivityMode() {
         <tr><td>Pending changes (outbox)</td><td>{sync.pendingOutbox}</td></tr>
         <tr><td>Last synchronized</td><td>{sync.lastSyncAt ?? 'Never'}</td></tr>
       </tbody></table>}
+      {sync?.enabled && sync?.cloudConfigured && <div style={{ marginTop: 12 }}>
+        <button className="primary" disabled={!canEdit || busy} onClick={() => void forceResync()}>
+          {busy ? 'Re-syncing…' : 'Force full re-sync to cloud'}
+        </button>
+        <p className="hint" style={{ marginTop: 6, maxWidth: 640 }}>
+          Re-uploads every existing record (staff, documents, equipment, monitoring, inventory and more)
+          to the configured cloud database. Safe to run repeatedly. Use this after connecting the host to a
+          new cloud database so the remote portal shows your full registers, not just recent changes.
+        </p>
+        {!canEdit && <p className="muted">Only a System Administrator or Laboratory Manager can run a re-sync.</p>}
+      </div>}
     </div>
   </div>;
 }

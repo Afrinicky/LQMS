@@ -22,6 +22,13 @@ export type SyncStatus = {
   lastError: string | null;
   message: string;
 };
+export type SyncResult = {
+  ok: boolean;
+  skipped: boolean;
+  pushed: number;
+  pulled: number;
+  message: string;
+};
 export type RemoteCloudUser = {
   id: number;
   staff_id: number;
