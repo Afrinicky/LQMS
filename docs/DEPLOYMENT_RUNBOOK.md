@@ -31,11 +31,30 @@ Keep all of these out of git. `.env` is already gitignored.
 
 ## Step 1 — Create the Neon database
 
-1. Sign up at **neon.tech**, create a **Project** (pick a region close to the lab).
+There are two ways; use whichever your Neon account offers.
+
+**Option A — standalone Neon (neon.tech):**
+1. Sign up at **neon.tech**, create a **Project** (region close to the lab).
 2. It creates a database (e.g. `neondb`). Copy the **owner connection string**:
    ```
    postgresql://OWNER:PASSWORD@ep-xxxx.REGION.aws.neon.tech/neondb?sslmode=require
    ```
+
+**Option B — via the Vercel + Neon integration** (if Neon says *"To create a new
+project, use the Neon Postgres integration in Vercel"*):
+1. First import this repo as a **Vercel project** (Step 4.1–4.2 below) so it exists.
+2. In that Vercel project → **Storage → Create Database → Neon (Serverless
+   Postgres)** and follow the prompts. This creates the Neon project, links it,
+   and **auto-injects `DATABASE_URL`** (and pooled/unpooled variants) into the
+   Vercel project's environment — so the portal has its connection with no manual
+   env var.
+3. Open the database from Vercel (**Storage → your DB → Open in Neon**, or the
+   Neon console) to (a) copy a connection string for the **Host**, and (b) run
+   SQL in Step 3. Use the string ending in `?sslmode=require`.
+
+Either way you end up with a Neon connection string. The **Host** uses it as
+`SECH_LIMS_CLOUD_URL`; the **portal** uses `PORTAL_DATABASE_URL` (or the
+integration-injected `DATABASE_URL` as a fallback).
 
 ## Step 2 — Point the Host at Neon and start syncing
 
@@ -80,10 +99,16 @@ use the restricted role before real rollout.)
 1. In **Vercel**, *Add New → Project* and import this repository.
 2. It auto-detects `vercel.json` (static `portal/` + `api/` functions; no build).
 3. Add **Environment Variables** (Production):
-   - `PORTAL_DATABASE_URL` = the `portal_api` connection string (Step 3).
-   - `CLOUD_JWT_SECRET` = a long random secret (generate one, keep it safe).
-   - *(optional)* `DATABASE_URL` = owner string — only if you skipped Step 3.
-4. **Deploy.** Note the production URL (e.g. `https://sech-portal.vercel.app`).
+   - `CLOUD_JWT_SECRET` = a long random secret (generate one, keep it safe). **Required.**
+   - `PORTAL_DATABASE_URL` = the `portal_api` connection string (Step 3). Preferred.
+   - If you used the **Vercel+Neon integration** (Option B), `DATABASE_URL` is
+     already injected — the portal will use it if `PORTAL_DATABASE_URL` is unset,
+     so you can defer the restricted role and start immediately.
+4. **Deploy** (or redeploy after adding env vars). Note the production URL
+   (e.g. `https://sech-portal.vercel.app`).
+
+> Order note for Option B: import the repo to Vercel (4.1–4.2) → create the Neon
+> DB via Storage (Step 1B) → set `CLOUD_JWT_SECRET` → redeploy → then Steps 2/3/5.
 
 **Verify:** open the URL — you should see the portal sign-in screen. It will say
 "invalid email or password" until you provision an account (Step 5).
