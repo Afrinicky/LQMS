@@ -7,12 +7,21 @@
  */
 import { useEffect, useState } from 'react';
 import { api } from '../src/services/api';
-import { submit } from './net';
-import { Back, Field, Result, today, s, type Msg } from './ui';
+import { submit, uploadEvidence, type SubmitResult } from './net';
+import { Back, Field, PhotoField, Result, today, s, type Msg } from './ui';
 
 export type CaptureKey = 'env' | 'equip:maintenance' | 'equip:breakdown' | 'safety' | 'nc';
 
 type Row = Record<string, unknown>;
+
+/** Attach a photo to a just-created record; returns a suffix for the result msg. */
+async function attachPhoto(photo: File | null, out: SubmitResult, moduleKey: string, recordType: string): Promise<string> {
+  if (!photo || out.queued) return '';
+  const id = (out.data as { id?: number | string } | undefined)?.id;
+  if (!id) return '';
+  try { await uploadEvidence(photo, moduleKey, recordType, id); return ' Photo attached.'; }
+  catch { return ' (photo could not be attached).'; }
+}
 
 export function CaptureScreen({ capture, onBack }: { capture: CaptureKey; onBack: () => void }) {
   const title = capture === 'env' ? 'Environmental reading'
@@ -39,6 +48,7 @@ function NcForm() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [correction, setCorrection] = useState('');
+  const [photo, setPhoto] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<Msg>(null);
 
@@ -50,7 +60,7 @@ function NcForm() {
       const out = await submit('/nonconformities',
         { eventDate: date, title, description, severity, category, immediateCorrection: correction }, `NC · ${title}`);
       if (out.queued) setRes({ kind: 'queued', msg: 'Saved offline — will submit automatically when back online.' });
-      else { const no = s((out.data as { ncNumber?: string })?.ncNumber || ''); setRes({ kind: 'ok', msg: `Nonconformity raised${no ? ' (' + no + ')' : ''}.` }); setTitle(''); setDescription(''); setCorrection(''); }
+      else { const no = s((out.data as { ncNumber?: string })?.ncNumber || ''); const extra = await attachPhoto(photo, out, 'nc_capa', 'nonconforming_events'); setRes({ kind: 'ok', msg: `Nonconformity raised${no ? ' (' + no + ')' : ''}.${extra}` }); setTitle(''); setDescription(''); setCorrection(''); setPhoto(null); }
     } catch (e) { setRes({ kind: 'err', msg: (e as Error).message }); } finally { setBusy(false); }
   }
 
@@ -70,6 +80,7 @@ function NcForm() {
       <Field label="Short title"><input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Wrong anticoagulant used" /></Field>
       <Field label="Description"><textarea rows={3} value={description} onChange={e => setDescription(e.target.value)} /></Field>
       <Field label="Immediate correction"><textarea rows={2} value={correction} onChange={e => setCorrection(e.target.value)} /></Field>
+      <PhotoField file={photo} onChange={setPhoto} />
       <button className="m-btn primary block" disabled={busy} onClick={save}>{busy ? 'Raising…' : 'Raise nonconformity'}</button>
       <Result r={res} />
     </div>
@@ -133,6 +144,7 @@ function EquipmentForm({ mode: initialMode }: { mode: 'maintenance' | 'breakdown
   const [impact, setImpact] = useState('');
   const [immediate, setImmediate] = useState('');
   const [eqStatus, setEqStatus] = useState('out_of_service');
+  const [photo, setPhoto] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<Msg>(null);
 
@@ -149,7 +161,11 @@ function EquipmentForm({ mode: initialMode }: { mode: 'maintenance' | 'breakdown
         ? await submit(`/equipment/${eqId}/maintenance`, { maintenanceDate: date, maintenanceType: mType, findings, actionTaken }, `Maintenance · ${eqName(eq)}`)
         : await submit(`/equipment/${eqId}/breakdown`, { breakdownDate: date, description, serviceImpact: impact, immediateAction: immediate, equipmentStatus: eqStatus }, `Breakdown · ${eqName(eq)}`);
       if (out.queued) setRes({ kind: 'queued', msg: 'Saved offline — will submit automatically when back online.' });
-      else { setRes({ kind: 'ok', msg: mode === 'maintenance' ? 'Maintenance logged.' : 'Breakdown reported. Equipment status updated.' }); setFindings(''); setActionTaken(''); setDescription(''); setImpact(''); setImmediate(''); }
+      else {
+        const extra = mode === 'breakdown' ? await attachPhoto(photo, out, 'equipment', 'equipment_breakdowns') : '';
+        setRes({ kind: 'ok', msg: (mode === 'maintenance' ? 'Maintenance logged.' : 'Breakdown reported. Equipment status updated.') + extra });
+        setFindings(''); setActionTaken(''); setDescription(''); setImpact(''); setImmediate(''); setPhoto(null);
+      }
     } catch (e) { setRes({ kind: 'err', msg: (e as Error).message }); } finally { setBusy(false); }
   }
 
@@ -185,6 +201,7 @@ function EquipmentForm({ mode: initialMode }: { mode: 'maintenance' | 'breakdown
             <option value="out_of_service">Out of service</option><option value="under_repair">Under repair</option><option value="restricted_use">Restricted use</option>
           </select>
         </Field>
+        <PhotoField file={photo} onChange={setPhoto} />
       </>}
       <button className="m-btn primary block" disabled={busy} onClick={save}>{busy ? 'Saving…' : mode === 'maintenance' ? 'Log maintenance' : 'Report breakdown'}</button>
       <Result r={res} />
@@ -199,6 +216,7 @@ function SafetyForm() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [immediate, setImmediate] = useState('');
+  const [photo, setPhoto] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<Msg>(null);
 
@@ -209,7 +227,7 @@ function SafetyForm() {
       const out = await submit('/facilities-safety/incidents',
         { incidentDate: date, title, description, severity, category, immediateAction: immediate }, `Safety · ${category}`);
       if (out.queued) setRes({ kind: 'queued', msg: 'Saved offline — will submit automatically when back online.' });
-      else { const no = s((out.data as { incidentNumber?: string })?.incidentNumber || ''); setRes({ kind: 'ok', msg: `Incident reported${no ? ' (' + no + ')' : ''}.` }); setTitle(''); setDescription(''); setImmediate(''); }
+      else { const no = s((out.data as { incidentNumber?: string })?.incidentNumber || ''); const extra = await attachPhoto(photo, out, 'facilities_safety', 'safety_incidents'); setRes({ kind: 'ok', msg: `Incident reported${no ? ' (' + no + ')' : ''}.${extra}` }); setTitle(''); setDescription(''); setImmediate(''); setPhoto(null); }
     } catch (e) { setRes({ kind: 'err', msg: (e as Error).message }); } finally { setBusy(false); }
   }
 
@@ -229,6 +247,7 @@ function SafetyForm() {
       <Field label="Short title"><input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Needlestick in phlebotomy" /></Field>
       <Field label="What happened"><textarea rows={3} value={description} onChange={e => setDescription(e.target.value)} /></Field>
       <Field label="Immediate action taken"><textarea rows={2} value={immediate} onChange={e => setImmediate(e.target.value)} /></Field>
+      <PhotoField file={photo} onChange={setPhoto} />
       <button className="m-btn primary block" disabled={busy} onClick={save}>{busy ? 'Reporting…' : 'Report incident'}</button>
       <Result r={res} />
     </div>

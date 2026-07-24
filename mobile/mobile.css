@@ -145,6 +145,12 @@ select:focus, textarea:focus { border-color:var(--accent-bright); box-shadow:0 0
 .m-seg { display:grid; grid-template-columns:1fr 1fr; gap:0; background:var(--panel2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:4px; }
 .m-seg button { padding:10px; border-radius:9px; font-size:13.5px; font-weight:600; color:var(--muted); }
 .m-seg button.active { background:var(--accent); color:#fff; }
+.m-photobtn { display:inline-flex; align-items:center; gap:8px; padding:12px 16px; border:1px dashed var(--border-strong); border-radius:var(--radius-sm);
+  background:var(--panel2); color:var(--muted); font-size:14px; font-weight:600; cursor:pointer; }
+.m-photobtn:active { transform:scale(.98); }
+.m-photo { position:relative; border-radius:var(--radius-sm); overflow:hidden; border:1px solid var(--border); }
+.m-photo img { display:block; width:100%; max-height:280px; object-fit:cover; }
+.m-photo-x { position:absolute; top:8px; right:8px; background:rgba(8,13,26,0.8); border:1px solid var(--border-strong); color:#fff; border-radius:var(--pill); padding:6px 12px; font-size:12px; font-weight:600; }
 .m-result { display:flex; align-items:center; gap:8px; font-size:13px; padding:12px 14px; border-radius:var(--radius-sm); border:1px solid var(--border); }
 .m-result.ok { color:var(--success); border-color:rgba(52,211,153,0.4); background:rgba(52,211,153,0.1); }
 .m-result.queued { color:var(--warning); border-color:rgba(245,181,68,0.4); background:rgba(245,181,68,0.1); }

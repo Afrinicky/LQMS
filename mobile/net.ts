@@ -52,6 +52,23 @@ export async function submit(path: string, body: unknown, label: string): Promis
   }
 }
 
+/**
+ * Attach a photo (or any file) as evidence to a just-created record. Uploads to
+ * the Host's generic evidence endpoint, which links it by (module, type, id).
+ * Online-only: a File cannot be meaningfully queued, so photos are attached only
+ * when the record was saved live. Throws on failure so the caller can degrade
+ * gracefully (the record itself is already saved).
+ */
+export async function uploadEvidence(file: File, moduleKey: string, recordType: string, recordId: number | string, notes?: string): Promise<void> {
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('moduleKey', moduleKey);
+  fd.append('recordType', recordType);
+  fd.append('recordId', String(recordId));
+  if (notes) fd.append('notes', notes);
+  await api('/evidence', { method: 'POST', body: fd });
+}
+
 /** Drain queued submissions. Keeps items that still fail on the network. */
 export async function flushOutbox(): Promise<void> {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return;

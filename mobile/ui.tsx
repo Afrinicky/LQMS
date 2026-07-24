@@ -1,5 +1,5 @@
 /** Shared mobile form/UI primitives used by the capture and inventory screens. */
-import type { ReactNode } from 'react';
+import { useEffect, useMemo, type ReactNode } from 'react';
 
 export const today = () => new Date().toISOString().slice(0, 10);
 export const s = (v: unknown) => (v === null || v === undefined ? '' : String(v));
@@ -31,4 +31,33 @@ export function Result({ r }: { r: Msg }) {
 
 export function Back({ onBack }: { onBack: () => void }) {
   return <button className="m-back" onClick={onBack}><Ico d={ICO.back} size={18} /> Back</button>;
+}
+
+const CAMERA = 'M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z';
+
+/**
+ * Photo picker using a file input with capture="environment" — this opens the
+ * device camera through the OS and works over plain http (unlike getUserMedia,
+ * which needs a secure context). Returns the chosen File to the parent form.
+ */
+export function PhotoField({ file, onChange }: { file: File | null; onChange: (f: File | null) => void }) {
+  const url = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
+  useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
+  return (
+    <div className="m-field">
+      <label className="m-lbl">Photo evidence (optional)</label>
+      {url ? (
+        <div className="m-photo">
+          <img src={url} alt="attached" />
+          <button className="m-photo-x" onClick={() => onChange(null)}>Remove</button>
+        </div>
+      ) : (
+        <label className="m-photobtn">
+          <Ico d={CAMERA} size={18} /> Add photo
+          <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+            onChange={e => onChange(e.target.files && e.target.files[0] ? e.target.files[0] : null)} />
+        </label>
+      )}
+    </div>
+  );
 }
