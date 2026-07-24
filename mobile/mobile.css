@@ -100,6 +100,10 @@ input:focus { border-color:var(--accent-bright); box-shadow:0 0 0 3px var(--acce
 .m-tag.danger { color:var(--danger); border-color:rgba(255,107,125,0.4); background:rgba(255,107,125,0.1); }
 .m-tag.ok { color:var(--success); border-color:rgba(52,211,153,0.4); background:rgba(52,211,153,0.1); }
 
+/* ---- CAPA card ---- */
+.m-req { background:var(--card); border:1px solid var(--border); border-radius:var(--radius-sm); padding:14px; }
+.m-req-title { font-size:14.5px; font-weight:600; margin-bottom:8px; }
+
 /* ---- Recent context panel ---- */
 .m-recent { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius-sm); padding:12px 14px; }
 .m-recent-h { font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--faint); font-weight:700; margin-bottom:8px; }

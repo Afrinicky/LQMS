@@ -10,7 +10,7 @@ import { api } from '../src/services/api';
 import { submit, uploadEvidence, type SubmitResult } from './net';
 import { Back, Field, PhotoField, Result, today, s, type Msg } from './ui';
 
-export type CaptureKey = 'env' | 'equip:maintenance' | 'equip:breakdown' | 'safety' | 'nc';
+export type CaptureKey = 'env' | 'equip:maintenance' | 'equip:breakdown' | 'safety' | 'nc' | 'complaint';
 
 type Row = Record<string, unknown>;
 
@@ -28,6 +28,7 @@ export function CaptureScreen({ capture, onBack }: { capture: CaptureKey; onBack
     : capture === 'equip:breakdown' ? 'Report breakdown'
     : capture === 'safety' ? 'Report safety incident'
     : capture === 'nc' ? 'Raise nonconformity'
+    : capture === 'complaint' ? 'Log a complaint'
     : 'Equipment maintenance';
   return (
     <div className="m-screen">
@@ -36,7 +37,56 @@ export function CaptureScreen({ capture, onBack }: { capture: CaptureKey; onBack
       {capture === 'env' ? <EnvForm />
         : capture === 'safety' ? <SafetyForm />
         : capture === 'nc' ? <NcForm />
+        : capture === 'complaint' ? <ComplaintForm />
         : <EquipmentForm mode={capture === 'equip:breakdown' ? 'breakdown' : 'maintenance'} />}
+    </div>
+  );
+}
+
+function ComplaintForm() {
+  const [date, setDate] = useState(today());
+  const [category, setCategory] = useState('Test result');
+  const [complainantType, setComplainantType] = useState('Patient');
+  const [source, setSource] = useState('Phone');
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState<Msg>(null);
+
+  async function save() {
+    if (!title.trim()) { setRes({ kind: 'err', msg: 'Enter a short title.' }); return; }
+    if (!description.trim()) { setRes({ kind: 'err', msg: 'Describe the complaint.' }); return; }
+    setBusy(true); setRes(null);
+    try {
+      const out = await submit('/complaints',
+        { receivedDate: date, category, complainantType, source, title, description }, `Complaint · ${title}`);
+      if (out.queued) setRes({ kind: 'queued', msg: 'Saved offline — will submit automatically when back online.' });
+      else { const no = s((out.data as { complaintNumber?: string })?.complaintNumber || ''); setRes({ kind: 'ok', msg: `Complaint logged${no ? ' (' + no + ')' : ''}.` }); setTitle(''); setDescription(''); }
+    } catch (e) { setRes({ kind: 'err', msg: (e as Error).message }); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="m-form">
+      <Field label="Date received"><input type="date" value={date} onChange={e => setDate(e.target.value)} /></Field>
+      <Field label="From">
+        <select value={complainantType} onChange={e => setComplainantType(e.target.value)}>
+          {['Patient', 'Clinician', 'Department', 'External laboratory', 'Other'].map(c => <option key={c}>{c}</option>)}
+        </select>
+      </Field>
+      <Field label="Category">
+        <select value={category} onChange={e => setCategory(e.target.value)}>
+          {['Test result', 'Turnaround time', 'Report error', 'Sample handling', 'Staff conduct', 'Service', 'Other'].map(c => <option key={c}>{c}</option>)}
+        </select>
+      </Field>
+      <Field label="Received via">
+        <select value={source} onChange={e => setSource(e.target.value)}>
+          {['Phone', 'Email', 'In person', 'Letter', 'Other'].map(c => <option key={c}>{c}</option>)}
+        </select>
+      </Field>
+      <Field label="Short title"><input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Delayed FBC result" /></Field>
+      <Field label="Description"><textarea rows={3} value={description} onChange={e => setDescription(e.target.value)} /></Field>
+      <button className="m-btn primary block" disabled={busy} onClick={save}>{busy ? 'Logging…' : 'Log complaint'}</button>
+      <Result r={res} />
     </div>
   );
 }
