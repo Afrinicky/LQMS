@@ -24,6 +24,7 @@
   },
   "include": [
     "src",
+    "mobile",
     "server",
     "shared",
     "electron",

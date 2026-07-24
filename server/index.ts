@@ -128,6 +128,17 @@ export function createApiServer() {
   const rendererDir = resolveRendererDir();
   if (rendererDir) {
     app.use(express.static(rendererDir, { index: false }));
+    // Mobile Staff Companion PWA: served at /m (and any /m/* client route) from
+    // its own entry (mobile.html) built alongside the desktop renderer. Same
+    // origin as the API, so it works over the LAN and over Tailscale unchanged.
+    const mobileFile = path.join(rendererDir, 'mobile.html');
+    app.use((req, res, next) => {
+      if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+      if (req.path !== '/m' && req.path !== '/m/' && !req.path.startsWith('/m/')) return next();
+      if (req.path.includes('.')) return next(); // let missing assets 404 normally
+      if (!fs.existsSync(mobileFile)) return next();
+      res.sendFile(mobileFile, err => { if (err) next(err); });
+    });
     // SPA fallback: any non-API GET that did not match a static asset returns
     // index.html so client-side routes (/home, /dashboard, …) resolve. Uses a
     // plain middleware to stay compatible with Express 5 path matching.

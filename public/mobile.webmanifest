@@ -1,0 +1,19 @@
+{
+  "name": "SECH_LIMS Staff Companion",
+  "short_name": "SECH Staff",
+  "description": "Mobile companion for SECH_LIMS laboratory staff — capture readings, log maintenance, manage tasks and records on the go, on the LAN or remotely.",
+  "id": "/m",
+  "start_url": "/m",
+  "scope": "/m",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#060A14",
+  "theme_color": "#0A1322",
+  "categories": ["medical", "productivity", "business"],
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
