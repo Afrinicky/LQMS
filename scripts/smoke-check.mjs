@@ -129,6 +129,7 @@ checkFile('mobile/Documents.tsx');
 checkFile('mobile/Assessments.tsx');
 checkFile('public/mobile.webmanifest');
 checkFile('docs/MOBILE_COMPANION_APP_PLAN.md');
+checkFile('docs/MOBILE_REMOTE_ACCESS.md');
 
 // PWA assets (installable mobile/desktop client)
 checkFile('public/manifest.webmanifest');

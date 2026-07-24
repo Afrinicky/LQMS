@@ -164,26 +164,37 @@ the core build.
 
 ## 9. Execution phases
 
-- **M0 — Foundation**: mobile app shell (bottom-tab PWA), Host-endpoint config
-  (LAN + remote), login against `/api/auth`, session + optional PIN lock,
-  installability polish. Home grid driven by the user's permissions.
-- **M1 — My Work & Me**: my tasks/actions, notifications, my profile & records,
-  document acknowledgements. (High value, low risk — read + light write.)
-- **M2 — Field capture**: Environmental readings, Equipment maintenance/calibration/
-  breakdown, with photo capture. Offline outbox live.
-- **M3 — Inventory & Safety**: stock view, usage/receipt/requests with barcode;
-  safety incident reporting with photo.
-- **M4 — Quality**: Nonconformities & CAPA (raise/update/evidence), Assessments
-  (conduct checklists), Complaints/Risks.
-- **M5 — Capture extras & polish**: IQC/EQA/POCT capture where sensible, QR scan
-  to open records, dashboard/KPI read-only cards.
-- **M6 — Notifications & offline hardening**: Web Push, robust sync/conflict UX,
-  performance.
-- **M7 (optional) — Public tunnel & native wrap**: Cloudflare Tunnel for all-staff
-  Internet access without per-device VPN; Capacitor build for app stores if wanted.
+Status as built (branch `claude/sech-lims-hybrid-architecture-qa21ze`):
 
-Each phase is independently useful and shippable. We build, you test on a real
-phone against the lab Host, then move on — exactly how we did R1–R8.
+- **M0 — Foundation** ✅: installable bottom-tab PWA served at `/m`, login against
+  `/api/auth`, same-origin API (LAN + Tailscale, no config), permission-aware home.
+- **M1 — My Work & Me** ✅: my assigned tasks (overdue flagged), scoped alerts, my
+  profile, sign-out.
+- **M2 — Field capture** ✅: environmental readings (with acceptable-range + status),
+  equipment maintenance / breakdown; offline outbox with auto-flush.
+- **M3 — Inventory & Safety** ✅: stock view (low-stock/expiry flags), record usage
+  against a batch; safety incident reporting.
+- **M4 — Quality** ✅: raise nonconformities; acknowledge SOPs / controlled documents
+  (personal attestation). *(Complaints/Risks/CAPA update: later.)*
+- **M5a — Photo evidence** ✅: attach a photo (OS camera via file input, works over
+  http) to breakdowns, safety incidents and nonconformities.
+- **M6 — Assessments** ✅: conduct checklist assessments (per-question response +
+  evidence, auto-saved, progress counter).
+- **Recent-context** ✅: recent readings / maintenance history shown inline on the
+  capture screens.
+
+Remaining / optional:
+
+- **HTTPS remote access** (see `docs/MOBILE_REMOTE_ACCESS.md`): Cloudflare Tunnel so
+  all staff reach the companion over the Internet without per-device Tailscale.
+  Prerequisite for the two items below.
+- **Web Push notifications** and **QR / barcode scanning** — require a secure
+  context (HTTPS), so they are deferred until the tunnel is in place; building them
+  over plain http would ship inert features.
+- **Native wrap** (Capacitor) for app-store distribution, if ever wanted.
+
+Each phase is independently useful and shippable. Build, test on a real phone
+against the lab Host, move on — exactly how we did R1–R8.
 
 ## 10. Open decisions (to confirm before M0)
 
