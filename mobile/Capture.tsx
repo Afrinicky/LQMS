@@ -1,52 +1,33 @@
 /**
- * Field-capture screens for the mobile companion (M2): environmental readings and
- * equipment maintenance / breakdown reports. Each posts directly to the existing
- * Host endpoints through the offline-aware submit() (see net.ts), so captures made
- * without signal are queued and flushed on reconnect. Attribution (who recorded
- * it) is taken from the signed-in account server-side.
+ * Field-capture screens for the mobile companion: environmental readings,
+ * equipment maintenance / breakdown (M2), and safety incident reports (M3).
+ * Each posts directly to the existing Host endpoints through the offline-aware
+ * submit() (see net.ts). Attribution is taken from the signed-in account
+ * server-side.
  */
 import { useEffect, useState } from 'react';
 import { api } from '../src/services/api';
 import { submit } from './net';
+import { Back, Field, Result, today, s, type Msg } from './ui';
 
-export type CaptureKey = 'env' | 'equip:maintenance' | 'equip:breakdown';
+export type CaptureKey = 'env' | 'equip:maintenance' | 'equip:breakdown' | 'safety';
 
-const ICO = {
-  back: 'M15 18l-6-6 6-6',
-  gauge: 'M12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM12 12 8 8M3 12a9 9 0 0 1 18 0',
-  flask: 'M9 3h6M10 3v6.5L5.2 17a2 2 0 0 0 1.7 3h10.2a2 2 0 0 0 1.7-3L14 9.5V3M7.5 14h9',
-  check: 'M20 6 9 17l-5-5',
-};
-const Ico = ({ d, size = 20 }: { d: string; size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-    {d.split('M').filter(Boolean).map((seg, i) => <path key={i} d={'M' + seg} />)}
-  </svg>
-);
-
-const today = () => new Date().toISOString().slice(0, 10);
 type Row = Record<string, unknown>;
-const s = (v: unknown) => (v === null || v === undefined ? '' : String(v));
-
-function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
-  return <div className="m-field"><label className="m-lbl">{label}</label>{children}{hint && <div className="m-fieldhint">{hint}</div>}</div>;
-}
 
 export function CaptureScreen({ capture, onBack }: { capture: CaptureKey; onBack: () => void }) {
-  const isEnv = capture === 'env';
-  const title = isEnv ? 'Environmental reading' : capture === 'equip:breakdown' ? 'Report breakdown' : 'Equipment maintenance';
+  const title = capture === 'env' ? 'Environmental reading'
+    : capture === 'equip:breakdown' ? 'Report breakdown'
+    : capture === 'safety' ? 'Report safety incident'
+    : 'Equipment maintenance';
   return (
     <div className="m-screen">
-      <button className="m-back" onClick={onBack}><Ico d={ICO.back} size={18} /> Back</button>
+      <Back onBack={onBack} />
       <div className="m-screen-h">{title}</div>
-      {isEnv ? <EnvForm /> : <EquipmentForm mode={capture === 'equip:breakdown' ? 'breakdown' : 'maintenance'} />}
+      {capture === 'env' ? <EnvForm />
+        : capture === 'safety' ? <SafetyForm />
+        : <EquipmentForm mode={capture === 'equip:breakdown' ? 'breakdown' : 'maintenance'} />}
     </div>
   );
-}
-
-function Result({ r }: { r: { kind: 'ok' | 'queued' | 'err'; msg: string } | null }) {
-  if (!r) return null;
-  const cls = r.kind === 'err' ? 'err' : r.kind === 'queued' ? 'queued' : 'ok';
-  return <div className={`m-result ${cls}`}>{r.kind === 'ok' && <Ico d={ICO.check} size={16} />}<span>{r.msg}</span></div>;
 }
 
 function EnvForm() {
@@ -56,7 +37,7 @@ function EnvForm() {
   const [value, setValue] = useState('');
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
-  const [res, setRes] = useState<{ kind: 'ok' | 'queued' | 'err'; msg: string } | null>(null);
+  const [res, setRes] = useState<Msg>(null);
 
   useEffect(() => { api<Row[]>('/monitoring/items').then(rows => { setItems(rows); if (rows[0]) setItemId(s(rows[0].id)); }).catch(() => setItems([])); }, []);
   const item = (items ?? []).find(r => s(r.id) === itemId);
@@ -68,11 +49,7 @@ function EnvForm() {
     try {
       const out = await submit(`/monitoring/items/${itemId}/readings`, { readingDate: date, value, comment }, `Reading · ${s(item?.name)}`);
       if (out.queued) setRes({ kind: 'queued', msg: 'Saved offline — will submit automatically when back online.' });
-      else {
-        const st = s((out.data as { status?: string })?.status || 'recorded');
-        setRes({ kind: 'ok', msg: `Reading recorded (${st}).` });
-        setValue(''); setComment('');
-      }
+      else { const st = s((out.data as { status?: string })?.status || 'recorded'); setRes({ kind: 'ok', msg: `Reading recorded (${st}).` }); setValue(''); setComment(''); }
     } catch (e) { setRes({ kind: 'err', msg: (e as Error).message }); } finally { setBusy(false); }
   }
 
@@ -111,7 +88,7 @@ function EquipmentForm({ mode: initialMode }: { mode: 'maintenance' | 'breakdown
   const [immediate, setImmediate] = useState('');
   const [eqStatus, setEqStatus] = useState('out_of_service');
   const [busy, setBusy] = useState(false);
-  const [res, setRes] = useState<{ kind: 'ok' | 'queued' | 'err'; msg: string } | null>(null);
+  const [res, setRes] = useState<Msg>(null);
 
   useEffect(() => { api<Row[]>('/equipment').then(rows => { setItems(rows); if (rows[0]) setEqId(s(rows[0].id)); }).catch(() => setItems([])); }, []);
   const eq = (items ?? []).find(r => s(r.id) === eqId);
@@ -126,10 +103,7 @@ function EquipmentForm({ mode: initialMode }: { mode: 'maintenance' | 'breakdown
         ? await submit(`/equipment/${eqId}/maintenance`, { maintenanceDate: date, maintenanceType: mType, findings, actionTaken }, `Maintenance · ${eqName(eq)}`)
         : await submit(`/equipment/${eqId}/breakdown`, { breakdownDate: date, description, serviceImpact: impact, immediateAction: immediate, equipmentStatus: eqStatus }, `Breakdown · ${eqName(eq)}`);
       if (out.queued) setRes({ kind: 'queued', msg: 'Saved offline — will submit automatically when back online.' });
-      else {
-        setRes({ kind: 'ok', msg: mode === 'maintenance' ? 'Maintenance logged.' : 'Breakdown reported. Equipment status updated.' });
-        setFindings(''); setActionTaken(''); setDescription(''); setImpact(''); setImmediate('');
-      }
+      else { setRes({ kind: 'ok', msg: mode === 'maintenance' ? 'Maintenance logged.' : 'Breakdown reported. Equipment status updated.' }); setFindings(''); setActionTaken(''); setDescription(''); setImpact(''); setImmediate(''); }
     } catch (e) { setRes({ kind: 'err', msg: (e as Error).message }); } finally { setBusy(false); }
   }
 
@@ -167,6 +141,49 @@ function EquipmentForm({ mode: initialMode }: { mode: 'maintenance' | 'breakdown
         </Field>
       </>}
       <button className="m-btn primary block" disabled={busy} onClick={save}>{busy ? 'Saving…' : mode === 'maintenance' ? 'Log maintenance' : 'Report breakdown'}</button>
+      <Result r={res} />
+    </div>
+  );
+}
+
+function SafetyForm() {
+  const [date, setDate] = useState(today());
+  const [category, setCategory] = useState('Needlestick / sharps');
+  const [severity, setSeverity] = useState('Medium');
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [immediate, setImmediate] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState<Msg>(null);
+
+  async function save() {
+    if (!description.trim() && !title.trim()) { setRes({ kind: 'err', msg: 'Enter a description of what happened.' }); return; }
+    setBusy(true); setRes(null);
+    try {
+      const out = await submit('/facilities-safety/incidents',
+        { incidentDate: date, title, description, severity, category, immediateAction: immediate }, `Safety · ${category}`);
+      if (out.queued) setRes({ kind: 'queued', msg: 'Saved offline — will submit automatically when back online.' });
+      else { const no = s((out.data as { incidentNumber?: string })?.incidentNumber || ''); setRes({ kind: 'ok', msg: `Incident reported${no ? ' (' + no + ')' : ''}.` }); setTitle(''); setDescription(''); setImmediate(''); }
+    } catch (e) { setRes({ kind: 'err', msg: (e as Error).message }); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="m-form">
+      <Field label="Date"><input type="date" value={date} onChange={e => setDate(e.target.value)} /></Field>
+      <Field label="Category">
+        <select value={category} onChange={e => setCategory(e.target.value)}>
+          {['Needlestick / sharps', 'Chemical spill', 'Biological exposure', 'Slip / trip / fall', 'Fire / electrical', 'Equipment injury', 'Other'].map(c => <option key={c}>{c}</option>)}
+        </select>
+      </Field>
+      <Field label="Severity">
+        <select value={severity} onChange={e => setSeverity(e.target.value)}>
+          {['Low', 'Medium', 'High', 'Critical'].map(c => <option key={c}>{c}</option>)}
+        </select>
+      </Field>
+      <Field label="Short title"><input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Needlestick in phlebotomy" /></Field>
+      <Field label="What happened"><textarea rows={3} value={description} onChange={e => setDescription(e.target.value)} /></Field>
+      <Field label="Immediate action taken"><textarea rows={2} value={immediate} onChange={e => setImmediate(e.target.value)} /></Field>
+      <button className="m-btn primary block" disabled={busy} onClick={save}>{busy ? 'Reporting…' : 'Report incident'}</button>
       <Result r={res} />
     </div>
   );

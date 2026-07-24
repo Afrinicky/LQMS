@@ -11,7 +11,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, getToken, setToken } from '../src/services/api';
 import type { ApiUser } from '../shared/types/api';
 import { CaptureScreen, type CaptureKey } from './Capture';
+import { InventoryScreen } from './Inventory';
 import { flushOutbox, outboxCount, OUTBOX_EVENT } from './net';
+
+type PushScreen = CaptureKey | 'inventory';
 
 // ---- tiny inline icon set (no external deps; keeps the bundle light) ----
 type IconProps = { d: string; size?: number };
@@ -29,6 +32,7 @@ const P = {
   alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
   doc: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/>',
   clipboard: '<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M9 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3"/><path d="M9 14l2 2 4-4"/>',
+  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>',
   chevron: '<path d="M9 18l6-6-6-6"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
@@ -40,13 +44,13 @@ type AlertRow = Record<string, unknown>;
 
 // Roadmap of mobile areas. `ready` ones are live now (M1); the rest render as
 // "Soon" so staff can see what's coming without hitting dead ends.
-const AREAS: { key: string; label: string; icon: string; ready?: boolean; tab?: Tab; cap?: CaptureKey }[] = [
+const AREAS: { key: string; label: string; icon: string; ready?: boolean; tab?: Tab; push?: PushScreen }[] = [
   { key: 'work', label: 'My tasks', icon: P.work, ready: true, tab: 'work' },
+  { key: 'env', label: 'Environmental', icon: P.gauge, ready: true, push: 'env' },
+  { key: 'equipment', label: 'Equipment', icon: P.flask, ready: true, push: 'equip:maintenance' },
+  { key: 'inventory', label: 'Inventory', icon: P.box, ready: true, push: 'inventory' },
+  { key: 'safety', label: 'Safety', icon: P.shield, ready: true, push: 'safety' },
   { key: 'alerts', label: 'Alerts', icon: P.alert, ready: true, tab: 'alerts' },
-  { key: 'me', label: 'My profile', icon: P.user, ready: true, tab: 'me' },
-  { key: 'env', label: 'Environmental', icon: P.gauge, ready: true, cap: 'env' },
-  { key: 'equipment', label: 'Equipment', icon: P.flask, ready: true, cap: 'equip:maintenance' },
-  { key: 'inventory', label: 'Inventory', icon: P.box },
   { key: 'nc', label: 'Nonconformities', icon: P.alert },
   { key: 'docs', label: 'Documents', icon: P.doc },
   { key: 'assess', label: 'Assessments', icon: P.clipboard },
@@ -68,7 +72,7 @@ export function App() {
   const [user, setUser] = useState<ApiUser | null>(null);
   const [booting, setBooting] = useState(true);
   const [tab, setTab] = useState<Tab>('home');
-  const [capture, setCapture] = useState<CaptureKey | null>(null);
+  const [capture, setCapture] = useState<PushScreen | null>(null);
   const [queued, setQueued] = useState(0);
 
   useEffect(() => {
@@ -109,7 +113,8 @@ export function App() {
       </header>
 
       <main className="m-content">
-        {capture ? <CaptureScreen capture={capture} onBack={() => setCapture(null)} />
+        {capture === 'inventory' ? <InventoryScreen onBack={() => setCapture(null)} />
+          : capture ? <CaptureScreen capture={capture} onBack={() => setCapture(null)} />
           : tab === 'home' ? <Home user={user} go={openTab} onCapture={setCapture} />
           : tab === 'work' ? <Work user={user} />
           : tab === 'alerts' ? <Alerts />
@@ -161,7 +166,7 @@ function Login({ onLoggedIn }: { onLoggedIn: (u: ApiUser) => void }) {
   );
 }
 
-function Home({ user, go, onCapture }: { user: ApiUser; go: (t: Tab) => void; onCapture: (c: CaptureKey) => void }) {
+function Home({ user, go, onCapture }: { user: ApiUser; go: (t: Tab) => void; onCapture: (c: PushScreen) => void }) {
   const [openActions, setOpenActions] = useState<number | null>(null);
   const [alertCount, setAlertCount] = useState<number | null>(null);
 
@@ -196,14 +201,14 @@ function Home({ user, go, onCapture }: { user: ApiUser; go: (t: Tab) => void; on
       <div className="m-quick">
         <button className="m-quickbtn" onClick={() => onCapture('env')}><span className="m-cell-ic"><Ico d={P.gauge} size={20} /></span>Reading</button>
         <button className="m-quickbtn" onClick={() => onCapture('equip:maintenance')}><span className="m-cell-ic"><Ico d={P.flask} size={20} /></span>Maintenance</button>
-        <button className="m-quickbtn" onClick={() => onCapture('equip:breakdown')}><span className="m-cell-ic alert"><Ico d={P.alert} size={20} /></span>Breakdown</button>
+        <button className="m-quickbtn" onClick={() => onCapture('safety')}><span className="m-cell-ic alert"><Ico d={P.shield} size={20} /></span>Incident</button>
       </div>
 
       <div className="m-section-h">Quick access</div>
       <div className="m-grid">
         {AREAS.map(a => (
           <button key={a.key} className={`m-cell ${a.ready ? '' : 'soon'}`}
-            onClick={() => { if (!a.ready) return; if (a.cap) onCapture(a.cap); else if (a.tab) go(a.tab); }} disabled={!a.ready}>
+            onClick={() => { if (!a.ready) return; if (a.push) onCapture(a.push); else if (a.tab) go(a.tab); }} disabled={!a.ready}>
             <span className="m-cell-ic"><Ico d={a.icon} size={22} /></span>
             <span className="m-cell-l">{a.label}</span>
             {!a.ready && <span className="m-soon">Soon</span>}
