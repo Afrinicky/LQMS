@@ -12,9 +12,12 @@ import { api, getToken, setToken } from '../src/services/api';
 import type { ApiUser } from '../shared/types/api';
 import { CaptureScreen, type CaptureKey } from './Capture';
 import { InventoryScreen } from './Inventory';
+import { DocumentsScreen } from './Documents';
+import { AssessmentsScreen } from './Assessments';
+import { CapaScreen } from './Capa';
 import { flushOutbox, outboxCount, OUTBOX_EVENT } from './net';
 
-type PushScreen = CaptureKey | 'inventory';
+type PushScreen = CaptureKey | 'inventory' | 'docs' | 'assess' | 'capa';
 
 // ---- tiny inline icon set (no external deps; keeps the bundle light) ----
 type IconProps = { d: string; size?: number };
@@ -33,6 +36,8 @@ const P = {
   doc: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/>',
   clipboard: '<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M9 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3"/><path d="M9 14l2 2 4-4"/>',
   shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/>',
+  check2: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4 12 14.01l-3-3"/>',
+  chat: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>',
   chevron: '<path d="M9 18l6-6-6-6"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
@@ -50,10 +55,12 @@ const AREAS: { key: string; label: string; icon: string; ready?: boolean; tab?: 
   { key: 'equipment', label: 'Equipment', icon: P.flask, ready: true, push: 'equip:maintenance' },
   { key: 'inventory', label: 'Inventory', icon: P.box, ready: true, push: 'inventory' },
   { key: 'safety', label: 'Safety', icon: P.shield, ready: true, push: 'safety' },
-  { key: 'alerts', label: 'Alerts', icon: P.alert, ready: true, tab: 'alerts' },
-  { key: 'nc', label: 'Nonconformities', icon: P.alert },
-  { key: 'docs', label: 'Documents', icon: P.doc },
-  { key: 'assess', label: 'Assessments', icon: P.clipboard },
+  { key: 'nc', label: 'Nonconformities', icon: P.alert, ready: true, push: 'nc' },
+  { key: 'capa', label: 'CAPA', icon: P.check2, ready: true, push: 'capa' },
+  { key: 'complaint', label: 'Complaints', icon: P.chat, ready: true, push: 'complaint' },
+  { key: 'docs', label: 'Documents', icon: P.doc, ready: true, push: 'docs' },
+  { key: 'assess', label: 'Assessments', icon: P.clipboard, ready: true, push: 'assess' },
+  { key: 'alerts', label: 'Alerts', icon: P.bell, ready: true, tab: 'alerts' },
 ];
 
 function esc(v: unknown): string { return v === null || v === undefined ? '' : String(v); }
@@ -114,6 +121,9 @@ export function App() {
 
       <main className="m-content">
         {capture === 'inventory' ? <InventoryScreen onBack={() => setCapture(null)} />
+          : capture === 'docs' ? <DocumentsScreen user={user} onBack={() => setCapture(null)} />
+          : capture === 'assess' ? <AssessmentsScreen onBack={() => setCapture(null)} />
+          : capture === 'capa' ? <CapaScreen onBack={() => setCapture(null)} />
           : capture ? <CaptureScreen capture={capture} onBack={() => setCapture(null)} />
           : tab === 'home' ? <Home user={user} go={openTab} onCapture={setCapture} />
           : tab === 'work' ? <Work user={user} />
