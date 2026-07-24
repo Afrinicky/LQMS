@@ -42,6 +42,11 @@ import { dennisRoutes } from './routes/dennis.js';
 import { syncRoutes } from './routes/sync.js';
 import { getSyncEngine } from './sync/syncEngine.js';
 import { remoteAccessRoutes } from './routes/remoteAccess.js';
+import { mobileRoutes } from './routes/mobile.js';
+import { formsRoutes } from './routes/forms.js';
+import { signatureRoutes } from './routes/signatures.js';
+import { qrRoutes } from './routes/qr.js';
+import { pushRoutes } from './routes/push.js';
 import { optionalAuth } from './middleware/auth.js';
 import { ensureDataDirs, getDb } from './db/database.js';
 import { seedDefaults } from './db/seed.js';
@@ -120,6 +125,13 @@ export function createApiServer() {
   app.use('/api/environmental', environmentalRoutes());
   app.use('/api/sync', syncRoutes());
   app.use('/api/remote-access', remoteAccessRoutes());
+  // Phase 2 Companion App expansion: mobile aggregation, digital forms engine,
+  // electronic signatures, QR infrastructure and push-notification framework.
+  app.use('/api/mobile', mobileRoutes());
+  app.use('/api/forms', formsRoutes());
+  app.use('/api/signatures', signatureRoutes());
+  app.use('/api/qr', qrRoutes());
+  app.use('/api/push', pushRoutes());
   app.use('/api', commonRoutes());
 
   // Serve the built single-page renderer so the packaged Electron window can

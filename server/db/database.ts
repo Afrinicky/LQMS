@@ -3934,4 +3934,321 @@ CREATE TABLE IF NOT EXISTS inventory_requests (
   decided_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );`);
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Phase 2 Companion App expansion — Staff Self-Service, Digital Forms Engine,
+  // Electronic Signatures, QR Infrastructure and Push Notification framework.
+  // All additive (CREATE TABLE IF NOT EXISTS), so existing databases upgrade in
+  // place. Records are written through the existing Host services, so they land
+  // in the same audit trail and sync as every other module.
+  // ────────────────────────────────────────────────────────────────────────
+  database.exec(`
+-- Electronic signatures: a tamper-evident record captured at the moment a user
+-- signs a regulated action (approvals, completions, acknowledgements). Bound to
+-- the target record by (module_key, record_type, record_id) and to the actor.
+CREATE TABLE IF NOT EXISTS e_signatures (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  module_key TEXT NOT NULL,
+  record_type TEXT NOT NULL,
+  record_id TEXT NOT NULL,
+  purpose TEXT NOT NULL,
+  meaning TEXT,
+  user_id INTEGER REFERENCES users(id),
+  staff_id INTEGER REFERENCES staff(id),
+  signer_name TEXT,
+  signature_image_file_id INTEGER REFERENCES files(id),
+  device_info TEXT,
+  ip_address TEXT,
+  audit_log_id INTEGER,
+  signed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_esign_record ON e_signatures(module_key, record_type, record_id);
+
+-- QR code registry: one stable token per physical/logical entity. The token is
+-- resolvable now (backend complete); scanning becomes live the moment a secure
+-- (HTTPS) camera context is available — no backend change required.
+CREATE TABLE IF NOT EXISTS qr_codes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  token TEXT NOT NULL UNIQUE,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  label TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(entity_type, entity_id)
+);
+
+-- Web/native push subscriptions. Stored now so that when an HTTPS tunnel is in
+-- place the notification framework can deliver to these endpoints unchanged.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  staff_id INTEGER REFERENCES staff(id),
+  platform TEXT NOT NULL DEFAULT 'web',
+  endpoint TEXT NOT NULL,
+  p256dh TEXT,
+  auth TEXT,
+  device_info TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  last_seen_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, endpoint)
+);
+
+-- Outbound push delivery queue: server-side event generation with retry. Rows
+-- are created now; an HTTPS-connected delivery worker drains them later.
+CREATE TABLE IF NOT EXISTS push_deliveries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  notification_id INTEGER REFERENCES notifications(id),
+  user_id INTEGER REFERENCES users(id),
+  title TEXT NOT NULL,
+  body TEXT,
+  priority TEXT NOT NULL DEFAULT 'normal',
+  payload TEXT,
+  scheduled_for TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_attempt_at TEXT,
+  last_error TEXT,
+  delivered_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Organisational announcements broadcast to staff, optionally scoped to a
+-- department/section/role. Read receipts tracked per staff member.
+CREATE TABLE IF NOT EXISTS announcements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  body TEXT,
+  category TEXT,
+  priority TEXT NOT NULL DEFAULT 'normal',
+  audience_role_key TEXT,
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  requires_acknowledgement INTEGER NOT NULL DEFAULT 0,
+  published_at TEXT,
+  expires_at TEXT,
+  status TEXT NOT NULL DEFAULT 'published',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS announcement_reads (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  announcement_id INTEGER NOT NULL REFERENCES announcements(id),
+  staff_id INTEGER REFERENCES staff(id),
+  user_id INTEGER REFERENCES users(id),
+  read_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  acknowledged_at TEXT,
+  UNIQUE(announcement_id, user_id)
+);
+
+-- Clock in/out events (attendance). GPS optional and configurable; coordinates
+-- are stored only when the device provides them.
+CREATE TABLE IF NOT EXISTS clock_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  staff_id INTEGER NOT NULL REFERENCES staff(id),
+  user_id INTEGER REFERENCES users(id),
+  event_type TEXT NOT NULL,
+  event_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  latitude REAL,
+  longitude REAL,
+  accuracy_m REAL,
+  location_label TEXT,
+  device_info TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_clock_staff ON clock_events(staff_id, event_at);
+
+-- Dynamic Digital Forms Engine. Templates are authored as JSON schemas (sections
+-- → fields) and rendered by the client; submissions store the answers as JSON so
+-- new operational forms can be created without any application update.
+CREATE TABLE IF NOT EXISTS form_templates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  template_key TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  category TEXT,
+  description TEXT,
+  module_key TEXT,
+  schema_json TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  requires_signature INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS form_submissions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  submission_number TEXT,
+  template_id INTEGER NOT NULL REFERENCES form_templates(id),
+  template_key TEXT NOT NULL,
+  template_version INTEGER NOT NULL DEFAULT 1,
+  answers_json TEXT NOT NULL,
+  result TEXT,
+  status TEXT NOT NULL DEFAULT 'submitted',
+  submitted_by_staff_id INTEGER REFERENCES staff(id),
+  submitted_by_user_id INTEGER REFERENCES users(id),
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  signature_id INTEGER REFERENCES e_signatures(id),
+  reviewed_by_staff_id INTEGER REFERENCES staff(id),
+  reviewed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_form_sub_template ON form_submissions(template_key, created_at);
+`);
+
+  // leave_requests predates this phase as a minimal record; extend it with the
+  // columns a full self-service leave workflow needs.
+  const leaveCols = new Set((database.prepare('PRAGMA table_info(leave_requests)').all() as Array<{ name: string }>).map(c => c.name));
+  if (!leaveCols.has('days')) database.exec('ALTER TABLE leave_requests ADD COLUMN days REAL');
+  if (!leaveCols.has('created_by')) database.exec('ALTER TABLE leave_requests ADD COLUMN created_by INTEGER REFERENCES users(id)');
+  if (!leaveCols.has('decision_notes')) database.exec('ALTER TABLE leave_requests ADD COLUMN decision_notes TEXT');
+  if (!leaveCols.has('updated_at')) database.exec('ALTER TABLE leave_requests ADD COLUMN updated_at TEXT');
+
+  const invReqCols = new Set((database.prepare('PRAGMA table_info(inventory_requests)').all() as Array<{ name: string }>).map(c => c.name));
+  if (!invReqCols.has('created_by')) database.exec('ALTER TABLE inventory_requests ADD COLUMN created_by INTEGER REFERENCES users(id)');
+  if (!invReqCols.has('decision_notes')) database.exec('ALTER TABLE inventory_requests ADD COLUMN decision_notes TEXT');
+  if (!invReqCols.has('needed_by')) database.exec('ALTER TABLE inventory_requests ADD COLUMN needed_by TEXT');
+  if (!invReqCols.has('updated_at')) database.exec('ALTER TABLE inventory_requests ADD COLUMN updated_at TEXT');
+
+  // Emergency contact + license fields staff can self-update from mobile.
+  const staffSelfCols = new Set((database.prepare('PRAGMA table_info(staff)').all() as Array<{ name: string }>).map(c => c.name));
+  if (!staffSelfCols.has('emergency_contact')) database.exec('ALTER TABLE staff ADD COLUMN emergency_contact TEXT');
+  if (!staffSelfCols.has('emergency_contact_phone')) database.exec('ALTER TABLE staff ADD COLUMN emergency_contact_phone TEXT');
+  if (!staffSelfCols.has('emergency_contact_relation')) database.exec('ALTER TABLE staff ADD COLUMN emergency_contact_relation TEXT');
+  if (!staffSelfCols.has('professional_licence')) database.exec('ALTER TABLE staff ADD COLUMN professional_licence TEXT');
+  if (!staffSelfCols.has('licence_expiry_date')) database.exec('ALTER TABLE staff ADD COLUMN licence_expiry_date TEXT');
+  if (!staffSelfCols.has('professional_regulator')) database.exec('ALTER TABLE staff ADD COLUMN professional_regulator TEXT');
+
+  seedFormTemplates(database);
+}
+
+/**
+ * Seed a starter library of operational form templates so administrators have
+ * working examples to clone. Idempotent: templates are only inserted when their
+ * template_key does not already exist, so edits by administrators are preserved.
+ */
+function seedFormTemplates(database: Database.Database) {
+  const exists = database.prepare('SELECT 1 FROM form_templates WHERE template_key = ?');
+  const insert = database.prepare(`INSERT INTO form_templates (template_key, title, category, description, module_key, schema_json, requires_signature) VALUES (?, ?, ?, ?, ?, ?, ?)`);
+  const field = (key: string, label: string, type: string, extra: Record<string, unknown> = {}) => ({ key, label, type, ...extra });
+  const templates: Array<{ key: string; title: string; category: string; description: string; module: string; requiresSig: number; sections: unknown[] }> = [
+    {
+      key: 'temperature_monitoring', title: 'Temperature Monitoring Sheet', category: 'Environmental', module: 'monitoring', requiresSig: 0,
+      description: 'Daily fridge/freezer/room temperature log with acceptable-range check.',
+      sections: [{ title: 'Reading', fields: [
+        field('unit', 'Unit / location', 'text', { required: true }),
+        field('reading_c', 'Temperature (°C)', 'number', { required: true }),
+        field('within_range', 'Within acceptable range?', 'passfail', { required: true }),
+        field('action_taken', 'Action taken if out of range', 'textarea'),
+        field('photo', 'Photo of display', 'photo'),
+      ] }],
+    },
+    {
+      key: 'daily_opening_checklist', title: 'Daily Opening Checklist', category: 'Operations', module: 'facilities_safety', requiresSig: 1,
+      description: 'Start-of-day readiness checks.',
+      sections: [{ title: 'Opening checks', fields: [
+        field('power_ok', 'Power and UPS operational', 'checkbox'),
+        field('fridges_ok', 'Refrigerators within range', 'checkbox'),
+        field('reagents_ok', 'Adequate reagents in stock', 'checkbox'),
+        field('waste_ok', 'Waste bins emptied and lined', 'checkbox'),
+        field('safety_ok', 'PPE and spill kit available', 'checkbox'),
+        field('remarks', 'Remarks', 'textarea'),
+      ] }],
+    },
+    {
+      key: 'closing_checklist', title: 'Daily Closing Checklist', category: 'Operations', module: 'facilities_safety', requiresSig: 1,
+      description: 'End-of-day shutdown and securing checks.',
+      sections: [{ title: 'Closing checks', fields: [
+        field('samples_stored', 'Samples correctly stored', 'checkbox'),
+        field('equipment_off', 'Non-critical equipment powered down', 'checkbox'),
+        field('fridges_locked', 'Fridges/freezers secured', 'checkbox'),
+        field('doors_locked', 'Doors and windows secured', 'checkbox'),
+        field('remarks', 'Remarks', 'textarea'),
+      ] }],
+    },
+    {
+      key: 'cleaning_schedule', title: 'Cleaning Schedule', category: 'Housekeeping', module: 'facilities_safety', requiresSig: 1,
+      description: 'Area cleaning record.',
+      sections: [{ title: 'Cleaning', fields: [
+        field('area', 'Area cleaned', 'text', { required: true }),
+        field('method', 'Cleaning method / agent', 'text'),
+        field('completed', 'Cleaning completed', 'passfail', { required: true }),
+        field('photo', 'Photo evidence', 'photo'),
+      ] }],
+    },
+    {
+      key: 'waste_disposal_log', title: 'Waste Disposal Log', category: 'Housekeeping', module: 'facilities_safety', requiresSig: 1,
+      description: 'Clinical and general waste disposal record.',
+      sections: [{ title: 'Disposal', fields: [
+        field('waste_type', 'Waste type', 'dropdown', { options: ['Infectious', 'Sharps', 'Chemical', 'General'], required: true }),
+        field('quantity', 'Quantity (bags/containers)', 'number'),
+        field('disposal_method', 'Disposal method', 'text'),
+        field('carrier', 'Carrier / destination', 'text'),
+      ] }],
+    },
+    {
+      key: 'equipment_maintenance', title: 'Equipment Maintenance Record', category: 'Equipment', module: 'equipment', requiresSig: 1,
+      description: 'Routine/preventive/corrective maintenance record.',
+      sections: [{ title: 'Maintenance', fields: [
+        field('equipment', 'Equipment (scan QR)', 'qr', { required: true }),
+        field('type', 'Maintenance type', 'dropdown', { options: ['Routine', 'Preventive', 'Corrective'], required: true }),
+        field('work_done', 'Work performed', 'textarea', { required: true }),
+        field('outcome', 'Outcome', 'passfail'),
+        field('photo', 'Photo', 'photo'),
+      ] }],
+    },
+    {
+      key: 'internal_audit_checklist', title: 'Internal Audit Checklist', category: 'Quality', module: 'assessments', requiresSig: 1,
+      description: 'Generic internal audit checklist section.',
+      sections: [{ title: 'Audit', fields: [
+        field('area', 'Area / process audited', 'text', { required: true }),
+        field('conformity', 'Conformity', 'rating', { max: 5 }),
+        field('findings', 'Findings', 'textarea'),
+        field('nonconformity', 'Nonconformity raised?', 'passfail'),
+      ] }],
+    },
+    {
+      key: 'fire_safety_inspection', title: 'Fire Safety Inspection', category: 'Safety', module: 'facilities_safety', requiresSig: 1,
+      description: 'Fire extinguisher and exit inspection.',
+      sections: [{ title: 'Inspection', fields: [
+        field('extinguishers_ok', 'Extinguishers charged and in date', 'passfail', { required: true }),
+        field('exits_clear', 'Exits and routes clear', 'passfail', { required: true }),
+        field('alarms_ok', 'Alarms functional', 'passfail'),
+        field('remarks', 'Remarks', 'textarea'),
+      ] }],
+    },
+    {
+      key: 'vehicle_inspection', title: 'Vehicle Inspection Form', category: 'Operations', module: 'facilities_safety', requiresSig: 1,
+      description: 'Sample-transport vehicle inspection.',
+      sections: [{ title: 'Vehicle', fields: [
+        field('vehicle_reg', 'Vehicle registration', 'text', { required: true }),
+        field('mileage', 'Mileage', 'number'),
+        field('coolbox_ok', 'Cool box / cold chain intact', 'passfail', { required: true }),
+        field('cleanliness', 'Cleanliness', 'rating', { max: 5 }),
+        field('defects', 'Defects noted', 'textarea'),
+      ] }],
+    },
+    {
+      key: 'facility_inspection', title: 'Facility Inspection Form', category: 'Facilities', module: 'facilities_safety', requiresSig: 0,
+      description: 'General facility condition inspection.',
+      sections: [{ title: 'Facility', fields: [
+        field('area', 'Area', 'text', { required: true }),
+        field('lighting_ok', 'Lighting adequate', 'checkbox'),
+        field('ventilation_ok', 'Ventilation adequate', 'checkbox'),
+        field('hazards', 'Hazards observed', 'textarea'),
+        field('photo', 'Photo', 'photo'),
+      ] }],
+    },
+  ];
+  for (const t of templates) {
+    if (exists.get(t.key)) continue;
+    insert.run(t.key, t.title, t.category, t.description, t.module, JSON.stringify({ sections: t.sections }), t.requiresSig);
+  }
 }
