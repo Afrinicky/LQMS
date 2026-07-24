@@ -121,6 +121,8 @@ checkFile('mobile.html');
 checkFile('mobile/main.tsx');
 checkFile('mobile/App.tsx');
 checkFile('mobile/mobile.css');
+checkFile('mobile/net.ts');
+checkFile('mobile/Capture.tsx');
 checkFile('public/mobile.webmanifest');
 checkFile('docs/MOBILE_COMPANION_APP_PLAN.md');
 

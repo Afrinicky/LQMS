@@ -10,6 +10,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, getToken, setToken } from '../src/services/api';
 import type { ApiUser } from '../shared/types/api';
+import { CaptureScreen, type CaptureKey } from './Capture';
+import { flushOutbox, outboxCount, OUTBOX_EVENT } from './net';
 
 // ---- tiny inline icon set (no external deps; keeps the bundle light) ----
 type IconProps = { d: string; size?: number };
@@ -38,12 +40,12 @@ type AlertRow = Record<string, unknown>;
 
 // Roadmap of mobile areas. `ready` ones are live now (M1); the rest render as
 // "Soon" so staff can see what's coming without hitting dead ends.
-const AREAS: { key: string; label: string; icon: string; ready?: boolean; tab?: Tab }[] = [
+const AREAS: { key: string; label: string; icon: string; ready?: boolean; tab?: Tab; cap?: CaptureKey }[] = [
   { key: 'work', label: 'My tasks', icon: P.work, ready: true, tab: 'work' },
   { key: 'alerts', label: 'Alerts', icon: P.alert, ready: true, tab: 'alerts' },
   { key: 'me', label: 'My profile', icon: P.user, ready: true, tab: 'me' },
-  { key: 'env', label: 'Environmental', icon: P.gauge },
-  { key: 'equipment', label: 'Equipment', icon: P.flask },
+  { key: 'env', label: 'Environmental', icon: P.gauge, ready: true, cap: 'env' },
+  { key: 'equipment', label: 'Equipment', icon: P.flask, ready: true, cap: 'equip:maintenance' },
   { key: 'inventory', label: 'Inventory', icon: P.box },
   { key: 'nc', label: 'Nonconformities', icon: P.alert },
   { key: 'docs', label: 'Documents', icon: P.doc },
@@ -66,12 +68,26 @@ export function App() {
   const [user, setUser] = useState<ApiUser | null>(null);
   const [booting, setBooting] = useState(true);
   const [tab, setTab] = useState<Tab>('home');
+  const [capture, setCapture] = useState<CaptureKey | null>(null);
+  const [queued, setQueued] = useState(0);
 
   useEffect(() => {
     if (!getToken()) { setBooting(false); return; }
     api<{ user: ApiUser }>('/auth/me').then(r => setUser(r.user)).catch(() => setToken(null)).finally(() => setBooting(false));
   }, []);
 
+  // Offline outbox: reflect the queued count and flush on reconnect / app load.
+  useEffect(() => {
+    const refresh = () => setQueued(outboxCount());
+    const onOnline = () => { void flushOutbox().then(refresh); };
+    refresh();
+    void flushOutbox().then(refresh);
+    window.addEventListener(OUTBOX_EVENT, refresh);
+    window.addEventListener('online', onOnline);
+    return () => { window.removeEventListener(OUTBOX_EVENT, refresh); window.removeEventListener('online', onOnline); };
+  }, [user]);
+
+  const openTab = useCallback((t: Tab) => { setCapture(null); setTab(t); }, []);
   const onLoggedIn = useCallback((u: ApiUser) => { setUser(u); setTab('home'); }, []);
   const logout = useCallback(async () => {
     await api('/auth/logout', { method: 'POST' }).catch(() => undefined);
@@ -88,19 +104,21 @@ export function App() {
         <div className="m-top-title">
           <strong>SECH_LIMS</strong><span>Staff Companion</span>
         </div>
+        {queued > 0 && <span className="m-outbox" title="Captures waiting to sync">{queued} queued</span>}
         <span className="m-avatar" title={user.fullName}>{initials(user.staffName || user.fullName)}</span>
       </header>
 
       <main className="m-content">
-        {tab === 'home' && <Home user={user} go={setTab} />}
-        {tab === 'work' && <Work user={user} />}
-        {tab === 'alerts' && <Alerts />}
-        {tab === 'me' && <Me user={user} onLogout={logout} />}
+        {capture ? <CaptureScreen capture={capture} onBack={() => setCapture(null)} />
+          : tab === 'home' ? <Home user={user} go={openTab} onCapture={setCapture} />
+          : tab === 'work' ? <Work user={user} />
+          : tab === 'alerts' ? <Alerts />
+          : <Me user={user} onLogout={logout} />}
       </main>
 
       <nav className="m-tabs">
         {([['home', 'Home', P.home], ['work', 'My Work', P.work], ['alerts', 'Alerts', P.bell], ['me', 'Me', P.user]] as [Tab, string, string][]).map(([k, lbl, ic]) => (
-          <button key={k} className={`m-tab ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}>
+          <button key={k} className={`m-tab ${tab === k && !capture ? 'active' : ''}`} onClick={() => openTab(k)}>
             <Ico d={ic} size={21} /><span>{lbl}</span>
           </button>
         ))}
@@ -143,7 +161,7 @@ function Login({ onLoggedIn }: { onLoggedIn: (u: ApiUser) => void }) {
   );
 }
 
-function Home({ user, go }: { user: ApiUser; go: (t: Tab) => void }) {
+function Home({ user, go, onCapture }: { user: ApiUser; go: (t: Tab) => void; onCapture: (c: CaptureKey) => void }) {
   const [openActions, setOpenActions] = useState<number | null>(null);
   const [alertCount, setAlertCount] = useState<number | null>(null);
 
@@ -174,17 +192,25 @@ function Home({ user, go }: { user: ApiUser; go: (t: Tab) => void }) {
         </button>
       </div>
 
+      <div className="m-section-h">Quick capture</div>
+      <div className="m-quick">
+        <button className="m-quickbtn" onClick={() => onCapture('env')}><span className="m-cell-ic"><Ico d={P.gauge} size={20} /></span>Reading</button>
+        <button className="m-quickbtn" onClick={() => onCapture('equip:maintenance')}><span className="m-cell-ic"><Ico d={P.flask} size={20} /></span>Maintenance</button>
+        <button className="m-quickbtn" onClick={() => onCapture('equip:breakdown')}><span className="m-cell-ic alert"><Ico d={P.alert} size={20} /></span>Breakdown</button>
+      </div>
+
       <div className="m-section-h">Quick access</div>
       <div className="m-grid">
         {AREAS.map(a => (
-          <button key={a.key} className={`m-cell ${a.ready ? '' : 'soon'}`} onClick={() => a.ready && a.tab && go(a.tab)} disabled={!a.ready}>
+          <button key={a.key} className={`m-cell ${a.ready ? '' : 'soon'}`}
+            onClick={() => { if (!a.ready) return; if (a.cap) onCapture(a.cap); else if (a.tab) go(a.tab); }} disabled={!a.ready}>
             <span className="m-cell-ic"><Ico d={a.icon} size={22} /></span>
             <span className="m-cell-l">{a.label}</span>
             {!a.ready && <span className="m-soon">Soon</span>}
           </button>
         ))}
       </div>
-      <p className="m-hint">More areas roll out progressively. Environmental capture, equipment maintenance and inventory are next.</p>
+      <p className="m-hint">More areas roll out progressively. Inventory, nonconformities and documents are next.</p>
     </div>
   );
 }
