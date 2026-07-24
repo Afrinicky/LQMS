@@ -258,7 +258,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     const staffId = parseIntNullable(req.query.staffId);
     const where = staffId ? 'WHERE a.staff_id = ? AND a.status IN (\'pending\',\'overdue\')' : 'WHERE a.status IN (\'pending\',\'overdue\')';
     const params: unknown[] = staffId ? [staffId] : [];
-    res.json(db.prepare(`SELECT a.*, d.document_code, d.title, d.document_type, v.version_number FROM document_attestations a JOIN documents d ON d.id = COALESCE(a.document_id, (SELECT document_id FROM document_versions WHERE id = a.document_version_id)) LEFT JOIN document_versions v ON v.id = a.document_version_id ${where} ORDER BY a.due_date NULLS LAST, a.id DESC`).all(...params));
+    res.json(db.prepare(`SELECT a.*, d.id AS doc_id, d.document_code, d.title, d.document_type, v.version_number FROM document_attestations a JOIN documents d ON d.id = COALESCE(a.document_id, (SELECT document_id FROM document_versions WHERE id = a.document_version_id)) LEFT JOIN document_versions v ON v.id = a.document_version_id ${where} ORDER BY a.due_date NULLS LAST, a.id DESC`).all(...params));
   });
 
   router.get('/distribution/inbox', requirePermission('documents', 'view'), (req, res) => {

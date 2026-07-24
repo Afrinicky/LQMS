@@ -114,6 +114,8 @@ input:focus { border-color:var(--accent-bright); box-shadow:0 0 0 3px var(--acce
 .m-btn.primary { background:var(--accent); color:#fff; box-shadow:0 8px 22px rgba(47,107,255,0.3); margin-top:18px; }
 .m-btn.primary:disabled { opacity:.6; }
 .m-btn.danger { background:transparent; border:1px solid rgba(255,107,125,0.4); color:var(--danger); margin-top:8px; }
+.m-btn.small { padding:8px 14px; font-size:13px; box-shadow:none; margin-top:0; }
+.m-ackrow { display:flex; align-items:center; gap:10px; margin-top:10px; flex-wrap:wrap; }
 
 /* ---- Outbox badge ---- */
 .m-outbox { font-size:11px; font-weight:600; color:var(--warning); border:1px solid rgba(245,181,68,0.4);

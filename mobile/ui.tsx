@@ -7,6 +7,7 @@ export const s = (v: unknown) => (v === null || v === undefined ? '' : String(v)
 export const ICO = {
   back: 'M15 18l-6-6 6-6',
   check: 'M20 6 9 17l-5-5',
+  doc: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8ZM14 2v6h6',
 };
 
 /** Minimal multi-path icon: splits the path string on "M" sub-paths. */

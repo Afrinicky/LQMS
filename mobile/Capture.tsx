@@ -10,7 +10,7 @@ import { api } from '../src/services/api';
 import { submit } from './net';
 import { Back, Field, Result, today, s, type Msg } from './ui';
 
-export type CaptureKey = 'env' | 'equip:maintenance' | 'equip:breakdown' | 'safety';
+export type CaptureKey = 'env' | 'equip:maintenance' | 'equip:breakdown' | 'safety' | 'nc';
 
 type Row = Record<string, unknown>;
 
@@ -18,6 +18,7 @@ export function CaptureScreen({ capture, onBack }: { capture: CaptureKey; onBack
   const title = capture === 'env' ? 'Environmental reading'
     : capture === 'equip:breakdown' ? 'Report breakdown'
     : capture === 'safety' ? 'Report safety incident'
+    : capture === 'nc' ? 'Raise nonconformity'
     : 'Equipment maintenance';
   return (
     <div className="m-screen">
@@ -25,7 +26,52 @@ export function CaptureScreen({ capture, onBack }: { capture: CaptureKey; onBack
       <div className="m-screen-h">{title}</div>
       {capture === 'env' ? <EnvForm />
         : capture === 'safety' ? <SafetyForm />
+        : capture === 'nc' ? <NcForm />
         : <EquipmentForm mode={capture === 'equip:breakdown' ? 'breakdown' : 'maintenance'} />}
+    </div>
+  );
+}
+
+function NcForm() {
+  const [date, setDate] = useState(today());
+  const [category, setCategory] = useState('Process / procedure');
+  const [severity, setSeverity] = useState('Minor');
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [correction, setCorrection] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState<Msg>(null);
+
+  async function save() {
+    if (!title.trim()) { setRes({ kind: 'err', msg: 'Enter a short title.' }); return; }
+    if (!description.trim()) { setRes({ kind: 'err', msg: 'Describe the nonconformity.' }); return; }
+    setBusy(true); setRes(null);
+    try {
+      const out = await submit('/nonconformities',
+        { eventDate: date, title, description, severity, category, immediateCorrection: correction }, `NC · ${title}`);
+      if (out.queued) setRes({ kind: 'queued', msg: 'Saved offline — will submit automatically when back online.' });
+      else { const no = s((out.data as { ncNumber?: string })?.ncNumber || ''); setRes({ kind: 'ok', msg: `Nonconformity raised${no ? ' (' + no + ')' : ''}.` }); setTitle(''); setDescription(''); setCorrection(''); }
+    } catch (e) { setRes({ kind: 'err', msg: (e as Error).message }); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="m-form">
+      <Field label="Date detected"><input type="date" value={date} onChange={e => setDate(e.target.value)} /></Field>
+      <Field label="Category">
+        <select value={category} onChange={e => setCategory(e.target.value)}>
+          {['Process / procedure', 'Sample / specimen', 'Equipment', 'Reagent / material', 'Result / report', 'Environment', 'Documentation', 'Other'].map(c => <option key={c}>{c}</option>)}
+        </select>
+      </Field>
+      <Field label="Severity">
+        <select value={severity} onChange={e => setSeverity(e.target.value)}>
+          {['Minor', 'Major', 'Critical'].map(c => <option key={c}>{c}</option>)}
+        </select>
+      </Field>
+      <Field label="Short title"><input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Wrong anticoagulant used" /></Field>
+      <Field label="Description"><textarea rows={3} value={description} onChange={e => setDescription(e.target.value)} /></Field>
+      <Field label="Immediate correction"><textarea rows={2} value={correction} onChange={e => setCorrection(e.target.value)} /></Field>
+      <button className="m-btn primary block" disabled={busy} onClick={save}>{busy ? 'Raising…' : 'Raise nonconformity'}</button>
+      <Result r={res} />
     </div>
   );
 }

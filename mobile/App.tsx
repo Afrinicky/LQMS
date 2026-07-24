@@ -12,9 +12,10 @@ import { api, getToken, setToken } from '../src/services/api';
 import type { ApiUser } from '../shared/types/api';
 import { CaptureScreen, type CaptureKey } from './Capture';
 import { InventoryScreen } from './Inventory';
+import { DocumentsScreen } from './Documents';
 import { flushOutbox, outboxCount, OUTBOX_EVENT } from './net';
 
-type PushScreen = CaptureKey | 'inventory';
+type PushScreen = CaptureKey | 'inventory' | 'docs';
 
 // ---- tiny inline icon set (no external deps; keeps the bundle light) ----
 type IconProps = { d: string; size?: number };
@@ -50,9 +51,9 @@ const AREAS: { key: string; label: string; icon: string; ready?: boolean; tab?: 
   { key: 'equipment', label: 'Equipment', icon: P.flask, ready: true, push: 'equip:maintenance' },
   { key: 'inventory', label: 'Inventory', icon: P.box, ready: true, push: 'inventory' },
   { key: 'safety', label: 'Safety', icon: P.shield, ready: true, push: 'safety' },
-  { key: 'alerts', label: 'Alerts', icon: P.alert, ready: true, tab: 'alerts' },
-  { key: 'nc', label: 'Nonconformities', icon: P.alert },
-  { key: 'docs', label: 'Documents', icon: P.doc },
+  { key: 'nc', label: 'Nonconformities', icon: P.alert, ready: true, push: 'nc' },
+  { key: 'docs', label: 'Documents', icon: P.doc, ready: true, push: 'docs' },
+  { key: 'alerts', label: 'Alerts', icon: P.bell, ready: true, tab: 'alerts' },
   { key: 'assess', label: 'Assessments', icon: P.clipboard },
 ];
 
@@ -114,6 +115,7 @@ export function App() {
 
       <main className="m-content">
         {capture === 'inventory' ? <InventoryScreen onBack={() => setCapture(null)} />
+          : capture === 'docs' ? <DocumentsScreen user={user} onBack={() => setCapture(null)} />
           : capture ? <CaptureScreen capture={capture} onBack={() => setCapture(null)} />
           : tab === 'home' ? <Home user={user} go={openTab} onCapture={setCapture} />
           : tab === 'work' ? <Work user={user} />
