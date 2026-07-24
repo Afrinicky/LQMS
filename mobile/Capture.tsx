@@ -93,11 +93,14 @@ function EnvForm() {
   const [date, setDate] = useState(today());
   const [value, setValue] = useState('');
   const [comment, setComment] = useState('');
+  const [recent, setRecent] = useState<Row[]>([]);
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<Msg>(null);
 
   useEffect(() => { api<Row[]>('/monitoring/items').then(rows => { setItems(rows); if (rows[0]) setItemId(s(rows[0].id)); }).catch(() => setItems([])); }, []);
   const item = (items ?? []).find(r => s(r.id) === itemId);
+  const loadRecent = (id: string) => { if (!id) { setRecent([]); return; } api<Row[]>(`/monitoring/items/${id}/readings`).then(r => setRecent(r.slice(0, 6))).catch(() => setRecent([])); };
+  useEffect(() => { loadRecent(itemId); }, [itemId]);
 
   async function save() {
     if (!itemId) { setRes({ kind: 'err', msg: 'Select a monitoring item.' }); return; }
@@ -106,7 +109,7 @@ function EnvForm() {
     try {
       const out = await submit(`/monitoring/items/${itemId}/readings`, { readingDate: date, value, comment }, `Reading · ${s(item?.name)}`);
       if (out.queued) setRes({ kind: 'queued', msg: 'Saved offline — will submit automatically when back online.' });
-      else { const st = s((out.data as { status?: string })?.status || 'recorded'); setRes({ kind: 'ok', msg: `Reading recorded (${st}).` }); setValue(''); setComment(''); }
+      else { const st = s((out.data as { status?: string })?.status || 'recorded'); setRes({ kind: 'ok', msg: `Reading recorded (${st}).` }); setValue(''); setComment(''); loadRecent(itemId); }
     } catch (e) { setRes({ kind: 'err', msg: (e as Error).message }); } finally { setBusy(false); }
   }
 
@@ -128,6 +131,22 @@ function EnvForm() {
       <Field label="Comment" hint="Required if the reading is out of range."><textarea rows={2} value={comment} onChange={e => setComment(e.target.value)} /></Field>
       <button className="m-btn primary block" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Record reading'}</button>
       <Result r={res} />
+      {recent.length > 0 && (
+        <div className="m-recent">
+          <div className="m-recent-h">Recent readings</div>
+          {recent.map((r, i) => {
+            const st = s(r.status).toLowerCase();
+            const cls = st.includes('crit') ? 'danger' : st.includes('warn') ? 'warn' : 'ok';
+            return (
+              <div className="m-recent-row" key={i}>
+                <span>{s(r.value)}{item?.unit ? ' ' + s(item.unit) : ''}</span>
+                <span className={`m-tag ${cls}`}>{s(r.status) || 'normal'}</span>
+                <span className="m-recent-date">{s(r.reading_date)}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -145,12 +164,19 @@ function EquipmentForm({ mode: initialMode }: { mode: 'maintenance' | 'breakdown
   const [immediate, setImmediate] = useState('');
   const [eqStatus, setEqStatus] = useState('out_of_service');
   const [photo, setPhoto] = useState<File | null>(null);
+  const [history, setHistory] = useState<Row[]>([]);
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<Msg>(null);
 
   useEffect(() => { api<Row[]>('/equipment').then(rows => { setItems(rows); if (rows[0]) setEqId(s(rows[0].id)); }).catch(() => setItems([])); }, []);
   const eq = (items ?? []).find(r => s(r.id) === eqId);
   const eqName = (r?: Row) => s(r?.name || r?.equipment_number || r?.asset_number || r?.id);
+  const loadHistory = (id: string) => {
+    if (!id) { setHistory([]); return; }
+    const path = mode === 'breakdown' ? `/equipment/${id}/breakdowns` : `/equipment/${id}/maintenance`;
+    api<Row[]>(path).then(r => setHistory(r.slice(0, 6))).catch(() => setHistory([]));
+  };
+  useEffect(() => { loadHistory(eqId); }, [eqId, mode]);
 
   async function save() {
     if (!eqId) { setRes({ kind: 'err', msg: 'Select an equipment item.' }); return; }
@@ -164,7 +190,7 @@ function EquipmentForm({ mode: initialMode }: { mode: 'maintenance' | 'breakdown
       else {
         const extra = mode === 'breakdown' ? await attachPhoto(photo, out, 'equipment', 'equipment_breakdowns') : '';
         setRes({ kind: 'ok', msg: (mode === 'maintenance' ? 'Maintenance logged.' : 'Breakdown reported. Equipment status updated.') + extra });
-        setFindings(''); setActionTaken(''); setDescription(''); setImpact(''); setImmediate(''); setPhoto(null);
+        setFindings(''); setActionTaken(''); setDescription(''); setImpact(''); setImmediate(''); setPhoto(null); loadHistory(eqId);
       }
     } catch (e) { setRes({ kind: 'err', msg: (e as Error).message }); } finally { setBusy(false); }
   }
@@ -205,6 +231,17 @@ function EquipmentForm({ mode: initialMode }: { mode: 'maintenance' | 'breakdown
       </>}
       <button className="m-btn primary block" disabled={busy} onClick={save}>{busy ? 'Saving…' : mode === 'maintenance' ? 'Log maintenance' : 'Report breakdown'}</button>
       <Result r={res} />
+      {history.length > 0 && (
+        <div className="m-recent">
+          <div className="m-recent-h">{mode === 'breakdown' ? 'Recent breakdowns' : 'Recent maintenance'}</div>
+          {history.map((r, i) => (
+            <div className="m-recent-row" key={i}>
+              <span>{mode === 'breakdown' ? (s(r.description).slice(0, 40) || 'Breakdown') : s(r.maintenance_type)}</span>
+              <span className="m-recent-date">{s(r.maintenance_date || r.breakdown_date)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

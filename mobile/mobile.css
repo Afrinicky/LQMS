@@ -98,6 +98,14 @@ input:focus { border-color:var(--accent-bright); box-shadow:0 0 0 3px var(--acce
 .m-tag { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; padding:2px 8px; border-radius:var(--pill); border:1px solid var(--border); }
 .m-tag.warn { color:var(--warning); border-color:rgba(245,181,68,0.4); background:rgba(245,181,68,0.1); }
 .m-tag.danger { color:var(--danger); border-color:rgba(255,107,125,0.4); background:rgba(255,107,125,0.1); }
+.m-tag.ok { color:var(--success); border-color:rgba(52,211,153,0.4); background:rgba(52,211,153,0.1); }
+
+/* ---- Recent context panel ---- */
+.m-recent { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius-sm); padding:12px 14px; }
+.m-recent-h { font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--faint); font-weight:700; margin-bottom:8px; }
+.m-recent-row { display:flex; align-items:center; gap:10px; padding:7px 0; border-bottom:1px solid var(--border); font-size:13px; }
+.m-recent-row:last-child { border-bottom:0; }
+.m-recent-date { margin-left:auto; color:var(--faint); font-size:12px; }
 
 /* ---- Me ---- */
 .m-me-head { display:flex; align-items:center; gap:14px; margin-bottom:4px; }
