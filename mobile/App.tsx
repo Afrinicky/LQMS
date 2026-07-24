@@ -13,9 +13,10 @@ import type { ApiUser } from '../shared/types/api';
 import { CaptureScreen, type CaptureKey } from './Capture';
 import { InventoryScreen } from './Inventory';
 import { DocumentsScreen } from './Documents';
+import { AssessmentsScreen } from './Assessments';
 import { flushOutbox, outboxCount, OUTBOX_EVENT } from './net';
 
-type PushScreen = CaptureKey | 'inventory' | 'docs';
+type PushScreen = CaptureKey | 'inventory' | 'docs' | 'assess';
 
 // ---- tiny inline icon set (no external deps; keeps the bundle light) ----
 type IconProps = { d: string; size?: number };
@@ -53,8 +54,8 @@ const AREAS: { key: string; label: string; icon: string; ready?: boolean; tab?: 
   { key: 'safety', label: 'Safety', icon: P.shield, ready: true, push: 'safety' },
   { key: 'nc', label: 'Nonconformities', icon: P.alert, ready: true, push: 'nc' },
   { key: 'docs', label: 'Documents', icon: P.doc, ready: true, push: 'docs' },
+  { key: 'assess', label: 'Assessments', icon: P.clipboard, ready: true, push: 'assess' },
   { key: 'alerts', label: 'Alerts', icon: P.bell, ready: true, tab: 'alerts' },
-  { key: 'assess', label: 'Assessments', icon: P.clipboard },
 ];
 
 function esc(v: unknown): string { return v === null || v === undefined ? '' : String(v); }
@@ -116,6 +117,7 @@ export function App() {
       <main className="m-content">
         {capture === 'inventory' ? <InventoryScreen onBack={() => setCapture(null)} />
           : capture === 'docs' ? <DocumentsScreen user={user} onBack={() => setCapture(null)} />
+          : capture === 'assess' ? <AssessmentsScreen onBack={() => setCapture(null)} />
           : capture ? <CaptureScreen capture={capture} onBack={() => setCapture(null)} />
           : tab === 'home' ? <Home user={user} go={openTab} onCapture={setCapture} />
           : tab === 'work' ? <Work user={user} />

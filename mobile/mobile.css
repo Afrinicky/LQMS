@@ -156,6 +156,22 @@ select:focus, textarea:focus { border-color:var(--accent-bright); box-shadow:0 0
 .m-result.queued { color:var(--warning); border-color:rgba(245,181,68,0.4); background:rgba(245,181,68,0.1); }
 .m-result.err { color:var(--danger); border-color:rgba(255,107,125,0.4); background:rgba(255,107,125,0.1); }
 
+/* ---- Assessments ---- */
+.m-item.tappable { text-align:left; width:100%; align-items:center; }
+.m-chevron { margin-left:auto; color:var(--faint); font-size:22px; line-height:1; }
+.m-progress { font-size:12.5px; color:var(--muted); background:var(--panel); border:1px solid var(--border); border-radius:var(--pill); padding:6px 14px; align-self:flex-start; }
+.m-qcard { background:var(--card); border:1px solid var(--border); border-radius:var(--radius-sm); padding:14px; display:flex; flex-direction:column; gap:10px; }
+.m-qtext { font-size:13.5px; line-height:1.4; }
+.m-rchips { display:flex; flex-wrap:wrap; gap:7px; }
+.m-rchip { font-size:12px; font-weight:600; padding:7px 12px; border-radius:var(--pill); border:1px solid var(--border); color:var(--muted); background:var(--panel2); }
+.m-rchip.on.ok { background:var(--success); border-color:var(--success); color:#04241a; }
+.m-rchip.on.warn { background:var(--warning); border-color:var(--warning); color:#2a1c00; }
+.m-rchip.on.bad { background:var(--danger); border-color:var(--danger); color:#2a0007; }
+.m-rchip.on.na { background:var(--faint); border-color:var(--faint); color:#0b0f18; }
+.m-qnote { padding:10px 12px; font-size:14px; }
+.m-qstate { font-size:11.5px; color:var(--faint); }
+.m-qstate.saved { color:var(--success); } .m-qstate.queued { color:var(--warning); } .m-qstate.err { color:var(--danger); }
+
 /* ---- Bottom tab bar ---- */
 .m-tabs { position:fixed; left:0; right:0; bottom:0; height:calc(var(--tabbar-h) + env(safe-area-inset-bottom));
   padding-bottom:env(safe-area-inset-bottom); display:grid; grid-template-columns:repeat(4,1fr);
