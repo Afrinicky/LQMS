@@ -116,6 +116,18 @@ checkFile('api/portal/approvals.ts');
 checkFile('api/portal/approve.ts');
 checkFile('server/sync/applyHandlers.ts');
 
+// Mobile Staff Companion PWA (M0 foundation + M1)
+checkFile('mobile.html');
+checkFile('mobile/main.tsx');
+checkFile('mobile/App.tsx');
+checkFile('mobile/mobile.css');
+checkFile('mobile/net.ts');
+checkFile('mobile/ui.tsx');
+checkFile('mobile/Capture.tsx');
+checkFile('mobile/Inventory.tsx');
+checkFile('public/mobile.webmanifest');
+checkFile('docs/MOBILE_COMPANION_APP_PLAN.md');
+
 // PWA assets (installable mobile/desktop client)
 checkFile('public/manifest.webmanifest');
 checkFile('public/sw.js');

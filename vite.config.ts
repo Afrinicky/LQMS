@@ -8,5 +8,16 @@ export default defineConfig({
   // the JS/CSS then 404 with the wrong MIME type and the app never boots.
   base: '/',
   server: { host: '127.0.0.1', port: 5173 },
-  build: { outDir: 'dist' }
+  build: {
+    outDir: 'dist',
+    rollupOptions: {
+      // Two entry points: the desktop renderer (index.html → /) and the mobile
+      // Staff Companion PWA (mobile.html → served by the Host at /m). Shared code
+      // is split into common chunks automatically.
+      input: {
+        main: 'index.html',
+        mobile: 'mobile.html',
+      },
+    },
+  },
 });
