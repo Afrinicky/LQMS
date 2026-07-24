@@ -183,6 +183,45 @@ Status as built (branch `claude/sech-lims-hybrid-architecture-qa21ze`):
 - **Recent-context** ✅: recent readings / maintenance history shown inline on the
   capture screens.
 
+### Phase 2 — Primary digital workstation ✅ (branch `claude/sechlims-mobile-upgrades-micuq9`)
+
+Phase 2 expands the companion from a capture tool into the primary mobile
+workspace. See `docs/MOBILE_COMPANION_PHASE_2.md` for the full design.
+
+- **Staff Self-Service** ✅: profile & contact edit, emergency contacts,
+  professional licences, document/certificate upload (→ verification workflow),
+  leave requests, clock in/out (optional GPS), duty roster, training history &
+  upcoming requirements, competency records, announcements, and electronic
+  acknowledgement/signing of declarations. (`mobile/SelfService.tsx`,
+  `/api/mobile/me/*`, `/api/mobile/announcements`).
+- **Role-based dashboard** ✅: `/api/mobile/dashboard` returns permission-filtered
+  widgets + quick actions; the home screen is tailored per role with drill-down.
+- **Dynamic Digital Forms Engine** ✅: JSON templates rendered on the client with
+  every field type, conditional questions and validation; administrators publish
+  new forms with no app update. Ten starter templates seeded.
+  (`mobile/Forms.tsx`, `/api/forms/*`, `form_templates`/`form_submissions`).
+- **Mobile approval workflows** ✅: unified RBAC-filtered inbox with approve /
+  reject / return, comments, e-signature, timestamp and audit trail; the
+  requester is notified. (`mobile/Approvals.tsx`, `/api/mobile/approvals`).
+- **Electronic signatures** ✅: `e_signatures` records identity, timestamp,
+  device, IP and an audit-log reference; used by approvals, form completion and
+  acknowledgements. (`server/services/signatureService.ts`, `/api/signatures`).
+- **QR infrastructure** ✅ (backend complete): stable per-entity tokens for
+  equipment, reagents, inventory, storage locations, rooms, environmental points
+  and maintenance records, each resolving to its record. Scanning goes live
+  unchanged once a secure camera context exists. (`server/services/qrService.ts`,
+  `/api/qr/*`).
+- **Push-notification framework** ✅ (backend complete): subscriptions,
+  preferences, server-side event generation, scheduling/reminders, priorities,
+  read/unread, history and retry — wired to delivery when HTTPS lands.
+  (`server/services/pushService.ts`, `/api/push/*`).
+- **Camera intelligence** ✅: image compression, offline photo capture, QR/barcode
+  scanning (live over a secure context, manual entry otherwise) with an
+  OCR-ready "confirm or edit" step. (`mobile/Scan.tsx`, `mobile/native.ts`).
+- **Native-app preparation** ✅: all device access is behind `mobile/native.ts`;
+  `capacitor.config.ts` documents the Android wrap. The PWA stays fully
+  functional.
+
 Remaining / optional:
 
 - **HTTPS remote access** (see `docs/MOBILE_REMOTE_ACCESS.md`): Cloudflare Tunnel so
