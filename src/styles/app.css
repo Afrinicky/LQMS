@@ -1022,6 +1022,33 @@ button.step-toggle:hover { background: rgba(255,255,255,0.05); box-shadow: none;
   background: transparent; color: var(--muted); border: 1px solid var(--border);
 }
 .drawer-close:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+
+/* Change-password modal (centered dialog) */
+.pw-overlay {
+  position: fixed; inset: 0; z-index: 70;
+  background: rgba(4, 8, 16, 0.55);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+  animation: drawer-fade 0.15s ease;
+}
+.pw-modal {
+  width: min(420px, 96vw);
+  background: linear-gradient(180deg, var(--card), var(--surface));
+  border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  animation: drawer-slide 0.18s ease;
+}
+.pw-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+}
+.pw-head h3 { font-size: 17px; display: flex; align-items: center; gap: 9px; }
+.pw-body { padding: 18px 20px 20px; display: flex; flex-direction: column; gap: 6px; }
+.pw-label { font-size: 12px; color: var(--muted); margin-top: 8px; }
+.pw-show { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); margin-top: 12px; }
+.pw-show input { width: auto; }
+.pw-error { color: var(--danger); font-size: 12.5px; margin: 10px 0 0; }
+.pw-ok { color: var(--success); font-size: 13.5px; margin: 4px 0 4px; }
+
 .link-btn { padding: 5px 14px; }
 tr.clickable-row { cursor: pointer; }
 tr.clickable-row:hover td { background: var(--accent-soft); }

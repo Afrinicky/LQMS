@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, ChevronDown, Database, Server, LogOut, PanelLeftClose, PanelLeftOpen, Search, FlaskConical } from 'lucide-react';
+import { Bell, ChevronDown, Database, Server, LogOut, PanelLeftClose, PanelLeftOpen, Search, FlaskConical, KeyRound } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { MODULES } from '../../shared/constants/modules';
 import { NAV_SECTIONS, NAV_GROUP_LABELS } from '../../shared/constants/navigation';
@@ -8,6 +8,7 @@ import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import { moduleIcon, sectionIcon } from '../components/ui/moduleIcons';
 import { DennisFloatingWidget } from '../components/DennisFloatingWidget';
+import { ChangePasswordModal } from '../components/ChangePasswordModal';
 
 const API_HOST = (() => {
   try { return new URL((window as any).sechLims?.apiBaseUrl ?? 'http://127.0.0.1:4317/api').host; }
@@ -27,6 +28,7 @@ export default function AppLayout() {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
   const [unread, setUnread] = useState<number | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
   const [sectionOverrides, setSectionOverrides] = useState<Record<string, boolean>>({});
 
   const enabled = useMemo(
@@ -174,9 +176,11 @@ export default function AppLayout() {
                 <span>{user?.roleName ?? 'Member'}</span>
               </span>
             </button>
+            <button className="icon-btn" type="button" aria-label="Change password" title="Change password" onClick={() => setShowPassword(true)}><KeyRound size={18} /></button>
             <button className="icon-btn" type="button" aria-label="Logout" onClick={logout}><LogOut size={18} /></button>
           </div>
         </header>
+        {showPassword && <ChangePasswordModal onClose={() => setShowPassword(false)} />}
 
         <section className="content"><Outlet /></section>
 
