@@ -18,9 +18,22 @@ name: Build Android APK
 #      base64 -w0 upload.jks        # paste into ANDROID_KEYSTORE_BASE64
 
 on:
+  # Manual run from the Actions tab (needs this file on the default branch).
   workflow_dispatch:
+  # A published GitHub Release — the APK is attached to it.
   release:
     types: [published]
+  # Pushing a version tag builds the APK and creates a Release for that tag with
+  # the APK attached. This works from ANY branch (tag/push events use the
+  # workflow from the tagged commit), so you can build before merging to main:
+  #   git tag v0.1.0 && git push origin v0.1.0
+  push:
+    tags:
+      - 'v*'
+
+# Needed so the workflow can create a Release and attach the APK to it.
+permissions:
+  contents: write
 
 jobs:
   build-apk:
@@ -102,8 +115,12 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Attach APK to the release
-        if: github.event_name == 'release'
+      # On a published release OR a pushed v* tag, publish the APK to a GitHub
+      # Release so staff can download it. (For a tag push, this creates the
+      # release for that tag automatically.)
+      - name: Publish APK to the release
+        if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: SECH_LIMS-Staff.apk
+          generate_release_notes: true
