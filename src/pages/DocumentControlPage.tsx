@@ -130,6 +130,9 @@ export function DocumentControlPage() {
   const { isEnabled } = useModules();
   const { user } = useAuth();
   const canGovern = !!user && GOVERN_ROLES.includes(user.roleName || '');
+  // Permanent deletion is administrator-only and deliberately kept out of plain
+  // sight — the server independently enforces the same restriction.
+  const isAdmin = !!user && (user.roleName || '').trim().toLowerCase() === 'system administrator';
   const { staff, sections, departments, positions } = useLookups();
   const [searchParams, setSearchParams] = useSearchParams();
   const [section, setSection] = useState<(typeof SECTIONS)[number]>('Dashboard');
@@ -157,6 +160,10 @@ export function DocumentControlPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [transferModal, setTransferModal] = useState<{ docIds: number[]; ownerStaffId: string; note: string; busy: boolean } | null>(null);
   const [bulkBusyAction, setBulkBusyAction] = useState('');
+  // Admin-only, kept out of plain sight: a confirmation modal for permanent
+  // deletion. `confirmText` must equal "DELETE" before the action is enabled.
+  const [deleteModal, setDeleteModal] = useState<{ docs: DocumentRecord[]; confirmText: string; busy: boolean } | null>(null);
+  const [adminMenuOpen, setAdminMenuOpen] = useState(false);
 
   const [docForm, setDocForm] = useState(emptyDocForm);
   const [versionForm, setVersionForm] = useState(emptyVersionForm);
@@ -398,17 +405,41 @@ export function DocumentControlPage() {
     catch (e) { setError((e as Error).message); }
   }
 
-  async function deleteDoc() {
-    if (!selectedDoc) return;
-    const label = `${selectedDoc.document_code ? selectedDoc.document_code + ' · ' : ''}${selectedDoc.title}`;
-    if (!window.confirm(`Permanently delete "${label}" and all its versions, attestations and files?\n\nThis cannot be undone. To retire a document while keeping its history, use "Mark obsolete" instead.`)) return;
-    try {
-      await api(`/documents/${selectedDoc.id}`, { method: 'DELETE' });
-      setSelectedDoc(null);
-      await load();
-      flash(`Deleted "${label}" from the system.`);
-    } catch (e) { setError((e as Error).message); }
+  // Open the guarded delete confirmation for one document (from the drawer) or
+  // for the current register selection (admin bulk tool). No-op for non-admins;
+  // the server also rejects the request.
+  function requestDelete(docs: DocumentRecord[]) {
+    if (!isAdmin || !docs.length) return;
+    setAdminMenuOpen(false);
+    setDeleteModal({ docs, confirmText: '', busy: false });
   }
+
+  async function confirmDelete() {
+    if (!deleteModal || deleteModal.confirmText.trim().toUpperCase() !== 'DELETE') return;
+    setDeleteModal({ ...deleteModal, busy: true });
+    const ids = deleteModal.docs.map(d => d.id);
+    try {
+      if (ids.length === 1) {
+        await api(`/documents/${ids[0]}`, { method: 'DELETE' });
+        setDeleteModal(null);
+        if (selectedDoc && ids.includes(selectedDoc.id)) setSelectedDoc(null);
+        setSelectedIds(new Set());
+        await load();
+        flash('Document permanently deleted.');
+      } else {
+        const r = await api<{ deleted: number; failed: number }>('/documents/bulk-delete', { method: 'POST', body: JSON.stringify({ ids }) });
+        setDeleteModal(null);
+        if (selectedDoc && ids.includes(selectedDoc.id)) setSelectedDoc(null);
+        setSelectedIds(new Set());
+        await load();
+        if (r.failed > 0) setError(`Deleted ${r.deleted} document(s); ${r.failed} could not be deleted.`);
+        else flash(`Permanently deleted ${r.deleted} document(s).`);
+      }
+    } catch (e) { setDeleteModal(m => m && { ...m, busy: false }); setError((e as Error).message); }
+  }
+
+  // Kept for the drawer's delete action — opens the same guarded modal.
+  function deleteDoc() { if (selectedDoc) requestDelete([selectedDoc]); }
 
   async function approveDoc() {
     if (!selectedDoc) return;
@@ -675,6 +706,20 @@ export function DocumentControlPage() {
         <button className="secondary" disabled={!!bulkBusyAction} onClick={() => bulkAction('submit-review')}>{bulkBusyAction === 'submit-review' ? 'Submitting…' : 'Submit for review'}</button>
         <button className="danger" disabled={!!bulkBusyAction} onClick={() => bulkAction('obsolete')}>{bulkBusyAction === 'obsolete' ? 'Working…' : 'Mark obsolete…'}</button>
         <span style={{ flex: 1 }} />
+        {/* Permanent deletion lives here, out of plain sight behind an admin-only
+            menu, so it can never be hit by accident by ordinary quality staff. */}
+        {isAdmin && <div className="dm-menuwrap">
+          <button className="secondary" disabled={!!bulkBusyAction} onClick={() => setAdminMenuOpen(o => !o)}>Admin ▾</button>
+          {adminMenuOpen && <>
+            <div style={{ position: 'fixed', inset: 0, zIndex: 35 }} onClick={() => setAdminMenuOpen(false)} />
+            <div className="dm-admin-menu">
+              <span className="dm-admin-menu-head">Administrator only</span>
+              <button className="dm-danger-item" onClick={() => requestDelete(registerDocs.filter(d => selectedIds.has(d.id)))}>
+                🗑 Delete {selectedIds.size} document{selectedIds.size === 1 ? '' : 's'} permanently…
+              </button>
+            </div>
+          </>}
+        </div>}
         <button className="secondary" onClick={() => setSelectedIds(new Set())}>Clear selection</button>
       </div>}
 
@@ -756,10 +801,36 @@ export function DocumentControlPage() {
           </div>
         </div>
       </div>}
+
+      {/* Administrator-only permanent deletion — a typed confirmation guards it. */}
+      {deleteModal && <div className="dm-modal-overlay" onClick={() => !deleteModal.busy && setDeleteModal(null)}>
+        <div className="dm-modal" onClick={e => e.stopPropagation()}>
+          <h3 style={{ marginTop: 0, color: '#FF8D9C' }}>Permanently delete {deleteModal.docs.length === 1 ? 'this document' : `${deleteModal.docs.length} documents`}</h3>
+          <p className="muted" style={{ marginTop: 0 }}>
+            This removes {deleteModal.docs.length === 1 ? 'the document' : 'these documents'}, every version, attestation, review, distribution and print log,
+            and deletes the underlying files from disk. <strong>This cannot be undone.</strong> To retire a document while keeping its history, use “Mark obsolete” instead.
+          </p>
+          <div className="dm-del-list">
+            {deleteModal.docs.slice(0, 8).map(d => <div key={d.id}>{d.document_code ? `${d.document_code} · ` : ''}{d.title}</div>)}
+            {deleteModal.docs.length > 8 && <div className="muted">…and {deleteModal.docs.length - 8} more</div>}
+          </div>
+          <label>Type <strong>DELETE</strong> to confirm
+            <input autoFocus value={deleteModal.confirmText} onChange={e => setDeleteModal({ ...deleteModal, confirmText: e.target.value })}
+              placeholder="DELETE" onKeyDown={e => { if (e.key === 'Enter') confirmDelete(); }} />
+          </label>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
+            <button className="secondary" disabled={deleteModal.busy} onClick={() => setDeleteModal(null)}>Cancel</button>
+            <button className="danger" disabled={deleteModal.busy || deleteModal.confirmText.trim().toUpperCase() !== 'DELETE'} onClick={confirmDelete}>
+              {deleteModal.busy ? 'Deleting…' : `Delete ${deleteModal.docs.length === 1 ? 'document' : deleteModal.docs.length + ' documents'} permanently`}
+            </button>
+          </div>
+        </div>
+      </div>}
+
       {selectedDoc && <div className="doc-drawer-overlay" onClick={() => setSelectedDoc(null)}>
       <div className="doc-drawer" onClick={e => e.stopPropagation()}>
       <DocumentDetailPanel doc={selectedDoc} staff={staff} positions={positions} sections={sections} departments={departments}
-        canGovern={canGovern}
+        canGovern={canGovern} isAdmin={isAdmin}
         onTransferOwner={() => setTransferModal({ docIds: [selectedDoc.id], ownerStaffId: '', note: '', busy: false })}
         versionForm={versionForm} setVersionForm={setVersionForm} versionFile={versionFile} setVersionFile={setVersionFile} submitVersion={submitVersion}
         reviewForm={reviewForm} setReviewForm={setReviewForm} submitReview={submitReview}
@@ -1767,7 +1838,7 @@ function MasterListDetailsForm({ doc, onSaved, onError }: { doc: any; onSaved: (
 }
 
 function DocumentDetailPanel(props: any) {
-  const { doc, staff, positions, sections, departments, canGovern, onTransferOwner,
+  const { doc, staff, positions, sections, departments, canGovern, isAdmin, onTransferOwner,
     versionForm, setVersionForm, versionFile, setVersionFile, submitVersion,
     reviewForm, setReviewForm, submitReview,
     attestForm, setAttestForm, submitAttest,
@@ -1908,12 +1979,15 @@ function DocumentDetailPanel(props: any) {
       <button onClick={submitObsolete}>Mark obsolete</button>
     </div>}
 
-    {/* Danger zone: permanent removal. Prefer "Mark obsolete" to keep history. */}
-    <div className="doc-danger-zone">
-      <h4>Delete document</h4>
+    {/* Danger zone: permanent removal — administrator-only, and tucked inside a
+        collapsed disclosure so it stays out of plain sight. Prefer "Mark
+        obsolete" to keep history. The server also enforces the admin check. */}
+    {isAdmin && <details className="doc-danger-zone dm-danger-details">
+      <summary>Administrator tools</summary>
+      <h4 style={{ marginTop: 10 }}>Delete document</h4>
       <p className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>Permanently removes this document, all versions, attestations, distribution, print logs and files. This cannot be undone — to retire while keeping history, mark it obsolete instead.</p>
       <button className="danger" onClick={onDelete}>Delete document permanently</button>
-    </div>
+    </details>}
     </div>
   </div>;
 }

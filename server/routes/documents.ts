@@ -165,6 +165,63 @@ function nextDocumentCode(db: any, type: string, sectionCode?: string | null): s
   return `${prefix}${String(max + 1).padStart(pad, '0')}`;
 }
 
+// Deleting documents is an administrator-only capability, deliberately kept out
+// of the reach of the ordinary "approve" authority so it cannot be reached by
+// mistake. A System Administrator is any user whose role is the system-admin
+// role. Callers must be authenticated first (requirePermission runs before).
+function isAdminUser(req: any): boolean {
+  const db = getDb();
+  const row = db.prepare('SELECT r.name AS role_name FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?').get(req.user?.id) as { role_name?: string } | undefined;
+  return (row?.role_name || '').trim().toLowerCase() === 'system administrator';
+}
+
+// Permanently remove one document and everything owned by it (versions,
+// attestations, comments, distribution, print logs, reviews), remove its AI
+// index and record links, detach incidental references from other business
+// records, and delete now-unreferenced files from disk. Runs in its own
+// transaction. Shared by the single- and bulk-delete endpoints.
+function deleteDocumentCascade(db: any, docId: number): void {
+  const fileIds = (db.prepare('SELECT DISTINCT file_id FROM document_versions WHERE document_id = ? AND file_id IS NOT NULL').all(docId) as Array<{ file_id: number }>).map(r => r.file_id);
+  const columnExists = (table: string, column: string) => {
+    try { return (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).some(c => c.name === column); }
+    catch { return false; }
+  };
+  const tableExists = (table: string) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?").get(table));
+
+  const remove = db.transaction(() => {
+    db.prepare('DELETE FROM document_attestations WHERE document_id = ? OR document_version_id IN (SELECT id FROM document_versions WHERE document_id = ?)').run(docId, docId);
+    for (const t of ['document_comments', 'document_distribution', 'document_print_logs', 'document_reviews']) {
+      if (tableExists(t)) db.prepare(`DELETE FROM ${t} WHERE document_id = ?`).run(docId);
+    }
+    if (tableExists('dennis_document_chunks')) db.prepare('DELETE FROM dennis_document_chunks WHERE source_document_id = ?').run(docId);
+    if (tableExists('dennis_documents')) db.prepare('DELETE FROM dennis_documents WHERE source_document_id = ?').run(docId);
+    db.prepare("DELETE FROM record_links WHERE (source_module_key = 'documents' AND source_record_type = 'documents' AND source_record_id = ?) OR (target_module_key = 'documents' AND target_record_type = 'documents' AND target_record_id = ?)").run(String(docId), String(docId));
+    const versionIds = (db.prepare('SELECT id FROM document_versions WHERE document_id = ?').all(docId) as Array<{ id: number }>).map(r => r.id);
+    for (const [table, col] of [['record_register', 'document_id'], ['quality_objectives', 'document_id'], ['tat_records', 'document_id'], ['lab_test_catalog', 'document_id'], ['referral_laboratories', 'document_id'], ['specimen_acceptance_criteria', 'document_id'], ['laboratory_documents', 'document_id'], ['ethical_declaration_forms', 'document_id'], ['record_destruction_log', 'document_id'], ['staff_declarations', 'document_id']] as const) {
+      if (tableExists(table) && columnExists(table, col)) db.prepare(`UPDATE ${table} SET ${col} = NULL WHERE ${col} = ?`).run(docId);
+    }
+    if (versionIds.length && tableExists('staff_declarations') && columnExists('staff_declarations', 'document_version_id')) {
+      const placeholders = versionIds.map(() => '?').join(',');
+      db.prepare(`UPDATE staff_declarations SET document_version_id = NULL WHERE document_version_id IN (${placeholders})`).run(...versionIds);
+    }
+    db.prepare('UPDATE documents SET current_version_id = NULL WHERE id = ?').run(docId);
+    db.prepare('DELETE FROM document_versions WHERE document_id = ?').run(docId);
+    db.prepare('DELETE FROM documents WHERE id = ?').run(docId);
+    for (const fileId of fileIds) {
+      const stillUsed = (db.prepare('SELECT COUNT(*) AS n FROM document_versions WHERE file_id = ?').get(fileId) as { n: number }).n
+        + (tableExists('staff_documents') ? (db.prepare('SELECT COUNT(*) AS n FROM staff_documents WHERE file_id = ?').get(fileId) as { n: number }).n : 0);
+      if (stillUsed > 0) continue;
+      const file = db.prepare('SELECT stored_name, storage_area FROM files WHERE id = ?').get(fileId) as { stored_name: string; storage_area: string } | undefined;
+      if (file) {
+        const root = file.storage_area === 'evidence' ? evidenceRoot : uploadRoot;
+        try { const fp = path.join(root, file.stored_name); if (fs.existsSync(fp)) fs.unlinkSync(fp); } catch { /* best-effort disk cleanup */ }
+        db.prepare('DELETE FROM files WHERE id = ?').run(fileId);
+      }
+    }
+  });
+  remove();
+}
+
 export function documentControlRoutes() {
   const router = Router();
 
@@ -1054,72 +1111,48 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     res.json({ ok: true });
   });
 
-  // Permanently remove a document from the system. This is a destructive,
-  // audited action gated on the documents "approve" authority (the same level
-  // that retires/obsoletes documents). It deletes the document, all its versions
-  // and their owned records (attestations, comments, distribution, print logs,
-  // reviews), removes the AI index and record links, and deletes the underlying
-  // files from disk when they are not referenced elsewhere. Incidental links to
-  // the document from other business records are detached (set to NULL) so those
-  // records survive without a dangling reference. For an ISO-compliant retire
-  // that keeps history, use "mark obsolete" instead.
+  // Permanently remove MANY documents at once — an administrator-only recovery
+  // tool for clearing out mistaken or broken imports (e.g. documents that
+  // replicated from another host without their files). Registered before the
+  // single-delete route. Gated on documents "approve" AND System Administrator.
+  // For an ISO-compliant retire that keeps history, use "mark obsolete" instead.
+  router.post('/bulk-delete', requirePermission('documents', 'approve'), (req, res) => {
+    if (!isAdminUser(req)) return res.status(403).json({ error: 'Only a System Administrator can permanently delete documents.' });
+    const db = getDb();
+    const ids: number[] = Array.isArray(req.body?.ids) ? req.body.ids.map((n: unknown) => Number(n)).filter((n: number) => Number.isFinite(n)) : [];
+    if (!ids.length) return res.status(400).json({ error: 'Provide an array of document ids to delete.' });
+    if (ids.length > 500) return res.status(400).json({ error: 'Too many documents in one request (max 500).' });
+    const results: Array<{ id: number; ok: boolean; error?: string; documentCode?: string; title?: string }> = [];
+    for (const docId of ids) {
+      const doc = db.prepare('SELECT id, document_code, title, status FROM documents WHERE id = ?').get(docId) as any;
+      if (!doc) { results.push({ id: docId, ok: false, error: 'Not found' }); continue; }
+      try {
+        deleteDocumentCascade(db, docId);
+        audit(req, { action: 'delete', entity: 'documents', entityId: docId, oldValue: { documentCode: doc.document_code, title: doc.title, status: doc.status, bulk: true } });
+        results.push({ id: docId, ok: true, documentCode: doc.document_code, title: doc.title });
+      } catch (err) {
+        results.push({ id: docId, ok: false, error: err instanceof Error ? err.message : 'Failed to delete' });
+      }
+    }
+    const deleted = results.filter(r => r.ok).length;
+    res.json({ ok: true, deleted, failed: results.length - deleted, results });
+  });
+
+  // Permanently remove a single document from the system. Administrator-only and
+  // audited. It deletes the document, all its versions and their owned records
+  // (attestations, comments, distribution, print logs, reviews), removes the AI
+  // index and record links, and deletes the underlying files from disk when they
+  // are not referenced elsewhere. Incidental links to the document from other
+  // business records are detached (set to NULL) so those records survive without
+  // a dangling reference. For an ISO-compliant retire that keeps history, use
+  // "mark obsolete" instead.
   router.delete('/:id', requirePermission('documents', 'approve'), (req, res) => {
+    if (!isAdminUser(req)) return res.status(403).json({ error: 'Only a System Administrator can permanently delete documents.' });
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
     if (!doc) return res.status(404).json({ error: 'Document not found' });
     const docId = Number(req.params.id);
-
-    // Files owned by this document's versions — candidates for on-disk removal.
-    const fileIds = (db.prepare('SELECT DISTINCT file_id FROM document_versions WHERE document_id = ? AND file_id IS NOT NULL').all(docId) as Array<{ file_id: number }>).map(r => r.file_id);
-
-    const columnExists = (table: string, column: string) => {
-      try { return (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).some(c => c.name === column); }
-      catch { return false; }
-    };
-    const tableExists = (table: string) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?").get(table));
-
-    const remove = db.transaction(() => {
-      // Owned child records — safe to delete with the document.
-      db.prepare('DELETE FROM document_attestations WHERE document_id = ? OR document_version_id IN (SELECT id FROM document_versions WHERE document_id = ?)').run(docId, docId);
-      for (const t of ['document_comments', 'document_distribution', 'document_print_logs', 'document_reviews']) {
-        if (tableExists(t)) db.prepare(`DELETE FROM ${t} WHERE document_id = ?`).run(docId);
-      }
-      // AI (Dennis) index for this document.
-      if (tableExists('dennis_document_chunks')) db.prepare('DELETE FROM dennis_document_chunks WHERE source_document_id = ?').run(docId);
-      if (tableExists('dennis_documents')) db.prepare('DELETE FROM dennis_documents WHERE source_document_id = ?').run(docId);
-      // Cross-module record links either way.
-      db.prepare("DELETE FROM record_links WHERE (source_module_key = 'documents' AND source_record_type = 'documents' AND source_record_id = ?) OR (target_module_key = 'documents' AND target_record_type = 'documents' AND target_record_id = ?)").run(String(docId), String(docId));
-      // Detach incidental references from other business records so nothing dangles.
-      const versionIds = (db.prepare('SELECT id FROM document_versions WHERE document_id = ?').all(docId) as Array<{ id: number }>).map(r => r.id);
-      for (const [table, col] of [['record_register', 'document_id'], ['quality_objectives', 'document_id'], ['tat_records', 'document_id'], ['lab_test_catalog', 'document_id'], ['referral_laboratories', 'document_id'], ['specimen_acceptance_criteria', 'document_id'], ['laboratory_documents', 'document_id'], ['ethical_declaration_forms', 'document_id'], ['record_destruction_log', 'document_id'], ['staff_declarations', 'document_id']] as const) {
-        if (tableExists(table) && columnExists(table, col)) db.prepare(`UPDATE ${table} SET ${col} = NULL WHERE ${col} = ?`).run(docId);
-      }
-      if (versionIds.length && tableExists('staff_declarations') && columnExists('staff_declarations', 'document_version_id')) {
-        const placeholders = versionIds.map(() => '?').join(',');
-        db.prepare(`UPDATE staff_declarations SET document_version_id = NULL WHERE document_version_id IN (${placeholders})`).run(...versionIds);
-      }
-      // Break the documents→current_version_id reference before removing the
-      // versions it points at (foreign keys are enforced), then delete versions
-      // and finally the document itself.
-      db.prepare('UPDATE documents SET current_version_id = NULL WHERE id = ?').run(docId);
-      db.prepare('DELETE FROM document_versions WHERE document_id = ?').run(docId);
-      db.prepare('DELETE FROM documents WHERE id = ?').run(docId);
-
-      // Delete files from disk + table when no longer referenced anywhere.
-      for (const fileId of fileIds) {
-        const stillUsed = (db.prepare('SELECT COUNT(*) AS n FROM document_versions WHERE file_id = ?').get(fileId) as { n: number }).n
-          + (tableExists('staff_documents') ? (db.prepare('SELECT COUNT(*) AS n FROM staff_documents WHERE file_id = ?').get(fileId) as { n: number }).n : 0);
-        if (stillUsed > 0) continue;
-        const file = db.prepare('SELECT stored_name, storage_area FROM files WHERE id = ?').get(fileId) as { stored_name: string; storage_area: string } | undefined;
-        if (file) {
-          const root = file.storage_area === 'evidence' ? evidenceRoot : uploadRoot;
-          try { const fp = path.join(root, file.stored_name); if (fs.existsSync(fp)) fs.unlinkSync(fp); } catch { /* best-effort disk cleanup */ }
-          db.prepare('DELETE FROM files WHERE id = ?').run(fileId);
-        }
-      }
-    });
-
-    try { remove(); }
+    try { deleteDocumentCascade(db, docId); }
     catch (err) { return res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to delete document' }); }
     audit(req, { action: 'delete', entity: 'documents', entityId: docId, oldValue: { documentCode: doc.document_code, title: doc.title, status: doc.status } });
     res.json({ ok: true });
