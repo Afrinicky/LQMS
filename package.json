@@ -35,7 +35,6 @@
     "@capacitor/geolocation": "^6.1.0",
     "@capacitor/ios": "^6.2.0",
     "@capacitor/preferences": "^6.0.3",
-    "@capacitor/push-notifications": "^6.0.4",
     "@capacitor/splash-screen": "^6.0.3",
     "@capacitor/status-bar": "^6.0.2",
     "adm-zip": "latest",

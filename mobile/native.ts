@@ -119,6 +119,11 @@ export async function initNativeShell(): Promise<void> {
  * Register this device for native push and hand the token to the Host. Safe to
  * call after login; no-ops in the PWA (Web Push is registered separately once
  * HTTPS is available). Errors are swallowed — push is an enhancement.
+ *
+ * Native push is OPT-IN: @capacitor/push-notifications is not part of the
+ * default build because on Android it requires Firebase, and a missing
+ * google-services.json crashes the app on launch. When the plugin is absent
+ * this simply no-ops. See docs/NATIVE_APP_BUILD.md to enable it with Firebase.
  */
 export async function registerNativePush(postSubscribe: (endpoint: string, platform: string) => Promise<void>): Promise<void> {
   const push = plugin('PushNotifications');

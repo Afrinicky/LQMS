@@ -121,14 +121,46 @@ authenticates against the Host exactly like the PWA.
 `mobile/native.ts` detects the native shell and enables, with no code change:
 
 - **Geolocation** for clock-in via the Geolocation plugin (permission-prompted).
-- **Push notifications** — on login the app registers with the OS and posts its
-  token to `/api/push/subscribe`; the existing push framework then delivers.
 - **Status bar / splash** theming.
 - The live **QR/barcode scanner** (secure context) and **camera** capture.
+- **Push notifications** — opt-in; see the note below.
 
 The PWA build contains **no** Capacitor dependency — plugins are reached through
 the `window.Capacitor` global that only exists inside the native shell, so the
 web app is unaffected.
+
+## Troubleshooting: the app closes immediately on launch (Android)
+
+If, right after installing, the app opens and then closes itself within a second
+(no error, no white screen), the usual cause is **native Push Notifications
+without Firebase**. `@capacitor/push-notifications` on Android integrates
+Firebase Cloud Messaging, and Firebase's startup provider crashes the whole app
+(`Default FirebaseApp is not initialized in this process`) when there is no valid
+`google-services.json` in `android/app/`.
+
+To confirm, plug the phone in and run:
+
+```
+adb logcat | grep -i "FirebaseApp\|AndroidRuntime\|sechlims"
+```
+
+**This is why native push is off by default.** The app is fully functional
+without it, so nothing else needs to change to get a working build.
+
+### Re-enabling native push (only when you have Firebase)
+
+1. Create a Firebase project and register the Android app with the id
+   `gh.nickland.sechlims.companion`.
+2. Download `google-services.json` and place it in `android/app/`.
+3. `npm install @capacitor/push-notifications@^6`.
+4. Re-add the `PushNotifications` block under `plugins` in `capacitor.config.ts`.
+5. `npm run cap:sync`, rebuild.
+
+`registerNativePush()` in `mobile/native.ts` already no-ops when the plugin is
+absent, so no application code changes are needed either way.
+
+Any *other* startup failure now shows an on-screen error (with a Reload button)
+instead of a blank screen — capture that text if you see it and share it.
 
 ## 7. Updating a published app
 
