@@ -42,9 +42,16 @@ const config: CapacitorConfig = {
       backgroundColor: '#0A1322',
       showSpinner: false,
     },
-    PushNotifications: {
-      presentationOptions: ['badge', 'sound', 'alert'],
-    },
+    // NOTE: native Push Notifications are intentionally NOT enabled by default.
+    // On Android, @capacitor/push-notifications pulls in Firebase Cloud
+    // Messaging, and Firebase's startup ContentProvider CRASHES the app on
+    // launch ("Default FirebaseApp is not initialized") when no valid
+    // google-services.json is bundled — which looks like the app closing itself
+    // the moment it opens. The app is fully functional without push. To turn it
+    // back on: install @capacitor/push-notifications, add a real
+    // google-services.json (Firebase console) into android/app/, re-add the
+    // PushNotifications config block here, then `npm run cap:sync`. See
+    // docs/NATIVE_APP_BUILD.md → "App closes immediately on launch (Android)".
   },
 };
 

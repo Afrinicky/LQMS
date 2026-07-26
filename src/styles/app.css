@@ -1948,3 +1948,34 @@ button.tiny { padding: 2px 8px; font-size: 11px; }
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px;
 }
 .dm-own-box .dm-avatar { width: 34px; height: 34px; font-size: 12.5px; }
+
+/* Admin-only permanent-delete affordances (kept out of plain sight) */
+/* Anchor the popover to its trigger (the viewer defines its own scoped copy). */
+.dm-bulkbar .dm-menuwrap { position: relative; }
+.dm-admin-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 40; min-width: 240px;
+  background: var(--panel); border: 1px solid var(--border-strong); border-radius: 10px;
+  padding: 6px; box-shadow: 0 14px 40px rgba(0,0,0,0.55); display: flex; flex-direction: column; gap: 2px;
+}
+.dm-admin-menu-head {
+  font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--muted); padding: 6px 8px 4px;
+}
+.dm-danger-item {
+  text-align: left; background: transparent; border: 0; box-shadow: none;
+  color: #FF8D9C; font-size: 12.5px; font-weight: 600; padding: 9px 10px; border-radius: 7px; cursor: pointer; white-space: nowrap;
+}
+.dm-danger-item:hover { background: rgba(226, 62, 82, 0.16); }
+.dm-del-list {
+  max-height: 150px; overflow: auto; margin: 4px 0 6px; padding: 8px 10px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+  font-size: 12.5px; line-height: 1.6;
+}
+.dm-danger-details > summary {
+  cursor: pointer; font-weight: 600; color: var(--muted); list-style: none;
+  padding: 6px 0; user-select: none;
+}
+.dm-danger-details > summary::-webkit-details-marker { display: none; }
+.dm-danger-details > summary::before { content: "▸ "; color: var(--muted); }
+.dm-danger-details[open] > summary::before { content: "▾ "; }
+.dm-danger-details[open] > summary { color: #FF8D9C; }
