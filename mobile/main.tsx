@@ -2,9 +2,12 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
 import { initNativeShell } from './native';
+import { initInstallCapture } from './install';
 import './mobile.css';
 
-// Theme the native status bar and dismiss the splash once mounted (no-op in PWA).
+// Capture the PWA install prompt early (before React mounts) so the app can
+// offer its own "Install" button; theme the native status bar / hide splash.
+initInstallCapture();
 void initNativeShell();
 
 const root = document.getElementById('root');

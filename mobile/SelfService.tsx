@@ -15,6 +15,7 @@ import { submit } from './net';
 import { Back, Field, Ico, ICO, Result, s, today, type Msg } from './ui';
 import { getPosition, deviceInfo, compressImage } from './native';
 import { SignaturePad, uploadSignatureImage } from './Signature';
+import { canPromptInstall, promptInstall, onInstallStateChange, isIOS, isStandalone } from './install';
 
 type Row = Record<string, unknown>;
 type View = 'hub' | 'profile' | 'leave' | 'roster' | 'licences' | 'training' | 'competency' | 'announcements' | 'declarations' | 'documents' | 'settings' | 'password';
@@ -30,6 +31,7 @@ const IC = {
   pen: 'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z',
   doc: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8ZM14 2v6h6',
   lock: 'M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2ZM8 11V7a4 4 0 0 1 8 0v4',
+  install: 'M12 3v12M8 11l4 4 4-4M4 21h16',
   gear: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z',
   logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
 };
@@ -101,6 +103,8 @@ export function SelfServiceScreen({ user, onLogout }: { user: ApiUser; onLogout:
 
       {linked && <ClockCard />}
 
+      <InstallCard />
+
       {!linked && <p className="m-empty">Your login isn’t linked to a staff profile yet. Ask your administrator to link your account to unlock full self-service.</p>}
 
       <div className="m-section-h">Self-service</div>
@@ -116,6 +120,32 @@ export function SelfServiceScreen({ user, onLogout }: { user: ApiUser; onLogout:
 
       <button className="m-btn danger block" onClick={onLogout}><Ico d={IC.logout} size={18} /> Sign out</button>
       <p className="m-hint" style={{ textAlign: 'center' }}>SECH_LIMS Staff Companion · by Nickland</p>
+    </div>
+  );
+}
+
+/* ── Install this app (PWA) ─────────────────────────────────────────────── */
+function InstallCard() {
+  const [, force] = useState(0);
+  const [showIos, setShowIos] = useState(false);
+  useEffect(() => onInstallStateChange(() => force(n => n + 1)), []);
+
+  // Hide inside the native app or when already installed to the home screen.
+  if (isNativeApp() || isStandalone()) return null;
+  const ios = isIOS();
+  if (!canPromptInstall() && !ios) return null;
+
+  return (
+    <div className="m-install">
+      <span className="m-cell-ic"><Ico d={IC.install} size={20} /></span>
+      <div className="m-install-body">
+        <div className="m-install-title">Install the app</div>
+        <div className="m-install-sub">Add SECH_LIMS to your home screen for a full-screen, app-like experience.</div>
+        {showIos && ios && <div className="m-install-ios">Tap the <strong>Share</strong> icon in Safari, then <strong>Add to Home Screen</strong>.</div>}
+      </div>
+      <button className="m-btn small primary" style={{ margin: 0 }} onClick={() => ios ? setShowIos(v => !v) : promptInstall()}>
+        {ios ? 'How' : 'Install'}
+      </button>
     </div>
   );
 }
