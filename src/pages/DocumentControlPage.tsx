@@ -4,6 +4,7 @@ import { FileText } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import { SignatureThumb } from '../components/SignatureThumb';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
+import { useAuth } from '../hooks/useAuth';
 import { useModules } from '../hooks/useModules';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import { api, API_BASE, getToken } from '../services/api';
@@ -114,8 +115,21 @@ const emptyPrintForm = { printPurpose: '', controlledCopy: false, copyNumber: ''
 
 const SECTIONS = ['Dashboard', 'Documents', 'Records', 'Central Archive', 'Master List', 'Laboratory Profile'] as const;
 
+// Roles with governance authority over the register (change ownership, bulk
+// actions). The server independently enforces the documents "approve"
+// permission on every one of these actions — this only gates the UI.
+const GOVERN_ROLES = ['System Administrator', 'Quality Manager', 'Laboratory Manager', 'Laboratory Director'];
+
+// Initials chip for owner/author columns.
+function initialsOf(name?: string | null): string {
+  if (!name) return '—';
+  return name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]!.toUpperCase()).join('');
+}
+
 export function DocumentControlPage() {
   const { isEnabled } = useModules();
+  const { user } = useAuth();
+  const canGovern = !!user && GOVERN_ROLES.includes(user.roleName || '');
   const { staff, sections, departments, positions } = useLookups();
   const [searchParams, setSearchParams] = useSearchParams();
   const [section, setSection] = useState<(typeof SECTIONS)[number]>('Dashboard');
@@ -133,6 +147,16 @@ export function DocumentControlPage() {
   const [selectedDoc, setSelectedDoc] = useState<DocumentRecord | null>(null);
   const [viewer, setViewer] = useState<{ docId: number; versionId: number; attestationId?: number; workflowStatus?: string } | null>(null);
   const [registerFilter, setRegisterFilter] = useState('');
+  // Register controls: structured filters, column sorting, and multi-select for
+  // the governance bulk actions (quality / laboratory management).
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterType, setFilterType] = useState('');
+  const [filterSection, setFilterSection] = useState('');
+  const [filterOwner, setFilterOwner] = useState('');
+  const [sortBy, setSortBy] = useState<{ key: string; dir: 1 | -1 }>({ key: 'document_code', dir: 1 });
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [transferModal, setTransferModal] = useState<{ docIds: number[]; ownerStaffId: string; note: string; busy: boolean } | null>(null);
+  const [bulkBusyAction, setBulkBusyAction] = useState('');
 
   const [docForm, setDocForm] = useState(emptyDocForm);
   const [versionForm, setVersionForm] = useState(emptyVersionForm);
@@ -413,6 +437,50 @@ export function DocumentControlPage() {
     </button>;
   }
 
+  // ---- Governance actions (admin / quality / laboratory management) ----
+  async function transferOwnership() {
+    if (!transferModal || !transferModal.ownerStaffId) return;
+    setTransferModal({ ...transferModal, busy: true });
+    let done = 0; const errors: string[] = [];
+    for (const docId of transferModal.docIds) {
+      try {
+        await api(`/documents/${docId}/transfer-ownership`, { method: 'POST', body: JSON.stringify({ ownerStaffId: Number(transferModal.ownerStaffId), note: transferModal.note || null }) });
+        done++;
+      } catch (e) { errors.push((e as Error).message); }
+    }
+    setTransferModal(null); setSelectedIds(new Set());
+    await load();
+    if (selectedDoc && transferModal.docIds.includes(selectedDoc.id)) await openDoc(selectedDoc.id);
+    if (errors.length) setError(`Ownership updated for ${done} document(s); ${errors.length} failed: ${errors[0]}`);
+    else flash(`Ownership transferred for ${done} document(s). The new owner has been notified.`);
+  }
+
+  async function bulkAction(action: 'distribute' | 'obsolete' | 'submit-review') {
+    const ids = Array.from(selectedIds);
+    if (!ids.length) return;
+    let reason = '';
+    if (action === 'obsolete') {
+      reason = prompt(`Reason for marking ${ids.length} document(s) obsolete?`) || '';
+      if (!reason) return;
+    } else if (!window.confirm(action === 'distribute'
+      ? `Distribute ${ids.length} document(s) to all active staff for attestation?`
+      : `Submit ${ids.length} document(s) for review?`)) return;
+    setBulkBusyAction(action);
+    let done = 0; const errors: string[] = [];
+    for (const id of ids) {
+      try {
+        if (action === 'distribute') await api(`/documents/${id}/distribute-all`, { method: 'POST', body: JSON.stringify({}) });
+        else if (action === 'obsolete') await api(`/documents/${id}/mark-obsolete`, { method: 'POST', body: JSON.stringify({ obsoleteReason: reason }) });
+        else await api(`/documents/${id}/submit-review`, { method: 'POST', body: JSON.stringify({}) });
+        done++;
+      } catch (e) { errors.push((e as Error).message); }
+    }
+    setBulkBusyAction(''); setSelectedIds(new Set());
+    await load();
+    if (errors.length) setError(`${done} succeeded, ${errors.length} failed: ${errors[0]}`);
+    else flash(action === 'distribute' ? `Distributed ${done} document(s) to all staff for attestation.` : action === 'obsolete' ? `Marked ${done} document(s) obsolete.` : `Submitted ${done} document(s) for review.`);
+  }
+
   async function markVersionObsolete(versionId: number) {
     if (!selectedDoc) return;
     const reason = prompt('Reason for marking this version obsolete?');
@@ -449,11 +517,41 @@ export function DocumentControlPage() {
   const obsoleteDocs = documents.filter(d => d.status === 'obsolete');
   const reviewQueue = documents.filter(d => d.status === 'under_review');
   const approvalQueue = documents.filter(d => d.status === 'reviewed');
-  const filteredRegister = documents.filter(d => d.status !== 'obsolete').filter(d => {
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const registerDocs = documents.filter(d => d.status !== 'obsolete');
+  const registerTypes = Array.from(new Set(registerDocs.map(d => d.document_type).filter(Boolean))) as string[];
+  const registerOwners = Array.from(new Map(registerDocs.filter(d => d.owner_staff_id).map(d => [d.owner_staff_id!, d.owner_name || staffName(staff, d.owner_staff_id)])).entries());
+  const filteredRegister = registerDocs.filter(d => {
+    if (filterStatus && d.status !== filterStatus) return false;
+    if (filterType && d.document_type !== filterType) return false;
+    if (filterSection && String(d.section_id || '') !== filterSection) return false;
+    if (filterOwner && String(d.owner_staff_id || '') !== filterOwner) return false;
     if (!registerFilter.trim()) return true;
     const q = registerFilter.toLowerCase();
-    return (d.document_code || '').toLowerCase().includes(q) || d.title.toLowerCase().includes(q) || (d.document_type || '').toLowerCase().includes(q) || d.status.toLowerCase().includes(q);
+    return (d.document_code || '').toLowerCase().includes(q) || d.title.toLowerCase().includes(q) || (d.document_type || '').toLowerCase().includes(q)
+      || d.status.toLowerCase().includes(q) || (d.section_name || '').toLowerCase().includes(q) || (d.owner_name || '').toLowerCase().includes(q);
+  }).sort((a, b) => {
+    const key = sortBy.key;
+    const va = key === 'category' ? documentCategoryLabel(a) : key === 'attestations' ? (a.attestations_signed || 0) / Math.max(1, a.attestations_total || 0) : (a as any)[key];
+    const vb = key === 'category' ? documentCategoryLabel(b) : key === 'attestations' ? (b.attestations_signed || 0) / Math.max(1, b.attestations_total || 0) : (b as any)[key];
+    if (va == null && vb == null) return 0;
+    if (va == null) return 1;
+    if (vb == null) return -1;
+    return (typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb), undefined, { numeric: true })) * sortBy.dir;
   });
+  const previewVersionId = (d: DocumentRecord) => d.resolved_version_id ?? d.current_version_id ?? 0;
+  const hasVersion = (d: DocumentRecord) => Boolean(d.resolved_version_id || d.current_version_id);
+  const allVisibleSelected = filteredRegister.length > 0 && filteredRegister.every(d => selectedIds.has(d.id));
+  function toggleSelectAll() {
+    setSelectedIds(allVisibleSelected ? new Set() : new Set(filteredRegister.map(d => d.id)));
+  }
+  function toggleSelect(id: number) {
+    setSelectedIds(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  }
+  const sortHeader = (label: string, key: string) =>
+    <th className="dm-sort" onClick={() => setSortBy(s => ({ key, dir: s.key === key ? (s.dir === 1 ? -1 : 1) : 1 }))}>
+      {label}{sortBy.key === key ? (sortBy.dir === 1 ? ' ▲' : ' ▼') : ''}
+    </th>;
 
   const queueRow = (d: DocumentRecord) => <tr key={d.id}>
     <td>{d.document_code || '—'}</td><td>{d.title}</td><td>{d.document_type || '—'}</td>
@@ -464,7 +562,16 @@ export function DocumentControlPage() {
   return <div className="module-page">
     <PageHeader eyebrow="Documents and Records" title="Documents &amp; Records" subtitle="Controlled documents and controlled records — creation, review, approval, distribution, attestation, retention and disposal." />
     {tabBar(section, SECTIONS as unknown as string[], s => setSection(s as (typeof SECTIONS)[number]))}
-    {section === 'Documents' && tabBar(tab, docTabs, setTab)}
+    {section === 'Documents' && <div className="tabs dm-doc-tabs">
+      {docTabs.map(name => {
+        const count = name === 'Review Queue' ? reviewQueue.length : name === 'Approval Queue' ? approvalQueue.length
+          : name === 'Reviews Due' ? reviewsDue.length : name === 'Attestations' ? pendingAttestations.length
+          : name === 'My Inbox' ? inbox.filter(e => e.attestation_status !== 'signed').length : name === 'Obsolete Register' ? obsoleteDocs.length : 0;
+        return <button key={name} type="button" className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>
+          {name}{count > 0 && <span className="dm-tab-count">{count}</span>}
+        </button>;
+      })}
+    </div>}
     {error && <div className="error">{error}</div>}
     {notice && <div className="banner-success" style={{ background: '#e8f6ee', border: '1px solid #58b27a', color: '#1c6b3e', padding: '8px 12px', borderRadius: 6, margin: '8px 0' }}>{notice}</div>}
 
@@ -535,36 +642,125 @@ export function DocumentControlPage() {
     </> : <p>Loading summary…</p>)}
 
     {section === 'Documents' && tab === 'Document Register' && <>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
-        <input placeholder="Search code, title, type, status…" value={registerFilter} onChange={e => setRegisterFilter(e.target.value)} style={{ minWidth: 320 }} />
-        <span className="muted">{filteredRegister.length} document(s)</span>
+      <div className="dm-toolbar">
+        <input className="dm-search" placeholder="Search code, title, unit, owner…" value={registerFilter} onChange={e => setRegisterFilter(e.target.value)} />
+        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} title="Status">
+          <option value="">All statuses</option>
+          {['draft', 'under_review', 'reviewed', 'approved', 'current', 'due_review'].map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
+        </select>
+        <select value={filterType} onChange={e => setFilterType(e.target.value)} title="Document type">
+          <option value="">All types</option>
+          {registerTypes.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <select value={filterSection} onChange={e => setFilterSection(e.target.value)} title="Unit / section">
+          <option value="">All units</option>
+          {sections.map(s => <option key={s.id} value={String(s.id)}>{s.name}</option>)}
+        </select>
+        <select value={filterOwner} onChange={e => setFilterOwner(e.target.value)} title="Owner / author">
+          <option value="">All owners</option>
+          {registerOwners.map(([id, name]) => <option key={id} value={String(id)}>{name}</option>)}
+        </select>
+        {(filterStatus || filterType || filterSection || filterOwner || registerFilter) &&
+          <button className="secondary" onClick={() => { setRegisterFilter(''); setFilterStatus(''); setFilterType(''); setFilterSection(''); setFilterOwner(''); }}>Clear</button>}
+        <span className="dm-count">{filteredRegister.length} of {registerDocs.length} document{registerDocs.length === 1 ? '' : 's'}</span>
         <span style={{ flex: 1 }} />
-        <button className="secondary" disabled={!!exportBusy} onClick={() => runExport('/documents/register/export', 'Document_Register.xlsx')}>{exportBusy === '/documents/register/export' ? 'Preparing…' : 'Export register (Excel)'}</button>
+        <button className="secondary" onClick={() => setTab('New Document')}>＋ New document</button>
+        <button className="secondary" disabled={!!exportBusy} onClick={() => runExport('/documents/register/export', 'Document_Register.xlsx')}>{exportBusy === '/documents/register/export' ? 'Preparing…' : '⬇ Export (Excel)'}</button>
       </div>
-      <div style={{ overflowX: 'auto' }}>
-      <table className="data-table"><thead><tr><th>No.</th><th>Code</th><th>Category</th><th>Unit / Section</th><th>Title</th><th>Version</th><th>Status</th><th>Effective</th><th>Next review</th><th>Author</th><th>Actions</th></tr></thead><tbody>
-        {filteredRegister.map((d, i) => <tr key={d.id} className="clickable-row" {...focusAttr('documents', d.id)}
-          onClick={() => d.current_version_id ? setViewer({ docId: d.id, versionId: d.current_version_id!, workflowStatus: d.status }) : openDoc(d.id)}
-          title="Click to preview">
-          <td>{i + 1}</td>
-          <td>{d.document_code || '—'}</td><td>{documentCategoryLabel(d)}</td>
-          <td>{d.section_name || 'General / QMS-wide'}</td>
-          <td>{d.title}</td>
-          <td>{d.current_version_number || '—'}</td>
-          <td>{statusCell(d)}</td>
-          <td>{d.current_effective_date ? String(d.current_effective_date).slice(0, 10) : '—'}</td>
-          <td>{d.next_review_date || '—'}</td>
-          <td>{d.owner_name || staffName(staff, d.owner_staff_id)}</td>
-          <td style={{ whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
-            {d.current_version_id && <button className="link-btn" onClick={() => setViewer({ docId: d.id, versionId: d.current_version_id!, workflowStatus: d.status })}>Preview</button>}{' '}
-            <button className="secondary" onClick={() => openDoc(d.id)}>Manage</button>
-          </td>
-        </tr>)}
+
+      {canGovern && selectedIds.size > 0 && <div className="dm-bulkbar">
+        <strong>{selectedIds.size} selected</strong>
+        <button className="secondary" disabled={!!bulkBusyAction} onClick={() => setTransferModal({ docIds: Array.from(selectedIds), ownerStaffId: '', note: '', busy: false })}>Change owner…</button>
+        <button className="secondary" disabled={!!bulkBusyAction} onClick={() => bulkAction('distribute')}>{bulkBusyAction === 'distribute' ? 'Distributing…' : 'Distribute for attestation'}</button>
+        <button className="secondary" disabled={!!bulkBusyAction} onClick={() => bulkAction('submit-review')}>{bulkBusyAction === 'submit-review' ? 'Submitting…' : 'Submit for review'}</button>
+        <button className="danger" disabled={!!bulkBusyAction} onClick={() => bulkAction('obsolete')}>{bulkBusyAction === 'obsolete' ? 'Working…' : 'Mark obsolete…'}</button>
+        <span style={{ flex: 1 }} />
+        <button className="secondary" onClick={() => setSelectedIds(new Set())}>Clear selection</button>
+      </div>}
+
+      <div className="dm-table-wrap">
+      <table className="data-table dm-table"><thead><tr>
+        {canGovern && <th className="dm-check"><input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} title="Select all shown" /></th>}
+        <th>No.</th>
+        {sortHeader('Code', 'document_code')}
+        {sortHeader('Title', 'title')}
+        {sortHeader('Unit / Section', 'section_name')}
+        {sortHeader('Version', 'current_version_number')}
+        {sortHeader('Status', 'status')}
+        {sortHeader('Attestation', 'attestations')}
+        {sortHeader('Effective', 'current_effective_date')}
+        {sortHeader('Next review', 'next_review_date')}
+        {sortHeader('Owner / Author', 'owner_name')}
+        <th>Actions</th>
+      </tr></thead><tbody>
+        {filteredRegister.map((d, i) => {
+          const attTotal = d.attestations_total || 0;
+          const attSigned = d.attestations_signed || 0;
+          const reviewOverdue = d.next_review_date && d.next_review_date < todayIso;
+          const owner = d.owner_name || (d.owner_staff_id ? staffName(staff, d.owner_staff_id) : null);
+          return <tr key={d.id} className="clickable-row" {...focusAttr('documents', d.id)}
+            onClick={() => hasVersion(d) ? setViewer({ docId: d.id, versionId: previewVersionId(d), workflowStatus: d.status }) : openDoc(d.id)}
+            title="Click to preview">
+            {canGovern && <td className="dm-check" onClick={e => e.stopPropagation()}>
+              <input type="checkbox" checked={selectedIds.has(d.id)} onChange={() => toggleSelect(d.id)} />
+            </td>}
+            <td className="dm-num">{i + 1}</td>
+            <td className="dm-code">{d.document_code || '—'}</td>
+            <td className="dm-title-cell">
+              <span className="dm-title">{d.title}</span>
+              <span className="dm-sub">{documentCategoryLabel(d)}{d.is_controlled ? ' · Controlled' : ''}{d.access_level && d.access_level !== 'internal' ? ` · ${d.access_level}` : ''}</span>
+            </td>
+            <td>{d.section_name || 'General / QMS-wide'}</td>
+            <td className="dm-num">{d.current_version_number || '—'}</td>
+            <td>{statusCell(d)}</td>
+            <td className="dm-att-cell">
+              {attTotal > 0 ? <span className="dm-att" title={`${attSigned} of ${attTotal} staff have signed`}>
+                <span className="dm-att-bar"><span style={{ width: `${Math.round((attSigned / attTotal) * 100)}%` }} /></span>
+                <span className="dm-att-txt">{attSigned}/{attTotal}</span>
+              </span> : <span className="dm-dim">—</span>}
+            </td>
+            <td className="dm-date">{d.current_effective_date ? String(d.current_effective_date).slice(0, 10) : '—'}</td>
+            <td className={`dm-date${reviewOverdue ? ' dm-overdue' : ''}`} title={reviewOverdue ? 'Review overdue' : undefined}>{d.next_review_date || '—'}</td>
+            <td>{owner ? <span className="dm-owner" title={owner}><span className="dm-avatar">{initialsOf(owner)}</span><span className="dm-owner-name">{owner}</span></span> : <span className="dm-dim">—</span>}</td>
+            <td className="dm-actions" onClick={e => e.stopPropagation()}>
+              {hasVersion(d) && <button className="link-btn" onClick={() => setViewer({ docId: d.id, versionId: previewVersionId(d), workflowStatus: d.status })}>Preview</button>}
+              <button className="secondary" onClick={() => openDoc(d.id)}>Manage</button>
+            </td>
+          </tr>;
+        })}
+        {filteredRegister.length === 0 && <tr><td colSpan={canGovern ? 12 : 11} className="muted" style={{ textAlign: 'center', padding: 24 }}>
+          {registerDocs.length === 0 ? 'No controlled documents registered yet — use “New Document” or “Bulk Import” to add them.' : 'No documents match the current filters.'}
+        </td></tr>}
       </tbody></table>
       </div>
+
+      {transferModal && <div className="dm-modal-overlay" onClick={() => !transferModal.busy && setTransferModal(null)}>
+        <div className="dm-modal" onClick={e => e.stopPropagation()}>
+          <h3 style={{ marginTop: 0 }}>Change document owner</h3>
+          <p className="muted" style={{ marginTop: 0 }}>
+            Transfers ownership of {transferModal.docIds.length} document{transferModal.docIds.length === 1 ? '' : 's'}. The new owner becomes
+            responsible for keeping the document{transferModal.docIds.length === 1 ? '' : 's'} current; both parties are notified and the change is audited.
+          </p>
+          <label>New owner / author
+            <select value={transferModal.ownerStaffId} onChange={e => setTransferModal({ ...transferModal, ownerStaffId: e.target.value })}>
+              <option value="">— choose staff member —</option>
+              {staff.filter(s => s.isActive !== false).map(s => <option key={s.id} value={s.id}>{s.fullName}{s.sectionName ? ` (${s.sectionName})` : ''}</option>)}
+            </select>
+          </label>
+          <label>Note (optional, included in the notification)
+            <input value={transferModal.note} onChange={e => setTransferModal({ ...transferModal, note: e.target.value })} placeholder="e.g. Handover — previous owner has left the section" />
+          </label>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
+            <button className="secondary" disabled={transferModal.busy} onClick={() => setTransferModal(null)}>Cancel</button>
+            <button disabled={transferModal.busy || !transferModal.ownerStaffId} onClick={transferOwnership}>{transferModal.busy ? 'Transferring…' : 'Transfer ownership'}</button>
+          </div>
+        </div>
+      </div>}
       {selectedDoc && <div className="doc-drawer-overlay" onClick={() => setSelectedDoc(null)}>
       <div className="doc-drawer" onClick={e => e.stopPropagation()}>
       <DocumentDetailPanel doc={selectedDoc} staff={staff} positions={positions} sections={sections} departments={departments}
+        canGovern={canGovern}
+        onTransferOwner={() => setTransferModal({ docIds: [selectedDoc.id], ownerStaffId: '', note: '', busy: false })}
         versionForm={versionForm} setVersionForm={setVersionForm} versionFile={versionFile} setVersionFile={setVersionFile} submitVersion={submitVersion}
         reviewForm={reviewForm} setReviewForm={setReviewForm} submitReview={submitReview}
         attestForm={attestForm} setAttestForm={setAttestForm} submitAttest={submitAttest}
@@ -709,10 +905,10 @@ export function DocumentControlPage() {
     {section === 'Central Archive' && <CentralArchiveView staff={staff} onError={setError} onNotice={flash} />}
 
     {section === 'Master List' && <MasterListView exportBusy={exportBusy} onExport={runExport} onError={setError}
-      documents={documents} onPreview={d => setViewer({ docId: d.id, versionId: d.current_version_id || 0, workflowStatus: d.status })} />}
+      documents={documents} onPreview={d => setViewer({ docId: d.id, versionId: previewVersionId(d), workflowStatus: d.status })} />}
 
     {section === 'Laboratory Profile' && <LaboratoryProfileView staff={staff} documents={documents} onOpenDoc={openDoc}
-      onPreview={d => setViewer({ docId: d.id, versionId: d.current_version_id || 0, workflowStatus: d.status })} onError={setError} />}
+      onPreview={d => setViewer({ docId: d.id, versionId: previewVersionId(d), workflowStatus: d.status })} onError={setError} />}
   </div>;
 }
 
@@ -775,7 +971,7 @@ function LaboratoryProfileView({ staff, documents, onOpenDoc, onPreview, onError
               {d ? <>
                 <span className="hint">{d.document_code || '—'} · {d.title}{d.current_version_number ? ` · v${d.current_version_number}` : ''}</span>
                 <div className="doc-card-actions">
-                  {d.current_version_id && <button type="button" onClick={() => onPreview(d)}>Preview</button>}
+                  {(d.current_version_id || d.resolved_version_id) && <button type="button" onClick={() => onPreview(d)}>Preview</button>}
                   <button type="button" className="secondary" onClick={() => onOpenDoc(d.id)}>Manage</button>
                 </div>
               </> : <span className="hint">Not registered yet — add it in Settings → My Laboratory.</span>}
@@ -862,7 +1058,7 @@ function MasterListView({ exportBusy, onExport, onError, documents, onPreview }:
         {reg.rows.map((row, i) => {
           const codeStr = row.map(c => String(c ?? '')).join('  ');
           const doc = sub !== 'Records Register' ? documents.find(d => d.document_code && codeStr.includes(d.document_code)) : undefined;
-          const clickable = !!doc?.current_version_id;
+          const clickable = Boolean(doc?.current_version_id || doc?.resolved_version_id);
           return <tr key={i} className={clickable ? 'clickable-row' : ''} title={clickable ? 'Click to preview' : undefined}
             onClick={clickable ? () => onPreview(doc!) : undefined}>{row.map((cell, j) => <td key={j}>{cell === '' || cell == null ? '—' : String(cell)}</td>)}</tr>;
         })}
@@ -1164,6 +1360,9 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
     api<VersionContent>(`/documents/${docId}/versions/${activeVersionId}/content`)
       .then(c => {
         setContent(c);
+        // The server may have resolved 0/"current"/a stale id to the document's
+        // real version — adopt it so edits and re-reads target the right one.
+        if (c.id && c.id !== activeVersionId) setActiveVersionId(c.id);
         const pdfish = c.file_mime === 'application/pdf' || /\.pdf$/i.test(c.file_name || '');
         const imgish = (c.file_mime || '').startsWith('image/');
         // Faithful formats render natively, so open the original by default;
@@ -1568,7 +1767,7 @@ function MasterListDetailsForm({ doc, onSaved, onError }: { doc: any; onSaved: (
 }
 
 function DocumentDetailPanel(props: any) {
-  const { doc, staff, positions, sections, departments,
+  const { doc, staff, positions, sections, departments, canGovern, onTransferOwner,
     versionForm, setVersionForm, versionFile, setVersionFile, submitVersion,
     reviewForm, setReviewForm, submitReview,
     attestForm, setAttestForm, submitAttest,
@@ -1584,6 +1783,7 @@ function DocumentDetailPanel(props: any) {
   }
   const signedCount = (doc.attestations || []).filter((a: any) => a.status === 'signed').length;
   const pendingCount = (doc.attestations || []).filter((a: any) => a.status !== 'signed').length;
+  const ownerName = staffName(staff, doc.owner_staff_id);
 
   return <div className="doc-drawer-panel">
     <div className="doc-drawer-head">
@@ -1595,9 +1795,30 @@ function DocumentDetailPanel(props: any) {
     </div>
     <div className="doc-drawer-body">
     <WorkflowStepper status={doc.status} />
-    <p style={{ margin: '4px 0' }}>Type: {doc.document_type || '—'} | Status: {formatBadge(doc.status)} | Access: {doc.access_level || '—'} | Controlled: {doc.is_controlled ? 'Yes' : 'No'}</p>
-    <p style={{ margin: '4px 0' }}>Owner: {staffName(staff, doc.owner_staff_id)} | Section: {sections.find((s: any) => s.id === doc.section_id)?.name || '—'} | Next review: {doc.next_review_date || '—'}</p>
-    <p style={{ margin: '4px 0' }}>Reviewed by: {staffName(staff, doc.reviewed_by_staff_id)} | Approved by: {staffName(staff, doc.approved_by_staff_id)} {doc.approved_at ? `on ${String(doc.approved_at).slice(0, 10)}` : ''}</p>
+
+    {/* Key facts at a glance. */}
+    <div className="dm-facts">
+      <div><span className="hint">Status</span><div>{formatBadge(doc.status)}</div></div>
+      <div><span className="hint">Type</span><div>{doc.document_type || '—'}</div></div>
+      <div><span className="hint">Unit / Section</span><div>{sections.find((s: any) => s.id === doc.section_id)?.name || 'General / QMS-wide'}</div></div>
+      <div><span className="hint">Access</span><div>{doc.access_level || '—'}{doc.is_controlled ? ' · Controlled' : ''}</div></div>
+      <div><span className="hint">Next review</span><div>{doc.next_review_date || '—'}</div></div>
+      <div><span className="hint">Reviewed by</span><div>{staffName(staff, doc.reviewed_by_staff_id)}</div></div>
+      <div><span className="hint">Approved by</span><div>{staffName(staff, doc.approved_by_staff_id)}{doc.approved_at ? ` · ${String(doc.approved_at).slice(0, 10)}` : ''}</div></div>
+      <div><span className="hint">Attestations</span><div>{signedCount} signed · {pendingCount} pending</div></div>
+    </div>
+
+    {/* Ownership & responsibility — changeable by administrators / management. */}
+    <div className="dm-own-box">
+      <span className="dm-avatar">{initialsOf(ownerName === '—' ? null : ownerName)}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 600 }}>{ownerName === '—' ? 'No owner assigned' : ownerName}</div>
+        <span className="hint">Document owner / author — responsible for keeping this document current.</span>
+      </div>
+      {canGovern
+        ? <button className="secondary" onClick={onTransferOwner}>Change owner…</button>
+        : <span className="hint" title="Only administrators and laboratory management can change document ownership.">Managed by admin</span>}
+    </div>
 
     {/* Unique document identification: the number can be corrected here. */}
     <div style={{ display: 'flex', gap: 6, alignItems: 'center', margin: '8px 0' }}>
@@ -1610,7 +1831,7 @@ function DocumentDetailPanel(props: any) {
 
     {/* Lifecycle actions, shown contextually */}
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-      {doc.current_version_id && <button onClick={() => onView(doc.current_version_id)}>Open document</button>}
+      {(doc.current_version_id || (doc.versions || []).length > 0) && <button onClick={() => onView(doc.current_version_id || 0)}>Open document</button>}
       {doc.status === 'draft' && <button onClick={submitForReview}>Submit for review →</button>}
       {(doc.status === 'reviewed' || doc.status === 'under_review') && <button onClick={approveDoc}>Approve &amp; issue →</button>}
       {(doc.status === 'current' || doc.status === 'approved') && <button onClick={distributeAll}>Distribute to all staff for attestation</button>}

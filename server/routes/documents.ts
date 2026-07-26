@@ -34,6 +34,33 @@ function addMonths(dateIso: string, months: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+// Resolve which version of a document to serve. Callers may pass 0/"current",
+// and documents replicated from another host (cloud sync) can carry a
+// current_version_id minted on the origin node that doesn't exist here — so an
+// exact miss falls back to this document's own current version, then its latest
+// version, instead of failing with "Version not found".
+function resolveVersionId(db: any, docId: number | string, versionParam: unknown): number | null {
+  const requested = parseIntNullable(versionParam);
+  if (requested) {
+    const exact = db.prepare('SELECT id FROM document_versions WHERE id = ? AND document_id = ?').get(requested, docId) as { id: number } | undefined;
+    if (exact) return exact.id;
+  }
+  const doc = db.prepare('SELECT current_version_id FROM documents WHERE id = ?').get(docId) as { current_version_id: number | null } | undefined;
+  if (doc?.current_version_id) {
+    const cur = db.prepare('SELECT id FROM document_versions WHERE id = ? AND document_id = ?').get(doc.current_version_id, docId) as { id: number } | undefined;
+    if (cur) return cur.id;
+  }
+  const latest = db.prepare('SELECT id FROM document_versions WHERE document_id = ? ORDER BY id DESC LIMIT 1').get(docId) as { id: number } | undefined;
+  if (latest) {
+    // Self-heal a dangling pointer so joins (register, master list) recover too.
+    if (doc && doc.current_version_id && doc.current_version_id !== latest.id) {
+      db.prepare('UPDATE documents SET current_version_id = ? WHERE id = ?').run(latest.id, docId);
+    }
+    return latest.id;
+  }
+  return null;
+}
+
 function flipOverdueAttestations(db: any) {
   db.prepare("UPDATE document_attestations SET status = 'overdue' WHERE status = 'pending' AND due_date IS NOT NULL AND due_date < date('now')").run();
 }
@@ -200,7 +227,7 @@ export function documentControlRoutes() {
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
     if (!doc) return res.status(404).json({ error: 'Document not found' });
-    const versionId = parseIntNullable(req.query.versionId) ?? doc.current_version_id;
+    const versionId = resolveVersionId(db, req.params.id, req.query.versionId);
     const version = versionId ? db.prepare('SELECT * FROM document_versions WHERE id = ?').get(versionId) as any : null;
     const rows = db.prepare(`
       SELECT a.*, s.full_name AS staff_name, s.employee_no, sec.name AS section_name,
@@ -668,12 +695,19 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     if (req.query.sectionId) { filters.push('d.section_id = ?'); params.push(Number(req.query.sectionId)); }
     // Register-ready listing: each document carries its unit, current version
     // and the people on the master list (author / reviewer / authoriser).
+    // COALESCE onto the latest version so documents whose current_version_id was
+    // minted on another host (cloud sync) still show their real version/date.
     let query = `SELECT d.*, s.name AS section_name,
-        v.version_number AS current_version_number, v.effective_date AS current_effective_date,
-        ow.full_name AS owner_name, rv.full_name AS reviewer_name, ap.full_name AS approver_name
+        COALESCE(v.version_number, lv.version_number) AS current_version_number,
+        COALESCE(v.effective_date, lv.effective_date) AS current_effective_date,
+        COALESCE(d.current_version_id, lv.id) AS resolved_version_id,
+        ow.full_name AS owner_name, rv.full_name AS reviewer_name, ap.full_name AS approver_name,
+        (SELECT COUNT(*) FROM document_attestations a WHERE a.document_id = d.id OR a.document_version_id IN (SELECT id FROM document_versions dv WHERE dv.document_id = d.id)) AS attestations_total,
+        (SELECT COUNT(*) FROM document_attestations a WHERE (a.document_id = d.id OR a.document_version_id IN (SELECT id FROM document_versions dv WHERE dv.document_id = d.id)) AND a.status = 'signed') AS attestations_signed
       FROM documents d
       LEFT JOIN sections s ON s.id = d.section_id
-      LEFT JOIN document_versions v ON v.id = d.current_version_id
+      LEFT JOIN document_versions v ON v.id = d.current_version_id AND v.document_id = d.id
+      LEFT JOIN document_versions lv ON lv.id = (SELECT MAX(id) FROM document_versions WHERE document_id = d.id)
       LEFT JOIN staff ow ON ow.id = d.owner_staff_id
       LEFT JOIN staff rv ON rv.id = d.reviewed_by_staff_id
       LEFT JOIN staff ap ON ap.id = d.approved_by_staff_id`;
@@ -749,6 +783,34 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     res.json({ ok: true });
   });
 
+  // Transfer document ownership. Gated on the documents "approve" authority
+  // (administrators / laboratory management), audited, and both the outgoing and
+  // incoming owners are notified. SECHPO026 — the document owner is accountable
+  // for keeping it current, so a change of owner is a controlled action.
+  router.post('/:id/transfer-ownership', requirePermission('documents', 'approve'), (req, res) => {
+    const db = getDb();
+    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    const newOwnerId = parseIntNullable(req.body.ownerStaffId);
+    if (!newOwnerId) return res.status(400).json({ error: 'ownerStaffId is required' });
+    const newOwner = db.prepare('SELECT id, full_name FROM staff WHERE id = ?').get(newOwnerId) as { id: number; full_name: string } | undefined;
+    if (!newOwner) return res.status(404).json({ error: 'Staff member not found' });
+    const oldOwnerId = doc.owner_staff_id as number | null;
+    if (oldOwnerId === newOwnerId) return res.status(400).json({ error: 'This staff member already owns the document.' });
+    db.prepare('UPDATE documents SET owner_staff_id = ?, owner_position_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(newOwnerId, parseIntNullable(req.body.ownerPositionId) ?? doc.owner_position_id, req.params.id);
+    const label = `${doc.document_code ? doc.document_code + ' — ' : ''}${doc.title}`;
+    const note = req.body.note ? ` Note: ${String(req.body.note).slice(0, 300)}` : '';
+    notifyStaff(db, newOwnerId, 'documents', 'Document ownership assigned to you',
+      `You are now the owner/author of ${label}. You are responsible for keeping it current and presenting it for review.${note}`,
+      { recordType: 'documents', recordId: doc.id, actionUrl: `/documents?focus=documents:${doc.id}`, actionLabel: 'Open document' });
+    if (oldOwnerId) notifyStaff(db, oldOwnerId, 'documents', 'Document ownership transferred',
+      `Ownership of ${label} has been transferred to ${newOwner.full_name}.${note}`,
+      { recordType: 'documents', recordId: doc.id, notificationType: 'info', severity: 'low' });
+    audit(req, { action: 'transfer_ownership', entity: 'documents', entityId: req.params.id, oldValue: { ownerStaffId: oldOwnerId }, newValue: { ownerStaffId: newOwnerId, note: req.body.note ?? null } });
+    res.json({ ok: true, ownerStaffId: newOwnerId, ownerName: newOwner.full_name });
+  });
+
   router.post('/:id/versions', requirePermission('documents', 'create'), (req, res) => {
     if (!req.body.versionNumber) return res.status(400).json({ error: 'versionNumber is required' });
     const db = getDb();
@@ -777,9 +839,11 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   // -------- In-app document content (read / edit the SOP body) --------
   router.get('/:id/versions/:versionId/content', requirePermission('documents', 'view'), (req, res) => {
     const db = getDb();
+    const versionId = resolveVersionId(db, req.params.id, req.params.versionId);
+    if (!versionId) return res.status(404).json({ error: 'This document has no version on this host yet. Add a version (upload its file) to view it.' });
     const v = db.prepare(`SELECT v.id, v.document_id, v.version_number, v.version_label, v.status, v.file_id, v.content_text, v.content_html, v.content_sections, v.extraction_method, v.page_count, v.extracted_at, v.content_updated_at, v.content_updated_by,
       f.original_name AS file_name, f.mime_type AS file_mime, f.size_bytes AS file_size, cu.full_name AS content_updated_by_name
-      FROM document_versions v LEFT JOIN files f ON f.id = v.file_id LEFT JOIN staff cu ON cu.id = v.content_updated_by WHERE v.id = ? AND v.document_id = ?`).get(req.params.versionId, req.params.id) as any;
+      FROM document_versions v LEFT JOIN files f ON f.id = v.file_id LEFT JOIN staff cu ON cu.id = v.content_updated_by WHERE v.id = ?`).get(versionId) as any;
     if (!v) return res.status(404).json({ error: 'Version not found' });
     let sections: unknown = [];
     try { sections = v.content_sections ? JSON.parse(v.content_sections) : []; } catch { sections = []; }
@@ -788,7 +852,8 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   // Re-read the attached file and refresh the extracted content.
   router.post('/:id/versions/:versionId/re-extract', requirePermission('documents', 'edit'), (req, res) => {
     const db = getDb();
-    const v = db.prepare('SELECT * FROM document_versions WHERE id = ? AND document_id = ?').get(req.params.versionId, req.params.id) as any;
+    const versionId = resolveVersionId(db, req.params.id, req.params.versionId);
+    const v = versionId ? db.prepare('SELECT * FROM document_versions WHERE id = ?').get(versionId) as any : null;
     if (!v) return res.status(404).json({ error: 'Version not found' });
     if (!v.file_id) return res.status(400).json({ error: 'This version has no attached file to read.' });
     const result = extractIntoVersion(db, Number(v.id), Number(v.file_id));
@@ -799,7 +864,8 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   // Save an edited document body (controlled content authored inside SECH_LIMS).
   router.put('/:id/versions/:versionId/content', requirePermission('documents', 'edit'), (req, res) => {
     const db = getDb();
-    const v = db.prepare('SELECT * FROM document_versions WHERE id = ? AND document_id = ?').get(req.params.versionId, req.params.id) as any;
+    const versionId = resolveVersionId(db, req.params.id, req.params.versionId);
+    const v = versionId ? db.prepare('SELECT * FROM document_versions WHERE id = ?').get(versionId) as any : null;
     if (!v) return res.status(404).json({ error: 'Version not found' });
     const staffId = getStaffIdOrCurrent(req, req.body.editedByStaffId);
     const sections = req.body.contentSections !== undefined ? JSON.stringify(req.body.contentSections) : v.content_sections;
@@ -821,7 +887,8 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
     if (!doc) return res.status(404).json({ error: 'Document not found' });
-    const v = db.prepare('SELECT * FROM document_versions WHERE id = ? AND document_id = ?').get(req.params.versionId, req.params.id) as any;
+    const resolvedId = resolveVersionId(db, req.params.id, req.params.versionId);
+    const v = resolvedId ? db.prepare('SELECT * FROM document_versions WHERE id = ?').get(resolvedId) as any : null;
     if (!v) return res.status(404).json({ error: 'Version not found' });
     if (!v.content_html || !v.content_html.trim()) return res.status(400).json({ error: 'This version has no in-app content to export. Use "Edit content" or "Re-read from file" first.' });
     const title = `${doc.document_code ? doc.document_code + ' - ' : ''}${doc.title}`;
@@ -846,7 +913,8 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     const body = req.body || {};
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
     if (!doc) return res.status(404).json({ error: 'Document not found' });
-    const v = db.prepare('SELECT * FROM document_versions WHERE id = ? AND document_id = ?').get(req.params.versionId, req.params.id) as any;
+    const resolvedId = resolveVersionId(db, req.params.id, req.params.versionId);
+    const v = resolvedId ? db.prepare('SELECT * FROM document_versions WHERE id = ?').get(resolvedId) as any : null;
     if (!v) return res.status(404).json({ error: 'Version not found' });
     if (!v.content_html || !v.content_html.trim()) return res.status(400).json({ error: 'This version has no in-app content to export. Use "Edit content" or "Re-read from file" first.' });
     const title = `${doc.document_code ? doc.document_code + ' - ' : ''}${doc.title}`;
@@ -898,7 +966,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
     if (!doc) return res.status(404).json({ error: 'Document not found' });
-    const versionId = parseIntNullable(req.body.versionId) ?? doc.current_version_id;
+    const versionId = resolveVersionId(db, doc.id, req.body.versionId);
     if (!versionId) return res.status(400).json({ error: 'No current version to distribute. Approve a version first.' });
     const assignedBy = getStaffIdOrCurrent(req, req.body.assignedByStaffId);
     const assigned = distributeToStaff(db, doc, versionId, activeStaffIds(db), assignedBy, req.user!.id, req.body.dueDate ?? null);
@@ -952,7 +1020,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     if (!doc) return res.status(404).json({ error: 'Document not found' });
     const approvedBy = getStaffIdOrCurrent(req, req.body.approvedByStaffId);
     if (approvedBy === null) return res.status(400).json({ error: 'This action requires the logged-in user to be linked to a staff record.' });
-    const versionId = parseIntNullable(req.body.versionId) ?? doc.current_version_id;
+    const versionId = resolveVersionId(db, doc.id, req.body.versionId);
     if (!versionId) return res.status(400).json({ error: 'No version available to approve. Add a version first.' });
     const previousCurrent = db.prepare("SELECT id FROM document_versions WHERE document_id = ? AND status = 'current' AND id != ?").all(req.params.id, versionId) as Array<{ id: number }>;
     for (const v of previousCurrent) {
@@ -1061,7 +1129,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
     if (!doc) return res.status(404).json({ error: 'Document not found' });
-    const versionId = parseIntNullable(req.body.documentVersionId) ?? doc.current_version_id;
+    const versionId = resolveVersionId(db, doc.id, req.body.documentVersionId);
     if (!versionId) return res.status(400).json({ error: 'document has no version to attest to' });
     const targetStaffIds: number[] = Array.isArray(req.body.staffIds) ? req.body.staffIds.map((n: unknown) => Number(n)).filter((n: number) => isFinite(n)) : [];
     const targetType = req.body.targetType ?? (targetStaffIds.length ? 'staff' : null);
@@ -1175,7 +1243,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
     if (!doc) return res.status(404).json({ error: 'Document not found' });
-    const versionId = parseIntNullable(req.query.versionId) ?? doc.current_version_id;
+    const versionId = resolveVersionId(db, req.params.id, req.query.versionId);
     const version = versionId ? db.prepare('SELECT v.*, f.original_name AS file_name FROM document_versions v LEFT JOIN files f ON f.id = v.file_id WHERE v.id = ?').get(versionId) as any : null;
     const signedAttestations = versionId ? db.prepare(`SELECT a.attested_at, s.full_name AS staff_name, s.employee_no FROM document_attestations a LEFT JOIN staff s ON s.id = a.staff_id WHERE a.document_version_id = ? AND a.status = 'signed' ORDER BY a.attested_at`).all(versionId) as any[] : [];
     const ownerName = doc.owner_staff_id ? (db.prepare('SELECT full_name FROM staff WHERE id = ?').get(doc.owner_staff_id) as any)?.full_name : null;

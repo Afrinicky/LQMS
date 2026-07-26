@@ -3858,6 +3858,22 @@ CREATE INDEX IF NOT EXISTS idx_sync_outbox_status ON sync_outbox(sync_status);
     );
   }
 
+  // Files also carry a globally-unique id (but no outbox capture): the bytes of a
+  // document version's file travel to other hosts inside the version's synced
+  // record, and the uuid lets the receiving host recognise a file it already has.
+  {
+    const fileCols = new Set((database.prepare('PRAGMA table_info(files)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!fileCols.has('uuid')) {
+      database.exec('ALTER TABLE files ADD COLUMN uuid TEXT');
+      database.exec(`UPDATE files SET uuid = ${UUID_V4} WHERE uuid IS NULL`);
+    }
+    database.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_files_uuid ON files(uuid)');
+    database.exec(
+      'CREATE TRIGGER IF NOT EXISTS trg_files_uuid AFTER INSERT ON files ' +
+      `WHEN NEW.uuid IS NULL BEGIN UPDATE files SET uuid = ${UUID_V4} WHERE rowid = NEW.rowid; END`
+    );
+  }
+
   // Change-data-capture into sync_outbox. Installed ONLY when synchronization is
   // enabled (SECH_LIMS_SYNC_ENABLED) so there is zero write overhead or table
   // growth while sync is off; toggling the flag off cleanly drops the triggers.

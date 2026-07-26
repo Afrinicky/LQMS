@@ -17,9 +17,12 @@
  *  pull(): reads cloud changes since a watermark → merges into local tables by
  *          uuid, with capture suppressed so applied changes are not re-emitted.
  */
+import path from 'node:path';
+import fs from 'node:fs';
 import { config } from '../config/index.js';
 import { getStore } from '../db/store.js';
-import { getDb } from '../db/database.js';
+import { getDb, uploadRoot, evidenceRoot } from '../db/database.js';
+import { safeStoredFilename } from '../utils/safeFilename.js';
 import { PostgresStore } from '../db/postgresStore.js';
 import { SYNCABLE_TABLES, isSyncableTable } from '../db/syncableTables.js';
 import { canRemoteActivity, canApproveActivity } from '../services/remoteCapabilities.js';
@@ -92,6 +95,21 @@ function redactForSync(table: string, data: Record<string, unknown>): Record<str
   const out: Record<string, unknown> = {};
   for (const k of Object.keys(data)) if (STAFF_SYNC_FIELDS.has(k)) out[k] = data[k];
   return out;
+}
+
+// Largest document file whose bytes are carried inside its version's synced
+// record (base64 in JSONB). Larger files sync as metadata only — the in-app
+// extracted content (content_html/text) still replicates, so the document
+// remains readable on the other host even without the original bytes.
+const MAX_SYNC_FILE_BYTES = 20 * 1024 * 1024;
+
+interface FileTransport {
+  uuid: string;
+  original_name: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  storage_area: string;
+  data_base64?: string;
 }
 
 class CloudSyncEngine implements SyncEngine {
@@ -180,6 +198,13 @@ class CloudSyncEngine implements SyncEngine {
     const local = getStore();
     const cloud = this.cloudStore();
     const node = await this.nodeId();
+    // One-time re-backfill after the documents-domain portability upgrade, so
+    // records already in the cloud are re-published with uuid references and
+    // file bytes — other hosts can then repair links that replicated before it.
+    if ((await this.getSetting('syncDocPortabilityV2')) !== '1') {
+      await this.setSetting('syncBackfillDone', '0');
+      await this.setSetting('syncDocPortabilityV2', '1');
+    }
     let pushed = await this.backfillIfNeeded(local, cloud, node);
     const pending = await local.all<{ id: number; entity_table: string; entity_uuid: string | null; entity_id: number; operation: string }>(
       "SELECT id, entity_table, entity_uuid, entity_id, operation FROM sync_outbox WHERE sync_status = 'pending' ORDER BY id"
@@ -222,8 +247,115 @@ class CloudSyncEngine implements SyncEngine {
     return { ...result, message: `Full re-sync complete — ${result.message}` };
   }
 
+  // ---- documents-domain FK portability ---------------------------------------
+  // Integer foreign keys are node-local: a document's current_version_id or a
+  // version's document_id/file_id minted on one host is meaningless (or worse,
+  // points at the wrong row) on another. Outbound records therefore carry
+  // portable uuid references (plus the file's bytes), and inbound records are
+  // resolved back to local ids before being applied.
+
+  private async uuidOf(table: string, id: unknown): Promise<string | null> {
+    if (id == null) return null;
+    const row = await getStore().get<{ uuid: string | null }>(`SELECT uuid FROM ${table} WHERE id = ?`, [id]);
+    return row?.uuid ?? null;
+  }
+
+  private async idOf(table: string, uuid: unknown): Promise<number | null> {
+    if (!uuid) return null;
+    const row = await getStore().get<{ id: number }>(`SELECT id FROM ${table} WHERE uuid = ?`, [uuid]);
+    return row?.id ?? null;
+  }
+
+  private async enrichOutbound(table: string, data: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (Object.keys(data).length === 0) return data; // tombstone
+    const out = { ...data };
+    if (table === 'documents') {
+      out.current_version_uuid = await this.uuidOf('document_versions', data.current_version_id);
+      out.owner_staff_uuid = await this.uuidOf('staff', data.owner_staff_id);
+      out.reviewed_by_staff_uuid = await this.uuidOf('staff', data.reviewed_by_staff_id);
+      out.approved_by_staff_uuid = await this.uuidOf('staff', data.approved_by_staff_id);
+    } else if (table === 'document_versions') {
+      out.document_uuid = await this.uuidOf('documents', data.document_id);
+      out.prepared_by_staff_uuid = await this.uuidOf('staff', data.prepared_by_staff_id);
+      out.file_uuid = null;
+      out.file_transport = null;
+      if (data.file_id != null) {
+        const f = await getStore().get<Record<string, unknown>>('SELECT * FROM files WHERE id = ?', [data.file_id]);
+        if (f) {
+          out.file_uuid = f.uuid ?? null;
+          const transport: FileTransport = {
+            uuid: String(f.uuid), original_name: String(f.original_name), mime_type: (f.mime_type as string) ?? null,
+            size_bytes: (f.size_bytes as number) ?? null, storage_area: String(f.storage_area || 'uploads'),
+          };
+          try {
+            const root = transport.storage_area === 'evidence' ? evidenceRoot : uploadRoot;
+            const fp = path.join(root, String(f.stored_name));
+            if (fs.existsSync(fp) && fs.statSync(fp).size <= MAX_SYNC_FILE_BYTES) {
+              transport.data_base64 = fs.readFileSync(fp).toString('base64');
+            }
+          } catch { /* metadata-only transport */ }
+          out.file_transport = transport;
+        }
+      }
+    }
+    return out;
+  }
+
+  /** Create (or complete) the local copy of a synced file. Returns the local file id. */
+  private async materializeFile(transport: FileTransport | null | undefined): Promise<number | null> {
+    if (!transport?.uuid) return null;
+    const local = getStore();
+    const area = transport.storage_area === 'evidence' ? 'evidence' : 'uploads';
+    const root = area === 'evidence' ? evidenceRoot : uploadRoot;
+    const existing = await local.get<{ id: number; stored_name: string }>('SELECT id, stored_name FROM files WHERE uuid = ?', [transport.uuid]);
+    let fileId = existing?.id ?? null;
+    let storedName = existing?.stored_name ?? null;
+    if (!existing) {
+      storedName = safeStoredFilename(transport.original_name || 'document');
+      await local.run('INSERT INTO files (original_name, stored_name, mime_type, size_bytes, storage_area, uuid) VALUES (?, ?, ?, ?, ?, ?)',
+        [transport.original_name || 'document', storedName, transport.mime_type ?? null, transport.size_bytes ?? 0, area, transport.uuid]);
+      fileId = (await local.get<{ id: number }>('SELECT id FROM files WHERE uuid = ?', [transport.uuid]))?.id ?? null;
+    }
+    if (transport.data_base64 && storedName) {
+      try {
+        const fp = path.join(root, storedName);
+        if (!fs.existsSync(fp)) fs.writeFileSync(fp, Buffer.from(transport.data_base64, 'base64'));
+      } catch (err) {
+        console.error('[sync] could not write synced file to disk:', err instanceof Error ? err.message : err);
+      }
+    }
+    return fileId;
+  }
+
+  /**
+   * Translate an inbound record's foreign keys to local ids. Returns null when a
+   * required parent hasn't replicated yet (the row is skipped this cycle; the
+   * cursor only advances past it once it applies, so it is retried next pull).
+   */
+  private async resolveInbound(table: string, data: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+    if (table !== 'documents' && table !== 'document_versions') return data;
+    const out = { ...data };
+    if (table === 'documents') {
+      out.current_version_id = await this.idOf('document_versions', data.current_version_uuid);
+      out.owner_staff_id = await this.idOf('staff', data.owner_staff_uuid);
+      out.reviewed_by_staff_id = await this.idOf('staff', data.reviewed_by_staff_uuid);
+      out.approved_by_staff_id = await this.idOf('staff', data.approved_by_staff_uuid);
+      // Section/department/user ids are node-local too; never trust them inbound.
+      out.section_id = null; out.department_id = null; out.owner_position_id = null; out.created_by = null;
+      return out;
+    }
+    // document_versions — the parent document must exist locally first.
+    const docId = await this.idOf('documents', data.document_uuid);
+    if (!docId) return null;
+    out.document_id = docId;
+    out.prepared_by_staff_id = await this.idOf('staff', data.prepared_by_staff_uuid);
+    out.reviewed_by_staff_id = null; out.approved_by_staff_id = null; out.created_by = null; out.content_updated_by = null;
+    out.file_id = await this.materializeFile((data.file_transport as FileTransport | null) ?? null);
+    return out;
+  }
+
   private async upsertCloud(cloud: PostgresStore, table: string, uuid: string, data: Record<string, unknown>, updatedAt: string, deletedAt: string | null, node: string | null): Promise<void> {
-    data = redactForSync(table, data);
+    data = await this.enrichOutbound(table, redactForSync(table, data));
     await cloud.run(
       `INSERT INTO synced_records (entity_table, uuid, data, updated_at, deleted_at, origin_node, cloud_seq)
        VALUES (?, ?, ?::jsonb, ?, ?, ?, nextval('synced_records_seq'))
@@ -252,16 +384,28 @@ class CloudSyncEngine implements SyncEngine {
 
     let pulled = 0;
     let maxSeq = cursor;
+    let touchedDocuments = false;
+    const deferred: typeof remote = [];
     // Suppress capture so applying pulled changes does not re-emit to the outbox.
     await local.run("UPDATE sync_control SET value = '0' WHERE key = 'capture'");
     try {
       for (const r of remote) {
         if (isSyncableTable(r.entity_table)) {
-          await this.applyRemote(local, r.entity_table, r.uuid, r.data, r.updated_at, r.deleted_at);
-          pulled++;
+          const applied = await this.applyRemote(local, r.entity_table, r.uuid, r.data, r.updated_at, r.deleted_at);
+          if (applied === 'deferred') deferred.push(r);
+          else pulled++;
+          if (r.entity_table === 'documents' || r.entity_table === 'document_versions') touchedDocuments = true;
         }
         maxSeq = r.cloud_seq;
       }
+      // Second pass: rows whose parent arrived later in the same batch (e.g. a
+      // version replicated ahead of its document) now resolve.
+      for (const r of deferred) {
+        const applied = await this.applyRemote(local, r.entity_table, r.uuid, r.data, r.updated_at, r.deleted_at);
+        if (applied !== 'deferred') pulled++;
+        else console.warn(`[sync] deferred ${r.entity_table} ${r.uuid}: parent record not on this host yet (will be repaired on a later cycle)`);
+      }
+      if (touchedDocuments) await this.repairDocumentLinks(local, cloud);
     } finally {
       await local.run("UPDATE sync_control SET value = '1' WHERE key = 'capture'");
     }
@@ -270,20 +414,23 @@ class CloudSyncEngine implements SyncEngine {
     return { ok: true, skipped: false, pushed: 0, pulled, message: `Pulled ${pulled} change(s) from the cloud.` };
   }
 
-  private async applyRemote(local: ReturnType<typeof getStore>, table: string, uuid: string, data: Record<string, unknown>, remoteUpdatedAt: unknown, remoteDeletedAt: unknown): Promise<void> {
+  private async applyRemote(local: ReturnType<typeof getStore>, table: string, uuid: string, data: Record<string, unknown>, remoteUpdatedAt: unknown, remoteDeletedAt: unknown): Promise<'applied' | 'deferred'> {
     const existing = await local.get<{ id: number; updated_at: string | null }>(`SELECT id, updated_at FROM ${table} WHERE uuid = ?`, [uuid]);
     // Tombstone: soft-delete locally.
     if (remoteDeletedAt) {
       if (existing) await local.run(`UPDATE ${table} SET deleted_at = ? WHERE uuid = ?`, [toIso(remoteDeletedAt), uuid]);
-      return;
+      return 'applied';
     }
+    const resolved = await this.resolveInbound(table, data);
+    if (!resolved) return 'deferred';
+    data = resolved;
     const cols = await this.localColumns(table);
     const keys = Object.keys(data).filter((k) => cols.includes(k) && k !== 'id');
     if (existing) {
       // Last-writer-wins: skip if the local copy is newer.
-      if (toEpoch(existing.updated_at) > toEpoch(remoteUpdatedAt)) return;
+      if (toEpoch(existing.updated_at) > toEpoch(remoteUpdatedAt)) return 'applied';
       const setKeys = keys.filter((k) => k !== 'uuid');
-      if (setKeys.length === 0) return;
+      if (setKeys.length === 0) return 'applied';
       const assignments = setKeys.map((k) => `${k} = ?`).join(', ');
       await local.run(`UPDATE ${table} SET ${assignments} WHERE uuid = ?`, [...setKeys.map((k) => data[k] as unknown), uuid]);
     } else {
@@ -291,6 +438,62 @@ class CloudSyncEngine implements SyncEngine {
       const values = insKeys.map((k) => (k === 'uuid' ? uuid : (data[k] as unknown)));
       const placeholders = insKeys.map(() => '?').join(', ');
       await local.run(`INSERT INTO ${table} (${insKeys.join(', ')}) VALUES (${placeholders})`, values);
+    }
+    return 'applied';
+  }
+
+  /**
+   * Re-link the local document graph from the cloud's portable uuid references.
+   * Fixes rows that replicated before this fix existed (their integer FKs came
+   * from another host and dangle or point at the wrong rows) and completes links
+   * for records that arrived out of order. Bytes are only fetched for files that
+   * are actually missing locally. Idempotent; cheap for quiet registers.
+   */
+  private async repairDocumentLinks(local: ReturnType<typeof getStore>, cloud: PostgresStore): Promise<void> {
+    // Versions first, so documents can then point at them.
+    const versions = await cloud.all<{ uuid: string; data: Record<string, unknown> }>(
+      `SELECT uuid, data - 'file_transport' AS data FROM synced_records WHERE entity_table = 'document_versions' AND deleted_at IS NULL`);
+    for (const v of versions) {
+      const row = await local.get<{ id: number; document_id: number | null; file_id: number | null }>('SELECT id, document_id, file_id FROM document_versions WHERE uuid = ?', [v.uuid]);
+      if (!row) continue;
+      const docId = await this.idOf('documents', v.data.document_uuid);
+      if (docId && row.document_id !== docId) await local.run('UPDATE document_versions SET document_id = ? WHERE id = ?', [docId, row.id]);
+      const fileUuid = v.data.file_uuid as string | undefined;
+      if (fileUuid) {
+        let fileId = await this.idOf('files', fileUuid);
+        let needsBytes = false;
+        if (fileId) {
+          const f = await local.get<{ stored_name: string; storage_area: string }>('SELECT stored_name, storage_area FROM files WHERE id = ?', [fileId]);
+          if (f) needsBytes = !fs.existsSync(path.join(f.storage_area === 'evidence' ? evidenceRoot : uploadRoot, f.stored_name));
+        }
+        if (!fileId || needsBytes) {
+          const full = await cloud.get<{ transport: FileTransport | null }>(
+            `SELECT data -> 'file_transport' AS transport FROM synced_records WHERE entity_table = 'document_versions' AND uuid = ?`, [v.uuid]);
+          fileId = await this.materializeFile(full?.transport ?? null) ?? fileId;
+        }
+        if (fileId && row.file_id !== fileId) await local.run('UPDATE document_versions SET file_id = ? WHERE id = ?', [fileId, row.id]);
+      }
+    }
+    const docs = await cloud.all<{ uuid: string; data: Record<string, unknown> }>(
+      `SELECT uuid, data - 'file_transport' AS data FROM synced_records WHERE entity_table = 'documents' AND deleted_at IS NULL`);
+    for (const d of docs) {
+      const row = await local.get<Record<string, unknown>>('SELECT id, current_version_id, owner_staff_id, reviewed_by_staff_id, approved_by_staff_id FROM documents WHERE uuid = ?', [d.uuid]);
+      if (!row) continue;
+      const sets: string[] = [];
+      const vals: unknown[] = [];
+      let versionId = await this.idOf('document_versions', d.data.current_version_uuid);
+      if (versionId) {
+        const belongs = await local.get<{ id: number }>('SELECT id FROM document_versions WHERE id = ? AND document_id = ?', [versionId, row.id]);
+        if (!belongs) versionId = null;
+      }
+      // Fall back to the newest local version belonging to this document.
+      if (!versionId) versionId = (await local.get<{ id: number }>('SELECT MAX(id) AS id FROM document_versions WHERE document_id = ?', [row.id]))?.id ?? null;
+      if (versionId && row.current_version_id !== versionId) { sets.push('current_version_id = ?'); vals.push(versionId); }
+      for (const [uuidKey, col] of [['owner_staff_uuid', 'owner_staff_id'], ['reviewed_by_staff_uuid', 'reviewed_by_staff_id'], ['approved_by_staff_uuid', 'approved_by_staff_id']] as const) {
+        const staffId = await this.idOf('staff', d.data[uuidKey]);
+        if (staffId && row[col] !== staffId) { sets.push(`${col} = ?`); vals.push(staffId); }
+      }
+      if (sets.length) await local.run(`UPDATE documents SET ${sets.join(', ')} WHERE id = ?`, [...vals, row.id]);
     }
   }
 
@@ -429,6 +632,8 @@ class CloudSyncEngine implements SyncEngine {
     };
   }
 
+  private repairedThisRun = false;
+
   private async runOnce(): Promise<void> {
     if (this.running) return;
     this.running = true;
@@ -436,6 +641,15 @@ class CloudSyncEngine implements SyncEngine {
       await this.processSubmissions();
       await this.push();
       await this.pull();
+      // Once per process lifetime, repair the document graph even when no new
+      // cloud changes arrived — heals links broken by earlier sync versions.
+      if (!this.repairedThisRun) {
+        this.repairedThisRun = true;
+        const local = getStore();
+        await local.run("UPDATE sync_control SET value = '0' WHERE key = 'capture'");
+        try { await this.repairDocumentLinks(local, this.cloudStore()); }
+        finally { await local.run("UPDATE sync_control SET value = '1' WHERE key = 'capture'"); }
+      }
       this.lastError = null;
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
