@@ -9,15 +9,16 @@
  * Host's existing role-based approval workflows.
  */
 import { useEffect, useState } from 'react';
-import { api } from '../src/services/api';
+import { api, getApiBaseOverride, setApiBaseOverride, isNativeApp } from '../src/services/api';
 import type { ApiUser } from '../shared/types/api';
 import { submit } from './net';
 import { Back, Field, Ico, ICO, Result, s, today, type Msg } from './ui';
 import { getPosition, deviceInfo, compressImage } from './native';
-import { SignaturePad, uploadSignatureImage } from './Signature';
+import { SignatureGate, SignatureManager } from './SignatureOnFile';
+import { canPromptInstall, promptInstall, onInstallStateChange, isIOS, isStandalone } from './install';
 
 type Row = Record<string, unknown>;
-type View = 'hub' | 'profile' | 'leave' | 'roster' | 'licences' | 'training' | 'competency' | 'announcements' | 'declarations' | 'documents' | 'settings' | 'password';
+type View = 'hub' | 'profile' | 'leave' | 'roster' | 'licences' | 'training' | 'competency' | 'announcements' | 'declarations' | 'documents' | 'settings' | 'password' | 'signature';
 
 const IC = {
   user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0',
@@ -30,6 +31,7 @@ const IC = {
   pen: 'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z',
   doc: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8ZM14 2v6h6',
   lock: 'M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2ZM8 11V7a4 4 0 0 1 8 0v4',
+  install: 'M12 3v12M8 11l4 4 4-4M4 21h16',
   gear: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z',
   logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
 };
@@ -69,6 +71,7 @@ export function SelfServiceScreen({ user, onLogout }: { user: ApiUser; onLogout:
         {view === 'declarations' && <DeclarationsView records={(me?.declarations as Row[]) ?? []} onBack={back} onSigned={() => api<Row>('/mobile/me').then(setMe)} />}
         {view === 'settings' && <SettingsView onBack={back} />}
         {view === 'password' && <ChangePasswordView onBack={back} />}
+        {view === 'signature' && <MySignatureView onBack={back} />}
       </div>
     );
   }
@@ -85,6 +88,7 @@ export function SelfServiceScreen({ user, onLogout }: { user: ApiUser; onLogout:
     { key: 'competency', label: 'Competency', icon: IC.award },
     { key: 'announcements', label: 'Announcements', icon: IC.mega, badge: counts.ann },
     { key: 'declarations', label: 'Sign forms', icon: IC.pen, badge: counts.decl },
+    { key: 'signature', label: 'My signature', icon: IC.pen },
     { key: 'password', label: 'Password', icon: IC.lock },
     { key: 'settings', label: 'Notifications', icon: IC.gear },
   ];
@@ -101,6 +105,8 @@ export function SelfServiceScreen({ user, onLogout }: { user: ApiUser; onLogout:
 
       {linked && <ClockCard />}
 
+      <InstallCard />
+
       {!linked && <p className="m-empty">Your login isn’t linked to a staff profile yet. Ask your administrator to link your account to unlock full self-service.</p>}
 
       <div className="m-section-h">Self-service</div>
@@ -116,6 +122,32 @@ export function SelfServiceScreen({ user, onLogout }: { user: ApiUser; onLogout:
 
       <button className="m-btn danger block" onClick={onLogout}><Ico d={IC.logout} size={18} /> Sign out</button>
       <p className="m-hint" style={{ textAlign: 'center' }}>SECH_LIMS Staff Companion · by Nickland</p>
+    </div>
+  );
+}
+
+/* ── Install this app (PWA) ─────────────────────────────────────────────── */
+function InstallCard() {
+  const [, force] = useState(0);
+  const [showIos, setShowIos] = useState(false);
+  useEffect(() => onInstallStateChange(() => force(n => n + 1)), []);
+
+  // Hide inside the native app or when already installed to the home screen.
+  if (isNativeApp() || isStandalone()) return null;
+  const ios = isIOS();
+  if (!canPromptInstall() && !ios) return null;
+
+  return (
+    <div className="m-install">
+      <span className="m-cell-ic"><Ico d={IC.install} size={20} /></span>
+      <div className="m-install-body">
+        <div className="m-install-title">Install the app</div>
+        <div className="m-install-sub">Add SECH_LIMS to your home screen for a full-screen, app-like experience.</div>
+        {showIos && ios && <div className="m-install-ios">Tap the <strong>Share</strong> icon in Safari, then <strong>Add to Home Screen</strong>.</div>}
+      </div>
+      <button className="m-btn small primary" style={{ margin: 0 }} onClick={() => ios ? setShowIos(v => !v) : promptInstall()}>
+        {ios ? 'How' : 'Install'}
+      </button>
     </div>
   );
 }
@@ -488,7 +520,7 @@ function AnnouncementsView({ onBack, onRead }: { onBack: () => void; onRead: () 
 /* ── Declarations / sign forms ──────────────────────────────────────────── */
 function DeclarationsView({ records, onBack, onSigned }: { records: Row[]; onBack: () => void; onSigned: () => void }) {
   const [active, setActive] = useState<Row | null>(null);
-  const [sig, setSig] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<Msg>(null);
   const pending = records.filter(r => s(r.status) === 'pending');
@@ -496,12 +528,12 @@ function DeclarationsView({ records, onBack, onSigned }: { records: Row[]; onBac
 
   async function sign() {
     if (!active) return;
-    if (!sig) { setRes({ kind: 'err', msg: 'Please sign in the box.' }); return; }
+    if (!ready) { setRes({ kind: 'err', msg: 'Upload your signature first — it is applied here.' }); return; }
     setBusy(true); setRes(null);
     try {
-      const fileId = await uploadSignatureImage(sig);
-      await api(`/mobile/me/declarations/${s(active.id)}/sign`, { method: 'POST', body: JSON.stringify({ signatureImageFileId: fileId }) });
-      setRes({ kind: 'ok', msg: 'Signed.' }); setActive(null); setSig(null); onSigned();
+      // The Host applies your signature on file automatically.
+      await api(`/mobile/me/declarations/${s(active.id)}/sign`, { method: 'POST', body: JSON.stringify({}) });
+      setRes({ kind: 'ok', msg: 'Signed.' }); setActive(null); onSigned();
     } catch (e) { setRes({ kind: 'err', msg: (e as Error).message }); } finally { setBusy(false); }
   }
 
@@ -515,7 +547,7 @@ function DeclarationsView({ records, onBack, onSigned }: { records: Row[]; onBac
       </div>
       <div className="m-form">
         <label className="m-lbl">Signature</label>
-        <SignaturePad onChange={setSig} />
+        <SignatureGate onReady={setReady} />
         <button className="m-btn primary block" disabled={busy} onClick={sign}><Ico d={IC.pen} size={16} /> {busy ? 'Signing…' : 'Sign electronically'}</button>
         <Result r={res} />
       </div>
@@ -529,7 +561,7 @@ function DeclarationsView({ records, onBack, onSigned }: { records: Row[]; onBac
       {pending.length === 0 && <p className="m-empty">Nothing awaiting your signature. ✅</p>}
       <div className="m-list">
         {pending.map((d, i) => (
-          <button className="m-item tappable" key={i} onClick={() => { setActive(d); setSig(null); setRes(null); }}>
+          <button className="m-item tappable" key={i} onClick={() => { setActive(d); setReady(false); setRes(null); }}>
             <span className="m-item-ic alert"><Ico d={IC.pen} size={18} /></span>
             <div className="m-item-body"><div className="m-item-title">{s(d.title)}</div><div className="m-item-meta"><span className="m-chip">{s(d.declaration_type)}</span></div></div>
             <span className="m-chevron">›</span>
@@ -581,6 +613,15 @@ function SettingsView({ onBack }: { onBack: () => void }) {
         </label>
       </div>
       <p className="m-hint">Push notifications to this device turn on automatically once the secure (HTTPS) tunnel or native app is available. The framework is already prepared.</p>
+      {isNativeApp() && (
+        <>
+          <div className="m-section-h" style={{ marginTop: 14 }}>Host connection</div>
+          <div className="m-card">
+            <div className="m-kv"><span>Connected to</span><strong>{(getApiBaseOverride() ?? '—').replace(/^https?:\/\//, '')}</strong></div>
+          </div>
+          <button className="m-btn ghost block" style={{ marginTop: 10 }} onClick={() => { setApiBaseOverride(null); window.location.reload(); }}>Change Host address</button>
+        </>
+      )}
       <div className="m-section-h" style={{ marginTop: 12 }}>Registered devices</div>
       {devices.length === 0 && <p className="m-empty">No push devices registered yet.</p>}
       <div className="m-list">
@@ -589,6 +630,18 @@ function SettingsView({ onBack }: { onBack: () => void }) {
         ))}
       </div>
       <Result r={msg} />
+    </>
+  );
+}
+
+/* ── My signature ───────────────────────────────────────────────────────── */
+function MySignatureView({ onBack }: { onBack: () => void }) {
+  return (
+    <>
+      <Back onBack={onBack} />
+      <div className="m-screen-h">My signature</div>
+      <p className="m-hint" style={{ marginTop: 0 }}>Upload your signature once. It is applied automatically to everything you sign — approvals, forms, declarations and acknowledgements — and reflected across the system.</p>
+      <SignatureManager />
     </>
   );
 }

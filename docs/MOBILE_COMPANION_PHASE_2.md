@@ -58,14 +58,26 @@ POST /api/forms/templates
   ] } ] } }
 ```
 
-## Electronic signatures
+## Electronic signatures — signature on file
 
-`recordSignature(req, { moduleKey, recordType, recordId, purpose, meaning })`
-persists a signature and links it to the audit row it generates. It is called by
-approvals, form completion (when `requires_signature`), announcement
-acknowledgement and declaration signing. The signature image is optional (the
-identity + meaning + timestamp is the record); when supplied it is uploaded and
-referenced by `signature_image_file_id`.
+Staff upload their signature **once** and it is reused for every signing in place
+of drawing one each time:
+
+- `GET/POST /api/signatures/me` — check / upload (replace) my signature. Stored on
+  `staff.signature_file_id`.
+- `GET /api/signatures/me/image`, `GET /api/signatures/staff/:id/image` — the
+  signature image (auth-fetched as a blob for display).
+- `recordSignature(req, { moduleKey, recordType, recordId, purpose, meaning })`
+  persists a signature, links it to its audit row, and — when no explicit image
+  is passed — **automatically attaches the signer's signature on file**. It is
+  called by approvals, form completion (`requires_signature`), announcement
+  acknowledgement, declaration signing and document acknowledgement, so a
+  signature set once reflects on the Host and everywhere signatures appear.
+
+Clients: mobile **My signature** (Self-Service) and desktop **My signature**
+(header ✒️) manage the upload; the mobile `SignatureGate` and desktop
+`SignatureThumb`/attestations table display it. The old draw-a-signature pad is
+removed.
 
 ## QR infrastructure (backend complete now)
 

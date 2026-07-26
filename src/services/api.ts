@@ -28,18 +28,49 @@ declare global {
 //     origin is always correct and survives fallback ports. (Skipped on the
 //     Vite dev server at :5173, where the API lives on a different port.)
 //  4. Localhost default for plain browser/dev use.
+//
+// The native mobile app (Capacitor) is NOT served same-origin — it loads from
+// capacitor://localhost — so it stores the Host address the user enters on the
+// "Connect to Host" screen under API_BASE_OVERRIDE_KEY. That saved value takes
+// priority so the same build reaches the Host over LAN, Tailscale or a tunnel.
+export const API_BASE_OVERRIDE_KEY = 'sech_lims_api_base';
+
+export function getApiBaseOverride(): string | null {
+  try { return typeof localStorage !== 'undefined' ? localStorage.getItem(API_BASE_OVERRIDE_KEY) : null; } catch { return null; }
+}
+/** Persist (or clear) the Host API base URL. Caller reloads to apply. */
+export function setApiBaseOverride(url: string | null) {
+  try {
+    if (url && url.trim()) localStorage.setItem(API_BASE_OVERRIDE_KEY, url.trim().replace(/\/+$/, ''));
+    else localStorage.removeItem(API_BASE_OVERRIDE_KEY);
+  } catch { /* storage unavailable */ }
+}
+
+/** True when running inside the Capacitor native shell (Android/iOS app). */
+export function isNativeApp(): boolean {
+  return Boolean((window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.());
+}
+
 function resolveApiBase(): string {
+  const override = getApiBaseOverride();
+  if (override) return `${override}/api`;
   const fromPreload = window.sechLims?.apiBaseUrl;
   if (fromPreload) return fromPreload;
   const fromEnv = import.meta.env.VITE_API_BASE_URL;
   if (fromEnv) return fromEnv;
-  if (typeof location !== 'undefined' && /^https?:$/.test(location.protocol) && location.port !== '5173') {
+  // A native shell has no useful same-origin (capacitor://localhost) — the app
+  // routes the user to the Host-connection screen until an override is saved.
+  if (!isNativeApp() && typeof location !== 'undefined' && /^https?:$/.test(location.protocol) && location.port !== '5173') {
     return `${location.origin}/api`;
   }
   return 'http://127.0.0.1:4317/api';
 }
 
 export const API_BASE = resolveApiBase();
+/** Whether the app still needs the user to configure a Host address (native only). */
+export function needsHostConfig(): boolean {
+  return isNativeApp() && !getApiBaseOverride();
+}
 console.log('[renderer] API_BASE resolved to', API_BASE);
 
 export function getToken() { return localStorage.getItem('sech_lims_token'); }

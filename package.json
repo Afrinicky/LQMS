@@ -18,9 +18,26 @@
     "rebuild:native": "electron-builder install-app-deps",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
-    "dist:win": "npm run build && electron-builder --win"
+    "dist:win": "npm run build && electron-builder --win",
+    "build:mobile": "vite build --config vite.mobile.config.ts && node scripts/prepare-capacitor.mjs",
+    "build:mobile:vercel": "vite build --config vite.mobile.config.ts && node scripts/prepare-capacitor.mjs && node scripts/prepare-vercel-mobile.mjs",
+    "cap:sync": "npm run build:mobile && cap sync",
+    "cap:android": "npm run build:mobile && cap sync android && cap open android",
+    "cap:ios": "npm run build:mobile && cap sync ios && cap open ios",
+    "mobile:assets": "capacitor-assets generate --assetPath build-resources/mobile"
   },
   "dependencies": {
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/app": "^6.0.2",
+    "@capacitor/camera": "^6.1.2",
+    "@capacitor/core": "^6.2.0",
+    "@capacitor/filesystem": "^6.0.2",
+    "@capacitor/geolocation": "^6.1.0",
+    "@capacitor/ios": "^6.2.0",
+    "@capacitor/preferences": "^6.0.3",
+    "@capacitor/push-notifications": "^6.0.4",
+    "@capacitor/splash-screen": "^6.0.3",
+    "@capacitor/status-bar": "^6.0.2",
     "adm-zip": "latest",
     "archiver": "latest",
     "bcryptjs": "latest",
@@ -37,6 +54,8 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^6.2.0",
     "@types/adm-zip": "latest",
     "@types/cors": "latest",
     "@types/express": "latest",

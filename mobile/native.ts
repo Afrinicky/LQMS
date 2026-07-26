@@ -13,10 +13,17 @@
  * offers manual entry instead of shipping an inert button.
  */
 
-// Capacitor injects this global when running inside the native shell.
-interface CapacitorGlobal { isNativePlatform?: () => boolean; getPlatform?: () => string }
+// Capacitor injects this global when running inside the native shell. Plugins
+// are reached through window.Capacitor.Plugins so nothing is imported at build
+// time — the PWA build has no Capacitor dependency, and the native build wires
+// the real plugins in automatically.
+interface CapacitorGlobal { isNativePlatform?: () => boolean; getPlatform?: () => string; Plugins?: Record<string, any> }
 declare global {
   interface Window { Capacitor?: CapacitorGlobal }
+}
+
+function plugin<T = any>(name: string): T | undefined {
+  return window.Capacitor?.Plugins?.[name] as T | undefined;
 }
 
 export function isNative(): boolean {
@@ -59,7 +66,16 @@ export function capabilities(): DeviceCapabilities {
 export interface Coords { latitude: number; longitude: number; accuracy?: number }
 
 /** Best-effort current position. Resolves null when unavailable or denied. */
-export function getPosition(timeoutMs = 8000): Promise<Coords | null> {
+export async function getPosition(timeoutMs = 8000): Promise<Coords | null> {
+  // Native: use the Geolocation plugin (handles runtime permission prompts).
+  const geo = plugin('Geolocation');
+  if (geo?.getCurrentPosition) {
+    try {
+      const pos = await geo.getCurrentPosition({ enableHighAccuracy: true, timeout: timeoutMs });
+      return { latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy };
+    } catch { return null; }
+  }
+  // Web/PWA fallback.
   return new Promise(resolve => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) return resolve(null);
     navigator.geolocation.getCurrentPosition(
@@ -83,6 +99,38 @@ export function deviceId(): string {
   let id = localStorage.getItem(KEY);
   if (!id) { id = 'dev-' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem(KEY, id); }
   return id;
+}
+
+/**
+ * Initialise the native shell: theme the status bar to match the app, then
+ * dismiss the splash screen once the web layer is ready. No-ops in the PWA.
+ */
+export async function initNativeShell(): Promise<void> {
+  if (!isNative()) return;
+  try {
+    const statusBar = plugin('StatusBar');
+    await statusBar?.setStyle?.({ style: 'DARK' });
+    await statusBar?.setBackgroundColor?.({ color: '#0A1322' });
+  } catch { /* status bar theming is best-effort */ }
+  try { await plugin('SplashScreen')?.hide?.(); } catch { /* no splash plugin */ }
+}
+
+/**
+ * Register this device for native push and hand the token to the Host. Safe to
+ * call after login; no-ops in the PWA (Web Push is registered separately once
+ * HTTPS is available). Errors are swallowed — push is an enhancement.
+ */
+export async function registerNativePush(postSubscribe: (endpoint: string, platform: string) => Promise<void>): Promise<void> {
+  const push = plugin('PushNotifications');
+  if (!isNative() || !push?.requestPermissions) return;
+  try {
+    const perm = await push.requestPermissions();
+    if (perm?.receive !== 'granted') return;
+    push.addListener?.('registration', async (token: { value: string }) => {
+      try { await postSubscribe(token.value, platform()); } catch { /* retried on next launch */ }
+    });
+    await push.register();
+  } catch { /* push registration is best-effort */ }
 }
 
 /**

@@ -4125,6 +4125,9 @@ CREATE INDEX IF NOT EXISTS idx_form_sub_template ON form_submissions(template_ke
   if (!staffSelfCols.has('professional_licence')) database.exec('ALTER TABLE staff ADD COLUMN professional_licence TEXT');
   if (!staffSelfCols.has('licence_expiry_date')) database.exec('ALTER TABLE staff ADD COLUMN licence_expiry_date TEXT');
   if (!staffSelfCols.has('professional_regulator')) database.exec('ALTER TABLE staff ADD COLUMN professional_regulator TEXT');
+  // Signature on file: each staff member uploads their signature once; it is
+  // then reused for every electronic signing in place of drawing one each time.
+  if (!staffSelfCols.has('signature_file_id')) database.exec('ALTER TABLE staff ADD COLUMN signature_file_id INTEGER REFERENCES files(id)');
 
   seedFormTemplates(database);
 }

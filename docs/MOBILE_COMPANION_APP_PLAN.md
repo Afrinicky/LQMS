@@ -230,7 +230,12 @@ Remaining / optional:
 - **Web Push notifications** and **QR / barcode scanning** — require a secure
   context (HTTPS), so they are deferred until the tunnel is in place; building them
   over plain http would ship inert features.
-- **Native wrap** (Capacitor) for app-store distribution, if ever wanted.
+- **Native wrap** (Capacitor) for app-store distribution ✅ — the project is now
+  packageable as a native Android/iOS app for the Play Store / App Store. See
+  `docs/NATIVE_APP_BUILD.md`. `npm run build:mobile` emits `dist-mobile/`;
+  `capacitor.config.ts`, native plugin wiring in `mobile/native.ts`, a
+  first-launch Host-connection screen and generated store icons/splash are in
+  place. The PWA remains fully functional and carries no Capacitor dependency.
 
 Each phase is independently useful and shippable. Build, test on a real phone
 against the lab Host, move on — exactly how we did R1–R8.

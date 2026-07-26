@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useRef, useState, type CSSProperties, type Pointe
 import { Link, useSearchParams } from 'react-router-dom';
 import { FileText } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
+import { SignatureThumb } from '../components/SignatureThumb';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
@@ -1652,9 +1653,9 @@ function DocumentDetailPanel(props: any) {
     </form>}
 
     <h4>Attestations ({signedCount} signed)</h4>
-    <table className="data-table"><thead><tr><th>Staff</th><th>Version</th><th>Status</th><th>Due</th><th>Signed</th><th></th></tr></thead><tbody>
-      {(doc.attestations || []).map((a: any) => <tr key={a.id}><td>{a.staff_name || staffName(staff, a.staff_id)}</td><td>{a.version_number || '—'}</td><td>{formatBadge(a.status)}</td><td>{a.due_date || '—'}</td><td>{a.attested_at ? String(a.attested_at).slice(0, 10) : '—'}</td><td>{a.status !== 'signed' && <button onClick={() => onSignAttestation(a.id, doc.id)}>Sign</button>}</td></tr>)}
-      {(doc.attestations || []).length === 0 && <tr><td colSpan={6} className="muted">No attestations assigned yet. Approve the document or use “Distribute to all staff”.</td></tr>}
+    <table className="data-table"><thead><tr><th>Staff</th><th>Version</th><th>Status</th><th>Due</th><th>Signed</th><th>Signature</th><th></th></tr></thead><tbody>
+      {(doc.attestations || []).map((a: any) => <tr key={a.id}><td>{a.staff_name || staffName(staff, a.staff_id)}</td><td>{a.version_number || '—'}</td><td>{formatBadge(a.status)}</td><td>{a.due_date || '—'}</td><td>{a.attested_at ? String(a.attested_at).slice(0, 10) : '—'}</td><td>{a.status === 'signed' ? <SignatureThumb staffId={a.staff_id} /> : '—'}</td><td>{a.status !== 'signed' && <button onClick={() => onSignAttestation(a.id, doc.id)}>Sign</button>}</td></tr>)}
+      {(doc.attestations || []).length === 0 && <tr><td colSpan={7} className="muted">No attestations assigned yet. Approve the document or use “Distribute to all staff”.</td></tr>}
     </tbody></table>
     <form className="form-grid" onSubmit={submitAttest}>
       <label>Target<select value={attestForm.targetType} onChange={(e: any) => setAttestForm({ ...attestForm, targetType: e.target.value })}>{TARGET_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></label>

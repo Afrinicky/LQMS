@@ -201,6 +201,14 @@ select:focus, textarea:focus { border-color:var(--accent-bright); box-shadow:0 0
 .m-badge { position:absolute; top:6px; right:6px; min-width:18px; height:18px; padding:0 5px; border-radius:var(--pill);
   background:var(--danger); color:#fff; font-size:11px; font-weight:700; display:grid; place-items:center; }
 
+/* ---- Install app card (PWA) ---- */
+.m-install { display:flex; align-items:center; gap:12px; padding:13px 14px; border-radius:var(--radius);
+  border:1px solid rgba(47,107,255,0.35); background:linear-gradient(150deg,var(--accent-soft),var(--card)); }
+.m-install-body { flex:1; min-width:0; }
+.m-install-title { font-size:14.5px; font-weight:700; }
+.m-install-sub { font-size:12px; color:var(--muted); margin-top:2px; }
+.m-install-ios { font-size:12px; color:var(--text); margin-top:8px; background:var(--panel); border:1px solid var(--border); border-radius:var(--radius-sm); padding:8px 10px; }
+
 /* ---- Phase 2: clock in/out card ---- */
 .m-clock { background:linear-gradient(150deg,var(--panel2),var(--card)); border:1px solid var(--border); border-radius:var(--radius); padding:14px 16px; }
 .m-clock-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
@@ -234,11 +242,14 @@ select:focus, textarea:focus { border-color:var(--accent-bright); box-shadow:0 0
 .m-seg3 button.active.reject { background:var(--danger); color:#2a0007; }
 .m-seg3 button.active.return { background:var(--warning); color:#2a1c00; }
 
-/* ---- Phase 2: signature pad ---- */
-.m-sign { display:flex; flex-direction:column; gap:8px; }
-.m-sign-canvas { width:100%; height:170px; background:#f6f8fc; border:1px solid var(--border-strong); border-radius:var(--radius-sm); touch-action:none; }
-.m-sign-row { display:flex; align-items:center; justify-content:space-between; }
+/* ---- Signature on file ---- */
 .m-sign-hint { font-size:12px; color:var(--faint); }
+.m-sig-img { display:block; max-width:100%; max-height:120px; background:#fff; border-radius:8px; padding:6px; object-fit:contain; }
+.m-sig-card { background:#fff; border:1px solid var(--border); border-radius:var(--radius-sm); padding:10px; display:flex; flex-direction:column; align-items:center; gap:6px; }
+.m-sig-note { font-size:11.5px; color:#5a6478; }
+.m-sig-gate { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius-sm); padding:12px; display:flex; flex-direction:column; gap:8px; }
+.m-sig-gate-head { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--muted); }
+.m-sig-inline { font-size:13px; color:var(--success); background:rgba(52,211,153,0.1); border:1px solid rgba(52,211,153,0.35); border-radius:var(--radius-sm); padding:11px 13px; }
 
 /* ---- Phase 2: scan ---- */
 .m-scan-note { display:flex; gap:12px; align-items:flex-start; background:var(--panel); border:1px solid var(--border); border-radius:var(--radius-sm); padding:14px; color:var(--accent-bright); }

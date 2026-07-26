@@ -9,6 +9,7 @@ import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent, getCurrentStaffId } from './routeHelpers.js';
 import { extractDocument, deriveDocumentCodeFromName } from '../utils/documentExtract.js';
 import { indexDocument } from '../services/dennisService.js';
+import { recordSignature } from '../services/signatureService.js';
 import { buildDocxFromHtml } from '../utils/documentBuild.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
 import { recordCentralArchive } from './archives.js';
@@ -1140,8 +1141,13 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     }
     if (!attestation) return res.status(404).json({ error: 'No pending attestation was found for you on this document.' });
     if (attestation.status === 'signed') return res.status(400).json({ error: 'This attestation has already been signed.' });
+    // Apply the signer's signature on file (uploaded once, reused everywhere).
+    const onFile = db.prepare('SELECT signature_file_id FROM staff WHERE id = ?').get(staffId) as { signature_file_id?: number | null } | undefined;
+    const signatureFileId = parseIntNullable(req.body.signatureFileId) ?? onFile?.signature_file_id ?? null;
     db.prepare("UPDATE document_attestations SET status = 'signed', attested_at = CURRENT_TIMESTAMP, signed_by_user_id = ?, signature_file_id = ?, notes = COALESCE(?, notes) WHERE id = ?")
-      .run(req.user!.id, parseIntNullable(req.body.signatureFileId), req.body.notes ?? null, attestation.id);
+      .run(req.user!.id, signatureFileId, req.body.notes ?? null, attestation.id);
+    // Also record it in the unified electronic-signature trail.
+    try { recordSignature(req, { moduleKey: 'documents', recordType: 'document_attestations', recordId: attestation.id, purpose: 'document_acknowledgement', meaning: 'Acknowledged controlled document' }); } catch { /* trail is best-effort */ }
     db.prepare("UPDATE document_distribution SET status = 'completed' WHERE document_id = ? AND target_staff_id = ? AND status = 'pending'").run(req.params.id, staffId);
     // Auto-resolve the "sign this document" notifications for the caller so the
     // inbox and dashboard clear the moment the required action is completed.

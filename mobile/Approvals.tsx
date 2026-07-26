@@ -10,7 +10,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../src/services/api';
 import { Back, Ico, Result, s, type Msg } from './ui';
-import { SignaturePad, uploadSignatureImage } from './Signature';
+import { SignatureGate } from './SignatureOnFile';
 
 type Row = Record<string, unknown>;
 type Decision = 'approve' | 'reject' | 'return';
@@ -59,19 +59,19 @@ export function ApprovalsScreen({ onBack }: { onBack: () => void }) {
 function DecisionScreen({ item, onBack, onDone }: { item: Row; onBack: () => void; onDone: () => void }) {
   const [decision, setDecision] = useState<Decision>('approve');
   const [comments, setComments] = useState('');
-  const [sig, setSig] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<Msg>(null);
 
   async function submitDecision() {
     setRes(null);
     if (decision !== 'approve' && !comments.trim()) { setRes({ kind: 'err', msg: 'Please add a comment explaining the decision.' }); return; }
-    if (!sig) { setRes({ kind: 'err', msg: 'Please sign to authorise this decision.' }); return; }
+    if (!ready) { setRes({ kind: 'err', msg: 'Upload your signature first — it is applied to this decision.' }); return; }
     setBusy(true);
     try {
-      const signatureImageFileId = await uploadSignatureImage(sig);
+      // The Host applies the signer's signature on file automatically.
       await api(`/mobile/approvals/${s(item.type)}/${s(item.id)}/decision`, {
-        method: 'POST', body: JSON.stringify({ decision, comments, signatureImageFileId }),
+        method: 'POST', body: JSON.stringify({ decision, comments }),
       });
       setRes({ kind: 'ok', msg: 'Decision recorded and signed.' });
       setTimeout(onDone, 700);
@@ -99,7 +99,7 @@ function DecisionScreen({ item, onBack, onDone }: { item: Row; onBack: () => voi
         <label className="m-lbl">Comments{decision !== 'approve' ? ' (required)' : ' (optional)'}</label>
         <textarea rows={3} value={comments} onChange={e => setComments(e.target.value)} placeholder={decision === 'return' ? 'What needs correcting?' : decision === 'reject' ? 'Reason for rejection' : 'Any note (optional)'} />
         <label className="m-lbl">Electronic signature</label>
-        <SignaturePad onChange={setSig} />
+        <SignatureGate onReady={setReady} />
         <button className="m-btn primary block" disabled={busy} onClick={submitDecision}>
           <Ico d={P.check} size={18} /> {busy ? 'Recording…' : `Sign & ${decision === 'approve' ? 'approve' : decision === 'reject' ? 'reject' : 'return'}`}
         </button>
