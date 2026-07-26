@@ -600,6 +600,22 @@ export function commonRoutes() {
     res.json({ ok: true });
   });
 
+  // Administrator password reset. For when a staff member has forgotten their
+  // password (there is no email-based recovery on a LAN Host): an admin sets a
+  // new temporary password, hands it over, and the user changes it themselves
+  // via /auth/change-password. All of the user's sessions are revoked.
+  router.post('/users/:id/reset-password', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const { newPassword } = req.body ?? {};
+    if (!newPassword || String(newPassword).length < 8) return res.status(400).json({ error: 'A temporary password of at least 8 characters is required.' });
+    const user = db.prepare('SELECT id, username FROM users WHERE id = ?').get(req.params.id) as { id: number; username: string } | undefined;
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    db.prepare('UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(bcrypt.hashSync(String(newPassword), 12), user.id);
+    db.prepare("UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL").run(user.id);
+    audit(req, { action: 'reset_password', entity: 'users', entityId: user.id, newValue: { username: user.username } });
+    res.json({ ok: true });
+  });
+
   router.get('/positions', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT id, title, description, reports_to_position_id reportsToPositionId, is_active isActive, archived_at archivedAt FROM positions ORDER BY is_active DESC, title').all()));
   router.post('/positions', requirePermission('settings', 'create'), (req, res) => {
     const { title, description, reportsToPositionId } = req.body;

@@ -373,6 +373,18 @@ export function DocumentControlPage() {
     catch (e) { setError((e as Error).message); }
   }
 
+  async function deleteDoc() {
+    if (!selectedDoc) return;
+    const label = `${selectedDoc.document_code ? selectedDoc.document_code + ' · ' : ''}${selectedDoc.title}`;
+    if (!window.confirm(`Permanently delete "${label}" and all its versions, attestations and files?\n\nThis cannot be undone. To retire a document while keeping its history, use "Mark obsolete" instead.`)) return;
+    try {
+      await api(`/documents/${selectedDoc.id}`, { method: 'DELETE' });
+      setSelectedDoc(null);
+      await load();
+      flash(`Deleted "${label}" from the system.`);
+    } catch (e) { setError((e as Error).message); }
+  }
+
   async function approveDoc() {
     if (!selectedDoc) return;
     try { const r = await api<{ distributed: number }>(`/documents/${selectedDoc.id}/approve`, { method: 'POST', body: JSON.stringify({}) }); await openDoc(selectedDoc.id); await load(); flash(`Approved and issued as the current version. Automatically distributed to ${r.distributed} staff for attestation.`); }
@@ -561,6 +573,7 @@ export function DocumentControlPage() {
         onSignAttestation={signAttestation} onMarkVersionObsolete={markVersionObsolete} onPrintPreview={openPrintPreview}
         onView={(vid: number) => setViewer({ docId: selectedDoc.id, versionId: vid })}
         onCodeSaved={() => openDoc(selectedDoc.id)} onError={setError}
+        onDelete={deleteDoc}
         onClose={() => setSelectedDoc(null)} />
       </div></div>}
     </>}
@@ -1560,7 +1573,7 @@ function DocumentDetailPanel(props: any) {
     attestForm, setAttestForm, submitAttest,
     printForm, setPrintForm, submitPrint,
     obsoleteReason, setObsoleteReason, submitObsolete,
-    submitForReview, approveDoc, distributeAll, onSignAttestation, onMarkVersionObsolete, onPrintPreview, onView, onCodeSaved, onError, onClose } = props;
+    submitForReview, approveDoc, distributeAll, onSignAttestation, onMarkVersionObsolete, onPrintPreview, onView, onCodeSaved, onError, onDelete, onClose } = props;
   const [codeEdit, setCodeEdit] = useState(doc.document_code || '');
   useEffect(() => { setCodeEdit(doc.document_code || ''); }, [doc.id, doc.document_code]);
 
@@ -1672,6 +1685,13 @@ function DocumentDetailPanel(props: any) {
       <label>Reason<input value={obsoleteReason} onChange={(e: any) => setObsoleteReason(e.target.value)} /></label>{' '}
       <button onClick={submitObsolete}>Mark obsolete</button>
     </div>}
+
+    {/* Danger zone: permanent removal. Prefer "Mark obsolete" to keep history. */}
+    <div className="doc-danger-zone">
+      <h4>Delete document</h4>
+      <p className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>Permanently removes this document, all versions, attestations, distribution, print logs and files. This cannot be undone — to retire while keeping history, mark it obsolete instead.</p>
+      <button className="danger" onClick={onDelete}>Delete document permanently</button>
+    </div>
     </div>
   </div>;
 }

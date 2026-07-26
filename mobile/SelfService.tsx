@@ -17,7 +17,7 @@ import { getPosition, deviceInfo, compressImage } from './native';
 import { SignaturePad, uploadSignatureImage } from './Signature';
 
 type Row = Record<string, unknown>;
-type View = 'hub' | 'profile' | 'leave' | 'roster' | 'licences' | 'training' | 'competency' | 'announcements' | 'declarations' | 'documents' | 'settings';
+type View = 'hub' | 'profile' | 'leave' | 'roster' | 'licences' | 'training' | 'competency' | 'announcements' | 'declarations' | 'documents' | 'settings' | 'password';
 
 const IC = {
   user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0',
@@ -29,6 +29,7 @@ const IC = {
   mega: 'M3 11v2a1 1 0 0 0 1 1h3l5 4V6L7 10H4a1 1 0 0 0-1 1ZM16 9a3 3 0 0 1 0 6',
   pen: 'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z',
   doc: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8ZM14 2v6h6',
+  lock: 'M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2ZM8 11V7a4 4 0 0 1 8 0v4',
   gear: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z',
   logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
 };
@@ -67,6 +68,7 @@ export function SelfServiceScreen({ user, onLogout }: { user: ApiUser; onLogout:
         {view === 'announcements' && <AnnouncementsView onBack={back} onRead={() => api<Row[]>('/mobile/announcements').then(a => setCounts(c => ({ ...c, ann: a.filter(x => !x.read_at).length })))} />}
         {view === 'declarations' && <DeclarationsView records={(me?.declarations as Row[]) ?? []} onBack={back} onSigned={() => api<Row>('/mobile/me').then(setMe)} />}
         {view === 'settings' && <SettingsView onBack={back} />}
+        {view === 'password' && <ChangePasswordView onBack={back} />}
       </div>
     );
   }
@@ -83,6 +85,7 @@ export function SelfServiceScreen({ user, onLogout }: { user: ApiUser; onLogout:
     { key: 'competency', label: 'Competency', icon: IC.award },
     { key: 'announcements', label: 'Announcements', icon: IC.mega, badge: counts.ann },
     { key: 'declarations', label: 'Sign forms', icon: IC.pen, badge: counts.decl },
+    { key: 'password', label: 'Password', icon: IC.lock },
     { key: 'settings', label: 'Notifications', icon: IC.gear },
   ];
 
@@ -586,6 +589,47 @@ function SettingsView({ onBack }: { onBack: () => void }) {
         ))}
       </div>
       <Result r={msg} />
+    </>
+  );
+}
+
+/* ── Change password ────────────────────────────────────────────────────── */
+function ChangePasswordView({ onBack }: { onBack: () => void }) {
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState<Msg>(null);
+
+  async function save() {
+    setRes(null);
+    if (!current) { setRes({ kind: 'err', msg: 'Enter your current password.' }); return; }
+    if (next.length < 8) { setRes({ kind: 'err', msg: 'New password must be at least 8 characters.' }); return; }
+    if (next !== confirm) { setRes({ kind: 'err', msg: 'The new passwords do not match.' }); return; }
+    if (next === current) { setRes({ kind: 'err', msg: 'Choose a password different from your current one.' }); return; }
+    setBusy(true);
+    try {
+      await api('/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: current, newPassword: next }) });
+      setRes({ kind: 'ok', msg: 'Password changed. Use it next time you sign in.' });
+      setCurrent(''); setNext(''); setConfirm('');
+    } catch (e) { setRes({ kind: 'err', msg: (e as Error).message }); } finally { setBusy(false); }
+  }
+
+  const inputType = show ? 'text' : 'password';
+  return (
+    <>
+      <Back onBack={onBack} />
+      <div className="m-screen-h">Change password</div>
+      <p className="m-hint" style={{ marginTop: 0 }}>Set your own password after signing in with the one your administrator gave you.</p>
+      <div className="m-form">
+        <Field label="Current password"><input type={inputType} value={current} onChange={e => setCurrent(e.target.value)} autoComplete="current-password" autoCapitalize="none" /></Field>
+        <Field label="New password" hint="At least 8 characters."><input type={inputType} value={next} onChange={e => setNext(e.target.value)} autoComplete="new-password" autoCapitalize="none" /></Field>
+        <Field label="Confirm new password"><input type={inputType} value={confirm} onChange={e => setConfirm(e.target.value)} autoComplete="new-password" autoCapitalize="none" /></Field>
+        <label className="m-toggle"><span>Show passwords</span><input type="checkbox" checked={show} onChange={e => setShow(e.target.checked)} /></label>
+        <button className="m-btn primary block" disabled={busy} onClick={save}><Ico d={IC.lock} size={16} /> {busy ? 'Saving…' : 'Update password'}</button>
+        <Result r={res} />
+      </div>
     </>
   );
 }
