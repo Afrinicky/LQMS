@@ -56,11 +56,19 @@ export function recordSignature(req: Request, input: SignatureInput): SignatureR
   const deviceInfo = input.deviceInfo ?? deviceFromRequest(req);
   const ip = req.ip ?? null;
 
+  // Signature image: prefer an explicit one, otherwise fall back to the signer's
+  // signature on file (uploaded once, reused for every signing).
+  let signatureFileId = parseIntNullable(input.signatureImageFileId);
+  if (!signatureFileId && staffId) {
+    const onFile = db.prepare('SELECT signature_file_id FROM staff WHERE id = ?').get(staffId) as { signature_file_id?: number | null } | undefined;
+    signatureFileId = onFile?.signature_file_id ?? null;
+  }
+
   const result = db.prepare(`INSERT INTO e_signatures
       (module_key, record_type, record_id, purpose, meaning, user_id, staff_id, signer_name, signature_image_file_id, device_info, ip_address, signed_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`)
     .run(input.moduleKey, input.recordType, String(input.recordId), input.purpose, input.meaning ?? null,
-      req.user.id, staffId, signer?.full_name ?? req.user.username, parseIntNullable(input.signatureImageFileId), deviceInfo, ip);
+      req.user.id, staffId, signer?.full_name ?? req.user.username, signatureFileId, deviceInfo, ip);
   const id = Number(result.lastInsertRowid);
 
   audit(req, { action: 'e_sign', entity: input.recordType, entityId: input.recordId, newValue: { purpose: input.purpose, meaning: input.meaning, signatureId: id } });

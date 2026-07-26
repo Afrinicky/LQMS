@@ -14,11 +14,11 @@ import type { ApiUser } from '../shared/types/api';
 import { submit } from './net';
 import { Back, Field, Ico, ICO, Result, s, today, type Msg } from './ui';
 import { getPosition, deviceInfo, compressImage } from './native';
-import { SignaturePad, uploadSignatureImage } from './Signature';
+import { SignatureGate, SignatureManager } from './SignatureOnFile';
 import { canPromptInstall, promptInstall, onInstallStateChange, isIOS, isStandalone } from './install';
 
 type Row = Record<string, unknown>;
-type View = 'hub' | 'profile' | 'leave' | 'roster' | 'licences' | 'training' | 'competency' | 'announcements' | 'declarations' | 'documents' | 'settings' | 'password';
+type View = 'hub' | 'profile' | 'leave' | 'roster' | 'licences' | 'training' | 'competency' | 'announcements' | 'declarations' | 'documents' | 'settings' | 'password' | 'signature';
 
 const IC = {
   user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0',
@@ -71,6 +71,7 @@ export function SelfServiceScreen({ user, onLogout }: { user: ApiUser; onLogout:
         {view === 'declarations' && <DeclarationsView records={(me?.declarations as Row[]) ?? []} onBack={back} onSigned={() => api<Row>('/mobile/me').then(setMe)} />}
         {view === 'settings' && <SettingsView onBack={back} />}
         {view === 'password' && <ChangePasswordView onBack={back} />}
+        {view === 'signature' && <MySignatureView onBack={back} />}
       </div>
     );
   }
@@ -87,6 +88,7 @@ export function SelfServiceScreen({ user, onLogout }: { user: ApiUser; onLogout:
     { key: 'competency', label: 'Competency', icon: IC.award },
     { key: 'announcements', label: 'Announcements', icon: IC.mega, badge: counts.ann },
     { key: 'declarations', label: 'Sign forms', icon: IC.pen, badge: counts.decl },
+    { key: 'signature', label: 'My signature', icon: IC.pen },
     { key: 'password', label: 'Password', icon: IC.lock },
     { key: 'settings', label: 'Notifications', icon: IC.gear },
   ];
@@ -518,7 +520,7 @@ function AnnouncementsView({ onBack, onRead }: { onBack: () => void; onRead: () 
 /* ── Declarations / sign forms ──────────────────────────────────────────── */
 function DeclarationsView({ records, onBack, onSigned }: { records: Row[]; onBack: () => void; onSigned: () => void }) {
   const [active, setActive] = useState<Row | null>(null);
-  const [sig, setSig] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<Msg>(null);
   const pending = records.filter(r => s(r.status) === 'pending');
@@ -526,12 +528,12 @@ function DeclarationsView({ records, onBack, onSigned }: { records: Row[]; onBac
 
   async function sign() {
     if (!active) return;
-    if (!sig) { setRes({ kind: 'err', msg: 'Please sign in the box.' }); return; }
+    if (!ready) { setRes({ kind: 'err', msg: 'Upload your signature first — it is applied here.' }); return; }
     setBusy(true); setRes(null);
     try {
-      const fileId = await uploadSignatureImage(sig);
-      await api(`/mobile/me/declarations/${s(active.id)}/sign`, { method: 'POST', body: JSON.stringify({ signatureImageFileId: fileId }) });
-      setRes({ kind: 'ok', msg: 'Signed.' }); setActive(null); setSig(null); onSigned();
+      // The Host applies your signature on file automatically.
+      await api(`/mobile/me/declarations/${s(active.id)}/sign`, { method: 'POST', body: JSON.stringify({}) });
+      setRes({ kind: 'ok', msg: 'Signed.' }); setActive(null); onSigned();
     } catch (e) { setRes({ kind: 'err', msg: (e as Error).message }); } finally { setBusy(false); }
   }
 
@@ -545,7 +547,7 @@ function DeclarationsView({ records, onBack, onSigned }: { records: Row[]; onBac
       </div>
       <div className="m-form">
         <label className="m-lbl">Signature</label>
-        <SignaturePad onChange={setSig} />
+        <SignatureGate onReady={setReady} />
         <button className="m-btn primary block" disabled={busy} onClick={sign}><Ico d={IC.pen} size={16} /> {busy ? 'Signing…' : 'Sign electronically'}</button>
         <Result r={res} />
       </div>
@@ -559,7 +561,7 @@ function DeclarationsView({ records, onBack, onSigned }: { records: Row[]; onBac
       {pending.length === 0 && <p className="m-empty">Nothing awaiting your signature. ✅</p>}
       <div className="m-list">
         {pending.map((d, i) => (
-          <button className="m-item tappable" key={i} onClick={() => { setActive(d); setSig(null); setRes(null); }}>
+          <button className="m-item tappable" key={i} onClick={() => { setActive(d); setReady(false); setRes(null); }}>
             <span className="m-item-ic alert"><Ico d={IC.pen} size={18} /></span>
             <div className="m-item-body"><div className="m-item-title">{s(d.title)}</div><div className="m-item-meta"><span className="m-chip">{s(d.declaration_type)}</span></div></div>
             <span className="m-chevron">›</span>
@@ -628,6 +630,18 @@ function SettingsView({ onBack }: { onBack: () => void }) {
         ))}
       </div>
       <Result r={msg} />
+    </>
+  );
+}
+
+/* ── My signature ───────────────────────────────────────────────────────── */
+function MySignatureView({ onBack }: { onBack: () => void }) {
+  return (
+    <>
+      <Back onBack={onBack} />
+      <div className="m-screen-h">My signature</div>
+      <p className="m-hint" style={{ marginTop: 0 }}>Upload your signature once. It is applied automatically to everything you sign — approvals, forms, declarations and acknowledgements — and reflected across the system.</p>
+      <SignatureManager />
     </>
   );
 }

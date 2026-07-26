@@ -12,7 +12,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../src/services/api';
 import { submit } from './net';
 import { Back, Field, Ico, ICO, PhotoField, Result, s, type Msg } from './ui';
-import { SignaturePad, uploadSignatureImage } from './Signature';
+import { SignatureGate } from './SignatureOnFile';
 import { ScanField } from './Scan';
 
 type Row = Record<string, unknown>;
@@ -69,7 +69,7 @@ function FormFill({ templateKey, title, onBack }: { templateKey: string; title: 
   const [schema, setSchema] = useState<FSchema | null>(null);
   const [requiresSig, setRequiresSig] = useState(false);
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
-  const [sig, setSig] = useState<string | null>(null);
+  const [sigReady, setSigReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<Msg>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -92,21 +92,18 @@ function FormFill({ templateKey, title, onBack }: { templateKey: string; title: 
       if (f.type === 'heading' || !visible(f)) continue;
       if (f.required && isEmpty(answers[f.key])) { setRes({ kind: 'err', msg: `"${f.label}" is required.` }); return; }
     }
+    if (requiresSig && !sigReady) { setRes({ kind: 'err', msg: 'Upload your signature first — it is applied on submit.' }); return; }
     setBusy(true);
     try {
-      let signatureImageFileId: number | null = null;
-      if (requiresSig) {
-        if (!sig) { setRes({ kind: 'err', msg: 'Please sign before submitting.' }); setBusy(false); return; }
-        signatureImageFileId = await uploadSignatureImage(sig);
-      }
       // Photo fields hold a File for preview; JSON can only carry a reference, so
       // record the filename (the bytes stay on the device — a documented limit of
       // in-form photos; use the dedicated capture screens for linked evidence).
       const serializable: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(answers)) serializable[k] = v instanceof File ? `[photo] ${v.name}` : v;
-      const out = await submit('/forms/submissions', { templateKey, answers: serializable, signatureImageFileId }, `Form · ${title}`);
+      // The Host applies the signer's signature on file when the form requires one.
+      const out = await submit('/forms/submissions', { templateKey, answers: serializable }, `Form · ${title}`);
       if (out.queued) setRes({ kind: 'queued', msg: 'Saved offline — will submit automatically when back online.' });
-      else { const no = s((out.data as { submissionNumber?: string })?.submissionNumber || ''); setRes({ kind: 'ok', msg: `Submitted${no ? ' (' + no + ')' : ''}.` }); setAnswers({}); setSig(null); }
+      else { const no = s((out.data as { submissionNumber?: string })?.submissionNumber || ''); setRes({ kind: 'ok', msg: `Submitted${no ? ' (' + no + ')' : ''}.` }); setAnswers({}); }
     } catch (e) { setRes({ kind: 'err', msg: (e as Error).message }); } finally { setBusy(false); }
   }
 
@@ -127,8 +124,8 @@ function FormFill({ templateKey, title, onBack }: { templateKey: string; title: 
             </div>
           ))}
           {requiresSig && (
-            <Field label="Signature" hint="Your signature is recorded with your identity, time and device.">
-              <SignaturePad onChange={setSig} />
+            <Field label="Signature" hint="Your signature on file is applied with your identity, time and device.">
+              <SignatureGate onReady={setSigReady} />
             </Field>
           )}
           <button className="m-btn primary block" disabled={busy} onClick={save}>{busy ? 'Submitting…' : 'Submit form'}</button>
@@ -137,6 +134,15 @@ function FormFill({ templateKey, title, onBack }: { templateKey: string; title: 
       )}
     </div>
   );
+}
+
+// A signature field is satisfied by the signer's signature on file, applied by
+// the Host on submit — mark it signed automatically so validation passes.
+function AutoSignedField({ label, hint, value, onChange }: { label: string; hint?: string; value: unknown; onChange: (v: unknown) => void }) {
+  useEffect(() => { if (value !== 'signed') onChange('signed'); }, [value, onChange]);
+  return <Field label={label} hint={hint || 'Applied with your signature on file.'}>
+    <div className="m-sig-inline">Signed with your signature on file</div>
+  </Field>;
 }
 
 function FieldRenderer({ f, value, onChange }: { f: FField; value: unknown; onChange: (v: unknown) => void }) {
@@ -194,7 +200,7 @@ function FieldRenderer({ f, value, onChange }: { f: FField; value: unknown; onCh
       </Field>;
     }
     case 'signature':
-      return <Field label={label} hint={f.hint || 'Sign in the box'}><SignaturePad onChange={dataUrl => onChange(dataUrl ? 'signed' : '')} /></Field>;
+      return <AutoSignedField label={label} hint={f.hint} value={value} onChange={onChange} />;
     case 'photo':
       return <PhotoField file={(value as File) ?? null} onChange={file => onChange(file)} />;
     case 'qr':

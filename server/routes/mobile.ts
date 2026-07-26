@@ -209,9 +209,11 @@ export function mobileRoutes() {
     const decl = db.prepare('SELECT * FROM staff_declarations WHERE id = ?').get(req.params.id) as Row | undefined;
     if (!decl) return res.status(404).json({ error: 'Declaration not found' });
     if (decl.staff_id && Number(decl.staff_id) !== staffId) return res.status(403).json({ error: 'This declaration is assigned to another staff member.' });
-    const sig = recordSignature(req, { moduleKey: 'personnel', recordType: 'staff_declaration', recordId: req.params.id, purpose: 'declaration_sign', meaning: `Signed: ${String(decl.title ?? '')}`, signatureImageFileId: req.body?.signatureImageFileId ?? null });
+    // Uses the signer's signature on file (attached automatically by the service).
+    const onFile = db.prepare('SELECT signature_file_id FROM staff WHERE id = ?').get(staffId) as { signature_file_id?: number | null } | undefined;
+    const sig = recordSignature(req, { moduleKey: 'personnel', recordType: 'staff_declaration', recordId: req.params.id, purpose: 'declaration_sign', meaning: `Signed: ${String(decl.title ?? '')}` });
     db.prepare("UPDATE staff_declarations SET staff_id = ?, signed_at = CURRENT_TIMESTAMP, signature_file_id = ?, status = 'signed', updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-      .run(staffId, parseIntNullable(req.body?.signatureImageFileId), req.params.id);
+      .run(staffId, onFile?.signature_file_id ?? null, req.params.id);
     audit(req, { action: 'sign', entity: 'staff_declarations', entityId: req.params.id, newValue: { status: 'signed', signatureId: sig.id } });
     res.json({ ok: true, signature: sig });
   });
