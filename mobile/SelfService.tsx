@@ -9,7 +9,7 @@
  * Host's existing role-based approval workflows.
  */
 import { useEffect, useState } from 'react';
-import { api } from '../src/services/api';
+import { api, getApiBaseOverride, setApiBaseOverride, isNativeApp } from '../src/services/api';
 import type { ApiUser } from '../shared/types/api';
 import { submit } from './net';
 import { Back, Field, Ico, ICO, Result, s, today, type Msg } from './ui';
@@ -581,6 +581,15 @@ function SettingsView({ onBack }: { onBack: () => void }) {
         </label>
       </div>
       <p className="m-hint">Push notifications to this device turn on automatically once the secure (HTTPS) tunnel or native app is available. The framework is already prepared.</p>
+      {isNativeApp() && (
+        <>
+          <div className="m-section-h" style={{ marginTop: 14 }}>Host connection</div>
+          <div className="m-card">
+            <div className="m-kv"><span>Connected to</span><strong>{(getApiBaseOverride() ?? '—').replace(/^https?:\/\//, '')}</strong></div>
+          </div>
+          <button className="m-btn ghost block" style={{ marginTop: 10 }} onClick={() => { setApiBaseOverride(null); window.location.reload(); }}>Change Host address</button>
+        </>
+      )}
       <div className="m-section-h" style={{ marginTop: 12 }}>Registered devices</div>
       {devices.length === 0 && <p className="m-empty">No push devices registered yet.</p>}
       <div className="m-list">

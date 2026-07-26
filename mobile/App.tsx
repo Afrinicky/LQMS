@@ -14,8 +14,10 @@
  * all structured for a future Capacitor native wrap (see native.ts).
  */
 import { useCallback, useEffect, useState } from 'react';
-import { api, getToken, setToken } from '../src/services/api';
+import { api, getToken, setToken, needsHostConfig } from '../src/services/api';
 import type { ApiUser } from '../shared/types/api';
+import { registerNativePush, deviceInfo } from './native';
+import { HostSetup } from './HostSetup';
 import { CaptureScreen, type CaptureKey } from './Capture';
 import { InventoryScreen } from './Inventory';
 import { DocumentsScreen } from './Documents';
@@ -95,11 +97,21 @@ export function App() {
   const [tab, setTab] = useState<Tab>('home');
   const [capture, setCapture] = useState<PushScreen | null>(null);
   const [queued, setQueued] = useState(0);
+  // Native app only: true until the user has configured a Host address.
+  const [needHost, setNeedHost] = useState(needsHostConfig());
 
   useEffect(() => {
+    if (needHost) { setBooting(false); return; }
     if (!getToken()) { setBooting(false); return; }
     api<{ user: ApiUser }>('/auth/me').then(r => setUser(r.user)).catch(() => setToken(null)).finally(() => setBooting(false));
-  }, []);
+  }, [needHost]);
+
+  // Register the device for native push once signed in (no-op in the PWA).
+  useEffect(() => {
+    if (!user) return;
+    void registerNativePush((endpoint, platform) =>
+      api('/push/subscribe', { method: 'POST', body: JSON.stringify({ endpoint, platform, deviceInfo: deviceInfo() }) }).then(() => undefined));
+  }, [user]);
 
   useEffect(() => {
     const refresh = () => setQueued(outboxCount());
@@ -118,6 +130,9 @@ export function App() {
     setToken(null); setUser(null);
   }, []);
 
+  // Reload so the API layer picks up the newly-saved Host address (API_BASE is
+  // resolved once at load).
+  if (needHost) return <HostSetup onConnected={() => window.location.reload()} />;
   if (booting) return <div className="m-splash"><span className="m-brandmark"><Ico d={P.flask} size={26} /></span><div className="m-spin" /></div>;
   if (!user) return <Login onLoggedIn={onLoggedIn} />;
 
