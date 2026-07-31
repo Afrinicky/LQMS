@@ -591,7 +591,7 @@ export function schedulingRoutes() {
       ${signName ? `<div class="sign">……………………………………<br/>${escHtml(signName)}</div>` : ''}
     </div>`;
     // Reassignment memo keeps a portrait layout; override the landscape default.
-    const head = `<style>@page{size:A4 portrait;margin:14mm}</style>`;
+    const head = `<style>@page{size:A4 landscape;margin:12mm}</style>`;
     audit(req, { action: 'print', entity: 'reassignment_schedules', entityId: req.params.id });
     res.send(printShell(`${s.schedule_number} — Reassignment`, head, body, req.query.autoprint !== '0'));
   });

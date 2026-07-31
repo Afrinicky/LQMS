@@ -4,6 +4,7 @@ import { KpiStrip, ChartCard, DonutChart, BarMeter, BarChart, CHART_COLORS, Modu
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
+import ScannedRecordUpload from '../components/ScannedRecordUpload';
 import { EnvironmentalMonitoringPage, EnvLiveCards } from './EnvironmentalMonitoringPage';
 import type {
   Location, Section, Department, Staff, Supplier, EquipmentItem, InventoryItem, MonitoringRecord, SafetyIncident,
@@ -240,7 +241,7 @@ export function EquipmentPage() {
   return <div>
     <PageHeader eyebrow="Equipment Management" title="Equipment Management" subtitle="Asset register, maintenance, calibration, and breakdown tracking." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
-    {tabBar(tab, ['Dashboard', 'Equipment Register', 'Equipment Profile', 'New Equipment', 'Verification & Validation', 'Calibration', 'Maintenance Records', 'Breakdowns', 'Adverse Events', 'Training & Competency', 'Equipment Files', 'Reports placeholder'], setTab)}
+    {tabBar(tab, ['Dashboard', 'Equipment Register', 'Equipment Profile', 'New Equipment', 'Verification & Validation', 'Calibration', 'Maintenance Records', 'Scanned Records', 'Breakdowns', 'Adverse Events', 'Training & Competency', 'Equipment Files', 'Reports placeholder'], setTab)}
 
     {tab === 'Dashboard' && <><ModuleAlerts moduleKey="equipment" /><KpiStrip items={[
       { label: 'Equipment items', value: summary?.equipmentTotal ?? equipment.length, onClick: () => setTab('Equipment Register') },
@@ -340,6 +341,18 @@ export function EquipmentPage() {
     {tab === 'Calibration' && <><EquipmentLifecycleTab kind="calibration" equipment={equipment} staff={staff} setError={setError} onChanged={reloadSelected} /><ReferenceStandardsPanel staff={staff} setError={setError} /></>}
 
     {tab === 'Maintenance Records' && <EquipmentMaintenanceTab equipment={equipment} staff={staff} sections={sections} setError={setError} onChanged={() => { void load(); void reloadSelected(); }} />}
+
+    {tab === 'Scanned Records' && <ScannedRecordUpload moduleKey="equipment" sections={sections} equipment={equipment.map(e => ({ id: e.id, name: `${e.equipment_number} — ${e.name}` }))} defaultEquipmentId={selected?.id}
+      heading="Scanned maintenance logs & legacy equipment records"
+      blurb="Upload scanned maintenance logs, service reports and historical paper records for equipment as evidence the work was done. State whether the log covers weekly or monthly checks, and flag any out-of-range/failed check — a nonconformity is raised automatically so it is followed up."
+      categories={[
+        { value: 'maintenance_log', label: 'Maintenance / service log' },
+        { value: 'service_report', label: 'Service / engineer report' },
+        { value: 'calibration_certificate', label: 'Calibration certificate' },
+        { value: 'temperature_log', label: 'Temperature log (fridge/freezer)' },
+        { value: 'legacy_record', label: 'Legacy / historical record' },
+        { value: 'other', label: 'Other' },
+      ]} />}
 
     {tab === 'Breakdowns' && <div className="card">
       <h3>Report breakdown</h3>

@@ -4,6 +4,7 @@ import { KpiStrip } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
+import ScannedRecordUpload from '../components/ScannedRecordUpload';
 import type {
   Department, Section, Location, Staff, EquipmentItem,
   EnvAsset, EnvDevice, EnvReading, EnvAlert, EnvExcursion, EnvDashboard, EnvSettings,
@@ -113,7 +114,7 @@ export function EnvironmentalMonitoringPage({ embedded = false }: { embedded?: b
 
   if (!enabled) return <DisabledModule />;
 
-  const TABS = ['Live Dashboard', 'Assets', 'Devices', 'Manual Entry', 'Alerts', 'Excursions', 'Insights', 'Notifications', 'Charts', 'Reports', 'Settings'];
+  const TABS = ['Live Dashboard', 'Assets', 'Devices', 'Manual Entry', 'Alerts', 'Excursions', 'Insights', 'Notifications', 'Charts', 'Scanned Charts', 'Reports', 'Settings'];
 
   return <div className="module-page env-mon">
     {!embedded && <PageHeader eyebrow="Facilities and Safety" title="Environmental Monitoring" subtitle="Manual and automated temperature/humidity monitoring, alarms and excursions." />}
@@ -128,6 +129,17 @@ export function EnvironmentalMonitoringPage({ embedded = false }: { embedded?: b
     {tab === 'Devices' && <DevicesTab devices={devices} assets={assets} locations={locations} drivers={drivers} commMethods={commMethods} onChanged={() => { loadDevices(); loadAssets(); loadDashboard(); }} onError={setError} onFlash={flash} />}
 
     {tab === 'Manual Entry' && <ManualEntryTab assets={assets} staff={staff} onSaved={() => { loadDashboard(); loadAlerts(); loadExcursions(); }} onError={setError} onFlash={flash} />}
+
+    {tab === 'Scanned Charts' && <ScannedRecordUpload moduleKey="monitoring" sections={sections} equipment={equipment.map(e => ({ id: e.id, name: e.name }))}
+      heading="Scanned monitoring charts & legacy records"
+      blurb="Upload scanned temperature/humidity charts and logs as evidence that monitoring was performed, and preserve historical paper charts. Choose whether the chart covers weekly or monthly readings, and flag any out-of-range reading — a nonconformity is raised automatically so the excursion is investigated."
+      categories={[
+        { value: 'temperature_chart', label: 'Temperature chart' },
+        { value: 'humidity_chart', label: 'Humidity chart' },
+        { value: 'monitoring_log', label: 'Monitoring log sheet' },
+        { value: 'legacy_record', label: 'Legacy / historical record' },
+        { value: 'other', label: 'Other' },
+      ]} />}
 
     {tab === 'Alerts' && <AlertsTab alerts={alerts} onChanged={() => { loadAlerts(); loadDashboard(); }} onError={setError} />}
 

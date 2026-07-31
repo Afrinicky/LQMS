@@ -198,7 +198,7 @@ export function DutyRosterBoard({ staff, canEdit }: { staff: Staff[]; canEdit: b
         </thead>
         <tbody>
           {roster.rows.map(row => <tr key={row.id}>
-            <td style={{ ...gridCell, textAlign: 'left', fontFamily: 'monospace', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden' }} title={row.staff_id ? (row.staff_name || '') : (row.label || '')}>
+            <td style={{ ...gridCell, textAlign: 'left', fontFamily: 'monospace', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', background: '#fff', color: '#111' }} title={row.staff_id ? (row.staff_name || '') : (row.label || '')}>
               {row.staff_id ? row.staff_name : (row.label || '—')}
             </td>
             {Array.from({ length: md.days }).map((_, i) => {
@@ -439,7 +439,7 @@ export function BenchScheduleBoard({ sections, canEdit }: { sections: Section[];
         </thead>
         <tbody>
           {bs.rows.map(row => <tr key={row.id}>
-            <td style={{ ...gridCell, textAlign: 'left', fontFamily: 'monospace', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden' }}>{row.staff_id ? row.staff_name : row.label}</td>
+            <td style={{ ...gridCell, textAlign: 'left', fontFamily: 'monospace', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', background: '#fff', color: '#111' }}>{row.staff_id ? row.staff_name : row.label}</td>
             {Array.from({ length: md.days }).map((_, i) => { const d = i + 1; const v = cellMap.get(`${row.id}:${d}`) || ''; return <td key={d} onClick={() => canEdit && setCell(row.id, d, paint)} style={{ ...gridCell, cursor: canEdit ? 'pointer' : 'default', background: md.isWeekend(d) ? '#f3d9cc' : '#fff', color: '#0b1f33', fontWeight: 800, fontSize: 11 }}>{v}</td>; })}
           </tr>)}
         </tbody>

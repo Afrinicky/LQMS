@@ -4,6 +4,7 @@ import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts }
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
+import ScannedRecordUpload from '../components/ScannedRecordUpload';
 import type {
   Location, Section, Staff, EquipmentItem,
   IqcMaterial, IqcResult, IqcLotChange,
@@ -165,7 +166,7 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
     catch (e) { setError((e as Error).message); }
   }
 
-  const tabs = ['Dashboard', 'IQC Materials', 'New Material', 'Result Entry', 'QC Failures', 'Levey-Jennings', 'Lot Changes', 'Reports'].filter(name => !embedded || name !== 'Dashboard');
+  const tabs = ['Dashboard', 'IQC Materials', 'New Material', 'Result Entry', 'QC Failures', 'Levey-Jennings', 'Lot Changes', 'Scanned Records', 'Reports'].filter(name => !embedded || name !== 'Dashboard');
   const failures = results.filter(r => r.status !== 'accepted');
 
   return <div className="module-page">
@@ -268,6 +269,11 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
         {lotChanges.map(lc => <tr key={lc.id}><td>{lc.change_date}</td><td>{lc.old_material_name} / {lc.old_lot_number}</td><td>{lc.new_material_name} / {lc.new_lot_number}</td><td>{lc.reason || '—'}</td></tr>)}
       </tbody></table>
     </>}
+
+    {tab === 'Scanned Records' && <ScannedRecordUpload moduleKey="iqc" sections={sections} equipment={equipment.map(e => ({ id: e.id, name: e.name }))}
+      heading="Scanned IQC charts & legacy records"
+      blurb="Upload scanned Levey-Jennings charts and historical IQC sheets so paper records are preserved and stand as evidence. Flag any out-of-control run — a nonconformity is raised automatically."
+      categories={[{ value: 'iqc_chart', label: 'Levey-Jennings / QC chart' }, { value: 'iqc_log', label: 'IQC log sheet' }, { value: 'legacy_record', label: 'Legacy / historical record' }, { value: 'other', label: 'Other' }]} />}
 
     {tab === 'Reports' && (() => {
       const breaches = results.filter(r => r.rule_violation);
@@ -606,7 +612,7 @@ export function VerificationValidationPage({ embedded = false }: { embedded?: bo
     catch (e) { setError((e as Error).message); }
   }
 
-  const tabs = ['Dashboard', 'Method Verification Register', 'New Verification', 'Experiments', 'Equipment Verification', 'Reports'].filter(name => !embedded || name !== 'Dashboard');
+  const tabs = ['Dashboard', 'Method Verification Register', 'New Verification', 'Experiments', 'Equipment Verification', 'Scanned Records', 'Reports'].filter(name => !embedded || name !== 'Dashboard');
 
   return <div className="module-page">
     {!embedded && <PageHeader eyebrow="Process Management" title="Verification &amp; Validation" subtitle="Method and equipment verification and validation records." />}
@@ -718,6 +724,11 @@ export function VerificationValidationPage({ embedded = false }: { embedded?: bo
         <button className="secondary" onClick={() => setSelectedEquip(null)}>Close</button>
       </div>}
     </>}
+
+    {tab === 'Scanned Records' && <ScannedRecordUpload moduleKey="verification_validation" equipment={equipment.map(e => ({ id: e.id, name: e.name }))}
+      heading="Scanned verification / validation reports & legacy records"
+      blurb="Upload scanned method verification and validation reports (and historical paper records) as evidence. Flag any failed acceptance criterion — a nonconformity is raised automatically."
+      categories={[{ value: 'verification_report', label: 'Verification report' }, { value: 'validation_report', label: 'Validation report' }, { value: 'legacy_record', label: 'Legacy / historical record' }, { value: 'other', label: 'Other' }]} />}
 
     {tab === 'Reports' && (() => {
       const done = (s?: string) => !!s && /complet|approv|pass|accept/i.test(s);

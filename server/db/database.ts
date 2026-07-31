@@ -3117,6 +3117,45 @@ CREATE INDEX IF NOT EXISTS idx_bench_schedule_cells_schedule ON bench_schedule_c
   }
 
   // ===================================================================
+  // Scanned records / evidence uploads
+  // The lab is migrating from paper: historical monitoring charts, maintenance
+  // logs, IQC sheets, verification/validation reports etc. can be scanned and
+  // uploaded so those records are not lost. Going forward, scanned charts (e.g.
+  // a fridge/room temperature chart, a maintenance log) serve as evidence that a
+  // duty was performed. Each upload records the period it covers (daily/weekly/
+  // monthly) and whether it contains an out-of-range reading; when it does, the
+  // system raises a nonconformity so the CAPA workflow follows.
+  // -------------------------------------------------------------------
+  database.exec(`
+CREATE TABLE IF NOT EXISTS scanned_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  record_number TEXT NOT NULL UNIQUE,
+  module_key TEXT NOT NULL,            -- monitoring | equipment | iqc | verification_validation | eqa | measurement_uncertainty | other
+  category TEXT,                       -- e.g. temperature_chart, maintenance_log, iqc_chart, verification_report, legacy_record
+  title TEXT NOT NULL,
+  coverage TEXT NOT NULL DEFAULT 'one_off', -- daily | weekly | monthly | one_off
+  period_start TEXT,
+  period_end TEXT,
+  month TEXT,                          -- YYYY-MM when a monthly/weekly chart
+  section_id INTEGER REFERENCES sections(id),
+  equipment_id INTEGER REFERENCES equipment_items(id),
+  monitoring_item_id INTEGER,
+  file_id INTEGER REFERENCES files(id),
+  is_legacy INTEGER NOT NULL DEFAULT 0,     -- 1 = historical paper record being preserved
+  has_out_of_range INTEGER NOT NULL DEFAULT 0,
+  out_of_range_notes TEXT,
+  nc_id INTEGER REFERENCES nonconforming_events(id),
+  notes TEXT,
+  uploaded_by_staff_id INTEGER REFERENCES staff(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_scanned_records_module ON scanned_records(module_key);
+CREATE INDEX IF NOT EXISTS idx_scanned_records_equipment ON scanned_records(equipment_id);
+`);
+
+  // ===================================================================
   // Phase 9: Documents & Records upgrade
   // Faithful to SECH Document Control Procedure (SECHPO026) and Control of
   // Records Procedure (SECHPO051).

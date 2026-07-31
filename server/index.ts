@@ -26,6 +26,7 @@ import { centralArchivesRoutes } from './routes/archives.js';
 import { organisationExtendedRoutes } from './routes/organisationExtended.js';
 import { personnelRoutes } from './routes/personnel.js';
 import { schedulingRoutes } from './routes/scheduling.js';
+import { scannedRecordsRoutes } from './routes/scannedRecords.js';
 import { assessmentsRoutes } from './routes/assessments.js';
 import { meetingsRoutes } from './routes/meetings.js';
 import { managementReviewRoutes } from './routes/managementReview.js';
@@ -113,6 +114,7 @@ export function createApiServer() {
   app.use('/api/dennis', dennisRoutes());
   app.use('/api/personnel', personnelRoutes());
   app.use('/api/scheduling', schedulingRoutes());
+  app.use('/api/scanned-records', scannedRecordsRoutes());
   app.use('/api/assessments', assessmentsRoutes());
   app.use('/api/meetings', meetingsRoutes());
   app.use('/api/management-review', managementReviewRoutes());
