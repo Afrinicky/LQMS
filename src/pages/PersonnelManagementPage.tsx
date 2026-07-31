@@ -4,6 +4,8 @@ import { KpiStrip, ChartCard, BarMeter, BarChart, CHART_COLORS, ModuleAlerts } f
 import { useModules } from '../hooks/useModules';
 import { Download, Upload } from 'lucide-react';
 import { api, API_BASE, getToken } from '../services/api';
+import { useAuth } from '../hooks/useAuth';
+import { DutyRosterBoard, ReassignmentBoard, BenchScheduleBoard } from './SchedulingBoards';
 import DisabledModule from '../components/DisabledModule';
 import type {
   Section, Department, Staff, Position,
@@ -75,6 +77,9 @@ function staffName(staffList: Staff[], id?: number | null) {
 
 export function PersonnelManagementPage() {
   const { isEnabled } = useModules();
+  const { user } = useAuth();
+  // Managers / unit heads may build the rosters; everyone else sees them read-only.
+  const canEditRosters = /manager|head|administrator|supervisor/i.test(user?.roleName || '');
   const { staff, sections, departments, positions, reloadStaff } = useLookups();
   const [tab, setTab] = useState('Dashboard');
   const [error, setError] = useState<string | null>(null);
@@ -369,7 +374,7 @@ export function PersonnelManagementPage() {
     catch (e) { setError((e as Error).message); }
   }
 
-  const tabs = ['Dashboard', 'Master Personnel Register', 'Add Staff', 'Staff Documents', 'Orientation & Induction', 'Declarations', 'Training Events', 'Competency Assessments', 'Performance Appraisals', 'Technical Authorizations', 'Duty Rosters', 'My Profile', 'Reports'];
+  const tabs = ['Dashboard', 'Master Personnel Register', 'Add Staff', 'Staff Documents', 'Orientation & Induction', 'Declarations', 'Training Events', 'Competency Assessments', 'Performance Appraisals', 'Technical Authorizations', 'Duty Roster', 'Unit Reassignments', 'Bench Schedules', 'My Profile', 'Reports'];
   const staffName2 = (id?: number) => staff.find(s => s.id === id)?.fullName || '—';
 
   return <div className="module-page">
@@ -675,46 +680,9 @@ export function PersonnelManagementPage() {
 
     {tab === 'Technical Authorizations' && <p>Technical authorisations are created from completed competency assessments via the Competency Assessments tab. They appear on each staff member's profile under <em>My Profile</em>.</p>}
 
-    {tab === 'Duty Rosters' && <>
-      <form className="form-grid" onSubmit={submitRoster}>
-        <label>Department<select value={rosterForm.departmentId} onChange={e => setRosterForm({ ...rosterForm, departmentId: e.target.value })}><option value="">—</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
-        <label>Section<select value={rosterForm.sectionId} onChange={e => setRosterForm({ ...rosterForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-        <label>Start date<input type="date" value={rosterForm.rosterStartDate} onChange={e => setRosterForm({ ...rosterForm, rosterStartDate: e.target.value })} required /></label>
-        <label>End date<input type="date" value={rosterForm.rosterEndDate} onChange={e => setRosterForm({ ...rosterForm, rosterEndDate: e.target.value })} required /></label>
-        <label>Notes<textarea value={rosterForm.notes} onChange={e => setRosterForm({ ...rosterForm, notes: e.target.value })} /></label>
-        <button type="submit">Create roster</button>
-      </form>
-      <table className="data-table"><thead><tr><th>Number</th><th>Section</th><th>Period</th><th>Status</th><th></th></tr></thead><tbody>
-        {rosters.map(r => <tr key={r.id}>
-          <td>{r.roster_number}</td><td>{sections.find(s => s.id === r.section_id)?.name || '—'}</td>
-          <td>{r.roster_start_date} → {r.roster_end_date}</td><td>{formatBadge(r.status)}</td>
-          <td><button onClick={() => openRoster(r.id)}>Open</button>{r.status !== 'approved' && <button onClick={() => approveRoster(r.id)}>Approve</button>}</td>
-        </tr>)}
-      </tbody></table>
-      {selectedRoster && <div className="card" style={{ marginTop: 16 }}>
-        <h3>{selectedRoster.roster_number}</h3>
-        <p>Period: {selectedRoster.roster_start_date} → {selectedRoster.roster_end_date} | Status: {formatBadge(selectedRoster.status)}</p>
-        {rosterCoverage && <div className="cards">
-          <div className="card"><h4>Days covered</h4><p className="metric">{rosterCoverage.coveredDates}/{rosterCoverage.totalDates}</p></div>
-          <div className="card"><h4>Gap days</h4><p className="metric">{rosterCoverage.gapDates.length}</p>{rosterCoverage.gapDates.length > 0 && <small>{rosterCoverage.gapDates.slice(0, 5).join(', ')}{rosterCoverage.gapDates.length > 5 ? '…' : ''}</small>}</div>
-          <div className="card"><h4>Time conflicts</h4><p className="metric">{rosterCoverage.conflicts.length}</p>{rosterCoverage.conflicts.length > 0 && <small>{rosterCoverage.conflicts.slice(0, 3).map(c => `${c.duty_date} staff #${c.staff_id}`).join('; ')}</small>}</div>
-        </div>}
-        <table className="data-table"><thead><tr><th>Date</th><th>Staff</th><th>Shift</th><th>Hours</th><th>Role</th><th>Notes</th></tr></thead><tbody>
-          {(selectedRoster.assignments || []).map(a => <tr key={a.id}><td>{a.duty_date}</td><td>{a.staff_name || staffName(staff, a.staff_id)}</td><td>{a.shift_name || '—'}</td><td>{a.start_time || '—'} – {a.end_time || '—'}</td><td>{a.duty_role || '—'}</td><td>{a.notes || '—'}</td></tr>)}
-        </tbody></table>
-        <form className="form-grid" onSubmit={submitAssignment}>
-          <label>Staff<select value={assignForm.staffId} onChange={e => setAssignForm({ ...assignForm, staffId: e.target.value })} required><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-          <label>Duty date<input type="date" value={assignForm.dutyDate} onChange={e => setAssignForm({ ...assignForm, dutyDate: e.target.value })} required /></label>
-          <label>Shift name<input value={assignForm.shiftName} onChange={e => setAssignForm({ ...assignForm, shiftName: e.target.value })} placeholder="e.g. Morning, Night" /></label>
-          <label>Start time<input type="time" value={assignForm.startTime} onChange={e => setAssignForm({ ...assignForm, startTime: e.target.value })} /></label>
-          <label>End time<input type="time" value={assignForm.endTime} onChange={e => setAssignForm({ ...assignForm, endTime: e.target.value })} /></label>
-          <label>Duty role<input value={assignForm.dutyRole} onChange={e => setAssignForm({ ...assignForm, dutyRole: e.target.value })} placeholder="e.g. Bench, Phlebotomy" /></label>
-          <label>Notes<input value={assignForm.notes} onChange={e => setAssignForm({ ...assignForm, notes: e.target.value })} /></label>
-          <button type="submit">Add assignment</button>
-        </form>
-        <button className="secondary" onClick={() => setSelectedRoster(null)}>Close panel</button>
-      </div>}
-    </>}
+    {tab === 'Duty Roster' && <DutyRosterBoard staff={staff} canEdit={canEditRosters} />}
+    {tab === 'Unit Reassignments' && <ReassignmentBoard staff={staff} canEdit={canEditRosters} />}
+    {tab === 'Bench Schedules' && <BenchScheduleBoard sections={sections} canEdit={canEditRosters} />}
 
     {tab === 'My Profile' && <>
       {myProfile && <div className="card">

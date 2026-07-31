@@ -725,7 +725,7 @@ function OrgNodeEditor({ node, ctx }: { node: OrgNodeData; ctx: OrgCtx }) {
 // write to the same section-scoped tables used by Process Management,
 // Equipment and Supplier & Inventory, so the configuration stays linked.
 
-const SECTION_SUBTABS = ['Profile', 'Services', 'Test Menu', 'Equipment', 'Stock & Inventory', 'Staff'] as const;
+const SECTION_SUBTABS = ['Profile', 'Services', 'Test Menu', 'Equipment', 'Stock & Inventory', 'Staff', 'Benches'] as const;
 type SectionSubtab = typeof SECTION_SUBTABS[number];
 
 export function SectionConfig() {
@@ -967,7 +967,44 @@ function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onCl
         {detail.staff.length === 0 && <tr><td colSpan={3} className="hint">No staff assigned to this unit yet.</td></tr>}
       </tbody></table>
     </>}
+
+    {subtab === 'Benches' && <SectionBenches sectionId={sectionId} />}
   </div>;
+}
+
+// Benches / workspaces this unit assigns its staff to on the unit bench schedule
+// (e.g. Culture & Sensitivity, Parasitology, GeneXpert, Microscopy). These feed
+// the Bench Schedule grid in Personnel Management.
+function SectionBenches({ sectionId }: { sectionId: number }) {
+  type BenchRow = { id: number; name: string; code: string | null; description: string | null; display_order: number; is_active: number };
+  const [rows, setRows] = useState<BenchRow[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState({ name: '', code: '', description: '' });
+  function load() { api<BenchRow[]>(`/scheduling/sections/${sectionId}/benches`).then(setRows).catch(e => setError((e as Error).message)); }
+  useEffect(() => { load(); }, [sectionId]);
+  async function call(path: string, options: RequestInit) { setError(null); try { await api(path, options); load(); return true; } catch (e) { setError((e as Error).message); return false; } }
+  async function add(e: FormEvent) { e.preventDefault(); if (!form.name.trim()) return; const ok = await call(`/scheduling/sections/${sectionId}/benches`, { method: 'POST', body: JSON.stringify(form) }); if (ok) setForm({ name: '', code: '', description: '' }); }
+  return <>
+    <p className="hint">Benches / workspaces in this unit. Staff on the unit's monthly <Link to="/personnel">Bench Schedule</Link> are assigned to these each day. The short code is what appears in the schedule grid cells.</p>
+    {error && <div className="error">{error}</div>}
+    <table className="data-table"><thead><tr><th>Order</th><th>Name</th><th>Code</th><th>Description</th><th>Active</th><th></th></tr></thead><tbody>
+      {rows.map(b => <tr key={b.id}>
+        <td style={{ width: 66 }}><input type="number" defaultValue={b.display_order} style={{ width: 52 }} onBlur={e => call(`/scheduling/benches/${b.id}`, { method: 'PUT', body: JSON.stringify({ displayOrder: Number(e.target.value) }) })} /></td>
+        <td><input defaultValue={b.name} onBlur={e => call(`/scheduling/benches/${b.id}`, { method: 'PUT', body: JSON.stringify({ name: e.target.value }) })} /></td>
+        <td><input defaultValue={b.code || ''} style={{ width: 70 }} onBlur={e => call(`/scheduling/benches/${b.id}`, { method: 'PUT', body: JSON.stringify({ code: e.target.value }) })} /></td>
+        <td><input defaultValue={b.description || ''} onBlur={e => call(`/scheduling/benches/${b.id}`, { method: 'PUT', body: JSON.stringify({ description: e.target.value }) })} /></td>
+        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={!!b.is_active} onChange={e => call(`/scheduling/benches/${b.id}`, { method: 'PUT', body: JSON.stringify({ isActive: e.target.checked }) })} /></td>
+        <td><button className="secondary" onClick={() => { if (confirm(`Delete bench "${b.name}"?`)) call(`/scheduling/benches/${b.id}`, { method: 'DELETE' }); }}>Delete</button></td>
+      </tr>)}
+      {rows.length === 0 && <tr><td colSpan={6} className="hint">No benches yet. Add the unit's workspaces below.</td></tr>}
+    </tbody></table>
+    <form className="form-grid" onSubmit={add} style={{ marginTop: 12 }}>
+      <label>Bench / workspace name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Culture & Sensitivity" required /></label>
+      <label>Short code<input value={form.code} onChange={e => setForm({ ...form, code: e.target.value })} placeholder="e.g. C&S" /></label>
+      <label>Description<input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></label>
+      <button type="submit">Add bench</button>
+    </form>
+  </>;
 }
 
 // ---------------------------------------------------------------------------
@@ -1773,6 +1810,70 @@ function CoreDocumentsTab({ qualityManualSummary, onSummaryChange, onSaveSummary
   </div>;
 }
 
+// Laboratory logo — uploaded once and embedded on printed rosters, schedules
+// and other documents. The image is served behind auth, so it is fetched as a
+// blob with the bearer token and shown via an object URL.
+function LabLogo() {
+  const [logoFileId, setLogoFileId] = useState<number | null>(null);
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  async function loadPreview(id: number | null) {
+    setUrl(null);
+    if (!id) return;
+    try {
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/laboratory-logo?ts=${Date.now()}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+      if (!res.ok) return;
+      setUrl(URL.createObjectURL(await res.blob()));
+    } catch { /* ignore preview failure */ }
+  }
+  function load() {
+    api<Record<string, unknown> | null>('/laboratory-profile').then(p => {
+      const id = p && p.logo_file_id != null ? Number(p.logo_file_id) : null;
+      setLogoFileId(id); void loadPreview(id);
+    }).catch(() => undefined);
+  }
+  useEffect(() => { load(); }, []);
+
+  async function upload(file: File) {
+    setError(null); setBusy(true);
+    try {
+      const fd = new FormData(); fd.append('file', file);
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/files`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({ error: res.statusText }))).error ?? res.statusText);
+      const data = await res.json();
+      await api('/laboratory-profile', { method: 'PUT', body: JSON.stringify({ logoFileId: data.id }) });
+      setLogoFileId(Number(data.id)); await loadPreview(Number(data.id));
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); if (inputRef.current) inputRef.current.value = ''; }
+  }
+  async function remove() {
+    setError(null);
+    try { await api('/laboratory-profile', { method: 'PUT', body: JSON.stringify({ logoFileId: null }) }); setLogoFileId(null); setUrl(null); }
+    catch (e) { setError((e as Error).message); }
+  }
+
+  return <div className="card">
+    <h3>Laboratory logo</h3>
+    <p>Upload your laboratory / hospital logo. It appears on the masthead of printed <strong>duty rosters</strong>, <strong>bench schedules</strong> and other documents so they match your official forms. Use a square or landscape PNG/JPG with a transparent or white background.</p>
+    {error && <div className="error">{error}</div>}
+    <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+      <div style={{ width: 120, height: 120, border: '1px dashed #bbb', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fafafa', overflow: 'hidden' }}>
+        {url ? <img src={url} alt="Laboratory logo" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} /> : <span className="muted" style={{ fontSize: 12 }}>No logo</span>}
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <input ref={inputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) void upload(f); }} />
+        <button type="button" disabled={busy} onClick={() => inputRef.current?.click()}>{busy ? 'Uploading…' : (logoFileId ? 'Replace logo' : 'Upload logo')}</button>
+        {logoFileId && <button type="button" className="secondary" onClick={remove}>Remove</button>}
+      </div>
+    </div>
+  </div>;
+}
+
 export function MyLaboratory() {
   const blank = { facilityName: '', shortName: '', motto: '', registrationNumber: '', address: '', city: '', country: '', phone: '', email: '', website: '', accreditationBody: '', accreditationNumber: '', accreditationStatus: '', legalStatus: '', legalIdentityNotes: '', qualityPolicy: '', qualityManualSummary: '', mission: '', vision: '' };
   const [tab, setTab] = useState<LabTab>('Identity & Legal');
@@ -1899,10 +2000,13 @@ export function MyLaboratory() {
           <button type="submit">Save identity</button>
         </form>
       </div>
-      <div className="card">
-        <h3>Legal identity documents</h3>
-        <p>Upload documentation that establishes the laboratory's legal identity — certificates, licences, registrations.</p>
-        <LabDocuments category="legal_identity" docTypes={['Operating licence', 'Certificate of incorporation', 'Business registration', 'Tax registration', 'Ownership / governance', 'Other']} />
+      <div style={{ display: 'grid', gap: 16 }}>
+        <LabLogo />
+        <div className="card">
+          <h3>Legal identity documents</h3>
+          <p>Upload documentation that establishes the laboratory's legal identity — certificates, licences, registrations.</p>
+          <LabDocuments category="legal_identity" docTypes={['Operating licence', 'Certificate of incorporation', 'Business registration', 'Tax registration', 'Ownership / governance', 'Other']} />
+        </div>
       </div>
     </div>}
 
@@ -2267,6 +2371,70 @@ export function ConnectivityMode() {
         </p>
         {!canEdit && <p className="muted">Only a System Administrator or Laboratory Manager can run a re-sync.</p>}
       </div>}
+    </div>
+  </div>;
+}
+
+// ==========================================================================
+// Roster & Scheduling settings — the shift-type catalogue that drives the
+// department duty roster grid and legend. Laboratories select only the shifts
+// they practise, and may add, recolour, reorder or deactivate any shift.
+// ==========================================================================
+type ShiftTypeRow = { id: number; code: string; label: string; category: string; bg_color: string; text_color: string; display_order: number; is_active: number; is_system: number };
+const SHIFT_CATEGORIES = ['shift', 'off', 'leave'];
+
+export function RosterSettings() {
+  const [rows, setRows] = useState<ShiftTypeRow[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [form, setForm] = useState({ code: '', label: '', category: 'shift', bgColor: '#ffffff', textColor: '#111111' });
+
+  function load() { api<ShiftTypeRow[]>('/scheduling/shift-types').then(setRows).catch(e => setError((e as Error).message)); }
+  useEffect(() => { load(); }, []);
+
+  async function call(path: string, options: RequestInit, ok?: string) {
+    setError(null); setSuccess(null);
+    try { await api(path, options); if (ok) setSuccess(ok); load(); return true; }
+    catch (e) { setError((e as Error).message); return false; }
+  }
+  async function add(e: FormEvent) {
+    e.preventDefault();
+    const okr = await call('/scheduling/shift-types', { method: 'POST', body: JSON.stringify(form) }, 'Shift added.');
+    if (okr) setForm({ code: '', label: '', category: 'shift', bgColor: '#ffffff', textColor: '#111111' });
+  }
+
+  return <div>
+    <div className="card">
+      <h3>Roster &amp; Scheduling — Shift Types</h3>
+      <p>These shift codes drive the department <strong>Duty Roster</strong> grid and its legend. Not every laboratory practises every shift — deactivate the ones you do not use, and add your own. Colours are used to fill the roster cells and print exactly as shown here. (Leave types such as Annual/Part/Study Leave and Leave Without Pay merge into a labelled bar on the printed roster.)</p>
+      {error && <div className="error">{error}</div>}
+      {success && <div className="notice-ok">{success}</div>}
+      <table className="data-table"><thead><tr><th>Order</th><th>Code</th><th>Label</th><th>Category</th><th>Preview</th><th>Colours</th><th>Active</th><th></th></tr></thead><tbody>
+        {rows.map(r => <tr key={r.id}>
+          <td style={{ width: 70 }}><input type="number" defaultValue={r.display_order} style={{ width: 56 }} onBlur={e => call(`/scheduling/shift-types/${r.id}`, { method: 'PUT', body: JSON.stringify({ displayOrder: Number(e.target.value) }) })} /></td>
+          <td><strong>{r.code}</strong></td>
+          <td><input defaultValue={r.label} onBlur={e => call(`/scheduling/shift-types/${r.id}`, { method: 'PUT', body: JSON.stringify({ label: e.target.value }) })} /></td>
+          <td><select defaultValue={r.category} onChange={e => call(`/scheduling/shift-types/${r.id}`, { method: 'PUT', body: JSON.stringify({ category: e.target.value }) })}>{SHIFT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></td>
+          <td style={{ textAlign: 'center' }}><span style={{ display: 'inline-block', minWidth: 26, padding: '2px 8px', borderRadius: 4, background: r.bg_color, color: r.text_color, fontWeight: 700, border: '1px solid #ccc' }}>{r.code}</span></td>
+          <td style={{ whiteSpace: 'nowrap' }}>
+            <input type="color" defaultValue={r.bg_color} title="Background" onBlur={e => call(`/scheduling/shift-types/${r.id}`, { method: 'PUT', body: JSON.stringify({ bgColor: e.target.value }) })} />
+            <input type="color" defaultValue={r.text_color} title="Text" onBlur={e => call(`/scheduling/shift-types/${r.id}`, { method: 'PUT', body: JSON.stringify({ textColor: e.target.value }) })} />
+          </td>
+          <td style={{ textAlign: 'center' }}><input type="checkbox" checked={!!r.is_active} onChange={e => call(`/scheduling/shift-types/${r.id}`, { method: 'PUT', body: JSON.stringify({ isActive: e.target.checked }) })} /></td>
+          <td>{!r.is_system && <button className="secondary" onClick={() => { if (confirm(`Delete shift "${r.code}"?`)) call(`/scheduling/shift-types/${r.id}`, { method: 'DELETE' }, 'Deleted.'); }}>Delete</button>}</td>
+        </tr>)}
+      </tbody></table>
+    </div>
+    <div className="card" style={{ marginTop: 16 }}>
+      <h3>Add a shift type</h3>
+      <form className="form-grid" onSubmit={add}>
+        <label>Code<input value={form.code} onChange={e => setForm({ ...form, code: e.target.value.toUpperCase() })} placeholder="e.g. E (Evening)" required maxLength={4} /></label>
+        <label>Label<input value={form.label} onChange={e => setForm({ ...form, label: e.target.value })} placeholder="e.g. Evening Duty" required /></label>
+        <label>Category<select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>{SHIFT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
+        <label>Cell background<input type="color" value={form.bgColor} onChange={e => setForm({ ...form, bgColor: e.target.value })} /></label>
+        <label>Cell text colour<input type="color" value={form.textColor} onChange={e => setForm({ ...form, textColor: e.target.value })} /></label>
+        <button type="submit">Add shift type</button>
+      </form>
     </div>
   </div>;
 }

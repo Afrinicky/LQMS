@@ -7,7 +7,7 @@ import { ModuleProvider } from './hooks/useModules';
 import { API_BASE, getSetupStatus } from './services/api';
 import { LoginPage, SetupPage } from './pages/AuthPages';
 import { Dashboard, Home, ModulePage } from './pages/CorePages';
-import { ActionTracker, DocumentImport, EvidenceUpload, MyLaboratory, PeopleAccess, SectionConfig, SystemSettings } from './pages/SettingsPages';
+import { ActionTracker, DocumentImport, EvidenceUpload, MyLaboratory, PeopleAccess, SectionConfig, SystemSettings, RosterSettings } from './pages/SettingsPages';
 import { NcCapaPage, ComplaintsPage, RisksPage, QmsActionTracker } from './pages/QMSPages';
 import { MODULES } from '../shared/constants/modules';
 import { FlaskConical, TriangleAlert } from 'lucide-react';
@@ -208,6 +208,7 @@ function AppRoutes() {
         <Route path="laboratory" element={<MyLaboratory/>}/>
         <Route path="people" element={<PeopleAccess/>}/>
         <Route path="sections" element={<SectionConfig/>}/>
+        <Route path="scheduling" element={<RosterSettings/>}/>
         <Route path="system" element={<SystemSettings/>}/>
         <Route path="document-import" element={<DocumentImport/>}/>
         <Route path="evidence" element={<EvidenceUpload/>}/>
