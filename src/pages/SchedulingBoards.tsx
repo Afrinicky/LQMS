@@ -178,7 +178,7 @@ export function DutyRosterBoard({ staff, canEdit }: { staff: Staff[]; canEdit: b
         <span className="muted" style={{ fontSize: 12 }}>Paint:</span>
         {enabledShifts.map(s => <button key={s.code} type="button" onClick={() => { setPaint(s.code); setErase(false); }} title={s.label}
           style={{ padding: '4px 10px', border: paint === s.code && !erase ? '2px solid #111' : '1px solid #bbb', borderRadius: 5, background: s.bg_color, color: s.text_color, fontWeight: 700, cursor: 'pointer' }}>{s.code}</button>)}
-        <button type="button" onClick={() => setErase(true)} style={{ padding: '4px 10px', border: erase ? '2px solid #111' : '1px solid #bbb', borderRadius: 5, background: '#fff', cursor: 'pointer' }}>Erase</button>
+        <button type="button" onClick={() => setErase(true)} style={{ padding: '4px 10px', border: erase ? '2px solid #111' : '1px solid #bbb', borderRadius: 5, background: '#fff', color: '#111', fontWeight: 700, cursor: 'pointer' }}>Erase</button>
         <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>Click a cell to apply · click the ✎ on a row to fill the whole row.</span>
       </div>}
 
@@ -427,8 +427,8 @@ export function BenchScheduleBoard({ sections, canEdit }: { sections: Section[];
       </div>
       {bs.benches.length === 0 ? <div className="notice">No benches configured for this unit yet. Add them in <em>Settings → Section/Unit Configuration → Benches</em>.</div> : canEdit && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', margin: '4px 0 12px' }}>
         <span className="muted" style={{ fontSize: 12 }}>Paint bench:</span>
-        {bs.benches.filter(b => b.is_active).map(b => { const v = b.code || b.name; return <button key={b.id} type="button" onClick={() => setPaint(v)} title={b.name} style={{ padding: '4px 10px', border: paint === v ? '2px solid #111' : '1px solid #bbb', borderRadius: 5, background: '#eef2f7', cursor: 'pointer', fontWeight: 700 }}>{v}</button>; })}
-        <button type="button" onClick={() => setPaint('')} style={{ padding: '4px 10px', border: paint === '' ? '2px solid #111' : '1px solid #bbb', borderRadius: 5, background: '#fff', cursor: 'pointer' }}>Erase</button>
+        {bs.benches.filter(b => b.is_active).map(b => { const v = b.code || b.name; return <button key={b.id} type="button" onClick={() => setPaint(v)} title={b.name} style={{ padding: '4px 10px', border: paint === v ? '2px solid #111' : '1px solid #bbb', borderRadius: 5, background: '#eef2f7', color: '#111', cursor: 'pointer', fontWeight: 700 }}>{v}</button>; })}
+        <button type="button" onClick={() => setPaint('')} style={{ padding: '4px 10px', border: paint === '' ? '2px solid #111' : '1px solid #bbb', borderRadius: 5, background: '#fff', color: '#111', fontWeight: 700, cursor: 'pointer' }}>Erase</button>
       </div>}
 
       <table style={{ borderCollapse: 'collapse', fontSize: 11, tableLayout: 'fixed', width: 'max-content' }}>

@@ -28,7 +28,11 @@ function useLookups() {
     api<Staff[]>('/staff').then(setStaff).catch(() => setStaff([]));
     api<Section[]>('/sections').then(setSections).catch(() => setSections([]));
     api<Location[]>('/locations').then(setLocations).catch(() => setLocations([]));
-    api<EquipmentItem[]>('/equipment').then(setEquipment).catch(() => setEquipment([]));
+    // Only laboratory / measuring equipment undergoes analytical QC (IQC,
+    // verification, validation, measurement uncertainty). Support equipment
+    // (fridges, air-conditioners, incubators …) is excluded here — it is quality
+    // assured through environmental monitoring and preventive maintenance instead.
+    api<EquipmentItem[]>('/equipment').then(list => setEquipment(list.filter(e => e.equipment_class !== 'support'))).catch(() => setEquipment([]));
   }, []);
   return { staff, sections, locations, equipment };
 }

@@ -146,6 +146,34 @@ CREATE TABLE IF NOT EXISTS dennis_settings (id INTEGER PRIMARY KEY AUTOINCREMENT
   if (!equipmentNames.has('disposal_date')) database.exec('ALTER TABLE equipment_items ADD COLUMN disposal_date TEXT');
   if (!equipmentNames.has('disposal_reference')) database.exec('ALTER TABLE equipment_items ADD COLUMN disposal_reference TEXT');
   if (!equipmentNames.has('disposal_evidence_file_id')) database.exec('ALTER TABLE equipment_items ADD COLUMN disposal_evidence_file_id INTEGER REFERENCES files(id)');
+  // Equipment quality regime (ISO 15189): 'laboratory' items are the measuring /
+  // examination equipment (analysers, pipettes, balances, centrifuges …) that
+  // undergo IQC, verification/validation and measurement-uncertainty checks;
+  // 'support' items are ancillary equipment (fridges, freezers, incubators, air
+  // conditioners, UPS …) whose quality is assured by environmental monitoring,
+  // temperature checks and preventive maintenance rather than analytical QC.
+  if (!equipmentNames.has('equipment_class')) {
+    database.exec("ALTER TABLE equipment_items ADD COLUMN equipment_class TEXT NOT NULL DEFAULT 'laboratory'");
+    // Auto-classify existing records: anything that looks like support / ancillary
+    // equipment is moved out of the analytical-QC lists so only true laboratory
+    // equipment appears for IQC, verification, validation and uncertainty.
+    database.exec(`UPDATE equipment_items SET equipment_class = 'support'
+      WHERE lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%fridge%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%refrigerat%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%freezer%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%cold room%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%air cond%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%aircon%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '% a/c%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%incubator%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%water bath%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%oven%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%ups%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%generator%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%stabilizer%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%printer%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%computer%'`);
+  }
 
   // Phase 3: extend inventory_items
   const inventoryColumns = database.prepare("PRAGMA table_info(inventory_items)").all() as Array<{ name: string }>;
