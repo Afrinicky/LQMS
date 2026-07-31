@@ -151,6 +151,72 @@ export function equipmentRoutes() {
     }
   });
 
+  // ===================== Maintenance records — Excel export / import =====================
+  const MAINTENANCE_HEADERS = [
+    'Equipment identifier', 'Equipment name', 'Maintenance date', 'Maintenance type', 'Performed by (employee no.)',
+    'Findings', 'Action taken', 'Next due date', 'Status', 'Service provider', 'Provider type',
+  ] as const;
+  function buildMaintenanceWorkbook(withData: boolean): Buffer {
+    const db = getDb();
+    const rows: any[][] = [];
+    if (withData) {
+      const recs = db.prepare(`SELECT m.*, e.equipment_number, e.name AS equipment_name, st.employee_no AS performed_no
+        FROM equipment_maintenance_records m JOIN equipment_items e ON e.id = m.equipment_id
+        LEFT JOIN staff st ON st.id = m.performed_by_staff_id ORDER BY m.maintenance_date DESC, m.id DESC`).all() as any[];
+      for (const m of recs) rows.push([
+        m.equipment_number, m.equipment_name, m.maintenance_date, m.maintenance_type, m.performed_no ?? '',
+        m.findings ?? '', m.action_taken ?? '', m.next_due_date ?? '', m.status ?? '', m.service_provider ?? '', m.provider_type ?? '',
+      ]);
+    }
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([MAINTENANCE_HEADERS as unknown as string[], ...rows]);
+    ws['!cols'] = MAINTENANCE_HEADERS.map(h => ({ wch: Math.min(30, Math.max(14, h.length + 2)) }));
+    XLSX.utils.book_append_sheet(wb, ws, 'MAINTENANCE RECORDS');
+    return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+  }
+  router.get('/maintenance/template', requirePermission('equipment', 'view'), (_req, res) => sendWorkbook(res, buildMaintenanceWorkbook(false), 'Equipment_Maintenance_Template.xlsx'));
+  router.get('/maintenance/export', requirePermission('equipment', 'view'), (_req, res) => sendWorkbook(res, buildMaintenanceWorkbook(true), 'Equipment_Maintenance_Records.xlsx'));
+  router.post('/maintenance/import', requirePermission('equipment', 'create'), upload.single('file'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the Equipment Maintenance .xlsx file.' });
+    try {
+      const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+      const sheet = wb.SheetNames.find(n => n.toUpperCase().includes('MAINTEN')) || wb.SheetNames[0];
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[sheet], { defval: '', raw: false });
+      const db = getDb();
+      const eqByNo = new Map<string, number>();
+      for (const e of db.prepare('SELECT id, equipment_number FROM equipment_items').all() as any[]) eqByNo.set(String(e.equipment_number).toLowerCase(), e.id);
+      const staffByNo = new Map<string, number>();
+      for (const s of db.prepare('SELECT id, employee_no FROM staff WHERE employee_no IS NOT NULL').all() as any[]) staffByNo.set(String(s.employee_no).toLowerCase(), s.id);
+      const norm = (v: unknown) => { const s = String(v ?? '').trim(); return s === '' ? null : s; };
+      const errors: string[] = [];
+      let created = 0;
+      const ins = db.prepare(`INSERT INTO equipment_maintenance_records (equipment_id, maintenance_date, maintenance_type, performed_by_staff_id, findings, action_taken, next_due_date, status, service_provider, provider_type, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      const tx = db.transaction(() => {
+        rows.forEach((r, idx) => {
+          const rowNo = idx + 2;
+          const eqNo = norm(r['Equipment identifier']);
+          const eqId = eqNo ? eqByNo.get(String(eqNo).toLowerCase()) : undefined;
+          if (!eqId) { errors.push(`Row ${rowNo}: equipment identifier "${eqNo ?? ''}" not found.`); return; }
+          const date = norm(r['Maintenance date']);
+          const type = norm(r['Maintenance type']);
+          if (!date) { errors.push(`Row ${rowNo}: Maintenance date is required.`); return; }
+          if (!type) { errors.push(`Row ${rowNo}: Maintenance type is required.`); return; }
+          const performedBy = norm(r['Performed by (employee no.)']) ? (staffByNo.get(String(r['Performed by (employee no.)']).toLowerCase()) ?? null) : null;
+          const nextDue = norm(r['Next due date']);
+          try {
+            ins.run(eqId, date, type, performedBy, norm(r['Findings']), norm(r['Action taken']), nextDue, norm(r['Status']) ?? 'completed', norm(r['Service provider']), norm(r['Provider type']), req.user!.id);
+            if (nextDue) db.prepare('UPDATE equipment_items SET last_service_date = ?, next_service_due = ?, next_maintenance_due = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(date, nextDue, nextDue, eqId);
+            else db.prepare('UPDATE equipment_items SET last_service_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(date, eqId);
+            created++;
+          } catch (e) { errors.push(`Row ${rowNo}: ${(e as Error).message}`); }
+        });
+      });
+      tx();
+      audit(req, { action: 'import', entity: 'equipment_maintenance_records', entityId: null, newValue: { created, errors: errors.length } });
+      res.json({ totalRows: rows.length, created, errors });
+    } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+  });
+
   // ===================== Editable checklist question bank =====================
   const CHECKLIST_TYPES = ['verification_validation', 'calibration'];
 
@@ -605,11 +671,12 @@ export function equipmentRoutes() {
     }
     const responsibleStaffId = parseIntNullable(req.body.responsibleStaffId ?? req.body.assignedToStaffId);
     const nextMaintenanceDue = req.body.nextMaintenanceDue ?? req.body.nextServiceDue ?? null;
-    const result = db.prepare(`INSERT INTO equipment_items (equipment_number, name, category, manufacturer, model, serial_number, location_id, department_id, section_id, status, calibration_due_date, last_service_date, next_service_due, assigned_to_staff_id, equipment_type, maintenance_frequency, calibration_frequency, next_maintenance_due, next_calibration_due, responsible_staff_id, date_received, date_commissioned, calibration_required, notes, supplier_name, supplier_location, supplier_contact, country_of_origin, condition_received, date_out_of_service, criticality, ifu_file_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    const result = db.prepare(`INSERT INTO equipment_items (equipment_number, name, category, equipment_class, manufacturer, model, serial_number, location_id, department_id, section_id, status, calibration_due_date, last_service_date, next_service_due, assigned_to_staff_id, equipment_type, maintenance_frequency, calibration_frequency, next_maintenance_due, next_calibration_due, responsible_staff_id, date_received, date_commissioned, calibration_required, notes, supplier_name, supplier_location, supplier_contact, country_of_origin, condition_received, date_out_of_service, criticality, ifu_file_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(
         equipmentNumber,
         req.body.name,
         req.body.category ?? null,
+        req.body.equipmentClass === 'support' ? 'support' : 'laboratory',
         req.body.manufacturer ?? null,
         req.body.model ?? null,
         req.body.serialNumber ?? null,
@@ -662,11 +729,12 @@ export function equipmentRoutes() {
         return res.status(409).json({ error: `Equipment identifier ${equipmentNumber} is already in use.` });
       }
     }
-    db.prepare(`UPDATE equipment_items SET equipment_number = ?, name = ?, category = ?, manufacturer = ?, model = ?, serial_number = ?, location_id = ?, department_id = ?, section_id = ?, status = ?, calibration_due_date = ?, last_service_date = ?, next_service_due = ?, assigned_to_staff_id = ?, equipment_type = ?, maintenance_frequency = ?, calibration_frequency = ?, next_maintenance_due = ?, next_calibration_due = ?, responsible_staff_id = ?, date_received = ?, date_commissioned = ?, calibration_required = ?, notes = ?, supplier_name = ?, supplier_location = ?, supplier_contact = ?, country_of_origin = ?, condition_received = ?, date_out_of_service = ?, criticality = ?, ifu_file_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+    db.prepare(`UPDATE equipment_items SET equipment_number = ?, name = ?, category = ?, equipment_class = ?, manufacturer = ?, model = ?, serial_number = ?, location_id = ?, department_id = ?, section_id = ?, status = ?, calibration_due_date = ?, last_service_date = ?, next_service_due = ?, assigned_to_staff_id = ?, equipment_type = ?, maintenance_frequency = ?, calibration_frequency = ?, next_maintenance_due = ?, next_calibration_due = ?, responsible_staff_id = ?, date_received = ?, date_commissioned = ?, calibration_required = ?, notes = ?, supplier_name = ?, supplier_location = ?, supplier_contact = ?, country_of_origin = ?, condition_received = ?, date_out_of_service = ?, criticality = ?, ifu_file_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
       .run(
         equipmentNumber,
         req.body.name ?? oldValue.name,
         req.body.category ?? oldValue.category,
+        req.body.equipmentClass ? (req.body.equipmentClass === 'support' ? 'support' : 'laboratory') : oldValue.equipment_class,
         req.body.manufacturer ?? oldValue.manufacturer,
         req.body.model ?? oldValue.model,
         req.body.serialNumber ?? oldValue.serial_number,

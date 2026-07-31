@@ -73,7 +73,7 @@ function printShell(title: string, headHtml: string, bodyHtml: string, autoprint
   const autoprintScript = autoprint ? '<script>window.addEventListener("load", () => { setTimeout(() => window.print(), 300); });</script>' : '';
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${escHtml(title)}</title>
 <style>
-@page{size:A4 portrait;margin:8mm}
+@page{size:A4 landscape;margin:8mm}
 *{box-sizing:border-box}
 html,body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 body{font-family:Arial,Helvetica,sans-serif;color:#111;padding:10px 14px;margin:0}
@@ -591,7 +591,7 @@ export function schedulingRoutes() {
       ${signName ? `<div class="sign">……………………………………<br/>${escHtml(signName)}</div>` : ''}
     </div>`;
     // Reassignment memo keeps a portrait layout; override the landscape default.
-    const head = `<style>@page{size:A4 portrait;margin:14mm}</style>`;
+    const head = `<style>@page{size:A4 landscape;margin:12mm}</style>`;
     audit(req, { action: 'print', entity: 'reassignment_schedules', entityId: req.params.id });
     res.send(printShell(`${s.schedule_number} — Reassignment`, head, body, req.query.autoprint !== '0'));
   });

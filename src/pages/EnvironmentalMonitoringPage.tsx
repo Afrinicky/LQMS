@@ -4,6 +4,8 @@ import { KpiStrip } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
+import ScannedRecordUpload from '../components/ScannedRecordUpload';
+import XlsxToolbar from '../components/XlsxToolbar';
 import type {
   Department, Section, Location, Staff, EquipmentItem,
   EnvAsset, EnvDevice, EnvReading, EnvAlert, EnvExcursion, EnvDashboard, EnvSettings,
@@ -113,7 +115,7 @@ export function EnvironmentalMonitoringPage({ embedded = false }: { embedded?: b
 
   if (!enabled) return <DisabledModule />;
 
-  const TABS = ['Live Dashboard', 'Assets', 'Devices', 'Manual Entry', 'Alerts', 'Excursions', 'Insights', 'Notifications', 'Charts', 'Reports', 'Settings'];
+  const TABS = ['Live Dashboard', 'Assets', 'Devices', 'Manual Entry', 'Alerts', 'Excursions', 'Insights', 'Notifications', 'Charts', 'Scanned Charts', 'Reports', 'Settings'];
 
   return <div className="module-page env-mon">
     {!embedded && <PageHeader eyebrow="Facilities and Safety" title="Environmental Monitoring" subtitle="Manual and automated temperature/humidity monitoring, alarms and excursions." />}
@@ -128,6 +130,17 @@ export function EnvironmentalMonitoringPage({ embedded = false }: { embedded?: b
     {tab === 'Devices' && <DevicesTab devices={devices} assets={assets} locations={locations} drivers={drivers} commMethods={commMethods} onChanged={() => { loadDevices(); loadAssets(); loadDashboard(); }} onError={setError} onFlash={flash} />}
 
     {tab === 'Manual Entry' && <ManualEntryTab assets={assets} staff={staff} onSaved={() => { loadDashboard(); loadAlerts(); loadExcursions(); }} onError={setError} onFlash={flash} />}
+
+    {tab === 'Scanned Charts' && <ScannedRecordUpload moduleKey="monitoring" sections={sections} equipment={equipment.map(e => ({ id: e.id, name: e.name }))}
+      heading="Scanned monitoring charts & legacy records"
+      blurb="Upload scanned temperature/humidity charts and logs as evidence that monitoring was performed, and preserve historical paper charts. Choose whether the chart covers weekly or monthly readings, and flag any out-of-range reading — a nonconformity is raised automatically so the excursion is investigated."
+      categories={[
+        { value: 'temperature_chart', label: 'Temperature chart' },
+        { value: 'humidity_chart', label: 'Humidity chart' },
+        { value: 'monitoring_log', label: 'Monitoring log sheet' },
+        { value: 'legacy_record', label: 'Legacy / historical record' },
+        { value: 'other', label: 'Other' },
+      ]} />}
 
     {tab === 'Alerts' && <AlertsTab alerts={alerts} onChanged={() => { loadAlerts(); loadDashboard(); }} onError={setError} />}
 
@@ -354,6 +367,8 @@ function ManualEntryTab({ assets, staff, onSaved, onError, onFlash }: any) {
   return <div className="card">
     <h3>Manual reading</h3>
     <p className="muted" style={{ marginTop: 0 }}>Manual entries are tagged as <em>manual</em> and evaluated by the same alarm/excursion engine as automated readings.</p>
+    <XlsxToolbar exportPath="/environmental/readings/export" templatePath="/environmental/readings/template" importPath="/environmental/readings/import" exportName="Environmental_Readings.xlsx" onImported={onSaved} />
+    <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>Export/import temperature &amp; humidity readings in Excel. Imported rows are matched to assets by their <strong>Asset code</strong> and pass through the same excursion engine, so out-of-range values raise alerts automatically.</p>
     <form className="form-grid" onSubmit={submit}>
       <label>Asset<select value={form.assetId} onChange={e => setForm({ ...form, assetId: e.target.value })} required><option value="">—</option>{assets.map((a: EnvAsset) => <option key={a.id} value={a.id}>{a.name} ({a.temp_min ?? '−'}–{a.temp_max ?? '−'}°C)</option>)}</select></label>
       <label>Temperature (°C)<input type="number" step="any" value={form.temperature} onChange={e => setForm({ ...form, temperature: e.target.value })} required /></label>

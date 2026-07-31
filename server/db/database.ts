@@ -146,6 +146,34 @@ CREATE TABLE IF NOT EXISTS dennis_settings (id INTEGER PRIMARY KEY AUTOINCREMENT
   if (!equipmentNames.has('disposal_date')) database.exec('ALTER TABLE equipment_items ADD COLUMN disposal_date TEXT');
   if (!equipmentNames.has('disposal_reference')) database.exec('ALTER TABLE equipment_items ADD COLUMN disposal_reference TEXT');
   if (!equipmentNames.has('disposal_evidence_file_id')) database.exec('ALTER TABLE equipment_items ADD COLUMN disposal_evidence_file_id INTEGER REFERENCES files(id)');
+  // Equipment quality regime (ISO 15189): 'laboratory' items are the measuring /
+  // examination equipment (analysers, pipettes, balances, centrifuges …) that
+  // undergo IQC, verification/validation and measurement-uncertainty checks;
+  // 'support' items are ancillary equipment (fridges, freezers, incubators, air
+  // conditioners, UPS …) whose quality is assured by environmental monitoring,
+  // temperature checks and preventive maintenance rather than analytical QC.
+  if (!equipmentNames.has('equipment_class')) {
+    database.exec("ALTER TABLE equipment_items ADD COLUMN equipment_class TEXT NOT NULL DEFAULT 'laboratory'");
+    // Auto-classify existing records: anything that looks like support / ancillary
+    // equipment is moved out of the analytical-QC lists so only true laboratory
+    // equipment appears for IQC, verification, validation and uncertainty.
+    database.exec(`UPDATE equipment_items SET equipment_class = 'support'
+      WHERE lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%fridge%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%refrigerat%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%freezer%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%cold room%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%air cond%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%aircon%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '% a/c%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%incubator%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%water bath%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%oven%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%ups%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%generator%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%stabilizer%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%printer%'
+         OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%computer%'`);
+  }
 
   // Phase 3: extend inventory_items
   const inventoryColumns = database.prepare("PRAGMA table_info(inventory_items)").all() as Array<{ name: string }>;
@@ -3087,6 +3115,45 @@ CREATE INDEX IF NOT EXISTS idx_bench_schedule_cells_schedule ON bench_schedule_c
     ];
     for (const r of rows) seedShift.run(...r);
   }
+
+  // ===================================================================
+  // Scanned records / evidence uploads
+  // The lab is migrating from paper: historical monitoring charts, maintenance
+  // logs, IQC sheets, verification/validation reports etc. can be scanned and
+  // uploaded so those records are not lost. Going forward, scanned charts (e.g.
+  // a fridge/room temperature chart, a maintenance log) serve as evidence that a
+  // duty was performed. Each upload records the period it covers (daily/weekly/
+  // monthly) and whether it contains an out-of-range reading; when it does, the
+  // system raises a nonconformity so the CAPA workflow follows.
+  // -------------------------------------------------------------------
+  database.exec(`
+CREATE TABLE IF NOT EXISTS scanned_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  record_number TEXT NOT NULL UNIQUE,
+  module_key TEXT NOT NULL,            -- monitoring | equipment | iqc | verification_validation | eqa | measurement_uncertainty | other
+  category TEXT,                       -- e.g. temperature_chart, maintenance_log, iqc_chart, verification_report, legacy_record
+  title TEXT NOT NULL,
+  coverage TEXT NOT NULL DEFAULT 'one_off', -- daily | weekly | monthly | one_off
+  period_start TEXT,
+  period_end TEXT,
+  month TEXT,                          -- YYYY-MM when a monthly/weekly chart
+  section_id INTEGER REFERENCES sections(id),
+  equipment_id INTEGER REFERENCES equipment_items(id),
+  monitoring_item_id INTEGER,
+  file_id INTEGER REFERENCES files(id),
+  is_legacy INTEGER NOT NULL DEFAULT 0,     -- 1 = historical paper record being preserved
+  has_out_of_range INTEGER NOT NULL DEFAULT 0,
+  out_of_range_notes TEXT,
+  nc_id INTEGER REFERENCES nonconforming_events(id),
+  notes TEXT,
+  uploaded_by_staff_id INTEGER REFERENCES staff(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_scanned_records_module ON scanned_records(module_key);
+CREATE INDEX IF NOT EXISTS idx_scanned_records_equipment ON scanned_records(equipment_id);
+`);
 
   // ===================================================================
   // Phase 9: Documents & Records upgrade
