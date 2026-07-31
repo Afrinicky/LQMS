@@ -49,6 +49,7 @@ export function DutyRosterBoard({ staff, canEdit }: { staff: Staff[]; canEdit: b
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [newMonth, setNewMonth] = useState(nextMonthValue());
+  const [copyFrom, setCopyFrom] = useState('');
   const [paint, setPaint] = useState<string>('M');
   const [erase, setErase] = useState(false);
   // local editable cell map: `${rowId}:${day}` -> code
@@ -74,8 +75,9 @@ export function DutyRosterBoard({ staff, canEdit }: { staff: Staff[]; canEdit: b
   async function createRoster(e: FormEvent) {
     e.preventDefault(); setError(null); setMsg(null);
     try {
-      const r = await api<{ id: number }>('/scheduling/duty-rosters', { method: 'POST', body: JSON.stringify({ month: newMonth }) });
-      loadList(); await open(r.id); setMsg('Roster created with every active staff member. Paint the shifts below.');
+      const r = await api<{ id: number }>('/scheduling/duty-rosters', { method: 'POST', body: JSON.stringify({ month: newMonth, copyFromId: copyFrom || undefined }) });
+      setCopyFrom(''); loadList(); await open(r.id);
+      setMsg(copyFrom ? 'Roster created from the previous month — adjust the cells and publish.' : 'Roster created with every active staff member. Paint the shifts below.');
     } catch (e) { setError((e as Error).message); }
   }
 
@@ -145,11 +147,12 @@ export function DutyRosterBoard({ staff, canEdit }: { staff: Staff[]; canEdit: b
       <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
         <h3 style={{ margin: 0 }}>Department Duty Roster</h3>
         {canEdit && <form onSubmit={createRoster} style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label style={{ margin: 0 }}>Copy from <select value={copyFrom} onChange={e => setCopyFrom(e.target.value)}><option value="">— blank —</option>{rosters.map(r => <option key={r.id} value={r.id}>{r.roster_number}{r.month ? ` (${monthDays(r.month).label})` : ''}</option>)}</select></label>
           <label style={{ margin: 0 }}>New monthly roster <input type="month" value={newMonth} onChange={e => setNewMonth(e.target.value)} required /></label>
           <button type="submit">+ Create roster</button>
         </form>}
       </div>
-      <p className="muted" style={{ marginTop: 0 }}>A single roster for the whole department each month. Creating one adds every active staff member automatically — then paint each person's shift for every day. Colours and shift codes are configured in <em>Settings → Roster &amp; Scheduling</em>.</p>
+      <p className="muted" style={{ marginTop: 0 }}>A single roster for the whole department each month. Creating a blank one adds every active staff member automatically; or <strong>copy a previous month</strong> to reuse its shifts as a starting point and make only a few edits. Colours and shift codes are configured in <em>Settings → Roster &amp; Scheduling</em>.</p>
       <table className="data-table"><thead><tr><th>Number</th><th>Month</th><th>Title</th><th>Status</th><th></th></tr></thead><tbody>
         {rosters.map(r => <tr key={r.id}>
           <td>{r.roster_number}</td><td>{r.month ? monthDays(r.month).label : '—'}</td><td>{r.title}</td><td>{statusBadge(r.status)}</td>
@@ -231,23 +234,27 @@ const gridHead: CSSProperties = { border: '1px solid #6b7280', color: '#fff', ba
 const gridCell: CSSProperties = { border: '1px solid #6b7280', textAlign: 'center', padding: 1, height: 20 };
 
 // ========================= Reassignment (memo) Board =========================
-type ReRow = { id: number; unit_label: string; is_span: number; supervisor_staff_id: number | null; supervisor_text: string | null; supervisor_name?: string | null; deputy_staff_id: number | null; deputy_text: string | null; deputy_name?: string | null; members_text: string | null; span_text: string | null; display_order: number };
+type ReRow = { id: number; unit_label: string; is_span: number; section_id: number | null; supervisor_staff_id: number | null; supervisor_text: string | null; supervisor_name?: string | null; deputy_staff_id: number | null; deputy_text: string | null; deputy_name?: string | null; members_text: string | null; member_ids: string | null; span_text: string | null; display_order: number };
 type Reassign = { id: number; schedule_number: string; month: string; effective_date: string; memo_to: string; memo_from: string; memo_date: string; subject: string; intro_text: string; nb_notes: string; signatory_name: string; status: string; rows: ReRow[] };
 
-export function ReassignmentBoard({ staff, canEdit }: { staff: Staff[]; canEdit: boolean }) {
+const emptyReRow = { unitLabel: '', sectionId: '', supervisorStaffId: '', deputyStaffId: '', memberIds: [] as string[], isSpan: false, spanText: '' };
+
+export function ReassignmentBoard({ staff, sections, canEdit }: { staff: Staff[]; sections: Section[]; canEdit: boolean }) {
   const [list, setList] = useState<Array<{ id: number; schedule_number: string; month: string; status: string; subject: string }>>([]);
   const [sched, setSched] = useState<Reassign | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [newMonth, setNewMonth] = useState(nextMonthValue());
-  const [rowForm, setRowForm] = useState({ unitLabel: '', supervisorStaffId: '', deputyStaffId: '', membersText: '', isSpan: false, spanText: '' });
+  const [copyFrom, setCopyFrom] = useState('');
+  const [rowForm, setRowForm] = useState(emptyReRow);
+  const staffName = (id: number | string) => staff.find(s => String(s.id) === String(id))?.fullName || '';
 
   function loadList() { api<typeof list>('/scheduling/reassignments').then(setList).catch(e => setError((e as Error).message)); }
   useEffect(() => { loadList(); }, []);
   async function open(id: number) { setError(null); setMsg(null); try { setSched(await api<Reassign>(`/scheduling/reassignments/${id}`)); } catch (e) { setError((e as Error).message); } }
   async function create(e: FormEvent) {
     e.preventDefault(); setError(null);
-    try { const r = await api<{ id: number }>('/scheduling/reassignments', { method: 'POST', body: JSON.stringify({ month: newMonth }) }); loadList(); await open(r.id); }
+    try { const r = await api<{ id: number }>('/scheduling/reassignments', { method: 'POST', body: JSON.stringify({ month: newMonth, copyFromId: copyFrom || undefined }) }); setCopyFrom(''); loadList(); await open(r.id); }
     catch (e) { setError((e as Error).message); }
   }
   async function saveHeader(patch: Record<string, unknown>) {
@@ -255,11 +262,14 @@ export function ReassignmentBoard({ staff, canEdit }: { staff: Staff[]; canEdit:
   }
   async function addRow(e: FormEvent) {
     e.preventDefault(); if (!sched) return; if (!rowForm.unitLabel) { setError('Unit label required.'); return; }
-    try { await api(`/scheduling/reassignments/${sched.id}/rows`, { method: 'POST', body: JSON.stringify(rowForm) }); setRowForm({ unitLabel: '', supervisorStaffId: '', deputyStaffId: '', membersText: '', isSpan: false, spanText: '' }); await open(sched.id); }
+    const membersText = rowForm.memberIds.map(staffName).filter(Boolean).join(', ');
+    const body = { unitLabel: rowForm.unitLabel, sectionId: rowForm.sectionId || null, isSpan: rowForm.isSpan, spanText: rowForm.spanText,
+      supervisorStaffId: rowForm.supervisorStaffId || null, deputyStaffId: rowForm.deputyStaffId || null, memberIds: rowForm.memberIds, membersText };
+    try { await api(`/scheduling/reassignments/${sched.id}/rows`, { method: 'POST', body: JSON.stringify(body) }); setRowForm(emptyReRow); await open(sched.id); }
     catch (e) { setError((e as Error).message); }
   }
   async function delRow(id: number) { if (!sched) return; try { await api(`/scheduling/reassignment-rows/${id}`, { method: 'DELETE' }); await open(sched.id); } catch (e) { setError((e as Error).message); } }
-  async function act(path: string, ok: string) { if (!sched) return; try { await api(`/scheduling/reassignments/${sched.id}/${path}`, { method: 'POST', body: JSON.stringify({}) }); setMsg(ok); loadList(); await open(sched.id); } catch (e) { setError((e as Error).message); } }
+  async function act(path: string, ok: string) { if (!sched) return; try { const r = await api<{ staffReassigned?: number[] }>(`/scheduling/reassignments/${sched.id}/${path}`, { method: 'POST', body: JSON.stringify({}) }); setMsg(ok + (r?.staffReassigned?.length ? ` ${r.staffReassigned.length} staff moved to their new unit on the register.` : '')); loadList(); await open(sched.id); } catch (e) { setError((e as Error).message); } }
   async function remove(id: number) { if (!confirm('Delete this schedule?')) return; try { await api(`/scheduling/reassignments/${id}`, { method: 'DELETE' }); if (sched?.id === id) setSched(null); loadList(); } catch (e) { setError((e as Error).message); } }
 
   return <div>
@@ -268,12 +278,13 @@ export function ReassignmentBoard({ staff, canEdit }: { staff: Staff[]; canEdit:
     <div className="card">
       <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
         <h3 style={{ margin: 0 }}>Unit / Staff Reassignment Schedule</h3>
-        {canEdit && <form onSubmit={create} style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+        {canEdit && <form onSubmit={create} style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label style={{ margin: 0 }}>Copy from <select value={copyFrom} onChange={e => setCopyFrom(e.target.value)}><option value="">— blank —</option>{list.map(s => <option key={s.id} value={s.id}>{s.schedule_number}{s.month ? ` (${monthDays(s.month).label})` : ''}</option>)}</select></label>
           <label style={{ margin: 0 }}>New schedule <input type="month" value={newMonth} onChange={e => setNewMonth(e.target.value)} required /></label>
           <button type="submit">+ Create</button>
         </form>}
       </div>
-      <p className="muted" style={{ marginTop: 0 }}>The monthly memo re-assigning staff to units (supervisor, deputy and members). Prepared by the laboratory manager. Creating one pre-fills the standard NB notes — edit everything to taste, then publish and print.</p>
+      <p className="muted" style={{ marginTop: 0 }}>The monthly memo re-assigning staff to units (supervisor, deputy and members). Prepared by the laboratory manager. Creating one pre-fills the standard NB notes — or <strong>copy last month</strong> and edit a few rows. When a row is linked to a unit, publishing moves those staff to that unit on the master register.</p>
       <table className="data-table"><thead><tr><th>Number</th><th>Month</th><th>Subject</th><th>Status</th><th></th></tr></thead><tbody>
         {list.map(s => <tr key={s.id}><td>{s.schedule_number}</td><td>{s.month ? monthDays(s.month).label : '—'}</td><td>{s.subject}</td><td>{statusBadge(s.status)}</td>
           <td><button onClick={() => open(s.id)}>Open</button> <button className="secondary" onClick={() => openPrintPage(`/scheduling/reassignments/${s.id}/print`, setError)}>Print</button>{canEdit && <> <button className="secondary" onClick={() => remove(s.id)}>Delete</button></>}</td></tr>)}
@@ -317,12 +328,18 @@ export function ReassignmentBoard({ staff, canEdit }: { staff: Staff[]; canEdit:
       </tbody></table>
 
       {canEdit && <form onSubmit={addRow} className="form-grid" style={{ marginTop: 12 }}>
-        <label>Unit label<input value={rowForm.unitLabel} onChange={e => setRowForm({ ...rowForm, unitLabel: e.target.value })} placeholder="e.g. Haematology" required /></label>
+        <label>Link to unit / section<select value={rowForm.sectionId} onChange={e => { const sid = e.target.value; const nm = sections.find(s => String(s.id) === sid)?.name; setRowForm({ ...rowForm, sectionId: sid, unitLabel: rowForm.unitLabel || nm || '' }); }}><option value="">— not linked —</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+        <label>Unit label (as printed)<input value={rowForm.unitLabel} onChange={e => setRowForm({ ...rowForm, unitLabel: e.target.value })} placeholder="e.g. Microbiology & GeneXpert" required /></label>
         <label className="check-inline"><input type="checkbox" checked={rowForm.isSpan} onChange={e => setRowForm({ ...rowForm, isSpan: e.target.checked })} /> Single wide cell (e.g. QMS Desk, Manager)</label>
         {rowForm.isSpan ? <label style={{ gridColumn: '1 / -1' }}>People (free text)<input value={rowForm.spanText} onChange={e => setRowForm({ ...rowForm, spanText: e.target.value })} placeholder="e.g. Evans Agyapong Owusu, Nicholas Afriyie" /></label> : <>
           <label>Supervisor<select value={rowForm.supervisorStaffId} onChange={e => setRowForm({ ...rowForm, supervisorStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           <label>Deputy supervisor<select value={rowForm.deputyStaffId} onChange={e => setRowForm({ ...rowForm, deputyStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-          <label>Member(s) (comma separated)<input value={rowForm.membersText} onChange={e => setRowForm({ ...rowForm, membersText: e.target.value })} placeholder="e.g. Martha Boakye" /></label>
+          <label style={{ gridColumn: '1 / -1' }}>Member(s) — select one or more (Ctrl/Cmd-click)
+            <select multiple value={rowForm.memberIds} size={Math.min(6, Math.max(3, staff.length))} onChange={e => setRowForm({ ...rowForm, memberIds: Array.from(e.target.selectedOptions).map(o => o.value) })} style={{ minHeight: 90 }}>
+              {staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
+            </select>
+          </label>
+          {rowForm.memberIds.length > 0 && <div className="muted" style={{ gridColumn: '1 / -1', fontSize: 12 }}>Members: {rowForm.memberIds.map(staffName).filter(Boolean).join(', ')}</div>}
         </>}
         <button type="submit">+ Add unit row</button>
       </form>}
@@ -338,17 +355,20 @@ type BenchDef = { id: number; name: string; code: string | null; display_order: 
 type Bench = { id: number; schedule_number: string; section_id: number; section_name: string; month: string; title: string; status: string; rows: BenchRow[]; cells: BenchCell[]; benches: BenchDef[] };
 
 export function BenchScheduleBoard({ sections, canEdit }: { sections: Section[]; canEdit: boolean }) {
-  const [list, setList] = useState<Array<{ id: number; schedule_number: string; section_name: string; month: string; status: string }>>([]);
+  const [list, setList] = useState<Array<{ id: number; schedule_number: string; section_id: number; section_name: string; month: string; status: string }>>([]);
   const [bs, setBs] = useState<Bench | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [form, setForm] = useState({ sectionId: '', month: nextMonthValue() });
+  const [copyFrom, setCopyFrom] = useState('');
   const [paint, setPaint] = useState('');
   const [cellMap, setCellMap] = useState<Map<string, string>>(new Map());
   const dirty = useRef<Set<string>>(new Set());
 
   function loadList() { api<typeof list>('/scheduling/bench-schedules').then(setList).catch(e => setError((e as Error).message)); }
   useEffect(() => { loadList(); }, []);
+  // Bench schedules for the unit chosen in the create form, offered as templates.
+  const templatesForSection = form.sectionId ? list.filter(s => String(s.section_id) === form.sectionId) : list;
   async function open(id: number) {
     setError(null); setMsg(null);
     try {
@@ -360,7 +380,7 @@ export function BenchScheduleBoard({ sections, canEdit }: { sections: Section[];
   async function create(e: FormEvent) {
     e.preventDefault(); setError(null);
     if (!form.sectionId) { setError('Pick a unit.'); return; }
-    try { const r = await api<{ id: number }>('/scheduling/bench-schedules', { method: 'POST', body: JSON.stringify(form) }); loadList(); await open(r.id); }
+    try { const r = await api<{ id: number }>('/scheduling/bench-schedules', { method: 'POST', body: JSON.stringify({ ...form, copyFromId: copyFrom || undefined }) }); setCopyFrom(''); loadList(); await open(r.id); }
     catch (e) { setError((e as Error).message); }
   }
   const md = bs ? monthDays(bs.month) : null;
@@ -380,12 +400,13 @@ export function BenchScheduleBoard({ sections, canEdit }: { sections: Section[];
       <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
         <h3 style={{ margin: 0 }}>Unit Bench Schedules</h3>
         {canEdit && <form onSubmit={create} style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })} required><option value="">— unit —</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+          <select value={form.sectionId} onChange={e => { setForm({ ...form, sectionId: e.target.value }); setCopyFrom(''); }} required><option value="">— unit —</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
           <input type="month" value={form.month} onChange={e => setForm({ ...form, month: e.target.value })} required />
+          <select value={copyFrom} onChange={e => setCopyFrom(e.target.value)} title="Copy a previous schedule as a template"><option value="">— blank —</option>{templatesForSection.map(s => <option key={s.id} value={s.id}>copy {s.schedule_number}{s.month ? ` (${monthDays(s.month).label})` : ''}</option>)}</select>
           <button type="submit">+ Create</button>
         </form>}
       </div>
-      <p className="muted" style={{ marginTop: 0 }}>Each unit assigns its staff to benches/workspaces per day. Benches are configured in <em>Settings → Section/Unit Configuration → Benches</em>. Unit heads prepare these for their own unit.</p>
+      <p className="muted" style={{ marginTop: 0 }}>Each unit assigns its staff to benches/workspaces per day. Benches are configured in <em>Settings → Section/Unit Configuration → Benches</em>. Unit heads prepare these for their own unit — or <strong>copy last month</strong> and tweak.</p>
       <table className="data-table"><thead><tr><th>Number</th><th>Unit</th><th>Month</th><th>Status</th><th></th></tr></thead><tbody>
         {list.map(s => <tr key={s.id}><td>{s.schedule_number}</td><td>{s.section_name}</td><td>{s.month ? monthDays(s.month).label : '—'}</td><td>{statusBadge(s.status)}</td>
           <td><button onClick={() => open(s.id)}>Open</button> <button className="secondary" onClick={() => openPrintPage(`/scheduling/bench-schedules/${s.id}/print`, setError)}>Print</button>{canEdit && <> <button className="secondary" onClick={() => remove(s.id)}>Delete</button></>}</td></tr>)}
@@ -419,7 +440,7 @@ export function BenchScheduleBoard({ sections, canEdit }: { sections: Section[];
         <tbody>
           {bs.rows.map(row => <tr key={row.id}>
             <td style={{ ...gridCell, textAlign: 'left', fontFamily: 'monospace', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden' }}>{row.staff_id ? row.staff_name : row.label}</td>
-            {Array.from({ length: md.days }).map((_, i) => { const d = i + 1; const v = cellMap.get(`${row.id}:${d}`) || ''; return <td key={d} onClick={() => canEdit && setCell(row.id, d, paint)} style={{ ...gridCell, cursor: canEdit ? 'pointer' : 'default', background: md.isWeekend(d) ? '#f3d9cc' : '#fff', fontWeight: 700 }}>{v}</td>; })}
+            {Array.from({ length: md.days }).map((_, i) => { const d = i + 1; const v = cellMap.get(`${row.id}:${d}`) || ''; return <td key={d} onClick={() => canEdit && setCell(row.id, d, paint)} style={{ ...gridCell, cursor: canEdit ? 'pointer' : 'default', background: md.isWeekend(d) ? '#f3d9cc' : '#fff', color: '#0b1f33', fontWeight: 800, fontSize: 11 }}>{v}</td>; })}
           </tr>)}
         </tbody>
       </table>
