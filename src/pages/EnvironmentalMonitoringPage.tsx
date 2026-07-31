@@ -5,6 +5,7 @@ import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import ScannedRecordUpload from '../components/ScannedRecordUpload';
+import XlsxToolbar from '../components/XlsxToolbar';
 import type {
   Department, Section, Location, Staff, EquipmentItem,
   EnvAsset, EnvDevice, EnvReading, EnvAlert, EnvExcursion, EnvDashboard, EnvSettings,
@@ -366,6 +367,8 @@ function ManualEntryTab({ assets, staff, onSaved, onError, onFlash }: any) {
   return <div className="card">
     <h3>Manual reading</h3>
     <p className="muted" style={{ marginTop: 0 }}>Manual entries are tagged as <em>manual</em> and evaluated by the same alarm/excursion engine as automated readings.</p>
+    <XlsxToolbar exportPath="/environmental/readings/export" templatePath="/environmental/readings/template" importPath="/environmental/readings/import" exportName="Environmental_Readings.xlsx" onImported={onSaved} />
+    <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>Export/import temperature &amp; humidity readings in Excel. Imported rows are matched to assets by their <strong>Asset code</strong> and pass through the same excursion engine, so out-of-range values raise alerts automatically.</p>
     <form className="form-grid" onSubmit={submit}>
       <label>Asset<select value={form.assetId} onChange={e => setForm({ ...form, assetId: e.target.value })} required><option value="">—</option>{assets.map((a: EnvAsset) => <option key={a.id} value={a.id}>{a.name} ({a.temp_min ?? '−'}–{a.temp_max ?? '−'}°C)</option>)}</select></label>
       <label>Temperature (°C)<input type="number" step="any" value={form.temperature} onChange={e => setForm({ ...form, temperature: e.target.value })} required /></label>

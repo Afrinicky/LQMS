@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import multer from 'multer';
+import * as XLSX from 'xlsx';
 import { getDb } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
@@ -12,6 +14,8 @@ import { buildReport, reportToWorkbook, reportToHtml, REPORT_TYPES } from '../se
 
 const numericOnly = (req: any, _res: any, next: any) => (/^\d+$/.test(req.params.id) ? next() : next('route'));
 const MODULE = 'facilities_safety'; // Environmental Monitoring lives under Facilities & Safety RBAC.
+const xlsxUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+const READING_HEADERS = ['Asset code', 'Asset name', 'Recorded at', 'Temperature', 'Humidity', 'Recorded by (employee no.)', 'Observation', 'Corrective action'] as const;
 
 export function environmentalRoutes() {
   const router = Router();
@@ -111,6 +115,84 @@ export function environmentalRoutes() {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(reportToHtml(report, req.query.autoprint !== '0'));
     audit(req, { action: 'print', entity: 'environmental_report', entityId: req.params.type });
+  });
+
+  // ---- Readings — Excel export / import (manual temperature/humidity logs) ----
+  function buildReadingsWorkbook(withData: boolean, from?: string, to?: string): Buffer {
+    const db = getDb();
+    const rows: any[][] = [];
+    if (withData) {
+      const cond: string[] = []; const params: unknown[] = [];
+      if (from) { cond.push('r.recorded_at >= ?'); params.push(from); }
+      if (to) { cond.push('r.recorded_at <= ?'); params.push(to + 'T23:59:59'); }
+      const where = cond.length ? ' WHERE ' + cond.join(' AND ') : '';
+      const recs = db.prepare(`SELECT r.*, a.asset_code, a.name AS asset_name, st.employee_no AS recorded_no
+        FROM environmental_readings r JOIN environmental_assets a ON a.id = r.asset_id
+        LEFT JOIN staff st ON st.id = r.recorded_by_staff_id ${where} ORDER BY r.recorded_at DESC LIMIT 20000`).all(...params) as any[];
+      for (const r of recs) rows.push([
+        r.asset_code, r.asset_name, r.recorded_at, r.temperature ?? '', r.humidity ?? '', r.recorded_no ?? '', r.observation ?? '', r.corrective_action ?? '',
+      ]);
+    }
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([READING_HEADERS as unknown as string[], ...rows]);
+    ws['!cols'] = READING_HEADERS.map(h => ({ wch: Math.min(30, Math.max(12, h.length + 2)) }));
+    XLSX.utils.book_append_sheet(wb, ws, 'READINGS');
+    return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+  }
+  function sendXlsx(res: any, buf: Buffer, filename: string) {
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.end(buf);
+  }
+  router.get('/readings/template', requirePermission(MODULE, 'view'), (_req, res) => sendXlsx(res, buildReadingsWorkbook(false), 'Environmental_Readings_Template.xlsx'));
+  router.get('/readings/export', requirePermission(MODULE, 'view'), (req, res) => {
+    sendXlsx(res, buildReadingsWorkbook(true, req.query.from as string, req.query.to as string), 'Environmental_Readings.xlsx');
+    audit(req, { action: 'export', entity: 'environmental_readings', entityId: null });
+  });
+  router.post('/readings/import', requirePermission(MODULE, 'create'), xlsxUpload.single('file'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the Environmental Readings .xlsx file.' });
+    try {
+      const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+      const sheet = wb.SheetNames.find(n => n.toUpperCase().includes('READING')) || wb.SheetNames[0];
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[sheet], { defval: '', raw: false });
+      const db = getDb();
+      const assetByCode = new Map<string, number>();
+      for (const a of db.prepare('SELECT id, asset_code FROM environmental_assets').all() as any[]) assetByCode.set(String(a.asset_code).toLowerCase(), a.id);
+      const staffByNo = new Map<string, number>();
+      for (const s of db.prepare('SELECT id, employee_no FROM staff WHERE employee_no IS NOT NULL').all() as any[]) staffByNo.set(String(s.employee_no).toLowerCase(), s.id);
+      const norm = (v: unknown) => { const s = String(v ?? '').trim(); return s === '' ? null : s; };
+      const errors: string[] = [];
+      let created = 0, excursions = 0;
+      const tx = db.transaction(() => {
+        rows.forEach((r, idx) => {
+          const rowNo = idx + 2;
+          const code = norm(r['Asset code']);
+          const assetId = code ? assetByCode.get(String(code).toLowerCase()) : undefined;
+          if (!assetId) { errors.push(`Row ${rowNo}: asset code "${code ?? ''}" not found.`); return; }
+          const tempRaw = norm(r['Temperature']);
+          const humRaw = norm(r['Humidity']);
+          if (tempRaw == null && humRaw == null) { errors.push(`Row ${rowNo}: a temperature or humidity value is required.`); return; }
+          const at = norm(r['Recorded at']);
+          const recordedAt = at ? new Date(at).toISOString() : new Date().toISOString();
+          const staffId = norm(r['Recorded by (employee no.)']) ? (staffByNo.get(String(r['Recorded by (employee no.)']).toLowerCase()) ?? null) : null;
+          try {
+            const out = recordReading(db, {
+              assetId, source: 'excel_import',
+              temperature: tempRaw == null ? null : Number(tempRaw),
+              humidity: humRaw == null ? null : Number(humRaw),
+              recordedAt, recordedByStaffId: staffId,
+              observation: norm(r['Observation']), correctiveAction: norm(r['Corrective action']),
+              userId: req.user!.id,
+            });
+            created++;
+            if (out && out.status && out.status !== 'normal') excursions++;
+          } catch (e) { errors.push(`Row ${rowNo}: ${(e as Error).message}`); }
+        });
+      });
+      tx();
+      audit(req, { action: 'import', entity: 'environmental_readings', entityId: null, newValue: { created, excursions, errors: errors.length } });
+      res.json({ totalRows: rows.length, created, excursions, errors });
+    } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
 
   // ---- Assets ----

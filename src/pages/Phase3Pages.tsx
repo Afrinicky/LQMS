@@ -5,6 +5,7 @@ import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import ScannedRecordUpload from '../components/ScannedRecordUpload';
+import XlsxToolbar from '../components/XlsxToolbar';
 import { EnvironmentalMonitoringPage, EnvLiveCards } from './EnvironmentalMonitoringPage';
 import type {
   Location, Section, Department, Staff, Supplier, EquipmentItem, InventoryItem, MonitoringRecord, SafetyIncident,
@@ -885,6 +886,13 @@ function EquipmentMaintenanceTab({ equipment, staff, sections, setError, onChang
 
   return <div>
     <div className="card">
+      <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+        <h3 style={{ margin: 0 }}>Maintenance records — Excel</h3>
+      </div>
+      <p className="muted" style={{ marginTop: 0 }}>Export all logged maintenance to Excel, or bulk-import maintenance records from a spreadsheet (rows are matched to equipment by their identifier). Download the template for the exact columns.</p>
+      <XlsxToolbar exportPath="/equipment/maintenance/export" templatePath="/equipment/maintenance/template" importPath="/equipment/maintenance/import" exportName="Equipment_Maintenance_Records.xlsx" onImported={() => { loadDue(); if (equipId) loadForEquip(equipId); onChanged(); }} />
+    </div>
+    <div className="card" style={{ marginTop: 16 }}>
       <h3>Due &amp; overdue</h3>
       <p className="muted" style={{ marginTop: 0 }}>Every routine maintenance and servicing schedule that is due within 30 days or overdue. Log it done in one click.</p>
       {due.length === 0 ? <p className="muted">Nothing due.</p> : <table className="table"><thead><tr><th>Equipment</th><th>Type</th><th>Frequency</th><th>Due</th><th></th></tr></thead><tbody>
