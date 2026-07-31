@@ -269,7 +269,55 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
       </tbody></table>
     </>}
 
-    {tab === 'Reports' && <p>Reports view will surface IQC trends and Levey-Jennings style summaries in a later phase.</p>}
+    {tab === 'Reports' && (() => {
+      const breaches = results.filter(r => r.rule_violation);
+      const inControlPct = results.length ? Math.round(((results.length - breaches.length) / results.length) * 100) : 0;
+      const pendingReview = results.filter(r => !r.reviewed_at).length;
+      const perMaterial = materials.map(m => {
+        const rs = results.filter(r => r.iqc_material_id === m.id);
+        const vals = rs.map(r => Number(r.result_value)).filter(v => Number.isFinite(v));
+        const mean = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+        const br = rs.filter(r => r.rule_violation).length;
+        const last = rs.slice().sort((a, b) => (b.run_date || '').localeCompare(a.run_date || ''))[0];
+        return { m, n: rs.length, mean, br, last, pct: rs.length ? Math.round(((rs.length - br) / rs.length) * 100) : null };
+      });
+      return <>
+        <KpiStrip items={[
+          { label: 'Active materials', value: materials.filter(m => m.is_active).length },
+          { label: 'Results logged', value: results.length },
+          { label: 'In-control', value: `${inControlPct}%`, tone: inControlPct >= 95 ? undefined : 'warning' },
+          { label: 'Rule breaches', value: breaches.length, tone: breaches.length ? 'warning' : undefined },
+          { label: 'Pending review', value: pendingReview, tone: pendingReview ? 'warning' : undefined },
+          { label: 'Lot changes', value: lotChanges.length },
+        ]} />
+        <div className="card" style={{ marginTop: 16 }}>
+          <h3>Per-material QC performance</h3>
+          <p className="muted" style={{ marginTop: 0 }}>Westgard rule breaches and in-control rate for each control material. Open the <em>Levey-Jennings</em> tab to see the run chart for any material.</p>
+          <table className="data-table"><thead><tr><th>Material</th><th>Test / analyte</th><th>Runs</th><th>Observed mean</th><th>Target mean</th><th>Breaches</th><th>In-control</th><th>Last run</th></tr></thead><tbody>
+            {perMaterial.map(x => <tr key={x.m.id}>
+              <td>{x.m.material_name}<div className="muted" style={{ fontSize: 11 }}>Lot {x.m.lot_number}</div></td>
+              <td>{x.m.test_name}{x.m.analyte ? ` · ${x.m.analyte}` : ''}</td>
+              <td>{x.n}</td>
+              <td>{x.mean != null ? x.mean.toFixed(2) : '—'}</td>
+              <td>{x.m.target_mean ?? '—'}</td>
+              <td>{x.br ? <span className="badge warning">{x.br}</span> : 0}</td>
+              <td>{x.pct != null ? `${x.pct}%` : '—'}</td>
+              <td>{x.last ? x.last.run_date : '—'}</td>
+            </tr>)}
+            {perMaterial.length === 0 && <tr><td colSpan={8} className="muted">No IQC materials yet.</td></tr>}
+          </tbody></table>
+        </div>
+        {breaches.length > 0 && <div className="card" style={{ marginTop: 16 }}>
+          <h3>Recent rule breaches</h3>
+          <table className="data-table"><thead><tr><th>Date</th><th>Material</th><th>Value</th><th>Rule</th><th>Z-score</th><th>Reviewed</th></tr></thead><tbody>
+            {breaches.slice().sort((a, b) => (b.run_date || '').localeCompare(a.run_date || '')).slice(0, 20).map(r => <tr key={r.id}>
+              <td>{r.run_date}</td><td>{r.material_name || materials.find(m => m.id === r.iqc_material_id)?.material_name || '—'}</td>
+              <td>{r.result_value}</td><td>{formatBadge(r.rule_violation)}</td><td>{r.z_score != null ? r.z_score.toFixed(2) : '—'}</td><td>{r.reviewed_at ? '✓' : <span className="badge warning">pending</span>}</td>
+            </tr>)}
+          </tbody></table>
+        </div>}
+      </>;
+    })()}
   </div>;
 }
 
@@ -398,7 +446,7 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
         <label>Submission due<input type="date" value={eventForm.submissionDueDate} onChange={e => setEventForm({ ...eventForm, submissionDueDate: e.target.value })} /></label>
         <label>Submitted date<input type="date" value={eventForm.submittedDate} onChange={e => setEventForm({ ...eventForm, submittedDate: e.target.value })} /></label>
         <label>Result received<input type="date" value={eventForm.resultReceivedDate} onChange={e => setEventForm({ ...eventForm, resultReceivedDate: e.target.value })} /></label>
-        <label>Performance status<input value={eventForm.performanceStatus} onChange={e => setEventForm({ ...eventForm, performanceStatus: e.target.value })} placeholder="e.g. satisfactory" /></label>
+        <label>Performance status<select value={eventForm.performanceStatus} onChange={e => setEventForm({ ...eventForm, performanceStatus: e.target.value })}><option value="">— not yet assessed —</option><option value="satisfactory">Satisfactory</option><option value="unsatisfactory">Unsatisfactory</option><option value="not assessed">Not assessed</option></select></label>
         <label>Score<input value={eventForm.score} onChange={e => setEventForm({ ...eventForm, score: e.target.value })} /></label>
         <label>Findings<textarea value={eventForm.findings} onChange={e => setEventForm({ ...eventForm, findings: e.target.value })} /></label>
         <label>Responsible<select value={eventForm.responsibleStaffId} onChange={e => setEventForm({ ...eventForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
@@ -438,7 +486,45 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
       </tr>)}
     </tbody></table>}
 
-    {tab === 'Reports' && <p>EQA performance reporting view will be added in a later phase.</p>}
+    {tab === 'Reports' && (() => {
+      const isUnsat = (s?: string) => !!s && /unsat|unaccept|fail|poor/i.test(s);
+      const isSat = (s?: string) => !!s && /satisf|accept|pass|good/i.test(s);
+      const scored = events.filter(e => e.performance_status);
+      const unsat = events.filter(e => isUnsat(e.performance_status));
+      const sat = events.filter(e => isSat(e.performance_status));
+      const pendingSubmission = events.filter(e => !e.submitted_date && e.submission_due_date);
+      const perProgram = programs.map(p => {
+        const evs = events.filter(e => e.eqa_program_id === p.id);
+        return { p, n: evs.length, sat: evs.filter(e => isSat(e.performance_status)).length, unsat: evs.filter(e => isUnsat(e.performance_status)).length, last: evs.slice().sort((a, b) => (b.result_received_date || b.created_at || '').localeCompare(a.result_received_date || a.created_at || ''))[0] };
+      });
+      return <>
+        <KpiStrip items={[
+          { label: 'Programs', value: programs.filter(p => p.is_active).length },
+          { label: 'Events', value: events.length },
+          { label: 'Satisfactory', value: sat.length },
+          { label: 'Unsatisfactory', value: unsat.length, tone: unsat.length ? 'warning' : undefined },
+          { label: 'Success rate', value: scored.length ? `${Math.round((sat.length / scored.length) * 100)}%` : '—' },
+          { label: 'Awaiting submission', value: pendingSubmission.length, tone: pendingSubmission.length ? 'warning' : undefined },
+        ]} />
+        <div className="card" style={{ marginTop: 16 }}>
+          <h3>Per-programme performance</h3>
+          <table className="data-table"><thead><tr><th>Programme</th><th>Provider</th><th>Test area</th><th>Events</th><th>Satisfactory</th><th>Unsatisfactory</th><th>Last score</th></tr></thead><tbody>
+            {perProgram.map(x => <tr key={x.p.id}>
+              <td>{x.p.program_name}</td><td>{x.p.provider}</td><td>{x.p.test_area}</td><td>{x.n}</td>
+              <td>{x.sat}</td><td>{x.unsat ? <span className="badge warning">{x.unsat}</span> : 0}</td>
+              <td>{x.last?.score || x.last?.performance_status || '—'}</td>
+            </tr>)}
+            {perProgram.length === 0 && <tr><td colSpan={7} className="muted">No EQA programmes yet.</td></tr>}
+          </tbody></table>
+        </div>
+        {unsat.length > 0 && <div className="card" style={{ marginTop: 16 }}>
+          <h3>Unsatisfactory performances needing action</h3>
+          <table className="data-table"><thead><tr><th>Cycle</th><th>Programme</th><th>Status</th><th>Score</th><th>Corrective action</th></tr></thead><tbody>
+            {unsat.map(e => <tr key={e.id}><td>{e.cycle_name}</td><td>{e.program_name || programs.find(p => p.id === e.eqa_program_id)?.program_name || '—'}</td><td>{formatBadge(e.performance_status)}</td><td>{e.score || '—'}</td><td>{e.corrective_action_required ? <span className="badge warning">required</span> : (e.nc_id ? 'NC raised' : '—')}</td></tr>)}
+          </tbody></table>
+        </div>}
+      </>;
+    })()}
   </div>;
 }
 
@@ -633,7 +719,43 @@ export function VerificationValidationPage({ embedded = false }: { embedded?: bo
       </div>}
     </>}
 
-    {tab === 'Reports' && <p>Verification & validation reports will be added in a later phase.</p>}
+    {tab === 'Reports' && (() => {
+      const done = (s?: string) => !!s && /complet|approv|pass|accept/i.test(s);
+      const methodsDone = methods.filter(m => done(m.status));
+      const methodsPending = methods.filter(m => !done(m.status));
+      const equipDone = equipVerifs.filter(e => done(e.status));
+      const equipPending = equipVerifs.filter(e => !done(e.status));
+      return <>
+        <KpiStrip items={[
+          { label: 'Method verifications', value: methods.length },
+          { label: 'Methods completed', value: methodsDone.length },
+          { label: 'Methods in progress', value: methodsPending.length, tone: methodsPending.length ? 'warning' : undefined },
+          { label: 'Equipment verifications', value: equipVerifs.length },
+          { label: 'Equipment completed', value: equipDone.length },
+          { label: 'Equipment pending', value: equipPending.length, tone: equipPending.length ? 'warning' : undefined },
+        ]} />
+        <div className="card" style={{ marginTop: 16 }}>
+          <h3>Method verification &amp; validation register</h3>
+          <table className="data-table"><thead><tr><th>Number</th><th>Method / test</th><th>Type</th><th>Completed</th><th>Conclusion</th><th>Status</th></tr></thead><tbody>
+            {methods.slice().sort((a, b) => (b.completion_date || b.created_at || '').localeCompare(a.completion_date || a.created_at || '')).map(m => <tr key={m.id}>
+              <td>{m.verification_number}</td><td>{m.method_name}<div className="muted" style={{ fontSize: 11 }}>{m.test_name}</div></td>
+              <td>{(m.verification_type || '').replace(/_/g, ' ')}</td><td>{m.completion_date || '—'}</td><td>{m.conclusion || '—'}</td><td>{formatBadge(m.status)}</td>
+            </tr>)}
+            {methods.length === 0 && <tr><td colSpan={6} className="muted">No method verifications recorded.</td></tr>}
+          </tbody></table>
+        </div>
+        <div className="card" style={{ marginTop: 16 }}>
+          <h3>Equipment verification register</h3>
+          <table className="data-table"><thead><tr><th>Number</th><th>Equipment</th><th>Type</th><th>Date</th><th>Conclusion</th><th>Status</th></tr></thead><tbody>
+            {equipVerifs.slice().sort((a, b) => (b.verification_date || '').localeCompare(a.verification_date || '')).map(e => <tr key={e.id}>
+              <td>{e.verification_number}</td><td>{e.equipment_name || '—'}{e.equipment_number ? <div className="muted" style={{ fontSize: 11 }}>{e.equipment_number}</div> : null}</td>
+              <td>{(e.verification_type || '').replace(/_/g, ' ')}</td><td>{e.verification_date}</td><td>{e.conclusion || '—'}</td><td>{formatBadge(e.status)}</td>
+            </tr>)}
+            {equipVerifs.length === 0 && <tr><td colSpan={6} className="muted">No equipment verifications recorded.</td></tr>}
+          </tbody></table>
+        </div>
+      </>;
+    })()}
   </div>;
 }
 
@@ -745,6 +867,31 @@ export function MeasurementUncertaintyPage({ embedded = false }: { embedded?: bo
       </tr>)}
     </tbody></table>}
 
-    {tab === 'Reports' && <p>Measurement uncertainty trend reports will be added in a later phase.</p>}
+    {tab === 'Reports' && (() => {
+      const approved = records.filter(r => /approv/i.test(r.status));
+      const pending = records.filter(r => !/approv/i.test(r.status));
+      const highCv = records.filter(r => r.cv_percent != null && Number(r.cv_percent) > 10);
+      return <>
+        <KpiStrip items={[
+          { label: 'MU records', value: records.length },
+          { label: 'Approved', value: approved.length },
+          { label: 'Pending', value: pending.length, tone: pending.length ? 'warning' : undefined },
+          { label: 'CV > 10%', value: highCv.length, tone: highCv.length ? 'warning' : undefined },
+        ]} />
+        <div className="card" style={{ marginTop: 16 }}>
+          <h3>Measurement uncertainty budget by test</h3>
+          <p className="muted" style={{ marginTop: 0 }}>Estimated uncertainty for each measurand. Expanded uncertainty (U) is reported at the stated coverage factor (k, usually 2 ≈ 95%).</p>
+          <table className="data-table"><thead><tr><th>Number</th><th>Test / analyte</th><th>Mean</th><th>SD</th><th>CV %</th><th>u</th><th>U (expanded)</th><th>k</th><th>Status</th></tr></thead><tbody>
+            {records.slice().sort((a, b) => (b.calculation_date || '').localeCompare(a.calculation_date || '')).map(r => <tr key={r.id}>
+              <td>{r.mu_number}</td><td>{r.test_name}{r.analyte ? ` · ${r.analyte}` : ''}{r.equipment_name ? <div className="muted" style={{ fontSize: 11 }}>{r.equipment_name}</div> : null}</td>
+              <td>{r.mean_value ?? '—'}</td><td>{r.sd_value ?? '—'}</td>
+              <td>{r.cv_percent != null ? <span className={Number(r.cv_percent) > 10 ? 'badge warning' : ''}>{Number(r.cv_percent).toFixed(1)}</span> : '—'}</td>
+              <td>{r.uncertainty_value ?? '—'}</td><td>{r.expanded_uncertainty ?? '—'}</td><td>{r.coverage_factor ?? '—'}</td><td>{formatBadge(r.status)}</td>
+            </tr>)}
+            {records.length === 0 && <tr><td colSpan={9} className="muted">No measurement uncertainty records yet.</td></tr>}
+          </tbody></table>
+        </div>
+      </>;
+    })()}
   </div>;
 }
