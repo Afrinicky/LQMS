@@ -73,24 +73,26 @@ function printShell(title: string, headHtml: string, bodyHtml: string, autoprint
   const autoprintScript = autoprint ? '<script>window.addEventListener("load", () => { setTimeout(() => window.print(), 300); });</script>' : '';
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${escHtml(title)}</title>
 <style>
-@page{size:A4 landscape;margin:8mm}
+@page{size:A4 portrait;margin:8mm}
 *{box-sizing:border-box}
+html,body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 body{font-family:Arial,Helvetica,sans-serif;color:#111;padding:10px 14px;margin:0}
 .no-print{background:#f4f6fb;padding:8px 12px;border:1px solid #ccd;border-radius:6px;margin-bottom:12px;font-size:12px}
 .mast{display:flex;align-items:center;gap:16px;margin-bottom:6px}
-.mast img{height:78px;width:auto;object-fit:contain}
+.mast img{height:82px;width:auto;object-fit:contain}
 .mast-txt{flex:1;text-align:center}
 .mast-txt .org{font-weight:bold;font-size:16px;line-height:1.35;letter-spacing:.3px}
-.doc-title{text-align:center;font-weight:bold;font-size:15px;letter-spacing:2px;text-decoration:underline;margin:4px 0 10px}
+.doc-title{text-align:center;font-weight:bold;font-size:16px;letter-spacing:2px;text-decoration:underline;margin:6px 0 12px}
+/* Grid fills the sheet: tall rows + readable type, all as selectable text. */
 table.grid{border-collapse:collapse;width:100%;table-layout:fixed}
-table.grid th,table.grid td{border:1px solid #6b7280;text-align:center;font-size:9px;padding:1px;overflow:hidden;white-space:nowrap}
-table.grid td.name,table.grid th.name{text-align:left;font-weight:bold;font-family:'Courier New',monospace;font-size:9.5px;padding:2px 5px;width:150px;white-space:nowrap}
+table.grid th,table.grid td{border:1px solid #444;text-align:center;font-size:12px;padding:2px 1px;overflow:hidden;white-space:nowrap;height:30px}
+table.grid td.name,table.grid th.name{text-align:left;font-weight:bold;font-family:'Courier New',monospace;font-size:11px;padding:2px 5px;width:120px;white-space:nowrap}
 table.grid .hdr{background:#c85a2a;color:#fff;font-weight:bold}
 table.grid .hdr-wknd{background:#a8471f;color:#fff;font-weight:bold}
-table.grid .monthcell{background:#fff;color:#c85a2a;font-weight:bold;font-style:italic;font-size:11px;text-align:left;padding-left:6px}
+table.grid .monthcell{background:#fff;color:#c85a2a;font-weight:bold;font-style:italic;font-size:12px;text-align:left;padding-left:6px}
 table.grid .wknd{background:#f3d9cc}
-.legend{margin-top:12px;font-size:11px;font-family:'Courier New',monospace}
-.legend span{margin-right:34px;white-space:nowrap}
+.legend{margin-top:14px;font-size:12.5px;font-family:'Courier New',monospace;font-weight:bold}
+.legend span{margin-right:30px;white-space:nowrap;display:inline-block;margin-bottom:4px}
 .memo h1{font-size:26px;margin:0 0 8px;font-family:'Times New Roman',serif}
 .memo .metaline{font-size:13px;margin:2px 0;font-family:'Times New Roman',serif}
 .memo table{border-collapse:collapse;width:100%;margin:14px 0;font-family:'Times New Roman',serif}
@@ -216,11 +218,32 @@ export function schedulingRoutes() {
         req.body.headerOrg || orgLines, req.body.headerFacility || h.facility, req.body.headerSubtitle || h.subtitle,
         mm.startDate, mm.endDate, getStaffIdOrCurrent(req, req.body.preparedByStaffId), req.body.notes ?? null, req.user!.id, createdAt);
     const rosterId = Number(result.lastInsertRowid);
-    // Seed one row per active staff member (whole department), in register order.
-    const staff = db.prepare("SELECT id FROM staff WHERE is_active = 1 ORDER BY full_name").all() as Array<{ id: number }>;
-    const insRow = db.prepare('INSERT INTO duty_roster_rows (roster_id, staff_id, display_order) VALUES (?, ?, ?)');
-    staff.forEach((s, i) => insRow.run(rosterId, s.id, i + 1));
-    audit(req, { action: 'create', entity: 'duty_rosters', entityId: rosterId, newValue: { rosterNumber, month } });
+    const copyFromId = parseIntNullable(req.body.copyFromId);
+    const src = copyFromId ? db.prepare('SELECT * FROM duty_rosters WHERE id = ?').get(copyFromId) as any : null;
+    const insRow = db.prepare('INSERT INTO duty_roster_rows (roster_id, staff_id, label, display_order) VALUES (?, ?, ?, ?)');
+    if (src) {
+      // Use a previous roster as a template: copy its rows (staff + label rows)
+      // and, unless told otherwise, the painted shifts too, remapping to the new
+      // days. This saves rebuilding the whole month from scratch.
+      const srcRows = db.prepare('SELECT * FROM duty_roster_rows WHERE roster_id = ? ORDER BY display_order, id').all(copyFromId) as any[];
+      const includeCells = req.body.copyCells !== false;
+      const insCell = db.prepare('INSERT OR IGNORE INTO duty_roster_cells (roster_id, row_id, day, shift_code, note) VALUES (?, ?, ?, ?, ?)');
+      for (const sr of srcRows) {
+        const newRowId = Number(insRow.run(rosterId, sr.staff_id, sr.label, sr.display_order).lastInsertRowid);
+        if (includeCells) {
+          const srcCells = db.prepare('SELECT * FROM duty_roster_cells WHERE row_id = ? AND day <= ?').all(sr.id, mm.days) as any[];
+          for (const c of srcCells) insCell.run(rosterId, newRowId, c.day, c.shift_code, c.note);
+        }
+      }
+      // Carry the template's title and shift subset when not explicitly provided.
+      if (!req.body.title && src.title) db.prepare('UPDATE duty_rosters SET title = ? WHERE id = ?').run(src.title, rosterId);
+      if (!(Array.isArray(req.body.shiftCodes) && req.body.shiftCodes.length) && src.shift_codes) db.prepare('UPDATE duty_rosters SET shift_codes = ? WHERE id = ?').run(src.shift_codes, rosterId);
+    } else {
+      // Fresh roster: seed one row per active staff member, in register order.
+      const staff = db.prepare("SELECT id FROM staff WHERE is_active = 1 ORDER BY full_name").all() as Array<{ id: number }>;
+      staff.forEach((s, i) => insRow.run(rosterId, s.id, null, i + 1));
+    }
+    audit(req, { action: 'create', entity: 'duty_rosters', entityId: rosterId, newValue: { rosterNumber, month, copyFromId } });
     res.status(201).json({ id: rosterId, rosterNumber });
   });
 
@@ -376,7 +399,7 @@ export function schedulingRoutes() {
       bodyRows += `<tr><td class="name">${escHtml(name)}</td>${tds}</tr>`;
     }
 
-    const colW = `<colgroup><col style="width:150px"/>${dayNums.map(() => '<col/>').join('')}</colgroup>`;
+    const colW = `<colgroup><col style="width:120px"/>${dayNums.map(() => '<col/>').join('')}</colgroup>`;
     const table = `<table class="grid">${colW}<thead>${head1}${head2}</thead><tbody>${bodyRows}</tbody></table>`;
 
     // legend from enabled codes actually in the catalogue
@@ -418,8 +441,21 @@ export function schedulingRoutes() {
       .run(num, month || null, effective, req.body.memoTo || 'All Laboratory Staff', req.body.memoFrom || 'Quality Manager', req.body.memoDate || createdAt.slice(0, 10),
         req.body.subject || 'Re-assignment of Laboratory Staff', intro, req.body.nbNotes ?? defaultNb, parseIntNullable(req.body.signatoryStaffId), req.body.signatoryName || null,
         getStaffIdOrCurrent(req, req.body.preparedByStaffId), req.body.notes ?? null, req.user!.id, createdAt);
-    audit(req, { action: 'create', entity: 'reassignment_schedules', entityId: Number(r.lastInsertRowid), newValue: { num, month } });
-    res.status(201).json({ id: Number(r.lastInsertRowid), scheduleNumber: num });
+    const newId = Number(r.lastInsertRowid);
+    // Use a previous schedule as a template: copy all its unit rows so only a
+    // few edits are needed for the new month.
+    const copyFromId = parseIntNullable(req.body.copyFromId);
+    if (copyFromId) {
+      const srcRows = db.prepare('SELECT * FROM reassignment_rows WHERE schedule_id = ? ORDER BY display_order, id').all(copyFromId) as any[];
+      const insRow = db.prepare(`INSERT INTO reassignment_rows (schedule_id, unit_label, is_span, section_id, supervisor_staff_id, supervisor_text, deputy_staff_id, deputy_text, members_text, member_ids, span_text, display_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      for (const sr of srcRows) insRow.run(newId, sr.unit_label, sr.is_span, sr.section_id, sr.supervisor_staff_id, sr.supervisor_text, sr.deputy_staff_id, sr.deputy_text, sr.members_text, sr.member_ids, sr.span_text, sr.display_order);
+      const srcHdr = db.prepare('SELECT nb_notes, subject, memo_from, memo_to, signatory_staff_id, signatory_name FROM reassignment_schedules WHERE id = ?').get(copyFromId) as any;
+      if (srcHdr) db.prepare('UPDATE reassignment_schedules SET nb_notes = COALESCE(?, nb_notes), subject = ?, memo_from = ?, memo_to = ?, signatory_staff_id = ?, signatory_name = ? WHERE id = ?')
+        .run(srcHdr.nb_notes, srcHdr.subject, srcHdr.memo_from, srcHdr.memo_to, srcHdr.signatory_staff_id, srcHdr.signatory_name, newId);
+    }
+    audit(req, { action: 'create', entity: 'reassignment_schedules', entityId: newId, newValue: { num, month, copyFromId } });
+    res.status(201).json({ id: newId, scheduleNumber: num });
   });
 
   function loadReassignment(db: any, id: unknown) {
@@ -459,9 +495,39 @@ export function schedulingRoutes() {
     db.prepare("UPDATE reassignment_schedules SET status = 'approved', approved_by_staff_id = ?, approved_at = CURRENT_TIMESTAMP WHERE id = ?").run(getStaffIdOrCurrent(req, req.body.approvedByStaffId), req.params.id);
     res.json({ ok: true });
   });
+  // Publishing a reassignment applies it to the master register: every staff
+  // member named on a row that is linked to a real unit/section (supervisor,
+  // deputy and members) is moved to that section, so the rest of the system
+  // reflects the new unit assignment.
+  function applyReassignmentToRegister(db: any, scheduleId: unknown) {
+    const rows = db.prepare('SELECT * FROM reassignment_rows WHERE schedule_id = ? AND section_id IS NOT NULL').all(scheduleId) as any[];
+    const moved: number[] = [];
+    const setSection = db.prepare('UPDATE staff SET section_id = ?, unit = COALESCE((SELECT name FROM sections WHERE id = ?), unit), updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+    for (const r of rows) {
+      const ids = new Set<number>();
+      if (r.supervisor_staff_id) ids.add(Number(r.supervisor_staff_id));
+      if (r.deputy_staff_id) ids.add(Number(r.deputy_staff_id));
+      try { for (const m of JSON.parse(r.member_ids || '[]')) { const n = Number(m); if (Number.isFinite(n)) ids.add(n); } } catch { /* ignore */ }
+      for (const id of ids) { setSection.run(r.section_id, r.section_id, id); moved.push(id); }
+    }
+    return moved.length;
+  }
   router.post('/reassignments/:id/publish', requirePermission('personnel', 'edit'), (req, res) => {
-    getDb().prepare("UPDATE reassignment_schedules SET status = 'published', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
-    res.json({ ok: true });
+    const db = getDb();
+    if (!db.prepare('SELECT id FROM reassignment_schedules WHERE id = ?').get(req.params.id)) return res.status(404).json({ error: 'Schedule not found' });
+    db.prepare("UPDATE reassignment_schedules SET status = 'published', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
+    const moved = applyReassignmentToRegister(db, req.params.id);
+    audit(req, { action: 'publish', entity: 'reassignment_schedules', entityId: req.params.id, newValue: { staffReassigned: moved } });
+    res.json({ ok: true, staffReassigned: moved });
+  });
+  // Apply the unit reassignment to the master register on demand, without
+  // (re)publishing — useful after editing a linked row.
+  router.post('/reassignments/:id/apply-to-register', requirePermission('personnel', 'edit'), (req, res) => {
+    const db = getDb();
+    if (!db.prepare('SELECT id FROM reassignment_schedules WHERE id = ?').get(req.params.id)) return res.status(404).json({ error: 'Schedule not found' });
+    const moved = applyReassignmentToRegister(db, req.params.id);
+    audit(req, { action: 'edit', entity: 'reassignment_schedules', entityId: req.params.id, newValue: { staffReassigned: moved } });
+    res.json({ ok: true, staffReassigned: moved });
   });
 
   router.post('/reassignments/:id/rows', requirePermission('personnel', 'edit'), (req, res) => {
@@ -469,10 +535,11 @@ export function schedulingRoutes() {
     if (!db.prepare('SELECT id FROM reassignment_schedules WHERE id = ?').get(req.params.id)) return res.status(404).json({ error: 'Schedule not found' });
     if (!req.body.unitLabel) return res.status(400).json({ error: 'A unit label is required.' });
     const order = parseIntNullable(req.body.displayOrder) ?? (db.prepare('SELECT COALESCE(MAX(display_order),0)+1 n FROM reassignment_rows WHERE schedule_id = ?').get(req.params.id) as { n: number }).n;
-    const r = db.prepare(`INSERT INTO reassignment_rows (schedule_id, unit_label, is_span, supervisor_staff_id, supervisor_text, deputy_staff_id, deputy_text, members_text, span_text, display_order)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(req.params.id, req.body.unitLabel, req.body.isSpan ? 1 : 0, parseIntNullable(req.body.supervisorStaffId), req.body.supervisorText || null,
-        parseIntNullable(req.body.deputyStaffId), req.body.deputyText || null, req.body.membersText || null, req.body.spanText || null, order);
+    const memberIds = Array.isArray(req.body.memberIds) ? req.body.memberIds.map((x: unknown) => parseIntNullable(x)).filter((x: number | null) => x !== null) : null;
+    const r = db.prepare(`INSERT INTO reassignment_rows (schedule_id, unit_label, is_span, section_id, supervisor_staff_id, supervisor_text, deputy_staff_id, deputy_text, members_text, member_ids, span_text, display_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(req.params.id, req.body.unitLabel, req.body.isSpan ? 1 : 0, parseIntNullable(req.body.sectionId), parseIntNullable(req.body.supervisorStaffId), req.body.supervisorText || null,
+        parseIntNullable(req.body.deputyStaffId), req.body.deputyText || null, req.body.membersText || null, memberIds ? JSON.stringify(memberIds) : null, req.body.spanText || null, order);
     res.status(201).json({ id: Number(r.lastInsertRowid) });
   });
   router.put('/reassignment-rows/:rowId', requirePermission('personnel', 'edit'), (req, res) => {
@@ -480,11 +547,13 @@ export function schedulingRoutes() {
     const ex = db.prepare('SELECT * FROM reassignment_rows WHERE id = ?').get(req.params.rowId) as any;
     if (!ex) return res.status(404).json({ error: 'Row not found' });
     const b = req.body;
-    db.prepare(`UPDATE reassignment_rows SET unit_label = ?, is_span = ?, supervisor_staff_id = ?, supervisor_text = ?, deputy_staff_id = ?, deputy_text = ?, members_text = ?, span_text = ?, display_order = ? WHERE id = ?`)
+    const memberIds = b.memberIds !== undefined ? (Array.isArray(b.memberIds) ? JSON.stringify(b.memberIds.map((x: unknown) => parseIntNullable(x)).filter((x: number | null) => x !== null)) : null) : ex.member_ids;
+    db.prepare(`UPDATE reassignment_rows SET unit_label = ?, is_span = ?, section_id = ?, supervisor_staff_id = ?, supervisor_text = ?, deputy_staff_id = ?, deputy_text = ?, members_text = ?, member_ids = ?, span_text = ?, display_order = ? WHERE id = ?`)
       .run(b.unitLabel ?? ex.unit_label, b.isSpan === undefined ? ex.is_span : (b.isSpan ? 1 : 0),
+        b.sectionId !== undefined ? parseIntNullable(b.sectionId) : ex.section_id,
         b.supervisorStaffId !== undefined ? parseIntNullable(b.supervisorStaffId) : ex.supervisor_staff_id, b.supervisorText !== undefined ? b.supervisorText : ex.supervisor_text,
         b.deputyStaffId !== undefined ? parseIntNullable(b.deputyStaffId) : ex.deputy_staff_id, b.deputyText !== undefined ? b.deputyText : ex.deputy_text,
-        b.membersText !== undefined ? b.membersText : ex.members_text, b.spanText !== undefined ? b.spanText : ex.span_text,
+        b.membersText !== undefined ? b.membersText : ex.members_text, memberIds, b.spanText !== undefined ? b.spanText : ex.span_text,
         parseIntNullable(b.displayOrder) ?? ex.display_order, req.params.rowId);
     res.json({ ok: true });
   });
@@ -553,10 +622,24 @@ export function schedulingRoutes() {
       VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?)`)
       .run(num, sectionId, month, req.body.title || `${section.name} Bench Schedule`, getStaffIdOrCurrent(req, req.body.preparedByStaffId), req.body.notes ?? null, req.user!.id, createdAt);
     const scheduleId = Number(r.lastInsertRowid);
-    const staff = db.prepare("SELECT id FROM staff WHERE section_id = ? AND is_active = 1 ORDER BY full_name").all(sectionId) as Array<{ id: number }>;
-    const insRow = db.prepare('INSERT INTO bench_schedule_rows (schedule_id, staff_id, display_order) VALUES (?, ?, ?)');
-    staff.forEach((st, i) => insRow.run(scheduleId, st.id, i + 1));
-    audit(req, { action: 'create', entity: 'bench_schedules', entityId: scheduleId, newValue: { num, sectionId, month } });
+    const insRow = db.prepare('INSERT INTO bench_schedule_rows (schedule_id, staff_id, label, display_order) VALUES (?, ?, ?, ?)');
+    const copyFromId = parseIntNullable(req.body.copyFromId);
+    const src = copyFromId ? db.prepare('SELECT * FROM bench_schedules WHERE id = ?').get(copyFromId) as any : null;
+    if (src) {
+      // Template from a previous bench schedule (rows + bench assignments).
+      const daysInNew = monthMeta(month).days;
+      const includeCells = req.body.copyCells !== false;
+      const srcRows = db.prepare('SELECT * FROM bench_schedule_rows WHERE schedule_id = ? ORDER BY display_order, id').all(copyFromId) as any[];
+      const insCell = db.prepare('INSERT OR IGNORE INTO bench_schedule_cells (schedule_id, row_id, day, value, note) VALUES (?, ?, ?, ?, ?)');
+      for (const sr of srcRows) {
+        const newRowId = Number(insRow.run(scheduleId, sr.staff_id, sr.label, sr.display_order).lastInsertRowid);
+        if (includeCells) for (const c of db.prepare('SELECT * FROM bench_schedule_cells WHERE row_id = ? AND day <= ?').all(sr.id, daysInNew) as any[]) insCell.run(scheduleId, newRowId, c.day, c.value, c.note);
+      }
+    } else {
+      const staff = db.prepare("SELECT id FROM staff WHERE section_id = ? AND is_active = 1 ORDER BY full_name").all(sectionId) as Array<{ id: number }>;
+      staff.forEach((st, i) => insRow.run(scheduleId, st.id, null, i + 1));
+    }
+    audit(req, { action: 'create', entity: 'bench_schedules', entityId: scheduleId, newValue: { num, sectionId, month, copyFromId } });
     res.status(201).json({ id: scheduleId, scheduleNumber: num });
   });
   function loadBench(db: any, id: unknown) {
@@ -651,7 +734,7 @@ export function schedulingRoutes() {
       }
       bodyRows += `<tr><td class="name">${escHtml(name)}</td>${tds}</tr>`;
     }
-    const colW = `<colgroup><col style="width:150px"/>${dayNums.map(() => '<col/>').join('')}</colgroup>`;
+    const colW = `<colgroup><col style="width:120px"/>${dayNums.map(() => '<col/>').join('')}</colgroup>`;
     const table = `<table class="grid">${colW}<thead><tr>${head1}</tr><tr>${head2}</tr></thead><tbody>${bodyRows}</tbody></table>`;
     const legend = bs.benches.length ? `<div class="legend">${bs.benches.map((b: any) => `<span><b>${escHtml(b.code || b.name)}</b>: ${escHtml(b.name)}</span>`).join('')}</div>` : '';
     const orgLines = escHtml(h.org) + (h.facility ? `<br/>${escHtml(h.facility)}` : '');

@@ -681,7 +681,7 @@ export function PersonnelManagementPage() {
     {tab === 'Technical Authorizations' && <p>Technical authorisations are created from completed competency assessments via the Competency Assessments tab. They appear on each staff member's profile under <em>My Profile</em>.</p>}
 
     {tab === 'Duty Roster' && <DutyRosterBoard staff={staff} canEdit={canEditRosters} />}
-    {tab === 'Unit Reassignments' && <ReassignmentBoard staff={staff} canEdit={canEditRosters} />}
+    {tab === 'Unit Reassignments' && <ReassignmentBoard staff={staff} sections={sections} canEdit={canEditRosters} />}
     {tab === 'Bench Schedules' && <BenchScheduleBoard sections={sections} canEdit={canEditRosters} />}
 
     {tab === 'My Profile' && <>

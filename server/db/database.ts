@@ -3059,6 +3059,16 @@ CREATE INDEX IF NOT EXISTS idx_bench_schedule_cells_schedule ON bench_schedule_c
     }
   }
 
+  // reassignment_rows gained an optional link to a real unit/section and a
+  // structured member list, so publishing a reassignment can move those staff to
+  // the unit on the master register (staff.section_id).
+  {
+    const rrCols = new Set((database.prepare('PRAGMA table_info(reassignment_rows)').all() as Array<{ name: string }>).map(c => c.name));
+    for (const [col, type] of [['section_id', 'INTEGER'], ['member_ids', 'TEXT']] as const) {
+      if (!rrCols.has(col)) database.exec(`ALTER TABLE reassignment_rows ADD COLUMN ${col} ${type}`);
+    }
+  }
+
   // Seed the standard shift-type catalogue once. Colours mirror the paper roster
   // (Off/leave in red, Call in purple, Night dark). Laboratories may edit, add,
   // recolour, deactivate or reorder these from Settings → Roster & Scheduling.
