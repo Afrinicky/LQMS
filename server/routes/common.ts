@@ -907,9 +907,28 @@ export function commonRoutes() {
     for (const [col, key] of fields) {
       if (b[key] !== undefined) db.prepare(`UPDATE laboratory_profile SET ${col} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1`).run(b[key] === '' ? null : b[key]);
     }
+    // Laboratory logo — an uploaded file id (from POST /files). Cleared with null.
+    if (b.logoFileId !== undefined) db.prepare('UPDATE laboratory_profile SET logo_file_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1').run(b.logoFileId === '' || b.logoFileId === null ? null : parseIntNullable(b.logoFileId));
     if (b.registrationComplete !== undefined) db.prepare('UPDATE laboratory_profile SET registration_complete = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1').run(b.registrationComplete ? 1 : 0);
     audit(req, { action: 'edit', entity: 'laboratory_profile', entityId: 1, newValue: b });
     res.json({ ok: true });
+  });
+
+  // Serve the laboratory logo bytes for on-screen display anywhere in the app
+  // (Settings preview, headers). Any signed-in user may read it; the image is
+  // also embedded as a data URI directly into printed rosters and schedules.
+  router.get('/laboratory-logo', requireAuth, (_req, res) => {
+    const db = getDb();
+    const prof = db.prepare('SELECT logo_file_id FROM laboratory_profile WHERE id = 1').get() as { logo_file_id?: number } | undefined;
+    if (!prof?.logo_file_id) return res.status(404).json({ error: 'No logo set' });
+    const file = db.prepare('SELECT * FROM files WHERE id = ?').get(prof.logo_file_id) as any;
+    if (!file) return res.status(404).json({ error: 'Logo file missing' });
+    const root = file.storage_area === 'evidence' ? evidenceRoot : uploadRoot;
+    const fp = path.join(root, file.stored_name);
+    if (!fs.existsSync(fp)) return res.status(404).json({ error: 'Logo file missing' });
+    res.setHeader('Content-Type', file.mime_type || 'image/png');
+    res.setHeader('Cache-Control', 'private, max-age=30');
+    fs.createReadStream(fp).pipe(res);
   });
 
   // Combined, read-only laboratory configuration for display outside Settings

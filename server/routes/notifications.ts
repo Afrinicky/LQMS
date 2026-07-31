@@ -409,6 +409,28 @@ function collectScanCandidates(db: any): ScanCandidate[] {
     for (const r of rows) out.push({ moduleKey: 'information_management', recordType: 'data_correction_requests', recordId: String(r.id), title: `Data correction pending: ${r.request_number}`, message: 'Awaiting review/approval', dueDate: null, severity: 'low', notificationType: 'approval_required', itemType: 'data_correction_pending' });
   }
 
+  // Prepare next month's rosters & schedules — remind the manager a week before
+  // the next month begins if the department duty roster and/or unit reassignment
+  // schedule for that month is not yet started. Rosters are pasted in the lab, so
+  // they must be ready in advance.
+  if (tableExists(db, 'duty_rosters')) {
+    const now = new Date();
+    const daysInThisMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    // Only raise from ~7 days before month end onwards.
+    if (now.getDate() >= daysInThisMonth - 7) {
+      const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const nextMonth = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`;
+      const nextStart = `${nextMonth}-01`;
+      const nextLabel = next.toLocaleString('en', { month: 'long', year: 'numeric' });
+      const hasRoster = (db.prepare('SELECT COUNT(*) c FROM duty_rosters WHERE month = ?').get(nextMonth) as { c: number }).c > 0;
+      if (!hasRoster) out.push({ moduleKey: 'personnel', recordType: 'duty_rosters', recordId: `next-${nextMonth}`, title: `Prepare ${nextLabel} duty roster`, message: `The department duty roster for ${nextLabel} has not been started. Prepare it before the month begins so it can be printed and posted.`, dueDate: nextStart, severity: 'high', notificationType: 'due_soon', itemType: 'roster_preparation' });
+      if (tableExists(db, 'reassignment_schedules')) {
+        const hasReassign = (db.prepare('SELECT COUNT(*) c FROM reassignment_schedules WHERE month = ?').get(nextMonth) as { c: number }).c > 0;
+        if (!hasReassign) out.push({ moduleKey: 'personnel', recordType: 'reassignment_schedules', recordId: `next-${nextMonth}`, title: `Prepare ${nextLabel} staff reassignment`, message: `The unit/staff reassignment schedule for ${nextLabel} has not been started.`, dueDate: nextStart, severity: 'medium', notificationType: 'due_soon', itemType: 'reassignment_preparation' });
+      }
+    }
+  }
+
   return out;
 }
 

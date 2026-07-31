@@ -2908,6 +2908,177 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_env_notif_alert_rule ON environmental_noti
   }
 
   // ===================================================================
+  // Duty Roster & Scheduling redesign
+  // Department-wide monthly duty roster (Excel-like grid), unit reassignment
+  // schedule (memo), and per-unit bench/workspace schedules. A configurable
+  // shift-type catalogue drives the roster cells and legend; each laboratory
+  // selects only the shifts it practises. Configurable benches drive the unit
+  // bench schedules. These print to match the laboratory's paper forms.
+  // -------------------------------------------------------------------
+  database.exec(`
+CREATE TABLE IF NOT EXISTS roster_shift_types (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT NOT NULL UNIQUE,             -- M, A, C, N, O, AL, PL, SL, LWP …
+  label TEXT NOT NULL,                   -- Morning Duty, Call Duty, Annual Leave …
+  category TEXT NOT NULL DEFAULT 'shift',-- shift | off | leave
+  bg_color TEXT NOT NULL DEFAULT '#ffffff',
+  text_color TEXT NOT NULL DEFAULT '#111111',
+  display_order INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  is_system INTEGER NOT NULL DEFAULT 0,  -- protects the standard set from deletion
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- Rows of a duty roster: a staff member, or a free-text label/spacer row
+-- (e.g. "MORNING SHIFT" or a blank separator on the printed sheet).
+CREATE TABLE IF NOT EXISTS duty_roster_rows (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  roster_id INTEGER NOT NULL REFERENCES duty_rosters(id) ON DELETE CASCADE,
+  staff_id INTEGER REFERENCES staff(id),
+  label TEXT,                            -- used when staff_id is NULL
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_duty_roster_rows_roster ON duty_roster_rows(roster_id);
+
+-- One cell per (row, day-of-month). shift_code references roster_shift_types.code.
+CREATE TABLE IF NOT EXISTS duty_roster_cells (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  roster_id INTEGER NOT NULL REFERENCES duty_rosters(id) ON DELETE CASCADE,
+  row_id INTEGER NOT NULL REFERENCES duty_roster_rows(id) ON DELETE CASCADE,
+  day INTEGER NOT NULL,                  -- 1..31
+  shift_code TEXT,
+  note TEXT,
+  UNIQUE(row_id, day)
+);
+CREATE INDEX IF NOT EXISTS idx_duty_roster_cells_roster ON duty_roster_cells(roster_id);
+
+-- Unit / staff reassignment schedule — the monthly memo (attachment format).
+CREATE TABLE IF NOT EXISTS reassignment_schedules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  schedule_number TEXT NOT NULL UNIQUE,
+  month TEXT,                            -- YYYY-MM
+  effective_date TEXT,
+  memo_to TEXT NOT NULL DEFAULT 'All Laboratory Staff',
+  memo_from TEXT NOT NULL DEFAULT 'Quality Manager',
+  memo_date TEXT,
+  subject TEXT NOT NULL DEFAULT 'Re-assignment of Laboratory Staff',
+  intro_text TEXT,
+  nb_notes TEXT,                         -- one note per line, printed under NB:
+  signatory_staff_id INTEGER REFERENCES staff(id),
+  signatory_name TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',  -- draft | published | approved
+  prepared_by_staff_id INTEGER REFERENCES staff(id),
+  approved_by_staff_id INTEGER REFERENCES staff(id),
+  approved_at TEXT,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS reassignment_rows (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  schedule_id INTEGER NOT NULL REFERENCES reassignment_schedules(id) ON DELETE CASCADE,
+  unit_label TEXT NOT NULL,
+  is_span INTEGER NOT NULL DEFAULT 0,    -- 1 = single wide cell (e.g. QMS Desk, Manager)
+  supervisor_staff_id INTEGER REFERENCES staff(id),
+  supervisor_text TEXT,
+  deputy_staff_id INTEGER REFERENCES staff(id),
+  deputy_text TEXT,
+  members_text TEXT,                     -- comma-separated member names
+  span_text TEXT,                        -- names shown across the row for span rows
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_reassignment_rows_schedule ON reassignment_rows(schedule_id);
+
+-- Benches / workspaces configured per unit (Settings → Section/Unit config).
+CREATE TABLE IF NOT EXISTS section_benches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  section_id INTEGER NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,                    -- e.g. Culture & Sensitivity, GeneXpert
+  code TEXT,                             -- short code shown in the grid, e.g. C&S
+  description TEXT,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_section_benches_section ON section_benches(section_id);
+
+-- Per-unit monthly bench schedule (grid: staff × days → bench).
+CREATE TABLE IF NOT EXISTS bench_schedules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  schedule_number TEXT NOT NULL UNIQUE,
+  section_id INTEGER NOT NULL REFERENCES sections(id),
+  month TEXT NOT NULL,                   -- YYYY-MM
+  title TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',  -- draft | published | approved
+  prepared_by_staff_id INTEGER REFERENCES staff(id),
+  approved_by_staff_id INTEGER REFERENCES staff(id),
+  approved_at TEXT,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_bench_schedules_section ON bench_schedules(section_id);
+CREATE TABLE IF NOT EXISTS bench_schedule_rows (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  schedule_id INTEGER NOT NULL REFERENCES bench_schedules(id) ON DELETE CASCADE,
+  staff_id INTEGER REFERENCES staff(id),
+  label TEXT,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_bench_schedule_rows_schedule ON bench_schedule_rows(schedule_id);
+CREATE TABLE IF NOT EXISTS bench_schedule_cells (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  schedule_id INTEGER NOT NULL REFERENCES bench_schedules(id) ON DELETE CASCADE,
+  row_id INTEGER NOT NULL REFERENCES bench_schedule_rows(id) ON DELETE CASCADE,
+  day INTEGER NOT NULL,
+  value TEXT,                            -- bench code / name or free text
+  note TEXT,
+  UNIQUE(row_id, day)
+);
+CREATE INDEX IF NOT EXISTS idx_bench_schedule_cells_schedule ON bench_schedule_cells(schedule_id);
+`);
+
+  // duty_rosters predates the monthly grid model — add the columns the redesign
+  // needs on upgraded installs. The header fields let each roster carry its own
+  // printed masthead (org / facility / subtitle) and the shift subset it uses.
+  {
+    const drCols = new Set((database.prepare('PRAGMA table_info(duty_rosters)').all() as Array<{ name: string }>).map(c => c.name));
+    for (const [col, type] of [
+      ['month', 'TEXT'], ['title', 'TEXT'], ['shift_codes', 'TEXT'],
+      ['header_org', 'TEXT'], ['header_facility', 'TEXT'], ['header_subtitle', 'TEXT'],
+      ['published_at', 'TEXT'],
+    ] as const) {
+      if (!drCols.has(col)) database.exec(`ALTER TABLE duty_rosters ADD COLUMN ${col} ${type}`);
+    }
+  }
+
+  // Seed the standard shift-type catalogue once. Colours mirror the paper roster
+  // (Off/leave in red, Call in purple, Night dark). Laboratories may edit, add,
+  // recolour, deactivate or reorder these from Settings → Roster & Scheduling.
+  if ((database.prepare('SELECT COUNT(*) c FROM roster_shift_types').get() as { c: number }).c === 0) {
+    const seedShift = database.prepare('INSERT INTO roster_shift_types (code, label, category, bg_color, text_color, display_order, is_active, is_system) VALUES (?, ?, ?, ?, ?, ?, 1, 1)');
+    const rows: Array<[string, string, string, string, string, number]> = [
+      ['M', 'Morning Duty', 'shift', '#ffffff', '#111111', 1],
+      ['A', 'Afternoon Duty', 'shift', '#cfe8ff', '#0b3d66', 2],
+      ['N', 'Night Duty', 'shift', '#1f2937', '#ffffff', 3],
+      ['C', 'Call Duty', 'shift', '#7a2fd6', '#ffffff', 4],
+      ['O', 'Off Duty', 'off', '#e11d1d', '#ffffff', 5],
+      ['AL', 'Annual Leave', 'leave', '#e11d1d', '#ffffff', 6],
+      ['PL', 'Part Leave', 'leave', '#e11d1d', '#ffffff', 7],
+      ['SL', 'Study Leave', 'leave', '#d97706', '#ffffff', 8],
+      ['LWP', 'Leave Without Pay', 'leave', '#6b7280', '#ffffff', 9],
+    ];
+    for (const r of rows) seedShift.run(...r);
+  }
+
+  // ===================================================================
   // Phase 9: Documents & Records upgrade
   // Faithful to SECH Document Control Procedure (SECHPO026) and Control of
   // Records Procedure (SECHPO051).
