@@ -9,7 +9,7 @@ import { LoginPage, SetupPage } from './pages/AuthPages';
 import { Dashboard, Home, ModulePage } from './pages/CorePages';
 import { ActionTracker, DocumentImport, EvidenceUpload, MyLaboratory, PeopleAccess, SectionConfig, SystemSettings, RosterSettings } from './pages/SettingsPages';
 import { ComplaintsPage, RisksPage, QmsActionTracker } from './pages/QMSPages';
-import { NonconformitiesPage, IncidentsPage, CapaPage } from './pages/NcCapaPages';
+import { NcCapaPage } from './pages/NcCapaPages';
 import { MODULES } from '../shared/constants/modules';
 import { FlaskConical, TriangleAlert } from 'lucide-react';
 import { WaveBackground } from './components/ui';
@@ -178,10 +178,11 @@ function AppRoutes() {
       <Route path="/dennis" element={<Suspense fallback={<ModuleFallback/>}><DennisPage/></Suspense>}/>
       <Route path="/organisation" element={<Suspense fallback={<ModuleFallback/>}><OrganisationPage/></Suspense>}/>
       <Route path="/personnel" element={<Suspense fallback={<ModuleFallback/>}><PersonnelManagementPage/></Suspense>}/>
-      {/* Nonconforming Event Management — three sibling submodules. */}
-      <Route path="/nonconformities" element={<NonconformitiesPage/>}/>
-      <Route path="/incidents" element={<IncidentsPage/>}/>
-      <Route path="/capa" element={<CapaPage/>}/>
+      {/* Nonconforming Event Management — one workspace; the submodules are top
+          tabs. Each path renders the same page and selects the matching tab. */}
+      <Route path="/nonconformities" element={<NcCapaPage/>}/>
+      <Route path="/incidents" element={<NcCapaPage/>}/>
+      <Route path="/capa" element={<NcCapaPage/>}/>
       <Route path="/nc-capa" element={<Navigate to="/nonconformities" replace/>}/>
       <Route path="/complaints" element={<ComplaintsPage/>}/>
       <Route path="/risks" element={<RisksPage/>}/>

@@ -1,8 +1,8 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ModuleAlerts } from '../components/ui';
-import { api } from '../services/api';
+import { api, API_BASE, getToken } from '../services/api';
 import { useModules } from '../hooks/useModules';
 import DisabledModule from '../components/DisabledModule';
 import RiskMatrix, { riskLevelBadge, bandFor } from '../components/RiskMatrix';
@@ -45,7 +45,7 @@ type Incident = {
   investigation_team: string | null; root_cause: string | null; rca_method: string | null; contributing_factors: string | null;
   corrective_action: string | null; preventive_action: string | null; notified_to: string | null; reportable_external: number; external_authority: string | null;
   nc_id: number | null; nc_number: string | null; capa_id: number | null; capa_number: string | null; status: string; notes: string | null;
-  workflow_stage: string | null; rca_required: number | null; affects_patient_safety: number | null; escalation_reason: string | null;
+  workflow_stage: string | null; rca_required: number | null; affects_patient_safety: number | null; escalation_reason: string | null; rca_evidence_file_id: number | null;
 };
 
 // --- small presentational helpers -----------------------------------------
@@ -87,6 +87,7 @@ type WFItem = {
   risk_score: number | null; risk_level: string | null; occurrence_score: number | null; severity_score: number | null;
   description: string | null; immediate_action: string | null; rca_required: number | null; affects_patient_safety: number | null;
   investigation_team?: string | null; rca_method?: string | null; root_cause?: string | null; contributing_factors?: string | null;
+  rca_evidence_file_id?: number | null;
 };
 
 /**
@@ -111,6 +112,8 @@ function StageBoard({ kind, stage, sections, cfg, onChanged }: {
   const [method, setMethod] = useState('5_whys');
   const [rootCause, setRootCause] = useState('');
   const [contributing, setContributing] = useState('');
+  const [evidence, setEvidence] = useState<File | null>(null);
+  const [hasEvidence, setHasEvidence] = useState(false);
 
   const isNc = kind === 'nc';
   const investigationLabel = isNc ? 'Root cause analysis' : 'Investigation';
@@ -127,7 +130,7 @@ function StageBoard({ kind, stage, sections, cfg, onChanged }: {
           unit: sections.find(s => s.id === r.section_id)?.name || '—',
           risk_score: r.risk_score, risk_level: r.risk_level, occurrence_score: r.occurrence_score, severity_score: r.severity_score,
           description: r.description, immediate_action: r.immediate_correction, rca_required: r.rca_required,
-          affects_patient_safety: r.affects_patient_safety,
+          affects_patient_safety: r.affects_patient_safety, rca_evidence_file_id: r.rca_evidence_file_id,
           investigation_team: r.investigation_team, rca_method: r.rca_method, root_cause: r.root_cause,
         } : {
           id: r.id, ref: r.incident_number, date: (r.incident_datetime || '').slice(0, 10),
@@ -135,7 +138,7 @@ function StageBoard({ kind, stage, sections, cfg, onChanged }: {
           typeLabel: (r.incident_type || 'incident').replace(/_/g, ' '), unit: r.section_name || '—',
           risk_score: r.risk_score, risk_level: r.risk_level, occurrence_score: r.occurrence_score, severity_score: r.severity_score,
           description: r.description, immediate_action: r.immediate_action, rca_required: r.rca_required,
-          affects_patient_safety: r.affects_patient_safety,
+          affects_patient_safety: r.affects_patient_safety, rca_evidence_file_id: r.rca_evidence_file_id,
           investigation_team: r.investigation_team, rca_method: r.rca_method, root_cause: r.root_cause, contributing_factors: r.contributing_factors,
         });
       setItems(mapped.sort((a, b) => (b.date || '').localeCompare(a.date || '')));
@@ -152,6 +155,7 @@ function StageBoard({ kind, stage, sections, cfg, onChanged }: {
     setNotes('');
     setTeam(it.investigation_team || ''); setMethod(it.rca_method || '5_whys');
     setRootCause(it.root_cause || ''); setContributing(it.contributing_factors || '');
+    setEvidence(null); setHasEvidence(!!it.rca_evidence_file_id);
   }
   const base = (it: WFItem) => isNc ? `/nonconformities/${it.id}` : `/incidents/${it.id}`;
 
@@ -173,9 +177,18 @@ function StageBoard({ kind, stage, sections, cfg, onChanged }: {
   async function submitRca() {
     if (!sel) return;
     if (!rootCause.trim()) { setError('Record the identified root cause.'); return; }
+    if (!evidence && !hasEvidence) { setError('Attach the completed root-cause analysis sheet before completing.'); return; }
     setBusy(true); setError(null);
     try {
-      await api(`${base(sel)}/rca`, { method: 'POST', body: JSON.stringify({ investigationTeam: team, rcaMethod: method, rootCause, contributingFactors: contributing }) });
+      // Multipart so the analysis sheet is stored alongside the findings.
+      const fd = new FormData();
+      fd.append('investigationTeam', team); fd.append('rcaMethod', method);
+      fd.append('rootCause', rootCause); fd.append('contributingFactors', contributing);
+      if (evidence) fd.append('evidence', evidence);
+      const token = getToken();
+      const res = await fetch(`${API_BASE}${base(sel)}/rca`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
+      const data = await res.json().catch(() => ({ error: res.statusText }));
+      if (!res.ok) throw new Error(data.error ?? res.statusText);
       setMsg(`Root cause recorded for ${sel.ref}. Ready for CAPA.`);
       setSel(null); load(); onChanged();
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
@@ -246,8 +259,13 @@ function StageBoard({ kind, stage, sections, cfg, onChanged }: {
           <label>Method<select value={method} onChange={e => setMethod(e.target.value)}>{RCA_METHOD_OPTIONS.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}</select></label>
           <label style={{ gridColumn: '1 / -1' }}>Root cause(s) identified<textarea value={rootCause} onChange={e => setRootCause(e.target.value)} required /></label>
           <label style={{ gridColumn: '1 / -1' }}>Contributing factors (optional)<textarea value={contributing} onChange={e => setContributing(e.target.value)} /></label>
+          <label style={{ gridColumn: '1 / -1' }}>
+            Analysis sheet (the completed {(RCA_METHOD_OPTIONS.find(m => m.v === method)?.l || 'RCA')} worksheet) — required
+            <input type="file" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx" onChange={e => setEvidence(e.target.files?.[0] ?? null)} />
+            {hasEvidence && !evidence && <small className="muted">An analysis sheet is already attached — <a href={`${API_BASE}${base(sel)}/rca-evidence`} target="_blank" rel="noreferrer">view it</a>. Choose a file to replace it.</small>}
+          </label>
         </div>
-        <button style={{ marginTop: 10 }} disabled={busy || !cfg.canFollowUp} onClick={submitRca}>{busy ? 'Saving…' : `Complete ${investigationLabel.toLowerCase()}`}</button>
+        <button style={{ marginTop: 10 }} disabled={busy || !cfg.canFollowUp || (!evidence && !hasEvidence)} onClick={submitRca}>{busy ? 'Saving…' : `Complete ${investigationLabel.toLowerCase()}`}</button>
       </>}
     </div>}
   </div>;
@@ -257,7 +275,33 @@ function StageBoard({ kind, stage, sections, cfg, onChanged }: {
 // Submodule 1 — Nonconformities
 // ==========================================================================
 
-export function NonconformitiesPage() {
+// One workspace, three top-level tabs — mirroring Process Management. The
+// active tab is driven by the route so cross-links (e.g. a nonconformity's
+// "Managed as CAPA-…" link) and the browser back button all behave naturally.
+const NC_TOP_TABS = [
+  { key: 'nonconformities', label: 'Nonconformities', path: '/nonconformities' },
+  { key: 'incidents', label: 'Incidents & Adverse Events', path: '/incidents' },
+  { key: 'capa', label: 'CAPA', path: '/capa' },
+];
+
+export function NcCapaPage() {
+  const { isEnabled } = useModules();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const active = location.pathname.startsWith('/incidents') ? 'incidents'
+    : location.pathname.startsWith('/capa') ? 'capa' : 'nonconformities';
+  if (!isEnabled('nc_capa')) return <DisabledModule />;
+  return <div>
+    <PageHeader eyebrow="Nonconforming Event Management" title="Nonconforming Event Management"
+      subtitle="Nonconformities, incidents & adverse events, and corrective/preventive action — one connected workflow from logging to closure." />
+    <div className="tabs">{NC_TOP_TABS.map(t => <button key={t.key} type="button" className={active === t.key ? 'active' : ''} onClick={() => navigate(t.path)}>{t.label}</button>)}</div>
+    {active === 'nonconformities' && <NonconformitiesPage embedded />}
+    {active === 'incidents' && <IncidentsPage embedded />}
+    {active === 'capa' && <CapaPage embedded />}
+  </div>;
+}
+
+export function NonconformitiesPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { isEnabled } = useModules();
   const { staff, sections } = useLookupData();
   const cfg = useWorkflowConfig();
@@ -317,8 +361,8 @@ export function NonconformitiesPage() {
   const TABS = ['Register', 'Log Event', 'Risk Assessment', 'Root Cause Analysis'];
 
   return <div>
-    <PageHeader eyebrow="Nonconforming Event Management" title="Nonconformities"
-      subtitle="Log a nonconforming event, assess its risk, investigate the cause where it matters, then drive corrective action to closure." />
+    {!embedded && <PageHeader eyebrow="Nonconforming Event Management" title="Nonconformities"
+      subtitle="Log a nonconforming event, assess its risk, investigate the cause where it matters, then drive corrective action to closure." />}
     <Tabs tabs={TABS} tab={tab} setTab={setTab} counts={{ 'Risk Assessment': stages.risk, 'Root Cause Analysis': stages.rca }} />
     <Banner kind="error">{state.error}</Banner>
     <Banner kind="ok">{msg}</Banner>
@@ -457,7 +501,8 @@ function NcDetail({ nc, staff, sections, cfg, capa, onClose, onChanged, onError,
       <div>
         <h4 style={{ marginBottom: 4 }}>Root cause</h4>
         {n.root_cause
-          ? <p style={{ margin: 0 }}>{n.root_cause}<span className="muted" style={{ fontSize: 12 }}> · {(n.rca_method || '').replace(/_/g, ' ')}{n.investigation_team ? ` · ${n.investigation_team}` : ''}</span></p>
+          ? <p style={{ margin: 0 }}>{n.root_cause}<span className="muted" style={{ fontSize: 12 }}> · {(n.rca_method || '').replace(/_/g, ' ')}{n.investigation_team ? ` · ${n.investigation_team}` : ''}</span>
+            {n.rca_evidence_file_id ? <div style={{ fontSize: 12 }}><a href={`${API_BASE}/nonconformities/${nc.id}/rca-evidence`} target="_blank" rel="noreferrer">📎 View analysis sheet</a></div> : null}</p>
           : <p className="muted" style={{ margin: 0 }}>{n.rca_required ? 'Investigation outstanding — see the Root Cause Analysis tab.' : 'Not required for this event.'}</p>}
       </div>
     </div>
@@ -479,7 +524,7 @@ function NcDetail({ nc, staff, sections, cfg, capa, onClose, onChanged, onError,
 // Submodule 2 — Incidents & Adverse Events
 // ==========================================================================
 
-export function IncidentsPage() {
+export function IncidentsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { isEnabled } = useModules();
   const { staff, sections } = useLookupData();
   const cfg = useWorkflowConfig();
@@ -524,8 +569,8 @@ export function IncidentsPage() {
   const TABS = ['Register', 'Report Incident', 'Risk Assessment', 'Investigation'];
 
   return <div>
-    <PageHeader eyebrow="Nonconforming Event Management" title="Incidents &amp; Adverse Events"
-      subtitle="Report incidents, adverse events, occurrences and near-misses, then assess, investigate and act on them." />
+    {!embedded && <PageHeader eyebrow="Nonconforming Event Management" title="Incidents &amp; Adverse Events"
+      subtitle="Report incidents, adverse events, occurrences and near-misses, then assess, investigate and act on them." />}
     <Tabs tabs={TABS} tab={tab} setTab={setTab} counts={{ 'Risk Assessment': stages.risk, Investigation: stages.rca }} />
     <Banner kind="error">{error}</Banner>
     <Banner kind="ok">{msg}</Banner>
@@ -639,7 +684,8 @@ function IncidentDetail({ incident: i, cfg, onClose, onChanged, onError, onMsg }
       </div>
       <div>
         <h4 style={{ marginBottom: 4 }}>Investigation</h4>
-        {i.root_cause ? <p style={{ margin: 0 }}>{i.root_cause}<span className="muted" style={{ fontSize: 12 }}> · {(i.rca_method || '').replace(/_/g, ' ')}</span></p>
+        {i.root_cause ? <p style={{ margin: 0 }}>{i.root_cause}<span className="muted" style={{ fontSize: 12 }}> · {(i.rca_method || '').replace(/_/g, ' ')}</span>
+          {(i as any).rca_evidence_file_id ? <div style={{ fontSize: 12 }}><a href={`${API_BASE}/incidents/${i.id}/rca-evidence`} target="_blank" rel="noreferrer">📎 View analysis sheet</a></div> : null}</p>
           : <p className="muted" style={{ margin: 0 }}>{i.rca_required ? 'Outstanding — see the Investigation tab.' : 'Not required for this event.'}</p>}
       </div>
     </div>
@@ -710,7 +756,7 @@ function nextStepFor(c: any): { label: string; hint: string } {
   return { label: 'Close the CAPA', hint: 'Effectiveness is confirmed — record the closure.' };
 }
 
-export function CapaPage() {
+export function CapaPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { isEnabled } = useModules();
   const { staff } = useLookupData();
   const cfg = useWorkflowConfig();
@@ -751,8 +797,8 @@ export function CapaPage() {
   const TABS = ['Register', 'My Worklist', 'Overdue', 'Effectiveness Reviews'];
 
   return <div>
-    <PageHeader eyebrow="Nonconforming Event Management" title="Corrective &amp; Preventive Action (CAPA)"
-      subtitle="One register for every corrective and preventive action — from nonconformities, incidents, complaints or raised directly. Plan, implement, verify, prove it worked, close." />
+    {!embedded && <PageHeader eyebrow="Nonconforming Event Management" title="Corrective &amp; Preventive Action (CAPA)"
+      subtitle="One register for every corrective and preventive action — from nonconformities, incidents, complaints or raised directly. Plan, implement, verify, prove it worked, close." />}
     <Tabs tabs={TABS} tab={tab} setTab={setTab} counts={{ Overdue: summary?.overdue ?? 0, 'Effectiveness Reviews': summary?.awaitingEffectiveness ?? 0 }} />
     <Banner kind="error">{error}</Banner>
     <Banner kind="ok">{msg}</Banner>
