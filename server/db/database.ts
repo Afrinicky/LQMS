@@ -3200,6 +3200,17 @@ CREATE TABLE IF NOT EXISTS verification_parameters (
   updated_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_verification_parameters_study ON verification_parameters(verification_id);
+-- Raw data behind a performance characteristic (replicates for precision,
+-- test/comparator pairs for method comparison, measured/assigned for linearity).
+CREATE TABLE IF NOT EXISTS verification_datapoints (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  parameter_id INTEGER NOT NULL REFERENCES verification_parameters(id) ON DELETE CASCADE,
+  sample_label TEXT,
+  value_a REAL,
+  value_b REAL,
+  display_order INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_verification_datapoints_param ON verification_datapoints(parameter_id);
 `);
 
   // ===================================================================
