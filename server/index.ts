@@ -7,6 +7,7 @@ import setupRoutes from './routes/setup.js';
 import authRoutes from './routes/auth.js';
 import { commonRoutes } from './routes/common.js';
 import { nonconformityRoutes } from './routes/nonconformities.js';
+import { incidentRoutes } from './routes/incidents.js';
 import { capaRoutes } from './routes/capa.js';
 import { complaintsRoutes } from './routes/complaints.js';
 import { riskRoutes } from './routes/risks.js';
@@ -87,6 +88,7 @@ export function createApiServer() {
   app.use('/api/setup', setupRoutes);
   app.use('/api/auth', authRoutes);
   app.use('/api/nonconformities', nonconformityRoutes());
+  app.use('/api/incidents', incidentRoutes());
   app.use('/api/capa', capaRoutes());
   app.use('/api/complaints', complaintsRoutes());
   app.use('/api/risks', riskRoutes());

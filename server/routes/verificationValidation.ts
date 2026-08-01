@@ -9,6 +9,7 @@ import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
+import { mean, sd, cvPercent, linreg, round } from '../utils/stats.js';
 
 // ==========================================================================
 // Method Verification & Validation (ISO 15189:2022 §7.3.3 / CLSI EP series)
@@ -252,6 +253,61 @@ export function verificationValidationRoutes() {
   router.delete('/parameters/:pid', requirePermission('verification_validation', 'edit'), (req, res) => {
     getDb().prepare('DELETE FROM verification_parameters WHERE id = ?').run(req.params.pid);
     res.json({ ok: true });
+  });
+
+  // ---- Raw-data workbench: datapoints + auto-computed statistics ----
+  router.get('/parameters/:pid/datapoints', requirePermission('verification_validation', 'view'), (req, res) => {
+    res.json(getDb().prepare('SELECT * FROM verification_datapoints WHERE parameter_id = ? ORDER BY display_order, id').all(req.params.pid));
+  });
+  // Replace the whole datapoint set for a parameter.
+  router.post('/parameters/:pid/datapoints', requirePermission('verification_validation', 'edit'), (req, res) => {
+    const db = getDb();
+    if (!db.prepare('SELECT id FROM verification_parameters WHERE id = ?').get(req.params.pid)) return res.status(404).json({ error: 'Parameter not found' });
+    const points: Array<{ sampleLabel?: string; valueA?: unknown; valueB?: unknown }> = Array.isArray(req.body.points) ? req.body.points : [];
+    const num = (v: unknown) => { const n = Number(v); return v === '' || v === null || v === undefined || !Number.isFinite(n) ? null : n; };
+    const tx = db.transaction(() => {
+      db.prepare('DELETE FROM verification_datapoints WHERE parameter_id = ?').run(req.params.pid);
+      const ins = db.prepare('INSERT INTO verification_datapoints (parameter_id, sample_label, value_a, value_b, display_order) VALUES (?, ?, ?, ?, ?)');
+      points.forEach((p, i) => { if (num(p.valueA) !== null || num(p.valueB) !== null || (p.sampleLabel && String(p.sampleLabel).trim())) ins.run(req.params.pid, p.sampleLabel ?? null, num(p.valueA), num(p.valueB), i + 1); });
+    });
+    tx();
+    res.json({ ok: true });
+  });
+  // Compute the statistic appropriate to the characteristic and write it back to
+  // the parameter's observed/statistic fields.
+  router.post('/parameters/:pid/compute', requirePermission('verification_validation', 'edit'), (req, res) => {
+    const db = getDb();
+    const p = db.prepare('SELECT * FROM verification_parameters WHERE id = ?').get(req.params.pid) as any;
+    if (!p) return res.status(404).json({ error: 'Parameter not found' });
+    const pts = db.prepare('SELECT * FROM verification_datapoints WHERE parameter_id = ? ORDER BY display_order, id').all(req.params.pid) as any[];
+    const a = pts.map(d => Number(d.value_a)).filter(v => Number.isFinite(v));
+    const b = pts.map(d => Number(d.value_b)).filter(v => Number.isFinite(v));
+    const code = p.parameter as string;
+    let observed = '', statLabel = p.statistic_label, statVal = '', n = a.length;
+    if (/^precision|reproducibility/.test(code)) {
+      const m = mean(a), s = sd(a), cv = cvPercent(a);
+      statLabel = 'CV%'; statVal = round(cv, 2)?.toString() ?? '';
+      observed = cv != null ? `CV ${round(cv, 2)}% (mean ${round(m, 3)}, SD ${round(s, 3)}, n=${n})` : '';
+    } else if (/trueness|bias|interference/.test(code)) {
+      const target = Number(p.claimed_value);
+      const m = mean(a);
+      if (Number.isFinite(target) && target !== 0 && m != null) { const bias = (m - target) / target * 100; statLabel = 'Bias%'; statVal = round(bias, 2)?.toString() ?? ''; observed = `Bias ${round(bias, 2)}% (mean ${round(m, 3)} vs target ${target}, n=${n})`; }
+      else if (m != null) { observed = `mean ${round(m, 3)} (n=${n}); set a claimed/target value to compute bias%`; }
+    } else if (code === 'method_comparison') {
+      const reg = linreg(b, a); // y = test (a) on x = comparator (b)
+      if (reg) { statLabel = 'Slope; r'; statVal = `${round(reg.slope, 3)}; ${round(reg.r, 3)}`; observed = `y = ${round(reg.slope, 3)}x ${reg.intercept >= 0 ? '+' : '−'} ${Math.abs(round(reg.intercept, 3) ?? 0)}, r = ${round(reg.r, 4)} (n=${reg.n})`; n = reg.n; }
+      else observed = 'Enter test (A) and comparator (B) pairs to compute regression';
+    } else if (code === 'linearity') {
+      const reg = linreg(b, a); // measured (a) vs assigned (b)
+      if (reg) { statLabel = 'r²'; statVal = round(reg.r2, 4)?.toString() ?? ''; observed = `r² = ${round(reg.r2, 4)}, slope = ${round(reg.slope, 3)} (n=${reg.n})`; n = reg.n; }
+      else observed = 'Enter measured (A) and assigned (B) pairs to compute linearity';
+    } else {
+      const m = mean(a), s = sd(a);
+      if (m != null) { statVal = round(m, 3)?.toString() ?? ''; observed = `mean ${round(m, 3)}${s != null ? `, SD ${round(s, 3)}` : ''} (n=${n})`; }
+    }
+    db.prepare('UPDATE verification_parameters SET observed_value = ?, statistic_label = ?, statistic_value = ?, n_samples = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(observed || p.observed_value, statLabel || p.statistic_label, statVal || p.statistic_value, n || p.n_samples, req.params.pid);
+    res.json({ ok: true, observed, statisticLabel: statLabel, statisticValue: statVal, n });
   });
 
   // Attach / insert the verification or validation report (a scanned or generated file).

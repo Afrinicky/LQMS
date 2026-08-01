@@ -10,6 +10,7 @@ import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import { api, API_BASE, getToken } from '../services/api';
 import type { OfficeFileChangedPayload } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
+import DocumentScanner from '../components/DocumentScanner';
 import type {
   Section, Department, Staff, Position,
   DocumentRecord, DocumentAttestation, DocumentControlSummary, DistributionInboxEntry, VersionContent,
@@ -870,7 +871,12 @@ export function DocumentControlPage() {
       <label>Controlled locations / distribution<input value={docForm.controlledLocations} onChange={e => setDocForm({ ...docForm, controlledLocations: e.target.value })} placeholder="e.g. All laboratory computers; QM Master File" /></label>
       <label>Retention period<input value={docForm.retentionPeriod} onChange={e => setDocForm({ ...docForm, retentionPeriod: e.target.value })} placeholder="e.g. 5 years after obsolescence" /></label>
       <label>Remarks<input value={docForm.remarks} onChange={e => setDocForm({ ...docForm, remarks: e.target.value })} /></label>
-      <label>File upload (PDF/Word — title, number &amp; content are read automatically)<input type="file" accept=".pdf,.doc,.docx,.txt,.md,.rtf,.odt" onChange={e => onPickNewDocFile(e.target.files?.[0] ?? null)} /></label>
+      <label>File upload (PDF/Word — title, number &amp; content are read automatically)
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input type="file" accept=".pdf,.doc,.docx,.txt,.md,.rtf,.odt" onChange={e => onPickNewDocFile(e.target.files?.[0] ?? null)} />
+          <DocumentScanner onCapture={f => onPickNewDocFile(f)} buttonLabel="📷 Scan signed copy" />
+        </div>
+      </label>
       <button type="submit">Create document (Draft)</button>
     </form>}
 

@@ -3200,6 +3200,87 @@ CREATE TABLE IF NOT EXISTS verification_parameters (
   updated_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_verification_parameters_study ON verification_parameters(verification_id);
+-- Raw data behind a performance characteristic (replicates for precision,
+-- test/comparator pairs for method comparison, measured/assigned for linearity).
+CREATE TABLE IF NOT EXISTS verification_datapoints (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  parameter_id INTEGER NOT NULL REFERENCES verification_parameters(id) ON DELETE CASCADE,
+  sample_label TEXT,
+  value_a REAL,
+  value_b REAL,
+  display_order INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_verification_datapoints_param ON verification_datapoints(parameter_id);
+`);
+
+  // ===================================================================
+  // Nonconformity form (SECHFO005) + Incident / Adverse Event management
+  // The NC record is extended to the full Nonconformance Corrective Action Form:
+  // Section A (type, description, immediate + remedial action), Section B (5x5
+  // risk evaluation), Section C (root cause analysis), Section D (CAPA),
+  // Section E (follow-up & effectiveness), Section F (approvals). Incidents /
+  // adverse events / occurrences are managed in their own register with the same
+  // 5x5 risk model (ISO 15189:2022 risk management; ISO 22367).
+  // -------------------------------------------------------------------
+  {
+    const ncCols = new Set((database.prepare('PRAGMA table_info(nonconforming_events)').all() as Array<{ name: string }>).map(c => c.name));
+    for (const [col, type] of [
+      ['time_of_event', 'TEXT'], ['detected_by_name', 'TEXT'], ['nc_type', 'TEXT'], ['nc_type_other', 'TEXT'],
+      ['remedial_action', 'TEXT'], ['occurrence_score', 'INTEGER'], ['severity_score', 'INTEGER'], ['risk_score', 'INTEGER'], ['risk_level', 'TEXT'],
+      ['investigation_team', 'TEXT'], ['root_cause', 'TEXT'], ['rca_method', 'TEXT'], ['rca_evidence_file_id', 'INTEGER'],
+      ['corrective_action', 'TEXT'], ['preventive_action', 'TEXT'], ['capa_responsible_staff_id', 'INTEGER'], ['capa_timeline_date', 'TEXT'],
+      ['effectiveness_reviewed_by_staff_id', 'INTEGER'], ['effectiveness_review_date', 'TEXT'], ['corrective_effective', 'INTEGER'], ['effectiveness_comments', 'TEXT'],
+      ['approved_by_staff_id', 'INTEGER'], ['approved_at', 'TEXT'], ['approval_comments', 'TEXT'],
+    ] as const) {
+      if (!ncCols.has(col)) database.exec(`ALTER TABLE nonconforming_events ADD COLUMN ${col} ${type}`);
+    }
+  }
+  database.exec(`
+CREATE TABLE IF NOT EXISTS incidents (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  incident_number TEXT NOT NULL UNIQUE,
+  incident_datetime TEXT,
+  incident_type TEXT,                  -- patient_safety, staff_safety, near_miss, sentinel_event, biosafety_exposure, needlestick, specimen_related, equipment_related, data_security, fire_disaster, other
+  incident_type_other TEXT,
+  is_near_miss INTEGER NOT NULL DEFAULT 0,
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  location_text TEXT,
+  persons_involved TEXT,
+  description TEXT,
+  immediate_action TEXT,
+  harm_level TEXT,                     -- none, minor, moderate, severe, death
+  occurrence_score INTEGER,
+  severity_score INTEGER,
+  risk_score INTEGER,
+  risk_level TEXT,
+  reported_by_staff_id INTEGER REFERENCES staff(id),
+  reported_by_name TEXT,
+  reported_at TEXT,
+  investigation_team TEXT,
+  root_cause TEXT,
+  rca_method TEXT,
+  contributing_factors TEXT,
+  corrective_action TEXT,
+  preventive_action TEXT,
+  notified_to TEXT,
+  reportable_external INTEGER NOT NULL DEFAULT 0,
+  external_authority TEXT,
+  nc_id INTEGER REFERENCES nonconforming_events(id),
+  capa_id INTEGER REFERENCES capa_records(id),
+  status TEXT NOT NULL DEFAULT 'reported',   -- reported, under_investigation, action_in_progress, closed
+  reviewed_by_staff_id INTEGER REFERENCES staff(id),
+  reviewed_at TEXT,
+  approved_by_staff_id INTEGER REFERENCES staff(id),
+  approved_at TEXT,
+  evidence_file_id INTEGER REFERENCES files(id),
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status);
+CREATE INDEX IF NOT EXISTS idx_incidents_type ON incidents(incident_type);
 `);
 
   // ===================================================================

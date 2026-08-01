@@ -208,7 +208,7 @@ export function VerificationValidationPage({ embedded = false }: { embedded?: bo
       {selected && <StudyWorkspace study={selected} staff={staff} sections={sections} equipment={equipment} catalogue={catalogue}
         canManage={!!canManage} addParam={addParam} setAddParam={setAddParam} onAddParam={addParameter} onSeed={seedStandard}
         onSaveHeader={saveHeader} onSaveParam={saveParam} onDelParam={delParam} onReview={review} onAuthorize={authorize}
-        onDelete={() => removeStudy(selected.id)} onClose={() => setSelected(null)} onPrint={() => openPrint(`/verification-validation/${selected.id}/print`, setError)}
+        onDelete={() => removeStudy(selected.id)} onClose={() => setSelected(null)} onPrint={() => openPrint(`/verification-validation/${selected.id}/print`, setError)} onRefresh={refreshSelected}
         reportRef={reportRef} onUploadReport={uploadReport} setError={setError} />}
     </>}
 
@@ -283,14 +283,15 @@ export function VerificationValidationPage({ embedded = false }: { embedded?: bo
 }
 
 // ---- Study detail workspace ----
-function StudyWorkspace({ study, staff, sections, equipment, catalogue, canManage, addParam, setAddParam, onAddParam, onSeed, onSaveHeader, onSaveParam, onDelParam, onReview, onAuthorize, onDelete, onClose, onPrint, reportRef, onUploadReport, setError }: {
+function StudyWorkspace({ study, staff, sections, equipment, catalogue, canManage, addParam, setAddParam, onAddParam, onSeed, onSaveHeader, onSaveParam, onDelParam, onReview, onAuthorize, onDelete, onClose, onPrint, onRefresh, reportRef, onUploadReport, setError }: {
   study: Study; staff: Staff[]; sections: Section[]; equipment: EquipmentItem[]; catalogue: Record<string, { label: string; stat: string; unit?: string }>;
   canManage: boolean; addParam: string; setAddParam: (v: string) => void; onAddParam: () => void; onSeed: () => void;
   onSaveHeader: (p: Record<string, unknown>) => void; onSaveParam: (pid: number, p: Record<string, unknown>) => void; onDelParam: (pid: number) => void;
-  onReview: () => void; onAuthorize: (a: boolean, reject?: boolean) => void; onDelete: () => void; onClose: () => void; onPrint: () => void;
+  onReview: () => void; onAuthorize: (a: boolean, reject?: boolean) => void; onDelete: () => void; onClose: () => void; onPrint: () => void; onRefresh: () => void;
   reportRef: React.RefObject<HTMLInputElement>; onUploadReport: (f: File) => void; setError: (m: string | null) => void;
 }) {
   const [showEdit, setShowEdit] = useState(false);
+  const [dataFor, setDataFor] = useState<VParam | null>(null);
   const failed = study.parameters.filter(p => p.outcome === 'fail').length;
   const pending = study.parameters.filter(p => p.outcome === 'pending').length;
   const suggested = failed ? 'not_acceptable' : pending ? 'pending' : 'acceptable';
@@ -339,11 +340,12 @@ function StudyWorkspace({ study, staff, sections, equipment, catalogue, canManag
           <td>{canManage ? <input defaultValue={p.n_samples ?? ''} type="number" style={{ width: 52 }} onBlur={e => onSaveParam(p.id, { nSamples: e.target.value })} /> : (p.n_samples ?? '—')}</td>
           <td>{canManage ? <select defaultValue={p.outcome} onChange={e => onSaveParam(p.id, { outcome: e.target.value })}>{OUTCOMES.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}</select> : outcomeChip(p.outcome)}</td>
           <td>{canManage ? <input defaultValue={p.notes || ''} style={{ width: 140 }} onBlur={e => onSaveParam(p.id, { notes: e.target.value })} /> : (p.notes || '—')}</td>
-          {canManage && <td><button type="button" className="secondary" onClick={() => onDelParam(p.id)}>×</button></td>}
+          {canManage && <td style={{ whiteSpace: 'nowrap' }}><button type="button" className="secondary" onClick={() => setDataFor(p)}>Data</button> <button type="button" className="secondary" onClick={() => onDelParam(p.id)}>×</button></td>}
         </tr>)}
         {study.parameters.length === 0 && <tr><td colSpan={canManage ? 8 : 7} className="muted">No characteristics yet — add the standard set below.</td></tr>}
       </tbody></table>
     </div>
+    {dataFor && <ParamDataEditor param={dataFor} onClose={() => setDataFor(null)} onComputed={onRefresh} setError={setError} />}
     {canManage && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 8 }}>
       <select value={addParam} onChange={e => setAddParam(e.target.value)}><option value="">Add a characteristic…</option>{Object.entries(catalogue).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select>
       <button type="button" onClick={onAddParam} disabled={!addParam}>+ Add</button>
@@ -382,5 +384,51 @@ function StudyWorkspace({ study, staff, sections, equipment, catalogue, canManag
         {failed > 0 && <p className="muted" style={{ color: '#c1121f', fontSize: 12, marginTop: 8 }}>{failed} characteristic(s) failed — authorising will record a <strong>not acceptable</strong> verdict and raise a nonconformity.</p>}
       </div>
     </div>
+  </div>;
+}
+
+// ---- Raw-data workbench for a single performance characteristic ----
+type DP = { sampleLabel: string; valueA: string; valueB: string };
+function ParamDataEditor({ param, onClose, onComputed, setError }: { param: VParam; onClose: () => void; onComputed: () => void; setError: (m: string | null) => void }) {
+  const paired = param.parameter === 'method_comparison' || param.parameter === 'linearity';
+  const bLabel = param.parameter === 'method_comparison' ? 'Comparator (B)' : param.parameter === 'linearity' ? 'Assigned (B)' : 'Value B';
+  const aLabel = param.parameter === 'method_comparison' ? 'Test method (A)' : param.parameter === 'linearity' ? 'Measured (A)' : 'Value';
+  const [rows, setRows] = useState<DP[]>([]);
+  const [computed, setComputed] = useState<string>('');
+  useEffect(() => {
+    api<Array<{ sample_label: string | null; value_a: number | null; value_b: number | null }>>(`/verification-validation/parameters/${param.id}/datapoints`)
+      .then(dp => setRows(dp.length ? dp.map(d => ({ sampleLabel: d.sample_label || '', valueA: d.value_a == null ? '' : String(d.value_a), valueB: d.value_b == null ? '' : String(d.value_b) })) : Array.from({ length: 5 }, () => ({ sampleLabel: '', valueA: '', valueB: '' }))))
+      .catch(() => setRows(Array.from({ length: 5 }, () => ({ sampleLabel: '', valueA: '', valueB: '' }))));
+  }, [param.id]);
+  function setCell(i: number, k: keyof DP, v: string) { setRows(r => r.map((row, idx) => idx === i ? { ...row, [k]: v } : row)); }
+  async function saveCompute() {
+    setError(null);
+    try {
+      await api(`/verification-validation/parameters/${param.id}/datapoints`, { method: 'POST', body: JSON.stringify({ points: rows }) });
+      const r = await api<{ observed: string }>(`/verification-validation/parameters/${param.id}/compute`, { method: 'POST', body: JSON.stringify({}) });
+      setComputed(r.observed || 'No result — check your data.');
+      onComputed();
+    } catch (e) { setError((e as Error).message); }
+  }
+  const help = param.parameter === 'method_comparison' ? 'Enter paired results: your test method (A) against the comparator/reference (B). Slope, intercept and Pearson r are computed by least squares.'
+    : param.parameter === 'linearity' ? 'Enter measured (A) against assigned/expected (B) values across the range. r² and slope are computed.'
+    : /^precision|reproducibility/.test(param.parameter) ? 'Enter the replicate results. Mean, SD and CV% are computed.'
+    : /trueness|bias|interference/.test(param.parameter) ? 'Enter the replicate results; set a claimed/target value on the row to compute bias%.'
+    : 'Enter the values; mean and SD are computed.';
+  return <div className="card" style={{ marginTop: 12, background: 'var(--panel-2, #f6f8fc)' }}>
+    <div className="section-head" style={{ alignItems: 'center' }}><h4 style={{ margin: 0 }}>Raw data — {param.parameter_label}</h4><button className="secondary" style={{ marginLeft: 'auto' }} onClick={onClose}>Close</button></div>
+    <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>{help}</p>
+    <table className="data-table" style={{ maxWidth: 520 }}><thead><tr><th>Sample</th><th>{aLabel}</th>{paired && <th>{bLabel}</th>}</tr></thead><tbody>
+      {rows.map((row, i) => <tr key={i}>
+        <td><input value={row.sampleLabel} onChange={e => setCell(i, 'sampleLabel', e.target.value)} style={{ width: 120 }} placeholder={`#${i + 1}`} /></td>
+        <td><input type="number" step="any" value={row.valueA} onChange={e => setCell(i, 'valueA', e.target.value)} style={{ width: 110 }} /></td>
+        {paired && <td><input type="number" step="any" value={row.valueB} onChange={e => setCell(i, 'valueB', e.target.value)} style={{ width: 110 }} /></td>}
+      </tr>)}
+    </tbody></table>
+    <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+      <button type="button" className="secondary" onClick={() => setRows(r => [...r, { sampleLabel: '', valueA: '', valueB: '' }])}>+ Add row</button>
+      <button type="button" onClick={saveCompute}>Save &amp; compute</button>
+    </div>
+    {computed && <div className="notice-ok" style={{ marginTop: 8 }}>Computed: <strong>{computed}</strong> — written to the characteristic's observed value.</div>}
   </div>;
 }
