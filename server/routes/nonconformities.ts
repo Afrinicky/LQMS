@@ -10,6 +10,7 @@ import { generateRecordNumber } from '../utils/recordNumber.js';
 import multer from 'multer';
 import { getStaffIdOrCurrent } from './routeHelpers.js';
 import { computeRisk, SEVERITY, OCCURRENCE, RISK_BANDS } from '../utils/riskMatrix.js';
+import { workflowConfig, decideEscalation, createCapaForNc, canAmendRecords, RECORD_AMEND_ROLES } from '../utils/escalation.js';
 import { buildWorkbook, sendWorkbook, readSheet, cell, numCell } from '../utils/xlsxRegister.js';
 
 const ncXlsxUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
@@ -36,19 +37,12 @@ const NC_FIELDS: Array<[string, string]> = [
   ['department_id', 'departmentId#'], ['section_id', 'sectionId#'], ['source_module', 'sourceModule'], ['source_record_id', 'sourceRecordId'],
   ['title', 'title'], ['description', 'description'], ['nc_type', 'ncType'], ['nc_type_other', 'ncTypeOther'], ['category', 'category'],
   ['immediate_correction', 'immediateCorrection'], ['remedial_action', 'remedialAction'], ['patient_or_service_impact', 'patientOrServiceImpact'],
+  ['affects_patient_safety', 'affectsPatientSafety?'],
   ['occurrence_score', 'occurrenceScore#'], ['severity_score', 'severityScore#'],
   ['investigation_team', 'investigationTeam'], ['root_cause', 'rootCause'], ['rca_method', 'rcaMethod'], ['rca_evidence_file_id', 'rcaEvidenceFileId#'],
   ['corrective_action', 'correctiveAction'], ['preventive_action', 'preventiveAction'], ['capa_responsible_staff_id', 'capaResponsibleStaffId#'], ['capa_timeline_date', 'capaTimelineDate'],
   ['effectiveness_reviewed_by_staff_id', 'effectivenessReviewedByStaffId#'], ['effectiveness_review_date', 'effectivenessReviewDate'], ['corrective_effective', 'correctiveEffective?'], ['effectiveness_comments', 'effectivenessComments'],
 ];
-
-// Shared quality-workflow settings (key/value). remedialActionEnabled controls
-// whether a separate "remedial / short-term correction" field is captured — some
-// standards do not require it, so laboratories can switch it off.
-export function ncWorkflowConfig(db: any) {
-  const row = db.prepare("SELECT value FROM settings WHERE key = 'nc.remedialActionEnabled'").get() as { value: string } | undefined;
-  return { remedialActionEnabled: row ? row.value === '1' : true };
-}
 
 export function nonconformityRoutes() {
   const router = Router();
@@ -64,14 +58,26 @@ export function nonconformityRoutes() {
     const db = getDb();
     const canFollowUp = resolvePermission(req.user!.id, 'nc_capa', 'edit').allowed || resolvePermission(req.user!.id, 'nc_capa', 'approve').allowed;
     const canCreate = resolvePermission(req.user!.id, 'nc_capa', 'create').allowed;
-    res.json({ ...ncWorkflowConfig(db), canFollowUp, canCreate });
+    // Amending an already-logged event is restricted to senior quality roles so
+    // the record of what was originally reported stays trustworthy.
+    const canAmend = canAmendRecords(db, req.user!.roleId);
+    res.json({ ...workflowConfig(db), canFollowUp, canCreate, canAmend, amendRoles: RECORD_AMEND_ROLES });
   });
   router.put('/config', requirePermission('settings', 'edit'), (req, res) => {
     const db = getDb();
-    const enabled = req.body.remedialActionEnabled === true || req.body.remedialActionEnabled === 'true' || req.body.remedialActionEnabled === 1 || req.body.remedialActionEnabled === '1' ? '1' : '0';
-    db.prepare("INSERT INTO settings (key, value) VALUES ('nc.remedialActionEnabled', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP").run(enabled);
-    audit(req, { action: 'edit', entity: 'settings', entityId: 'nc.remedialActionEnabled', newValue: { remedialActionEnabled: enabled === '1' } });
-    res.json(ncWorkflowConfig(db));
+    const put = (key: string, value: string) => db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP').run(key, value);
+    const asFlag = (v: unknown) => (v === true || v === 'true' || v === 1 || v === '1') ? '1' : '0';
+    if (req.body.remedialActionEnabled !== undefined) put('nc.remedialActionEnabled', asFlag(req.body.remedialActionEnabled));
+    if (req.body.autoEscalatePatientSafety !== undefined) put('nc.autoEscalatePatientSafety', asFlag(req.body.autoEscalatePatientSafety));
+    if (req.body.autoCreateCapaOnEscalation !== undefined) put('nc.autoCreateCapaOnEscalation', asFlag(req.body.autoCreateCapaOnEscalation));
+    if (req.body.autoEscalateRiskLevel !== undefined) {
+      const lvl = String(req.body.autoEscalateRiskLevel);
+      if (!['off', 'moderate', 'high', 'very_high'].includes(lvl)) return res.status(400).json({ error: 'autoEscalateRiskLevel must be off, moderate, high or very_high.' });
+      put('nc.autoEscalateRiskLevel', lvl);
+    }
+    const cfg = workflowConfig(db);
+    audit(req, { action: 'edit', entity: 'settings', entityId: 'nc.workflow', newValue: cfg });
+    res.json(cfg);
   });
 
   router.get('/', requirePermission('nc_capa', 'view'), (_req, res) => {
@@ -123,6 +129,11 @@ export function nonconformityRoutes() {
     } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
 
+  // The facts as originally logged. Amending these rewrites the account of what
+  // happened, so it is reserved for senior quality roles.
+  const LOGGED_FACT_KEYS = ['eventDate', 'timeOfEvent', 'detectedByStaffId', 'detectedByName', 'sectionId', 'departmentId',
+    'title', 'description', 'ncType', 'ncTypeOther', 'immediateCorrection', 'remedialAction'];
+
   // Resolve a field value from the request body, honouring the type marker on
   // the mapping key: '#' → integer, '?' → tri-state boolean (0/1/null).
   function bodyVal(body: any, key: string): unknown {
@@ -167,6 +178,12 @@ export function nonconformityRoutes() {
     const db = getDb();
     const o = db.prepare('SELECT * FROM nonconforming_events WHERE id = ?').get(req.params.id) as any;
     if (!o) return res.status(404).json({ error: 'Nonconforming event not found' });
+    // The facts as originally logged are locked to senior quality roles so they
+    // cannot be quietly rewritten; the follow-up fields stay open to reviewers.
+    const touchesLogged = LOGGED_FACT_KEYS.some(k => req.body[k] !== undefined);
+    if (touchesLogged && !canAmendRecords(db, req.user!.roleId)) {
+      return res.status(403).json({ error: `Only a ${RECORD_AMEND_ROLES.join(', ')} can amend the logged details of a nonconformity. You can still record the risk assessment, root-cause analysis and actions.` });
+    }
     // Only update fields that were supplied; recompute risk when either score changes.
     const sets: string[] = []; const vals: unknown[] = [];
     for (const [col, key] of NC_FIELDS) {
@@ -218,14 +235,30 @@ export function nonconformityRoutes() {
     if (!o) return res.status(404).json({ error: 'Nonconforming event not found' });
     const risk = computeRisk(req.body.occurrenceScore, req.body.severityScore);
     if (risk.score == null) return res.status(400).json({ error: 'Select both an occurrence and a severity score to complete the risk assessment.' });
-    const rcaRequired = req.body.rcaRequired === true || req.body.rcaRequired === 'true' || req.body.rcaRequired === 1 || req.body.rcaRequired === '1' ? 1 : 0;
+    const manualRca = req.body.rcaRequired === true || req.body.rcaRequired === 'true' || req.body.rcaRequired === 1 || req.body.rcaRequired === '1';
+    // The patient-safety flag may be set at logging or confirmed here.
+    const affectsPatientSafety = req.body.affectsPatientSafety !== undefined
+      ? (req.body.affectsPatientSafety === true || req.body.affectsPatientSafety === 'true' || req.body.affectsPatientSafety === 1 || req.body.affectsPatientSafety === '1')
+      : !!o.affects_patient_safety;
+    const cfg = workflowConfig(db);
+    const decision = decideEscalation(cfg, { riskLevel: risk.level, affectsPatientSafety, manualRcaRequired: manualRca });
     const assessedBy = getStaffIdOrCurrent(req, req.body.assessedByStaffId);
-    const stage = rcaRequired ? 'rca' : 'capa';
+    const stage = decision.rcaRequired ? 'rca' : 'capa';
     db.prepare(`UPDATE nonconforming_events SET occurrence_score = ?, severity_score = ?, risk_score = ?, risk_level = ?, severity = COALESCE(severity, ?), impact_level = COALESCE(impact_level, ?),
-        rca_required = ?, risk_assessment_notes = ?, risk_assessed_by_staff_id = ?, risk_assessed_at = CURRENT_TIMESTAMP, workflow_stage = ?, status = CASE WHEN status = 'open' THEN 'reviewed' ELSE status END, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-      .run(risk.occurrence, risk.severity, risk.score, risk.level, risk.levelLabel ?? null, risk.levelLabel ?? null, rcaRequired, req.body.notes ?? null, assessedBy, stage, req.params.id);
-    audit(req, { action: 'edit', entity: 'nonconforming_events', entityId: req.params.id, newValue: { stage: 'risk_assessment', riskScore: risk.score, rcaRequired } });
-    res.json({ ok: true, riskScore: risk.score, riskLevel: risk.level, rcaRequired: !!rcaRequired, workflowStage: stage });
+        rca_required = ?, affects_patient_safety = ?, escalation_reason = ?, risk_assessment_notes = ?, risk_assessed_by_staff_id = ?, risk_assessed_at = CURRENT_TIMESTAMP, workflow_stage = ?,
+        status = CASE WHEN status = 'open' THEN 'reviewed' ELSE status END, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(risk.occurrence, risk.severity, risk.score, risk.level, risk.levelLabel ?? null, risk.levelLabel ?? null,
+        decision.rcaRequired ? 1 : 0, affectsPatientSafety ? 1 : 0, decision.reason, req.body.notes ?? null, assessedBy, stage, req.params.id);
+
+    // An escalated event gets its corrective-action record raised immediately so
+    // it can never sit unattended between assessment and CAPA planning.
+    let capa: { id: number; capaNumber: string } | null = null;
+    if (decision.createCapa) {
+      capa = createCapaForNc(db, req.params.id, req.user!.id, decision.reason);
+      if (capa) db.prepare("UPDATE nonconforming_events SET status = 'capa_required', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
+    }
+    audit(req, { action: 'edit', entity: 'nonconforming_events', entityId: req.params.id, newValue: { stage: 'risk_assessment', riskScore: risk.score, rcaRequired: decision.rcaRequired, escalated: decision.escalated, capa: capa?.capaNumber } });
+    res.json({ ok: true, riskScore: risk.score, riskLevel: risk.level, rcaRequired: decision.rcaRequired, workflowStage: stage, escalated: decision.escalated, escalationReason: decision.reason, capaNumber: capa?.capaNumber ?? null });
   });
 
   // Stage 3 — Root cause analysis. Only events flagged as requiring RCA reach

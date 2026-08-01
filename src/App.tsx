@@ -8,7 +8,8 @@ import { API_BASE, getSetupStatus } from './services/api';
 import { LoginPage, SetupPage } from './pages/AuthPages';
 import { Dashboard, Home, ModulePage } from './pages/CorePages';
 import { ActionTracker, DocumentImport, EvidenceUpload, MyLaboratory, PeopleAccess, SectionConfig, SystemSettings, RosterSettings } from './pages/SettingsPages';
-import { NcCapaPage, ComplaintsPage, RisksPage, QmsActionTracker } from './pages/QMSPages';
+import { ComplaintsPage, RisksPage, QmsActionTracker } from './pages/QMSPages';
+import { NonconformitiesPage, IncidentsPage, CapaPage } from './pages/NcCapaPages';
 import { MODULES } from '../shared/constants/modules';
 import { FlaskConical, TriangleAlert } from 'lucide-react';
 import { WaveBackground } from './components/ui';
@@ -177,7 +178,11 @@ function AppRoutes() {
       <Route path="/dennis" element={<Suspense fallback={<ModuleFallback/>}><DennisPage/></Suspense>}/>
       <Route path="/organisation" element={<Suspense fallback={<ModuleFallback/>}><OrganisationPage/></Suspense>}/>
       <Route path="/personnel" element={<Suspense fallback={<ModuleFallback/>}><PersonnelManagementPage/></Suspense>}/>
-      <Route path="/nc-capa" element={<NcCapaPage/>}/>
+      {/* Nonconforming Event Management — three sibling submodules. */}
+      <Route path="/nonconformities" element={<NonconformitiesPage/>}/>
+      <Route path="/incidents" element={<IncidentsPage/>}/>
+      <Route path="/capa" element={<CapaPage/>}/>
+      <Route path="/nc-capa" element={<Navigate to="/nonconformities" replace/>}/>
       <Route path="/complaints" element={<ComplaintsPage/>}/>
       <Route path="/risks" element={<RisksPage/>}/>
       <Route path="/actions" element={<QmsActionTracker/>}/>

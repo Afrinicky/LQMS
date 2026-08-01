@@ -6,6 +6,7 @@ import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import { computeRisk } from '../utils/riskMatrix.js';
+import { workflowConfig, decideEscalation, createCapaForIncident, canAmendRecords, RECORD_AMEND_ROLES } from '../utils/escalation.js';
 import { buildWorkbook, sendWorkbook, readSheet, cell, numCell } from '../utils/xlsxRegister.js';
 
 const incXlsxUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
@@ -24,13 +25,18 @@ const INCIDENT_TYPES = ['patient_safety', 'staff_safety', 'near_miss', 'sentinel
 const INCIDENT_FIELDS: Array<[string, string]> = [
   ['incident_datetime', 'incidentDatetime'], ['incident_type', 'incidentType'], ['incident_type_other', 'incidentTypeOther'], ['is_near_miss', 'isNearMiss?'],
   ['department_id', 'departmentId#'], ['section_id', 'sectionId#'], ['location_text', 'locationText'], ['persons_involved', 'personsInvolved'],
-  ['description', 'description'], ['immediate_action', 'immediateAction'], ['harm_level', 'harmLevel'],
+  ['description', 'description'], ['immediate_action', 'immediateAction'], ['harm_level', 'harmLevel'], ['affects_patient_safety', 'affectsPatientSafety?'],
   ['reported_by_staff_id', 'reportedByStaffId#'], ['reported_by_name', 'reportedByName'],
   ['investigation_team', 'investigationTeam'], ['root_cause', 'rootCause'], ['rca_method', 'rcaMethod'], ['contributing_factors', 'contributingFactors'],
   ['corrective_action', 'correctiveAction'], ['preventive_action', 'preventiveAction'],
   ['notified_to', 'notifiedTo'], ['reportable_external', 'reportableExternal?'], ['external_authority', 'externalAuthority'],
   ['evidence_file_id', 'evidenceFileId#'], ['notes', 'notes'],
 ];
+// The facts as originally reported. Changing these after the fact rewrites the
+// account of what happened, so it is reserved for senior quality roles.
+const REPORTED_FACT_KEYS = ['incidentDatetime', 'incidentType', 'incidentTypeOther', 'isNearMiss', 'sectionId', 'departmentId',
+  'locationText', 'personsInvolved', 'description', 'immediateAction', 'harmLevel', 'reportedByStaffId', 'reportedByName'];
+
 function bodyVal(body: any, key: string): unknown {
   if (key.endsWith('#')) return parseIntNullable(body[key.slice(0, -1)]);
   if (key.endsWith('?')) { const v = body[key.slice(0, -1)]; return v === undefined || v === '' || v === null ? 0 : (v === true || v === 'true' || v === 1 || v === '1' ? 1 : 0); }
@@ -129,6 +135,12 @@ export function incidentRoutes() {
     const db = getDb();
     const o = db.prepare('SELECT * FROM incidents WHERE id = ?').get(req.params.id) as any;
     if (!o) return res.status(404).json({ error: 'Incident not found' });
+    // As with nonconformities, the originally reported facts are locked to
+    // senior quality roles. Investigation fields stay open to any reviewer.
+    const touchesReported = REPORTED_FACT_KEYS.some(k => req.body[k] !== undefined);
+    if (touchesReported && !canAmendRecords(db, req.user!.roleId)) {
+      return res.status(403).json({ error: `Only a ${RECORD_AMEND_ROLES.join(', ')} can amend the reported details of an incident. You can still record the risk assessment, investigation and actions.` });
+    }
     const sets: string[] = []; const vals: unknown[] = [];
     for (const [col, key] of INCIDENT_FIELDS) {
       const plain = key.replace(/[#?]$/, '');
@@ -168,12 +180,25 @@ export function incidentRoutes() {
     if (!o) return res.status(404).json({ error: 'Incident not found' });
     const risk = computeRisk(req.body.occurrenceScore, req.body.severityScore);
     if (risk.score == null) return res.status(400).json({ error: 'Select both an occurrence and a severity score to complete the risk assessment.' });
-    const rcaRequired = req.body.rcaRequired === true || req.body.rcaRequired === 'true' || req.body.rcaRequired === 1 || req.body.rcaRequired === '1' ? 1 : 0;
-    const stage = rcaRequired ? 'rca' : 'capa';
-    db.prepare(`UPDATE incidents SET occurrence_score = ?, severity_score = ?, risk_score = ?, risk_level = ?, rca_required = ?, risk_assessed_by_staff_id = ?, risk_assessed_at = CURRENT_TIMESTAMP, workflow_stage = ?, status = CASE WHEN status = 'reported' THEN 'under_investigation' ELSE status END, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-      .run(risk.occurrence, risk.severity, risk.score, risk.level, rcaRequired, getStaffIdOrCurrent(req, req.body.assessedByStaffId), stage, req.params.id);
-    audit(req, { action: 'edit', entity: 'incidents', entityId: req.params.id, newValue: { stage: 'risk_assessment', riskScore: risk.score, rcaRequired } });
-    res.json({ ok: true, riskScore: risk.score, riskLevel: risk.level, rcaRequired: !!rcaRequired, workflowStage: stage });
+    const manualRca = req.body.rcaRequired === true || req.body.rcaRequired === 'true' || req.body.rcaRequired === 1 || req.body.rcaRequired === '1';
+    // Any actual harm, or an explicit patient-safety flag, counts as a
+    // patient-safety event for the escalation rules.
+    const flagged = req.body.affectsPatientSafety !== undefined
+      ? (req.body.affectsPatientSafety === true || req.body.affectsPatientSafety === 'true' || req.body.affectsPatientSafety === 1 || req.body.affectsPatientSafety === '1')
+      : !!o.affects_patient_safety;
+    const affectsPatientSafety = flagged || o.incident_type === 'patient_safety' || o.incident_type === 'sentinel_event'
+      || (o.harm_level && !['none', ''].includes(String(o.harm_level)));
+    const cfg = workflowConfig(db);
+    const decision = decideEscalation(cfg, { riskLevel: risk.level, affectsPatientSafety, manualRcaRequired: manualRca });
+    const stage = decision.rcaRequired ? 'rca' : 'capa';
+    db.prepare(`UPDATE incidents SET occurrence_score = ?, severity_score = ?, risk_score = ?, risk_level = ?, rca_required = ?, affects_patient_safety = ?, escalation_reason = ?, risk_assessment_notes = ?,
+        risk_assessed_by_staff_id = ?, risk_assessed_at = CURRENT_TIMESTAMP, workflow_stage = ?, status = CASE WHEN status = 'reported' THEN 'under_investigation' ELSE status END, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(risk.occurrence, risk.severity, risk.score, risk.level, decision.rcaRequired ? 1 : 0, affectsPatientSafety ? 1 : 0, decision.reason, req.body.notes ?? null,
+        getStaffIdOrCurrent(req, req.body.assessedByStaffId), stage, req.params.id);
+    let capa: { id: number; capaNumber: string } | null = null;
+    if (decision.createCapa) capa = createCapaForIncident(db, req.params.id, req.user!.id, decision.reason);
+    audit(req, { action: 'edit', entity: 'incidents', entityId: req.params.id, newValue: { stage: 'risk_assessment', riskScore: risk.score, rcaRequired: decision.rcaRequired, escalated: decision.escalated, capa: capa?.capaNumber } });
+    res.json({ ok: true, riskScore: risk.score, riskLevel: risk.level, rcaRequired: decision.rcaRequired, workflowStage: stage, escalated: decision.escalated, escalationReason: decision.reason, capaNumber: capa?.capaNumber ?? null });
   });
 
   // Stage 3 — Root cause analysis; on completion advances to CAPA/escalation.

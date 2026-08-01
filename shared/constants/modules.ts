@@ -14,7 +14,13 @@ export const MODULES: ModuleDefinition[] = [
   { key: 'organisation', label: 'Organisation & Leadership', path: '/organisation', protected: true },
   { key: 'personnel', label: 'Personnel Management', path: '/personnel', protected: true },
   { key: 'actions', label: 'Action Tracker', path: '/actions', protected: true },
+  // Nonconforming Event Management is presented as three sibling submodules.
+  // They all share the `nc_capa` permission key so existing role grants keep
+  // working; these keys only drive navigation and enable/disable.
   { key: 'nc_capa', label: 'Nonconforming Events & CAPA', path: '/nc-capa' },
+  { key: 'nonconformities', label: 'Nonconformities', path: '/nonconformities' },
+  { key: 'incidents', label: 'Incidents & Adverse Events', path: '/incidents' },
+  { key: 'capa', label: 'CAPA', path: '/capa' },
   { key: 'complaints', label: 'Complaints Register', path: '/complaints' },
   { key: 'risks', label: 'Risk Register', path: '/risks' },
   { key: 'customer_focus', label: 'Customer Focus', path: '/customer-focus' },
