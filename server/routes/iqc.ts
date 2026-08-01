@@ -1,9 +1,14 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { getDb } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
+import { buildWorkbook, sendWorkbook, readSheet, cell, numCell } from '../utils/xlsxRegister.js';
+
+const xlsxUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+const IQC_MATERIAL_HEADERS = ['Material name', 'Test', 'Analyte', 'Lot number', 'Manufacturer', 'Expiry date', 'Storage condition', 'Target mean', 'Target SD', 'Acceptable low', 'Acceptable high', 'Section'] as const;
 
 type PriorResult = { result_value: number };
 type SiblingZ = { z_score: number };
@@ -130,6 +135,53 @@ export function iqcRoutes() {
       );
     audit(req, { action: 'create', entity: 'iqc_materials', entityId: result.lastInsertRowid, newValue: { materialCode, ...req.body } });
     res.status(201).json({ id: result.lastInsertRowid, materialCode });
+  });
+
+  // ---- IQC materials — Excel export / template / import ----
+  function iqcMaterialsWorkbook(withData: boolean): Buffer {
+    const db = getDb();
+    const rows: unknown[][] = [];
+    if (withData) {
+      const items = db.prepare('SELECT m.*, s.name AS section_name FROM iqc_materials m LEFT JOIN sections s ON s.id = m.section_id ORDER BY m.material_name, m.lot_number').all() as any[];
+      for (const m of items) rows.push([m.material_name, m.test_name, m.analyte, m.lot_number, m.manufacturer ?? '', m.expiry_date ?? '', m.storage_condition ?? '', m.target_mean ?? '', m.target_sd ?? '', m.acceptable_low ?? '', m.acceptable_high ?? '', m.section_name ?? '']);
+    }
+    return buildWorkbook(IQC_MATERIAL_HEADERS, rows, 'IQC MATERIALS');
+  }
+  router.get('/materials/template', requirePermission('iqc', 'view'), (_req, res) => sendWorkbook(res, iqcMaterialsWorkbook(false), 'IQC_Materials_Template.xlsx'));
+  router.get('/materials/export', requirePermission('iqc', 'view'), (_req, res) => sendWorkbook(res, iqcMaterialsWorkbook(true), 'IQC_Materials.xlsx'));
+  router.post('/materials/import', requirePermission('iqc', 'create'), xlsxUpload.single('file'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the IQC Materials .xlsx file.' });
+    try {
+      const rows = readSheet(req.file.buffer, 'IQC');
+      const db = getDb();
+      const secByName = new Map<string, number>();
+      for (const s of db.prepare('SELECT id, name FROM sections').all() as any[]) secByName.set(String(s.name).toLowerCase(), s.id);
+      const errors: string[] = []; let created = 0, updated = 0;
+      const tx = db.transaction(() => {
+        rows.forEach((r, idx) => {
+          const rowNo = idx + 2;
+          const name = cell(r, 'Material name'); const test = cell(r, 'Test'); const analyte = cell(r, 'Analyte'); const lot = cell(r, 'Lot number');
+          if (!name || !test || !analyte || !lot) { errors.push(`Row ${rowNo}: Material name, Test, Analyte and Lot number are all required.`); return; }
+          const secId = cell(r, 'Section') ? (secByName.get(String(cell(r, 'Section')).toLowerCase()) ?? null) : null;
+          try {
+            const existing = db.prepare('SELECT id FROM iqc_materials WHERE material_name = ? AND lot_number = ?').get(name, lot) as any;
+            if (existing) {
+              db.prepare('UPDATE iqc_materials SET test_name = ?, analyte = ?, manufacturer = ?, expiry_date = ?, storage_condition = ?, target_mean = ?, target_sd = ?, acceptable_low = ?, acceptable_high = ?, section_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+                .run(test, analyte, cell(r, 'Manufacturer'), cell(r, 'Expiry date'), cell(r, 'Storage condition'), numCell(r, 'Target mean'), numCell(r, 'Target SD'), numCell(r, 'Acceptable low'), numCell(r, 'Acceptable high'), secId, existing.id);
+              updated++;
+            } else {
+              const materialCode = generateRecordNumber(db, 'iqc_materials', 'IQCM', new Date().toISOString());
+              db.prepare('INSERT INTO iqc_materials (material_code, material_name, section_id, test_name, analyte, lot_number, manufacturer, expiry_date, storage_condition, target_mean, target_sd, acceptable_low, acceptable_high, is_active, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)')
+                .run(materialCode, name, secId, test, analyte, lot, cell(r, 'Manufacturer'), cell(r, 'Expiry date'), cell(r, 'Storage condition'), numCell(r, 'Target mean'), numCell(r, 'Target SD'), numCell(r, 'Acceptable low'), numCell(r, 'Acceptable high'), req.user!.id, new Date().toISOString());
+              created++;
+            }
+          } catch (e) { errors.push(`Row ${rowNo}: ${(e as Error).message}`); }
+        });
+      });
+      tx();
+      audit(req, { action: 'import', entity: 'iqc_materials', entityId: null, newValue: { created, updated, errors: errors.length } });
+      res.json({ totalRows: rows.length, created, updated, errors });
+    } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
 
   router.get('/materials/:id', requirePermission('iqc', 'view'), (req, res) => {

@@ -5,6 +5,7 @@ import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import ScannedRecordUpload from '../components/ScannedRecordUpload';
+import XlsxToolbar from '../components/XlsxToolbar';
 import type {
   Location, Section, Staff, EquipmentItem,
   IqcMaterial, IqcResult, IqcLotChange,
@@ -198,6 +199,7 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
       </ChartCard>
     </div>}
 
+    {tab === 'IQC Materials' && <XlsxToolbar exportPath="/iqc/materials/export" templatePath="/iqc/materials/template" importPath="/iqc/materials/import" exportName="IQC_Materials.xlsx" onImported={load} />}
     {tab === 'IQC Materials' && <table className="data-table"><thead><tr><th>Code</th><th>Name</th><th>Test</th><th>Analyte</th><th>Lot</th><th>Expiry</th><th>Status</th></tr></thead><tbody>
       {materials.map(m => <tr key={m.id}><td>{m.material_code}</td><td>{m.material_name}</td><td>{m.test_name}</td><td>{m.analyte}</td><td>{m.lot_number}</td><td>{m.expiry_date || '—'}</td><td>{m.is_active ? 'Active' : 'Inactive'}</td></tr>)}
     </tbody></table>}
@@ -430,6 +432,7 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
       </ChartCard>
     </div>}
 
+    {tab === 'EQA Programs' && <XlsxToolbar exportPath="/eqa/programs/export" templatePath="/eqa/programs/template" importPath="/eqa/programs/import" exportName="EQA_Programmes.xlsx" onImported={load} />}
     {tab === 'EQA Programs' && <table className="data-table"><thead><tr><th>Code</th><th>Program</th><th>Provider</th><th>Test area</th><th>Frequency</th><th>Active</th></tr></thead><tbody>
       {programs.map(p => <tr key={p.id}><td>{p.program_code}</td><td>{p.program_name}</td><td>{p.provider}</td><td>{p.test_area}</td><td>{p.frequency || '—'}</td><td>{p.is_active ? 'Yes' : 'No'}</td></tr>)}
     </tbody></table>}
@@ -613,6 +616,7 @@ export function MeasurementUncertaintyPage({ embedded = false }: { embedded?: bo
       </ChartCard>
     </div>}
 
+    {tab === 'MU Register' && <XlsxToolbar exportPath="/measurement-uncertainty/export" templatePath="/measurement-uncertainty/template" importPath="/measurement-uncertainty/import" exportName="Measurement_Uncertainty.xlsx" onImported={load} />}
     {tab === 'MU Register' && <table className="data-table"><thead><tr><th>Number</th><th>Test</th><th>Analyte</th><th>Method</th><th>Equipment</th><th>Date</th><th>U (k={records[0]?.coverage_factor ?? '—'})</th><th>Status</th></tr></thead><tbody>
       {records.map(r => <tr key={r.id}><td>{r.mu_number}</td><td>{r.test_name}</td><td>{r.analyte}</td><td>{r.method_name || '—'}</td><td>{r.equipment_name || '—'}</td><td>{r.calculation_date}</td><td>{r.expanded_uncertainty ?? r.uncertainty_value ?? '—'}</td><td>{formatBadge(r.status)}</td></tr>)}
     </tbody></table>}

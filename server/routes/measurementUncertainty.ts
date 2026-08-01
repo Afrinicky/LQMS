@@ -1,11 +1,15 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { getDb } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
+import { buildWorkbook, sendWorkbook, readSheet, cell, numCell } from '../utils/xlsxRegister.js';
 
 const MU_STATUSES = ['draft', 'in_review', 'approved', 'archived', 'rejected'];
+const xlsxUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+const MU_HEADERS = ['Test', 'Analyte', 'Method', 'Calculation date', 'Data period start', 'Data period end', 'Mean', 'SD', 'CV %', 'Uncertainty (u)', 'Expanded U', 'Coverage factor (k)', 'Interpretation'] as const;
 
 export function measurementUncertaintyRoutes() {
   const router = Router();
@@ -13,6 +17,43 @@ export function measurementUncertaintyRoutes() {
   router.get('/', requirePermission('measurement_uncertainty', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare(`SELECT mu.*, e.name AS equipment_name FROM measurement_uncertainty_records mu LEFT JOIN equipment_items e ON e.id = mu.equipment_id ORDER BY mu.calculation_date DESC, mu.id DESC`).all());
+  });
+
+  // ---- MU records — Excel export / template / import ----
+  function muWorkbook(withData: boolean): Buffer {
+    const db = getDb();
+    const rows: unknown[][] = [];
+    if (withData) {
+      const items = db.prepare('SELECT * FROM measurement_uncertainty_records ORDER BY calculation_date DESC').all() as any[];
+      for (const m of items) rows.push([m.test_name, m.analyte, m.method_name ?? '', m.calculation_date ?? '', m.data_period_start ?? '', m.data_period_end ?? '', m.mean_value ?? '', m.sd_value ?? '', m.cv_percent ?? '', m.uncertainty_value ?? '', m.expanded_uncertainty ?? '', m.coverage_factor ?? '', m.interpretation ?? '']);
+    }
+    return buildWorkbook(MU_HEADERS, rows, 'MEASUREMENT UNCERTAINTY');
+  }
+  router.get('/template', requirePermission('measurement_uncertainty', 'view'), (_req, res) => sendWorkbook(res, muWorkbook(false), 'Measurement_Uncertainty_Template.xlsx'));
+  router.get('/export', requirePermission('measurement_uncertainty', 'view'), (_req, res) => sendWorkbook(res, muWorkbook(true), 'Measurement_Uncertainty.xlsx'));
+  router.post('/import', requirePermission('measurement_uncertainty', 'create'), xlsxUpload.single('file'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the Measurement Uncertainty .xlsx file.' });
+    try {
+      const rows = readSheet(req.file.buffer, 'UNCERT');
+      const db = getDb();
+      const errors: string[] = []; let created = 0;
+      const ins = db.prepare('INSERT INTO measurement_uncertainty_records (mu_number, test_name, analyte, method_name, calculation_date, data_period_start, data_period_end, mean_value, sd_value, cv_percent, uncertainty_value, expanded_uncertainty, coverage_factor, interpretation, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+      const tx = db.transaction(() => {
+        rows.forEach((r, idx) => {
+          const rowNo = idx + 2;
+          const test = cell(r, 'Test'); const analyte = cell(r, 'Analyte'); const date = cell(r, 'Calculation date');
+          if (!test || !analyte || !date) { errors.push(`Row ${rowNo}: Test, Analyte and Calculation date are required.`); return; }
+          try {
+            const muNumber = generateRecordNumber(db, 'measurement_uncertainty_records', 'MU', new Date().toISOString());
+            ins.run(muNumber, test, analyte, cell(r, 'Method'), date, cell(r, 'Data period start'), cell(r, 'Data period end'), numCell(r, 'Mean'), numCell(r, 'SD'), numCell(r, 'CV %'), numCell(r, 'Uncertainty (u)'), numCell(r, 'Expanded U'), numCell(r, 'Coverage factor (k)'), cell(r, 'Interpretation'), 'draft', req.user!.id, new Date().toISOString());
+            created++;
+          } catch (e) { errors.push(`Row ${rowNo}: ${(e as Error).message}`); }
+        });
+      });
+      tx();
+      audit(req, { action: 'import', entity: 'measurement_uncertainty_records', entityId: null, newValue: { created, errors: errors.length } });
+      res.json({ totalRows: rows.length, created, errors });
+    } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
 
   router.post('/', requirePermission('measurement_uncertainty', 'create'), (req, res) => {

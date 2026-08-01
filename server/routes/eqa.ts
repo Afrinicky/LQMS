@@ -1,12 +1,56 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { getDb } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
+import { buildWorkbook, sendWorkbook, readSheet, cell } from '../utils/xlsxRegister.js';
+
+const xlsxUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+const EQA_PROGRAM_HEADERS = ['Program name', 'Provider', 'Test area', 'Frequency', 'Contact', 'Section'] as const;
 
 export function eqaRoutes() {
   const router = Router();
+
+  // ---- EQA programmes — Excel export / template / import ----
+  function eqaProgramsWorkbook(withData: boolean): Buffer {
+    const db = getDb();
+    const rows: unknown[][] = [];
+    if (withData) {
+      const items = db.prepare('SELECT p.*, s.name AS section_name FROM eqa_programs p LEFT JOIN sections s ON s.id = p.section_id ORDER BY p.program_name').all() as any[];
+      for (const p of items) rows.push([p.program_name, p.provider, p.test_area, p.frequency ?? '', p.contact ?? '', p.section_name ?? '']);
+    }
+    return buildWorkbook(EQA_PROGRAM_HEADERS, rows, 'EQA PROGRAMMES');
+  }
+  router.get('/programs/template', requirePermission('eqa', 'view'), (_req, res) => sendWorkbook(res, eqaProgramsWorkbook(false), 'EQA_Programmes_Template.xlsx'));
+  router.get('/programs/export', requirePermission('eqa', 'view'), (_req, res) => sendWorkbook(res, eqaProgramsWorkbook(true), 'EQA_Programmes.xlsx'));
+  router.post('/programs/import', requirePermission('eqa', 'create'), xlsxUpload.single('file'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the EQA Programmes .xlsx file.' });
+    try {
+      const rows = readSheet(req.file.buffer, 'EQA');
+      const db = getDb();
+      const secByName = new Map<string, number>();
+      for (const s of db.prepare('SELECT id, name FROM sections').all() as any[]) secByName.set(String(s.name).toLowerCase(), s.id);
+      const errors: string[] = []; let created = 0, updated = 0;
+      const tx = db.transaction(() => {
+        rows.forEach((r, idx) => {
+          const rowNo = idx + 2;
+          const name = cell(r, 'Program name'); const provider = cell(r, 'Provider'); const area = cell(r, 'Test area');
+          if (!name || !provider || !area) { errors.push(`Row ${rowNo}: Program name, Provider and Test area are required.`); return; }
+          const secId = cell(r, 'Section') ? (secByName.get(String(cell(r, 'Section')).toLowerCase()) ?? null) : null;
+          try {
+            const existing = db.prepare('SELECT id FROM eqa_programs WHERE program_name = ? AND provider = ?').get(name, provider) as any;
+            if (existing) { db.prepare('UPDATE eqa_programs SET test_area = ?, frequency = ?, contact = ?, section_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(area, cell(r, 'Frequency'), cell(r, 'Contact'), secId, existing.id); updated++; }
+            else { const code = generateRecordNumber(db, 'eqa_programs', 'EQAP', new Date().toISOString()); db.prepare('INSERT INTO eqa_programs (program_code, program_name, provider, section_id, test_area, frequency, contact, is_active, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)').run(code, name, provider, secId, area, cell(r, 'Frequency'), cell(r, 'Contact'), req.user!.id, new Date().toISOString()); created++; }
+          } catch (e) { errors.push(`Row ${rowNo}: ${(e as Error).message}`); }
+        });
+      });
+      tx();
+      audit(req, { action: 'import', entity: 'eqa_programs', entityId: null, newValue: { created, updated, errors: errors.length } });
+      res.json({ totalRows: rows.length, created, updated, errors });
+    } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+  });
 
   router.get('/programs', requirePermission('eqa', 'view'), (_req, res) => {
     const db = getDb();

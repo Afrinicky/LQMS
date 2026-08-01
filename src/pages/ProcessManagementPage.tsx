@@ -4,6 +4,7 @@ import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts }
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
+import XlsxToolbar from '../components/XlsxToolbar';
 import { IqcPage, EqaPage, VerificationValidationPage, MeasurementUncertaintyPage } from './Phase4Pages';
 import { POCTPage } from './POCTPage';
 import { BloodBankHandoverPage } from './BloodBankHandoverPage';
@@ -271,6 +272,7 @@ export function ProcessManagementPage() {
     </>}
 
     {tab === 'Reference Intervals' && <>
+      <XlsxToolbar exportPath="/process-management/reference-intervals/export" templatePath="/process-management/reference-intervals/template" importPath="/process-management/reference-intervals/import" exportName="Reference_Intervals.xlsx" onImported={load} />
       <form className="form-grid" onSubmit={submitRi}>
         <label>Test<select value={riForm.testCatalogId} onChange={e => setRiForm({ ...riForm, testCatalogId: e.target.value })}><option value="">—</option>{tests.map(t => <option key={t.id} value={t.id}>{t.test_name}</option>)}</select></label>
         <label>Analyte<input value={riForm.analyte} onChange={e => setRiForm({ ...riForm, analyte: e.target.value })} required /></label>

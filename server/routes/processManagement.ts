@@ -1,9 +1,14 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { getDb } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
+import { buildWorkbook, sendWorkbook, readSheet, cell } from '../utils/xlsxRegister.js';
+
+const riXlsxUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+const RI_HEADERS = ['Analyte', 'Sample type', 'Population', 'Lower limit', 'Upper limit', 'Unit', 'Clinical decision limit', 'Source', 'Effective date', 'Review date', 'Status'] as const;
 
 const TEST_STATUSES = ['active', 'inactive', 'under_review', 'archived'];
 const REJECTION_STATUSES = ['open', 'communicated', 'repeat_requested', 'linked_to_nc', 'closed'];
@@ -779,6 +784,42 @@ export function processManagementRoutes() {
   // ============= Biological reference intervals =============
   router.get('/reference-intervals', requirePermission('process_management', 'view'), (_req, res) => {
     res.json(getDb().prepare('SELECT * FROM reference_interval_records ORDER BY created_at DESC').all());
+  });
+  // ---- Reference intervals — Excel export / template / import ----
+  function riWorkbook(withData: boolean): Buffer {
+    const rows: unknown[][] = [];
+    if (withData) {
+      for (const r of getDb().prepare('SELECT * FROM reference_interval_records ORDER BY analyte, sample_type').all() as any[])
+        rows.push([r.analyte, r.sample_type ?? '', r.population ?? '', r.lower_limit ?? '', r.upper_limit ?? '', r.unit ?? '', r.clinical_decision_limit ?? '', r.source ?? '', r.effective_date ?? '', r.review_date ?? '', r.status ?? '']);
+    }
+    return buildWorkbook(RI_HEADERS, rows, 'REFERENCE INTERVALS');
+  }
+  router.get('/reference-intervals/template', requirePermission('process_management', 'view'), (_req, res) => sendWorkbook(res, riWorkbook(false), 'Reference_Intervals_Template.xlsx'));
+  router.get('/reference-intervals/export', requirePermission('process_management', 'view'), (_req, res) => sendWorkbook(res, riWorkbook(true), 'Reference_Intervals.xlsx'));
+  router.post('/reference-intervals/import', requirePermission('process_management', 'create'), riXlsxUpload.single('file'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the Reference Intervals .xlsx file.' });
+    try {
+      const rows = readSheet(req.file.buffer, 'REFERENCE');
+      const db = getDb();
+      const errors: string[] = []; let created = 0, updated = 0;
+      const tx = db.transaction(() => {
+        rows.forEach((r, idx) => {
+          const rowNo = idx + 2;
+          const analyte = cell(r, 'Analyte');
+          if (!analyte) { errors.push(`Row ${rowNo}: Analyte is required.`); return; }
+          const sampleType = cell(r, 'Sample type');
+          try {
+            const existing = db.prepare('SELECT id FROM reference_interval_records WHERE analyte = ? AND COALESCE(sample_type, \'\') = COALESCE(?, \'\') AND COALESCE(population, \'\') = COALESCE(?, \'\')').get(analyte, sampleType, cell(r, 'Population')) as any;
+            const vals = [cell(r, 'Lower limit'), cell(r, 'Upper limit'), cell(r, 'Unit'), cell(r, 'Clinical decision limit'), cell(r, 'Source'), cell(r, 'Effective date'), cell(r, 'Review date'), cell(r, 'Status') ?? 'active'];
+            if (existing) { db.prepare('UPDATE reference_interval_records SET sample_type = ?, population = ?, lower_limit = ?, upper_limit = ?, unit = ?, clinical_decision_limit = ?, source = ?, effective_date = ?, review_date = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(sampleType, cell(r, 'Population'), ...vals, existing.id); updated++; }
+            else { const number = generateRecordNumber(db, 'reference_interval_records', 'RIV', new Date().toISOString()); db.prepare('INSERT INTO reference_interval_records (record_number, analyte, sample_type, population, lower_limit, upper_limit, unit, clinical_decision_limit, source, effective_date, review_date, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(number, analyte, sampleType, cell(r, 'Population'), ...vals, req.user!.id, new Date().toISOString()); created++; }
+          } catch (e) { errors.push(`Row ${rowNo}: ${(e as Error).message}`); }
+        });
+      });
+      tx();
+      audit(req, { action: 'import', entity: 'reference_interval_records', entityId: null, newValue: { created, updated, errors: errors.length } });
+      res.json({ totalRows: rows.length, created, updated, errors });
+    } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
   router.post('/reference-intervals', requirePermission('process_management', 'create'), (req, res) => {
     if (!req.body.analyte) return res.status(400).json({ error: 'analyte is required' });
