@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { getDb, uploadRoot, evidenceRoot } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
+import { resolvePermission } from '../services/permissionResolver.js';
 import { requireAuth } from '../middleware/auth.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
@@ -20,6 +21,7 @@ function parseIntNullable(value: unknown) {
   return Number.isFinite(num) ? num : null;
 }
 function escHtml(s: unknown): string { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string)); }
+function p_facility(db: any): string { const p = db.prepare('SELECT facility_name FROM laboratory_profile WHERE id = 1').get() as any; return p?.facility_name || 'Laboratory'; }
 function labMasthead(db: any): string {
   const p = db.prepare('SELECT * FROM laboratory_profile WHERE id = 1').get() as any;
   let logo = '';
@@ -40,11 +42,37 @@ const NC_FIELDS: Array<[string, string]> = [
   ['effectiveness_reviewed_by_staff_id', 'effectivenessReviewedByStaffId#'], ['effectiveness_review_date', 'effectivenessReviewDate'], ['corrective_effective', 'correctiveEffective?'], ['effectiveness_comments', 'effectivenessComments'],
 ];
 
+// Shared quality-workflow settings (key/value). remedialActionEnabled controls
+// whether a separate "remedial / short-term correction" field is captured — some
+// standards do not require it, so laboratories can switch it off.
+export function ncWorkflowConfig(db: any) {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'nc.remedialActionEnabled'").get() as { value: string } | undefined;
+  return { remedialActionEnabled: row ? row.value === '1' : true };
+}
+
 export function nonconformityRoutes() {
   const router = Router();
 
   // Static 5x5 risk-matrix metadata for the form UI.
   router.get('/risk-matrix', requireAuth, (_req, res) => res.json({ severity: SEVERITY, occurrence: OCCURRENCE, bands: RISK_BANDS }));
+
+  // Quality-workflow configuration for this laboratory. `canFollowUp` tells the
+  // UI whether the current user may progress an event beyond logging (risk
+  // assessment, RCA, CAPA) — everyone with 'create' can log an event, but only
+  // users with edit/approve rights follow it up.
+  router.get('/config', requireAuth, (req, res) => {
+    const db = getDb();
+    const canFollowUp = resolvePermission(req.user!.id, 'nc_capa', 'edit').allowed || resolvePermission(req.user!.id, 'nc_capa', 'approve').allowed;
+    const canCreate = resolvePermission(req.user!.id, 'nc_capa', 'create').allowed;
+    res.json({ ...ncWorkflowConfig(db), canFollowUp, canCreate });
+  });
+  router.put('/config', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const enabled = req.body.remedialActionEnabled === true || req.body.remedialActionEnabled === 'true' || req.body.remedialActionEnabled === 1 || req.body.remedialActionEnabled === '1' ? '1' : '0';
+    db.prepare("INSERT INTO settings (key, value) VALUES ('nc.remedialActionEnabled', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP").run(enabled);
+    audit(req, { action: 'edit', entity: 'settings', entityId: 'nc.remedialActionEnabled', newValue: { remedialActionEnabled: enabled === '1' } });
+    res.json(ncWorkflowConfig(db));
+  });
 
   router.get('/', requirePermission('nc_capa', 'view'), (_req, res) => {
     const db = getDb();
@@ -114,8 +142,8 @@ export function nonconformityRoutes() {
     const vals = NC_FIELDS.map(([, k]) => bodyVal(req.body, k));
     // Section B: compute risk from occurrence × severity.
     const risk = computeRisk(req.body.occurrenceScore, req.body.severityScore);
-    const extraCols = ['risk_score', 'risk_level', 'severity', 'impact_level'];
-    const extraVals = [risk.score, risk.level, req.body.severity ?? risk.levelLabel ?? null, req.body.impactLevel ?? risk.levelLabel ?? null];
+    const extraCols = ['risk_score', 'risk_level', 'severity', 'impact_level', 'workflow_stage'];
+    const extraVals = [risk.score, risk.level, req.body.severity ?? risk.levelLabel ?? null, req.body.impactLevel ?? risk.levelLabel ?? null, 'risk_assessment'];
     const allCols = ['nc_number', ...cols, ...extraCols, 'status', 'created_by', 'created_at'];
     const allVals = [ncNumber, ...vals, ...extraVals, 'open', req.user!.id, createdAt];
     // event_date defaults to now if omitted
@@ -181,6 +209,38 @@ export function nonconformityRoutes() {
     res.json({ ok: true });
   });
 
+  // Stage 2 — Risk assessment. Scores the event on the 5×5 matrix and records
+  // whether root-cause analysis is required (risk-proportionate per ISO 22367);
+  // advances the event to the RCA queue, or straight to CAPA when RCA is waived.
+  router.post('/:id/risk-assessment', requirePermission('nc_capa', 'edit'), (req, res) => {
+    const db = getDb();
+    const o = db.prepare('SELECT * FROM nonconforming_events WHERE id = ?').get(req.params.id) as any;
+    if (!o) return res.status(404).json({ error: 'Nonconforming event not found' });
+    const risk = computeRisk(req.body.occurrenceScore, req.body.severityScore);
+    if (risk.score == null) return res.status(400).json({ error: 'Select both an occurrence and a severity score to complete the risk assessment.' });
+    const rcaRequired = req.body.rcaRequired === true || req.body.rcaRequired === 'true' || req.body.rcaRequired === 1 || req.body.rcaRequired === '1' ? 1 : 0;
+    const assessedBy = getStaffIdOrCurrent(req, req.body.assessedByStaffId);
+    const stage = rcaRequired ? 'rca' : 'capa';
+    db.prepare(`UPDATE nonconforming_events SET occurrence_score = ?, severity_score = ?, risk_score = ?, risk_level = ?, severity = COALESCE(severity, ?), impact_level = COALESCE(impact_level, ?),
+        rca_required = ?, risk_assessment_notes = ?, risk_assessed_by_staff_id = ?, risk_assessed_at = CURRENT_TIMESTAMP, workflow_stage = ?, status = CASE WHEN status = 'open' THEN 'reviewed' ELSE status END, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(risk.occurrence, risk.severity, risk.score, risk.level, risk.levelLabel ?? null, risk.levelLabel ?? null, rcaRequired, req.body.notes ?? null, assessedBy, stage, req.params.id);
+    audit(req, { action: 'edit', entity: 'nonconforming_events', entityId: req.params.id, newValue: { stage: 'risk_assessment', riskScore: risk.score, rcaRequired } });
+    res.json({ ok: true, riskScore: risk.score, riskLevel: risk.level, rcaRequired: !!rcaRequired, workflowStage: stage });
+  });
+
+  // Stage 3 — Root cause analysis. Only events flagged as requiring RCA reach
+  // this queue; on completion they advance to CAPA.
+  router.post('/:id/rca', requirePermission('nc_capa', 'edit'), (req, res) => {
+    const db = getDb();
+    const o = db.prepare('SELECT * FROM nonconforming_events WHERE id = ?').get(req.params.id) as any;
+    if (!o) return res.status(404).json({ error: 'Nonconforming event not found' });
+    if (!req.body.rootCause || !String(req.body.rootCause).trim()) return res.status(400).json({ error: 'Record the identified root cause to complete the analysis.' });
+    db.prepare(`UPDATE nonconforming_events SET investigation_team = ?, rca_method = ?, root_cause = ?, rca_completed_at = CURRENT_TIMESTAMP, workflow_stage = 'capa', updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(req.body.investigationTeam ?? o.investigation_team ?? null, req.body.rcaMethod ?? o.rca_method ?? null, req.body.rootCause, req.params.id);
+    audit(req, { action: 'edit', entity: 'nonconforming_events', entityId: req.params.id, newValue: { stage: 'rca', rcaCompleted: true } });
+    res.json({ ok: true, workflowStage: 'capa' });
+  });
+
   router.post('/:id/create-capa', requirePermission('nc_capa', 'create'), (req, res) => {
     const db = getDb();
     const source = db.prepare('SELECT * FROM nonconforming_events WHERE id = ?').get(req.params.id);
@@ -207,6 +267,7 @@ export function nonconformityRoutes() {
     );
     const capaId = result.lastInsertRowid;
     db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run('nc_capa', 'nonconforming_events', req.params.id, 'nc_capa', 'capa_records', String(capaId), 'Linked CAPA from NC');
+    db.prepare("UPDATE nonconforming_events SET status = CASE WHEN status IN ('open', 'reviewed') THEN 'capa_required' ELSE status END, workflow_stage = 'capa', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
     audit(req, { action: 'create', entity: 'capa_records', entityId: capaId, newValue: { capaNumber, sourceModule: 'nonconformities', sourceRecordId: req.params.id } });
     res.status(201).json({ id: capaId, capaNumber });
   });
@@ -217,7 +278,7 @@ export function nonconformityRoutes() {
     if (!oldValue) return res.status(404).json({ error: 'Nonconforming event not found' });
     const closedByStaffId = getStaffIdOrCurrent(req, req.body.closedByStaffId);
     if (closedByStaffId === null) return res.status(400).json({ error: 'This action requires the logged-in user to be linked to a staff record.' });
-    db.prepare('UPDATE nonconforming_events SET status = ?, closure_notes = ?, closed_by_staff_id = ?, closed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(req.body.status ?? 'closed', req.body.closureNotes, closedByStaffId, req.params.id);
+    db.prepare("UPDATE nonconforming_events SET status = ?, workflow_stage = 'closed', closure_notes = ?, closed_by_staff_id = ?, closed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.body.status ?? 'closed', req.body.closureNotes, closedByStaffId, req.params.id);
     audit(req, { action: 'void_archive', entity: 'nonconforming_events', entityId: req.params.id, oldValue, newValue: { status: req.body.status ?? 'closed', closureNotes: req.body.closureNotes } });
     res.json({ ok: true });
   });
@@ -243,7 +304,9 @@ export function nonconformityRoutes() {
     res.status(201).json({ id: result.lastInsertRowid });
   });
 
-  // Printable Nonconformance Corrective Action Form (SECHFO005).
+  // Printable nonconformity & corrective-action report. The layout is a neutral,
+  // ISO-aligned record — it carries the laboratory's own masthead and record
+  // number, not any single facility's form number.
   router.get('/:id/print', requirePermission('nc_capa', 'view'), (req, res) => {
     const db = getDb();
     const n = db.prepare(`SELECT nc.*, s.name AS section_name,
@@ -263,7 +326,7 @@ export function nonconformityRoutes() {
     const line = (label: string, val: unknown) => `<div class="fld"><span class="lb">${label}</span><span class="vl">${escHtml(val || '')}</span></div>`;
     const box = (label: string, val: unknown) => `<div class="sec-item"><div class="lb">${label}</div><div class="box">${escHtml(val || '')}</div></div>`;
     const detectedBy = n.detected_by_full || n.detected_by_name || '';
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${escHtml(n.nc_number)} — NC/CA Form</title>
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${escHtml(n.nc_number)} — Nonconformity Report</title>
 <style>@page{size:A4 portrait;margin:12mm}*{box-sizing:border-box}html,body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 body{font-family:'Times New Roman',Georgia,serif;color:#111;font-size:12px;line-height:1.4;padding:4px 8px}
 .mast{display:flex;align-items:center;gap:12px;border-bottom:2px solid #111;padding-bottom:6px}.mast img{height:52px}.mast .org{font-weight:bold;font-size:15px}.mast .sub{font-size:10px;color:#444}
@@ -281,7 +344,7 @@ table.mx .hd{text-align:left;width:16%}.sm{font-weight:normal;font-size:8px;colo
 </style><script>window.addEventListener("load",()=>{setTimeout(()=>window.print(),300)})</script></head><body>
 <div class="no-print">The print dialog opens automatically — choose any printer or Save as PDF. <button onclick="window.print()">Print</button></div>
 ${labMasthead(db)}
-<h1>Nonconformance Corrective Action Form</h1>
+<h1>Nonconformity &amp; Corrective Action Report</h1>
 <div class="hdr">
   <div>${line('NCR Number:', n.nc_number)}${line('Date of Event:', n.event_date)}${line('Time of Event:', n.time_of_event)}</div>
   <div>${line('Unit:', n.section_name)}${line('Detected by (Name/Role):', detectedBy)}</div>
@@ -321,7 +384,7 @@ ${box('Comments:', n.effectiveness_comments)}
   <div><div>Approved by: <b>${escHtml(n.approved_full || '')}</b></div><div class="line"></div><div class="sm">Signature / Date${n.approved_at ? ` — ${escHtml(String(n.approved_at).slice(0, 10))}` : ''}</div></div>
 </div>
 ${n.approval_comments ? box('Comments:', n.approval_comments) : ''}
-<div class="sm" style="margin-top:16px;border-top:1px solid #ccc;padding-top:5px">Form SECHFO005 · ${escHtml(n.nc_number)} · Generated ${new Date().toISOString().slice(0, 19).replace('T', ' ')}</div>
+<div class="sm" style="margin-top:16px;border-top:1px solid #ccc;padding-top:5px">${escHtml(p_facility(db))} · Nonconformity record ${escHtml(n.nc_number)} · Generated ${new Date().toISOString().slice(0, 19).replace('T', ' ')}</div>
 </body></html>`;
     audit(req, { action: 'print', entity: 'nonconforming_events', entityId: req.params.id });
     res.send(html);

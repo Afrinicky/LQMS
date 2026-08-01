@@ -2224,7 +2224,7 @@ export function RemoteStaffAccess() {
 // ---------------------------------------------------------------------------
 // System  (system-level settings: modules, backups, devices)
 // ---------------------------------------------------------------------------
-const SYSTEM_TABS = ['Overview', 'Connectivity & Mode', 'Remote Staff Access', 'System Modules', 'Backup & Restore', 'Device Access / Pairing'] as const;
+const SYSTEM_TABS = ['Overview', 'Connectivity & Mode', 'Remote Staff Access', 'Quality Workflow', 'System Modules', 'Backup & Restore', 'Device Access / Pairing'] as const;
 type SystemTab = typeof SYSTEM_TABS[number];
 
 export function SystemSettings() {
@@ -2239,6 +2239,7 @@ export function SystemSettings() {
       {tab === 'Overview' && <SystemOverview />}
       {tab === 'Connectivity & Mode' && <ConnectivityMode />}
       {tab === 'Remote Staff Access' && <RemoteStaffAccess />}
+      {tab === 'Quality Workflow' && <QualityWorkflowSettings />}
       {tab === 'System Modules' && <ModuleToggles />}
       {tab === 'Backup & Restore' && <BackupRestore />}
       {tab === 'Device Access / Pairing' && <Devices />}
@@ -2258,6 +2259,39 @@ function SystemOverview() {
       <div className="card mini"><h4>Data</h4><p>Local SQLite host</p></div>
     </div>
     <p className="hint">Use the tabs above to enable/disable modules, run backups, and manage LAN device pairing.</p>
+  </div>;
+}
+
+// ---------------------------------------------------------------------------
+// Quality Workflow — configuration for the nonconformity / incident lifecycle.
+// Some quality standards do not require a separately-documented remedial (short-
+// term) correction, so laboratories can switch that field on or off.
+// ---------------------------------------------------------------------------
+function QualityWorkflowSettings() {
+  const [cfg, setCfg] = useState<{ remedialActionEnabled: boolean } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api<{ remedialActionEnabled: boolean }>('/nonconformities/config').then(setCfg).catch(e => setError((e as Error).message)); }, []);
+  async function toggle(next: boolean) {
+    setBusy(true); setError(null); setMsg(null);
+    try {
+      const r = await api<{ remedialActionEnabled: boolean }>('/nonconformities/config', { method: 'PUT', body: JSON.stringify({ remedialActionEnabled: next }) });
+      setCfg(r); setMsg('Saved.');
+    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  }
+  return <div className="card">
+    <h3 style={{ marginTop: 0 }}>Nonconformity &amp; incident workflow</h3>
+    <p className="muted" style={{ marginTop: 0 }}>Both nonconformities and incidents follow the same staged lifecycle: <strong>Log → Risk assessment → (root cause, where the risk warrants it) → CAPA → Closure</strong>. Everyone can log an event; risk assessment and follow-up are done by staff with reviewer permissions.</p>
+    {error && <div className="error">{error}</div>}
+    {msg && <div className="notice-ok">{msg}</div>}
+    {!cfg ? <p className="muted">Loading…</p> : <>
+      <label className="check-inline" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <input type="checkbox" checked={cfg.remedialActionEnabled} disabled={busy} onChange={e => toggle(e.target.checked)} />
+        Capture a separate “remedial action” (short-term correction) field when logging events
+      </label>
+      <p className="hint" style={{ marginTop: 6 }}>Turn this off if your standard only requires the immediate action and the corrective action. When off, the remedial-action field is hidden from the log form and record view.</p>
+    </>}
   </div>;
 }
 
