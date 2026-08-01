@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { api, API_BASE, getToken } from '../services/api';
+import DocumentScanner from './DocumentScanner';
 
 // Reusable uploader for scanned paper records / evidence charts. Used by
 // Environmental Monitoring, Equipment and other modules so historical records
@@ -120,7 +121,13 @@ export default function ScannedRecordUpload({
       </>}
       {sections && sections.length > 0 && <label>Unit / section<select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>}
       {equipment && equipment.length > 0 && <label>Equipment<select value={form.equipmentId} onChange={e => setForm({ ...form, equipmentId: e.target.value })}><option value="">—</option>{equipment.map(eq => <option key={eq.id} value={eq.id}>{eq.name}</option>)}</select></label>}
-      <label>Scanned file<input ref={fileRef} type="file" accept="image/*,application/pdf" onChange={e => setFile(e.target.files?.[0] ?? null)} /></label>
+      <label style={{ gridColumn: '1 / -1' }}>Scanned file
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input ref={fileRef} type="file" accept="image/*,application/pdf" onChange={e => setFile(e.target.files?.[0] ?? null)} />
+          <DocumentScanner onCapture={f => setFile(f)} />
+          {file && <span className="muted" style={{ fontSize: 12 }}>Selected: {file.name}</span>}
+        </div>
+      </label>
       <label className="check-inline"><input type="checkbox" checked={form.isLegacy} onChange={e => setForm({ ...form, isLegacy: e.target.checked })} /> Historical (legacy) record being preserved</label>
       <label className="check-inline"><input type="checkbox" checked={form.hasOutOfRange} onChange={e => setForm({ ...form, hasOutOfRange: e.target.checked })} /> This copy contains an out-of-range reading</label>
       {form.hasOutOfRange && <label style={{ gridColumn: '1 / -1' }}>Out-of-range details (what/when)<input value={form.outOfRangeNotes} onChange={e => setForm({ ...form, outOfRangeNotes: e.target.value })} placeholder="e.g. 08 Aug reading 9.2°C exceeded 2–8°C limit" /></label>}

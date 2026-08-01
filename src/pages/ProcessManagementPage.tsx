@@ -5,6 +5,8 @@ import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import XlsxToolbar from '../components/XlsxToolbar';
+import BarcodeScanner from '../components/BarcodeScanner';
+import { printLabelSheet } from '../utils/labelPrint';
 import { IqcPage, EqaPage, VerificationValidationPage, MeasurementUncertaintyPage } from './Phase4Pages';
 import { POCTPage } from './POCTPage';
 import { BloodBankHandoverPage } from './BloodBankHandoverPage';
@@ -265,8 +267,9 @@ export function ProcessManagementPage() {
         <label>Condition notes<textarea value={receiptForm.conditionNotes} onChange={e => setReceiptForm({ ...receiptForm, conditionNotes: e.target.value })} /></label>
         <button type="submit">Log receipt</button>
       </form>
+      <div style={{ margin: '4px 0 10px' }}><BarcodeScanner placeholder="Scan a specimen barcode (request ref / receipt no.)…" autoFocus={false} onScan={code => { const c = code.trim().toLowerCase(); const m = receipts.find(x => (x.request_reference || '').toLowerCase() === c || x.receipt_number.toLowerCase() === c); setError(m ? `Specimen ${m.receipt_number} — ${m.sample_type || ''} (${m.condition})` : `No specimen found for "${code}".`); }} /></div>
       <table className="data-table"><thead><tr><th>No.</th><th>Date</th><th>Request</th><th>Sample</th><th>Condition</th><th>Complete?</th><th></th></tr></thead><tbody>
-        {receipts.map(r => <tr key={r.id}><td>{r.receipt_number}</td><td>{r.receipt_date}</td><td>{r.request_reference || '—'}</td><td>{r.sample_type || '—'}</td><td>{formatBadge(r.condition)}</td><td>{r.request_complete ? 'Yes' : 'No'}</td><td>{r.condition !== 'rejected' && !r.rejection_id && <button onClick={() => rejectReceipt(r.id)}>Reject</button>}</td></tr>)}
+        {receipts.map(r => { const val = r.request_reference || r.receipt_number; return <tr key={r.id}><td>{r.receipt_number}</td><td>{r.receipt_date}</td><td>{r.request_reference || '—'}</td><td>{r.sample_type || '—'}</td><td>{formatBadge(r.condition)}</td><td>{r.request_complete ? 'Yes' : 'No'}</td><td><button className="secondary" onClick={() => printLabelSheet([{ barcodeValue: val, title: r.sample_type || 'Specimen', lines: [val, r.receipt_date + (r.receipt_time ? ` ${r.receipt_time}` : ''), r.receipt_number].filter(Boolean) }], { widthMm: 60, heightMm: 30, copies: 2, title: `Specimen label — ${r.receipt_number}` })}>Label</button> {r.condition !== 'rejected' && !r.rejection_id && <button onClick={() => rejectReceipt(r.id)}>Reject</button>}</td></tr>; })}
         {receipts.length === 0 && <tr><td colSpan={7}>No sample receipts logged.</td></tr>}
       </tbody></table>
     </>}

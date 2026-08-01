@@ -6,6 +6,10 @@ import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import ScannedRecordUpload from '../components/ScannedRecordUpload';
 import XlsxToolbar from '../components/XlsxToolbar';
+import BarcodeScanner from '../components/BarcodeScanner';
+import BarcodeLabelGenerator from '../components/BarcodeLabelGenerator';
+import { code128Svg } from '../../shared/utils/barcode';
+import { printLabelSheet, LABEL_PRESETS } from '../utils/labelPrint';
 import { EnvironmentalMonitoringPage, EnvLiveCards } from './EnvironmentalMonitoringPage';
 import type {
   Location, Section, Department, Staff, Supplier, EquipmentItem, InventoryItem, MonitoringRecord, SafetyIncident,
@@ -136,6 +140,7 @@ export function EquipmentPage() {
   const [breakdownForm, setBreakdownForm] = useState({ equipmentId: '', breakdownDate: '', reportedByStaffId: '', description: '', serviceImpact: '', immediateAction: '', equipmentStatus: 'out_of_service', repairAction: '', serviceProvider: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [bcSize, setBcSize] = useState('m');
 
   async function load() {
     setLoading(true);
@@ -276,7 +281,12 @@ export function EquipmentPage() {
           <button type="button" className="secondary" disabled={!!regBusy} title="Download the equipment register as an Excel workbook" onClick={() => downloadEquipmentRegister('/equipment/register/export', 'Equipment_Register.xlsx')}>{regBusy === '/equipment/register/export' ? 'Exporting…' : 'Export'}</button>
           <button type="button" className="secondary" disabled={!!regBusy} title="Upload a completed equipment register workbook" onClick={() => equipImportRef.current?.click()}>{regBusy === 'import' ? 'Importing…' : 'Import'}</button>
           <input ref={equipImportRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) void importEquipmentRegister(f); }} />
+          <select value={bcSize} onChange={e => setBcSize(e.target.value)} title="Barcode label size">{LABEL_PRESETS.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}</select>
+          <button type="button" className="secondary" title="Print Code 128 barcode asset tags for all equipment" onClick={() => { const p = LABEL_PRESETS.find(x => x.key === bcSize) || LABEL_PRESETS[1]; printLabelSheet(equipment.map(it => ({ barcodeValue: it.equipment_number, title: it.name, lines: [it.equipment_number, it.serial_number ? `S/N ${it.serial_number}` : ''].filter(Boolean) })), { widthMm: p.widthMm, heightMm: p.heightMm, title: 'Equipment barcode labels' }); }}>🏷️ Print barcode labels</button>
         </div>
+      </div>
+      <div style={{ margin: '4px 0 10px' }}>
+        <BarcodeScanner placeholder="Scan an equipment barcode to open it…" autoFocus={false} onScan={code => { const m = equipment.find(e => e.equipment_number?.toLowerCase() === code.trim().toLowerCase()); if (m) openDetail(m.id); else setError(`No equipment found for barcode "${code}".`); }} />
       </div>
       {regResult && <div className="success-msg" style={{ marginTop: 8 }}><strong>{regResult.created}</strong> created, <strong>{regResult.updated}</strong> updated ({regResult.totalRows} rows).{regResult.errors.length > 0 && <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>{regResult.errors.slice(0, 8).map((er, i) => <li key={i} style={{ fontSize: 12 }}>{er}</li>)}</ul>}</div>}
       {loading ? <p>Loading…</p> : equipment.length === 0 ? <p>No equipment items have been recorded yet.</p> :
@@ -475,13 +485,15 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
       const isId = f.key === 'identifier';
       return `<div class="line ${isId ? 'idline' : ''}"><span class="lbl">${esc(f.label)}</span><span class="v">${esc(val[f.key] || '—')}</span></div>`;
     }).join('');
+    const barcode = code128Svg(item.equipment_number, { moduleWidth: size.w < 60 ? 1 : 2, height: size.w < 60 ? 26 : 34, fontSize: size.w < 60 ? 8 : 10, quietZone: 6 });
     const css = `
       .label { width: ${size.w}mm; height: ${size.h}mm; border: 1px solid #111; padding: 3mm; overflow: hidden; page-break-after: always; }
+      .label .bc { text-align:center; line-height:0; margin-bottom: 1mm; } .label .bc svg { max-width: 100%; height: auto; }
       .label .line { display: flex; justify-content: space-between; gap: 4mm; font-size: ${size.w < 60 ? 8 : 10}px; padding: 0.6mm 0; border-bottom: 0.2mm dotted #bbb; }
       .label .lbl { color: #444; text-transform: uppercase; letter-spacing: .04em; } .label .v { font-weight: 700; text-align: right; }
       .label .idline .v { font-size: ${size.w < 60 ? 11 : 14}px; }
       @page { margin: 6mm; } body { margin: 0; }`;
-    printHtml(`Label — ${item.equipment_number}`, `<div class="label">${lines || '<div class="line"><span class="v">' + esc(item.equipment_number) + '</span></div>'}</div>`, css);
+    printHtml(`Label — ${item.equipment_number}`, `<div class="label"><div class="bc">${barcode}</div>${lines}</div>`, css);
   }
 
   const dv = (l: string, v: string | number | null | undefined) => <div className="kv-row"><span className="kv-k">{l}</span><span className="kv-v">{v != null && String(v).trim() !== '' ? v : '—'}</span></div>;
@@ -1295,7 +1307,7 @@ export function InventoryPage() {
   return <div>
     <PageHeader eyebrow="Supplier &amp; Inventory Management" title="Supplier &amp; Inventory Management" subtitle="Suppliers, reagents, stock levels, batches, and expiry control." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
-    {tabBar(tab, ['Dashboard', 'Item Register', 'New Item', 'Batches/Lots', 'Stock Movements', 'Suppliers', 'Storage Inspections', 'Reports placeholder'], setTab)}
+    {tabBar(tab, ['Dashboard', 'Item Register', 'New Item', 'Batches/Lots', 'Stock Movements', 'Suppliers', 'Storage Inspections', 'Barcode Labels', 'Reports placeholder'], setTab)}
 
     {tab === 'Dashboard' && <><ModuleAlerts moduleKey="supplier_inventory" /><KpiStrip items={[
       { label: 'Inventory items', value: items.length, onClick: () => setTab('Item Register') },
@@ -1321,7 +1333,11 @@ export function InventoryPage() {
     </div></>}
 
     {tab === 'Item Register' && <div className="card">
-      <h3>Items</h3>
+      <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <h3 style={{ margin: 0 }}>Items</h3>
+        <button style={{ marginLeft: 'auto' }} type="button" className="secondary" title="Print Code 128 barcode labels for all stock items" onClick={() => printLabelSheet(items.map(it => ({ barcodeValue: it.item_code, title: it.name, lines: [it.item_code, it.category || ''].filter(Boolean) })), { widthMm: 50, heightMm: 25, title: 'Stock barcode labels' })}>🏷️ Print barcode labels</button>
+      </div>
+      <div style={{ margin: '4px 0 10px' }}><BarcodeScanner placeholder="Scan a stock item barcode…" autoFocus={false} onScan={code => { const m = items.find(i => i.item_code?.toLowerCase() === code.trim().toLowerCase()); if (m) openDetail(m.id); else setError(`No item found for barcode "${code}".`); }} /></div>
       {loading ? <p>Loading…</p> : items.length === 0 ? <p>No items yet.</p> :
         <table className="table"><thead><tr><th>Code</th><th>Name</th><th>Category</th><th>Qty</th><th>Unit</th><th>Min</th><th>Reorder</th><th>Expiry</th><th></th></tr></thead><tbody>
           {items.map(i => <tr key={i.id}><td>{i.item_code}</td><td>{i.name}</td><td>{i.category || '—'}</td>
@@ -1464,6 +1480,8 @@ export function InventoryPage() {
           </tbody></table>}
       </div>
     </>}
+
+    {tab === 'Barcode Labels' && <BarcodeLabelGenerator />}
 
     {tab === 'Reports placeholder' && <div className="card"><p>Reports for inventory will be added in a later phase.</p></div>}
   </div>;
