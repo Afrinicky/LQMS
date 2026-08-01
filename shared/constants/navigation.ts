@@ -99,9 +99,11 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     key: 'nonconforming_events',
     title: 'Nonconforming Event Management',
-    desc: 'Nonconformities, CAPA and action follow-up',
+    desc: 'Nonconformities, incidents/adverse events and CAPA',
     group: 'essential',
-    modules: ['nc_capa'],
+    // Three submodules, each with its own staged workflow tabs. All three are
+    // governed by the shared `nc_capa` permission key.
+    modules: ['nonconformities', 'incidents', 'capa'],
   },
   {
     key: 'continual_improvement',

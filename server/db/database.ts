@@ -3234,6 +3234,8 @@ CREATE INDEX IF NOT EXISTS idx_verification_datapoints_param ON verification_dat
       // Staged ISO workflow: logged → risk_assessment → (conditional) rca → capa → closed.
       ['workflow_stage', 'TEXT'], ['rca_required', 'INTEGER'], ['risk_assessed_by_staff_id', 'INTEGER'], ['risk_assessed_at', 'TEXT'],
       ['risk_assessment_notes', 'TEXT'], ['rca_completed_at', 'TEXT'],
+      // Patient-safety flag drives auto-escalation regardless of risk band.
+      ['affects_patient_safety', 'INTEGER'], ['escalation_reason', 'TEXT'],
     ] as const) {
       if (!ncCols.has(col)) database.exec(`ALTER TABLE nonconforming_events ADD COLUMN ${col} ${type}`);
     }
@@ -3298,6 +3300,7 @@ CREATE INDEX IF NOT EXISTS idx_incidents_type ON incidents(incident_type);
     const incCols = new Set((database.prepare('PRAGMA table_info(incidents)').all() as Array<{ name: string }>).map(c => c.name));
     for (const [col, type] of [
       ['workflow_stage', 'TEXT'], ['rca_required', 'INTEGER'], ['risk_assessed_by_staff_id', 'INTEGER'], ['risk_assessed_at', 'TEXT'], ['rca_completed_at', 'TEXT'],
+      ['affects_patient_safety', 'INTEGER'], ['escalation_reason', 'TEXT'], ['risk_assessment_notes', 'TEXT'],
     ] as const) {
       if (!incCols.has(col)) database.exec(`ALTER TABLE incidents ADD COLUMN ${col} ${type}`);
     }
@@ -3307,6 +3310,25 @@ CREATE INDEX IF NOT EXISTS idx_incidents_type ON incidents(incident_type);
         WHEN root_cause IS NOT NULL AND TRIM(root_cause) <> '' THEN 'capa'
         WHEN risk_score IS NOT NULL THEN 'capa'
         ELSE 'risk_assessment' END WHERE workflow_stage IS NULL`);
+    }
+  }
+  // CAPA lifecycle: plan → implement → verify → effectiveness review → close.
+  // The effectiveness review needs its own reviewer/date/verdict so it can be
+  // recorded independently of the free-text notes.
+  {
+    const capaCols = new Set((database.prepare('PRAGMA table_info(capa_records)').all() as Array<{ name: string }>).map(c => c.name));
+    for (const [col, type] of [
+      ['incident_id', 'INTEGER'], ['effectiveness_reviewed_by_staff_id', 'INTEGER'], ['effectiveness_review_date', 'TEXT'],
+      ['effectiveness_verdict', 'TEXT'], ['target_completion_date', 'TEXT'], ['completed_at', 'TEXT'], ['closure_notes', 'TEXT'],
+    ] as const) {
+      if (!capaCols.has(col)) database.exec(`ALTER TABLE capa_records ADD COLUMN ${col} ${type}`);
+    }
+    // Normalise the legacy free-text effectiveness_status values onto the
+    // pending / effective / not_effective vocabulary the workflow now uses.
+    if (!capaCols.has('effectiveness_verdict')) {
+      database.exec(`UPDATE capa_records SET effectiveness_status = 'pending'
+        WHERE effectiveness_status IS NULL OR TRIM(effectiveness_status) = ''
+           OR LOWER(effectiveness_status) NOT IN ('pending', 'effective', 'not_effective')`);
     }
   }
 

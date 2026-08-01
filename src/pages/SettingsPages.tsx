@@ -2267,31 +2267,74 @@ function SystemOverview() {
 // Some quality standards do not require a separately-documented remedial (short-
 // term) correction, so laboratories can switch that field on or off.
 // ---------------------------------------------------------------------------
+type QualityWorkflowCfg = {
+  remedialActionEnabled: boolean;
+  autoEscalateRiskLevel: 'off' | 'moderate' | 'high' | 'very_high';
+  autoEscalatePatientSafety: boolean;
+  autoCreateCapaOnEscalation: boolean;
+  amendRoles?: string[];
+};
+
 function QualityWorkflowSettings() {
-  const [cfg, setCfg] = useState<{ remedialActionEnabled: boolean } | null>(null);
+  const [cfg, setCfg] = useState<QualityWorkflowCfg | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { api<{ remedialActionEnabled: boolean }>('/nonconformities/config').then(setCfg).catch(e => setError((e as Error).message)); }, []);
-  async function toggle(next: boolean) {
+  useEffect(() => { api<QualityWorkflowCfg>('/nonconformities/config').then(setCfg).catch(e => setError((e as Error).message)); }, []);
+
+  async function save(patch: Partial<QualityWorkflowCfg>) {
     setBusy(true); setError(null); setMsg(null);
     try {
-      const r = await api<{ remedialActionEnabled: boolean }>('/nonconformities/config', { method: 'PUT', body: JSON.stringify({ remedialActionEnabled: next }) });
-      setCfg(r); setMsg('Saved.');
+      const r = await api<QualityWorkflowCfg>('/nonconformities/config', { method: 'PUT', body: JSON.stringify(patch) });
+      setCfg(c => ({ ...(c as QualityWorkflowCfg), ...r })); setMsg('Saved.');
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
-  return <div className="card">
-    <h3 style={{ marginTop: 0 }}>Nonconformity &amp; incident workflow</h3>
-    <p className="muted" style={{ marginTop: 0 }}>Both nonconformities and incidents follow the same staged lifecycle: <strong>Log → Risk assessment → (root cause, where the risk warrants it) → CAPA → Closure</strong>. Everyone can log an event; risk assessment and follow-up are done by staff with reviewer permissions.</p>
-    {error && <div className="error">{error}</div>}
-    {msg && <div className="notice-ok">{msg}</div>}
-    {!cfg ? <p className="muted">Loading…</p> : <>
-      <label className="check-inline" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <input type="checkbox" checked={cfg.remedialActionEnabled} disabled={busy} onChange={e => toggle(e.target.checked)} />
-        Capture a separate “remedial action” (short-term correction) field when logging events
+
+  return <div>
+    <div className="card">
+      <h3 style={{ marginTop: 0 }}>Nonconformity &amp; incident workflow</h3>
+      <p className="muted" style={{ marginTop: 0 }}>Nonconformities and incidents follow the same staged lifecycle: <strong>Log → Risk assessment → (root cause, where the risk warrants it) → CAPA → Closure</strong>. Everyone can log an event; risk assessment and follow-up are done by staff with reviewer permissions.</p>
+      {error && <div className="error">{error}</div>}
+      {msg && <div className="notice-ok">{msg}</div>}
+      {!cfg ? <p className="muted">Loading…</p> : <>
+        <label className="check-inline" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input type="checkbox" checked={cfg.remedialActionEnabled} disabled={busy} onChange={e => save({ remedialActionEnabled: e.target.checked })} />
+          Capture a separate “remedial action” (short-term correction) field when logging events
+        </label>
+        <p className="hint" style={{ marginTop: 6 }}>Turn this off if your standard only requires the immediate action and the corrective action. When off, the remedial-action field is hidden from the log form and record view.</p>
+      </>}
+    </div>
+
+    {cfg && <div className="card">
+      <h3 style={{ marginTop: 0 }}>Automatic escalation</h3>
+      <p className="muted" style={{ marginTop: 0 }}>ISO 22367 asks that the depth of investigation be proportionate to risk, and ISO 15189 §7.5/§8.7 that events affecting patients are acted on however unlikely they are. These rules apply the moment a risk assessment is saved.</p>
+      <div className="form-grid">
+        <label>Escalate automatically at
+          <select value={cfg.autoEscalateRiskLevel} disabled={busy} onChange={e => save({ autoEscalateRiskLevel: e.target.value as QualityWorkflowCfg['autoEscalateRiskLevel'] })}>
+            <option value="off">Off — assessors decide case by case</option>
+            <option value="moderate">Medium risk (score 5–9) or above</option>
+            <option value="high">High risk (score 10–16) or above</option>
+            <option value="very_high">Very High risk (score 17–25) only</option>
+          </select>
+        </label>
+      </div>
+      <p className="hint" style={{ marginTop: 6 }}>An escalated event is sent to root-cause analysis and corrective action automatically; the assessor cannot skip the investigation.</p>
+
+      <label className="check-inline" style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 12 }}>
+        <input type="checkbox" checked={cfg.autoEscalatePatientSafety} disabled={busy} onChange={e => save({ autoEscalatePatientSafety: e.target.checked })} />
+        Always escalate events flagged as affecting patient safety, even at Low or Medium risk
       </label>
-      <p className="hint" style={{ marginTop: 6 }}>Turn this off if your standard only requires the immediate action and the corrective action. When off, the remedial-action field is hidden from the log form and record view.</p>
-    </>}
+      <label className="check-inline" style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
+        <input type="checkbox" checked={cfg.autoCreateCapaOnEscalation} disabled={busy} onChange={e => save({ autoCreateCapaOnEscalation: e.target.checked })} />
+        Raise the CAPA record automatically when an event escalates
+      </label>
+      <p className="hint" style={{ marginTop: 6 }}>With this on, an escalated event never sits unattended between assessment and CAPA planning — the CAPA appears in the register straight away, waiting for its action plan.</p>
+    </div>}
+
+    {cfg && <div className="card">
+      <h3 style={{ marginTop: 0 }}>Amending logged records</h3>
+      <p className="muted" style={{ marginTop: 0 }}>Anyone may log a nonconformity or report an incident, and any reviewer may record the risk assessment, investigation and actions. Changing the <em>originally reported facts</em> afterwards is restricted to {(cfg.amendRoles ?? []).join(', ') || 'senior quality roles'}, so the account of what happened stays trustworthy and the audit trail holds up at assessment.</p>
+    </div>}
   </div>;
 }
 

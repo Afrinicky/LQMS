@@ -139,7 +139,7 @@ export function Home() {
    top, then six compact charts; drill into modules for the detailed numbers.
    ========================================================================= */
 const QUICK_ACTIONS = [
-  { label: 'New Nonconformity', to: '/nc-capa', Icon: AlertOctagon },
+  { label: 'New Nonconformity', to: '/nonconformities', Icon: AlertOctagon },
   { label: 'Add Document', to: '/documents', Icon: FileText },
   { label: 'Schedule Assessment', to: '/assessments', Icon: ClipboardCheck },
   { label: 'Log Action', to: '/actions', Icon: ClipboardList },
@@ -181,8 +181,8 @@ export function Dashboard() {
   // entry carries an onClick that opens the module where the data lives.
   const go = (path: string) => () => navigate(path);
   const qualityWorkload = [
-    { label: 'Open NCs', value: n(qms?.openNCs), color: CHART_COLORS[3], onClick: go('/nc-capa') },
-    { label: 'Open CAPAs', value: n(qms?.openCAPAs), color: CHART_COLORS[0], onClick: go('/nc-capa') },
+    { label: 'Open NCs', value: n(qms?.openNCs), color: CHART_COLORS[3], onClick: go('/nonconformities') },
+    { label: 'Open CAPAs', value: n(qms?.openCAPAs), color: CHART_COLORS[0], onClick: go('/capa') },
     { label: 'Pending complaints', value: n(qms?.pendingComplaints), color: CHART_COLORS[2], onClick: go('/complaints') },
     { label: 'High/critical risks', value: n(qms?.highRisks), color: CHART_COLORS[4], onClick: go('/risks') },
   ];
@@ -245,8 +245,8 @@ export function Dashboard() {
 
       {/* One slim KPI band — the headline numbers, each opening its module */}
       <KpiStrip items={[
-        { label: 'Open NCs', value: c(qms?.openNCs), onClick: go('/nc-capa') },
-        { label: 'Open CAPAs', value: c(qms?.openCAPAs), onClick: go('/nc-capa') },
+        { label: 'Open NCs', value: c(qms?.openNCs), onClick: go('/nonconformities') },
+        { label: 'Open CAPAs', value: c(qms?.openCAPAs), onClick: go('/capa') },
         { label: 'Overdue actions', value: health?.overdueActions ?? c(qms?.overdueActions), tone: 'danger', onClick: go('/actions') },
         { label: 'Docs due review', value: docs?.dueReviews, onClick: go('/documents') },
         { label: 'Training due', value: people?.competencyAssessmentsDue, onClick: go('/personnel') },
