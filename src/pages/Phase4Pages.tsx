@@ -5,6 +5,7 @@ import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import ScannedRecordUpload from '../components/ScannedRecordUpload';
+import XlsxToolbar from '../components/XlsxToolbar';
 import type {
   Location, Section, Staff, EquipmentItem,
   IqcMaterial, IqcResult, IqcLotChange,
@@ -198,6 +199,7 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
       </ChartCard>
     </div>}
 
+    {tab === 'IQC Materials' && <XlsxToolbar exportPath="/iqc/materials/export" templatePath="/iqc/materials/template" importPath="/iqc/materials/import" exportName="IQC_Materials.xlsx" onImported={load} />}
     {tab === 'IQC Materials' && <table className="data-table"><thead><tr><th>Code</th><th>Name</th><th>Test</th><th>Analyte</th><th>Lot</th><th>Expiry</th><th>Status</th></tr></thead><tbody>
       {materials.map(m => <tr key={m.id}><td>{m.material_code}</td><td>{m.material_name}</td><td>{m.test_name}</td><td>{m.analyte}</td><td>{m.lot_number}</td><td>{m.expiry_date || '—'}</td><td>{m.is_active ? 'Active' : 'Inactive'}</td></tr>)}
     </tbody></table>}
@@ -430,6 +432,7 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
       </ChartCard>
     </div>}
 
+    {tab === 'EQA Programs' && <XlsxToolbar exportPath="/eqa/programs/export" templatePath="/eqa/programs/template" importPath="/eqa/programs/import" exportName="EQA_Programmes.xlsx" onImported={load} />}
     {tab === 'EQA Programs' && <table className="data-table"><thead><tr><th>Code</th><th>Program</th><th>Provider</th><th>Test area</th><th>Frequency</th><th>Active</th></tr></thead><tbody>
       {programs.map(p => <tr key={p.id}><td>{p.program_code}</td><td>{p.program_name}</td><td>{p.provider}</td><td>{p.test_area}</td><td>{p.frequency || '—'}</td><td>{p.is_active ? 'Yes' : 'No'}</td></tr>)}
     </tbody></table>}
@@ -535,240 +538,8 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
 }
 
 // ============= Verification & Validation =============
-export function VerificationValidationPage({ embedded = false }: { embedded?: boolean } = {}) {
-  const { isEnabled } = useModules();
-  const { staff, equipment } = useLookups();
-  const [tab, setTab] = useState(embedded ? 'Method Verification Register' : 'Dashboard');
-  const [methods, setMethods] = useState<MethodVerification[]>([]);
-  const [equipVerifs, setEquipVerifs] = useState<EquipmentVerification[]>([]);
-  const [summary, setSummary] = useState<VerificationSummary | null>(null);
-  const [selected, setSelected] = useState<(MethodVerification & { experiments?: VerificationExperiment[] }) | null>(null);
-  const [selectedEquip, setSelectedEquip] = useState<EquipmentVerificationDetail | null>(null);
-  const [methodForm, setMethodForm] = useState({ methodName: '', testName: '', verificationType: 'method_verification', equipmentId: '', reason: '', startDate: '', completionDate: '', parametersAssessed: '', acceptanceCriteria: '', summary: '', conclusion: '', status: 'in_progress' });
-  const [expForm, setExpForm] = useState({ verificationId: '', experimentType: '', datePerformed: '', sampleCount: '', resultsSummary: '', acceptanceMet: false, performedByStaffId: '' });
-  const [equipForm, setEquipForm] = useState({ equipmentId: '', verificationType: 'calibration_verification', verificationDate: '', reason: '', acceptanceCriteria: '', resultsSummary: '', conclusion: '', status: 'in_progress' });
-  const [error, setError] = useState<string | null>(null);
+export { VerificationValidationPage } from './VerificationValidationPage';
 
-  async function load() {
-    try {
-      const [methodList, equipList, sum] = await Promise.all([
-        api<MethodVerification[]>('/verification-validation'),
-        api<EquipmentVerification[]>('/verification-validation/equipment'),
-        api<VerificationSummary>('/dashboard/verification-summary').catch(() => null)
-      ]);
-      setMethods(methodList); setEquipVerifs(equipList);
-      if (sum) setSummary(sum);
-    } catch (e) { setError((e as Error).message); }
-  }
-  useEffect(() => { if (embedded || isEnabled('verification_validation')) void load(); }, [isEnabled]);
-  if (!embedded && !isEnabled('verification_validation')) return <DisabledModule />;
-
-  async function submitMethod(e: FormEvent) {
-    e.preventDefault(); setError(null);
-    try {
-      await api('/verification-validation', { method: 'POST', body: JSON.stringify(methodForm) });
-      setMethodForm({ methodName: '', testName: '', verificationType: 'method_verification', equipmentId: '', reason: '', startDate: '', completionDate: '', parametersAssessed: '', acceptanceCriteria: '', summary: '', conclusion: '', status: 'in_progress' });
-      await load(); setTab('Method Verification Register');
-    } catch (e) { setError((e as Error).message); }
-  }
-
-  async function submitExperiment(e: FormEvent) {
-    e.preventDefault(); setError(null);
-    if (!expForm.verificationId) return setError('Select a verification');
-    try {
-      await api(`/verification-validation/${expForm.verificationId}/experiments`, { method: 'POST', body: JSON.stringify(expForm) });
-      setExpForm({ verificationId: '', experimentType: '', datePerformed: '', sampleCount: '', resultsSummary: '', acceptanceMet: false, performedByStaffId: '' });
-      if (selected) await openMethod(selected.id);
-    } catch (e) { setError((e as Error).message); }
-  }
-
-  async function submitEquipVerif(e: FormEvent) {
-    e.preventDefault(); setError(null);
-    if (!equipForm.equipmentId) return setError('Select equipment');
-    try {
-      await api('/verification-validation/equipment', { method: 'POST', body: JSON.stringify(equipForm) });
-      setEquipForm({ equipmentId: '', verificationType: 'calibration_verification', verificationDate: '', reason: '', acceptanceCriteria: '', resultsSummary: '', conclusion: '', status: 'in_progress' });
-      await load();
-    } catch (e) { setError((e as Error).message); }
-  }
-
-  async function openMethod(id: number) {
-    try { setSelected(await api(`/verification-validation/${id}`)); }
-    catch (e) { setError((e as Error).message); }
-  }
-
-  async function approveMethod(id: number) {
-    try { await api(`/verification-validation/${id}/approve`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selected?.id === id) await openMethod(id); }
-    catch (e) { setError((e as Error).message); }
-  }
-
-  async function approveEquip(id: number) {
-    try { await api(`/verification-validation/equipment/${id}/approve`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selectedEquip?.id === id) await openEquip(id); }
-    catch (e) { setError((e as Error).message); }
-  }
-
-  async function openEquip(id: number) {
-    try { setSelectedEquip(await api<EquipmentVerificationDetail>(`/verification-validation/equipment/${id}`)); }
-    catch (e) { setError((e as Error).message); }
-  }
-
-  const tabs = ['Dashboard', 'Method Verification Register', 'New Verification', 'Experiments', 'Equipment Verification', 'Scanned Records', 'Reports'].filter(name => !embedded || name !== 'Dashboard');
-
-  return <div className="module-page">
-    {!embedded && <PageHeader eyebrow="Process Management" title="Verification &amp; Validation" subtitle="Method and equipment verification and validation records." />}
-    {tabBar(tab, tabs, setTab)}
-    {error && <div className="error">{error}</div>}
-
-    {tab === 'Dashboard' && <ModuleAlerts moduleKey="verification_validation" />}
-    {tab === 'Dashboard' && summary && <KpiStrip items={[
-      { label: 'Open method verifications', value: summary.openMethodVerifications, onClick: () => setTab('Method Verification Register') },
-      { label: 'Completed verifications', value: summary.completedVerifications, tone: 'success', onClick: () => setTab('Method Verification Register') },
-      { label: 'Pending approval', value: summary.pendingApproval, onClick: () => setTab('Method Verification Register') },
-      { label: 'Equipment verifications (year)', value: summary.equipmentVerificationsThisYear, onClick: () => setTab('Equipment Verification') },
-      { label: 'Equipment pending approval', value: summary.equipmentVerificationsPendingApproval, onClick: () => setTab('Equipment Verification') },
-    ]} />}
-    {tab === 'Dashboard' && summary && <div className="grid cols-2" style={{ marginTop: 18 }}>
-      <ChartCard title="Method verification status" subtitle="Open vs completed verifications">
-        <DonutChart centerLabel="Methods" data={[
-          { label: 'Completed', value: summary.completedVerifications, color: CHART_COLORS[1] },
-          { label: 'Open', value: summary.openMethodVerifications, color: CHART_COLORS[0] },
-          { label: 'Pending approval', value: summary.pendingApproval, color: CHART_COLORS[2] },
-        ]} />
-      </ChartCard>
-      <ChartCard title="Approval backlog" subtitle="Method and equipment sign-offs awaiting approval">
-        <BarMeter data={[
-          { label: 'Methods pending approval', value: summary.pendingApproval, color: CHART_COLORS[2] },
-          { label: 'Equip. verifications (year)', value: summary.equipmentVerificationsThisYear, color: CHART_COLORS[0] },
-          { label: 'Equip. pending approval', value: summary.equipmentVerificationsPendingApproval, color: CHART_COLORS[4] },
-        ]} />
-      </ChartCard>
-    </div>}
-
-    {tab === 'Method Verification Register' && <table className="data-table"><thead><tr><th>Number</th><th>Method</th><th>Test</th><th>Type</th><th>Equipment</th><th>Status</th><th></th></tr></thead><tbody>
-      {methods.map(m => <tr key={m.id}>
-        <td>{m.verification_number}</td><td>{m.method_name}</td><td>{m.test_name}</td><td>{m.verification_type}</td><td>{m.equipment_name || '—'}</td><td>{formatBadge(m.status)}</td>
-        <td><button onClick={() => openMethod(m.id)}>Open</button>{m.status !== 'approved' && <button onClick={() => approveMethod(m.id)}>Approve</button>}</td>
-      </tr>)}
-    </tbody></table>}
-
-    {tab === 'New Verification' && <form className="form-grid" onSubmit={submitMethod}>
-      <label>Method name<input value={methodForm.methodName} onChange={e => setMethodForm({ ...methodForm, methodName: e.target.value })} required /></label>
-      <label>Test name<input value={methodForm.testName} onChange={e => setMethodForm({ ...methodForm, testName: e.target.value })} required /></label>
-      <label>Verification type<select value={methodForm.verificationType} onChange={e => setMethodForm({ ...methodForm, verificationType: e.target.value })} required>
-        <option value="method_verification">Method verification</option>
-        <option value="method_validation">Method validation</option>
-        <option value="revalidation">Re-validation</option>
-      </select></label>
-      <label>Equipment<select value={methodForm.equipmentId} onChange={e => setMethodForm({ ...methodForm, equipmentId: e.target.value })}><option value="">—</option>{equipment.map(eq => <option key={eq.id} value={eq.id}>{eq.name}</option>)}</select></label>
-      <label>Reason<input value={methodForm.reason} onChange={e => setMethodForm({ ...methodForm, reason: e.target.value })} /></label>
-      <label>Start date<input type="date" value={methodForm.startDate} onChange={e => setMethodForm({ ...methodForm, startDate: e.target.value })} /></label>
-      <label>Completion date<input type="date" value={methodForm.completionDate} onChange={e => setMethodForm({ ...methodForm, completionDate: e.target.value })} /></label>
-      <label>Parameters assessed<textarea value={methodForm.parametersAssessed} onChange={e => setMethodForm({ ...methodForm, parametersAssessed: e.target.value })} /></label>
-      <label>Acceptance criteria<textarea value={methodForm.acceptanceCriteria} onChange={e => setMethodForm({ ...methodForm, acceptanceCriteria: e.target.value })} /></label>
-      <label>Summary<textarea value={methodForm.summary} onChange={e => setMethodForm({ ...methodForm, summary: e.target.value })} /></label>
-      <label>Conclusion<textarea value={methodForm.conclusion} onChange={e => setMethodForm({ ...methodForm, conclusion: e.target.value })} /></label>
-      <button type="submit">Create verification</button>
-    </form>}
-
-    {tab === 'Experiments' && <>
-      <form className="form-grid" onSubmit={submitExperiment}>
-        <label>Verification<select value={expForm.verificationId} onChange={e => setExpForm({ ...expForm, verificationId: e.target.value })} required><option value="">—</option>{methods.map(m => <option key={m.id} value={m.id}>{m.verification_number} – {m.method_name}</option>)}</select></label>
-        <label>Experiment type<input value={expForm.experimentType} onChange={e => setExpForm({ ...expForm, experimentType: e.target.value })} required placeholder="e.g. precision, accuracy, linearity" /></label>
-        <label>Date performed<input type="date" value={expForm.datePerformed} onChange={e => setExpForm({ ...expForm, datePerformed: e.target.value })} /></label>
-        <label>Sample count<input type="number" value={expForm.sampleCount} onChange={e => setExpForm({ ...expForm, sampleCount: e.target.value })} /></label>
-        <label>Results summary<textarea value={expForm.resultsSummary} onChange={e => setExpForm({ ...expForm, resultsSummary: e.target.value })} /></label>
-        <label>Performed by<select value={expForm.performedByStaffId} onChange={e => setExpForm({ ...expForm, performedByStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-        <label><input type="checkbox" checked={expForm.acceptanceMet} onChange={e => setExpForm({ ...expForm, acceptanceMet: e.target.checked })} /> Acceptance met</label>
-        <button type="submit">Add experiment</button>
-      </form>
-      {selected && <>
-        <h3>{selected.verification_number} – {selected.method_name}</h3>
-        <table className="data-table"><thead><tr><th>Type</th><th>Date</th><th>Samples</th><th>Results</th><th>Met</th></tr></thead><tbody>
-          {(selected.experiments || []).map(x => <tr key={x.id}><td>{x.experiment_type}</td><td>{x.date_performed || '—'}</td><td>{x.sample_count ?? '—'}</td><td>{x.results_summary || '—'}</td><td>{x.acceptance_met ? 'Yes' : 'No'}</td></tr>)}
-        </tbody></table>
-      </>}
-    </>}
-
-    {tab === 'Equipment Verification' && <>
-      <form className="form-grid" onSubmit={submitEquipVerif}>
-        <label>Equipment<select value={equipForm.equipmentId} onChange={e => setEquipForm({ ...equipForm, equipmentId: e.target.value })} required><option value="">—</option>{equipment.map(eq => <option key={eq.id} value={eq.id}>{eq.name}</option>)}</select></label>
-        <label>Verification type<input value={equipForm.verificationType} onChange={e => setEquipForm({ ...equipForm, verificationType: e.target.value })} required /></label>
-        <label>Verification date<input type="date" value={equipForm.verificationDate} onChange={e => setEquipForm({ ...equipForm, verificationDate: e.target.value })} required /></label>
-        <label>Reason<input value={equipForm.reason} onChange={e => setEquipForm({ ...equipForm, reason: e.target.value })} /></label>
-        <label>Acceptance criteria<textarea value={equipForm.acceptanceCriteria} onChange={e => setEquipForm({ ...equipForm, acceptanceCriteria: e.target.value })} /></label>
-        <label>Results summary<textarea value={equipForm.resultsSummary} onChange={e => setEquipForm({ ...equipForm, resultsSummary: e.target.value })} /></label>
-        <label>Conclusion<textarea value={equipForm.conclusion} onChange={e => setEquipForm({ ...equipForm, conclusion: e.target.value })} /></label>
-        <button type="submit">Record equipment verification</button>
-      </form>
-      <table className="data-table"><thead><tr><th>Number</th><th>Equipment</th><th>Type</th><th>Date</th><th>Status</th><th></th></tr></thead><tbody>
-        {equipVerifs.map(ev => <tr key={ev.id}>
-          <td>{ev.verification_number}</td><td>{ev.equipment_name}</td><td>{ev.verification_type}</td><td>{ev.verification_date}</td><td>{formatBadge(ev.status)}</td>
-          <td>
-            <button onClick={() => openEquip(ev.id)}>Open</button>
-            {ev.status !== 'approved' && <button onClick={() => approveEquip(ev.id)}>Approve</button>}
-          </td>
-        </tr>)}
-      </tbody></table>
-      {selectedEquip && <div className="card" style={{ marginTop: 16 }}>
-        <h3>{selectedEquip.verification_number} – {selectedEquip.equipment_name}</h3>
-        <p>Status: {formatBadge(selectedEquip.status)} | Date: {selectedEquip.verification_date} | Type: {selectedEquip.verification_type}</p>
-        {selectedEquip.reason && <p><strong>Reason:</strong> {selectedEquip.reason}</p>}
-        {selectedEquip.acceptance_criteria && <p><strong>Acceptance criteria:</strong> {selectedEquip.acceptance_criteria}</p>}
-        {selectedEquip.results_summary && <p><strong>Results:</strong> {selectedEquip.results_summary}</p>}
-        {selectedEquip.conclusion && <p><strong>Conclusion:</strong> {selectedEquip.conclusion}</p>}
-        <p>Verified by staff #{selectedEquip.verified_by_staff_id ?? '—'} | Approved by staff #{selectedEquip.approved_by_staff_id ?? '—'}</p>
-        {selectedEquip.links && selectedEquip.links.length > 0 && <>
-          <h4>Linked records</h4>
-          <ul>{selectedEquip.links.map(l => <li key={l.id}>{l.source_module_key}/{l.source_record_type}#{l.source_record_id} → {l.target_module_key}/{l.target_record_type}#{l.target_record_id}{l.notes ? ` — ${l.notes}` : ''}</li>)}</ul>
-        </>}
-        <button className="secondary" onClick={() => setSelectedEquip(null)}>Close</button>
-      </div>}
-    </>}
-
-    {tab === 'Scanned Records' && <ScannedRecordUpload moduleKey="verification_validation" equipment={equipment.map(e => ({ id: e.id, name: e.name }))}
-      heading="Scanned verification / validation reports & legacy records"
-      blurb="Upload scanned method verification and validation reports (and historical paper records) as evidence. Flag any failed acceptance criterion — a nonconformity is raised automatically."
-      categories={[{ value: 'verification_report', label: 'Verification report' }, { value: 'validation_report', label: 'Validation report' }, { value: 'legacy_record', label: 'Legacy / historical record' }, { value: 'other', label: 'Other' }]} />}
-
-    {tab === 'Reports' && (() => {
-      const done = (s?: string) => !!s && /complet|approv|pass|accept/i.test(s);
-      const methodsDone = methods.filter(m => done(m.status));
-      const methodsPending = methods.filter(m => !done(m.status));
-      const equipDone = equipVerifs.filter(e => done(e.status));
-      const equipPending = equipVerifs.filter(e => !done(e.status));
-      return <>
-        <KpiStrip items={[
-          { label: 'Method verifications', value: methods.length },
-          { label: 'Methods completed', value: methodsDone.length },
-          { label: 'Methods in progress', value: methodsPending.length, tone: methodsPending.length ? 'warning' : undefined },
-          { label: 'Equipment verifications', value: equipVerifs.length },
-          { label: 'Equipment completed', value: equipDone.length },
-          { label: 'Equipment pending', value: equipPending.length, tone: equipPending.length ? 'warning' : undefined },
-        ]} />
-        <div className="card" style={{ marginTop: 16 }}>
-          <h3>Method verification &amp; validation register</h3>
-          <table className="data-table"><thead><tr><th>Number</th><th>Method / test</th><th>Type</th><th>Completed</th><th>Conclusion</th><th>Status</th></tr></thead><tbody>
-            {methods.slice().sort((a, b) => (b.completion_date || b.created_at || '').localeCompare(a.completion_date || a.created_at || '')).map(m => <tr key={m.id}>
-              <td>{m.verification_number}</td><td>{m.method_name}<div className="muted" style={{ fontSize: 11 }}>{m.test_name}</div></td>
-              <td>{(m.verification_type || '').replace(/_/g, ' ')}</td><td>{m.completion_date || '—'}</td><td>{m.conclusion || '—'}</td><td>{formatBadge(m.status)}</td>
-            </tr>)}
-            {methods.length === 0 && <tr><td colSpan={6} className="muted">No method verifications recorded.</td></tr>}
-          </tbody></table>
-        </div>
-        <div className="card" style={{ marginTop: 16 }}>
-          <h3>Equipment verification register</h3>
-          <table className="data-table"><thead><tr><th>Number</th><th>Equipment</th><th>Type</th><th>Date</th><th>Conclusion</th><th>Status</th></tr></thead><tbody>
-            {equipVerifs.slice().sort((a, b) => (b.verification_date || '').localeCompare(a.verification_date || '')).map(e => <tr key={e.id}>
-              <td>{e.verification_number}</td><td>{e.equipment_name || '—'}{e.equipment_number ? <div className="muted" style={{ fontSize: 11 }}>{e.equipment_number}</div> : null}</td>
-              <td>{(e.verification_type || '').replace(/_/g, ' ')}</td><td>{e.verification_date}</td><td>{e.conclusion || '—'}</td><td>{formatBadge(e.status)}</td>
-            </tr>)}
-            {equipVerifs.length === 0 && <tr><td colSpan={6} className="muted">No equipment verifications recorded.</td></tr>}
-          </tbody></table>
-        </div>
-      </>;
-    })()}
-  </div>;
-}
 
 // ============= Measurement Uncertainty =============
 export function MeasurementUncertaintyPage({ embedded = false }: { embedded?: boolean } = {}) {
@@ -845,6 +616,7 @@ export function MeasurementUncertaintyPage({ embedded = false }: { embedded?: bo
       </ChartCard>
     </div>}
 
+    {tab === 'MU Register' && <XlsxToolbar exportPath="/measurement-uncertainty/export" templatePath="/measurement-uncertainty/template" importPath="/measurement-uncertainty/import" exportName="Measurement_Uncertainty.xlsx" onImported={load} />}
     {tab === 'MU Register' && <table className="data-table"><thead><tr><th>Number</th><th>Test</th><th>Analyte</th><th>Method</th><th>Equipment</th><th>Date</th><th>U (k={records[0]?.coverage_factor ?? '—'})</th><th>Status</th></tr></thead><tbody>
       {records.map(r => <tr key={r.id}><td>{r.mu_number}</td><td>{r.test_name}</td><td>{r.analyte}</td><td>{r.method_name || '—'}</td><td>{r.equipment_name || '—'}</td><td>{r.calculation_date}</td><td>{r.expanded_uncertainty ?? r.uncertainty_value ?? '—'}</td><td>{formatBadge(r.status)}</td></tr>)}
     </tbody></table>}

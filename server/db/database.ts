@@ -3156,6 +3156,53 @@ CREATE INDEX IF NOT EXISTS idx_scanned_records_equipment ON scanned_records(equi
 `);
 
   // ===================================================================
+  // Method Verification & Validation — ISO 15189 / CLSI-aligned redesign
+  // A study characterises a method's analytical performance against defined
+  // acceptance criteria: verification confirms a validated (e.g. manufacturer's)
+  // method performs as claimed in this laboratory; validation fully characterises
+  // a laboratory-developed or modified method. Each study carries structured
+  // performance-characteristic rows (precision, trueness/bias, linearity, AMR,
+  // LoD/LoQ, carryover, interference, method comparison, reference-interval
+  // verification, diagnostic sensitivity/specificity …), an overall verdict,
+  // authorisation for clinical use, and the signed report.
+  // -------------------------------------------------------------------
+  {
+    const mvCols = new Set((database.prepare('PRAGMA table_info(method_verifications)').all() as Array<{ name: string }>).map(c => c.name));
+    for (const [col, type] of [
+      ['study_type', "TEXT NOT NULL DEFAULT 'verification'"], ['analyte', 'TEXT'], ['sample_matrix', 'TEXT'],
+      ['measurement_units', 'TEXT'], ['measurand_type', "TEXT NOT NULL DEFAULT 'quantitative'"], ['reagent_lot', 'TEXT'],
+      ['manufacturer', 'TEXT'], ['manufacturer_claims_ref', 'TEXT'], ['guideline_ref', 'TEXT'], ['scope_reason', 'TEXT'],
+      ['performed_by_staff_id', 'INTEGER'], ['reviewed_by_staff_id', 'INTEGER'], ['reviewed_at', 'TEXT'], ['approved_at', 'TEXT'],
+      ['verdict', "TEXT NOT NULL DEFAULT 'pending'"], ['authorized_for_use', 'INTEGER NOT NULL DEFAULT 0'],
+      ['authorized_date', 'TEXT'], ['next_review_date', 'TEXT'], ['limitations', 'TEXT'], ['report_file_id', 'INTEGER'],
+    ] as const) {
+      if (!mvCols.has(col)) database.exec(`ALTER TABLE method_verifications ADD COLUMN ${col} ${type}`);
+    }
+  }
+  database.exec(`
+CREATE TABLE IF NOT EXISTS verification_parameters (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  verification_id INTEGER NOT NULL REFERENCES method_verifications(id) ON DELETE CASCADE,
+  parameter TEXT NOT NULL,             -- characteristic code (precision_repeatability, trueness_bias …)
+  parameter_label TEXT,                -- human label captured at creation
+  acceptance_criteria TEXT,            -- the target that must be met
+  claimed_value TEXT,                  -- manufacturer's / reference claim
+  observed_value TEXT,                 -- result obtained
+  statistic_label TEXT,                -- CV%, Bias%, r, Slope, Intercept, SD, LoD …
+  statistic_value TEXT,
+  unit TEXT,
+  n_samples INTEGER,
+  outcome TEXT NOT NULL DEFAULT 'pending', -- pass | fail | na | pending
+  notes TEXT,
+  evidence_file_id INTEGER REFERENCES files(id),
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_verification_parameters_study ON verification_parameters(verification_id);
+`);
+
+  // ===================================================================
   // Phase 9: Documents & Records upgrade
   // Faithful to SECH Document Control Procedure (SECHPO026) and Control of
   // Records Procedure (SECHPO051).
