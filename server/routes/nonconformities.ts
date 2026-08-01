@@ -11,9 +11,11 @@ import multer from 'multer';
 import { getStaffIdOrCurrent } from './routeHelpers.js';
 import { computeRisk, SEVERITY, OCCURRENCE, RISK_BANDS } from '../utils/riskMatrix.js';
 import { workflowConfig, decideEscalation, createCapaForNc, canAmendRecords, RECORD_AMEND_ROLES } from '../utils/escalation.js';
+import { saveEvidenceFile } from '../utils/fileStore.js';
 import { buildWorkbook, sendWorkbook, readSheet, cell, numCell } from '../utils/xlsxRegister.js';
 
 const ncXlsxUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+const evidenceUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 const NC_HEADERS = ['NCR Number', 'Date of Event', 'Time', 'Unit', 'Detected by', 'Type', 'Title', 'Description', 'Immediate action', 'Remedial action', 'Occurrence (1-5)', 'Severity (1-5)', 'Risk score', 'Risk level', 'Root cause', 'Corrective action', 'Preventive action', 'Status'] as const;
 
 function parseIntNullable(value: unknown) {
@@ -262,16 +264,37 @@ export function nonconformityRoutes() {
   });
 
   // Stage 3 — Root cause analysis. Only events flagged as requiring RCA reach
-  // this queue; on completion they advance to CAPA.
-  router.post('/:id/rca', requirePermission('nc_capa', 'edit'), (req, res) => {
+  // this queue; on completion they advance to CAPA. The analysis sheet (e.g.
+  // the completed 5 Whys or fishbone) must be attached as evidence — ISO 15189
+  // §8.7 requires the investigation to be documented and retained.
+  router.post('/:id/rca', requirePermission('nc_capa', 'edit'), evidenceUpload.single('evidence'), (req, res) => {
     const db = getDb();
     const o = db.prepare('SELECT * FROM nonconforming_events WHERE id = ?').get(req.params.id) as any;
     if (!o) return res.status(404).json({ error: 'Nonconforming event not found' });
     if (!req.body.rootCause || !String(req.body.rootCause).trim()) return res.status(400).json({ error: 'Record the identified root cause to complete the analysis.' });
-    db.prepare(`UPDATE nonconforming_events SET investigation_team = ?, rca_method = ?, root_cause = ?, rca_completed_at = CURRENT_TIMESTAMP, workflow_stage = 'capa', updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-      .run(req.body.investigationTeam ?? o.investigation_team ?? null, req.body.rcaMethod ?? o.rca_method ?? null, req.body.rootCause, req.params.id);
-    audit(req, { action: 'edit', entity: 'nonconforming_events', entityId: req.params.id, newValue: { stage: 'rca', rcaCompleted: true } });
-    res.json({ ok: true, workflowStage: 'capa' });
+    // The analysis sheet is mandatory unless one is already attached.
+    let evidenceFileId: number | null = o.rca_evidence_file_id ?? null;
+    if (req.file) evidenceFileId = saveEvidenceFile(db, req.file, req.user!.id);
+    if (!evidenceFileId) return res.status(400).json({ error: 'Attach the completed root-cause analysis sheet (e.g. the 5 Whys or fishbone) before completing the analysis.' });
+    db.prepare(`UPDATE nonconforming_events SET investigation_team = ?, rca_method = ?, root_cause = ?, rca_evidence_file_id = ?, rca_completed_at = CURRENT_TIMESTAMP, workflow_stage = 'capa', updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(req.body.investigationTeam ?? o.investigation_team ?? null, req.body.rcaMethod ?? o.rca_method ?? null, req.body.rootCause, evidenceFileId, req.params.id);
+    audit(req, { action: 'edit', entity: 'nonconforming_events', entityId: req.params.id, newValue: { stage: 'rca', rcaCompleted: true, evidenceFileId } });
+    res.json({ ok: true, workflowStage: 'capa', evidenceFileId });
+  });
+
+  // Stream the attached root-cause analysis sheet. Gated on nc_capa view so any
+  // reviewer working the case can open it without documents-module rights.
+  router.get('/:id/rca-evidence', requirePermission('nc_capa', 'view'), (req, res) => {
+    const db = getDb();
+    const nc = db.prepare('SELECT rca_evidence_file_id FROM nonconforming_events WHERE id = ?').get(req.params.id) as any;
+    if (!nc?.rca_evidence_file_id) return res.status(404).send('No evidence attached.');
+    const f = db.prepare('SELECT * FROM files WHERE id = ?').get(nc.rca_evidence_file_id) as any;
+    if (!f) return res.status(404).send('File not found.');
+    const fp = path.join(f.storage_area === 'evidence' ? evidenceRoot : uploadRoot, f.stored_name);
+    if (!fs.existsSync(fp)) return res.status(404).send('File missing on disk.');
+    res.setHeader('Content-Type', f.mime_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${(f.original_name || 'rca-evidence').replace(/"/g, '')}"`);
+    fs.createReadStream(fp).pipe(res);
   });
 
   router.post('/:id/create-capa', requirePermission('nc_capa', 'create'), (req, res) => {

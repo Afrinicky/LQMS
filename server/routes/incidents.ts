@@ -1,15 +1,19 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { getDb } from '../db/database.js';
+import fs from 'fs';
+import path from 'path';
+import { getDb, uploadRoot, evidenceRoot } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import { computeRisk } from '../utils/riskMatrix.js';
 import { workflowConfig, decideEscalation, createCapaForIncident, canAmendRecords, RECORD_AMEND_ROLES } from '../utils/escalation.js';
+import { saveEvidenceFile } from '../utils/fileStore.js';
 import { buildWorkbook, sendWorkbook, readSheet, cell, numCell } from '../utils/xlsxRegister.js';
 
 const incXlsxUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+const evidenceUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 const INC_HEADERS = ['Incident No', 'Date/time', 'Type', 'Near miss', 'Unit', 'Location', 'Persons involved', 'Description', 'Immediate action', 'Harm level', 'Occurrence (1-5)', 'Severity (1-5)', 'Risk score', 'Risk level', 'Reported by', 'Root cause', 'Corrective action', 'Preventive action', 'Status'] as const;
 const INCIDENT_TYPES = ['patient_safety', 'staff_safety', 'near_miss', 'sentinel_event', 'biosafety_exposure', 'needlestick', 'specimen_related', 'equipment_related', 'data_security', 'fire_disaster', 'other'];
 
@@ -201,16 +205,34 @@ export function incidentRoutes() {
     res.json({ ok: true, riskScore: risk.score, riskLevel: risk.level, rcaRequired: decision.rcaRequired, workflowStage: stage, escalated: decision.escalated, escalationReason: decision.reason, capaNumber: capa?.capaNumber ?? null });
   });
 
-  // Stage 3 — Root cause analysis; on completion advances to CAPA/escalation.
-  router.post('/:id/rca', requirePermission('nc_capa', 'edit'), (req, res) => {
+  // Stage 3 — Investigation / root cause analysis; on completion advances to
+  // CAPA. The completed analysis sheet must be attached as evidence.
+  router.post('/:id/rca', requirePermission('nc_capa', 'edit'), evidenceUpload.single('evidence'), (req, res) => {
     const db = getDb();
     const o = db.prepare('SELECT * FROM incidents WHERE id = ?').get(req.params.id) as any;
     if (!o) return res.status(404).json({ error: 'Incident not found' });
     if (!req.body.rootCause || !String(req.body.rootCause).trim()) return res.status(400).json({ error: 'Record the identified root cause to complete the analysis.' });
-    db.prepare(`UPDATE incidents SET investigation_team = ?, rca_method = ?, root_cause = ?, contributing_factors = ?, rca_completed_at = CURRENT_TIMESTAMP, workflow_stage = 'capa', updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-      .run(req.body.investigationTeam ?? o.investigation_team ?? null, req.body.rcaMethod ?? o.rca_method ?? null, req.body.rootCause, req.body.contributingFactors ?? o.contributing_factors ?? null, req.params.id);
-    audit(req, { action: 'edit', entity: 'incidents', entityId: req.params.id, newValue: { stage: 'rca', rcaCompleted: true } });
-    res.json({ ok: true, workflowStage: 'capa' });
+    let evidenceFileId: number | null = o.rca_evidence_file_id ?? null;
+    if (req.file) evidenceFileId = saveEvidenceFile(db, req.file, req.user!.id);
+    if (!evidenceFileId) return res.status(400).json({ error: 'Attach the completed root-cause analysis sheet (e.g. the 5 Whys or fishbone) before completing the investigation.' });
+    db.prepare(`UPDATE incidents SET investigation_team = ?, rca_method = ?, root_cause = ?, contributing_factors = ?, rca_evidence_file_id = ?, rca_completed_at = CURRENT_TIMESTAMP, workflow_stage = 'capa', updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(req.body.investigationTeam ?? o.investigation_team ?? null, req.body.rcaMethod ?? o.rca_method ?? null, req.body.rootCause, req.body.contributingFactors ?? o.contributing_factors ?? null, evidenceFileId, req.params.id);
+    audit(req, { action: 'edit', entity: 'incidents', entityId: req.params.id, newValue: { stage: 'rca', rcaCompleted: true, evidenceFileId } });
+    res.json({ ok: true, workflowStage: 'capa', evidenceFileId });
+  });
+
+  // Stream the attached investigation / root-cause analysis sheet.
+  router.get('/:id/rca-evidence', requirePermission('nc_capa', 'view'), (req, res) => {
+    const db = getDb();
+    const inc = db.prepare('SELECT rca_evidence_file_id FROM incidents WHERE id = ?').get(req.params.id) as any;
+    if (!inc?.rca_evidence_file_id) return res.status(404).send('No evidence attached.');
+    const f = db.prepare('SELECT * FROM files WHERE id = ?').get(inc.rca_evidence_file_id) as any;
+    if (!f) return res.status(404).send('File not found.');
+    const fp = path.join(f.storage_area === 'evidence' ? evidenceRoot : uploadRoot, f.stored_name);
+    if (!fs.existsSync(fp)) return res.status(404).send('File missing on disk.');
+    res.setHeader('Content-Type', f.mime_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${(f.original_name || 'rca-evidence').replace(/"/g, '')}"`);
+    fs.createReadStream(fp).pipe(res);
   });
 
   // Escalate an incident into a nonconformity (carrying the description, risk and

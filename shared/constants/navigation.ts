@@ -101,9 +101,9 @@ export const NAV_SECTIONS: NavSection[] = [
     title: 'Nonconforming Event Management',
     desc: 'Nonconformities, incidents/adverse events and CAPA',
     group: 'essential',
-    // Three submodules, each with its own staged workflow tabs. All three are
-    // governed by the shared `nc_capa` permission key.
-    modules: ['nonconformities', 'incidents', 'capa'],
+    // A single workspace whose Nonconformities, Incidents/Adverse Events and
+    // CAPA submodules are top-level tabs (mirrors Process Management).
+    modules: ['nc_capa'],
   },
   {
     key: 'continual_improvement',

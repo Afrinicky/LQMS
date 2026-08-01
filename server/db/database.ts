@@ -3300,7 +3300,7 @@ CREATE INDEX IF NOT EXISTS idx_incidents_type ON incidents(incident_type);
     const incCols = new Set((database.prepare('PRAGMA table_info(incidents)').all() as Array<{ name: string }>).map(c => c.name));
     for (const [col, type] of [
       ['workflow_stage', 'TEXT'], ['rca_required', 'INTEGER'], ['risk_assessed_by_staff_id', 'INTEGER'], ['risk_assessed_at', 'TEXT'], ['rca_completed_at', 'TEXT'],
-      ['affects_patient_safety', 'INTEGER'], ['escalation_reason', 'TEXT'], ['risk_assessment_notes', 'TEXT'],
+      ['affects_patient_safety', 'INTEGER'], ['escalation_reason', 'TEXT'], ['risk_assessment_notes', 'TEXT'], ['rca_evidence_file_id', 'INTEGER'],
     ] as const) {
       if (!incCols.has(col)) database.exec(`ALTER TABLE incidents ADD COLUMN ${col} ${type}`);
     }
@@ -3329,6 +3329,22 @@ CREATE INDEX IF NOT EXISTS idx_incidents_type ON incidents(incident_type);
       database.exec(`UPDATE capa_records SET effectiveness_status = 'pending'
         WHERE effectiveness_status IS NULL OR TRIM(effectiveness_status) = ''
            OR LOWER(effectiveness_status) NOT IN ('pending', 'effective', 'not_effective')`);
+    }
+  }
+  // The Nonconformities / Incidents / CAPA submodules were briefly seeded as
+  // their own module keys; they are now top-level tabs under `nc_capa`. Remove
+  // the orphan rows so they no longer appear as separate module toggles. The
+  // real permission key (`nc_capa`) and all role grants are untouched.
+  {
+    for (const key of ['nonconformities', 'incidents', 'capa']) {
+      const perms = database.prepare('SELECT id FROM permissions WHERE module_key = ?').all(key) as Array<{ id: number }>;
+      for (const p of perms) {
+        database.prepare('DELETE FROM role_permissions WHERE permission_id = ?').run(p.id);
+        database.prepare('DELETE FROM position_permissions WHERE permission_id = ?').run(p.id);
+        database.prepare('DELETE FROM user_permission_overrides WHERE permission_id = ?').run(p.id);
+      }
+      database.prepare('DELETE FROM permissions WHERE module_key = ?').run(key);
+      database.prepare('DELETE FROM system_modules WHERE key = ?').run(key);
     }
   }
 
