@@ -47,6 +47,7 @@ export function incidentRoutes() {
     const cond: string[] = []; const params: unknown[] = [];
     if (req.query.status) { cond.push('i.status = ?'); params.push(req.query.status); }
     if (req.query.type) { cond.push('i.incident_type = ?'); params.push(req.query.type); }
+    if (req.query.stage) { cond.push('i.workflow_stage = ?'); params.push(req.query.stage); }
     if (cond.length) q += ' WHERE ' + cond.join(' AND ');
     q += ' ORDER BY i.incident_datetime DESC, i.id DESC';
     res.json(db.prepare(q).all(...params));
@@ -104,8 +105,8 @@ export function incidentRoutes() {
     const cols = INCIDENT_FIELDS.map(([c]) => c);
     const vals = INCIDENT_FIELDS.map(([, k]) => bodyVal(req.body, k));
     const risk = computeRisk(req.body.occurrenceScore, req.body.severityScore);
-    const allCols = ['incident_number', ...cols, 'occurrence_score', 'severity_score', 'risk_score', 'risk_level', 'reported_at', 'status', 'created_by', 'created_at'];
-    const allVals = [incidentNumber, ...vals, risk.occurrence, risk.severity, risk.score, risk.level, createdAt, 'reported', req.user!.id, createdAt];
+    const allCols = ['incident_number', ...cols, 'occurrence_score', 'severity_score', 'risk_score', 'risk_level', 'workflow_stage', 'reported_at', 'status', 'created_by', 'created_at'];
+    const allVals = [incidentNumber, ...vals, risk.occurrence, risk.severity, risk.score, risk.level, 'risk_assessment', createdAt, 'reported', req.user!.id, createdAt];
     const dtIdx = allCols.indexOf('incident_datetime'); if (!allVals[dtIdx]) allVals[dtIdx] = createdAt;
     const rbIdx = allCols.indexOf('reported_by_staff_id'); if (!allVals[rbIdx]) allVals[rbIdx] = getStaffIdOrCurrent(req, null);
     db.prepare(`INSERT INTO incidents (${allCols.join(', ')}) VALUES (${allCols.map(() => '?').join(', ')})`).run(...allVals as any[]);
@@ -154,9 +155,37 @@ export function incidentRoutes() {
   router.post('/:id/approve', requirePermission('nc_capa', 'approve'), (req, res) => {
     const db = getDb();
     if (!db.prepare('SELECT id FROM incidents WHERE id = ?').get(req.params.id)) return res.status(404).json({ error: 'Incident not found' });
-    db.prepare("UPDATE incidents SET approved_by_staff_id = ?, approved_at = CURRENT_TIMESTAMP, status = 'closed', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(getStaffIdOrCurrent(req, req.body.approvedByStaffId), req.params.id);
+    db.prepare("UPDATE incidents SET approved_by_staff_id = ?, approved_at = CURRENT_TIMESTAMP, status = 'closed', workflow_stage = 'closed', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(getStaffIdOrCurrent(req, req.body.approvedByStaffId), req.params.id);
     audit(req, { action: 'approve', entity: 'incidents', entityId: req.params.id });
     res.json({ ok: true });
+  });
+
+  // Stage 2 — Risk assessment (5×5 matrix); records whether RCA is required and
+  // advances the incident to the RCA queue, or straight to CAPA/escalation.
+  router.post('/:id/risk-assessment', requirePermission('nc_capa', 'edit'), (req, res) => {
+    const db = getDb();
+    const o = db.prepare('SELECT * FROM incidents WHERE id = ?').get(req.params.id) as any;
+    if (!o) return res.status(404).json({ error: 'Incident not found' });
+    const risk = computeRisk(req.body.occurrenceScore, req.body.severityScore);
+    if (risk.score == null) return res.status(400).json({ error: 'Select both an occurrence and a severity score to complete the risk assessment.' });
+    const rcaRequired = req.body.rcaRequired === true || req.body.rcaRequired === 'true' || req.body.rcaRequired === 1 || req.body.rcaRequired === '1' ? 1 : 0;
+    const stage = rcaRequired ? 'rca' : 'capa';
+    db.prepare(`UPDATE incidents SET occurrence_score = ?, severity_score = ?, risk_score = ?, risk_level = ?, rca_required = ?, risk_assessed_by_staff_id = ?, risk_assessed_at = CURRENT_TIMESTAMP, workflow_stage = ?, status = CASE WHEN status = 'reported' THEN 'under_investigation' ELSE status END, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(risk.occurrence, risk.severity, risk.score, risk.level, rcaRequired, getStaffIdOrCurrent(req, req.body.assessedByStaffId), stage, req.params.id);
+    audit(req, { action: 'edit', entity: 'incidents', entityId: req.params.id, newValue: { stage: 'risk_assessment', riskScore: risk.score, rcaRequired } });
+    res.json({ ok: true, riskScore: risk.score, riskLevel: risk.level, rcaRequired: !!rcaRequired, workflowStage: stage });
+  });
+
+  // Stage 3 — Root cause analysis; on completion advances to CAPA/escalation.
+  router.post('/:id/rca', requirePermission('nc_capa', 'edit'), (req, res) => {
+    const db = getDb();
+    const o = db.prepare('SELECT * FROM incidents WHERE id = ?').get(req.params.id) as any;
+    if (!o) return res.status(404).json({ error: 'Incident not found' });
+    if (!req.body.rootCause || !String(req.body.rootCause).trim()) return res.status(400).json({ error: 'Record the identified root cause to complete the analysis.' });
+    db.prepare(`UPDATE incidents SET investigation_team = ?, rca_method = ?, root_cause = ?, contributing_factors = ?, rca_completed_at = CURRENT_TIMESTAMP, workflow_stage = 'capa', updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(req.body.investigationTeam ?? o.investigation_team ?? null, req.body.rcaMethod ?? o.rca_method ?? null, req.body.rootCause, req.body.contributingFactors ?? o.contributing_factors ?? null, req.params.id);
+    audit(req, { action: 'edit', entity: 'incidents', entityId: req.params.id, newValue: { stage: 'rca', rcaCompleted: true } });
+    res.json({ ok: true, workflowStage: 'capa' });
   });
 
   // Escalate an incident into a nonconformity (carrying the description, risk and
@@ -169,12 +198,12 @@ export function incidentRoutes() {
     const createdAt = new Date().toISOString();
     const ncNumber = generateRecordNumber(db, 'nonconforming_events', 'NC', createdAt);
     const ncType = i.incident_type === 'specimen_related' ? 'pre_analytical' : i.incident_type === 'equipment_related' ? 'analytical' : (i.incident_type === 'biosafety_exposure' || i.incident_type === 'needlestick' || i.incident_type === 'staff_safety') ? 'safety_environment' : 'other';
-    const r = db.prepare(`INSERT INTO nonconforming_events (nc_number, event_date, time_of_event, detected_by_staff_id, section_id, department_id, source_module, source_record_id, title, description, nc_type, immediate_correction, occurrence_score, severity_score, risk_score, risk_level, status, created_by, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, 'incidents', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`)
+    const r = db.prepare(`INSERT INTO nonconforming_events (nc_number, event_date, time_of_event, detected_by_staff_id, section_id, department_id, source_module, source_record_id, title, description, nc_type, immediate_correction, occurrence_score, severity_score, risk_score, risk_level, workflow_stage, status, created_by, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'incidents', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'risk_assessment', 'open', ?, ?)`)
       .run(ncNumber, (i.incident_datetime || createdAt).slice(0, 10), (i.incident_datetime || '').slice(11, 16), i.reported_by_staff_id, i.section_id, i.department_id, String(i.id),
         `Incident: ${i.incident_type ? String(i.incident_type).replace(/_/g, ' ') : 'occurrence'}`, i.description, ncType, i.immediate_action, i.occurrence_score, i.severity_score, i.risk_score, i.risk_level, req.user!.id, createdAt);
     const ncId = (db.prepare('SELECT last_insert_rowid() AS id').get() as any).id;
-    db.prepare('UPDATE incidents SET nc_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(ncId, req.params.id);
+    db.prepare("UPDATE incidents SET nc_id = ?, workflow_stage = CASE WHEN workflow_stage = 'closed' THEN workflow_stage ELSE 'capa' END, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(ncId, req.params.id);
     db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run('nc_capa', 'incidents', String(req.params.id), 'nc_capa', 'nonconforming_events', String(ncId), 'Nonconformity raised from incident');
     audit(req, { action: 'create', entity: 'nonconforming_events', entityId: ncId, newValue: { ncNumber, fromIncident: i.incident_number } });
     res.status(201).json({ id: ncId, ncNumber });

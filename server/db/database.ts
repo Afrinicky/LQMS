@@ -3231,8 +3231,19 @@ CREATE INDEX IF NOT EXISTS idx_verification_datapoints_param ON verification_dat
       ['corrective_action', 'TEXT'], ['preventive_action', 'TEXT'], ['capa_responsible_staff_id', 'INTEGER'], ['capa_timeline_date', 'TEXT'],
       ['effectiveness_reviewed_by_staff_id', 'INTEGER'], ['effectiveness_review_date', 'TEXT'], ['corrective_effective', 'INTEGER'], ['effectiveness_comments', 'TEXT'],
       ['approved_by_staff_id', 'INTEGER'], ['approved_at', 'TEXT'], ['approval_comments', 'TEXT'],
+      // Staged ISO workflow: logged → risk_assessment → (conditional) rca → capa → closed.
+      ['workflow_stage', 'TEXT'], ['rca_required', 'INTEGER'], ['risk_assessed_by_staff_id', 'INTEGER'], ['risk_assessed_at', 'TEXT'],
+      ['risk_assessment_notes', 'TEXT'], ['rca_completed_at', 'TEXT'],
     ] as const) {
       if (!ncCols.has(col)) database.exec(`ALTER TABLE nonconforming_events ADD COLUMN ${col} ${type}`);
+    }
+    // Backfill workflow_stage for pre-existing rows so they land in the right worklist.
+    if (!ncCols.has('workflow_stage')) {
+      database.exec(`UPDATE nonconforming_events SET workflow_stage = CASE
+        WHEN status = 'closed' THEN 'closed'
+        WHEN root_cause IS NOT NULL AND TRIM(root_cause) <> '' THEN 'capa'
+        WHEN risk_score IS NOT NULL THEN 'capa'
+        ELSE 'risk_assessment' END WHERE workflow_stage IS NULL`);
     }
   }
   database.exec(`
@@ -3282,6 +3293,22 @@ CREATE TABLE IF NOT EXISTS incidents (
 CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status);
 CREATE INDEX IF NOT EXISTS idx_incidents_type ON incidents(incident_type);
 `);
+  // Incidents follow the same staged workflow as nonconformities.
+  {
+    const incCols = new Set((database.prepare('PRAGMA table_info(incidents)').all() as Array<{ name: string }>).map(c => c.name));
+    for (const [col, type] of [
+      ['workflow_stage', 'TEXT'], ['rca_required', 'INTEGER'], ['risk_assessed_by_staff_id', 'INTEGER'], ['risk_assessed_at', 'TEXT'], ['rca_completed_at', 'TEXT'],
+    ] as const) {
+      if (!incCols.has(col)) database.exec(`ALTER TABLE incidents ADD COLUMN ${col} ${type}`);
+    }
+    if (!incCols.has('workflow_stage')) {
+      database.exec(`UPDATE incidents SET workflow_stage = CASE
+        WHEN status = 'closed' THEN 'closed'
+        WHEN root_cause IS NOT NULL AND TRIM(root_cause) <> '' THEN 'capa'
+        WHEN risk_score IS NOT NULL THEN 'capa'
+        ELSE 'risk_assessment' END WHERE workflow_stage IS NULL`);
+    }
+  }
 
   // ===================================================================
   // Phase 9: Documents & Records upgrade

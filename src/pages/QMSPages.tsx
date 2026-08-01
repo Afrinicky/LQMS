@@ -4,9 +4,10 @@ import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts }
 import { api, API_BASE, getToken } from '../services/api';
 import { useModules } from '../hooks/useModules';
 import DisabledModule from '../components/DisabledModule';
-import RiskMatrix, { riskLevelBadge } from '../components/RiskMatrix';
+import RiskMatrix, { riskLevelBadge, bandFor, RISK_BANDS } from '../components/RiskMatrix';
 import XlsxToolbar from '../components/XlsxToolbar';
 import IncidentsBoard from './IncidentsBoard';
+import WorkflowStepper from '../components/WorkflowStepper';
 import type { ActionRecord, ComplaintRecord, CapaRecord, NonconformingEvent, QmsSummary, RiskRecord, Section, Staff } from '../../shared/types/api';
 
 async function openNcPrint(path: string, onError: (m: string) => void) {
@@ -56,6 +57,15 @@ const badgeStyles: Record<string, string> = {
   pending: 'badge badge--warning',
 };
 
+const capaSourceLabel = (c: { source_module?: string | null; nc_id?: number | null; complaint_id?: number | null; risk_id?: number | null }) => {
+  const m = (c.source_module || '').toLowerCase();
+  if (m === 'nonconformities' || c.nc_id) return 'Nonconformity';
+  if (m === 'incidents') return 'Incident';
+  if (m === 'complaints' || c.complaint_id) return 'Complaint';
+  if (m === 'risks' || c.risk_id) return 'Risk';
+  return 'Manual';
+};
+
 const formatBadge = (status: string | undefined) => {
   if (!status) return <span className="badge">Unknown</span>;
   return <span className={badgeStyles[status] || 'badge'}>{status.replace(/_/g, ' ')}</span>;
@@ -75,6 +85,154 @@ function useLookupData() {
   return { staff, sections };
 }
 
+const WF_RCA_METHODS = [{ v: '5_whys', l: '5 Whys' }, { v: 'fishbone', l: 'Fishbone (Ishikawa)' }, { v: 'pareto', l: 'Pareto analysis' }, { v: 'fault_tree', l: 'Fault tree' }, { v: 'other', l: 'Other' }];
+
+type WFItem = {
+  kind: 'nc' | 'incident'; id: number; ref: string; date: string; title: string; unit: string; typeLabel: string;
+  risk_score: number | null; risk_level: string | null; occurrence_score: number | null; severity_score: number | null;
+  description: string | null; immediate_action: string | null; rca_required: number | null;
+  investigation_team?: string | null; rca_method?: string | null; root_cause?: string | null; contributing_factors?: string | null;
+};
+
+// Shared worklist that drives one workflow stage (risk assessment or root-cause
+// analysis) across BOTH nonconformities and incidents / adverse events, so
+// reviewers work a single queue regardless of where the event originated.
+function WorkflowStageBoard({ stage, sections, canFollowUp, onChanged }: {
+  stage: 'risk_assessment' | 'rca'; sections: Section[]; canFollowUp: boolean; onChanged: () => void;
+}) {
+  const [items, setItems] = useState<WFItem[]>([]);
+  const [sel, setSel] = useState<WFItem | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  // risk-assessment fields
+  const [occ, setOcc] = useState<number | null>(null);
+  const [sev, setSev] = useState<number | null>(null);
+  const [rcaReq, setRcaReq] = useState(false);
+  const [notes, setNotes] = useState('');
+  // rca fields
+  const [team, setTeam] = useState('');
+  const [method, setMethod] = useState('5_whys');
+  const [rootCause, setRootCause] = useState('');
+  const [contributing, setContributing] = useState('');
+
+  function load() {
+    setError(null);
+    Promise.all([
+      api<any[]>('/nonconformities').catch(() => []),
+      api<any[]>(`/incidents?stage=${stage}`).catch(() => []),
+    ]).then(([ncs, incs]) => {
+      const ncItems: WFItem[] = (ncs || []).filter(n => (n.workflow_stage || 'risk_assessment') === stage && n.status !== 'closed').map(n => ({
+        kind: 'nc', id: n.id, ref: n.nc_number, date: n.event_date, title: n.title, typeLabel: (n.nc_type || 'nonconformity').replace(/_/g, ' '),
+        unit: sections.find(s => s.id === n.section_id)?.name || '—',
+        risk_score: n.risk_score, risk_level: n.risk_level, occurrence_score: n.occurrence_score, severity_score: n.severity_score,
+        description: n.description, immediate_action: n.immediate_correction, rca_required: n.rca_required,
+        investigation_team: n.investigation_team, rca_method: n.rca_method, root_cause: n.root_cause,
+      }));
+      const incItems: WFItem[] = (incs || []).filter(i => i.status !== 'closed').map(i => ({
+        kind: 'incident', id: i.id, ref: i.incident_number, date: (i.incident_datetime || '').slice(0, 10), title: i.description ? String(i.description).slice(0, 60) : (i.incident_type || 'incident').replace(/_/g, ' '),
+        typeLabel: (i.incident_type || 'incident').replace(/_/g, ' '), unit: i.section_name || '—',
+        risk_score: i.risk_score, risk_level: i.risk_level, occurrence_score: i.occurrence_score, severity_score: i.severity_score,
+        description: i.description, immediate_action: i.immediate_action, rca_required: i.rca_required,
+        investigation_team: i.investigation_team, rca_method: i.rca_method, root_cause: i.root_cause, contributing_factors: i.contributing_factors,
+      }));
+      setItems([...ncItems, ...incItems].sort((a, b) => (b.date || '').localeCompare(a.date || '')));
+    }).catch(e => setError((e as Error).message));
+  }
+  useEffect(() => { load(); }, [stage]);
+
+  function pick(it: WFItem) {
+    setSel(it); setError(null); setMsg(null);
+    setOcc(it.occurrence_score ?? null); setSev(it.severity_score ?? null);
+    // Suggest RCA when the current risk sits in the High / Very-High band.
+    const band = it.risk_score ? bandFor(it.risk_score) : null;
+    setRcaReq(it.rca_required != null ? !!it.rca_required : !!(band && (band.level === 'high' || band.level === 'very_high')));
+    setNotes('');
+    setTeam(it.investigation_team || ''); setMethod(it.rca_method || '5_whys'); setRootCause(it.root_cause || ''); setContributing(it.contributing_factors || '');
+  }
+  const base = (it: WFItem) => it.kind === 'nc' ? `/nonconformities/${it.id}` : `/incidents/${it.id}`;
+
+  async function submitRisk() {
+    if (!sel) return;
+    if (!occ || !sev) { setError('Select both an occurrence and a severity score.'); return; }
+    setBusy(true); setError(null);
+    try {
+      await api(`${base(sel)}/risk-assessment`, { method: 'POST', body: JSON.stringify({ occurrenceScore: occ, severityScore: sev, rcaRequired: rcaReq, notes }) });
+      setMsg(`Risk assessment saved for ${sel.ref}. ${rcaReq ? 'Sent to Root Cause Analysis.' : 'Ready for CAPA.'}`);
+      setSel(null); load(); onChanged();
+    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  }
+  async function submitRca() {
+    if (!sel) return;
+    if (!rootCause.trim()) { setError('Record the identified root cause.'); return; }
+    setBusy(true); setError(null);
+    try {
+      await api(`${base(sel)}/rca`, { method: 'POST', body: JSON.stringify({ investigationTeam: team, rcaMethod: method, rootCause, contributingFactors: contributing }) });
+      setMsg(`Root cause recorded for ${sel.ref}. Ready for CAPA.`);
+      setSel(null); load(); onChanged();
+    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  }
+
+  const previewScore = occ && sev ? occ * sev : null;
+  const previewBand = previewScore ? bandFor(previewScore) : null;
+
+  return <div className="card">
+    <WorkflowStepper active={stage} />
+    <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+      <h3 style={{ margin: 0 }}>{stage === 'risk_assessment' ? 'Risk assessment queue' : 'Root cause analysis queue'}</h3>
+    </div>
+    <p className="muted" style={{ marginTop: 0 }}>{stage === 'risk_assessment'
+      ? 'Every logged nonconformity and incident is scored on the 5×5 matrix before it is classified. The risk score decides whether a full root-cause analysis is required (ISO 22367 — investigation proportionate to risk).'
+      : 'Events whose risk warrants investigation. Record the root cause; the event then moves to CAPA. Not every event reaches this queue — low-risk events may proceed straight to CAPA or closure.'}</p>
+    {error && <div className="error">{error}</div>}
+    {msg && <div className="notice-ok">{msg}</div>}
+    {!canFollowUp && <div className="notice-warn" style={{ marginBottom: 8 }}>You can view this queue, but following up (risk assessment, root-cause analysis) requires reviewer permission.</div>}
+
+    <table className="table" style={{ marginTop: 8 }}><thead><tr><th>Ref</th><th>Source</th><th>Date</th><th>Title</th><th>Unit</th><th>Risk</th><th></th></tr></thead><tbody>
+      {items.map(it => <tr key={`${it.kind}-${it.id}`}>
+        <td>{it.ref}</td>
+        <td><span className={`badge ${it.kind === 'nc' ? 'badge--info' : 'badge--warning'}`}>{it.kind === 'nc' ? 'NC' : 'Incident'}</span></td>
+        <td>{it.date}</td>
+        <td>{it.title}<div className="muted" style={{ fontSize: 11 }}>{it.typeLabel}</div></td>
+        <td>{it.unit}</td>
+        <td>{it.risk_score != null ? <>{it.risk_score} {riskLevelBadge(it.risk_level)}</> : '—'}</td>
+        <td><button disabled={!canFollowUp} onClick={() => pick(it)}>{stage === 'risk_assessment' ? 'Assess' : 'Analyse'}</button></td>
+      </tr>)}
+      {items.length === 0 && <tr><td colSpan={7} className="muted">Nothing awaiting {stage === 'risk_assessment' ? 'risk assessment' : 'root-cause analysis'}.</td></tr>}
+    </tbody></table>
+
+    {sel && <div className="card" style={{ marginTop: 16, borderTop: '3px solid var(--primary, #2563eb)' }}>
+      <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <h3 style={{ margin: 0 }}>{sel.ref} <span className={`badge ${sel.kind === 'nc' ? 'badge--info' : 'badge--warning'}`}>{sel.kind === 'nc' ? 'Nonconformity' : 'Incident'}</span></h3>
+        <button style={{ marginLeft: 'auto' }} className="secondary" onClick={() => setSel(null)}>Close</button>
+      </div>
+      <p className="muted" style={{ fontSize: 12 }}>{sel.date} · {sel.typeLabel} · {sel.unit}</p>
+      <p><strong>Description:</strong> {sel.description || '—'}</p>
+      <p><strong>Immediate action taken:</strong> {sel.immediate_action || '—'}</p>
+
+      {stage === 'risk_assessment' ? <>
+        <h4 style={{ marginBottom: 4 }}>Score the risk (click a cell)</h4>
+        <RiskMatrix occurrence={occ} severity={sev} onChange={(o, s) => { setOcc(o); setSev(s); }} />
+        {previewBand && <p style={{ margin: '8px 0' }}>Risk score <strong>{previewScore}</strong> — {riskLevelBadge(previewBand.level)} <span className="muted">{previewBand.action}</span></p>}
+        <label className="check-inline" style={{ marginTop: 6 }}><input type="checkbox" checked={rcaReq} onChange={e => setRcaReq(e.target.checked)} /> Root-cause analysis required for this event</label>
+        <p className="muted" style={{ fontSize: 12, marginTop: 2 }}>Suggested automatically for High / Very-High risk. Uncheck for low-risk events that only need a correction and closure.</p>
+        <label style={{ display: 'block', marginTop: 8 }}>Assessment notes (optional)<textarea value={notes} onChange={e => setNotes(e.target.value)} /></label>
+        <button style={{ marginTop: 10 }} disabled={busy || !canFollowUp} onClick={submitRisk}>{busy ? 'Saving…' : 'Complete risk assessment'}</button>
+      </> : <>
+        <p style={{ margin: '6px 0' }}>Current risk: {sel.risk_score != null ? <>{sel.risk_score} {riskLevelBadge(sel.risk_level)}</> : '—'}</p>
+        <h4 style={{ marginBottom: 4 }}>Root cause analysis</h4>
+        <div className="form-grid">
+          <label>Investigation team / person<input value={team} onChange={e => setTeam(e.target.value)} /></label>
+          <label>Method<select value={method} onChange={e => setMethod(e.target.value)}>{WF_RCA_METHODS.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}</select></label>
+          <label style={{ gridColumn: '1 / -1' }}>Root cause(s) identified<textarea value={rootCause} onChange={e => setRootCause(e.target.value)} required /></label>
+          <label style={{ gridColumn: '1 / -1' }}>Contributing factors (optional)<textarea value={contributing} onChange={e => setContributing(e.target.value)} /></label>
+        </div>
+        <button style={{ marginTop: 10 }} disabled={busy || !canFollowUp} onClick={submitRca}>{busy ? 'Saving…' : 'Complete root-cause analysis'}</button>
+      </>}
+    </div>}
+  </div>;
+}
+
 export function NcCapaPage() {
   const { isEnabled } = useModules();
   const { staff, sections } = useLookupData();
@@ -90,8 +248,10 @@ export function NcCapaPage() {
   const [loadState, setLoadState] = useState<LoadState>({ loading: false, error: null });
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [capaSourceFilter, setCapaSourceFilter] = useState('');
+  const [config, setConfig] = useState<{ remedialActionEnabled: boolean; canFollowUp: boolean; canCreate: boolean }>({ remedialActionEnabled: true, canFollowUp: true, canCreate: true });
 
-  useEffect(() => { if (!isEnabled('nc_capa')) return; void load(); }, [isEnabled]);
+  useEffect(() => { if (!isEnabled('nc_capa')) return; void load(); api<typeof config>('/nonconformities/config').then(setConfig).catch(() => {}); }, [isEnabled]);
 
   async function load() {
     setLoadState({ loading: true, error: null });
@@ -157,7 +317,7 @@ export function NcCapaPage() {
       const r = await api<{ id: number }>('/nonconformities', { method: 'POST', body: JSON.stringify(formState) });
       setFormState(emptyNcForm);
       await load();
-      setTab('Nonconforming Events');
+      setTab('NC Register');
       await loadNcDetail(r.id);
     } catch (error) {
       setLoadState({ loading: false, error: (error as Error).message });
@@ -322,17 +482,17 @@ export function NcCapaPage() {
   if (!isEnabled('nc_capa')) return <DisabledModule />;
 
   return <div>
-    <PageHeader eyebrow="Nonconforming Event Management" title="Nonconforming Events &amp; CAPA" subtitle="Incidents, investigations, and corrective/preventive actions." />
-    <div className="tabs">{['Dashboard', 'Nonconforming Events', 'New Event', 'Incidents & Adverse Events', 'CAPA Register', 'Overdue CAPAs', 'Effectiveness Reviews', ...(isEnabled('actions') ? ['Action Tracker'] : []), 'Reports placeholder'].map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
+    <PageHeader eyebrow="Nonconforming Event Management" title="Nonconforming Events &amp; CAPA" subtitle="Log an event, assess its risk, investigate the root cause where needed, then drive corrective &amp; preventive action to closure." />
+    <div className="tabs">{['Dashboard', 'New Event', 'Risk Assessment', 'Root Cause Analysis', 'NC Register', 'Incidents & Adverse Events', 'CAPA Register', 'Overdue CAPAs', 'Effectiveness Reviews', ...(isEnabled('actions') ? ['Action Tracker'] : []), 'Reports placeholder'].map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
     {loadState.error && <div className="card"><strong>Error:</strong> {loadState.error}</div>}
     {loadState.loading && <div className="card"><em>Loading QMS data…</em></div>}
     {tab === 'Dashboard' && <><ModuleAlerts moduleKey="nc_capa" /><KpiStrip items={[
-      { label: 'Open NCs', value: summary?.openNCs.count ?? ncList.filter(n => n.status !== 'closed').length, onClick: () => setTab('Nonconforming Events') },
-      { label: 'NCs pending review', value: ncList.filter(n => n.status === 'open').length, onClick: () => setTab('Nonconforming Events') },
+      { label: 'Open NCs', value: summary?.openNCs.count ?? ncList.filter(n => n.status !== 'closed').length, onClick: () => setTab('NC Register') },
+      { label: 'Awaiting risk assessment', value: ncList.filter(n => (n.workflow_stage || 'risk_assessment') === 'risk_assessment' && n.status !== 'closed').length, tone: 'warning', onClick: () => setTab('Risk Assessment') },
+      { label: 'Awaiting root cause', value: ncList.filter(n => n.workflow_stage === 'rca' && n.status !== 'closed').length, onClick: () => setTab('Root Cause Analysis') },
       { label: 'Open CAPAs', value: summary?.openCAPAs.count ?? capaList.filter(c => c.status !== 'closed').length, onClick: () => setTab('CAPA Register') },
       { label: 'Overdue CAPAs', value: overdueCAPAs.length, tone: 'danger', onClick: () => setTab('Overdue CAPAs') },
       { label: 'Effectiveness reviews due', value: effectivenessDue.length, onClick: () => setTab('Effectiveness Reviews') },
-      { label: 'High risk CAPAs', value: summary?.highRisks.count ?? 0, onClick: () => setTab('CAPA Register') },
     ]} />
     <div className="grid cols-2" style={{ marginTop: 18 }}>
       <ChartCard title="Open quality items" subtitle="Composition of active NCs and CAPAs">
@@ -346,65 +506,64 @@ export function NcCapaPage() {
         <BarMeter data={[
           { label: 'Overdue CAPAs', value: overdueCAPAs.length, color: CHART_COLORS[3] },
           { label: 'Effectiveness reviews due', value: effectivenessDue.length, color: CHART_COLORS[2] },
-          { label: 'NCs pending review', value: ncList.filter(n => n.status === 'open').length, color: CHART_COLORS[0] },
+          { label: 'Awaiting risk assessment', value: ncList.filter(n => (n.workflow_stage || 'risk_assessment') === 'risk_assessment' && n.status !== 'closed').length, color: CHART_COLORS[0] },
         ]} />
       </ChartCard>
     </div></>}
 
     {tab === 'Incidents & Adverse Events' && <IncidentsBoard staff={staff} sections={sections} />}
 
-    {tab === 'Nonconforming Events' && <div className="card">
+    {tab === 'Risk Assessment' && <WorkflowStageBoard stage="risk_assessment" sections={sections} canFollowUp={config.canFollowUp} onChanged={load} />}
+    {tab === 'Root Cause Analysis' && <WorkflowStageBoard stage="rca" sections={sections} canFollowUp={config.canFollowUp} onChanged={load} />}
+
+    {tab === 'NC Register' && <div className="card">
       <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap' }}><h3 style={{ margin: 0 }}>Nonconformity register</h3><button style={{ marginLeft: 'auto' }} onClick={() => setTab('New Event')}>+ New nonconformity</button></div>
       <XlsxToolbar exportPath="/nonconformities/register/export" templatePath="/nonconformities/register/template" importPath="/nonconformities/register/import" exportName="Nonconformities.xlsx" onImported={load} />
       <div className="form" style={{ gridTemplateColumns: '1fr auto', alignItems: 'end' }}>
         <label>Search<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search NC number, title, description" /></label>
         <label>Status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All</option>{ncStatusOptions.map(status => <option key={status} value={status}>{status.replace(/_/g, ' ')}</option>)}</select></label>
       </div>
-      {filteredNcs.length === 0 ? <p>No nonconforming events match the current filters.</p> : <table className="table"><thead><tr><th>NC No.</th><th>Date</th><th>Type</th><th>Section</th><th>Title</th><th>Risk</th><th>Status</th><th>CAPA</th><th>Actions</th></tr></thead><tbody>{filteredNcs.map(n => <tr key={n.id}><td>{n.nc_number}</td><td>{n.event_date}</td><td>{(n.nc_type || n.source_module || '—').replace(/_/g, ' ')}</td><td>{sections.find(s => s.id === n.section_id)?.name || n.section_id || '—'}</td><td>{n.title}</td><td>{n.risk_score != null ? <>{n.risk_score} {riskLevelBadge(n.risk_level)}</> : (n.severity || '—')}</td><td>{formatBadge(n.status)}</td><td>{capaList.some(c => c.nc_id === n.id) ? 'Yes' : 'No'}</td><td><button onClick={() => loadNcDetail(n.id)}>View</button> <button className="secondary" onClick={() => openNcPrint(`/nonconformities/${n.id}/print`, m => setLoadState({ loading: false, error: m }))}>Print form</button></td></tr>)}</tbody></table>}
+      {filteredNcs.length === 0 ? <p>No nonconforming events match the current filters.</p> : <table className="table"><thead><tr><th>NC No.</th><th>Date</th><th>Type</th><th>Section</th><th>Title</th><th>Risk</th><th>Status</th><th>CAPA</th><th>Actions</th></tr></thead><tbody>{filteredNcs.map(n => <tr key={n.id}><td>{n.nc_number}</td><td>{n.event_date}</td><td>{(n.nc_type || n.source_module || '—').replace(/_/g, ' ')}</td><td>{sections.find(s => s.id === n.section_id)?.name || n.section_id || '—'}</td><td>{n.title}</td><td>{n.risk_score != null ? <>{n.risk_score} {riskLevelBadge(n.risk_level)}</> : (n.severity || '—')}</td><td>{formatBadge(n.status)}</td><td>{capaList.some(c => c.nc_id === n.id) ? 'Yes' : 'No'}</td><td><button onClick={() => loadNcDetail(n.id)}>View</button> <button className="secondary" onClick={() => openNcPrint(`/nonconformities/${n.id}/print`, m => setLoadState({ loading: false, error: m }))}>Print report</button></td></tr>)}</tbody></table>}
     </div>}
 
-    {tab === 'New Event' && <div className="card"><h3>Nonconformance Corrective Action Form (SECHFO005)</h3>
-      <p className="muted" style={{ marginTop: 0 }}>Record the nonconformity below. After creating it you can complete the root-cause, CAPA, follow-up and approval sections, and print the form.</p>
+    {tab === 'New Event' && <div className="card">
+      <WorkflowStepper active="log" />
+      <h3 style={{ marginTop: 0 }}>Log a nonconforming event</h3>
+      <p className="muted" style={{ marginTop: 0 }}>Any staff member can record a nonconforming event. Capture the facts, the date/time and any immediate action taken — nothing more is needed now. The event then flows to <strong>Risk Assessment</strong>, and (where the risk warrants) <strong>Root Cause Analysis</strong> and <strong>CAPA</strong>, handled by authorised reviewers.</p>
       <form onSubmit={submitNewNc}>
-        <fieldset className="reg-section"><legend>Header</legend><div className="form-grid">
+        <fieldset className="reg-section"><legend>Event details</legend><div className="form-grid">
           <label>Date of event<input type="date" value={formState.eventDate} onChange={e => setFormState(p => ({ ...p, eventDate: e.target.value }))} required /></label>
           <label>Time of event<input type="time" value={formState.timeOfEvent} onChange={e => setFormState(p => ({ ...p, timeOfEvent: e.target.value }))} /></label>
           <label>Unit / section<select value={formState.sectionId} onChange={e => setFormState(p => ({ ...p, sectionId: e.target.value }))}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-          <label>Detected by (staff)<select value={formState.detectedByStaffId} onChange={e => setFormState(p => ({ ...p, detectedByStaffId: e.target.value }))}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+          <label>Reported by (staff)<select value={formState.detectedByStaffId} onChange={e => setFormState(p => ({ ...p, detectedByStaffId: e.target.value }))}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           <label>… or name / role<input value={formState.detectedByName} onChange={e => setFormState(p => ({ ...p, detectedByName: e.target.value }))} placeholder="if not a staff record" /></label>
-        </div></fieldset>
-        <fieldset className="reg-section"><legend>Section A — Description of Nonconformity</legend><div className="form-grid">
-          <label style={{ gridColumn: '1 / -1' }}>Type of nonconformity<select value={formState.ncType} onChange={e => setFormState(p => ({ ...p, ncType: e.target.value }))}>{NC_TYPE_OPTIONS.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}</select></label>
+          <label style={{ gridColumn: '1 / -1' }}>Category<select value={formState.ncType} onChange={e => setFormState(p => ({ ...p, ncType: e.target.value }))}>{NC_TYPE_OPTIONS.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}</select></label>
           {formState.ncType === 'other' && <label style={{ gridColumn: '1 / -1' }}>Specify<input value={formState.ncTypeOther} onChange={e => setFormState(p => ({ ...p, ncTypeOther: e.target.value }))} /></label>}
           <label style={{ gridColumn: '1 / -1' }}>Title<input value={formState.title} onChange={e => setFormState(p => ({ ...p, title: e.target.value }))} required placeholder="Short descriptive title" /></label>
-          <label style={{ gridColumn: '1 / -1' }}>Description of nonconformity (facts only, no blame)<textarea value={formState.description} onChange={e => setFormState(p => ({ ...p, description: e.target.value }))} required /></label>
+          <label style={{ gridColumn: '1 / -1' }}>What happened? (facts only, no blame)<textarea value={formState.description} onChange={e => setFormState(p => ({ ...p, description: e.target.value }))} required /></label>
           <label style={{ gridColumn: '1 / -1' }}>Immediate action taken (urgent step to contain the problem)<textarea value={formState.immediateCorrection} onChange={e => setFormState(p => ({ ...p, immediateCorrection: e.target.value }))} /></label>
-          <label style={{ gridColumn: '1 / -1' }}>Remedial action taken (short-term fix)<textarea value={formState.remedialAction} onChange={e => setFormState(p => ({ ...p, remedialAction: e.target.value }))} /></label>
+          {config.remedialActionEnabled && <label style={{ gridColumn: '1 / -1' }}>Remedial action taken (short-term correction)<textarea value={formState.remedialAction} onChange={e => setFormState(p => ({ ...p, remedialAction: e.target.value }))} /></label>}
         </div></fieldset>
-        <fieldset className="reg-section"><legend>Section B — Risk Evaluation (5×5 matrix)</legend>
-          <RiskMatrix occurrence={formState.occurrenceScore} severity={formState.severityScore} onChange={(o, s) => setFormState(p => ({ ...p, occurrenceScore: o, severityScore: s }))} />
-        </fieldset>
-        <fieldset className="reg-section"><legend>Section C — Root Cause Analysis (optional now)</legend><div className="form-grid">
-          <label>Investigation team / person<input value={formState.investigationTeam} onChange={e => setFormState(p => ({ ...p, investigationTeam: e.target.value }))} /></label>
-          <label>RCA method<select value={formState.rcaMethod} onChange={e => setFormState(p => ({ ...p, rcaMethod: e.target.value }))}>{RCA_METHOD_OPTIONS.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}</select></label>
-          <label style={{ gridColumn: '1 / -1' }}>Root cause(s) identified<textarea value={formState.rootCause} onChange={e => setFormState(p => ({ ...p, rootCause: e.target.value }))} /></label>
-        </div></fieldset>
-        <fieldset className="reg-section"><legend>Section D — Corrective &amp; Preventive Actions</legend><div className="form-grid">
-          <label style={{ gridColumn: '1 / -1' }}>Corrective action (to fix current issue)<textarea value={formState.correctiveAction} onChange={e => setFormState(p => ({ ...p, correctiveAction: e.target.value }))} /></label>
-          <label style={{ gridColumn: '1 / -1' }}>Preventive action (to avoid recurrence)<textarea value={formState.preventiveAction} onChange={e => setFormState(p => ({ ...p, preventiveAction: e.target.value }))} /></label>
-          <label>Responsible person<select value={formState.capaResponsibleStaffId} onChange={e => setFormState(p => ({ ...p, capaResponsibleStaffId: e.target.value }))}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-          <label>Timeline for completion<input type="date" value={formState.capaTimelineDate} onChange={e => setFormState(p => ({ ...p, capaTimelineDate: e.target.value }))} /></label>
-        </div></fieldset>
-        <button type="submit">Create nonconformity</button>
+        <button type="submit">Log event</button>
       </form>
     </div>}
 
     {tab === 'CAPA Register' && <div className="card">
-      <div className="form" style={{ gridTemplateColumns: '1fr auto', alignItems: 'end' }}>
+      <WorkflowStepper active="capa" />
+      <h3 style={{ marginTop: 0 }}>Corrective &amp; Preventive Action register</h3>
+      <p className="muted" style={{ marginTop: 0 }}>Every CAPA — whether raised from a nonconformity, an incident/adverse event, a complaint, or manually — is managed here in one place: verification, effectiveness review and closure.</p>
+      <KpiStrip items={[
+        { label: 'From nonconformities', value: capaList.filter(c => capaSourceLabel(c) === 'Nonconformity').length, onClick: () => setCapaSourceFilter('nonconformities') },
+        { label: 'From incidents', value: capaList.filter(c => capaSourceLabel(c) === 'Incident').length, onClick: () => setCapaSourceFilter('incidents') },
+        { label: 'From complaints', value: capaList.filter(c => capaSourceLabel(c) === 'Complaint').length, onClick: () => setCapaSourceFilter('complaints') },
+        { label: 'Open CAPAs', value: capaList.filter(c => c.status !== 'closed').length, tone: 'warning', onClick: () => { setCapaSourceFilter(''); setStatusFilter(''); } },
+      ]} />
+      <div className="form" style={{ gridTemplateColumns: '1fr auto auto', alignItems: 'end', marginTop: 12 }}>
         <label>Search<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search CAPA number, title" /></label>
+        <label>Source<select value={capaSourceFilter} onChange={e => setCapaSourceFilter(e.target.value)}><option value="">All</option><option value="nonconformities">Nonconformity</option><option value="incidents">Incident</option><option value="complaints">Complaint</option><option value="manual">Manual</option></select></label>
         <label>Status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All</option>{capaStatusOptions.map(status => <option key={status} value={status}>{status.replace(/_/g, ' ')}</option>)}</select></label>
       </div>
-      {filteredCapas.length === 0 ? <p>No CAPA records match the current filters.</p> : <table className="table"><thead><tr><th>CAPA No.</th><th>Source</th><th>Title</th><th>Responsible</th><th>Due</th><th>Priority</th><th>Status</th><th>Effectiveness</th><th>Actions</th></tr></thead><tbody>{filteredCapas.map(c => <tr key={c.id}><td>{c.capa_number}</td><td>{c.source_module || 'Manual'}</td><td>{c.title}</td><td>{staff.find(s => s.id === c.responsible_staff_id)?.fullName || c.responsible_staff_id || '—'}</td><td>{c.due_date || 'N/A'}</td><td>{c.priority}</td><td>{formatBadge(c.status)}</td><td>{c.effectiveness_status || 'pending'}</td><td><button onClick={() => loadCapaDetail(c.id)}>View</button></td></tr>)}</tbody></table>}
+      {(() => { const rows = filteredCapas.filter(c => !capaSourceFilter || (capaSourceFilter === 'manual' ? capaSourceLabel(c) === 'Manual' : (c.source_module || '') === capaSourceFilter)); return rows.length === 0 ? <p>No CAPA records match the current filters.</p> : <table className="table"><thead><tr><th>CAPA No.</th><th>Source</th><th>Title</th><th>Responsible</th><th>Due</th><th>Priority</th><th>Status</th><th>Effectiveness</th><th>Actions</th></tr></thead><tbody>{rows.map(c => <tr key={c.id}><td>{c.capa_number}</td><td><span className="badge badge--info">{capaSourceLabel(c)}</span></td><td>{c.title}</td><td>{staff.find(s => s.id === c.responsible_staff_id)?.fullName || c.responsible_staff_id || '—'}</td><td>{c.due_date || 'N/A'}</td><td>{c.priority}</td><td>{formatBadge(c.status)}</td><td>{c.effectiveness_status || 'pending'}</td><td><button onClick={() => loadCapaDetail(c.id)}>View</button></td></tr>)}</tbody></table>; })()}
     </div>}
 
     {tab === 'Overdue CAPAs' && <div className="card"><h3>Overdue CAPAs</h3>{overdueCAPAs.length === 0 ? <p>No overdue CAPAs at this time.</p> : <table className="table"><thead><tr><th>CAPA No.</th><th>Title</th><th>Due date</th><th>Status</th></tr></thead><tbody>{overdueCAPAs.map(c => <tr key={c.id}><td>{c.capa_number}</td><td>{c.title}</td><td>{c.due_date}</td><td>{formatBadge(c.status)}</td></tr>)}</tbody></table>}</div>}
@@ -419,42 +578,43 @@ export function NcCapaPage() {
       <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <h3 style={{ margin: 0 }}>NC {selectedNc.nc_number} {formatBadge(selectedNc.status)} {nc.risk_score != null ? <>{nc.risk_score} {riskLevelBadge(nc.risk_level)}</> : null}</h3>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <button className="secondary" onClick={() => openNcPrint(`/nonconformities/${ncId}/print`, m => setLoadState({ loading: false, error: m }))}>Print form</button>
+          <button className="secondary" onClick={() => openNcPrint(`/nonconformities/${ncId}/print`, m => setLoadState({ loading: false, error: m }))}>Print report</button>
           <button className="secondary" onClick={() => setSelectedNc(null)}>Close</button>
         </div>
       </div>
-      <p className="muted" style={{ fontSize: 12 }}>{selectedNc.event_date}{nc.time_of_event ? ` ${nc.time_of_event}` : ''} · {(nc.nc_type || '—').replace(/_/g, ' ')} · {sections.find(s => s.id === selectedNc.section_id)?.name || '—'} · detected by {staff.find(s => s.id === selectedNc.detected_by_staff_id)?.fullName || nc.detected_by_name || '—'}</p>
+      <p className="muted" style={{ fontSize: 12 }}>{selectedNc.event_date}{nc.time_of_event ? ` ${nc.time_of_event}` : ''} · {(nc.nc_type || '—').replace(/_/g, ' ')} · {sections.find(s => s.id === selectedNc.section_id)?.name || '—'} · reported by {staff.find(s => s.id === selectedNc.detected_by_staff_id)?.fullName || nc.detected_by_name || '—'}</p>
+      <WorkflowStepper active={nc.workflow_stage || (selectedNc.status === 'closed' ? 'closed' : 'risk_assessment')} />
       <p><strong>Description:</strong> {selectedNc.description || '—'}</p>
       <p><strong>Immediate action:</strong> {nc.immediate_correction || '—'}</p>
-      <p><strong>Remedial action:</strong> {nc.remedial_action || '—'}</p>
+      {config.remedialActionEnabled && <p><strong>Remedial action:</strong> {nc.remedial_action || '—'}</p>}
 
-      <details style={{ margin: '10px 0' }} open><summary style={{ cursor: 'pointer', fontWeight: 600 }}>Full form — risk, root cause, CAPA, follow-up &amp; approval (Sections B–F)</summary>
+      <details style={{ margin: '10px 0' }} open><summary style={{ cursor: 'pointer', fontWeight: 600 }}>Full record — risk, root cause, corrective &amp; preventive action, follow-up &amp; approval</summary>
         <div style={{ padding: '8px 0' }}>
-          <h4 style={{ margin: '6px 0' }}>Section B — Risk evaluation</h4>
+          <h4 style={{ margin: '6px 0' }}>Risk evaluation</h4>
           <RiskMatrix occurrence={nc.occurrence_score ?? null} severity={nc.severity_score ?? null} onChange={(o, s) => saveNcField(ncId, { occurrenceScore: o, severityScore: s })} />
-          <h4 style={{ margin: '12px 0 6px' }}>Section C — Root cause analysis</h4>
+          <h4 style={{ margin: '12px 0 6px' }}>Root cause analysis</h4>
           <div className="form-grid">
             <label>Investigation team<input defaultValue={nc.investigation_team || ''} onBlur={e => saveNcField(ncId, { investigationTeam: e.target.value })} /></label>
             <label>RCA method<select defaultValue={nc.rca_method || ''} onChange={e => saveNcField(ncId, { rcaMethod: e.target.value })}><option value="">—</option>{RCA_METHOD_OPTIONS.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}</select></label>
             <label style={{ gridColumn: '1 / -1' }}>Root cause(s)<textarea defaultValue={nc.root_cause || ''} onBlur={e => saveNcField(ncId, { rootCause: e.target.value })} /></label>
           </div>
-          <h4 style={{ margin: '12px 0 6px' }}>Section D — Corrective &amp; preventive actions</h4>
+          <h4 style={{ margin: '12px 0 6px' }}>Corrective &amp; preventive action</h4>
           <div className="form-grid">
             <label style={{ gridColumn: '1 / -1' }}>Corrective action<textarea defaultValue={nc.corrective_action || ''} onBlur={e => saveNcField(ncId, { correctiveAction: e.target.value })} /></label>
             <label style={{ gridColumn: '1 / -1' }}>Preventive action<textarea defaultValue={nc.preventive_action || ''} onBlur={e => saveNcField(ncId, { preventiveAction: e.target.value })} /></label>
             <label>Responsible person<select defaultValue={nc.capa_responsible_staff_id ? String(nc.capa_responsible_staff_id) : ''} onChange={e => saveNcField(ncId, { capaResponsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
             <label>Timeline for completion<input type="date" defaultValue={nc.capa_timeline_date || ''} onBlur={e => saveNcField(ncId, { capaTimelineDate: e.target.value })} /></label>
           </div>
-          <h4 style={{ margin: '12px 0 6px' }}>Section E — Follow-up &amp; effectiveness check</h4>
+          <h4 style={{ margin: '12px 0 6px' }}>Follow-up &amp; effectiveness check</h4>
           <div className="form-grid">
             <label>Reviewed by<select defaultValue={nc.effectiveness_reviewed_by_staff_id ? String(nc.effectiveness_reviewed_by_staff_id) : ''} onChange={e => saveNcField(ncId, { effectivenessReviewedByStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
             <label>Review date<input type="date" defaultValue={nc.effectiveness_review_date || ''} onBlur={e => saveNcField(ncId, { effectivenessReviewDate: e.target.value })} /></label>
             <label>Corrective action effective?<select defaultValue={nc.corrective_effective == null ? '' : String(nc.corrective_effective)} onChange={e => saveNcField(ncId, { correctiveEffective: e.target.value === '' ? null : e.target.value === '1' })}><option value="">Not assessed</option><option value="1">Yes</option><option value="0">No</option></select></label>
             <label style={{ gridColumn: '1 / -1' }}>Comments<textarea defaultValue={nc.effectiveness_comments || ''} onBlur={e => saveNcField(ncId, { effectivenessComments: e.target.value })} /></label>
           </div>
-          <h4 style={{ margin: '12px 0 6px' }}>Section F — Approval</h4>
+          <h4 style={{ margin: '12px 0 6px' }}>Approval</h4>
           <p style={{ margin: '2px 0' }}>Approved by: <strong>{staff.find(s => s.id === nc.approved_by_staff_id)?.fullName || '—'}</strong>{nc.approved_at ? ` · ${String(nc.approved_at).slice(0, 10)}` : ''}</p>
-          <button onClick={() => approveNc(ncId)}>Approve nonconformity (Section F)</button>
+          <button onClick={() => approveNc(ncId)}>Approve nonconformity</button>
         </div>
       </details>
       {selectedNc.links?.length ? <div><h4>Linked records</h4><table className="table"><thead><tr><th>Source</th><th>Target</th><th>Notes</th></tr></thead><tbody>{selectedNc.links.map(link => <tr key={link.id}><td>{link.source_module_key} / {link.source_record_type}#{link.source_record_id}</td><td>{link.target_module_key} / {link.target_record_type}#{link.target_record_id}</td><td>{link.notes || '—'}</td></tr>)}</tbody></table></div> : <p>No linked records are attached to this NC.</p>}

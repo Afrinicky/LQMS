@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { api } from '../services/api';
 import RiskMatrix, { riskLevelBadge } from '../components/RiskMatrix';
 import XlsxToolbar from '../components/XlsxToolbar';
+import WorkflowStepper from '../components/WorkflowStepper';
 import type { Staff, Section } from '../../shared/types/api';
 
 // Incident / Adverse Event / Occurrence management (ISO 15189 risk management;
@@ -16,6 +17,7 @@ type Incident = {
   investigation_team: string | null; root_cause: string | null; rca_method: string | null; contributing_factors: string | null;
   corrective_action: string | null; preventive_action: string | null; notified_to: string | null; reportable_external: number; external_authority: string | null;
   nc_id: number | null; nc_number: string | null; status: string; notes: string | null;
+  workflow_stage?: string | null; rca_required?: number | null;
 };
 
 const INCIDENT_TYPES = [
@@ -62,7 +64,7 @@ export default function IncidentsBoard({ staff, sections }: { staff: Staff[]; se
         <h3 style={{ margin: 0 }}>Incident / Adverse Event Register</h3>
         <button style={{ marginLeft: 'auto' }} onClick={() => setShowNew(v => !v)}>{showNew ? 'Cancel' : '+ Report incident'}</button>
       </div>
-      <p className="muted" style={{ marginTop: 0 }}>Report and manage incidents, adverse events, occurrences and near-misses. Each is risk-rated on the 5×5 matrix; high-risk events should be escalated to a nonconformity so the CAPA workflow follows.</p>
+      <p className="muted" style={{ marginTop: 0 }}>Any staff member can report an incident, adverse event, occurrence or near-miss — just capture the facts and any immediate action. Reported events then flow through the same staged workflow as nonconformities: <strong>Risk Assessment</strong> → (where warranted) <strong>Root Cause Analysis</strong> → <strong>CAPA</strong>, handled from the tabs above by authorised reviewers.</p>
       <XlsxToolbar exportPath="/incidents/register/export" templatePath="/incidents/register/template" importPath="/incidents/register/import" exportName="Incidents.xlsx" onImported={load} />
 
       {showNew && <form className="form-grid" onSubmit={create} style={{ marginTop: 12, border: '1px solid var(--border, #ddd)', padding: 12, borderRadius: 8 }}>
@@ -77,11 +79,7 @@ export default function IncidentsBoard({ staff, sections }: { staff: Staff[]; se
         <label>Reported by<select value={nf.reportedByStaffId} onChange={e => setNf({ ...nf, reportedByStaffId: e.target.value })}><option value="">Me</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label style={{ gridColumn: '1 / -1' }}>Description (facts only)<textarea value={nf.description} onChange={e => setNf({ ...nf, description: e.target.value })} required /></label>
         <label style={{ gridColumn: '1 / -1' }}>Immediate action taken<textarea value={nf.immediateAction} onChange={e => setNf({ ...nf, immediateAction: e.target.value })} /></label>
-        <div style={{ gridColumn: '1 / -1' }}>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>Risk assessment (click a cell):</div>
-          <RiskMatrix occurrence={nf.occurrenceScore} severity={nf.severityScore} onChange={(o, s) => setNf({ ...nf, occurrenceScore: o, severityScore: s })} />
-        </div>
-        <button type="submit">Log incident</button>
+        <button type="submit">Report incident</button>
       </form>}
 
       <table className="data-table" style={{ marginTop: 12 }}><thead><tr><th>No</th><th>Date</th><th>Type</th><th>Unit</th><th>Risk</th><th>Status</th><th>NC</th><th></th></tr></thead><tbody>
@@ -105,11 +103,13 @@ export default function IncidentsBoard({ staff, sections }: { staff: Staff[]; se
         <button style={{ marginLeft: 'auto' }} className="secondary" onClick={() => setSel(null)}>Close</button>
       </div>
       <p className="muted" style={{ fontSize: 12 }}>{(sel.incident_type || '').replace(/_/g, ' ')}{sel.is_near_miss ? ' · near miss' : ''} · {(sel.incident_datetime || '').slice(0, 16).replace('T', ' ')} · {sel.section_name || '—'}{sel.location_text ? ` · ${sel.location_text}` : ''} · reported by {sel.reported_by_full || sel.reported_by_name || '—'}</p>
+      <WorkflowStepper active={sel.workflow_stage || (sel.status === 'closed' ? 'closed' : 'risk_assessment')} />
       <p><strong>Description:</strong> {sel.description || '—'}</p>
       <p><strong>Immediate action:</strong> {sel.immediate_action || '—'}</p>
       <p><strong>Persons involved:</strong> {sel.persons_involved || '—'} · <strong>Harm:</strong> {sel.harm_level || '—'}</p>
+      <p className="muted" style={{ fontSize: 12 }}>Risk assessment and root-cause analysis are normally done from the <strong>Risk Assessment</strong> and <strong>Root Cause Analysis</strong> tabs. You can also edit them in place below.</p>
 
-      {canEdit && <>
+      {canEdit && <details><summary style={{ cursor: 'pointer', fontWeight: 600, margin: '6px 0' }}>Full record — assess &amp; investigate in place</summary>
         <h4 style={{ marginBottom: 4 }}>Risk assessment</h4>
         <RiskMatrix occurrence={sel.occurrence_score} severity={sel.severity_score} onChange={(o, s) => save({ occurrenceScore: o, severityScore: s })} />
         <h4 style={{ marginBottom: 4, marginTop: 14 }}>Investigation &amp; actions</h4>
@@ -125,7 +125,7 @@ export default function IncidentsBoard({ staff, sections }: { staff: Staff[]; se
           {!!sel.reportable_external && <label>External authority<input defaultValue={sel.external_authority || ''} onBlur={e => save({ externalAuthority: e.target.value })} /></label>}
           <label>Status<select value={sel.status} onChange={e => save({ status: e.target.value })}>{STATUSES.map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select></label>
         </div>
-      </>}
+      </details>}
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
         {!sel.nc_id && <button onClick={createNc}>Escalate to Nonconformity</button>}
