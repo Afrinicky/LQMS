@@ -50,16 +50,19 @@ export function ModuleAlerts({ moduleKey, title = 'Alerts & attention', scope = 
   moduleKey: string; title?: string; scope?: 'all' | 'mine'; limit?: number; showEmpty?: boolean; onOpen?: (a: LiveAlert) => void;
 }) {
   const [alerts, setAlerts] = useState<LiveAlert[] | null>(null);
+  const [denied, setDenied] = useState(false);
   const [expanded, setExpanded] = useState(false);
   useEffect(() => {
     let live = true;
     api<LiveAlert[]>(`/notifications/live-alerts?module=${encodeURIComponent(moduleKey)}${scope === 'mine' ? '&scope=mine' : ''}`)
-      .then(a => { if (live) setAlerts(a); })
-      .catch(() => { if (live) setAlerts([]); });
+      .then(a => { if (live) { setAlerts(a); setDenied(false); } })
+      // A refusal is not "no alerts": someone without access to the alert feed
+      // must not be told the module is clear, so the strip is dropped instead.
+      .catch(() => { if (live) { setAlerts([]); setDenied(true); } });
     return () => { live = false; };
   }, [moduleKey, scope]);
 
-  if (alerts === null) return null;
+  if (alerts === null || denied) return null;
   if (alerts.length === 0 && !showEmpty) return null;
 
   const cap = limit && !expanded ? limit : alerts.length;

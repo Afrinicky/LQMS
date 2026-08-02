@@ -6,6 +6,7 @@ import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import ScannedRecordUpload from '../components/ScannedRecordUpload';
 import XlsxToolbar from '../components/XlsxToolbar';
+import { usePermissions } from '../hooks/usePermissions';
 import type {
   Department, Section, Location, Staff, EquipmentItem,
   EnvAsset, EnvDevice, EnvReading, EnvAlert, EnvExcursion, EnvDashboard, EnvSettings,
@@ -65,6 +66,7 @@ const CARD_TONE: Record<string, string> = { normal: 'ok', warning: 'warn', criti
 const TREND_ICON: Record<string, string> = { up: '▲', down: '▼', flat: '▬' };
 
 export function EnvironmentalMonitoringPage({ embedded = false }: { embedded?: boolean } = {}) {
+  const { can } = usePermissions();
   const { isEnabled } = useModules();
   const { departments, sections, locations, staff, equipment } = useLookups();
   const [tab, setTab] = useState('Live Dashboard');
@@ -157,7 +159,7 @@ export function EnvironmentalMonitoringPage({ embedded = false }: { embedded?: b
         <label>Asset<select value={chartAsset} onChange={e => setChartAsset(e.target.value)}><option value="">— select —</option>{assets.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
         <label>Range<select value={chartRange} onChange={e => setChartRange(e.target.value)}>{['24h', '7d', '30d', '90d'].map(r => <option key={r} value={r}>{r === '24h' ? '24 hours' : r === '7d' ? '7 days' : r === '30d' ? '30 days' : '90 days'}</option>)}</select></label>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
-          <button type="button" className="secondary" disabled={!chartData.length} onClick={() => exportCsv(chartData, assets.find(a => String(a.id) === chartAsset)?.name || 'asset')}>Export CSV</button>
+          {can('monitoring', 'export') && <button type="button" className="secondary" disabled={!chartData.length} onClick={() => exportCsv(chartData, assets.find(a => String(a.id) === chartAsset)?.name || 'asset')}>Export CSV</button>}
         </div>
       </div>
       {chartAsset
@@ -367,7 +369,7 @@ function ManualEntryTab({ assets, staff, onSaved, onError, onFlash }: any) {
   return <div className="card">
     <h3>Manual reading</h3>
     <p className="muted" style={{ marginTop: 0 }}>Manual entries are tagged as <em>manual</em> and evaluated by the same alarm/excursion engine as automated readings.</p>
-    <XlsxToolbar exportPath="/environmental/readings/export" templatePath="/environmental/readings/template" importPath="/environmental/readings/import" exportName="Environmental_Readings.xlsx" onImported={onSaved} />
+    <XlsxToolbar module="monitoring" exportPath="/environmental/readings/export" templatePath="/environmental/readings/template" importPath="/environmental/readings/import" exportName="Environmental_Readings.xlsx" onImported={onSaved} />
     <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>Export/import temperature &amp; humidity readings in Excel. Imported rows are matched to assets by their <strong>Asset code</strong> and pass through the same excursion engine, so out-of-range values raise alerts automatically.</p>
     <form className="form-grid" onSubmit={submit}>
       <label>Asset<select value={form.assetId} onChange={e => setForm({ ...form, assetId: e.target.value })} required><option value="">—</option>{assets.map((a: EnvAsset) => <option key={a.id} value={a.id}>{a.name} ({a.temp_min ?? '−'}–{a.temp_max ?? '−'}°C)</option>)}</select></label>
@@ -525,6 +527,7 @@ async function fetchAuthedBlob(path: string): Promise<Blob | null> {
 }
 
 function ReportsTab({ onError }: any) {
+  const { can } = usePermissions();
   const [types, setTypes] = useState<EnvReportType[]>([]);
   const [type, setType] = useState('summary');
   const [from, setFrom] = useState('');
@@ -551,8 +554,8 @@ function ReportsTab({ onError }: any) {
       <label>From<input type="date" value={from} onChange={e => setFrom(e.target.value)} /></label>
       <label>To<input type="date" value={to} onChange={e => setTo(e.target.value)} /></label>
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
-        <button type="button" onClick={exportExcel}>Export Excel</button>
-        <button type="button" className="secondary" onClick={printPdf}>Print / PDF</button>
+        {can('monitoring', 'export') && <button type="button" onClick={exportExcel}>Export Excel</button>}
+        {can('monitoring', 'print') && <button type="button" className="secondary" onClick={printPdf}>Print / PDF</button>}
       </div>
     </div>
   </div>;

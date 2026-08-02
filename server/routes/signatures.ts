@@ -20,6 +20,8 @@ import multer from 'multer';
 import fs from 'node:fs';
 import path from 'node:path';
 import { requireAuth } from '../middleware/auth.js';
+import { requireResolvedPermission } from '../middleware/permissions.js';
+import { canViewModule } from '../services/permissionResolver.js';
 import { getDb, uploadRoot, evidenceRoot } from '../db/database.js';
 import { audit } from '../services/auditService.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
@@ -77,13 +79,31 @@ export function signatureRoutes() {
 
   // A staff member's signature image, so it can be shown wherever their
   // signature appears (approvals, attestations, printed records).
+  //
+  // A signature image is forgeable material, so this is not open to every
+  // signed-in account: you may fetch your own, one belonging to staff you are
+  // allowed to view under Personnel, or one that already appears on a signed
+  // record (the case this endpoint exists to serve). Every other fetch is
+  // refused, and each successful one is written to the audit trail.
   router.get('/staff/:id/image', requireAuth, (req, res) => {
-    const row = getDb().prepare('SELECT signature_file_id FROM staff WHERE id = ?').get(req.params.id) as { signature_file_id?: number } | undefined;
-    if (!streamFile(res, row?.signature_file_id)) res.status(404).json({ error: 'No signature on file' });
+    const db = getDb();
+    const staffId = Number(req.params.id);
+    const isSelf = req.user?.staffId != null && Number(req.user.staffId) === staffId;
+    const hasSignedRecord = !isSelf && Boolean(db.prepare('SELECT 1 FROM e_signatures WHERE staff_id = ? LIMIT 1').get(staffId));
+    const mayViewPersonnel = !isSelf && canViewModule(req.user!.id, 'personnel');
+    if (!isSelf && !hasSignedRecord && !mayViewPersonnel) {
+      return res.status(403).json({ error: 'Permission denied', decision: { allowed: false, source: 'Denied override', reason: 'You may not view this staff member’s signature.' } });
+    }
+    const row = db.prepare('SELECT signature_file_id FROM staff WHERE id = ?').get(staffId) as { signature_file_id?: number } | undefined;
+    if (!row?.signature_file_id) return res.status(404).json({ error: 'No signature on file' });
+    if (!isSelf) audit(req, { action: 'view_signature_image', entity: 'staff', entityId: staffId });
+    if (!streamFile(res, row.signature_file_id)) res.status(404).json({ error: 'No signature on file' });
   });
 
   // ── Record / read signatures on a record ──
-  router.post('/', requireAuth, (req, res) => {
+  // Signing a record changes its evidence, so it takes the edit right on the
+  // module that owns the record — not merely a valid session.
+  router.post('/', requireResolvedPermission(req => (req.body?.moduleKey ? String(req.body.moduleKey) : null), 'edit'), (req, res) => {
     const { moduleKey, recordType, recordId, purpose, meaning, staffId, signatureImageFileId } = req.body ?? {};
     if (!moduleKey || !recordType || recordId === undefined || recordId === null || !purpose) {
       return res.status(400).json({ error: 'moduleKey, recordType, recordId and purpose are required' });
@@ -92,7 +112,7 @@ export function signatureRoutes() {
     res.status(201).json(sig);
   });
 
-  router.get('/:module/:type/:id', requireAuth, (req, res) => {
+  router.get('/:module/:type/:id', requireResolvedPermission(req => req.params.module), (req, res) => {
     res.json(signaturesFor(req.params.module, req.params.type, req.params.id));
   });
 

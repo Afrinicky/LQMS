@@ -5,6 +5,7 @@ import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import { ComplaintsPage } from './QMSPages';
+import { usePermissions } from '../hooks/usePermissions';
 import type {
   Section, Department, Staff,
   CustomerStakeholder, ServiceAgreement, CustomerFeedback,
@@ -45,6 +46,7 @@ function staffName(staffList: Staff[], id?: number | null) {
 }
 
 export function CustomerFocusPage() {
+  const { can } = usePermissions();
   const { isEnabled } = useModules();
   const { staff, sections, departments } = useLookups();
   const [tab, setTab] = useState('Dashboard');
@@ -392,7 +394,7 @@ export function CustomerFocusPage() {
           <td>{f.title}</td><td>{formatBadge(f.urgency)}</td><td>{formatBadge(f.status)}</td>
           <td>{f.stakeholder_name || '—'}</td>
           <td>
-            <button onClick={() => printFeedback(f.id)}>Print</button>
+            {can('customer_focus', 'print') && <button onClick={() => printFeedback(f.id)}>Print</button>}
             {!f.complaint_id && <button onClick={() => escalateToComplaint(f.id)}>Escalate to complaint</button>}
             <button onClick={() => feedbackCreateAction(f.id)}>Action</button>
             {!f.nc_id && <button onClick={() => feedbackCreateNc(f.id)}>NC</button>}

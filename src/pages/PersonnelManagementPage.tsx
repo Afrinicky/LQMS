@@ -7,6 +7,7 @@ import { api, API_BASE, getToken } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import { DutyRosterBoard, ReassignmentBoard, BenchScheduleBoard } from './SchedulingBoards';
 import DisabledModule from '../components/DisabledModule';
+import { usePermissions } from '../hooks/usePermissions';
 import type {
   Section, Department, Staff, Position,
   StaffDocument, StaffDeclaration, TrainingEvent, CompetencyAssessment, DutyRoster,
@@ -76,10 +77,14 @@ function staffName(staffList: Staff[], id?: number | null) {
 }
 
 export function PersonnelManagementPage() {
+  const { can } = usePermissions();
   const { isEnabled } = useModules();
   const { user } = useAuth();
-  // Managers / unit heads may build the rosters; everyone else sees them read-only.
-  const canEditRosters = /manager|head|administrator|supervisor/i.test(user?.roleName || '');
+  // Who may build rosters is a granted permission, not a guess from the role's
+  // name. The old test matched any role whose title happened to contain
+  // "manager", "head", "administrator" or "supervisor", so a custom role such
+  // as "Bench Head" silently gained roster editing nobody had granted it.
+  const canEditRosters = can('personnel', 'edit');
   const { staff, sections, departments, positions, reloadStaff } = useLookups();
   const [tab, setTab] = useState('Dashboard');
   const [error, setError] = useState<string | null>(null);
@@ -418,9 +423,11 @@ export function PersonnelManagementPage() {
         <div className="section-head" style={{ alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <h3 style={{ margin: 0 }}>Master Personnel Register</h3>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <button type="button" className="secondary" disabled={!!regBusy} title="Download the register as an Excel workbook" onClick={() => downloadRegister('/staff/export', 'Master_Personnel_Register.xlsx')}><Download size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />{regBusy === '/staff/export' ? 'Exporting…' : 'Export'}</button>
-            <button type="button" className="secondary" disabled={!!regBusy} title="Upload a completed register workbook" onClick={() => importInputRef.current?.click()}><Upload size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />{regBusy === 'import' ? 'Importing…' : 'Import'}</button>
-            <input ref={importInputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) void importRegister(f); }} />
+            {can('personnel', 'export') && <button type="button" className="secondary" disabled={!!regBusy} title="Download the register as an Excel workbook" onClick={() => downloadRegister('/staff/export', 'Master_Personnel_Register.xlsx')}><Download size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />{regBusy === '/staff/export' ? 'Exporting…' : 'Export'}</button>}
+            {can('personnel', 'create') && <>
+              <button type="button" className="secondary" disabled={!!regBusy} title="Upload a completed register workbook" onClick={() => importInputRef.current?.click()}><Upload size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />{regBusy === 'import' ? 'Importing…' : 'Import'}</button>
+              <input ref={importInputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) void importRegister(f); }} />
+            </>}
             <input placeholder="Search name, ID, position…" value={staffSearch} onChange={e => setStaffSearch(e.target.value)} style={{ maxWidth: 240 }} />
           </div>
         </div>

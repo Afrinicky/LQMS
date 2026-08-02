@@ -1979,3 +1979,106 @@ button.tiny { padding: 2px 8px; font-size: 11px; }
 .dm-danger-details > summary::before { content: "▸ "; color: var(--muted); }
 .dm-danger-details[open] > summary::before { content: "▾ "; }
 .dm-danger-details[open] > summary { color: #FF8D9C; }
+
+/* ============================================================================
+   MAIN DASHBOARD — "my dashboard" band
+   ----------------------------------------------------------------------------
+   The profile card and the inbox sit side by side above the laboratory-wide
+   figures: who you are and what is waiting on you, before anything else. The
+   inbox is the wider of the two because it holds a list; the profile is a calm
+   identity panel that never competes with it.
+   ========================================================================= */
+.dash-me {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.85fr) minmax(320px, 1.6fr);
+  gap: 16px;
+  margin-bottom: 18px;
+}
+@media (max-width: 1080px) { .dash-me { grid-template-columns: 1fr; } }
+
+/* ---- Profile card ---- */
+.dash-profile { display: flex; flex-direction: column; gap: 16px; }
+.dp-identity { display: flex; align-items: center; gap: 13px; }
+.dp-avatar {
+  width: 46px; height: 46px; flex: none; border-radius: 14px;
+  display: grid; place-items: center;
+  font-size: 15px; font-weight: 700; letter-spacing: 0.02em;
+  color: var(--accent-bright);
+  background: var(--accent-soft);
+  border: 1px solid rgba(78, 141, 255, 0.28);
+}
+.dp-who { min-width: 0; }
+.dp-who h3 { margin: 0; font-size: 16px; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; }
+.dp-role { font-size: 12px; color: var(--muted); }
+
+.dp-facts { margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.dp-facts > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.dp-facts dt { font-size: 11.5px; color: var(--faint); text-transform: uppercase; letter-spacing: 0.06em; }
+.dp-facts dd {
+  margin: 0; font-size: 12.5px; color: var(--text); text-align: right;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 62%;
+}
+.dp-facts dd.dp-ok { color: var(--success); display: inline-flex; align-items: center; gap: 5px; }
+.dp-facts dd.dp-todo { color: var(--warning); }
+
+.dp-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+@media (min-width: 1400px) { .dp-stats { grid-template-columns: repeat(4, 1fr); } }
+.dp-stat {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 10px 11px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--panel); color: var(--text); cursor: pointer; text-align: left;
+  transition: border-color .14s ease, transform .14s ease;
+}
+.dp-stat:hover { border-color: rgba(78, 141, 255, 0.45); transform: translateY(-2px); }
+.dp-stat strong { font-size: 19px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.dp-stat span { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.dp-stat.danger strong { color: var(--danger); }
+
+.dp-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+.dp-actions button { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.dp-hint { font-size: 11.5px; color: var(--warning); line-height: 1.45; }
+
+/* ---- Inbox card ---- */
+.dash-inbox { display: flex; flex-direction: column; gap: 4px; }
+.di-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+.di-head h3 { margin: 0; font-size: 15px; display: inline-flex; align-items: center; gap: 8px; }
+.di-head p { margin: 3px 0 0; font-size: 12px; color: var(--muted); }
+
+.di-clear {
+  display: flex; align-items: center; gap: 10px;
+  padding: 18px 4px; color: var(--success); font-size: 13px;
+}
+
+.di-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.di-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 8px; border-top: 1px solid var(--border);
+  border-radius: 8px; cursor: pointer; transition: background .12s ease;
+}
+.di-item:first-child { border-top: 0; }
+.di-item:hover, .di-item:focus-visible { background: rgba(255,255,255,.04); outline: none; }
+.di-item[aria-busy="true"] { opacity: 0.6; }
+.di-rail { width: 4px; align-self: stretch; min-height: 30px; border-radius: 99px; flex: none; }
+.di-rail.crit { background: var(--danger); }
+.di-rail.warn { background: var(--warning); }
+.di-rail.ok { background: var(--accent-bright); }
+.di-rail.info { background: var(--faint); }
+.di-main { flex: 1; min-width: 0; }
+.di-title { font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.di-item.unread .di-title { font-weight: 650; }
+.di-meta { display: flex; align-items: center; gap: 8px; margin-top: 3px; font-size: 11px; color: var(--faint); text-transform: capitalize; }
+.di-due { font-size: 11px; font-weight: 650; padding: 3px 9px; border-radius: 99px; white-space: nowrap; flex: none; }
+.di-due.crit { color: var(--danger); background: var(--danger-bg); }
+.di-due.warn { color: var(--warning); background: var(--warning-bg); }
+.di-due.muted { color: var(--faint); background: var(--panel-2); }
+.di-go { color: var(--faint); flex: none; }
+.di-item:hover .di-go { color: var(--accent-bright); }
+.di-more {
+  align-self: flex-start; margin-top: 8px; padding: 0; border: 0; background: none;
+  color: var(--accent-bright); font-size: 12px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+
+/* Breathing room between the dashboard's bands so nothing feels stacked. */
+.dash .section-title { margin-top: 22px; }
+.dash .attn-hero { margin-bottom: 18px; }

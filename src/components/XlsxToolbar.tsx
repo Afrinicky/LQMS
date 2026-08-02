@@ -1,13 +1,19 @@
 import { useRef, useState } from 'react';
 import { Download, Upload, FileSpreadsheet } from 'lucide-react';
 import { downloadXlsx, uploadXlsx, type ImportResult } from '../services/xlsx';
+import { usePermissions } from '../hooks/usePermissions';
 
 // Reusable Export / Import (Excel) toolbar. Give it the export, template and
 // import endpoints; it handles the download, the file picker and shows the
 // import summary. `onImported` refreshes the caller's data.
+//
+// `module` is the module the data belongs to. Export appears only for someone
+// with the export right on it, and import only with the create right — a user
+// who may read a register but not take a copy of it never sees the button.
 export default function XlsxToolbar({
-  exportPath, templatePath, importPath, exportName, onImported, exportOnly,
+  module, exportPath, templatePath, importPath, exportName, onImported, exportOnly,
 }: {
+  module: string;
   exportPath: string;
   templatePath?: string;
   importPath?: string;
@@ -15,6 +21,9 @@ export default function XlsxToolbar({
   onImported?: () => void;
   exportOnly?: boolean;
 }) {
+  const { can } = usePermissions();
+  const mayExport = can(module, 'export');
+  const mayImport = can(module, 'create');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
@@ -32,15 +41,18 @@ export default function XlsxToolbar({
     finally { setBusy(''); if (inputRef.current) inputRef.current.value = ''; }
   }
 
+  // Nothing to offer: render nothing at all rather than an empty toolbar.
+  if (!mayExport && !mayImport) return null;
+
   return <div style={{ margin: '4px 0 10px' }}>
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-      <button type="button" className="secondary" disabled={!!busy} onClick={() => doExport(exportPath, exportName, 'export')}>
+      {mayExport && <button type="button" className="secondary" disabled={!!busy} onClick={() => doExport(exportPath, exportName, 'export')}>
         <Download size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />{busy === 'export' ? 'Exporting…' : 'Export to Excel'}
-      </button>
-      {!exportOnly && templatePath && <button type="button" className="secondary" disabled={!!busy} onClick={() => doExport(templatePath, exportName.replace('.xlsx', '_Template.xlsx'), 'tpl')}>
+      </button>}
+      {!exportOnly && templatePath && mayImport && <button type="button" className="secondary" disabled={!!busy} onClick={() => doExport(templatePath, exportName.replace('.xlsx', '_Template.xlsx'), 'tpl')}>
         <FileSpreadsheet size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />{busy === 'tpl' ? 'Preparing…' : 'Download template'}
       </button>}
-      {!exportOnly && importPath && <>
+      {!exportOnly && importPath && mayImport && <>
         <button type="button" className="secondary" disabled={!!busy} onClick={() => inputRef.current?.click()}>
           <Upload size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />{busy === 'import' ? 'Importing…' : 'Import from Excel'}
         </button>

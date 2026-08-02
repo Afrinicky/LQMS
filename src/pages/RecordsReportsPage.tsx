@@ -5,6 +5,7 @@ import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import { LinkedRecordsPanel } from '../components/LinkedRecordsPanel';
+import { usePermissions } from '../hooks/usePermissions';
 import type {
   Staff, ReportTemplate, ReportRequest, PrintJob, EvidencePack,
   RecordRetentionRule, RecordRetentionReview, AuditTrailReview,
@@ -22,6 +23,7 @@ const REPORT_MODULES = ['nc_capa', 'complaints', 'risks', 'actions', 'equipment'
 const ARCHIVE_ACTIONS = ['flag_for_review', 'move_to_archive', 'retain_with_review_note', 'do_not_archive'];
 
 export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } = {}) {
+  const { can } = usePermissions();
   const { isEnabled } = useModules();
   const [tab, setTab] = useState(embedded ? 'Report Templates' : 'Dashboard');
   const [error, setError] = useState<string | null>(null);
@@ -298,7 +300,7 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
           <td>
             <button onClick={() => openPack(p.id)}>Open</button>
             <button onClick={() => packAction(p.id, 'generate')}>Generate JSON</button>
-            <button onClick={() => openPackPrint(p.id)}>Print</button>
+            {can('records_reports', 'print') && <button onClick={() => openPackPrint(p.id)}>Print</button>}
             {p.status === 'prepared' && <button onClick={() => packAction(p.id, 'review')}>Review</button>}
             {p.status === 'reviewed' && <button onClick={() => packAction(p.id, 'approve')}>Approve</button>}
             {p.status === 'approved' && <button onClick={() => packAction(p.id, 'archive')}>Archive</button>}

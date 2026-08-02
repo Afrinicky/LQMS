@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { getDb } from '../db/database.js';
-import { requirePermission } from '../middleware/permissions.js';
+import { requirePermission, viewableModulesOf } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent, getCurrentStaffId } from './routeHelpers.js';
@@ -455,7 +455,14 @@ export function notificationsRoutes() {
     const module = req.query.module ? String(req.query.module) : undefined;
     const scope = req.query.scope === 'mine' ? 'mine' : 'all';
     const staffId = req.user?.staffId ?? null;
-    const alerts = computeLiveAlerts(db, { module, scope, staffId });
+    // An alert names the record it came from, so the feed is trimmed to the
+    // modules the caller may view. Someone without access to Personnel never
+    // learns from the dashboard that a competency assessment is overdue.
+    const viewable = viewableModulesOf(req);
+    if (module && !viewable.has(module)) {
+      return res.status(403).json({ error: 'Permission denied', decision: { allowed: false, source: 'Denied override', reason: 'You may not view alerts for this module.' } });
+    }
+    const alerts = computeLiveAlerts(db, { module, scope, staffId }).filter(a => viewable.has(a.module));
     if (req.query.grouped === 'true') return res.json({ total: alerts.length, groups: groupLiveAlerts(alerts) });
     res.json(alerts);
   });
@@ -724,7 +731,11 @@ export function notificationsRoutes() {
     let query = 'SELECT * FROM notifications';
     if (filters.length) query += ` WHERE ${filters.join(' AND ')}`;
     query += " ORDER BY CASE status WHEN 'unread' THEN 0 WHEN 'read' THEN 1 ELSE 2 END, CASE severity WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, due_date NULLS LAST, id DESC LIMIT 500";
-    res.json(db.prepare(query).all(...params));
+    // A notification quotes the record that raised it, so the inbox only ever
+    // shows rows from modules the caller may view.
+    const viewable = viewableModulesOf(req);
+    const rows = db.prepare(query).all(...params) as { module_key: string | null }[];
+    res.json(rows.filter(n => !n.module_key || viewable.has(n.module_key)));
   });
 
   router.post('/', requirePermission('notifications', 'create'), (req, res) => {
@@ -747,8 +758,11 @@ export function notificationsRoutes() {
 
   router.get('/:id', requirePermission('notifications', 'view'), (req, res) => {
     const db = getDb();
-    const n = db.prepare('SELECT * FROM notifications WHERE id = ?').get(req.params.id);
+    const n = db.prepare('SELECT * FROM notifications WHERE id = ?').get(req.params.id) as { module_key: string | null } | undefined;
     if (!n) return res.status(404).json({ error: 'Notification not found' });
+    if (n.module_key && !viewableModulesOf(req).has(n.module_key)) {
+      return res.status(403).json({ error: 'Permission denied', decision: { allowed: false, source: 'Denied override', reason: 'This alert belongs to a module you may not view.' } });
+    }
     const events = db.prepare('SELECT * FROM notification_events WHERE notification_id = ? ORDER BY id').all(req.params.id);
     res.json({ ...n, events });
   });

@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api, API_BASE, getToken } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import { MODULES, PERMISSION_ACTIONS, TECHNICAL_AUTHORIZATION_LEVELS } from '../../shared/constants/modules';
+import { usePermissions } from '../hooks/usePermissions';
 import type {
   OrgTree, OrgTreeNode, ProfessionalRank,
   Position, Staff, SystemModule, ApiUser, Permission, Section, Device,
@@ -1343,7 +1344,11 @@ function formatBytes(n: number): string {
 
 export function BackupRestore(){
   const { user, logout } = useAuth();
-  const isAdmin = user?.roleName === 'System Administrator';
+  const { can } = usePermissions();
+  // The factory reset is destructive, so it is shown only to someone holding
+  // the highest right on Settings. The server checks the same thing, plus the
+  // administrator role, before it will run.
+  const isAdmin = user?.roleName === 'System Administrator' && can('settings', 'approve');
   const [backups, setBackups] = useState<BackupEntry[]>([]);
   const [location, setLocation] = useState('');
   const [busy, setBusy] = useState(false);
@@ -1529,6 +1534,7 @@ export function PeopleAccess() {
 
 // Staff register Excel import / export.
 function StaffImportExport() {
+  const { can } = usePermissions();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ created: number; updated: number; skipped: number; errors: string[] } | null>(null);
@@ -1569,7 +1575,7 @@ function StaffImportExport() {
       <p>Download the <strong>Master Personnel Register</strong> workbook. It carries every personnel field — Staff ID, full name parts and initials, date of birth, gender, designation and position, professional regulator, licence and qualifications, unit, personnel category, appointment type and date, years of experience, national ID, emergency contact, phone, email and file location. Use the blank template to prepare a bulk upload, or export the current register.</p>
       <div className="quick-actions" style={{ marginTop: 8 }}>
         <button type="button" onClick={() => download('/staff/template', 'Staff_Register_Template.xlsx')}>Download blank template</button>
-        <button type="button" className="secondary" onClick={() => download('/staff/export', 'Master_Personnel_Register.xlsx')}>Export current register</button>
+        {can('personnel', 'export') && <button type="button" className="secondary" onClick={() => download('/staff/export', 'Master_Personnel_Register.xlsx')}>Export current register</button>}
       </div>
     </div>
     <div className="card">
@@ -2349,7 +2355,8 @@ function QualityWorkflowSettings() {
 // ---------------------------------------------------------------------------
 export function ConnectivityMode() {
   const { user } = useAuth();
-  const canEdit = user?.roleName === 'System Administrator' || user?.roleName === 'Laboratory Manager';
+  const { can } = usePermissions();
+  const canEdit = can('settings', 'edit');
   const [info, setInfo] = useState<SystemConnectivity | null>(null);
   const [sync, setSync] = useState<SyncStatus | null>(null);
   const [busy, setBusy] = useState(false);

@@ -14,6 +14,7 @@ import {
   type NonconformingEventDetail, type WorkflowConfig,
 } from './qmsShared';
 import type { CapaRecord, NonconformingEvent, Section, Staff } from '../../shared/types/api';
+import { usePermissions } from '../hooks/usePermissions';
 
 // ==========================================================================
 // Nonconforming Event Management — three sibling submodules that share one
@@ -302,6 +303,7 @@ export function NcCapaPage() {
 }
 
 export function NonconformitiesPage({ embedded = false }: { embedded?: boolean } = {}) {
+  const { can } = usePermissions();
   const { isEnabled } = useModules();
   const { staff, sections } = useLookupData();
   const cfg = useWorkflowConfig();
@@ -381,7 +383,7 @@ export function NonconformitiesPage({ embedded = false }: { embedded?: boolean }
           <h3 style={{ margin: 0 }}>Nonconformity register</h3>
           <button style={{ marginLeft: 'auto' }} onClick={() => setTab('Log Event')}>+ Log nonconformity</button>
         </div>
-        <XlsxToolbar exportPath="/nonconformities/register/export" templatePath="/nonconformities/register/template" importPath="/nonconformities/register/import" exportName="Nonconformities.xlsx" onImported={load} />
+        <XlsxToolbar module="nc_capa" exportPath="/nonconformities/register/export" templatePath="/nonconformities/register/template" importPath="/nonconformities/register/import" exportName="Nonconformities.xlsx" onImported={load} />
         <div className="form" style={{ gridTemplateColumns: '1fr auto', alignItems: 'end' }}>
           <label>Search<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search number, title or description" /></label>
           <label>Status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All</option>{['open', 'reviewed', 'capa_required', 'closed'].map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select></label>
@@ -400,7 +402,7 @@ export function NonconformitiesPage({ embedded = false }: { embedded?: boolean }
             <td>{capa ? <Link to="/capa">{capa.capa_number}</Link> : '—'}</td>
             <td style={{ whiteSpace: 'nowrap' }}>
               <button onClick={() => openDetail(n.id)}>View</button>{' '}
-              <button className="secondary" onClick={() => openPrintWindow(`/nonconformities/${n.id}/print`, m => setState({ loading: false, error: m }))}>Print</button>
+              {can('nc_capa', 'print') && <button className="secondary" onClick={() => openPrintWindow(`/nonconformities/${n.id}/print`, m => setState({ loading: false, error: m }))}>Print</button>}
             </td>
           </tr>; })}
           {filtered.length === 0 && <EmptyRow colSpan={9}>No nonconformities match the current filters.</EmptyRow>}
@@ -448,6 +450,7 @@ function NcDetail({ nc, staff, sections, cfg, capa, onClose, onChanged, onError,
   nc: NonconformingEventDetail; staff: Staff[]; sections: Section[]; cfg: WorkflowConfig; capa?: CapaRecord;
   onClose: () => void; onChanged: () => void; onError: (m: string) => void; onMsg: (m: string) => void;
 }) {
+  const { can } = usePermissions();
   const n = nc as any;
   const [amend, setAmend] = useState(false);
   const [edit, setEdit] = useState({ title: nc.title, description: nc.description || '', immediateCorrection: n.immediate_correction || '', remedialAction: n.remedial_action || '' });
@@ -467,7 +470,7 @@ function NcDetail({ nc, staff, sections, cfg, capa, onClose, onChanged, onError,
       <h3 style={{ margin: 0 }}>{nc.nc_number} {formatBadge(nc.status)} {n.risk_score != null ? <>{n.risk_score} {riskLevelBadge(n.risk_level)}</> : null}
         {n.affects_patient_safety ? <span className="badge badge--danger" style={{ marginLeft: 6 }}>patient safety</span> : null}</h3>
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-        <button className="secondary" onClick={() => openPrintWindow(`/nonconformities/${nc.id}/print`, onError)}>Print report</button>
+        {can('nc_capa', 'print') && <button className="secondary" onClick={() => openPrintWindow(`/nonconformities/${nc.id}/print`, onError)}>Print report</button>}
         <button className="secondary" onClick={onClose}>Close</button>
       </div>
     </div>
@@ -588,7 +591,7 @@ export function IncidentsPage({ embedded = false }: { embedded?: boolean } = {})
           <h3 style={{ margin: 0 }}>Incident &amp; adverse event register</h3>
           <button style={{ marginLeft: 'auto' }} onClick={() => setTab('Report Incident')}>+ Report incident</button>
         </div>
-        <XlsxToolbar exportPath="/incidents/register/export" templatePath="/incidents/register/template" importPath="/incidents/register/import" exportName="Incidents.xlsx" onImported={load} />
+        <XlsxToolbar module="nc_capa" exportPath="/incidents/register/export" templatePath="/incidents/register/template" importPath="/incidents/register/import" exportName="Incidents.xlsx" onImported={load} />
         <div className="form" style={{ gridTemplateColumns: '1fr', alignItems: 'end' }}>
           <label>Search<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search number or description" /></label>
         </div>

@@ -1,17 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import {
-  Bell, Search, FlaskConical, FileText, AlertOctagon, ClipboardCheck,
-  ArrowRight, ClipboardList, CalendarClock, FolderArchive, PackageSearch,
-} from 'lucide-react';
+import { Bell, Search, FlaskConical, ArrowRight, PackageSearch } from 'lucide-react';
 import { api } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import DisabledModule from '../components/DisabledModule';
 import { useModules } from '../hooks/useModules';
+import { usePermissions } from '../hooks/usePermissions';
+import { canEnterSettings, settingsBlurb } from '../constants/settingsAccess';
 import { MODULES } from '../../shared/constants/modules';
 import { NAV_SECTIONS } from '../../shared/constants/navigation';
 import { sectionIcon } from '../components/ui/moduleIcons';
-import { WaveBackground, MedicalLabBackgroundMarks, PageHeader, KpiStrip, ChartCard, DonutChart, BarChart, BarMeter, CHART_COLORS, AttentionCenter, AlertsByModule } from '../components/ui';
+import { WaveBackground, MedicalLabBackgroundMarks, PageHeader, KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, AttentionCenter, AlertsByModule } from '../components/ui';
+import DashboardProfileCard from '../components/DashboardProfileCard';
+import DashboardInbox from '../components/DashboardInbox';
 
 type CountRow = { count: number };
 type AnyRec = Record<string, any>;
@@ -36,15 +37,44 @@ export function Home() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { isEnabled } = useModules();
+  const { can, canView } = usePermissions();
   const [unread, setUnread] = useState<number | null>(null);
   const [needsRegistration, setNeedsRegistration] = useState(false);
 
   useEffect(() => {
-    safeGet<{ unreadNotifications: number }>('/dashboard/notifications-summary').then(d => setUnread(d?.unreadNotifications ?? null));
+    if (canView('notifications')) {
+      safeGet<{ unreadNotifications: number }>('/dashboard/notifications-summary').then(d => setUnread(d?.unreadNotifications ?? null));
+    }
     // First-run: prompt the user to register the laboratory until the profile is
-    // marked complete under Settings → My Laboratory.
-    safeGet<{ registration_complete?: number } | null>('/laboratory-profile').then(p => setNeedsRegistration(!p || Number(p.registration_complete ?? 0) !== 1));
-  }, []);
+    // marked complete under Settings → My Laboratory. Only someone who can
+    // actually complete the registration is asked to.
+    if (canView('settings')) {
+      safeGet<{ registration_complete?: number } | null>('/laboratory-profile').then(p => setNeedsRegistration(!p || Number(p.registration_complete ?? 0) !== 1));
+    }
+  }, [canView]);
+
+  // The launchpad shows a card only for sections that contain at least one
+  // module this user may open — the same test the sidebar applies, so the two
+  // surfaces always agree and neither advertises inaccessible work.
+  const visibleSections = useMemo(() => {
+    const essentials = NAV_SECTIONS.filter(s => s.group === 'essential');
+    return NAV_SECTIONS.flatMap(section => {
+      // Settings holds delegated tools as well as administration, so it shows
+      // for anyone who can open at least one page inside it.
+      const landing = section.key === 'settings'
+        ? (canEnterSettings(can) ? 'settings' : undefined)
+        : section.modules.find(k => isEnabled(k) && canView(k));
+      if (!landing) return [];
+      return [{
+        // The Settings card describes what this person will actually find
+        // inside it rather than the administrator's version of the page.
+        section: section.key === 'settings' ? { ...section, desc: settingsBlurb(can) } : section,
+        to: MODULE_PATHS.get(landing) ?? '#',
+        // Only the twelve quality essentials carry an index badge (01–12).
+        essentialIndex: section.group === 'essential' ? essentials.indexOf(section) + 1 : null,
+      }];
+    });
+  }, [isEnabled, canView, can]);
 
   const firstName = user?.fullName?.trim().split(/\s+/)[0] ?? 'there';
 
@@ -70,11 +100,14 @@ export function Home() {
         </div>
         <div className="topbar-actions">
           <span className="health-pill"><span className="dot" /><span>System Healthy</span></span>
-          <button className="icon-btn" type="button" aria-label="Notifications" onClick={() => navigate('/notifications')}>
-            <Bell size={18} />
-            {unread !== null && unread > 0 && <span className="icon-badge">{unread > 99 ? '99+' : unread}</span>}
-          </button>
-          <button className="user-chip" type="button" onClick={() => navigate('/settings')}>
+          {canView('notifications') && (
+            <button className="icon-btn" type="button" aria-label="Notifications" onClick={() => navigate('/notifications')}>
+              <Bell size={18} />
+              {unread !== null && unread > 0 && <span className="icon-badge">{unread > 99 ? '99+' : unread}</span>}
+            </button>
+          )}
+          <button className="user-chip" type="button" title="My profile"
+            onClick={() => navigate(canView('dashboard') ? '/dashboard' : '/home')}>
             <span className="user-avatar">{initials(user?.fullName)}</span>
             <span className="user-meta">
               <strong>{user?.fullName ?? 'User'}</strong>
@@ -101,26 +134,10 @@ export function Home() {
         </section>
 
         <div className="launch-grid">
-          {NAV_SECTIONS.map(section => {
-            // A section lands on its first enabled module; it is disabled only
-            // when none of its modules are enabled (settings is always on).
-            const firstEnabled = section.modules.find(k => isEnabled(k) || k === 'settings');
-            const to = MODULE_PATHS.get(firstEnabled ?? section.modules[0]) ?? '#';
-            const disabled = !firstEnabled;
+          {visibleSections.map(({ section, to, essentialIndex }) => {
             const Icon = sectionIcon(section.key);
-            // Only the twelve quality essentials carry an index badge (01–12).
-            const essentialIndex = section.group === 'essential'
-              ? NAV_SECTIONS.filter(s => s.group === 'essential').indexOf(section) + 1
-              : null;
             return (
-              <Link
-                key={section.key}
-                to={disabled ? '#' : to}
-                className="launch-card"
-                onClick={e => { if (disabled) e.preventDefault(); }}
-                style={disabled ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
-                aria-disabled={disabled}
-              >
+              <Link key={section.key} to={to} className="launch-card">
                 {essentialIndex !== null && <span className="launch-index">{String(essentialIndex).padStart(2, '0')}</span>}
                 <span className="launch-ico"><Icon size={24} /></span>
                 <h3>{section.title}</h3>
@@ -129,27 +146,39 @@ export function Home() {
             );
           })}
         </div>
+        {visibleSections.length === 0 && (
+          <div className="card">
+            <div className="empty-state">
+              <span className="es-ico"><PackageSearch size={26} /></span>
+              <h3>No workspaces assigned yet</h3>
+              <p>Your account has not been given access to any module. Ask a System Administrator to assign your role and permissions under Settings → People &amp; Access.</p>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
 }
 
 /* ============================================================================
-   MAIN DASHBOARD — one-page, chart-first QMS snapshot. A single KPI band on
-   top, then six compact charts; drill into modules for the detailed numbers.
+   MAIN DASHBOARD — the staff member's home base.
+
+   Three things, in the order they matter to the person looking at it:
+     1. Who they are and what is waiting on them  — profile + inbox, side by side
+     2. What needs attention across the laboratory — severity ring + priorities
+     3. The numbers behind it                      — key figures, then a compact
+                                                     chart per management area
+
+   Every tile, row and bar opens the exact record or register it summarises, so
+   the dashboard is a way into the work rather than a report about it. Nothing
+   is shown for a module the reader may not open: the metric is dropped, not
+   greyed out, so the page shrinks to fit the role instead of teasing it.
    ========================================================================= */
-const QUICK_ACTIONS = [
-  { label: 'New Nonconformity', to: '/nonconformities', Icon: AlertOctagon },
-  { label: 'Add Document', to: '/documents', Icon: FileText },
-  { label: 'Schedule Assessment', to: '/assessments', Icon: ClipboardCheck },
-  { label: 'Log Action', to: '/actions', Icon: ClipboardList },
-  { label: 'Review Calendar', to: '/notifications', Icon: CalendarClock },
-  { label: 'Open Reports', to: '/records-reports', Icon: FolderArchive },
-];
 
 export function Dashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { canView } = usePermissions();
   const [qms, setQms] = useState<AnyRec | null>(null);
   const [ops, setOps] = useState<AnyRec | null>(null);
   const [tech, setTech] = useState<AnyRec | null>(null);
@@ -157,153 +186,126 @@ export function Dashboard() {
   const [people, setPeople] = useState<AnyRec | null>(null);
   const [gov, setGov] = useState<AnyRec | null>(null);
   const [notifs, setNotifs] = useState<AnyRec | null>(null);
-  const [health, setHealth] = useState<AnyRec | null>(null);
-  const [myWork, setMyWork] = useState<AnyRec | null>(null);
 
+  // Only ask for summaries this user is allowed to receive. Requesting the
+  // rest would only produce a row of 403s in the console and, worse, invite
+  // someone to wonder what the hidden numbers were.
   useEffect(() => {
-    safeGet('/dashboard/qms-summary').then(setQms);
-    safeGet('/dashboard/operations-summary').then(setOps);
-    safeGet('/dashboard/technical-quality-summary').then(setTech);
-    safeGet('/dashboard/document-control-summary').then(setDocs);
-    safeGet('/dashboard/personnel-summary').then(setPeople);
-    safeGet('/dashboard/governance-summary').then(setGov);
-    safeGet('/dashboard/notifications-summary').then(setNotifs);
-    safeGet('/dashboard/system-health-summary').then(setHealth);
-    safeGet('/dashboard/my-work-summary').then(setMyWork);
-  }, []);
+    const when = (moduleKeys: string[], path: string, set: (v: AnyRec | null) => void) => {
+      if (moduleKeys.some(canView)) safeGet(path).then(set);
+    };
+    when(['nc_capa', 'complaints', 'risks', 'actions'], '/dashboard/qms-summary', setQms);
+    when(['equipment', 'supplier_inventory', 'monitoring', 'facilities_safety'], '/dashboard/operations-summary', setOps);
+    when(['iqc', 'eqa', 'verification_validation', 'measurement_uncertainty'], '/dashboard/technical-quality-summary', setTech);
+    when(['documents'], '/dashboard/document-control-summary', setDocs);
+    when(['personnel'], '/dashboard/personnel-summary', setPeople);
+    when(['assessments', 'meetings', 'management_review', 'quality_indicators', 'continual_improvement'], '/dashboard/governance-summary', setGov);
+    when(['notifications'], '/dashboard/notifications-summary', setNotifs);
+  }, [canView]);
 
   const c = (x: unknown): number | string | undefined =>
     (x && typeof x === 'object' && 'count' in (x as any)) ? (x as CountRow).count : (x as number | string | undefined);
   const n = (x: unknown): number => { const v = c(x); return typeof v === 'number' ? v : (typeof v === 'string' && v !== '' ? Number(v) || 0 : 0); };
   const firstName = user?.fullName?.trim().split(/\s+/)[0];
-
-  // Chart series derived entirely from the real summary counts above. Every
-  // entry carries an onClick that opens the module where the data lives.
   const go = (path: string) => () => navigate(path);
-  const qualityWorkload = [
-    { label: 'Open NCs', value: n(qms?.openNCs), color: CHART_COLORS[3], onClick: go('/nonconformities') },
-    { label: 'Open CAPAs', value: n(qms?.openCAPAs), color: CHART_COLORS[0], onClick: go('/capa') },
-    { label: 'Pending complaints', value: n(qms?.pendingComplaints), color: CHART_COLORS[2], onClick: go('/complaints') },
-    { label: 'High/critical risks', value: n(qms?.highRisks), color: CHART_COLORS[4], onClick: go('/risks') },
-  ];
-  const operationalReadiness = [
-    { label: 'Maintenance due', value: n(ops?.equipmentMaintenanceDue), color: CHART_COLORS[0], onClick: go('/equipment') },
-    { label: 'Calibration due', value: n(ops?.equipmentCalibrationDue), color: CHART_COLORS[5], onClick: go('/equipment') },
-    { label: 'Out of service', value: n(ops?.equipmentOutOfService), color: CHART_COLORS[3], onClick: go('/equipment') },
-    { label: 'Low stock', value: n(ops?.inventoryLowStock), color: CHART_COLORS[2], onClick: go('/supplier-inventory') },
-    { label: 'Expiring soon', value: n(ops?.inventoryExpiringSoon), color: CHART_COLORS[1], onClick: go('/supplier-inventory') },
-    { label: 'Expired stock', value: n(ops?.inventoryExpired), color: CHART_COLORS[6], onClick: go('/supplier-inventory') },
-  ];
-  const alertsBreakdown = [
-    { label: 'Due today', value: n(notifs?.dueToday), color: CHART_COLORS[2], onClick: go('/notifications') },
-    { label: 'Due soon', value: n(notifs?.dueSoon), color: CHART_COLORS[0], onClick: go('/notifications') },
-    { label: 'Overdue', value: n(notifs?.overdue), color: CHART_COLORS[3], onClick: go('/notifications') },
-    { label: 'Open tasks', value: n(notifs?.openTasks), color: CHART_COLORS[5], onClick: go('/notifications') },
-    { label: 'Approvals', value: n(notifs?.pendingApprovals), color: CHART_COLORS[4], onClick: go('/notifications') },
-  ];
-  const technicalQuality = [
-    { label: 'IQC failures (month)', value: n(tech?.iqcFailuresThisMonth), color: CHART_COLORS[3], onClick: go('/iqc') },
-    { label: 'IQC pending review', value: n(tech?.iqcResultsPendingReview), color: CHART_COLORS[0], onClick: go('/iqc') },
-    { label: 'EQA events due', value: n(tech?.eqaEventsDue), color: CHART_COLORS[5], onClick: go('/eqa') },
-    { label: 'Unsatisfactory EQA', value: n(tech?.eqaUnsatisfactoryEvents), color: CHART_COLORS[2], onClick: go('/eqa') },
-    { label: 'Open verifications', value: n(tech?.openVerifications), color: CHART_COLORS[1], onClick: go('/verification-validation') },
-    { label: 'MU records due', value: n(tech?.muRecordsDueForReview), color: CHART_COLORS[4], onClick: go('/measurement-uncertainty') },
-  ];
-  const peopleAndDocuments = [
-    { label: 'Doc reviews due', value: n(docs?.dueReviews), color: CHART_COLORS[0], onClick: go('/documents') },
-    { label: 'Doc reviews overdue', value: n(docs?.overdueReviews), color: CHART_COLORS[3], onClick: go('/documents') },
-    { label: 'Pending attestations', value: n(docs?.pendingAttestations), color: CHART_COLORS[5], onClick: go('/documents') },
-    { label: 'Certificates expiring', value: n(people?.certificatesExpiringSoon), color: CHART_COLORS[2], onClick: go('/personnel') },
-    { label: 'Competency due', value: n(people?.competencyAssessmentsDue), color: CHART_COLORS[4], onClick: go('/personnel') },
-    { label: 'Authorisations due', value: n(people?.authorizationsDueReview), color: CHART_COLORS[1], onClick: go('/personnel') },
-  ];
-  const governance = [
-    { label: 'Planned assessments', value: n(gov?.plannedAssessments), color: CHART_COLORS[0], onClick: go('/assessments') },
-    { label: 'Open findings', value: n(gov?.openFindings), color: CHART_COLORS[3], onClick: go('/assessments') },
-    { label: 'Pending mgmt reviews', value: n(gov?.pendingManagementReviews), color: CHART_COLORS[2], onClick: go('/management-review') },
-    { label: 'Critical QI results', value: n(gov?.criticalQualityIndicatorResults), color: CHART_COLORS[6], onClick: go('/quality-indicators') },
-    { label: 'Improvement projects', value: n(gov?.activeImprovementProjects), color: CHART_COLORS[1], onClick: go('/continual-improvement') },
-    { label: 'Overdue improvements', value: n(gov?.overdueImprovementActions), color: CHART_COLORS[4], onClick: go('/continual-improvement') },
-  ];
+
+  // A series entry survives only when its module is visible to this reader.
+  type Series = { label: string; value: number; color: string; onClick: () => void };
+  const series = (entries: Array<Series & { module: string }>): Series[] =>
+    entries.filter(e => canView(e.module)).map(({ module: _module, ...rest }) => rest);
+
+  const qualityWorkload = series([
+    { module: 'nc_capa', label: 'Open NCs', value: n(qms?.openNCs), color: CHART_COLORS[3], onClick: go('/nonconformities') },
+    { module: 'nc_capa', label: 'Open CAPAs', value: n(qms?.openCAPAs), color: CHART_COLORS[0], onClick: go('/capa') },
+    { module: 'complaints', label: 'Pending complaints', value: n(qms?.pendingComplaints), color: CHART_COLORS[2], onClick: go('/complaints') },
+    { module: 'risks', label: 'High/critical risks', value: n(qms?.highRisks), color: CHART_COLORS[4], onClick: go('/risks') },
+  ]);
+  const operationalReadiness = series([
+    { module: 'equipment', label: 'Maintenance due', value: n(ops?.equipmentMaintenanceDue), color: CHART_COLORS[0], onClick: go('/equipment') },
+    { module: 'equipment', label: 'Calibration due', value: n(ops?.equipmentCalibrationDue), color: CHART_COLORS[5], onClick: go('/equipment') },
+    { module: 'equipment', label: 'Out of service', value: n(ops?.equipmentOutOfService), color: CHART_COLORS[3], onClick: go('/equipment') },
+    { module: 'supplier_inventory', label: 'Low stock', value: n(ops?.inventoryLowStock), color: CHART_COLORS[2], onClick: go('/supplier-inventory') },
+    { module: 'supplier_inventory', label: 'Expiring soon', value: n(ops?.inventoryExpiringSoon), color: CHART_COLORS[1], onClick: go('/supplier-inventory') },
+    { module: 'supplier_inventory', label: 'Expired stock', value: n(ops?.inventoryExpired), color: CHART_COLORS[6], onClick: go('/supplier-inventory') },
+  ]);
+  const technicalQuality = series([
+    { module: 'iqc', label: 'IQC failures (month)', value: n(tech?.iqcFailuresThisMonth), color: CHART_COLORS[3], onClick: go('/iqc') },
+    { module: 'iqc', label: 'IQC pending review', value: n(tech?.iqcResultsPendingReview), color: CHART_COLORS[0], onClick: go('/iqc') },
+    { module: 'eqa', label: 'EQA events due', value: n(tech?.eqaEventsDue), color: CHART_COLORS[5], onClick: go('/eqa') },
+    { module: 'eqa', label: 'Unsatisfactory EQA', value: n(tech?.eqaUnsatisfactoryEvents), color: CHART_COLORS[2], onClick: go('/eqa') },
+    { module: 'verification_validation', label: 'Open verifications', value: n(tech?.openVerifications), color: CHART_COLORS[1], onClick: go('/verification-validation') },
+    { module: 'measurement_uncertainty', label: 'MU records due', value: n(tech?.muRecordsDueForReview), color: CHART_COLORS[4], onClick: go('/measurement-uncertainty') },
+  ]);
+  const peopleAndDocuments = series([
+    { module: 'documents', label: 'Doc reviews due', value: n(docs?.dueReviews), color: CHART_COLORS[0], onClick: go('/documents') },
+    { module: 'documents', label: 'Doc reviews overdue', value: n(docs?.overdueReviews), color: CHART_COLORS[3], onClick: go('/documents') },
+    { module: 'documents', label: 'Pending attestations', value: n(docs?.pendingAttestations), color: CHART_COLORS[5], onClick: go('/documents') },
+    { module: 'personnel', label: 'Certificates expiring', value: n(people?.certificatesExpiringSoon), color: CHART_COLORS[2], onClick: go('/personnel') },
+    { module: 'personnel', label: 'Competency due', value: n(people?.competencyAssessmentsDue), color: CHART_COLORS[4], onClick: go('/personnel') },
+    { module: 'personnel', label: 'Authorisations due', value: n(people?.authorizationsDueReview), color: CHART_COLORS[1], onClick: go('/personnel') },
+  ]);
+  const governance = series([
+    { module: 'assessments', label: 'Planned assessments', value: n(gov?.plannedAssessments), color: CHART_COLORS[0], onClick: go('/assessments') },
+    { module: 'assessments', label: 'Open findings', value: n(gov?.openFindings), color: CHART_COLORS[3], onClick: go('/assessments') },
+    { module: 'management_review', label: 'Pending mgmt reviews', value: n(gov?.pendingManagementReviews), color: CHART_COLORS[2], onClick: go('/management-review') },
+    { module: 'quality_indicators', label: 'Critical QI results', value: n(gov?.criticalQualityIndicatorResults), color: CHART_COLORS[6], onClick: go('/quality-indicators') },
+    { module: 'continual_improvement', label: 'Improvement projects', value: n(gov?.activeImprovementProjects), color: CHART_COLORS[1], onClick: go('/continual-improvement') },
+    { module: 'continual_improvement', label: 'Overdue improvements', value: n(gov?.overdueImprovementActions), color: CHART_COLORS[4], onClick: go('/continual-improvement') },
+  ]);
+
+  // The headline numbers, same rule: a tile appears only if its module does.
+  const kpis = [
+    { module: 'nc_capa', label: 'Open NCs', value: c(qms?.openNCs), onClick: go('/nonconformities') },
+    { module: 'nc_capa', label: 'Open CAPAs', value: c(qms?.openCAPAs), onClick: go('/capa') },
+    { module: 'actions', label: 'Overdue actions', value: c(qms?.overdueActions), tone: 'danger' as const, onClick: go('/actions') },
+    { module: 'documents', label: 'Docs due review', value: docs?.dueReviews, onClick: go('/documents') },
+    { module: 'personnel', label: 'Training due', value: people?.competencyAssessmentsDue, onClick: go('/personnel') },
+    { module: 'notifications', label: 'Unread alerts', value: notifs?.unreadNotifications, onClick: go('/notifications') },
+  ].filter(k => canView(k.module)).map(({ module: _module, ...rest }) => rest);
+
+  const charts: Array<{ title: string; subtitle: string; body: React.ReactNode }> = [];
+  if (qualityWorkload.length) charts.push({ title: 'Quality workload', subtitle: 'Open quality items', body: <DonutChart data={qualityWorkload} centerLabel="Open items" size={132} thickness={15} /> });
+  if (operationalReadiness.length) charts.push({ title: 'Operational readiness', subtitle: 'Equipment & inventory attention', body: <BarMeter data={operationalReadiness} /> });
+  if (technicalQuality.length) charts.push({ title: 'Technical quality', subtitle: 'IQC, EQA, verification, MU', body: <BarMeter data={technicalQuality} /> });
+  if (peopleAndDocuments.length) charts.push({ title: 'People & documents', subtitle: 'Reviews, competence, attestations', body: <BarMeter data={peopleAndDocuments} /> });
+  if (governance.length) charts.push({ title: 'Governance & improvement', subtitle: 'Audits, reviews, projects', body: <BarMeter data={governance} /> });
 
   return (
-    <div className="module-page">
+    <div className="module-page dash">
       <PageHeader
-        eyebrow="Quality overview"
+        eyebrow="My dashboard"
         title={firstName ? `Good day, ${firstName}` : 'Main Dashboard'}
-        subtitle="Your laboratory quality management snapshot — pending actions, reviews, alerts and indicators at a glance."
-        actions={<button className="secondary" type="button" onClick={() => navigate('/notifications')}><Bell size={16} /> Open inbox</button>}
+        subtitle="Your profile, your inbox and the laboratory's quality picture — every figure opens the record behind it."
+        actions={canView('notifications')
+          ? <button className="secondary" type="button" onClick={() => navigate('/notifications')}><Bell size={16} /> Open inbox</button>
+          : undefined}
       />
 
-      {/* Unified triage: severity ring + health meter + a short priority queue,
-          driven by the live system-wide alert feed so it always reflects what
-          needs attention. Stays calm and compact no matter the volume. */}
-      <AttentionCenter />
-
-      {/* Whole-laboratory alert picture as one ranked, stacked-severity chart */}
-      <AlertsByModule />
-
-      {/* One slim KPI band — the headline numbers, each opening its module */}
-      <KpiStrip items={[
-        { label: 'Open NCs', value: c(qms?.openNCs), onClick: go('/nonconformities') },
-        { label: 'Open CAPAs', value: c(qms?.openCAPAs), onClick: go('/capa') },
-        { label: 'Overdue actions', value: health?.overdueActions ?? c(qms?.overdueActions), tone: 'danger', onClick: go('/actions') },
-        { label: 'Docs due review', value: docs?.dueReviews, onClick: go('/documents') },
-        { label: 'Training due', value: people?.competencyAssessmentsDue, onClick: go('/personnel') },
-        { label: 'Unread alerts', value: notifs?.unreadNotifications, onClick: go('/notifications') },
-      ]} />
-
-      {/* Six compact charts cover the whole management system */}
-      <div className="section-title"><h3>Quality management overview</h3></div>
-      <div className="grid cols-3 dash-charts">
-        <ChartCard title="Quality workload" subtitle="Open quality items">
-          <DonutChart data={qualityWorkload} centerLabel="Open items" size={132} thickness={15} />
-        </ChartCard>
-        <ChartCard title="Operational readiness" subtitle="Equipment & inventory attention">
-          <BarMeter data={operationalReadiness} />
-        </ChartCard>
-        <ChartCard title="Alerts & tasks" subtitle="Time-sensitive follow-ups">
-          <BarChart data={alertsBreakdown} height={150} />
-        </ChartCard>
-        <ChartCard title="Technical quality" subtitle="IQC, EQA, verification, MU">
-          <BarMeter data={technicalQuality} />
-        </ChartCard>
-        <ChartCard title="People & documents" subtitle="Reviews, competence, attestations">
-          <BarMeter data={peopleAndDocuments} />
-        </ChartCard>
-        <ChartCard title="Governance & improvement" subtitle="Audits, reviews, projects">
-          <BarMeter data={governance} />
-        </ChartCard>
+      {/* 1 — the person, and what is waiting on them */}
+      <div className="dash-me">
+        <DashboardProfileCard />
+        {canView('notifications') && <DashboardInbox />}
       </div>
 
-      {/* My Work + Quick Actions */}
-      <div className="grid cols-2">
-        <div className="card">
-          <div className="section-head"><h3>My Work</h3><Link to="/actions">Open tracker <ArrowRight size={13} /></Link></div>
-          <KpiStrip flat items={[
-            { label: 'Open tasks', value: myWork?.myOpenTasks, onClick: go('/notifications') },
-            { label: 'Due today', value: myWork?.myDueToday, onClick: go('/notifications') },
-            { label: 'Overdue', value: myWork?.myOverdueItems, tone: 'danger', onClick: go('/notifications') },
-            { label: 'Open actions', value: myWork?.myOpenActions, onClick: go('/actions') },
-            { label: 'Approvals', value: myWork?.myPendingApprovals, onClick: go('/notifications') },
-            { label: 'Unread alerts', value: myWork?.myUnreadNotifications, onClick: go('/notifications') },
-          ]} />
+      {/* 2 — what needs attention across the laboratory. Both views read the
+          live-alert feed, which is itself trimmed to the modules this reader
+          may view, so they are shown only to someone who has that feed. */}
+      {canView('notifications') && <AttentionCenter />}
+
+      {/* 3 — the numbers behind it */}
+      {kpis.length > 0 && <>
+        <div className="section-title"><h3>Key numbers</h3></div>
+        <KpiStrip items={kpis} />
+      </>}
+
+      {charts.length > 0 && <>
+        <div className="section-title"><h3>Quality management overview</h3></div>
+        <div className="grid cols-3 dash-charts">
+          {charts.map(ch => <ChartCard key={ch.title} title={ch.title} subtitle={ch.subtitle}>{ch.body}</ChartCard>)}
         </div>
-        <div className="card">
-          <div className="section-head"><h3>Quick Actions</h3></div>
-          <div className="quick-actions">
-            {QUICK_ACTIONS.map(a => {
-              const Icon = a.Icon;
-              return (
-                <button key={a.label} type="button" className="quick-action" onClick={() => navigate(a.to)}>
-                  <span className="qa-ico"><Icon size={20} /></span>
-                  <strong>{a.label}</strong>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </div>
+      </>}
+
+      {canView('notifications') && <AlertsByModule />}
     </div>
   );
 }

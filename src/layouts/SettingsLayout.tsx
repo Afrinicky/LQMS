@@ -3,35 +3,48 @@ import {
   Users, Building2, Microscope, SlidersHorizontal, FileUp, Paperclip, ListChecks, CalendarClock,
 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
+import { usePermissions } from '../hooks/usePermissions';
+import { visibleSettingsTabs } from '../constants/settingsAccess';
 import type { LucideIcon } from 'lucide-react';
 
-const items: { to: string; label: string; Icon: LucideIcon }[] = [
-  { to: '/settings/laboratory', label: 'My Laboratory', Icon: Building2 },
-  { to: '/settings/people', label: 'People & Access', Icon: Users },
-  { to: '/settings/sections', label: 'Section/Unit Configuration', Icon: Microscope },
-  { to: '/settings/scheduling', label: 'Roster & Scheduling', Icon: CalendarClock },
-  { to: '/settings/system', label: 'System', Icon: SlidersHorizontal },
-  { to: '/settings/document-import', label: 'Document Master List Import', Icon: FileUp },
-  { to: '/settings/evidence', label: 'Evidence Upload', Icon: Paperclip },
-  { to: '/settings/actions', label: 'Action Tracker', Icon: ListChecks },
-];
+const ICONS: Record<string, LucideIcon> = {
+  '/settings/laboratory': Building2,
+  '/settings/people': Users,
+  '/settings/sections': Microscope,
+  '/settings/scheduling': CalendarClock,
+  '/settings/system': SlidersHorizontal,
+  '/settings/document-import': FileUp,
+  '/settings/evidence': Paperclip,
+  '/settings/actions': ListChecks,
+};
 
 export default function SettingsLayout() {
+  const { can } = usePermissions();
+  const visible = visibleSettingsTabs(can);
+  // Someone who only holds a delegated tool here is not an administrator, so
+  // the page does not describe administration they cannot perform.
+  const isAdministrator = visible.some(t => t.administration);
+
   return (
     <div className="module-page">
       <PageHeader
         eyebrow="Configuration"
         title="Settings"
-        subtitle="Lab identity, access control, roles and positions, module toggles, backups, and LAN/device preparation."
+        subtitle={isAdministrator
+          ? 'Lab identity, access control, roles and positions, module toggles, backups, and LAN/device preparation.'
+          : 'The configuration tools assigned to your role.'}
       />
       <div className="settings-layout">
         <nav className="settings-nav">
-          {items.map(({ to, label, Icon }) => (
-            <NavLink key={to} to={to}>
-              <Icon size={16} />
-              <span>{label}</span>
-            </NavLink>
-          ))}
+          {visible.map(({ to, label }) => {
+            const Icon = ICONS[to] ?? SlidersHorizontal;
+            return (
+              <NavLink key={to} to={to}>
+                <Icon size={16} />
+                <span>{label}</span>
+              </NavLink>
+            );
+          })}
         </nav>
         <div><Outlet /></div>
       </div>

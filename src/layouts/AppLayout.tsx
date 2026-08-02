@@ -5,6 +5,8 @@ import { MODULES } from '../../shared/constants/modules';
 import { NAV_SECTIONS, NAV_GROUP_LABELS } from '../../shared/constants/navigation';
 import { useAuth } from '../hooks/useAuth';
 import { useModules } from '../hooks/useModules';
+import { usePermissions } from '../hooks/usePermissions';
+import { canEnterSettings } from '../constants/settingsAccess';
 import { api } from '../services/api';
 import { moduleIcon, sectionIcon } from '../components/ui/moduleIcons';
 import { DennisFloatingWidget } from '../components/DennisFloatingWidget';
@@ -25,6 +27,7 @@ function initials(name?: string) {
 export default function AppLayout() {
   const { user, logout } = useAuth();
   const { modules, isEnabled } = useModules();
+  const { can, canView } = usePermissions();
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
@@ -34,10 +37,21 @@ export default function AppLayout() {
   const [sectionOverrides, setSectionOverrides] = useState<Record<string, boolean>>({});
 
   const enabled = useMemo(
-    () => new Set(modules.filter(m => m.enabled || m.key === 'settings').map(m => m.key)),
+    () => new Set(modules.filter(m => m.enabled).map(m => m.key)),
     [modules]
   );
-  const isVisible = (key: string) => enabled.size === 0 || enabled.has(key) || key === 'settings';
+  // A module reaches the sidebar only when it is switched on for the
+  // laboratory AND this user is allowed to view it. Anything else is not
+  // dimmed or badged — it is simply not drawn, so nobody browses a menu of
+  // work they cannot do.
+  //
+  // Settings is the one exception to "one module, one right": it also holds
+  // delegated tools (roster building, imports, evidence), so it appears for
+  // anyone who can open at least one page inside it.
+  const isVisible = (key: string) => {
+    if (!(enabled.size === 0 || enabled.has(key))) return false;
+    return key === 'settings' ? canEnterSettings(can) : canView(key);
+  };
   const moduleByKey = useMemo(() => new Map(MODULES.map(m => [m.key, m])), []);
 
   // Sidebar sections mirror the Home launchpad 1:1. A section renders as a
@@ -49,7 +63,7 @@ export default function AppLayout() {
       items: s.modules.filter(isVisible).map(k => moduleByKey.get(k)).filter(Boolean) as typeof MODULES,
     })).filter(s => s.items.length > 0),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [enabled, moduleByKey]
+    [enabled, moduleByKey, canView, can]
   );
   const activeSectionKey = useMemo(
     () => sections.find(s => s.items.some(m => location.pathname.startsWith(m.path)))?.key,
@@ -63,8 +77,10 @@ export default function AppLayout() {
   // follows the user again (active section open, the rest closed).
   useEffect(() => { setSectionOverrides({}); }, [activeSectionKey]);
 
+  const showInbox = canView('notifications');
+
   useEffect(() => {
-    if (!user) return;
+    if (!user || !showInbox) { setUnread(null); return; }
     let cancelled = false;
     const fetchUnread = () => {
       api<{ unreadNotifications: number }>('/dashboard/notifications-summary')
@@ -74,7 +90,7 @@ export default function AppLayout() {
     fetchUnread();
     const id = setInterval(fetchUnread, 60000);
     return () => { cancelled = true; clearInterval(id); };
-  }, [user]);
+  }, [user, showInbox]);
 
   // The Home route is a full-bleed launchpad with no persistent sidebar.
   if (location.pathname === '/home') return <>
@@ -167,11 +183,17 @@ export default function AppLayout() {
           </div>
           <div className="topbar-actions">
             <span className="health-pill"><span className="dot" /><span>System Healthy</span></span>
-            <button className="icon-btn" type="button" aria-label="Notifications" onClick={() => navigate('/notifications')}>
-              <Bell size={18} />
-              {unread !== null && unread > 0 && <span className="icon-badge">{unread > 99 ? '99+' : unread}</span>}
-            </button>
-            <button className="user-chip" type="button" onClick={() => navigate('/settings')}>
+            {showInbox && (
+              <button className="icon-btn" type="button" aria-label="Notifications" onClick={() => navigate('/notifications')}>
+                <Bell size={18} />
+                {unread !== null && unread > 0 && <span className="icon-badge">{unread > 99 ? '99+' : unread}</span>}
+              </button>
+            )}
+            {/* The chip opens the dashboard, where a staff member's own profile
+                now lives. It used to open Settings, which most roles may not
+                even see. */}
+            <button className="user-chip" type="button" title="My profile"
+              onClick={() => navigate(canView('dashboard') ? '/dashboard' : '/home')}>
               <span className="user-avatar">{initials(user?.fullName)}</span>
               <span className="user-meta">
                 <strong>{user?.fullName ?? 'User'}</strong>

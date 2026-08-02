@@ -39,6 +39,11 @@ export type RemoteCloudUser = {
   last_login_at: string | null;
 };
 export type ApiUser = { id: number; username: string; fullName: string; roleId: number; roleName?: string; staffId?: number | null; staffName?: string | null; isActive: boolean };
+/**
+ * A user's effective permissions: module key → the actions they may take.
+ * A module that is absent may not be viewed, so the client hides it entirely.
+ */
+export type PermissionMap = Record<string, string[]>;
 export type SystemModule = { id: number; key: string; label: string; path: string; enabled: boolean; alertsPaused: boolean };
 export type Position = { id: number; title: string; description?: string; reportsToPositionId?: number | null; isActive: boolean; archivedAt?: string | null };
 export type Staff = { id: number; employeeNo?: string; fullName: string; email?: string; phone?: string; isActive: boolean; sectionId?: number | null; sectionName?: string | null; primaryPosition?: string | null; userId?: number | null; username?: string | null; roleName?: string | null; userActive?: number | null;

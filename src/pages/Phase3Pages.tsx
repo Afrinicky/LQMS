@@ -11,6 +11,7 @@ import BarcodeLabelGenerator from '../components/BarcodeLabelGenerator';
 import { code128Svg } from '../../shared/utils/barcode';
 import { printLabelSheet, LABEL_PRESETS } from '../utils/labelPrint';
 import { EnvironmentalMonitoringPage, EnvLiveCards } from './EnvironmentalMonitoringPage';
+import { usePermissions } from '../hooks/usePermissions';
 import type {
   Location, Section, Department, Staff, Supplier, EquipmentItem, InventoryItem, MonitoringRecord, SafetyIncident,
   EquipmentMaintenanceRecord, EquipmentBreakdown, MonitoringItem, MonitoringReading,
@@ -122,6 +123,7 @@ function printHtml(title: string, bodyHtml: string, extraCss = '') {
 }
 
 export function EquipmentPage() {
+  const { can } = usePermissions();
   const { isEnabled } = useModules();
   const { staff, sections, locations } = useLookups();
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -278,11 +280,11 @@ export function EquipmentPage() {
         <h3 style={{ margin: 0 }}>Equipment register</h3>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span className="muted" style={{ fontSize: 13 }}>Click a row to open its profile.</span>
-          <button type="button" className="secondary" disabled={!!regBusy} title="Download the equipment register as an Excel workbook" onClick={() => downloadEquipmentRegister('/equipment/register/export', 'Equipment_Register.xlsx')}>{regBusy === '/equipment/register/export' ? 'Exporting…' : 'Export'}</button>
+          {can('equipment', 'export') && <button type="button" className="secondary" disabled={!!regBusy} title="Download the equipment register as an Excel workbook" onClick={() => downloadEquipmentRegister('/equipment/register/export', 'Equipment_Register.xlsx')}>{regBusy === '/equipment/register/export' ? 'Exporting…' : 'Export'}</button>}
           <button type="button" className="secondary" disabled={!!regBusy} title="Upload a completed equipment register workbook" onClick={() => equipImportRef.current?.click()}>{regBusy === 'import' ? 'Importing…' : 'Import'}</button>
           <input ref={equipImportRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) void importEquipmentRegister(f); }} />
           <select value={bcSize} onChange={e => setBcSize(e.target.value)} title="Barcode label size">{LABEL_PRESETS.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}</select>
-          <button type="button" className="secondary" title="Print Code 128 barcode asset tags for all equipment" onClick={() => { const p = LABEL_PRESETS.find(x => x.key === bcSize) || LABEL_PRESETS[1]; printLabelSheet(equipment.map(it => ({ barcodeValue: it.equipment_number, title: it.name, lines: [it.equipment_number, it.serial_number ? `S/N ${it.serial_number}` : ''].filter(Boolean) })), { widthMm: p.widthMm, heightMm: p.heightMm, title: 'Equipment barcode labels' }); }}>🏷️ Print barcode labels</button>
+          {can('equipment', 'print') && <button type="button" className="secondary" title="Print Code 128 barcode asset tags for all equipment" onClick={() => { const p = LABEL_PRESETS.find(x => x.key === bcSize) || LABEL_PRESETS[1]; printLabelSheet(equipment.map(it => ({ barcodeValue: it.equipment_number, title: it.name, lines: [it.equipment_number, it.serial_number ? `S/N ${it.serial_number}` : ''].filter(Boolean) })), { widthMm: p.widthMm, heightMm: p.heightMm, title: 'Equipment barcode labels' }); }}>🏷️ Print barcode labels</button>}
         </div>
       </div>
       <div style={{ margin: '4px 0 10px' }}>
@@ -398,6 +400,7 @@ type ProfileProps = {
 };
 
 function EquipmentProfile({ item, staff, sections, departments, locations, onBack, onSaved, setError, createBreakdownNc, createBreakdownCapa, returnToService }: ProfileProps) {
+  const { can } = usePermissions();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showLabel, setShowLabel] = useState(false);
@@ -504,8 +507,10 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button type="button" className="secondary" onClick={onBack}>← Register</button>
         {item.ifu_file_id ? <a className="secondary" href={`${API_BASE}/files/${item.ifu_file_id}/raw`} target="_blank" rel="noreferrer" style={{ padding: '6px 10px', borderRadius: 6, display: 'inline-block' }}>Manufacturer's IFU</a> : null}
-        <button type="button" className="secondary" onClick={printProfile}>Print profile</button>
-        <button type="button" className="secondary" onClick={() => setShowLabel(v => !v)}>Print label</button>
+        {can('equipment', 'print') && <>
+          <button type="button" className="secondary" onClick={printProfile}>Print profile</button>
+          <button type="button" className="secondary" onClick={() => setShowLabel(v => !v)}>Print label</button>
+        </>}
         {!editing && !item.decommissioned && <button type="button" className="secondary" onClick={() => setShowDecommission(v => !v)}>Decommission</button>}
         {!editing && <button type="button" onClick={() => setEditing(true)}>Edit</button>}
       </div>
@@ -902,7 +907,7 @@ function EquipmentMaintenanceTab({ equipment, staff, sections, setError, onChang
         <h3 style={{ margin: 0 }}>Maintenance records — Excel</h3>
       </div>
       <p className="muted" style={{ marginTop: 0 }}>Export all logged maintenance to Excel, or bulk-import maintenance records from a spreadsheet (rows are matched to equipment by their identifier). Download the template for the exact columns.</p>
-      <XlsxToolbar exportPath="/equipment/maintenance/export" templatePath="/equipment/maintenance/template" importPath="/equipment/maintenance/import" exportName="Equipment_Maintenance_Records.xlsx" onImported={() => { loadDue(); if (equipId) loadForEquip(equipId); onChanged(); }} />
+      <XlsxToolbar module="equipment" exportPath="/equipment/maintenance/export" templatePath="/equipment/maintenance/template" importPath="/equipment/maintenance/import" exportName="Equipment_Maintenance_Records.xlsx" onImported={() => { loadDue(); if (equipId) loadForEquip(equipId); onChanged(); }} />
     </div>
     <div className="card" style={{ marginTop: 16 }}>
       <h3>Due &amp; overdue</h3>
@@ -1199,6 +1204,7 @@ function EquipmentFilesTab({ equipment, sections, departments, setError, onChang
 type InventoryItemDetail = InventoryItem & { batches?: InventoryBatch[]; movements?: any[] };
 
 export function InventoryPage() {
+  const { can } = usePermissions();
   const { isEnabled } = useModules();
   const { staff, sections, locations } = useLookups();
   const [tab, setTab] = useState('Dashboard');
@@ -1335,7 +1341,7 @@ export function InventoryPage() {
     {tab === 'Item Register' && <div className="card">
       <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <h3 style={{ margin: 0 }}>Items</h3>
-        <button style={{ marginLeft: 'auto' }} type="button" className="secondary" title="Print Code 128 barcode labels for all stock items" onClick={() => printLabelSheet(items.map(it => ({ barcodeValue: it.item_code, title: it.name, lines: [it.item_code, it.category || ''].filter(Boolean) })), { widthMm: 50, heightMm: 25, title: 'Stock barcode labels' })}>🏷️ Print barcode labels</button>
+        {can('supplier_inventory', 'print') && <button style={{ marginLeft: 'auto' }} type="button" className="secondary" title="Print Code 128 barcode labels for all stock items" onClick={() => printLabelSheet(items.map(it => ({ barcodeValue: it.item_code, title: it.name, lines: [it.item_code, it.category || ''].filter(Boolean) })), { widthMm: 50, heightMm: 25, title: 'Stock barcode labels' })}>🏷️ Print barcode labels</button>}
       </div>
       <div style={{ margin: '4px 0 10px' }}><BarcodeScanner placeholder="Scan a stock item barcode…" autoFocus={false} onScan={code => { const m = items.find(i => i.item_code?.toLowerCase() === code.trim().toLowerCase()); if (m) openDetail(m.id); else setError(`No item found for barcode "${code}".`); }} /></div>
       {loading ? <p>Loading…</p> : items.length === 0 ? <p>No items yet.</p> :

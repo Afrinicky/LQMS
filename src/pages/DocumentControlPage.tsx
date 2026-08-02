@@ -6,6 +6,7 @@ import { SignatureThumb } from '../components/SignatureThumb';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
 import { useAuth } from '../hooks/useAuth';
 import { useModules } from '../hooks/useModules';
+import { usePermissions } from '../hooks/usePermissions';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import { api, API_BASE, getToken } from '../services/api';
 import type { OfficeFileChangedPayload } from '../services/api';
@@ -130,7 +131,15 @@ function initialsOf(name?: string | null): string {
 export function DocumentControlPage() {
   const { isEnabled } = useModules();
   const { user } = useAuth();
-  const canGovern = !!user && GOVERN_ROLES.includes(user.roleName || '');
+  const { can } = usePermissions();
+  // Document rights, straight from the server's resolver. Governance still
+  // takes one of the leadership roles, but it now also takes the edit right —
+  // a role name alone is no longer enough to reveal governance controls.
+  const mayCreate = can('documents', 'create');
+  const mayEdit = can('documents', 'edit');
+  const mayPrint = can('documents', 'print');
+  const mayExport = can('documents', 'export');
+  const canGovern = !!user && GOVERN_ROLES.includes(user.roleName || '') && mayEdit;
   // Permanent deletion is administrator-only and deliberately kept out of plain
   // sight — the server independently enforces the same restriction.
   const isAdmin = !!user && (user.roleName || '').trim().toLowerCase() === 'system administrator';
@@ -616,7 +625,7 @@ export function DocumentControlPage() {
     {section === 'Dashboard' && (summary ? <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <h3 style={{ margin: '6px 0' }}>Document control</h3>
-        <button className="secondary" disabled={!!exportBusy} onClick={() => runExport('/documents/masterlist/export', 'Document_and_Records_Master_List.xlsx')}>{exportBusy === '/documents/masterlist/export' ? 'Preparing…' : 'Export Master List (Excel)'}</button>
+        {mayExport && <button className="secondary" disabled={!!exportBusy} onClick={() => runExport('/documents/masterlist/export', 'Document_and_Records_Master_List.xlsx')}>{exportBusy === '/documents/masterlist/export' ? 'Preparing…' : 'Export Master List (Excel)'}</button>}
       </div>
       <KpiStrip items={[
         { label: 'Active documents', value: summary.currentDocuments, onClick: () => setSection('Documents') },
@@ -696,8 +705,8 @@ export function DocumentControlPage() {
           <button className="secondary" onClick={() => { setRegisterFilter(''); setFilterStatus(''); setFilterType(''); setFilterSection(''); setFilterOwner(''); }}>Clear</button>}
         <span className="dm-count">{filteredRegister.length} of {registerDocs.length} document{registerDocs.length === 1 ? '' : 's'}</span>
         <span style={{ flex: 1 }} />
-        <button className="secondary" onClick={() => setTab('New Document')}>＋ New document</button>
-        <button className="secondary" disabled={!!exportBusy} onClick={() => runExport('/documents/register/export', 'Document_Register.xlsx')}>{exportBusy === '/documents/register/export' ? 'Preparing…' : '⬇ Export (Excel)'}</button>
+        {mayCreate && <button className="secondary" onClick={() => setTab('New Document')}>＋ New document</button>}
+        {mayExport && <button className="secondary" disabled={!!exportBusy} onClick={() => runExport('/documents/register/export', 'Document_Register.xlsx')}>{exportBusy === '/documents/register/export' ? 'Preparing…' : '⬇ Export (Excel)'}</button>}
       </div>
 
       {canGovern && selectedIds.size > 0 && <div className="dm-bulkbar">
@@ -955,7 +964,7 @@ export function DocumentControlPage() {
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
         <p className="muted" style={{ margin: 0 }}>Documents withdrawn from circulation. Obsolete masters are retained in the archive until their destruction date, clearly separated from current documents.</p>
         <span style={{ flex: 1 }} />
-        <button className="secondary" disabled={!!exportBusy} onClick={() => runExport('/documents/obsolete-register/export', 'Obsolete_Document_Register.xlsx')}>{exportBusy === '/documents/obsolete-register/export' ? 'Preparing…' : 'Export register (Excel)'}</button>
+        {mayExport && <button className="secondary" disabled={!!exportBusy} onClick={() => runExport('/documents/obsolete-register/export', 'Obsolete_Document_Register.xlsx')}>{exportBusy === '/documents/obsolete-register/export' ? 'Preparing…' : 'Export register (Excel)'}</button>}
       </div>
       <div style={{ overflowX: 'auto' }}>
       <table className="data-table"><thead><tr><th>No.</th><th>Former code</th><th>Title</th><th>Last version</th><th>Reason / remark</th><th>Effective (last active)</th><th>Withdrawn</th><th>Author</th><th>Reviewer</th><th>Authoriser</th><th>Destroy date</th><th>Archive location</th><th></th></tr></thead><tbody>
@@ -1110,6 +1119,7 @@ async function openLabDocFile(fileId: number) {
 // master-list workbook, one view per register, exportable to Excel.
 // ============================================================================
 function MasterListView({ exportBusy, onExport, onError, documents, onPreview }: { exportBusy: string; onExport: (path: string, fallback: string) => Promise<void>; onError: (m: string) => void; documents: DocumentRecord[]; onPreview: (d: DocumentRecord) => void }) {
+  const { can } = usePermissions();
   const [data, setData] = useState<MasterListResponse | null>(null);
   const [sub, setSub] = useState('Document Register');
   useEffect(() => { api<MasterListResponse>('/documents/masterlist').then(setData).catch(e => onError((e as Error).message)); }, []);
@@ -1127,7 +1137,7 @@ function MasterListView({ exportBusy, onExport, onError, documents, onPreview }:
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
       {tabBar(sub, subs, setSub)}
       <span style={{ flex: 1 }} />
-      {exports.map(([label, path, fallback]) => <button key={path} className="secondary" disabled={!!exportBusy} onClick={() => onExport(path, fallback)}>{exportBusy === path ? 'Preparing…' : label}</button>)}
+      {can('documents', 'export') && exports.map(([label, path, fallback]) => <button key={path} className="secondary" disabled={!!exportBusy} onClick={() => onExport(path, fallback)}>{exportBusy === path ? 'Preparing…' : label}</button>)}
     </div>
     <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
       <div style={{ padding: '10px 14px', fontWeight: 700, borderBottom: '1px solid #e3e8f0' }}>{data.facility} — {sub.toUpperCase()}</div>
@@ -1844,6 +1854,7 @@ function MasterListDetailsForm({ doc, onSaved, onError }: { doc: any; onSaved: (
 }
 
 function DocumentDetailPanel(props: any) {
+  const { can } = usePermissions();
   const { doc, staff, positions, sections, departments, canGovern, isAdmin, onTransferOwner,
     versionForm, setVersionForm, versionFile, setVersionFile, submitVersion,
     reviewForm, setReviewForm, submitReview,
@@ -1912,7 +1923,7 @@ function DocumentDetailPanel(props: any) {
       {doc.status === 'draft' && <button onClick={submitForReview}>Submit for review →</button>}
       {(doc.status === 'reviewed' || doc.status === 'under_review') && <button onClick={approveDoc}>Approve &amp; issue →</button>}
       {(doc.status === 'current' || doc.status === 'approved') && <button onClick={distributeAll}>Distribute to all staff for attestation</button>}
-      <button className="secondary" onClick={() => onPrintPreview(doc.current_version_id)}>Print preview</button>
+      {can('documents', 'print') && <button className="secondary" onClick={() => onPrintPreview(doc.current_version_id)}>Print preview</button>}
     </div>
     {(doc.status === 'current' || doc.status === 'approved') && <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>{signedCount} attested · {pendingCount} pending</p>}
 
@@ -1923,8 +1934,8 @@ function DocumentDetailPanel(props: any) {
         <td>{formatBadge(v.status)}</td><td>{v.effective_date || '—'}</td><td>{v.approved_at ? String(v.approved_at).slice(0, 10) : '—'}</td><td>{v.revision_summary || '—'}</td>
         <td style={{ whiteSpace: 'nowrap' }}>
           <button onClick={() => onView(v.id)}>Open</button>{' '}
-          <button className="secondary" onClick={() => onPrintPreview(v.id)}>Print</button>{' '}
-          {v.status !== 'obsolete' && <button className="secondary" onClick={() => onMarkVersionObsolete(v.id)}>Obsolete</button>}
+          {can('documents', 'print') && <><button className="secondary" onClick={() => onPrintPreview(v.id)}>Print</button>{' '}</>}
+          {v.status !== 'obsolete' && can('documents', 'void_archive') && <button className="secondary" onClick={() => onMarkVersionObsolete(v.id)}>Obsolete</button>}
         </td>
       </tr>)}
     </tbody></table>
@@ -2002,6 +2013,7 @@ function DocumentDetailPanel(props: any) {
 // RECORD CONTROL (SECHPO051 — Control of Records Procedure)
 // ============================================================================
 function RecordControl({ staff, sections, departments, documents, onError, exportBusy, onExport }: { staff: Staff[]; sections: Section[]; departments: Department[]; documents: DocumentRecord[]; onError: (m: string) => void; exportBusy: string; onExport: (path: string, fallback: string) => Promise<void> }) {
+  const { can } = usePermissions();
   const [sub, setSub] = useState('Records Register');
   const [register, setRegister] = useState<RecordRegisterEntry[]>([]);
   const [schedule, setSchedule] = useState<RetentionScheduleRule[]>([]);
@@ -2075,7 +2087,7 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
         <input placeholder="Search code, title, category, source, status…" value={registerSearch} onChange={e => setRegisterSearch(e.target.value)} style={{ minWidth: 320 }} />
         <span className="muted">{filteredRegister.length} record(s)</span>
         <span style={{ flex: 1 }} />
-        <button className="secondary" disabled={!!exportBusy} onClick={() => onExport('/documents/records/register/export', 'Records_Register.xlsx')}>{exportBusy === '/documents/records/register/export' ? 'Preparing…' : 'Export register (Excel)'}</button>
+        {can('documents', 'export') && <button className="secondary" disabled={!!exportBusy} onClick={() => onExport('/documents/records/register/export', 'Records_Register.xlsx')}>{exportBusy === '/documents/records/register/export' ? 'Preparing…' : 'Export register (Excel)'}</button>}
       </div>
       <div style={{ overflowX: 'auto' }}>
       <table className="data-table"><thead><tr><th>No.</th><th>Code</th><th>Record type / title</th><th>Category</th><th>Source document</th><th>Format / medium</th><th>Unit / section</th><th>Storage location</th><th>Access</th><th>Retention</th><th>Disposal method</th><th>Status</th><th>Record file</th></tr></thead><tbody>
@@ -2213,6 +2225,7 @@ function AttestationsTabView({ pending, staff, documents, onSignAttestation, onO
   onOpenDoc: (docId: number, versionId: number | undefined, attestationId?: number) => void;
   onError: (m: string) => void;
 }) {
+  const { can } = usePermissions();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDocId, setSelectedDocId] = useState<number | null>(null);
   const [docList, setDocList] = useState<AttestationDocRow[]>([]);
@@ -2294,7 +2307,7 @@ function AttestationsTabView({ pending, staff, documents, onSignAttestation, onO
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button className="secondary" onClick={() => onOpenDoc(selectedDoc.id, documents.find(d => d.id === selectedDoc.id)?.current_version_id, undefined)}>Open document</button>
-              <button onClick={printList} disabled={busy}>Print list</button>
+              {can('documents', 'print') && <button onClick={printList} disabled={busy}>Print list</button>}
             </div>
           </div>
 
