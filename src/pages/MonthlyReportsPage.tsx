@@ -4,6 +4,7 @@ import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts }
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
+import { usePermissions } from '../hooks/usePermissions';
 import type {
   Section, Department, Staff,
   LhimsImportBatch, LhimsImportRow, ReportMappingRule, MonthlyReportBatch,
@@ -38,6 +39,7 @@ const initialMonth = now.getMonth() + 1;
 const initialYear = now.getFullYear();
 
 export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } = {}) {
+  const { can } = usePermissions();
   const { isEnabled } = useModules();
   const { staff, sections, departments } = useLookups();
   const [tab, setTab] = useState(embedded ? 'Import Batches' : 'Dashboard');
@@ -349,9 +351,11 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
             {(r.status === 'reviewed' || r.status === 'draft') && <button onClick={() => approveReport(r.id, false)}>Approve</button>}
             {(r.status === 'reviewed' || r.status === 'draft') && r.exception_count > 0 && <button onClick={() => approveReport(r.id, true)}>Approve (override)</button>}
             {(r.status === 'approved' || r.status === 'exported') && <>
-              <button onClick={() => exportReport(r.id, 'csv')}>Export CSV</button>
-              <button onClick={() => exportReport(r.id, 'html')}>Export HTML (print)</button>
-              <button onClick={() => exportReport(r.id, 'doc')}>Export DOC</button>
+              {can('monthly_reports', 'export') && <>
+                <button onClick={() => exportReport(r.id, 'csv')}>Export CSV</button>
+                <button onClick={() => exportReport(r.id, 'html')}>Export HTML (print)</button>
+                <button onClick={() => exportReport(r.id, 'doc')}>Export DOC</button>
+              </>}
             </>}
           </td>
         </tr>)}

@@ -391,15 +391,26 @@ export function personnelRoutes() {
   });
 
   // ============= Self-service =============
+  // A user's own profile. Always available to the signed-in user regardless of
+  // their rights on Personnel — this is their own record, and the dashboard
+  // profile card is built from it.
   router.get('/my-profile', (req, res) => {
     if (!req.user) return res.status(401).json({ error: 'Authentication required' });
     const db = getDb();
     const staffId = req.user.staffId;
-    if (!staffId) return res.json({ user: { id: req.user.id, fullName: req.user.fullName }, staff: null, positions: [], authorizations: [] });
-    const staff = db.prepare('SELECT s.*, sec.name AS section_name FROM staff s LEFT JOIN sections sec ON sec.id = s.section_id WHERE s.id = ?').get(staffId);
+    const account = db.prepare(
+      'SELECT u.id, u.username, u.full_name AS fullName, r.name AS roleName FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?'
+    ).get(req.user.id) as { id: number; username: string; fullName: string; roleName: string } | undefined;
+    const user = account ?? { id: req.user.id, username: req.user.username, fullName: req.user.username, roleName: null };
+    if (!staffId) return res.json({ user, staff: null, positions: [], authorizations: [], hasSignature: false });
+    const staff = db.prepare('SELECT s.*, sec.name AS section_name FROM staff s LEFT JOIN sections sec ON sec.id = s.section_id WHERE s.id = ?').get(staffId) as { signature_file_id?: number | null } | undefined;
     const positions = db.prepare('SELECT p.title, spa.assignment_type, spa.is_active FROM staff_position_assignments spa JOIN positions p ON p.id = spa.position_id WHERE spa.staff_id = ?').all(staffId);
-    const authorizations = db.prepare('SELECT * FROM technical_authorizations WHERE staff_id = ? AND is_active = 1').all(staffId);
-    res.json({ user: { id: req.user.id, fullName: req.user.fullName }, staff, positions, authorizations });
+    // Expired authorizations are filtered out here for the same reason the
+    // resolver ignores them: they no longer authorise anything.
+    const authorizations = db.prepare(
+      "SELECT * FROM technical_authorizations WHERE staff_id = ? AND is_active = 1 AND (expires_at IS NULL OR expires_at = '' OR date(expires_at) >= date('now'))"
+    ).all(staffId);
+    res.json({ user, staff, positions, authorizations, hasSignature: Boolean(staff?.signature_file_id) });
   });
 
   router.get('/my-tasks', (req, res) => {

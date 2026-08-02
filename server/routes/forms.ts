@@ -20,7 +20,7 @@
  */
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
-import { requirePermission } from '../middleware/permissions.js';
+import { requirePermission, viewableModulesOf } from '../middleware/permissions.js';
 import { getDb } from '../db/database.js';
 import { audit } from '../services/auditService.js';
 import { recordSignature } from '../services/signatureService.js';
@@ -110,7 +110,7 @@ export function formsRoutes() {
   const router = Router();
 
   // ── Templates ──
-  router.get('/templates', requireAuth, (req, res) => {
+  router.get('/templates', requirePermission('records_reports', 'view'), (req, res) => {
     const db = getDb();
     const includeInactive = req.query.all === '1';
     const category = req.query.category ? String(req.query.category) : null;
@@ -123,7 +123,7 @@ export function formsRoutes() {
     res.json(db.prepare(q).all(...params));
   });
 
-  router.get('/templates/:key', requireAuth, (req, res) => {
+  router.get('/templates/:key', requirePermission('records_reports', 'view'), (req, res) => {
     const db = getDb();
     const row = /^\d+$/.test(req.params.key)
       ? db.prepare('SELECT * FROM form_templates WHERE id = ?').get(req.params.key)
@@ -175,7 +175,7 @@ export function formsRoutes() {
   });
 
   // ── Submissions ──
-  router.post('/submissions', requireAuth, (req, res) => {
+  router.post('/submissions', requirePermission('records_reports', 'create'), (req, res) => {
     const { templateKey, answers, signatureImageFileId, meaning } = req.body ?? {};
     if (!templateKey || !answers || typeof answers !== 'object') return res.status(400).json({ error: 'templateKey and answers are required' });
     const db = getDb();
@@ -212,25 +212,36 @@ export function formsRoutes() {
     res.status(201).json({ id, submissionNumber, result });
   });
 
+  // Completed forms are records. A user always sees their own; seeing anyone
+  // else's takes the view right on Records & Reports, and the list is then
+  // still trimmed to the modules whose forms they may read.
   router.get('/submissions', requireAuth, (req, res) => {
     const db = getDb();
+    const viewable = viewableModulesOf(req);
     const where: string[] = []; const params: unknown[] = [];
     if (req.query.templateKey) { where.push('fs.template_key = ?'); params.push(String(req.query.templateKey)); }
-    if (req.query.mine === '1') { where.push('fs.submitted_by_user_id = ?'); params.push(req.user!.id); }
+    if (req.query.mine === '1' || !viewable.has('records_reports')) { where.push('fs.submitted_by_user_id = ?'); params.push(req.user!.id); }
     if (req.query.result) { where.push('fs.result = ?'); params.push(String(req.query.result)); }
-    let q = `SELECT fs.id, fs.submission_number, fs.template_key, fs.result, fs.status, fs.created_at, ft.title AS template_title, s.full_name AS submitted_by
+    let q = `SELECT fs.id, fs.submission_number, fs.template_key, fs.result, fs.status, fs.created_at, fs.submitted_by_user_id,
+        ft.title AS template_title, ft.module_key, s.full_name AS submitted_by
       FROM form_submissions fs JOIN form_templates ft ON ft.id = fs.template_id LEFT JOIN staff s ON s.id = fs.submitted_by_staff_id`;
     if (where.length) q += ` WHERE ${where.join(' AND ')}`;
     q += ' ORDER BY fs.created_at DESC LIMIT 200';
-    res.json(db.prepare(q).all(...params));
+    const rows = db.prepare(q).all(...params) as { module_key: string | null; submitted_by_user_id: number | null }[];
+    res.json(rows.filter(r => r.submitted_by_user_id === req.user!.id || !r.module_key || viewable.has(r.module_key)));
   });
 
   router.get('/submissions/:id', requireAuth, (req, res) => {
     const db = getDb();
-    const row = db.prepare(`SELECT fs.*, ft.title AS template_title, ft.schema_json, s.full_name AS submitted_by
+    const row = db.prepare(`SELECT fs.*, ft.title AS template_title, ft.schema_json, ft.module_key, s.full_name AS submitted_by
       FROM form_submissions fs JOIN form_templates ft ON ft.id = fs.template_id LEFT JOIN staff s ON s.id = fs.submitted_by_staff_id WHERE fs.id = ?`).get(req.params.id) as
-      { answers_json: string; schema_json: string } | undefined;
+      { answers_json: string; schema_json: string; module_key: string | null; submitted_by_user_id: number | null } | undefined;
     if (!row) return res.status(404).json({ error: 'Submission not found' });
+    const mine = row.submitted_by_user_id === req.user!.id;
+    const viewable = viewableModulesOf(req);
+    if (!mine && !(viewable.has('records_reports') && (!row.module_key || viewable.has(row.module_key)))) {
+      return res.status(403).json({ error: 'Permission denied', decision: { allowed: false, source: 'Denied override', reason: 'You may not read this submission.' } });
+    }
     res.json({ ...row, answers: JSON.parse(row.answers_json), schema: JSON.parse(row.schema_json) });
   });
 

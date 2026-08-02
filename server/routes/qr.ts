@@ -12,34 +12,41 @@
  */
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
-import { requirePermission } from '../middleware/permissions.js';
+import { requirePermission, requireResolvedPermission, viewableModulesOf } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { getDb } from '../db/database.js';
-import { ensureQrForEntity, ensureQrForAll, resolveToken, QR_ENTITY_TYPES } from '../services/qrService.js';
+import { ensureQrForEntity, ensureQrForAll, resolveToken, moduleForEntityType, moduleForToken, QR_ENTITY_TYPES } from '../services/qrService.js';
 
 export function qrRoutes() {
   const router = Router();
 
-  // List registered QR tokens (optionally filtered by entity type).
+  // List registered QR tokens. Tokens carry the label of the record they point
+  // at, so the list is filtered to the modules the caller may view.
   router.get('/', requireAuth, (req, res) => {
     const db = getDb();
     const type = req.query.entityType ? String(req.query.entityType) : null;
-    const rows = type
+    const rows = (type
       ? db.prepare('SELECT * FROM qr_codes WHERE entity_type = ? ORDER BY id DESC').all(type)
-      : db.prepare('SELECT * FROM qr_codes ORDER BY id DESC').all();
-    res.json(rows);
+      : db.prepare('SELECT * FROM qr_codes ORDER BY id DESC').all()) as { entity_type: string }[];
+    const viewable = viewableModulesOf(req);
+    res.json(rows.filter(r => {
+      const moduleKey = moduleForEntityType(r.entity_type);
+      return moduleKey ? viewable.has(moduleKey) : false;
+    }));
   });
 
-  // Resolve a scanned token → entity + deep link + record. Any authenticated
-  // user may resolve; the record they then open is still RBAC-guarded.
-  router.get('/:token', requireAuth, (req, res) => {
+  // Resolve a scanned token → entity + deep link + record. The response embeds
+  // the record itself, so the caller must be allowed to view its module —
+  // scanning a label must never become a way around the module's permissions.
+  router.get('/:token', requireResolvedPermission(req => moduleForToken(req.params.token)), (req, res) => {
     const resolved = resolveToken(req.params.token);
     if (!resolved) return res.status(404).json({ error: 'Unknown or inactive QR code' });
     res.json(resolved);
   });
 
-  // Fetch (or mint) the token for a specific entity — used to render/print labels.
-  router.get('/lookup/:type/:id', requireAuth, (req, res) => {
+  // Fetch (or mint) the token for a specific entity — used to render/print
+  // labels, so it takes the print right on the entity's own module.
+  router.get('/lookup/:type/:id', requireResolvedPermission(req => moduleForEntityType(req.params.type), 'print'), (req, res) => {
     if (!QR_ENTITY_TYPES.includes(req.params.type as never)) return res.status(400).json({ error: `entityType must be one of: ${QR_ENTITY_TYPES.join(', ')}` });
     const qr = ensureQrForEntity(req.params.type, req.params.id, req.user!.id);
     res.json(qr);

@@ -6,6 +6,7 @@ import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import { downloadXlsx } from '../services/xlsx';
 import type { Staff, Section, EquipmentItem } from '../../shared/types/api';
+import { usePermissions } from '../hooks/usePermissions';
 
 // ==========================================================================
 // Method Verification & Validation — ISO 15189:2022 (§7.3.3) / CLSI EP series.
@@ -65,6 +66,7 @@ async function openPrint(path: string, onError: (m: string) => void) {
 }
 
 export function VerificationValidationPage({ embedded = false }: { embedded?: boolean } = {}) {
+  const { can } = usePermissions();
   const { isEnabled } = useModules();
   const [staff, setStaff] = useState<Staff[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
@@ -187,7 +189,7 @@ export function VerificationValidationPage({ embedded = false }: { embedded?: bo
         <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
           <h3 style={{ margin: 0 }}>Verification &amp; validation studies</h3>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            <button type="button" className="secondary" onClick={() => downloadXlsx('/verification-validation/export', 'Method_Verification_Register.xlsx').catch(e => setError((e as Error).message))}>Export to Excel</button>
+            {can('verification_validation', 'export') && <button type="button" className="secondary" onClick={() => downloadXlsx('/verification-validation/export', 'Method_Verification_Register.xlsx').catch(e => setError((e as Error).message))}>Export to Excel</button>}
             <button type="button" onClick={() => setTab('New study')}>+ New study</button>
           </div>
         </div>
@@ -200,7 +202,7 @@ export function VerificationValidationPage({ embedded = false }: { embedded?: bo
             <td>{verdictBadge(s.verdict)}</td>
             <td>{s.authorized_for_use ? <span className="badge approved">✓ authorised</span> : '—'}</td>
             <td>{badge(s.status)}</td>
-            <td><button onClick={() => openStudy(s.id)}>Open</button> <button className="secondary" onClick={() => openPrint(`/verification-validation/${s.id}/print`, setError)}>Report</button></td>
+            <td><button onClick={() => openStudy(s.id)}>Open</button> {can('verification_validation', 'print') && <button className="secondary" onClick={() => openPrint(`/verification-validation/${s.id}/print`, setError)}>Report</button>}</td>
           </tr>)}
           {studies.length === 0 && <tr><td colSpan={8} className="muted">No studies yet. Start one from <em>New study</em>.</td></tr>}
         </tbody></table>
@@ -268,12 +270,12 @@ export function VerificationValidationPage({ embedded = false }: { embedded?: bo
       ]} />
       <div className="card" style={{ marginTop: 16 }}>
         <div className="section-head"><h3 style={{ margin: 0 }}>Verification &amp; validation register</h3>
-          <button type="button" className="secondary" onClick={() => downloadXlsx('/verification-validation/export', 'Method_Verification_Register.xlsx').catch(e => setError((e as Error).message))}>Export to Excel</button></div>
+          {can('verification_validation', 'export') && <button type="button" className="secondary" onClick={() => downloadXlsx('/verification-validation/export', 'Method_Verification_Register.xlsx').catch(e => setError((e as Error).message))}>Export to Excel</button>}</div>
         <table className="data-table"><thead><tr><th>Number</th><th>Test / method</th><th>Type</th><th>Guideline</th><th>Completed</th><th>Verdict</th><th>Status</th><th></th></tr></thead><tbody>
           {studies.map(s => <tr key={s.id}>
             <td>{s.verification_number}</td><td>{s.test_name}<div className="muted" style={{ fontSize: 11 }}>{s.method_name}</div></td>
             <td>{badge(s.study_type)}</td><td>{s.guideline_ref || '—'}</td><td>{s.completion_date || '—'}</td><td>{verdictBadge(s.verdict)}</td><td>{badge(s.status)}</td>
-            <td><button className="secondary" onClick={() => openPrint(`/verification-validation/${s.id}/print`, setError)}>Report</button></td>
+            <td>{can('verification_validation', 'print') && <button className="secondary" onClick={() => openPrint(`/verification-validation/${s.id}/print`, setError)}>Report</button>}</td>
           </tr>)}
           {studies.length === 0 && <tr><td colSpan={8} className="muted">No studies recorded.</td></tr>}
         </tbody></table>
@@ -290,6 +292,7 @@ function StudyWorkspace({ study, staff, sections, equipment, catalogue, canManag
   onReview: () => void; onAuthorize: (a: boolean, reject?: boolean) => void; onDelete: () => void; onClose: () => void; onPrint: () => void; onRefresh: () => void;
   reportRef: React.RefObject<HTMLInputElement>; onUploadReport: (f: File) => void; setError: (m: string | null) => void;
 }) {
+  const { can } = usePermissions();
   const [showEdit, setShowEdit] = useState(false);
   const [dataFor, setDataFor] = useState<VParam | null>(null);
   const failed = study.parameters.filter(p => p.outcome === 'fail').length;
@@ -300,7 +303,7 @@ function StudyWorkspace({ study, staff, sections, equipment, catalogue, canManag
     <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
       <h3 style={{ margin: 0 }}>{study.verification_number} — {study.test_name} {verdictBadge(study.verdict)} {study.authorized_for_use ? <span className="badge approved">✓ authorised for use</span> : null}</h3>
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button type="button" className="secondary" onClick={onPrint}>Print report</button>
+        {can('verification_validation', 'print') && <button type="button" className="secondary" onClick={onPrint}>Print report</button>}
         {canManage && <button type="button" className="secondary" onClick={() => setShowEdit(v => !v)}>{showEdit ? 'Hide details' : 'Edit details'}</button>}
         {canManage && <button type="button" className="secondary" onClick={onDelete}>Delete</button>}
         <button type="button" className="secondary" onClick={onClose}>Close</button>

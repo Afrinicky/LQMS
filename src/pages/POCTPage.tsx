@@ -4,6 +4,7 @@ import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts }
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
+import { usePermissions } from '../hooks/usePermissions';
 import type {
   Section, Department, Staff, Location,
   PoctSite, PoctDevice, PoctTest, PoctOperatorAuthorization,
@@ -43,6 +44,7 @@ function staffName(staffList: Staff[], id?: number | null) {
 }
 
 export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
+  const { can } = usePermissions();
   const { isEnabled } = useModules();
   const { staff, sections, departments, locations } = useLookups();
   const [tab, setTab] = useState(embedded ? 'Sites' : 'Dashboard');
@@ -209,7 +211,7 @@ export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
         <button type="submit">Create site</button>
       </form>
       <table className="data-table"><thead><tr><th>Code</th><th>Name</th><th>Section</th><th>Responsible</th><th>Status</th><th></th></tr></thead><tbody>
-        {sites.map(s => <tr key={s.id}><td>{s.site_code || '—'}</td><td>{s.site_name}</td><td>{sections.find(x => x.id === s.section_id)?.name || '—'}</td><td>{staffName(staff, s.responsible_staff_id)}</td><td>{formatBadge(s.status)}</td><td><button onClick={() => toggleSite(s.id)}>Toggle</button> <button onClick={() => openPrintPage(`/poct/sites/${s.id}/print`)}>Print site report</button> <button onClick={() => openPrintPage(`/poct/sites/${s.id}/authorization-roster/print`)}>Print roster</button></td></tr>)}
+        {sites.map(s => <tr key={s.id}><td>{s.site_code || '—'}</td><td>{s.site_name}</td><td>{sections.find(x => x.id === s.section_id)?.name || '—'}</td><td>{staffName(staff, s.responsible_staff_id)}</td><td>{formatBadge(s.status)}</td><td><button onClick={() => toggleSite(s.id)}>Toggle</button> {can('poct', 'print') && <><button onClick={() => openPrintPage(`/poct/sites/${s.id}/print`)}>Print site report</button> <button onClick={() => openPrintPage(`/poct/sites/${s.id}/authorization-roster/print`)}>Print roster</button></>}</td></tr>)}
       </tbody></table>
     </>}
 
@@ -335,7 +337,7 @@ export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
         <label>Test<select value={trendFilter.testId} onChange={e => setTrendFilter({ ...trendFilter, testId: e.target.value })}><option value="">—</option>{tests.map(t => <option key={t.id} value={t.id}>{t.test_name}</option>)}</select></label>
         <label>QC material (optional)<select value={trendFilter.materialId} onChange={e => setTrendFilter({ ...trendFilter, materialId: e.target.value })}><option value="">—</option>{qcMaterials.map(m => <option key={m.id} value={m.id}>{m.material_name}</option>)}</select></label>
         <button type="button" onClick={loadTrend}>Load trend</button>
-        <button type="button" onClick={() => openPrintPage(`/poct/qc-report/print${trendFilter.deviceId ? `?deviceId=${trendFilter.deviceId}` : ''}`)}>Print QC report</button>
+        {can('poct', 'print') && <button type="button" onClick={() => openPrintPage(`/poct/qc-report/print${trendFilter.deviceId ? `?deviceId=${trendFilter.deviceId}` : ''}`)}>Print QC report</button>}
       </div>
       {trendData && trendData.points && trendData.points.length > 0 && (() => {
         const points = trendData.points as Array<{ qc_date: string; result_value: number | null; status: string }>;
@@ -434,7 +436,7 @@ export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
       <table className="data-table"><thead><tr><th>Number</th><th>Period</th><th>Site</th><th>Status</th><th>Summaries</th><th></th></tr></thead><tbody>
         {reviews.map(r => <tr key={r.id}><td>{r.review_number}</td><td>{r.review_year}-{String(r.review_month).padStart(2, '0')}</td><td>{r.site_name || 'all'}</td><td>{formatBadge(r.status)}</td>
           <td>{[r.qc_summary, r.eqa_summary, r.operator_authorization_summary, r.device_issue_summary, r.incidents_summary].filter(Boolean).join(' · ') || '—'}</td>
-          <td><button onClick={() => generateReviewSummary(r.id)}>Generate summary</button>{r.status === 'draft' && <button onClick={() => reviewReview(r.id)}>Review</button>}{r.status === 'reviewed' && <button onClick={() => approveReview(r.id)}>Approve</button>}{r.status === 'approved' && <button onClick={() => closeReview(r.id)}>Close</button>} <button onClick={() => openPrintPage(`/poct/monthly-reviews/${r.id}/print`)}>Print</button></td>
+          <td><button onClick={() => generateReviewSummary(r.id)}>Generate summary</button>{r.status === 'draft' && <button onClick={() => reviewReview(r.id)}>Review</button>}{r.status === 'reviewed' && <button onClick={() => approveReview(r.id)}>Approve</button>}{r.status === 'approved' && <button onClick={() => closeReview(r.id)}>Close</button>} {can('poct', 'print') && <button onClick={() => openPrintPage(`/poct/monthly-reviews/${r.id}/print`)}>Print</button>}</td>
         </tr>)}
       </tbody></table>
     </>}
@@ -444,7 +446,7 @@ export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
       <ul>
         <li>Site report: open Sites tab and click <em>Print site report</em> on the desired row. Includes devices, active authorisations, recent QC, and open incidents.</li>
         <li>Authorisation roster: open Sites tab and click <em>Print roster</em>.</li>
-        <li>QC report: <button type="button" onClick={() => openPrintPage('/poct/qc-report/print')}>Print QC report (current month, all sites)</button> — or use the Print QC report button inside QC Monitoring to scope by device.</li>
+        {can('poct', 'print') && <li>QC report: <button type="button" onClick={() => openPrintPage('/poct/qc-report/print')}>Print QC report (current month, all sites)</button> — or use the Print QC report button inside QC Monitoring to scope by device.</li>}
         <li>Monthly review: open Monthly Reviews tab and click <em>Print</em>.</li>
       </ul>
       <h3>POCT actions (from incidents)</h3>

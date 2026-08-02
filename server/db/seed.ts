@@ -275,6 +275,27 @@ export function seedDefaults() {
     rolePermissionsMap['Data Officer'].dennis = ['view', 'export', 'print'];
     for (const roleName of ['Biomedical Scientist', 'Technician', 'Quality User']) rolePermissionsMap[roleName].dennis = ['view', 'print'];
 
+    // Baseline every role needs. The launchpad, the main dashboard and the
+    // personal inbox are themselves filtered to the modules a person may open,
+    // so granting them here shows nobody anything they are not entitled to —
+    // it only stops the shell itself from disappearing. Without this, hiding
+    // features by permission would leave most roles with an empty application.
+    for (const modulePermissions of Object.values(rolePermissionsMap)) {
+      modulePermissions.home = ['view'];
+      modulePermissions.dashboard = ['view'];
+      if (!modulePermissions.notifications) modulePermissions.notifications = ['view'];
+    }
+
+    // Organisation & Leadership had no role defaults at all, so every role
+    // except the administrator was refused the module the sidebar still
+    // offered them. Leadership manages it; everyone else may read it.
+    const organisationFull = ['view', 'create', 'edit', 'approve', 'export', 'print'];
+    for (const roleName of ['Laboratory Manager', 'Quality Manager']) rolePermissionsMap[roleName].organisation = organisationFull;
+    for (const roleName of ['Section Head', 'Quality Team Member']) rolePermissionsMap[roleName].organisation = ['view', 'create', 'edit', 'print'];
+    for (const roleName of ['Biomedical Scientist', 'Technician', 'Blood Bank Unit Head', 'Safety Manager', 'Data Officer', 'POCT Officer', 'Quality User']) {
+      rolePermissionsMap[roleName].organisation = ['view', 'print'];
+    }
+
     const adminRole = db.prepare('SELECT id FROM roles WHERE name = ?').get('System Administrator') as { id: number };
     const allPermissions = db.prepare('SELECT id, module_key, action FROM permissions').all() as { id: number; module_key: string; action: string }[];
 
@@ -282,12 +303,16 @@ export function seedDefaults() {
       db.prepare('INSERT OR IGNORE INTO role_permissions (role_id, permission_id, allowed, source) VALUES (?, ?, 1, ?)').run(adminRole.id, permission.id, 'Role default');
     }
 
+    // INSERT OR IGNORE, never OR REPLACE: seeding establishes a role's defaults
+    // the first time a permission exists and then never touches it again. With
+    // OR REPLACE, every permission an administrator revoked came back the next
+    // time the server restarted — a revocation that silently undid itself.
     for (const [roleName, modulePermissions] of Object.entries(rolePermissionsMap)) {
       const role = db.prepare('SELECT id FROM roles WHERE name = ?').get(roleName) as { id: number } | undefined;
       if (!role) continue;
       for (const permission of allPermissions) {
         if (modulePermissions[permission.module_key]?.includes(permission.action)) {
-          db.prepare('INSERT OR REPLACE INTO role_permissions (role_id, permission_id, allowed, source) VALUES (?, ?, 1, ?)').run(role.id, permission.id, 'Role default');
+          db.prepare('INSERT OR IGNORE INTO role_permissions (role_id, permission_id, allowed, source) VALUES (?, ?, 1, ?)').run(role.id, permission.id, 'Role default');
         }
       }
     }

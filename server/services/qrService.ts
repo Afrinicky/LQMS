@@ -33,6 +33,17 @@ const ENTITY_RESOLUTION: Record<string, { module: string; deep: string; table?: 
   maintenance_record: { module: 'equipment', deep: '/m/equipment', table: 'equipment_maintenance_records' },
 };
 
+/** The module a taggable entity type belongs to, for permission checks. */
+export function moduleForEntityType(entityType: string): string | null {
+  return ENTITY_RESOLUTION[entityType]?.module ?? null;
+}
+
+/** The module a scanned token points at, for permission checks. */
+export function moduleForToken(token: string): string | null {
+  const qr = getDb().prepare('SELECT entity_type FROM qr_codes WHERE token = ? AND is_active = 1').get(token) as { entity_type: string } | undefined;
+  return qr ? moduleForEntityType(qr.entity_type) : null;
+}
+
 function newToken(): string {
   // 16 bytes → 22-char url-safe token. Prefixed so tokens are visually distinct.
   return 'SQ' + crypto.randomBytes(16).toString('base64url');

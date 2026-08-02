@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { api, API_BASE, getToken } from '../services/api';
 import type { Staff, Section } from '../../shared/types/api';
+import { usePermissions } from '../hooks/usePermissions';
 
 // ==========================================================================
 // Scheduling boards — the department duty roster (Excel-like editable grid),
@@ -44,6 +45,7 @@ const statusBadge = (s: string) => <span className={`badge ${s === 'approved' ? 
 
 // ============================ Duty Roster Board ============================
 export function DutyRosterBoard({ staff, canEdit }: { staff: Staff[]; canEdit: boolean }) {
+  const { can } = usePermissions();
   const [rosters, setRosters] = useState<Array<{ id: number; roster_number: string; month: string; title: string; status: string }>>([]);
   const [roster, setRoster] = useState<Roster | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -156,7 +158,7 @@ export function DutyRosterBoard({ staff, canEdit }: { staff: Staff[]; canEdit: b
       <table className="data-table"><thead><tr><th>Number</th><th>Month</th><th>Title</th><th>Status</th><th></th></tr></thead><tbody>
         {rosters.map(r => <tr key={r.id}>
           <td>{r.roster_number}</td><td>{r.month ? monthDays(r.month).label : '—'}</td><td>{r.title}</td><td>{statusBadge(r.status)}</td>
-          <td><button onClick={() => open(r.id)}>Open</button> <button className="secondary" onClick={() => openPrintPage(`/scheduling/duty-rosters/${r.id}/print`, setError)}>Print</button>{canEdit && <> <button className="secondary" onClick={() => removeRoster(r.id)}>Delete</button></>}</td>
+          <td><button onClick={() => open(r.id)}>Open</button> {can('personnel', 'print') && <button className="secondary" onClick={() => openPrintPage(`/scheduling/duty-rosters/${r.id}/print`, setError)}>Print</button>}{canEdit && <> <button className="secondary" onClick={() => removeRoster(r.id)}>Delete</button></>}</td>
         </tr>)}
         {rosters.length === 0 && <tr><td colSpan={5} className="muted">No rosters yet.{canEdit ? ' Create one for next month above.' : ''}</td></tr>}
       </tbody></table>
@@ -167,7 +169,7 @@ export function DutyRosterBoard({ staff, canEdit }: { staff: Staff[]; canEdit: b
         <h3 style={{ margin: 0 }}>{roster.title} — {md.label} {statusBadge(roster.status)}</h3>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {canEdit && <button onClick={save} disabled={dirty.current.size === 0} title="Save painted cells">Save changes</button>}
-          <button className="secondary" onClick={() => openPrintPage(`/scheduling/duty-rosters/${roster.id}/print`, setError)}>Print / PDF</button>
+          {can('personnel', 'print') && <button className="secondary" onClick={() => openPrintPage(`/scheduling/duty-rosters/${roster.id}/print`, setError)}>Print / PDF</button>}
           {canEdit && roster.status !== 'published' && <button className="secondary" onClick={() => act('publish', 'Published — now visible to all staff (read-only).')}>Publish</button>}
           {canEdit && roster.status !== 'approved' && <button className="secondary" onClick={() => act('approve', 'Approved.')}>Approve</button>}
           <button className="secondary" onClick={() => setRoster(null)}>Close</button>
@@ -240,6 +242,7 @@ type Reassign = { id: number; schedule_number: string; month: string; effective_
 const emptyReRow = { unitLabel: '', sectionId: '', supervisorStaffId: '', deputyStaffId: '', memberIds: [] as string[], isSpan: false, spanText: '' };
 
 export function ReassignmentBoard({ staff, sections, canEdit }: { staff: Staff[]; sections: Section[]; canEdit: boolean }) {
+  const { can } = usePermissions();
   const [list, setList] = useState<Array<{ id: number; schedule_number: string; month: string; status: string; subject: string }>>([]);
   const [sched, setSched] = useState<Reassign | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -287,7 +290,7 @@ export function ReassignmentBoard({ staff, sections, canEdit }: { staff: Staff[]
       <p className="muted" style={{ marginTop: 0 }}>The monthly memo re-assigning staff to units (supervisor, deputy and members). Prepared by the laboratory manager. Creating one pre-fills the standard NB notes — or <strong>copy last month</strong> and edit a few rows. When a row is linked to a unit, publishing moves those staff to that unit on the master register.</p>
       <table className="data-table"><thead><tr><th>Number</th><th>Month</th><th>Subject</th><th>Status</th><th></th></tr></thead><tbody>
         {list.map(s => <tr key={s.id}><td>{s.schedule_number}</td><td>{s.month ? monthDays(s.month).label : '—'}</td><td>{s.subject}</td><td>{statusBadge(s.status)}</td>
-          <td><button onClick={() => open(s.id)}>Open</button> <button className="secondary" onClick={() => openPrintPage(`/scheduling/reassignments/${s.id}/print`, setError)}>Print</button>{canEdit && <> <button className="secondary" onClick={() => remove(s.id)}>Delete</button></>}</td></tr>)}
+          <td><button onClick={() => open(s.id)}>Open</button> {can('personnel', 'print') && <button className="secondary" onClick={() => openPrintPage(`/scheduling/reassignments/${s.id}/print`, setError)}>Print</button>}{canEdit && <> <button className="secondary" onClick={() => remove(s.id)}>Delete</button></>}</td></tr>)}
         {list.length === 0 && <tr><td colSpan={5} className="muted">No reassignment schedules yet.</td></tr>}
       </tbody></table>
     </div>
@@ -296,7 +299,7 @@ export function ReassignmentBoard({ staff, sections, canEdit }: { staff: Staff[]
       <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <h3 style={{ margin: 0 }}>{sched.schedule_number} {statusBadge(sched.status)}</h3>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button className="secondary" onClick={() => openPrintPage(`/scheduling/reassignments/${sched.id}/print`, setError)}>Print / PDF</button>
+          {can('personnel', 'print') && <button className="secondary" onClick={() => openPrintPage(`/scheduling/reassignments/${sched.id}/print`, setError)}>Print / PDF</button>}
           {canEdit && sched.status !== 'published' && <button className="secondary" onClick={() => act('publish', 'Published to all staff.')}>Publish</button>}
           {canEdit && sched.status !== 'approved' && <button className="secondary" onClick={() => act('approve', 'Approved.')}>Approve</button>}
           <button className="secondary" onClick={() => setSched(null)}>Close</button>
@@ -355,6 +358,7 @@ type BenchDef = { id: number; name: string; code: string | null; display_order: 
 type Bench = { id: number; schedule_number: string; section_id: number; section_name: string; month: string; title: string; status: string; rows: BenchRow[]; cells: BenchCell[]; benches: BenchDef[] };
 
 export function BenchScheduleBoard({ sections, canEdit }: { sections: Section[]; canEdit: boolean }) {
+  const { can } = usePermissions();
   const [list, setList] = useState<Array<{ id: number; schedule_number: string; section_id: number; section_name: string; month: string; status: string }>>([]);
   const [bs, setBs] = useState<Bench | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -409,7 +413,7 @@ export function BenchScheduleBoard({ sections, canEdit }: { sections: Section[];
       <p className="muted" style={{ marginTop: 0 }}>Each unit assigns its staff to benches/workspaces per day. Benches are configured in <em>Settings → Section/Unit Configuration → Benches</em>. Unit heads prepare these for their own unit — or <strong>copy last month</strong> and tweak.</p>
       <table className="data-table"><thead><tr><th>Number</th><th>Unit</th><th>Month</th><th>Status</th><th></th></tr></thead><tbody>
         {list.map(s => <tr key={s.id}><td>{s.schedule_number}</td><td>{s.section_name}</td><td>{s.month ? monthDays(s.month).label : '—'}</td><td>{statusBadge(s.status)}</td>
-          <td><button onClick={() => open(s.id)}>Open</button> <button className="secondary" onClick={() => openPrintPage(`/scheduling/bench-schedules/${s.id}/print`, setError)}>Print</button>{canEdit && <> <button className="secondary" onClick={() => remove(s.id)}>Delete</button></>}</td></tr>)}
+          <td><button onClick={() => open(s.id)}>Open</button> {can('personnel', 'print') && <button className="secondary" onClick={() => openPrintPage(`/scheduling/bench-schedules/${s.id}/print`, setError)}>Print</button>}{canEdit && <> <button className="secondary" onClick={() => remove(s.id)}>Delete</button></>}</td></tr>)}
         {list.length === 0 && <tr><td colSpan={5} className="muted">No bench schedules yet.</td></tr>}
       </tbody></table>
     </div>
@@ -419,7 +423,7 @@ export function BenchScheduleBoard({ sections, canEdit }: { sections: Section[];
         <h3 style={{ margin: 0 }}>{bs.section_name} — {md.label} {statusBadge(bs.status)}</h3>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {canEdit && <button onClick={save} disabled={dirty.current.size === 0}>Save changes</button>}
-          <button className="secondary" onClick={() => openPrintPage(`/scheduling/bench-schedules/${bs.id}/print`, setError)}>Print / PDF</button>
+          {can('personnel', 'print') && <button className="secondary" onClick={() => openPrintPage(`/scheduling/bench-schedules/${bs.id}/print`, setError)}>Print / PDF</button>}
           {canEdit && bs.status !== 'published' && <button className="secondary" onClick={() => act('publish', 'Published to all staff.')}>Publish</button>}
           {canEdit && bs.status !== 'approved' && <button className="secondary" onClick={() => act('approve', 'Approved.')}>Approve</button>}
           <button className="secondary" onClick={() => setBs(null)}>Close</button>

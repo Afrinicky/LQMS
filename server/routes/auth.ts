@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { getDb } from '../db/database.js';
 import { requireAuth } from '../middleware/auth.js';
 import { audit } from '../services/auditService.js';
+import { getEffectivePermissions } from '../services/permissionResolver.js';
 const router = Router();
 
 // Minimum length mirrors the policy enforced when accounts are created
@@ -15,11 +16,22 @@ router.post('/login', (req, res) => {
   if (!user || !bcrypt.compareSync(password, user.password_hash)) return res.status(401).json({ error: 'Invalid username or password' });
   const token = crypto.randomBytes(32).toString('hex');
   getDb().prepare("INSERT INTO auth_sessions (user_id, token, device_id, ip_address, expires_at) VALUES (?, ?, ?, ?, datetime('now', '+12 hours'))").run(user.id, token, req.headers['x-device-id'] ?? null, req.ip);
-  res.json({ token, user: { id: user.id, username: user.username, fullName: user.full_name, roleId: user.role_id, roleName: user.role_name, staffId: user.staff_id ?? null, staffName: user.staff_name ?? null, isActive: true } });
+  res.json({
+    token,
+    user: { id: user.id, username: user.username, fullName: user.full_name, roleId: user.role_id, roleName: user.role_name, staffId: user.staff_id ?? null, staffName: user.staff_name ?? null, isActive: true },
+    permissions: getEffectivePermissions(user.id),
+  });
 });
 router.get('/me', requireAuth, (req, res) => {
   const user = getDb().prepare('SELECT u.id, u.username, u.full_name fullName, u.role_id roleId, r.name roleName, u.staff_id staffId, s.full_name staffName, u.is_active isActive FROM users u JOIN roles r ON r.id = u.role_id LEFT JOIN staff s ON s.id = u.staff_id WHERE u.id = ?').get(req.user!.id);
-  res.json({ user });
+  res.json({ user, permissions: getEffectivePermissions(req.user!.id) });
+});
+
+// The caller's effective permissions on their own. The client hides every
+// feature that is absent from this map, so it is refreshed whenever the app
+// regains focus and after any change that could alter a user's rights.
+router.get('/permissions', requireAuth, (req, res) => {
+  res.json({ permissions: getEffectivePermissions(req.user!.id) });
 });
 router.post('/logout', requireAuth, (req, res) => {
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, '');

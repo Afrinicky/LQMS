@@ -15,6 +15,7 @@
     "build": "tsc --noEmit && vite build && tsc -p tsconfig.electron.json && node scripts/copy-preload.mjs",
     "preview": "vite preview",
     "smoke": "node scripts/smoke-check.mjs",
+    "rbac:check": "node scripts/rbac-check.mjs",
     "rebuild:native": "electron-builder install-app-deps",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",

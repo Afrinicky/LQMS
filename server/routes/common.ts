@@ -8,7 +8,7 @@ import { getDb, closeDb, ensureDataDirs, uploadRoot, evidenceRoot, backupRoot, d
 import { config, isLanExposed, type AppMode } from '../config/index.js';
 import { seedDefaults } from '../db/seed.js';
 import { requireAuth } from '../middleware/auth.js';
-import { requirePermission } from '../middleware/permissions.js';
+import { requirePermission, viewableModulesOf } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
 import { parseIntNullable } from './routeHelpers.js';
@@ -241,63 +241,87 @@ export function commonRoutes() {
   const router = Router();
   router.use(requireAuth);
 
-  router.get('/dashboard', (_req, res) => {
+  router.get('/dashboard', (req, res) => {
     const db = getDb();
+    const seen = viewableModulesOf(req);
+    const only = (moduleKey: string, fields: () => Record<string, unknown>) => (seen.has(moduleKey) ? fields() : {});
     res.json({
-      documents: db.prepare('SELECT COUNT(*) count FROM documents').get(),
-      actionsOpen: db.prepare("SELECT COUNT(*) count FROM actions WHERE status != 'closed'").get(),
-      staff: db.prepare('SELECT COUNT(*) count FROM staff').get(),
-      equipmentItems: db.prepare('SELECT COUNT(*) count FROM equipment_items').get(),
-      inventoryItems: db.prepare('SELECT COUNT(*) count FROM inventory_items').get(),
-      monitoringRecords: db.prepare('SELECT COUNT(*) count FROM monitoring_records').get(),
-      safetyIncidents: db.prepare('SELECT COUNT(*) count FROM safety_incidents').get(),
-      modulesEnabled: db.prepare('SELECT COUNT(*) count FROM system_modules WHERE enabled = 1').get(),
-      latestBackup: db.prepare('SELECT file_name FROM backup_logs ORDER BY id DESC LIMIT 1').get()
+      ...only('documents', () => ({ documents: db.prepare('SELECT COUNT(*) count FROM documents').get() })),
+      ...only('actions', () => ({ actionsOpen: db.prepare("SELECT COUNT(*) count FROM actions WHERE status != 'closed'").get() })),
+      ...only('personnel', () => ({ staff: db.prepare('SELECT COUNT(*) count FROM staff').get() })),
+      ...only('equipment', () => ({ equipmentItems: db.prepare('SELECT COUNT(*) count FROM equipment_items').get() })),
+      ...only('supplier_inventory', () => ({ inventoryItems: db.prepare('SELECT COUNT(*) count FROM inventory_items').get() })),
+      ...only('monitoring', () => ({ monitoringRecords: db.prepare('SELECT COUNT(*) count FROM monitoring_records').get() })),
+      ...only('facilities_safety', () => ({ safetyIncidents: db.prepare('SELECT COUNT(*) count FROM safety_incidents').get() })),
+      ...only('settings', () => ({
+        modulesEnabled: db.prepare('SELECT COUNT(*) count FROM system_modules WHERE enabled = 1').get(),
+        latestBackup: db.prepare('SELECT file_name FROM backup_logs ORDER BY id DESC LIMIT 1').get(),
+      })),
     });
   });
-  router.get('/dashboard/operations-summary', (_req, res) => {
+  router.get('/dashboard/operations-summary', (req, res) => {
     const db = getDb();
+    const seen = viewableModulesOf(req);
     const now = new Date().toISOString();
     const expiringSoonCutoff = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
     const count = (sql: string, ...params: unknown[]) => (db.prepare(sql).get(...params) as { count: number }).count;
+    const only = (moduleKey: string, fields: () => Record<string, number>) => (seen.has(moduleKey) ? fields() : {});
     res.json({
-      equipmentTotal: count('SELECT COUNT(*) count FROM equipment_items'),
-      equipmentMaintenanceDue: count('SELECT COUNT(*) count FROM equipment_items WHERE COALESCE(next_maintenance_due, next_service_due) IS NOT NULL AND COALESCE(next_maintenance_due, next_service_due) <= ?', now),
-      equipmentCalibrationDue: count('SELECT COUNT(*) count FROM equipment_items WHERE COALESCE(next_calibration_due, calibration_due_date) IS NOT NULL AND COALESCE(next_calibration_due, calibration_due_date) <= ?', now),
-      equipmentOutOfService: count("SELECT COUNT(*) count FROM equipment_items WHERE status IN ('out_of_service','under_repair','restricted_use')"),
-      inventoryLowStock: count('SELECT COUNT(*) count FROM inventory_items WHERE quantity <= COALESCE(NULLIF(minimum_stock,0), reorder_level, 0)'),
-      inventoryExpiringSoon: count('SELECT COUNT(*) count FROM inventory_items WHERE expiry_date IS NOT NULL AND expiry_date > ? AND expiry_date <= ?', now, expiringSoonCutoff),
-      inventoryExpired: count('SELECT COUNT(*) count FROM inventory_items WHERE expiry_date IS NOT NULL AND expiry_date < ?', now),
-      monitoringWarnings: count("SELECT COUNT(*) count FROM monitoring_readings WHERE status = 'warning'"),
-      monitoringCritical: count("SELECT COUNT(*) count FROM monitoring_readings WHERE status IN ('critical','out_of_range')"),
-      openSafetyIncidents: count("SELECT COUNT(*) count FROM safety_incidents WHERE status != 'closed'"),
-      storageInspectionsThisMonth: count("SELECT COUNT(*) count FROM storage_inspections WHERE strftime('%Y-%m', inspection_date) = strftime('%Y-%m','now')"),
-      storageInspectionsDue: count("SELECT COUNT(*) count FROM storage_inspections WHERE next_due_date IS NOT NULL AND next_due_date <= ?", now.slice(0, 10)),
-      openStorageActions: count("SELECT COUNT(*) count FROM storage_inspections WHERE outcome IN ('action_required','fail') AND status != 'closed'")
+      ...only('equipment', () => ({
+        equipmentTotal: count('SELECT COUNT(*) count FROM equipment_items'),
+        equipmentMaintenanceDue: count('SELECT COUNT(*) count FROM equipment_items WHERE COALESCE(next_maintenance_due, next_service_due) IS NOT NULL AND COALESCE(next_maintenance_due, next_service_due) <= ?', now),
+        equipmentCalibrationDue: count('SELECT COUNT(*) count FROM equipment_items WHERE COALESCE(next_calibration_due, calibration_due_date) IS NOT NULL AND COALESCE(next_calibration_due, calibration_due_date) <= ?', now),
+        equipmentOutOfService: count("SELECT COUNT(*) count FROM equipment_items WHERE status IN ('out_of_service','under_repair','restricted_use')"),
+      })),
+      ...only('supplier_inventory', () => ({
+        inventoryLowStock: count('SELECT COUNT(*) count FROM inventory_items WHERE quantity <= COALESCE(NULLIF(minimum_stock,0), reorder_level, 0)'),
+        inventoryExpiringSoon: count('SELECT COUNT(*) count FROM inventory_items WHERE expiry_date IS NOT NULL AND expiry_date > ? AND expiry_date <= ?', now, expiringSoonCutoff),
+        inventoryExpired: count('SELECT COUNT(*) count FROM inventory_items WHERE expiry_date IS NOT NULL AND expiry_date < ?', now),
+      })),
+      ...only('monitoring', () => ({
+        monitoringWarnings: count("SELECT COUNT(*) count FROM monitoring_readings WHERE status = 'warning'"),
+        monitoringCritical: count("SELECT COUNT(*) count FROM monitoring_readings WHERE status IN ('critical','out_of_range')"),
+      })),
+      ...only('facilities_safety', () => ({
+        openSafetyIncidents: count("SELECT COUNT(*) count FROM safety_incidents WHERE status != 'closed'"),
+        storageInspectionsThisMonth: count("SELECT COUNT(*) count FROM storage_inspections WHERE strftime('%Y-%m', inspection_date) = strftime('%Y-%m','now')"),
+        storageInspectionsDue: count("SELECT COUNT(*) count FROM storage_inspections WHERE next_due_date IS NOT NULL AND next_due_date <= ?", now.slice(0, 10)),
+        openStorageActions: count("SELECT COUNT(*) count FROM storage_inspections WHERE outcome IN ('action_required','fail') AND status != 'closed'"),
+      })),
     });
   });
 
   // Deprecated: kept for backward compatibility. New code should use the per-module
   // summary endpoints below (/dashboard/iqc-summary etc).
-  router.get('/dashboard/technical-quality-summary', (_req, res) => {
+  router.get('/dashboard/technical-quality-summary', (req, res) => {
     const db = getDb();
+    const seen = viewableModulesOf(req);
     const now = new Date().toISOString();
     const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
     const monthStartIso = monthStart.toISOString();
     const count = (sql: string, ...params: unknown[]) => (db.prepare(sql).get(...params) as { count: number }).count;
+    const only = (moduleKey: string, fields: () => Record<string, number>) => (seen.has(moduleKey) ? fields() : {});
     res.json({
-      activeIqcMaterials: count('SELECT COUNT(*) count FROM iqc_materials WHERE is_active = 1'),
-      iqcFailuresThisMonth: count("SELECT COUNT(*) count FROM iqc_results WHERE status IN ('rejected','warning','out_of_control') AND run_date >= ?", monthStartIso),
-      iqcResultsPendingReview: count("SELECT COUNT(*) count FROM iqc_results WHERE reviewed_at IS NULL AND status != 'accepted'"),
-      eqaEventsDue: count('SELECT COUNT(*) count FROM eqa_events WHERE submission_due_date IS NOT NULL AND submitted_date IS NULL AND submission_due_date <= ?', now),
-      eqaUnsatisfactoryEvents: count("SELECT COUNT(*) count FROM eqa_events WHERE performance_status IN ('unsatisfactory','poor','fail','failed')"),
-      openVerifications: count("SELECT COUNT(*) count FROM method_verifications WHERE status IN ('planned','in_progress')"),
-      equipmentVerificationsDue: count("SELECT COUNT(*) count FROM equipment_verifications WHERE status IN ('planned','in_progress')"),
-      muRecordsDueForReview: count("SELECT COUNT(*) count FROM measurement_uncertainty_records WHERE status IN ('draft','in_review')")
+      ...only('iqc', () => ({
+        activeIqcMaterials: count('SELECT COUNT(*) count FROM iqc_materials WHERE is_active = 1'),
+        iqcFailuresThisMonth: count("SELECT COUNT(*) count FROM iqc_results WHERE status IN ('rejected','warning','out_of_control') AND run_date >= ?", monthStartIso),
+        iqcResultsPendingReview: count("SELECT COUNT(*) count FROM iqc_results WHERE reviewed_at IS NULL AND status != 'accepted'"),
+      })),
+      ...only('eqa', () => ({
+        eqaEventsDue: count('SELECT COUNT(*) count FROM eqa_events WHERE submission_due_date IS NOT NULL AND submitted_date IS NULL AND submission_due_date <= ?', now),
+        eqaUnsatisfactoryEvents: count("SELECT COUNT(*) count FROM eqa_events WHERE performance_status IN ('unsatisfactory','poor','fail','failed')"),
+      })),
+      ...only('verification_validation', () => ({
+        openVerifications: count("SELECT COUNT(*) count FROM method_verifications WHERE status IN ('planned','in_progress')"),
+        equipmentVerificationsDue: count("SELECT COUNT(*) count FROM equipment_verifications WHERE status IN ('planned','in_progress')"),
+      })),
+      ...only('measurement_uncertainty', () => ({
+        muRecordsDueForReview: count("SELECT COUNT(*) count FROM measurement_uncertainty_records WHERE status IN ('draft','in_review')"),
+      })),
     });
   });
 
-  router.get('/dashboard/iqc-summary', (_req, res) => {
+  router.get('/dashboard/iqc-summary', requirePermission('iqc', 'view'), (_req, res) => {
     const db = getDb();
     const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
     const yearStart = new Date(); yearStart.setMonth(0, 1); yearStart.setHours(0, 0, 0, 0);
@@ -311,7 +335,7 @@ export function commonRoutes() {
     });
   });
 
-  router.get('/dashboard/eqa-summary', (_req, res) => {
+  router.get('/dashboard/eqa-summary', requirePermission('eqa', 'view'), (_req, res) => {
     const db = getDb();
     const now = new Date().toISOString();
     const dueSoonCutoff = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
@@ -325,7 +349,7 @@ export function commonRoutes() {
     });
   });
 
-  router.get('/dashboard/verification-summary', (_req, res) => {
+  router.get('/dashboard/verification-summary', requirePermission('verification_validation', 'view'), (_req, res) => {
     const db = getDb();
     const yearStart = new Date(); yearStart.setMonth(0, 1); yearStart.setHours(0, 0, 0, 0);
     const count = (sql: string, ...params: unknown[]) => (db.prepare(sql).get(...params) as { count: number }).count;
@@ -338,7 +362,7 @@ export function commonRoutes() {
     });
   });
 
-  router.get('/dashboard/measurement-uncertainty-summary', (_req, res) => {
+  router.get('/dashboard/measurement-uncertainty-summary', requirePermission('measurement_uncertainty', 'view'), (_req, res) => {
     const db = getDb();
     const yearStart = new Date(); yearStart.setMonth(0, 1); yearStart.setHours(0, 0, 0, 0);
     const dueSoonCutoff = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
@@ -352,7 +376,7 @@ export function commonRoutes() {
     });
   });
 
-  router.get('/dashboard/blood-bank-summary', (_req, res) => {
+  router.get('/dashboard/blood-bank-summary', requirePermission('blood_bank_handover', 'view'), (_req, res) => {
     const db = getDb();
     const now = new Date();
     const nowIso = now.toISOString();
@@ -373,7 +397,7 @@ export function commonRoutes() {
     });
   });
 
-  router.get('/dashboard/monthly-reports-summary', (_req, res) => {
+  router.get('/dashboard/monthly-reports-summary', requirePermission('monthly_reports', 'view'), (_req, res) => {
     const db = getDb();
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
@@ -390,7 +414,7 @@ export function commonRoutes() {
     });
   });
 
-  router.get('/dashboard/document-control-summary', (_req, res) => {
+  router.get('/dashboard/document-control-summary', requirePermission('documents', 'view'), (_req, res) => {
     const db = getDb();
     const todayIso = new Date().toISOString().slice(0, 10);
     const dueCutoff = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -405,7 +429,7 @@ export function commonRoutes() {
     });
   });
 
-  router.get('/dashboard/personnel-summary', (_req, res) => {
+  router.get('/dashboard/personnel-summary', requirePermission('personnel', 'view'), (_req, res) => {
     const db = getDb();
     const todayIso = new Date().toISOString().slice(0, 10);
     const expiryCutoff = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -429,7 +453,7 @@ export function commonRoutes() {
     });
   });
 
-  router.get('/dashboard/customer-focus-summary', (_req, res) => {
+  router.get('/dashboard/customer-focus-summary', requirePermission('customer_focus', 'view'), (_req, res) => {
     const db = getDb();
     const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
     const todayIso = new Date().toISOString().slice(0, 10);
@@ -451,7 +475,7 @@ export function commonRoutes() {
     });
   });
 
-  router.get('/dashboard/notifications-summary', (req, res) => {
+  router.get('/dashboard/notifications-summary', requirePermission('notifications', 'view'), (req, res) => {
     // Reuse the central summary computation to keep numbers identical.
     // Defer the import to avoid a circular module load. Also opportunistically
     // run the throttled routed alert scan so notifications stay current as the
@@ -460,7 +484,7 @@ export function commonRoutes() {
     import('./notifications.js').then(m => res.json(m.computeSummary(req))).catch(e => res.status(500).json({ error: (e as Error).message }));
   });
 
-  router.get('/dashboard/records-reports-summary', (_req, res) => {
+  router.get('/dashboard/records-reports-summary', requirePermission('records_reports', 'view'), (_req, res) => {
     const db = getDb();
     const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
     const count = (sql: string, ...params: unknown[]) => (db.prepare(sql).get(...params) as { count: number }).count;
@@ -476,7 +500,7 @@ export function commonRoutes() {
     });
   });
 
-  router.get('/dashboard/poct-summary', (_req, res) => {
+  router.get('/dashboard/poct-summary', requirePermission('poct', 'view'), (_req, res) => {
     const db = getDb();
     const today = new Date().toISOString().slice(0, 10);
     const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
@@ -493,7 +517,7 @@ export function commonRoutes() {
     });
   });
 
-  router.get('/dashboard/information-management-summary', (_req, res) => {
+  router.get('/dashboard/information-management-summary', requirePermission('information_management', 'view'), (_req, res) => {
     const db = getDb();
     const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
     const count = (sql: string, ...params: unknown[]) => (db.prepare(sql).get(...params) as { count: number }).count;
@@ -510,7 +534,7 @@ export function commonRoutes() {
     });
   });
 
-  router.get('/dashboard/process-management-summary', (_req, res) => {
+  router.get('/dashboard/process-management-summary', requirePermission('process_management', 'view'), (_req, res) => {
     const db = getDb();
     const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
     const today = new Date().toISOString().slice(0, 10);
@@ -537,35 +561,60 @@ export function commonRoutes() {
     });
   });
 
-  router.get('/dashboard/governance-summary', (_req, res) => {
+  // The cross-module summaries below report on several modules at once, so
+  // each field is emitted only when the caller may view the module it counts.
+  // A field the caller may not see is absent rather than zero — the client
+  // then leaves it out of the dashboard instead of showing a misleading 0.
+  router.get('/dashboard/governance-summary', (req, res) => {
     const db = getDb();
+    const seen = viewableModulesOf(req);
     const todayIso = new Date().toISOString().slice(0, 10);
     const count = (sql: string, ...params: unknown[]) => (db.prepare(sql).get(...params) as { count: number }).count;
+    const only = (moduleKey: string, fields: () => Record<string, number>) => (seen.has(moduleKey) ? fields() : {});
     res.json({
-      plannedAssessments: count("SELECT COUNT(*) count FROM assessment_programs WHERE status IN ('planned','in_progress')"),
-      openFindings: count("SELECT COUNT(*) count FROM assessment_findings WHERE status != 'closed'"),
-      openMeetings: count("SELECT COUNT(*) count FROM meetings WHERE status IN ('scheduled','completed')"),
-      pendingManagementReviews: count("SELECT COUNT(*) count FROM management_reviews WHERE status IN ('draft','inputs_collected','reviewed')"),
-      activeQualityIndicators: count("SELECT COUNT(*) count FROM quality_indicators WHERE is_active = 1"),
-      criticalQualityIndicatorResults: count("SELECT COUNT(*) count FROM quality_indicator_results WHERE status = 'critical' AND (reviewed_at IS NULL OR nc_id IS NULL)"),
-      activeImprovementProjects: count("SELECT COUNT(*) count FROM improvement_projects WHERE status IN ('planned','active')"),
-      overdueImprovementActions: count("SELECT COUNT(*) count FROM actions WHERE module_key = 'continual_improvement' AND status != 'Closed' AND due_date IS NOT NULL AND due_date < ?", todayIso)
+      ...only('assessments', () => ({
+        plannedAssessments: count("SELECT COUNT(*) count FROM assessment_programs WHERE status IN ('planned','in_progress')"),
+        openFindings: count("SELECT COUNT(*) count FROM assessment_findings WHERE status != 'closed'"),
+      })),
+      ...only('meetings', () => ({
+        openMeetings: count("SELECT COUNT(*) count FROM meetings WHERE status IN ('scheduled','completed')"),
+      })),
+      ...only('management_review', () => ({
+        pendingManagementReviews: count("SELECT COUNT(*) count FROM management_reviews WHERE status IN ('draft','inputs_collected','reviewed')"),
+      })),
+      ...only('quality_indicators', () => ({
+        activeQualityIndicators: count("SELECT COUNT(*) count FROM quality_indicators WHERE is_active = 1"),
+        criticalQualityIndicatorResults: count("SELECT COUNT(*) count FROM quality_indicator_results WHERE status = 'critical' AND (reviewed_at IS NULL OR nc_id IS NULL)"),
+      })),
+      ...only('continual_improvement', () => ({
+        activeImprovementProjects: count("SELECT COUNT(*) count FROM improvement_projects WHERE status IN ('planned','active')"),
+        overdueImprovementActions: count("SELECT COUNT(*) count FROM actions WHERE module_key = 'continual_improvement' AND status != 'Closed' AND due_date IS NOT NULL AND due_date < ?", todayIso),
+      })),
     });
   });
 
-  router.get('/dashboard/qms-summary', (_req, res) => {
+  router.get('/dashboard/qms-summary', (req, res) => {
     const db = getDb();
-    const staffId = _req.user?.staffId ?? null;
-    const myAssignedActions = staffId
-      ? db.prepare('SELECT COUNT(*) count FROM actions WHERE assigned_to_staff_id = ? AND status != ?').get(staffId, 'Closed')
-      : { count: 0 };
+    const seen = viewableModulesOf(req);
+    const staffId = req.user?.staffId ?? null;
+    const count = (sql: string, ...params: unknown[]) => (db.prepare(sql).get(...params) as { count: number }).count;
+    const only = (moduleKey: string, fields: () => Record<string, number>) => (seen.has(moduleKey) ? fields() : {});
     res.json({
-      openNCs: db.prepare("SELECT COUNT(*) count FROM nonconforming_events WHERE status != 'closed'").get(),
-      openCAPAs: db.prepare("SELECT COUNT(*) count FROM capa_records WHERE status != 'closed'").get(),
-      pendingComplaints: db.prepare("SELECT COUNT(*) count FROM complaints WHERE status != 'closed'").get(),
-      highRisks: db.prepare("SELECT COUNT(*) count FROM risks WHERE risk_level IN ('High','Critical') AND status != 'closed'").get(),
-      myAssignedActions,
-      overdueActions: db.prepare('SELECT COUNT(*) count FROM actions WHERE due_date IS NOT NULL AND due_date < CURRENT_TIMESTAMP AND status != ?').get('Closed')
+      ...only('nc_capa', () => ({
+        openNCs: count("SELECT COUNT(*) count FROM nonconforming_events WHERE status != 'closed'"),
+        openCAPAs: count("SELECT COUNT(*) count FROM capa_records WHERE status != 'closed'"),
+      })),
+      ...only('complaints', () => ({
+        pendingComplaints: count("SELECT COUNT(*) count FROM complaints WHERE status != 'closed'"),
+      })),
+      ...only('risks', () => ({
+        highRisks: count("SELECT COUNT(*) count FROM risks WHERE risk_level IN ('High','Critical') AND status != 'closed'"),
+      })),
+      ...only('actions', () => ({
+        overdueActions: count('SELECT COUNT(*) count FROM actions WHERE due_date IS NOT NULL AND due_date < CURRENT_TIMESTAMP AND status != ?', 'Closed'),
+      })),
+      // Always personal to the caller, so it needs no module right.
+      myAssignedActions: staffId ? count('SELECT COUNT(*) count FROM actions WHERE assigned_to_staff_id = ? AND status != ?', staffId, 'Closed') : 0,
     });
   });
 
@@ -2050,7 +2099,7 @@ export function commonRoutes() {
     res.json({ ok: true, mode: requested });
   });
 
-  router.get('/dashboard/system-health-summary', (_req, res) => {
+  router.get('/dashboard/system-health-summary', requirePermission('settings', 'view'), (_req, res) => {
     const db = getDb();
     const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
     const today = new Date().toISOString().slice(0, 10);
@@ -2124,10 +2173,18 @@ export function commonRoutes() {
     const recordType = String(req.query.record_type ?? '').trim();
     const recordId = String(req.query.record_id ?? '').trim();
     if (!moduleKey || !recordType || !recordId) return res.status(400).json({ error: 'module_key, record_type, and record_id are required' });
+    // Links point at records in other modules, so both the anchor record's
+    // module and every linked module are checked before anything is returned.
+    const seen = viewableModulesOf(req);
+    if (!seen.has(moduleKey)) return res.status(403).json({ error: 'Permission denied', decision: { allowed: false, source: 'Denied override', reason: 'You may not view records in this module.' } });
     const db = getDb();
     const outgoing = db.prepare('SELECT id, source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes, created_at FROM record_links WHERE source_module_key = ? AND source_record_type = ? AND source_record_id = ? ORDER BY id DESC').all(moduleKey, recordType, recordId);
     const incoming = db.prepare('SELECT id, source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes, created_at FROM record_links WHERE target_module_key = ? AND target_record_type = ? AND target_record_id = ? ORDER BY id DESC').all(moduleKey, recordType, recordId);
-    res.json({ outgoing, incoming });
+    const visible = (r: { source_module_key: string; target_module_key: string }) => seen.has(r.source_module_key) && seen.has(r.target_module_key);
+    res.json({
+      outgoing: (outgoing as { source_module_key: string; target_module_key: string }[]).filter(visible),
+      incoming: (incoming as { source_module_key: string; target_module_key: string }[]).filter(visible),
+    });
   });
 
   for (const group of ['lab-profile','departments','sections','locations','authorizations','approval-routes','links','notifications','settings']) router.get(`/${group}`, (_req, res) => res.json([]));

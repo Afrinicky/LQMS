@@ -5,6 +5,7 @@ import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import { RisksPage } from './QMSPages';
+import { usePermissions } from '../hooks/usePermissions';
 import type {
   Section, Department, Staff,
   AssessmentProgram, AssessmentFinding,
@@ -80,6 +81,7 @@ function dashboardCards(s: GovernanceSummary | null, keys: Array<{ label: string
 
 // ============= Assessments =============
 export function AssessmentsPage() {
+  const { can } = usePermissions();
   const { isEnabled } = useModules();
   const { staff, sections, departments } = useLookups();
   const summary = useGovernanceSummary();
@@ -322,7 +324,7 @@ export function AssessmentsPage() {
 
     {tab === 'Assessment Programmes' && <>
       <table className="data-table"><thead><tr><th>Number</th><th>Title</th><th>Type</th><th>Start</th><th>Lead</th><th>Status</th><th></th></tr></thead><tbody>
-        {programs.map(p => <tr key={p.id}><td>{p.program_number}</td><td>{p.title}</td><td>{p.assessment_type.replace(/_/g, ' ')}</td><td>{p.planned_start_date}</td><td>{staffName(staff, p.lead_assessor_staff_id)}</td><td>{formatBadge(p.status)}</td><td><button onClick={() => open(p.id)}>Open</button> <button onClick={() => openPrintPage(`/assessments/${p.id}/print`)}>Print</button></td></tr>)}
+        {programs.map(p => <tr key={p.id}><td>{p.program_number}</td><td>{p.title}</td><td>{p.assessment_type.replace(/_/g, ' ')}</td><td>{p.planned_start_date}</td><td>{staffName(staff, p.lead_assessor_staff_id)}</td><td>{formatBadge(p.status)}</td><td><button onClick={() => open(p.id)}>Open</button> {can('assessments', 'print') && <button onClick={() => openPrintPage(`/assessments/${p.id}/print`)}>Print</button>}</td></tr>)}
       </tbody></table>
       {selected && <div className="card" style={{ marginTop: 16 }}>
         <h3>{selected.program_number} — {selected.title}</h3>
@@ -369,7 +371,7 @@ export function AssessmentsPage() {
           <td><label><input type="checkbox" checked={!!c.marking_enabled} onChange={e => updateChecklistMarking(c.id, e.target.checked)} /> marks</label></td>
           <td>
             <button onClick={() => openChecklist(c.id)}>Open</button>
-            <button onClick={() => openPrintPage(`/assessments/checklists/${c.id}/print`)}>Print</button>
+            {can('assessments', 'print') && <button onClick={() => openPrintPage(`/assessments/checklists/${c.id}/print`)}>Print</button>}
             <button onClick={() => toggleChecklist(c.id)}>{c.status === 'active' ? 'Deactivate' : 'Activate'}</button>
             {c.status !== 'archived' && <button onClick={() => archiveChecklist(c.id)}>Archive</button>}
             <button onClick={() => deleteChecklist(c.id)} className="secondary">Delete</button>
@@ -509,7 +511,7 @@ export function AssessmentsPage() {
     {tab === 'Internal Audit Marks' && <>
       <div className="form-grid">
         <label>Assessment<select value={scoreAssessmentId} onChange={e => { setScoreAssessmentId(e.target.value); void loadScoreSummary(e.target.value); }}><option value="">—</option>{programs.map(p => <option key={p.id} value={p.id}>{p.program_number} — {p.title}</option>)}</select></label>
-        {scoreAssessmentId && <button type="button" onClick={() => openPrintPage(`/assessments/${scoreAssessmentId}/print`)}>Print full assessment report</button>}
+        {scoreAssessmentId && can('assessments', 'print') && <button type="button" onClick={() => openPrintPage(`/assessments/${scoreAssessmentId}/print`)}>Print full assessment report</button>}
       </div>
       {scoreSummary && <>
         <div className="cards">

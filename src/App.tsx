@@ -4,6 +4,9 @@ import AppLayout from './layouts/AppLayout';
 import SettingsLayout from './layouts/SettingsLayout';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { ModuleProvider } from './hooks/useModules';
+import { PermissionProvider, usePermissions } from './hooks/usePermissions';
+import { RequirePermission, RequireAnyPermission } from './components/RequirePermission';
+import { SETTINGS_TABS, visibleSettingsTabs } from './constants/settingsAccess';
 import { API_BASE, getSetupStatus } from './services/api';
 import { LoginPage, SetupPage } from './pages/AuthPages';
 import { Dashboard, Home, ModulePage } from './pages/CorePages';
@@ -42,6 +45,13 @@ const BloodBankHandoverPage = lazy(() => import('./pages/BloodBankHandoverPage')
 const MonthlyReportsPage = lazy(() => import('./pages/MonthlyReportsPage').then(m => ({ default: m.MonthlyReportsPage })));
 
 const ModuleFallback = () => <div className="card">Loading module…</div>;
+
+/** /settings lands on the first tab the user can actually open. */
+function SettingsLanding() {
+  const { can } = usePermissions();
+  const first = visibleSettingsTabs(can)[0];
+  return <Navigate to={first ? first.to : '/home'} replace/>;
+}
 
 // Startup is a one-shot sequence that validates the environment (local API
 // reachable, first-time setup complete). Once it reaches `ready`, auth gating is
@@ -170,55 +180,60 @@ function AppRoutes() {
   return <Routes>
     <Route path="/setup" element={<SetupPage/>}/>
     <Route path="/login" element={<LoginPage/>}/>
-    <Route element={<ModuleProvider><AppLayout/></ModuleProvider>}>
+    <Route element={<ModuleProvider><PermissionProvider><AppLayout/></PermissionProvider></ModuleProvider>}>
       <Route index element={<Navigate to="/home"/>}/>
       <Route path="/home" element={<Home/>}/>
-      <Route path="/dashboard" element={<Dashboard/>}/>
-      <Route path="/documents" element={<Suspense fallback={<ModuleFallback/>}><DocumentControlPage/></Suspense>}/>
-      <Route path="/dennis" element={<Suspense fallback={<ModuleFallback/>}><DennisPage/></Suspense>}/>
-      <Route path="/organisation" element={<Suspense fallback={<ModuleFallback/>}><OrganisationPage/></Suspense>}/>
-      <Route path="/personnel" element={<Suspense fallback={<ModuleFallback/>}><PersonnelManagementPage/></Suspense>}/>
+      <Route path="/dashboard" element={<RequirePermission module="dashboard" redirect="/home"><Dashboard/></RequirePermission>}/>
+      <Route path="/documents" element={<RequirePermission module="documents"><Suspense fallback={<ModuleFallback/>}><DocumentControlPage/></Suspense></RequirePermission>}/>
+      <Route path="/dennis" element={<RequirePermission module="dennis"><Suspense fallback={<ModuleFallback/>}><DennisPage/></Suspense></RequirePermission>}/>
+      <Route path="/organisation" element={<RequirePermission module="organisation"><Suspense fallback={<ModuleFallback/>}><OrganisationPage/></Suspense></RequirePermission>}/>
+      <Route path="/personnel" element={<RequirePermission module="personnel"><Suspense fallback={<ModuleFallback/>}><PersonnelManagementPage/></Suspense></RequirePermission>}/>
       {/* Nonconforming Event Management — one workspace; the submodules are top
           tabs. Each path renders the same page and selects the matching tab. */}
-      <Route path="/nonconformities" element={<NcCapaPage/>}/>
-      <Route path="/incidents" element={<NcCapaPage/>}/>
-      <Route path="/capa" element={<NcCapaPage/>}/>
+      <Route path="/nonconformities" element={<RequirePermission module="nc_capa"><NcCapaPage/></RequirePermission>}/>
+      <Route path="/incidents" element={<RequirePermission module="nc_capa"><NcCapaPage/></RequirePermission>}/>
+      <Route path="/capa" element={<RequirePermission module="nc_capa"><NcCapaPage/></RequirePermission>}/>
       <Route path="/nc-capa" element={<Navigate to="/nonconformities" replace/>}/>
-      <Route path="/complaints" element={<ComplaintsPage/>}/>
-      <Route path="/risks" element={<RisksPage/>}/>
-      <Route path="/actions" element={<QmsActionTracker/>}/>
-      <Route path="/equipment" element={<Suspense fallback={<ModuleFallback/>}><EquipmentPage/></Suspense>}/>
-      <Route path="/supplier-inventory" element={<Suspense fallback={<ModuleFallback/>}><InventoryPage/></Suspense>}/>
-      <Route path="/monitoring" element={<Suspense fallback={<ModuleFallback/>}><MonitoringPage/></Suspense>}/>
-      <Route path="/facilities-safety" element={<Suspense fallback={<ModuleFallback/>}><SafetyPage/></Suspense>}/>
-      <Route path="/iqc" element={<Suspense fallback={<ModuleFallback/>}><IqcPage/></Suspense>}/>
-      <Route path="/eqa" element={<Suspense fallback={<ModuleFallback/>}><EqaPage/></Suspense>}/>
-      <Route path="/verification-validation" element={<Suspense fallback={<ModuleFallback/>}><VerificationValidationPage/></Suspense>}/>
-      <Route path="/measurement-uncertainty" element={<Suspense fallback={<ModuleFallback/>}><MeasurementUncertaintyPage/></Suspense>}/>
-      <Route path="/blood-bank-handover" element={<Suspense fallback={<ModuleFallback/>}><BloodBankHandoverPage/></Suspense>}/>
-      <Route path="/monthly-reports" element={<Suspense fallback={<ModuleFallback/>}><MonthlyReportsPage/></Suspense>}/>
-      <Route path="/assessments" element={<Suspense fallback={<ModuleFallback/>}><AssessmentsPage/></Suspense>}/>
-      <Route path="/meetings" element={<Suspense fallback={<ModuleFallback/>}><MeetingsPage/></Suspense>}/>
-      <Route path="/management-review" element={<Suspense fallback={<ModuleFallback/>}><ManagementReviewPage/></Suspense>}/>
-      <Route path="/quality-indicators" element={<Suspense fallback={<ModuleFallback/>}><QualityIndicatorsPage/></Suspense>}/>
-      <Route path="/continual-improvement" element={<Suspense fallback={<ModuleFallback/>}><ContinualImprovementPage/></Suspense>}/>
-      <Route path="/customer-focus" element={<Suspense fallback={<ModuleFallback/>}><CustomerFocusPage/></Suspense>}/>
-      <Route path="/poct" element={<Suspense fallback={<ModuleFallback/>}><POCTPage/></Suspense>}/>
-      <Route path="/notifications" element={<Suspense fallback={<ModuleFallback/>}><NotificationsPage/></Suspense>}/>
-      <Route path="/records-reports" element={<Suspense fallback={<ModuleFallback/>}><RecordsReportsPage/></Suspense>}/>
-      <Route path="/process-management" element={<Suspense fallback={<ModuleFallback/>}><ProcessManagementPage/></Suspense>}/>
-      <Route path="/information-management" element={<Suspense fallback={<ModuleFallback/>}><InformationManagementPage/></Suspense>}/>
+      <Route path="/complaints" element={<RequirePermission module="complaints"><ComplaintsPage/></RequirePermission>}/>
+      <Route path="/risks" element={<RequirePermission module="risks"><RisksPage/></RequirePermission>}/>
+      <Route path="/actions" element={<RequirePermission module="actions"><QmsActionTracker/></RequirePermission>}/>
+      <Route path="/equipment" element={<RequirePermission module="equipment"><Suspense fallback={<ModuleFallback/>}><EquipmentPage/></Suspense></RequirePermission>}/>
+      <Route path="/supplier-inventory" element={<RequirePermission module="supplier_inventory"><Suspense fallback={<ModuleFallback/>}><InventoryPage/></Suspense></RequirePermission>}/>
+      <Route path="/monitoring" element={<RequirePermission module="monitoring"><Suspense fallback={<ModuleFallback/>}><MonitoringPage/></Suspense></RequirePermission>}/>
+      <Route path="/facilities-safety" element={<RequirePermission module="facilities_safety"><Suspense fallback={<ModuleFallback/>}><SafetyPage/></Suspense></RequirePermission>}/>
+      <Route path="/iqc" element={<RequirePermission module="iqc"><Suspense fallback={<ModuleFallback/>}><IqcPage/></Suspense></RequirePermission>}/>
+      <Route path="/eqa" element={<RequirePermission module="eqa"><Suspense fallback={<ModuleFallback/>}><EqaPage/></Suspense></RequirePermission>}/>
+      <Route path="/verification-validation" element={<RequirePermission module="verification_validation"><Suspense fallback={<ModuleFallback/>}><VerificationValidationPage/></Suspense></RequirePermission>}/>
+      <Route path="/measurement-uncertainty" element={<RequirePermission module="measurement_uncertainty"><Suspense fallback={<ModuleFallback/>}><MeasurementUncertaintyPage/></Suspense></RequirePermission>}/>
+      <Route path="/blood-bank-handover" element={<RequirePermission module="blood_bank_handover"><Suspense fallback={<ModuleFallback/>}><BloodBankHandoverPage/></Suspense></RequirePermission>}/>
+      <Route path="/monthly-reports" element={<RequirePermission module="monthly_reports"><Suspense fallback={<ModuleFallback/>}><MonthlyReportsPage/></Suspense></RequirePermission>}/>
+      <Route path="/assessments" element={<RequirePermission module="assessments"><Suspense fallback={<ModuleFallback/>}><AssessmentsPage/></Suspense></RequirePermission>}/>
+      <Route path="/meetings" element={<RequirePermission module="meetings"><Suspense fallback={<ModuleFallback/>}><MeetingsPage/></Suspense></RequirePermission>}/>
+      <Route path="/management-review" element={<RequirePermission module="management_review"><Suspense fallback={<ModuleFallback/>}><ManagementReviewPage/></Suspense></RequirePermission>}/>
+      <Route path="/quality-indicators" element={<RequirePermission module="quality_indicators"><Suspense fallback={<ModuleFallback/>}><QualityIndicatorsPage/></Suspense></RequirePermission>}/>
+      <Route path="/continual-improvement" element={<RequirePermission module="continual_improvement"><Suspense fallback={<ModuleFallback/>}><ContinualImprovementPage/></Suspense></RequirePermission>}/>
+      <Route path="/customer-focus" element={<RequirePermission module="customer_focus"><Suspense fallback={<ModuleFallback/>}><CustomerFocusPage/></Suspense></RequirePermission>}/>
+      <Route path="/poct" element={<RequirePermission module="poct"><Suspense fallback={<ModuleFallback/>}><POCTPage/></Suspense></RequirePermission>}/>
+      <Route path="/notifications" element={<RequirePermission module="notifications"><Suspense fallback={<ModuleFallback/>}><NotificationsPage/></Suspense></RequirePermission>}/>
+      <Route path="/records-reports" element={<RequirePermission module="records_reports"><Suspense fallback={<ModuleFallback/>}><RecordsReportsPage/></Suspense></RequirePermission>}/>
+      <Route path="/process-management" element={<RequirePermission module="process_management"><Suspense fallback={<ModuleFallback/>}><ProcessManagementPage/></Suspense></RequirePermission>}/>
+      <Route path="/information-management" element={<RequirePermission module="information_management"><Suspense fallback={<ModuleFallback/>}><InformationManagementPage/></Suspense></RequirePermission>}/>
       {placeholders.map(m => <Route key={m.key} path={m.path.slice(1)} element={<ModulePage moduleKey={m.key} title={m.label} placeholder/>}/>)}
-      <Route path="/settings" element={<SettingsLayout/>}>
-        <Route index element={<Navigate to="laboratory"/>}/>
-        <Route path="laboratory" element={<MyLaboratory/>}/>
-        <Route path="people" element={<PeopleAccess/>}/>
-        <Route path="sections" element={<SectionConfig/>}/>
-        <Route path="scheduling" element={<RosterSettings/>}/>
-        <Route path="system" element={<SystemSettings/>}/>
-        <Route path="document-import" element={<DocumentImport/>}/>
-        <Route path="evidence" element={<EvidenceUpload/>}/>
-        <Route path="actions" element={<ActionTracker/>}/>
+      {/* Settings holds pages with different requirements: the shell opens for
+          anyone who can reach at least one of them, and each page is gated on
+          the exact right it needs. */}
+      <Route path="/settings" element={
+        <RequireAnyPermission requirements={SETTINGS_TABS.filter(t => t.grantsEntry)}><SettingsLayout/></RequireAnyPermission>
+      }>
+        <Route index element={<SettingsLanding/>}/>
+        <Route path="laboratory" element={<RequirePermission module="settings"><MyLaboratory/></RequirePermission>}/>
+        <Route path="people" element={<RequirePermission module="settings" action="edit"><PeopleAccess/></RequirePermission>}/>
+        <Route path="sections" element={<RequirePermission module="settings" action="edit"><SectionConfig/></RequirePermission>}/>
+        <Route path="scheduling" element={<RequirePermission module="personnel" action="edit"><RosterSettings/></RequirePermission>}/>
+        <Route path="system" element={<RequirePermission module="settings" action="edit"><SystemSettings/></RequirePermission>}/>
+        <Route path="document-import" element={<RequirePermission module="documents" action="create"><DocumentImport/></RequirePermission>}/>
+        <Route path="evidence" element={<RequirePermission module="records_reports" action="create"><EvidenceUpload/></RequirePermission>}/>
+        <Route path="actions" element={<RequirePermission module="actions"><ActionTracker/></RequirePermission>}/>
         {/* legacy deep links → People & Access */}
         <Route path="register-staff" element={<Navigate to="/settings/people" replace/>}/>
         <Route path="users" element={<Navigate to="/settings/people" replace/>}/>
