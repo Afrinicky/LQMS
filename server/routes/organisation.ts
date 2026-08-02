@@ -28,10 +28,10 @@ export function organisationRoutes() {
   });
 
   // ============= Code of conduct =============
-  router.get('/code-of-conduct', requirePermission('organisation', 'view'), (_req, res) => {
+  router.get('/code-of-conduct', requirePermission('organisation.structure', 'view'), (_req, res) => {
     res.json(getDb().prepare('SELECT * FROM code_of_conduct_records ORDER BY signed_date DESC, created_at DESC').all());
   });
-  router.post('/code-of-conduct', requirePermission('organisation', 'create'), (req, res) => {
+  router.post('/code-of-conduct', requirePermission('organisation.structure', 'create'), (req, res) => {
     const db = getDb();
     const createdAt = new Date().toISOString();
     const number = generateRecordNumber(db, 'code_of_conduct_records', 'COC', createdAt);
@@ -40,7 +40,7 @@ export function organisationRoutes() {
     audit(req, { action: 'create', entity: 'code_of_conduct_records', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
     res.status(201).json({ id: r.lastInsertRowid, recordNumber: number });
   });
-  router.put('/code-of-conduct/:id', requirePermission('organisation', 'edit'), (req, res) => {
+  router.put('/code-of-conduct/:id', requirePermission('organisation.structure', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM code_of_conduct_records WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Record not found' });
@@ -51,10 +51,10 @@ export function organisationRoutes() {
   });
 
   // ============= Budget projections =============
-  router.get('/budget', requirePermission('organisation', 'view'), (_req, res) => {
+  router.get('/budget', requirePermission('organisation.budget', 'view'), (_req, res) => {
     res.json(getDb().prepare('SELECT * FROM budget_projections ORDER BY fiscal_year DESC, category ASC, created_at DESC').all());
   });
-  router.post('/budget', requirePermission('organisation', 'create'), (req, res) => {
+  router.post('/budget', requirePermission('organisation.budget', 'create'), (req, res) => {
     const db = getDb();
     const createdAt = new Date().toISOString();
     const number = generateRecordNumber(db, 'budget_projections', 'BUD', createdAt);
@@ -64,7 +64,7 @@ export function organisationRoutes() {
     audit(req, { action: 'create', entity: 'budget_projections', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
     res.status(201).json({ id: r.lastInsertRowid, projectionNumber: number });
   });
-  router.put('/budget/:id', requirePermission('organisation', 'edit'), (req, res) => {
+  router.put('/budget/:id', requirePermission('organisation.budget', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM budget_projections WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Budget line not found' });
@@ -76,10 +76,10 @@ export function organisationRoutes() {
   });
 
   // ============= Regulatory registrations & licences =============
-  router.get('/registrations', requirePermission('organisation', 'view'), (_req, res) => {
+  router.get('/registrations', requirePermission('organisation.licences', 'view'), (_req, res) => {
     res.json(getDb().prepare('SELECT * FROM regulatory_registrations ORDER BY expiry_date IS NULL, expiry_date ASC, created_at DESC').all());
   });
-  router.post('/registrations', requirePermission('organisation', 'create'), (req, res) => {
+  router.post('/registrations', requirePermission('organisation.licences', 'create'), (req, res) => {
     if (!req.body.title) return res.status(400).json({ error: 'title is required' });
     const db = getDb();
     const createdAt = new Date().toISOString();
@@ -89,7 +89,7 @@ export function organisationRoutes() {
     audit(req, { action: 'create', entity: 'regulatory_registrations', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
     res.status(201).json({ id: r.lastInsertRowid, registrationNumber: number });
   });
-  router.put('/registrations/:id', requirePermission('organisation', 'edit'), (req, res) => {
+  router.put('/registrations/:id', requirePermission('organisation.licences', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM regulatory_registrations WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Registration not found' });

@@ -53,12 +53,12 @@ export function monitoringRoutes() {
   });
 
   // Monitoring items (the "what to monitor" definitions)
-  router.get('/items', requirePermission('monitoring', 'view'), (_req, res) => {
+  router.get('/items', requirePermission('monitoring.assets', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT * FROM monitoring_items ORDER BY name').all());
   });
 
-  router.post('/items', requirePermission('monitoring', 'create'), (req, res) => {
+  router.post('/items', requirePermission('monitoring.assets', 'create'), (req, res) => {
     if (!req.body.name) return res.status(400).json({ error: 'name is required' });
     if (!req.body.parameter) return res.status(400).json({ error: 'parameter is required' });
     if (!req.body.unit) return res.status(400).json({ error: 'unit is required' });
@@ -95,7 +95,7 @@ export function monitoringRoutes() {
     res.status(201).json({ id: result.lastInsertRowid, itemCode });
   });
 
-  router.get('/items/:id', requirePermission('monitoring', 'view'), (req, res) => {
+  router.get('/items/:id', requirePermission('monitoring.assets', 'view'), (req, res) => {
     const db = getDb();
     const item = db.prepare('SELECT * FROM monitoring_items WHERE id = ?').get(req.params.id);
     if (!item) return res.status(404).json({ error: 'Monitoring item not found' });
@@ -103,7 +103,7 @@ export function monitoringRoutes() {
     res.json({ ...item, readings });
   });
 
-  router.put('/items/:id', requirePermission('monitoring', 'edit'), (req, res) => {
+  router.put('/items/:id', requirePermission('monitoring.assets', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM monitoring_items WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Monitoring item not found' });
@@ -134,12 +134,12 @@ export function monitoringRoutes() {
   });
 
   // Readings
-  router.get('/items/:id/readings', requirePermission('monitoring', 'view'), (req, res) => {
+  router.get('/items/:id/readings', requirePermission('monitoring.assets', 'view'), (req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT * FROM monitoring_readings WHERE monitoring_item_id = ? ORDER BY reading_date DESC, id DESC').all(req.params.id));
   });
 
-  router.post('/items/:id/readings', requirePermission('monitoring', 'create'), (req, res) => {
+  router.post('/items/:id/readings', requirePermission('monitoring.assets', 'create'), (req, res) => {
     if (!req.body.readingDate) return res.status(400).json({ error: 'readingDate is required' });
     if (req.body.value === undefined || req.body.value === null || req.body.value === '') return res.status(400).json({ error: 'value is required' });
     const db = getDb();
@@ -168,7 +168,7 @@ export function monitoringRoutes() {
     res.status(201).json({ id: result.lastInsertRowid, status });
   });
 
-  router.get('/readings', requirePermission('monitoring', 'view'), (req, res) => {
+  router.get('/readings', requirePermission('monitoring.readings', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = [];
     const params: unknown[] = [];
@@ -180,7 +180,7 @@ export function monitoringRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/readings/:id/review', requirePermission('monitoring', 'approve'), (req, res) => {
+  router.post('/readings/:id/review', requirePermission('monitoring.readings', 'approve'), (req, res) => {
     const db = getDb();
     const reading = db.prepare('SELECT * FROM monitoring_readings WHERE id = ?').get(req.params.id);
     if (!reading) return res.status(404).json({ error: 'Reading not found' });

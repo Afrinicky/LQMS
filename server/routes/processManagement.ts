@@ -78,7 +78,7 @@ export function processManagementRoutes() {
   });
 
   // ============= Test catalog =============
-  router.get('/tests', requirePermission('process_management', 'view'), (req, res) => {
+  router.get('/tests', requirePermission('process_management.directory', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.status) { filters.push('status = ?'); params.push(String(req.query.status)); }
@@ -89,7 +89,7 @@ export function processManagementRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/tests', requirePermission('process_management', 'create'), (req, res) => {
+  router.post('/tests', requirePermission('process_management.directory', 'create'), (req, res) => {
     if (!req.body.testName) return res.status(400).json({ error: 'testName is required' });
     if (!req.body.sampleType) return res.status(400).json({ error: 'sampleType is required' });
     const status = req.body.status ?? 'active';
@@ -105,14 +105,14 @@ export function processManagementRoutes() {
     res.status(201).json({ id, testCode });
   });
 
-  router.get('/tests/:id', requirePermission('process_management', 'view'), (req, res) => {
+  router.get('/tests/:id', requirePermission('process_management.directory', 'view'), (req, res) => {
     const db = getDb();
     const t = db.prepare('SELECT * FROM lab_test_catalog WHERE id = ?').get(req.params.id);
     if (!t) return res.status(404).json({ error: 'Test not found' });
     res.json(t);
   });
 
-  router.put('/tests/:id', requirePermission('process_management', 'edit'), (req, res) => {
+  router.put('/tests/:id', requirePermission('process_management.directory', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM lab_test_catalog WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Test not found' });
@@ -123,7 +123,7 @@ export function processManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/tests/:id/toggle', requirePermission('process_management', 'edit'), (req, res) => {
+  router.post('/tests/:id/toggle', requirePermission('process_management.directory', 'edit'), (req, res) => {
     const db = getDb();
     const t = db.prepare('SELECT * FROM lab_test_catalog WHERE id = ?').get(req.params.id) as any;
     if (!t) return res.status(404).json({ error: 'Test not found' });
@@ -134,7 +134,7 @@ export function processManagementRoutes() {
   });
 
   // ============= Acceptance criteria =============
-  router.get('/acceptance-criteria', requirePermission('process_management', 'view'), (req, res) => {
+  router.get('/acceptance-criteria', requirePermission('process_management.directory', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.testCatalogId) { filters.push('test_catalog_id = ?'); params.push(Number(req.query.testCatalogId)); }
@@ -145,7 +145,7 @@ export function processManagementRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/acceptance-criteria', requirePermission('process_management', 'create'), (req, res) => {
+  router.post('/acceptance-criteria', requirePermission('process_management.directory', 'create'), (req, res) => {
     if (!req.body.sampleType) return res.status(400).json({ error: 'sampleType is required' });
     if (!req.body.acceptanceCriteria) return res.status(400).json({ error: 'acceptanceCriteria is required' });
     const db = getDb();
@@ -157,14 +157,14 @@ export function processManagementRoutes() {
     res.status(201).json({ id });
   });
 
-  router.get('/acceptance-criteria/:id', requirePermission('process_management', 'view'), (req, res) => {
+  router.get('/acceptance-criteria/:id', requirePermission('process_management.directory', 'view'), (req, res) => {
     const db = getDb();
     const c = db.prepare('SELECT * FROM specimen_acceptance_criteria WHERE id = ?').get(req.params.id);
     if (!c) return res.status(404).json({ error: 'Acceptance criteria not found' });
     res.json(c);
   });
 
-  router.put('/acceptance-criteria/:id', requirePermission('process_management', 'edit'), (req, res) => {
+  router.put('/acceptance-criteria/:id', requirePermission('process_management.directory', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM specimen_acceptance_criteria WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Acceptance criteria not found' });
@@ -174,7 +174,7 @@ export function processManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/acceptance-criteria/:id/toggle', requirePermission('process_management', 'edit'), (req, res) => {
+  router.post('/acceptance-criteria/:id/toggle', requirePermission('process_management.directory', 'edit'), (req, res) => {
     const db = getDb();
     const c = db.prepare('SELECT * FROM specimen_acceptance_criteria WHERE id = ?').get(req.params.id) as any;
     if (!c) return res.status(404).json({ error: 'Acceptance criteria not found' });
@@ -256,12 +256,12 @@ export function processManagementRoutes() {
   });
 
   // ============= Critical result rules =============
-  router.get('/critical-result-rules', requirePermission('process_management', 'view'), (_req, res) => {
+  router.get('/critical-result-rules', requirePermission('process_management.critical', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT * FROM critical_result_rules ORDER BY analyte_name').all());
   });
 
-  router.post('/critical-result-rules', requirePermission('process_management', 'create'), (req, res) => {
+  router.post('/critical-result-rules', requirePermission('process_management.critical', 'create'), (req, res) => {
     if (!parseIntNullable(req.body.testCatalogId)) return res.status(400).json({ error: 'testCatalogId is required' });
     if (!req.body.analyteName) return res.status(400).json({ error: 'analyteName is required' });
     const db = getDb();
@@ -272,14 +272,14 @@ export function processManagementRoutes() {
     res.status(201).json({ id });
   });
 
-  router.get('/critical-result-rules/:id', requirePermission('process_management', 'view'), (req, res) => {
+  router.get('/critical-result-rules/:id', requirePermission('process_management.critical', 'view'), (req, res) => {
     const db = getDb();
     const r = db.prepare('SELECT * FROM critical_result_rules WHERE id = ?').get(req.params.id);
     if (!r) return res.status(404).json({ error: 'Rule not found' });
     res.json(r);
   });
 
-  router.put('/critical-result-rules/:id', requirePermission('process_management', 'edit'), (req, res) => {
+  router.put('/critical-result-rules/:id', requirePermission('process_management.critical', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM critical_result_rules WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Rule not found' });
@@ -289,7 +289,7 @@ export function processManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/critical-result-rules/:id/toggle', requirePermission('process_management', 'edit'), (req, res) => {
+  router.post('/critical-result-rules/:id/toggle', requirePermission('process_management.critical', 'edit'), (req, res) => {
     const db = getDb();
     const r = db.prepare('SELECT * FROM critical_result_rules WHERE id = ?').get(req.params.id) as any;
     if (!r) return res.status(404).json({ error: 'Rule not found' });
@@ -300,7 +300,7 @@ export function processManagementRoutes() {
   });
 
   // ============= Critical result notifications =============
-  router.get('/critical-results', requirePermission('process_management', 'view'), (req, res) => {
+  router.get('/critical-results', requirePermission('process_management.critical', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.status) { filters.push('status = ?'); params.push(String(req.query.status)); }
@@ -310,7 +310,7 @@ export function processManagementRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/critical-results', requirePermission('process_management', 'create'), (req, res) => {
+  router.post('/critical-results', requirePermission('process_management.critical', 'create'), (req, res) => {
     if (!req.body.eventDate) return res.status(400).json({ error: 'eventDate is required' });
     if (!req.body.eventTime) return res.status(400).json({ error: 'eventTime is required' });
     if (!req.body.analyteName) return res.status(400).json({ error: 'analyteName is required' });
@@ -339,14 +339,14 @@ export function processManagementRoutes() {
     res.status(201).json({ id, notificationNumber: notifNumber, escalationRequired: !!escalationRequired, status });
   });
 
-  router.get('/critical-results/:id', requirePermission('process_management', 'view'), (req, res) => {
+  router.get('/critical-results/:id', requirePermission('process_management.critical', 'view'), (req, res) => {
     const db = getDb();
     const c = db.prepare('SELECT * FROM critical_result_notifications WHERE id = ?').get(req.params.id);
     if (!c) return res.status(404).json({ error: 'Notification not found' });
     res.json(c);
   });
 
-  router.put('/critical-results/:id', requirePermission('process_management', 'edit'), (req, res) => {
+  router.put('/critical-results/:id', requirePermission('process_management.critical', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM critical_result_notifications WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Notification not found' });
@@ -357,7 +357,7 @@ export function processManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/critical-results/:id/acknowledge', requirePermission('process_management', 'edit'), (req, res) => {
+  router.post('/critical-results/:id/acknowledge', requirePermission('process_management.critical', 'edit'), (req, res) => {
     const db = getDb();
     const c = db.prepare('SELECT * FROM critical_result_notifications WHERE id = ?').get(req.params.id) as any;
     if (!c) return res.status(404).json({ error: 'Notification not found' });
@@ -385,7 +385,7 @@ export function processManagementRoutes() {
     res.status(201).json({ id: actionId });
   });
 
-  router.post('/critical-results/:id/close', requirePermission('process_management', 'approve'), (req, res) => {
+  router.post('/critical-results/:id/close', requirePermission('process_management.critical', 'approve'), (req, res) => {
     const db = getDb();
     const c = db.prepare('SELECT * FROM critical_result_notifications WHERE id = ?').get(req.params.id) as any;
     if (!c) return res.status(404).json({ error: 'Notification not found' });
@@ -395,12 +395,12 @@ export function processManagementRoutes() {
   });
 
   // ============= Referral laboratories =============
-  router.get('/referral-labs', requirePermission('process_management', 'view'), (_req, res) => {
+  router.get('/referral-labs', requirePermission('process_management.referrals', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT * FROM referral_laboratories ORDER BY referral_lab_name').all());
   });
 
-  router.post('/referral-labs', requirePermission('process_management', 'create'), (req, res) => {
+  router.post('/referral-labs', requirePermission('process_management.referrals', 'create'), (req, res) => {
     if (!req.body.referralLabName) return res.status(400).json({ error: 'referralLabName is required' });
     const status = req.body.status ?? 'active';
     if (!LAB_STATUSES.includes(status)) return res.status(400).json({ error: `status must be one of: ${LAB_STATUSES.join(', ')}` });
@@ -415,14 +415,14 @@ export function processManagementRoutes() {
     res.status(201).json({ id, referralLabCode: labCode });
   });
 
-  router.get('/referral-labs/:id', requirePermission('process_management', 'view'), (req, res) => {
+  router.get('/referral-labs/:id', requirePermission('process_management.referrals', 'view'), (req, res) => {
     const db = getDb();
     const l = db.prepare('SELECT * FROM referral_laboratories WHERE id = ?').get(req.params.id);
     if (!l) return res.status(404).json({ error: 'Lab not found' });
     res.json(l);
   });
 
-  router.put('/referral-labs/:id', requirePermission('process_management', 'edit'), (req, res) => {
+  router.put('/referral-labs/:id', requirePermission('process_management.referrals', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM referral_laboratories WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Lab not found' });
@@ -433,7 +433,7 @@ export function processManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/referral-labs/:id/status', requirePermission('process_management', 'edit'), (req, res) => {
+  router.post('/referral-labs/:id/status', requirePermission('process_management.referrals', 'edit'), (req, res) => {
     if (!req.body.status || !LAB_STATUSES.includes(req.body.status)) return res.status(400).json({ error: `status must be one of: ${LAB_STATUSES.join(', ')}` });
     const db = getDb();
     const l = db.prepare('SELECT * FROM referral_laboratories WHERE id = ?').get(req.params.id) as any;
@@ -444,7 +444,7 @@ export function processManagementRoutes() {
   });
 
   // ============= Referral tests =============
-  router.get('/referral-tests', requirePermission('process_management', 'view'), (req, res) => {
+  router.get('/referral-tests', requirePermission('process_management.referrals', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.referralLabId) { filters.push('referral_lab_id = ?'); params.push(Number(req.query.referralLabId)); }
@@ -454,7 +454,7 @@ export function processManagementRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/referral-tests', requirePermission('process_management', 'create'), (req, res) => {
+  router.post('/referral-tests', requirePermission('process_management.referrals', 'create'), (req, res) => {
     if (!parseIntNullable(req.body.referralLabId)) return res.status(400).json({ error: 'referralLabId is required' });
     if (!req.body.referralTestName) return res.status(400).json({ error: 'referralTestName is required' });
     const db = getDb();
@@ -465,14 +465,14 @@ export function processManagementRoutes() {
     res.status(201).json({ id });
   });
 
-  router.get('/referral-tests/:id', requirePermission('process_management', 'view'), (req, res) => {
+  router.get('/referral-tests/:id', requirePermission('process_management.referrals', 'view'), (req, res) => {
     const db = getDb();
     const t = db.prepare('SELECT * FROM referral_tests WHERE id = ?').get(req.params.id);
     if (!t) return res.status(404).json({ error: 'Referral test not found' });
     res.json(t);
   });
 
-  router.put('/referral-tests/:id', requirePermission('process_management', 'edit'), (req, res) => {
+  router.put('/referral-tests/:id', requirePermission('process_management.referrals', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM referral_tests WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Referral test not found' });
@@ -482,7 +482,7 @@ export function processManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/referral-tests/:id/toggle', requirePermission('process_management', 'edit'), (req, res) => {
+  router.post('/referral-tests/:id/toggle', requirePermission('process_management.referrals', 'edit'), (req, res) => {
     const db = getDb();
     const t = db.prepare('SELECT * FROM referral_tests WHERE id = ?').get(req.params.id) as any;
     if (!t) return res.status(404).json({ error: 'Referral test not found' });
@@ -493,7 +493,7 @@ export function processManagementRoutes() {
   });
 
   // ============= Referral sendouts =============
-  router.get('/referral-sendouts', requirePermission('process_management', 'view'), (req, res) => {
+  router.get('/referral-sendouts', requirePermission('process_management.referrals', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.status) { filters.push('status = ?'); params.push(String(req.query.status)); }
@@ -506,7 +506,7 @@ export function processManagementRoutes() {
     res.json(rows.map(r => ({ ...r, _delayed: r.expected_return_date && r.expected_return_date < today && !r.result_received_date && r.status !== 'closed' })));
   });
 
-  router.post('/referral-sendouts', requirePermission('process_management', 'create'), (req, res) => {
+  router.post('/referral-sendouts', requirePermission('process_management.referrals', 'create'), (req, res) => {
     if (!req.body.sendoutDate) return res.status(400).json({ error: 'sendoutDate is required' });
     if (!parseIntNullable(req.body.referralLabId)) return res.status(400).json({ error: 'referralLabId is required' });
     const db = getDb();
@@ -519,14 +519,14 @@ export function processManagementRoutes() {
     res.status(201).json({ id, sendoutNumber });
   });
 
-  router.get('/referral-sendouts/:id', requirePermission('process_management', 'view'), (req, res) => {
+  router.get('/referral-sendouts/:id', requirePermission('process_management.referrals', 'view'), (req, res) => {
     const db = getDb();
     const s = db.prepare('SELECT * FROM referral_sendouts WHERE id = ?').get(req.params.id);
     if (!s) return res.status(404).json({ error: 'Sendout not found' });
     res.json(s);
   });
 
-  router.put('/referral-sendouts/:id', requirePermission('process_management', 'edit'), (req, res) => {
+  router.put('/referral-sendouts/:id', requirePermission('process_management.referrals', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM referral_sendouts WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Sendout not found' });
@@ -556,7 +556,7 @@ export function processManagementRoutes() {
     res.status(201).json({ id: actionId });
   });
 
-  router.post('/referral-sendouts/:id/close', requirePermission('process_management', 'approve'), (req, res) => {
+  router.post('/referral-sendouts/:id/close', requirePermission('process_management.referrals', 'approve'), (req, res) => {
     const db = getDb();
     const s = db.prepare('SELECT * FROM referral_sendouts WHERE id = ?').get(req.params.id) as any;
     if (!s) return res.status(404).json({ error: 'Sendout not found' });
@@ -566,7 +566,7 @@ export function processManagementRoutes() {
   });
 
   // ============= Report amendments =============
-  router.get('/report-amendments', requirePermission('process_management', 'view'), (req, res) => {
+  router.get('/report-amendments', requirePermission('process_management.amendments', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.status) { filters.push('status = ?'); params.push(String(req.query.status)); }
@@ -576,7 +576,7 @@ export function processManagementRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/report-amendments', requirePermission('process_management', 'create'), (req, res) => {
+  router.post('/report-amendments', requirePermission('process_management.amendments', 'create'), (req, res) => {
     if (!req.body.amendmentDate) return res.status(400).json({ error: 'amendmentDate is required' });
     if (!req.body.reasonForAmendment) return res.status(400).json({ error: 'reasonForAmendment is required' });
     const db = getDb();
@@ -589,14 +589,14 @@ export function processManagementRoutes() {
     res.status(201).json({ id, amendmentNumber });
   });
 
-  router.get('/report-amendments/:id', requirePermission('process_management', 'view'), (req, res) => {
+  router.get('/report-amendments/:id', requirePermission('process_management.amendments', 'view'), (req, res) => {
     const db = getDb();
     const a = db.prepare('SELECT * FROM report_amendment_logs WHERE id = ?').get(req.params.id);
     if (!a) return res.status(404).json({ error: 'Amendment not found' });
     res.json(a);
   });
 
-  router.put('/report-amendments/:id', requirePermission('process_management', 'edit'), (req, res) => {
+  router.put('/report-amendments/:id', requirePermission('process_management.amendments', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM report_amendment_logs WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Amendment not found' });
@@ -607,7 +607,7 @@ export function processManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/report-amendments/:id/authorize', requirePermission('process_management', 'approve'), (req, res) => {
+  router.post('/report-amendments/:id/authorize', requirePermission('process_management.amendments', 'approve'), (req, res) => {
     const db = getDb();
     const a = db.prepare('SELECT * FROM report_amendment_logs WHERE id = ?').get(req.params.id) as any;
     if (!a) return res.status(404).json({ error: 'Amendment not found' });
@@ -637,7 +637,7 @@ export function processManagementRoutes() {
     res.status(201).json({ id: actionId });
   });
 
-  router.post('/report-amendments/:id/close', requirePermission('process_management', 'approve'), (req, res) => {
+  router.post('/report-amendments/:id/close', requirePermission('process_management.amendments', 'approve'), (req, res) => {
     const db = getDb();
     const a = db.prepare('SELECT * FROM report_amendment_logs WHERE id = ?').get(req.params.id) as any;
     if (!a) return res.status(404).json({ error: 'Amendment not found' });
@@ -647,12 +647,12 @@ export function processManagementRoutes() {
   });
 
   // ============= Process reviews =============
-  router.get('/process-reviews', requirePermission('process_management', 'view'), (_req, res) => {
+  router.get('/process-reviews', requirePermission('process_management.reviews', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT * FROM process_review_records ORDER BY review_period_end DESC, id DESC').all());
   });
 
-  router.post('/process-reviews', requirePermission('process_management', 'create'), (req, res) => {
+  router.post('/process-reviews', requirePermission('process_management.reviews', 'create'), (req, res) => {
     if (!req.body.reviewPeriodStart) return res.status(400).json({ error: 'reviewPeriodStart is required' });
     if (!req.body.reviewPeriodEnd) return res.status(400).json({ error: 'reviewPeriodEnd is required' });
     const db = getDb();
@@ -665,14 +665,14 @@ export function processManagementRoutes() {
     res.status(201).json({ id, reviewNumber });
   });
 
-  router.get('/process-reviews/:id', requirePermission('process_management', 'view'), (req, res) => {
+  router.get('/process-reviews/:id', requirePermission('process_management.reviews', 'view'), (req, res) => {
     const db = getDb();
     const r = db.prepare('SELECT * FROM process_review_records WHERE id = ?').get(req.params.id);
     if (!r) return res.status(404).json({ error: 'Process review not found' });
     res.json(r);
   });
 
-  router.put('/process-reviews/:id', requirePermission('process_management', 'edit'), (req, res) => {
+  router.put('/process-reviews/:id', requirePermission('process_management.reviews', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM process_review_records WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Process review not found' });
@@ -683,7 +683,7 @@ export function processManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/process-reviews/:id/generate-summary', requirePermission('process_management', 'edit'), (req, res) => {
+  router.post('/process-reviews/:id/generate-summary', requirePermission('process_management.reviews', 'edit'), (req, res) => {
     const db = getDb();
     const r = db.prepare('SELECT * FROM process_review_records WHERE id = ?').get(req.params.id) as any;
     if (!r) return res.status(404).json({ error: 'Process review not found' });
@@ -707,7 +707,7 @@ export function processManagementRoutes() {
     res.json({ ok: true, counts: { rejections, rejectionNc, criticalTotal, criticalDelayed, referralTotal, referralDelayed, amendments, amendmentsNc } });
   });
 
-  router.post('/process-reviews/:id/approve', requirePermission('process_management', 'approve'), (req, res) => {
+  router.post('/process-reviews/:id/approve', requirePermission('process_management.reviews', 'approve'), (req, res) => {
     const db = getDb();
     const r = db.prepare('SELECT * FROM process_review_records WHERE id = ?').get(req.params.id) as any;
     if (!r) return res.status(404).json({ error: 'Process review not found' });
@@ -718,7 +718,7 @@ export function processManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/process-reviews/:id/close', requirePermission('process_management', 'approve'), (req, res) => {
+  router.post('/process-reviews/:id/close', requirePermission('process_management.reviews', 'approve'), (req, res) => {
     const db = getDb();
     const r = db.prepare('SELECT * FROM process_review_records WHERE id = ?').get(req.params.id) as any;
     if (!r) return res.status(404).json({ error: 'Process review not found' });
@@ -728,10 +728,10 @@ export function processManagementRoutes() {
   });
 
   // ============= Pre-examination instructions =============
-  router.get('/pre-examination', requirePermission('process_management', 'view'), (_req, res) => {
+  router.get('/pre-examination', requirePermission('process_management.receipt', 'view'), (_req, res) => {
     res.json(getDb().prepare('SELECT * FROM pre_examination_instructions ORDER BY created_at DESC').all());
   });
-  router.post('/pre-examination', requirePermission('process_management', 'create'), (req, res) => {
+  router.post('/pre-examination', requirePermission('process_management.receipt', 'create'), (req, res) => {
     if (!req.body.title) return res.status(400).json({ error: 'title is required' });
     const db = getDb();
     const createdAt = new Date().toISOString();
@@ -741,7 +741,7 @@ export function processManagementRoutes() {
     audit(req, { action: 'create', entity: 'pre_examination_instructions', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
     res.status(201).json({ id: r.lastInsertRowid, instructionNumber: number });
   });
-  router.put('/pre-examination/:id', requirePermission('process_management', 'edit'), (req, res) => {
+  router.put('/pre-examination/:id', requirePermission('process_management.receipt', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM pre_examination_instructions WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Instruction not found' });
@@ -782,7 +782,7 @@ export function processManagementRoutes() {
   });
 
   // ============= Biological reference intervals =============
-  router.get('/reference-intervals', requirePermission('process_management', 'view'), (_req, res) => {
+  router.get('/reference-intervals', requirePermission('process_management.intervals', 'view'), (_req, res) => {
     res.json(getDb().prepare('SELECT * FROM reference_interval_records ORDER BY created_at DESC').all());
   });
   // ---- Reference intervals — Excel export / template / import ----
@@ -794,9 +794,9 @@ export function processManagementRoutes() {
     }
     return buildWorkbook(RI_HEADERS, rows, 'REFERENCE INTERVALS');
   }
-  router.get('/reference-intervals/template', requirePermission('process_management', 'view'), (_req, res) => sendWorkbook(res, riWorkbook(false), 'Reference_Intervals_Template.xlsx'));
-  router.get('/reference-intervals/export', requirePermission('process_management', 'view'), (_req, res) => sendWorkbook(res, riWorkbook(true), 'Reference_Intervals.xlsx'));
-  router.post('/reference-intervals/import', requirePermission('process_management', 'create'), riXlsxUpload.single('file'), (req, res) => {
+  router.get('/reference-intervals/template', requirePermission('process_management.intervals', 'view'), (_req, res) => sendWorkbook(res, riWorkbook(false), 'Reference_Intervals_Template.xlsx'));
+  router.get('/reference-intervals/export', requirePermission('process_management.intervals', 'view'), (_req, res) => sendWorkbook(res, riWorkbook(true), 'Reference_Intervals.xlsx'));
+  router.post('/reference-intervals/import', requirePermission('process_management.intervals', 'create'), riXlsxUpload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the Reference Intervals .xlsx file.' });
     try {
       const rows = readSheet(req.file.buffer, 'REFERENCE');
@@ -821,7 +821,7 @@ export function processManagementRoutes() {
       res.json({ totalRows: rows.length, created, updated, errors });
     } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
-  router.post('/reference-intervals', requirePermission('process_management', 'create'), (req, res) => {
+  router.post('/reference-intervals', requirePermission('process_management.intervals', 'create'), (req, res) => {
     if (!req.body.analyte) return res.status(400).json({ error: 'analyte is required' });
     const db = getDb();
     const createdAt = new Date().toISOString();
@@ -831,7 +831,7 @@ export function processManagementRoutes() {
     audit(req, { action: 'create', entity: 'reference_interval_records', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
     res.status(201).json({ id: r.lastInsertRowid, recordNumber: number });
   });
-  router.put('/reference-intervals/:id', requirePermission('process_management', 'edit'), (req, res) => {
+  router.put('/reference-intervals/:id', requirePermission('process_management.intervals', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM reference_interval_records WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Reference interval not found' });
@@ -842,10 +842,10 @@ export function processManagementRoutes() {
   });
 
   // ============= Result comparability studies =============
-  router.get('/comparability', requirePermission('process_management', 'view'), (_req, res) => {
+  router.get('/comparability', requirePermission('process_management.intervals', 'view'), (_req, res) => {
     res.json(getDb().prepare('SELECT * FROM result_comparability_studies ORDER BY study_date DESC, created_at DESC').all());
   });
-  router.post('/comparability', requirePermission('process_management', 'create'), (req, res) => {
+  router.post('/comparability', requirePermission('process_management.intervals', 'create'), (req, res) => {
     if (!req.body.studyDate) return res.status(400).json({ error: 'studyDate is required' });
     const db = getDb();
     const createdAt = new Date().toISOString();
@@ -855,7 +855,7 @@ export function processManagementRoutes() {
     audit(req, { action: 'create', entity: 'result_comparability_studies', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
     res.status(201).json({ id: r.lastInsertRowid, studyNumber: number });
   });
-  router.put('/comparability/:id', requirePermission('process_management', 'edit'), (req, res) => {
+  router.put('/comparability/:id', requirePermission('process_management.intervals', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM result_comparability_studies WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Comparability study not found' });
@@ -866,10 +866,10 @@ export function processManagementRoutes() {
   });
 
   // ============= Contingency / continuity plans =============
-  router.get('/contingency-plans', requirePermission('process_management', 'view'), (_req, res) => {
+  router.get('/contingency-plans', requirePermission('process_management.reviews', 'view'), (_req, res) => {
     res.json(getDb().prepare('SELECT * FROM contingency_plans ORDER BY created_at DESC').all());
   });
-  router.post('/contingency-plans', requirePermission('process_management', 'create'), (req, res) => {
+  router.post('/contingency-plans', requirePermission('process_management.reviews', 'create'), (req, res) => {
     if (!req.body.title) return res.status(400).json({ error: 'title is required' });
     const db = getDb();
     const createdAt = new Date().toISOString();
@@ -879,7 +879,7 @@ export function processManagementRoutes() {
     audit(req, { action: 'create', entity: 'contingency_plans', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
     res.status(201).json({ id: r.lastInsertRowid, planNumber: number });
   });
-  router.put('/contingency-plans/:id', requirePermission('process_management', 'edit'), (req, res) => {
+  router.put('/contingency-plans/:id', requirePermission('process_management.reviews', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM contingency_plans WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Contingency plan not found' });

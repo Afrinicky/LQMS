@@ -10,29 +10,29 @@ const SAFETY_STATUSES = ['open', 'under_review', 'action_required', 'closed'];
 export function safetyRoutes() {
   const router = Router();
 
-  router.get('/', requirePermission('facilities_safety', 'view'), (_req, res) => {
+  router.get('/', requirePermission('facilities_safety.incidents', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT * FROM safety_incidents ORDER BY incident_date DESC, created_at DESC').all());
   });
 
-  router.get('/incidents', requirePermission('facilities_safety', 'view'), (_req, res) => {
+  router.get('/incidents', requirePermission('facilities_safety.incidents', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT * FROM safety_incidents ORDER BY incident_date DESC, created_at DESC').all());
   });
 
-  router.post('/', requirePermission('facilities_safety', 'create'), (req, res) => {
+  router.post('/', requirePermission('facilities_safety.incidents', 'create'), (req, res) => {
     const result = createIncident(req);
     if ('error' in result) return res.status(result.status).json({ error: result.error });
     res.status(201).json(result.payload);
   });
 
-  router.post('/incidents', requirePermission('facilities_safety', 'create'), (req, res) => {
+  router.post('/incidents', requirePermission('facilities_safety.incidents', 'create'), (req, res) => {
     const result = createIncident(req);
     if ('error' in result) return res.status(result.status).json({ error: result.error });
     res.status(201).json(result.payload);
   });
 
-  router.get('/incidents/:id', requirePermission('facilities_safety', 'view'), (req, res) => {
+  router.get('/incidents/:id', requirePermission('facilities_safety.incidents', 'view'), (req, res) => {
     const db = getDb();
     const item = db.prepare('SELECT * FROM safety_incidents WHERE id = ?').get(req.params.id);
     if (!item) return res.status(404).json({ error: 'Safety incident not found' });
@@ -41,23 +41,23 @@ export function safetyRoutes() {
     res.json({ ...item, links });
   });
 
-  router.put('/incidents/:id', requirePermission('facilities_safety', 'edit'), (req, res) => updateIncident(req, res));
+  router.put('/incidents/:id', requirePermission('facilities_safety.incidents', 'edit'), (req, res) => updateIncident(req, res));
 
   // Numeric-guarded so the named sub-resource routes below (equipment,
   // inspections, waste, chemicals, immunizations, summary) are not shadowed:
   // non-numeric ids fall through to the later, more specific routes.
   const numericOnly = (req: any, res: any, next: any) => /^\d+$/.test(req.params.id) ? next() : next('route');
-  router.get('/:id', numericOnly, requirePermission('facilities_safety', 'view'), (req, res) => {
+  router.get('/:id', numericOnly, requirePermission('facilities_safety.incidents', 'view'), (req, res) => {
     const db = getDb();
     const item = db.prepare('SELECT * FROM safety_incidents WHERE id = ?').get(req.params.id);
     if (!item) return res.status(404).json({ error: 'Safety incident not found' });
     res.json(item);
   });
 
-  router.put('/:id', numericOnly, requirePermission('facilities_safety', 'edit'), (req, res) => updateIncident(req, res));
+  router.put('/:id', numericOnly, requirePermission('facilities_safety.incidents', 'edit'), (req, res) => updateIncident(req, res));
 
-  router.post('/:id/close', numericOnly, requirePermission('facilities_safety', 'void_archive'), (req, res) => closeIncident(req, res));
-  router.post('/incidents/:id/close', requirePermission('facilities_safety', 'void_archive'), (req, res) => closeIncident(req, res));
+  router.post('/:id/close', numericOnly, requirePermission('facilities_safety.incidents', 'void_archive'), (req, res) => closeIncident(req, res));
+  router.post('/incidents/:id/close', requirePermission('facilities_safety.incidents', 'void_archive'), (req, res) => closeIncident(req, res));
 
   router.post('/incidents/:id/create-nc', requirePermission('nc_capa', 'create'), (req, res) => {
     const db = getDb();
@@ -149,10 +149,10 @@ export function safetyRoutes() {
   // ============================================================
   // Safety equipment register
   // ============================================================
-  router.get('/equipment', requirePermission('facilities_safety', 'view'), (_req, res) => {
+  router.get('/equipment', requirePermission('facilities_safety.equipment', 'view'), (_req, res) => {
     res.json(getDb().prepare('SELECT * FROM safety_equipment ORDER BY next_inspection_due IS NULL, next_inspection_due ASC, created_at DESC').all());
   });
-  router.post('/equipment', requirePermission('facilities_safety', 'create'), (req, res) => {
+  router.post('/equipment', requirePermission('facilities_safety.equipment', 'create'), (req, res) => {
     if (!req.body.name) return res.status(400).json({ error: 'name is required' });
     const db = getDb();
     const createdAt = new Date().toISOString();
@@ -162,7 +162,7 @@ export function safetyRoutes() {
     audit(req, { action: 'create', entity: 'safety_equipment', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
     res.status(201).json({ id: r.lastInsertRowid, equipmentNumber: number });
   });
-  router.put('/equipment/:id', requirePermission('facilities_safety', 'edit'), (req, res) => {
+  router.put('/equipment/:id', requirePermission('facilities_safety.equipment', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM safety_equipment WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Safety equipment not found' });
@@ -175,10 +175,10 @@ export function safetyRoutes() {
   // ============================================================
   // Safety inspections / audits / drills
   // ============================================================
-  router.get('/inspections', requirePermission('facilities_safety', 'view'), (_req, res) => {
+  router.get('/inspections', requirePermission('facilities_safety.inspections', 'view'), (_req, res) => {
     res.json(getDb().prepare('SELECT * FROM safety_inspections ORDER BY inspection_date DESC, created_at DESC').all());
   });
-  router.get('/inspections/:id', requirePermission('facilities_safety', 'view'), (req, res) => {
+  router.get('/inspections/:id', requirePermission('facilities_safety.inspections', 'view'), (req, res) => {
     const db = getDb();
     const item = db.prepare('SELECT * FROM safety_inspections WHERE id = ?').get(req.params.id);
     if (!item) return res.status(404).json({ error: 'Inspection not found' });
@@ -186,7 +186,7 @@ export function safetyRoutes() {
       .all('facilities_safety', 'safety_inspections', String(req.params.id), 'facilities_safety', 'safety_inspections', String(req.params.id));
     res.json({ ...item, links });
   });
-  router.post('/inspections', requirePermission('facilities_safety', 'create'), (req, res) => {
+  router.post('/inspections', requirePermission('facilities_safety.inspections', 'create'), (req, res) => {
     if (!req.body.inspectionDate) return res.status(400).json({ error: 'inspectionDate is required' });
     const db = getDb();
     const createdAt = new Date().toISOString();
@@ -196,7 +196,7 @@ export function safetyRoutes() {
     audit(req, { action: 'create', entity: 'safety_inspections', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
     res.status(201).json({ id: r.lastInsertRowid, inspectionNumber: number });
   });
-  router.put('/inspections/:id', requirePermission('facilities_safety', 'edit'), (req, res) => {
+  router.put('/inspections/:id', requirePermission('facilities_safety.inspections', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM safety_inspections WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Inspection not found' });
@@ -205,7 +205,7 @@ export function safetyRoutes() {
     audit(req, { action: 'edit', entity: 'safety_inspections', entityId: req.params.id, oldValue: old, newValue: req.body });
     res.json({ ok: true });
   });
-  router.post('/inspections/:id/close', requirePermission('facilities_safety', 'void_archive'), (req, res) => {
+  router.post('/inspections/:id/close', requirePermission('facilities_safety.inspections', 'void_archive'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM safety_inspections WHERE id = ?').get(req.params.id);
     if (!old) return res.status(404).json({ error: 'Inspection not found' });
@@ -247,10 +247,10 @@ export function safetyRoutes() {
   // ============================================================
   // Waste disposal log
   // ============================================================
-  router.get('/waste', requirePermission('facilities_safety', 'view'), (_req, res) => {
+  router.get('/waste', requirePermission('facilities_safety.waste', 'view'), (_req, res) => {
     res.json(getDb().prepare('SELECT * FROM waste_disposal_records ORDER BY disposal_date DESC, created_at DESC').all());
   });
-  router.post('/waste', requirePermission('facilities_safety', 'create'), (req, res) => {
+  router.post('/waste', requirePermission('facilities_safety.waste', 'create'), (req, res) => {
     if (!req.body.disposalDate) return res.status(400).json({ error: 'disposalDate is required' });
     const db = getDb();
     const createdAt = new Date().toISOString();
@@ -264,10 +264,10 @@ export function safetyRoutes() {
   // ============================================================
   // Hazardous chemical inventory
   // ============================================================
-  router.get('/chemicals', requirePermission('facilities_safety', 'view'), (_req, res) => {
+  router.get('/chemicals', requirePermission('facilities_safety.waste', 'view'), (_req, res) => {
     res.json(getDb().prepare('SELECT * FROM hazardous_chemicals ORDER BY expiry_date IS NULL, expiry_date ASC, created_at DESC').all());
   });
-  router.post('/chemicals', requirePermission('facilities_safety', 'create'), (req, res) => {
+  router.post('/chemicals', requirePermission('facilities_safety.waste', 'create'), (req, res) => {
     if (!req.body.name) return res.status(400).json({ error: 'name is required' });
     const db = getDb();
     const createdAt = new Date().toISOString();
@@ -277,7 +277,7 @@ export function safetyRoutes() {
     audit(req, { action: 'create', entity: 'hazardous_chemicals', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
     res.status(201).json({ id: r.lastInsertRowid, chemicalNumber: number });
   });
-  router.put('/chemicals/:id', requirePermission('facilities_safety', 'edit'), (req, res) => {
+  router.put('/chemicals/:id', requirePermission('facilities_safety.waste', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM hazardous_chemicals WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Chemical not found' });
@@ -290,10 +290,10 @@ export function safetyRoutes() {
   // ============================================================
   // Staff immunisation / post-exposure records
   // ============================================================
-  router.get('/immunizations', requirePermission('facilities_safety', 'view'), (_req, res) => {
+  router.get('/immunizations', requirePermission('facilities_safety.health', 'view'), (_req, res) => {
     res.json(getDb().prepare('SELECT * FROM staff_immunizations ORDER BY COALESCE(date_administered, exposure_date) DESC, created_at DESC').all());
   });
-  router.post('/immunizations', requirePermission('facilities_safety', 'create'), (req, res) => {
+  router.post('/immunizations', requirePermission('facilities_safety.health', 'create'), (req, res) => {
     const db = getDb();
     const createdAt = new Date().toISOString();
     const number = generateRecordNumber(db, 'staff_immunizations', 'IMM', createdAt);
@@ -302,7 +302,7 @@ export function safetyRoutes() {
     audit(req, { action: 'create', entity: 'staff_immunizations', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
     res.status(201).json({ id: r.lastInsertRowid, recordNumber: number });
   });
-  router.put('/immunizations/:id', requirePermission('facilities_safety', 'edit'), (req, res) => {
+  router.put('/immunizations/:id', requirePermission('facilities_safety.health', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM staff_immunizations WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Record not found' });

@@ -22,13 +22,13 @@ const EQUIPMENT_STATUSES = ['active', 'operational', 'out_of_service', 'under_re
 export function equipmentRoutes() {
   const router = Router();
 
-  router.get('/', requirePermission('equipment', 'view'), (_req, res) => {
+  router.get('/', requirePermission('equipment.register', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT * FROM equipment_items ORDER BY created_at DESC').all());
   });
 
   // --- Configurable unique-identifier pattern (registered before '/:id') ---
-  router.get('/config/id-pattern', requirePermission('equipment', 'view'), (_req, res) => {
+  router.get('/config/id-pattern', requirePermission('equipment.register', 'view'), (_req, res) => {
     const db = getDb();
     res.json({ pattern: getEquipmentPattern(db), preview: previewEquipmentNumber(db) });
   });
@@ -45,7 +45,7 @@ export function equipmentRoutes() {
   });
 
   // Preview the identifier the next new item would receive.
-  router.get('/config/next-number', requirePermission('equipment', 'view'), (_req, res) => {
+  router.get('/config/next-number', requirePermission('equipment.register', 'view'), (_req, res) => {
     res.json({ number: previewEquipmentNumber(getDb()) });
   });
 
@@ -76,15 +76,15 @@ export function equipmentRoutes() {
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
   }
 
-  router.get('/register/template', requirePermission('equipment', 'view'), (_req, res) => {
+  router.get('/register/template', requirePermission('equipment.register', 'view'), (_req, res) => {
     sendWorkbook(res, buildEquipmentWorkbook(false), 'Equipment_Register_Template.xlsx');
   });
-  router.get('/register/export', requirePermission('equipment', 'view'), (_req, res) => {
+  router.get('/register/export', requirePermission('equipment.register', 'view'), (_req, res) => {
     sendWorkbook(res, buildEquipmentWorkbook(true), 'Equipment_Register.xlsx');
   });
 
   // Rows are matched by Identifier: existing items are updated, new ones created.
-  router.post('/register/import', requirePermission('equipment', 'create'), upload.single('file'), (req, res) => {
+  router.post('/register/import', requirePermission('equipment.register', 'create'), upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the Equipment Register .xlsx file.' });
     try {
       const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
@@ -174,9 +174,9 @@ export function equipmentRoutes() {
     XLSX.utils.book_append_sheet(wb, ws, 'MAINTENANCE RECORDS');
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
   }
-  router.get('/maintenance/template', requirePermission('equipment', 'view'), (_req, res) => sendWorkbook(res, buildMaintenanceWorkbook(false), 'Equipment_Maintenance_Template.xlsx'));
-  router.get('/maintenance/export', requirePermission('equipment', 'view'), (_req, res) => sendWorkbook(res, buildMaintenanceWorkbook(true), 'Equipment_Maintenance_Records.xlsx'));
-  router.post('/maintenance/import', requirePermission('equipment', 'create'), upload.single('file'), (req, res) => {
+  router.get('/maintenance/template', requirePermission('equipment.maintenance', 'view'), (_req, res) => sendWorkbook(res, buildMaintenanceWorkbook(false), 'Equipment_Maintenance_Template.xlsx'));
+  router.get('/maintenance/export', requirePermission('equipment.maintenance', 'view'), (_req, res) => sendWorkbook(res, buildMaintenanceWorkbook(true), 'Equipment_Maintenance_Records.xlsx'));
+  router.post('/maintenance/import', requirePermission('equipment.maintenance', 'create'), upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the Equipment Maintenance .xlsx file.' });
     try {
       const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
@@ -220,7 +220,7 @@ export function equipmentRoutes() {
   // ===================== Editable checklist question bank =====================
   const CHECKLIST_TYPES = ['verification_validation', 'calibration'];
 
-  router.get('/checklists/:type', requirePermission('equipment', 'view'), (req, res) => {
+  router.get('/checklists/:type', requirePermission('equipment.maintenance', 'view'), (req, res) => {
     if (!CHECKLIST_TYPES.includes(req.params.type)) return res.status(400).json({ error: 'Unknown checklist type' });
     const db = getDb();
     const includeInactive = req.query.all === '1';
@@ -228,7 +228,7 @@ export function equipmentRoutes() {
     res.json(rows);
   });
 
-  router.post('/checklists/:type', requirePermission('equipment', 'edit'), (req, res) => {
+  router.post('/checklists/:type', requirePermission('equipment.maintenance', 'edit'), (req, res) => {
     if (!CHECKLIST_TYPES.includes(req.params.type)) return res.status(400).json({ error: 'Unknown checklist type' });
     if (!req.body.prompt) return res.status(400).json({ error: 'prompt is required' });
     const db = getDb();
@@ -239,7 +239,7 @@ export function equipmentRoutes() {
     res.status(201).json({ id: result.lastInsertRowid });
   });
 
-  router.put('/checklists/items/:id', requirePermission('equipment', 'edit'), (req, res) => {
+  router.put('/checklists/items/:id', requirePermission('equipment.maintenance', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM equipment_checklist_items WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Checklist item not found' });
@@ -266,12 +266,12 @@ export function equipmentRoutes() {
   }
 
   // ===================== Verification & validation =====================
-  router.get('/:id/verifications', requirePermission('equipment', 'view'), (req, res) => {
+  router.get('/:id/verifications', requirePermission('equipment.verification', 'view'), (req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT * FROM equipment_verification_records WHERE equipment_id = ? ORDER BY performed_date DESC, id DESC').all(req.params.id));
   });
 
-  router.post('/:id/verifications', requirePermission('equipment', 'create'), (req, res) => {
+  router.post('/:id/verifications', requirePermission('equipment.verification', 'create'), (req, res) => {
     if (!req.body.performedDate) return res.status(400).json({ error: 'performedDate is required' });
     const db = getDb();
     const equipment = db.prepare('SELECT id FROM equipment_items WHERE id = ?').get(req.params.id);
@@ -290,7 +290,7 @@ export function equipmentRoutes() {
     res.status(201).json({ id, verificationNumber: number });
   });
 
-  router.get('/verifications/:vid', requirePermission('equipment', 'view'), (req, res) => {
+  router.get('/verifications/:vid', requirePermission('equipment.verification', 'view'), (req, res) => {
     const db = getDb();
     const record = db.prepare('SELECT * FROM equipment_verification_records WHERE id = ?').get(req.params.vid);
     if (!record) return res.status(404).json({ error: 'Verification not found' });
@@ -298,7 +298,7 @@ export function equipmentRoutes() {
     res.json({ ...record, responses });
   });
 
-  router.post('/verifications/:vid/review', requirePermission('equipment', 'edit'), (req, res) => {
+  router.post('/verifications/:vid/review', requirePermission('equipment.verification', 'edit'), (req, res) => {
     const db = getDb();
     const record = db.prepare('SELECT * FROM equipment_verification_records WHERE id = ?').get(req.params.vid) as any;
     if (!record) return res.status(404).json({ error: 'Verification not found' });
@@ -310,11 +310,11 @@ export function equipmentRoutes() {
   });
 
   // ===================== Reference standards register =====================
-  router.get('/reference-standards', requirePermission('equipment', 'view'), (_req, res) => {
+  router.get('/reference-standards', requirePermission('equipment.maintenance', 'view'), (_req, res) => {
     res.json(getDb().prepare('SELECT * FROM reference_standards ORDER BY created_at DESC').all());
   });
 
-  router.post('/reference-standards', requirePermission('equipment', 'create'), (req, res) => {
+  router.post('/reference-standards', requirePermission('equipment.maintenance', 'create'), (req, res) => {
     if (!req.body.name) return res.status(400).json({ error: 'name is required' });
     const db = getDb();
     const createdAt = new Date().toISOString();
@@ -326,12 +326,12 @@ export function equipmentRoutes() {
   });
 
   // ===================== Calibration =====================
-  router.get('/:id/calibrations', requirePermission('equipment', 'view'), (req, res) => {
+  router.get('/:id/calibrations', requirePermission('equipment.maintenance', 'view'), (req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT * FROM equipment_calibration_records WHERE equipment_id = ? ORDER BY calibration_date DESC, id DESC').all(req.params.id));
   });
 
-  router.post('/:id/calibrations', requirePermission('equipment', 'create'), (req, res) => {
+  router.post('/:id/calibrations', requirePermission('equipment.maintenance', 'create'), (req, res) => {
     if (!req.body.calibrationDate) return res.status(400).json({ error: 'calibrationDate is required' });
     const db = getDb();
     const equipment = db.prepare('SELECT id FROM equipment_items WHERE id = ?').get(req.params.id);
@@ -354,7 +354,7 @@ export function equipmentRoutes() {
     res.status(201).json({ id, calibrationNumber: number });
   });
 
-  router.get('/calibrations/:cid', requirePermission('equipment', 'view'), (req, res) => {
+  router.get('/calibrations/:cid', requirePermission('equipment.maintenance', 'view'), (req, res) => {
     const db = getDb();
     const record = db.prepare('SELECT * FROM equipment_calibration_records WHERE id = ?').get(req.params.cid);
     if (!record) return res.status(404).json({ error: 'Calibration not found' });
@@ -362,7 +362,7 @@ export function equipmentRoutes() {
     res.json({ ...record, responses });
   });
 
-  router.post('/calibrations/:cid/review', requirePermission('equipment', 'edit'), (req, res) => {
+  router.post('/calibrations/:cid/review', requirePermission('equipment.maintenance', 'edit'), (req, res) => {
     const db = getDb();
     const record = db.prepare('SELECT * FROM equipment_calibration_records WHERE id = ?').get(req.params.cid) as any;
     if (!record) return res.status(404).json({ error: 'Calibration not found' });
@@ -393,18 +393,18 @@ export function equipmentRoutes() {
   }
 
   // All schedules that are due within 30 days or overdue, newest-due first.
-  router.get('/schedules/due', requirePermission('equipment', 'view'), (_req, res) => {
+  router.get('/schedules/due', requirePermission('equipment.maintenance', 'view'), (_req, res) => {
     const db = getDb();
     const soon = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     res.json(db.prepare(`SELECT s.*, e.name AS equipment_name, e.equipment_number FROM equipment_schedules s JOIN equipment_items e ON e.id = s.equipment_id WHERE s.is_active = 1 AND s.next_due_date IS NOT NULL AND s.next_due_date <= ? ORDER BY s.next_due_date`).all(soon));
   });
 
-  router.get('/:id/schedules', requirePermission('equipment', 'view'), (req, res) => {
+  router.get('/:id/schedules', requirePermission('equipment.maintenance', 'view'), (req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT * FROM equipment_schedules WHERE equipment_id = ? ORDER BY is_active DESC, next_due_date').all(req.params.id));
   });
 
-  router.post('/:id/schedules', requirePermission('equipment', 'create'), (req, res) => {
+  router.post('/:id/schedules', requirePermission('equipment.maintenance', 'create'), (req, res) => {
     if (!req.body.frequency || !SCHEDULE_FREQUENCIES.includes(req.body.frequency)) return res.status(400).json({ error: `frequency must be one of: ${SCHEDULE_FREQUENCIES.join(', ')}` });
     const db = getDb();
     const equipment = db.prepare('SELECT id FROM equipment_items WHERE id = ?').get(req.params.id);
@@ -417,7 +417,7 @@ export function equipmentRoutes() {
     res.status(201).json({ id: result.lastInsertRowid, nextDueDate: nextDue });
   });
 
-  router.put('/schedules/:sid', requirePermission('equipment', 'edit'), (req, res) => {
+  router.put('/schedules/:sid', requirePermission('equipment.maintenance', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM equipment_schedules WHERE id = ?').get(req.params.sid) as any;
     if (!old) return res.status(404).json({ error: 'Schedule not found' });
@@ -455,17 +455,17 @@ export function equipmentRoutes() {
     return ncId;
   }
 
-  router.get('/adverse-events', requirePermission('equipment', 'view'), (_req, res) => {
+  router.get('/adverse-events', requirePermission('equipment.adverse', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT a.*, e.name AS equipment_name, e.equipment_number FROM equipment_adverse_events a JOIN equipment_items e ON e.id = a.equipment_id ORDER BY a.event_date DESC, a.id DESC').all());
   });
 
-  router.get('/:id/adverse-events', requirePermission('equipment', 'view'), (req, res) => {
+  router.get('/:id/adverse-events', requirePermission('equipment.adverse', 'view'), (req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT * FROM equipment_adverse_events WHERE equipment_id = ? ORDER BY event_date DESC, id DESC').all(req.params.id));
   });
 
-  router.post('/:id/adverse-events', requirePermission('equipment', 'create'), (req, res) => {
+  router.post('/:id/adverse-events', requirePermission('equipment.adverse', 'create'), (req, res) => {
     if (!req.body.eventDate) return res.status(400).json({ error: 'eventDate is required' });
     if (!req.body.eventType) return res.status(400).json({ error: 'eventType is required' });
     if (!req.body.description) return res.status(400).json({ error: 'description is required' });
@@ -489,14 +489,14 @@ export function equipmentRoutes() {
     res.status(201).json({ id, adverseEventNumber: number, ncId });
   });
 
-  router.get('/adverse-events/:aid', requirePermission('equipment', 'view'), (req, res) => {
+  router.get('/adverse-events/:aid', requirePermission('equipment.adverse', 'view'), (req, res) => {
     const db = getDb();
     const record = db.prepare('SELECT a.*, e.name AS equipment_name, e.equipment_number FROM equipment_adverse_events a JOIN equipment_items e ON e.id = a.equipment_id WHERE a.id = ?').get(req.params.aid);
     if (!record) return res.status(404).json({ error: 'Adverse event not found' });
     res.json(record);
   });
 
-  router.put('/adverse-events/:aid', requirePermission('equipment', 'edit'), (req, res) => {
+  router.put('/adverse-events/:aid', requirePermission('equipment.adverse', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM equipment_adverse_events WHERE id = ?').get(req.params.aid) as any;
     if (!old) return res.status(404).json({ error: 'Adverse event not found' });
@@ -554,17 +554,17 @@ export function equipmentRoutes() {
   });
 
   // ===================== Equipment training & competence =====================
-  router.get('/competencies', requirePermission('equipment', 'view'), (_req, res) => {
+  router.get('/competencies', requirePermission('equipment.training', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare(`SELECT c.*, e.name AS equipment_name, e.equipment_number, s.full_name AS staff_name FROM equipment_competencies c JOIN equipment_items e ON e.id = c.equipment_id JOIN staff s ON s.id = c.staff_id ORDER BY c.created_at DESC`).all());
   });
 
-  router.get('/:id/competencies', requirePermission('equipment', 'view'), (req, res) => {
+  router.get('/:id/competencies', requirePermission('equipment.training', 'view'), (req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT c.*, s.full_name AS staff_name FROM equipment_competencies c JOIN staff s ON s.id = c.staff_id WHERE c.equipment_id = ? ORDER BY c.created_at DESC').all(req.params.id));
   });
 
-  router.post('/:id/competencies', requirePermission('equipment', 'create'), (req, res) => {
+  router.post('/:id/competencies', requirePermission('equipment.training', 'create'), (req, res) => {
     if (!req.body.staffId) return res.status(400).json({ error: 'staffId is required' });
     const db = getDb();
     const equipment = db.prepare('SELECT id, name, equipment_number, section_id, department_id FROM equipment_items WHERE id = ?').get(req.params.id) as any;
@@ -608,7 +608,7 @@ export function equipmentRoutes() {
   });
 
   // ===================== Equipment documents (via Documents module) =====================
-  router.get('/:id/documents', requirePermission('equipment', 'view'), (req, res) => {
+  router.get('/:id/documents', requirePermission('equipment.files', 'view'), (req, res) => {
     const db = getDb();
     res.json(db.prepare(`SELECT d.id, d.document_code, d.title, d.document_type, d.status,
         (SELECT file_id FROM document_versions WHERE document_id = d.id AND file_id IS NOT NULL ORDER BY id DESC LIMIT 1) AS file_id
@@ -619,7 +619,7 @@ export function equipmentRoutes() {
 
   // Link an already-created controlled document (from the Documents module) to
   // this equipment so it appears in both places.
-  router.post('/:id/documents', requirePermission('equipment', 'edit'), (req, res) => {
+  router.post('/:id/documents', requirePermission('equipment.files', 'edit'), (req, res) => {
     if (!req.body.documentId) return res.status(400).json({ error: 'documentId is required' });
     const db = getDb();
     const equipment = db.prepare('SELECT id FROM equipment_items WHERE id = ?').get(req.params.id);
@@ -634,7 +634,7 @@ export function equipmentRoutes() {
     res.status(201).json({ ok: true });
   });
 
-  router.get('/:id', requirePermission('equipment', 'view'), (req, res) => {
+  router.get('/:id', requirePermission('equipment.register', 'view'), (req, res) => {
     const db = getDb();
     const item = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(req.params.id);
     if (!item) return res.status(404).json({ error: 'Equipment item not found' });
@@ -655,7 +655,7 @@ export function equipmentRoutes() {
     res.json({ ...item, maintenance, breakdowns, verifications, calibrations, schedules, adverseEvents, competencies, documents, links });
   });
 
-  router.post('/', requirePermission('equipment', 'create'), (req, res) => {
+  router.post('/', requirePermission('equipment.register', 'create'), (req, res) => {
     if (!req.body.name) return res.status(400).json({ error: 'name is required' });
     if (!req.body.status) return res.status(400).json({ error: 'status is required' });
     if (!EQUIPMENT_STATUSES.includes(req.body.status)) return res.status(400).json({ error: `status must be one of: ${EQUIPMENT_STATUSES.join(', ')}` });
@@ -713,7 +713,7 @@ export function equipmentRoutes() {
     res.status(201).json({ id: result.lastInsertRowid, equipmentNumber });
   });
 
-  router.put('/:id', requirePermission('equipment', 'edit'), (req, res) => {
+  router.put('/:id', requirePermission('equipment.register', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Equipment item not found' });
@@ -773,7 +773,7 @@ export function equipmentRoutes() {
   // Decommissioning & safe disposal. One record per item; sets status to retired
   // and captures decontamination confirmation + disposal method as a safety and
   // traceability trail.
-  router.post('/:id/decommission', requirePermission('equipment', 'edit'), (req, res) => {
+  router.post('/:id/decommission', requirePermission('equipment.register', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Equipment item not found' });
@@ -798,12 +798,12 @@ export function equipmentRoutes() {
   });
 
   // Maintenance records
-  router.get('/:id/maintenance', requirePermission('equipment', 'view'), (req, res) => {
+  router.get('/:id/maintenance', requirePermission('equipment.maintenance', 'view'), (req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT * FROM equipment_maintenance_records WHERE equipment_id = ? ORDER BY maintenance_date DESC').all(req.params.id));
   });
 
-  router.post('/:id/maintenance', requirePermission('equipment', 'create'), (req, res) => {
+  router.post('/:id/maintenance', requirePermission('equipment.maintenance', 'create'), (req, res) => {
     if (!req.body.maintenanceDate) return res.status(400).json({ error: 'maintenanceDate is required' });
     if (!req.body.maintenanceType) return res.status(400).json({ error: 'maintenanceType is required' });
     const db = getDb();
@@ -847,12 +847,12 @@ export function equipmentRoutes() {
   });
 
   // Breakdowns
-  router.get('/:id/breakdowns', requirePermission('equipment', 'view'), (req, res) => {
+  router.get('/:id/breakdowns', requirePermission('equipment.maintenance', 'view'), (req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT * FROM equipment_breakdowns WHERE equipment_id = ? ORDER BY breakdown_date DESC').all(req.params.id));
   });
 
-  router.post('/:id/breakdown', requirePermission('equipment', 'create'), (req, res) => {
+  router.post('/:id/breakdown', requirePermission('equipment.maintenance', 'create'), (req, res) => {
     if (!req.body.breakdownDate) return res.status(400).json({ error: 'breakdownDate is required' });
     if (!req.body.description) return res.status(400).json({ error: 'description is required' });
     const db = getDb();
@@ -944,7 +944,7 @@ export function equipmentRoutes() {
     res.status(201).json({ id: capaId, capaNumber });
   });
 
-  router.post('/breakdowns/:id/return-to-service', requirePermission('equipment', 'edit'), (req, res) => {
+  router.post('/breakdowns/:id/return-to-service', requirePermission('equipment.maintenance', 'edit'), (req, res) => {
     const db = getDb();
     const breakdown = db.prepare('SELECT * FROM equipment_breakdowns WHERE id = ?').get(req.params.id) as any;
     if (!breakdown) return res.status(404).json({ error: 'Breakdown not found' });

@@ -21,12 +21,12 @@ export function inventoryRoutes() {
   const router = Router();
 
   // Legacy list (kept)
-  router.get('/', requirePermission('supplier_inventory', 'view'), (_req, res) => {
+  router.get('/', requirePermission('supplier_inventory.stock', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare(`SELECT i.*, s.name AS supplier_name, s.contact AS supplier_contact FROM inventory_items i LEFT JOIN suppliers s ON s.id = i.supplier_id ORDER BY i.created_at DESC`).all());
   });
 
-  router.post('/', requirePermission('supplier_inventory', 'create'), (req, res) => {
+  router.post('/', requirePermission('supplier_inventory.stock', 'create'), (req, res) => {
     if (!(req.body.name || req.body.itemName)) return res.status(400).json({ error: 'name is required' });
     if (!req.body.category) return res.status(400).json({ error: 'category is required' });
     if (!(req.body.unit || req.body.unitOfMeasure)) return res.status(400).json({ error: 'unit is required' });
@@ -58,13 +58,13 @@ export function inventoryRoutes() {
   });
 
   // Items
-  router.get('/items', requirePermission('supplier_inventory', 'view'), (_req, res) => {
+  router.get('/items', requirePermission('supplier_inventory.stock', 'view'), (_req, res) => {
     const db = getDb();
     const rows = db.prepare(`SELECT i.*, s.name AS supplier_name FROM inventory_items i LEFT JOIN suppliers s ON s.id = i.supplier_id ORDER BY i.name`).all() as any[];
     res.json(rows.map(row => ({ ...row, item_name: row.name, unit_of_measure: row.unit, expiry_status: computeExpiryStatus(row.expiry_date), low_stock: row.quantity <= (row.minimum_stock || row.reorder_level || 0) })));
   });
 
-  router.post('/items', requirePermission('supplier_inventory', 'create'), (req, res) => {
+  router.post('/items', requirePermission('supplier_inventory.stock', 'create'), (req, res) => {
     if (!(req.body.name || req.body.itemName)) return res.status(400).json({ error: 'name is required' });
     if (!req.body.category) return res.status(400).json({ error: 'category is required' });
     if (!(req.body.unit || req.body.unitOfMeasure)) return res.status(400).json({ error: 'unit is required' });
@@ -95,7 +95,7 @@ export function inventoryRoutes() {
     res.status(201).json({ id: result.lastInsertRowid, itemCode });
   });
 
-  router.get('/items/:id', requirePermission('supplier_inventory', 'view'), (req, res) => {
+  router.get('/items/:id', requirePermission('supplier_inventory.stock', 'view'), (req, res) => {
     const db = getDb();
     const item = db.prepare(`SELECT i.*, s.name AS supplier_name FROM inventory_items i LEFT JOIN suppliers s ON s.id = i.supplier_id WHERE i.id = ?`).get(req.params.id) as any;
     if (!item) return res.status(404).json({ error: 'Inventory item not found' });
@@ -104,7 +104,7 @@ export function inventoryRoutes() {
     res.json({ ...item, item_name: item.name, unit_of_measure: item.unit, expiry_status: computeExpiryStatus(item.expiry_date), low_stock: item.quantity <= (item.minimum_stock || item.reorder_level || 0), batches, movements });
   });
 
-  router.put('/items/:id', requirePermission('supplier_inventory', 'edit'), (req, res) => {
+  router.put('/items/:id', requirePermission('supplier_inventory.stock', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM inventory_items WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Inventory item not found' });
@@ -131,7 +131,7 @@ export function inventoryRoutes() {
   });
 
   // Batches
-  router.post('/items/:id/batches', requirePermission('supplier_inventory', 'create'), (req, res) => {
+  router.post('/items/:id/batches', requirePermission('supplier_inventory.stock', 'create'), (req, res) => {
     if (req.body.quantityReceived === undefined || req.body.quantityReceived === '' || req.body.quantityReceived === null) return res.status(400).json({ error: 'quantityReceived is required' });
     if (!req.body.dateReceived) return res.status(400).json({ error: 'dateReceived is required' });
     const db = getDb();
@@ -163,13 +163,13 @@ export function inventoryRoutes() {
     res.status(201).json({ id: result.lastInsertRowid });
   });
 
-  router.get('/batches', requirePermission('supplier_inventory', 'view'), (_req, res) => {
+  router.get('/batches', requirePermission('supplier_inventory.stock', 'view'), (_req, res) => {
     const db = getDb();
     const rows = db.prepare(`SELECT b.*, i.name AS item_name, i.unit AS unit_of_measure FROM inventory_batches b JOIN inventory_items i ON i.id = b.item_id ORDER BY b.expiry_date ASC, b.date_received ASC`).all() as any[];
     res.json(rows.map(row => ({ ...row, expiry_status: computeExpiryStatus(row.expiry_date) })));
   });
 
-  router.post('/batches/:id/movement', requirePermission('supplier_inventory', 'create'), (req, res) => {
+  router.post('/batches/:id/movement', requirePermission('supplier_inventory.stock', 'create'), (req, res) => {
     if (!req.body.movementType) return res.status(400).json({ error: 'movementType is required' });
     if (req.body.quantity === undefined || req.body.quantity === '') return res.status(400).json({ error: 'quantity is required' });
     const db = getDb();
@@ -203,7 +203,7 @@ export function inventoryRoutes() {
     res.status(201).json({ id: result.lastInsertRowid });
   });
 
-  router.post('/batches/:id/acceptance', requirePermission('supplier_inventory', 'edit'), (req, res) => {
+  router.post('/batches/:id/acceptance', requirePermission('supplier_inventory.stock', 'edit'), (req, res) => {
     const db = getDb();
     const batch = db.prepare('SELECT * FROM inventory_batches WHERE id = ?').get(req.params.id);
     if (!batch) return res.status(404).json({ error: 'Batch not found' });
@@ -245,12 +245,12 @@ export function inventoryRoutes() {
   });
 
   // Suppliers
-  router.get('/suppliers', requirePermission('supplier_inventory', 'view'), (_req, res) => {
+  router.get('/suppliers', requirePermission('supplier_inventory.suppliers', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT * FROM suppliers ORDER BY name').all());
   });
 
-  router.post('/suppliers', requirePermission('supplier_inventory', 'create'), (req, res) => {
+  router.post('/suppliers', requirePermission('supplier_inventory.suppliers', 'create'), (req, res) => {
     if (!req.body.name) return res.status(400).json({ error: 'name is required' });
     const db = getDb();
     const createdAt = new Date().toISOString();
@@ -275,7 +275,7 @@ export function inventoryRoutes() {
     res.status(201).json({ id: result.lastInsertRowid, supplierCode });
   });
 
-  router.put('/suppliers/:id', requirePermission('supplier_inventory', 'edit'), (req, res) => {
+  router.put('/suppliers/:id', requirePermission('supplier_inventory.suppliers', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Supplier not found' });
@@ -298,7 +298,7 @@ export function inventoryRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/suppliers/:id/evaluation', requirePermission('supplier_inventory', 'create'), (req, res) => {
+  router.post('/suppliers/:id/evaluation', requirePermission('supplier_inventory.suppliers', 'create'), (req, res) => {
     const db = getDb();
     const supplier = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id);
     if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
@@ -324,14 +324,14 @@ export function inventoryRoutes() {
   // Numeric-guarded so named sub-resources (e.g. storage-inspections) below
   // are not shadowed; non-numeric ids fall through to the later routes.
   const numericOnly = (req: any, _res: any, next: any) => /^\d+$/.test(req.params.id) ? next() : next('route');
-  router.get('/:id', numericOnly, requirePermission('supplier_inventory', 'view'), (req, res) => {
+  router.get('/:id', numericOnly, requirePermission('supplier_inventory.stock', 'view'), (req, res) => {
     const db = getDb();
     const item = db.prepare('SELECT i.*, s.name AS supplier_name, s.contact AS supplier_contact FROM inventory_items i LEFT JOIN suppliers s ON s.id = i.supplier_id WHERE i.id = ?').get(req.params.id);
     if (!item) return res.status(404).json({ error: 'Inventory item not found' });
     res.json(item);
   });
 
-  router.put('/:id', numericOnly, requirePermission('supplier_inventory', 'edit'), (req, res) => {
+  router.put('/:id', numericOnly, requirePermission('supplier_inventory.stock', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM inventory_items WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Inventory item not found' });
@@ -353,10 +353,10 @@ export function inventoryRoutes() {
   });
 
   // ============= Storage-area condition inspections =============
-  router.get('/storage-inspections', requirePermission('supplier_inventory', 'view'), (_req, res) => {
+  router.get('/storage-inspections', requirePermission('supplier_inventory.storage', 'view'), (_req, res) => {
     res.json(getDb().prepare('SELECT * FROM storage_inspections ORDER BY inspection_date DESC, created_at DESC').all());
   });
-  router.post('/storage-inspections', requirePermission('supplier_inventory', 'create'), (req, res) => {
+  router.post('/storage-inspections', requirePermission('supplier_inventory.storage', 'create'), (req, res) => {
     if (!req.body.inspectionDate) return res.status(400).json({ error: 'inspectionDate is required' });
     const db = getDb();
     const createdAt = new Date().toISOString();
@@ -367,7 +367,7 @@ export function inventoryRoutes() {
     audit(req, { action: 'create', entity: 'storage_inspections', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
     res.status(201).json({ id: r.lastInsertRowid, inspectionNumber: number });
   });
-  router.put('/storage-inspections/:id', requirePermission('supplier_inventory', 'edit'), (req, res) => {
+  router.put('/storage-inspections/:id', requirePermission('supplier_inventory.storage', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM storage_inspections WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Storage inspection not found' });

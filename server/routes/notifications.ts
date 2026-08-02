@@ -468,7 +468,7 @@ export function notificationsRoutes() {
   });
 
   // -------- Run the routed scan now (manual trigger) --------
-  router.post('/auto-scan', requirePermission('notifications', 'create'), async (req, res) => {
+  router.post('/auto-scan', requirePermission('notifications.rules', 'create'), async (req, res) => {
     const db = getDb();
     const { runAlertScanAndRoute } = await import('../services/alertService.js');
     const result = runAlertScanAndRoute(db, req.user?.id ?? null);
@@ -477,12 +477,12 @@ export function notificationsRoutes() {
   });
 
   // -------- Rules --------
-  router.get('/rules', requirePermission('notifications', 'view'), (_req, res) => {
+  router.get('/rules', requirePermission('notifications.rules', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT * FROM notification_rules ORDER BY rule_name').all());
   });
 
-  router.post('/rules', requirePermission('notifications', 'create'), (req, res) => {
+  router.post('/rules', requirePermission('notifications.rules', 'create'), (req, res) => {
     if (!req.body.ruleName) return res.status(400).json({ error: 'ruleName is required' });
     if (!req.body.moduleKey) return res.status(400).json({ error: 'moduleKey is required' });
     if (!req.body.triggerType) return res.status(400).json({ error: 'triggerType is required' });
@@ -497,14 +497,14 @@ export function notificationsRoutes() {
     res.status(201).json({ id, ruleCode });
   });
 
-  router.get('/rules/:id', requirePermission('notifications', 'view'), (req, res) => {
+  router.get('/rules/:id', requirePermission('notifications.rules', 'view'), (req, res) => {
     const db = getDb();
     const rule = db.prepare('SELECT * FROM notification_rules WHERE id = ?').get(req.params.id);
     if (!rule) return res.status(404).json({ error: 'Rule not found' });
     res.json(rule);
   });
 
-  router.put('/rules/:id', requirePermission('notifications', 'edit'), (req, res) => {
+  router.put('/rules/:id', requirePermission('notifications.rules', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM notification_rules WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Rule not found' });
@@ -515,7 +515,7 @@ export function notificationsRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/rules/:id/toggle', requirePermission('notifications', 'edit'), (req, res) => {
+  router.post('/rules/:id/toggle', requirePermission('notifications.rules', 'edit'), (req, res) => {
     const db = getDb();
     const r = db.prepare('SELECT * FROM notification_rules WHERE id = ?').get(req.params.id) as any;
     if (!r) return res.status(404).json({ error: 'Rule not found' });
@@ -526,7 +526,7 @@ export function notificationsRoutes() {
   });
 
   // -------- Calendar --------
-  router.get('/calendar', requirePermission('notifications', 'view'), (req, res) => {
+  router.get('/calendar', requirePermission('notifications.calendar', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.moduleKey) { filters.push('module_key = ?'); params.push(String(req.query.moduleKey)); }
@@ -540,7 +540,7 @@ export function notificationsRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/calendar', requirePermission('notifications', 'create'), (req, res) => {
+  router.post('/calendar', requirePermission('notifications.calendar', 'create'), (req, res) => {
     if (!req.body.title) return res.status(400).json({ error: 'title is required' });
     if (!req.body.dueDate) return res.status(400).json({ error: 'dueDate is required' });
     if (!req.body.itemType) return res.status(400).json({ error: 'itemType is required' });
@@ -557,7 +557,7 @@ export function notificationsRoutes() {
     res.status(201).json({ id, calendarNumber });
   });
 
-  router.post('/calendar/generate', requirePermission('notifications', 'create'), (req, res) => {
+  router.post('/calendar/generate', requirePermission('notifications.calendar', 'create'), (req, res) => {
     const db = getDb();
     const today = new Date().toISOString().slice(0, 10);
     const candidates = collectScanCandidates(db);
@@ -593,14 +593,14 @@ export function notificationsRoutes() {
     res.json({ ok: true, candidates: candidates.length, notificationsCreated: notifsCreated, calendarItemsCreated: calendarCreated, skipped });
   });
 
-  router.get('/calendar/:id', requirePermission('notifications', 'view'), (req, res) => {
+  router.get('/calendar/:id', requirePermission('notifications.calendar', 'view'), (req, res) => {
     const db = getDb();
     const item = db.prepare('SELECT * FROM review_calendar_items WHERE id = ?').get(req.params.id);
     if (!item) return res.status(404).json({ error: 'Calendar item not found' });
     res.json(item);
   });
 
-  router.put('/calendar/:id', requirePermission('notifications', 'edit'), (req, res) => {
+  router.put('/calendar/:id', requirePermission('notifications.calendar', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM review_calendar_items WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Calendar item not found' });
@@ -611,7 +611,7 @@ export function notificationsRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/calendar/:id/complete', requirePermission('notifications', 'edit'), (req, res) => {
+  router.post('/calendar/:id/complete', requirePermission('notifications.calendar', 'edit'), (req, res) => {
     const db = getDb();
     const item = db.prepare('SELECT * FROM review_calendar_items WHERE id = ?').get(req.params.id) as any;
     if (!item) return res.status(404).json({ error: 'Calendar item not found' });
@@ -621,7 +621,7 @@ export function notificationsRoutes() {
   });
 
   // -------- Tasks --------
-  router.get('/tasks', requirePermission('notifications', 'view'), (req, res) => {
+  router.get('/tasks', requirePermission('notifications.inbox', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.status) { filters.push('status = ?'); params.push(String(req.query.status)); }
@@ -633,7 +633,7 @@ export function notificationsRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/tasks', requirePermission('notifications', 'create'), (req, res) => {
+  router.post('/tasks', requirePermission('notifications.inbox', 'create'), (req, res) => {
     if (!req.body.title) return res.status(400).json({ error: 'title is required' });
     const db = getDb();
     const createdAt = new Date().toISOString();
@@ -648,14 +648,14 @@ export function notificationsRoutes() {
     res.status(201).json({ id, taskNumber });
   });
 
-  router.get('/tasks/:id', requirePermission('notifications', 'view'), (req, res) => {
+  router.get('/tasks/:id', requirePermission('notifications.inbox', 'view'), (req, res) => {
     const db = getDb();
     const task = db.prepare('SELECT * FROM user_task_queue WHERE id = ?').get(req.params.id);
     if (!task) return res.status(404).json({ error: 'Task not found' });
     res.json(task);
   });
 
-  router.put('/tasks/:id', requirePermission('notifications', 'edit'), (req, res) => {
+  router.put('/tasks/:id', requirePermission('notifications.inbox', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM user_task_queue WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Task not found' });
@@ -666,7 +666,7 @@ export function notificationsRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/tasks/:id/start', requirePermission('notifications', 'edit'), (req, res) => {
+  router.post('/tasks/:id/start', requirePermission('notifications.inbox', 'edit'), (req, res) => {
     const db = getDb();
     const task = db.prepare('SELECT * FROM user_task_queue WHERE id = ?').get(req.params.id) as any;
     if (!task) return res.status(404).json({ error: 'Task not found' });
@@ -675,7 +675,7 @@ export function notificationsRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/tasks/:id/complete', requirePermission('notifications', 'edit'), (req, res) => {
+  router.post('/tasks/:id/complete', requirePermission('notifications.inbox', 'edit'), (req, res) => {
     const db = getDb();
     const task = db.prepare('SELECT * FROM user_task_queue WHERE id = ?').get(req.params.id) as any;
     if (!task) return res.status(404).json({ error: 'Task not found' });
@@ -684,7 +684,7 @@ export function notificationsRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/tasks/:id/cancel', requirePermission('notifications', 'edit'), (req, res) => {
+  router.post('/tasks/:id/cancel', requirePermission('notifications.inbox', 'edit'), (req, res) => {
     const db = getDb();
     const task = db.prepare('SELECT * FROM user_task_queue WHERE id = ?').get(req.params.id) as any;
     if (!task) return res.status(404).json({ error: 'Task not found' });
@@ -694,13 +694,13 @@ export function notificationsRoutes() {
   });
 
   // -------- Preferences --------
-  router.get('/preferences', requirePermission('notifications', 'view'), (req, res) => {
+  router.get('/preferences', requirePermission('notifications.inbox', 'view'), (req, res) => {
     const db = getDb();
     if (!req.user) return res.status(401).json({ error: 'auth required' });
     res.json(db.prepare('SELECT * FROM notification_preferences WHERE user_id = ?').all(req.user.id));
   });
 
-  router.put('/preferences', requirePermission('notifications', 'edit'), (req, res) => {
+  router.put('/preferences', requirePermission('notifications.inbox', 'edit'), (req, res) => {
     if (!req.user) return res.status(401).json({ error: 'auth required' });
     const items = Array.isArray(req.body.preferences) ? req.body.preferences : [];
     const db = getDb();

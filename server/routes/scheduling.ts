@@ -122,7 +122,7 @@ export function schedulingRoutes() {
   router.use(requireAuth);
 
   // ========================= Shift-type catalogue =========================
-  router.get('/shift-types', requirePermission('personnel', 'view'), (_req, res) => {
+  router.get('/shift-types', requirePermission('personnel.rosters', 'view'), (_req, res) => {
     res.json(getDb().prepare('SELECT * FROM roster_shift_types ORDER BY display_order, id').all());
   });
   router.post('/shift-types', requirePermission('settings', 'create'), (req, res) => {
@@ -158,7 +158,7 @@ export function schedulingRoutes() {
   });
 
   // ========================= Bench catalogue (per unit) =========================
-  router.get('/sections/:id/benches', requirePermission('personnel', 'view'), (req, res) => {
+  router.get('/sections/:id/benches', requirePermission('personnel.rosters', 'view'), (req, res) => {
     res.json(getDb().prepare('SELECT * FROM section_benches WHERE section_id = ? ORDER BY display_order, id').all(req.params.id));
   });
   router.post('/sections/:id/benches', requirePermission('settings', 'create'), (req, res) => {
@@ -191,7 +191,7 @@ export function schedulingRoutes() {
   });
 
   // ========================= Duty rosters (department-wide monthly grid) =========================
-  router.get('/duty-rosters', requirePermission('personnel', 'view'), (req, res) => {
+  router.get('/duty-rosters', requirePermission('personnel.rosters', 'view'), (req, res) => {
     const db = getDb();
     let q = 'SELECT r.*, d.name AS department_name FROM duty_rosters r LEFT JOIN departments d ON d.id = r.department_id';
     const params: unknown[] = [];
@@ -200,7 +200,7 @@ export function schedulingRoutes() {
     res.json(db.prepare(q).all(...params));
   });
 
-  router.post('/duty-rosters', requirePermission('personnel', 'create'), (req, res) => {
+  router.post('/duty-rosters', requirePermission('personnel.rosters', 'create'), (req, res) => {
     const db = getDb();
     const month = String(req.body.month || '').trim();
     if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'A month (YYYY-MM) is required.' });
@@ -255,7 +255,7 @@ export function schedulingRoutes() {
     return { ...roster, rows, cells };
   }
 
-  router.get('/duty-rosters/:id', requirePermission('personnel', 'view'), (req, res) => {
+  router.get('/duty-rosters/:id', requirePermission('personnel.rosters', 'view'), (req, res) => {
     const db = getDb();
     const roster = loadRoster(db, req.params.id);
     if (!roster) return res.status(404).json({ error: 'Roster not found' });
@@ -263,7 +263,7 @@ export function schedulingRoutes() {
     res.json({ ...roster, shiftTypes });
   });
 
-  router.put('/duty-rosters/:id', requirePermission('personnel', 'edit'), (req, res) => {
+  router.put('/duty-rosters/:id', requirePermission('personnel.rosters', 'edit'), (req, res) => {
     const db = getDb();
     const ex = db.prepare('SELECT * FROM duty_rosters WHERE id = ?').get(req.params.id) as any;
     if (!ex) return res.status(404).json({ error: 'Roster not found' });
@@ -278,7 +278,7 @@ export function schedulingRoutes() {
     res.json({ ok: true });
   });
 
-  router.delete('/duty-rosters/:id', requirePermission('personnel', 'void_archive'), (req, res) => {
+  router.delete('/duty-rosters/:id', requirePermission('personnel.rosters', 'void_archive'), (req, res) => {
     const db = getDb();
     const ex = db.prepare('SELECT * FROM duty_rosters WHERE id = ?').get(req.params.id);
     if (!ex) return res.status(404).json({ error: 'Roster not found' });
@@ -290,7 +290,7 @@ export function schedulingRoutes() {
   });
 
   // Roster rows (add a staff row or a free-text label/spacer row)
-  router.post('/duty-rosters/:id/rows', requirePermission('personnel', 'edit'), (req, res) => {
+  router.post('/duty-rosters/:id/rows', requirePermission('personnel.rosters', 'edit'), (req, res) => {
     const db = getDb();
     if (!db.prepare('SELECT id FROM duty_rosters WHERE id = ?').get(req.params.id)) return res.status(404).json({ error: 'Roster not found' });
     const order = parseIntNullable(req.body.displayOrder) ?? (db.prepare('SELECT COALESCE(MAX(display_order),0)+1 n FROM duty_roster_rows WHERE roster_id = ?').get(req.params.id) as { n: number }).n;
@@ -298,7 +298,7 @@ export function schedulingRoutes() {
       .run(req.params.id, parseIntNullable(req.body.staffId), req.body.label || null, order);
     res.status(201).json({ id: Number(r.lastInsertRowid) });
   });
-  router.put('/duty-roster-rows/:rowId', requirePermission('personnel', 'edit'), (req, res) => {
+  router.put('/duty-roster-rows/:rowId', requirePermission('personnel.rosters', 'edit'), (req, res) => {
     const db = getDb();
     const ex = db.prepare('SELECT * FROM duty_roster_rows WHERE id = ?').get(req.params.rowId) as any;
     if (!ex) return res.status(404).json({ error: 'Row not found' });
@@ -307,7 +307,7 @@ export function schedulingRoutes() {
         parseIntNullable(req.body.displayOrder) ?? ex.display_order, req.params.rowId);
     res.json({ ok: true });
   });
-  router.delete('/duty-roster-rows/:rowId', requirePermission('personnel', 'edit'), (req, res) => {
+  router.delete('/duty-roster-rows/:rowId', requirePermission('personnel.rosters', 'edit'), (req, res) => {
     const db = getDb();
     db.prepare('DELETE FROM duty_roster_cells WHERE row_id = ?').run(req.params.rowId);
     db.prepare('DELETE FROM duty_roster_rows WHERE id = ?').run(req.params.rowId);
@@ -315,7 +315,7 @@ export function schedulingRoutes() {
   });
 
   // Bulk upsert cells. body.cells = [{ rowId, day, shiftCode, note }]
-  router.post('/duty-rosters/:id/cells', requirePermission('personnel', 'edit'), (req, res) => {
+  router.post('/duty-rosters/:id/cells', requirePermission('personnel.rosters', 'edit'), (req, res) => {
     const db = getDb();
     if (!db.prepare('SELECT id FROM duty_rosters WHERE id = ?').get(req.params.id)) return res.status(404).json({ error: 'Roster not found' });
     const cells: Array<{ rowId: number; day: number; shiftCode?: string | null; note?: string | null }> = Array.isArray(req.body.cells) ? req.body.cells : [];
@@ -333,7 +333,7 @@ export function schedulingRoutes() {
     res.json({ ok: true, count: cells.length });
   });
 
-  router.post('/duty-rosters/:id/approve', requirePermission('personnel', 'approve'), (req, res) => {
+  router.post('/duty-rosters/:id/approve', requirePermission('personnel.rosters', 'approve'), (req, res) => {
     const db = getDb();
     const ex = db.prepare('SELECT * FROM duty_rosters WHERE id = ?').get(req.params.id) as any;
     if (!ex) return res.status(404).json({ error: 'Roster not found' });
@@ -341,7 +341,7 @@ export function schedulingRoutes() {
     audit(req, { action: 'approve', entity: 'duty_rosters', entityId: req.params.id, oldValue: { status: ex.status } });
     res.json({ ok: true });
   });
-  router.post('/duty-rosters/:id/publish', requirePermission('personnel', 'edit'), (req, res) => {
+  router.post('/duty-rosters/:id/publish', requirePermission('personnel.rosters', 'edit'), (req, res) => {
     const db = getDb();
     const ex = db.prepare('SELECT * FROM duty_rosters WHERE id = ?').get(req.params.id) as any;
     if (!ex) return res.status(404).json({ error: 'Roster not found' });
@@ -350,7 +350,7 @@ export function schedulingRoutes() {
     res.json({ ok: true });
   });
 
-  router.get('/duty-rosters/:id/print', requirePermission('personnel', 'view'), (req, res) => {
+  router.get('/duty-rosters/:id/print', requirePermission('personnel.rosters', 'view'), (req, res) => {
     const db = getDb();
     const roster = loadRoster(db, req.params.id) as any;
     if (!roster) return res.status(404).send('Roster not found');
@@ -413,7 +413,7 @@ export function schedulingRoutes() {
   });
 
   // ========================= Reassignment schedules (memo) =========================
-  router.get('/reassignments', requirePermission('personnel', 'view'), (req, res) => {
+  router.get('/reassignments', requirePermission('personnel.rosters', 'view'), (req, res) => {
     const db = getDb();
     let q = 'SELECT * FROM reassignment_schedules';
     const params: unknown[] = [];
@@ -422,7 +422,7 @@ export function schedulingRoutes() {
     res.json(db.prepare(q).all(...params));
   });
 
-  router.post('/reassignments', requirePermission('personnel', 'create'), (req, res) => {
+  router.post('/reassignments', requirePermission('personnel.rosters', 'create'), (req, res) => {
     const db = getDb();
     const month = String(req.body.month || '').trim();
     const createdAt = new Date().toISOString();
@@ -466,12 +466,12 @@ export function schedulingRoutes() {
       WHERE rr.schedule_id = ? ORDER BY rr.display_order, rr.id`).all(id);
     return { ...s, rows };
   }
-  router.get('/reassignments/:id', requirePermission('personnel', 'view'), (req, res) => {
+  router.get('/reassignments/:id', requirePermission('personnel.rosters', 'view'), (req, res) => {
     const r = loadReassignment(getDb(), req.params.id);
     if (!r) return res.status(404).json({ error: 'Schedule not found' });
     res.json(r);
   });
-  router.put('/reassignments/:id', requirePermission('personnel', 'edit'), (req, res) => {
+  router.put('/reassignments/:id', requirePermission('personnel.rosters', 'edit'), (req, res) => {
     const db = getDb();
     const ex = db.prepare('SELECT * FROM reassignment_schedules WHERE id = ?').get(req.params.id) as any;
     if (!ex) return res.status(404).json({ error: 'Schedule not found' });
@@ -483,13 +483,13 @@ export function schedulingRoutes() {
     audit(req, { action: 'edit', entity: 'reassignment_schedules', entityId: req.params.id, oldValue: ex, newValue: b });
     res.json({ ok: true });
   });
-  router.delete('/reassignments/:id', requirePermission('personnel', 'void_archive'), (req, res) => {
+  router.delete('/reassignments/:id', requirePermission('personnel.rosters', 'void_archive'), (req, res) => {
     const db = getDb();
     db.prepare('DELETE FROM reassignment_rows WHERE schedule_id = ?').run(req.params.id);
     db.prepare('DELETE FROM reassignment_schedules WHERE id = ?').run(req.params.id);
     res.json({ ok: true });
   });
-  router.post('/reassignments/:id/approve', requirePermission('personnel', 'approve'), (req, res) => {
+  router.post('/reassignments/:id/approve', requirePermission('personnel.rosters', 'approve'), (req, res) => {
     const db = getDb();
     if (!db.prepare('SELECT id FROM reassignment_schedules WHERE id = ?').get(req.params.id)) return res.status(404).json({ error: 'Schedule not found' });
     db.prepare("UPDATE reassignment_schedules SET status = 'approved', approved_by_staff_id = ?, approved_at = CURRENT_TIMESTAMP WHERE id = ?").run(getStaffIdOrCurrent(req, req.body.approvedByStaffId), req.params.id);
@@ -512,7 +512,7 @@ export function schedulingRoutes() {
     }
     return moved.length;
   }
-  router.post('/reassignments/:id/publish', requirePermission('personnel', 'edit'), (req, res) => {
+  router.post('/reassignments/:id/publish', requirePermission('personnel.rosters', 'edit'), (req, res) => {
     const db = getDb();
     if (!db.prepare('SELECT id FROM reassignment_schedules WHERE id = ?').get(req.params.id)) return res.status(404).json({ error: 'Schedule not found' });
     db.prepare("UPDATE reassignment_schedules SET status = 'published', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
@@ -522,7 +522,7 @@ export function schedulingRoutes() {
   });
   // Apply the unit reassignment to the master register on demand, without
   // (re)publishing — useful after editing a linked row.
-  router.post('/reassignments/:id/apply-to-register', requirePermission('personnel', 'edit'), (req, res) => {
+  router.post('/reassignments/:id/apply-to-register', requirePermission('personnel.rosters', 'edit'), (req, res) => {
     const db = getDb();
     if (!db.prepare('SELECT id FROM reassignment_schedules WHERE id = ?').get(req.params.id)) return res.status(404).json({ error: 'Schedule not found' });
     const moved = applyReassignmentToRegister(db, req.params.id);
@@ -530,7 +530,7 @@ export function schedulingRoutes() {
     res.json({ ok: true, staffReassigned: moved });
   });
 
-  router.post('/reassignments/:id/rows', requirePermission('personnel', 'edit'), (req, res) => {
+  router.post('/reassignments/:id/rows', requirePermission('personnel.rosters', 'edit'), (req, res) => {
     const db = getDb();
     if (!db.prepare('SELECT id FROM reassignment_schedules WHERE id = ?').get(req.params.id)) return res.status(404).json({ error: 'Schedule not found' });
     if (!req.body.unitLabel) return res.status(400).json({ error: 'A unit label is required.' });
@@ -542,7 +542,7 @@ export function schedulingRoutes() {
         parseIntNullable(req.body.deputyStaffId), req.body.deputyText || null, req.body.membersText || null, memberIds ? JSON.stringify(memberIds) : null, req.body.spanText || null, order);
     res.status(201).json({ id: Number(r.lastInsertRowid) });
   });
-  router.put('/reassignment-rows/:rowId', requirePermission('personnel', 'edit'), (req, res) => {
+  router.put('/reassignment-rows/:rowId', requirePermission('personnel.rosters', 'edit'), (req, res) => {
     const db = getDb();
     const ex = db.prepare('SELECT * FROM reassignment_rows WHERE id = ?').get(req.params.rowId) as any;
     if (!ex) return res.status(404).json({ error: 'Row not found' });
@@ -557,12 +557,12 @@ export function schedulingRoutes() {
         parseIntNullable(b.displayOrder) ?? ex.display_order, req.params.rowId);
     res.json({ ok: true });
   });
-  router.delete('/reassignment-rows/:rowId', requirePermission('personnel', 'edit'), (req, res) => {
+  router.delete('/reassignment-rows/:rowId', requirePermission('personnel.rosters', 'edit'), (req, res) => {
     getDb().prepare('DELETE FROM reassignment_rows WHERE id = ?').run(req.params.rowId);
     res.json({ ok: true });
   });
 
-  router.get('/reassignments/:id/print', requirePermission('personnel', 'view'), (req, res) => {
+  router.get('/reassignments/:id/print', requirePermission('personnel.rosters', 'view'), (req, res) => {
     const db = getDb();
     const s = loadReassignment(db, req.params.id) as any;
     if (!s) return res.status(404).send('Schedule not found');
@@ -597,7 +597,7 @@ export function schedulingRoutes() {
   });
 
   // ========================= Bench schedules (per unit monthly grid) =========================
-  router.get('/bench-schedules', requirePermission('personnel', 'view'), (req, res) => {
+  router.get('/bench-schedules', requirePermission('personnel.rosters', 'view'), (req, res) => {
     const db = getDb();
     let q = 'SELECT bs.*, s.name AS section_name FROM bench_schedules bs JOIN sections s ON s.id = bs.section_id';
     const params: unknown[] = [];
@@ -608,7 +608,7 @@ export function schedulingRoutes() {
     q += ' ORDER BY bs.month DESC, bs.id DESC';
     res.json(db.prepare(q).all(...params));
   });
-  router.post('/bench-schedules', requirePermission('personnel', 'create'), (req, res) => {
+  router.post('/bench-schedules', requirePermission('personnel.rosters', 'create'), (req, res) => {
     const db = getDb();
     const sectionId = parseIntNullable(req.body.sectionId);
     const month = String(req.body.month || '').trim();
@@ -650,12 +650,12 @@ export function schedulingRoutes() {
     const benches = db.prepare('SELECT * FROM section_benches WHERE section_id = ? ORDER BY display_order, id').all((bs as any).section_id);
     return { ...bs, rows, cells, benches };
   }
-  router.get('/bench-schedules/:id', requirePermission('personnel', 'view'), (req, res) => {
+  router.get('/bench-schedules/:id', requirePermission('personnel.rosters', 'view'), (req, res) => {
     const bs = loadBench(getDb(), req.params.id);
     if (!bs) return res.status(404).json({ error: 'Schedule not found' });
     res.json(bs);
   });
-  router.put('/bench-schedules/:id', requirePermission('personnel', 'edit'), (req, res) => {
+  router.put('/bench-schedules/:id', requirePermission('personnel.rosters', 'edit'), (req, res) => {
     const db = getDb();
     const ex = db.prepare('SELECT * FROM bench_schedules WHERE id = ?').get(req.params.id) as any;
     if (!ex) return res.status(404).json({ error: 'Schedule not found' });
@@ -664,14 +664,14 @@ export function schedulingRoutes() {
       .run(b.title ?? ex.title, b.month && /^\d{4}-\d{2}$/.test(b.month) ? b.month : ex.month, b.notes ?? ex.notes, req.params.id);
     res.json({ ok: true });
   });
-  router.delete('/bench-schedules/:id', requirePermission('personnel', 'void_archive'), (req, res) => {
+  router.delete('/bench-schedules/:id', requirePermission('personnel.rosters', 'void_archive'), (req, res) => {
     const db = getDb();
     db.prepare('DELETE FROM bench_schedule_cells WHERE schedule_id = ?').run(req.params.id);
     db.prepare('DELETE FROM bench_schedule_rows WHERE schedule_id = ?').run(req.params.id);
     db.prepare('DELETE FROM bench_schedules WHERE id = ?').run(req.params.id);
     res.json({ ok: true });
   });
-  router.post('/bench-schedules/:id/rows', requirePermission('personnel', 'edit'), (req, res) => {
+  router.post('/bench-schedules/:id/rows', requirePermission('personnel.rosters', 'edit'), (req, res) => {
     const db = getDb();
     if (!db.prepare('SELECT id FROM bench_schedules WHERE id = ?').get(req.params.id)) return res.status(404).json({ error: 'Schedule not found' });
     const order = parseIntNullable(req.body.displayOrder) ?? (db.prepare('SELECT COALESCE(MAX(display_order),0)+1 n FROM bench_schedule_rows WHERE schedule_id = ?').get(req.params.id) as { n: number }).n;
@@ -679,13 +679,13 @@ export function schedulingRoutes() {
       .run(req.params.id, parseIntNullable(req.body.staffId), req.body.label || null, order);
     res.status(201).json({ id: Number(r.lastInsertRowid) });
   });
-  router.delete('/bench-schedule-rows/:rowId', requirePermission('personnel', 'edit'), (req, res) => {
+  router.delete('/bench-schedule-rows/:rowId', requirePermission('personnel.rosters', 'edit'), (req, res) => {
     const db = getDb();
     db.prepare('DELETE FROM bench_schedule_cells WHERE row_id = ?').run(req.params.rowId);
     db.prepare('DELETE FROM bench_schedule_rows WHERE id = ?').run(req.params.rowId);
     res.json({ ok: true });
   });
-  router.post('/bench-schedules/:id/cells', requirePermission('personnel', 'edit'), (req, res) => {
+  router.post('/bench-schedules/:id/cells', requirePermission('personnel.rosters', 'edit'), (req, res) => {
     const db = getDb();
     if (!db.prepare('SELECT id FROM bench_schedules WHERE id = ?').get(req.params.id)) return res.status(404).json({ error: 'Schedule not found' });
     const cells: Array<{ rowId: number; day: number; value?: string | null; note?: string | null }> = Array.isArray(req.body.cells) ? req.body.cells : [];
@@ -702,16 +702,16 @@ export function schedulingRoutes() {
     tx();
     res.json({ ok: true });
   });
-  router.post('/bench-schedules/:id/approve', requirePermission('personnel', 'approve'), (req, res) => {
+  router.post('/bench-schedules/:id/approve', requirePermission('personnel.rosters', 'approve'), (req, res) => {
     getDb().prepare("UPDATE bench_schedules SET status = 'approved', approved_by_staff_id = ?, approved_at = CURRENT_TIMESTAMP WHERE id = ?").run(getStaffIdOrCurrent(req, req.body.approvedByStaffId), req.params.id);
     res.json({ ok: true });
   });
-  router.post('/bench-schedules/:id/publish', requirePermission('personnel', 'edit'), (req, res) => {
+  router.post('/bench-schedules/:id/publish', requirePermission('personnel.rosters', 'edit'), (req, res) => {
     getDb().prepare("UPDATE bench_schedules SET status = 'published', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
     res.json({ ok: true });
   });
 
-  router.get('/bench-schedules/:id/print', requirePermission('personnel', 'view'), (req, res) => {
+  router.get('/bench-schedules/:id/print', requirePermission('personnel.rosters', 'view'), (req, res) => {
     const db = getDb();
     const bs = loadBench(db, req.params.id) as any;
     if (!bs) return res.status(404).send('Schedule not found');

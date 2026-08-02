@@ -90,7 +90,7 @@ export function customerFocusRoutes() {
   });
 
   // ============= Stakeholders =============
-  router.get('/stakeholders', requirePermission('customer_focus', 'view'), (req, res) => {
+  router.get('/stakeholders', requirePermission('customer_focus.stakeholders', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = [];
     const params: unknown[] = [];
@@ -102,7 +102,7 @@ export function customerFocusRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/stakeholders', requirePermission('customer_focus', 'create'), (req, res) => {
+  router.post('/stakeholders', requirePermission('customer_focus.stakeholders', 'create'), (req, res) => {
     if (!req.body.stakeholderName) return res.status(400).json({ error: 'stakeholderName is required' });
     if (!req.body.stakeholderType) return res.status(400).json({ error: 'stakeholderType is required' });
     if (!STAKEHOLDER_TYPES.includes(req.body.stakeholderType)) return res.status(400).json({ error: `stakeholderType must be one of: ${STAKEHOLDER_TYPES.join(', ')}` });
@@ -116,7 +116,7 @@ export function customerFocusRoutes() {
     res.status(201).json({ id, stakeholderNumber });
   });
 
-  router.get('/stakeholders/:id', requirePermission('customer_focus', 'view'), (req, res) => {
+  router.get('/stakeholders/:id', requirePermission('customer_focus.stakeholders', 'view'), (req, res) => {
     const db = getDb();
     const stakeholder = db.prepare('SELECT * FROM customer_stakeholders WHERE id = ?').get(req.params.id) as any;
     if (!stakeholder) return res.status(404).json({ error: 'Stakeholder not found' });
@@ -126,7 +126,7 @@ export function customerFocusRoutes() {
     res.json({ ...stakeholder, agreements, feedback, communications });
   });
 
-  router.put('/stakeholders/:id', requirePermission('customer_focus', 'edit'), (req, res) => {
+  router.put('/stakeholders/:id', requirePermission('customer_focus.stakeholders', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM customer_stakeholders WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Stakeholder not found' });
@@ -137,7 +137,7 @@ export function customerFocusRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/stakeholders/:id/toggle', requirePermission('customer_focus', 'edit'), (req, res) => {
+  router.post('/stakeholders/:id/toggle', requirePermission('customer_focus.stakeholders', 'edit'), (req, res) => {
     const db = getDb();
     const s = db.prepare('SELECT * FROM customer_stakeholders WHERE id = ?').get(req.params.id) as any;
     if (!s) return res.status(404).json({ error: 'Stakeholder not found' });
@@ -148,7 +148,7 @@ export function customerFocusRoutes() {
   });
 
   // ============= Service Agreements =============
-  router.get('/service-agreements', requirePermission('customer_focus', 'view'), (req, res) => {
+  router.get('/service-agreements', requirePermission('customer_focus.stakeholders', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = [];
     const params: unknown[] = [];
@@ -160,7 +160,7 @@ export function customerFocusRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/service-agreements', requirePermission('customer_focus', 'create'), (req, res) => {
+  router.post('/service-agreements', requirePermission('customer_focus.stakeholders', 'create'), (req, res) => {
     if (!parseIntNullable(req.body.stakeholderId)) return res.status(400).json({ error: 'stakeholderId is required' });
     if (!req.body.agreementTitle) return res.status(400).json({ error: 'agreementTitle is required' });
     if (!req.body.serviceScope) return res.status(400).json({ error: 'serviceScope is required' });
@@ -180,14 +180,14 @@ export function customerFocusRoutes() {
     res.status(201).json({ id, agreementNumber });
   });
 
-  router.get('/service-agreements/:id', requirePermission('customer_focus', 'view'), (req, res) => {
+  router.get('/service-agreements/:id', requirePermission('customer_focus.stakeholders', 'view'), (req, res) => {
     const db = getDb();
     const sa = db.prepare('SELECT sa.*, cs.stakeholder_name FROM service_agreements sa LEFT JOIN customer_stakeholders cs ON cs.id = sa.stakeholder_id WHERE sa.id = ?').get(req.params.id);
     if (!sa) return res.status(404).json({ error: 'Service agreement not found' });
     res.json(sa);
   });
 
-  router.put('/service-agreements/:id', requirePermission('customer_focus', 'edit'), (req, res) => {
+  router.put('/service-agreements/:id', requirePermission('customer_focus.stakeholders', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM service_agreements WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Service agreement not found' });
@@ -198,7 +198,7 @@ export function customerFocusRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/service-agreements/:id/approve', requirePermission('customer_focus', 'approve'), (req, res) => {
+  router.post('/service-agreements/:id/approve', requirePermission('customer_focus.stakeholders', 'approve'), (req, res) => {
     const db = getDb();
     const sa = db.prepare('SELECT * FROM service_agreements WHERE id = ?').get(req.params.id) as any;
     if (!sa) return res.status(404).json({ error: 'Service agreement not found' });
@@ -209,7 +209,7 @@ export function customerFocusRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/service-agreements/:id/archive', requirePermission('customer_focus', 'approve'), (req, res) => {
+  router.post('/service-agreements/:id/archive', requirePermission('customer_focus.stakeholders', 'approve'), (req, res) => {
     const db = getDb();
     const sa = db.prepare('SELECT * FROM service_agreements WHERE id = ?').get(req.params.id) as any;
     if (!sa) return res.status(404).json({ error: 'Service agreement not found' });
@@ -219,7 +219,7 @@ export function customerFocusRoutes() {
   });
 
   // ============= Feedback =============
-  router.get('/feedback', requirePermission('customer_focus', 'view'), (req, res) => {
+  router.get('/feedback', requirePermission('customer_focus.feedback', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = [];
     const params: unknown[] = [];
@@ -232,7 +232,7 @@ export function customerFocusRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/feedback', requirePermission('customer_focus', 'create'), (req, res) => {
+  router.post('/feedback', requirePermission('customer_focus.feedback', 'create'), (req, res) => {
     if (!req.body.feedbackDate) return res.status(400).json({ error: 'feedbackDate is required' });
     if (!req.body.feedbackType) return res.status(400).json({ error: 'feedbackType is required' });
     if (!FEEDBACK_TYPES.includes(req.body.feedbackType)) return res.status(400).json({ error: `feedbackType must be one of: ${FEEDBACK_TYPES.join(', ')}` });
@@ -251,7 +251,7 @@ export function customerFocusRoutes() {
     res.status(201).json({ id, feedbackNumber });
   });
 
-  router.get('/feedback/:id', requirePermission('customer_focus', 'view'), (req, res) => {
+  router.get('/feedback/:id', requirePermission('customer_focus.feedback', 'view'), (req, res) => {
     const db = getDb();
     const f = db.prepare('SELECT f.*, cs.stakeholder_name FROM customer_feedback f LEFT JOIN customer_stakeholders cs ON cs.id = f.stakeholder_id WHERE f.id = ?').get(req.params.id) as any;
     if (!f) return res.status(404).json({ error: 'Feedback not found' });
@@ -259,7 +259,7 @@ export function customerFocusRoutes() {
     res.json({ ...f, links });
   });
 
-  router.put('/feedback/:id', requirePermission('customer_focus', 'edit'), (req, res) => {
+  router.put('/feedback/:id', requirePermission('customer_focus.feedback', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM customer_feedback WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Feedback not found' });
@@ -330,7 +330,7 @@ export function customerFocusRoutes() {
     res.status(201).json({ id: capaId, capaNumber });
   });
 
-  router.post('/feedback/:id/close', requirePermission('customer_focus', 'approve'), (req, res) => {
+  router.post('/feedback/:id/close', requirePermission('customer_focus.feedback', 'approve'), (req, res) => {
     const db = getDb();
     const f = db.prepare('SELECT * FROM customer_feedback WHERE id = ?').get(req.params.id) as any;
     if (!f) return res.status(404).json({ error: 'Feedback not found' });
@@ -342,7 +342,7 @@ export function customerFocusRoutes() {
   });
 
   // ============= Surveys =============
-  router.get('/surveys', requirePermission('customer_focus', 'view'), (req, res) => {
+  router.get('/surveys', requirePermission('customer_focus.surveys', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = [];
     const params: unknown[] = [];
@@ -353,7 +353,7 @@ export function customerFocusRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/surveys', requirePermission('customer_focus', 'create'), (req, res) => {
+  router.post('/surveys', requirePermission('customer_focus.surveys', 'create'), (req, res) => {
     if (!req.body.surveyTitle) return res.status(400).json({ error: 'surveyTitle is required' });
     if (!req.body.surveyType) return res.status(400).json({ error: 'surveyType is required' });
     if (!SURVEY_TYPES.includes(req.body.surveyType)) return res.status(400).json({ error: `surveyType must be one of: ${SURVEY_TYPES.join(', ')}` });
@@ -369,7 +369,7 @@ export function customerFocusRoutes() {
     res.status(201).json({ id, surveyNumber });
   });
 
-  router.get('/surveys/:id', requirePermission('customer_focus', 'view'), (req, res) => {
+  router.get('/surveys/:id', requirePermission('customer_focus.surveys', 'view'), (req, res) => {
     const db = getDb();
     const survey = db.prepare('SELECT * FROM satisfaction_surveys WHERE id = ?').get(req.params.id) as any;
     if (!survey) return res.status(404).json({ error: 'Survey not found' });
@@ -378,7 +378,7 @@ export function customerFocusRoutes() {
     res.json({ ...survey, questions, responseCount });
   });
 
-  router.put('/surveys/:id', requirePermission('customer_focus', 'edit'), (req, res) => {
+  router.put('/surveys/:id', requirePermission('customer_focus.surveys', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM satisfaction_surveys WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Survey not found' });
@@ -389,7 +389,7 @@ export function customerFocusRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/surveys/:id/questions', requirePermission('customer_focus', 'create'), (req, res) => {
+  router.post('/surveys/:id/questions', requirePermission('customer_focus.surveys', 'create'), (req, res) => {
     if (!req.body.questionText) return res.status(400).json({ error: 'questionText is required' });
     if (!req.body.questionType) return res.status(400).json({ error: 'questionType is required' });
     if (!QUESTION_TYPES.includes(req.body.questionType)) return res.status(400).json({ error: `questionType must be one of: ${QUESTION_TYPES.join(', ')}` });
@@ -403,7 +403,7 @@ export function customerFocusRoutes() {
     res.status(201).json({ id });
   });
 
-  router.put('/surveys/:id/questions/:questionId', requirePermission('customer_focus', 'edit'), (req, res) => {
+  router.put('/surveys/:id/questions/:questionId', requirePermission('customer_focus.surveys', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM satisfaction_survey_questions WHERE id = ? AND survey_id = ?').get(req.params.questionId, req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Question not found' });
@@ -414,7 +414,7 @@ export function customerFocusRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/surveys/:id/approve', requirePermission('customer_focus', 'approve'), (req, res) => {
+  router.post('/surveys/:id/approve', requirePermission('customer_focus.surveys', 'approve'), (req, res) => {
     const db = getDb();
     const s = db.prepare('SELECT * FROM satisfaction_surveys WHERE id = ?').get(req.params.id) as any;
     if (!s) return res.status(404).json({ error: 'Survey not found' });
@@ -425,7 +425,7 @@ export function customerFocusRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/surveys/:id/close', requirePermission('customer_focus', 'approve'), (req, res) => {
+  router.post('/surveys/:id/close', requirePermission('customer_focus.surveys', 'approve'), (req, res) => {
     const db = getDb();
     const s = db.prepare('SELECT * FROM satisfaction_surveys WHERE id = ?').get(req.params.id) as any;
     if (!s) return res.status(404).json({ error: 'Survey not found' });
@@ -434,7 +434,7 @@ export function customerFocusRoutes() {
     res.json({ ok: true });
   });
 
-  router.get('/surveys/:id/analytics', requirePermission('customer_focus', 'view'), (req, res) => {
+  router.get('/surveys/:id/analytics', requirePermission('customer_focus.surveys', 'view'), (req, res) => {
     const db = getDb();
     const survey = db.prepare('SELECT * FROM satisfaction_surveys WHERE id = ?').get(req.params.id) as any;
     if (!survey) return res.status(404).json({ error: 'Survey not found' });
@@ -463,7 +463,7 @@ export function customerFocusRoutes() {
     res.json({ survey_id: Number(req.params.id), survey_title: survey.survey_title, total_responses: totalResponses, period_start: survey.period_start, period_end: survey.period_end, status: survey.status, questions: analytics });
   });
 
-  router.get('/service-agreements/:id/performance', requirePermission('customer_focus', 'view'), (req, res) => {
+  router.get('/service-agreements/:id/performance', requirePermission('customer_focus.stakeholders', 'view'), (req, res) => {
     const db = getDb();
     const sa = db.prepare('SELECT sa.*, cs.stakeholder_name FROM service_agreements sa LEFT JOIN customer_stakeholders cs ON cs.id = sa.stakeholder_id WHERE sa.id = ?').get(req.params.id) as any;
     if (!sa) return res.status(404).json({ error: 'Service agreement not found' });
@@ -493,12 +493,12 @@ export function customerFocusRoutes() {
     });
   });
 
-  router.get('/surveys/:id/responses', requirePermission('customer_focus', 'view'), (req, res) => {
+  router.get('/surveys/:id/responses', requirePermission('customer_focus.surveys', 'view'), (req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT r.*, cs.stakeholder_name FROM satisfaction_survey_responses r LEFT JOIN customer_stakeholders cs ON cs.id = r.stakeholder_id WHERE r.survey_id = ? ORDER BY r.response_date DESC, r.id DESC').all(req.params.id));
   });
 
-  router.post('/surveys/:id/responses', requirePermission('customer_focus', 'create'), (req, res) => {
+  router.post('/surveys/:id/responses', requirePermission('customer_focus.surveys', 'create'), (req, res) => {
     if (!req.body.responseDate) return res.status(400).json({ error: 'responseDate is required' });
     const db = getDb();
     const survey = db.prepare('SELECT * FROM satisfaction_surveys WHERE id = ?').get(req.params.id) as any;
@@ -525,7 +525,7 @@ export function customerFocusRoutes() {
     res.status(201).json({ id: responseId, answersSaved: answers.length });
   });
 
-  router.get('/responses', requirePermission('customer_focus', 'view'), (req, res) => {
+  router.get('/responses', requirePermission('customer_focus.surveys', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = [];
     const params: unknown[] = [];
@@ -542,7 +542,7 @@ export function customerFocusRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.get('/responses/:id', requirePermission('customer_focus', 'view'), (req, res) => {
+  router.get('/responses/:id', requirePermission('customer_focus.surveys', 'view'), (req, res) => {
     const db = getDb();
     const response = db.prepare('SELECT r.*, s.survey_title, cs.stakeholder_name FROM satisfaction_survey_responses r JOIN satisfaction_surveys s ON s.id = r.survey_id LEFT JOIN customer_stakeholders cs ON cs.id = r.stakeholder_id WHERE r.id = ?').get(req.params.id) as any;
     if (!response) return res.status(404).json({ error: 'Response not found' });
@@ -551,7 +551,7 @@ export function customerFocusRoutes() {
   });
 
   // ============= Communications =============
-  router.get('/communications', requirePermission('customer_focus', 'view'), (req, res) => {
+  router.get('/communications', requirePermission('customer_focus.communication', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = [];
     const params: unknown[] = [];
@@ -563,7 +563,7 @@ export function customerFocusRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/communications', requirePermission('customer_focus', 'create'), (req, res) => {
+  router.post('/communications', requirePermission('customer_focus.communication', 'create'), (req, res) => {
     if (!req.body.communicationDate) return res.status(400).json({ error: 'communicationDate is required' });
     if (!req.body.communicationType) return res.status(400).json({ error: 'communicationType is required' });
     if (!COMMUNICATION_TYPES.includes(req.body.communicationType)) return res.status(400).json({ error: `communicationType must be one of: ${COMMUNICATION_TYPES.join(', ')}` });
@@ -585,14 +585,14 @@ export function customerFocusRoutes() {
     res.status(201).json({ id, communicationNumber });
   });
 
-  router.get('/communications/:id', requirePermission('customer_focus', 'view'), (req, res) => {
+  router.get('/communications/:id', requirePermission('customer_focus.communication', 'view'), (req, res) => {
     const db = getDb();
     const c = db.prepare('SELECT cl.*, cs.stakeholder_name, s.full_name AS staff_name FROM customer_communication_logs cl LEFT JOIN customer_stakeholders cs ON cs.id = cl.stakeholder_id LEFT JOIN staff s ON s.id = cl.staff_id WHERE cl.id = ?').get(req.params.id);
     if (!c) return res.status(404).json({ error: 'Communication not found' });
     res.json(c);
   });
 
-  router.put('/communications/:id', requirePermission('customer_focus', 'edit'), (req, res) => {
+  router.put('/communications/:id', requirePermission('customer_focus.communication', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM customer_communication_logs WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Communication not found' });
@@ -618,7 +618,7 @@ export function customerFocusRoutes() {
     res.status(201).json({ id: actionId });
   });
 
-  router.post('/communications/:id/close', requirePermission('customer_focus', 'edit'), (req, res) => {
+  router.post('/communications/:id/close', requirePermission('customer_focus.communication', 'edit'), (req, res) => {
     const db = getDb();
     const c = db.prepare('SELECT * FROM customer_communication_logs WHERE id = ?').get(req.params.id) as any;
     if (!c) return res.status(404).json({ error: 'Communication not found' });
@@ -630,12 +630,12 @@ export function customerFocusRoutes() {
   });
 
   // ============= Imports =============
-  router.get('/imports', requirePermission('customer_focus', 'view'), (_req, res) => {
+  router.get('/imports', requirePermission('customer_focus.imports', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT * FROM customer_focus_import_batches ORDER BY created_at DESC').all());
   });
 
-  router.post('/imports', requirePermission('customer_focus', 'create'), uploadInstance.single('file'), (req, res) => {
+  router.post('/imports', requirePermission('customer_focus.imports', 'create'), uploadInstance.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'A file upload is required' });
     if (!req.body.importType) return res.status(400).json({ error: 'importType is required' });
     if (!IMPORT_TYPES.includes(req.body.importType)) return res.status(400).json({ error: `importType must be one of: ${IMPORT_TYPES.join(', ')}` });
@@ -654,7 +654,7 @@ export function customerFocusRoutes() {
     res.status(201).json({ id: batchId, batchNumber });
   });
 
-  router.get('/imports/:id', requirePermission('customer_focus', 'view'), (req, res) => {
+  router.get('/imports/:id', requirePermission('customer_focus.imports', 'view'), (req, res) => {
     const db = getDb();
     const batch = db.prepare('SELECT * FROM customer_focus_import_batches WHERE id = ?').get(req.params.id) as any;
     if (!batch) return res.status(404).json({ error: 'Import batch not found' });
@@ -662,7 +662,7 @@ export function customerFocusRoutes() {
     res.json({ ...batch, rows });
   });
 
-  router.post('/imports/:id/process', requirePermission('customer_focus', 'create'), (req, res) => {
+  router.post('/imports/:id/process', requirePermission('customer_focus.imports', 'create'), (req, res) => {
     const db = getDb();
     const batch = db.prepare('SELECT * FROM customer_focus_import_batches WHERE id = ?').get(req.params.id) as any;
     if (!batch) return res.status(404).json({ error: 'Import batch not found' });
@@ -776,7 +776,7 @@ export function customerFocusRoutes() {
   });
 
   // -------- Printable feedback (print) --------
-  router.get('/feedback/:id/print', requirePermission('customer_focus', 'print'), (req, res) => {
+  router.get('/feedback/:id/print', requirePermission('customer_focus.feedback', 'print'), (req, res) => {
     const db = getDb();
     const f = db.prepare('SELECT f.*, cs.stakeholder_name FROM customer_feedback f LEFT JOIN customer_stakeholders cs ON cs.id = f.stakeholder_id WHERE f.id = ?').get(req.params.id) as any;
     if (!f) return res.status(404).send('Feedback not found');
@@ -804,10 +804,10 @@ ${links.length ? `<h3>Linked records</h3><ul>${links.map(l => `<li>${esc(l.targe
   });
 
   // ============= Advisory services =============
-  router.get('/advisory', requirePermission('customer_focus', 'view'), (_req, res) => {
+  router.get('/advisory', requirePermission('customer_focus.advisory', 'view'), (_req, res) => {
     res.json(getDb().prepare('SELECT * FROM advisory_services ORDER BY service_date DESC, created_at DESC').all());
   });
-  router.post('/advisory', requirePermission('customer_focus', 'create'), (req, res) => {
+  router.post('/advisory', requirePermission('customer_focus.advisory', 'create'), (req, res) => {
     if (!req.body.serviceDate) return res.status(400).json({ error: 'serviceDate is required' });
     const db = getDb();
     const createdAt = new Date().toISOString();
@@ -817,7 +817,7 @@ ${links.length ? `<h3>Linked records</h3><ul>${links.map(l => `<li>${esc(l.targe
     audit(req, { action: 'create', entity: 'advisory_services', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
     res.status(201).json({ id: r.lastInsertRowid, recordNumber: number });
   });
-  router.put('/advisory/:id', requirePermission('customer_focus', 'edit'), (req, res) => {
+  router.put('/advisory/:id', requirePermission('customer_focus.advisory', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM advisory_services WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Advisory record not found' });
@@ -828,10 +828,10 @@ ${links.length ? `<h3>Linked records</h3><ul>${links.map(l => `<li>${esc(l.targe
   });
 
   // ============= Laboratory handbook =============
-  router.get('/handbook', requirePermission('customer_focus', 'view'), (_req, res) => {
+  router.get('/handbook', requirePermission('customer_focus.advisory', 'view'), (_req, res) => {
     res.json(getDb().prepare('SELECT * FROM laboratory_handbook_entries ORDER BY display_order ASC, created_at DESC').all());
   });
-  router.post('/handbook', requirePermission('customer_focus', 'create'), (req, res) => {
+  router.post('/handbook', requirePermission('customer_focus.advisory', 'create'), (req, res) => {
     if (!req.body.title) return res.status(400).json({ error: 'title is required' });
     const db = getDb();
     const createdAt = new Date().toISOString();
@@ -841,7 +841,7 @@ ${links.length ? `<h3>Linked records</h3><ul>${links.map(l => `<li>${esc(l.targe
     audit(req, { action: 'create', entity: 'laboratory_handbook_entries', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
     res.status(201).json({ id: r.lastInsertRowid, entryNumber: number });
   });
-  router.put('/handbook/:id', requirePermission('customer_focus', 'edit'), (req, res) => {
+  router.put('/handbook/:id', requirePermission('customer_focus.advisory', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM laboratory_handbook_entries WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Handbook entry not found' });

@@ -17,6 +17,7 @@
  */
 import { getDb } from '../db/database.js';
 import { MODULES, PERMISSION_ACTIONS } from '../../shared/constants/modules.js';
+import { FEATURES, featuresOfModule, isFeatureKey, getFeature } from '../../shared/constants/features.js';
 
 export type PermissionDecision = { allowed: boolean; source: string; reason: string };
 
@@ -125,46 +126,102 @@ function computeGrants(userId: number): Map<string, Grant> {
 
   // ── Rule 1: `view` is the floor for every other action ────────────────────
   // Applied last so it also overrides grants made by any layer above.
-  const modulesSeen = new Set(permissions.map(p => p.module_key));
-  for (const moduleKey of modulesSeen) {
-    const canView = grants.get(key(moduleKey, BASE_ACTION))?.allowed === true;
+  const keysSeen = new Set(permissions.map(p => p.module_key));
+  for (const permKey of keysSeen) {
+    const canView = grants.get(key(permKey, BASE_ACTION))?.allowed === true;
     for (const action of PERMISSION_ACTIONS) {
       if (action === BASE_ACTION) continue;
-      const g = grants.get(key(moduleKey, action));
+      const g = grants.get(key(permKey, action));
       if (g?.allowed && !canView) {
-        set(moduleKey, action, false, 'Denied override',
-          `The ${action} right needs the right to view this module. Grant "view" first.`);
+        set(permKey, action, false, 'Denied override',
+          `The ${action} right needs the right to view this area. Grant "view" first.`);
+      }
+    }
+  }
+
+  // ── Rule 2: a module's access is the union of its features ───────────────
+  // Permissions are granted on features, but 1,000+ existing route guards name
+  // modules. Deriving the module from its features keeps every one of them
+  // working: `personnel:view` now means "can view at least one part of
+  // Personnel", which is exactly the question the module gate is asking — is
+  // this workspace worth showing at all. The finer question is asked with a
+  // feature key.
+  for (const moduleKey of new Set(FEATURES.map(f => f.module))) {
+    const features = featuresOfModule(moduleKey);
+    for (const action of PERMISSION_ACTIONS) {
+      const allowedBy = features.find(f => grants.get(key(f.key, action))?.allowed === true);
+      if (allowedBy) {
+        set(moduleKey, action, true, 'Feature grant', `Allowed by the "${allowedBy.label}" feature.`);
+      } else {
+        set(moduleKey, action, false, 'Denied override', 'No feature inside this module allows this action.');
       }
     }
   }
 
   // ── Disabled modules grant nothing, whatever the layers above said ────────
-  for (const moduleKey of modulesSeen) {
-    if (enabledModules.has(moduleKey)) continue;
+  const moduleOf = (permKey: string) => getFeature(permKey)?.module ?? permKey;
+  for (const permKey of new Set([...keysSeen, ...FEATURES.map(f => f.key)])) {
+    if (enabledModules.has(moduleOf(permKey))) continue;
     for (const action of PERMISSION_ACTIONS) {
-      set(moduleKey, action, false, 'Module disabled', 'The module is disabled or unavailable.');
+      set(permKey, action, false, 'Module disabled', 'The module is disabled or unavailable.');
     }
   }
 
   return grants;
 }
 
-/** Decide a single (module, action) question for a user. */
-export function resolvePermission(userId: number, moduleKey: string, action: string): PermissionDecision {
+/**
+ * Decide a single question for a user. `permKey` is either a module key
+ * (`personnel`) or a feature key (`personnel.appraisals`).
+ */
+export function resolvePermission(userId: number, permKey: string, action: string): PermissionDecision {
   const db = getDb();
+  const moduleKey = getFeature(permKey)?.module ?? permKey;
   const module = db.prepare('SELECT enabled FROM system_modules WHERE key = ?').get(moduleKey) as { enabled: number } | undefined;
   if (!module || module.enabled !== 1) return { allowed: false, source: 'Module disabled', reason: 'The module is disabled or unavailable.' };
 
   const user = db.prepare('SELECT is_active FROM users WHERE id = ?').get(userId) as { is_active: number } | undefined;
   if (!user || user.is_active !== 1) return { allowed: false, source: 'Denied override', reason: 'Inactive or unknown user.' };
 
-  const permission = db.prepare('SELECT id FROM permissions WHERE module_key = ? AND action = ?').get(moduleKey, action) as { id: number } | undefined;
-  if (!permission) return { allowed: false, source: 'Denied override', reason: 'Permission is not defined.' };
+  if (!isFeatureKey(permKey)) {
+    const permission = db.prepare('SELECT id FROM permissions WHERE module_key = ? AND action = ?').get(permKey, action) as { id: number } | undefined;
+    if (!permission && featuresOfModule(permKey).length === 0) {
+      return { allowed: false, source: 'Denied override', reason: 'Permission is not defined.' };
+    }
+  }
 
-  const grant = computeGrants(userId).get(`${moduleKey}:${action}`);
+  const grant = computeGrants(userId).get(`${permKey}:${action}`);
   if (grant?.allowed) return { allowed: true, source: grant.source, reason: grant.reason };
   if (grant) return { allowed: false, source: grant.source, reason: grant.reason };
   return { allowed: false, source: 'Denied override', reason: 'No permission source allows this action.' };
+}
+
+/**
+ * Whether a user reaches a record in a *personal* feature.
+ *
+ * Personal features hold a person's own data — their profile, declarations,
+ * training, appraisals, occupational health. Everyone reaches their own record
+ * unconditionally; reaching someone else's takes the granted level. This is
+ * what makes "edit your own details, never open anyone else's" expressible.
+ *
+ * `ownerStaffId` is the staff record the row belongs to; pass null for a
+ * listing, which then answers "may this user see other people's rows here".
+ */
+export function canReachPersonalRecord(
+  userId: number,
+  featureKey: string,
+  action: string,
+  ownerStaffId: number | null,
+  callerStaffId: number | null,
+): boolean {
+  const feature = getFeature(featureKey);
+  if (feature?.personal && ownerStaffId != null && callerStaffId != null && Number(ownerStaffId) === Number(callerStaffId)) {
+    // Your own record. Viewing and printing it is always yours; changing it
+    // still needs a grant, so a laboratory can keep appraisals read-only to
+    // the person they are about.
+    if (action === BASE_ACTION || action === 'print') return true;
+  }
+  return resolvePermission(userId, featureKey, action).allowed;
 }
 
 /**
@@ -176,10 +233,14 @@ export function resolvePermission(userId: number, moduleKey: string, action: str
 export function getEffectivePermissions(userId: number): PermissionMap {
   const grants = computeGrants(userId);
   const map: PermissionMap = {};
-  for (const module of MODULES) {
-    const actions = PERMISSION_ACTIONS.filter(a => grants.get(`${module.key}:${a}`)?.allowed === true);
-    if (actions.includes(BASE_ACTION)) map[module.key] = [...actions];
-  }
+  const add = (permKey: string) => {
+    const actions = PERMISSION_ACTIONS.filter(a => grants.get(`${permKey}:${a}`)?.allowed === true);
+    if (actions.includes(BASE_ACTION)) map[permKey] = [...actions];
+  };
+  for (const module of MODULES) add(module.key);
+  // Features travel in the same map, keyed `module.feature`, so the client
+  // hides a tab with the same call it uses to hide a module.
+  for (const feature of FEATURES) add(feature.key);
   return map;
 }
 

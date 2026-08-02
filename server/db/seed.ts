@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { DEFAULT_POSITIONS, MODULES, PERMISSION_ACTIONS } from '../../shared/constants/modules.js';
+import { FEATURES, LEVEL_ACTIONS, type AccessLevel } from '../../shared/constants/features.js';
 import { getDb } from './database.js';
 import { config } from '../config/index.js';
 
@@ -29,6 +30,14 @@ export function seedDefaults() {
         db.prepare('INSERT OR IGNORE INTO permissions (module_key, action, label) VALUES (?, ?, ?)').run(module.key, action, `${module.label}: ${action}`);
       }
     }
+    // Features are permission targets in their own right, stored in the same
+    // table keyed `module.feature`. A module's access is derived from these by
+    // the resolver, so both granularities live in one place.
+    for (const feature of FEATURES) {
+      for (const action of PERMISSION_ACTIONS) {
+        db.prepare('INSERT OR IGNORE INTO permissions (module_key, action, label) VALUES (?, ?, ?)').run(feature.key, action, `${feature.label}: ${action}`);
+      }
+    }
     for (const title of DEFAULT_POSITIONS) {
       db.prepare('INSERT OR IGNORE INTO positions (title, description, is_active) VALUES (?, ?, 1)').run(title, 'Default organogram position. Assign staff during setup or later.');
     }
@@ -46,259 +55,296 @@ export function seedDefaults() {
     db.prepare("INSERT OR IGNORE INTO dennis_settings (setting_key, setting_value) VALUES ('dennis.mode', 'Offline only')").run();
     db.prepare("INSERT OR IGNORE INTO dennis_settings (setting_key, setting_value) VALUES ('dennis.online.enabled', 'false')").run();
 
-    const rolePermissionsMap: Record<string, Record<string, string[]>> = {
-      'Laboratory Manager': {
-        documents: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        personnel: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        nc_capa: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        complaints: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        risks: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        supplier_inventory: ['view', 'create', 'edit', 'print'],
-        equipment: ['view', 'create', 'edit', 'print'],
-        monitoring: ['view', 'create', 'edit', 'print'],
-        facilities_safety: ['view', 'create', 'edit', 'print'],
-        actions: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        iqc: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        eqa: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        verification_validation: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        measurement_uncertainty: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        blood_bank_handover: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        monthly_reports: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        assessments: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        meetings: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        management_review: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        quality_indicators: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        continual_improvement: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        customer_focus: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        poct: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        notifications: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        records_reports: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        process_management: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        information_management: ['view', 'create', 'edit', 'approve', 'export', 'print']
-      },
-      'Quality Manager': {
-        documents: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        personnel: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        nc_capa: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        complaints: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        risks: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        supplier_inventory: ['view', 'create', 'edit', 'print'],
-        equipment: ['view', 'create', 'edit', 'print'],
-        monitoring: ['view', 'create', 'edit', 'print'],
-        facilities_safety: ['view', 'create', 'edit', 'print'],
-        actions: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        iqc: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        eqa: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        verification_validation: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        measurement_uncertainty: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        blood_bank_handover: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        monthly_reports: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        assessments: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        meetings: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        management_review: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        quality_indicators: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        continual_improvement: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        customer_focus: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        poct: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        notifications: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        records_reports: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        process_management: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        information_management: ['view', 'create', 'edit', 'approve', 'export', 'print']
-      },
-      'Data Officer': {
-        monthly_reports: ['view', 'create', 'edit', 'export', 'print'],
-        nc_capa: ['view', 'create', 'print'],
-        actions: ['view', 'create', 'edit', 'print'],
-        supplier_inventory: ['view', 'print'],
-        process_management: ['view', 'create', 'edit', 'print'],
-        information_management: ['view', 'create', 'edit', 'export', 'print']
-      },
-      'POCT Officer': {
-        poct: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        nc_capa: ['view', 'create', 'edit', 'print'],
-        actions: ['view', 'create', 'edit', 'print'],
-        equipment: ['view', 'create', 'edit', 'print'],
-        iqc: ['view', 'create', 'edit', 'print'],
-        eqa: ['view', 'create', 'edit', 'print'],
-        personnel: ['view', 'create', 'edit', 'print'],
-        supplier_inventory: ['view', 'print'],
-        documents: ['view', 'print']
-      },
-      'Blood Bank Unit Head': {
-        blood_bank_handover: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        nc_capa: ['view', 'create', 'edit', 'print'],
-        actions: ['view', 'create', 'edit', 'print'],
-        facilities_safety: ['view', 'create', 'print'],
-        monitoring: ['view', 'create', 'print'],
-        equipment: ['view', 'print'],
-        supplier_inventory: ['view', 'print']
-      },
-      'Safety Manager': {
-        facilities_safety: ['view', 'create', 'edit', 'approve', 'export', 'print'],
-        blood_bank_handover: ['view', 'print'],
-        nc_capa: ['view', 'create', 'edit', 'print'],
-        actions: ['view', 'create', 'edit', 'print']
-      },
-      'Quality Team Member': {
-        documents: ['view', 'create', 'edit', 'print'],
-        personnel: ['view', 'create', 'edit', 'print'],
-        nc_capa: ['view', 'create', 'edit', 'print'],
-        complaints: ['view', 'create', 'edit', 'print'],
-        risks: ['view', 'create', 'edit', 'print'],
-        supplier_inventory: ['view', 'create', 'edit', 'print'],
-        equipment: ['view', 'create', 'edit', 'print'],
-        monitoring: ['view', 'create', 'edit', 'print'],
-        facilities_safety: ['view', 'create', 'edit', 'print'],
-        actions: ['view', 'create', 'edit', 'print'],
-        iqc: ['view', 'create', 'edit', 'print'],
-        eqa: ['view', 'create', 'edit', 'print'],
-        verification_validation: ['view', 'create', 'edit', 'print'],
-        measurement_uncertainty: ['view', 'create', 'edit', 'print'],
-        blood_bank_handover: ['view', 'create', 'edit', 'print'],
-        monthly_reports: ['view', 'create', 'edit', 'print'],
-        assessments: ['view', 'create', 'edit', 'print'],
-        meetings: ['view', 'create', 'edit', 'print'],
-        management_review: ['view', 'create', 'edit', 'print'],
-        quality_indicators: ['view', 'create', 'edit', 'print'],
-        continual_improvement: ['view', 'create', 'edit', 'print'],
-        customer_focus: ['view', 'create', 'edit', 'print'],
-        poct: ['view', 'create', 'edit', 'print'],
-        notifications: ['view', 'create', 'edit', 'print'],
-        records_reports: ['view', 'create', 'edit', 'export', 'print'],
-        process_management: ['view', 'create', 'edit', 'print'],
-        information_management: ['view', 'create', 'edit', 'export', 'print']
-      },
-      'Section Head': {
-        documents: ['view', 'create', 'edit', 'print'],
-        personnel: ['view', 'create', 'edit', 'print'],
-        nc_capa: ['view', 'create', 'edit', 'print'],
-        complaints: ['view', 'create', 'edit', 'print'],
-        risks: ['view', 'create', 'edit', 'print'],
-        supplier_inventory: ['view', 'create', 'edit', 'print'],
-        equipment: ['view', 'create', 'edit', 'print'],
-        monitoring: ['view', 'create', 'edit', 'print'],
-        facilities_safety: ['view', 'create', 'edit', 'print'],
-        actions: ['view', 'create', 'edit', 'print'],
-        iqc: ['view', 'create', 'edit', 'print'],
-        eqa: ['view', 'create', 'edit', 'print'],
-        verification_validation: ['view', 'create', 'edit', 'print'],
-        measurement_uncertainty: ['view', 'create', 'edit', 'print'],
-        monthly_reports: ['view', 'create', 'edit', 'print'],
-        assessments: ['view', 'create', 'edit', 'print'],
-        meetings: ['view', 'create', 'edit', 'print'],
-        management_review: ['view'],
-        quality_indicators: ['view', 'create', 'edit', 'print'],
-        continual_improvement: ['view', 'create', 'edit', 'print'],
-        customer_focus: ['view', 'create', 'edit', 'print'],
-        poct: ['view', 'create', 'edit', 'print'],
-        notifications: ['view', 'create', 'edit', 'print'],
-        records_reports: ['view', 'create', 'edit', 'export', 'print'],
-        process_management: ['view', 'create', 'edit', 'print'],
-        information_management: ['view', 'create', 'edit', 'export', 'print']
-      },
-      'Biomedical Scientist': {
-        documents: ['view', 'print'],
-        personnel: ['view'],
-        nc_capa: ['view', 'create', 'print'],
-        complaints: ['view', 'create', 'print'],
-        risks: ['view', 'create', 'print'],
-        supplier_inventory: ['view', 'create', 'print'],
-        equipment: ['view', 'create', 'print'],
-        monitoring: ['view', 'create', 'print'],
-        facilities_safety: ['view', 'create', 'print'],
-        actions: ['view', 'create', 'print'],
-        iqc: ['view', 'create', 'print'],
-        eqa: ['view', 'create', 'print'],
-        verification_validation: ['view', 'create', 'print'],
-        measurement_uncertainty: ['view', 'create', 'print'],
-        blood_bank_handover: ['view', 'create', 'edit', 'print'],
-        monthly_reports: ['view', 'print'],
-        assessments: ['view', 'create', 'print'],
-        meetings: ['view', 'print'],
-        quality_indicators: ['view', 'create', 'print'],
-        continual_improvement: ['view', 'create', 'print'],
-        customer_focus: ['view', 'create', 'print'],
-        poct: ['view', 'create', 'edit', 'print'],
-        notifications: ['view', 'create', 'print'],
-        records_reports: ['view', 'create', 'print'],
-        process_management: ['view', 'create', 'print'],
-        information_management: ['view', 'create']
-      },
-      'Technician': {
-        documents: ['view', 'print'],
-        personnel: ['view'],
-        nc_capa: ['view', 'create', 'print'],
-        complaints: ['view', 'create', 'print'],
-        risks: ['view', 'create', 'print'],
-        supplier_inventory: ['view', 'create', 'print'],
-        equipment: ['view', 'create', 'print'],
-        monitoring: ['view', 'create', 'print'],
-        facilities_safety: ['view', 'create', 'print'],
-        actions: ['view', 'create', 'print'],
-        iqc: ['view', 'create', 'print'],
-        eqa: ['view', 'create', 'print'],
-        verification_validation: ['view', 'create', 'print'],
-        measurement_uncertainty: ['view', 'create', 'print'],
-        blood_bank_handover: ['view', 'create'],
-        monthly_reports: ['view'],
-        assessments: ['view'],
-        meetings: ['view'],
-        quality_indicators: ['view'],
-        continual_improvement: ['view'],
-        customer_focus: ['view'],
-        poct: ['view', 'create'],
-        notifications: ['view'],
-        records_reports: ['view'],
-        process_management: ['view', 'create'],
-        information_management: ['view']
-      },
-      'Quality User': {
-        nc_capa: ['view', 'create', 'edit', 'print'],
-        complaints: ['view', 'create', 'edit', 'print'],
-        risks: ['view', 'create', 'edit', 'print'],
-        supplier_inventory: ['view', 'create', 'edit', 'print'],
-        equipment: ['view', 'create', 'edit', 'print'],
-        monitoring: ['view', 'create', 'edit', 'print'],
-        facilities_safety: ['view', 'create', 'edit', 'print'],
-        actions: ['view', 'create', 'edit', 'print'],
-        iqc: ['view', 'create', 'edit', 'print'],
-        eqa: ['view', 'create', 'edit', 'print'],
-        verification_validation: ['view', 'create', 'edit', 'print'],
-        measurement_uncertainty: ['view', 'create', 'edit', 'print']
-      }
+    // ========================================================================
+    // Role defaults, expressed as an access LEVEL per feature.
+    //
+    // The old map hand-listed action arrays per module — 224 decisions a role,
+    // unreviewable in practice, which is how a Technician came to hold create
+    // rights on the equipment register and a POCT Officer edit rights on every
+    // staff record. Levels are declarative and least-privilege by default:
+    // anything not listed is `none`.
+    //
+    //   view       open and print, change nothing
+    //   contribute add new records, alter nothing existing
+    //   manage     add, change and export
+    //   full       manage, plus approve and archive
+    //
+    // Keys are feature keys (`personnel.register`) for modules that have been
+    // broken up, and module keys for those that have not.
+    // ========================================================================
+
+    // Every member of staff, whatever their rank: their own record, their own
+    // inbox, the launchpad, the ability to raise a safety incident or a
+    // nonconformity, and read access to the documents they must follow.
+    const EVERYONE: Partial<Record<AccessLevel, string[]>> = {
+      view: ['home', 'dashboard', 'documents.library', 'organisation.structure', 'dennis'],
+      manage: ['personnel.self', 'notifications.inbox'],
+      contribute: ['nc_capa', 'facilities_safety.incidents', 'actions'],
     };
 
-    const dennisFull = ['view', 'create', 'edit', 'approve', 'export', 'print'];
-    for (const roleName of ['Laboratory Manager', 'Quality Manager']) rolePermissionsMap[roleName].dennis = dennisFull;
-    for (const roleName of ['Section Head', 'Quality Team Member']) rolePermissionsMap[roleName].dennis = ['view', 'create', 'edit', 'export', 'print'];
-    rolePermissionsMap['Blood Bank Unit Head'].dennis = ['view', 'create', 'edit', 'print'];
-    rolePermissionsMap['Data Officer'].dennis = ['view', 'export', 'print'];
-    for (const roleName of ['Biomedical Scientist', 'Technician', 'Quality User']) rolePermissionsMap[roleName].dennis = ['view', 'print'];
+    const ROLE_ACCESS: Record<string, Partial<Record<AccessLevel, string[]>>> = {
+      // ---- Frontline bench staff ------------------------------------------
+      // Records the work they do. Owns nothing, configures nothing, and cannot
+      // open a colleague's personnel file.
+      'Technician': {
+        contribute: [
+          'monitoring.readings', 'equipment.maintenance', 'supplier_inventory.stock',
+          'process_management.receipt', 'process_management.rejections',
+          'customer_focus.feedback', 'customer_focus.communication',
+          'iqc', 'blood_bank_handover', 'poct', 'risks', 'complaints',
+        ],
+        view: [
+          'process_management.directory', 'process_management.intervals',
+          'equipment.register', 'supplier_inventory.storage', 'eqa',
+          'notifications.calendar', 'monitoring.reports',
+        ],
+      },
 
-    // Baseline every role needs. The launchpad, the main dashboard and the
-    // personal inbox are themselves filtered to the modules a person may open,
-    // so granting them here shows nobody anything they are not entitled to —
-    // it only stops the shell itself from disappearing. Without this, hiding
-    // features by permission would leave most roles with an empty application.
-    for (const modulePermissions of Object.values(rolePermissionsMap)) {
-      modulePermissions.home = ['view'];
-      modulePermissions.dashboard = ['view'];
-      if (!modulePermissions.notifications) modulePermissions.notifications = ['view'];
-    }
+      // ---- Registered scientific staff -------------------------------------
+      // Everything a Technician does, plus the technical quality work they are
+      // qualified to perform and the registers that go with it.
+      'Biomedical Scientist': {
+        manage: ['iqc', 'monitoring.readings', 'equipment.maintenance', 'process_management.receipt'],
+        contribute: [
+          'eqa', 'verification_validation', 'measurement_uncertainty',
+          'equipment.verification', 'equipment.adverse',
+          'process_management.rejections', 'process_management.critical',
+          'process_management.referrals', 'blood_bank_handover', 'poct',
+          'supplier_inventory.stock', 'quality_indicators', 'continual_improvement',
+          'customer_focus.feedback', 'customer_focus.communication',
+          'risks', 'complaints', 'facilities_safety.equipment',
+        ],
+        view: [
+          'process_management.directory', 'process_management.intervals',
+          'equipment.register', 'equipment.files', 'supplier_inventory.storage',
+          'assessments', 'meetings', 'records_reports.generate',
+          'notifications.calendar', 'monitoring.reports', 'documents.records',
+        ],
+      },
 
-    // Organisation & Leadership had no role defaults at all, so every role
-    // except the administrator was refused the module the sidebar still
-    // offered them. Leadership manages it; everyone else may read it.
-    const organisationFull = ['view', 'create', 'edit', 'approve', 'export', 'print'];
-    for (const roleName of ['Laboratory Manager', 'Quality Manager']) rolePermissionsMap[roleName].organisation = organisationFull;
-    for (const roleName of ['Section Head', 'Quality Team Member']) rolePermissionsMap[roleName].organisation = ['view', 'create', 'edit', 'print'];
-    for (const roleName of ['Biomedical Scientist', 'Technician', 'Blood Bank Unit Head', 'Safety Manager', 'Data Officer', 'POCT Officer', 'Quality User']) {
-      rolePermissionsMap[roleName].organisation = ['view', 'print'];
+      // ---- General QMS user -------------------------------------------------
+      'Quality User': {
+        contribute: [
+          'risks', 'complaints', 'quality_indicators', 'continual_improvement',
+          'customer_focus.feedback', 'customer_focus.communication',
+          'monitoring.readings', 'equipment.maintenance', 'supplier_inventory.stock',
+        ],
+        view: ['assessments', 'meetings', 'notifications.calendar', 'documents.records'],
+      },
+
+      // ---- Section / unit leadership ---------------------------------------
+      // Runs a section: its people's rosters and training, its equipment, its
+      // technical quality. Not the laboratory's finances or licences.
+      'Section Head': {
+        full: ['iqc', 'eqa', 'verification_validation', 'measurement_uncertainty'],
+        manage: [
+          'personnel.rosters', 'personnel.training', 'personnel.orientation',
+          'equipment.register', 'equipment.maintenance', 'equipment.verification',
+          'equipment.training', 'equipment.files', 'equipment.adverse',
+          'supplier_inventory.stock', 'supplier_inventory.storage',
+          'process_management.receipt', 'process_management.rejections',
+          'process_management.referrals', 'process_management.reviews',
+          'monitoring.readings', 'monitoring.assets', 'monitoring.reports',
+          'nc_capa', 'risks', 'complaints', 'actions', 'quality_indicators',
+          'continual_improvement', 'blood_bank_handover', 'poct',
+          'documents.authoring', 'documents.records',
+          'customer_focus.feedback', 'customer_focus.communication', 'customer_focus.advisory',
+          'facilities_safety.incidents', 'facilities_safety.equipment', 'facilities_safety.inspections',
+          'records_reports.generate', 'notifications.calendar', 'monthly_reports',
+        ],
+        view: [
+          'personnel.register', 'personnel.authorizations',
+          'process_management.directory', 'process_management.intervals',
+          'process_management.critical', 'assessments', 'meetings',
+          'documents.masterlist', 'documents.archive', 'supplier_inventory.suppliers',
+        ],
+      },
+
+      // ---- Quality office ---------------------------------------------------
+      'Quality Team Member': {
+        manage: [
+          'nc_capa', 'complaints', 'risks', 'actions', 'assessments',
+          'quality_indicators', 'continual_improvement', 'customer_focus.feedback',
+          'customer_focus.surveys', 'customer_focus.communication', 'customer_focus.advisory',
+          'customer_focus.reports', 'documents.authoring', 'documents.records',
+          'documents.masterlist', 'documents.archive',
+          'records_reports.generate', 'records_reports.evidence', 'records_reports.print',
+          'notifications.calendar', 'meetings', 'monthly_reports',
+          'process_management.reviews', 'monitoring.reports',
+        ],
+        view: [
+          'personnel.register', 'personnel.training', 'personnel.orientation',
+          'personnel.authorizations', 'personnel.reports',
+          'equipment.register', 'equipment.maintenance', 'equipment.verification',
+          'supplier_inventory.stock', 'supplier_inventory.suppliers',
+          'process_management.directory', 'process_management.intervals',
+          'process_management.critical', 'process_management.referrals',
+          'information_management.assets', 'information_management.reviews',
+          'organisation.quality_config', 'organisation.records_review',
+          'management_review', 'iqc', 'eqa', 'verification_validation',
+          'measurement_uncertainty', 'poct', 'blood_bank_handover',
+          'facilities_safety.equipment', 'facilities_safety.inspections',
+          'records_reports.audit', 'monitoring.readings',
+        ],
+      },
+
+      // ---- Quality Manager --------------------------------------------------
+      // Owns the management system end to end. Not staff pay, appraisals or
+      // the budget — those stay with the Laboratory Manager.
+      'Quality Manager': {
+        full: [
+          'nc_capa', 'complaints', 'risks', 'actions', 'assessments',
+          'quality_indicators', 'continual_improvement', 'management_review',
+          'meetings', 'monthly_reports', 'iqc', 'eqa', 'verification_validation',
+          'measurement_uncertainty', 'poct', 'blood_bank_handover',
+          'documents.library', 'documents.authoring', 'documents.workflow',
+          'documents.records', 'documents.masterlist', 'documents.archive',
+          'customer_focus.feedback', 'customer_focus.surveys', 'customer_focus.communication',
+          'customer_focus.advisory', 'customer_focus.stakeholders', 'customer_focus.imports',
+          'customer_focus.reports',
+          'records_reports.generate', 'records_reports.evidence', 'records_reports.print',
+          'records_reports.audit', 'records_reports.retention',
+          'organisation.quality_config', 'organisation.records_review',
+          'notifications.calendar', 'notifications.rules',
+        ],
+        manage: [
+          'personnel.training', 'personnel.orientation', 'personnel.authorizations',
+          'personnel.declarations', 'personnel.reports', 'personnel.rosters',
+          'equipment.register', 'equipment.maintenance', 'equipment.verification',
+          'equipment.training', 'equipment.files', 'equipment.adverse', 'equipment.reports',
+          'supplier_inventory.stock', 'supplier_inventory.suppliers',
+          'supplier_inventory.storage', 'supplier_inventory.labels', 'supplier_inventory.reports',
+          'process_management.receipt', 'process_management.directory',
+          'process_management.rejections', 'process_management.intervals',
+          'process_management.critical', 'process_management.referrals',
+          'process_management.amendments', 'process_management.reviews',
+          'information_management.assets', 'information_management.access',
+          'information_management.security', 'information_management.data',
+          'information_management.change', 'information_management.downtime',
+          'information_management.reviews', 'information_management.reports',
+          'monitoring.readings', 'monitoring.assets', 'monitoring.settings', 'monitoring.reports',
+          'facilities_safety.incidents', 'facilities_safety.equipment',
+          'facilities_safety.inspections', 'facilities_safety.waste', 'facilities_safety.environment',
+          'organisation.structure', 'organisation.licences', 'documents.profile',
+        ],
+        view: ['personnel.register', 'organisation.budget'],
+      },
+
+      // ---- Laboratory Manager ----------------------------------------------
+      // Accountable for the whole laboratory, including its people and money.
+      'Laboratory Manager': {
+        full: [
+          'personnel.register', 'personnel.orientation', 'personnel.declarations',
+          'personnel.training', 'personnel.appraisals', 'personnel.authorizations',
+          'personnel.rosters', 'personnel.reports',
+          'nc_capa', 'complaints', 'risks', 'actions', 'assessments',
+          'quality_indicators', 'continual_improvement', 'management_review',
+          'meetings', 'monthly_reports', 'iqc', 'eqa', 'verification_validation',
+          'measurement_uncertainty', 'poct', 'blood_bank_handover',
+          'documents.library', 'documents.authoring', 'documents.workflow',
+          'documents.records', 'documents.masterlist', 'documents.archive', 'documents.profile',
+          'organisation.structure', 'organisation.quality_config', 'organisation.budget',
+          'organisation.records_review', 'organisation.licences',
+          'customer_focus.feedback', 'customer_focus.surveys', 'customer_focus.communication',
+          'customer_focus.advisory', 'customer_focus.stakeholders', 'customer_focus.imports',
+          'customer_focus.reports',
+          'records_reports.generate', 'records_reports.evidence', 'records_reports.print',
+          'records_reports.audit', 'records_reports.retention',
+          'notifications.calendar', 'notifications.rules',
+        ],
+        manage: [
+          'equipment.register', 'equipment.maintenance', 'equipment.verification',
+          'equipment.training', 'equipment.files', 'equipment.adverse', 'equipment.reports',
+          'supplier_inventory.stock', 'supplier_inventory.suppliers',
+          'supplier_inventory.storage', 'supplier_inventory.labels', 'supplier_inventory.reports',
+          'process_management.receipt', 'process_management.directory',
+          'process_management.rejections', 'process_management.intervals',
+          'process_management.critical', 'process_management.referrals',
+          'process_management.amendments', 'process_management.reviews',
+          'information_management.assets', 'information_management.access',
+          'information_management.security', 'information_management.data',
+          'information_management.change', 'information_management.downtime',
+          'information_management.reviews', 'information_management.reports',
+          'monitoring.readings', 'monitoring.assets', 'monitoring.settings', 'monitoring.reports',
+          'facilities_safety.incidents', 'facilities_safety.equipment',
+          'facilities_safety.inspections', 'facilities_safety.waste',
+          'facilities_safety.health', 'facilities_safety.environment',
+        ],
+      },
+
+      // ---- Specialist leads --------------------------------------------------
+      'Blood Bank Unit Head': {
+        full: ['blood_bank_handover'],
+        manage: [
+          'nc_capa', 'actions', 'risks', 'monitoring.readings',
+          'equipment.maintenance', 'supplier_inventory.stock',
+          'facilities_safety.incidents', 'facilities_safety.equipment',
+        ],
+        view: ['equipment.register', 'supplier_inventory.storage', 'documents.records', 'notifications.calendar'],
+      },
+
+      'Safety Manager': {
+        full: [
+          'facilities_safety.incidents', 'facilities_safety.equipment',
+          'facilities_safety.inspections', 'facilities_safety.waste',
+          'facilities_safety.health', 'facilities_safety.environment',
+        ],
+        manage: ['nc_capa', 'actions', 'risks', 'monitoring.readings', 'monitoring.reports'],
+        view: ['blood_bank_handover', 'equipment.register', 'personnel.training', 'notifications.calendar'],
+      },
+
+      'Data Officer': {
+        full: ['monthly_reports'],
+        manage: [
+          'information_management.assets', 'information_management.data',
+          'information_management.downtime', 'information_management.reports',
+          'records_reports.generate', 'actions',
+        ],
+        view: [
+          'information_management.change', 'information_management.reviews',
+          'supplier_inventory.stock', 'process_management.receipt',
+          'documents.records', 'notifications.calendar', 'quality_indicators',
+        ],
+      },
+
+      // POCT oversight. Deliberately holds NO rights over the personnel
+      // register: the previous default let a POCT Officer edit any member of
+      // staff's record, which their role never required.
+      'POCT Officer': {
+        full: ['poct'],
+        manage: [
+          'equipment.maintenance', 'equipment.training', 'iqc', 'eqa',
+          'nc_capa', 'actions', 'monitoring.readings',
+        ],
+        view: [
+          'equipment.register', 'supplier_inventory.stock',
+          'personnel.training', 'documents.records', 'notifications.calendar',
+        ],
+      },
+    };
+
+    // Fold the shared baseline into every role without overwriting a role's own,
+    // higher, level for the same key.
+    const LEVEL_RANK: Record<AccessLevel, number> = { none: 0, view: 1, contribute: 2, manage: 3, full: 4 };
+    const effectiveLevels: Record<string, Record<string, AccessLevel>> = {};
+    for (const [roleName, byLevel] of Object.entries(ROLE_ACCESS)) {
+      const flat: Record<string, AccessLevel> = {};
+      const apply = (source: Partial<Record<AccessLevel, string[]>>) => {
+        for (const [level, keys] of Object.entries(source) as [AccessLevel, string[]][]) {
+          for (const k of keys) {
+            if (!flat[k] || LEVEL_RANK[level] > LEVEL_RANK[flat[k]]) flat[k] = level;
+          }
+        }
+      };
+      apply(EVERYONE);
+      apply(byLevel);
+      effectiveLevels[roleName] = flat;
     }
 
     const adminRole = db.prepare('SELECT id FROM roles WHERE name = ?').get('System Administrator') as { id: number };
     const allPermissions = db.prepare('SELECT id, module_key, action FROM permissions').all() as { id: number; module_key: string; action: string }[];
 
+    // The administrator holds everything, module and feature alike.
     for (const permission of allPermissions) {
       db.prepare('INSERT OR IGNORE INTO role_permissions (role_id, permission_id, allowed, source) VALUES (?, ?, 1, ?)').run(adminRole.id, permission.id, 'Role default');
     }
@@ -307,11 +353,12 @@ export function seedDefaults() {
     // the first time a permission exists and then never touches it again. With
     // OR REPLACE, every permission an administrator revoked came back the next
     // time the server restarted — a revocation that silently undid itself.
-    for (const [roleName, modulePermissions] of Object.entries(rolePermissionsMap)) {
+    for (const [roleName, levels] of Object.entries(effectiveLevels)) {
       const role = db.prepare('SELECT id FROM roles WHERE name = ?').get(roleName) as { id: number } | undefined;
       if (!role) continue;
       for (const permission of allPermissions) {
-        if (modulePermissions[permission.module_key]?.includes(permission.action)) {
+        const level = levels[permission.module_key];
+        if (level && LEVEL_ACTIONS[level].includes(permission.action)) {
           db.prepare('INSERT OR IGNORE INTO role_permissions (role_id, permission_id, allowed, source) VALUES (?, ?, 1, ?)').run(role.id, permission.id, 'Role default');
         }
       }

@@ -10,7 +10,7 @@ const PROJECT_STATUSES = ['planned', 'active', 'on_hold', 'completed', 'closed']
 export function improvementRoutes() {
   const router = Router();
 
-  router.get('/', requirePermission('continual_improvement', 'view'), (req, res) => {
+  router.get('/', requirePermission('continual_improvement.projects', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = [];
     const params: unknown[] = [];
@@ -21,7 +21,7 @@ export function improvementRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/', requirePermission('continual_improvement', 'create'), (req, res) => {
+  router.post('/', requirePermission('continual_improvement.projects', 'create'), (req, res) => {
     if (!req.body.title) return res.status(400).json({ error: 'title is required' });
     if (!req.body.improvementArea) return res.status(400).json({ error: 'improvementArea is required' });
     if (!req.body.aimStatement) return res.status(400).json({ error: 'aimStatement is required' });
@@ -40,7 +40,7 @@ export function improvementRoutes() {
     res.status(201).json({ id, projectNumber });
   });
 
-  router.get('/:id', requirePermission('continual_improvement', 'view'), (req, res) => {
+  router.get('/:id', requirePermission('continual_improvement.projects', 'view'), (req, res) => {
     const db = getDb();
     const project = db.prepare('SELECT * FROM improvement_projects WHERE id = ?').get(req.params.id) as any;
     if (!project) return res.status(404).json({ error: 'Improvement project not found' });
@@ -49,7 +49,7 @@ export function improvementRoutes() {
     res.json({ ...project, updates, links });
   });
 
-  router.put('/:id', requirePermission('continual_improvement', 'edit'), (req, res) => {
+  router.put('/:id', requirePermission('continual_improvement.projects', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM improvement_projects WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Improvement project not found' });
@@ -60,7 +60,7 @@ export function improvementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/:id/update', requirePermission('continual_improvement', 'edit'), (req, res) => {
+  router.post('/:id/update', requirePermission('continual_improvement.projects', 'edit'), (req, res) => {
     if (!req.body.updateDate) return res.status(400).json({ error: 'updateDate is required' });
     const db = getDb();
     const project = db.prepare('SELECT id FROM improvement_projects WHERE id = ?').get(req.params.id);
@@ -88,7 +88,7 @@ export function improvementRoutes() {
     res.status(201).json({ id: actionId });
   });
 
-  router.post('/:id/close', requirePermission('continual_improvement', 'approve'), (req, res) => {
+  router.post('/:id/close', requirePermission('continual_improvement.projects', 'approve'), (req, res) => {
     const db = getDb();
     const project = db.prepare('SELECT * FROM improvement_projects WHERE id = ?').get(req.params.id) as any;
     if (!project) return res.status(404).json({ error: 'Improvement project not found' });

@@ -226,7 +226,7 @@ export function documentControlRoutes() {
   const router = Router();
 
   // -------- Reviews due (specific path before /:id) --------
-  router.get('/reviews/due', requirePermission('documents', 'view'), (req, res) => {
+  router.get('/reviews/due', requirePermission('documents.library', 'view'), (req, res) => {
     const db = getDb();
     const horizonDays = Math.min(Math.max(Number(req.query.days) || 30, 1), 365);
     const cutoff = new Date(Date.now() + horizonDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -235,7 +235,7 @@ export function documentControlRoutes() {
 
   // Every attestation ever assigned or signed — filterable by document code,
   // title, staff name, status. Powers the redesigned Attestation List tab.
-  router.get('/attestations/list', requirePermission('documents', 'view'), (req, res) => {
+  router.get('/attestations/list', requirePermission('documents.library', 'view'), (req, res) => {
     const db = getDb();
     flipOverdueAttestations(db);
     const filters: string[] = [];
@@ -264,7 +264,7 @@ export function documentControlRoutes() {
 
   // Documents that have at least one attestation (for the "pick a document"
   // search on the Attestation List tab).
-  router.get('/attestations/documents', requirePermission('documents', 'view'), (_req, res) => {
+  router.get('/attestations/documents', requirePermission('documents.library', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare(`
       SELECT d.id, d.document_code, d.title, d.document_type, d.status,
@@ -280,7 +280,7 @@ export function documentControlRoutes() {
 
   // Renders a printable Attestation List for a document (all signed staff).
   // Independent of the document body — used for auditors and hard-copy records.
-  router.get('/:id/attestations/print', requirePermission('documents', 'print'), (req, res) => {
+  router.get('/:id/attestations/print', requirePermission('documents.library', 'print'), (req, res) => {
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
     if (!doc) return res.status(404).json({ error: 'Document not found' });
@@ -337,7 +337,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     res.send(html);
   });
 
-  router.get('/attestations/pending', requirePermission('documents', 'view'), (req, res) => {
+  router.get('/attestations/pending', requirePermission('documents.library', 'view'), (req, res) => {
     const db = getDb();
     flipOverdueAttestations(db);
     const staffId = parseIntNullable(req.query.staffId);
@@ -346,7 +346,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     res.json(db.prepare(`SELECT a.*, d.id AS doc_id, d.document_code, d.title, d.document_type, v.version_number FROM document_attestations a JOIN documents d ON d.id = COALESCE(a.document_id, (SELECT document_id FROM document_versions WHERE id = a.document_version_id)) LEFT JOIN document_versions v ON v.id = a.document_version_id ${where} ORDER BY a.due_date NULLS LAST, a.id DESC`).all(...params));
   });
 
-  router.get('/distribution/inbox', requirePermission('documents', 'view'), (req, res) => {
+  router.get('/distribution/inbox', requirePermission('documents.library', 'view'), (req, res) => {
     const db = getDb();
     flipOverdueAttestations(db);
     const staffId = parseIntNullable(req.query.staffId) ?? req.user?.staffId ?? null;
@@ -364,20 +364,20 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   });
 
   // -------- Document number generator (SECHPO026 §5.1.6) --------
-  router.get('/next-code', requirePermission('documents', 'view'), (req, res) => {
+  router.get('/next-code', requirePermission('documents.library', 'view'), (req, res) => {
     const db = getDb();
     const code = nextDocumentCode(db, String(req.query.type || 'SOP'), req.query.sectionCode ? String(req.query.sectionCode) : null);
     res.json({ code });
   });
   // Derive a document code from a file/document name, e.g.
   // "SECHPO026 Document Control Procedure" -> "SECHPO026".
-  router.get('/derive-code', requirePermission('documents', 'view'), (req, res) => {
+  router.get('/derive-code', requirePermission('documents.library', 'view'), (req, res) => {
     res.json({ code: deriveDocumentCodeFromName(String(req.query.name || '')) });
   });
   // Read an already-uploaded file and return the document title and number guessed
   // from its content/heading — so "New Document" can auto-fill name and number the
   // same way bulk import does. Does not persist anything.
-  router.post('/extract-preview', requirePermission('documents', 'create'), (req, res) => {
+  router.post('/extract-preview', requirePermission('documents.authoring', 'create'), (req, res) => {
     const db = getDb();
     const fileId = parseIntNullable(req.body.fileId);
     if (!fileId) return res.status(400).json({ error: 'fileId is required' });
@@ -401,7 +401,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   // RECORD CONTROL (SECHPO051 — Control of Records Procedure)
   // Registered before /:id so the path segments never collide with it.
   // ===================================================================
-  router.get('/records/summary', requirePermission('documents', 'view'), (_req, res) => {
+  router.get('/records/summary', requirePermission('documents.records', 'view'), (_req, res) => {
     const db = getDb();
     const todayIso = new Date().toISOString().slice(0, 10);
     const c = (sql: string, ...p: unknown[]) => (db.prepare(sql).get(...p) as { c: number }).c;
@@ -419,7 +419,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   });
 
   // Record register (inventory of controlled records)
-  router.get('/records/register', requirePermission('documents', 'view'), (req, res) => {
+  router.get('/records/register', requirePermission('documents.records', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.status) { filters.push('rr.status = ?'); params.push(String(req.query.status)); }
@@ -431,7 +431,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     q += ' ORDER BY rr.created_at DESC';
     res.json(db.prepare(q).all(...params));
   });
-  router.post('/records/register', requirePermission('documents', 'create'), (req, res) => {
+  router.post('/records/register', requirePermission('documents.records', 'create'), (req, res) => {
     if (!req.body.title) return res.status(400).json({ error: 'title is required' });
     const db = getDb();
     const code = req.body.recordCode || generateRecordNumber(db, 'record_register', 'SECHREC');
@@ -448,7 +448,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     audit(req, { action: 'create', entity: 'record_register', entityId: r.lastInsertRowid, newValue: { code, ...req.body } });
     res.status(201).json({ id: r.lastInsertRowid, recordCode: code });
   });
-  router.put('/records/register/:id', requirePermission('documents', 'edit'), (req, res) => {
+  router.put('/records/register/:id', requirePermission('documents.records', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM record_register WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Record not found' });
@@ -463,10 +463,10 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   });
 
   // Retention schedule (SECHPO051 Appendix A)
-  router.get('/records/retention-schedule', requirePermission('documents', 'view'), (_req, res) => {
+  router.get('/records/retention-schedule', requirePermission('documents.records', 'view'), (_req, res) => {
     res.json(getDb().prepare('SELECT * FROM record_retention_schedule ORDER BY sn, id').all());
   });
-  router.post('/records/retention-schedule', requirePermission('documents', 'create'), (req, res) => {
+  router.post('/records/retention-schedule', requirePermission('documents.records', 'create'), (req, res) => {
     if (!req.body.recordType || !req.body.retentionPeriod) return res.status(400).json({ error: 'recordType and retentionPeriod are required' });
     const db = getDb();
     const maxSn = (db.prepare('SELECT MAX(sn) m FROM record_retention_schedule').get() as { m: number | null }).m ?? 0;
@@ -475,7 +475,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     audit(req, { action: 'create', entity: 'record_retention_schedule', entityId: r.lastInsertRowid, newValue: req.body });
     res.status(201).json({ id: r.lastInsertRowid });
   });
-  router.put('/records/retention-schedule/:id', requirePermission('documents', 'edit'), (req, res) => {
+  router.put('/records/retention-schedule/:id', requirePermission('documents.records', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM record_retention_schedule WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Rule not found' });
@@ -487,11 +487,11 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   });
 
   // Quality & Technical Records Review Log (SECHPO051 §5.7)
-  router.get('/records/review-log', requirePermission('documents', 'view'), (_req, res) => {
+  router.get('/records/review-log', requirePermission('documents.records', 'view'), (_req, res) => {
     res.json(getDb().prepare(`SELECT rl.*, s.name AS section_name, st.full_name AS responsible_name, rv.full_name AS reviewer_name
       FROM record_review_log rl LEFT JOIN sections s ON s.id = rl.section_id LEFT JOIN staff st ON st.id = rl.responsible_staff_id LEFT JOIN staff rv ON rv.id = rl.reviewer_staff_id ORDER BY rl.review_date DESC, rl.id DESC`).all());
   });
-  router.post('/records/review-log', requirePermission('documents', 'create'), (req, res) => {
+  router.post('/records/review-log', requirePermission('documents.records', 'create'), (req, res) => {
     if (!req.body.reviewDate || !req.body.recordCategory) return res.status(400).json({ error: 'reviewDate and recordCategory are required' });
     const db = getDb();
     const num = generateRecordNumber(db, 'record_review_log', 'RECREV', req.body.reviewDate);
@@ -503,7 +503,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     audit(req, { action: 'create', entity: 'record_review_log', entityId: r.lastInsertRowid, newValue: { num, ...req.body } });
     res.status(201).json({ id: r.lastInsertRowid, reviewNumber: num });
   });
-  router.put('/records/review-log/:id', requirePermission('documents', 'edit'), (req, res) => {
+  router.put('/records/review-log/:id', requirePermission('documents.records', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM record_review_log WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Review not found' });
@@ -515,11 +515,11 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   });
 
   // Document & Record Destruction log (SECHF0047, SECHPO051 §5.6)
-  router.get('/records/destruction-log', requirePermission('documents', 'view'), (_req, res) => {
+  router.get('/records/destruction-log', requirePermission('documents.records', 'view'), (_req, res) => {
     res.json(getDb().prepare(`SELECT dl.*, a.full_name AS authorized_by_name, w.full_name AS witness_name
       FROM record_destruction_log dl LEFT JOIN staff a ON a.id = dl.authorized_by_staff_id LEFT JOIN staff w ON w.id = dl.witness_staff_id ORDER BY dl.date_destroyed DESC, dl.id DESC`).all());
   });
-  router.post('/records/destruction-log', requirePermission('documents', 'approve'), (req, res) => {
+  router.post('/records/destruction-log', requirePermission('documents.records', 'approve'), (req, res) => {
     if (!req.body.description || !req.body.dateDestroyed) return res.status(400).json({ error: 'description and dateDestroyed are required' });
     const db = getDb();
     const num = generateRecordNumber(db, 'record_destruction_log', 'SECHF0047', req.body.dateDestroyed);
@@ -534,10 +534,10 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   });
 
   // Backup & Archive log (SECHPO051 §5.4)
-  router.get('/records/backup-log', requirePermission('documents', 'view'), (_req, res) => {
+  router.get('/records/backup-log', requirePermission('documents.records', 'view'), (_req, res) => {
     res.json(getDb().prepare(`SELECT bl.*, s.full_name AS performed_by_name FROM record_backup_log bl LEFT JOIN staff s ON s.id = bl.performed_by_staff_id ORDER BY bl.backup_date DESC, bl.id DESC`).all());
   });
-  router.post('/records/backup-log', requirePermission('documents', 'create'), (req, res) => {
+  router.post('/records/backup-log', requirePermission('documents.records', 'create'), (req, res) => {
     if (!req.body.backupDate) return res.status(400).json({ error: 'backupDate is required' });
     const db = getDb();
     const num = generateRecordNumber(db, 'record_backup_log', 'BKP', req.body.backupDate);
@@ -695,7 +695,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   }
 
   // Master list as JSON, for the on-screen Master List view.
-  router.get('/masterlist', requirePermission('documents', 'view'), (_req, res) => {
+  router.get('/masterlist', requirePermission('documents.masterlist', 'view'), (_req, res) => {
     const db = getDb();
     res.json({
       facility: facilityName(db),
@@ -706,7 +706,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   });
 
   // Full master list workbook: all three registers as separate sheets.
-  router.get('/masterlist/export', requirePermission('documents', 'export'), (req, res) => {
+  router.get('/masterlist/export', requirePermission('documents.masterlist', 'export'), (req, res) => {
     const db = getDb();
     const fac = facilityName(db);
     const code = masterListCode(db);
@@ -718,7 +718,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     sendWorkbook(res, wb, 'Document_and_Records_Master_List.xlsx');
   });
 
-  router.get('/register/export', requirePermission('documents', 'export'), (req, res) => {
+  router.get('/register/export', requirePermission('documents.library', 'export'), (req, res) => {
     const db = getDb();
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, registerSheet(`${facilityName(db)} - LABORATORY DOCUMENT REGISTER${masterListCode(db)}`, DOC_REGISTER_HEADERS, documentRegisterRows(db)), 'Document Register');
@@ -726,7 +726,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     sendWorkbook(res, wb, 'Document_Register.xlsx');
   });
 
-  router.get('/records/register/export', requirePermission('documents', 'export'), (req, res) => {
+  router.get('/records/register/export', requirePermission('documents.records', 'export'), (req, res) => {
     const db = getDb();
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, registerSheet(`${facilityName(db)} - LABORATORY RECORDS REGISTER${masterListCode(db)}`, REC_REGISTER_HEADERS, recordsRegisterRows(db)), 'Records Register');
@@ -734,7 +734,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     sendWorkbook(res, wb, 'Records_Register.xlsx');
   });
 
-  router.get('/obsolete-register/export', requirePermission('documents', 'export'), (req, res) => {
+  router.get('/obsolete-register/export', requirePermission('documents.masterlist', 'export'), (req, res) => {
     const db = getDb();
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, registerSheet(`${facilityName(db)} - OBSOLETE DOCUMENT REGISTER`, OBS_REGISTER_HEADERS, obsoleteRegisterRows(db)), 'Obsolete Document Register');
@@ -743,7 +743,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   });
 
   // -------- Documents CRUD --------
-  router.get('/', requirePermission('documents', 'view'), (req, res) => {
+  router.get('/', requirePermission('documents.library', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = [];
     const params: unknown[] = [];
@@ -773,7 +773,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/', requirePermission('documents', 'create'), (req, res) => {
+  router.post('/', requirePermission('documents.authoring', 'create'), (req, res) => {
     if (!req.body.title) return res.status(400).json({ error: 'title is required' });
     if (!req.body.documentType) return res.status(400).json({ error: 'documentType is required' });
     const db = getDb();
@@ -807,7 +807,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     res.status(201).json({ id: docId, documentCode });
   });
 
-  router.get('/:id', requirePermission('documents', 'view'), (req, res) => {
+  router.get('/:id', requirePermission('documents.library', 'view'), (req, res) => {
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
     if (!doc) return res.status(404).json({ error: 'Document not found' });
@@ -820,7 +820,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     res.json({ ...doc, versions, reviews, attestations, printLogs, distribution, links });
   });
 
-  router.put('/:id', requirePermission('documents', 'edit'), (req, res) => {
+  router.put('/:id', requirePermission('documents.authoring', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Document not found' });
@@ -844,7 +844,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   // (administrators / laboratory management), audited, and both the outgoing and
   // incoming owners are notified. SECHPO026 — the document owner is accountable
   // for keeping it current, so a change of owner is a controlled action.
-  router.post('/:id/transfer-ownership', requirePermission('documents', 'approve'), (req, res) => {
+  router.post('/:id/transfer-ownership', requirePermission('documents.workflow', 'approve'), (req, res) => {
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
     if (!doc) return res.status(404).json({ error: 'Document not found' });
@@ -868,7 +868,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     res.json({ ok: true, ownerStaffId: newOwnerId, ownerName: newOwner.full_name });
   });
 
-  router.post('/:id/versions', requirePermission('documents', 'create'), (req, res) => {
+  router.post('/:id/versions', requirePermission('documents.authoring', 'create'), (req, res) => {
     if (!req.body.versionNumber) return res.status(400).json({ error: 'versionNumber is required' });
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
@@ -894,7 +894,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   });
 
   // -------- In-app document content (read / edit the SOP body) --------
-  router.get('/:id/versions/:versionId/content', requirePermission('documents', 'view'), (req, res) => {
+  router.get('/:id/versions/:versionId/content', requirePermission('documents.library', 'view'), (req, res) => {
     const db = getDb();
     const versionId = resolveVersionId(db, req.params.id, req.params.versionId);
     if (!versionId) return res.status(404).json({ error: 'This document has no version on this host yet. Add a version (upload its file) to view it.' });
@@ -907,7 +907,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     res.json({ ...v, content_sections: sections });
   });
   // Re-read the attached file and refresh the extracted content.
-  router.post('/:id/versions/:versionId/re-extract', requirePermission('documents', 'edit'), (req, res) => {
+  router.post('/:id/versions/:versionId/re-extract', requirePermission('documents.authoring', 'edit'), (req, res) => {
     const db = getDb();
     const versionId = resolveVersionId(db, req.params.id, req.params.versionId);
     const v = versionId ? db.prepare('SELECT * FROM document_versions WHERE id = ?').get(versionId) as any : null;
@@ -919,7 +919,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     res.json({ ok: true, method: result?.method ?? 'none', length: result?.text?.length ?? 0, sections: result?.sections?.length ?? 0 });
   });
   // Save an edited document body (controlled content authored inside SECH_LIMS).
-  router.put('/:id/versions/:versionId/content', requirePermission('documents', 'edit'), (req, res) => {
+  router.put('/:id/versions/:versionId/content', requirePermission('documents.authoring', 'edit'), (req, res) => {
     const db = getDb();
     const versionId = resolveVersionId(db, req.params.id, req.params.versionId);
     const v = versionId ? db.prepare('SELECT * FROM document_versions WHERE id = ?').get(versionId) as any : null;
@@ -940,7 +940,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   //   - export-docx/save-as-version: the export becomes the document's newest
   //     version (so edits made in-app round-trip into the official record as a
   //     real Word file, not just trapped HTML).
-  router.post('/:id/versions/:versionId/export-docx', requirePermission('documents', 'view'), async (req, res) => {
+  router.post('/:id/versions/:versionId/export-docx', requirePermission('documents.library', 'view'), async (req, res) => {
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
     if (!doc) return res.status(404).json({ error: 'Document not found' });
@@ -965,7 +965,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     }
   });
 
-  router.post('/:id/versions/:versionId/export-docx/save-as-version', requirePermission('documents', 'edit'), async (req, res) => {
+  router.post('/:id/versions/:versionId/export-docx/save-as-version', requirePermission('documents.authoring', 'edit'), async (req, res) => {
     const db = getDb();
     const body = req.body || {};
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
@@ -999,11 +999,11 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   });
 
   // -------- Workflow comments (drafter / reviewer / approver) --------
-  router.get('/:id/comments', requirePermission('documents', 'view'), (req, res) => {
+  router.get('/:id/comments', requirePermission('documents.library', 'view'), (req, res) => {
     const db = getDb();
     res.json(db.prepare(`SELECT c.*, s.full_name AS author_name FROM document_comments c LEFT JOIN staff s ON s.id = c.author_staff_id WHERE c.document_id = ? ORDER BY c.id DESC`).all(req.params.id));
   });
-  router.post('/:id/comments', requirePermission('documents', 'view'), (req, res) => {
+  router.post('/:id/comments', requirePermission('documents.library', 'view'), (req, res) => {
     if (!req.body.comment || !String(req.body.comment).trim()) return res.status(400).json({ error: 'comment is required' });
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
@@ -1019,7 +1019,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
 
   // Distribute the current version to all active staff for attestation (ISO
   // 15189 §8.3 — staff must read and acknowledge controlled documents).
-  router.post('/:id/distribute-all', requirePermission('documents', 'edit'), (req, res) => {
+  router.post('/:id/distribute-all', requirePermission('documents.workflow', 'edit'), (req, res) => {
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
     if (!doc) return res.status(404).json({ error: 'Document not found' });
@@ -1031,7 +1031,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     res.status(201).json({ ok: true, assigned: assigned.length });
   });
 
-  router.post('/:id/submit-review', requirePermission('documents', 'edit'), (req, res) => {
+  router.post('/:id/submit-review', requirePermission('documents.workflow', 'edit'), (req, res) => {
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
     if (!doc) return res.status(404).json({ error: 'Document not found' });
@@ -1043,7 +1043,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     res.json({ ok: true });
   });
 
-  router.post('/:id/review', requirePermission('documents', 'edit'), (req, res) => {
+  router.post('/:id/review', requirePermission('documents.workflow', 'edit'), (req, res) => {
     if (!req.body.reviewOutcome) return res.status(400).json({ error: 'reviewOutcome is required' });
     if (!REVIEW_OUTCOMES.includes(req.body.reviewOutcome)) return res.status(400).json({ error: `reviewOutcome must be one of: ${REVIEW_OUTCOMES.join(', ')}` });
     if (!req.body.reviewDate) return res.status(400).json({ error: 'reviewDate is required' });
@@ -1071,7 +1071,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     res.status(201).json({ id: reviewId, reviewNumber });
   });
 
-  router.post('/:id/approve', requirePermission('documents', 'approve'), (req, res) => {
+  router.post('/:id/approve', requirePermission('documents.workflow', 'approve'), (req, res) => {
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
     if (!doc) return res.status(404).json({ error: 'Document not found' });
@@ -1099,7 +1099,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     res.json({ ok: true, versionId, distributed });
   });
 
-  router.post('/:id/mark-obsolete', requirePermission('documents', 'approve'), (req, res) => {
+  router.post('/:id/mark-obsolete', requirePermission('documents.workflow', 'approve'), (req, res) => {
     if (!req.body.obsoleteReason) return res.status(400).json({ error: 'obsoleteReason is required' });
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
@@ -1116,7 +1116,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   // replicated from another host without their files). Registered before the
   // single-delete route. Gated on documents "approve" AND System Administrator.
   // For an ISO-compliant retire that keeps history, use "mark obsolete" instead.
-  router.post('/bulk-delete', requirePermission('documents', 'approve'), (req, res) => {
+  router.post('/bulk-delete', requirePermission('documents.workflow', 'approve'), (req, res) => {
     if (!isAdminUser(req)) return res.status(403).json({ error: 'Only a System Administrator can permanently delete documents.' });
     const db = getDb();
     const ids: number[] = Array.isArray(req.body?.ids) ? req.body.ids.map((n: unknown) => Number(n)).filter((n: number) => Number.isFinite(n)) : [];
@@ -1146,7 +1146,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   // business records are detached (set to NULL) so those records survive without
   // a dangling reference. For an ISO-compliant retire that keeps history, use
   // "mark obsolete" instead.
-  router.delete('/:id', requirePermission('documents', 'approve'), (req, res) => {
+  router.delete('/:id', requirePermission('documents.workflow', 'approve'), (req, res) => {
     if (!isAdminUser(req)) return res.status(403).json({ error: 'Only a System Administrator can permanently delete documents.' });
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
@@ -1158,7 +1158,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     res.json({ ok: true });
   });
 
-  router.post('/:id/assign-attestation', requirePermission('documents', 'edit'), (req, res) => {
+  router.post('/:id/assign-attestation', requirePermission('documents.workflow', 'edit'), (req, res) => {
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
     if (!doc) return res.status(404).json({ error: 'Document not found' });
@@ -1215,7 +1215,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     res.status(201).json({ ok: true, assigned: created.length, attestationIds: created });
   });
 
-  router.get('/:id/attestations', requirePermission('documents', 'view'), (req, res) => {
+  router.get('/:id/attestations', requirePermission('documents.library', 'view'), (req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT a.*, s.full_name AS staff_name, v.version_number FROM document_attestations a LEFT JOIN staff s ON s.id = a.staff_id LEFT JOIN document_versions v ON v.id = a.document_version_id WHERE a.document_id = ? OR a.document_version_id IN (SELECT id FROM document_versions WHERE document_id = ?) ORDER BY a.id DESC').all(req.params.id, req.params.id));
   });
@@ -1223,7 +1223,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   // Sign an attestation. Signatures are strictly bound to the AUTHENTICATED user
   // — a staff member may NEVER sign an attestation on behalf of another. Any
   // `staffId` sent in the body is ignored; the signer is always the current user.
-  router.post('/:id/attest', requirePermission('documents', 'view'), (req, res) => {
+  router.post('/:id/attest', requirePermission('documents.library', 'view'), (req, res) => {
     const db = getDb();
     const attestationId = parseIntNullable(req.body.attestationId);
     // Signer is always the caller — never accept a body-provided staff id.
@@ -1257,7 +1257,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     res.json({ ok: true, attestationId: attestation.id });
   });
 
-  router.post('/:id/versions/:versionId/mark-obsolete', requirePermission('documents', 'approve'), (req, res) => {
+  router.post('/:id/versions/:versionId/mark-obsolete', requirePermission('documents.workflow', 'approve'), (req, res) => {
     if (!req.body.obsoleteReason) return res.status(400).json({ error: 'obsoleteReason is required' });
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
@@ -1272,7 +1272,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     res.json({ ok: true });
   });
 
-  router.get('/:id/print-render', requirePermission('documents', 'print'), (req, res) => {
+  router.get('/:id/print-render', requirePermission('documents.library', 'print'), (req, res) => {
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
     if (!doc) return res.status(404).json({ error: 'Document not found' });
@@ -1332,7 +1332,7 @@ table.meta th { background: #eef2f7; width: 22%; }
     res.send(html);
   });
 
-  router.post('/:id/print-log', requirePermission('documents', 'print'), (req, res) => {
+  router.post('/:id/print-log', requirePermission('documents.library', 'print'), (req, res) => {
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
     if (!doc) return res.status(404).json({ error: 'Document not found' });
