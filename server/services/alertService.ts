@@ -1,4 +1,5 @@
 import { collectScanCandidates, classifyDue, severityForCandidate, type ScanCandidate } from '../routes/notifications.js';
+import { alertTargetFor } from '../../shared/constants/alertTargets.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 
 // ==========================================================================
@@ -77,16 +78,25 @@ function relTime(dueDate: string | null): string {
   return `due in ${days}d`;
 }
 
+/**
+ * The URL that opens the thing the alert is about.
+ *
+ * Three parts, each narrowing the aim: the route for the module, the tab the
+ * record actually lives on (ALERT_TARGETS), and the record's own identity so
+ * the page can scroll to it and flash it (useFocusTarget on the client). A
+ * module served by several routes — nonconformities, incidents, CAPA — names
+ * its own route. Anything a page does not yet consume is inert, so an alert
+ * always at worst lands where it used to.
+ */
 function actionUrlFor(c: ScanCandidate): string {
-  const base = MODULE_ROUTES[c.moduleKey] || '/notifications';
-  // Carry the exact record identity so the destination page can scroll to and
-  // highlight the offending record (see useFocusTarget on the client). Pages
-  // that don't yet consume `focus` simply land on the correct module — the
-  // param is inert, so this is always safe.
-  if (c.recordType && c.recordId) {
-    return `${base}?focus=${encodeURIComponent(`${c.recordType}:${c.recordId}`)}`;
-  }
-  return base;
+  const target = alertTargetFor(c.itemType);
+  const base = target.route || MODULE_ROUTES[c.moduleKey] || '/notifications';
+  const params = new URLSearchParams();
+  if (target.tab) params.set('tab', target.tab);
+  if (target.subtab) params.set('subtab', target.subtab);
+  if (c.recordType && c.recordId) params.set('focus', `${c.recordType}:${c.recordId}`);
+  const query = params.toString();
+  return query ? `${base}?${query}` : base;
 }
 
 // Compute always-current alerts (not persisted). Optionally filter to a staff

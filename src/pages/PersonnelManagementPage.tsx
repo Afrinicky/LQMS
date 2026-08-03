@@ -9,6 +9,7 @@ import { DutyRosterBoard, ReassignmentBoard, BenchScheduleBoard } from './Schedu
 import DisabledModule from '../components/DisabledModule';
 import { usePermissions } from '../hooks/usePermissions';
 import PermissionTabs from '../components/PermissionTabs';
+import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import type {
   Section, Department, Staff, Position,
   StaffDocument, StaffDeclaration, TrainingEvent, CompetencyAssessment, DutyRoster,
@@ -99,6 +100,9 @@ export function PersonnelManagementPage() {
   const [trainings, setTrainings] = useState<TrainingEvent[]>([]);
   const [selectedTraining, setSelectedTraining] = useState<TrainingEvent | null>(null);
   const [competencies, setCompetencies] = useState<CompetencyAssessment[]>([]);
+  // A dashboard alert arrives with ?tab= and ?focus=; the tab bar opens the tab,
+  // this scrolls to the record and flashes it.
+  useFocusTarget(staffDocs.length + competencies.length);
   const [selectedComp, setSelectedComp] = useState<CompetencyAssessment | null>(null);
   const [rosters, setRosters] = useState<DutyRoster[]>([]);
   const [selectedRoster, setSelectedRoster] = useState<DutyRoster | null>(null);
@@ -510,7 +514,7 @@ export function PersonnelManagementPage() {
           const today = new Date().toISOString().slice(0, 10);
           const expiringSoon = d.expiry_date && d.expiry_date <= new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10) && d.expiry_date >= today;
           const expired = d.expiry_date && d.expiry_date < today;
-          return <tr key={d.id}>
+          return <tr key={d.id} {...focusAttr('staff_documents', d.id)}>
             <td>{d.staff_name || staffName(staff, d.staff_id)}</td><td>{d.document_type}</td><td>{d.title}</td>
             <td>{d.issue_date || '—'}</td>
             <td>{d.expiry_date || '—'} {expired && <span className="badge danger">expired</span>}{expiringSoon && <span className="badge warning">expiring</span>}</td>
@@ -622,7 +626,7 @@ export function PersonnelManagementPage() {
         <button type="submit">Create competency assessment</button>
       </form>
       <table className="data-table"><thead><tr><th>Number</th><th>Staff</th><th>Activity</th><th>Method</th><th>Date</th><th>Outcome</th><th>Status</th><th></th></tr></thead><tbody>
-        {competencies.map(c => <tr key={c.id}>
+        {competencies.map(c => <tr key={c.id} {...focusAttr('competency_assessments', c.id)}>
           <td>{c.competency_number}</td><td>{c.staff_name || staffName(staff, c.staff_id)}</td>
           <td>{c.activity}</td><td>{c.assessment_method.replace(/_/g, ' ')}</td>
           <td>{c.assessment_date}</td><td>{formatBadge(c.outcome)}</td><td>{formatBadge(c.status)}</td>

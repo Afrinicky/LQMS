@@ -4,15 +4,25 @@ import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts }
 import { api } from '../services/api';
 import { useModules } from '../hooks/useModules';
 import DisabledModule from '../components/DisabledModule';
+import { useTabParam } from '../hooks/useTabParam';
+import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import { formatBadge, toDisplay, useLookupData, type ComplaintDetail, type LoadState, type RiskDetail } from './qmsShared';
 import type { ActionRecord, ComplaintRecord, RiskRecord } from '../../shared/types/api';
 
+
+// Named so a dashboard alert can aim at a tab by name (?tab=Complaints Register).
+const COMPLAINT_TABS = ['Dashboard', 'Complaints Register', 'New Complaint', 'Investigation', 'Trends placeholder', 'Reports placeholder'];
+const RISK_TABS = ['Dashboard', 'Risk Register', 'New Risk', 'Reviews Due', 'Reports placeholder'];
 
 export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { isEnabled } = useModules();
   const { staff, sections } = useLookupData();
   const [tab, setTab] = useState(embedded ? 'Complaints Register' : 'Dashboard');
+  useTabParam(COMPLAINT_TABS, setTab);
   const [complaints, setComplaints] = useState<ComplaintRecord[]>([]);
+  // A dashboard alert lands here with ?tab= and ?focus=; this scrolls to the
+  // record it names and flashes it.
+  useFocusTarget(complaints);
   const [selected, setSelected] = useState<ComplaintDetail | null>(null);
   const [formState, setFormState] = useState({ receivedDate: '', source: '', complainantType: '', complainantName: '', contact: '', sectionId: '', category: '', title: '', description: '', assignedToStaffId: '' });
   const [workflowState, setWorkflowState] = useState({ assignedToStaffId: '', acknowledgementStatus: 'assigned', investigationSummary: '', rootCause: '', correction: '', closureSummary: '' });
@@ -148,7 +158,7 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
 
   return <div>
     {!embedded && <PageHeader eyebrow="Customer Focus" title="Complaints Register" subtitle="Complaints intake, investigation, and resolution." />}
-    <div className="tabs">{['Dashboard', 'Complaints Register', 'New Complaint', 'Investigation', 'Trends placeholder', 'Reports placeholder'].filter(name => !embedded || name !== 'Dashboard').map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
+    <div className="tabs">{COMPLAINT_TABS.filter(name => !embedded || name !== 'Dashboard').map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
     {loadState.error && <div className="card"><strong>Error:</strong> {loadState.error}</div>}
     {loadState.loading && <div className="card"><em>Loading complaints…</em></div>}
     {tab === 'Dashboard' && <><ModuleAlerts moduleKey="complaints" /><KpiStrip items={[
@@ -179,7 +189,7 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
         <label>Search<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search complaint number, title" /></label>
         <label>Status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All</option>{statusOptions.map(status => <option key={status} value={status}>{status.replace(/_/g, ' ')}</option>)}</select></label>
       </div>
-      {filteredComplaints.length === 0 ? <p>No complaints match the current filters.</p> : <table className="table"><thead><tr><th>No.</th><th>Date</th><th>Source</th><th>Type</th><th>Category</th><th>Title</th><th>Assigned</th><th>Status</th><th>Actions</th></tr></thead><tbody>{filteredComplaints.map(c => <tr key={c.id}><td>{c.complaint_number}</td><td>{c.received_date}</td><td>{c.source || '—'}</td><td>{c.complainant_type || '—'}</td><td>{c.category || '—'}</td><td>{c.title}</td><td>{staff.find(s => s.id === c.assigned_to_staff_id)?.fullName || toDisplay(c.assigned_to_staff_id)}</td><td>{formatBadge(c.status)}</td><td><button onClick={() => loadComplaintDetail(c.id)}>View</button></td></tr>)}</tbody></table>}
+      {filteredComplaints.length === 0 ? <p>No complaints match the current filters.</p> : <table className="table"><thead><tr><th>No.</th><th>Date</th><th>Source</th><th>Type</th><th>Category</th><th>Title</th><th>Assigned</th><th>Status</th><th>Actions</th></tr></thead><tbody>{filteredComplaints.map(c => <tr key={c.id} {...focusAttr('complaints', c.id)}><td>{c.complaint_number}</td><td>{c.received_date}</td><td>{c.source || '—'}</td><td>{c.complainant_type || '—'}</td><td>{c.category || '—'}</td><td>{c.title}</td><td>{staff.find(s => s.id === c.assigned_to_staff_id)?.fullName || toDisplay(c.assigned_to_staff_id)}</td><td>{formatBadge(c.status)}</td><td><button onClick={() => loadComplaintDetail(c.id)}>View</button></td></tr>)}</tbody></table>}
     </div>}
     {tab === 'New Complaint' && <div className="card"><form className="form" onSubmit={submit}>
       <label>Received date<input type="date" value={formState.receivedDate} onChange={e => setFormState(prev => ({ ...prev, receivedDate: e.target.value }))} required /></label>
@@ -208,7 +218,9 @@ export function RisksPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { isEnabled } = useModules();
   const { staff, sections } = useLookupData();
   const [tab, setTab] = useState(embedded ? 'Risk Register' : 'Dashboard');
+  useTabParam(RISK_TABS, setTab);
   const [risks, setRisks] = useState<RiskRecord[]>([]);
+  useFocusTarget(risks);
   const [selected, setSelected] = useState<RiskDetail | null>(null);
   const [formState, setFormState] = useState({ sectionId: '', riskArea: '', riskDescription: '', cause: '', consequence: '', existingControls: '', likelihood: '1', severity: '1', detectability: '1', mitigationPlan: '', responsibleStaffId: '', reviewDueDate: '' });
   const [workflowState, setWorkflowState] = useState({ reviewNotes: '', nextReviewDate: '', actionTitle: '', actionDescription: '', actionAssignedToStaffId: '', actionDueDate: '', actionPriority: 'normal' });
@@ -331,7 +343,7 @@ export function RisksPage({ embedded = false }: { embedded?: boolean } = {}) {
 
   return <div>
     {!embedded && <PageHeader eyebrow="Continual Improvement" title="Risk Register" subtitle="Risk identification, mitigation, and periodic review." />}
-    <div className="tabs">{['Dashboard', 'Risk Register', 'New Risk', 'Reviews Due', 'Reports placeholder'].filter(name => !embedded || name !== 'Dashboard').map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
+    <div className="tabs">{RISK_TABS.filter(name => !embedded || name !== 'Dashboard').map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
     {loadState.error && <div className="card"><strong>Error:</strong> {loadState.error}</div>}
     {loadState.loading && <div className="card"><em>Loading risk register…</em></div>}
     {tab === 'Dashboard' && <><ModuleAlerts moduleKey="risks" /><KpiStrip items={[
@@ -363,7 +375,7 @@ export function RisksPage({ embedded = false }: { embedded?: boolean } = {}) {
         <label>Search<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search risk number, area" /></label>
         <label>Status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All</option>{statusOptions.map(status => <option key={status} value={status}>{status.replace(/_/g, ' ')}</option>)}</select></label>
       </div>
-      {filteredRisks.length === 0 ? <p>No risks match the current filters.</p> : <table className="table"><thead><tr><th>Risk No.</th><th>Area</th><th>Description</th><th>Score</th><th>Level</th><th>Responsible</th><th>Review Due</th><th>Status</th><th>Actions</th></tr></thead><tbody>{filteredRisks.map(r => <tr key={r.id}><td>{r.risk_number}</td><td>{r.risk_area}</td><td>{r.risk_description}</td><td>{r.risk_score || '—'}</td><td>{r.risk_level || '—'}</td><td>{staff.find(s => s.id === r.responsible_staff_id)?.fullName || toDisplay(r.responsible_staff_id)}</td><td>{r.review_due_date || 'N/A'}</td><td>{formatBadge(r.status)}</td><td><button onClick={() => loadRiskDetail(r.id)}>View</button></td></tr>)}</tbody></table>}
+      {filteredRisks.length === 0 ? <p>No risks match the current filters.</p> : <table className="table"><thead><tr><th>Risk No.</th><th>Area</th><th>Description</th><th>Score</th><th>Level</th><th>Responsible</th><th>Review Due</th><th>Status</th><th>Actions</th></tr></thead><tbody>{filteredRisks.map(r => <tr key={r.id} {...focusAttr('risks', r.id)}><td>{r.risk_number}</td><td>{r.risk_area}</td><td>{r.risk_description}</td><td>{r.risk_score || '—'}</td><td>{r.risk_level || '—'}</td><td>{staff.find(s => s.id === r.responsible_staff_id)?.fullName || toDisplay(r.responsible_staff_id)}</td><td>{r.review_due_date || 'N/A'}</td><td>{formatBadge(r.status)}</td><td><button onClick={() => loadRiskDetail(r.id)}>View</button></td></tr>)}</tbody></table>}
     </div>}
     {tab === 'New Risk' && <div className="card"><form className="form" onSubmit={submit}>
       <label>Section<select value={formState.sectionId} onChange={e => setFormState(prev => ({ ...prev, sectionId: e.target.value }))}><option value="">Select section</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>

@@ -9,6 +9,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import DisabledModule from '../components/DisabledModule';
 import PermissionTabs from '../components/PermissionTabs';
 import XlsxToolbar from '../components/XlsxToolbar';
+import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import { PageHeader, KpiStrip, ModuleAlerts } from '../components/ui';
 import LeveyJenningsChart, { type ChartData } from '../components/LeveyJenningsChart';
 import {
@@ -794,6 +795,8 @@ function RunReview({ runs, onChanged, canApprove, onError }: {
   runs: Run[]; onChanged: () => void; canApprove: boolean; onError: (m: string) => void;
 }) {
   const [filter, setFilter] = useState<'attention' | 'all'>('attention');
+  // A dashboard alert lands here with ?tab=Review&focus=iqc_runs:<id>.
+  useFocusTarget(runs);
   const [action, setAction] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState<number | null>(null);
 
@@ -836,7 +839,7 @@ function RunReview({ runs, onChanged, canApprove, onError }: {
       ) : (
         <ul className="iqc-runs">
           {shown.map(r => (
-            <li key={r.id} className={STATUS_TONE[r.status]}>
+            <li key={r.id} className={STATUS_TONE[r.status]} {...focusAttr('iqc_runs', r.id)}>
               <span className={`iqc-rail ${STATUS_TONE[r.status]}`} />
               <div className="iqc-run-main">
                 <div className="iqc-run-title">

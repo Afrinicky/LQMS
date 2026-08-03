@@ -130,11 +130,11 @@ function collectScanCandidates(db: any): ScanCandidate[] {
   }
   // Equipment maintenance/servicing schedules due or overdue
   if (tableExists(db, 'equipment_schedules')) {
-    const rows = db.prepare("SELECT s.id, s.schedule_type, s.next_due_date, s.responsible_staff_id, e.name AS equipment_name FROM equipment_schedules s JOIN equipment_items e ON e.id = s.equipment_id WHERE s.is_active = 1 AND s.next_due_date IS NOT NULL AND s.next_due_date <= ?").all(soonIso) as any[];
+    const rows = db.prepare("SELECT s.id, s.schedule_type, s.next_due_date, s.responsible_staff_id, s.equipment_id, e.name AS equipment_name FROM equipment_schedules s JOIN equipment_items e ON e.id = s.equipment_id WHERE s.is_active = 1 AND s.next_due_date IS NOT NULL AND s.next_due_date <= ?").all(soonIso) as any[];
     for (const r of rows) {
       const overdue = r.next_due_date < today;
       const label = r.schedule_type === 'servicing' ? 'servicing' : 'preventive maintenance';
-      out.push({ moduleKey: 'equipment', recordType: 'equipment_schedules', recordId: String(r.id), title: `Equipment ${label} ${overdue ? 'overdue' : 'due'}: ${r.equipment_name}`, message: `${label} due ${r.next_due_date}`, dueDate: r.next_due_date, severity: overdue ? 'high' : 'medium', notificationType: overdue ? 'overdue' : 'due_soon', itemType: 'equipment_schedule', responsibleStaffId: r.responsible_staff_id });
+      out.push({ moduleKey: 'equipment', recordType: 'equipment_items', recordId: String(r.equipment_id), title: `Equipment ${label} ${overdue ? 'overdue' : 'due'}: ${r.equipment_name}`, message: `${label} due ${r.next_due_date}`, dueDate: r.next_due_date, severity: overdue ? 'high' : 'medium', notificationType: overdue ? 'overdue' : 'due_soon', itemType: 'equipment_schedule', responsibleStaffId: r.responsible_staff_id });
     }
   }
 
@@ -154,8 +154,26 @@ function collectScanCandidates(db: any): ScanCandidate[] {
     for (const r of rows) out.push({ moduleKey: 'monitoring', recordType: 'monitoring_readings', recordId: String(r.id), title: `Monitoring reading ${r.status}`, message: `Reading ${r.value} on ${r.reading_date} pending review`, dueDate: r.reading_date, severity: 'high', notificationType: 'review_required', itemType: 'monitoring_excursion' });
   }
 
-  // IQC results pending review
-  if (tableExists(db, 'iqc_results')) {
+  // Control runs pending review. The run is what a reviewer signs off — one
+  // failing run of a full blood count control is one decision, not eight — so
+  // the alert names the run, the control it used and the rule that broke.
+  if (tableExists(db, 'iqc_runs')) {
+    const rows = db.prepare(`SELECT r.id, r.run_number, r.run_date, r.status, r.rule_summary, r.patient_results_released,
+        m.material_name, m.lot_number, m.section_id
+      FROM iqc_runs r LEFT JOIN iqc_materials m ON m.id = r.iqc_material_id
+      WHERE r.reviewed_at IS NULL AND r.status != 'in_control'`).all() as any[];
+    for (const r of rows) {
+      const rejected = r.status === 'out_of_control';
+      out.push({
+        moduleKey: 'iqc', recordType: 'iqc_runs', recordId: String(r.id),
+        title: `Control run ${rejected ? 'rejected' : 'flagged'}: ${r.material_name || 'IQC'}${r.lot_number ? ` lot ${r.lot_number}` : ''}`,
+        message: [r.rule_summary, Number(r.patient_results_released) === 0 ? 'Patient results are withheld until this is reviewed.' : null]
+          .filter(Boolean).join(' — ') || `Run ${r.run_number} awaits review`,
+        dueDate: r.run_date, severity: rejected ? 'high' : 'medium',
+        notificationType: 'review_required', itemType: 'iqc_review', sectionId: r.section_id,
+      });
+    }
+  } else if (tableExists(db, 'iqc_results')) {
     const rows = db.prepare("SELECT id, run_date FROM iqc_results WHERE reviewed_at IS NULL AND status != 'accepted'").all() as any[];
     for (const r of rows) out.push({ moduleKey: 'iqc', recordType: 'iqc_results', recordId: String(r.id), title: `IQC result pending review`, message: `IQC #${r.id} from ${r.run_date} requires review`, dueDate: r.run_date, severity: 'medium', notificationType: 'review_required', itemType: 'iqc_review' });
   }

@@ -1164,6 +1164,10 @@ tr.clickable-row:hover td { background: var(--accent-soft); }
 .attn-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
 .attn-legend li { display: flex; align-items: center; gap: 9px; cursor: pointer; padding: 5px 8px; margin: 0 -8px; border-radius: 9px; transition: background .15s ease; }
 .attn-legend li:hover { background: rgba(255,255,255,.05); }
+/* A selected severity narrows the queue beside it; an empty one is inert. */
+.attn-legend li.is-on { background: rgba(255,255,255,.09); box-shadow: inset 2px 0 0 var(--accent-bright); }
+.attn-legend li.is-empty { cursor: default; opacity: .5; }
+.attn-legend li.is-empty:hover { background: none; }
 .attn-legend .d { width: 9px; height: 9px; border-radius: 50%; flex: none; }
 .attn-legend .l { font-size: 12.5px; color: var(--muted); flex: 1; }
 .attn-legend .v { font-size: 15px; font-weight: 750; font-variant-numeric: tabular-nums; }
@@ -1223,7 +1227,18 @@ tr.clickable-row:hover td { background: var(--accent-soft); }
 .abm-seg { height: 100%; }
 .abm-seg.crit { background: var(--danger); } .abm-seg.warn { background: var(--warning); } .abm-seg.info { background: var(--accent-bright); }
 .abm-total { font-size: 13px; font-weight: 750; font-variant-numeric: tabular-nums; min-width: 22px; text-align: right; }
-.abm-go { color: var(--faint); }
+.abm-go { color: var(--faint); transition: transform .15s ease; }
+.abm-go.is-open { transform: rotate(90deg); color: var(--accent-bright); }
+/* A module row opens to its own alerts, so the reader picks the exact record. */
+.abm-row-wrap { list-style: none; border-radius: 8px; }
+.abm-row-wrap.is-open { background: rgba(255,255,255,.03); }
+.abm-alerts { margin: 2px 0 8px; padding: 0 8px 0 18px; border-left: 2px solid var(--border-strong); }
+.abm-alerts .pq-item { padding: 8px 6px; }
+.abm-alerts .pq-title { font-size: 12.5px; }
+.abm-alerts .pq-meta span { font-size: 11.5px; }
+/* The alert's own sentence — not a label, so it keeps its own capitalisation. */
+.pq-msg { margin-top: 3px; font-size: 11.5px; color: var(--faint); line-height: 1.45;
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 
 /* Focus flash — highlights the exact record a dashboard alert points to */
 .focus-flash { animation: focus-flash 2.6s ease-out; }
@@ -1232,6 +1247,8 @@ tr.clickable-row:hover td { background: var(--accent-soft); }
   100% { box-shadow: 0 0 0 0 transparent; background-color: transparent; }
 }
 tr.focus-flash > td { background-color: var(--accent-soft); transition: background-color 2.6s ease-out; }
+/* List rows (control runs, cards) get the same treatment as table rows. */
+li.focus-flash, div.focus-flash { background-color: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent-bright); border-radius: 10px; }
 
 /* Section title used between dashboard bands */
 .section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 8px 0 -2px; }

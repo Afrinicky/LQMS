@@ -9,7 +9,7 @@
  * verdict is what decides whether patient results may be reported.
  */
 import type { IqcControlType, IqcRuleProfile } from '../../shared/constants/iqc.js';
-import { isRejection } from '../../shared/constants/iqc.js';
+import { isRejection, RULE_LABELS } from '../../shared/constants/iqc.js';
 
 export type AnalyteDef = {
   id: number;
@@ -193,10 +193,13 @@ export function evaluateRun(
   const warned = verdicts.filter(v => v.status === 'warning');
   const status: RunVerdict['status'] = rejected.length ? 'out_of_control' : warned.length ? 'warning' : 'in_control';
 
+  // The summary is read on a dashboard alert and on a printed record, so it
+  // names the rule the way a laboratory says it (1₃ₛ), not the way it is keyed.
+  const say = (v: AnalyteVerdict) => `${v.analyte}: ${RULE_LABELS[v.rule ?? ''] ?? v.rule}`;
   const summary = rejected.length
-    ? rejected.map(v => `${v.analyte}: ${v.rule}`).join('; ')
+    ? rejected.map(say).join('; ')
     : warned.length
-      ? warned.map(v => `${v.analyte}: ${v.rule}`).join('; ')
+      ? warned.map(say).join('; ')
       : null;
 
   return {

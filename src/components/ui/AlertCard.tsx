@@ -15,6 +15,13 @@ import type { LiveAlert, LiveAlertsGrouped } from '../../../shared/types/api';
 const TONE_CLASS: Record<string, string> = { crit: 'tone-crit', warn: 'tone-warn', ok: 'tone-ok', info: 'tone-off' };
 const TONE_ICON: Record<string, typeof Bell> = { crit: AlertTriangle, warn: Clock, ok: Bell, info: Bell };
 
+/** An alert's URL without the record it points at — the module's own landing page. */
+function moduleRouteOf(alert: LiveAlert | undefined): string {
+  if (!alert?.actionUrl) return '/notifications';
+  const [path] = alert.actionUrl.split('?');
+  return path || '/notifications';
+}
+
 export function AlertCard({ alert, onOpen }: { alert: LiveAlert; onOpen?: (a: LiveAlert) => void }) {
   const navigate = useNavigate();
   const Icon = TONE_ICON[alert.tone] || Bell;
@@ -136,7 +143,9 @@ export function AlertSummary({ onOpenAlert }: { onOpenAlert?: (a: LiveAlert) => 
         <div className="alert-module-detail">
           <div className="alert-section-head">
             <h4>{activeGroup.moduleLabel} — {activeGroup.total} alert(s)</h4>
-            <button type="button" className="alert-more" onClick={() => navigate(activeGroup.alerts[0]?.actionUrl || '/notifications')}>Open module <ChevronRight size={13} /></button>
+            {/* The module itself, not whichever alert happened to sort first —
+                the individual records are one click away in the grid below. */}
+            <button type="button" className="alert-more" onClick={() => navigate(moduleRouteOf(activeGroup.alerts[0]))}>Open module <ChevronRight size={13} /></button>
           </div>
           <AlertGrid alerts={activeGroup.alerts.slice(0, 8)} onOpen={onOpenAlert} />
         </div>

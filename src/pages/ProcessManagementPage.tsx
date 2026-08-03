@@ -4,6 +4,7 @@ import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts }
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
+import { useTabParam } from '../hooks/useTabParam';
 import XlsxToolbar from '../components/XlsxToolbar';
 import BarcodeScanner from '../components/BarcodeScanner';
 import { printLabelSheet } from '../utils/labelPrint';
@@ -26,6 +27,16 @@ const formatBadge = (status?: string) => <span className={statusBadgeClass(statu
 // Tabs are filtered by permission — a tab whose feature this user cannot
 // view is not drawn. See src/components/PermissionTabs.tsx.
 const TAB_MODULE = 'process_management';
+
+// Every tab this workspace can show, in one flat list, so an alert can name one.
+const ALL_PROCESS_TABS = [
+  'Dashboard',
+  'Pre-Examination', 'Sample Receipt', 'Test Directory', 'Acceptance Criteria', 'Specimen Rejections',
+  'Reference Intervals', 'Comparability', 'IQC', 'EQA', 'Method Verification', 'Measurement Uncertainty', 'POCT',
+  'Critical Result Rules', 'Critical Notifications', 'Referral Labs', 'Referral Tests', 'Referral Sendouts',
+  'Report Amendments', 'Process Reviews', 'Contingency Plan',
+  'Blood banking',
+];
 const tabBar = (active: string, tabs: string[], onChange: (name: string) => void) =>
   <PermissionTabs moduleKey={TAB_MODULE} tabs={tabs} active={active} onChange={onChange} />;
 
@@ -113,6 +124,11 @@ export function ProcessManagementPage() {
     } catch (e) { setError((e as Error).message); }
   }
   useEffect(() => { if (isEnabled('process_management')) void load(); }, [isEnabled]);
+  // A dashboard alert names the tab it wants; the phase bar that holds it only
+  // renders once that tab is active, so the aim is taken here, above the
+  // module-disabled return so the hook order never changes.
+  useTabParam(ALL_PROCESS_TABS, setTab);
+
   if (!isEnabled('process_management')) return <DisabledModule />;
 
   async function post(path: string, body: any) { return api(path, { method: 'POST', body: JSON.stringify(body) }); }
