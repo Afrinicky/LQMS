@@ -371,3 +371,20 @@ export function permKeyForTab(moduleKey: string, tab: string): string | null {
   const feature = featuresOfModule(moduleKey).find(f => f.tabs?.includes(tab));
   return feature ? feature.key : null;
 }
+
+/**
+ * Tabs that are nothing but a blank form for adding a record. Showing one to
+ * somebody who may read a register but not add to it is the exact complaint
+ * this work set out to fix — they fill the form in and the save is refused —
+ * so these ask for `create` rather than `view`.
+ */
+const CREATE_TAB_NAMES = new Set([
+  'Add Staff', 'Log Event', 'Report Incident', 'Manual Entry', 'Enter Reading',
+  'Result Entry', 'Results Entry', 'Generate Report', 'Generate Alerts',
+  'Feedback Intake', 'Sample Receipt',
+]);
+
+/** The action a tab requires: `create` for the "new record" tabs, else `view`. */
+export function actionForTab(tab: string): 'view' | 'create' {
+  return tab.startsWith('New ') || CREATE_TAB_NAMES.has(tab) ? 'create' : 'view';
+}

@@ -6,6 +6,7 @@ import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import { RisksPage } from './QMSPages';
 import { usePermissions } from '../hooks/usePermissions';
+import PermissionTabs from '../components/PermissionTabs';
 import type {
   Section, Department, Staff,
   AssessmentProgram, AssessmentFinding,
@@ -20,8 +21,11 @@ import type {
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
-const tabBar = (active: string, tabs: string[], onChange: (name: string) => void) =>
-  <div className="tabs">{tabs.map(name => <button key={name} type="button" className={active === name ? 'active' : ''} onClick={() => onChange(name)}>{name}</button>)}</div>;
+// Tabs are filtered by permission — a tab whose feature this user cannot
+// view is not drawn. These pages host several modules, so each call
+// passes the module its tabs belong to.
+const tabBarFor = (moduleKey: string) => (active: string, tabs: string[], onChange: (name: string) => void) =>
+  <PermissionTabs moduleKey={moduleKey} tabs={tabs} active={active} onChange={onChange} />;
 
 const ASSESSMENT_TYPES = ['internal_audit', 'self_assessment', 'gap_review', 'peer_review', 'other'];
 const FINDING_TYPES = ['observation', 'nonconformity', 'improvement_opportunity', 'risk'];
@@ -310,7 +314,7 @@ export function AssessmentsPage() {
   return <div className="module-page">
     <PageHeader eyebrow="Assessments" title="Assessments" subtitle="Internal audits, risk management, and quality indicator monitoring." />
     <div className="tabs">{topTabs.map(t => <button key={t.key} type="button" className={t.active ? 'active' : ''} onClick={t.go}>{t.key}</button>)}</div>
-    {inInternalAudit && tabBar(tab, INTERNAL_AUDIT_TABS, setTab)}
+    {inInternalAudit && tabBarFor('assessments')(tab, INTERNAL_AUDIT_TABS, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Risk Management' && <RisksPage embedded />}
@@ -586,7 +590,7 @@ export function MeetingsPage({ embedded = false }: { embedded?: boolean } = {}) 
   const tabs = ['Dashboard', 'Meetings', 'New Meeting', 'Attendance', 'Action Items', 'Reports'];
   return <div className={embedded ? '' : 'module-page'}>
     {!embedded && <PageHeader eyebrow="Organisation and Leadership" title="Meetings &amp; Minutes" subtitle="Meeting scheduling, agendas, minutes, and action items." />}
-    {tabBar(tab, embedded ? tabs.filter(t => t !== 'Dashboard') : tabs, setTab)}
+    {tabBarFor('meetings')(tab, embedded ? tabs.filter(t => t !== 'Dashboard') : tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && <ModuleAlerts moduleKey="meetings" />}
@@ -674,7 +678,7 @@ export function ManagementReviewPage({ embedded = false }: { embedded?: boolean 
   const tabs = ['Dashboard', 'Review Register', 'New Review', 'Inputs', 'Actions', 'Reports'];
   return <div className={embedded ? '' : 'module-page'}>
     {!embedded && <PageHeader eyebrow="Organisation and Leadership" title="Management Review" subtitle="Management review inputs, outputs, and resulting actions." />}
-    {tabBar(tab, embedded ? tabs.filter(t => t !== 'Dashboard') : tabs, setTab)}
+    {tabBarFor('management_review')(tab, embedded ? tabs.filter(t => t !== 'Dashboard') : tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && <ModuleAlerts moduleKey="management_review" />}
@@ -759,7 +763,7 @@ export function QualityIndicatorsPage({ embedded = false }: { embedded?: boolean
   const tabs = ['Dashboard', 'Indicator Register', 'New Indicator', 'Results Entry', 'Trends', 'Reports'];
   return <div className={embedded ? '' : 'module-page'}>
     {!embedded && <PageHeader eyebrow="Continual Improvement" title="Quality Indicators" subtitle="Quality indicators, targets, and result monitoring." />}
-    {tabBar(tab, embedded ? tabs.filter(t => t !== 'Dashboard') : tabs, setTab)}
+    {tabBarFor('quality_indicators')(tab, embedded ? tabs.filter(t => t !== 'Dashboard') : tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && <ModuleAlerts moduleKey="quality_indicators" />}
@@ -881,7 +885,7 @@ export function ContinualImprovementPage() {
   const tabs = ['Dashboard', 'Improvement Projects', 'New Project', 'Updates', 'Reports'];
   return <div className="module-page">
     <PageHeader eyebrow="Continual Improvement" title="Continual Improvement" subtitle="Improvement projects, indicators, and action tracking." />
-    {tabBar(tab, tabs, setTab)}
+    {tabBarFor('continual_improvement')(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && <ModuleAlerts moduleKey="continual_improvement" />}

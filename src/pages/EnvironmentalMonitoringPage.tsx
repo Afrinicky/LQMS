@@ -7,14 +7,18 @@ import DisabledModule from '../components/DisabledModule';
 import ScannedRecordUpload from '../components/ScannedRecordUpload';
 import XlsxToolbar from '../components/XlsxToolbar';
 import { usePermissions } from '../hooks/usePermissions';
+import PermissionTabs from '../components/PermissionTabs';
 import type {
   Department, Section, Location, Staff, EquipmentItem,
   EnvAsset, EnvDevice, EnvReading, EnvAlert, EnvExcursion, EnvDashboard, EnvSettings,
   EnvEscalationRule, EnvNotificationQueueItem, EnvChannel, EnvInsight, EnvReportType,
 } from '../../shared/types/api';
 
-const tabBar = (active: string, tabs: string[], onChange: (n: string) => void) =>
-  <div className="tabs">{tabs.map(n => <button key={n} type="button" className={active === n ? 'active' : ''} onClick={() => onChange(n)}>{n}</button>)}</div>;
+// Tabs are filtered by permission — a tab whose feature this user cannot
+// view is not drawn. See src/components/PermissionTabs.tsx.
+const TAB_MODULE = 'monitoring';
+const tabBar = (active: string, tabs: string[], onChange: (name: string) => void) =>
+  <PermissionTabs moduleKey={TAB_MODULE} tabs={tabs} active={active} onChange={onChange} />;
 const badge = (s?: string) => <span className={`badge ${s ? s.toLowerCase().replace(/\s+/g, '-') : ''}`}>{s ? s.replace(/_/g, ' ') : '—'}</span>;
 const fmtTime = (iso?: string | null) => { if (!iso) return '—'; const d = new Date(iso); return isNaN(+d) ? String(iso) : d.toLocaleString(); };
 const ago = (iso?: string | null) => { if (!iso) return 'never'; const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000); if (s < 60) return `${Math.round(s)}s ago`; if (s < 3600) return `${Math.round(s / 60)}m ago`; if (s < 86400) return `${Math.round(s / 3600)}h ago`; return `${Math.round(s / 86400)}d ago`; };

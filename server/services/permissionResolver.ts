@@ -124,6 +124,29 @@ function computeGrants(userId: number): Map<string, Grant> {
     set(p.module_key, p.action, o.allowed === 1, o.source || 'Manual override', 'User-specific permission override.');
   }
 
+  // ── Denying a whole module cascades to everything inside it ───────────────
+  // Module access is derived from features (see below), so without this an
+  // administrator revoking "Documents" from someone would change nothing at
+  // all: the union of their still-granted document features would hand it
+  // straight back. A denial written against a module is the plainest way to
+  // say "not this person, not anywhere in here", and it has to hold.
+  const explicitDenials = new Set<string>();
+  const collectDenials = (rows: { permission_id: number; allowed: number }[]) => {
+    for (const r of rows) {
+      if (r.allowed !== 0) continue;
+      const p = permById.get(r.permission_id);
+      if (p && featuresOfModule(p.module_key).length > 0) explicitDenials.add(`${p.module_key}:${p.action}`);
+    }
+  };
+  collectDenials(overrides);
+  collectDenials(rolePerms);
+  for (const denied of explicitDenials) {
+    const [moduleKey, action] = denied.split(':');
+    for (const feature of featuresOfModule(moduleKey)) {
+      set(feature.key, action, false, 'Denied override', `Denied for the whole ${moduleKey} module.`);
+    }
+  }
+
   // ── Rule 1: `view` is the floor for every other action ────────────────────
   // Applied last so it also overrides grants made by any layer above.
   const keysSeen = new Set(permissions.map(p => p.module_key));

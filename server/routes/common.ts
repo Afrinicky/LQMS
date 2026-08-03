@@ -10,6 +10,7 @@ import { seedDefaults } from '../db/seed.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requirePermission, viewableModulesOf } from '../middleware/permissions.js';
 import { resolvePermission } from '../services/permissionResolver.js';
+import { ACCESS_LEVELS, LEVEL_ACTIONS, type AccessLevel } from '../../shared/constants/features.js';
 import { audit } from '../services/auditService.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
 import { parseIntNullable } from './routeHelpers.js';
@@ -1600,6 +1601,85 @@ export function commonRoutes() {
     audit(req, { action: 'create', entity: 'user_permission_overrides', entityId: result.lastInsertRowid, newValue: { userId, permissionId, allowed, reason } });
     res.status(201).json({ ok: true });
   });
+  // Set a whole ACCESS LEVEL in one call.
+  //
+  // The matrix used to ask an administrator for seven yes/no answers per area
+  // per role — hundreds of clicks, each independently wrong-clickable, with no
+  // way to see what a role could actually do. A level is one decision that
+  // writes the actions it implies and explicitly denies the rest, so the stored
+  // grants always spell out a coherent, reviewable position.
+  router.post('/permissions/level', requirePermission('settings', 'edit'), (req, res) => {
+    const { scope, subjectId, permKey, level, reason } = req.body ?? {};
+    if (!['role', 'position', 'user'].includes(scope)) return res.status(400).json({ error: "scope must be 'role', 'position' or 'user'" });
+    if (!subjectId) return res.status(400).json({ error: 'subjectId is required' });
+    if (!permKey) return res.status(400).json({ error: 'permKey is required' });
+    if (!ACCESS_LEVELS.includes(level)) return res.status(400).json({ error: `level must be one of: ${ACCESS_LEVELS.join(', ')}` });
+
+    const db = getDb();
+    const perms = db.prepare('SELECT id, action FROM permissions WHERE module_key = ?').all(permKey) as { id: number; action: string }[];
+    if (perms.length === 0) return res.status(404).json({ error: `No permissions are defined for "${permKey}".` });
+
+    const granted = new Set(LEVEL_ACTIONS[level as AccessLevel]);
+    const table = scope === 'role' ? 'role_permissions' : scope === 'position' ? 'position_permissions' : 'user_permission_overrides';
+    const column = scope === 'role' ? 'role_id' : scope === 'position' ? 'position_id' : 'user_id';
+    const source = scope === 'user' ? 'Manual override' : 'Manual assignment';
+
+    const tx = db.transaction(() => {
+      for (const p of perms) {
+        const allowed = granted.has(p.action) ? 1 : 0;
+        if (scope === 'user') {
+          db.prepare(`INSERT OR REPLACE INTO user_permission_overrides (user_id, permission_id, allowed, source, reason) VALUES (?, ?, ?, ?, ?)`)
+            .run(subjectId, p.id, allowed, source, reason ?? null);
+        } else {
+          db.prepare(`INSERT OR REPLACE INTO ${table} (${column}, permission_id, allowed, source) VALUES (?, ?, ?, ?)`)
+            .run(subjectId, p.id, allowed, source);
+        }
+      }
+    });
+    tx();
+    audit(req, { action: 'set_level', entity: table, entityId: subjectId, newValue: { permKey, level, scope } });
+    res.json({ ok: true, permKey, level, actionsGranted: [...granted] });
+  });
+
+  // Clear a user's personal overrides for one area so they fall back to their
+  // role. Without this an override could only ever be replaced, never removed.
+  router.delete('/permissions/user-override/:userId/:permKey', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const perms = db.prepare('SELECT id FROM permissions WHERE module_key = ?').all(req.params.permKey) as { id: number }[];
+    const tx = db.transaction(() => {
+      for (const p of perms) db.prepare('DELETE FROM user_permission_overrides WHERE user_id = ? AND permission_id = ?').run(req.params.userId, p.id);
+    });
+    tx();
+    audit(req, { action: 'clear_override', entity: 'user_permission_overrides', entityId: req.params.userId, newValue: { permKey: req.params.permKey } });
+    res.json({ ok: true });
+  });
+
+  // The catalogue the access-control screen renders: every grantable area, the
+  // level each role/position/user currently holds, and what each level means.
+  router.get('/permissions/catalogue', requirePermission('settings', 'view'), (req, res) => {
+    const db = getDb();
+    const perms = db.prepare('SELECT id, module_key, action FROM permissions').all() as { id: number; module_key: string; action: string }[];
+    const byId = new Map(perms.map(p => [p.id, p]));
+    const collect = (rows: { subject: number; permission_id: number; allowed: number }[]) => {
+      const map: Record<string, Record<string, string[]>> = {};
+      for (const r of rows) {
+        if (r.allowed !== 1) continue;
+        const p = byId.get(r.permission_id);
+        if (!p) continue;
+        ((map[String(r.subject)] ??= {})[p.module_key] ??= []).push(p.action);
+      }
+      return map;
+    };
+    res.json({
+      roles: collect((db.prepare('SELECT role_id AS subject, permission_id, allowed FROM role_permissions').all() as never)),
+      positions: collect((db.prepare('SELECT position_id AS subject, permission_id, allowed FROM position_permissions').all() as never)),
+      users: collect((db.prepare('SELECT user_id AS subject, permission_id, allowed FROM user_permission_overrides').all() as never)),
+      userOverrideKeys: (db.prepare('SELECT DISTINCT user_id, permission_id FROM user_permission_overrides').all() as { user_id: number; permission_id: number }[])
+        .map(r => ({ userId: r.user_id, permKey: byId.get(r.permission_id)?.module_key }))
+        .filter(r => r.permKey),
+    });
+  });
+
   router.get('/authorizations/technical', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare(`
     SELECT ta.id, ta.staff_id, ta.position_id, ta.module_key, ta.section_id, ta.level, ta.is_active, ta.granted_at, ta.expires_at, ta.competency_assessment_id,
       s.full_name AS staff_name, p.title AS position_title, sec.name AS section_name
