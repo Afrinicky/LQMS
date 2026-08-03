@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { usePermissions } from '../hooks/usePermissions';
 import { permKeyForTab, actionForTab } from '../../shared/constants/features';
+import { useTabParam } from '../hooks/useTabParam';
 
 /**
  * The workspace tab bar, filtered by permission.
@@ -17,6 +18,11 @@ import { permKeyForTab, actionForTab } from '../../shared/constants/features';
  * If the active tab is filtered away (a bookmarked deep link, or rights
  * withdrawn mid-session), the bar moves the user to the first tab they can
  * actually open rather than leaving them on a blank panel.
+ *
+ * A `?tab=` in the URL opens that tab — this is how a dashboard alert lands on
+ * the tab holding its record rather than on the module's front page. It is
+ * still subject to permission: a tab the user may not see is not opened by
+ * putting its name in a link.
  */
 export function usePermittedTabs(moduleKey: string, tabs: string[], active: string, onChange: (name: string) => void) {
   const { can } = usePermissions();
@@ -28,6 +34,8 @@ export function usePermittedTabs(moduleKey: string, tabs: string[], active: stri
     }),
     [moduleKey, tabs, can],
   );
+
+  useTabParam(permitted, onChange);
 
   useEffect(() => {
     if (permitted.length === 0) return;

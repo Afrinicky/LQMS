@@ -17,7 +17,23 @@ export async function downloadXlsx(path: string, fallbackName: string): Promise<
   URL.revokeObjectURL(url);
 }
 
-export type ImportResult = { totalRows?: number; created?: number; updated?: number; excursions?: number; errors?: string[] };
+// Fetches a server-rendered printable report and opens it in a new window. The
+// request has to go through fetch rather than a plain link because the token
+// travels in a header, so the HTML is written into the window afterwards.
+export async function openPrintable(path: string): Promise<void> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+  if (!res.ok) throw new Error((await res.text()) || res.statusText);
+  const html = await res.text();
+  const w = window.open('', '_blank');
+  if (!w) throw new Error('Allow pop-ups for this site to open the printable report.');
+  w.document.open(); w.document.write(html); w.document.close();
+}
+
+export type ImportResult = {
+  totalRows?: number; created?: number; updated?: number; excursions?: number;
+  analytes?: number; readings?: number; rejected?: number; errors?: string[];
+};
 
 export async function uploadXlsx(path: string, file: File): Promise<ImportResult> {
   const fd = new FormData();

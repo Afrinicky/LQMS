@@ -7,6 +7,7 @@ import DisabledModule from '../components/DisabledModule';
 import { RisksPage } from './QMSPages';
 import { usePermissions } from '../hooks/usePermissions';
 import PermissionTabs from '../components/PermissionTabs';
+import { useTabParam } from '../hooks/useTabParam';
 import type {
   Section, Department, Staff,
   AssessmentProgram, AssessmentFinding,
@@ -84,6 +85,10 @@ function dashboardCards(s: GovernanceSummary | null, keys: Array<{ label: string
 }
 
 // ============= Assessments =============
+// Every tab the assessments workspace can show, so an alert can name one.
+const ASSESSMENT_TABS = ['Dashboard', 'Assessment Programmes', 'New Assessment', 'Checklist Library',
+  'Plan Assessment', 'Assessment Questions', 'Internal Audit Marks', 'Findings', 'Reports'];
+
 export function AssessmentsPage() {
   const { can } = usePermissions();
   const { isEnabled } = useModules();
@@ -126,6 +131,11 @@ export function AssessmentsPage() {
     } catch (e) { setError((e as Error).message); }
   }
   useEffect(() => { if (isEnabled('assessments')) void load(); }, [isEnabled]);
+  // The internal-audit bar only renders once one of its tabs is active, so an
+  // alert aiming at Findings is honoured here, above the module-disabled
+  // return so the hook order never changes.
+  useTabParam(ASSESSMENT_TABS, setTab);
+
   if (!isEnabled('assessments')) return <DisabledModule />;
 
   // Checklist library helpers

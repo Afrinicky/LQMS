@@ -8,6 +8,8 @@ import { useModules } from '../hooks/useModules';
 import { usePermissions } from '../hooks/usePermissions';
 import DisabledModule from '../components/DisabledModule';
 import PermissionTabs from '../components/PermissionTabs';
+import XlsxToolbar from '../components/XlsxToolbar';
+import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import { PageHeader, KpiStrip, ModuleAlerts } from '../components/ui';
 import LeveyJenningsChart, { type ChartData } from '../components/LeveyJenningsChart';
 import {
@@ -161,9 +163,15 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
 
       {tab === 'New Control' && (
         can('iqc', 'create')
-          ? <DefineControl sections={sections} staff={staff} equipment={equipment}
-              onSaved={async () => { await load(); setNotice('Control defined. It is ready to run.'); setTab('Controls'); }}
-              onError={setError} />
+          ? <>
+              <ImportControls onImported={async (n) => {
+                await load();
+                if (n > 0) setNotice(`${n} control${n === 1 ? '' : 's'} brought in from Excel. Check the register.`);
+              }} />
+              <DefineControl sections={sections} staff={staff} equipment={equipment}
+                onSaved={async () => { await load(); setNotice('Control defined. It is ready to run.'); setTab('Controls'); }}
+                onError={setError} />
+            </>
           : <p className="muted">You do not have permission to define new controls.</p>
       )}
 
@@ -243,12 +251,21 @@ function ControlRegister({ materials, onChanged, onRun, onChart, canEdit }: {
     }
   };
 
+  // The register export takes a period, which for a register means the window in
+  // which the lots were brought into use.
+  const toolbar = <XlsxToolbar
+    module="iqc" exportPath="/iqc/controls/export" exportName="IQC_Controls.xlsx"
+    exportOnly dateRange dateLabel="Registered" />;
+
   if (materials.length === 0) {
-    return <div className="card"><div className="empty-state">
-      <span className="es-ico"><Beaker size={26} /></span>
-      <h3>No controls defined yet</h3>
-      <p>Define a control material — commercial or in-house — and say what it measures. Once defined it can be run.</p>
-    </div></div>;
+    return <div className="card">
+      {toolbar}
+      <div className="empty-state">
+        <span className="es-ico"><Beaker size={26} /></span>
+        <h3>No controls defined yet</h3>
+        <p>Define a control material — commercial or in-house — and say what it measures. Once defined it can be run.</p>
+      </div>
+    </div>;
   }
 
   return (
@@ -260,6 +277,7 @@ function ControlRegister({ materials, onChanged, onRun, onChart, canEdit }: {
           <button type="button" className="secondary" onClick={onChart}>Charts</button>
         </div>
       </div>
+      {toolbar}
       <table className="data-table iqc-table">
         <thead><tr>
           <th>Control</th><th>Test</th><th>Type</th><th>Source</th><th>Lot</th>
@@ -352,6 +370,32 @@ function ControlDetail({ material, analytes, canEdit }: { material: Material; an
 }
 
 /* ------------------------------------------------------------ define control */
+
+/**
+ * Bringing controls in from Excel. One sheet carries one control or the whole
+ * register — control-level columns simply repeat down the rows of each of its
+ * analytes — so a laboratory setting the system up does not have to type forty
+ * lots in by hand. A lot that already exists is updated rather than duplicated.
+ */
+function ImportControls({ onImported }: { onImported: (created: number) => void | Promise<void> }) {
+  return (
+    <div className="card iqc-import">
+      <div className="section-head">
+        <h3>Already have your controls in a spreadsheet?</h3>
+      </div>
+      <p className="muted" style={{ marginTop: 0 }}>
+        Download the template, fill in one row per analyte (repeat the control's own columns down its
+        rows), and import it. A single control or a whole register works the same way. Anything that
+        cannot be accepted is reported by row number, and nothing in that row is written.
+      </p>
+      <XlsxToolbar
+        module="iqc" importOnly exportName="IQC_Controls.xlsx"
+        templatePath="/iqc/controls/template" importPath="/iqc/controls/import"
+        onImported={r => void onImported((r.created ?? 0) + (r.updated ?? 0))}
+      />
+    </div>
+  );
+}
 
 function DefineControl({ sections, staff, equipment, onSaved, onError }: {
   sections: Section[]; staff: Staff[]; equipment: EquipmentItem[];
@@ -616,6 +660,34 @@ function RunControl({ materials, equipment, staff, onRecorded, onError }: {
   }
 
   return (
+    <>
+    {/* Analysers that already write QC to a spreadsheet, and benches catching up
+        on a backlog, come in here. The file is put through exactly the same
+        evaluation as a run typed below, so an imported failure is flagged and
+        withholds patient results in the same way. */}
+    <div className="card iqc-import">
+      <div className="section-head"><h3>Import runs from Excel</h3></div>
+      <p className="muted" style={{ marginTop: 0 }}>
+        One row per reading. Rows sharing a lot, date, time and instrument are treated as one run and
+        evaluated together — which is what the multirules need.
+        {material
+          ? <> The template below is pre-filled for <strong>{material.material_name}</strong> (lot {material.lot_number}).</>
+          : <> Choose a control below first and the template comes pre-filled with its analytes.</>}
+      </p>
+      <XlsxToolbar
+        module="iqc" importOnly exportName="IQC_Runs.xlsx"
+        templatePath={`/iqc/runs/template${materialId ? `?materialId=${materialId}` : ''}`}
+        importPath="/iqc/runs/import"
+        onImported={r => {
+          const n = r.created ?? 0;
+          if (n === 0) return;
+          void onRecorded(r.rejected
+            ? `${n} run(s) imported — ${r.rejected} rejected. Patient results for those runs are withheld.`
+            : `${n} run(s) imported from Excel.`);
+        }}
+      />
+    </div>
+
     <form className="card iqc-run" onSubmit={submit}>
       <div className="section-head"><h3><ClipboardCheck size={16} /> Record a control run</h3></div>
 
@@ -713,6 +785,7 @@ function RunControl({ materials, equipment, staff, onRecorded, onError }: {
         </div>
       )}
     </form>
+    </>
   );
 }
 
@@ -722,6 +795,8 @@ function RunReview({ runs, onChanged, canApprove, onError }: {
   runs: Run[]; onChanged: () => void; canApprove: boolean; onError: (m: string) => void;
 }) {
   const [filter, setFilter] = useState<'attention' | 'all'>('attention');
+  // A dashboard alert lands here with ?tab=Review&focus=iqc_runs:<id>.
+  useFocusTarget(runs);
   const [action, setAction] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState<number | null>(null);
 
@@ -754,12 +829,17 @@ function RunReview({ runs, onChanged, canApprove, onError }: {
         </div>
       </div>
 
+      {/* The QC record for a period — results, outcomes and rules — as one file. */}
+      <XlsxToolbar
+        module="iqc" exportOnly dateRange dateLabel="Runs"
+        exportPath="/iqc/runs/export" exportName="IQC_Runs.xlsx" />
+
       {shown.length === 0 ? (
         <div className="iqc-clear plain"><CheckCircle2 size={18} /><span>Nothing waiting. Every run is in control and reviewed.</span></div>
       ) : (
         <ul className="iqc-runs">
           {shown.map(r => (
-            <li key={r.id} className={STATUS_TONE[r.status]}>
+            <li key={r.id} className={STATUS_TONE[r.status]} {...focusAttr('iqc_runs', r.id)}>
               <span className={`iqc-rail ${STATUS_TONE[r.status]}`} />
               <div className="iqc-run-main">
                 <div className="iqc-run-title">
@@ -809,7 +889,14 @@ function ChartTab({ materials, onError }: { materials: Material[]; onError: (m: 
   const [materialId, setMaterialId] = useState('');
   const [analytes, setAnalytes] = useState<Analyte[]>([]);
   const [analyteId, setAnalyteId] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
   const [data, setData] = useState<ChartData | null>(null);
+
+  // One period governs the chart on screen, the printed record and the export,
+  // so what a reviewer signs is what they were looking at.
+  const range = [from && `from=${from}`, to && `to=${to}`].filter(Boolean).join('&');
+  const q = range ? `?${range}` : '';
 
   useEffect(() => {
     setAnalyteId(''); setData(null);
@@ -821,8 +908,10 @@ function ChartTab({ materials, onError }: { materials: Material[]; onError: (m: 
 
   useEffect(() => {
     if (!analyteId) { setData(null); return; }
-    api<ChartData>(`/iqc/analytes/${analyteId}/chart`).then(setData).catch(e => onError((e as Error).message));
-  }, [analyteId, onError]);
+    api<ChartData>(`/iqc/analytes/${analyteId}/chart${q}`).then(setData).catch(e => onError((e as Error).message));
+  }, [analyteId, q, onError]);
+
+  const analyteName = analytes.find(a => String(a.id) === analyteId)?.analyte ?? 'chart';
 
   return (
     <div className="card">
@@ -839,7 +928,27 @@ function ChartTab({ materials, onError }: { materials: Material[]; onError: (m: 
             {analytes.map(a => <option key={a.id} value={a.id}>{a.analyte}</option>)}
           </select>
         </label>
+        <label>From<input type="date" value={from} max={to || undefined} onChange={e => setFrom(e.target.value)} /></label>
+        <label>To<input type="date" value={to} min={from || undefined} onChange={e => setTo(e.target.value)} /></label>
       </div>
+      {(from || to) && (
+        <p className="muted" style={{ marginTop: -6 }}>
+          Showing {from || 'the first result'} to {to || 'today'}.
+          {' '}<button type="button" className="link-button" onClick={() => { setFrom(''); setTo(''); }}>Show all results</button>
+        </p>
+      )}
+
+      {analyteId && (
+        <XlsxToolbar
+          module="iqc"
+          exportName={`LJ_${analyteName.replace(/\W+/g, '_')}.xlsx`}
+          exportPath={`/iqc/analytes/${analyteId}/chart.xlsx${q}`}
+          printPath={`/iqc/analytes/${analyteId}/chart/print${q}`}
+          printLabel="Print chart (PDF)"
+          exportOnly
+        />
+      )}
+
       {!materialId && <p className="muted">Choose a quantitative control to chart. Qualitative controls have no numeric series — review them under Review instead.</p>}
       {data && <LeveyJenningsChart data={data} />}
     </div>

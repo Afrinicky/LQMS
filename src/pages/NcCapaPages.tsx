@@ -8,6 +8,8 @@ import DisabledModule from '../components/DisabledModule';
 import RiskMatrix, { riskLevelBadge, bandFor } from '../components/RiskMatrix';
 import XlsxToolbar from '../components/XlsxToolbar';
 import WorkflowStepper from '../components/WorkflowStepper';
+import { useTabParam } from '../hooks/useTabParam';
+import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import {
   NC_TYPE_OPTIONS, RCA_METHOD_OPTIONS, capaSourceLabel, formatBadge, fmtDate, EmptyRow,
   openPrintWindow, useLookupData, useWorkflowConfig, type CapaDetail, type LoadState,
@@ -57,8 +59,10 @@ function Banner({ kind, children }: { kind: 'error' | 'ok' | 'info'; children: R
   return <div className={cls} style={{ marginBottom: 10 }}>{children}</div>;
 }
 
-/** Tab bar shared by the three submodules. */
+/** Tab bar shared by the three submodules. Honours ?tab= so a dashboard alert
+ *  opens the register the record is on, not the submodule's first tab. */
 function Tabs({ tabs, tab, setTab, counts }: { tabs: string[]; tab: string; setTab: (t: string) => void; counts?: Record<string, number> }) {
+  useTabParam(tabs, setTab);
   return <div className="tabs">{tabs.map(name => {
     const n = counts?.[name];
     return <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>
@@ -310,6 +314,8 @@ export function NonconformitiesPage({ embedded = false }: { embedded?: boolean }
   const [tab, setTab] = useState('Register');
   const [list, setList] = useState<NonconformingEvent[]>([]);
   const [capas, setCapas] = useState<CapaRecord[]>([]);
+  // A dashboard alert lands here with ?tab=Register&focus=nonconforming_events:<id>.
+  useFocusTarget(list);
   const [selected, setSelected] = useState<NonconformingEventDetail | null>(null);
   const [state, setState] = useState<LoadState>({ loading: false, error: null });
   const [msg, setMsg] = useState<string | null>(null);
@@ -391,7 +397,7 @@ export function NonconformitiesPage({ embedded = false }: { embedded?: boolean }
         <table className="table"><thead><tr>
           <th>NC No.</th><th>Date</th><th>Category</th><th>Unit</th><th>Title</th><th>Risk</th><th>Stage</th><th>CAPA</th><th></th>
         </tr></thead><tbody>
-          {filtered.map(n => { const nc = n as any; const capa = capas.find(c => c.nc_id === n.id); return <tr key={n.id}>
+          {filtered.map(n => { const nc = n as any; const capa = capas.find(c => c.nc_id === n.id); return <tr key={n.id} {...focusAttr('nonconforming_events', n.id)}>
             <td>{n.nc_number}{nc.affects_patient_safety ? <div><span className="badge badge--danger" style={{ fontSize: 10 }}>patient safety</span></div> : null}</td>
             <td>{n.event_date}</td>
             <td>{(n.nc_type || '—').replace(/_/g, ' ')}</td>

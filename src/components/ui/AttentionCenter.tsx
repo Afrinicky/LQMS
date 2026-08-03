@@ -72,6 +72,9 @@ export function AttentionCenter() {
   const navigate = useNavigate();
   const today = TODAY();
   const [alerts, setAlerts] = useState<LiveAlert[] | null>(null);
+  // Clicking a severity narrows the queue below rather than dumping the reader
+  // in a generic inbox — the ring and the list are one instrument.
+  const [bucket, setBucket] = useState<Bucket | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -86,6 +89,11 @@ export function AttentionCenter() {
     for (const a of alerts || []) counts[bucketOf(a, today)]++;
     return { counts, total: (alerts || []).length };
   }, [alerts, today]);
+
+  const queue = useMemo(
+    () => (alerts || []).filter(a => !bucket || bucketOf(a, today) === bucket),
+    [alerts, bucket, today],
+  );
 
   if (alerts === null) return null; // still loading — keep the layout calm
 
@@ -113,12 +121,13 @@ export function AttentionCenter() {
     { value: counts.today, color: 'var(--accent-bright)' },
     { value: counts.info, color: 'var(--faint)' },
   ];
-  const legend: { label: string; value: number; color: string }[] = [
-    { label: 'Critical', value: counts.crit, color: 'var(--danger)' },
-    { label: 'Overdue', value: counts.overdue, color: 'var(--warning)' },
-    { label: 'Due today', value: counts.today, color: 'var(--accent-bright)' },
-    { label: 'Info / later', value: counts.info, color: 'var(--faint)' },
+  const legend: { key: Bucket; label: string; value: number; color: string }[] = [
+    { key: 'crit', label: 'Critical', value: counts.crit, color: 'var(--danger)' },
+    { key: 'overdue', label: 'Overdue', value: counts.overdue, color: 'var(--warning)' },
+    { key: 'today', label: 'Due today', value: counts.today, color: 'var(--accent-bright)' },
+    { key: 'info', label: 'Info / later', value: counts.info, color: 'var(--faint)' },
   ];
+  const bucketLabel = legend.find(l => l.key === bucket)?.label ?? '';
 
   return (
     <div className="attn-hero">
@@ -129,7 +138,14 @@ export function AttentionCenter() {
           <div className="attn-ring"><Ring segments={ringSegments} total={total} /></div>
           <ul className="attn-legend">
             {legend.map(l => (
-              <li key={l.label} onClick={() => navigate('/notifications')} role="button" title="Open the inbox">
+              <li
+                key={l.key}
+                className={`${bucket === l.key ? 'is-on' : ''} ${l.value === 0 ? 'is-empty' : ''}`}
+                onClick={() => { if (l.value > 0) setBucket(b => (b === l.key ? null : l.key)); }}
+                role="button"
+                aria-pressed={bucket === l.key}
+                title={l.value === 0 ? `No ${l.label.toLowerCase()} items` : `Show only ${l.label.toLowerCase()} items`}
+              >
                 <span className="d" style={{ background: l.color }} />
                 <span className="l">{l.label}</span>
                 <span className="v" style={{ color: l.color === 'var(--faint)' ? 'var(--text)' : l.color }}>{l.value}</span>
@@ -151,15 +167,18 @@ export function AttentionCenter() {
           right work to do next. */}
       <div className="card pq-card">
         <div className="pq-head">
-          <h3>Top priorities</h3>
-          <button type="button" className="pq-link" onClick={() => navigate('/notifications')}>View all {total} <ArrowRight size={13} /></button>
+          <h3>{bucket ? `${bucketLabel} — ${queue.length}` : 'Top priorities'}</h3>
+          {bucket
+            ? <button type="button" className="pq-link" onClick={() => setBucket(null)}>Show all {total} <ArrowRight size={13} /></button>
+            : <button type="button" className="pq-link" onClick={() => navigate('/notifications')}>Open inbox <ArrowRight size={13} /></button>}
         </div>
         <ul className="pq-list">
-          {(alerts || []).slice(0, 5).map(a => {
+          {queue.slice(0, bucket ? 10 : 5).map(a => {
             const b = bucketOf(a, today);
             const chip = dueChip(a, today);
             return (
-              <li key={a.key} className="pq-item" onClick={() => navigate(a.actionUrl)} role="button" title="Open the record">
+              <li key={a.key} className="pq-item" onClick={() => navigate(a.actionUrl)} role="button"
+                  title={`Open: ${a.message || a.title}`}>
                 <span className={`pq-rail ${RAIL_CLASS[b]}`} />
                 <div className="pq-main">
                   <div className="pq-title">{a.title}</div>
@@ -174,19 +193,29 @@ export function AttentionCenter() {
             );
           })}
         </ul>
+        {queue.length > (bucket ? 10 : 5) && (
+          <button type="button" className="alert-more" onClick={() => navigate('/notifications')}>
+            {queue.length - (bucket ? 10 : 5)} more in the inbox <ChevronRight size={13} />
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
 // AlertsByModule — the whole-laboratory alert picture as one compact chart:
-// a ranked, stacked severity bar per module. Replaces the old wall of module
-// cards; each row opens that module. Renders nothing while loading and a clean
-// "all clear" line when there is nothing to show.
+// a ranked, stacked severity bar per module. Renders nothing while loading and
+// a clean "all clear" line when there is nothing to show.
+//
+// A row used to jump straight to whichever alert happened to sort first, which
+// is only ever right by accident. It now opens the module's own alerts, so the
+// reader picks the record they meant and lands on it.
 export function AlertsByModule({ limit = 8 }: { limit?: number }) {
   const navigate = useNavigate();
+  const today = TODAY();
   const [data, setData] = useState<LiveAlertsGrouped | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [open, setOpen] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -212,7 +241,7 @@ export function AlertsByModule({ limit = 8 }: { limit?: number }) {
       <div className="abm-head">
         <div>
           <h3>Alerts across the laboratory</h3>
-          <p>{data.total} active {data.total === 1 ? 'alert' : 'alerts'} in {data.groups.length} module{data.groups.length === 1 ? '' : 's'} — click a module to resolve.</p>
+          <p>{data.total} active {data.total === 1 ? 'alert' : 'alerts'} in {data.groups.length} module{data.groups.length === 1 ? '' : 's'} — open a module to see its alerts, then click one to go straight to the record.</p>
         </div>
         <div className="abm-key">
           <span><i style={{ background: 'var(--danger)' }} />Critical</span>
@@ -223,18 +252,40 @@ export function AlertsByModule({ limit = 8 }: { limit?: number }) {
       <ul className="abm-list">
         {shown.map(g => {
           const info = Math.max(0, g.total - g.crit - g.warn);
-          const to = g.alerts[0]?.actionUrl || '/notifications';
           const w = (g.total / max) * 100;
+          const isOpen = open === g.module;
           return (
-            <li key={g.module} className="abm-row" onClick={() => navigate(to)} role="button" title={`Open ${g.moduleLabel}`}>
-              <span className="abm-name">{g.moduleLabel}</span>
-              <div className="abm-track" style={{ width: `${Math.max(12, w)}%` }}>
-                {g.crit > 0 && <div className="abm-seg crit" style={{ flex: g.crit }} title={`${g.crit} critical`} />}
-                {g.warn > 0 && <div className="abm-seg warn" style={{ flex: g.warn }} title={`${g.warn} due`} />}
-                {info > 0 && <div className="abm-seg info" style={{ flex: info }} title={`${info} info`} />}
+            <li key={g.module} className={`abm-row-wrap ${isOpen ? 'is-open' : ''}`}>
+              <div className="abm-row" onClick={() => setOpen(m => (m === g.module ? null : g.module))} role="button"
+                   aria-expanded={isOpen} title={`Show the ${g.total} ${g.moduleLabel} alert(s)`}>
+                <span className="abm-name">{g.moduleLabel}</span>
+                <div className="abm-track" style={{ width: `${Math.max(12, w)}%` }}>
+                  {g.crit > 0 && <div className="abm-seg crit" style={{ flex: g.crit }} title={`${g.crit} critical`} />}
+                  {g.warn > 0 && <div className="abm-seg warn" style={{ flex: g.warn }} title={`${g.warn} due`} />}
+                  {info > 0 && <div className="abm-seg info" style={{ flex: info }} title={`${info} info`} />}
+                </div>
+                <span className="abm-total">{g.total}</span>
+                <ChevronRight size={15} className={`abm-go ${isOpen ? 'is-open' : ''}`} />
               </div>
-              <span className="abm-total">{g.total}</span>
-              <ChevronRight size={15} className="abm-go" />
+              {isOpen && (
+                <ul className="pq-list abm-alerts">
+                  {g.alerts.map(a => {
+                    const chip = dueChip(a, today);
+                    return (
+                      <li key={a.key} className="pq-item" onClick={() => navigate(a.actionUrl)} role="button"
+                          title={`Open: ${a.message || a.title}`}>
+                        <span className={`pq-rail ${RAIL_CLASS[bucketOf(a, today)]}`} />
+                        <div className="pq-main">
+                          <div className="pq-title">{a.title}</div>
+                          {a.message && <div className="pq-msg">{a.message}</div>}
+                        </div>
+                        <span className={`pq-due ${chip.tone}`}>{chip.text}</span>
+                        <ArrowRight size={15} className="pq-go" />
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </li>
           );
         })}

@@ -13,6 +13,7 @@ import { printLabelSheet, LABEL_PRESETS } from '../utils/labelPrint';
 import { EnvironmentalMonitoringPage, EnvLiveCards } from './EnvironmentalMonitoringPage';
 import { usePermissions } from '../hooks/usePermissions';
 import PermissionTabs from '../components/PermissionTabs';
+import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import type {
   Location, Section, Department, Staff, Supplier, EquipmentItem, InventoryItem, MonitoringRecord, SafetyIncident,
   EquipmentMaintenanceRecord, EquipmentBreakdown, MonitoringItem, MonitoringReading,
@@ -133,6 +134,9 @@ export function EquipmentPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [tab, setTab] = useState('Dashboard');
   const [equipment, setEquipment] = useState<EquipmentItem[]>([]);
+  // A dashboard alert arrives with ?tab= and ?focus=; the tab bar opens the tab,
+  // this scrolls to the record and flashes it.
+  useFocusTarget(equipment);
   const [summary, setSummary] = useState<OperationsSummary | null>(null);
   const [selected, setSelected] = useState<EquipmentDetail | null>(null);
   const [nextNumber, setNextNumber] = useState('');
@@ -298,7 +302,7 @@ export function EquipmentPage() {
       {loading ? <p>Loading…</p> : equipment.length === 0 ? <p>No equipment items have been recorded yet.</p> :
         <div style={{ overflowX: 'auto' }}>
         <table className="table"><thead><tr><th>Identifier</th><th>Name</th><th>Serial no.</th><th>Model</th><th>Manufacturer</th><th>Supplier</th><th>Country</th><th>Condition</th><th>Received</th><th>In service</th><th>Location</th><th>Out of service</th><th>Status</th></tr></thead><tbody>
-          {equipment.map(item => <tr key={item.id} className="row-clickable" style={{ cursor: 'pointer' }} onClick={() => openDetail(item.id)} title="Open equipment profile">
+          {equipment.map(item => <tr key={item.id} {...focusAttr('equipment_items', item.id)} className="row-clickable" style={{ cursor: 'pointer' }} onClick={() => openDetail(item.id)} title="Open equipment profile">
             <td>{item.equipment_number}</td><td>{item.name}</td><td>{item.serial_number || '—'}</td><td>{item.model || '—'}</td><td>{item.manufacturer || '—'}</td>
             <td>{item.supplier_name || '—'}</td><td>{item.country_of_origin || '—'}</td><td>{item.condition_received || '—'}</td>
             <td>{item.date_received || '—'}</td><td>{item.date_commissioned || '—'}</td>
@@ -934,7 +938,7 @@ function EquipmentMaintenanceTab({ equipment, staff, sections, setError, onChang
       {!equipId ? <p className="muted">Select an equipment item to manage its schedules and log maintenance.</p> : <>
         <h4>Schedules</h4>
         {schedules.length === 0 ? <p className="muted">No schedules yet — every equipment should carry at least its routine maintenance schedule.</p> : <table className="table"><thead><tr><th>Type</th><th>Frequency</th><th>Provider</th><th>Responsible</th><th>Last done</th><th>Next due</th><th>Active</th><th></th></tr></thead><tbody>
-          {schedules.map(s => { const overdue = s.next_due_date && s.next_due_date < today; return <tr key={s.id}>
+          {schedules.map(s => { const overdue = s.next_due_date && s.next_due_date < today; return <tr key={s.id} {...focusAttr('equipment_schedules', s.id)}>
             <td>{(s.schedule_type || '').replace(/_/g, ' ')}</td>
             <td>{s.frequency}{s.frequency === 'custom' && s.interval_days ? ` (${s.interval_days}d)` : ''}</td>
             <td>{s.provider_name || (s.provider_type || '—')}</td>
@@ -1215,6 +1219,7 @@ export function InventoryPage() {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [batches, setBatches] = useState<InventoryBatch[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  useFocusTarget(items.length + batches.length + suppliers.length);
   const [summary, setSummary] = useState<OperationsSummary | null>(null);
   const [selected, setSelected] = useState<InventoryItemDetail | null>(null);
   const [itemForm, setItemForm] = useState({ name: '', category: '', supplierId: '', locationId: '', sectionId: '', quantity: 0, unit: '', minimumStock: 0, reorderLevel: 0, expiryDate: '', storageRequirement: '', status: 'available' });
@@ -1350,7 +1355,7 @@ export function InventoryPage() {
       <div style={{ margin: '4px 0 10px' }}><BarcodeScanner placeholder="Scan a stock item barcode…" autoFocus={false} onScan={code => { const m = items.find(i => i.item_code?.toLowerCase() === code.trim().toLowerCase()); if (m) openDetail(m.id); else setError(`No item found for barcode "${code}".`); }} /></div>
       {loading ? <p>Loading…</p> : items.length === 0 ? <p>No items yet.</p> :
         <table className="table"><thead><tr><th>Code</th><th>Name</th><th>Category</th><th>Qty</th><th>Unit</th><th>Min</th><th>Reorder</th><th>Expiry</th><th></th></tr></thead><tbody>
-          {items.map(i => <tr key={i.id}><td>{i.item_code}</td><td>{i.name}</td><td>{i.category || '—'}</td>
+          {items.map(i => <tr key={i.id} {...focusAttr('inventory_items', i.id)}><td>{i.item_code}</td><td>{i.name}</td><td>{i.category || '—'}</td>
             <td>{i.quantity}{i.low_stock && <span className="badge" style={{ marginLeft: 6, background: '#fff7df', color: '#6b4b05' }}>low</span>}</td>
             <td>{i.unit || '—'}</td><td>{i.minimum_stock || 0}</td><td>{i.reorder_level || 0}</td>
             <td>{i.expiry_date || '—'} {i.expiry_status && i.expiry_status !== 'valid' && <span className="badge" style={{ background: i.expiry_status === 'expired' ? '#fde2e2' : '#fff7df', color: i.expiry_status === 'expired' ? 'var(--danger)' : '#6b4b05' }}>{i.expiry_status.replace('_', ' ')}</span>}</td>
@@ -1397,7 +1402,7 @@ export function InventoryPage() {
         <h3>Batches (FEFO order)</h3>
         {batches.length === 0 ? <p>No batches recorded.</p> :
           <table className="table"><thead><tr><th>Item</th><th>Batch</th><th>Lot</th><th>Available</th><th>Expiry</th><th>Acceptance</th><th>Actions</th></tr></thead><tbody>
-            {batches.map(b => <tr key={b.id}><td>{b.item_name || b.item_id}</td><td>{b.batch_number || '—'}</td><td>{b.lot_number || '—'}</td>
+            {batches.map(b => <tr key={b.id} {...focusAttr('inventory_batches', b.id)}><td>{b.item_name || b.item_id}</td><td>{b.batch_number || '—'}</td><td>{b.lot_number || '—'}</td>
               <td>{b.quantity_available} {b.unit_of_measure || ''}</td>
               <td>{b.expiry_date || '—'} {b.expiry_status && b.expiry_status !== 'valid' && <span className="badge" style={{ background: b.expiry_status === 'expired' ? '#fde2e2' : '#fff7df', color: b.expiry_status === 'expired' ? 'var(--danger)' : '#6b4b05' }}>{b.expiry_status.replace('_', ' ')}</span>}</td>
               <td>{formatBadge(b.acceptance_status)}</td>
@@ -1457,7 +1462,7 @@ export function InventoryPage() {
         <h3>Suppliers</h3>
         {suppliers.length === 0 ? <p>No suppliers.</p> :
           <table className="table"><thead><tr><th>Code</th><th>Name</th><th>Contact</th><th>Last eval</th><th>Next eval</th><th>Status</th></tr></thead><tbody>
-            {suppliers.map(s => <tr key={s.id}><td>{s.supplier_code}</td><td>{s.name}</td><td>{s.contact_person || s.contact || '—'}</td><td>{s.last_evaluation_date || '—'}</td><td>{s.next_evaluation_due || '—'}</td><td>{formatBadge(s.status)}</td></tr>)}
+            {suppliers.map(s => <tr key={s.id} {...focusAttr('suppliers', s.id)}><td>{s.supplier_code}</td><td>{s.name}</td><td>{s.contact_person || s.contact || '—'}</td><td>{s.last_evaluation_date || '—'}</td><td>{s.next_evaluation_due || '—'}</td><td>{formatBadge(s.status)}</td></tr>)}
           </tbody></table>}
       </div>
     </div>}
@@ -1526,6 +1531,7 @@ export function MonitoringPage({ embedded = false }: { embedded?: boolean } = {}
   const [tab, setTab] = useState(embedded ? 'Monitoring Items' : 'Dashboard');
   const [items, setItems] = useState<MonitoringItem[]>([]);
   const [readings, setReadings] = useState<MonitoringReading[]>([]);
+  useFocusTarget(readings);
   const [summary, setSummary] = useState<OperationsSummary | null>(null);
   const [legacyRecords, setLegacyRecords] = useState<MonitoringRecord[]>([]);
   const [itemForm, setItemForm] = useState({ name: '', monitoringType: '', parameter: '', unit: '', sectionId: '', locationId: '', lowerLimit: '', upperLimit: '', warningLowerLimit: '', warningUpperLimit: '', criticalLowerLimit: '', criticalUpperLimit: '', frequency: '', responsibleStaffId: '', ncTriggerEnabled: false });
@@ -1661,7 +1667,7 @@ export function MonitoringPage({ embedded = false }: { embedded?: boolean } = {}
       <h3>Excursions</h3>
       {excursions.length === 0 ? <p>No excursions recorded.</p> :
         <table className="table"><thead><tr><th>Date</th><th>Item</th><th>Value</th><th>Status</th><th>Comment</th><th>Actions</th></tr></thead><tbody>
-          {excursions.map(r => <tr key={r.id}><td>{r.reading_date}</td><td>{r.item_name || items.find(i => i.id === r.monitoring_item_id)?.name}</td><td>{r.value} {r.item_unit}</td><td>{formatBadge(r.status)}</td><td>{r.comment || '—'}</td>
+          {excursions.map(r => <tr key={r.id} {...focusAttr('monitoring_readings', r.id)}><td>{r.reading_date}</td><td>{r.item_name || items.find(i => i.id === r.monitoring_item_id)?.name}</td><td>{r.value} {r.item_unit}</td><td>{formatBadge(r.status)}</td><td>{r.comment || '—'}</td>
             <td>
               {!r.reviewed_at && <button type="button" className="secondary" onClick={() => reviewReading(r.id)}>Review</button>}{' '}
               {!r.nc_id && (r.status === 'critical' || r.status === 'out_of_range') && <button type="button" className="secondary" onClick={() => createNcForReading(r.id)}>Create NC</button>}{' '}
@@ -1691,6 +1697,9 @@ export function SafetyPage() {
   const [summary, setSummary] = useState<FacilitiesSafetySummary | null>(null);
   const [equipment, setEquipment] = useState<SafetyEquipment[]>([]);
   const [inspections, setInspections] = useState<SafetyInspection[]>([]);
+  // A dashboard alert arrives with ?tab= and ?focus=; the tab bar opens the tab,
+  // this scrolls to the record and flashes it.
+  useFocusTarget(incidents.length + equipment.length + inspections.length);
   const [waste, setWaste] = useState<WasteDisposalRecord[]>([]);
   const [chemicals, setChemicals] = useState<HazardousChemical[]>([]);
   const [immunizations, setImmunizations] = useState<StaffImmunization[]>([]);
@@ -1838,7 +1847,7 @@ export function SafetyPage() {
       <h3>Incident register</h3>
       {loading ? <p>Loading…</p> : incidents.length === 0 ? <p>No incidents recorded.</p> :
         <table className="table"><thead><tr><th>No.</th><th>Date</th><th>Title</th><th>Severity</th><th>Status</th><th></th></tr></thead><tbody>
-          {incidents.map(i => <tr key={i.id}><td>{i.incident_number}</td><td>{i.incident_date}</td><td>{i.title || (i.description || '').slice(0, 80)}</td><td>{i.severity || '—'}</td><td>{formatBadge(i.status)}</td><td><button type="button" className="secondary" onClick={() => openDetail(i.id)}>Open</button></td></tr>)}
+          {incidents.map(i => <tr key={i.id} {...focusAttr('safety_incidents', i.id)}><td>{i.incident_number}</td><td>{i.incident_date}</td><td>{i.title || (i.description || '').slice(0, 80)}</td><td>{i.severity || '—'}</td><td>{formatBadge(i.status)}</td><td><button type="button" className="secondary" onClick={() => openDetail(i.id)}>Open</button></td></tr>)}
         </tbody></table>}
       {selected && <SafetyDetailPanel item={selected} staff={staff} onClose={() => setSelected(null)} createNc={createNc} createCapa={createCapa} closeIncident={closeIncident} />}
     </div>}
@@ -1885,7 +1894,7 @@ export function SafetyPage() {
         <h3>Safety equipment register</h3>
         {equipment.length === 0 ? <p>No safety equipment recorded.</p> :
           <table className="table"><thead><tr><th>No.</th><th>Name</th><th>Type</th><th>Location</th><th>Next inspection</th><th>Next certification</th><th>Status</th></tr></thead><tbody>
-            {equipment.map(e => <tr key={e.id}><td>{e.equipment_number}</td><td>{e.name}</td><td>{prettify(e.equipment_type)}</td><td>{locations.find(l => l.id === e.location_id)?.name || '—'}</td><td>{e.next_inspection_due || '—'}</td><td>{e.next_certification_due || '—'}</td><td>{formatBadge(e.status)}</td></tr>)}
+            {equipment.map(e => <tr key={e.id} {...focusAttr('safety_equipment', e.id)}><td>{e.equipment_number}</td><td>{e.name}</td><td>{prettify(e.equipment_type)}</td><td>{locations.find(l => l.id === e.location_id)?.name || '—'}</td><td>{e.next_inspection_due || '—'}</td><td>{e.next_certification_due || '—'}</td><td>{formatBadge(e.status)}</td></tr>)}
           </tbody></table>}
       </div>
     </>}
@@ -1911,7 +1920,7 @@ export function SafetyPage() {
         <h3>Inspection & drill register</h3>
         {inspections.length === 0 ? <p>No inspections recorded.</p> :
           <table className="table"><thead><tr><th>No.</th><th>Type</th><th>Date</th><th>Outcome</th><th>Next due</th><th>Status</th><th></th></tr></thead><tbody>
-            {inspections.map(i => <tr key={i.id}><td>{i.inspection_number}</td><td>{prettify(i.inspection_type)}</td><td>{i.inspection_date}</td><td>{prettify(i.outcome)}</td><td>{i.next_due_date || '—'}</td><td>{formatBadge(i.status)}</td><td><button type="button" className="secondary" onClick={() => openInspection(i.id)}>Open</button></td></tr>)}
+            {inspections.map(i => <tr key={i.id} {...focusAttr('safety_inspections', i.id)}><td>{i.inspection_number}</td><td>{prettify(i.inspection_type)}</td><td>{i.inspection_date}</td><td>{prettify(i.outcome)}</td><td>{i.next_due_date || '—'}</td><td>{formatBadge(i.status)}</td><td><button type="button" className="secondary" onClick={() => openInspection(i.id)}>Open</button></td></tr>)}
           </tbody></table>}
         {selectedInsp && <InspectionDetailPanel item={selectedInsp} staff={staff} onClose={() => setSelectedInsp(null)} createNc={inspNc} createCapa={inspCapa} closeInspection={inspClose} />}
       </div>
@@ -1965,7 +1974,7 @@ export function SafetyPage() {
         <h3>Hazardous chemical inventory</h3>
         {chemicals.length === 0 ? <p>No chemicals recorded.</p> :
           <table className="table"><thead><tr><th>No.</th><th>Name</th><th>Hazard class</th><th>SDS</th><th>Storage</th><th>Expiry</th><th>Status</th></tr></thead><tbody>
-            {chemicals.map(c => <tr key={c.id}><td>{c.chemical_number}</td><td>{c.name}</td><td>{prettify(c.hazard_class)}</td><td>{c.sds_on_file ? (c.sds_reference || 'On file') : <span style={{ color: 'var(--warning)' }}>Missing</span>}</td><td>{locations.find(l => l.id === c.storage_location_id)?.name || '—'}</td><td>{c.expiry_date || '—'}</td><td>{formatBadge(c.status)}</td></tr>)}
+            {chemicals.map(c => <tr key={c.id} {...focusAttr('hazardous_chemicals', c.id)}><td>{c.chemical_number}</td><td>{c.name}</td><td>{prettify(c.hazard_class)}</td><td>{c.sds_on_file ? (c.sds_reference || 'On file') : <span style={{ color: 'var(--warning)' }}>Missing</span>}</td><td>{locations.find(l => l.id === c.storage_location_id)?.name || '—'}</td><td>{c.expiry_date || '—'}</td><td>{formatBadge(c.status)}</td></tr>)}
           </tbody></table>}
       </div>
     </>}
@@ -1993,7 +2002,7 @@ export function SafetyPage() {
         <h3>Immunisation & exposure register</h3>
         {immunizations.length === 0 ? <p>No records.</p> :
           <table className="table"><thead><tr><th>No.</th><th>Type</th><th>Staff</th><th>Vaccine / agent</th><th>Administered</th><th>Next due</th><th>Outcome</th></tr></thead><tbody>
-            {immunizations.map(m => <tr key={m.id}><td>{m.record_number}</td><td>{prettify(m.record_type)}</td><td>{staffName(staff, m.staff_id)}</td><td>{m.vaccine_or_agent || '—'}</td><td>{m.date_administered || '—'}</td><td>{m.next_due_date || '—'}</td><td>{m.outcome || (m.record_type === 'post_exposure' ? <span style={{ color: 'var(--warning)' }}>Open</span> : '—')}</td></tr>)}
+            {immunizations.map(m => <tr key={m.id} {...focusAttr('staff_immunizations', m.id)}><td>{m.record_number}</td><td>{prettify(m.record_type)}</td><td>{staffName(staff, m.staff_id)}</td><td>{m.vaccine_or_agent || '—'}</td><td>{m.date_administered || '—'}</td><td>{m.next_due_date || '—'}</td><td>{m.outcome || (m.record_type === 'post_exposure' ? <span style={{ color: 'var(--warning)' }}>Open</span> : '—')}</td></tr>)}
           </tbody></table>}
       </div>
     </>}

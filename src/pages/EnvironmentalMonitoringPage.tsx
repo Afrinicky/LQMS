@@ -8,6 +8,7 @@ import ScannedRecordUpload from '../components/ScannedRecordUpload';
 import XlsxToolbar from '../components/XlsxToolbar';
 import { usePermissions } from '../hooks/usePermissions';
 import PermissionTabs from '../components/PermissionTabs';
+import { useTabParam } from '../hooks/useTabParam';
 import type {
   Department, Section, Location, Staff, EquipmentItem,
   EnvAsset, EnvDevice, EnvReading, EnvAlert, EnvExcursion, EnvDashboard, EnvSettings,
@@ -17,6 +18,11 @@ import type {
 // Tabs are filtered by permission — a tab whose feature this user cannot
 // view is not drawn. See src/components/PermissionTabs.tsx.
 const TAB_MODULE = 'monitoring';
+// This workspace is nested inside the Facilities & Safety "Environmental
+// Monitoring" tab, so an alert aims at it with ?subtab= while ?tab= selects the
+// outer tab.
+const TABS = ['Live Dashboard', 'Assets', 'Devices', 'Manual Entry', 'Alerts', 'Excursions', 'Insights', 'Notifications', 'Charts', 'Scanned Charts', 'Reports', 'Settings'];
+
 const tabBar = (active: string, tabs: string[], onChange: (name: string) => void) =>
   <PermissionTabs moduleKey={TAB_MODULE} tabs={tabs} active={active} onChange={onChange} />;
 const badge = (s?: string) => <span className={`badge ${s ? s.toLowerCase().replace(/\s+/g, '-') : ''}`}>{s ? s.replace(/_/g, ' ') : '—'}</span>;
@@ -76,6 +82,8 @@ export function EnvironmentalMonitoringPage({ embedded = false }: { embedded?: b
   const [tab, setTab] = useState('Live Dashboard');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // An environmental alert on a dashboard aims here with ?subtab=Excursions.
+  useTabParam(TABS, setTab, 'subtab');
 
   const [dashboard, setDashboard] = useState<EnvDashboard | null>(null);
   const [assets, setAssets] = useState<EnvAsset[]>([]);
@@ -120,8 +128,6 @@ export function EnvironmentalMonitoringPage({ embedded = false }: { embedded?: b
   useEffect(() => { if (tab === 'Charts' && chartAsset) loadChart(chartAsset, chartRange); }, [tab, chartAsset, chartRange]);
 
   if (!enabled) return <DisabledModule />;
-
-  const TABS = ['Live Dashboard', 'Assets', 'Devices', 'Manual Entry', 'Alerts', 'Excursions', 'Insights', 'Notifications', 'Charts', 'Scanned Charts', 'Reports', 'Settings'];
 
   return <div className="module-page env-mon">
     {!embedded && <PageHeader eyebrow="Facilities and Safety" title="Environmental Monitoring" subtitle="Manual and automated temperature/humidity monitoring, alarms and excursions." />}
