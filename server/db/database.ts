@@ -103,6 +103,50 @@ CREATE TABLE IF NOT EXISTS dennis_settings (id INTEGER PRIMARY KEY AUTOINCREMENT
   if (!hasStaffId) {
     database.exec('ALTER TABLE users ADD COLUMN staff_id INTEGER REFERENCES staff(id)');
   }
+  const userNames = new Set(tableInfo.map(col => col.name));
+  // Set when an administrator requires this person to choose a new password.
+  // They sign in with the password they have, and the application will not let
+  // them go anywhere until they have replaced it.
+  if (!userNames.has('must_change_password')) {
+    database.exec('ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0');
+  }
+
+  // ---------------------------------------------------------------------
+  // Password reset requests.
+  //
+  // There is no email on a LAN Host, so a forgotten password is recovered by
+  // asking an administrator, who verifies the person's identity in the room
+  // and then approves. The approval IS the security boundary, so the request
+  // records where it came from and every decision is audited.
+  //
+  //   claim_token  held only by the browser that asked; used to poll the
+  //                decision. Requests for unknown usernames are stored too, so
+  //                the response cannot be used to discover which accounts exist.
+  //   reset_token  minted on approval, single use, short lived. It is handed
+  //                only to the holder of the matching claim token.
+  // ---------------------------------------------------------------------
+  database.exec(`
+CREATE TABLE IF NOT EXISTS password_reset_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER REFERENCES users(id),
+  requested_username TEXT NOT NULL,
+  claim_token TEXT NOT NULL UNIQUE,
+  reset_token TEXT UNIQUE,
+  status TEXT NOT NULL DEFAULT 'pending',
+  origin TEXT NOT NULL DEFAULT 'user',
+  reason TEXT,
+  ip_address TEXT,
+  device_id TEXT,
+  decided_by_user_id INTEGER REFERENCES users(id),
+  decision_note TEXT,
+  decided_at TEXT,
+  completed_at TEXT,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_password_resets_status ON password_reset_requests(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_reset_requests(user_id, status);
+`);
   const actionColumns = database.prepare("PRAGMA table_info(actions)").all() as Array<{ name: string }>;
   const actionNames = new Set(actionColumns.map(col => col.name));
   if (!actionNames.has('source_module')) database.exec('ALTER TABLE actions ADD COLUMN source_module TEXT');

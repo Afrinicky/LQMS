@@ -8,7 +8,7 @@ import { api } from '../services/api';
  * endpoint the mobile companion uses. This is how staff take over the temporary
  * password an administrator issued them.
  */
-export function ChangePasswordModal({ onClose }: { onClose: () => void }) {
+export function ChangePasswordModal({ onClose, required = false, onChanged }: { onClose: () => void; required?: boolean; onChanged?: () => void }) {
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -28,17 +28,23 @@ export function ChangePasswordModal({ onClose }: { onClose: () => void }) {
     try {
       await api('/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: current, newPassword: next }) });
       setDone(true);
+      onChanged?.();
     } catch (err) { setError((err as Error).message); } finally { setBusy(false); }
   }
 
   const type = show ? 'text' : 'password';
   return (
-    <div className="pw-overlay" onClick={onClose}>
+    <div className="pw-overlay" onClick={required ? undefined : onClose}>
       <div className="pw-modal" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Change password">
         <div className="pw-head">
-          <h3><KeyRound size={18} /> Change password</h3>
-          <button className="drawer-close" type="button" aria-label="Close" onClick={onClose}><X size={18} /></button>
+          <h3><KeyRound size={18} /> {required ? 'Choose a new password' : 'Change password'}</h3>
+          {!required && <button className="drawer-close" type="button" aria-label="Close" onClick={onClose}><X size={18} /></button>}
         </div>
+        {required && !done && (
+          <p className="pw-required">
+            An administrator has asked you to set a new password before you carry on.
+          </p>
+        )}
         {done ? (
           <div className="pw-body">
             <p className="pw-ok">Your password has been changed. Use it next time you sign in.</p>
@@ -55,7 +61,7 @@ export function ChangePasswordModal({ onClose }: { onClose: () => void }) {
             <label className="pw-show"><input type="checkbox" checked={show} onChange={e => setShow(e.target.checked)} /> Show passwords</label>
             {error && <p className="pw-error">{error}</p>}
             <div className="form-actions">
-              <button type="button" className="secondary" onClick={onClose}>Cancel</button>
+              {!required && <button type="button" className="secondary" onClick={onClose}>Cancel</button>}
               <button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Update password'}</button>
             </div>
           </form>

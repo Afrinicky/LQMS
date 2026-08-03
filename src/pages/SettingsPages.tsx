@@ -5,6 +5,8 @@ import { useAuth } from '../hooks/useAuth';
 import { MODULES, PERMISSION_ACTIONS, TECHNICAL_AUTHORIZATION_LEVELS } from '../../shared/constants/modules';
 import { usePermissions } from '../hooks/usePermissions';
 import { AccessControl } from './AccessControl';
+import UserAccountActions from '../components/UserAccountActions';
+import PasswordResetApprovals from '../components/PasswordResetApprovals';
 import type {
   OrgTree, OrgTreeNode, ProfessionalRank,
   Position, Staff, SystemModule, ApiUser, Permission, Section, Device,
@@ -302,6 +304,7 @@ export function UsersAccess(){
   const [error,setError]=useState<string|null>(null);
   const [success,setSuccess]=useState<string|null>(null);
   const [openUser,setOpenUser]=useState<number|null>(null);
+  const [manageUser,setManageUser]=useState<number|null>(null);
   const [linkSel,setLinkSel]=useState<string>('');
   const load=()=>{api<(ApiUser & {staffName?: string})[]>('/users').then(setUsers); api<{id:number;name:string}[]>('/roles').then(setRoles); api<Staff[]>('/staff').then(setStaff).catch(()=>setStaff([]))};
   useEffect(()=>{void load()},[]);
@@ -326,7 +329,8 @@ export function UsersAccess(){
     } catch (err) { setError((err as Error).message); }
   }
   const unlinkedStaff = staff.filter(s => !s.userId);
-  return <div className="card"><h3>Users &amp; Access</h3>
+  return <><PasswordResetApprovals />
+  <div className="card"><h3>Users &amp; Access</h3>
     <p>Create login accounts and link them to staff records. To onboard a whole new person (staff + account + positions) use <Link to="/settings/people">Register New Staff</Link>. Click any user below to link or change its staff record.</p>
     {error && <div className="error">{error}</div>}
     {success && <div className="notice-ok">{success}</div>}
@@ -342,12 +346,16 @@ export function UsersAccess(){
       {users.map(u=>{
         const linkable = staff.filter(s => !s.userId || s.userId === u.id);
         const open = openUser===u.id;
+        const manage = manageUser===u.id;
         return <Fragment key={u.id}>
           <tr className="row-click" onClick={()=>{ setOpenUser(open?null:u.id); setLinkSel(u.staffId?String(u.staffId):''); setError(null); setSuccess(null); }}>
             <td>{u.username}</td><td>{u.fullName}</td><td>{u.roleName}</td>
             <td>{u.staffName || <span className="muted">Not linked</span>}</td>
-            <td>{u.isActive?'Yes':'No'}</td>
-            <td><button type="button" className="tiny" onClick={e=>{ e.stopPropagation(); setOpenUser(open?null:u.id); setLinkSel(u.staffId?String(u.staffId):''); setError(null); setSuccess(null); }}>{open?'Close':(u.staffId?'Change link':'Link staff')}</button></td>
+            <td>{u.isActive?'Yes':<span className="badge inactive">Deactivated</span>}</td>
+            <td style={{whiteSpace:'nowrap'}}>
+              <button type="button" className="tiny" onClick={e=>{ e.stopPropagation(); setOpenUser(open?null:u.id); setLinkSel(u.staffId?String(u.staffId):''); setError(null); setSuccess(null); }}>{open?'Close':(u.staffId?'Change link':'Link staff')}</button>{' '}
+              <button type="button" className="tiny" onClick={e=>{ e.stopPropagation(); setManageUser(manage?null:u.id); setError(null); setSuccess(null); }}>{manage?'Close':'Account…'}</button>
+            </td>
           </tr>
           {open && <tr className="link-editor-row"><td colSpan={6}>
             <div className="user-link-editor">
@@ -361,10 +369,13 @@ export function UsersAccess(){
               {staff.length===0 && <span className="hint">No staff records yet — register staff first.</span>}
             </div>
           </td></tr>}
+          {manage && <tr className="link-editor-row"><td colSpan={6}>
+            <UserAccountActions user={u} onChanged={load} />
+          </td></tr>}
         </Fragment>;
       })}
     </tbody></table>
-  </div>;
+  </div></>;
 }
 
 // ---------------------------------------------------------------------------

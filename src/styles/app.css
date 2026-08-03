@@ -2189,3 +2189,117 @@ button.tiny { padding: 2px 8px; font-size: 11px; }
 .lvl-picker.lvl-contribute button.active { background: var(--c2); }
 .lvl-picker.lvl-manage  button.active { background: var(--c4); }
 .lvl-picker.lvl-full    button.active { background: var(--c7); }
+
+/* ============================================================================
+   PASSWORD RESET — sign-in screen
+   ========================================================================= */
+.auth-forgot {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  margin: 10px auto 0; padding: 6px 12px; border: 0; background: none;
+  color: var(--faint); font-size: 12.5px; cursor: pointer; border-radius: var(--radius-pill);
+  transition: color .14s ease, background .14s ease;
+}
+.auth-forgot:hover { color: var(--accent-bright); background: var(--accent-soft); }
+
+.pwr-backdrop {
+  position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 20px;
+  background: rgba(4, 8, 18, 0.72); backdrop-filter: blur(6px);
+  animation: pwr-fade .18s ease;
+}
+@keyframes pwr-fade { from { opacity: 0 } to { opacity: 1 } }
+.pwr {
+  position: relative; width: min(420px, 100%); padding: 30px 28px 26px;
+  text-align: center; animation: pwr-rise .22s cubic-bezier(.2,.8,.3,1);
+}
+@keyframes pwr-rise { from { opacity: 0; transform: translateY(10px) scale(.98) } to { opacity: 1; transform: none } }
+.pwr-close {
+  position: absolute; top: 12px; right: 12px; width: 28px; height: 28px;
+  display: grid; place-items: center; border: 0; border-radius: 8px;
+  background: transparent; color: var(--faint); cursor: pointer;
+}
+.pwr-close:hover { background: rgba(255,255,255,.06); color: var(--text); }
+.pwr h3 { margin: 14px 0 6px; font-size: 18px; }
+.pwr > form > p, .pwr-wait p { margin: 0 0 18px; font-size: 12.5px; color: var(--muted); line-height: 1.6; }
+.pwr .auth-field { text-align: left; }
+.pwr .auth-field em { font-style: normal; color: var(--faint); }
+.pwr-ico {
+  width: 52px; height: 52px; margin: 0 auto; border-radius: 16px; display: grid; place-items: center;
+  background: var(--accent-soft); color: var(--accent-bright);
+  border: 1px solid rgba(78,141,255,.3);
+}
+.pwr-ico.ok { background: var(--success-bg); color: var(--success); border-color: rgba(52,211,153,.32); }
+.pwr-ico.bad { background: var(--danger-bg); color: var(--danger); border-color: rgba(255,107,125,.32); }
+
+.pwr-pulse {
+  width: 52px; height: 52px; margin: 0 auto; border-radius: 16px; display: grid; place-items: center;
+  background: var(--warning-bg); color: var(--warning); border: 1px solid rgba(245,181,68,.3);
+  animation: pwr-breathe 2.4s ease-in-out infinite;
+}
+@keyframes pwr-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245,181,68,.28) }
+  50%      { box-shadow: 0 0 0 12px rgba(245,181,68,0) }
+}
+.pwr-dots { display: flex; gap: 6px; justify-content: center; margin: 2px 0 14px; }
+.pwr-dots i { width: 6px; height: 6px; border-radius: 99px; background: var(--accent-bright); opacity: .35; animation: pwr-dot 1.2s ease-in-out infinite; }
+.pwr-dots i:nth-child(2) { animation-delay: .18s }
+.pwr-dots i:nth-child(3) { animation-delay: .36s }
+@keyframes pwr-dot { 0%,100% { opacity: .25; transform: translateY(0) } 50% { opacity: 1; transform: translateY(-3px) } }
+.pwr-meta { font-size: 11.5px; color: var(--faint); margin-bottom: 16px !important; }
+.pwr-wait button { margin-top: 4px; }
+
+/* Forced change */
+.pw-required {
+  margin: 0 22px 6px; padding: 9px 12px; border-radius: var(--radius-sm);
+  background: var(--warning-bg); color: var(--warning); font-size: 12.5px; line-height: 1.5;
+}
+
+/* ============================================================================
+   PASSWORD RESET APPROVALS — administrator side
+   ========================================================================= */
+.pwra { display: flex; flex-direction: column; gap: 12px; margin-bottom: 14px; }
+.pwra-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.pwra-head h3 { margin: 0; font-size: 15px; display: inline-flex; align-items: center; gap: 8px; }
+.pwra-count {
+  font-size: 11.5px; font-weight: 650; padding: 3px 10px; border-radius: 99px;
+  background: var(--warning-bg); color: var(--warning);
+}
+.pwra-warn {
+  margin: 0; padding: 10px 12px; border-radius: var(--radius-sm); font-size: 12.5px; line-height: 1.55;
+  background: var(--warning-bg); color: var(--warning);
+}
+.pwra-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.pwra-list li {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel);
+}
+.pwra-who { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.pwra-who strong { font-size: 13.5px; }
+.pwra-user { font-size: 11.5px; color: var(--muted); }
+.pwra-reason { font-size: 12px; color: var(--text); font-style: italic; }
+.pwra-meta { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--faint); }
+.pwra-act { display: flex; gap: 8px; flex: none; }
+.pwra-act button { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.pwra-recent { margin-top: 4px; }
+.pwra-recent summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }
+
+/* ============================================================================
+   USER ACCOUNT ACTIONS
+   ========================================================================= */
+.uaa { display: flex; flex-direction: column; gap: 2px; padding: 4px 0; }
+.uaa-row {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap;
+  padding: 13px 2px; border-bottom: 1px solid var(--border);
+}
+.uaa-row:last-child { border-bottom: 0; }
+.uaa-row.danger-zone { background: linear-gradient(90deg, rgba(255,107,125,.05), transparent 55%); }
+.uaa-what { flex: 1; min-width: 260px; }
+.uaa-what strong { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; }
+.uaa-what p { margin: 4px 0 0; font-size: 12px; color: var(--muted); line-height: 1.55; max-width: 64ch; }
+.uaa-do { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: none; }
+.uaa-do input { max-width: 180px; }
+.uaa-do button { font-size: 12.5px; display: inline-flex; align-items: center; gap: 6px; }
+.uaa-ask { font-size: 12.5px; color: var(--danger); font-weight: 600; }
+.uaa-flag { font-size: 11.5px; color: var(--warning); }
+.badge.inactive { background: var(--danger-bg); color: var(--danger); }
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg) } }
