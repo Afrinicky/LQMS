@@ -1,0 +1,751 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SECH_LIMS — Remote Staff Portal</title>
+  <style>
+    :root {
+      --bg:#080D1A; --surface:#0D1424; --card:#101A2E; --panel:#0e1626; --panel2:#16263f;
+      --border:rgba(255,255,255,0.08); --border-strong:rgba(255,255,255,0.14);
+      --text:#F5F8FF; --muted:#A8B3C7; --faint:#6E7C95;
+      --accent:#2F6BFF; --accent-bright:#4E8DFF; --accent-soft:rgba(47,107,255,0.14); --accent-glow:rgba(78,141,255,0.35);
+      --success:#34D399; --success-bg:rgba(52,211,153,0.14); --warning:#F5B544; --danger:#FF6B7D;
+      --radius:16px; --radius-sm:10px; --radius-pill:999px;
+      --shadow-sm:0 2px 10px rgba(0,0,0,0.28); --shadow:0 14px 40px rgba(2,8,23,0.55);
+      --sidebar-w:264px; --topbar-h:64px; --status-h:38px;
+      --font:"Inter","Segoe UI",system-ui,-apple-system,Arial,sans-serif;
+    }
+    * { box-sizing:border-box; }
+    html, body { margin:0; min-height:100vh; }
+    body { background:radial-gradient(1100px 700px at 50% -14%, rgba(47,107,255,0.12), transparent 62%), linear-gradient(160deg,#0A1322,#060A14);
+           color:var(--text); font-family:var(--font); -webkit-font-smoothing:antialiased; }
+    a { color:inherit; text-decoration:none; }
+    .hidden { display:none !important; }
+    .muted { color:var(--muted); } .faint { color:var(--faint); } .err { color:var(--danger); }
+    h1,h2,h3 { margin:0; }
+
+    /* ---------- Auth (sign-in / change password) ---------- */
+    .auth-wrap { min-height:100vh; display:grid; place-items:center; padding:24px; }
+    .auth-card { width:100%; max-width:420px; background:var(--card); border:1px solid var(--border);
+                 border-radius:var(--radius); padding:26px; box-shadow:var(--shadow); }
+    .auth-brand { display:flex; align-items:center; gap:12px; margin-bottom:18px; }
+    .brand-mark { width:42px; height:42px; border-radius:13px; display:grid; place-items:center; color:#fff;
+                  background:linear-gradient(140deg,#2F6BFF,#1B49C0); box-shadow:0 10px 26px rgba(47,107,255,0.4); }
+    .brand-text h1 { font-size:16px; font-weight:700; letter-spacing:.02em; }
+    .brand-text span { font-size:11.5px; color:var(--muted); }
+    .auth-card h2 { font-size:19px; margin-bottom:6px; }
+    label.lbl { font-size:12px; color:var(--muted); display:block; margin:12px 0 5px; }
+    input, select, textarea { width:100%; padding:11px 13px; border-radius:var(--radius-sm); border:1px solid var(--border);
+            background:var(--panel2); color:var(--text); font-size:14px; font-family:inherit; outline:none; transition:border-color .15s, box-shadow .15s; }
+    input:focus, select:focus, textarea:focus { border-color:var(--accent-bright); box-shadow:0 0 0 3px var(--accent-soft); }
+    textarea { resize:vertical; }
+    button { background:var(--accent); color:#fff; border:0; border-radius:var(--radius-sm); padding:11px 18px;
+             font-weight:600; cursor:pointer; font-size:13.5px; font-family:inherit; transition:filter .15s, transform .05s; }
+    button:hover { filter:brightness(1.09); } button:active { transform:translateY(1px); }
+    button:disabled { opacity:.55; cursor:not-allowed; }
+    button.primary { box-shadow:0 8px 22px rgba(47,107,255,0.32); }
+    button.ghost { background:transparent; border:1px solid var(--border-strong); color:var(--text); }
+    button.ghost:hover { background:var(--panel2); filter:none; }
+    button.block { width:100%; }
+
+    /* ---------- App shell ---------- */
+    .shell { display:grid; grid-template-columns:var(--sidebar-w) 1fr; min-height:100vh; }
+    .sidebar { background:linear-gradient(180deg,#0C1526,#0A1120); border-right:1px solid var(--border);
+               display:flex; flex-direction:column; position:sticky; top:0; height:100vh; overflow-y:auto; z-index:40; }
+    .sidebar .brand { display:flex; align-items:center; gap:12px; padding:18px 20px 16px; }
+    .sidebar .brand .brand-text h1 { font-size:17px; }
+    .nav { padding:6px 12px 20px; display:flex; flex-direction:column; gap:2px; }
+    .nav-group-label { font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--faint);
+                       padding:16px 12px 6px; font-weight:700; }
+    .nav-item { display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:11px; cursor:pointer;
+                color:var(--muted); font-size:13.5px; font-weight:500; border:0; background:transparent; width:100%; text-align:left;
+                font-family:inherit; transition:background .14s, color .14s; position:relative; }
+    .nav-item:hover { background:rgba(255,255,255,0.04); color:var(--text); filter:none; }
+    .nav-item.active { background:var(--accent-soft); color:#fff; }
+    .nav-item.active::before { content:""; position:absolute; left:-12px; top:8px; bottom:8px; width:3px;
+                               border-radius:0 3px 3px 0; background:var(--accent-bright); }
+    .nav-item svg { width:17px; height:17px; flex:none; opacity:.9; }
+    .nav-item .count { margin-left:auto; font-size:11px; color:var(--faint); background:var(--panel2);
+                       border-radius:999px; padding:1px 8px; }
+    #navRecords:empty { display:none; }
+
+    .main { display:flex; flex-direction:column; min-width:0; }
+    .topbar { height:var(--topbar-h); display:flex; align-items:center; gap:14px; padding:0 22px;
+              border-bottom:1px solid var(--border); background:rgba(9,15,28,0.72); backdrop-filter:blur(8px);
+              position:sticky; top:0; z-index:30; }
+    .hamburger { display:none; }
+    .viewhead { display:flex; align-items:center; gap:10px; min-width:0; }
+    .viewhead h2 { font-size:18px; font-weight:700; letter-spacing:.01em; white-space:nowrap; }
+    #back { padding:6px 11px; font-size:12.5px; }
+    .topbar-actions { margin-left:auto; display:flex; align-items:center; gap:10px; }
+    .health-pill { display:inline-flex; align-items:center; gap:7px; font-size:12px; color:var(--muted);
+                   border:1px solid var(--border); border-radius:var(--radius-pill); padding:5px 12px; }
+    .health-pill .dot { width:8px; height:8px; border-radius:50%; background:var(--success); box-shadow:0 0 0 3px rgba(52,211,153,0.16); }
+    .user-chip { display:flex; align-items:center; gap:10px; background:var(--panel2); border:1px solid var(--border);
+                 border-radius:var(--radius-pill); padding:5px 12px 5px 6px; color:var(--text); }
+    .user-chip:hover { filter:none; background:var(--panel); }
+    .user-avatar { width:30px; height:30px; border-radius:50%; display:grid; place-items:center; font-size:12px; font-weight:700;
+                   color:#fff; background:linear-gradient(140deg,#2F6BFF,#1B49C0); }
+    .user-meta { display:flex; flex-direction:column; line-height:1.15; text-align:left; }
+    .user-meta strong { font-size:12.5px; font-weight:600; }
+    .user-meta span { font-size:11px; color:var(--muted); }
+    .icon-btn { background:transparent; border:1px solid var(--border); border-radius:10px; padding:8px; color:var(--muted);
+                display:grid; place-items:center; }
+    .icon-btn:hover { background:var(--panel2); color:var(--text); filter:none; }
+
+    .content { padding:22px; flex:1; max-width:1160px; width:100%; margin:0 auto; }
+    .statusbar { height:var(--status-h); display:flex; align-items:center; gap:18px; padding:0 22px;
+                 border-top:1px solid var(--border); font-size:11.5px; color:var(--faint); }
+    .statusbar .ok { color:var(--success); }
+    .statusbar .spacer { margin-left:auto; }
+    .statusbar svg { width:13px; height:13px; vertical-align:-2px; margin-right:4px; }
+
+    /* ---------- Cards / content ---------- */
+    .card { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:20px; box-shadow:var(--shadow-sm); }
+    .card + .card { margin-top:16px; }
+    .section-title { font-size:14px; font-weight:700; letter-spacing:.01em; margin-bottom:4px; }
+    .section-sub { font-size:12.5px; color:var(--muted); margin-bottom:14px; }
+    .spin { display:inline-block; width:16px; height:16px; border:2px solid rgba(78,141,255,.25);
+            border-top-color:var(--accent-bright); border-radius:50%; animation:spin .8s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+
+    .access-banner { background:linear-gradient(135deg, rgba(47,107,255,0.12), rgba(47,107,255,0.03));
+                     border:1px solid var(--border); border-radius:var(--radius-sm); padding:14px 16px; }
+    .access-banner .head { font-size:13px; color:var(--muted); }
+    .access-banner .head strong { color:var(--text); }
+    .chips { margin-top:10px; display:flex; flex-wrap:wrap; gap:7px; }
+    .pill { font-size:11px; padding:3px 10px; border-radius:var(--radius-pill); background:var(--panel2); border:1px solid var(--border); color:var(--muted); }
+    .pill.action { background:var(--accent-soft); border-color:rgba(47,107,255,0.3); color:#cdddff; }
+
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:14px; margin-top:16px; }
+    .tile { background:linear-gradient(150deg, var(--panel2), var(--card)); border:1px solid var(--border);
+            border-radius:14px; padding:16px; cursor:pointer; transition:border-color .15s, transform .1s; }
+    .tile:hover { border-color:var(--accent-bright); transform:translateY(-2px); }
+    .tile h3 { font-size:12.5px; color:var(--muted); font-weight:600; display:flex; align-items:center; gap:8px; }
+    .tile h3 svg { width:15px; height:15px; opacity:.85; }
+    .tile .n { font-size:28px; font-weight:800; margin-top:8px; letter-spacing:-.01em; }
+    .tile .cap { font-size:11px; color:var(--faint); margin-top:2px; }
+
+    table { width:100%; border-collapse:collapse; margin-top:6px; font-size:13px; }
+    th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--border); vertical-align:top; }
+    th { color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+    tr.row { cursor:pointer; } tr.row:hover td { background:rgba(78,141,255,0.06); }
+    .table-wrap { overflow-x:auto; border-radius:var(--radius-sm); }
+
+    .kv { display:grid; grid-template-columns:230px 1fr; gap:0 16px; font-size:13px; }
+    .kv .k { color:var(--muted); padding:9px 0; border-bottom:1px solid var(--border); text-transform:capitalize; }
+    .kv .v { padding:9px 0; border-bottom:1px solid var(--border); word-break:break-word; }
+
+    .form-block { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius-sm); padding:16px; margin-bottom:16px; max-width:520px; }
+    .form-block h3 { font-size:14px; margin-bottom:4px; }
+    .form-actions { margin-top:14px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .form-msg { font-size:12.5px; color:var(--muted); }
+    .req-card { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius-sm); padding:14px; margin-bottom:12px; }
+    .req-card .rc-title { font-weight:600; font-size:13.5px; }
+    .badge-ok { color:var(--success); border-color:rgba(52,211,153,0.4); }
+    .badge-no { color:var(--danger); border-color:rgba(255,107,125,0.4); }
+
+    .backdrop { position:fixed; inset:0; background:rgba(3,7,15,0.6); z-index:35; }
+
+    /* ---------- Responsive ---------- */
+    @media (max-width:900px) {
+      .shell { grid-template-columns:1fr; }
+      .sidebar { position:fixed; left:0; top:0; width:var(--sidebar-w); transform:translateX(-100%);
+                 transition:transform .22s ease; box-shadow:var(--shadow); }
+      .shell.nav-open .sidebar { transform:translateX(0); }
+      .hamburger { display:grid; }
+      .content { padding:16px; }
+      .user-meta { display:none; }
+      .kv { grid-template-columns:1fr; }
+      .kv .k { border-bottom:0; padding-bottom:0; }
+      .kv .v { padding-top:2px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- ===================== AUTH ===================== -->
+  <div id="authWrap" class="auth-wrap">
+    <!-- Sign-in -->
+    <section id="gate" class="auth-card">
+      <div class="auth-brand">
+        <span class="brand-mark">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6"/><path d="M10 3v6.5L5.2 17a2 2 0 0 0 1.7 3h10.2a2 2 0 0 0 1.7-3L14 9.5V3"/><path d="M7.5 14h9"/></svg>
+        </span>
+        <div class="brand-text"><h1>SECH_LIMS</h1><span>Remote Staff Portal · by Nickland</span></div>
+      </div>
+      <h2>Sign in</h2>
+      <p class="muted" style="margin:0;font-size:13px;">Use the remote-access account your laboratory administrator created for you. You can view laboratory records and submit permitted actions — the laboratory Host stays authoritative.</p>
+      <label class="lbl">Email</label>
+      <input id="email" type="email" placeholder="you@example.com" autocomplete="username" />
+      <label class="lbl">Password</label>
+      <input id="password" type="password" placeholder="Password" autocomplete="current-password" />
+      <div style="margin-top:16px;"><button id="signin" class="primary block">Sign in</button></div>
+      <p id="gateErr" class="err hidden" style="font-size:13px;margin-top:12px;"></p>
+    </section>
+
+    <!-- First-login / change password -->
+    <section id="pwgate" class="auth-card hidden">
+      <div class="auth-brand">
+        <span class="brand-mark">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6"/><path d="M10 3v6.5L5.2 17a2 2 0 0 0 1.7 3h10.2a2 2 0 0 0 1.7-3L14 9.5V3"/><path d="M7.5 14h9"/></svg>
+        </span>
+        <div class="brand-text"><h1>SECH_LIMS</h1><span>Remote Staff Portal · by Nickland</span></div>
+      </div>
+      <h2>Set a new password</h2>
+      <p class="muted" style="margin:0;font-size:13px;">Please replace the temporary password provided by your administrator.</p>
+      <label class="lbl">Current (temporary) password</label>
+      <input id="pwCurrent" type="password" autocomplete="current-password" />
+      <label class="lbl">New password (min 8 characters)</label>
+      <input id="pwNew" type="password" autocomplete="new-password" />
+      <div style="margin-top:16px;"><button id="pwSave" class="primary block">Update password</button></div>
+      <p id="pwErr" class="err hidden" style="font-size:13px;margin-top:12px;"></p>
+    </section>
+  </div>
+
+  <!-- ===================== APP SHELL ===================== -->
+  <div id="app" class="shell hidden">
+    <div id="backdrop" class="backdrop hidden"></div>
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6"/><path d="M10 3v6.5L5.2 17a2 2 0 0 0 1.7 3h10.2a2 2 0 0 0 1.7-3L14 9.5V3"/><path d="M7.5 14h9"/></svg>
+        </span>
+        <div class="brand-text"><h1>SECH_LIMS</h1><span>Remote Staff Portal</span></div>
+      </div>
+      <nav class="nav">
+        <div class="nav-group-label">Workspace</div>
+        <button id="navOverview" class="nav-item" data-nav="overview">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+          <span>Overview</span>
+        </button>
+        <button id="workBtn" class="nav-item" data-nav="work">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          <span>My work</span>
+        </button>
+        <button id="fcBtn" class="nav-item hidden" data-nav="fieldcap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2h6v2l-1 1v3l4 9a2 2 0 0 1-1.8 2.9H7.8A2 2 0 0 1 6 17l4-9V5L9 4Z"/></svg>
+          <span>Field capture</span>
+        </button>
+        <button id="apprBtn" class="nav-item hidden" data-nav="appr">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          <span>Approvals</span>
+        </button>
+        <button id="subsBtn" class="nav-item" data-nav="subs">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.4 5.5 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.4-6.5A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.8 1.5Z"/></svg>
+          <span>My submissions</span>
+        </button>
+        <div class="nav-group-label">Records</div>
+        <div id="navRecords"></div>
+      </nav>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <button id="hamburger" class="icon-btn hamburger" aria-label="Menu">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+        </button>
+        <div class="viewhead">
+          <button id="home" class="ghost hidden">← Overview</button>
+          <h2 id="viewTitle">Overview</h2>
+          <span id="loading" class="hidden"><span class="spin"></span></span>
+          <span id="offBadge" class="pill hidden" style="border-color:var(--warning);color:var(--warning);"></span>
+        </div>
+        <div class="topbar-actions">
+          <span class="health-pill"><span class="dot"></span><span>Cloud · Live</span></span>
+          <button class="user-chip" id="userChip" type="button">
+            <span class="user-avatar" id="userAvatar">–</span>
+            <span class="user-meta"><strong id="userName">Staff</strong><span id="userRole">Remote</span></span>
+          </button>
+          <button id="disconnect" class="icon-btn" aria-label="Sign out" title="Sign out">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <section class="content">
+        <p id="appErr" class="err hidden" style="margin-top:0;"></p>
+
+        <div id="overview">
+          <div class="access-banner" id="access" style="margin-bottom:16px;"></div>
+          <div class="card">
+            <div class="section-title">Laboratory records</div>
+            <div class="section-sub">Live records replicated from the laboratory Host. Select a category to browse.</div>
+            <div id="tiles" class="grid"></div>
+          </div>
+        </div>
+
+        <div id="list" class="card hidden"></div>
+        <div id="detail" class="card hidden"></div>
+        <div id="subs" class="card hidden"></div>
+        <div id="work" class="hidden"></div>
+        <div id="appr" class="hidden"></div>
+        <div id="fieldcap" class="hidden"></div>
+      </section>
+
+      <footer class="statusbar">
+        <span class="ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></svg>Cloud portal · Online</span>
+        <span>Replica of the laboratory Host · Host remains authoritative</span>
+        <span id="statusSync" class="faint"></span>
+        <span class="spacer"></span>
+        <span>SECH_LIMS by Nickland</span>
+      </footer>
+    </div>
+  </div>
+
+  <script>
+    const LABELS = {
+      nonconforming_events:'Nonconformities', capa_records:'CAPA', complaints:'Complaints', risks:'Risks',
+      equipment_items:'Equipment', equipment_maintenance_records:'Equipment maintenance',
+      equipment_calibration_records:'Equipment calibration', inventory_items:'Inventory',
+      inventory_batches:'Inventory batches', suppliers:'Suppliers', monitoring_items:'Monitoring items',
+      monitoring_readings:'Monitoring readings', safety_incidents:'Safety incidents', actions:'Actions',
+      documents:'Documents', document_versions:'Document versions', iqc_materials:'IQC materials',
+      iqc_results:'IQC results', eqa_programs:'EQA programs', eqa_events:'EQA events', staff:'Staff'
+    };
+    const ID_KEYS = ['risk_number','capa_number','nc_number','complaint_number','equipment_number','item_code',
+      'supplier_code','monitoring_number','incident_number','document_code','verification_number',
+      'calibration_number','adverse_event_number','employee_no','program_code','material_code'];
+    const NAME_KEYS = ['title','name','full_name','risk_area','parameter','method_name','program_name','material_name'];
+    // A small inline icon per record category (falls back to a generic folder).
+    const ICON = {
+      folder:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
+      doc:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/>',
+      flask:'<path d="M9 3h6"/><path d="M10 3v6.5L5.2 17a2 2 0 0 0 1.7 3h10.2a2 2 0 0 0 1.7-3L14 9.5V3"/>',
+      people:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/>',
+      box:'<path d="M21 8 12 3 3 8l9 5 9-5Z"/><path d="M3 8v8l9 5 9-5V8"/>',
+      gauge:'<path d="M12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/><path d="M12 12 8 8"/><path d="M3 12a9 9 0 0 1 18 0"/>',
+      alert:'<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>'
+    };
+    const CAT_ICON = {
+      documents:'doc', document_versions:'doc', staff:'people', equipment_items:'flask',
+      equipment_maintenance_records:'flask', equipment_calibration_records:'flask',
+      inventory_items:'box', inventory_batches:'box', suppliers:'box',
+      monitoring_items:'gauge', monitoring_readings:'gauge',
+      safety_incidents:'alert', nonconforming_events:'alert', risks:'alert', complaints:'alert', capa_records:'alert'
+    };
+    function catSvg(entity){ const g = ICON[CAT_ICON[entity] || 'folder'] || ICON.folder;
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'+g+'</svg>'; }
+
+    const $ = (id) => document.getElementById(id);
+    const label = (e) => LABELS[e] || e;
+    let jwt = localStorage.getItem('sech_lims_portal_jwt') || '';
+    let caps = null;
+    let me = null;
+
+    function setActive(key){ document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.getAttribute('data-nav') === key)); }
+    function closeNav(){ $('app').classList.remove('nav-open'); $('backdrop').classList.add('hidden'); }
+
+    function initials(name){ if(!name) return '–'; const p = String(name).trim().split(/\s+/); return ((p[0]&&p[0][0]||'')+(p[1]&&p[1][0]||'')).toUpperCase() || (p[0]&&p[0][0]||'–').toUpperCase(); }
+    function renderUser(){
+      const name = (me && (me.fullName || me.email)) || 'Staff';
+      $('userName').textContent = me && me.fullName ? me.fullName : (me && me.email ? me.email : 'Staff');
+      $('userRole').textContent = (me && me.role) || 'Remote staff';
+      $('userAvatar').textContent = initials(me && (me.fullName || me.email));
+      $('userChip').title = (me && me.email) || '';
+    }
+
+    function renderAccess() {
+      const el = $('access');
+      if (!caps) { el.classList.add('hidden'); return; }
+      const allowed = (caps.activities || []).filter(a => a.allowed);
+      el.classList.remove('hidden');
+      el.innerHTML =
+        '<div class="head">Your remote access — '
+        + '<strong>' + (caps.viewModules || []).length + '</strong> categories viewable · '
+        + '<strong>' + allowed.length + '</strong> action(s) available'
+        + (caps.remoteEnabled ? '' : ' <span class="err">(disabled)</span>') + '</div>'
+        + (allowed.length ? '<div class="chips">' + allowed.map(a =>
+            '<span class="pill action">' + esc(a.label) + (a.tier === 'approval' ? ' · approval' : '') + '</span>'
+          ).join('') + '</div>' : '')
+        + '<div class="faint" style="font-size:11px;margin-top:8px;">Remote actions are enabled progressively by your administrator.</div>';
+      const canApprove = !!(caps && (caps.approvals || []).some(a => a.allowed));
+      $('apprBtn').classList.toggle('hidden', !canApprove);
+      $('fcBtn').classList.toggle('hidden', !fcAvailable());
+    }
+
+    async function api(path) {
+      const res = await fetch(path, { headers: { Authorization: 'Bearer ' + jwt } });
+      if (res.status === 401) { throw Object.assign(new Error('Session ended.'), { code: 401 }); }
+      if (!res.ok) { const b = await res.json().catch(()=>({})); throw new Error(b.error || ('Request failed ('+res.status+')')); }
+      return res.json();
+    }
+    async function postJson(path, body, withAuth) {
+      const headers = { 'Content-Type': 'application/json' };
+      if (withAuth) headers.Authorization = 'Bearer ' + jwt;
+      const res = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || ('Request failed (' + res.status + ')'));
+      return data;
+    }
+    const loading = (on) => $('loading').classList.toggle('hidden', !on);
+
+    function firstKey(data, keys) { for (const k of keys) if (data[k]) return String(data[k]); return ''; }
+    function canDo(key) { return !!(caps && (caps.activities || []).some(a => a.key === key && a.allowed)); }
+
+    // --- Offline outbox ---
+    const OUTBOX_KEY = 'sech_portal_outbox';
+    function readOutbox() { try { return JSON.parse(localStorage.getItem(OUTBOX_KEY) || '[]'); } catch { return []; } }
+    function writeOutbox(a) { localStorage.setItem(OUTBOX_KEY, JSON.stringify(a)); }
+    function enqueueOffline(body) { const q = readOutbox(); q.push({ id: Date.now() + '-' + Math.random().toString(36).slice(2, 6), body }); writeOutbox(q); updateOfflineBadge(); }
+    function updateOfflineBadge() { const n = readOutbox().length; const el = $('offBadge'); if (!el) return; el.textContent = n ? (n + ' queued offline') : ''; el.classList.toggle('hidden', n === 0); }
+    async function flushOffline() {
+      if (!navigator.onLine || !jwt) return;
+      const q = readOutbox(); if (!q.length) return;
+      const remaining = [];
+      for (const item of q) {
+        try { await postJson('/api/portal/submit', item.body, true); }
+        catch (e) { if (e.code === 401) return; remaining.push(item); }
+      }
+      writeOutbox(remaining); updateOfflineBadge();
+    }
+    window.addEventListener('online', () => { flushOffline(); });
+
+    async function submitActivity(activity, targetTable, targetUuid, payload, msgEl) {
+      const body = { activity, targetTable, targetUuid, payload: payload || {} };
+      if (!navigator.onLine) { enqueueOffline(body); msgEl.textContent = 'Saved offline — will submit automatically when back online.'; return; }
+      try {
+        msgEl.textContent = 'Submitting…';
+        const r = await postJson('/api/portal/submit', body, true);
+        msgEl.textContent = r.tier === 'approval'
+          ? 'Submitted — pending approval on the Host.'
+          : 'Submitted — pending Host processing. Track it under “My submissions”.';
+      } catch (e) {
+        if (e.code === 401) { logout('Session ended.'); return; }
+        if (e.name === 'TypeError' || !navigator.onLine) { enqueueOffline(body); msgEl.textContent = 'Saved offline — will submit automatically when back online.'; return; }
+        msgEl.textContent = e.message;
+      }
+    }
+
+    function onlyView(id){ ['overview','list','detail','subs','work','appr','fieldcap'].forEach(v => $(v).classList.toggle('hidden', v !== id)); }
+
+    function fcAvailable() { return canDo('env.reading') || canDo('equipment.maintenance_log') || canDo('equipment.breakdown_report'); }
+    async function showFieldCapture() {
+      onlyView('fieldcap'); $('home').classList.remove('hidden'); $('viewTitle').textContent = 'Field capture'; setActive('fieldcap'); closeNav();
+      loading(true); $('appErr').classList.add('hidden');
+      try {
+        let mon = [], eq = [];
+        if (canDo('env.reading')) mon = (await api('/api/cloud/records?entity=monitoring_items&limit=500')).records;
+        if (canDo('equipment.maintenance_log') || canDo('equipment.breakdown_report')) eq = (await api('/api/cloud/records?entity=equipment_items&limit=500')).records;
+        const opts = (rows) => rows.map(r => '<option value="' + esc(r.uuid) + '">' + esc(r.data.name || r.data.item_code || r.data.equipment_number || r.uuid) + '</option>').join('');
+        let html = '<div class="card">';
+        if (canDo('env.reading')) {
+          html += '<div class="form-block"><h3>Environmental reading</h3>'
+            + (mon.length
+              ? '<label class="lbl">Monitoring item</label><select id="erItem">' + opts(mon) + '</select>'
+                + '<label class="lbl">Value</label><input id="erVal" type="number" step="any"/>'
+                + '<label class="lbl">Comment</label><input id="erComment"/>'
+                + '<div class="form-actions"><button id="erSave" class="primary">Record reading</button> <span id="erMsg" class="form-msg"></span></div>'
+              : '<p class="muted">No monitoring items available.</p>') + '</div>';
+        }
+        if (canDo('equipment.maintenance_log')) {
+          html += '<div class="form-block"><h3>Equipment maintenance</h3>'
+            + (eq.length
+              ? '<label class="lbl">Equipment</label><select id="emItem">' + opts(eq) + '</select>'
+                + '<label class="lbl">Type</label><select id="emType"><option>routine</option><option>preventive</option><option>corrective</option></select>'
+                + '<label class="lbl">Findings</label><textarea id="emFindings" rows="2"></textarea>'
+                + '<label class="lbl">Action taken</label><textarea id="emAction" rows="2"></textarea>'
+                + '<div class="form-actions"><button id="emSave" class="primary">Log maintenance</button> <span id="emMsg" class="form-msg"></span></div>'
+              : '<p class="muted">No equipment available.</p>') + '</div>';
+        }
+        if (canDo('equipment.breakdown_report')) {
+          html += '<div class="form-block"><h3>Report equipment breakdown</h3>'
+            + (eq.length
+              ? '<label class="lbl">Equipment</label><select id="ebItem">' + opts(eq) + '</select>'
+                + '<label class="lbl">Description</label><textarea id="ebDesc" rows="2"></textarea>'
+                + '<label class="lbl">Service impact</label><input id="ebImpact"/>'
+                + '<label class="lbl">Immediate action</label><input id="ebAction"/>'
+                + '<div class="form-actions"><button id="ebSave" class="primary">Report breakdown</button> <span id="ebMsg" class="form-msg"></span></div>'
+              : '<p class="muted">No equipment available.</p>') + '</div>';
+        }
+        html += '</div>';
+        $('fieldcap').innerHTML = (canDo('env.reading')||canDo('equipment.maintenance_log')||canDo('equipment.breakdown_report')) ? html : '<div class="card"><p class="muted">No field-capture actions are enabled for you.</p></div>';
+        const er = $('erSave'); if (er) er.onclick = () => { const v = $('erVal').value; const m = $('erMsg'); if (v === '') { m.textContent = 'Enter a value.'; return; } submitActivity('env.reading', 'monitoring_items', $('erItem').value, { value: v, comment: $('erComment').value }, m); };
+        const em = $('emSave'); if (em) em.onclick = () => submitActivity('equipment.maintenance_log', 'equipment_items', $('emItem').value, { maintenanceType: $('emType').value, findings: $('emFindings').value, actionTaken: $('emAction').value }, $('emMsg'));
+        const eb = $('ebSave'); if (eb) eb.onclick = () => { const d = $('ebDesc').value; const m = $('ebMsg'); if (!d) { m.textContent = 'Enter a description.'; return; } submitActivity('equipment.breakdown_report', 'equipment_items', $('ebItem').value, { description: d, serviceImpact: $('ebImpact').value, immediateAction: $('ebAction').value }, m); };
+      } catch (e) { handleErr(e); } finally { loading(false); }
+    }
+
+    const ACT_LABELS = { 'leave.request': 'Leave request', 'inventory.request': 'Inventory request' };
+    function actLabel(k) { return ACT_LABELS[k] || k; }
+    function summarizePayload(pl) {
+      if (pl && (pl.startDate || pl.endDate)) return 'Leave ' + (pl.type || '') + ': ' + (pl.startDate || '?') + ' → ' + (pl.endDate || '?') + (pl.reason ? ' — ' + pl.reason : '');
+      if (pl && pl.itemName) return 'Inventory: ' + (pl.quantity ? pl.quantity + ' ' : '') + (pl.unit ? pl.unit + ' ' : '') + pl.itemName + (pl.justification ? ' — ' + pl.justification : '');
+      try { return JSON.stringify(pl); } catch { return ''; }
+    }
+
+    async function showApprovals() {
+      onlyView('appr'); $('home').classList.remove('hidden'); $('viewTitle').textContent = 'Approvals'; setActive('appr'); closeNav();
+      loading(true); $('appErr').classList.add('hidden');
+      try {
+        const { approvals } = await api('/api/portal/approvals');
+        let html = '<div class="card"><div class="section-title">Pending approvals</div><div class="section-sub">Requests from staff awaiting your decision. Decisions are finalized on the Host.</div>';
+        if (!approvals.length) html += '<p class="muted">No pending approvals.</p>';
+        for (const a of approvals) {
+          const u = esc(a.submission_uuid);
+          html += '<div class="req-card">'
+            + '<div class="rc-title">' + esc(actLabel(a.activity)) + '</div>'
+            + '<div class="muted" style="font-size:12px;margin:4px 0;">From: ' + esc(a.actor_email || ('staff #' + a.actor_staff_id)) + ' · ' + (a.created_at ? new Date(a.created_at).toLocaleString() : '') + '</div>'
+            + '<div style="font-size:12.5px;margin:6px 0;">' + esc(summarizePayload(a.payload)) + '</div>'
+            + '<input class="apReason" data-u="' + u + '" placeholder="Reason (optional)"/>'
+            + '<div class="form-actions"><button class="apOk primary" data-u="' + u + '">Approve</button> '
+            + '<button class="ghost apNo" data-u="' + u + '">Reject</button> '
+            + '<span class="apMsg form-msg" data-u="' + u + '"></span></div></div>';
+        }
+        html += '</div>';
+        $('appr').innerHTML = html;
+        $('appr').querySelectorAll('.apOk').forEach(b => b.onclick = () => decide(b.getAttribute('data-u'), 'approve'));
+        $('appr').querySelectorAll('.apNo').forEach(b => b.onclick = () => decide(b.getAttribute('data-u'), 'reject'));
+      } catch (e) { handleErr(e); } finally { loading(false); }
+    }
+    async function decide(uuid, decision) {
+      const reason = $('appr').querySelector('.apReason[data-u="' + uuid + '"]').value;
+      const msg = $('appr').querySelector('.apMsg[data-u="' + uuid + '"]');
+      try {
+        msg.textContent = 'Submitting…';
+        await postJson('/api/portal/approve', { submissionUuid: uuid, decision, reason }, true);
+        msg.textContent = decision === 'approve' ? 'Approved — the Host will finalize.' : 'Rejected.';
+        setTimeout(showApprovals, 900);
+      } catch (e) { if (e.code === 401) { logout('Session ended.'); return; } msg.textContent = e.message; }
+    }
+
+    async function showWork() {
+      onlyView('work'); $('home').classList.remove('hidden'); $('viewTitle').textContent = 'My work'; setActive('work'); closeNav();
+      loading(true); $('appErr').classList.add('hidden');
+      try {
+        const prof = await api('/api/portal/profile');
+        const { tasks } = await api('/api/portal/my-tasks');
+        const pd = prof.profile ? prof.profile.data : {};
+        let html = '<div class="card">';
+        if (canDo('profile.update')) {
+          html += '<div class="form-block"><h3>My profile</h3>'
+            + '<label class="lbl">Phone</label><input id="pfPhone" value="' + esc(pd.phone || '') + '"/>'
+            + '<label class="lbl">Email</label><input id="pfEmail" value="' + esc(pd.email || '') + '"/>'
+            + '<div class="form-actions"><button id="pfSave" class="primary">Save profile</button> <span id="pfMsg" class="form-msg"></span></div></div>';
+        }
+        html += '<div class="section-title" style="margin-top:6px;">My tasks</div><div class="section-sub">Actions assigned to you on the laboratory Host.</div>';
+        if (!canDo('task.update')) html += '<p class="muted">Remote task updates are not enabled for you.</p>';
+        else if (!tasks.length) html += '<p class="muted">No tasks assigned to you.</p>';
+        else {
+          for (const t of tasks) {
+            const d = t.data || {}; const u = esc(t.uuid);
+            html += '<div class="req-card">'
+              + '<div class="rc-title">' + esc(d.title || 'Task') + '</div>'
+              + '<div class="muted" style="font-size:12px;margin:4px 0;">Current status: ' + esc(d.status || '') + '</div>'
+              + '<label class="lbl">Update status</label>'
+              + '<select class="tkStatus" data-uuid="' + u + '"><option value="">— keep —</option>'
+              + ['Not started', 'In progress', 'Completed', 'Blocked'].map(o => '<option' + (d.status === o ? ' selected' : '') + '>' + o + '</option>').join('') + '</select>'
+              + '<label class="lbl">Notes</label>'
+              + '<textarea class="tkNotes" data-uuid="' + u + '" rows="2">' + esc(d.completion_notes || '') + '</textarea>'
+              + '<div class="form-actions"><button class="tkSave primary" data-uuid="' + u + '">Update task</button> <span class="tkMsg form-msg" data-uuid="' + u + '"></span></div></div>';
+          }
+        }
+        if (canDo('leave.request')) {
+          html += '<div class="form-block" style="margin-top:16px;"><h3>Request leave</h3>'
+            + '<label class="lbl">Type</label><select id="lvType"><option>Annual</option><option>Sick</option><option>Compassionate</option><option>Other</option></select>'
+            + '<label class="lbl">From</label><input id="lvStart" type="date"/>'
+            + '<label class="lbl">To</label><input id="lvEnd" type="date"/>'
+            + '<label class="lbl">Reason</label><textarea id="lvReason" rows="2"></textarea>'
+            + '<div class="form-actions"><button id="lvSave" class="primary">Submit leave request</button> <span id="lvMsg" class="form-msg"></span></div></div>';
+        }
+        if (canDo('inventory.request')) {
+          html += '<div class="form-block"><h3>Request inventory</h3>'
+            + '<label class="lbl">Item</label><input id="ivItem" placeholder="e.g. Nitrile gloves (M)"/>'
+            + '<label class="lbl">Quantity</label><input id="ivQty" type="number" step="any"/>'
+            + '<label class="lbl">Unit</label><input id="ivUnit" placeholder="box / pack / each"/>'
+            + '<label class="lbl">Justification</label><textarea id="ivJust" rows="2"></textarea>'
+            + '<div class="form-actions"><button id="ivSave" class="primary">Submit inventory request</button> <span id="ivMsg" class="form-msg"></span></div></div>';
+        }
+        html += '</div>';
+        $('work').innerHTML = html;
+        const ivSave = document.getElementById('ivSave');
+        if (ivSave) ivSave.onclick = () => { const item = $('ivItem').value; const m = $('ivMsg'); if (!item) { m.textContent = 'Enter an item.'; return; } submitActivity('inventory.request', null, null, { itemName: item, quantity: $('ivQty').value, unit: $('ivUnit').value, justification: $('ivJust').value }, m); };
+        const lvSave = document.getElementById('lvSave');
+        if (lvSave) lvSave.onclick = () => {
+          const start = $('lvStart').value, end = $('lvEnd').value, msg = $('lvMsg');
+          if (!start || !end) { msg.textContent = 'Start and end dates are required.'; return; }
+          submitActivity('leave.request', null, null, { type: $('lvType').value, startDate: start, endDate: end, reason: $('lvReason').value }, msg);
+        };
+        const pfSave = document.getElementById('pfSave');
+        if (pfSave) pfSave.onclick = () => submitActivity('profile.update', 'staff', prof.profile ? prof.profile.uuid : null, { phone: $('pfPhone').value, email: $('pfEmail').value }, $('pfMsg'));
+        $('work').querySelectorAll('.tkSave').forEach(btn => {
+          const uuid = btn.getAttribute('data-uuid');
+          btn.onclick = () => {
+            const status = $('work').querySelector('.tkStatus[data-uuid="' + uuid + '"]').value;
+            const notes = $('work').querySelector('.tkNotes[data-uuid="' + uuid + '"]').value;
+            const msg = $('work').querySelector('.tkMsg[data-uuid="' + uuid + '"]');
+            const payload = { completionNotes: notes }; if (status) payload.status = status;
+            submitActivity('task.update', 'actions', uuid, payload, msg);
+          };
+        });
+      } catch (e) { handleErr(e); } finally { loading(false); }
+    }
+
+    async function showSubmissions() {
+      onlyView('subs'); $('home').classList.remove('hidden'); $('viewTitle').textContent = 'My submissions'; setActive('subs'); closeNav();
+      loading(true); $('appErr').classList.add('hidden');
+      try {
+        const { submissions } = await api('/api/portal/submissions');
+        let html = '<div class="section-title">My submissions</div><div class="section-sub">Actions you have submitted and their status on the Host.</div><div class="table-wrap"><table><thead><tr><th>Activity</th><th>Status</th><th>Result</th><th>When</th></tr></thead><tbody>';
+        if (!submissions.length) html += '<tr><td colspan="4" class="muted">No submissions yet.</td></tr>';
+        for (const s of submissions) {
+          const color = s.status === 'applied' ? 'var(--success)' : s.status === 'rejected' ? 'var(--danger)' : '';
+          const st = '<span class="pill"' + (color ? ' style="border-color:' + color + ';color:' + color + ';"' : '') + '>' + esc(s.status) + '</span>';
+          html += '<tr><td>' + esc(s.activity) + '</td><td>' + st + '</td><td class="muted">' + esc(s.result || '') + '</td><td class="muted">' + (s.created_at ? new Date(s.created_at).toLocaleString() : '') + '</td></tr>';
+        }
+        html += '</tbody></table></div>';
+        $('subs').innerHTML = '<div class="card">' + html + '</div>';
+      } catch (e) { handleErr(e); } finally { loading(false); }
+    }
+
+    function renderRecordsNav(entities){
+      const box = $('navRecords'); box.innerHTML = '';
+      for (const e of entities) {
+        const b = document.createElement('button');
+        b.className = 'nav-item'; b.setAttribute('data-nav', 'rec:' + e.entity_table);
+        b.innerHTML = catSvg(e.entity_table) + '<span>' + esc(label(e.entity_table)) + '</span><span class="count">' + e.total + '</span>';
+        b.onclick = () => showList(e.entity_table);
+        box.appendChild(b);
+      }
+    }
+
+    async function showOverview() {
+      onlyView('overview'); $('home').classList.add('hidden'); $('viewTitle').textContent = 'Overview'; setActive('overview'); closeNav();
+      loading(true); $('appErr').classList.add('hidden');
+      try {
+        const { entities } = await api('/api/cloud/summary');
+        renderRecordsNav(entities);
+        const tiles = $('tiles'); tiles.innerHTML = '';
+        if (!entities.length) tiles.innerHTML = '<p class="muted">No records have synced yet. On the laboratory Host, open Settings → System → Connectivity &amp; Mode and run “Force full re-sync to cloud”.</p>';
+        for (const e of entities) {
+          const d = document.createElement('div'); d.className = 'tile';
+          d.innerHTML = '<h3>'+catSvg(e.entity_table)+label(e.entity_table)+'</h3><div class="n">'+e.total+'</div><div class="cap">records</div>';
+          d.onclick = () => showList(e.entity_table);
+          tiles.appendChild(d);
+        }
+      } catch (e) { handleErr(e); } finally { loading(false); }
+    }
+
+    async function showList(entity) {
+      onlyView('list'); $('home').classList.remove('hidden'); setActive('rec:' + entity); closeNav();
+      $('viewTitle').textContent = label(entity); loading(true); $('appErr').classList.add('hidden');
+      try {
+        const { records } = await api('/api/cloud/records?entity=' + encodeURIComponent(entity) + '&limit=500');
+        let html = '<div class="section-title">' + esc(label(entity)) + '</div><div class="section-sub">' + records.length + ' record(s) replicated from the Host.</div><div class="table-wrap"><table><thead><tr><th>Reference</th><th>Description</th><th>Status</th><th>Updated</th><th></th></tr></thead><tbody>';
+        if (!records.length) html += '<tr><td colspan="5" class="muted">No records.</td></tr>';
+        for (const r of records) {
+          const d = r.data || {};
+          const ref = firstKey(d, ID_KEYS) || r.uuid.slice(0, 8);
+          const name = firstKey(d, NAME_KEYS) || '';
+          const status = d.status ? '<span class="pill">'+esc(String(d.status))+'</span>' : '';
+          const upd = r.updated_at ? new Date(r.updated_at).toLocaleString() : '';
+          html += '<tr class="row" data-uuid="'+esc(r.uuid)+'"><td>'+esc(ref)+'</td><td>'+esc(name)+'</td><td>'+status+'</td><td class="muted">'+esc(upd)+'</td><td class="muted">View →</td></tr>';
+        }
+        html += '</tbody></table></div>';
+        $('list').innerHTML = html;
+        $('list').querySelectorAll('tr.row').forEach(tr => tr.onclick = () => showDetail(entity, tr.getAttribute('data-uuid')));
+      } catch (e) { handleErr(e); } finally { loading(false); }
+    }
+
+    async function showDetail(entity, uuid) {
+      onlyView('detail'); $('home').classList.remove('hidden'); loading(true); $('appErr').classList.add('hidden');
+      try {
+        const { record } = await api('/api/cloud/record?entity=' + encodeURIComponent(entity) + '&uuid=' + encodeURIComponent(uuid));
+        const d = record.data || {};
+        let html = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;"><button class="ghost" id="back">← ' + esc(label(entity)) + '</button>';
+        if (record.deleted_at) html += '<span class="pill badge-no">Deleted</span>';
+        html += '</div><div class="kv">';
+        for (const k of Object.keys(d).sort()) {
+          if (k === 'id') continue;
+          let v = d[k]; if (v === null || v === undefined) v = '';
+          html += '<div class="k">'+esc(k.replace(/_/g,' '))+'</div><div class="v">'+esc(String(v))+'</div>';
+        }
+        html += '</div>';
+        if (entity === 'documents' && canDo('sop.acknowledge') && !record.deleted_at) {
+          html += '<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">'
+            + '<button id="ackBtn" class="primary">Acknowledge this SOP</button>'
+            + '<span id="ackMsg" class="form-msg" style="margin-left:10px;"></span></div>';
+        }
+        $('detail').innerHTML = html;
+        $('back').onclick = () => showList(entity);
+        const ackBtn = document.getElementById('ackBtn');
+        if (ackBtn) ackBtn.onclick = () => submitActivity('sop.acknowledge', 'documents', uuid, {}, document.getElementById('ackMsg'));
+      } catch (e) { handleErr(e); } finally { loading(false); }
+    }
+
+    function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+    function handleErr(e) {
+      if (e.code === 401) { logout('Session ended — please sign in again.'); return; }
+      $('appErr').textContent = e.message; $('appErr').classList.remove('hidden');
+    }
+
+    async function enterApp() {
+      $('authWrap').classList.add('hidden');
+      $('app').classList.remove('hidden');
+      if (!caps || !me) {
+        try {
+          const m = await api('/api/portal/me');
+          caps = m.capabilities; me = { email: m.email, role: m.role, fullName: m.fullName };
+        } catch (e) { if (e.code === 401) { logout('Session ended — please sign in again.'); return; } }
+      }
+      renderUser();
+      renderAccess();
+      updateOfflineBadge(); flushOffline();
+      showOverview();
+    }
+    function showPwGate() {
+      $('app').classList.add('hidden'); $('authWrap').classList.remove('hidden');
+      $('gate').classList.add('hidden'); $('pwErr').classList.add('hidden'); $('pwgate').classList.remove('hidden');
+    }
+
+    async function signIn() {
+      const email = $('email').value.trim(); const password = $('password').value;
+      if (!email || !password) return;
+      $('gateErr').classList.add('hidden');
+      try {
+        const { token, user, capabilities } = await postJson('/api/portal/login', { email, password }, false);
+        jwt = token; localStorage.setItem('sech_lims_portal_jwt', token); caps = capabilities;
+        me = user ? { email: user.email, role: user.role, fullName: user.fullName } : null;
+        $('password').value = '';
+        if (user && user.mustChangePassword) { $('pwCurrent').value = password; showPwGate(); }
+        else enterApp();
+      } catch (e) { $('gateErr').textContent = e.message; $('gateErr').classList.remove('hidden'); }
+    }
+
+    async function changePassword() {
+      const currentPassword = $('pwCurrent').value; const newPassword = $('pwNew').value;
+      if (newPassword.length < 8) { $('pwErr').textContent = 'New password must be at least 8 characters.'; $('pwErr').classList.remove('hidden'); return; }
+      try {
+        await postJson('/api/portal/change-password', { currentPassword, newPassword }, true);
+        $('pwCurrent').value = ''; $('pwNew').value = '';
+        enterApp();
+      } catch (e) { $('pwErr').textContent = e.message; $('pwErr').classList.remove('hidden'); }
+    }
+
+    function logout(msg) {
+      jwt = ''; me = null; caps = null; localStorage.removeItem('sech_lims_portal_jwt');
+      $('app').classList.add('hidden'); $('pwgate').classList.add('hidden');
+      $('authWrap').classList.remove('hidden'); $('gate').classList.remove('hidden');
+      if (msg) { $('gateErr').textContent = msg; $('gateErr').classList.remove('hidden'); }
+    }
+    const disconnect = logout;
+
+    $('signin').onclick = signIn;
+    $('password').addEventListener('keydown', e => { if (e.key === 'Enter') signIn(); });
+    $('pwSave').onclick = changePassword;
+    $('pwNew').addEventListener('keydown', e => { if (e.key === 'Enter') changePassword(); });
+    $('home').onclick = showOverview;
+    $('navOverview').onclick = showOverview;
+    $('subsBtn').onclick = showSubmissions;
+    $('workBtn').onclick = showWork;
+    $('apprBtn').onclick = showApprovals;
+    $('fcBtn').onclick = showFieldCapture;
+    $('disconnect').onclick = () => logout();
+    $('userChip').onclick = () => showWork();
+    $('hamburger').onclick = () => { const s = $('app'); s.classList.toggle('nav-open'); $('backdrop').classList.toggle('hidden', !s.classList.contains('nav-open')); };
+    $('backdrop').onclick = closeNav;
+    if (jwt) { enterApp(); }
+  </script>
+</body>
+</html>

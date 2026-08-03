@@ -1,0 +1,63 @@
+/** Shared mobile form/UI primitives used by the capture and inventory screens. */
+import { useEffect, useMemo, type ReactNode } from 'react';
+
+export const today = () => new Date().toISOString().slice(0, 10);
+export const s = (v: unknown) => (v === null || v === undefined ? '' : String(v));
+
+export const ICO = {
+  back: 'M15 18l-6-6 6-6',
+  check: 'M20 6 9 17l-5-5',
+  doc: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8ZM14 2v6h6',
+};
+
+/** Minimal multi-path icon: splits the path string on "M" sub-paths. */
+export const Ico = ({ d, size = 20 }: { d: string; size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+    {d.split('M').filter(Boolean).map((seg, i) => <path key={i} d={'M' + seg} />)}
+  </svg>
+);
+
+export function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
+  return <div className="m-field"><label className="m-lbl">{label}</label>{children}{hint && <div className="m-fieldhint">{hint}</div>}</div>;
+}
+
+export type Msg = { kind: 'ok' | 'queued' | 'err'; msg: string } | null;
+
+export function Result({ r }: { r: Msg }) {
+  if (!r) return null;
+  const cls = r.kind === 'err' ? 'err' : r.kind === 'queued' ? 'queued' : 'ok';
+  return <div className={`m-result ${cls}`}>{r.kind === 'ok' && <Ico d={ICO.check} size={16} />}<span>{r.msg}</span></div>;
+}
+
+export function Back({ onBack }: { onBack: () => void }) {
+  return <button className="m-back" onClick={onBack}><Ico d={ICO.back} size={18} /> Back</button>;
+}
+
+const CAMERA = 'M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z';
+
+/**
+ * Photo picker using a file input with capture="environment" — this opens the
+ * device camera through the OS and works over plain http (unlike getUserMedia,
+ * which needs a secure context). Returns the chosen File to the parent form.
+ */
+export function PhotoField({ file, onChange }: { file: File | null; onChange: (f: File | null) => void }) {
+  const url = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
+  useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
+  return (
+    <div className="m-field">
+      <label className="m-lbl">Photo evidence (optional)</label>
+      {url ? (
+        <div className="m-photo">
+          <img src={url} alt="attached" />
+          <button className="m-photo-x" onClick={() => onChange(null)}>Remove</button>
+        </div>
+      ) : (
+        <label className="m-photobtn">
+          <Ico d={CAMERA} size={18} /> Add photo
+          <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+            onChange={e => onChange(e.target.files && e.target.files[0] ? e.target.files[0] : null)} />
+        </label>
+      )}
+    </div>
+  );
+}

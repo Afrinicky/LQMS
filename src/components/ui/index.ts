@@ -1,0 +1,11 @@
+export { default as WaveBackground } from './WaveBackground';
+export { default as MedicalLabBackgroundMarks } from './MedicalLabBackgroundMarks';
+export { default as PageHeader } from './PageHeader';
+export { default as StatCard } from './StatCard';
+export { default as KpiStrip } from './KpiStrip';
+export type { KpiItem } from './KpiStrip';
+export { default as EmptyState } from './EmptyState';
+export { MODULE_ICONS, moduleIcon, SECTION_ICONS, sectionIcon } from './moduleIcons';
+export { DonutChart, BarChart, BarMeter, RadialGauge, Sparkline, ChartCard, CHART_COLORS } from './Charts';
+export { AlertCard, AlertGrid, ModuleAlerts, AlertSummary } from './AlertCard';
+export { AttentionCenter, AlertsByModule } from './AttentionCenter';

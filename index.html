@@ -1,1 +1,68 @@
-<!doctype html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>SECH_LIMS by Nickland</title></head><body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>SECH_LIMS by Nickland</title>
+  <!-- Progressive Web App: installable on desktop and mobile, served over the LAN. -->
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#0A1322" />
+  <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="SECH_LIMS" />
+  <style>
+    html, body, #root { min-height: 100vh; margin: 0; }
+    body {
+      background:
+        radial-gradient(1000px 640px at 50% -12%, rgba(47,107,255,0.18), transparent 60%),
+        linear-gradient(160deg, #0A1322 0%, #060A14 100%);
+      color: #F5F8FF;
+      font-family: Inter, "Segoe UI", system-ui, Arial, sans-serif;
+    }
+    #boot-splash {
+      position: fixed; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 18px; text-align: center; padding: 24px;
+    }
+    #boot-splash .mark {
+      width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center;
+      background: linear-gradient(140deg, #2F6BFF, #1B49C0);
+      box-shadow: 0 10px 30px rgba(47,107,255,0.45); color: #fff;
+    }
+    #boot-splash .title { font-size: 26px; font-weight: 700; letter-spacing: 0.02em; }
+    #boot-splash .sub { font-size: 13px; color: #A8B3C7; margin-top: -8px; }
+    #boot-splash .spinner {
+      width: 34px; height: 34px; border-radius: 50%;
+      border: 3px solid rgba(78,141,255,0.18); border-top-color: #4E8DFF;
+      animation: spin 0.8s linear infinite; margin-top: 6px;
+    }
+    #boot-splash .status { font-size: 13.5px; color: #A8B3C7; }
+    #boot-splash .diag { font-size: 11.5px; color: #5A6680; max-width: 460px; line-height: 1.5; margin-top: 10px; }
+    #boot-splash .diag code { background: #122038; color: #4E8DFF; padding: 2px 6px; border-radius: 4px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <div id="boot-splash">
+      <div class="mark">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 3h6"/><path d="M10 3v6.5L5.2 17a2 2 0 0 0 1.7 3h10.2a2 2 0 0 0 1.7-3L14 9.5V3"/><path d="M7.5 14h9"/>
+        </svg>
+      </div>
+      <div>
+        <div class="title">SECH_LIMS</div>
+        <div class="sub">by Nickland</div>
+      </div>
+      <div class="spinner"></div>
+      <div class="status">Starting your laboratory workspace…</div>
+      <div class="diag">
+        If this screen stays for more than a minute, open <strong>View &rarr; Toggle Developer Tools</strong>.
+        Boot diagnostics are written to <code>%APPDATA%\sech-lims-by-nickland\boot.log</code>.
+      </div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>
