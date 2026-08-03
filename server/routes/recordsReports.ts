@@ -108,7 +108,7 @@ export function recordsReportsRoutes() {
   });
 
   // ============= Report templates =============
-  router.get('/templates', requirePermission('records_reports', 'view'), (req, res) => {
+  router.get('/templates', requirePermission('records_reports.generate', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.moduleKey) { filters.push('module_key = ?'); params.push(String(req.query.moduleKey)); }
@@ -119,7 +119,7 @@ export function recordsReportsRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/templates', requirePermission('records_reports', 'create'), (req, res) => {
+  router.post('/templates', requirePermission('records_reports.generate', 'create'), (req, res) => {
     if (!req.body.templateName) return res.status(400).json({ error: 'templateName is required' });
     if (!req.body.templateType) return res.status(400).json({ error: 'templateType is required' });
     if (!req.body.outputFormat) return res.status(400).json({ error: 'outputFormat is required' });
@@ -134,14 +134,14 @@ export function recordsReportsRoutes() {
     res.status(201).json({ id, templateCode });
   });
 
-  router.get('/templates/:id', requirePermission('records_reports', 'view'), (req, res) => {
+  router.get('/templates/:id', requirePermission('records_reports.generate', 'view'), (req, res) => {
     const db = getDb();
     const t = db.prepare('SELECT * FROM report_templates WHERE id = ?').get(req.params.id);
     if (!t) return res.status(404).json({ error: 'Template not found' });
     res.json(t);
   });
 
-  router.put('/templates/:id', requirePermission('records_reports', 'edit'), (req, res) => {
+  router.put('/templates/:id', requirePermission('records_reports.generate', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM report_templates WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Template not found' });
@@ -152,7 +152,7 @@ export function recordsReportsRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/templates/:id/toggle', requirePermission('records_reports', 'edit'), (req, res) => {
+  router.post('/templates/:id/toggle', requirePermission('records_reports.generate', 'edit'), (req, res) => {
     const db = getDb();
     const t = db.prepare('SELECT * FROM report_templates WHERE id = ?').get(req.params.id) as any;
     if (!t) return res.status(404).json({ error: 'Template not found' });
@@ -163,7 +163,7 @@ export function recordsReportsRoutes() {
   });
 
   // ============= Report requests =============
-  router.get('/reports', requirePermission('records_reports', 'view'), (req, res) => {
+  router.get('/reports', requirePermission('records_reports.generate', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.status) { filters.push('status = ?'); params.push(String(req.query.status)); }
@@ -174,7 +174,7 @@ export function recordsReportsRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/reports', requirePermission('records_reports', 'create'), (req, res) => {
+  router.post('/reports', requirePermission('records_reports.generate', 'create'), (req, res) => {
     if (!req.body.reportTitle) return res.status(400).json({ error: 'reportTitle is required' });
     if (!req.body.moduleKey) return res.status(400).json({ error: 'moduleKey is required' });
     const db = getDb();
@@ -188,7 +188,7 @@ export function recordsReportsRoutes() {
     res.status(201).json({ id, requestNumber });
   });
 
-  router.get('/reports/:id', requirePermission('records_reports', 'view'), (req, res) => {
+  router.get('/reports/:id', requirePermission('records_reports.generate', 'view'), (req, res) => {
     const db = getDb();
     const r = db.prepare('SELECT * FROM report_requests WHERE id = ?').get(req.params.id);
     if (!r) return res.status(404).json({ error: 'Report request not found' });
@@ -196,7 +196,7 @@ export function recordsReportsRoutes() {
     res.json({ ...r, exports: exports_ });
   });
 
-  router.put('/reports/:id', requirePermission('records_reports', 'edit'), (req, res) => {
+  router.put('/reports/:id', requirePermission('records_reports.generate', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM report_requests WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Report request not found' });
@@ -207,7 +207,7 @@ export function recordsReportsRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/reports/:id/generate', requirePermission('records_reports', 'create'), (req, res) => {
+  router.post('/reports/:id/generate', requirePermission('records_reports.generate', 'create'), (req, res) => {
     const db = getDb();
     const r = db.prepare('SELECT * FROM report_requests WHERE id = ?').get(req.params.id) as any;
     if (!r) return res.status(404).json({ error: 'Report request not found' });
@@ -230,7 +230,7 @@ export function recordsReportsRoutes() {
     res.json({ ok: true, total, sampleCount: sample.length, summary, rejectedFilterKeys: applied.rejectedKeys });
   });
 
-  router.post('/reports/:id/review', requirePermission('records_reports', 'edit'), (req, res) => {
+  router.post('/reports/:id/review', requirePermission('records_reports.generate', 'edit'), (req, res) => {
     const db = getDb();
     const r = db.prepare('SELECT * FROM report_requests WHERE id = ?').get(req.params.id) as any;
     if (!r) return res.status(404).json({ error: 'Report request not found' });
@@ -241,7 +241,7 @@ export function recordsReportsRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/reports/:id/approve', requirePermission('records_reports', 'approve'), (req, res) => {
+  router.post('/reports/:id/approve', requirePermission('records_reports.generate', 'approve'), (req, res) => {
     const db = getDb();
     const r = db.prepare('SELECT * FROM report_requests WHERE id = ?').get(req.params.id) as any;
     if (!r) return res.status(404).json({ error: 'Report request not found' });
@@ -252,7 +252,7 @@ export function recordsReportsRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/reports/:id/export', requirePermission('records_reports', 'export'), (req, res) => {
+  router.post('/reports/:id/export', requirePermission('records_reports.generate', 'export'), (req, res) => {
     const format = (req.body.format ?? 'csv').toLowerCase();
     if (!['csv', 'json', 'html'].includes(format)) return res.status(400).json({ error: 'format must be csv, json, or html' });
     const db = getDb();
@@ -291,7 +291,7 @@ export function recordsReportsRoutes() {
   });
 
   // ============= Print jobs =============
-  router.get('/print-jobs', requirePermission('records_reports', 'view'), (req, res) => {
+  router.get('/print-jobs', requirePermission('records_reports.print', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.moduleKey) { filters.push('module_key = ?'); params.push(String(req.query.moduleKey)); }
@@ -301,7 +301,7 @@ export function recordsReportsRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/print-jobs', requirePermission('records_reports', 'print'), (req, res) => {
+  router.post('/print-jobs', requirePermission('records_reports.print', 'print'), (req, res) => {
     if (!req.body.printTitle) return res.status(400).json({ error: 'printTitle is required' });
     if (!req.body.printPurpose) return res.status(400).json({ error: 'printPurpose is required' });
     const db = getDb();
@@ -315,7 +315,7 @@ export function recordsReportsRoutes() {
     res.status(201).json({ id, printNumber });
   });
 
-  router.get('/print-jobs/:id', requirePermission('records_reports', 'view'), (req, res) => {
+  router.get('/print-jobs/:id', requirePermission('records_reports.print', 'view'), (req, res) => {
     const db = getDb();
     const p = db.prepare('SELECT * FROM print_jobs WHERE id = ?').get(req.params.id);
     if (!p) return res.status(404).json({ error: 'Print job not found' });
@@ -323,7 +323,7 @@ export function recordsReportsRoutes() {
   });
 
   // ============= Evidence packs =============
-  router.get('/evidence-packs', requirePermission('records_reports', 'view'), (req, res) => {
+  router.get('/evidence-packs', requirePermission('records_reports.evidence', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.status) { filters.push('status = ?'); params.push(String(req.query.status)); }
@@ -333,7 +333,7 @@ export function recordsReportsRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/evidence-packs', requirePermission('records_reports', 'create'), (req, res) => {
+  router.post('/evidence-packs', requirePermission('records_reports.evidence', 'create'), (req, res) => {
     if (!req.body.packTitle) return res.status(400).json({ error: 'packTitle is required' });
     if (!req.body.packPurpose) return res.status(400).json({ error: 'packPurpose is required' });
     const db = getDb();
@@ -347,7 +347,7 @@ export function recordsReportsRoutes() {
     res.status(201).json({ id, packNumber });
   });
 
-  router.get('/evidence-packs/:id', requirePermission('records_reports', 'view'), (req, res) => {
+  router.get('/evidence-packs/:id', requirePermission('records_reports.evidence', 'view'), (req, res) => {
     const db = getDb();
     const pack = db.prepare('SELECT * FROM evidence_packs WHERE id = ?').get(req.params.id) as any;
     if (!pack) return res.status(404).json({ error: 'Evidence pack not found' });
@@ -355,7 +355,7 @@ export function recordsReportsRoutes() {
     res.json({ ...pack, items });
   });
 
-  router.put('/evidence-packs/:id', requirePermission('records_reports', 'edit'), (req, res) => {
+  router.put('/evidence-packs/:id', requirePermission('records_reports.evidence', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM evidence_packs WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Evidence pack not found' });
@@ -366,7 +366,7 @@ export function recordsReportsRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/evidence-packs/:id/items', requirePermission('records_reports', 'create'), (req, res) => {
+  router.post('/evidence-packs/:id/items', requirePermission('records_reports.evidence', 'create'), (req, res) => {
     if (!req.body.moduleKey) return res.status(400).json({ error: 'moduleKey is required' });
     if (!req.body.recordType) return res.status(400).json({ error: 'recordType is required' });
     if (!req.body.recordId) return res.status(400).json({ error: 'recordId is required' });
@@ -382,7 +382,7 @@ export function recordsReportsRoutes() {
     res.status(201).json({ id });
   });
 
-  router.delete('/evidence-packs/:id/items/:itemId', requirePermission('records_reports', 'edit'), (req, res) => {
+  router.delete('/evidence-packs/:id/items/:itemId', requirePermission('records_reports.evidence', 'edit'), (req, res) => {
     const db = getDb();
     const item = db.prepare('SELECT * FROM evidence_pack_items WHERE id = ? AND evidence_pack_id = ?').get(req.params.itemId, req.params.id) as any;
     if (!item) return res.status(404).json({ error: 'Item not found on this pack' });
@@ -391,7 +391,7 @@ export function recordsReportsRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/evidence-packs/:id/generate', requirePermission('records_reports', 'create'), (req, res) => {
+  router.post('/evidence-packs/:id/generate', requirePermission('records_reports.evidence', 'create'), (req, res) => {
     const db = getDb();
     const pack = db.prepare('SELECT * FROM evidence_packs WHERE id = ?').get(req.params.id) as any;
     if (!pack) return res.status(404).json({ error: 'Evidence pack not found' });
@@ -406,7 +406,7 @@ export function recordsReportsRoutes() {
     res.json({ ok: true, fileId, fileName, itemCount: items.length });
   });
 
-  router.get('/evidence-packs/:id/print', requirePermission('records_reports', 'print'), (req, res) => {
+  router.get('/evidence-packs/:id/print', requirePermission('records_reports.evidence', 'print'), (req, res) => {
     const db = getDb();
     const pack = db.prepare('SELECT * FROM evidence_packs WHERE id = ?').get(req.params.id) as any;
     if (!pack) return res.status(404).send('Evidence pack not found');
@@ -432,7 +432,7 @@ ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(i.module_key)}/${esc(i
     res.send(html);
   });
 
-  router.post('/evidence-packs/:id/review', requirePermission('records_reports', 'edit'), (req, res) => {
+  router.post('/evidence-packs/:id/review', requirePermission('records_reports.evidence', 'edit'), (req, res) => {
     const db = getDb();
     const pack = db.prepare('SELECT * FROM evidence_packs WHERE id = ?').get(req.params.id) as any;
     if (!pack) return res.status(404).json({ error: 'Evidence pack not found' });
@@ -443,7 +443,7 @@ ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(i.module_key)}/${esc(i
     res.json({ ok: true });
   });
 
-  router.post('/evidence-packs/:id/approve', requirePermission('records_reports', 'approve'), (req, res) => {
+  router.post('/evidence-packs/:id/approve', requirePermission('records_reports.evidence', 'approve'), (req, res) => {
     const db = getDb();
     const pack = db.prepare('SELECT * FROM evidence_packs WHERE id = ?').get(req.params.id) as any;
     if (!pack) return res.status(404).json({ error: 'Evidence pack not found' });
@@ -454,7 +454,7 @@ ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(i.module_key)}/${esc(i
     res.json({ ok: true });
   });
 
-  router.post('/evidence-packs/:id/archive', requirePermission('records_reports', 'approve'), (req, res) => {
+  router.post('/evidence-packs/:id/archive', requirePermission('records_reports.evidence', 'approve'), (req, res) => {
     const db = getDb();
     const pack = db.prepare('SELECT * FROM evidence_packs WHERE id = ?').get(req.params.id) as any;
     if (!pack) return res.status(404).json({ error: 'Evidence pack not found' });
@@ -464,12 +464,12 @@ ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(i.module_key)}/${esc(i
   });
 
   // ============= Retention rules + reviews =============
-  router.get('/retention-rules', requirePermission('records_reports', 'view'), (_req, res) => {
+  router.get('/retention-rules', requirePermission('records_reports.retention', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT * FROM record_retention_rules ORDER BY module_key, record_type').all());
   });
 
-  router.post('/retention-rules', requirePermission('records_reports', 'create'), (req, res) => {
+  router.post('/retention-rules', requirePermission('records_reports.retention', 'create'), (req, res) => {
     if (!req.body.ruleName) return res.status(400).json({ error: 'ruleName is required' });
     if (!req.body.moduleKey) return res.status(400).json({ error: 'moduleKey is required' });
     if (!req.body.recordType) return res.status(400).json({ error: 'recordType is required' });
@@ -486,7 +486,7 @@ ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(i.module_key)}/${esc(i
     res.status(201).json({ id });
   });
 
-  router.put('/retention-rules/:id', requirePermission('records_reports', 'edit'), (req, res) => {
+  router.put('/retention-rules/:id', requirePermission('records_reports.retention', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM record_retention_rules WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Rule not found' });
@@ -497,7 +497,7 @@ ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(i.module_key)}/${esc(i
     res.json({ ok: true });
   });
 
-  router.post('/retention-rules/:id/toggle', requirePermission('records_reports', 'edit'), (req, res) => {
+  router.post('/retention-rules/:id/toggle', requirePermission('records_reports.retention', 'edit'), (req, res) => {
     const db = getDb();
     const rule = db.prepare('SELECT * FROM record_retention_rules WHERE id = ?').get(req.params.id) as any;
     if (!rule) return res.status(404).json({ error: 'Rule not found' });
@@ -507,12 +507,12 @@ ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(i.module_key)}/${esc(i
     res.json({ ok: true, isActive: newActive === 1 });
   });
 
-  router.get('/retention-reviews', requirePermission('records_reports', 'view'), (_req, res) => {
+  router.get('/retention-reviews', requirePermission('records_reports.retention', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT * FROM record_retention_reviews ORDER BY review_date DESC').all());
   });
 
-  router.post('/retention-reviews', requirePermission('records_reports', 'create'), (req, res) => {
+  router.post('/retention-reviews', requirePermission('records_reports.retention', 'create'), (req, res) => {
     if (!req.body.reviewDate) return res.status(400).json({ error: 'reviewDate is required' });
     const db = getDb();
     const createdAt = new Date().toISOString();
@@ -535,14 +535,14 @@ ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(i.module_key)}/${esc(i
     res.status(201).json({ id, reviewNumber, recordsDueForArchive: dueForArchive });
   });
 
-  router.get('/retention-reviews/:id', requirePermission('records_reports', 'view'), (req, res) => {
+  router.get('/retention-reviews/:id', requirePermission('records_reports.retention', 'view'), (req, res) => {
     const db = getDb();
     const r = db.prepare('SELECT * FROM record_retention_reviews WHERE id = ?').get(req.params.id);
     if (!r) return res.status(404).json({ error: 'Retention review not found' });
     res.json(r);
   });
 
-  router.post('/retention-reviews/:id/complete', requirePermission('records_reports', 'edit'), (req, res) => {
+  router.post('/retention-reviews/:id/complete', requirePermission('records_reports.retention', 'edit'), (req, res) => {
     const db = getDb();
     const r = db.prepare('SELECT * FROM record_retention_reviews WHERE id = ?').get(req.params.id) as any;
     if (!r) return res.status(404).json({ error: 'Retention review not found' });
@@ -554,7 +554,7 @@ ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(i.module_key)}/${esc(i
   });
 
   // ============= Audit trail =============
-  router.get('/audit-trail', requirePermission('records_reports', 'view'), (req, res) => {
+  router.get('/audit-trail', requirePermission('records_reports.audit', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.from) { filters.push('created_at >= ?'); params.push(String(req.query.from)); }
@@ -568,7 +568,7 @@ ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(i.module_key)}/${esc(i
     res.json(db.prepare(query).all(...params));
   });
 
-  router.get('/audit-trail/summary', requirePermission('records_reports', 'view'), (req, res) => {
+  router.get('/audit-trail/summary', requirePermission('records_reports.audit', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.from) { filters.push('created_at >= ?'); params.push(String(req.query.from)); }
@@ -581,12 +581,12 @@ ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(i.module_key)}/${esc(i
     res.json({ total, byAction, byEntity, byActor });
   });
 
-  router.get('/audit-reviews', requirePermission('records_reports', 'view'), (_req, res) => {
+  router.get('/audit-reviews', requirePermission('records_reports.audit', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare(`SELECT r.*, a.title AS action_title, a.status AS action_status, a.due_date AS action_due_date FROM audit_trail_reviews r LEFT JOIN actions a ON a.id = r.action_id ORDER BY r.review_date DESC`).all());
   });
 
-  router.post('/audit-reviews', requirePermission('records_reports', 'create'), (req, res) => {
+  router.post('/audit-reviews', requirePermission('records_reports.audit', 'create'), (req, res) => {
     if (!req.body.reviewDate) return res.status(400).json({ error: 'reviewDate is required' });
     if (!req.body.dateFrom) return res.status(400).json({ error: 'dateFrom is required' });
     if (!req.body.dateTo) return res.status(400).json({ error: 'dateTo is required' });
@@ -601,7 +601,7 @@ ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(i.module_key)}/${esc(i
     res.status(201).json({ id, reviewNumber });
   });
 
-  router.get('/audit-reviews/:id', requirePermission('records_reports', 'view'), (req, res) => {
+  router.get('/audit-reviews/:id', requirePermission('records_reports.audit', 'view'), (req, res) => {
     const db = getDb();
     const r = db.prepare('SELECT * FROM audit_trail_reviews WHERE id = ?').get(req.params.id);
     if (!r) return res.status(404).json({ error: 'Audit review not found' });
@@ -622,7 +622,7 @@ ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(i.module_key)}/${esc(i
     res.status(201).json({ id: actionId });
   });
 
-  router.post('/audit-reviews/:id/close', requirePermission('records_reports', 'approve'), (req, res) => {
+  router.post('/audit-reviews/:id/close', requirePermission('records_reports.audit', 'approve'), (req, res) => {
     const db = getDb();
     const r = db.prepare('SELECT * FROM audit_trail_reviews WHERE id = ?').get(req.params.id) as any;
     if (!r) return res.status(404).json({ error: 'Audit review not found' });
@@ -632,12 +632,12 @@ ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(i.module_key)}/${esc(i
   });
 
   // ============= Backup / restore checks =============
-  router.get('/backup-checks', requirePermission('records_reports', 'view'), (_req, res) => {
+  router.get('/backup-checks', requirePermission('records_reports.retention', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT * FROM backup_restore_checks ORDER BY check_date DESC').all());
   });
 
-  router.post('/backup-checks', requirePermission('records_reports', 'create'), (req, res) => {
+  router.post('/backup-checks', requirePermission('records_reports.retention', 'create'), (req, res) => {
     if (!req.body.checkDate) return res.status(400).json({ error: 'checkDate is required' });
     if (!req.body.checkType) return res.status(400).json({ error: 'checkType is required' });
     if (!req.body.backupStatus) return res.status(400).json({ error: 'backupStatus is required' });
@@ -653,7 +653,7 @@ ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(i.module_key)}/${esc(i
     res.status(201).json({ id, checkNumber });
   });
 
-  router.get('/backup-checks/:id', requirePermission('records_reports', 'view'), (req, res) => {
+  router.get('/backup-checks/:id', requirePermission('records_reports.retention', 'view'), (req, res) => {
     const db = getDb();
     const c = db.prepare('SELECT * FROM backup_restore_checks WHERE id = ?').get(req.params.id);
     if (!c) return res.status(404).json({ error: 'Backup check not found' });
@@ -674,7 +674,7 @@ ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(i.module_key)}/${esc(i
     res.status(201).json({ id: actionId });
   });
 
-  router.post('/backup-checks/:id/close', requirePermission('records_reports', 'approve'), (req, res) => {
+  router.post('/backup-checks/:id/close', requirePermission('records_reports.retention', 'approve'), (req, res) => {
     const db = getDb();
     const c = db.prepare('SELECT * FROM backup_restore_checks WHERE id = ?').get(req.params.id) as any;
     if (!c) return res.status(404).json({ error: 'Backup check not found' });

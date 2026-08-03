@@ -4,6 +4,7 @@ import { api, API_BASE, getToken } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import { MODULES, PERMISSION_ACTIONS, TECHNICAL_AUTHORIZATION_LEVELS } from '../../shared/constants/modules';
 import { usePermissions } from '../hooks/usePermissions';
+import { AccessControl } from './AccessControl';
 import type {
   OrgTree, OrgTreeNode, ProfessionalRank,
   Position, Staff, SystemModule, ApiUser, Permission, Section, Device,
@@ -1511,7 +1512,7 @@ export function Devices(){
 // People & Access  (merged module: everything about staff, users, positions,
 // the organogram, the permission matrix, and staff Excel import/export)
 // ---------------------------------------------------------------------------
-const PEOPLE_TABS = ['Register New Staff', 'Users & Access', 'Positions & Organogram', 'Permission Matrix', 'Import / Export'] as const;
+const PEOPLE_TABS = ['Register New Staff', 'Users & Access', 'Positions & Organogram', 'Access Control', 'Advanced Matrix', 'Import / Export'] as const;
 type PeopleTab = typeof PEOPLE_TABS[number];
 
 export function PeopleAccess() {
@@ -1519,14 +1520,15 @@ export function PeopleAccess() {
   return <div className="settings-module">
     <div className="settings-module-head">
       <h2>People &amp; Access</h2>
-      <p>One place for everyone who works in the laboratory: register staff, manage login accounts, the positions &amp; organogram, the authorization matrix, and bulk import/export of the staff register.</p>
+      <p>One place for everyone who works in the laboratory: register staff, manage login accounts, the positions &amp; organogram, who can do what, and bulk import/export of the staff register.</p>
     </div>
     <div className="tabs">{PEOPLE_TABS.map(t => <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>)}</div>
     <div className="people-tab-body">
       {tab === 'Register New Staff' && <RegisterStaff />}
       {tab === 'Users & Access' && <UsersAccess />}
       {tab === 'Positions & Organogram' && <Positions />}
-      {tab === 'Permission Matrix' && <PermissionMatrix />}
+      {tab === 'Access Control' && <AccessControl />}
+      {tab === 'Advanced Matrix' && <PermissionMatrix />}
       {tab === 'Import / Export' && <StaffImportExport />}
     </div>
   </div>;

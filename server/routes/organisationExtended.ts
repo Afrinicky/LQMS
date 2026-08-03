@@ -27,7 +27,7 @@ export function organisationExtendedRoutes() {
   // ==================================================================
   const FORM_TYPES = ['code_of_conduct', 'impartiality', 'confidentiality', 'conflict_of_interest', 'adherence', 'other'];
 
-  router.get('/ethical-forms', requirePermission('organisation', 'view'), (req, res) => {
+  router.get('/ethical-forms', requirePermission('organisation.structure', 'view'), (req, res) => {
     const db = getDb();
     const forms = db.prepare(`SELECT f.*, s.full_name AS uploaded_by_name,
       (SELECT COUNT(*) FROM ethical_declaration_signatures WHERE form_id = f.id) AS signature_count,
@@ -43,7 +43,7 @@ export function organisationExtendedRoutes() {
     res.json(withMy);
   });
 
-  router.get('/ethical-forms/:id', requirePermission('organisation', 'view'), (req, res) => {
+  router.get('/ethical-forms/:id', requirePermission('organisation.structure', 'view'), (req, res) => {
     const db = getDb();
     const f = db.prepare(`SELECT f.*, s.full_name AS uploaded_by_name, fl.original_name AS file_name, fl.mime_type AS file_mime
       FROM ethical_declaration_forms f LEFT JOIN staff s ON s.id = f.uploaded_by_staff_id
@@ -55,7 +55,7 @@ export function organisationExtendedRoutes() {
     res.json({ ...f, signatures });
   });
 
-  router.post('/ethical-forms', requirePermission('organisation', 'create'), (req, res) => {
+  router.post('/ethical-forms', requirePermission('organisation.structure', 'create'), (req, res) => {
     if (!req.body.title) return res.status(400).json({ error: 'title is required' });
     if (!req.body.formType || !FORM_TYPES.includes(req.body.formType)) return res.status(400).json({ error: `formType must be one of: ${FORM_TYPES.join(', ')}` });
     const db = getDb();
@@ -79,7 +79,7 @@ export function organisationExtendedRoutes() {
     res.status(201).json({ id, formNumber });
   });
 
-  router.put('/ethical-forms/:id', requirePermission('organisation', 'edit'), (req, res) => {
+  router.put('/ethical-forms/:id', requirePermission('organisation.structure', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM ethical_declaration_forms WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Form not found' });
@@ -97,7 +97,7 @@ export function organisationExtendedRoutes() {
 
   // Sign a form. Signatures are PERSONAL — always bound to the authenticated
   // caller. A body-provided staffId is ignored.
-  router.post('/ethical-forms/:id/sign', requirePermission('organisation', 'view'), (req, res) => {
+  router.post('/ethical-forms/:id/sign', requirePermission('organisation.structure', 'view'), (req, res) => {
     const db = getDb();
     const staffId = getCurrentStaffId(req);
     if (staffId === null) return res.status(400).json({ error: 'Your login is not linked to a staff record; personal declarations cannot be signed.' });
@@ -119,7 +119,7 @@ export function organisationExtendedRoutes() {
   // ==================================================================
   // ORGANOGRAM CONTINUITY PLANS — for the absence of key personnel
   // ==================================================================
-  router.get('/continuity-plans', requirePermission('organisation', 'view'), (_req, res) => {
+  router.get('/continuity-plans', requirePermission('organisation.structure', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare(`SELECT cp.*, p.title AS position_title, dp.title AS deputy_position_title, s.full_name AS deputy_name
       FROM continuity_plans cp
@@ -129,7 +129,7 @@ export function organisationExtendedRoutes() {
       ORDER BY cp.key_role`).all());
   });
 
-  router.post('/continuity-plans', requirePermission('organisation', 'create'), (req, res) => {
+  router.post('/continuity-plans', requirePermission('organisation.structure', 'create'), (req, res) => {
     if (!req.body.keyRole) return res.status(400).json({ error: 'keyRole is required' });
     const db = getDb();
     const num = generateRecordNumber(db, 'continuity_plans', 'CONT', new Date().toISOString());
@@ -145,7 +145,7 @@ export function organisationExtendedRoutes() {
     res.status(201).json({ id: r.lastInsertRowid, planNumber: num });
   });
 
-  router.put('/continuity-plans/:id', requirePermission('organisation', 'edit'), (req, res) => {
+  router.put('/continuity-plans/:id', requirePermission('organisation.structure', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM continuity_plans WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Plan not found' });
@@ -161,7 +161,7 @@ export function organisationExtendedRoutes() {
     res.json({ ok: true });
   });
 
-  router.delete('/continuity-plans/:id', requirePermission('organisation', 'edit'), (req, res) => {
+  router.delete('/continuity-plans/:id', requirePermission('organisation.structure', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM continuity_plans WHERE id = ?').get(req.params.id);
     if (!old) return res.status(404).json({ error: 'Plan not found' });
@@ -173,7 +173,7 @@ export function organisationExtendedRoutes() {
   // ==================================================================
   // BUDGET PROJECTIONS — enriched with ISO scope breakdown + totals
   // ==================================================================
-  router.get('/budget/breakdown', requirePermission('organisation', 'view'), (req, res) => {
+  router.get('/budget/breakdown', requirePermission('organisation.budget', 'view'), (req, res) => {
     const db = getDb();
     const year = String(req.query.year || new Date().getFullYear());
     const rows = db.prepare('SELECT * FROM budget_projections WHERE fiscal_year = ? ORDER BY scope, category').all(year) as any[];
@@ -189,11 +189,11 @@ export function organisationExtendedRoutes() {
   // ==================================================================
   // QUALITY & TECHNICAL RECORDS REVIEW
   // ==================================================================
-  router.get('/qt-reviews/configs', requirePermission('organisation', 'view'), (_req, res) => {
+  router.get('/qt-reviews/configs', requirePermission('organisation.records_review', 'view'), (_req, res) => {
     res.json(getDb().prepare('SELECT c.*, s.full_name AS responsible_name FROM qt_review_configs c LEFT JOIN staff s ON s.id = c.responsible_staff_id ORDER BY c.area_label').all());
   });
 
-  router.put('/qt-reviews/configs/:areaKey', requirePermission('organisation', 'edit'), (req, res) => {
+  router.put('/qt-reviews/configs/:areaKey', requirePermission('organisation.records_review', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM qt_review_configs WHERE area_key = ?').get(req.params.areaKey) as any;
     if (!old) return res.status(404).json({ error: 'Config not found' });
@@ -209,7 +209,7 @@ export function organisationExtendedRoutes() {
   // Aggregate data for one review area over a period from the module tables.
   // Returns counts, sample rows, and links so the reviewer can navigate to the
   // source. Reviewer records findings + raises NC/CAPA from the review.
-  router.get('/qt-reviews/data/:areaKey', requirePermission('organisation', 'view'), (req, res) => {
+  router.get('/qt-reviews/data/:areaKey', requirePermission('organisation.records_review', 'view'), (req, res) => {
     const db = getDb();
     const areaKey = req.params.areaKey;
     const start = String(req.query.periodStart || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10));
@@ -268,7 +268,7 @@ export function organisationExtendedRoutes() {
     res.json(data);
   });
 
-  router.get('/qt-reviews', requirePermission('organisation', 'view'), (req, res) => {
+  router.get('/qt-reviews', requirePermission('organisation.records_review', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = [];
     const params: unknown[] = [];
@@ -278,7 +278,7 @@ export function organisationExtendedRoutes() {
     res.json(db.prepare(`SELECT r.*, s.full_name AS reviewer_name FROM qt_reviews r LEFT JOIN staff s ON s.id = r.reviewed_by_staff_id ${where} ORDER BY r.period_end DESC, r.id DESC LIMIT 500`).all(...params));
   });
 
-  router.post('/qt-reviews', requirePermission('organisation', 'create'), (req, res) => {
+  router.post('/qt-reviews', requirePermission('organisation.records_review', 'create'), (req, res) => {
     if (!req.body.areaKey || !req.body.periodStart || !req.body.periodEnd) return res.status(400).json({ error: 'areaKey, periodStart and periodEnd are required' });
     const db = getDb();
     const num = generateRecordNumber(db, 'qt_reviews', 'QTR', new Date().toISOString());
@@ -298,7 +298,7 @@ export function organisationExtendedRoutes() {
     res.status(201).json({ id, reviewNumber: num });
   });
 
-  router.put('/qt-reviews/:id', requirePermission('organisation', 'edit'), (req, res) => {
+  router.put('/qt-reviews/:id', requirePermission('organisation.records_review', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM qt_reviews WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Review not found' });

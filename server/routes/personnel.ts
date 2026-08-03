@@ -48,7 +48,7 @@ export function personnelRoutes() {
   const router = Router();
 
   // ============= Staff documents =============
-  router.get('/staff-documents', requirePermission('personnel', 'view'), (req, res) => {
+  router.get('/staff-documents', requirePermission('personnel.register', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = [];
     const params: unknown[] = [];
@@ -60,7 +60,7 @@ export function personnelRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/staff-documents', requirePermission('personnel', 'create'), (req, res) => {
+  router.post('/staff-documents', requirePermission('personnel.register', 'create'), (req, res) => {
     if (!parseIntNullable(req.body.staffId)) return res.status(400).json({ error: 'staffId is required' });
     if (!req.body.documentType) return res.status(400).json({ error: 'documentType is required' });
     if (!req.body.title) return res.status(400).json({ error: 'title is required' });
@@ -75,7 +75,7 @@ export function personnelRoutes() {
     res.status(201).json({ id });
   });
 
-  router.post('/staff-documents/:id/verify', requirePermission('personnel', 'approve'), (req, res) => {
+  router.post('/staff-documents/:id/verify', requirePermission('personnel.register', 'approve'), (req, res) => {
     const db = getDb();
     const doc = db.prepare('SELECT * FROM staff_documents WHERE id = ?').get(req.params.id) as any;
     if (!doc) return res.status(404).json({ error: 'Staff document not found' });
@@ -90,7 +90,7 @@ export function personnelRoutes() {
   });
 
   // ============= Declarations =============
-  router.get('/declarations', requirePermission('personnel', 'view'), (req, res) => {
+  router.get('/declarations', requirePermission('personnel.declarations', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = [];
     const params: unknown[] = [];
@@ -102,7 +102,7 @@ export function personnelRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/declarations', requirePermission('personnel', 'create'), (req, res) => {
+  router.post('/declarations', requirePermission('personnel.declarations', 'create'), (req, res) => {
     if (!req.body.declarationType) return res.status(400).json({ error: 'declarationType is required' });
     if (!DECLARATION_TYPES.includes(req.body.declarationType)) return res.status(400).json({ error: `declarationType must be one of: ${DECLARATION_TYPES.join(', ')}` });
     if (!req.body.title) return res.status(400).json({ error: 'title is required' });
@@ -125,7 +125,7 @@ export function personnelRoutes() {
     res.status(201).json({ id, declarationNumber });
   });
 
-  router.post('/declarations/:id/sign', requirePermission('personnel', 'edit'), (req, res) => {
+  router.post('/declarations/:id/sign', requirePermission('personnel.declarations', 'edit'), (req, res) => {
     const db = getDb();
     const decl = db.prepare('SELECT * FROM staff_declarations WHERE id = ?').get(req.params.id) as any;
     if (!decl) return res.status(404).json({ error: 'Declaration not found' });
@@ -138,7 +138,7 @@ export function personnelRoutes() {
   });
 
   // ============= Training =============
-  router.get('/training', requirePermission('personnel', 'view'), (req, res) => {
+  router.get('/training', requirePermission('personnel.training', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = [];
     const params: unknown[] = [];
@@ -149,7 +149,7 @@ export function personnelRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/training', requirePermission('personnel', 'create'), (req, res) => {
+  router.post('/training', requirePermission('personnel.training', 'create'), (req, res) => {
     if (!req.body.title) return res.status(400).json({ error: 'title is required' });
     if (!req.body.trainingDate) return res.status(400).json({ error: 'trainingDate is required' });
     const status = req.body.status ?? 'planned';
@@ -167,7 +167,7 @@ export function personnelRoutes() {
     res.status(201).json({ id, trainingNumber });
   });
 
-  router.get('/training/:id', requirePermission('personnel', 'view'), (req, res) => {
+  router.get('/training/:id', requirePermission('personnel.training', 'view'), (req, res) => {
     const db = getDb();
     const event = db.prepare('SELECT * FROM training_events WHERE id = ?').get(req.params.id) as any;
     if (!event) return res.status(404).json({ error: 'Training event not found' });
@@ -175,7 +175,7 @@ export function personnelRoutes() {
     res.json({ ...event, attendance });
   });
 
-  router.post('/training/:id/attendance', requirePermission('personnel', 'create'), (req, res) => {
+  router.post('/training/:id/attendance', requirePermission('personnel.training', 'create'), (req, res) => {
     if (!parseIntNullable(req.body.staffId)) return res.status(400).json({ error: 'staffId is required' });
     const db = getDb();
     const event = db.prepare('SELECT id FROM training_events WHERE id = ?').get(req.params.id);
@@ -198,7 +198,7 @@ export function personnelRoutes() {
   });
 
   // ============= Competency =============
-  router.get('/competency', requirePermission('personnel', 'view'), (req, res) => {
+  router.get('/competency', requirePermission('personnel.training', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = [];
     const params: unknown[] = [];
@@ -210,7 +210,7 @@ export function personnelRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/competency', requirePermission('personnel', 'create'), (req, res) => {
+  router.post('/competency', requirePermission('personnel.training', 'create'), (req, res) => {
     if (!parseIntNullable(req.body.staffId)) return res.status(400).json({ error: 'staffId is required' });
     if (!req.body.activity) return res.status(400).json({ error: 'activity is required' });
     if (!req.body.assessmentMethod) return res.status(400).json({ error: 'assessmentMethod is required' });
@@ -230,7 +230,7 @@ export function personnelRoutes() {
     res.status(201).json({ id, competencyNumber });
   });
 
-  router.get('/competency/:id', requirePermission('personnel', 'view'), (req, res) => {
+  router.get('/competency/:id', requirePermission('personnel.training', 'view'), (req, res) => {
     const db = getDb();
     const record = db.prepare('SELECT c.*, s.full_name AS staff_name, a.full_name AS assessor_name FROM competency_assessments c LEFT JOIN staff s ON s.id = c.staff_id LEFT JOIN staff a ON a.id = c.assessor_staff_id WHERE c.id = ?').get(req.params.id);
     if (!record) return res.status(404).json({ error: 'Competency assessment not found' });
@@ -238,7 +238,7 @@ export function personnelRoutes() {
     res.json({ ...record, links });
   });
 
-  router.post('/competency/:id/complete', requirePermission('personnel', 'edit'), (req, res) => {
+  router.post('/competency/:id/complete', requirePermission('personnel.training', 'edit'), (req, res) => {
     if (!req.body.outcome) return res.status(400).json({ error: 'outcome is required' });
     if (!COMPETENCY_OUTCOMES.includes(req.body.outcome)) return res.status(400).json({ error: `outcome must be one of: ${COMPETENCY_OUTCOMES.join(', ')}` });
     const db = getDb();
@@ -259,7 +259,7 @@ export function personnelRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/competency/:id/create-authorization', requirePermission('personnel', 'approve'), (req, res) => {
+  router.post('/competency/:id/create-authorization', requirePermission('personnel.training', 'approve'), (req, res) => {
     if (!req.body.moduleKey) return res.status(400).json({ error: 'moduleKey is required' });
     if (!req.body.level) return res.status(400).json({ error: 'level is required' });
     const db = getDb();
@@ -275,7 +275,7 @@ export function personnelRoutes() {
   });
 
   // ============= Duty rosters =============
-  router.get('/rosters', requirePermission('personnel', 'view'), (req, res) => {
+  router.get('/rosters', requirePermission('personnel.rosters', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = [];
     const params: unknown[] = [];
@@ -287,7 +287,7 @@ export function personnelRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/rosters', requirePermission('personnel', 'create'), (req, res) => {
+  router.post('/rosters', requirePermission('personnel.rosters', 'create'), (req, res) => {
     if (!req.body.rosterStartDate) return res.status(400).json({ error: 'rosterStartDate is required' });
     if (!req.body.rosterEndDate) return res.status(400).json({ error: 'rosterEndDate is required' });
     const status = req.body.status ?? 'draft';
@@ -302,7 +302,7 @@ export function personnelRoutes() {
     res.status(201).json({ id, rosterNumber });
   });
 
-  router.get('/rosters/:id', requirePermission('personnel', 'view'), (req, res) => {
+  router.get('/rosters/:id', requirePermission('personnel.rosters', 'view'), (req, res) => {
     const db = getDb();
     const roster = db.prepare('SELECT * FROM duty_rosters WHERE id = ?').get(req.params.id);
     if (!roster) return res.status(404).json({ error: 'Roster not found' });
@@ -310,7 +310,7 @@ export function personnelRoutes() {
     res.json({ ...roster, assignments });
   });
 
-  router.post('/rosters/:id/assignments', requirePermission('personnel', 'edit'), (req, res) => {
+  router.post('/rosters/:id/assignments', requirePermission('personnel.rosters', 'edit'), (req, res) => {
     if (!parseIntNullable(req.body.staffId)) return res.status(400).json({ error: 'staffId is required' });
     if (!req.body.dutyDate) return res.status(400).json({ error: 'dutyDate is required' });
     const db = getDb();
@@ -324,7 +324,7 @@ export function personnelRoutes() {
     res.status(201).json({ id });
   });
 
-  router.post('/rosters/:id/approve', requirePermission('personnel', 'approve'), (req, res) => {
+  router.post('/rosters/:id/approve', requirePermission('personnel.rosters', 'approve'), (req, res) => {
     const db = getDb();
     const roster = db.prepare('SELECT * FROM duty_rosters WHERE id = ?').get(req.params.id) as any;
     if (!roster) return res.status(404).json({ error: 'Roster not found' });
@@ -335,7 +335,7 @@ export function personnelRoutes() {
     res.json({ ok: true });
   });
 
-  router.get('/rosters/:id/coverage', requirePermission('personnel', 'view'), (req, res) => {
+  router.get('/rosters/:id/coverage', requirePermission('personnel.rosters', 'view'), (req, res) => {
     const db = getDb();
     const roster = db.prepare('SELECT * FROM duty_rosters WHERE id = ?').get(req.params.id) as any;
     if (!roster) return res.status(404).json({ error: 'Roster not found' });
@@ -502,15 +502,15 @@ export function personnelRoutes() {
     res.send(buf);
   }
 
-  router.get('/register/template', requirePermission('personnel', 'view'), (_req, res) => {
+  router.get('/register/template', requirePermission('personnel.register', 'view'), (_req, res) => {
     sendWorkbook(res, registerWorkbook(false), 'Master_Personnel_Register_Template.xlsx');
   });
 
-  router.get('/register/export', requirePermission('personnel', 'view'), (_req, res) => {
+  router.get('/register/export', requirePermission('personnel.register', 'view'), (_req, res) => {
     sendWorkbook(res, registerWorkbook(true), 'Master_Personnel_Register.xlsx');
   });
 
-  router.post('/register/import', requirePermission('personnel', 'create'), upload.single('file'), (req, res) => {
+  router.post('/register/import', requirePermission('personnel.register', 'create'), upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the Master Personnel Register .xlsx file.' });
     let rows: Record<string, unknown>[];
     try {
@@ -591,13 +591,13 @@ export function personnelRoutes() {
   /* ──────────────────────────────────────────────────────────────────────
    * Orientation / Induction tracking.
    * ──────────────────────────────────────────────────────────────────────── */
-  router.get('/orientations', requirePermission('personnel', 'view'), (_req, res) => {
+  router.get('/orientations', requirePermission('personnel.orientation', 'view'), (_req, res) => {
     res.json(getDb().prepare(`SELECT o.*, s.full_name AS staff_name, f.full_name AS facilitator_name
       FROM staff_orientations o JOIN staff s ON s.id = o.staff_id
       LEFT JOIN staff f ON f.id = o.facilitator_staff_id ORDER BY o.created_at DESC, o.id DESC`).all());
   });
 
-  router.post('/orientations', requirePermission('personnel', 'create'), (req, res) => {
+  router.post('/orientations', requirePermission('personnel.orientation', 'create'), (req, res) => {
     if (!parseIntNullable(req.body.staffId)) return res.status(400).json({ error: 'staffId is required' });
     const db = getDb();
     const stepCols: Record<string, string> = {};
@@ -612,7 +612,7 @@ export function personnelRoutes() {
     res.status(201).json({ id: r.lastInsertRowid });
   });
 
-  router.put('/orientations/:id', requirePermission('personnel', 'edit'), (req, res) => {
+  router.put('/orientations/:id', requirePermission('personnel.orientation', 'edit'), (req, res) => {
     const db = getDb();
     const existing = db.prepare('SELECT * FROM staff_orientations WHERE id = ?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Orientation record not found' });
@@ -635,10 +635,10 @@ export function personnelRoutes() {
   });
 
   // ============= Performance appraisals =============
-  router.get('/appraisals', requirePermission('personnel', 'view'), (_req, res) => {
+  router.get('/appraisals', requirePermission('personnel.appraisals', 'view'), (_req, res) => {
     res.json(getDb().prepare('SELECT * FROM performance_appraisals ORDER BY appraisal_date DESC, created_at DESC').all());
   });
-  router.post('/appraisals', requirePermission('personnel', 'create'), (req, res) => {
+  router.post('/appraisals', requirePermission('personnel.appraisals', 'create'), (req, res) => {
     if (!req.body.appraisalDate) return res.status(400).json({ error: 'appraisalDate is required' });
     const db = getDb();
     const createdAt = new Date().toISOString();
@@ -648,7 +648,7 @@ export function personnelRoutes() {
     audit(req, { action: 'create', entity: 'performance_appraisals', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
     res.status(201).json({ id: r.lastInsertRowid, recordNumber: number });
   });
-  router.put('/appraisals/:id', requirePermission('personnel', 'edit'), (req, res) => {
+  router.put('/appraisals/:id', requirePermission('personnel.appraisals', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM performance_appraisals WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Appraisal not found' });

@@ -6,6 +6,7 @@ import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import ScannedRecordUpload from '../components/ScannedRecordUpload';
 import XlsxToolbar from '../components/XlsxToolbar';
+import PermissionTabs from '../components/PermissionTabs';
 import type {
   Location, Section, Staff, EquipmentItem,
   IqcMaterial, IqcResult, IqcLotChange,
@@ -18,8 +19,11 @@ import type {
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
-const tabBar = (active: string, tabs: string[], onChange: (name: string) => void) =>
-  <div className="tabs">{tabs.map(name => <button key={name} type="button" className={active === name ? 'active' : ''} onClick={() => onChange(name)}>{name}</button>)}</div>;
+// Tabs are filtered by permission — a tab whose feature this user cannot
+// view is not drawn. These pages host several modules, so each call
+// passes the module its tabs belong to.
+const tabBarFor = (moduleKey: string) => (active: string, tabs: string[], onChange: (name: string) => void) =>
+  <PermissionTabs moduleKey={moduleKey} tabs={tabs} active={active} onChange={onChange} />;
 
 function useLookups() {
   const [staff, setStaff] = useState<Staff[]>([]);
@@ -172,7 +176,7 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
 
   return <div className="module-page">
     {!embedded && <PageHeader eyebrow="Process Management" title="IQC Management" subtitle="Internal quality control materials, results, and review." />}
-    {tabBar(tab, tabs, setTab)}
+    {tabBarFor('iqc')(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && <ModuleAlerts moduleKey="iqc" />}
@@ -405,7 +409,7 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
 
   return <div className="module-page">
     {!embedded && <PageHeader eyebrow="Process Management" title="EQA Management" subtitle="External quality assessment events, results, and follow-up." />}
-    {tabBar(tab, tabs, setTab)}
+    {tabBarFor('eqa')(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && <ModuleAlerts moduleKey="eqa" />}
@@ -587,7 +591,7 @@ export function MeasurementUncertaintyPage({ embedded = false }: { embedded?: bo
 
   return <div className="module-page">
     {!embedded && <PageHeader eyebrow="Process Management" title="Measurement Uncertainty" subtitle="Measurement uncertainty budgets and periodic review." />}
-    {tabBar(tab, tabs, setTab)}
+    {tabBarFor('measurement_uncertainty')(tab, tabs, setTab)}
     {error && <div className="error">{error}</div>}
 
     {tab === 'Dashboard' && <ModuleAlerts moduleKey="measurement_uncertainty" />}

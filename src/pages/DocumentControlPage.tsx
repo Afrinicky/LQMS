@@ -12,6 +12,7 @@ import { api, API_BASE, getToken } from '../services/api';
 import type { OfficeFileChangedPayload } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import DocumentScanner from '../components/DocumentScanner';
+import PermissionTabs from '../components/PermissionTabs';
 import type {
   Section, Department, Staff, Position,
   DocumentRecord, DocumentAttestation, DocumentControlSummary, DistributionInboxEntry, VersionContent,
@@ -21,8 +22,11 @@ import type {
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
+// Tabs are filtered by permission — a tab whose feature this user cannot
+// view is not drawn. See src/components/PermissionTabs.tsx.
+const TAB_MODULE = 'documents';
 const tabBar = (active: string, tabs: string[], onChange: (name: string) => void) =>
-  <div className="tabs">{tabs.map(name => <button key={name} type="button" className={active === name ? 'active' : ''} onClick={() => onChange(name)}>{name}</button>)}</div>;
+  <PermissionTabs moduleKey={TAB_MODULE} tabs={tabs} active={active} onChange={onChange} />;
 
 const DOCUMENT_TYPES = ['SOP', 'Policy', 'Manual', 'Form', 'Register', 'Log', 'Tracker', 'Job Aid', 'Quality Manual', 'Handbook', 'Safety Manual', 'Master List', 'External Document', 'Reference Document', 'Other'];
 const ACCESS_LEVELS = ['public', 'internal', 'restricted', 'confidential'];
@@ -120,7 +124,6 @@ const SECTIONS = ['Dashboard', 'Documents', 'Records', 'Central Archive', 'Maste
 // Roles with governance authority over the register (change ownership, bulk
 // actions). The server independently enforces the documents "approve"
 // permission on every one of these actions — this only gates the UI.
-const GOVERN_ROLES = ['System Administrator', 'Quality Manager', 'Laboratory Manager', 'Laboratory Director'];
 
 // Initials chip for owner/author columns.
 function initialsOf(name?: string | null): string {
@@ -135,11 +138,11 @@ export function DocumentControlPage() {
   // Document rights, straight from the server's resolver. Governance still
   // takes one of the leadership roles, but it now also takes the edit right —
   // a role name alone is no longer enough to reveal governance controls.
-  const mayCreate = can('documents', 'create');
-  const mayEdit = can('documents', 'edit');
-  const mayPrint = can('documents', 'print');
-  const mayExport = can('documents', 'export');
-  const canGovern = !!user && GOVERN_ROLES.includes(user.roleName || '') && mayEdit;
+  const mayCreate = can('documents.authoring', 'create');
+  const mayEdit = can('documents.authoring', 'edit');
+  const mayPrint = can('documents.library', 'print');
+  const mayExport = can('documents.masterlist', 'export');
+  const canGovern = can('documents.workflow', 'edit');
   // Permanent deletion is administrator-only and deliberately kept out of plain
   // sight — the server independently enforces the same restriction.
   const isAdmin = !!user && (user.roleName || '').trim().toLowerCase() === 'system administrator';
@@ -1137,7 +1140,7 @@ function MasterListView({ exportBusy, onExport, onError, documents, onPreview }:
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
       {tabBar(sub, subs, setSub)}
       <span style={{ flex: 1 }} />
-      {can('documents', 'export') && exports.map(([label, path, fallback]) => <button key={path} className="secondary" disabled={!!exportBusy} onClick={() => onExport(path, fallback)}>{exportBusy === path ? 'Preparing…' : label}</button>)}
+      {can('documents.masterlist', 'export') && exports.map(([label, path, fallback]) => <button key={path} className="secondary" disabled={!!exportBusy} onClick={() => onExport(path, fallback)}>{exportBusy === path ? 'Preparing…' : label}</button>)}
     </div>
     <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
       <div style={{ padding: '10px 14px', fontWeight: 700, borderBottom: '1px solid #e3e8f0' }}>{data.facility} — {sub.toUpperCase()}</div>
@@ -1920,10 +1923,13 @@ function DocumentDetailPanel(props: any) {
     {/* Lifecycle actions, shown contextually */}
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
       {(doc.current_version_id || (doc.versions || []).length > 0) && <button onClick={() => onView(doc.current_version_id || 0)}>Open document</button>}
-      {doc.status === 'draft' && <button onClick={submitForReview}>Submit for review →</button>}
-      {(doc.status === 'reviewed' || doc.status === 'under_review') && <button onClick={approveDoc}>Approve &amp; issue →</button>}
-      {(doc.status === 'current' || doc.status === 'approved') && <button onClick={distributeAll}>Distribute to all staff for attestation</button>}
-      {can('documents', 'print') && <button className="secondary" onClick={() => onPrintPreview(doc.current_version_id)}>Print preview</button>}
+      {/* Lifecycle acts belong to whoever governs documents, not to anyone who
+          can read one. These were gated on document status alone, so a
+          Technician was shown "Approve & issue" on every reviewed document. */}
+      {doc.status === 'draft' && can('documents.workflow', 'edit') && <button onClick={submitForReview}>Submit for review →</button>}
+      {(doc.status === 'reviewed' || doc.status === 'under_review') && can('documents.workflow', 'approve') && <button onClick={approveDoc}>Approve &amp; issue →</button>}
+      {(doc.status === 'current' || doc.status === 'approved') && can('documents.workflow', 'edit') && <button onClick={distributeAll}>Distribute to all staff for attestation</button>}
+      {can('documents.library', 'print') && <button className="secondary" onClick={() => onPrintPreview(doc.current_version_id)}>Print preview</button>}
     </div>
     {(doc.status === 'current' || doc.status === 'approved') && <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>{signedCount} attested · {pendingCount} pending</p>}
 
@@ -1934,8 +1940,8 @@ function DocumentDetailPanel(props: any) {
         <td>{formatBadge(v.status)}</td><td>{v.effective_date || '—'}</td><td>{v.approved_at ? String(v.approved_at).slice(0, 10) : '—'}</td><td>{v.revision_summary || '—'}</td>
         <td style={{ whiteSpace: 'nowrap' }}>
           <button onClick={() => onView(v.id)}>Open</button>{' '}
-          {can('documents', 'print') && <><button className="secondary" onClick={() => onPrintPreview(v.id)}>Print</button>{' '}</>}
-          {v.status !== 'obsolete' && can('documents', 'void_archive') && <button className="secondary" onClick={() => onMarkVersionObsolete(v.id)}>Obsolete</button>}
+          {can('documents.library', 'print') && <><button className="secondary" onClick={() => onPrintPreview(v.id)}>Print</button>{' '}</>}
+          {v.status !== 'obsolete' && can('documents.workflow', 'void_archive') && <button className="secondary" onClick={() => onMarkVersionObsolete(v.id)}>Obsolete</button>}
         </td>
       </tr>)}
     </tbody></table>
@@ -2087,7 +2093,7 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
         <input placeholder="Search code, title, category, source, status…" value={registerSearch} onChange={e => setRegisterSearch(e.target.value)} style={{ minWidth: 320 }} />
         <span className="muted">{filteredRegister.length} record(s)</span>
         <span style={{ flex: 1 }} />
-        {can('documents', 'export') && <button className="secondary" disabled={!!exportBusy} onClick={() => onExport('/documents/records/register/export', 'Records_Register.xlsx')}>{exportBusy === '/documents/records/register/export' ? 'Preparing…' : 'Export register (Excel)'}</button>}
+        {can('documents.masterlist', 'export') && <button className="secondary" disabled={!!exportBusy} onClick={() => onExport('/documents/records/register/export', 'Records_Register.xlsx')}>{exportBusy === '/documents/records/register/export' ? 'Preparing…' : 'Export register (Excel)'}</button>}
       </div>
       <div style={{ overflowX: 'auto' }}>
       <table className="data-table"><thead><tr><th>No.</th><th>Code</th><th>Record type / title</th><th>Category</th><th>Source document</th><th>Format / medium</th><th>Unit / section</th><th>Storage location</th><th>Access</th><th>Retention</th><th>Disposal method</th><th>Status</th><th>Record file</th></tr></thead><tbody>
@@ -2307,7 +2313,7 @@ function AttestationsTabView({ pending, staff, documents, onSignAttestation, onO
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button className="secondary" onClick={() => onOpenDoc(selectedDoc.id, documents.find(d => d.id === selectedDoc.id)?.current_version_id, undefined)}>Open document</button>
-              {can('documents', 'print') && <button onClick={printList} disabled={busy}>Print list</button>}
+              {can('documents.library', 'print') && <button onClick={printList} disabled={busy}>Print list</button>}
             </div>
           </div>
 

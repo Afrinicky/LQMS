@@ -12,6 +12,7 @@ import { code128Svg } from '../../shared/utils/barcode';
 import { printLabelSheet, LABEL_PRESETS } from '../utils/labelPrint';
 import { EnvironmentalMonitoringPage, EnvLiveCards } from './EnvironmentalMonitoringPage';
 import { usePermissions } from '../hooks/usePermissions';
+import PermissionTabs from '../components/PermissionTabs';
 import type {
   Location, Section, Department, Staff, Supplier, EquipmentItem, InventoryItem, MonitoringRecord, SafetyIncident,
   EquipmentMaintenanceRecord, EquipmentBreakdown, MonitoringItem, MonitoringReading,
@@ -24,8 +25,11 @@ import type {
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
 
-const tabBar = (active: string, tabs: string[], onChange: (name: string) => void) =>
-  <div className="tabs">{tabs.map(name => <button key={name} type="button" className={active === name ? 'active' : ''} onClick={() => onChange(name)}>{name}</button>)}</div>;
+// Tabs are filtered by permission — a tab whose feature this user cannot
+// view is not drawn. These pages host several modules, so each call
+// passes the module its tabs belong to.
+const tabBarFor = (moduleKey: string) => (active: string, tabs: string[], onChange: (name: string) => void) =>
+  <PermissionTabs moduleKey={moduleKey} tabs={tabs} active={active} onChange={onChange} />;
 
 function useLookups() {
   const [staff, setStaff] = useState<Staff[]>([]);
@@ -249,7 +253,7 @@ export function EquipmentPage() {
   return <div>
     <PageHeader eyebrow="Equipment Management" title="Equipment Management" subtitle="Asset register, maintenance, calibration, and breakdown tracking." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
-    {tabBar(tab, ['Dashboard', 'Equipment Register', 'Equipment Profile', 'New Equipment', 'Verification & Validation', 'Calibration', 'Maintenance Records', 'Scanned Records', 'Breakdowns', 'Adverse Events', 'Training & Competency', 'Equipment Files', 'Reports placeholder'], setTab)}
+    {tabBarFor('equipment')(tab, ['Dashboard', 'Equipment Register', 'Equipment Profile', 'New Equipment', 'Verification & Validation', 'Calibration', 'Maintenance Records', 'Scanned Records', 'Breakdowns', 'Adverse Events', 'Training & Competency', 'Equipment Files', 'Reports placeholder'], setTab)}
 
     {tab === 'Dashboard' && <><ModuleAlerts moduleKey="equipment" /><KpiStrip items={[
       { label: 'Equipment items', value: summary?.equipmentTotal ?? equipment.length, onClick: () => setTab('Equipment Register') },
@@ -1313,7 +1317,7 @@ export function InventoryPage() {
   return <div>
     <PageHeader eyebrow="Supplier &amp; Inventory Management" title="Supplier &amp; Inventory Management" subtitle="Suppliers, reagents, stock levels, batches, and expiry control." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
-    {tabBar(tab, ['Dashboard', 'Item Register', 'New Item', 'Batches/Lots', 'Stock Movements', 'Suppliers', 'Storage Inspections', 'Barcode Labels', 'Reports placeholder'], setTab)}
+    {tabBarFor('supplier_inventory')(tab, ['Dashboard', 'Item Register', 'New Item', 'Batches/Lots', 'Stock Movements', 'Suppliers', 'Storage Inspections', 'Barcode Labels', 'Reports placeholder'], setTab)}
 
     {tab === 'Dashboard' && <><ModuleAlerts moduleKey="supplier_inventory" /><KpiStrip items={[
       { label: 'Inventory items', value: items.length, onClick: () => setTab('Item Register') },
@@ -1584,7 +1588,7 @@ export function MonitoringPage({ embedded = false }: { embedded?: boolean } = {}
   return <div>
     {!embedded && <PageHeader eyebrow="Facilities and Safety" title="Environmental Monitoring" subtitle="Temperature and environment readings, excursions, and trends." />}
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
-    {tabBar(tab, ['Dashboard', 'Monitoring Items', 'New Monitoring Item', 'Enter Reading', 'Excursions', 'Monthly Charts placeholder'].filter(t => !embedded || t !== 'Dashboard'), setTab)}
+    {tabBarFor('monitoring')(tab, ['Dashboard', 'Monitoring Items', 'New Monitoring Item', 'Enter Reading', 'Excursions', 'Monthly Charts placeholder'].filter(t => !embedded || t !== 'Dashboard'), setTab)}
 
     {tab === 'Dashboard' && <><ModuleAlerts moduleKey="monitoring" /><KpiStrip items={[
       { label: 'Monitoring items', value: items.length, onClick: () => setTab('Monitoring Items') },
@@ -1792,7 +1796,7 @@ export function SafetyPage() {
   return <div>
     <PageHeader eyebrow="Facilities and Safety" title="Facilities &amp; Safety" subtitle="Safety incidents, equipment, inspections, waste, chemicals and occupational health." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
-    {tabBar(tab, ['Dashboard', 'Safety Incidents', 'New Incident', 'Safety Equipment', 'Inspections & Drills', 'Waste Disposal', 'Hazardous Chemicals', 'Immunisation & Exposure', 'Environmental Monitoring'], setTab)}
+    {tabBarFor('facilities_safety')(tab, ['Dashboard', 'Safety Incidents', 'New Incident', 'Safety Equipment', 'Inspections & Drills', 'Waste Disposal', 'Hazardous Chemicals', 'Immunisation & Exposure', 'Environmental Monitoring'], setTab)}
 
     {tab === 'Dashboard' && <><KpiStrip items={[
       { label: 'Open incidents', value: openIncidents, tone: openIncidents ? 'warning' : undefined, onClick: () => setTab('Safety Incidents') },

@@ -7,6 +7,7 @@ import DisabledModule from '../components/DisabledModule';
 import { downloadXlsx } from '../services/xlsx';
 import type { Staff, Section, EquipmentItem } from '../../shared/types/api';
 import { usePermissions } from '../hooks/usePermissions';
+import PermissionTabs from '../components/PermissionTabs';
 
 // ==========================================================================
 // Method Verification & Validation — ISO 15189:2022 (§7.3.3) / CLSI EP series.
@@ -43,8 +44,11 @@ const MATRICES = ['Serum', 'Plasma', 'Whole blood', 'Urine', 'CSF', 'Stool', 'Sw
 const OUTCOMES = [{ v: 'pending', l: 'Pending' }, { v: 'pass', l: 'Pass' }, { v: 'fail', l: 'Fail' }, { v: 'na', l: 'N/A' }];
 const VERDICTS = [{ v: 'pending', l: 'Pending' }, { v: 'acceptable', l: 'Acceptable' }, { v: 'acceptable_with_limitations', l: 'Acceptable with limitations' }, { v: 'not_acceptable', l: 'Not acceptable' }];
 
-const tabBar = (active: string, tabs: string[], onChange: (n: string) => void) =>
-  <div className="tabs">{tabs.map(n => <button key={n} type="button" className={active === n ? 'active' : ''} onClick={() => onChange(n)}>{n}</button>)}</div>;
+// Tabs are filtered by permission — a tab whose feature this user cannot
+// view is not drawn. See src/components/PermissionTabs.tsx.
+const TAB_MODULE = 'verification_validation';
+const tabBar = (active: string, tabs: string[], onChange: (name: string) => void) =>
+  <PermissionTabs moduleKey={TAB_MODULE} tabs={tabs} active={active} onChange={onChange} />;
 const badge = (s?: string) => <span className={`badge ${s ? s.toLowerCase().replace(/\s+/g, '-') : ''}`}>{(s || '—').replace(/_/g, ' ')}</span>;
 const verdictBadge = (v: string) => {
   const tone = v === 'acceptable' ? 'approved' : v === 'not_acceptable' ? 'danger' : v === 'acceptable_with_limitations' ? 'warning' : '';

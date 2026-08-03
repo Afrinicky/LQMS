@@ -8,6 +8,7 @@ import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import { RecordsReportsPage } from './RecordsReportsPage';
 import { MonthlyReportsPage } from './MonthlyReportsPage';
+import PermissionTabs from '../components/PermissionTabs';
 import type {
   NotificationRecord, NotificationRule, ReviewCalendarItem, UserTaskQueueItem,
   NotificationPreference, NotificationsSummary, Staff,
@@ -15,8 +16,11 @@ import type {
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
+// Tabs are filtered by permission — a tab whose feature this user cannot
+// view is not drawn. See src/components/PermissionTabs.tsx.
+const TAB_MODULE = 'notifications';
 const tabBar = (active: string, tabs: string[], onChange: (name: string) => void) =>
-  <div className="tabs">{tabs.map(name => <button key={name} type="button" className={active === name ? 'active' : ''} onClick={() => onChange(name)}>{name}</button>)}</div>;
+  <PermissionTabs moduleKey={TAB_MODULE} tabs={tabs} active={active} onChange={onChange} />;
 
 const RULE_TRIGGERS = ['due_soon', 'overdue', 'expiry_alert', 'review_required', 'approval_required', 'follow_up', 'custom'];
 const CALENDAR_STATUSES = ['pending', 'due_soon', 'overdue', 'completed', 'cancelled'];

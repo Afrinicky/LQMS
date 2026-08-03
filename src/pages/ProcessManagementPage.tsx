@@ -10,6 +10,7 @@ import { printLabelSheet } from '../utils/labelPrint';
 import { IqcPage, EqaPage, VerificationValidationPage, MeasurementUncertaintyPage } from './Phase4Pages';
 import { POCTPage } from './POCTPage';
 import { BloodBankHandoverPage } from './BloodBankHandoverPage';
+import PermissionTabs from '../components/PermissionTabs';
 import type {
   Section, Department, Staff,
   LabTestCatalog, SpecimenAcceptanceCriteria, SpecimenRejectionRecord,
@@ -21,8 +22,11 @@ import type {
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
+// Tabs are filtered by permission — a tab whose feature this user cannot
+// view is not drawn. See src/components/PermissionTabs.tsx.
+const TAB_MODULE = 'process_management';
 const tabBar = (active: string, tabs: string[], onChange: (name: string) => void) =>
-  <div className="tabs">{tabs.map(name => <button key={name} type="button" className={active === name ? 'active' : ''} onClick={() => onChange(name)}>{name}</button>)}</div>;
+  <PermissionTabs moduleKey={TAB_MODULE} tabs={tabs} active={active} onChange={onChange} />;
 
 const TEST_STATUSES = ['active', 'inactive', 'under_review', 'archived'];
 const LAB_STATUSES = ['active', 'inactive', 'suspended', 'archived'];

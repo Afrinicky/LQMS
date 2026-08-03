@@ -79,7 +79,7 @@ export function informationManagementRoutes() {
   });
 
   // ============= Information assets =============
-  router.get('/assets', requirePermission('information_management', 'view'), (req, res) => {
+  router.get('/assets', requirePermission('information_management.assets', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.status) { filters.push('status = ?'); params.push(String(req.query.status)); }
@@ -90,7 +90,7 @@ export function informationManagementRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/assets', requirePermission('information_management', 'create'), (req, res) => {
+  router.post('/assets', requirePermission('information_management.assets', 'create'), (req, res) => {
     if (!req.body.assetName) return res.status(400).json({ error: 'assetName is required' });
     if (!req.body.assetType) return res.status(400).json({ error: 'assetType is required' });
     const status = req.body.status ?? 'active';
@@ -106,14 +106,14 @@ export function informationManagementRoutes() {
     res.status(201).json({ id, assetCode });
   });
 
-  router.get('/assets/:id', requirePermission('information_management', 'view'), (req, res) => {
+  router.get('/assets/:id', requirePermission('information_management.assets', 'view'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM information_assets WHERE id = ?').get(req.params.id);
     if (!row) return res.status(404).json({ error: 'Asset not found' });
     res.json(row);
   });
 
-  router.put('/assets/:id', requirePermission('information_management', 'edit'), (req, res) => {
+  router.put('/assets/:id', requirePermission('information_management.assets', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM information_assets WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Asset not found' });
@@ -124,7 +124,7 @@ export function informationManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/assets/:id/status', requirePermission('information_management', 'edit'), (req, res) => {
+  router.post('/assets/:id/status', requirePermission('information_management.assets', 'edit'), (req, res) => {
     if (!ASSET_STATUSES.includes(req.body.status)) return res.status(400).json({ error: `status must be one of: ${ASSET_STATUSES.join(', ')}` });
     const db = getDb();
     const row = db.prepare('SELECT status FROM information_assets WHERE id = ?').get(req.params.id) as { status: string } | undefined;
@@ -135,7 +135,7 @@ export function informationManagementRoutes() {
   });
 
   // ============= Information systems =============
-  router.get('/systems', requirePermission('information_management', 'view'), (req, res) => {
+  router.get('/systems', requirePermission('information_management.assets', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.status) { filters.push('status = ?'); params.push(String(req.query.status)); }
@@ -145,7 +145,7 @@ export function informationManagementRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/systems', requirePermission('information_management', 'create'), (req, res) => {
+  router.post('/systems', requirePermission('information_management.assets', 'create'), (req, res) => {
     if (!req.body.systemName) return res.status(400).json({ error: 'systemName is required' });
     if (!req.body.systemType) return res.status(400).json({ error: 'systemType is required' });
     const status = req.body.status ?? 'active';
@@ -160,14 +160,14 @@ export function informationManagementRoutes() {
     res.status(201).json({ id, systemCode });
   });
 
-  router.get('/systems/:id', requirePermission('information_management', 'view'), (req, res) => {
+  router.get('/systems/:id', requirePermission('information_management.assets', 'view'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM information_systems WHERE id = ?').get(req.params.id);
     if (!row) return res.status(404).json({ error: 'System not found' });
     res.json(row);
   });
 
-  router.put('/systems/:id', requirePermission('information_management', 'edit'), (req, res) => {
+  router.put('/systems/:id', requirePermission('information_management.assets', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM information_systems WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'System not found' });
@@ -178,7 +178,7 @@ export function informationManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/systems/:id/status', requirePermission('information_management', 'edit'), (req, res) => {
+  router.post('/systems/:id/status', requirePermission('information_management.assets', 'edit'), (req, res) => {
     if (!SYSTEM_STATUSES.includes(req.body.status)) return res.status(400).json({ error: `status must be one of: ${SYSTEM_STATUSES.join(', ')}` });
     const db = getDb();
     const row = db.prepare('SELECT status FROM information_systems WHERE id = ?').get(req.params.id) as { status: string } | undefined;
@@ -189,7 +189,7 @@ export function informationManagementRoutes() {
   });
 
   // ============= Access reviews =============
-  router.get('/access-reviews', requirePermission('information_management', 'view'), (req, res) => {
+  router.get('/access-reviews', requirePermission('information_management.access', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.status) { filters.push('status = ?'); params.push(String(req.query.status)); }
@@ -200,7 +200,7 @@ export function informationManagementRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/access-reviews', requirePermission('information_management', 'create'), (req, res) => {
+  router.post('/access-reviews', requirePermission('information_management.access', 'create'), (req, res) => {
     if (!parseIntNullable(req.body.systemId)) return res.status(400).json({ error: 'systemId is required' });
     if (!req.body.reviewDate) return res.status(400).json({ error: 'reviewDate is required' });
     const db = getDb();
@@ -214,7 +214,7 @@ export function informationManagementRoutes() {
     res.status(201).json({ id, reviewNumber });
   });
 
-  router.get('/access-reviews/:id', requirePermission('information_management', 'view'), (req, res) => {
+  router.get('/access-reviews/:id', requirePermission('information_management.access', 'view'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM system_access_reviews WHERE id = ?').get(req.params.id) as any;
     if (!row) return res.status(404).json({ error: 'Access review not found' });
@@ -222,7 +222,7 @@ export function informationManagementRoutes() {
     res.json({ ...row, items });
   });
 
-  router.put('/access-reviews/:id', requirePermission('information_management', 'edit'), (req, res) => {
+  router.put('/access-reviews/:id', requirePermission('information_management.access', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM system_access_reviews WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Access review not found' });
@@ -233,7 +233,7 @@ export function informationManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/access-reviews/:id/generate-items', requirePermission('information_management', 'edit'), (req, res) => {
+  router.post('/access-reviews/:id/generate-items', requirePermission('information_management.access', 'edit'), (req, res) => {
     const db = getDb();
     const review = db.prepare('SELECT * FROM system_access_reviews WHERE id = ?').get(req.params.id) as any;
     if (!review) return res.status(404).json({ error: 'Access review not found' });
@@ -254,7 +254,7 @@ export function informationManagementRoutes() {
     res.status(201).json({ ok: true, inserted, totalUsers: users.length });
   });
 
-  router.post('/access-reviews/:id/items', requirePermission('information_management', 'edit'), (req, res) => {
+  router.post('/access-reviews/:id/items', requirePermission('information_management.access', 'edit'), (req, res) => {
     const db = getDb();
     const review = db.prepare('SELECT * FROM system_access_reviews WHERE id = ?').get(req.params.id) as any;
     if (!review) return res.status(404).json({ error: 'Access review not found' });
@@ -284,7 +284,7 @@ export function informationManagementRoutes() {
     res.status(201).json({ id: actionId });
   });
 
-  router.post('/access-reviews/:id/close', requirePermission('information_management', 'approve'), (req, res) => {
+  router.post('/access-reviews/:id/close', requirePermission('information_management.access', 'approve'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM system_access_reviews WHERE id = ?').get(req.params.id) as any;
     if (!row) return res.status(404).json({ error: 'Access review not found' });
@@ -294,7 +294,7 @@ export function informationManagementRoutes() {
   });
 
   // ============= Security incidents =============
-  router.get('/security-incidents', requirePermission('information_management', 'view'), (req, res) => {
+  router.get('/security-incidents', requirePermission('information_management.security', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.status) { filters.push('status = ?'); params.push(String(req.query.status)); }
@@ -305,7 +305,7 @@ export function informationManagementRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/security-incidents', requirePermission('information_management', 'create'), (req, res) => {
+  router.post('/security-incidents', requirePermission('information_management.security', 'create'), (req, res) => {
     if (!req.body.incidentDate) return res.status(400).json({ error: 'incidentDate is required' });
     if (!req.body.incidentType) return res.status(400).json({ error: 'incidentType is required' });
     if (!req.body.title) return res.status(400).json({ error: 'title is required' });
@@ -322,14 +322,14 @@ export function informationManagementRoutes() {
     res.status(201).json({ id, incidentNumber });
   });
 
-  router.get('/security-incidents/:id', requirePermission('information_management', 'view'), (req, res) => {
+  router.get('/security-incidents/:id', requirePermission('information_management.security', 'view'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM information_security_incidents WHERE id = ?').get(req.params.id);
     if (!row) return res.status(404).json({ error: 'Incident not found' });
     res.json(row);
   });
 
-  router.put('/security-incidents/:id', requirePermission('information_management', 'edit'), (req, res) => {
+  router.put('/security-incidents/:id', requirePermission('information_management.security', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM information_security_incidents WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Incident not found' });
@@ -368,7 +368,7 @@ export function informationManagementRoutes() {
     res.status(201).json({ id: capaId, capaNumber });
   });
 
-  router.post('/security-incidents/:id/close', requirePermission('information_management', 'approve'), (req, res) => {
+  router.post('/security-incidents/:id/close', requirePermission('information_management.security', 'approve'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM information_security_incidents WHERE id = ?').get(req.params.id) as any;
     if (!row) return res.status(404).json({ error: 'Incident not found' });
@@ -379,7 +379,7 @@ export function informationManagementRoutes() {
   });
 
   // ============= Data corrections =============
-  router.get('/data-corrections', requirePermission('information_management', 'view'), (req, res) => {
+  router.get('/data-corrections', requirePermission('information_management.data', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.status) { filters.push('status = ?'); params.push(String(req.query.status)); }
@@ -389,7 +389,7 @@ export function informationManagementRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/data-corrections', requirePermission('information_management', 'create'), (req, res) => {
+  router.post('/data-corrections', requirePermission('information_management.data', 'create'), (req, res) => {
     if (!req.body.requestDate) return res.status(400).json({ error: 'requestDate is required' });
     if (!req.body.correctionReason) return res.status(400).json({ error: 'correctionReason is required' });
     if (!req.body.requestedCorrectionSummary) return res.status(400).json({ error: 'requestedCorrectionSummary is required' });
@@ -404,14 +404,14 @@ export function informationManagementRoutes() {
     res.status(201).json({ id, requestNumber });
   });
 
-  router.get('/data-corrections/:id', requirePermission('information_management', 'view'), (req, res) => {
+  router.get('/data-corrections/:id', requirePermission('information_management.data', 'view'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM data_correction_requests WHERE id = ?').get(req.params.id);
     if (!row) return res.status(404).json({ error: 'Data correction not found' });
     res.json(row);
   });
 
-  router.put('/data-corrections/:id', requirePermission('information_management', 'edit'), (req, res) => {
+  router.put('/data-corrections/:id', requirePermission('information_management.data', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM data_correction_requests WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Data correction not found' });
@@ -422,7 +422,7 @@ export function informationManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/data-corrections/:id/review', requirePermission('information_management', 'edit'), (req, res) => {
+  router.post('/data-corrections/:id/review', requirePermission('information_management.data', 'edit'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM data_correction_requests WHERE id = ?').get(req.params.id) as any;
     if (!row) return res.status(404).json({ error: 'Data correction not found' });
@@ -432,7 +432,7 @@ export function informationManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/data-corrections/:id/approve', requirePermission('information_management', 'approve'), (req, res) => {
+  router.post('/data-corrections/:id/approve', requirePermission('information_management.data', 'approve'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM data_correction_requests WHERE id = ?').get(req.params.id) as any;
     if (!row) return res.status(404).json({ error: 'Data correction not found' });
@@ -443,7 +443,7 @@ export function informationManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/data-corrections/:id/complete', requirePermission('information_management', 'edit'), (req, res) => {
+  router.post('/data-corrections/:id/complete', requirePermission('information_management.data', 'edit'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM data_correction_requests WHERE id = ?').get(req.params.id) as any;
     if (!row) return res.status(404).json({ error: 'Data correction not found' });
@@ -462,7 +462,7 @@ export function informationManagementRoutes() {
     res.status(201).json({ id: actionId });
   });
 
-  router.post('/data-corrections/:id/close', requirePermission('information_management', 'approve'), (req, res) => {
+  router.post('/data-corrections/:id/close', requirePermission('information_management.data', 'approve'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM data_correction_requests WHERE id = ?').get(req.params.id) as any;
     if (!row) return res.status(404).json({ error: 'Data correction not found' });
@@ -472,7 +472,7 @@ export function informationManagementRoutes() {
   });
 
   // ============= Change requests =============
-  router.get('/change-requests', requirePermission('information_management', 'view'), (req, res) => {
+  router.get('/change-requests', requirePermission('information_management.change', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.status) { filters.push('status = ?'); params.push(String(req.query.status)); }
@@ -483,7 +483,7 @@ export function informationManagementRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/change-requests', requirePermission('information_management', 'create'), (req, res) => {
+  router.post('/change-requests', requirePermission('information_management.change', 'create'), (req, res) => {
     if (!req.body.requestDate) return res.status(400).json({ error: 'requestDate is required' });
     if (!req.body.changeType) return res.status(400).json({ error: 'changeType is required' });
     if (!req.body.title) return res.status(400).json({ error: 'title is required' });
@@ -500,14 +500,14 @@ export function informationManagementRoutes() {
     res.status(201).json({ id, changeNumber });
   });
 
-  router.get('/change-requests/:id', requirePermission('information_management', 'view'), (req, res) => {
+  router.get('/change-requests/:id', requirePermission('information_management.change', 'view'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM system_change_requests WHERE id = ?').get(req.params.id);
     if (!row) return res.status(404).json({ error: 'Change request not found' });
     res.json(row);
   });
 
-  router.put('/change-requests/:id', requirePermission('information_management', 'edit'), (req, res) => {
+  router.put('/change-requests/:id', requirePermission('information_management.change', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM system_change_requests WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Change request not found' });
@@ -518,7 +518,7 @@ export function informationManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/change-requests/:id/review', requirePermission('information_management', 'edit'), (req, res) => {
+  router.post('/change-requests/:id/review', requirePermission('information_management.change', 'edit'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM system_change_requests WHERE id = ?').get(req.params.id) as any;
     if (!row) return res.status(404).json({ error: 'Change request not found' });
@@ -528,7 +528,7 @@ export function informationManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/change-requests/:id/approve', requirePermission('information_management', 'approve'), (req, res) => {
+  router.post('/change-requests/:id/approve', requirePermission('information_management.change', 'approve'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM system_change_requests WHERE id = ?').get(req.params.id) as any;
     if (!row) return res.status(404).json({ error: 'Change request not found' });
@@ -539,7 +539,7 @@ export function informationManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/change-requests/:id/implement', requirePermission('information_management', 'edit'), (req, res) => {
+  router.post('/change-requests/:id/implement', requirePermission('information_management.change', 'edit'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM system_change_requests WHERE id = ?').get(req.params.id) as any;
     if (!row) return res.status(404).json({ error: 'Change request not found' });
@@ -548,7 +548,7 @@ export function informationManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/change-requests/:id/validate', requirePermission('information_management', 'approve'), (req, res) => {
+  router.post('/change-requests/:id/validate', requirePermission('information_management.change', 'approve'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM system_change_requests WHERE id = ?').get(req.params.id) as any;
     if (!row) return res.status(404).json({ error: 'Change request not found' });
@@ -567,7 +567,7 @@ export function informationManagementRoutes() {
     res.status(201).json({ id: actionId });
   });
 
-  router.post('/change-requests/:id/close', requirePermission('information_management', 'approve'), (req, res) => {
+  router.post('/change-requests/:id/close', requirePermission('information_management.change', 'approve'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM system_change_requests WHERE id = ?').get(req.params.id) as any;
     if (!row) return res.status(404).json({ error: 'Change request not found' });
@@ -652,7 +652,7 @@ export function informationManagementRoutes() {
   });
 
   // ============= System validations =============
-  router.get('/validations', requirePermission('information_management', 'view'), (req, res) => {
+  router.get('/validations', requirePermission('information_management.change', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.status) { filters.push('status = ?'); params.push(String(req.query.status)); }
@@ -663,7 +663,7 @@ export function informationManagementRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/validations', requirePermission('information_management', 'create'), (req, res) => {
+  router.post('/validations', requirePermission('information_management.change', 'create'), (req, res) => {
     if (!parseIntNullable(req.body.systemId)) return res.status(400).json({ error: 'systemId is required' });
     if (!req.body.validationDate) return res.status(400).json({ error: 'validationDate is required' });
     if (!req.body.validationType) return res.status(400).json({ error: 'validationType is required' });
@@ -679,14 +679,14 @@ export function informationManagementRoutes() {
     res.status(201).json({ id, validationNumber });
   });
 
-  router.get('/validations/:id', requirePermission('information_management', 'view'), (req, res) => {
+  router.get('/validations/:id', requirePermission('information_management.change', 'view'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM system_validation_records WHERE id = ?').get(req.params.id);
     if (!row) return res.status(404).json({ error: 'Validation not found' });
     res.json(row);
   });
 
-  router.put('/validations/:id', requirePermission('information_management', 'edit'), (req, res) => {
+  router.put('/validations/:id', requirePermission('information_management.change', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM system_validation_records WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Validation not found' });
@@ -697,7 +697,7 @@ export function informationManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/validations/:id/approve', requirePermission('information_management', 'approve'), (req, res) => {
+  router.post('/validations/:id/approve', requirePermission('information_management.change', 'approve'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM system_validation_records WHERE id = ?').get(req.params.id) as any;
     if (!row) return res.status(404).json({ error: 'Validation not found' });
@@ -708,7 +708,7 @@ export function informationManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/validations/:id/close', requirePermission('information_management', 'approve'), (req, res) => {
+  router.post('/validations/:id/close', requirePermission('information_management.change', 'approve'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM system_validation_records WHERE id = ?').get(req.params.id) as any;
     if (!row) return res.status(404).json({ error: 'Validation not found' });
@@ -718,7 +718,7 @@ export function informationManagementRoutes() {
   });
 
   // ============= Downtime =============
-  router.get('/downtime', requirePermission('information_management', 'view'), (req, res) => {
+  router.get('/downtime', requirePermission('information_management.downtime', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.status) { filters.push('status = ?'); params.push(String(req.query.status)); }
@@ -736,7 +736,7 @@ export function informationManagementRoutes() {
     return Math.round((e - s) / 60000);
   }
 
-  router.post('/downtime', requirePermission('information_management', 'create'), (req, res) => {
+  router.post('/downtime', requirePermission('information_management.downtime', 'create'), (req, res) => {
     if (!parseIntNullable(req.body.systemId)) return res.status(400).json({ error: 'systemId is required' });
     if (!req.body.downtimeStart) return res.status(400).json({ error: 'downtimeStart is required' });
     if (!req.body.affectedServices) return res.status(400).json({ error: 'affectedServices is required' });
@@ -752,14 +752,14 @@ export function informationManagementRoutes() {
     res.status(201).json({ id, downtimeNumber, durationMinutes: duration });
   });
 
-  router.get('/downtime/:id', requirePermission('information_management', 'view'), (req, res) => {
+  router.get('/downtime/:id', requirePermission('information_management.downtime', 'view'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM system_downtime_records WHERE id = ?').get(req.params.id);
     if (!row) return res.status(404).json({ error: 'Downtime not found' });
     res.json(row);
   });
 
-  router.put('/downtime/:id', requirePermission('information_management', 'edit'), (req, res) => {
+  router.put('/downtime/:id', requirePermission('information_management.downtime', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM system_downtime_records WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Downtime not found' });
@@ -792,7 +792,7 @@ export function informationManagementRoutes() {
     res.status(201).json({ id: ncId, ncNumber });
   });
 
-  router.post('/downtime/:id/resolve', requirePermission('information_management', 'edit'), (req, res) => {
+  router.post('/downtime/:id/resolve', requirePermission('information_management.downtime', 'edit'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM system_downtime_records WHERE id = ?').get(req.params.id) as any;
     if (!row) return res.status(404).json({ error: 'Downtime not found' });
@@ -804,7 +804,7 @@ export function informationManagementRoutes() {
     res.json({ ok: true, durationMinutes: duration });
   });
 
-  router.post('/downtime/:id/close', requirePermission('information_management', 'approve'), (req, res) => {
+  router.post('/downtime/:id/close', requirePermission('information_management.downtime', 'approve'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM system_downtime_records WHERE id = ?').get(req.params.id) as any;
     if (!row) return res.status(404).json({ error: 'Downtime not found' });
@@ -814,12 +814,12 @@ export function informationManagementRoutes() {
   });
 
   // ============= Information management reviews =============
-  router.get('/reviews', requirePermission('information_management', 'view'), (_req, res) => {
+  router.get('/reviews', requirePermission('information_management.reviews', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare('SELECT * FROM information_management_reviews ORDER BY review_period_end DESC, id DESC').all());
   });
 
-  router.post('/reviews', requirePermission('information_management', 'create'), (req, res) => {
+  router.post('/reviews', requirePermission('information_management.reviews', 'create'), (req, res) => {
     if (!req.body.reviewPeriodStart) return res.status(400).json({ error: 'reviewPeriodStart is required' });
     if (!req.body.reviewPeriodEnd) return res.status(400).json({ error: 'reviewPeriodEnd is required' });
     if (!req.body.reviewDate) return res.status(400).json({ error: 'reviewDate is required' });
@@ -834,14 +834,14 @@ export function informationManagementRoutes() {
     res.status(201).json({ id, reviewNumber });
   });
 
-  router.get('/reviews/:id', requirePermission('information_management', 'view'), (req, res) => {
+  router.get('/reviews/:id', requirePermission('information_management.reviews', 'view'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM information_management_reviews WHERE id = ?').get(req.params.id);
     if (!row) return res.status(404).json({ error: 'Review not found' });
     res.json(row);
   });
 
-  router.put('/reviews/:id', requirePermission('information_management', 'edit'), (req, res) => {
+  router.put('/reviews/:id', requirePermission('information_management.reviews', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM information_management_reviews WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Review not found' });
@@ -852,7 +852,7 @@ export function informationManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/reviews/:id/generate-summary', requirePermission('information_management', 'edit'), (req, res) => {
+  router.post('/reviews/:id/generate-summary', requirePermission('information_management.reviews', 'edit'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM information_management_reviews WHERE id = ?').get(req.params.id) as any;
     if (!row) return res.status(404).json({ error: 'Review not found' });
@@ -886,7 +886,7 @@ export function informationManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/reviews/:id/approve', requirePermission('information_management', 'approve'), (req, res) => {
+  router.post('/reviews/:id/approve', requirePermission('information_management.reviews', 'approve'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM information_management_reviews WHERE id = ?').get(req.params.id) as any;
     if (!row) return res.status(404).json({ error: 'Review not found' });
@@ -897,7 +897,7 @@ export function informationManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/reviews/:id/close', requirePermission('information_management', 'approve'), (req, res) => {
+  router.post('/reviews/:id/close', requirePermission('information_management.reviews', 'approve'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM information_management_reviews WHERE id = ?').get(req.params.id) as any;
     if (!row) return res.status(404).json({ error: 'Review not found' });

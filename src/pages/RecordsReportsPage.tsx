@@ -6,6 +6,7 @@ import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import { LinkedRecordsPanel } from '../components/LinkedRecordsPanel';
 import { usePermissions } from '../hooks/usePermissions';
+import PermissionTabs from '../components/PermissionTabs';
 import type {
   Staff, ReportTemplate, ReportRequest, PrintJob, EvidencePack,
   RecordRetentionRule, RecordRetentionReview, AuditTrailReview,
@@ -15,8 +16,11 @@ import type {
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
+// Tabs are filtered by permission — a tab whose feature this user cannot
+// view is not drawn. See src/components/PermissionTabs.tsx.
+const TAB_MODULE = 'records_reports';
 const tabBar = (active: string, tabs: string[], onChange: (name: string) => void) =>
-  <div className="tabs">{tabs.map(name => <button key={name} type="button" className={active === name ? 'active' : ''} onClick={() => onChange(name)}>{name}</button>)}</div>;
+  <PermissionTabs moduleKey={TAB_MODULE} tabs={tabs} active={active} onChange={onChange} />;
 
 const OUTPUT_FORMATS = ['html', 'csv', 'json', 'print_view'];
 const REPORT_MODULES = ['nc_capa', 'complaints', 'risks', 'actions', 'equipment', 'supplier_inventory', 'monitoring', 'iqc', 'eqa', 'blood_bank_handover', 'monthly_reports', 'assessments', 'quality_indicators', 'customer_focus', 'poct', 'notifications'];

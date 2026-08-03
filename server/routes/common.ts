@@ -9,6 +9,8 @@ import { config, isLanExposed, type AppMode } from '../config/index.js';
 import { seedDefaults } from '../db/seed.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requirePermission, viewableModulesOf } from '../middleware/permissions.js';
+import { resolvePermission } from '../services/permissionResolver.js';
+import { ACCESS_LEVELS, LEVEL_ACTIONS, type AccessLevel } from '../../shared/constants/features.js';
 import { audit } from '../services/auditService.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
 import { parseIntNullable } from './routeHelpers.js';
@@ -1111,7 +1113,19 @@ export function commonRoutes() {
     res.json({ ok: true });
   });
 
-  router.get('/staff', requirePermission('personnel', 'view'), (_req, res) => res.json(getDb().prepare(`
+  // The full register carries dates of birth, national identifiers, licences
+  // and appointment terms. Anyone may need a colleague's NAME — to assign an
+  // action, record attendance, pick a reviewer — so a minimal directory is
+  // served to everyone and the full record only to the personnel register.
+  router.get('/staff', requirePermission('personnel.self', 'view'), (req, res) => {
+    if (!resolvePermission(req.user!.id, 'personnel.register', 'view').allowed) {
+      return res.json(getDb().prepare(`
+        SELECT s.id, s.employee_no employeeNo, s.full_name fullName, s.section_id sectionId,
+          sec.name sectionName, s.job_title jobTitle, s.designation, s.is_active isActive
+        FROM staff s LEFT JOIN sections sec ON sec.id = s.section_id
+        WHERE s.is_active = 1 ORDER BY s.full_name`).all());
+    }
+    return res.json(getDb().prepare(`
     SELECT s.id, s.employee_no employeeNo, s.full_name fullName, s.email, s.phone, s.section_id sectionId, sec.name sectionName, s.is_active isActive,
       s.surname, s.middle_name middleName, s.first_name firstName, s.initials, s.date_of_birth dateOfBirth, s.gender,
       s.designation, s.job_title jobTitle, s.professional_regulator professionalRegulator, s.professional_licence professionalLicence,
@@ -1125,9 +1139,10 @@ export function commonRoutes() {
     LEFT JOIN sections sec ON sec.id = s.section_id
     LEFT JOIN users u ON u.staff_id = s.id
     LEFT JOIN roles r ON r.id = u.role_id
-    ORDER BY s.is_active DESC, s.full_name`).all()));
+    ORDER BY s.is_active DESC, s.full_name`).all());
+  });
 
-  router.post('/staff', requirePermission('personnel', 'create'), (req, res) => {
+  router.post('/staff', requirePermission('personnel.register', 'create'), (req, res) => {
     const cols = buildStaffColumns(req.body);
     if (!cols.full_name) return res.status(400).json({ error: 'A full name (or first name + surname) is required.' });
     const keys = Object.keys(cols);
@@ -1136,10 +1151,28 @@ export function commonRoutes() {
     audit(req, { action: 'create', entity: 'staff', entityId: r.lastInsertRowid, newValue: req.body });
     res.status(201).json({ id: r.lastInsertRowid });
   });
-  router.put('/staff/:id', requirePermission('personnel', 'edit'), (req, res) => {
+  router.put('/staff/:id', requirePermission('personnel.self', 'view'), (req, res) => {
     const existing = getDb().prepare('SELECT * FROM staff WHERE id = ?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Staff not found' });
-    const cols = buildStaffColumns(req.body);
+
+    // A member of staff keeps their own contact details current without being
+    // handed the register. Identity, professional registration and appointment
+    // terms are the employer's record of them, not theirs to rewrite, so those
+    // columns still take the register's edit right — as does anyone else's row.
+    const mine = Number(req.params.id) === Number(req.user?.staffId ?? -1);
+    const mayEditRegister = resolvePermission(req.user!.id, 'personnel.register', 'edit').allowed;
+    if (!mine && !mayEditRegister) {
+      return res.status(403).json({ error: 'Permission denied', decision: { allowed: false, source: 'Denied override', reason: 'You may only change your own record.' } });
+    }
+    let cols = buildStaffColumns(req.body);
+    if (!mayEditRegister) {
+      const SELF_EDITABLE = new Set(['email', 'phone', 'emergency_contact']);
+      const refused = Object.keys(cols).filter(c => !SELF_EDITABLE.has(c));
+      if (refused.length) {
+        return res.status(403).json({ error: 'Permission denied', decision: { allowed: false, source: 'Denied override', reason: 'You may update your contact details only. Ask the personnel office to change anything else.' } });
+      }
+      cols = Object.fromEntries(Object.entries(cols).filter(([c]) => SELF_EDITABLE.has(c)));
+    }
     const keys = Object.keys(cols);
     if (keys.length) {
       getDb().prepare(`UPDATE staff SET ${keys.map(k => `${k} = ?`).join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...keys.map(k => cols[k]), req.params.id);
@@ -1162,7 +1195,7 @@ export function commonRoutes() {
   // the authorization grid. All in one transaction. This is the Settings → Register
   // New Staff workflow and is the single source that wires a new person into Users &
   // Access, Positions & Organogram, the Permission Matrix and Personnel Management.
-  router.post('/staff/register', requirePermission('personnel', 'create'), (req, res) => {
+  router.post('/staff/register', requirePermission('personnel.register', 'create'), (req, res) => {
     const db = getDb();
     const { firstName, surname, otherNames, employeeNo, fullName, email, phone, sectionId, positionIds, primaryPositionId, createUser, username, password, roleId, authorizations, permissions } = req.body as {
       firstName?: string; surname?: string; otherNames?: string;
@@ -1266,7 +1299,7 @@ export function commonRoutes() {
     res.setHeader('Content-Disposition', 'attachment; filename="Staff_Register_Template.xlsx"');
     res.send(buildRegisterWorkbook(false));
   });
-  router.get('/staff/export', requirePermission('personnel', 'view'), (_req, res) => {
+  router.get('/staff/export', requirePermission('personnel.register', 'export'), (_req, res) => {
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="Master_Personnel_Register-${new Date().toISOString().slice(0, 10)}.xlsx"`);
     res.send(buildRegisterWorkbook(true));
@@ -1275,7 +1308,11 @@ export function commonRoutes() {
   // Full linkage profile for a staff member — surfaces every place the person is
   // connected across the system (login account, positions/organogram, technical
   // authorizations and section scope, and personnel activity volumes).
-  router.get('/staff/:id', requirePermission('personnel', 'view'), (req, res) => {
+  router.get('/staff/:id', requirePermission('personnel.self', 'view'), (req, res) => {
+    if (Number(req.params.id) !== Number(req.user?.staffId ?? -1)
+      && !resolvePermission(req.user!.id, 'personnel.register', 'view').allowed) {
+      return res.status(403).json({ error: 'Permission denied', decision: { allowed: false, source: 'Denied override', reason: 'You may only open your own staff record.' } });
+    }
     const db = getDb();
     const staff = db.prepare('SELECT s.*, sec.name AS section_name FROM staff s LEFT JOIN sections sec ON sec.id = s.section_id WHERE s.id = ?').get(req.params.id) as any;
     if (!staff) return res.status(404).json({ error: 'Staff record not found' });
@@ -1294,7 +1331,7 @@ export function commonRoutes() {
     res.json({ staff, positions, account, authorizations, activity });
   });
 
-  router.post('/staff/:id/positions', requirePermission('personnel', 'edit'), (req, res) => {
+  router.post('/staff/:id/positions', requirePermission('personnel.register', 'edit'), (req, res) => {
     const db = getDb();
     if (!parseIntNullable(req.body.positionId)) return res.status(400).json({ error: 'positionId is required' });
     const r = db.prepare('INSERT INTO staff_position_assignments (staff_id, position_id, assignment_type) VALUES (?, ?, ?)')
@@ -1331,7 +1368,7 @@ export function commonRoutes() {
   const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } });
 
   // ===== People & Access — staff Excel import (export lives near the staff routes) =====
-  router.post('/staff/import', requirePermission('personnel', 'create'), upload.single('file'), (req, res) => {
+  router.post('/staff/import', requirePermission('personnel.register', 'create'), upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const db = getDb();
     let rows: Record<string, unknown>[] = [];
@@ -1564,6 +1601,85 @@ export function commonRoutes() {
     audit(req, { action: 'create', entity: 'user_permission_overrides', entityId: result.lastInsertRowid, newValue: { userId, permissionId, allowed, reason } });
     res.status(201).json({ ok: true });
   });
+  // Set a whole ACCESS LEVEL in one call.
+  //
+  // The matrix used to ask an administrator for seven yes/no answers per area
+  // per role — hundreds of clicks, each independently wrong-clickable, with no
+  // way to see what a role could actually do. A level is one decision that
+  // writes the actions it implies and explicitly denies the rest, so the stored
+  // grants always spell out a coherent, reviewable position.
+  router.post('/permissions/level', requirePermission('settings', 'edit'), (req, res) => {
+    const { scope, subjectId, permKey, level, reason } = req.body ?? {};
+    if (!['role', 'position', 'user'].includes(scope)) return res.status(400).json({ error: "scope must be 'role', 'position' or 'user'" });
+    if (!subjectId) return res.status(400).json({ error: 'subjectId is required' });
+    if (!permKey) return res.status(400).json({ error: 'permKey is required' });
+    if (!ACCESS_LEVELS.includes(level)) return res.status(400).json({ error: `level must be one of: ${ACCESS_LEVELS.join(', ')}` });
+
+    const db = getDb();
+    const perms = db.prepare('SELECT id, action FROM permissions WHERE module_key = ?').all(permKey) as { id: number; action: string }[];
+    if (perms.length === 0) return res.status(404).json({ error: `No permissions are defined for "${permKey}".` });
+
+    const granted = new Set(LEVEL_ACTIONS[level as AccessLevel]);
+    const table = scope === 'role' ? 'role_permissions' : scope === 'position' ? 'position_permissions' : 'user_permission_overrides';
+    const column = scope === 'role' ? 'role_id' : scope === 'position' ? 'position_id' : 'user_id';
+    const source = scope === 'user' ? 'Manual override' : 'Manual assignment';
+
+    const tx = db.transaction(() => {
+      for (const p of perms) {
+        const allowed = granted.has(p.action) ? 1 : 0;
+        if (scope === 'user') {
+          db.prepare(`INSERT OR REPLACE INTO user_permission_overrides (user_id, permission_id, allowed, source, reason) VALUES (?, ?, ?, ?, ?)`)
+            .run(subjectId, p.id, allowed, source, reason ?? null);
+        } else {
+          db.prepare(`INSERT OR REPLACE INTO ${table} (${column}, permission_id, allowed, source) VALUES (?, ?, ?, ?)`)
+            .run(subjectId, p.id, allowed, source);
+        }
+      }
+    });
+    tx();
+    audit(req, { action: 'set_level', entity: table, entityId: subjectId, newValue: { permKey, level, scope } });
+    res.json({ ok: true, permKey, level, actionsGranted: [...granted] });
+  });
+
+  // Clear a user's personal overrides for one area so they fall back to their
+  // role. Without this an override could only ever be replaced, never removed.
+  router.delete('/permissions/user-override/:userId/:permKey', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const perms = db.prepare('SELECT id FROM permissions WHERE module_key = ?').all(req.params.permKey) as { id: number }[];
+    const tx = db.transaction(() => {
+      for (const p of perms) db.prepare('DELETE FROM user_permission_overrides WHERE user_id = ? AND permission_id = ?').run(req.params.userId, p.id);
+    });
+    tx();
+    audit(req, { action: 'clear_override', entity: 'user_permission_overrides', entityId: req.params.userId, newValue: { permKey: req.params.permKey } });
+    res.json({ ok: true });
+  });
+
+  // The catalogue the access-control screen renders: every grantable area, the
+  // level each role/position/user currently holds, and what each level means.
+  router.get('/permissions/catalogue', requirePermission('settings', 'view'), (req, res) => {
+    const db = getDb();
+    const perms = db.prepare('SELECT id, module_key, action FROM permissions').all() as { id: number; module_key: string; action: string }[];
+    const byId = new Map(perms.map(p => [p.id, p]));
+    const collect = (rows: { subject: number; permission_id: number; allowed: number }[]) => {
+      const map: Record<string, Record<string, string[]>> = {};
+      for (const r of rows) {
+        if (r.allowed !== 1) continue;
+        const p = byId.get(r.permission_id);
+        if (!p) continue;
+        ((map[String(r.subject)] ??= {})[p.module_key] ??= []).push(p.action);
+      }
+      return map;
+    };
+    res.json({
+      roles: collect((db.prepare('SELECT role_id AS subject, permission_id, allowed FROM role_permissions').all() as never)),
+      positions: collect((db.prepare('SELECT position_id AS subject, permission_id, allowed FROM position_permissions').all() as never)),
+      users: collect((db.prepare('SELECT user_id AS subject, permission_id, allowed FROM user_permission_overrides').all() as never)),
+      userOverrideKeys: (db.prepare('SELECT DISTINCT user_id, permission_id FROM user_permission_overrides').all() as { user_id: number; permission_id: number }[])
+        .map(r => ({ userId: r.user_id, permKey: byId.get(r.permission_id)?.module_key }))
+        .filter(r => r.permKey),
+    });
+  });
+
   router.get('/authorizations/technical', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare(`
     SELECT ta.id, ta.staff_id, ta.position_id, ta.module_key, ta.section_id, ta.level, ta.is_active, ta.granted_at, ta.expires_at, ta.competency_assessment_id,
       s.full_name AS staff_name, p.title AS position_title, sec.name AS section_name

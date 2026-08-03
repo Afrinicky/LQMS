@@ -2082,3 +2082,110 @@ button.tiny { padding: 2px 8px; font-size: 11px; }
 /* Breathing room between the dashboard's bands so nothing feels stacked. */
 .dash .section-title { margin-top: 22px; }
 .dash .attn-hero { margin-bottom: 18px; }
+
+/* ============================================================================
+   ACCESS CONTROL — "who can do what"
+   ----------------------------------------------------------------------------
+   One question per area instead of seven checkboxes: a segmented level picker
+   that reads left-to-right from no access to full. The picker is coloured by
+   the level it currently holds, so a page of rows can be scanned for outliers
+   without reading a word.
+   ========================================================================= */
+.access-control { display: flex; flex-direction: column; gap: 14px; }
+
+.ac-intro { display: flex; gap: 14px; align-items: flex-start; }
+.ac-intro-ico {
+  width: 38px; height: 38px; flex: none; border-radius: 11px; display: grid; place-items: center;
+  background: var(--accent-soft); color: var(--accent-bright);
+}
+.ac-intro h3 { margin: 0 0 4px; font-size: 15px; }
+.ac-intro p { margin: 0; font-size: 12.5px; color: var(--muted); line-height: 1.6; max-width: 74ch; }
+
+.ac-scope { display: flex; gap: 8px; flex-wrap: wrap; }
+.ac-scope button {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 8px 14px; border-radius: var(--radius-pill);
+  border: 1px solid var(--border); background: var(--panel); color: var(--muted);
+  font-size: 12.5px; cursor: pointer;
+}
+.ac-scope button.active { background: var(--accent-soft); border-color: rgba(78,141,255,.45); color: var(--text); }
+
+.ac-body { display: grid; grid-template-columns: 232px 1fr; gap: 16px; align-items: start; }
+@media (max-width: 980px) { .ac-body { grid-template-columns: 1fr; } }
+
+.ac-subjects {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--card); overflow: hidden; position: sticky; top: 10px;
+}
+.ac-subject-list { max-height: 70vh; overflow-y: auto; display: flex; flex-direction: column; }
+.ac-subject-list button {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 11px 14px; border: 0; border-bottom: 1px solid var(--border);
+  background: none; color: var(--text); text-align: left; cursor: pointer; width: 100%;
+}
+.ac-subject-list button:hover { background: rgba(255,255,255,.04); }
+.ac-subject-list button.active { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent-bright); }
+.ac-subject-list button strong { font-size: 13px; font-weight: 600; }
+.ac-subject-list button span { font-size: 11px; color: var(--faint); }
+
+.ac-areas { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.ac-areas-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.ac-areas-head h3 { margin: 0; font-size: 17px; }
+.ac-areas-head p { margin: 2px 0 0; font-size: 12px; }
+.ac-search {
+  display: flex; align-items: center; gap: 8px; min-width: 260px;
+  padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-pill);
+  background: var(--panel); color: var(--faint);
+}
+.ac-search input { border: 0; background: transparent; padding: 0; box-shadow: none; flex: 1; font-size: 12.5px; }
+
+.ac-group { border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); overflow: hidden; }
+.ac-group-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--panel);
+}
+.ac-group-head h4 { margin: 0; font-size: 13.5px; letter-spacing: .01em; }
+.ac-group-bulk { display: flex; align-items: center; gap: 6px; font-size: 11.5px; }
+.ac-group-bulk button { padding: 4px 10px; font-size: 11.5px; }
+
+.ac-list { list-style: none; margin: 0; padding: 0; }
+.ac-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 18px;
+  padding: 13px 16px; border-bottom: 1px solid var(--border);
+}
+.ac-row:last-child { border-bottom: 0; }
+.ac-row.sensitive { background: linear-gradient(90deg, rgba(245,181,68,.05), transparent 40%); }
+.ac-row-main { min-width: 0; flex: 1; }
+.ac-row-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; font-weight: 600; }
+.ac-row-main p { margin: 3px 0 0; font-size: 12px; color: var(--muted); line-height: 1.5; max-width: 68ch; }
+.ac-row-main p.ac-actions { margin-top: 5px; font-size: 11px; color: var(--faint); text-transform: capitalize; }
+.ac-tag {
+  font-size: 10px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 99px; background: var(--panel-2); color: var(--faint);
+}
+.ac-tag.warn { background: var(--warning-bg); color: var(--warning); }
+.ac-tag.muted { background: transparent; border: 1px dashed var(--border-strong); }
+
+.ac-row-control { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex: none; }
+.ac-reset {
+  display: inline-flex; align-items: center; gap: 4px;
+  border: 0; background: none; color: var(--faint); font-size: 11px; cursor: pointer; padding: 0;
+}
+.ac-reset:hover { color: var(--accent-bright); }
+
+/* Segmented level picker */
+.lvl-picker { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-pill); overflow: hidden; background: var(--panel); }
+.lvl-picker button {
+  border: 0; background: none; color: var(--faint); cursor: pointer;
+  padding: 6px 11px; font-size: 11.5px; font-weight: 600; white-space: nowrap;
+  border-right: 1px solid var(--border);
+}
+.lvl-picker button:last-child { border-right: 0; }
+.lvl-picker button:hover:not(.active):not(:disabled) { background: rgba(255,255,255,.05); color: var(--text); }
+.lvl-picker button:disabled { opacity: .5; cursor: not-allowed; }
+.lvl-picker button.active { color: #0A1020; }
+.lvl-picker.lvl-none    button.active { background: var(--faint); color: var(--bg); }
+.lvl-picker.lvl-view    button.active { background: var(--c8); }
+.lvl-picker.lvl-contribute button.active { background: var(--c2); }
+.lvl-picker.lvl-manage  button.active { background: var(--c4); }
+.lvl-picker.lvl-full    button.active { background: var(--c7); }
