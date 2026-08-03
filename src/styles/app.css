@@ -2439,6 +2439,21 @@ button.tiny { padding: 2px 8px; font-size: 11px; }
 .iqc-inhouse dd { margin: 2px 0 0; font-size: 12.5px; }
 .iqc-inhouse p { margin: 8px 0 0; font-size: 12px; color: var(--muted); line-height: 1.55; }
 
+/* ---- Excel in and out ---- */
+.iqc-import { border-left: 3px solid var(--accent-soft); }
+.iqc-import p { font-size: 12.5px; line-height: 1.6; margin-bottom: 10px; }
+.notice-warn {
+  background: var(--warning-bg, rgba(245, 181, 68, .12)); color: var(--warning);
+  border: 1px solid rgba(245, 181, 68, .35); border-radius: var(--radius-sm);
+  padding: 10px 14px; margin: 10px 0; font-size: 13.5px;
+}
+.notice-warn ul, .notice-ok ul { line-height: 1.6; }
+button.link-button {
+  background: none; border: 0; padding: 0; color: var(--accent-bright);
+  font-size: 12px; text-decoration: underline; cursor: pointer; width: auto;
+}
+button.link-button:hover { color: var(--text); }
+
 /* ---- Define a control ---- */
 .iqc-define { display: flex; flex-direction: column; gap: 4px; }
 .iqc-step { border: 0; border-top: 1px solid var(--border); padding: 16px 0 6px; margin: 0; }

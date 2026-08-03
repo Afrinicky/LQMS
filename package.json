@@ -28,7 +28,8 @@
     "cap:sync": "npm run build:mobile && cap sync",
     "cap:android": "npm run build:mobile && cap sync android && cap open android",
     "cap:ios": "npm run build:mobile && cap sync ios && cap open ios",
-    "mobile:assets": "capacitor-assets generate --assetPath build-resources/mobile"
+    "mobile:assets": "capacitor-assets generate --assetPath build-resources/mobile",
+    "check:iqc-io": "node scripts/iqc-io-check.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.0",
