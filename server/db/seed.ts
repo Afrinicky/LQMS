@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { DEFAULT_POSITIONS, MODULES, PERMISSION_ACTIONS } from '../../shared/constants/modules.js';
-import { FEATURES, LEVEL_ACTIONS, type AccessLevel } from '../../shared/constants/features.js';
+import { FEATURES, LEVEL_ACTIONS, featuresOfModule, type AccessLevel } from '../../shared/constants/features.js';
 import { getDb } from './database.js';
 import { config } from '../config/index.js';
 
@@ -73,6 +73,11 @@ export function seedDefaults() {
     // broken up, and module keys for those that have not.
     // ========================================================================
 
+    // Bump whenever the table below changes in a way an existing laboratory
+    // must receive — a right withdrawn, or a new area added to a role. See the
+    // note beside the application loop for why this exists.
+    const ROLE_DEFAULTS_VERSION = '2026.08-features.3';
+
     // Every member of staff, whatever their rank: their own record, their own
     // inbox, the launchpad, the ability to raise a safety incident or a
     // nonconformity, and read access to the documents they must follow.
@@ -144,15 +149,18 @@ export function seedDefaults() {
           'supplier_inventory.stock', 'supplier_inventory.storage',
           'process_management.receipt', 'process_management.rejections',
           'process_management.referrals', 'process_management.reviews',
-          'monitoring.readings', 'monitoring.assets', 'monitoring.reports',
+          'monitoring.readings', 'monitoring.reports',
           'nc_capa', 'risks', 'complaints', 'actions', 'quality_indicators',
           'continual_improvement', 'blood_bank_handover', 'poct',
           'documents.authoring', 'documents.records',
           'customer_focus.feedback', 'customer_focus.communication', 'customer_focus.advisory',
           'facilities_safety.incidents', 'facilities_safety.equipment', 'facilities_safety.inspections',
-          'records_reports.generate', 'notifications.calendar', 'monthly_reports',
+          'records_reports.generate', 'notifications.calendar',
         ],
         view: [
+          // Read, not run: the monitoring asset register and monthly LHIMS
+          // reporting belong to the quality office and the data officer.
+          'monitoring.assets', 'monthly_reports',
           'personnel.register', 'personnel.authorizations',
           'process_management.directory', 'process_management.intervals',
           'process_management.critical', 'assessments', 'meetings',
@@ -170,7 +178,7 @@ export function seedDefaults() {
           'documents.masterlist', 'documents.archive',
           'records_reports.generate', 'records_reports.evidence', 'records_reports.print',
           'notifications.calendar', 'meetings', 'monthly_reports',
-          'process_management.reviews', 'monitoring.reports',
+          'process_management.reviews',
         ],
         view: [
           'personnel.register', 'personnel.training', 'personnel.orientation',
@@ -184,13 +192,17 @@ export function seedDefaults() {
           'management_review', 'iqc', 'eqa', 'verification_validation',
           'measurement_uncertainty', 'poct', 'blood_bank_handover',
           'facilities_safety.equipment', 'facilities_safety.inspections',
-          'records_reports.audit', 'monitoring.readings',
+          'records_reports.audit', 'monitoring.readings', 'monitoring.reports',
         ],
       },
 
       // ---- Quality Manager --------------------------------------------------
       // Owns the management system end to end. Not staff pay, appraisals or
       // the budget — those stay with the Laboratory Manager.
+      // Quality Manager — owns the management system and audits the rest.
+      // Auditing something is not the same as running it: equipment, stock,
+      // IT change control and facilities belong to the people who operate
+      // them, so the Quality Manager reads those rather than managing them.
       'Quality Manager': {
         full: [
           'nc_capa', 'complaints', 'risks', 'actions', 'assessments',
@@ -208,26 +220,34 @@ export function seedDefaults() {
           'notifications.calendar', 'notifications.rules',
         ],
         manage: [
+          // Quality's own instruments: competence, impartiality, the manual.
           'personnel.training', 'personnel.orientation', 'personnel.authorizations',
-          'personnel.declarations', 'personnel.reports', 'personnel.rosters',
+          'personnel.declarations', 'personnel.reports',
+          'documents.profile', 'organisation.structure',
+          'process_management.directory', 'process_management.intervals',
+          'process_management.critical', 'process_management.amendments',
+          'process_management.reviews', 'process_management.rejections',
+          'monitoring.reports',
+        ],
+        view: [
+          // Audited, not operated. The Quality Manager must be able to read
+          // every one of these; running them belongs to equipment, stores, IT,
+          // safety and the sections.
+          'personnel.register', 'personnel.rosters',
           'equipment.register', 'equipment.maintenance', 'equipment.verification',
           'equipment.training', 'equipment.files', 'equipment.adverse', 'equipment.reports',
           'supplier_inventory.stock', 'supplier_inventory.suppliers',
-          'supplier_inventory.storage', 'supplier_inventory.labels', 'supplier_inventory.reports',
-          'process_management.receipt', 'process_management.directory',
-          'process_management.rejections', 'process_management.intervals',
-          'process_management.critical', 'process_management.referrals',
-          'process_management.amendments', 'process_management.reviews',
+          'supplier_inventory.storage', 'supplier_inventory.reports',
+          'process_management.receipt', 'process_management.referrals',
           'information_management.assets', 'information_management.access',
           'information_management.security', 'information_management.data',
           'information_management.change', 'information_management.downtime',
           'information_management.reviews', 'information_management.reports',
-          'monitoring.readings', 'monitoring.assets', 'monitoring.settings', 'monitoring.reports',
+          'monitoring.readings', 'monitoring.assets', 'monitoring.settings',
           'facilities_safety.incidents', 'facilities_safety.equipment',
-          'facilities_safety.inspections', 'facilities_safety.waste', 'facilities_safety.environment',
-          'organisation.structure', 'organisation.licences', 'documents.profile',
+          'facilities_safety.inspections', 'facilities_safety.waste',
+          'facilities_safety.environment', 'organisation.licences',
         ],
-        view: ['personnel.register', 'organisation.budget'],
       },
 
       // ---- Laboratory Manager ----------------------------------------------
@@ -261,28 +281,42 @@ export function seedDefaults() {
           'process_management.rejections', 'process_management.intervals',
           'process_management.critical', 'process_management.referrals',
           'process_management.amendments', 'process_management.reviews',
-          'information_management.assets', 'information_management.access',
-          'information_management.security', 'information_management.data',
-          'information_management.change', 'information_management.downtime',
-          'information_management.reviews', 'information_management.reports',
-          'monitoring.readings', 'monitoring.assets', 'monitoring.settings', 'monitoring.reports',
+          'information_management.assets', 'information_management.data',
+          'information_management.downtime', 'information_management.reports',
+          'monitoring.readings', 'monitoring.assets', 'monitoring.reports',
           'facilities_safety.incidents', 'facilities_safety.equipment',
           'facilities_safety.inspections', 'facilities_safety.waste',
-          'facilities_safety.health', 'facilities_safety.environment',
+          'facilities_safety.environment',
+        ],
+        view: [
+          // Accountable for the laboratory, but these are operated by others:
+          // IT runs change control and access review, the Safety Manager holds
+          // occupational health, and monitoring thresholds are a technical
+          // setting rather than a management decision.
+          'information_management.access', 'information_management.security',
+          'information_management.change', 'information_management.reviews',
+          'facilities_safety.health', 'monitoring.settings',
         ],
       },
 
       // ---- Specialist leads --------------------------------------------------
+      // Runs the blood bank. Seniority is not breadth: laboratory-wide
+      // equipment, stores and safety equipment belong to the people who own
+      // those functions, so this role contributes to them rather than
+      // managing them.
       'Blood Bank Unit Head': {
         full: ['blood_bank_handover'],
-        manage: [
-          'nc_capa', 'actions', 'risks', 'monitoring.readings',
-          'equipment.maintenance', 'supplier_inventory.stock',
-          'facilities_safety.incidents', 'facilities_safety.equipment',
+        manage: ['nc_capa', 'actions', 'risks', 'monitoring.readings'],
+        contribute: ['equipment.maintenance', 'supplier_inventory.stock'],
+        view: [
+          'equipment.register', 'supplier_inventory.storage', 'documents.records',
+          'notifications.calendar', 'facilities_safety.equipment',
         ],
-        view: ['equipment.register', 'supplier_inventory.storage', 'documents.records', 'notifications.calendar'],
       },
 
+      // Owns safety and occupational health outright. The laboratory's
+      // equipment register is not a safety record — safety equipment has its
+      // own feature — so it is not granted here.
       'Safety Manager': {
         full: [
           'facilities_safety.incidents', 'facilities_safety.equipment',
@@ -290,7 +324,7 @@ export function seedDefaults() {
           'facilities_safety.health', 'facilities_safety.environment',
         ],
         manage: ['nc_capa', 'actions', 'risks', 'monitoring.readings', 'monitoring.reports'],
-        view: ['blood_bank_handover', 'equipment.register', 'personnel.training', 'notifications.calendar'],
+        view: ['blood_bank_handover', 'personnel.training', 'notifications.calendar'],
       },
 
       'Data Officer': {
@@ -301,24 +335,29 @@ export function seedDefaults() {
           'records_reports.generate', 'actions',
         ],
         view: [
+          // Stock levels are not a data-reporting concern, so they are not here.
           'information_management.change', 'information_management.reviews',
-          'supplier_inventory.stock', 'process_management.receipt',
-          'documents.records', 'notifications.calendar', 'quality_indicators',
+          'process_management.receipt', 'documents.records',
+          'notifications.calendar', 'quality_indicators',
         ],
       },
 
       // POCT oversight. Deliberately holds NO rights over the personnel
       // register: the previous default let a POCT Officer edit any member of
       // staff's record, which their role never required.
+      // POCT oversight, and only that. Point-of-care devices, operator
+      // authorisations, QC and EQA all live inside the POCT module, so the
+      // laboratory-wide equivalents — the bench IQC and EQA registers, lab
+      // equipment training, the personnel training register — are not this
+      // role's concern and are not granted. It also holds no right over the
+      // personnel register, which the previous default let it edit outright.
       'POCT Officer': {
         full: ['poct'],
-        manage: [
-          'equipment.maintenance', 'equipment.training', 'iqc', 'eqa',
-          'nc_capa', 'actions', 'monitoring.readings',
-        ],
+        manage: ['nc_capa', 'actions'],
+        contribute: ['equipment.maintenance', 'monitoring.readings'],
         view: [
-          'equipment.register', 'supplier_inventory.stock',
-          'personnel.training', 'documents.records', 'notifications.calendar',
+          'equipment.register', 'supplier_inventory.stock', 'iqc', 'eqa',
+          'documents.records', 'notifications.calendar',
         ],
       },
     };
@@ -349,19 +388,64 @@ export function seedDefaults() {
       db.prepare('INSERT OR IGNORE INTO role_permissions (role_id, permission_id, allowed, source) VALUES (?, ?, 1, ?)').run(adminRole.id, permission.id, 'Role default');
     }
 
-    // INSERT OR IGNORE, never OR REPLACE: seeding establishes a role's defaults
-    // the first time a permission exists and then never touches it again. With
-    // OR REPLACE, every permission an administrator revoked came back the next
-    // time the server restarted — a revocation that silently undid itself.
+    // ── How defaults reach a laboratory that is already running ──────────────
+    // Two rules pull in opposite directions and both matter:
+    //
+    //   • A permission an administrator revoked must stay revoked. Re-applying
+    //     defaults on every restart silently undid their decision.
+    //   • A default we later find to be WRONG — a Technician holding create on
+    //     the equipment register, a POCT Officer able to edit any staff record
+    //     — must actually reach the installations running it. Never overwriting
+    //     means a security correction ships to new databases only.
+    //
+    // The version marker settles it: when ROLE_DEFAULTS_VERSION changes, the
+    // corrected defaults are applied once, authoritatively — granting what the
+    // level allows and explicitly denying what it does not. Every restart after
+    // that leaves the laboratory's own decisions alone.
+    const storedVersion = (db.prepare("SELECT value FROM settings WHERE key = 'roleDefaultsVersion'").get() as { value: string } | undefined)?.value ?? null;
+    const reapply = storedVersion !== ROLE_DEFAULTS_VERSION;
+
+    if (reapply) {
+      // Modules that have been split into features carry no grants of their
+      // own — their access is derived. Any leftover module-level row is at
+      // best ignored and at worst a denial that cascades over every feature
+      // inside, so they are cleared out as part of applying the defaults.
+      const derivedModules = [...new Set(FEATURES.map(f => f.module))];
+      for (const moduleKey of derivedModules) {
+        const ids = db.prepare('SELECT id FROM permissions WHERE module_key = ?').all(moduleKey) as { id: number }[];
+        for (const { id } of ids) {
+          db.prepare('DELETE FROM role_permissions WHERE permission_id = ? AND role_id != ?').run(id, adminRole.id);
+        }
+      }
+    }
+
     for (const [roleName, levels] of Object.entries(effectiveLevels)) {
       const role = db.prepare('SELECT id FROM roles WHERE name = ?').get(roleName) as { id: number } | undefined;
       if (!role) continue;
       for (const permission of allPermissions) {
+        // A module that has been split into features has no grants of its own:
+        // its access is derived from those features. Writing a row here would
+        // be a denial that cascades over the features and switches the whole
+        // module off for the role.
+        if (featuresOfModule(permission.module_key).length > 0) continue;
         const level = levels[permission.module_key];
-        if (level && LEVEL_ACTIONS[level].includes(permission.action)) {
+        const allowed = level && LEVEL_ACTIONS[level].includes(permission.action) ? 1 : 0;
+        if (reapply) {
+          // Write the whole position, allowed AND denied, so a right this role
+          // should not hold is actively withdrawn rather than left behind.
+          db.prepare('INSERT OR REPLACE INTO role_permissions (role_id, permission_id, allowed, source) VALUES (?, ?, ?, ?)').run(role.id, permission.id, allowed, 'Role default');
+        } else if (allowed) {
           db.prepare('INSERT OR IGNORE INTO role_permissions (role_id, permission_id, allowed, source) VALUES (?, ?, 1, ?)').run(role.id, permission.id, 'Role default');
         }
       }
+    }
+
+    if (reapply) {
+      db.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('roleDefaultsVersion', ?, CURRENT_TIMESTAMP)").run(ROLE_DEFAULTS_VERSION);
+      db.prepare('INSERT INTO audit_logs (actor_user_id, action, entity, entity_id, new_value) VALUES (NULL, ?, ?, ?, ?)')
+        .run('role_defaults_applied', 'role_permissions', ROLE_DEFAULTS_VERSION,
+          JSON.stringify({ version: ROLE_DEFAULTS_VERSION, previous: storedVersion, roles: Object.keys(effectiveLevels).length }));
+      console.log(`[seed] role defaults ${storedVersion ?? '(none)'} -> ${ROLE_DEFAULTS_VERSION} applied`);
     }
 
     type SeedSection = { title: string; description?: string; questions: Array<{ text: string; guidance?: string; evidence?: string }> };
