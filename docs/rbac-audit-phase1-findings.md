@@ -237,3 +237,66 @@ document lifecycle buttons.
 Rebuild role defaults against the feature catalogue on a least-privilege basis,
 and extend the automated probe to assert every finding in this report is closed
 for every seeded role.
+
+---
+
+# Outcome (Phases 2–5)
+
+All findings closed. Verified live against a running server, 48 automated
+checks across three suites. Reproduce with the server running:
+
+```
+node scripts/rbac-roles.mjs      # effective permissions per role
+node scripts/rbac-check.mjs      # engine: 16 checks
+node scripts/rbac-selfservice.mjs # own record vs colleagues: 18 checks
+node scripts/rbac-matrix.mjs     # the matrix really controls access: 14 checks
+node scripts/rbac-probe.mjs      # every finding above, per role
+```
+
+## What a Technician sees now
+
+| Module | Tabs before | Tabs after |
+|---|---|---|
+| Personnel Management | 15 | **2** — Dashboard, My Profile |
+| Organisation & Leadership | 9 | **3** — no budget, licences or records review |
+| Customer Focus | 12 | **4** — feedback intake and communication log |
+| Equipment | 13 | **7** — no verification, adverse events, files, new equipment |
+| Supplier & Inventory | 9 | **6** — no suppliers, barcode labels, reports |
+| Information Management | 12 | **0** — module hidden entirely |
+| Notifications | 7 | **5** — no alert rules, no generate alerts |
+
+## Findings, closed
+
+| # | Finding | Now |
+|---|---------|-----|
+| 1 | Technician read every colleague's HR file | Refused. Own record only; colleague records, declarations, appraisals, competency, orientation, rosters and authorizations all closed |
+| 2 | POCT Officer could edit any staff record | Refused. The role holds no right over the personnel register |
+| 3 | Lower ranks could add equipment, suppliers, reference intervals | Refused. View-level on those registers |
+| 4 | Approve buttons shown to staff who cannot approve | Gated on `documents.workflow` |
+| 5 | Organisation budget, licences, records review open to all | Own features, leadership only |
+| 6 | Security incidents, access reviews, change control open | Own features, hidden from bench staff |
+| 7 | Notification rules readable by everyone | Own feature, quality office and above |
+| 8 | Stakeholders, advisory, imports open to all | Own features |
+| 9 | Immunisation & exposure beside incident reporting | Own feature, marked confidential |
+| 10 | 224-checkbox matrix nobody could review | One access level per area, grouped and searchable |
+
+## Judgement calls worth reviewing
+
+These are defensible either way. They are now one dropdown to change.
+
+- **POCT Officer keeps `personnel.training: view`.** Authorising point-of-care
+  operators depends on competency evidence. If that is not wanted, set it to
+  *No access* — their own POCT operator authorisations are unaffected.
+- **Bench staff keep `supplier_inventory.stock: contribute`.** They record
+  stock receipt and use. They cannot touch the supplier register.
+- **`equipment.maintenance: contribute` for Technicians.** They log maintenance
+  and breakdowns but cannot alter the asset register.
+
+## Known limitation
+
+Modules that were not split — IQC, EQA, complaints, risks, assessments,
+monthly reports and the rest — still grant at module level. They were not in
+the reported scope and their tabs are far more homogeneous, but the same
+treatment applies whenever one of them needs it: add features to
+`shared/constants/features.ts` and the matrix, seeding and tab filtering pick
+them up with no further change.
