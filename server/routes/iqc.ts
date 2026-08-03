@@ -100,41 +100,88 @@ export function iqcRoutes() {
 
   router.get('/materials', requirePermission('iqc', 'view'), (_req, res) => {
     const db = getDb();
-    res.json(db.prepare('SELECT * FROM iqc_materials ORDER BY material_name, lot_number').all());
+    res.json(db.prepare(`SELECT m.*, sec.name AS section_name, e.name AS equipment_name,
+        prep.full_name AS prepared_by_name,
+        (SELECT COUNT(*) FROM iqc_analytes a WHERE a.iqc_material_id = m.id AND a.is_active = 1) AS analyte_count,
+        (SELECT COUNT(*) FROM iqc_runs r WHERE r.iqc_material_id = m.id) AS run_count,
+        (SELECT MAX(r.run_date) FROM iqc_runs r WHERE r.iqc_material_id = m.id) AS last_run_date
+      FROM iqc_materials m
+      LEFT JOIN sections sec ON sec.id = m.section_id
+      LEFT JOIN equipment_items e ON e.id = m.equipment_id
+      LEFT JOIN staff prep ON prep.id = m.prepared_by_staff_id
+      ORDER BY m.is_active DESC, m.material_name, m.lot_number`).all());
   });
 
   router.post('/materials', requirePermission('iqc', 'create'), (req, res) => {
-    if (!req.body.materialName) return res.status(400).json({ error: 'materialName is required' });
-    if (!req.body.testName) return res.status(400).json({ error: 'testName is required' });
-    if (!req.body.analyte) return res.status(400).json({ error: 'analyte is required' });
-    if (!req.body.lotNumber) return res.status(400).json({ error: 'lotNumber is required' });
+    if (!req.body.materialName) return res.status(400).json({ error: 'Give the control material a name.' });
+    if (!req.body.testName) return res.status(400).json({ error: 'Say which test this control is for.' });
+    if (!req.body.lotNumber) return res.status(400).json({ error: 'A lot or batch number is required.' });
+
+    const source = req.body.source === 'in_house' ? 'in_house' : 'commercial';
+    const controlType = ['quantitative', 'qualitative', 'semi_quantitative'].includes(req.body.controlType)
+      ? req.body.controlType : 'quantitative';
+    // A qualitative control is judged against its expected result; anything
+    // else would be meaningless, so the profile is fixed rather than offered.
+    const ruleProfile = controlType === 'qualitative'
+      ? 'match_expected'
+      : (['westgard_standard', 'westgard_simple', 'range_only', 'match_expected'].includes(req.body.ruleProfile)
+        ? req.body.ruleProfile : (controlType === 'semi_quantitative' ? 'range_only' : 'westgard_standard'));
+
+    // An in-house control has no manufacturer to vouch for it, so its own
+    // provenance is what makes it traceable (ISO 15189:2022 §7.3.7.2).
+    if (source === 'in_house' && !String(req.body.preparationMethod ?? '').trim()) {
+      return res.status(400).json({ error: 'An in-house control must record how it was prepared.' });
+    }
+
     const db = getDb();
     const createdAt = new Date().toISOString();
     const materialCode = generateRecordNumber(db, 'iqc_materials', 'IQCM', createdAt);
-    const result = db.prepare(`INSERT INTO iqc_materials (material_code, material_name, department_id, section_id, test_name, analyte, lot_number, manufacturer, expiry_date, storage_condition, target_mean, target_sd, acceptable_low, acceptable_high, equipment_id, inventory_batch_id, is_active, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(
-        materialCode,
-        req.body.materialName,
-        parseIntNullable(req.body.departmentId),
-        parseIntNullable(req.body.sectionId),
-        req.body.testName,
-        req.body.analyte,
-        req.body.lotNumber,
-        req.body.manufacturer ?? null,
-        req.body.expiryDate ?? null,
-        req.body.storageCondition ?? null,
-        req.body.targetMean !== undefined && req.body.targetMean !== '' ? Number(req.body.targetMean) : null,
-        req.body.targetSd !== undefined && req.body.targetSd !== '' ? Number(req.body.targetSd) : null,
-        req.body.acceptableLow !== undefined && req.body.acceptableLow !== '' ? Number(req.body.acceptableLow) : null,
-        req.body.acceptableHigh !== undefined && req.body.acceptableHigh !== '' ? Number(req.body.acceptableHigh) : null,
-        parseIntNullable(req.body.equipmentId),
-        parseIntNullable(req.body.inventoryBatchId),
-        req.body.isActive === false ? 0 : 1,
-        req.user!.id,
-        createdAt
-      );
-    audit(req, { action: 'create', entity: 'iqc_materials', entityId: result.lastInsertRowid, newValue: { materialCode, ...req.body } });
-    res.status(201).json({ id: result.lastInsertRowid, materialCode });
+    const n = (v: unknown) => (v === undefined || v === '' || v === null || Number.isNaN(Number(v)) ? null : Number(v));
+
+    let materialId = 0;
+    const tx = db.transaction(() => {
+      const result = db.prepare(`INSERT INTO iqc_materials (material_code, material_name, department_id, section_id,
+          test_name, analyte, lot_number, manufacturer, expiry_date, storage_condition, target_mean, target_sd,
+          acceptable_low, acceptable_high, equipment_id, inventory_batch_id, is_active, created_by, created_at,
+          source, control_type, level_label, unit, qc_frequency, rule_profile,
+          prepared_by_staff_id, preparation_date, preparation_method, base_material, validation_summary,
+          stability_period, open_vial_expiry, instructions)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(
+          materialCode, req.body.materialName, parseIntNullable(req.body.departmentId), parseIntNullable(req.body.sectionId),
+          req.body.testName,
+          // The legacy single-analyte column stays populated with the first
+          // analyte so older screens and exports keep reading sensibly.
+          (Array.isArray(req.body.analytes) && req.body.analytes[0]?.analyte) || req.body.analyte || req.body.testName,
+          req.body.lotNumber, req.body.manufacturer ?? null, req.body.expiryDate ?? null, req.body.storageCondition ?? null,
+          n(req.body.targetMean), n(req.body.targetSd), n(req.body.acceptableLow), n(req.body.acceptableHigh),
+          parseIntNullable(req.body.equipmentId), parseIntNullable(req.body.inventoryBatchId),
+          req.body.isActive === false ? 0 : 1, req.user!.id, createdAt,
+          source, controlType, req.body.levelLabel ?? null, req.body.unit ?? null,
+          req.body.qcFrequency ?? 'each_run', ruleProfile,
+          parseIntNullable(req.body.preparedByStaffId), req.body.preparationDate ?? null,
+          req.body.preparationMethod ?? null, req.body.baseMaterial ?? null, req.body.validationSummary ?? null,
+          req.body.stabilityPeriod ?? null, req.body.openVialExpiry ?? null, req.body.instructions ?? null,
+        );
+      materialId = Number(result.lastInsertRowid);
+
+      const analytes = Array.isArray(req.body.analytes) && req.body.analytes.length
+        ? req.body.analytes
+        : [{ analyte: req.body.analyte || req.body.testName, unit: req.body.unit, targetMean: req.body.targetMean, targetSd: req.body.targetSd, acceptableLow: req.body.acceptableLow, acceptableHigh: req.body.acceptableHigh, expectedResult: req.body.expectedResult }];
+      const insert = db.prepare(`INSERT INTO iqc_analytes (iqc_material_id, analyte, unit, target_mean, target_sd,
+          acceptable_low, acceptable_high, decimal_places, expected_result, display_order)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      analytes.forEach((a: Record<string, unknown>, i: number) => {
+        const name = String(a.analyte ?? '').trim();
+        if (!name) return;
+        insert.run(materialId, name, a.unit ?? null, n(a.targetMean), n(a.targetSd),
+          n(a.acceptableLow), n(a.acceptableHigh), n(a.decimalPlaces) ?? 2, (a.expectedResult as string) || null, i);
+      });
+    });
+    tx();
+
+    audit(req, { action: 'create', entity: 'iqc_materials', entityId: materialId, newValue: { materialCode, source, controlType } });
+    res.status(201).json({ id: materialId, materialCode });
   });
 
   // ---- IQC materials — Excel export / template / import ----

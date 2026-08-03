@@ -1,9 +1,10 @@
 import { FormEvent, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { FlaskConical, User, Lock, Building2, IdCard, ArrowRight } from 'lucide-react';
+import { FlaskConical, User, Lock, Building2, IdCard, ArrowRight, KeyRound } from 'lucide-react';
 import { api } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import { WaveBackground, MedicalLabBackgroundMarks } from '../components/ui';
+import PasswordResetDialog from '../components/PasswordResetDialog';
 
 function AuthBrand({ tagline }: { tagline: string }) {
   return (
@@ -33,6 +34,8 @@ export function LoginPage() {
   const { login, user } = useAuth();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showReset, setShowReset] = useState(false);
+  const [lastUsername, setLastUsername] = useState('');
   const nav = useNavigate();
   if (user) return <Navigate to="/home" />;
 
@@ -60,14 +63,19 @@ export function LoginPage() {
           <h2>Welcome back</h2>
           <p>Sign in to your laboratory quality management workspace.</p>
         </div>
-        <Field icon={<User size={16} />} label="Username" name="username" required autoFocus autoComplete="username" placeholder="Enter your username" />
+        <Field icon={<User size={16} />} label="Username" name="username" required autoFocus autoComplete="username" placeholder="Enter your username"
+          onChange={e => setLastUsername(e.currentTarget.value)} />
         <Field icon={<Lock size={16} />} label="Password" name="password" type="password" required autoComplete="current-password" placeholder="Enter your password" />
         {error && <div className="error">{error}</div>}
         <button className="auth-submit" disabled={busy}>
           {busy ? <><span className="spinner sm" /> Signing in…</> : <>Sign in <ArrowRight size={16} /></>}
         </button>
+        <button type="button" className="auth-forgot" onClick={() => setShowReset(true)}>
+          <KeyRound size={13} /> Forgotten your password?
+        </button>
         <div className="auth-foot"><span className="dot" /> Local workspace · Offline-ready</div>
       </form>
+      {showReset && <PasswordResetDialog initialUsername={lastUsername} onClose={() => setShowReset(false)} />}
     </div>
   );
 }

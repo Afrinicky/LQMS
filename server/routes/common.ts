@@ -11,6 +11,8 @@ import { requireAuth } from '../middleware/auth.js';
 import { requirePermission, viewableModulesOf } from '../middleware/permissions.js';
 import { resolvePermission } from '../services/permissionResolver.js';
 import { ACCESS_LEVELS, LEVEL_ACTIONS, type AccessLevel } from '../../shared/constants/features.js';
+import { pendingRequests, recentRequests, decideRequest } from '../services/passwordResetService.js';
+import { historicReferences, purgeDisposableRows } from '../services/userReferences.js';
 import { audit } from '../services/auditService.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
 import { parseIntNullable } from './routeHelpers.js';
@@ -621,7 +623,7 @@ export function commonRoutes() {
   });
 
   router.get('/roles', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT id, name, description, is_system isSystem FROM roles ORDER BY name').all()));
-  router.get('/users', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT u.id, u.username, u.full_name fullName, u.role_id roleId, u.staff_id staffId, s.full_name staffName, r.name roleName, u.is_active isActive FROM users u JOIN roles r ON r.id = u.role_id LEFT JOIN staff s ON s.id = u.staff_id ORDER BY u.full_name').all()));
+  router.get('/users', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT u.id, u.username, u.full_name fullName, u.role_id roleId, u.staff_id staffId, s.full_name staffName, r.name roleName, u.is_active isActive, u.must_change_password mustChangePassword FROM users u JOIN roles r ON r.id = u.role_id LEFT JOIN staff s ON s.id = u.staff_id ORDER BY u.full_name').all()));
   router.post('/users', requirePermission('settings', 'create'), (req, res) => {
     const { username, password, fullName, roleId } = req.body;
     const db = getDb();
@@ -661,9 +663,134 @@ export function commonRoutes() {
     if (!newPassword || String(newPassword).length < 8) return res.status(400).json({ error: 'A temporary password of at least 8 characters is required.' });
     const user = db.prepare('SELECT id, username FROM users WHERE id = ?').get(req.params.id) as { id: number; username: string } | undefined;
     if (!user) return res.status(404).json({ error: 'User not found' });
-    db.prepare('UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(bcrypt.hashSync(String(newPassword), 12), user.id);
+    // The password is temporary by definition, so the account is flagged to
+    // choose its own on first use rather than living on the one handed over.
+    db.prepare('UPDATE users SET password_hash = ?, must_change_password = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(bcrypt.hashSync(String(newPassword), 12), user.id);
     db.prepare("UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL").run(user.id);
     audit(req, { action: 'reset_password', entity: 'users', entityId: user.id, newValue: { username: user.username } });
+    res.json({ ok: true });
+  });
+
+  // Require this person to choose a new password. They sign in with the one
+  // they have and the application will not let them past the change dialog —
+  // so this is for "your password must change", not "I have forgotten it".
+  // Someone who cannot sign in at all needs a temporary password (above) or an
+  // approved self-service request.
+  router.post('/users/:id/require-password-change', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const user = db.prepare('SELECT id, username FROM users WHERE id = ?').get(req.params.id) as { id: number; username: string } | undefined;
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    db.prepare('UPDATE users SET must_change_password = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(user.id);
+    audit(req, { action: 'require_password_change', entity: 'users', entityId: user.id, newValue: { username: user.username } });
+    res.json({ ok: true });
+  });
+
+  // ===== Password reset requests raised from the sign-in screen =====
+  router.get('/users/password-resets', requirePermission('settings', 'edit'), (_req, res) => {
+    res.json({ pending: pendingRequests(), recent: recentRequests() });
+  });
+
+  router.post('/users/password-resets/:id/decide', requirePermission('settings', 'edit'), (req, res) => {
+    const { decision, note } = (req.body ?? {}) as { decision?: string; note?: string };
+    if (decision !== 'approve' && decision !== 'deny') return res.status(400).json({ error: "decision must be 'approve' or 'deny'" });
+    const row = decideRequest(Number(req.params.id), decision, req.user!.id, note);
+    if (!row) return res.status(404).json({ error: 'That request is no longer waiting for a decision.' });
+    audit(req, {
+      action: decision === 'approve' ? 'approve_password_reset' : 'deny_password_reset',
+      entity: 'password_reset_requests', entityId: row.id,
+      newValue: { username: row.requested_username, note: note ?? null },
+    });
+    // Close the approver's own notification for this request.
+    getDb().prepare("UPDATE notifications SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP WHERE record_type = 'password_reset_requests' AND record_id = ? AND status != 'resolved'")
+      .run(String(row.id));
+    res.json({ ok: true, status: row.status });
+  });
+
+  // ===== Removing an account =====
+  //
+  // A user is woven through the audit trail, electronic signatures and the
+  // authorship of records, and an accredited laboratory may not lose any of
+  // that. So deactivating is the normal answer — access ends, history stands —
+  // and erasing is offered only for an account that never did anything.
+  // This reports which it is, and why.
+  router.get('/users/:id/deletion-impact', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const user = db.prepare('SELECT id, username, full_name fullName, role_id roleId, is_active isActive FROM users WHERE id = ?').get(req.params.id) as
+      { id: number; username: string; fullName: string; roleId: number; isActive: number } | undefined;
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const blockers: string[] = [];
+    if (Number(req.params.id) === req.user!.id) blockers.push('This is your own account.');
+    const adminRole = db.prepare("SELECT id FROM roles WHERE name = 'System Administrator'").get() as { id: number } | undefined;
+    if (adminRole && user.roleId === adminRole.id) {
+      const others = (db.prepare('SELECT COUNT(*) c FROM users WHERE role_id = ? AND is_active = 1 AND id != ?').get(adminRole.id, user.id) as { c: number }).c;
+      if (others === 0) blockers.push('This is the only active System Administrator. Promote someone else first.');
+    }
+
+    const historic = historicReferences(user.id);
+
+    res.json({
+      user: { id: user.id, username: user.username, fullName: user.fullName, isActive: user.isActive === 1 },
+      blockers,
+      canDeactivate: blockers.length === 0,
+      canDelete: blockers.length === 0 && historic.length === 0,
+      historicReferences: historic,
+      totalHistoricRows: historic.reduce((n, r) => n + r.rows, 0),
+    });
+  });
+
+  // Deactivate (default) or erase. Erasing is refused when the account left any
+  // trace in the record — the client is told to deactivate instead.
+  router.delete('/users/:id', requirePermission('settings', 'void_archive'), (req, res) => {
+    const db = getDb();
+    const mode = req.query.mode === 'delete' ? 'delete' : 'deactivate';
+    const user = db.prepare('SELECT id, username, full_name, role_id, is_active FROM users WHERE id = ?').get(req.params.id) as
+      { id: number; username: string; full_name: string; role_id: number; is_active: number } | undefined;
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (user.id === req.user!.id) return res.status(400).json({ error: 'You cannot remove your own account.' });
+
+    const adminRole = db.prepare("SELECT id FROM roles WHERE name = 'System Administrator'").get() as { id: number } | undefined;
+    if (adminRole && user.role_id === adminRole.id) {
+      const others = (db.prepare('SELECT COUNT(*) c FROM users WHERE role_id = ? AND is_active = 1 AND id != ?').get(adminRole.id, user.id) as { c: number }).c;
+      if (others === 0) return res.status(400).json({ error: 'This is the only active System Administrator. Give another account that role first.' });
+    }
+
+    if (mode === 'deactivate') {
+      const tx = db.transaction(() => {
+        db.prepare('UPDATE users SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(user.id);
+        db.prepare('UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL').run(user.id);
+        db.prepare("UPDATE password_reset_requests SET status = 'cancelled' WHERE user_id = ? AND status IN ('pending','approved')").run(user.id);
+      });
+      tx();
+      audit(req, { action: 'deactivate', entity: 'users', entityId: user.id, oldValue: { isActive: 1 }, newValue: { isActive: 0, username: user.username } });
+      return res.json({ ok: true, mode: 'deactivate' });
+    }
+
+    // Permanent erase — only for an account with no laboratory history.
+    const blocking = historicReferences(user.id);
+    if (blocking.length) {
+      return res.status(409).json({
+        error: 'This account has laboratory history and cannot be erased. Deactivate it instead — access ends immediately and the record stays intact.',
+        references: blocking.map(r => `${r.table} (${r.rows})`),
+      });
+    }
+
+    const tx = db.transaction(() => {
+      purgeDisposableRows(user.id);
+      db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+    });
+    tx();
+    audit(req, { action: 'delete', entity: 'users', entityId: user.id, oldValue: { username: user.username, fullName: user.full_name }, newValue: null });
+    res.json({ ok: true, mode: 'delete' });
+  });
+
+  // Bring a deactivated account back.
+  router.post('/users/:id/reactivate', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const user = db.prepare('SELECT id, username FROM users WHERE id = ?').get(req.params.id) as { id: number; username: string } | undefined;
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    db.prepare('UPDATE users SET is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(user.id);
+    audit(req, { action: 'reactivate', entity: 'users', entityId: user.id, newValue: { username: user.username } });
     res.json({ ok: true });
   });
 

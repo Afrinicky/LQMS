@@ -38,7 +38,7 @@ export type RemoteCloudUser = {
   status: string;
   last_login_at: string | null;
 };
-export type ApiUser = { id: number; username: string; fullName: string; roleId: number; roleName?: string; staffId?: number | null; staffName?: string | null; isActive: boolean };
+export type ApiUser = { id: number; username: string; fullName: string; roleId: number; roleName?: string; staffId?: number | null; staffName?: string | null; isActive: boolean; mustChangePassword?: boolean };
 /**
  * A user's effective permissions: module key → the actions they may take.
  * A module that is absent may not be viewed, so the client hides it entirely.

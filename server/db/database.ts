@@ -103,6 +103,50 @@ CREATE TABLE IF NOT EXISTS dennis_settings (id INTEGER PRIMARY KEY AUTOINCREMENT
   if (!hasStaffId) {
     database.exec('ALTER TABLE users ADD COLUMN staff_id INTEGER REFERENCES staff(id)');
   }
+  const userNames = new Set(tableInfo.map(col => col.name));
+  // Set when an administrator requires this person to choose a new password.
+  // They sign in with the password they have, and the application will not let
+  // them go anywhere until they have replaced it.
+  if (!userNames.has('must_change_password')) {
+    database.exec('ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0');
+  }
+
+  // ---------------------------------------------------------------------
+  // Password reset requests.
+  //
+  // There is no email on a LAN Host, so a forgotten password is recovered by
+  // asking an administrator, who verifies the person's identity in the room
+  // and then approves. The approval IS the security boundary, so the request
+  // records where it came from and every decision is audited.
+  //
+  //   claim_token  held only by the browser that asked; used to poll the
+  //                decision. Requests for unknown usernames are stored too, so
+  //                the response cannot be used to discover which accounts exist.
+  //   reset_token  minted on approval, single use, short lived. It is handed
+  //                only to the holder of the matching claim token.
+  // ---------------------------------------------------------------------
+  database.exec(`
+CREATE TABLE IF NOT EXISTS password_reset_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER REFERENCES users(id),
+  requested_username TEXT NOT NULL,
+  claim_token TEXT NOT NULL UNIQUE,
+  reset_token TEXT UNIQUE,
+  status TEXT NOT NULL DEFAULT 'pending',
+  origin TEXT NOT NULL DEFAULT 'user',
+  reason TEXT,
+  ip_address TEXT,
+  device_id TEXT,
+  decided_by_user_id INTEGER REFERENCES users(id),
+  decision_note TEXT,
+  decided_at TEXT,
+  completed_at TEXT,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_password_resets_status ON password_reset_requests(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_reset_requests(user_id, status);
+`);
   const actionColumns = database.prepare("PRAGMA table_info(actions)").all() as Array<{ name: string }>;
   const actionNames = new Set(actionColumns.map(col => col.name));
   if (!actionNames.has('source_module')) database.exec('ALTER TABLE actions ADD COLUMN source_module TEXT');
@@ -681,6 +725,114 @@ CREATE TABLE IF NOT EXISTS measurement_uncertainty_records (
   updated_at TEXT
 );
 `);
+
+  // -------------------------------------------------------------------
+  // IQC, restructured around how control actually works at the bench.
+  //
+  // The original model was one material = one analyte = one number, which
+  // fits a single-analyte chemistry control and nothing else. A full blood
+  // count runs one vial and reads eight parameters off it; a hepatitis B
+  // surface antigen control is not a number at all, it is "reactive" and the
+  // only question is whether it came out reactive. Both are IQC and both have
+  // to be recordable without pretending to be the other.
+  //
+  //   iqc_materials   a LOT of control material: commercial or in-house,
+  //                   at a level, for a test, with its control type
+  //   iqc_analytes    what is measured on it — one row for a chemistry
+  //                   control, eight for an FBC control, one qualitative
+  //                   row for HBsAg
+  //   iqc_runs        one occasion of running that control
+  //   iqc_results     one analyte's reading within a run
+  // -------------------------------------------------------------------
+  const iqcMaterialColumns = database.prepare("PRAGMA table_info(iqc_materials)").all() as Array<{ name: string }>;
+  const iqcMaterialNames = new Set(iqcMaterialColumns.map(c => c.name));
+  const addMaterialColumn = (name: string, ddl: string) => {
+    if (!iqcMaterialNames.has(name)) database.exec(`ALTER TABLE iqc_materials ADD COLUMN ${ddl}`);
+  };
+  // 'commercial' | 'in_house'
+  addMaterialColumn('source', "source TEXT NOT NULL DEFAULT 'commercial'");
+  // 'quantitative' | 'qualitative' | 'semi_quantitative'
+  addMaterialColumn('control_type', "control_type TEXT NOT NULL DEFAULT 'quantitative'");
+  // Level or designation: "Level 1 (Normal)", "Positive control", "Negative control"
+  addMaterialColumn('level_label', 'level_label TEXT');
+  addMaterialColumn('unit', 'unit TEXT');
+  // How often the control must be run, so the schedule is part of the definition.
+  addMaterialColumn('qc_frequency', "qc_frequency TEXT NOT NULL DEFAULT 'each_run'");
+  // Which rule set applies: 'westgard_standard' | 'westgard_simple' | 'range_only' | 'match_expected'
+  addMaterialColumn('rule_profile', "rule_profile TEXT NOT NULL DEFAULT 'westgard_standard'");
+  // In-house preparation provenance (ISO 15189 §7.3.7.2 requires it be documented).
+  addMaterialColumn('prepared_by_staff_id', 'prepared_by_staff_id INTEGER REFERENCES staff(id)');
+  addMaterialColumn('preparation_date', 'preparation_date TEXT');
+  addMaterialColumn('preparation_method', 'preparation_method TEXT');
+  addMaterialColumn('base_material', 'base_material TEXT');
+  addMaterialColumn('validation_summary', 'validation_summary TEXT');
+  addMaterialColumn('stability_period', 'stability_period TEXT');
+  addMaterialColumn('open_vial_expiry', 'open_vial_expiry TEXT');
+  addMaterialColumn('instructions', 'instructions TEXT');
+
+  database.exec(`
+CREATE TABLE IF NOT EXISTS iqc_analytes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  iqc_material_id INTEGER NOT NULL REFERENCES iqc_materials(id),
+  analyte TEXT NOT NULL,
+  unit TEXT,
+  -- Quantitative / semi-quantitative
+  target_mean REAL,
+  target_sd REAL,
+  acceptable_low REAL,
+  acceptable_high REAL,
+  decimal_places INTEGER NOT NULL DEFAULT 2,
+  -- Qualitative: what this control must produce to pass
+  expected_result TEXT,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (iqc_material_id, analyte)
+);
+CREATE INDEX IF NOT EXISTS idx_iqc_analytes_material ON iqc_analytes(iqc_material_id, display_order);
+
+CREATE TABLE IF NOT EXISTS iqc_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_number TEXT,
+  iqc_material_id INTEGER NOT NULL REFERENCES iqc_materials(id),
+  run_date TEXT NOT NULL,
+  run_time TEXT,
+  shift TEXT,
+  equipment_id INTEGER REFERENCES equipment_items(id),
+  section_id INTEGER REFERENCES sections(id),
+  operator_staff_id INTEGER REFERENCES staff(id),
+  reagent_lot TEXT,
+  -- 'in_control' | 'warning' | 'out_of_control'
+  status TEXT NOT NULL DEFAULT 'in_control',
+  rule_summary TEXT,
+  -- The decision this run drives: may patient results be reported?
+  patient_results_released INTEGER,
+  release_decision_note TEXT,
+  corrective_action TEXT,
+  comment TEXT,
+  reviewed_by_staff_id INTEGER REFERENCES staff(id),
+  reviewed_at TEXT,
+  nc_id INTEGER REFERENCES nonconforming_events(id),
+  capa_id INTEGER REFERENCES capa_records(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_iqc_runs_material ON iqc_runs(iqc_material_id, run_date);
+CREATE INDEX IF NOT EXISTS idx_iqc_runs_status ON iqc_runs(status, run_date);
+`);
+
+  // Link existing results into the run/analyte model. Rows predating this keep
+  // working: they simply have no run and no analyte row.
+  const iqcResultCols = database.prepare("PRAGMA table_info(iqc_results)").all() as Array<{ name: string }>;
+  const iqcResultCol = new Set(iqcResultCols.map(c => c.name));
+  if (!iqcResultCol.has('iqc_run_id')) database.exec('ALTER TABLE iqc_results ADD COLUMN iqc_run_id INTEGER REFERENCES iqc_runs(id)');
+  if (!iqcResultCol.has('iqc_analyte_id')) database.exec('ALTER TABLE iqc_results ADD COLUMN iqc_analyte_id INTEGER REFERENCES iqc_analytes(id)');
+  if (!iqcResultCol.has('qualitative_result')) database.exec('ALTER TABLE iqc_results ADD COLUMN qualitative_result TEXT');
+  if (!iqcResultCol.has('expected_result')) database.exec('ALTER TABLE iqc_results ADD COLUMN expected_result TEXT');
+  // result_value is NOT NULL in the original schema, which a qualitative
+  // reading has nothing to put in. SQLite cannot drop a NOT NULL constraint,
+  // so qualitative rows store 0 and carry their meaning in qualitative_result.
+  if (!iqcResultCol.has('is_qualitative')) database.exec('ALTER TABLE iqc_results ADD COLUMN is_qualitative INTEGER NOT NULL DEFAULT 0');
 
   // Phase 4 polish: extend iqc_results with z_score
   const iqcResultColumns = database.prepare("PRAGMA table_info(iqc_results)").all() as Array<{ name: string }>;

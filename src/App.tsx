@@ -37,7 +37,7 @@ const EquipmentPage = lazy(() => import('./pages/Phase3Pages').then(m => ({ defa
 const InventoryPage = lazy(() => import('./pages/Phase3Pages').then(m => ({ default: m.InventoryPage })));
 const MonitoringPage = lazy(() => import('./pages/Phase3Pages').then(m => ({ default: m.MonitoringPage })));
 const SafetyPage = lazy(() => import('./pages/Phase3Pages').then(m => ({ default: m.SafetyPage })));
-const IqcPage = lazy(() => import('./pages/Phase4Pages').then(m => ({ default: m.IqcPage })));
+const IqcPage = lazy(() => import('./pages/IqcPage').then(m => ({ default: m.IqcPage })));
 const EqaPage = lazy(() => import('./pages/Phase4Pages').then(m => ({ default: m.EqaPage })));
 const VerificationValidationPage = lazy(() => import('./pages/Phase4Pages').then(m => ({ default: m.VerificationValidationPage })));
 const MeasurementUncertaintyPage = lazy(() => import('./pages/Phase4Pages').then(m => ({ default: m.MeasurementUncertaintyPage })));

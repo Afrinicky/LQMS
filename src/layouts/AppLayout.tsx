@@ -25,7 +25,7 @@ function initials(name?: string) {
 }
 
 export default function AppLayout() {
-  const { user, logout } = useAuth();
+  const { user, logout, refreshUser } = useAuth();
   const { modules, isEnabled } = useModules();
   const { can, canView } = usePermissions();
   const navigate = useNavigate();
@@ -205,7 +205,15 @@ export default function AppLayout() {
             <button className="icon-btn" type="button" aria-label="Logout" onClick={logout}><LogOut size={18} /></button>
           </div>
         </header>
-        {showPassword && <ChangePasswordModal onClose={() => setShowPassword(false)} />}
+        {/* An administrator can require a new password. The dialog then cannot be
+          dismissed — there is nowhere else to go until it is done. */}
+      {(showPassword || user?.mustChangePassword) && (
+        <ChangePasswordModal
+          required={Boolean(user?.mustChangePassword)}
+          onClose={() => setShowPassword(false)}
+          onChanged={refreshUser}
+        />
+      )}
         {showSignature && <SignatureModal onClose={() => setShowSignature(false)} />}
 
         <section className="content"><Outlet /></section>
@@ -218,7 +226,9 @@ export default function AppLayout() {
           <span>Host API · {API_HOST}</span>
           <span className="status-spacer" />
           <span>SECH_LIMS by Nickland</span>
-          <span>Version 0.1.0</span>
+          <span title="When this build was produced. If a change you expect is missing, rebuild and restart.">
+            Version 0.1.0 · build {typeof __BUILD_STAMP__ === 'string' ? __BUILD_STAMP__ : 'dev'}
+          </span>
         </footer>
       </main>
     </div>

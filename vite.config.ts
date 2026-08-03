@@ -1,5 +1,13 @@
 import { defineConfig } from 'vite';
+
+// Stamped into the bundle at build time and shown in the status bar. A LAN
+// deployment is updated by pulling source and rebuilding, and it is otherwise
+// impossible to tell from the running window whether the build in front of you
+// includes a change you just made — the version number alone never moves.
+const BUILD_STAMP = new Date().toISOString().slice(0, 16).replace('T', ' ');
+
 export default defineConfig({
+  define: { __BUILD_STAMP__: JSON.stringify(BUILD_STAMP) },
   // Absolute base. The packaged renderer is served over http:// from the
   // embedded API server (same origin), NOT file://, so assets must resolve to
   // the origin root (/assets/index-xxxx.js). A relative base ('./') breaks on
