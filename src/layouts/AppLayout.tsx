@@ -226,7 +226,9 @@ export default function AppLayout() {
           <span>Host API · {API_HOST}</span>
           <span className="status-spacer" />
           <span>SECH_LIMS by Nickland</span>
-          <span>Version 0.1.0</span>
+          <span title="When this build was produced. If a change you expect is missing, rebuild and restart.">
+            Version 0.1.0 · build {typeof __BUILD_STAMP__ === 'string' ? __BUILD_STAMP__ : 'dev'}
+          </span>
         </footer>
       </main>
     </div>
