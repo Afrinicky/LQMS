@@ -2482,6 +2482,37 @@ button.link-button:hover { color: var(--text); }
   background: var(--accent-soft); color: var(--accent-bright); font-size: 11px; font-weight: 700;
 }
 .iqc-note { margin: 10px 0 0; font-size: 12px; color: var(--muted); line-height: 1.6; }
+.iqc-note.warn {
+  background: var(--warning-bg); border: 1px solid rgba(245, 181, 68, .3);
+  border-radius: var(--radius-sm); padding: 10px 12px; color: var(--text);
+}
+
+/* ---- Correcting and removing ---- */
+.iqc-detail-acts { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding-top: 4px; border-top: 1px solid var(--border); margin-top: 2px; }
+.iqc-edit .section-head h4 { margin: 0; display: flex; align-items: center; gap: 7px; font-size: 13.5px; }
+.iqc-edit .form-actions { margin-top: 4px; }
+
+/* Destructive and administrator-only panels share one calm, unmistakable frame:
+   never a wall of red, but never mistakable for an ordinary form either. */
+.iqc-danger {
+  border: 1px solid rgba(214, 66, 88, .45); border-left: 3px solid var(--danger);
+  border-radius: var(--radius-sm); background: rgba(214, 66, 88, .05);
+  padding: 12px 14px; margin-top: 10px; display: flex; flex-direction: column; gap: 9px;
+}
+.iqc-danger.edit { border-color: var(--border-strong); border-left-color: var(--accent-bright); background: rgba(255,255,255,.03); }
+.iqc-danger > strong { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; }
+.iqc-danger p { margin: 0; font-size: 12px; line-height: 1.6; color: var(--muted); }
+.iqc-danger textarea { font-size: 12.5px; }
+.iqc-danger-acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+.iqc-danger-acts button { font-size: 12.5px; }
+
+.iqc-admin-acts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.iqc-admin-tag {
+  display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .05em; color: var(--faint);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-pill); padding: 2px 8px;
+}
+button.tiny.danger { color: var(--danger); border-color: rgba(214, 66, 88, .4); }
 .iqc-note.bad { color: var(--danger); }
 
 .iqc-choice { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }

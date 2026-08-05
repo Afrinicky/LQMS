@@ -239,33 +239,12 @@ export function iqcRoutes() {
     res.json({ ...material, results });
   });
 
-  router.put('/materials/:id', requirePermission('iqc', 'edit'), (req, res) => {
-    const db = getDb();
-    const oldValue = db.prepare('SELECT * FROM iqc_materials WHERE id = ?').get(req.params.id) as any;
-    if (!oldValue) return res.status(404).json({ error: 'IQC material not found' });
-    db.prepare(`UPDATE iqc_materials SET material_name = ?, department_id = ?, section_id = ?, test_name = ?, analyte = ?, lot_number = ?, manufacturer = ?, expiry_date = ?, storage_condition = ?, target_mean = ?, target_sd = ?, acceptable_low = ?, acceptable_high = ?, equipment_id = ?, inventory_batch_id = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-      .run(
-        req.body.materialName ?? oldValue.material_name,
-        parseIntNullable(req.body.departmentId) ?? oldValue.department_id,
-        parseIntNullable(req.body.sectionId) ?? oldValue.section_id,
-        req.body.testName ?? oldValue.test_name,
-        req.body.analyte ?? oldValue.analyte,
-        req.body.lotNumber ?? oldValue.lot_number,
-        req.body.manufacturer ?? oldValue.manufacturer,
-        req.body.expiryDate ?? oldValue.expiry_date,
-        req.body.storageCondition ?? oldValue.storage_condition,
-        req.body.targetMean !== undefined && req.body.targetMean !== '' ? Number(req.body.targetMean) : oldValue.target_mean,
-        req.body.targetSd !== undefined && req.body.targetSd !== '' ? Number(req.body.targetSd) : oldValue.target_sd,
-        req.body.acceptableLow !== undefined && req.body.acceptableLow !== '' ? Number(req.body.acceptableLow) : oldValue.acceptable_low,
-        req.body.acceptableHigh !== undefined && req.body.acceptableHigh !== '' ? Number(req.body.acceptableHigh) : oldValue.acceptable_high,
-        parseIntNullable(req.body.equipmentId) ?? oldValue.equipment_id,
-        parseIntNullable(req.body.inventoryBatchId) ?? oldValue.inventory_batch_id,
-        req.body.isActive !== undefined ? (req.body.isActive ? 1 : 0) : oldValue.is_active,
-        req.params.id
-      );
-    audit(req, { action: 'edit', entity: 'iqc_materials', entityId: req.params.id, oldValue, newValue: req.body });
-    res.json({ ok: true });
-  });
+  // Editing a control's parameters lives in routes/iqcAdmin.ts, which knows
+  // about the redesigned model — source, control type, rule profile, in-house
+  // provenance and the analyte set — and refuses an edit that would rewrite what
+  // recorded runs already mean. The flat pre-redesign handler that used to sit
+  // here wrote only the legacy columns and was shadowed by it; it is gone rather
+  // than left as a second, quieter way to change the same record.
 
   router.get('/materials/:id/results', requirePermission('iqc', 'view'), (req, res) => {
     const db = getDb();

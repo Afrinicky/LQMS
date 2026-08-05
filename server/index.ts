@@ -19,6 +19,7 @@ import { organisationRoutes } from './routes/organisation.js';
 import { iqcRoutes } from './routes/iqc.js';
 import { iqcRunRoutes } from './routes/iqcRuns.js';
 import { iqcImportExportRoutes } from './routes/iqcImportExport.js';
+import { iqcAdminRoutes } from './routes/iqcAdmin.js';
 import { eqaRoutes } from './routes/eqa.js';
 import { verificationValidationRoutes } from './routes/verificationValidation.js';
 import { measurementUncertaintyRoutes } from './routes/measurementUncertainty.js';
@@ -101,6 +102,7 @@ export function createApiServer() {
   app.use('/api/organisation', organisationRoutes());
   // Runs, analytes and charts mount first so their specific paths win over
   // the older material/result routes that share the same prefix.
+  app.use('/api/iqc', iqcAdminRoutes());
   app.use('/api/iqc', iqcImportExportRoutes());
   app.use('/api/iqc', iqcRunRoutes());
   app.use('/api/iqc', iqcRoutes());

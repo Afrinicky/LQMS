@@ -38,7 +38,10 @@ export type RemoteCloudUser = {
   status: string;
   last_login_at: string | null;
 };
-export type ApiUser = { id: number; username: string; fullName: string; roleId: number; roleName?: string; staffId?: number | null; staffName?: string | null; isActive: boolean; mustChangePassword?: boolean };
+// isAdministrator reserves the few capabilities the permission matrix does not
+// grant — correcting or removing a control run that has already been acted on.
+// The client hides those controls; the server refuses them either way.
+export type ApiUser = { id: number; username: string; fullName: string; roleId: number; roleName?: string; isAdministrator?: boolean; staffId?: number | null; staffName?: string | null; isActive: boolean; mustChangePassword?: boolean };
 /**
  * A user's effective permissions: module key → the actions they may take.
  * A module that is absent may not be viewed, so the client hides it entirely.

@@ -111,6 +111,20 @@ CREATE TABLE IF NOT EXISTS dennis_settings (id INTEGER PRIMARY KEY AUTOINCREMENT
     database.exec('ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0');
   }
 
+  // Which role is THE administrator.
+  //
+  // A handful of capabilities are reserved for an administrator rather than
+  // granted through the permission matrix — correcting or removing a quality
+  // record that has already been signed, for instance. Those need a definition
+  // that does not depend on a role's name, since a laboratory may rename its
+  // roles. The flag is set on the seeded System Administrator and can be moved
+  // deliberately; `is_system` is a different thing and does not imply it.
+  const roleColumns = database.prepare("PRAGMA table_info(roles)").all() as Array<{ name: string }>;
+  if (!roleColumns.some(c => c.name === 'is_administrator')) {
+    database.exec('ALTER TABLE roles ADD COLUMN is_administrator INTEGER NOT NULL DEFAULT 0');
+    database.exec("UPDATE roles SET is_administrator = 1 WHERE name = 'System Administrator'");
+  }
+
   // ---------------------------------------------------------------------
   // Password reset requests.
   //
