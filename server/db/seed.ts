@@ -24,6 +24,12 @@ export function seedDefaults() {
     for (const role of rolesToSeed) {
       db.prepare('INSERT OR IGNORE INTO roles (name, description, is_system) VALUES (?, ?, ?)').run(role.name, role.description, role.is_system ?? 0);
     }
+    // The administrator flag is what reserves the few capabilities that sit
+    // outside the permission matrix (see requireAdministrator). A laboratory
+    // that has never had one gets it on the seeded role; one that has moved it
+    // deliberately keeps its own choice.
+    const anyAdmin = db.prepare('SELECT COUNT(*) AS n FROM roles WHERE is_administrator = 1').get() as { n: number };
+    if (anyAdmin.n === 0) db.prepare("UPDATE roles SET is_administrator = 1 WHERE name = 'System Administrator'").run();
     for (const module of MODULES) {
       db.prepare('INSERT OR IGNORE INTO system_modules (key, label, path, enabled, alerts_paused) VALUES (?, ?, ?, 1, 0)').run(module.key, module.label, module.path);
       for (const action of PERMISSION_ACTIONS) {
