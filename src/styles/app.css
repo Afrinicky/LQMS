@@ -2564,3 +2564,125 @@ button.tiny.danger { color: var(--danger); border-color: rgba(214, 66, 88, .4); 
 .iqc-run-act { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .iqc-run-act input { flex: 1; min-width: 220px; font-size: 12.5px; }
 .iqc-run-act button { font-size: 12.5px; }
+
+/* ============================================================
+   Backup & Restore
+   ------------------------------------------------------------
+   The page answers, top to bottom: am I protected, when does that
+   happen next, is there a copy off site, what have I got, and how
+   do I get back. The two irreversible actions sit apart at the
+   bottom and the factory reset stays folded away until asked for.
+   ============================================================ */
+.bk { display: flex; flex-direction: column; gap: 16px; }
+.bk-intro h3 { margin: 0 0 4px; font-size: 17px; }
+.bk-intro p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.65; max-width: 78ch; }
+
+/* ---- Protection at a glance ---- */
+.bk-status { border-left: 3px solid var(--border-strong); }
+.bk-status.tone-ok { border-left-color: var(--success); }
+.bk-status.tone-warn { border-left-color: var(--warning); }
+.bk-status.tone-bad { border-left-color: var(--danger); }
+.bk-status-main { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.bk-status-main h3 { margin: 0 0 3px; font-size: 16px; }
+.bk-status-main p { margin: 0; font-size: 12.5px; color: var(--muted); }
+.bk-status-main .bk-now { margin-left: auto; }
+.bk-shield { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 12px; flex: none; }
+.bk-shield.ok { background: var(--success-bg); color: var(--success); }
+.bk-shield.warn { background: var(--warning-bg); color: var(--warning); }
+.bk-shield.bad { background: rgba(214, 66, 88, .14); color: var(--danger); }
+
+.bk-legs { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.bk-leg { display: flex; align-items: flex-start; gap: 9px; font-size: 12.5px; }
+.bk-leg.ok > svg { color: var(--success); flex: none; margin-top: 1px; }
+.bk-leg.off > svg { color: var(--warning); flex: none; margin-top: 1px; }
+.bk-leg strong { display: block; font-weight: 600; }
+.bk-leg span { display: block; color: var(--faint); font-size: 11.5px; margin-top: 1px; }
+
+/* ---- Two columns that stack on a narrow screen ---- */
+.bk-cols { display: grid; grid-template-columns: 3fr 2fr; gap: 16px; align-items: start; }
+@media (max-width: 1100px) { .bk-cols { grid-template-columns: 1fr; } }
+
+/* ---- Manual or automatic ---- */
+.bk-mode { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+@media (max-width: 620px) { .bk-mode { grid-template-columns: 1fr; } }
+.bk-mode button {
+  text-align: left; padding: 12px 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong); background: transparent; cursor: pointer;
+  display: flex; flex-direction: column; gap: 4px; width: 100%;
+}
+.bk-mode button:hover:not(:disabled) { border-color: var(--accent-bright); }
+.bk-mode button.active { border-color: var(--accent-bright); background: var(--accent-soft); }
+.bk-mode button:disabled { opacity: .6; cursor: default; }
+.bk-mode strong { font-size: 13.5px; display: flex; align-items: center; gap: 8px; }
+.bk-mode em {
+  font-style: normal; font-size: 9.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--accent-bright); border: 1px solid var(--accent-bright);
+  border-radius: var(--radius-pill); padding: 1px 7px;
+}
+.bk-mode span { font-size: 11.5px; color: var(--muted); line-height: 1.55; }
+
+/* ---- Schedule presets ---- */
+.bk-presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: 10px; }
+.bk-presets button {
+  text-align: left; padding: 11px 13px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: transparent; cursor: pointer;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.bk-presets button:hover:not(:disabled) { border-color: var(--border-strong); }
+.bk-presets button.active { border-color: var(--accent-bright); background: var(--accent-soft); }
+.bk-presets button:disabled { opacity: .6; cursor: default; }
+.bk-preset-head { display: flex; align-items: center; gap: 8px; }
+.bk-preset-head strong { font-size: 13px; }
+.bk-preset-head em {
+  font-style: normal; font-size: 9.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--accent-bright);
+}
+.bk-preset-detail { font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; }
+.bk-preset-why { font-size: 11px; color: var(--faint); line-height: 1.5; margin-top: 3px; }
+
+.bk-times { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-top: 14px; }
+.bk-times label { font-size: 12px; }
+.bk-times input { display: block; }
+
+.bk-days { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+.bk-days button {
+  padding: 5px 11px; border-radius: var(--radius-pill); font-size: 11.5px;
+  border: 1px solid var(--border-strong); background: transparent; cursor: pointer;
+}
+.bk-days button.active { border-color: var(--accent-bright); background: var(--accent-soft); color: var(--accent-bright); }
+
+.bk-retention { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+.bk-retention h4 { margin: 0 0 3px; font-size: 13px; }
+.bk-retention-row { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; }
+.bk-retention-row label { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
+.bk-retention-row input { width: 62px; text-align: center; }
+
+.bk-check { display: flex; align-items: center; gap: 9px; margin-top: 14px; font-size: 12.5px; }
+.bk-check input { width: auto; }
+
+/* ---- Google Drive ---- */
+.bk-drive .bk-warn {
+  display: flex; gap: 8px; align-items: flex-start; font-size: 11.5px; line-height: 1.6;
+  background: var(--warning-bg); border: 1px solid rgba(245, 181, 68, .28);
+  border-radius: var(--radius-sm); padding: 9px 11px; color: var(--muted); margin: 10px 0;
+}
+.bk-drive .bk-warn svg { flex: none; margin-top: 1px; color: var(--warning); }
+.bk-drive .bk-warn.bad { background: rgba(214, 66, 88, .08); border-color: rgba(214, 66, 88, .3); }
+.bk-drive .bk-warn.bad svg { color: var(--danger); }
+.bk-steps { margin: 4px 0 14px; padding-left: 20px; font-size: 12px; color: var(--muted); line-height: 1.75; }
+.bk-steps li { margin-bottom: 4px; }
+.bk-drive textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.bk-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 11px; margin: 4px 0 12px; }
+.bk-facts dt { font-size: 10px; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.bk-facts dd { margin: 3px 0 0; font-size: 12.5px; word-break: break-word; }
+
+/* ---- The list, and getting back ---- */
+.bk-table .cell-sub { font-size: 10.5px; color: var(--faint); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin-top: 2px; }
+.bk-row-acts { display: flex; gap: 6px; justify-content: flex-end; }
+.bk-restore-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+
+.bk-reset { border: 1px solid rgba(214, 66, 88, .35); }
+.bk-reset-collapsed { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.bk-reset-collapsed strong { font-size: 13.5px; }
+.bk-reset-collapsed p { margin: 3px 0 0; }
+.bk-reset .section-head h3 { display: flex; align-items: center; gap: 7px; }

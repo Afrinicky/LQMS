@@ -1,6 +1,13 @@
 import { Fragment, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import {
+  ShieldCheck, AlertTriangle, CheckCircle2, Cloud, Clock, HardDrive, Archive,
+  Download, Upload, Plus, Info,
+} from 'lucide-react';
 import { api, API_BASE, getToken } from '../services/api';
+import {
+  SCHEDULE_PRESETS, DAY_NAMES, describeRetention, normaliseSchedule, type BackupSchedule,
+} from '../../shared/constants/backup';
 import { useAuth } from '../hooks/useAuth';
 import { MODULES, PERMISSION_ACTIONS, TECHNICAL_AUTHORIZATION_LEVELS } from '../../shared/constants/modules';
 import { usePermissions } from '../hooks/usePermissions';
@@ -1345,7 +1352,7 @@ export function ActionTracker(){
   </div>;
 }
 
-type BackupEntry = { fileName: string; sizeBytes: number; createdAt: string; source: string; downloadPath: string };
+type BackupEntry = { fileName: string; sizeBytes: number; createdAt: string; source: string; downloadPath: string; syncedAt?: string | null };
 
 function formatBytes(n: number): string {
   if (!n) return '0 B';
@@ -1360,28 +1367,43 @@ export function BackupRestore(){
   // The factory reset is destructive, so it is shown only to someone holding
   // the highest right on Settings. The server checks the same thing, plus the
   // administrator role, before it will run.
-  const isAdmin = user?.roleName === 'System Administrator' && can('settings', 'approve');
+  const isAdmin = user?.isAdministrator === true && can('settings', 'approve');
+  const mayConfigure = can('settings', 'edit');
+  const mayRestore = can('settings', 'approve');
+
+  const [status, setStatus] = useState<ProtectionStatus | null>(null);
   const [backups, setBackups] = useState<BackupEntry[]>([]);
   const [location, setLocation] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
   const [resetConfirm, setResetConfirm] = useState('');
+  const [showReset, setShowReset] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const load = () => api<{ location: string; backups: BackupEntry[] }>('/backup/list')
-    .then(r => { setBackups(r.backups); setLocation(r.location); })
-    .catch(e => setError(e.message));
+  const load = async () => {
+    try {
+      const [list, st] = await Promise.all([
+        api<{ location: string; backups: BackupEntry[] }>('/backup/list'),
+        api<ProtectionStatus>('/backup/status').catch(() => null),
+      ]);
+      setBackups(list.backups); setLocation(list.location);
+      if (st) setStatus(st);
+    } catch (e) { setError((e as Error).message); }
+  };
   useEffect(() => { void load(); }, []);
 
-  async function createBackup() {
-    setBusy(true); setError(null); setMessage(null);
+  async function runBackup() {
+    setBusy('backup'); setError(null); setMessage(null);
     try {
-      const r = await api<{ fileName: string; sizeBytes: number; location: string }>('/backup/create', { method: 'POST' });
-      setMessage(`Backup created: ${r.fileName} (${formatBytes(r.sizeBytes)}). Saved in ${r.location}. Use Download to save a copy anywhere you like.`);
+      const r = await api<{ backup: BackupFileInfo; pruned: string[]; sync: { ok: boolean; error?: string } | null }>('/backup/run-now', { method: 'POST', body: '{}' });
+      const parts = [`Backup taken — ${r.backup.fileName} (${formatBytes(r.backup.sizeBytes)})`];
+      if (r.pruned.length) parts.push(`${r.pruned.length} older backup(s) pruned`);
+      if (r.sync) parts.push(r.sync.ok ? 'copied to Google Drive' : `Drive copy failed: ${r.sync.error}`);
+      setMessage(parts.join(' · '));
       await load();
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+    } catch (e) { setError((e as Error).message); } finally { setBusy(''); }
   }
 
   async function download(entry: BackupEntry) {
@@ -1403,18 +1425,18 @@ export function BackupRestore(){
 
   async function restoreExisting(entry: BackupEntry) {
     if (!window.confirm(`Restore from "${entry.fileName}"?\n\n${CONFIRM}`)) return;
-    setBusy(true); setError(null); setMessage(null);
+    setBusy('restore'); setError(null); setMessage(null);
     try {
       const r = await api<{ message: string; safetyBackup: string }>('/backup/restore', { method: 'POST', body: JSON.stringify({ fileName: entry.fileName }) });
       setMessage(`${r.message} (Safety snapshot saved as ${r.safetyBackup}.)`);
       await load();
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+    } catch (e) { setError((e as Error).message); } finally { setBusy(''); }
   }
 
   async function restoreFromUpload() {
     if (!restoreFile) return;
     if (!window.confirm(`Restore from uploaded file "${restoreFile.name}"?\n\n${CONFIRM}`)) return;
-    setBusy(true); setError(null); setMessage(null);
+    setBusy('restore'); setError(null); setMessage(null);
     try {
       const fd = new FormData();
       fd.append('file', restoreFile);
@@ -1423,73 +1445,572 @@ export function BackupRestore(){
       setRestoreFile(null);
       if (fileRef.current) fileRef.current.value = '';
       await load();
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+    } catch (e) { setError((e as Error).message); } finally { setBusy(''); }
+  }
+
+  async function syncNow() {
+    setBusy('sync'); setError(null); setMessage(null);
+    try {
+      const r = await api<{ ok: boolean; message: string }>('/backup/drive/sync', { method: 'POST', body: '{}' });
+      if (r.ok) setMessage(r.message); else setError(r.message);
+      await load();
+    } catch (e) { setError((e as Error).message); } finally { setBusy(''); }
+  }
+
+  async function prune() {
+    if (!window.confirm('Apply the retention policy now? Backups outside the window are deleted from this host.')) return;
+    setBusy('prune'); setError(null); setMessage(null);
+    try {
+      const r = await api<{ message: string }>('/backup/prune', { method: 'POST', body: '{}' });
+      setMessage(r.message);
+      await load();
+    } catch (e) { setError((e as Error).message); } finally { setBusy(''); }
   }
 
   async function factoryReset() {
     if (resetConfirm !== 'RESET') return;
     if (!window.confirm('FACTORY RESET\n\nThis PERMANENTLY erases ALL data — the database, uploads, evidence and configuration — and returns the system to first-time setup.\n\nA full backup is created automatically first so this can be undone. You will be signed out afterwards.\n\nAre you absolutely sure?')) return;
-    setBusy(true); setError(null); setMessage(null);
+    setBusy('reset'); setError(null); setMessage(null);
     try {
       const r = await api<{ message: string; backup: string }>('/backup/factory-reset', { method: 'POST', body: JSON.stringify({ confirm: 'RESET' }) });
       setResetConfirm('');
       setMessage(`${r.message} A safety backup was saved as ${r.backup}. Signing out…`);
       setTimeout(() => { void logout().catch(() => undefined).finally(() => window.location.reload()); }, 1800);
-    } catch (e) { setError((e as Error).message); setBusy(false); }
+    } catch (e) { setError((e as Error).message); setBusy(''); }
   }
 
-  return <div className="card"><h3>Backup &amp; Restore</h3>
-    <p>Backups are ZIP archives that include the SQLite database, uploads, evidence, config, and a backup-manifest.json. They are stored on the server at <code>{location || 'the backups folder'}</code>. Use <strong>Download</strong> to keep a copy anywhere, and restore from an existing backup or from a ZIP file on your computer.</p>
+  const syncedNames = new Set<string>();
+  const newest = backups[0];
 
-    {error && <p className="error" role="alert">{error}</p>}
-    {message && <p className="hint" role="status">{message}</p>}
+  return <div className="bk">
+    <PageIntro
+      title="Backup & Restore"
+      lead="A backup is the whole laboratory in one file — the database, uploads, evidence and configuration. Take one on a schedule, keep a sensible number, and put a copy somewhere the building is not."
+    />
 
-    <div className="form-actions">
-      <button onClick={createBackup} disabled={busy}>{busy ? 'Working…' : 'Create backup (ZIP)'}</button>
+    {error && <div className="error" role="alert">{error}</div>}
+    {message && <div className="notice-ok" role="status">{message}</div>}
+
+    <ProtectionCard
+      status={status}
+      newest={newest}
+      onBackupNow={runBackup}
+      busy={busy}
+      canBackup={can('settings', 'export')}
+    />
+
+    <div className="bk-cols">
+      <ScheduleCard status={status} readOnly={!mayConfigure} onSaved={async (m) => { setMessage(m); await load(); }} onError={setError} />
+      <DriveCard status={status} readOnly={!mayRestore} canSync={can('settings', 'export')}
+        onChanged={async (m) => { setMessage(m); await load(); }} onError={setError}
+        onSyncNow={syncNow} busy={busy} />
     </div>
 
-    <h4>Available backups</h4>
-    {backups.length === 0
-      ? <p className="hint">No backups yet. Create one above.</p>
-      : <table className="table"><thead><tr><th>File</th><th>Size</th><th>Created</th><th>Source</th><th>Actions</th></tr></thead><tbody>
-          {backups.map(b => <tr key={b.fileName}>
-            <td>{b.fileName}</td>
-            <td>{formatBytes(b.sizeBytes)}</td>
-            <td>{new Date(b.createdAt).toLocaleString()}</td>
-            <td>{b.source === 'system' ? 'This system' : 'External'}</td>
-            <td>
-              <button className="secondary" onClick={() => download(b)} disabled={busy}>Download</button>{' '}
-              <button onClick={() => restoreExisting(b)} disabled={busy}>Restore</button>
-            </td>
-          </tr>)}
-        </tbody></table>}
+    <BackupList
+      backups={backups} location={location} busy={busy} syncedNames={syncedNames}
+      driveConnected={status?.drive.connected ?? false}
+      canRestore={mayRestore} canPrune={mayRestore}
+      onDownload={download} onRestore={restoreExisting} onPrune={prune}
+      retention={status?.schedule.retention ?? null}
+    />
 
-    <h4>Restore from a ZIP file</h4>
-    <p className="hint">Select a backup ZIP saved on your computer (for example one you downloaded earlier) and restore it.</p>
-    <div className="form-actions">
-      <input ref={fileRef} type="file" accept=".zip,application/zip" onChange={e => setRestoreFile(e.target.files?.[0] ?? null)} />
-      <button onClick={restoreFromUpload} disabled={busy || !restoreFile}>{busy ? 'Working…' : 'Restore from selected ZIP'}</button>
-    </div>
-
-    {isAdmin && <>
-      <hr />
-      <h4 style={{ color: 'var(--danger)' }}>Factory reset</h4>
-      <p className="hint">Permanently erase <strong>all data</strong> — database, uploads, evidence and configuration — and return the system to first-time setup. A full backup is created automatically first so this can be undone, and existing backups are kept. Only a System Administrator can do this.</p>
-      <p className="hint">To proceed, type <code>RESET</code> below and then confirm.</p>
-      <div className="form-actions">
-        <input
-          type="text"
-          value={resetConfirm}
-          onChange={e => setResetConfirm(e.target.value)}
-          placeholder="Type RESET to confirm"
-          aria-label="Type RESET to confirm factory reset"
-          autoComplete="off"
-        />
-        <button className="danger" onClick={factoryReset} disabled={busy || resetConfirm !== 'RESET'}>{busy ? 'Working…' : 'Reset to factory settings'}</button>
+    {mayRestore && (
+      <div className="card bk-restore">
+        <div className="section-head"><h3><Upload size={15} /> Restore from a file</h3></div>
+        <p className="hint">
+          For a backup kept off this host — one you downloaded earlier, or fetched from Google Drive. The current data is
+          snapshotted first, so a restore from the wrong file can itself be undone.
+        </p>
+        <div className="bk-restore-row">
+          <input ref={fileRef} type="file" accept=".zip,application/zip" onChange={e => setRestoreFile(e.target.files?.[0] ?? null)} />
+          <button onClick={restoreFromUpload} disabled={!!busy || !restoreFile}>
+            {busy === 'restore' ? 'Restoring…' : 'Restore from this file'}
+          </button>
+        </div>
       </div>
-    </>}
+    )}
+
+    {isAdmin && (
+      <div className="card bk-reset">
+        {!showReset ? (
+          <div className="bk-reset-collapsed">
+            <div>
+              <strong>Factory reset</strong>
+              <p className="hint">Erase everything and return to first-time setup. Kept out of the way on purpose.</p>
+            </div>
+            <button type="button" className="secondary" onClick={() => setShowReset(true)}>Show</button>
+          </div>
+        ) : (
+          <>
+            <div className="section-head"><h3 style={{ color: 'var(--danger)' }}><AlertTriangle size={15} /> Factory reset</h3>
+              <button type="button" className="secondary tiny" onClick={() => { setShowReset(false); setResetConfirm(''); }}>Hide</button>
+            </div>
+            <p className="hint">
+              Permanently erases <strong>all data</strong> — database, uploads, evidence and configuration — and returns the system
+              to first-time setup. A full backup is taken first and existing backups are kept, so this can be undone.
+            </p>
+            <div className="bk-restore-row">
+              <input type="text" value={resetConfirm} onChange={e => setResetConfirm(e.target.value)} placeholder="Type RESET to confirm" style={{ maxWidth: 220 }} />
+              <button className="danger" onClick={factoryReset} disabled={!!busy || resetConfirm !== 'RESET'}>
+                {busy === 'reset' ? 'Resetting…' : 'Erase everything'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    )}
   </div>;
 }
+
+
+/* ========================================================================
+   Backup & Restore — the parts.
+
+   The screen answers, in order: am I protected right now, when does that
+   happen next, is there a copy off site, what have I got, and how do I get
+   back. The two irreversible things — restore and factory reset — sit at the
+   bottom, apart from the routine ones, and the reset is folded away until
+   somebody asks for it.
+   ======================================================================== */
+
+type BackupFileInfo = { fileName: string; sizeBytes: number; createdAt: string; source: string };
+type ProtectionStatus = {
+  schedule: BackupSchedule;
+  nextRun: string | null;
+  lastBackup: BackupFileInfo | null;
+  backupCount: number;
+  totalBytes: number;
+  drive: {
+    connected: boolean; folderId: string | null; folderName: string | null; clientEmail: string | null;
+    lastSyncAt: string | null; lastSyncFile: string | null;
+    lastFailureAt: string | null; lastFailureMessage: string | null; pendingCount: number;
+  };
+};
+
+const timeAgo = (iso: string | null | undefined): string => {
+  if (!iso) return 'never';
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return 'unknown';
+  const mins = Math.round((Date.now() - then) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+};
+
+const whenNext = (iso: string | null): string => {
+  if (!iso) return '—';
+  const at = new Date(iso);
+  const today = new Date();
+  const sameDay = at.toDateString() === today.toDateString();
+  const time = at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (sameDay) return `today at ${time}`;
+  const tomorrow = new Date(today.getTime() + 86400000);
+  if (at.toDateString() === tomorrow.toDateString()) return `tomorrow at ${time}`;
+  return `${at.toLocaleDateString([], { weekday: 'long' })} at ${time}`;
+};
+
+/** A short heading on the panel, so the page reads as a page and not a form. */
+function PageIntro({ title, lead }: { title: string; lead: string }) {
+  return <div className="bk-intro"><h3>{title}</h3><p>{lead}</p></div>;
+}
+
+/**
+ * How protected the laboratory is, in one line it can read from across the
+ * room: when the last backup was, when the next one is, and whether a copy
+ * exists anywhere but this machine.
+ */
+function ProtectionCard({ status, newest, onBackupNow, busy, canBackup }: {
+  status: ProtectionStatus | null; newest: BackupFileInfo | undefined;
+  onBackupNow: () => void; busy: string; canBackup: boolean;
+}) {
+  const last = status?.lastBackup ?? newest ?? null;
+  const ageHours = last ? (Date.now() - new Date(last.createdAt).getTime()) / 3600000 : Infinity;
+  const scheduled = status?.schedule.enabled ?? false;
+  const offsite = status?.drive.connected && !status?.drive.lastFailureAt ? (status?.drive.lastSyncAt ?? null) : null;
+
+  // Three states, and they mean what they say. "Protected" needs all three legs:
+  // a recent backup, a schedule so the next one does not depend on somebody
+  // remembering, and a copy that is not in this building.
+  const tone = !last ? 'bad' : (!scheduled || ageHours > 48) ? 'warn' : offsite ? 'ok' : 'warn';
+  const headline = !last ? 'No backup has ever been taken'
+    : tone === 'ok' ? 'This laboratory is protected'
+    : 'Protected, with a gap';
+
+  return (
+    <div className={`card bk-status tone-${tone}`}>
+      <div className="bk-status-main">
+        <span className={`bk-shield ${tone}`}>{tone === 'ok' ? <ShieldCheck size={26} /> : <AlertTriangle size={26} />}</span>
+        <div>
+          <h3>{headline}</h3>
+          <p>
+            {last
+              ? <>Last backup {timeAgo(last.createdAt)} · {formatBytes(last.sizeBytes)}</>
+              : <>Nothing has been saved yet. Take one now.</>}
+            {status && <> · {status.backupCount} kept here ({formatBytes(status.totalBytes)})</>}
+          </p>
+        </div>
+        {canBackup && (
+          <button onClick={onBackupNow} disabled={!!busy} className="bk-now">
+            <Download size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />
+            {busy === 'backup' ? 'Backing up…' : 'Back up now'}
+          </button>
+        )}
+      </div>
+      <div className="bk-legs">
+        <Leg ok={!!last && ageHours <= 48} label="Recent copy"
+          detail={last ? `${timeAgo(last.createdAt)}` : 'none yet'} />
+        <Leg ok={scheduled} label="Runs on its own"
+          detail={scheduled ? `next ${whenNext(status?.nextRun ?? null)}` : 'switched off'} />
+        <Leg ok={!!offsite} label="Copy off site"
+          detail={status?.drive.connected
+            ? (status.drive.lastSyncAt ? `Drive, ${timeAgo(status.drive.lastSyncAt)}` : 'Drive connected, nothing sent yet')
+            : 'this machine only'} />
+      </div>
+    </div>
+  );
+}
+
+function Leg({ ok, label, detail }: { ok: boolean; label: string; detail: string }) {
+  return (
+    <div className={`bk-leg ${ok ? 'ok' : 'off'}`}>
+      {ok ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
+      <div><strong>{label}</strong><span>{detail}</span></div>
+    </div>
+  );
+}
+
+/**
+ * When backups happen.
+ *
+ * The presets carry their reasoning, because "every night at 02:00" is a
+ * recommendation with a reason behind it and a laboratory choosing otherwise
+ * should be able to see what it is trading away.
+ */
+function ScheduleCard({ status, readOnly, onSaved, onError }: {
+  status: ProtectionStatus | null; readOnly: boolean;
+  onSaved: (message: string) => void | Promise<void>; onError: (m: string) => void;
+}) {
+  const [schedule, setSchedule] = useState<BackupSchedule | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (status) setSchedule(status.schedule); }, [status]);
+  if (!schedule) return <div className="card"><p className="muted">Loading the schedule…</p></div>;
+
+  const set = (patch: Partial<BackupSchedule>) => setSchedule(s => (s ? { ...s, ...patch } : s));
+  const setTime = (i: number, v: string) => setSchedule(s => {
+    if (!s) return s;
+    const times = [...s.times]; times[i] = v; return { ...s, times };
+  });
+
+  async function save() {
+    setBusy(true);
+    try {
+      const r = await api<{ description: string; nextRun: string | null }>('/backup/schedule', { method: 'PUT', body: JSON.stringify(schedule) });
+      await onSaved(schedule!.enabled ? `${r.description} Next backup ${whenNext(r.nextRun)}.` : 'Automatic backups are off.');
+    } catch (e) { onError((e as Error).message); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="card bk-schedule">
+      <div className="section-head">
+        <h3><HardDrive size={15} /> Local backups on this host</h3>
+      </div>
+
+      {/* Manual or automatic is the first decision, so it is a choice with two
+          named answers rather than a switch the reader has to interpret. */}
+      <div className="bk-mode">
+        <button type="button" disabled={readOnly}
+          className={!schedule.enabled ? 'active' : ''}
+          onClick={() => set({ enabled: false })}>
+          <strong>Manual only</strong>
+          <span>A backup happens when somebody presses "Back up now". Nothing runs on its own.</span>
+        </button>
+        <button type="button" disabled={readOnly}
+          className={schedule.enabled ? 'active' : ''}
+          onClick={() => set({ enabled: true })}>
+          <strong>Automatic <em>Recommended</em></strong>
+          <span>The host takes one on a schedule, whether or not anyone remembers.</span>
+        </button>
+      </div>
+
+      {!schedule.enabled && (
+        <p className="hint">
+          Manual backups are still a real safety net — but most laboratories that lose data lose it because nobody
+          remembered. Retention below still applies to the backups you take by hand.
+        </p>
+      )}
+
+      {schedule.enabled && <>
+        <div className="bk-presets">
+          {SCHEDULE_PRESETS.map(p => (
+            <button key={p.key} type="button" disabled={readOnly}
+              className={schedule.frequency === p.key ? 'active' : ''}
+              onClick={() => set(normaliseSchedule({ ...schedule, ...p.apply }))}>
+              <span className="bk-preset-head">
+                <strong>{p.label}</strong>
+                {p.recommended && <em>Recommended</em>}
+              </span>
+              <span className="bk-preset-detail">{p.detail}</span>
+              <span className="bk-preset-why">{p.why}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="bk-times">
+          {schedule.times.map((t, i) => (
+            <label key={i}>{schedule.times.length > 1 ? `Time ${i + 1}` : 'At'}
+              <input type="time" value={t} disabled={readOnly} onChange={e => setTime(i, e.target.value)} />
+            </label>
+          ))}
+          {schedule.frequency === 'custom' && !readOnly && (
+            <>
+              {schedule.times.length < 6 && (
+                <button type="button" className="secondary tiny" onClick={() => set({ times: [...schedule.times, '02:00'] })}>
+                  <Plus size={12} /> Add a time
+                </button>
+              )}
+              {schedule.times.length > 1 && (
+                <button type="button" className="secondary tiny" onClick={() => set({ times: schedule.times.slice(0, -1) })}>Remove one</button>
+              )}
+            </>
+          )}
+        </div>
+
+        {schedule.frequency === 'weekly' && (
+          <div className="bk-days">
+            {DAY_NAMES.map((d, i) => (
+              <button key={d} type="button" disabled={readOnly}
+                className={schedule.daysOfWeek.includes(i) ? 'active' : ''}
+                onClick={() => set({ daysOfWeek: schedule.daysOfWeek.includes(i) ? schedule.daysOfWeek.filter(x => x !== i) : [...schedule.daysOfWeek, i].sort() })}>
+                {d.slice(0, 3)}
+              </button>
+            ))}
+          </div>
+        )}
+      </>}
+
+      <div className="bk-retention">
+          <h4>How many to keep</h4>
+          <p className="hint">{describeRetention(schedule.retention)}</p>
+          <div className="bk-retention-row">
+            <label>Daily, for
+              <input type="number" min={0} max={90} value={schedule.retention.daily} disabled={readOnly}
+                onChange={e => set({ retention: { ...schedule.retention, daily: Number(e.target.value) } })} />
+              <span>days</span>
+            </label>
+            <label>Then weekly, for
+              <input type="number" min={0} max={52} value={schedule.retention.weekly} disabled={readOnly}
+                onChange={e => set({ retention: { ...schedule.retention, weekly: Number(e.target.value) } })} />
+              <span>weeks</span>
+            </label>
+            <label>Then monthly, for
+              <input type="number" min={0} max={120} value={schedule.retention.monthly} disabled={readOnly}
+                onChange={e => set({ retention: { ...schedule.retention, monthly: Number(e.target.value) } })} />
+              <span>months</span>
+            </label>
+          </div>
+      </div>
+
+      {status?.drive.connected && (
+        <label className="bk-check">
+          <input type="checkbox" checked={schedule.syncToDrive} disabled={readOnly}
+            onChange={e => set({ syncToDrive: e.target.checked })} />
+          <span>Also copy each backup to Google Drive as soon as it is taken</span>
+        </label>
+      )}
+
+      {!readOnly && (
+        <div className="form-actions">
+          <button onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save schedule'}</button>
+        </div>
+      )}
+      {readOnly && <p className="hint">You can see the schedule but not change it.</p>}
+    </div>
+  );
+}
+
+/**
+ * The copy that is not in this building.
+ *
+ * Google Drive is reached with a service account rather than a "sign in with
+ * Google" prompt, because this host runs unattended with no browser: the
+ * laboratory creates the account once, shares a folder with it, and the host
+ * uses it forever. The setup steps are on the card rather than in a manual
+ * nobody will find.
+ */
+function DriveCard({ status, readOnly, canSync, onChanged, onError, onSyncNow, busy }: {
+  status: ProtectionStatus | null; readOnly: boolean; canSync: boolean;
+  onChanged: (message: string) => void | Promise<void>; onError: (m: string) => void;
+  onSyncNow: () => void; busy: string;
+}) {
+  const [connecting, setConnecting] = useState(false);
+  const [keyJson, setKeyJson] = useState('');
+  const [folderId, setFolderId] = useState('');
+  const [working, setWorking] = useState(false);
+  const drive = status?.drive;
+
+  useEffect(() => { if (drive?.folderId) setFolderId(drive.folderId); }, [drive?.folderId]);
+
+  async function connect() {
+    setWorking(true);
+    try {
+      const r = await api<{ clientEmail: string; folderName: string | null }>('/backup/drive', {
+        method: 'PUT', body: JSON.stringify({ serviceAccountKey: keyJson || undefined, folderId }),
+      });
+      setKeyJson(''); setConnecting(false);
+      await onChanged(`Google Drive connected as ${r.clientEmail}${r.folderName ? `, saving into "${r.folderName}"` : ''}.`);
+    } catch (e) { onError((e as Error).message); } finally { setWorking(false); }
+  }
+
+  async function test() {
+    setWorking(true);
+    try {
+      const r = await api<{ clientEmail: string; folderName: string | null }>('/backup/drive/test', { method: 'POST', body: JSON.stringify({ folderId }) });
+      await onChanged(`Google Drive is reachable as ${r.clientEmail}${r.folderName ? `, folder "${r.folderName}"` : ''}.`);
+    } catch (e) { onError((e as Error).message); } finally { setWorking(false); }
+  }
+
+  async function disconnect() {
+    if (!window.confirm('Disconnect Google Drive?\n\nBackups already copied there are untouched. New backups will stay on this host only.')) return;
+    setWorking(true);
+    try {
+      const r = await api<{ message: string }>('/backup/drive', { method: 'DELETE' });
+      await onChanged(r.message);
+    } catch (e) { onError((e as Error).message); } finally { setWorking(false); }
+  }
+
+  if (!drive?.connected && !connecting) {
+    return (
+      <div className="card bk-drive">
+        <div className="section-head"><h3><Cloud size={15} /> Copy off site</h3></div>
+        <p className="hint">
+          Every backup is on this machine. If the machine is stolen, flooded or simply fails, so is the quality record.
+          Connecting Google Drive puts a copy somewhere else automatically.
+        </p>
+        <p className="bk-warn">
+          <Info size={13} /> A backup contains the whole database, uploads and evidence. Sending it to Drive puts that in
+          Google's hands — a decision for the laboratory to make deliberately.
+        </p>
+        {!readOnly
+          ? <button type="button" onClick={() => setConnecting(true)}>Connect Google Drive</button>
+          : <p className="hint">Only someone with approval rights on Settings can connect it.</p>}
+      </div>
+    );
+  }
+
+  if (connecting) {
+    return (
+      <div className="card bk-drive">
+        <div className="section-head"><h3><Cloud size={15} /> Connect Google Drive</h3>
+          <button type="button" className="secondary tiny" onClick={() => setConnecting(false)}>Cancel</button>
+        </div>
+        <ol className="bk-steps">
+          <li>In the <strong>Google Cloud console</strong>, create a project and enable the <strong>Google Drive API</strong>.</li>
+          <li>Create a <strong>service account</strong>, then <em>Keys → Add key → JSON</em>. A file downloads.</li>
+          <li>In <strong>Google Drive</strong>, make the folder backups should go into. Share it with the service
+            account's email address, as an <strong>Editor</strong>.</li>
+          <li>Open that folder; the last part of the address bar is its <strong>folder ID</strong>.</li>
+        </ol>
+        <label className="stack">Service-account key (paste the whole JSON file)
+          <textarea rows={5} value={keyJson} onChange={e => setKeyJson(e.target.value)} spellCheck={false}
+            placeholder='{ "type": "service_account", "project_id": "…", "client_email": "…", "private_key": "…" }' />
+        </label>
+        <label className="stack">Destination folder ID
+          <input value={folderId} onChange={e => setFolderId(e.target.value)} placeholder="1AbC2dEfGhIjKlMnOpQrStUvWxYz" />
+        </label>
+        <p className="hint">The key is stored on this host only, readable by nothing else, and is never sent back to a browser.</p>
+        <div className="form-actions">
+          <button onClick={connect} disabled={working || !keyJson.trim()}>{working ? 'Checking with Google…' : 'Connect and verify'}</button>
+        </div>
+      </div>
+    );
+  }
+
+  const failing = !!drive.lastFailureAt && (!drive.lastSyncAt || drive.lastFailureAt > drive.lastSyncAt);
+  return (
+    <div className="card bk-drive">
+      <div className="section-head">
+        <h3><Cloud size={15} /> Copy off site</h3>
+        <span className={`chip ${failing ? 'bad' : 'ok'}`}>{failing ? 'Last copy failed' : 'Connected'}</span>
+      </div>
+      <dl className="bk-facts">
+        <div><dt>Account</dt><dd>{drive.clientEmail ?? '—'}</dd></div>
+        <div><dt>Folder</dt><dd>{drive.folderName || drive.folderId || 'Drive root'}</dd></div>
+        <div><dt>Last copy</dt><dd>{drive.lastSyncAt ? timeAgo(drive.lastSyncAt) : 'nothing sent yet'}</dd></div>
+        <div><dt>Waiting</dt><dd>{drive.pendingCount === 0 ? 'nothing' : `${drive.pendingCount} backup(s)`}</dd></div>
+      </dl>
+      {failing && <p className="bk-warn bad"><AlertTriangle size={13} /> {drive.lastFailureMessage}</p>}
+      <div className="form-actions">
+        {canSync && <button onClick={onSyncNow} disabled={!!busy || drive.pendingCount === 0}>
+          {busy === 'sync' ? 'Copying…' : drive.pendingCount === 0 ? 'Everything is copied' : `Copy ${drive.pendingCount} now`}
+        </button>}
+        {!readOnly && <button className="secondary" onClick={test} disabled={working}>{working ? 'Checking…' : 'Test connection'}</button>}
+        {!readOnly && <button className="secondary" onClick={disconnect} disabled={working}>Disconnect</button>}
+      </div>
+    </div>
+  );
+}
+
+/** What is on the shelf, and what can be done with each one. */
+function BackupList({ backups, location, busy, driveConnected, canRestore, canPrune, onDownload, onRestore, onPrune, retention }: {
+  backups: BackupEntry[]; location: string; busy: string; syncedNames: Set<string>;
+  driveConnected: boolean; canRestore: boolean; canPrune: boolean;
+  onDownload: (b: BackupEntry) => void; onRestore: (b: BackupEntry) => void; onPrune: () => void;
+  retention: BackupSchedule['retention'] | null;
+}) {
+  return (
+    <div className="card">
+      <div className="section-head">
+        <h3><Archive size={15} /> Backups on this host</h3>
+        {canPrune && backups.length > 0 && (
+          <button type="button" className="secondary tiny" onClick={onPrune} disabled={!!busy}>
+            {busy === 'prune' ? 'Pruning…' : 'Apply retention now'}
+          </button>
+        )}
+      </div>
+      {retention && <p className="hint">{describeRetention(retention)} Stored in <code>{location || 'the backups folder'}</code>.</p>}
+
+      {backups.length === 0 ? (
+        <div className="empty-state">
+          <span className="es-ico"><Archive size={24} /></span>
+          <h3>Nothing saved yet</h3>
+          <p>Take the first backup above, then turn the schedule on so it keeps happening.</p>
+        </div>
+      ) : (
+        <table className="data-table bk-table">
+          <thead><tr><th>Taken</th><th>Size</th><th>Kind</th>{driveConnected && <th>Off site</th>}<th /></tr></thead>
+          <tbody>
+            {backups.map(b => {
+              const safety = b.fileName.startsWith('pre-restore-');
+              return (
+                <tr key={b.fileName}>
+                  <td>
+                    <strong>{new Date(b.createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</strong>
+                    <div className="cell-sub">{b.fileName}</div>
+                  </td>
+                  <td>{formatBytes(b.sizeBytes)}</td>
+                  <td>
+                    {safety ? <span className="chip warn">Pre-restore snapshot</span>
+                      : b.source === 'system' ? <span className="chip">This system</span>
+                      : <span className="chip">Brought in</span>}
+                  </td>
+                  {driveConnected && <td>{b.syncedAt ? <span className="chip ok">Copied</span> : <span className="muted">on this host</span>}</td>}
+                  <td className="bk-row-acts">
+                    <button className="tiny secondary" onClick={() => onDownload(b)} disabled={!!busy}>Download</button>
+                    {canRestore && <button className="tiny" onClick={() => onRestore(b)} disabled={!!busy}>Restore</button>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 
 export function Devices(){
   const [devices,setDevices]=useState<Device[]>([]);
