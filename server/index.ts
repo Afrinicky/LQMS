@@ -20,6 +20,7 @@ import { iqcRoutes } from './routes/iqc.js';
 import { iqcRunRoutes } from './routes/iqcRuns.js';
 import { iqcImportExportRoutes } from './routes/iqcImportExport.js';
 import { iqcAdminRoutes } from './routes/iqcAdmin.js';
+import { backupSyncRoutes } from './routes/backupSync.js';
 import { eqaRoutes } from './routes/eqa.js';
 import { verificationValidationRoutes } from './routes/verificationValidation.js';
 import { measurementUncertaintyRoutes } from './routes/measurementUncertainty.js';
@@ -146,6 +147,9 @@ export function createApiServer() {
   app.use('/api/signatures', signatureRoutes());
   app.use('/api/qr', qrRoutes());
   app.use('/api/push', pushRoutes());
+  // Scheduling and off-site copies mount before commonRoutes so their more
+  // specific /backup/* paths win over the archive endpoints that share the prefix.
+  app.use('/api', backupSyncRoutes());
   app.use('/api', commonRoutes());
 
   // Serve the built single-page renderer so the packaged Electron window can
@@ -192,6 +196,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     // Background environmental poller. It self-gates on environmental_settings
     // (polling_enabled), so it is idle until a lab turns automated polling on.
     try { new EnvironmentalPoller(getDb).start(); } catch (e) { console.error('Environmental poller failed to start', e); }
+    // Automatic backups. Self-gates on the stored schedule, so it is idle until
+    // a laboratory turns them on, and it takes a missed backup shortly after a
+    // host that was switched off overnight comes back.
+    import('./services/backupService.js').then(({ BackupScheduler }) => {
+      new BackupScheduler().start();
+    }).catch(e => console.error('Backup scheduler failed to start', e));
     // Synchronization engine (stub). Self-gates on SECH_LIMS_SYNC_ENABLED and
     // does nothing while sync is disabled — reserved for the future cloud phase.
     try { getSyncEngine().start(); } catch (e) { console.error('Sync engine failed to start', e); }

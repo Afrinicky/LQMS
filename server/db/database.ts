@@ -87,6 +87,22 @@ CREATE TABLE IF NOT EXISTS capa_updates (id INTEGER PRIMARY KEY AUTOINCREMENT, c
 CREATE TABLE IF NOT EXISTS notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER REFERENCES users(id), module_key TEXT NOT NULL, title TEXT NOT NULL, message TEXT, status TEXT NOT NULL DEFAULT 'unread', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, action TEXT NOT NULL, entity TEXT NOT NULL, entity_id TEXT, old_value TEXT, new_value TEXT, ip_address TEXT, device_id TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS backup_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, file_name TEXT NOT NULL, manifest TEXT NOT NULL, created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+-- Every attempt to copy a backup off site, successful or not. "When did the
+-- quality record last leave the building" is a question an assessor asks, and a
+-- failed upload is part of the answer.
+CREATE TABLE IF NOT EXISTS backup_sync_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  file_name TEXT NOT NULL,
+  destination TEXT NOT NULL DEFAULT 'google_drive',
+  status TEXT NOT NULL,
+  remote_id TEXT,
+  size_bytes INTEGER,
+  duration_ms INTEGER,
+  message TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_backup_sync_file ON backup_sync_log(file_name, status);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS dennis_documents (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, module TEXT, document_type TEXT, source_record_id TEXT, version TEXT, status TEXT NOT NULL DEFAULT 'placeholder', file_path TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT);
 CREATE TABLE IF NOT EXISTS dennis_document_chunks (id INTEGER PRIMARY KEY AUTOINCREMENT, document_id INTEGER NOT NULL REFERENCES dennis_documents(id), chunk_text TEXT NOT NULL, chunk_index INTEGER NOT NULL DEFAULT 0, page_number INTEGER, section_heading TEXT, embedding_id TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);

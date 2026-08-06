@@ -14,35 +14,11 @@ import { ACCESS_LEVELS, LEVEL_ACTIONS, type AccessLevel } from '../../shared/con
 import { pendingRequests, recentRequests, decideRequest } from '../services/passwordResetService.js';
 import { historicReferences, purgeDisposableRows } from '../services/userReferences.js';
 import { audit } from '../services/auditService.js';
+import { writeBackupZip, isSafeBackupName, createBackup } from '../services/backupService.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
 import { parseIntNullable } from './routeHelpers.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import * as XLSX from 'xlsx';
-
-// archiver is loaded lazily inside the backup handler. Loading it at module
-// top level breaks the packaged Electron app under app.asar:
-//   - `import archiver from 'archiver'` fails with "does not provide an
-//     export named 'default'" because archiver is CommonJS.
-//   - `createRequire(import.meta.url)('archiver')` then fails with
-//     ERR_REQUIRE_ESM because archiver-utils is itself ESM.
-// A lazy dynamic import works in dev, production, and packaged modes and
-// keeps the rest of the app bootable even if archiver fails to resolve.
-async function loadArchiver(): Promise<(format: string, options?: any) => any> {
-  const mod: any = await import('archiver');
-  const factory = mod.default ?? mod;
-  // archiver <= v7: the module is a callable factory, archiver('zip', opts).
-  if (typeof factory === 'function') return factory as (format: string, options?: any) => any;
-  // archiver >= v8: pure ESM that exports format-specific classes instead of a
-  // factory. Provide a factory shim so the rest of the code is version-agnostic.
-  return (format: string, options?: any) => {
-    switch (format) {
-      case 'tar': return new mod.TarArchive(options);
-      case 'json': return new mod.JsonArchive(options);
-      case 'zip':
-      default: return new mod.ZipArchive(options);
-    }
-  };
-}
 
 // adm-zip is loaded lazily for the same packaging reasons as archiver above:
 // it is a CommonJS module and a top-level static import breaks under app.asar.
@@ -51,32 +27,6 @@ async function loadArchiver(): Promise<(format: string, options?: any) => any> {
 async function loadAdmZip(): Promise<any> {
   const mod: any = await import('adm-zip');
   return mod.default ?? mod;
-}
-
-// Only allow plain backup file names (no path separators / traversal) when a
-// caller references an existing backup by name for download or restore.
-function isSafeBackupName(name: string): boolean {
-  return typeof name === 'string' && /^[A-Za-z0-9._-]+\.zip$/.test(name) && !name.includes('..');
-}
-
-// Write a backup ZIP of the current deployment (SQLite + uploads + evidence +
-// config + manifest) to targetPath. Shared by the manual "Create backup"
-// endpoint and the automatic pre-restore safety snapshot.
-async function writeBackupZip(targetPath: string, manifest: unknown): Promise<void> {
-  const archiver = await loadArchiver();
-  await new Promise<void>((resolve, reject) => {
-    const output = fs.createWriteStream(targetPath);
-    const archive = archiver('zip', { zlib: { level: 9 } });
-    output.on('close', resolve);
-    archive.on('error', reject);
-    archive.pipe(output);
-    if (fs.existsSync(dbPath)) archive.file(dbPath, { name: 'database/sech_lims.sqlite' });
-    if (fs.existsSync(uploadRoot)) archive.directory(uploadRoot, 'uploads');
-    if (fs.existsSync(evidenceRoot)) archive.directory(evidenceRoot, 'evidence');
-    if (fs.existsSync(configRoot)) archive.directory(configRoot, 'config');
-    archive.append(JSON.stringify(manifest, null, 2), { name: 'backup-manifest.json' });
-    archive.finalize();
-  });
 }
 
 // Replace the contents of a destination directory with an extracted source
@@ -2065,6 +2015,11 @@ export function commonRoutes() {
     ensureDataDirs();
     const logs = getDb().prepare('SELECT file_name, created_at FROM backup_logs ORDER BY id DESC').all() as Array<{ file_name: string; created_at: string }>;
     const logByName = new Map(logs.map(l => [l.file_name, l.created_at]));
+    // When each backup last reached an off-site destination, so the list can say
+    // which copies exist only on this machine.
+    const synced = new Map((getDb().prepare(
+      "SELECT file_name, MAX(created_at) AS at FROM backup_sync_log WHERE status = 'success' GROUP BY file_name",
+    ).all() as Array<{ file_name: string; at: string }>).map(r => [r.file_name, r.at]));
     const files = fs.readdirSync(backupRoot)
       .filter(f => f.toLowerCase().endsWith('.zip') && !f.startsWith('.') && !f.startsWith('_'))
       .map(f => {
@@ -2074,6 +2029,7 @@ export function commonRoutes() {
           sizeBytes: stat.size,
           createdAt: logByName.get(f) ?? stat.mtime.toISOString(),
           source: logByName.has(f) ? 'system' : 'external',
+          syncedAt: synced.get(f) ?? null,
           downloadPath: `/backup/download/${encodeURIComponent(f)}`,
         };
       })
