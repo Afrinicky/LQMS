@@ -96,7 +96,9 @@ export function forgetKey(): void {
 
 /* ------------------------------------------------------------------ tokens */
 
-let cached: { token: string; expiresAt: number } | null = null;
+// One cached token per service account, keyed by its email — a laboratory may
+// now have more than one Drive destination.
+const cached = new Map<string, { token: string; expiresAt: number }>();
 
 const b64url = (input: Buffer | string) =>
   Buffer.from(input).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -106,10 +108,11 @@ const b64url = (input: Buffer | string) =>
  * asserting who we are and what we want, and Google returns a bearer token.
  * Tokens last an hour; this reuses one until a minute before it expires.
  */
-export async function getAccessToken(force = false): Promise<string> {
-  if (!force && cached && cached.expiresAt > Date.now() + 60_000) return cached.token;
-  const key = readKey();
+export async function getAccessToken(force = false, explicitKey?: ServiceAccountKey): Promise<string> {
+  const key = explicitKey ?? readKey();
   if (!key) throw new Error('Google Drive is not connected — no service-account key is stored.');
+  const hit = cached.get(key.client_email);
+  if (!force && hit && hit.expiresAt > Date.now() + 60_000) return hit.token;
 
   const now = Math.floor(Date.now() / 1000);
   const header = b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
@@ -132,21 +135,29 @@ export async function getAccessToken(force = false): Promise<string> {
   if (!res.ok || !body.access_token) {
     throw new Error(`Google refused the service-account key: ${body.error_description || body.error || res.statusText}`);
   }
-  cached = { token: body.access_token, expiresAt: Date.now() + 3500_000 };
+  cached.set(key.client_email, { token: body.access_token, expiresAt: Date.now() + 3500_000 });
   return body.access_token;
 }
 
 /* ------------------------------------------------------------------- calls */
 
-async function driveFetch(url: string, init: RequestInit = {}): Promise<Response> {
-  const token = await getAccessToken();
+async function driveFetch(url: string, init: RequestInit = {}, key?: ServiceAccountKey): Promise<Response> {
+  const token = await getAccessToken(false, key);
   const res = await fetch(url, { ...init, headers: { ...(init.headers ?? {}), Authorization: `Bearer ${token}` } });
   // One retry on an expired token, in case the cached one was revoked early.
   if (res.status === 401) {
-    const fresh = await getAccessToken(true);
+    const fresh = await getAccessToken(true, key);
     return fetch(url, { ...init, headers: { ...(init.headers ?? {}), Authorization: `Bearer ${fresh}` } });
   }
   return res;
+}
+
+/** Parse a pasted key without storing it, so a destination can hold its own. */
+export function parseKey(json: string): ServiceAccountKey | null {
+  try {
+    const key = JSON.parse(json) as ServiceAccountKey;
+    return key?.type === 'service_account' && key.client_email && key.private_key ? key : null;
+  } catch { return null; }
 }
 
 /** Turn Google's error body into something a person can act on. */
@@ -167,19 +178,19 @@ async function explain(res: Response, folderId: string | null): Promise<string> 
  * Confirm the credential works and the folder is reachable, before anybody
  * relies on it. Returns what it found so the screen can show it.
  */
-export async function testConnection(folderId: string | null): Promise<{
+export async function testConnection(folderId: string | null, key?: ServiceAccountKey): Promise<{
   ok: true; clientEmail: string; folderName: string | null; quota: { used: string | null; limit: string | null } | null;
 } | { ok: false; error: string }> {
-  const key = readKey();
-  if (!key) return { ok: false, error: 'No service-account key is stored yet.' };
+  const account = key ?? readKey();
+  if (!account) return { ok: false, error: 'No service-account key is stored yet.' };
   try {
-    const about = await driveFetch(`${ABOUT_URL}?fields=storageQuota,user`);
+    const about = await driveFetch(`${ABOUT_URL}?fields=storageQuota,user`, {}, account);
     if (!about.ok) return { ok: false, error: await explain(about, null) };
     const info = await about.json() as { storageQuota?: { usage?: string; limit?: string } };
 
     let folderName: string | null = null;
     if (folderId) {
-      const folder = await driveFetch(`${FILES_URL}/${encodeURIComponent(folderId)}?fields=id,name,mimeType&supportsAllDrives=true`);
+      const folder = await driveFetch(`${FILES_URL}/${encodeURIComponent(folderId)}?fields=id,name,mimeType&supportsAllDrives=true`, {}, account);
       if (!folder.ok) return { ok: false, error: await explain(folder, folderId) };
       const f = await folder.json() as { name?: string; mimeType?: string };
       if (f.mimeType !== 'application/vnd.google-apps.folder') {
@@ -189,7 +200,7 @@ export async function testConnection(folderId: string | null): Promise<{
     }
     return {
       ok: true,
-      clientEmail: key.client_email,
+      clientEmail: account.client_email,
       folderName,
       quota: info.storageQuota
         ? { used: info.storageQuota.usage ?? null, limit: info.storageQuota.limit ?? null }
@@ -209,6 +220,7 @@ export async function testConnection(folderId: string | null): Promise<{
 export async function uploadBackup(
   filePath: string, fileName: string, folderId: string | null,
   onProgress?: (sentBytes: number, totalBytes: number) => void,
+  key?: ServiceAccountKey,
 ): Promise<{ ok: true; fileId: string; webViewLink: string | null } | { ok: false; error: string }> {
   if (!fs.existsSync(filePath)) return { ok: false, error: `The backup ${fileName} is no longer on disk.` };
   const total = fs.statSync(filePath).size;
@@ -221,7 +233,7 @@ export async function uploadBackup(
       method: 'POST',
       headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': 'application/zip', 'X-Upload-Content-Length': String(total) },
       body: JSON.stringify(metadata),
-    });
+    }, key);
     if (!start.ok) return { ok: false, error: await explain(start, folderId) };
     const session = start.headers.get('location');
     if (!session) return { ok: false, error: 'Google did not return an upload session. Try again.' };
@@ -268,16 +280,16 @@ export async function uploadBackup(
 }
 
 /** What is already in the Drive folder, so retention can be mirrored there. */
-export async function listRemote(folderId: string | null): Promise<Array<{ id: string; name: string; createdTime: string; size: number }>> {
+export async function listRemote(folderId: string | null, key?: ServiceAccountKey): Promise<Array<{ id: string; name: string; createdTime: string; size: number }>> {
   const q = folderId ? `'${folderId}' in parents and trashed = false` : 'trashed = false';
   const url = `${FILES_URL}?q=${encodeURIComponent(q)}&fields=files(id,name,createdTime,size)&orderBy=createdTime desc&pageSize=200&supportsAllDrives=true&includeItemsFromAllDrives=true`;
-  const res = await driveFetch(url);
+  const res = await driveFetch(url, {}, key);
   if (!res.ok) throw new Error(await explain(res, folderId));
   const body = await res.json() as { files?: Array<{ id: string; name: string; createdTime: string; size?: string }> };
   return (body.files ?? []).map(f => ({ id: f.id, name: f.name, createdTime: f.createdTime, size: Number(f.size ?? 0) }));
 }
 
-export async function deleteRemote(fileId: string): Promise<boolean> {
-  const res = await driveFetch(`${FILES_URL}/${encodeURIComponent(fileId)}?supportsAllDrives=true`, { method: 'DELETE' });
+export async function deleteRemote(fileId: string, key?: ServiceAccountKey): Promise<boolean> {
+  const res = await driveFetch(`${FILES_URL}/${encodeURIComponent(fileId)}?supportsAllDrives=true`, { method: 'DELETE' }, key);
   return res.ok || res.status === 404;
 }

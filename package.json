@@ -33,7 +33,8 @@
     "check:alerts": "tsx scripts/alerts-check.mjs",
     "check:iqc-admin": "node scripts/iqc-admin-check.mjs",
     "check:backup": "tsx scripts/backup-check.mjs",
-    "check:backup-scheduler": "tsx scripts/backup-scheduler-check.mjs"
+    "check:backup-scheduler": "tsx scripts/backup-scheduler-check.mjs",
+    "check:backup-destinations": "tsx scripts/backup-destinations-check.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.0",

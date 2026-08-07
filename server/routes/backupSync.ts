@@ -1,33 +1,44 @@
 /**
- * Scheduling backups, and copying them off site.
+ * Scheduling backups, where they are written, and where copies are sent.
  *
- * The endpoints that make and restore archives live in routes/common.ts and are
- * unchanged. This is what wraps them: when backups happen without anybody
- * pressing a button, how long they are kept, and — if the laboratory has asked
- * for it — sending each one to Google Drive.
+ * The endpoints that make and restore archives live in routes/common.ts. This is
+ * what wraps them: when backups happen without anybody pressing a button, which
+ * folder they land in, how long they are kept, and which destinations each one
+ * is copied to.
  *
- *   GET  /backup/status                 everything the settings screen shows
- *   GET/PUT /backup/schedule            when automatic backups run
- *   POST /backup/run-now                take a scheduled-style backup on demand
- *   POST /backup/prune                  apply the retention policy now
- *   GET  /backup/drive                  connection state (never the key)
- *   PUT  /backup/drive                  store the service-account key + folder
- *   POST /backup/drive/test             prove the credential and folder work
- *   DELETE /backup/drive                forget the credential
- *   POST /backup/drive/sync             copy backups up now
- *   GET  /backup/drive/history          what has been copied, and what failed
+ *   GET  /backup/status                    everything the settings screen shows
+ *   GET/PUT /backup/schedule               when automatic backups run
+ *   GET/PUT /backup/folder                 where backups are written
+ *   POST /backup/run-now                   the whole cycle, on demand
+ *   POST /backup/prune                     apply the retention policy now
+ *   GET  /backup/destinations              the list (never the credentials)
+ *   GET  /backup/destination-kinds         what can be added, and what each needs
+ *   POST/PUT /backup/destinations[/:id]    add or change one, proving it works
+ *   POST /backup/destinations/:id/test     re-check a stored one
+ *   POST /backup/destinations/:id/toggle   switch one on or off
+ *   DELETE /backup/destinations/:id        forget one
+ *   POST /backup/destinations/sync         copy outstanding backups out now
+ *   GET  /backup/sync-history              what has been copied, and what failed
  *
- * Backups are the whole database. Changing where they go, or taking one on
- * demand, is settings work — so these sit behind the settings permissions, and
- * the two that reach the internet or destroy files sit behind `approve`.
+ * Backups are the whole database. Taking one or reading the settings is
+ * `settings` work; anything that changes where the laboratory's data can be
+ * sent, or that deletes archives, needs `approve`.
  */
 import { Router } from 'express';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { getDb } from '../db/database.js';
 import { normaliseSchedule, describeSchedule, nextRunAfter } from '../../shared/constants/backup.js';
+import { DESTINATION_KINDS_DEF, secretFieldsOf } from '../../shared/constants/backupDestinations.js';
 import * as backup from '../services/backupService.js';
-import * as drive from '../services/googleDrive.js';
+import * as dest from '../services/backupDestinations.js';
+
+/** Keep credentials out of the audit trail — record that they changed, not what to. */
+const redact = (kind: string, config: Record<string, unknown> = {}) => {
+  const out: Record<string, unknown> = { ...config };
+  for (const key of secretFieldsOf(kind)) if (out[key]) out[key] = '(changed)';
+  return out;
+};
 
 export function backupSyncRoutes() {
   const router = Router();
@@ -50,15 +61,46 @@ export function backupSyncRoutes() {
     res.json({ ok: true, schedule, description: describeSchedule(schedule), nextRun: nextRunAfter(schedule, new Date())?.toISOString() ?? null });
   });
 
+  /* --------------------------------------------------------------- folder */
+
+  router.get('/backup/folder', requirePermission('settings', 'view'), (_req, res) => {
+    res.json(dest.configuredFolder());
+  });
+
   /**
-   * Run the whole cycle now — backup, prune, and copy off site if that is
-   * configured. This is what "Back up now" does: the same thing the schedule
-   * does at 02:00, so what the button produces is what the night produces.
+   * Move where backups are written.
+   *
+   * Archives already on disk stay where they are — moving hundreds of megabytes
+   * without being asked is not this endpoint's business, and the old folder is
+   * still readable if somebody needs what is in it.
    */
+  router.put('/backup/folder', requirePermission('settings', 'approve'), async (req, res) => {
+    const before = dest.configuredFolder();
+    const result = await dest.setBackupFolder(req.body?.path ?? null);
+    if (result.ok !== true) return res.status(400).json({ error: result.error });
+    audit(req, { action: 'edit', entity: 'backup_folder', oldValue: { path: before.path }, newValue: { path: result.path } });
+    res.json({
+      ok: true, ...dest.configuredFolder(),
+      message: `New backups will be written to ${result.path}. Archives already taken stay where they are.`,
+    });
+  });
+
+  /** Check a folder is usable before committing to it. */
+  router.post('/backup/folder/test', requirePermission('settings', 'edit'), async (req, res) => {
+    const verdict = await dest.testConfig('folder', { path: String(req.body?.path ?? '') });
+    if (verdict.ok !== true) return res.status(400).json({ ok: false, error: verdict.error });
+    res.json({ ok: true, note: verdict.note });
+  });
+
+  /* ---------------------------------------------------------- the cycle */
+
   router.post('/backup/run-now', requirePermission('settings', 'export'), async (req, res) => {
     const result = await backup.runScheduledBackup(req.user!.id);
     if (result.error) return res.status(500).json({ error: `The backup could not be written: ${result.error}` });
-    audit(req, { action: 'create', entity: 'backup', entityId: result.backup?.fileName, newValue: { trigger: 'manual-full-cycle', pruned: result.pruned.length, synced: result.sync?.ok ?? null } });
+    audit(req, {
+      action: 'create', entity: 'backup', entityId: result.backup?.fileName,
+      newValue: { trigger: 'manual', pruned: result.pruned.length, copies: result.copies.map(c => ({ to: c.destinationName, ok: c.ok })) },
+    });
     res.status(201).json(result);
   });
 
@@ -66,118 +108,109 @@ export function backupSyncRoutes() {
     const schedule = backup.getSchedule();
     const removed = backup.pruneLocal(schedule);
     audit(req, { action: 'prune', entity: 'backup', newValue: { removed, retention: schedule.retention } });
-    res.json({ ok: true, removed, message: removed.length ? `${removed.length} older backup(s) removed under the retention policy.` : 'Nothing to remove — every backup is still within the retention policy.' });
+    res.json({
+      ok: true, removed,
+      message: removed.length
+        ? `${removed.length} older backup(s) removed under the retention policy.`
+        : 'Nothing to remove — every backup is still within the retention policy.',
+    });
   });
 
-  /* ---------------------------------------------------------------- drive */
+  /* --------------------------------------------------------- destinations */
 
-  /** Connection state. The private key is never returned, only what it is. */
-  router.get('/backup/drive', requirePermission('settings', 'view'), (_req, res) => {
-    const key = drive.readKey();
-    const settings = backup.getDriveSettings();
+  /** What can be added, and which fields each kind needs. Drives the forms. */
+  router.get('/backup/destination-kinds', requirePermission('settings', 'view'), (_req, res) => {
+    res.json(DESTINATION_KINDS_DEF);
+  });
+
+  router.get('/backup/destinations', requirePermission('settings', 'view'), (_req, res) => {
+    res.json(dest.listDestinations());
+  });
+
+  /**
+   * Add or change a destination.
+   *
+   * The configuration is tested against the real thing before it is stored, so
+   * a laboratory never ends up believing it has an off-site copy that has in
+   * fact been failing quietly since the day it was set up.
+   */
+  const save = (idFrom: (req: { params: Record<string, string> }) => number | null) =>
+    async (req: any, res: any) => {
+      const id = idFrom(req);
+      const result = await dest.saveDestination(id, {
+        kind: String(req.body?.kind ?? ''),
+        name: req.body?.name,
+        enabled: req.body?.enabled,
+        config: req.body?.config ?? {},
+      });
+      if (result.ok !== true) return res.status(400).json({ error: result.error });
+      audit(req, {
+        action: id ? 'edit' : 'create', entity: 'backup_destination', entityId: result.destination.id,
+        newValue: { kind: result.destination.kind, name: result.destination.name, config: redact(result.destination.kind, req.body?.config) },
+      });
+      res.status(id ? 200 : 201).json({ ok: true, destination: result.destination, note: result.note });
+    };
+
+  router.post('/backup/destinations', requirePermission('settings', 'approve'), save(() => null));
+  router.put('/backup/destinations/:id', requirePermission('settings', 'approve'), save(req => Number(req.params.id)));
+
+  router.post('/backup/destinations/:id/test', requirePermission('settings', 'edit'), async (req, res) => {
+    const verdict = await dest.testDestination(Number(req.params.id));
+    if (verdict.ok !== true) return res.status(400).json({ ok: false, error: verdict.error });
+    res.json({ ok: true, note: verdict.note });
+  });
+
+  router.post('/backup/destinations/:id/toggle', requirePermission('settings', 'edit'), (req, res) => {
+    const enabled = req.body?.enabled !== false;
+    if (!dest.setEnabled(Number(req.params.id), enabled)) return res.status(404).json({ error: 'That destination no longer exists.' });
+    audit(req, { action: enabled ? 'enable' : 'disable', entity: 'backup_destination', entityId: req.params.id });
+    res.json({ ok: true, enabled });
+  });
+
+  router.delete('/backup/destinations/:id', requirePermission('settings', 'approve'), (req, res) => {
+    const before = dest.listDestinations().find(d => d.id === Number(req.params.id));
+    if (!dest.deleteDestination(Number(req.params.id))) return res.status(404).json({ error: 'That destination no longer exists.' });
+    audit(req, { action: 'delete', entity: 'backup_destination', entityId: req.params.id, oldValue: { kind: before?.kind, name: before?.name } });
     res.json({
-      connected: key !== null,
-      clientEmail: key?.client_email ?? null,
-      projectId: key?.project_id ?? null,
-      folderId: settings.folderId,
-      folderName: settings.folderName,
-      pending: key ? backup.unsyncedBackups().length : 0,
+      ok: true,
+      message: `${before?.name ?? 'That destination'} removed. Copies already sent there are untouched; new backups will not go there.`,
     });
   });
 
   /**
-   * Store the service-account key and the destination folder.
-   *
-   * The key is written to the config directory with owner-only permissions and
-   * never goes back to a browser. Sending it is `approve` work: it is the
-   * credential that decides where the laboratory's whole database can be sent.
+   * Copy outstanding backups out now. With no body it catches every enabled
+   * destination up — which is what somebody presses after a spell offline.
    */
-  router.put('/backup/drive', requirePermission('settings', 'approve'), async (req, res) => {
-    const folderId = String(req.body?.folderId ?? '').trim() || null;
-    if (folderId && !/^[A-Za-z0-9_-]{10,}$/.test(folderId)) {
-      return res.status(400).json({ error: 'That does not look like a Drive folder ID. Open the folder in Drive; the ID is the last part of the address bar.' });
+  router.post('/backup/destinations/sync', requirePermission('settings', 'export'), async (req, res) => {
+    const id = req.body?.destinationId ? Number(req.body.destinationId) : null;
+    const results = await dest.syncPending(id, req.user!.id);
+    if (results.length === 0) {
+      return res.json({ ok: true, results: [], message: 'Every backup has already reached every destination.' });
     }
-
-    if (req.body?.serviceAccountKey) {
-      const stored = drive.saveKey(String(req.body.serviceAccountKey));
-      if (stored.ok !== true) return res.status(400).json({ error: stored.error });
-    } else if (!drive.readKey()) {
-      return res.status(400).json({ error: 'Paste the service-account key JSON to connect Google Drive.' });
-    }
-
-    // Prove it works before saying it is connected — a credential that is only
-    // discovered to be wrong at 02:00 is worse than no credential.
-    const test = await drive.testConnection(folderId);
-    if (test.ok !== true) {
-      if (req.body?.serviceAccountKey) drive.forgetKey();
-      return res.status(400).json({ error: test.error });
-    }
-
-    backup.saveDriveSettings({ folderId, folderName: test.folderName });
-    audit(req, { action: 'connect', entity: 'backup_drive', newValue: { clientEmail: test.clientEmail, folderId, folderName: test.folderName } });
-    res.json({ ok: true, connected: true, clientEmail: test.clientEmail, folderId, folderName: test.folderName, quota: test.quota });
-  });
-
-  router.post('/backup/drive/test', requirePermission('settings', 'edit'), async (req, res) => {
-    const folderId = req.body?.folderId !== undefined
-      ? (String(req.body.folderId).trim() || null)
-      : backup.getDriveSettings().folderId;
-    const test = await drive.testConnection(folderId);
-    if (test.ok !== true) return res.status(400).json({ ok: false, error: test.error });
-    res.json({ ok: true, ...test });
-  });
-
-  router.delete('/backup/drive', requirePermission('settings', 'approve'), (req, res) => {
-    const key = drive.readKey();
-    drive.forgetKey();
-    backup.saveDriveSettings({ folderId: null, folderName: null });
-    // Turn off the automatic copy too, rather than leave a schedule pointing at
-    // a credential that no longer exists and failing every night.
-    const schedule = backup.getSchedule();
-    if (schedule.syncToDrive) backup.saveSchedule({ ...schedule, syncToDrive: false });
-    audit(req, { action: 'disconnect', entity: 'backup_drive', oldValue: { clientEmail: key?.client_email ?? null } });
-    res.json({ ok: true, message: 'Google Drive is disconnected. Backups already copied there are untouched; new ones stay on this host only.' });
-  });
-
-  /**
-   * Copy backups up now. With no body it sends everything that has never
-   * reached Drive, which is what someone pressing "Sync now" after a spell
-   * offline actually wants.
-   */
-  router.post('/backup/drive/sync', requirePermission('settings', 'export'), async (req, res) => {
-    if (!drive.readKey()) return res.status(400).json({ error: 'Google Drive is not connected yet.' });
-
-    let files: string[];
-    if (req.body?.fileName) {
-      if (!backup.isSafeBackupName(String(req.body.fileName))) return res.status(400).json({ error: 'Invalid backup file name.' });
-      files = [String(req.body.fileName)];
-    } else {
-      files = backup.unsyncedBackups();
-    }
-    if (files.length === 0) {
-      return res.json({ ok: true, results: [], message: 'Every backup on this host is already in Google Drive.' });
-    }
-    // Newest first: if the connection drops part-way, the most valuable copy is
-    // the one that already made it.
-    const results = [];
-    for (const fileName of files) results.push(await backup.syncOne(fileName, req.user!.id));
-
     const sent = results.filter(r => r.ok).length;
     const failed = results.filter(r => !r.ok);
-    audit(req, { action: 'sync', entity: 'backup_drive', newValue: { attempted: files.length, sent, failed: failed.length } });
+    audit(req, { action: 'sync', entity: 'backup_destination', newValue: { attempted: results.length, sent, failed: failed.length } });
     res.json({
       ok: failed.length === 0,
       results,
       message: failed.length === 0
-        ? `${sent} backup(s) copied to Google Drive.`
-        : `${sent} of ${files.length} copied. ${failed[0].error}`,
+        ? `${sent} copy(ies) sent.`
+        : `${sent} of ${results.length} sent. ${failed[0].destinationName}: ${failed[0].error}`,
     });
   });
 
-  router.get('/backup/drive/history', requirePermission('settings', 'view'), (req, res) => {
+  router.get('/backup/sync-history', requirePermission('settings', 'view'), (req, res) => {
     const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 200);
-    res.json(getDb().prepare(`SELECT s.*, u.full_name AS by_name FROM backup_sync_log s
-      LEFT JOIN users u ON u.id = s.created_by ORDER BY s.id DESC LIMIT ?`).all(limit));
+    // The name is resolved from the destination if it still exists and from the
+    // row itself otherwise, so history reads properly after one is removed.
+    res.json(getDb().prepare(`SELECT s.id, s.file_name, s.destination, s.destination_id, s.status,
+        s.remote_id, s.size_bytes, s.duration_ms, s.message, s.created_by, s.created_at,
+        u.full_name AS by_name,
+        COALESCE(d.name, s.destination_name, s.destination) AS destination_name
+      FROM backup_sync_log s
+      LEFT JOIN users u ON u.id = s.created_by
+      LEFT JOIN backup_destinations d ON d.id = s.destination_id
+      ORDER BY s.id DESC LIMIT ?`).all(limit));
   });
 
   return router;

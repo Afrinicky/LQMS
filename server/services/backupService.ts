@@ -15,12 +15,16 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { getDb, ensureDataDirs, backupRoot, uploadRoot, evidenceRoot, configRoot, dbPath } from '../db/database.js';
+import { getDb, ensureDataDirs, uploadRoot, evidenceRoot, configRoot, dbPath } from '../db/database.js';
+import * as dest from './backupDestinations.js';
+
+// Where backups are written. Configurable (a second disk, a folder the
+// hospital's own server backup already sweeps), so every path goes through this
+// rather than a constant.
+const backupFolder = () => dest.backupFolder();
 import { normaliseSchedule, backupsToKeep, nextRunAfter, mostRecentDue, type BackupSchedule } from '../../shared/constants/backup.js';
-import * as drive from './googleDrive.js';
 
 const SCHEDULE_KEY = 'backup.schedule';
-const DRIVE_KEY = 'backup.drive';
 const LAST_RUN_KEY = 'backup.lastScheduledRun';
 
 /* --------------------------------------------------------------- archiving */
@@ -68,23 +72,50 @@ export async function writeBackupZip(targetPath: string, manifest: unknown): Pro
 
 export type BackupFile = { fileName: string; sizeBytes: number; createdAt: string; source: string };
 
+/**
+ * When a backup was taken, to the millisecond, read out of its own name.
+ *
+ * This is the only source that is both exact and consistent. The log's
+ * `created_at` is a SQLite timestamp, so it is only accurate to the second and
+ * is written in a different shape to an ISO string — and backups do land in the
+ * same second, when somebody presses the button while the schedule fires, or
+ * during testing. Two records that compare equal put retention in the position
+ * of choosing arbitrarily between them, which is how the newest archive ends up
+ * being the one that gets deleted.
+ */
+function stampFromName(fileName: string): string | null {
+  const match = fileName.match(/(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z/);
+  if (!match) return null;
+  const at = new Date(`${match[1]}T${match[2]}:${match[3]}:${match[4]}.${match[5]}Z`);
+  return Number.isNaN(at.getTime()) ? null : at.toISOString();
+}
+
+/** A SQLite `CURRENT_TIMESTAMP` (UTC, space-separated) as an ISO string. */
+function loggedStamp(value: string): string | null {
+  const at = new Date(/[TZ]/.test(value) ? value : `${value.replace(' ', 'T')}Z`);
+  return Number.isNaN(at.getTime()) ? null : at.toISOString();
+}
+
 /** Every backup ZIP on disk, newest first, with when the system thinks it was made. */
 export function listLocal(): BackupFile[] {
   ensureDataDirs();
   const logs = getDb().prepare('SELECT file_name, created_at FROM backup_logs ORDER BY id DESC').all() as Array<{ file_name: string; created_at: string }>;
   const logged = new Map(logs.map(l => [l.file_name, l.created_at]));
-  return fs.readdirSync(backupRoot)
+  return fs.readdirSync(backupFolder())
     .filter(f => f.toLowerCase().endsWith('.zip') && !f.startsWith('.') && !f.startsWith('_'))
     .map(f => {
-      const stat = fs.statSync(path.join(backupRoot, f));
+      const stat = fs.statSync(path.join(backupFolder(), f));
+      const fromLog = logged.has(f) ? loggedStamp(logged.get(f)!) : null;
       return {
         fileName: f,
         sizeBytes: stat.size,
-        createdAt: logged.get(f) ?? stat.mtime.toISOString(),
+        // Name first, then the log, then the file itself — most precise wins.
+        createdAt: stampFromName(f) ?? fromLog ?? stat.mtime.toISOString(),
         source: logged.has(f) ? 'system' : 'external',
       };
     })
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    // The name breaks ties, since it carries the millisecond the log has lost.
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.fileName.localeCompare(a.fileName));
 }
 
 /**
@@ -96,7 +127,7 @@ export async function createBackup(trigger: 'manual' | 'scheduled' | 'pre-restor
   ensureDataDirs();
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const fileName = trigger === 'pre-restore' ? `pre-restore-${stamp}.zip` : `sech-lims-backup-${stamp}.zip`;
-  const fullPath = path.join(backupRoot, fileName);
+  const fullPath = path.join(backupFolder(), fileName);
   const manifest = {
     product: 'SECH_LIMS by Nickland',
     createdAt: new Date().toISOString(),
@@ -128,22 +159,6 @@ export function saveSchedule(schedule: BackupSchedule): BackupSchedule {
   return clean;
 }
 
-export type DriveSettings = { folderId: string | null; folderName: string | null };
-
-export function getDriveSettings(): DriveSettings {
-  const row = getDb().prepare('SELECT value FROM settings WHERE key = ?').get(DRIVE_KEY) as { value: string } | undefined;
-  try {
-    const parsed = row ? JSON.parse(row.value) : {};
-    return { folderId: parsed.folderId ?? null, folderName: parsed.folderName ?? null };
-  } catch { return { folderId: null, folderName: null }; }
-}
-
-export function saveDriveSettings(settings: DriveSettings): void {
-  getDb().prepare(`INSERT INTO settings (key, value) VALUES (?, ?)
-    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`)
-    .run(DRIVE_KEY, JSON.stringify(settings));
-}
-
 const lastScheduledRun = (): number => {
   const row = getDb().prepare('SELECT value FROM settings WHERE key = ?').get(LAST_RUN_KEY) as { value: string } | undefined;
   const n = Number(row?.value);
@@ -172,82 +187,33 @@ export function pruneLocal(schedule: BackupSchedule, now = new Date()): string[]
   for (const b of all) {
     if (keep.has(b)) continue;
     try {
-      fs.rmSync(path.join(backupRoot, b.fileName), { force: true });
+      fs.rmSync(path.join(backupFolder(), b.fileName), { force: true });
       removed.push(b.fileName);
     } catch { /* a file we cannot delete is not worth failing the backup over */ }
   }
   return removed;
 }
 
-/* ------------------------------------------------------------- drive sync */
-
-export type SyncOutcome = { fileName: string; ok: boolean; error?: string; fileId?: string; sizeBytes?: number };
+/* --------------------------------------------------------------- copies out */
 
 /**
- * Copy one backup to Drive and record what happened. Every attempt is logged,
- * successful or not, because "when did this last leave the building" is a
- * question an assessor asks and a failed upload is the answer they need.
+ * Send everything outstanding to every enabled destination.
+ *
+ * Kept here as a thin pass-through so callers have one place to reach for,
+ * whether they are the scheduler, the "copy now" button, or a laboratory
+ * catching up after a spell with the network down.
  */
-export async function syncOne(fileName: string, userId: number | null): Promise<SyncOutcome> {
-  const db = getDb();
-  const { folderId } = getDriveSettings();
-  const full = path.join(backupRoot, fileName);
-  const sizeBytes = fs.existsSync(full) ? fs.statSync(full).size : 0;
-  const started = Date.now();
+export const syncPending = (destinationId: number | null, userId: number | null) =>
+  dest.syncPending(destinationId, userId);
 
-  const record = (ok: boolean, error: string | null, fileId: string | null) => {
-    db.prepare(`INSERT INTO backup_sync_log (file_name, destination, status, remote_id, size_bytes, duration_ms, message, created_by)
-      VALUES (?, 'google_drive', ?, ?, ?, ?, ?, ?)`)
-      .run(fileName, ok ? 'success' : 'failed', fileId, sizeBytes, Date.now() - started, error, userId);
-  };
-
-  if (!drive.readKey()) {
-    const error = 'Google Drive is not connected.';
-    record(false, error, null);
-    return { fileName, ok: false, error };
-  }
-
-  // Already up there? Don't send it twice — this runs after every scheduled
-  // backup and on demand, and the two can easily overlap.
-  try {
-    const remote = await drive.listRemote(folderId);
-    const existing = remote.find(r => r.name === fileName);
-    if (existing) {
-      record(true, null, existing.id);
-      return { fileName, ok: true, fileId: existing.id, sizeBytes };
-    }
-  } catch { /* if listing fails, fall through and try the upload anyway */ }
-
-  const result = await drive.uploadBackup(full, fileName, folderId);
-  if (result.ok === true) {
-    record(true, null, result.fileId);
-    return { fileName, ok: true, fileId: result.fileId, sizeBytes };
-  }
-  record(false, result.error, null);
-  return { fileName, ok: false, error: result.error, sizeBytes };
-}
-
-/** Apply the same retention window to the Drive folder as to the local one. */
-export async function pruneRemote(schedule: BackupSchedule, now = new Date()): Promise<string[]> {
-  const { folderId } = getDriveSettings();
-  const remote = await drive.listRemote(folderId);
-  const candidates = remote
-    .filter(f => f.name.startsWith('sech-lims-backup-'))
-    .map(f => ({ ...f, createdAt: f.createdTime }));
-  const keep = backupsToKeep(candidates, schedule.retention, now);
-  const removed: string[] = [];
-  for (const f of candidates) {
-    if (keep.has(f)) continue;
-    if (await drive.deleteRemote(f.id)) removed.push(f.name);
-  }
-  return removed;
-}
-
-/** Every backup on disk that has never reached Drive successfully. */
+/** Every backup on this host that has not reached every enabled destination. */
 export function unsyncedBackups(): string[] {
-  const db = getDb();
-  const synced = new Set((db.prepare("SELECT DISTINCT file_name FROM backup_sync_log WHERE status = 'success'").all() as Array<{ file_name: string }>).map(r => r.file_name));
-  return listLocal().filter(b => b.source === 'system' && !b.fileName.startsWith('pre-restore-') && !synced.has(b.fileName)).map(b => b.fileName);
+  const names = new Set<string>();
+  for (const d of dest.listDestinations()) {
+    if (!d.enabled) continue;
+    for (const f of dest.pendingFor(d.id)) names.add(f);
+  }
+  return [...names].sort().reverse();
 }
 
 /* --------------------------------------------------------------- scheduler */
@@ -255,35 +221,48 @@ export function unsyncedBackups(): string[] {
 export type ScheduledResult = {
   backup: BackupFile | null;
   pruned: string[];
-  sync: SyncOutcome | null;
-  prunedRemote: string[];
+  /** One entry per enabled destination — the hospital server, a bucket, Drive. */
+  copies: dest.CopyOutcome[];
+  prunedRemote: Record<string, string[]>;
   error?: string;
 };
 
 /**
- * One scheduled cycle: take the backup, prune what the policy has finished
- * with, then copy it off site if that was asked for.
+ * One cycle: take the backup, copy it everywhere it belongs, then prune what
+ * the policy has finished with.
  *
- * The order matters. The backup is written before anything is deleted, so a
- * failure never leaves the laboratory with fewer copies than it started with.
+ * The order matters twice over. The archive is written before anything is
+ * deleted, so a failure never leaves the laboratory with fewer copies than it
+ * started with. And the copies go out before the pruning, so a backup is never
+ * removed from here having never reached anywhere else.
+ *
+ * This is the whole of what "Back up now" does as well, so what the button
+ * produces at four in the afternoon is exactly what the night produces.
  */
 export async function runScheduledBackup(userId: number | null = null): Promise<ScheduledResult> {
   const schedule = getSchedule();
-  const out: ScheduledResult = { backup: null, pruned: [], sync: null, prunedRemote: [] };
+  const out: ScheduledResult = { backup: null, pruned: [], copies: [], prunedRemote: {} };
   try {
     out.backup = await createBackup('scheduled', userId);
   } catch (e) {
     out.error = (e as Error).message;
     return out;
   }
+
+  // Every enabled destination gets this backup, each attempted independently:
+  // the hospital server being down must not stop the copy reaching the cloud.
+  try { out.copies = await dest.copyToAll(out.backup.fileName, userId); }
+  catch (e) { console.error('[backup] copying out failed', e); }
+
   try { out.pruned = pruneLocal(schedule); } catch { /* keeping the backup matters more */ }
 
-  if (schedule.syncToDrive && drive.readKey()) {
-    out.sync = await syncOne(out.backup.fileName, userId);
-    if (out.sync.ok) {
-      try { out.prunedRemote = await pruneRemote(schedule); } catch { /* leave the remote copies be */ }
-    }
-  }
+  // Mirror the retention window everywhere, so a destination does not quietly
+  // accumulate a year of archives the laboratory thought it had pruned.
+  try {
+    const keep = new Set(listLocal().map(b => b.fileName));
+    out.prunedRemote = await dest.pruneAll(keep);
+  } catch { /* leave the copies be rather than risk deleting the wrong thing */ }
+
   return out;
 }
 
@@ -328,8 +307,15 @@ export class BackupScheduler {
     try {
       markScheduledRun(due.getTime());
       const result = await runScheduledBackup(null);
-      if (result.error) console.error('[backup] scheduled backup failed:', result.error);
-      else console.log(`[backup] scheduled backup ${result.backup?.fileName}${result.sync ? (result.sync.ok ? ' — copied to Google Drive' : ` — Drive copy failed: ${result.sync.error}`) : ''}`);
+      if (result.error) {
+        console.error('[backup] scheduled backup failed:', result.error);
+      } else {
+        const sent = result.copies.filter(c => c.ok).length;
+        const failed = result.copies.filter(c => !c.ok);
+        console.log(`[backup] ${result.backup?.fileName}` +
+          (result.copies.length ? ` — copied to ${sent} of ${result.copies.length} destination(s)` : '') +
+          (failed.length ? `; ${failed.map(f => `${f.destinationName}: ${f.error}`).join('; ')}` : ''));
+      }
       return result;
     } finally { this.running = false; }
   }
@@ -340,25 +326,34 @@ export function protectionStatus() {
   const schedule = getSchedule();
   const local = listLocal();
   const db = getDb();
-  const lastSync = db.prepare("SELECT * FROM backup_sync_log WHERE status = 'success' ORDER BY id DESC LIMIT 1").get() as Record<string, unknown> | undefined;
-  const lastFailure = db.prepare("SELECT * FROM backup_sync_log WHERE status = 'failed' ORDER BY id DESC LIMIT 1").get() as Record<string, unknown> | undefined;
   const newest = local[0] ?? null;
-  const driveConnected = drive.readKey() !== null;
+  const destinations = dest.listDestinations();
+  const enabled = destinations.filter(d => d.enabled);
+  const lastSuccess = db.prepare("SELECT * FROM backup_sync_log WHERE status = 'success' ORDER BY id DESC LIMIT 1")
+    .get() as Record<string, unknown> | undefined;
+
+  // "Off site" means a copy exists somewhere this building's misfortunes cannot
+  // reach. A second folder on the same machine does not count, however useful
+  // it is against a failing disk.
+  const offSiteKinds = new Set(['network', 's3', 'webdav', 'google_drive']);
+  const offSite = enabled.filter(d => offSiteKinds.has(d.kind));
+  const offSiteHealthy = offSite.filter(d => d.lastResult === 'success' && d.pending === 0);
+
   return {
     schedule,
     nextRun: nextRunAfter(schedule, new Date())?.toISOString() ?? null,
     lastBackup: newest,
     backupCount: local.length,
     totalBytes: local.reduce((sum, b) => sum + b.sizeBytes, 0),
-    drive: {
-      connected: driveConnected,
-      ...getDriveSettings(),
-      clientEmail: drive.readKey()?.client_email ?? null,
-      lastSyncAt: (lastSync?.created_at as string) ?? null,
-      lastSyncFile: (lastSync?.file_name as string) ?? null,
-      lastFailureAt: (lastFailure?.created_at as string) ?? null,
-      lastFailureMessage: (lastFailure?.message as string) ?? null,
-      pendingCount: driveConnected ? unsyncedBackups().length : 0,
+    folder: dest.configuredFolder(),
+    destinations,
+    copies: {
+      configured: enabled.length,
+      offSite: offSite.length,
+      offSiteHealthy: offSiteHealthy.length,
+      failing: enabled.filter(d => d.lastResult === 'failed').length,
+      pending: enabled.reduce((sum, d) => sum + d.pending, 0),
+      lastCopyAt: (lastSuccess?.created_at as string) ?? null,
     },
   };
 }

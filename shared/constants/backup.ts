@@ -185,11 +185,14 @@ export function nextRunAfter(s: BackupSchedule, from: Date): Date | null {
  * the newest in each calendar month. The very newest backup is always kept,
  * whatever the policy says, because a laboratory is never left with none.
  */
-export function backupsToKeep<T extends { createdAt: string }>(
+export function backupsToKeep<T extends { createdAt: string; fileName?: string }>(
   entries: T[], retention: BackupSchedule['retention'], now: Date = new Date(),
 ): Set<T> {
   const keep = new Set<T>();
-  const sorted = [...entries].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  // Ordering decides which archive survives, so it must never be arbitrary: two
+  // backups can share a timestamp, and the file name breaks the tie.
+  const sorted = [...entries].sort((a, b) =>
+    b.createdAt.localeCompare(a.createdAt) || (b.fileName ?? '').localeCompare(a.fileName ?? ''));
 
   const dayMs = 86400000;
   const seenWeeks = new Set<string>();
