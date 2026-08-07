@@ -4,7 +4,8 @@ import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
-import { getDb, closeDb, ensureDataDirs, uploadRoot, evidenceRoot, backupRoot, dbPath, configRoot, dataRoot } from '../db/database.js';
+import { getDb, closeDb, ensureDataDirs, uploadRoot, evidenceRoot, dbPath, configRoot, dataRoot } from '../db/database.js';
+import { backupFolder } from '../services/backupDestinations.js';
 import { config, isLanExposed, type AppMode } from '../config/index.js';
 import { seedDefaults } from '../db/seed.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -1984,7 +1985,7 @@ export function commonRoutes() {
   // uploads and evidence.
   const restoreUpload = multer({
     storage: multer.diskStorage({
-      destination: (_req, _file, cb) => { ensureDataDirs(); cb(null, backupRoot); },
+      destination: (_req, _file, cb) => { ensureDataDirs(); cb(null, backupFolder()); },
       filename: (_req, file, cb) => cb(null, `._upload-restore-${Date.now()}-${safeStoredFilename(file.originalname)}`),
     }),
     limits: { fileSize: 1024 * 1024 * 1024 }, // 1 GB
@@ -1993,7 +1994,7 @@ export function commonRoutes() {
   router.post('/backup/create', requirePermission('settings', 'export'), async (req, res) => {
     ensureDataDirs();
     const fileName = `sech-lims-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.zip`;
-    const fullPath = path.join(backupRoot, fileName);
+    const fullPath = path.join(backupFolder(), fileName);
     const manifest = { product: 'SECH_LIMS by Nickland', createdAt: new Date().toISOString(), includes: ['SQLite database', 'uploads', 'evidence', 'config', 'backup-manifest.json'] };
     // Checkpoint the WAL so the snapshot of the SQLite file is fully up to date.
     try { getDb().pragma('wal_checkpoint(TRUNCATE)'); } catch { /* best-effort */ }
@@ -2005,8 +2006,20 @@ export function commonRoutes() {
     }
     const sizeBytes = fs.existsSync(fullPath) ? fs.statSync(fullPath).size : 0;
     getDb().prepare('INSERT INTO backup_logs (file_name, manifest, created_by) VALUES (?, ?, ?)').run(fileName, JSON.stringify(manifest), req.user!.id);
-    audit(req, { action: 'create', entity: 'backup', entityId: fileName, newValue: manifest });
-    res.status(201).json({ fileName, manifest, sizeBytes, location: backupRoot, downloadPath: `/backup/download/${encodeURIComponent(fileName)}` });
+
+    // Copy it out straight away. A backup that waits on this machine until
+    // somebody remembers to press a second button is only half a backup, and
+    // the day it is needed is exactly the day nobody pressed it.
+    let copies: Array<{ destinationName: string; ok: boolean; error?: string }> = [];
+    try {
+      const { copyToAll } = await import('../services/backupDestinations.js');
+      copies = await copyToAll(fileName, req.user!.id);
+    } catch (err) {
+      console.error('[backup/create] copying to destinations failed', err);
+    }
+
+    audit(req, { action: 'create', entity: 'backup', entityId: fileName, newValue: { ...manifest, copies: copies.map(c => ({ to: c.destinationName, ok: c.ok })) } });
+    res.status(201).json({ fileName, manifest, sizeBytes, location: backupFolder(), copies, downloadPath: `/backup/download/${encodeURIComponent(fileName)}` });
   });
 
   // List the backup ZIPs available on disk, newest first, merged with any
@@ -2020,10 +2033,10 @@ export function commonRoutes() {
     const synced = new Map((getDb().prepare(
       "SELECT file_name, MAX(created_at) AS at FROM backup_sync_log WHERE status = 'success' GROUP BY file_name",
     ).all() as Array<{ file_name: string; at: string }>).map(r => [r.file_name, r.at]));
-    const files = fs.readdirSync(backupRoot)
+    const files = fs.readdirSync(backupFolder())
       .filter(f => f.toLowerCase().endsWith('.zip') && !f.startsWith('.') && !f.startsWith('_'))
       .map(f => {
-        const stat = fs.statSync(path.join(backupRoot, f));
+        const stat = fs.statSync(path.join(backupFolder(), f));
         return {
           fileName: f,
           sizeBytes: stat.size,
@@ -2034,14 +2047,14 @@ export function commonRoutes() {
         };
       })
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    res.json({ location: backupRoot, backups: files });
+    res.json({ location: backupFolder(), backups: files });
   });
 
   // Stream a backup ZIP back to the browser for the user to save locally.
   router.get('/backup/download/:fileName', requirePermission('settings', 'export'), (req, res) => {
     const name = req.params.fileName;
     if (!isSafeBackupName(name)) return res.status(400).json({ error: 'Invalid backup file name.' });
-    const full = path.join(backupRoot, name);
+    const full = path.join(backupFolder(), name);
     if (!fs.existsSync(full)) return res.status(404).json({ error: 'Backup not found.' });
     res.download(full, name);
   });
@@ -2059,7 +2072,7 @@ export function commonRoutes() {
       uploadedTemp = req.file.path;
     } else if (req.body && typeof req.body.fileName === 'string' && req.body.fileName) {
       if (!isSafeBackupName(req.body.fileName)) return res.status(400).json({ error: 'Invalid backup file name.' });
-      sourceZip = path.join(backupRoot, req.body.fileName);
+      sourceZip = path.join(backupFolder(), req.body.fileName);
       if (!fs.existsSync(sourceZip)) return res.status(404).json({ error: 'Selected backup was not found on the server.' });
     } else {
       return res.status(400).json({ error: 'No backup provided. Upload a ZIP file or choose an existing backup.' });
@@ -2097,7 +2110,7 @@ export function commonRoutes() {
     try {
       try { getDb().pragma('wal_checkpoint(TRUNCATE)'); } catch { /* best-effort */ }
       const safetyName = `pre-restore-${new Date().toISOString().replace(/[:.]/g, '-')}.zip`;
-      const safetyPath = path.join(backupRoot, safetyName);
+      const safetyPath = path.join(backupFolder(), safetyName);
       await writeBackupZip(safetyPath, { product: 'SECH_LIMS by Nickland', createdAt: new Date().toISOString(), kind: 'pre-restore-safety-snapshot' });
       safetyBackup = safetyName;
     } catch (err) {
@@ -2107,7 +2120,7 @@ export function commonRoutes() {
     }
 
     const actorId = req.user!.id;
-    const tmpDir = path.join(backupRoot, `._restore-${Date.now()}`);
+    const tmpDir = path.join(backupFolder(), `._restore-${Date.now()}`);
     try {
       // Extract the backup to a scratch folder.
       fs.mkdirSync(tmpDir, { recursive: true });
@@ -2173,7 +2186,7 @@ export function commonRoutes() {
     try {
       try { getDb().pragma('wal_checkpoint(TRUNCATE)'); } catch { /* best-effort */ }
       backupName = `pre-factory-reset-${new Date().toISOString().replace(/[:.]/g, '-')}.zip`;
-      await writeBackupZip(path.join(backupRoot, backupName), { product: 'SECH_LIMS by Nickland', createdAt: new Date().toISOString(), kind: 'pre-factory-reset-backup' });
+      await writeBackupZip(path.join(backupFolder(), backupName), { product: 'SECH_LIMS by Nickland', createdAt: new Date().toISOString(), kind: 'pre-factory-reset-backup' });
     } catch (err) {
       console.error('[backup/factory-reset] pre-reset backup failed', err);
       return res.status(500).json({ error: 'Could not create a pre-reset backup. Factory reset aborted; nothing was changed.' });

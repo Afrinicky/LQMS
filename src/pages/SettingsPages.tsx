@@ -1,13 +1,16 @@
 import { Fragment, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  ShieldCheck, AlertTriangle, CheckCircle2, Cloud, Clock, HardDrive, Archive,
-  Download, Upload, Plus, Info,
+  ShieldCheck, AlertTriangle, CheckCircle2, Cloud, HardDrive, Archive, FolderOpen,
+  Download, Upload, Plus,
 } from 'lucide-react';
 import { api, API_BASE, getToken } from '../services/api';
 import {
   SCHEDULE_PRESETS, DAY_NAMES, describeRetention, normaliseSchedule, type BackupSchedule,
 } from '../../shared/constants/backup';
+import {
+  describeDestination, type BackupDestination, type DestinationKindDef,
+} from '../../shared/constants/backupDestinations';
 import { useAuth } from '../hooks/useAuth';
 import { MODULES, PERMISSION_ACTIONS, TECHNICAL_AUTHORIZATION_LEVELS } from '../../shared/constants/modules';
 import { usePermissions } from '../hooks/usePermissions';
@@ -1361,6 +1364,20 @@ function formatBytes(n: number): string {
   return `${(n / Math.pow(1024, i)).toFixed(i ? 1 : 0)} ${units[i]}`;
 }
 
+/**
+ * A path that wraps at its own folder separators.
+ *
+ * A path has no spaces in it, so the browser breaks it wherever the line runs
+ * out — turning \\server\lims-backups into "\\server\lims-backu / ps", which
+ * somebody then has to reassemble by eye before they can check it is right.
+ * Marking each separator as a break opportunity keeps whole folder names
+ * together, which is how a path is actually read.
+ */
+function PathText({ value }: { value: string }) {
+  const parts = value.split(/(?<=[/\\])/);
+  return <>{parts.map((part, i) => <Fragment key={i}>{part}{i < parts.length - 1 && <wbr />}</Fragment>)}</>;
+}
+
 export function BackupRestore(){
   const { user, logout } = useAuth();
   const { can } = usePermissions();
@@ -1372,6 +1389,7 @@ export function BackupRestore(){
   const mayRestore = can('settings', 'approve');
 
   const [status, setStatus] = useState<ProtectionStatus | null>(null);
+  const [kinds, setKinds] = useState<DestinationKindDef[]>([]);
   const [backups, setBackups] = useState<BackupEntry[]>([]);
   const [location, setLocation] = useState('');
   const [busy, setBusy] = useState<string>('');
@@ -1384,12 +1402,14 @@ export function BackupRestore(){
 
   const load = async () => {
     try {
-      const [list, st] = await Promise.all([
+      const [list, st, kindList] = await Promise.all([
         api<{ location: string; backups: BackupEntry[] }>('/backup/list'),
         api<ProtectionStatus>('/backup/status').catch(() => null),
+        api<DestinationKindDef[]>('/backup/destination-kinds').catch(() => []),
       ]);
       setBackups(list.backups); setLocation(list.location);
       if (st) setStatus(st);
+      if (kindList.length) setKinds(kindList);
     } catch (e) { setError((e as Error).message); }
   };
   useEffect(() => { void load(); }, []);
@@ -1397,11 +1417,15 @@ export function BackupRestore(){
   async function runBackup() {
     setBusy('backup'); setError(null); setMessage(null);
     try {
-      const r = await api<{ backup: BackupFileInfo; pruned: string[]; sync: { ok: boolean; error?: string } | null }>('/backup/run-now', { method: 'POST', body: '{}' });
+      const r = await api<{ backup: BackupFileInfo; pruned: string[]; copies: Array<{ destinationName: string; ok: boolean; error?: string }> }>('/backup/run-now', { method: 'POST', body: '{}' });
+      const sent = r.copies.filter(c => c.ok);
+      const failed = r.copies.filter(c => !c.ok);
       const parts = [`Backup taken — ${r.backup.fileName} (${formatBytes(r.backup.sizeBytes)})`];
+      if (sent.length) parts.push(`copied to ${sent.map(c => c.destinationName).join(', ')}`);
       if (r.pruned.length) parts.push(`${r.pruned.length} older backup(s) pruned`);
-      if (r.sync) parts.push(r.sync.ok ? 'copied to Google Drive' : `Drive copy failed: ${r.sync.error}`);
-      setMessage(parts.join(' · '));
+      const text = parts.join(' · ');
+      if (failed.length) setError(`${text}. Could not reach ${failed.map(c => `${c.destinationName} (${c.error})`).join('; ')}.`);
+      else setMessage(text);
       await load();
     } catch (e) { setError((e as Error).message); } finally { setBusy(''); }
   }
@@ -1451,7 +1475,7 @@ export function BackupRestore(){
   async function syncNow() {
     setBusy('sync'); setError(null); setMessage(null);
     try {
-      const r = await api<{ ok: boolean; message: string }>('/backup/drive/sync', { method: 'POST', body: '{}' });
+      const r = await api<{ ok: boolean; message: string }>('/backup/destinations/sync', { method: 'POST', body: '{}' });
       if (r.ok) setMessage(r.message); else setError(r.message);
       await load();
     } catch (e) { setError((e as Error).message); } finally { setBusy(''); }
@@ -1501,14 +1525,16 @@ export function BackupRestore(){
 
     <div className="bk-cols">
       <ScheduleCard status={status} readOnly={!mayConfigure} onSaved={async (m) => { setMessage(m); await load(); }} onError={setError} />
-      <DriveCard status={status} readOnly={!mayRestore} canSync={can('settings', 'export')}
-        onChanged={async (m) => { setMessage(m); await load(); }} onError={setError}
-        onSyncNow={syncNow} busy={busy} />
+      <FolderCard status={status} readOnly={!mayRestore}
+        onChanged={async (m) => { setMessage(m); await load(); }} onError={setError} />
     </div>
+
+    <DestinationsCard status={status} kinds={kinds} readOnly={!mayRestore} canSync={can('settings', 'export')}
+      onChanged={async (m) => { setMessage(m); await load(); }} onError={setError} busy={busy} />
 
     <BackupList
       backups={backups} location={location} busy={busy} syncedNames={syncedNames}
-      driveConnected={status?.drive.connected ?? false}
+      driveConnected={(status?.copies.configured ?? 0) > 0}
       canRestore={mayRestore} canPrune={mayRestore}
       onDownload={download} onRestore={restoreExisting} onPrune={prune}
       retention={status?.schedule.retention ?? null}
@@ -1518,8 +1544,9 @@ export function BackupRestore(){
       <div className="card bk-restore">
         <div className="section-head"><h3><Upload size={15} /> Restore from a file</h3></div>
         <p className="hint">
-          For a backup kept off this host — one you downloaded earlier, or fetched from Google Drive. The current data is
-          snapshotted first, so a restore from the wrong file can itself be undone.
+          For a backup kept off this host — one you downloaded earlier, or fetched back from the hospital server, a USB
+          drive, or wherever else copies are sent. The current data is snapshotted first, so a restore from the wrong
+          file can itself be undone.
         </p>
         <div className="bk-restore-row">
           <input ref={fileRef} type="file" accept=".zip,application/zip" onChange={e => setRestoreFile(e.target.files?.[0] ?? null)} />
@@ -1580,10 +1607,11 @@ type ProtectionStatus = {
   lastBackup: BackupFileInfo | null;
   backupCount: number;
   totalBytes: number;
-  drive: {
-    connected: boolean; folderId: string | null; folderName: string | null; clientEmail: string | null;
-    lastSyncAt: string | null; lastSyncFile: string | null;
-    lastFailureAt: string | null; lastFailureMessage: string | null; pendingCount: number;
+  folder: { path: string; isDefault: boolean; available: boolean };
+  destinations: BackupDestination[];
+  copies: {
+    configured: number; offSite: number; offSiteHealthy: number;
+    failing: number; pending: number; lastCopyAt: string | null;
   };
 };
 
@@ -1629,7 +1657,7 @@ function ProtectionCard({ status, newest, onBackupNow, busy, canBackup }: {
   const last = status?.lastBackup ?? newest ?? null;
   const ageHours = last ? (Date.now() - new Date(last.createdAt).getTime()) / 3600000 : Infinity;
   const scheduled = status?.schedule.enabled ?? false;
-  const offsite = status?.drive.connected && !status?.drive.lastFailureAt ? (status?.drive.lastSyncAt ?? null) : null;
+  const offsite = (status?.copies.offSiteHealthy ?? 0) > 0;
 
   // Three states, and they mean what they say. "Protected" needs all three legs:
   // a recent backup, a schedule so the next one does not depend on somebody
@@ -1664,10 +1692,14 @@ function ProtectionCard({ status, newest, onBackupNow, busy, canBackup }: {
           detail={last ? `${timeAgo(last.createdAt)}` : 'none yet'} />
         <Leg ok={scheduled} label="Runs on its own"
           detail={scheduled ? `next ${whenNext(status?.nextRun ?? null)}` : 'switched off'} />
-        <Leg ok={!!offsite} label="Copy off site"
-          detail={status?.drive.connected
-            ? (status.drive.lastSyncAt ? `Drive, ${timeAgo(status.drive.lastSyncAt)}` : 'Drive connected, nothing sent yet')
-            : 'this machine only'} />
+        <Leg ok={offsite} label="Copy off site"
+          detail={
+            (status?.copies.offSite ?? 0) === 0 ? 'this machine only'
+              : status!.copies.failing > 0 ? `${status!.copies.failing} destination(s) failing`
+              : status!.copies.pending > 0 ? `${status!.copies.pending} waiting to be copied`
+              : status!.copies.lastCopyAt ? `copied ${timeAgo(status!.copies.lastCopyAt)}`
+              : 'set up, nothing sent yet'
+          } />
       </div>
     </div>
   );
@@ -1813,12 +1845,11 @@ function ScheduleCard({ status, readOnly, onSaved, onError }: {
           </div>
       </div>
 
-      {status?.drive.connected && (
-        <label className="bk-check">
-          <input type="checkbox" checked={schedule.syncToDrive} disabled={readOnly}
-            onChange={e => set({ syncToDrive: e.target.checked })} />
-          <span>Also copy each backup to Google Drive as soon as it is taken</span>
-        </label>
+      {(status?.copies.configured ?? 0) > 0 && (
+        <p className="hint bk-copies-note">
+          <Cloud size={12} /> Every backup is copied to your {status!.copies.configured} destination(s) as soon as it is
+          taken — by hand or by the schedule.
+        </p>
       )}
 
       {!readOnly && (
@@ -1832,123 +1863,281 @@ function ScheduleCard({ status, readOnly, onSaved, onError }: {
 }
 
 /**
- * The copy that is not in this building.
+ * Where copies go.
  *
- * Google Drive is reached with a service account rather than a "sign in with
- * Google" prompt, because this host runs unattended with no browser: the
- * laboratory creates the account once, shares a folder with it, and the host
- * uses it forever. The setup steps are on the card rather than in a manual
- * nobody will find.
+ * A list rather than one provider, because what a hospital already has decides
+ * what is possible: a file server, a NAS, MinIO on its own hardware, or a cloud
+ * account. Each row says where it points, whether the last copy worked, and how
+ * many backups are still waiting to reach it — which is the question somebody
+ * actually has when they open this screen.
  */
-function DriveCard({ status, readOnly, canSync, onChanged, onError, onSyncNow, busy }: {
-  status: ProtectionStatus | null; readOnly: boolean; canSync: boolean;
-  onChanged: (message: string) => void | Promise<void>; onError: (m: string) => void;
-  onSyncNow: () => void; busy: string;
+function DestinationsCard({ status, kinds, readOnly, canSync, onChanged, onError, busy }: {
+  status: ProtectionStatus | null; kinds: DestinationKindDef[]; readOnly: boolean; canSync: boolean;
+  onChanged: (message: string) => void | Promise<void>; onError: (m: string) => void; busy: string;
 }) {
-  const [connecting, setConnecting] = useState(false);
-  const [keyJson, setKeyJson] = useState('');
-  const [folderId, setFolderId] = useState('');
-  const [working, setWorking] = useState(false);
-  const drive = status?.drive;
+  const [adding, setAdding] = useState<string | null>(null);
+  const [editing, setEditing] = useState<number | null>(null);
+  const [working, setWorking] = useState('');
+  const destinations = status?.destinations ?? [];
 
-  useEffect(() => { if (drive?.folderId) setFolderId(drive.folderId); }, [drive?.folderId]);
-
-  async function connect() {
-    setWorking(true);
-    try {
-      const r = await api<{ clientEmail: string; folderName: string | null }>('/backup/drive', {
-        method: 'PUT', body: JSON.stringify({ serviceAccountKey: keyJson || undefined, folderId }),
-      });
-      setKeyJson(''); setConnecting(false);
-      await onChanged(`Google Drive connected as ${r.clientEmail}${r.folderName ? `, saving into "${r.folderName}"` : ''}.`);
-    } catch (e) { onError((e as Error).message); } finally { setWorking(false); }
+  async function act(key: string, run: () => Promise<{ message?: string }>) {
+    setWorking(key);
+    try { const r = await run(); await onChanged(r.message ?? 'Done.'); }
+    catch (e) { onError((e as Error).message); }
+    finally { setWorking(''); }
   }
 
-  async function test() {
-    setWorking(true);
-    try {
-      const r = await api<{ clientEmail: string; folderName: string | null }>('/backup/drive/test', { method: 'POST', body: JSON.stringify({ folderId }) });
-      await onChanged(`Google Drive is reachable as ${r.clientEmail}${r.folderName ? `, folder "${r.folderName}"` : ''}.`);
-    } catch (e) { onError((e as Error).message); } finally { setWorking(false); }
+  const kindOf = (k: string) => kinds.find(d => d.kind === k);
+
+  if (adding || editing !== null) {
+    const target = editing !== null ? destinations.find(d => d.id === editing) : null;
+    const def = kindOf(adding ?? target?.kind ?? '');
+    if (!def) return null;
+    return <DestinationForm
+      def={def} existing={target ?? null}
+      onCancel={() => { setAdding(null); setEditing(null); }}
+      onSaved={async (m) => { setAdding(null); setEditing(null); await onChanged(m); }}
+      onError={onError} />;
   }
 
-  async function disconnect() {
-    if (!window.confirm('Disconnect Google Drive?\n\nBackups already copied there are untouched. New backups will stay on this host only.')) return;
-    setWorking(true);
-    try {
-      const r = await api<{ message: string }>('/backup/drive', { method: 'DELETE' });
-      await onChanged(r.message);
-    } catch (e) { onError((e as Error).message); } finally { setWorking(false); }
-  }
-
-  if (!drive?.connected && !connecting) {
-    return (
-      <div className="card bk-drive">
-        <div className="section-head"><h3><Cloud size={15} /> Copy off site</h3></div>
-        <p className="hint">
-          Every backup is on this machine. If the machine is stolen, flooded or simply fails, so is the quality record.
-          Connecting Google Drive puts a copy somewhere else automatically.
-        </p>
-        <p className="bk-warn">
-          <Info size={13} /> A backup contains the whole database, uploads and evidence. Sending it to Drive puts that in
-          Google's hands — a decision for the laboratory to make deliberately.
-        </p>
-        {!readOnly
-          ? <button type="button" onClick={() => setConnecting(true)}>Connect Google Drive</button>
-          : <p className="hint">Only someone with approval rights on Settings can connect it.</p>}
+  return (
+    <div className="card bk-dests">
+      <div className="section-head">
+        <h3><Cloud size={15} /> Where copies go</h3>
+        {canSync && (status?.copies.pending ?? 0) > 0 && (
+          <button type="button" className="tiny" disabled={!!busy || !!working}
+            onClick={() => act('sync', () => api('/backup/destinations/sync', { method: 'POST', body: '{}' }))}>
+            {working === 'sync' ? 'Copying…' : `Copy ${status!.copies.pending} waiting`}
+          </button>
+        )}
       </div>
-    );
+
+      {destinations.length === 0 ? (
+        <p className="hint">
+          Every backup is on this computer only. If it is stolen, flooded or simply fails, so is the quality record.
+          Add somewhere else for copies to go — the hospital server needs nothing bought or installed.
+        </p>
+      ) : (
+        <ul className="bk-dest-list">
+          {destinations.map(d => {
+            const def = kindOf(d.kind);
+            const failing = d.lastResult === 'failed';
+            return (
+              <li key={d.id} className={`bk-dest ${d.enabled ? '' : 'is-off'} ${failing ? 'is-failing' : ''}`}>
+                <span className={`bk-dest-dot ${!d.enabled ? 'off' : failing ? 'bad' : d.lastResult === 'success' ? 'ok' : 'idle'}`} />
+                <div className="bk-dest-main">
+                  <div className="bk-dest-title">
+                    <strong>{d.name}</strong>
+                    {!def?.offSite && <span className="chip warn">Same machine</span>}
+                    {!d.enabled && <span className="chip">Paused</span>}
+                  </div>
+                  <div className="bk-dest-where"><PathText value={describeDestination(d)} /></div>
+                  <div className="bk-dest-state">
+                    {failing
+                      ? <span className="bad">{d.lastMessage}</span>
+                      : d.lastAttemptAt
+                        ? <>Last copy {timeAgo(d.lastAttemptAt)}</>
+                        : <>Nothing sent yet</>}
+                    {d.enabled && d.pending > 0 && <> · <strong>{d.pending}</strong> waiting</>}
+                  </div>
+                </div>
+                {!readOnly && (
+                  <div className="bk-dest-acts">
+                    <button type="button" className="tiny secondary" disabled={!!working}
+                      onClick={() => act(`test-${d.id}`, async () => {
+                        const r = await api<{ note?: string }>(`/backup/destinations/${d.id}/test`, { method: 'POST', body: '{}' });
+                        return { message: r.note ?? `${d.name} is reachable.` };
+                      })}>
+                      {working === `test-${d.id}` ? 'Checking…' : 'Test'}
+                    </button>
+                    <button type="button" className="tiny secondary" onClick={() => setEditing(d.id)}>Edit</button>
+                    <button type="button" className="tiny secondary" disabled={!!working}
+                      onClick={() => act(`toggle-${d.id}`, async () => {
+                        await api(`/backup/destinations/${d.id}/toggle`, { method: 'POST', body: JSON.stringify({ enabled: !d.enabled }) });
+                        return { message: `${d.name} ${d.enabled ? 'paused' : 'switched on'}.` };
+                      })}>
+                      {d.enabled ? 'Pause' : 'Resume'}
+                    </button>
+                    <button type="button" className="tiny danger" disabled={!!working}
+                      onClick={() => {
+                        if (!window.confirm(`Remove ${d.name}?\n\nCopies already sent there stay where they are. New backups will not go there.`)) return;
+                        void act(`del-${d.id}`, () => api(`/backup/destinations/${d.id}`, { method: 'DELETE' }));
+                      }}>Remove</button>
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {!readOnly && (
+        <div className="bk-dest-add">
+          <h4>Add somewhere</h4>
+          <div className="bk-kind-grid">
+            {kinds.map(k => (
+              <button key={k.kind} type="button" onClick={() => setAdding(k.kind)}>
+                <span className="bk-kind-head">
+                  <strong>{k.label}</strong>
+                  {!k.offSite && <em className="muted">same machine</em>}
+                  {k.needsInternet && <em className="muted">needs internet</em>}
+                </span>
+                <span className="bk-kind-tag">{k.tagline}</span>
+                <span className="bk-kind-why">{k.detail}</span>
+                {k.worksWith && <span className="bk-kind-with">Works with {k.worksWith}</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {readOnly && destinations.length > 0 && <p className="hint">Only someone with approval rights on Settings can change these.</p>}
+    </div>
+  );
+}
+
+/**
+ * One destination's settings, built from the field list the server publishes.
+ *
+ * Data-driven so a new provider is a description rather than another form — and
+ * so every provider gets the same behaviour: nothing is saved until it has been
+ * proved to reach something real.
+ */
+function DestinationForm({ def, existing, onCancel, onSaved, onError }: {
+  def: DestinationKindDef; existing: BackupDestination | null;
+  onCancel: () => void; onSaved: (message: string) => void | Promise<void>; onError: (m: string) => void;
+}) {
+  const [name, setName] = useState(existing?.name ?? def.label);
+  const [config, setConfig] = useState<Record<string, string>>(() => {
+    const seed: Record<string, string> = {};
+    for (const f of def.fields) seed[f.key] = String(existing?.config?.[f.key] ?? '');
+    return seed;
+  });
+  const [busy, setBusy] = useState(false);
+  const set = (k: string, v: string) => setConfig(c => ({ ...c, [k]: v }));
+
+  async function save() {
+    setBusy(true);
+    try {
+      const r = await api<{ note?: string; destination: BackupDestination }>(
+        existing ? `/backup/destinations/${existing.id}` : '/backup/destinations',
+        { method: existing ? 'PUT' : 'POST', body: JSON.stringify({ kind: def.kind, name, config }) });
+      await onSaved(`${r.destination.name} saved and verified.${r.note ? ` ${r.note}` : ''}`);
+    } catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
   }
 
-  if (connecting) {
-    return (
-      <div className="card bk-drive">
-        <div className="section-head"><h3><Cloud size={15} /> Connect Google Drive</h3>
-          <button type="button" className="secondary tiny" onClick={() => setConnecting(false)}>Cancel</button>
-        </div>
+  return (
+    <div className="card bk-dests">
+      <div className="section-head">
+        <h3><Cloud size={15} /> {existing ? `Edit ${existing.name}` : def.label}</h3>
+        <button type="button" className="secondary tiny" onClick={onCancel}>Cancel</button>
+      </div>
+      <p className="hint">{def.detail}</p>
+      {def.worksWith && <p className="hint"><strong>Works with:</strong> {def.worksWith}</p>}
+
+      {def.kind === 'google_drive' && (
         <ol className="bk-steps">
           <li>In the <strong>Google Cloud console</strong>, create a project and enable the <strong>Google Drive API</strong>.</li>
           <li>Create a <strong>service account</strong>, then <em>Keys → Add key → JSON</em>. A file downloads.</li>
-          <li>In <strong>Google Drive</strong>, make the folder backups should go into. Share it with the service
-            account's email address, as an <strong>Editor</strong>.</li>
+          <li>In <strong>Google Drive</strong>, make the destination folder and share it with the service account's email address, as an <strong>Editor</strong>.</li>
           <li>Open that folder; the last part of the address bar is its <strong>folder ID</strong>.</li>
         </ol>
-        <label className="stack">Service-account key (paste the whole JSON file)
-          <textarea rows={5} value={keyJson} onChange={e => setKeyJson(e.target.value)} spellCheck={false}
-            placeholder='{ "type": "service_account", "project_id": "…", "client_email": "…", "private_key": "…" }' />
+      )}
+
+      <label className="stack">Name it
+        <input value={name} onChange={e => setName(e.target.value)} placeholder={def.label} />
+      </label>
+
+      {def.fields.map(f => (
+        <label className="stack" key={f.key}>
+          {f.label}{f.required ? '' : <span className="muted"> (optional)</span>}
+          {f.type === 'textarea'
+            ? <textarea rows={5} spellCheck={false} value={config[f.key] ?? ''} placeholder={f.placeholder}
+                onChange={e => set(f.key, e.target.value)} />
+            : f.type === 'checkbox'
+              ? <span className="bk-check"><input type="checkbox" checked={config[f.key] === 'true'}
+                  onChange={e => set(f.key, e.target.checked ? 'true' : '')} /> <span>{f.help}</span></span>
+              : <input type={f.type === 'password' ? 'password' : 'text'} value={config[f.key] ?? ''}
+                  placeholder={existing?.hasSecret && f.type === 'password' ? 'Stored — leave blank to keep it' : f.placeholder}
+                  onChange={e => set(f.key, e.target.value)} />}
+          {f.help && f.type !== 'checkbox' && <span className="hint">{f.help}</span>}
         </label>
-        <label className="stack">Destination folder ID
-          <input value={folderId} onChange={e => setFolderId(e.target.value)} placeholder="1AbC2dEfGhIjKlMnOpQrStUvWxYz" />
-        </label>
-        <p className="hint">The key is stored on this host only, readable by nothing else, and is never sent back to a browser.</p>
-        <div className="form-actions">
-          <button onClick={connect} disabled={working || !keyJson.trim()}>{working ? 'Checking with Google…' : 'Connect and verify'}</button>
-        </div>
+      ))}
+
+      <p className="hint">
+        Nothing is saved until it has been checked against the real thing — a destination that only turns out to be wrong
+        at two in the morning is worse than none.
+        {(def.kind === 'google_drive' || def.kind === 's3' || def.kind === 'webdav') && ' Passwords and keys are stored on this host and never sent back to a browser.'}
+      </p>
+
+      <div className="form-actions">
+        <button onClick={save} disabled={busy}>{busy ? 'Checking…' : existing ? 'Save and verify' : 'Add and verify'}</button>
+        <button type="button" className="secondary" onClick={onCancel}>Cancel</button>
       </div>
-    );
+    </div>
+  );
+}
+
+/** Where backups are written on this machine. */
+function FolderCard({ status, readOnly, onChanged, onError }: {
+  status: ProtectionStatus | null; readOnly: boolean;
+  onChanged: (message: string) => void | Promise<void>; onError: (m: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState('');
+  const [busy, setBusy] = useState('');
+  const folder = status?.folder;
+
+  useEffect(() => { if (folder && !editing) setValue(folder.isDefault ? '' : folder.path); }, [folder?.path, editing]);
+
+  async function run(key: string, fn: () => Promise<{ message?: string; note?: string }>) {
+    setBusy(key);
+    try { const r = await fn(); await onChanged(r.message ?? r.note ?? 'Done.'); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(''); }
   }
 
-  const failing = !!drive.lastFailureAt && (!drive.lastSyncAt || drive.lastFailureAt > drive.lastSyncAt);
   return (
-    <div className="card bk-drive">
-      <div className="section-head">
-        <h3><Cloud size={15} /> Copy off site</h3>
-        <span className={`chip ${failing ? 'bad' : 'ok'}`}>{failing ? 'Last copy failed' : 'Connected'}</span>
-      </div>
-      <dl className="bk-facts">
-        <div><dt>Account</dt><dd>{drive.clientEmail ?? '—'}</dd></div>
-        <div><dt>Folder</dt><dd>{drive.folderName || drive.folderId || 'Drive root'}</dd></div>
-        <div><dt>Last copy</dt><dd>{drive.lastSyncAt ? timeAgo(drive.lastSyncAt) : 'nothing sent yet'}</dd></div>
-        <div><dt>Waiting</dt><dd>{drive.pendingCount === 0 ? 'nothing' : `${drive.pendingCount} backup(s)`}</dd></div>
-      </dl>
-      {failing && <p className="bk-warn bad"><AlertTriangle size={13} /> {drive.lastFailureMessage}</p>}
-      <div className="form-actions">
-        {canSync && <button onClick={onSyncNow} disabled={!!busy || drive.pendingCount === 0}>
-          {busy === 'sync' ? 'Copying…' : drive.pendingCount === 0 ? 'Everything is copied' : `Copy ${drive.pendingCount} now`}
-        </button>}
-        {!readOnly && <button className="secondary" onClick={test} disabled={working}>{working ? 'Checking…' : 'Test connection'}</button>}
-        {!readOnly && <button className="secondary" onClick={disconnect} disabled={working}>Disconnect</button>}
-      </div>
+    <div className="card bk-folder">
+      <div className="section-head"><h3><FolderOpen size={15} /> Where backups are kept</h3></div>
+      {!editing ? (
+        <>
+          <p className="bk-folder-path">
+            <code>{folder ? <PathText value={folder.path} /> : '—'}</code>
+            {folder?.isDefault && <span className="chip">Default</span>}
+            {folder && !folder.available && <span className="chip bad">Unavailable</span>}
+          </p>
+          <p className="hint">
+            Every backup — taken by hand or by the schedule — is written straight here, and copied on to the destinations
+            below. Nothing waits for somebody to press Download.
+            {folder && !folder.available && ' This folder cannot be reached at the moment, so backups are going to the default location instead.'}
+          </p>
+          {!readOnly && <button type="button" className="secondary" onClick={() => setEditing(true)}>Change folder</button>}
+        </>
+      ) : (
+        <>
+          <label className="stack">Folder path
+            <input value={value} onChange={e => setValue(e.target.value)}
+              placeholder="D:\LIMS-Backups   or   /var/backups/lims   (blank for the default)" />
+            <span className="hint">
+              A folder on this computer or a drive attached to it. To copy backups onto the hospital server, leave this
+              alone and add it as a destination below instead — that way a copy exists in both places.
+            </span>
+          </label>
+          <div className="form-actions">
+            <button disabled={!!busy} onClick={() => run('save', async () => {
+              const r = await api<{ message: string }>('/backup/folder', { method: 'PUT', body: JSON.stringify({ path: value.trim() || null }) });
+              setEditing(false);
+              return r;
+            })}>{busy === 'save' ? 'Checking…' : 'Use this folder'}</button>
+            <button type="button" className="secondary" disabled={!!busy || !value.trim()} onClick={() => run('test', () =>
+              api('/backup/folder/test', { method: 'POST', body: JSON.stringify({ path: value.trim() }) }))}>
+              {busy === 'test' ? 'Checking…' : 'Test it'}
+            </button>
+            <button type="button" className="secondary" onClick={() => setEditing(false)}>Cancel</button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

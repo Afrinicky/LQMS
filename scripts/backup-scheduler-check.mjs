@@ -34,7 +34,7 @@ const bk = await import('../server/services/backupService.ts');
 const hhmmOf = (d) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 const schedule = (patch) => bk.saveSchedule({
   enabled: true, frequency: 'custom', times: ['02:00'], daysOfWeek: [],
-  retention: { daily: 7, weekly: 4, monthly: 12 }, syncToDrive: false, ...patch,
+  retention: { daily: 7, weekly: 4, monthly: 12 }, ...patch,
 });
 
 /* ------------------------------------------------------------- 1. it fires */
@@ -49,7 +49,8 @@ const first = await scheduler.tick();
 check('the scheduler takes the backup that was due', !!first?.backup, JSON.stringify(first)?.slice(0, 100));
 check('and it is a real file', (first?.backup?.sizeBytes ?? 0) > 0, `${first?.backup?.sizeBytes} bytes`);
 check('the register now has one', bk.listLocal().length === 1);
-check('nothing was sent off site, because Drive is not connected', first?.sync === null);
+check('nothing was sent off site, because no destination is configured', first?.copies?.length === 0,
+  JSON.stringify(first?.copies));
 
 /* --------------------------------------------------- 2. it does not repeat */
 console.log('\n[2] And then it stops, rather than running every minute');
@@ -104,18 +105,19 @@ const removed3 = bk.pruneLocal(bk.getSchedule());
 check('a pre-restore safety snapshot is never pruned',
   !removed3.some(f => f.startsWith('pre-restore-')) && fs.existsSync(path.join(dataDir, 'backups', 'pre-restore-2020-01-01T00-00-00-000Z.zip')));
 
-/* ------------------------------------------------------ 6. syncing is opt-in */
+/* ------------------------------------------------------ 6. copies are opt-in */
 console.log('\n[6] Nothing leaves the building unless it was asked to');
 
-schedule({ times: [hhmmOf(new Date(Date.now() - 3 * 60_000))], syncToDrive: true });
-const wantsSync = await new bk.BackupScheduler().tick();
-check('a cycle asking for a Drive copy still takes the local backup', !!wantsSync?.backup);
-check('and skips the copy when Drive is not connected', wantsSync?.sync === null,
-  JSON.stringify(wantsSync?.sync));
+schedule({ times: [hhmmOf(new Date(Date.now() - 3 * 60_000))] });
+const noDestinations = await new bk.BackupScheduler().tick();
+check('a cycle with nowhere to copy to still takes the local backup', !!noDestinations?.backup);
+check('and sends nothing anywhere', noDestinations?.copies.length === 0, JSON.stringify(noDestinations?.copies));
+check('nor prunes anything remote', Object.keys(noDestinations?.prunedRemote ?? {}).length === 0);
 
 const status = bk.protectionStatus();
-check('the status reports Drive as not connected', status.drive.connected === false);
-check('and nothing waiting to be sent', status.drive.pendingCount === 0, `${status.drive.pendingCount}`);
+check('the status says no destination is configured', status.copies.configured === 0, JSON.stringify(status.copies));
+check('and that nothing is off site', status.copies.offSite === 0 && status.copies.offSiteHealthy === 0);
+check('while still naming the folder backups are written to', !!status.folder.path, JSON.stringify(status.folder));
 
 getDb().close();
 fs.rmSync(dataDir, { recursive: true, force: true });

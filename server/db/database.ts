@@ -9,14 +9,22 @@ import { SYNCABLE_TABLES } from './syncableTables.js';
 export const dataRoot = config.db.dataDir;
 export const uploadRoot = path.join(dataRoot, 'uploads');
 export const evidenceRoot = path.join(dataRoot, 'evidence');
-export const backupRoot = path.join(dataRoot, 'backups');
+/**
+ * Where backups land by default. A laboratory can point them somewhere else —
+ * a second disk, a folder on the hospital server — from the settings screen;
+ * see backupFolder() in services/backupService.ts, which every backup path goes
+ * through. This stays as the fallback and as the folder that is always created.
+ */
+export const defaultBackupRoot = path.join(dataRoot, 'backups');
+/** @deprecated Read backupFolder() instead, so a configured folder is honoured. */
+export const backupRoot = defaultBackupRoot;
 export const configRoot = path.join(dataRoot, 'config');
 export const dbPath = config.db.sqlitePath;
 
 let db: Database.Database | undefined;
 
 export function ensureDataDirs() {
-  for (const dir of [dataRoot, uploadRoot, evidenceRoot, backupRoot, configRoot]) fs.mkdirSync(dir, { recursive: true });
+  for (const dir of [dataRoot, uploadRoot, evidenceRoot, defaultBackupRoot, configRoot]) fs.mkdirSync(dir, { recursive: true });
 }
 
 export function getDb() {
@@ -103,6 +111,23 @@ CREATE TABLE IF NOT EXISTS backup_sync_log (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_backup_sync_file ON backup_sync_log(file_name, status);
+
+-- Where copies of a backup are sent. A laboratory keeps as many as it has: a
+-- folder on the hospital server, a bucket on its own MinIO, a cloud provider.
+-- Credentials live in the secret column and never leave this machine.
+CREATE TABLE IF NOT EXISTS backup_destinations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  name TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  config TEXT NOT NULL DEFAULT '{}',
+  secret TEXT,
+  last_result TEXT,
+  last_attempt_at TEXT,
+  last_message TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS dennis_documents (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, module TEXT, document_type TEXT, source_record_id TEXT, version TEXT, status TEXT NOT NULL DEFAULT 'placeholder', file_path TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT);
 CREATE TABLE IF NOT EXISTS dennis_document_chunks (id INTEGER PRIMARY KEY AUTOINCREMENT, document_id INTEGER NOT NULL REFERENCES dennis_documents(id), chunk_text TEXT NOT NULL, chunk_index INTEGER NOT NULL DEFAULT 0, page_number INTEGER, section_heading TEXT, embedding_id TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -136,6 +161,20 @@ CREATE TABLE IF NOT EXISTS dennis_settings (id INTEGER PRIMARY KEY AUTOINCREMENT
   // roles. The flag is set on the seeded System Administrator and can be moved
   // deliberately; `is_system` is a different thing and does not imply it.
   const roleColumns = database.prepare("PRAGMA table_info(roles)").all() as Array<{ name: string }>;
+  // Sync log rows written before destinations existed have no destination_id;
+  // they were all Google Drive, which is what the backfill says.
+  const syncColumns = database.prepare("PRAGMA table_info(backup_sync_log)").all() as Array<{ name: string }>;
+  if (syncColumns.length > 0 && !syncColumns.some(c => c.name === 'destination_id')) {
+    database.exec('ALTER TABLE backup_sync_log ADD COLUMN destination_id INTEGER REFERENCES backup_destinations(id)');
+  }
+  // The name is written into the row as well as pointed at, so the history of
+  // what was sent where still reads properly after a destination is removed —
+  // "sent to Hospital server" is the fact worth keeping, and it must not
+  // disappear along with the credentials.
+  if (syncColumns.length > 0 && !syncColumns.some(c => c.name === 'destination_name')) {
+    database.exec('ALTER TABLE backup_sync_log ADD COLUMN destination_name TEXT');
+  }
+
   if (!roleColumns.some(c => c.name === 'is_administrator')) {
     database.exec('ALTER TABLE roles ADD COLUMN is_administrator INTEGER NOT NULL DEFAULT 0');
     database.exec("UPDATE roles SET is_administrator = 1 WHERE name = 'System Administrator'");

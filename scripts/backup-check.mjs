@@ -3,13 +3,17 @@
  *
  * The things that matter here are the ones nobody notices until the day they
  * need them. A schedule that silently never fires. A retention policy that
- * deletes the last copy. A Drive credential that goes back to a browser. A
+ * deletes the last copy. A stored credential that goes back to a browser. A
  * failed upload that reports success. So this checks the boring guarantees.
  *
- * Google Drive itself is not reachable from a test host and does not need to
- * be: the credential handling, the refusals and the logging are all local, and
- * a connection attempt with a made-up key must fail cleanly rather than hang or
- * half-connect.
+ * This is the HTTP side: the schedule, the folder, and the destination
+ * endpoints as a browser meets them. Copying to real folders and shares is
+ * exercised in scripts/backup-destinations-check.mjs.
+ *
+ * No cloud provider is reachable from a test host and none needs to be: the
+ * credential handling, the refusals and the logging are all local, and a
+ * connection attempt with a made-up key must fail cleanly rather than hang or
+ * store something half-configured.
  *
  *   npx tsx scripts/backup-check.mjs
  */
@@ -154,7 +158,8 @@ const run = await j('/backup/run-now', { token: A, method: 'POST', body: {} });
 check('a backup runs on demand', run.status === 201, JSON.stringify(run.json)?.slice(0, 120));
 check('and produces a real file', (run.json?.backup?.sizeBytes ?? 0) > 0, `${run.json?.backup?.sizeBytes} bytes`);
 check('named so it sorts by date', /^sech-lims-backup-\d{4}-\d{2}-\d{2}/.test(run.json?.backup?.fileName ?? ''), run.json?.backup?.fileName);
-check('nothing was copied off site, because Drive is not connected', run.json?.sync === null);
+check('nothing was copied off site, because no destination is configured',
+  Array.isArray(run.json?.copies) && run.json.copies.length === 0, JSON.stringify(run.json?.copies));
 
 const list = (await j('/backup/list', { token: A })).json;
 check('it appears in the register', list.backups.some(b => b.fileName === run.json.backup.fileName));
@@ -175,42 +180,52 @@ const after = (await j('/backup/list', { token: A })).json.backups;
 check('a fresh backup is never pruned', after.some(b => b.fileName === run.json.backup.fileName));
 check('and nothing was lost from a young collection', after.length === before, `${before} → ${after.length}`);
 
-/* --------------------------------------------------- 7. the Drive credential */
-console.log('\n[7] The Google Drive credential is handled like a credential');
+/* ------------------------------------------------------ 7. destinations */
+console.log('\n[7] A destination is proved before it is believed');
 
-const driveBefore = (await j('/backup/drive', { token: A })).json;
-check('Drive starts disconnected', driveBefore.connected === false);
-check('and no account is claimed', driveBefore.clientEmail === null);
+const kinds = await j('/backup/destination-kinds', { token: A });
+check('the screen can be told what may be added', kinds.status === 200 && kinds.json.length >= 4, `${kinds.json?.length}`);
+check('and each kind says what it needs', kinds.json.every(k => Array.isArray(k.fields) && k.label && k.tagline));
+check('at least one kind is off site', kinds.json.some(k => k.offSite === true));
 
-const notJson = await j('/backup/drive', { token: A, method: 'PUT', body: { serviceAccountKey: 'hello' } });
+const noneYet = (await j('/backup/destinations', { token: A })).json;
+check('none are configured to begin with', Array.isArray(noneYet) && noneYet.length === 0, JSON.stringify(noneYet));
+
+const nonsenseKind = await j('/backup/destinations', { token: A, method: 'POST', body: { kind: 'carrier-pigeon', config: {} } });
+check('an unknown kind is refused', nonsenseKind.status === 400, `got ${nonsenseKind.status}`);
+
+const emptyFolder = await j('/backup/destinations', { token: A, method: 'POST', body: { kind: 'network', name: 'Ward server', config: {} } });
+check('a destination with nothing filled in is refused', emptyFolder.status === 400);
+check('naming the field that is missing', /Folder path/i.test(emptyFolder.json?.error ?? ''), emptyFolder.json?.error);
+
+const relative = await j('/backup/destinations', { token: A, method: 'POST', body: { kind: 'network', name: 'Ward server', config: { path: 'share/backups' } } });
+check('a path that is not a full path is refused', relative.status === 400);
+check('saying what a full path looks like', /full path/i.test(relative.json?.error ?? ''), relative.json?.error);
+
+/* --------------------------------------------------- 7b. the Drive credential */
+console.log('\n[7b] The Google Drive credential is handled like a credential');
+
+const drive = (body, method = 'POST', path = '/backup/destinations') =>
+  j(path, { token: A, method, body: { kind: 'google_drive', name: 'Drive', ...body } });
+
+const notJson = await drive({ config: { serviceAccountKey: 'hello' } });
 check('a key that is not JSON is refused', notJson.status === 400, `got ${notJson.status}`);
 check('with an explanation of what to paste', /JSON/i.test(notJson.json?.error ?? ''), notJson.json?.error);
 
-const oauthKey = await j('/backup/drive', { token: A, method: 'PUT', body: {
-  serviceAccountKey: JSON.stringify({ type: 'authorized_user', client_id: 'x', client_secret: 'y' }),
-} });
+const oauthKey = await drive({ config: { serviceAccountKey: JSON.stringify({ type: 'authorized_user', client_id: 'x', client_secret: 'y' }) } });
 check('an OAuth client key is refused with the right advice',
-  oauthKey.status === 400 && /service-account/i.test(oauthKey.json?.error ?? ''), oauthKey.json?.error);
+  oauthKey.status === 400 && /service.account/i.test(oauthKey.json?.error ?? ''), oauthKey.json?.error);
 
-const noKeyMaterial = await j('/backup/drive', { token: A, method: 'PUT', body: {
-  serviceAccountKey: JSON.stringify({ type: 'service_account', project_id: 'p', client_email: 'a@b.iam.gserviceaccount.com', private_key: 'not a key' }),
-} });
+const noKeyMaterial = await drive({ config: { serviceAccountKey: JSON.stringify({
+  type: 'service_account', project_id: 'p', client_email: 'a@b.iam.gserviceaccount.com', private_key: 'not a key',
+}) } });
 check('a key with no key material in it is refused', noKeyMaterial.status === 400, noKeyMaterial.json?.error);
-
-const badFolder = await j('/backup/drive', { token: A, method: 'PUT', body: { folderId: 'short' } });
-check('a folder ID that cannot be one is refused', badFolder.status === 400, badFolder.json?.error);
-
-const stillOff = (await j('/backup/drive', { token: A })).json;
-check('none of those attempts left it half-connected', stillOff.connected === false, JSON.stringify(stillOff));
-
-const syncWithout = await j('/backup/drive/sync', { token: A, method: 'POST', body: {} });
-check('syncing without a connection is refused clearly', syncWithout.status === 400 && /not connected/i.test(syncWithout.json?.error ?? ''), syncWithout.json?.error);
 
 // A syntactically real key that Google has never issued. This exercises the
 // whole path — JWT built, signed with the private key, sent to Google's token
-// endpoint — and must come back as a clean refusal, fast, leaving nothing
-// half-connected. On a host with no internet it fails differently and that is
-// equally correct, so both answers are accepted.
+// endpoint — and must come back as a clean refusal, fast, storing nothing. On a
+// host with no internet it fails differently and that is equally correct, so
+// both answers are accepted.
 const { generateKeyPairSync } = await import('node:crypto');
 const { privateKey } = generateKeyPairSync('rsa', {
   modulusLength: 2048,
@@ -218,7 +233,7 @@ const { privateKey } = generateKeyPairSync('rsa', {
   publicKeyEncoding: { type: 'spki', format: 'pem' },
 });
 const startedAt = Date.now();
-const fakeAccount = await j('/backup/drive', { token: A, method: 'PUT', body: {
+const fakeAccount = await drive({ config: {
   serviceAccountKey: JSON.stringify({
     type: 'service_account', project_id: 'sech-lims-test',
     client_email: 'backups@sech-lims-test.iam.gserviceaccount.com', private_key: privateKey,
@@ -230,12 +245,29 @@ check('a well-formed key for an account Google does not know is refused', fakeAc
 check('and the refusal says what Google said, or that it is unreachable',
   /account not found|invalid_grant|invalid grant|reach Google/i.test(fakeAccount.json?.error ?? ''), fakeAccount.json?.error);
 check('it fails quickly rather than hanging', elapsed < 20000, `${elapsed}ms`);
-const afterFake = (await j('/backup/drive', { token: A })).json;
-check('and a failed connection stores nothing', afterFake.connected === false && afterFake.clientEmail === null,
-  JSON.stringify(afterFake));
 
-const history = await j('/backup/drive/history', { token: A });
+const afterFake = (await j('/backup/destinations', { token: A })).json;
+check('none of those attempts left a half-connected destination behind',
+  afterFake.length === 0, JSON.stringify(afterFake));
+
+const syncWithNone = await j('/backup/destinations/sync', { token: A, method: 'POST', body: {} });
+check('a sync with nowhere to send says so plainly',
+  syncWithNone.status === 200 && /already reached|no destination/i.test(syncWithNone.json?.message ?? ''),
+  JSON.stringify(syncWithNone.json));
+
+const history = await j('/backup/sync-history', { token: A });
 check('the sync history is readable even when empty', history.status === 200 && Array.isArray(history.json));
+
+/* ------------------------------------------------------ 7c. the folder */
+console.log('\n[7c] Where backups are written is the laboratory\'s choice');
+
+const folder = (await j('/backup/folder', { token: A })).json;
+check('it starts at the default', folder.isDefault === true && !!folder.path, JSON.stringify(folder));
+
+const badFolder = await j('/backup/folder', { token: A, method: 'PUT', body: { path: 'somewhere/relative' } });
+check('a relative folder is refused', badFolder.status === 400, `got ${badFolder.status}`);
+check('with advice about what to give', /full path/i.test(badFolder.json?.error ?? ''), badFolder.json?.error);
+check('and the folder is unchanged', (await j('/backup/folder', { token: A })).json.isDefault === true);
 
 /* ------------------------------------------------------ 8. who may do what */
 console.log('\n[8] Backups are the whole database, so the rights match');
@@ -251,12 +283,13 @@ check('a technician cannot read the backup status', await perm('/backup/status',
 check('a technician cannot change the schedule', await perm('/backup/schedule', T, 'PUT', { enabled: false }) === 403);
 check('a technician cannot take a backup', await perm('/backup/run-now', T, 'POST', {}) === 403);
 check('a technician cannot prune', await perm('/backup/prune', T, 'POST', {}) === 403);
-check('a technician cannot connect Google Drive', await perm('/backup/drive', T, 'PUT', { folderId: null }) === 403);
-check('a technician cannot read the sync history', await perm('/backup/drive/history', T) === 403);
+check('a technician cannot add a destination', await perm('/backup/destinations', T, 'POST', { kind: 'folder', config: {} }) === 403);
+check('a technician cannot move the backup folder', await perm('/backup/folder', T, 'PUT', { path: '/tmp/anywhere' }) === 403);
+check('a technician cannot read the sync history', await perm('/backup/sync-history', T) === 403);
 check('and cannot download a backup', await perm(`/backup/download/${encodeURIComponent(run.json.backup.fileName)}`, T) === 403);
 
-// Settings rights without approval: may look and take one, may not connect
-// Drive or destroy backups.
+// Settings rights without approval: may look and take one, may not send the
+// laboratory's data somewhere new or destroy backups.
 const qmRole = roles.find(r => /quality manager/i.test(r.name));
 const qm = `bk_qm_${stamp}`;
 await j('/users', { token: A, method: 'POST', body: { username: qm, password: PW, fullName: 'Ama Darko', roleId: qmRole.id } });
@@ -264,7 +297,9 @@ await j('/permissions/level', { token: A, method: 'POST', body: { scope: 'role',
 const Q = (await j('/auth/login', { method: 'POST', body: { username: qm, password: PW } })).json?.token;
 check('a manager with settings rights can read the status', await perm('/backup/status', Q) === 200);
 check('and can take a backup', await perm('/backup/run-now', Q, 'POST', {}) === 201);
-check('but cannot connect Google Drive', await perm('/backup/drive', Q, 'PUT', { folderId: null }) === 403);
+check('but cannot add a destination for the data to leave by',
+  await perm('/backup/destinations', Q, 'POST', { kind: 'folder', config: {} }) === 403);
+check('nor move where backups are written', await perm('/backup/folder', Q, 'PUT', { path: '/tmp/anywhere' }) === 403);
 check('and cannot prune backups away', await perm('/backup/prune', Q, 'POST', {}) === 403);
 
 /* ------------------------------------------------------ 9. the audit trail */

@@ -6,6 +6,10 @@ import { config } from '../config/index.js';
 
 export function seedDefaults() {
   const db = getDb();
+  // An off-site copy configured before destinations existed keeps working.
+  try {
+    void import('../services/backupDestinations.js').then(m => m.migrateLegacyDrive()).catch(() => undefined);
+  } catch { /* never let a migration stop the system booting */ }
   const tx = db.transaction(() => {
     const rolesToSeed = [
       { name: 'System Administrator', description: 'Full foundation administration role.' },
