@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config/index.js';
 import { SYNCABLE_TABLES } from './syncableTables.js';
+import { BUILTIN_SOUNDS, DEFAULT_SOUND_FOR_EVENT } from '../../shared/constants/activities.js';
 
 // Filesystem layout is sourced from the centralized config module so every path
 // is env-configurable (SECH_LIMS_DATA_DIR / SECH_LIMS_DB_PATH) from one place.
@@ -4807,7 +4808,288 @@ CREATE INDEX IF NOT EXISTS idx_form_sub_template ON form_submissions(template_ke
   // then reused for every electronic signing in place of drawing one each time.
   if (!staffSelfCols.has('signature_file_id')) database.exec('ALTER TABLE staff ADD COLUMN signature_file_id INTEGER REFERENCES files(id)');
 
+  // ===================================================================
+  // Unit activities, duty reminders and the sound catalogue
+  // -------------------------------------------------------------------
+  // The recurring work a unit does — environmental charting, equipment checks,
+  // controls, reagent changes, weekly cleaning — defined once, then raised as a
+  // dated occurrence against whoever the duty roster placed in that unit. An
+  // occurrence is unique per (activity, period), so re-running the generator is
+  // safe: a daily activity cannot be raised twice for the same day, and a
+  // monthly one cannot be raised twice for the same month.
+  //
+  // Each definition also carries its own simplification state. Compliance
+  // follows ease, so an activity staff find painful is recorded as a design
+  // problem to fix rather than left as a discipline problem to chase.
+  // ===================================================================
+  database.exec(`
+CREATE TABLE IF NOT EXISTS unit_activities (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  activity_code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT,
+  instructions TEXT,                       -- the short "how to do it" shown on the to-do
+  category TEXT NOT NULL DEFAULT 'other',
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),   -- the unit that owns the work
+  bench_id INTEGER REFERENCES section_benches(id),
+  equipment_id INTEGER REFERENCES equipment_items(id),
+  environmental_asset_id INTEGER REFERENCES environmental_assets(id),
+  monitoring_item_id INTEGER REFERENCES monitoring_items(id),
+  target_module_key TEXT,                  -- where the work is actually recorded
+  target_route TEXT,                       -- deep link opened by "Do it now"
+  frequency TEXT NOT NULL DEFAULT 'daily', -- per_shift|daily|weekly|fortnightly|monthly|quarterly|biannual|annual|custom_days
+  interval_days INTEGER,                   -- used when frequency = custom_days
+  weekdays TEXT,                           -- JSON [0..6], for weekly/fortnightly
+  day_of_month INTEGER,                    -- for monthly and longer
+  months TEXT,                             -- JSON [1..12], for quarterly and longer
+  shift_codes TEXT,                        -- JSON roster shift codes; empty = any on-duty shift
+  due_time TEXT,                           -- HH:MM the work should be done by
+  grace_minutes INTEGER NOT NULL DEFAULT 0,
+  assign_mode TEXT NOT NULL DEFAULT 'on_duty',  -- on_duty|bench|unit_head|named_staff|whole_unit
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  priority TEXT NOT NULL DEFAULT 'normal',
+  evidence_required INTEGER NOT NULL DEFAULT 0,
+  notify_leadership INTEGER NOT NULL DEFAULT 1,
+  sound_key TEXT,
+  redesign_status TEXT NOT NULL DEFAULT 'none',  -- none|flagged|in_progress|redesigned
+  redesign_note TEXT,
+  simplicity_rating INTEGER,               -- 1..5, the designer's own estimate
+  redesign_flagged_by INTEGER REFERENCES users(id),
+  redesign_flagged_at TEXT,
+  estimated_minutes INTEGER,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_unit_activities_section ON unit_activities(section_id, is_active);
+
+CREATE TABLE IF NOT EXISTS activity_occurrences (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  activity_id INTEGER NOT NULL REFERENCES unit_activities(id) ON DELETE CASCADE,
+  period_key TEXT NOT NULL,                -- 2026-08-08 | 2026-W32 | 2026-08 | 2026-Q3 | 2026-H2 | 2026
+  occurrence_date TEXT NOT NULL,           -- the day it lands on someone's list
+  window_start TEXT NOT NULL,              -- first day it may be completed
+  window_end TEXT NOT NULL,                -- last day before it counts as missed
+  due_at TEXT,                             -- ISO datetime, when due_time is set
+  section_id INTEGER REFERENCES sections(id),
+  status TEXT NOT NULL DEFAULT 'pending',  -- pending|in_progress|done|missed|not_applicable
+  completed_at TEXT,
+  completed_by_staff_id INTEGER REFERENCES staff(id),
+  completion_note TEXT,
+  linked_record_type TEXT,
+  linked_record_id TEXT,
+  evidence_file_id INTEGER REFERENCES files(id),
+  reminded_at TEXT,
+  escalated_at TEXT,
+  missed_flagged_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT,
+  UNIQUE(activity_id, period_key)
+);
+CREATE INDEX IF NOT EXISTS idx_activity_occ_date ON activity_occurrences(occurrence_date, status);
+CREATE INDEX IF NOT EXISTS idx_activity_occ_section ON activity_occurrences(section_id, occurrence_date);
+
+-- Who the occurrence is on. Several people share one occurrence when a whole
+-- shift is on duty; any of them completing it completes the work, which is how
+-- the laboratory actually operates.
+CREATE TABLE IF NOT EXISTS activity_assignees (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  occurrence_id INTEGER NOT NULL REFERENCES activity_occurrences(id) ON DELETE CASCADE,
+  staff_id INTEGER NOT NULL REFERENCES staff(id),
+  user_id INTEGER REFERENCES users(id),
+  assignment_source TEXT NOT NULL DEFAULT 'duty_roster',
+  shift_code TEXT,
+  bench_name TEXT,
+  -- A watcher sees the item as oversight. Leadership watches; it never becomes
+  -- their own to-do, which is the whole point of routing by duty.
+  is_watcher INTEGER NOT NULL DEFAULT 0,
+  notified_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(occurrence_id, staff_id)
+);
+CREATE INDEX IF NOT EXISTS idx_activity_assignees_staff ON activity_assignees(staff_id, is_watcher);
+
+-- The staff's own verdict on how easy an activity is to execute. This is the
+-- evidence the redesign programme runs on.
+CREATE TABLE IF NOT EXISTS activity_feedback (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  activity_id INTEGER NOT NULL REFERENCES unit_activities(id) ON DELETE CASCADE,
+  occurrence_id INTEGER REFERENCES activity_occurrences(id) ON DELETE SET NULL,
+  staff_id INTEGER REFERENCES staff(id),
+  ease_rating INTEGER,                     -- 1 (very hard) .. 5 (very easy)
+  minutes_taken INTEGER,
+  comment TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_activity_feedback_activity ON activity_feedback(activity_id);
+
+-- How long before the month turns each schedule must exist, and what happens
+-- when it does not. One row; the laboratory adjusts it under Settings.
+CREATE TABLE IF NOT EXISTS scheduling_policy (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  roster_due_days_before INTEGER NOT NULL DEFAULT 7,
+  reassignment_due_days_before INTEGER NOT NULL DEFAULT 7,
+  bench_due_days_before INTEGER NOT NULL DEFAULT 3,
+  reminder_lead_days INTEGER NOT NULL DEFAULT 14,
+  auto_carry_forward INTEGER NOT NULL DEFAULT 1,
+  bench_inherit_gaps INTEGER NOT NULL DEFAULT 1,
+  activity_generation_days INTEGER NOT NULL DEFAULT 14,
+  missed_grace_hours INTEGER NOT NULL DEFAULT 6,
+  notify_leadership_daily INTEGER NOT NULL DEFAULT 1,
+  briefing_hour INTEGER NOT NULL DEFAULT 5,
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT
+);
+INSERT OR IGNORE INTO scheduling_policy (id) VALUES (1);
+
+-- Every automatic roll-forward, recorded. A month running on last month's
+-- roster is a fact an assessor will ask about, so it is written down rather
+-- than inferred.
+CREATE TABLE IF NOT EXISTS schedule_carry_forwards (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,                      -- duty_roster | reassignment | bench_schedule
+  month TEXT NOT NULL,                     -- YYYY-MM
+  section_id INTEGER NOT NULL DEFAULT 0,   -- 0 for laboratory-wide schedules
+  source_id INTEGER,
+  created_id INTEGER,
+  reason TEXT NOT NULL DEFAULT 'not_prepared',
+  detail TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(kind, month, section_id)
+);
+
+-- The sound catalogue. A built-in sound is a short synthesis spec rather than
+-- an audio file so it survives the offline install and plays identically in the
+-- desktop shell, the browser and the native app; a laboratory that prefers its
+-- own recording uploads one and points the same preference at the file.
+CREATE TABLE IF NOT EXISTS notification_sounds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sound_key TEXT NOT NULL UNIQUE,
+  label TEXT NOT NULL,
+  description TEXT,
+  tone_spec TEXT,                          -- JSON ToneSpec
+  file_id INTEGER REFERENCES files(id),    -- an uploaded sound instead of a spec
+  is_system INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+-- One laboratory-wide default row plus one row per user who has chosen their
+-- own. The user's row wins where it is set; anything they leave alone follows
+-- the laboratory.
+CREATE TABLE IF NOT EXISTS notification_sound_prefs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  scope TEXT NOT NULL DEFAULT 'user',      -- laboratory | user
+  user_id INTEGER REFERENCES users(id),
+  enabled INTEGER NOT NULL DEFAULT 1,
+  volume REAL NOT NULL DEFAULT 0.7,
+  desktop_enabled INTEGER NOT NULL DEFAULT 1,
+  mobile_enabled INTEGER NOT NULL DEFAULT 1,
+  repeat_count INTEGER NOT NULL DEFAULT 1,
+  quiet_hours_start TEXT,
+  quiet_hours_end TEXT,
+  daily_briefing_enabled INTEGER NOT NULL DEFAULT 1,
+  sound_todo TEXT NOT NULL DEFAULT 'chime_soft',
+  sound_reminder TEXT NOT NULL DEFAULT 'bell_double',
+  sound_overdue TEXT NOT NULL DEFAULT 'alert_urgent',
+  sound_critical TEXT NOT NULL DEFAULT 'alert_urgent',
+  sound_schedule TEXT NOT NULL DEFAULT 'schedule_due',
+  sound_briefing TEXT NOT NULL DEFAULT 'morning_briefing',
+  updated_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sound_prefs_scope ON notification_sound_prefs(scope, COALESCE(user_id, 0));
+
+-- ===================================================================
+-- System Audit
+-- -------------------------------------------------------------------
+-- A flag is one finding: something that should have happened and did not, or
+-- two records that disagree. flag_key is what makes the scan idempotent — the
+-- same finding on the same record updates its row rather than piling up copies,
+-- so a flag has a real first-seen date and a real age.
+-- ===================================================================
+CREATE TABLE IF NOT EXISTS system_audit_flags (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  flag_key TEXT NOT NULL UNIQUE,
+  check_key TEXT NOT NULL,
+  category TEXT NOT NULL,                  -- omission|inconsistency|integrity|governance|access|schedule|activity
+  severity TEXT NOT NULL DEFAULT 'medium',
+  module_key TEXT,
+  title TEXT NOT NULL,
+  detail TEXT,
+  record_type TEXT,
+  record_id TEXT,
+  section_id INTEGER REFERENCES sections(id),
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  due_date TEXT,
+  action_url TEXT,                         -- clicking the flag opens the problem
+  status TEXT NOT NULL DEFAULT 'open',     -- open|acknowledged|resolved|dismissed
+  first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  occurrences INTEGER NOT NULL DEFAULT 1,
+  acknowledged_by INTEGER REFERENCES users(id),
+  acknowledged_at TEXT,
+  resolved_at TEXT,
+  resolution_note TEXT,
+  auto_cleared_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_audit_flags_status ON system_audit_flags(status, severity);
+CREATE INDEX IF NOT EXISTS idx_audit_flags_category ON system_audit_flags(category, status);
+
+CREATE TABLE IF NOT EXISTS system_audit_scans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  finished_at TEXT,
+  duration_ms INTEGER,
+  checks_run INTEGER NOT NULL DEFAULT 0,
+  flags_found INTEGER NOT NULL DEFAULT 0,
+  flags_new INTEGER NOT NULL DEFAULT 0,
+  flags_cleared INTEGER NOT NULL DEFAULT 0,
+  triggered_by INTEGER REFERENCES users(id),
+  detail TEXT
+);
+`);
+
+  // duty_rosters, reassignment_schedules and bench_schedules pre-date automatic
+  // roll-forward: mark the ones the system created itself so a carried-forward
+  // month is never mistaken for one somebody actually prepared.
+  for (const table of ['duty_rosters', 'reassignment_schedules', 'bench_schedules']) {
+    const cols = new Set((database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(c => c.name));
+    if (!cols.has('carried_forward_from_id')) database.exec(`ALTER TABLE ${table} ADD COLUMN carried_forward_from_id INTEGER`);
+    if (!cols.has('is_carry_forward')) database.exec(`ALTER TABLE ${table} ADD COLUMN is_carry_forward INTEGER NOT NULL DEFAULT 0`);
+    if (!cols.has('carry_forward_note')) database.exec(`ALTER TABLE ${table} ADD COLUMN carry_forward_note TEXT`);
+  }
+  // A bench schedule belongs to a unit head; recording who it is expected from
+  // lets the reminder name a person rather than "somebody".
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(bench_schedules)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!cols.has('published_at')) database.exec('ALTER TABLE bench_schedules ADD COLUMN published_at TEXT');
+  }
+
+  seedNotificationSounds(database);
   seedFormTemplates(database);
+}
+
+/**
+ * Seed the built-in sound catalogue and the laboratory's default preferences.
+ * Idempotent by sound_key, so a laboratory that has renamed or deactivated a
+ * built-in sound keeps its change across upgrades.
+ */
+function seedNotificationSounds(database: Database.Database) {
+  const insert = database.prepare(`INSERT OR IGNORE INTO notification_sounds (sound_key, label, description, tone_spec, is_system, is_active, display_order)
+    VALUES (?, ?, ?, ?, 1, 1, ?)`);
+  BUILTIN_SOUNDS.forEach((sound, index) => {
+    insert.run(sound.key, sound.label, sound.description, JSON.stringify(sound.spec), index);
+  });
+  database.prepare(`INSERT OR IGNORE INTO notification_sound_prefs (scope, user_id, sound_todo, sound_reminder, sound_overdue, sound_critical, sound_schedule, sound_briefing)
+    VALUES ('laboratory', NULL, ?, ?, ?, ?, ?, ?)`)
+    .run(DEFAULT_SOUND_FOR_EVENT.todo, DEFAULT_SOUND_FOR_EVENT.reminder, DEFAULT_SOUND_FOR_EVENT.overdue,
+      DEFAULT_SOUND_FOR_EVENT.critical, DEFAULT_SOUND_FOR_EVENT.schedule, DEFAULT_SOUND_FOR_EVENT.briefing);
 }
 
 /**

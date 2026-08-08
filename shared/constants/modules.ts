@@ -41,6 +41,10 @@ export const MODULES: ModuleDefinition[] = [
   { key: 'monthly_reports', label: 'Monthly Reports & LHIMS Archive', path: '/monthly-reports' },
   { key: 'records_reports', label: 'Records, Reports & Evidence', path: '/records-reports' },
   { key: 'notifications', label: 'Notifications & Review Calendar', path: '/notifications' },
+  // System Audit — the laboratory's own watchtower over the software. Every
+  // action recorded, everything that was due and not done flagged, and every
+  // flag a link to the record it is about.
+  { key: 'system_audit', label: 'System Audit', path: '/system-audit' },
   { key: 'settings', label: 'Settings', path: '/settings', protected: true }
 ];
 
