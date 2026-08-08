@@ -121,7 +121,7 @@ check('every alert route is declared in the router', badRoutes.length === 0, bad
 const pageSource = ['Phase3Pages', 'Phase4Pages', 'Phase8Pages', 'PersonnelManagementPage', 'DocumentControlPage',
   'IqcPage', 'QMSPages', 'NcCapaPages', 'OrganisationPage', 'CustomerFocusPage', 'POCTPage',
   'InformationManagementPage', 'ProcessManagementPage', 'MonthlyReportsPage', 'BloodBankHandoverPage',
-  'VerificationValidationPage', 'EnvironmentalMonitoringPage']
+  'VerificationValidationPage', 'EnvironmentalMonitoringPage', 'SystemAuditPage']
   .map(f => readFileSync(new URL(`../src/pages/${f}.tsx`, import.meta.url), 'utf8')).join('\n');
 
 const namedTabs = [...new Set(Object.values(ALERT_TARGETS).flatMap(t => [t.tab, t.subtab]).filter(Boolean))];

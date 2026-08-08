@@ -130,6 +130,13 @@ export const NAV_SECTIONS: NavSection[] = [
     modules: ['notifications'],
   },
   {
+    key: 'system_audit',
+    title: 'System Audit',
+    desc: 'Live audit trail, omissions and inconsistencies across the system',
+    group: 'system',
+    modules: ['system_audit'],
+  },
+  {
     key: 'settings',
     title: 'Settings',
     desc: 'Users, permissions and configuration',

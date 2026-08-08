@@ -86,14 +86,16 @@ export function seedDefaults() {
     // Bump whenever the table below changes in a way an existing laboratory
     // must receive — a right withdrawn, or a new area added to a role. See the
     // note beside the application loop for why this exists.
-    const ROLE_DEFAULTS_VERSION = '2026.08-features.3';
+    const ROLE_DEFAULTS_VERSION = '2026.08-features.4-duty-activities';
 
     // Every member of staff, whatever their rank: their own record, their own
     // inbox, the launchpad, the ability to raise a safety incident or a
     // nonconformity, and read access to the documents they must follow.
     const EVERYONE: Partial<Record<AccessLevel, string[]>> = {
       view: ['home', 'dashboard', 'documents.library', 'organisation.structure', 'dennis'],
-      manage: ['personnel.self', 'notifications.inbox'],
+      // Reminder sounds are a personal setting in the same sense a person's own
+      // inbox is: everyone tunes, or silences, their own device.
+      manage: ['personnel.self', 'notifications.inbox', 'notifications.sounds'],
       contribute: ['nc_capa', 'facilities_safety.incidents', 'actions'],
     };
 
@@ -153,7 +155,7 @@ export function seedDefaults() {
       'Section Head': {
         full: ['iqc', 'eqa', 'verification_validation', 'measurement_uncertainty'],
         manage: [
-          'personnel.rosters', 'personnel.training', 'personnel.orientation',
+          'personnel.rosters', 'personnel.activities', 'personnel.training', 'personnel.orientation',
           'equipment.register', 'equipment.maintenance', 'equipment.verification',
           'equipment.training', 'equipment.files', 'equipment.adverse',
           'supplier_inventory.stock', 'supplier_inventory.storage',
@@ -175,6 +177,9 @@ export function seedDefaults() {
           'process_management.directory', 'process_management.intervals',
           'process_management.critical', 'assessments', 'meetings',
           'documents.masterlist', 'documents.archive', 'supplier_inventory.suppliers',
+          // A unit head sees what their unit failed to do, but the audit
+          // programme itself belongs to the quality office.
+          'system_audit.flags',
         ],
       },
 
@@ -203,6 +208,7 @@ export function seedDefaults() {
           'measurement_uncertainty', 'poct', 'blood_bank_handover',
           'facilities_safety.equipment', 'facilities_safety.inspections',
           'records_reports.audit', 'monitoring.readings', 'monitoring.reports',
+          'system_audit.trail', 'system_audit.flags',
         ],
       },
 
@@ -228,11 +234,14 @@ export function seedDefaults() {
           'records_reports.audit', 'records_reports.retention',
           'organisation.quality_config', 'organisation.records_review',
           'notifications.calendar', 'notifications.rules',
+          // The audit of the system itself, and the programme of unit
+          // activities the audit measures against — both are quality's.
+          'system_audit.trail', 'system_audit.flags', 'system_audit.checks',
         ],
         manage: [
           // Quality's own instruments: competence, impartiality, the manual.
           'personnel.training', 'personnel.orientation', 'personnel.authorizations',
-          'personnel.declarations', 'personnel.reports',
+          'personnel.declarations', 'personnel.reports', 'personnel.activities',
           'documents.profile', 'organisation.structure',
           'process_management.directory', 'process_management.intervals',
           'process_management.critical', 'process_management.amendments',
@@ -266,7 +275,7 @@ export function seedDefaults() {
         full: [
           'personnel.register', 'personnel.orientation', 'personnel.declarations',
           'personnel.training', 'personnel.appraisals', 'personnel.authorizations',
-          'personnel.rosters', 'personnel.reports',
+          'personnel.rosters', 'personnel.activities', 'personnel.reports',
           'nc_capa', 'complaints', 'risks', 'actions', 'assessments',
           'quality_indicators', 'continual_improvement', 'management_review',
           'meetings', 'monthly_reports', 'iqc', 'eqa', 'verification_validation',
@@ -281,6 +290,7 @@ export function seedDefaults() {
           'records_reports.generate', 'records_reports.evidence', 'records_reports.print',
           'records_reports.audit', 'records_reports.retention',
           'notifications.calendar', 'notifications.rules',
+          'system_audit.trail', 'system_audit.flags', 'system_audit.checks',
         ],
         manage: [
           'equipment.register', 'equipment.maintenance', 'equipment.verification',
@@ -334,7 +344,7 @@ export function seedDefaults() {
           'facilities_safety.health', 'facilities_safety.environment',
         ],
         manage: ['nc_capa', 'actions', 'risks', 'monitoring.readings', 'monitoring.reports'],
-        view: ['blood_bank_handover', 'personnel.training', 'notifications.calendar'],
+        view: ['blood_bank_handover', 'personnel.training', 'notifications.calendar', 'system_audit.flags'],
       },
 
       'Data Officer': {

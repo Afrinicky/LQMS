@@ -3,7 +3,7 @@ import {
   MessageSquareWarning, ShieldAlert, HeartHandshake, Wrench, ClipboardCheck, Boxes,
   Workflow, Database, TrendingUp, CalendarClock, FileSignature, Gauge, ShieldCheck,
   Thermometer, FlaskConical, Microscope, BadgeCheck, Ruler, Droplets,
-  CalendarRange, FolderArchive, Bell, Settings, Home, Activity, Bot, type LucideIcon,
+  CalendarRange, FolderArchive, Bell, Settings, Home, Activity, Bot, ScanSearch, type LucideIcon,
 } from 'lucide-react';
 
 /**
@@ -45,6 +45,7 @@ export const MODULE_ICONS: Record<string, LucideIcon> = {
   monthly_reports: CalendarRange,
   records_reports: FolderArchive,
   notifications: Bell,
+  system_audit: ScanSearch,
   settings: Settings,
 };
 
@@ -72,6 +73,7 @@ export const SECTION_ICONS: Record<string, LucideIcon> = {
   continual_improvement: TrendingUp,
   facilities_safety: ShieldCheck,
   notifications_reports: Bell,
+  system_audit: ScanSearch,
   settings: Settings,
 };
 
