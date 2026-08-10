@@ -34,7 +34,10 @@
     "check:iqc-admin": "node scripts/iqc-admin-check.mjs",
     "check:backup": "tsx scripts/backup-check.mjs",
     "check:backup-scheduler": "tsx scripts/backup-scheduler-check.mjs",
-    "check:backup-destinations": "tsx scripts/backup-destinations-check.mjs"
+    "check:backup-destinations": "tsx scripts/backup-destinations-check.mjs",
+    "validate:oq": "node scripts/validation/oq-suite.mjs",
+    "validate:pq": "node scripts/validation/pq-recovery.mjs",
+    "validate": "npm run validate:oq && npm run validate:pq"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.0",

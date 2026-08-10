@@ -1,0 +1,140 @@
+{
+  "suite": "SECH_LIMS Performance Qualification — backup and disaster recovery",
+  "executedAt": "2026-08-10T10:27:31.474Z",
+  "node": "v22.22.2",
+  "platform": "Linux 6.18.5-fc-v20",
+  "tally": {
+    "PASS": 15,
+    "DEVIATION": 1
+  },
+  "results": [
+    {
+      "id": "PQ-1.1",
+      "requirement": "URS-QMS-01",
+      "title": "Quality records can be created and are persisted",
+      "outcome": "PASS",
+      "observed": "3 of 3 staff records created (ids 1, 2, 3)",
+      "at": "2026-08-10T10:27:30.710Z"
+    },
+    {
+      "id": "PQ-1.2",
+      "requirement": "URS-AUD-01",
+      "title": "Those creations are written to the audit trail",
+      "outcome": "PASS",
+      "observed": "5 audit entries before backup",
+      "at": "2026-08-10T10:27:30.717Z"
+    },
+    {
+      "id": "PQ-2.1",
+      "requirement": "URS-DAT-02",
+      "title": "A backup package is produced and named",
+      "outcome": "PASS",
+      "observed": "fileName=sech-lims-backup-2026-08-10T10-27-30-724Z.zip",
+      "at": "2026-08-10T10:27:30.916Z"
+    },
+    {
+      "id": "PQ-2.2",
+      "requirement": "URS-DAT-02",
+      "title": "The backup package exists on disk with content",
+      "outcome": "PASS",
+      "observed": "/tmp/sechlims-pq-1786357647289/backups/sech-lims-backup-2026-08-10T10-27-30-724Z.zip → 214270 bytes",
+      "at": "2026-08-10T10:27:30.916Z"
+    },
+    {
+      "id": "PQ-2.3",
+      "requirement": "URS-DAT-08",
+      "title": "The backup carries a manifest describing its contents",
+      "outcome": "PASS",
+      "observed": "manifest.includes = [\"SQLite database\",\"uploads\",\"evidence\",\"config\",\"backup-manifest.json\"]",
+      "at": "2026-08-10T10:27:30.916Z"
+    },
+    {
+      "id": "PQ-3.1",
+      "requirement": "URS-QMS-01",
+      "title": "A record created after the backup is present before restore",
+      "outcome": "PASS",
+      "observed": "4 staff records live before restore (including the post-backup one)",
+      "at": "2026-08-10T10:27:30.934Z"
+    },
+    {
+      "id": "PQ-4.1",
+      "requirement": "URS-DAT-09",
+      "title": "Restore from a registered backup completes",
+      "outcome": "PASS",
+      "observed": "→ 200 {\"ok\":true,\"message\":\"Restore completed. The database and files were replaced from the backup. Users may need to sign in again.\",\"safetyBackup\":\"pre-restore-2026-08-10T10-27-30-958",
+      "at": "2026-08-10T10:27:31.096Z"
+    },
+    {
+      "id": "PQ-4.2",
+      "requirement": "URS-DAT-10",
+      "title": "Restore writes a pre-restore safety snapshot first",
+      "outcome": "PASS",
+      "observed": "safetyBackup=pre-restore-2026-08-10T10-27-30-958Z.zip",
+      "at": "2026-08-10T10:27:31.096Z"
+    },
+    {
+      "id": "PQ-4.3",
+      "requirement": "URS-DAT-11",
+      "title": "Users can sign in again after a restore",
+      "outcome": "PASS",
+      "observed": "→ 200",
+      "at": "2026-08-10T10:27:31.445Z"
+    },
+    {
+      "id": "PQ-4.4",
+      "requirement": "URS-DAT-12",
+      "title": "Every record present at backup time is present after restore",
+      "outcome": "PASS",
+      "observed": "restored 3 staff records: PQ Recovery Subject A | PQ Recovery Subject B | PQ Recovery Subject C",
+      "at": "2026-08-10T10:27:31.456Z"
+    },
+    {
+      "id": "PQ-4.5",
+      "requirement": "URS-DAT-13",
+      "title": "Records created after the backup are correctly absent after restore",
+      "outcome": "PASS",
+      "observed": "\"PQ Post-Backup Subject\" present after restore: false",
+      "at": "2026-08-10T10:27:31.456Z"
+    },
+    {
+      "id": "PQ-4.6",
+      "requirement": "URS-AUD-10",
+      "title": "The audit trail survives the restore intact",
+      "outcome": "PASS",
+      "observed": "5 entries before backup, 6 after restore",
+      "at": "2026-08-10T10:27:31.462Z"
+    },
+    {
+      "id": "PQ-4.7",
+      "requirement": "URS-AUD-11",
+      "title": "The restore itself is recorded in the audit trail",
+      "outcome": "PASS",
+      "observed": "A \"restore\" entry is present in the restored trail.",
+      "at": "2026-08-10T10:27:31.462Z"
+    },
+    {
+      "id": "PQ-5.1",
+      "requirement": "URS-DAT-14",
+      "title": "A data-integrity scan of the recovered system passes",
+      "outcome": "PASS",
+      "observed": "→ 200 recordsChecked=6 issuesFound=0 status=passed",
+      "at": "2026-08-10T10:27:31.471Z"
+    },
+    {
+      "id": "PQ-5.2",
+      "requirement": "URS-REL-03",
+      "title": "The host remains operational after a restore",
+      "outcome": "PASS",
+      "observed": "GET /health → 200",
+      "at": "2026-08-10T10:27:31.473Z"
+    },
+    {
+      "id": "PQ-5.3",
+      "requirement": "URS-DAT-04",
+      "title": "The restored archive could be proven authentic before use",
+      "outcome": "DEVIATION",
+      "observed": "No checksum is stored with the package and none is computed before the restore overwrites live data. The restore validates that the ZIP opens, not that it is the archive the laboratory took.",
+      "at": "2026-08-10T10:27:31.473Z"
+    }
+  ]
+}
