@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { getDb, uploadRoot } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
-import { audit } from '../services/auditService.js';
+import { audit, verifyAuditChain } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
@@ -568,6 +568,14 @@ ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(i.module_key)}/${esc(i
     res.json(db.prepare(query).all(...params));
   });
 
+  // "Has this trail been tampered with?" — the question an assessor asks, and
+  // until the hash chain existed there was no way to answer it. Available to
+  // anyone who may read the trail, including the Independent Reviewer role,
+  // which holds this and no administrative right at all.
+  router.get('/audit-trail/verify', requirePermission('records_reports.audit', 'view'), (_req, res) => {
+    res.json(verifyAuditChain());
+  });
+
   router.get('/audit-trail/summary', requirePermission('records_reports.audit', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
@@ -744,6 +752,19 @@ ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(i.module_key)}/${esc(i
     const auditMissing = countSafe("SELECT COUNT(*) AS c FROM audit_logs WHERE created_at IS NULL");
     if (auditMissing > 0) { findings.push(`audit_logs missing created_at: ${auditMissing}`); issues += auditMissing; }
     recordsChecked += countSafe('SELECT COUNT(*) AS c FROM audit_logs');
+
+    // The audit trail checked against itself. Each entry carries the hash of the
+    // one before it, so an entry that has been rewritten or removed shows up
+    // here as a break in the chain — which is the whole reason the chain exists
+    // (validation finding VF-05). Anything found is an integrity incident, not
+    // a tidy-up: it means the record of what the laboratory did has been edited.
+    const chain = verifyAuditChain();
+    if (!chain.ok) {
+      findings.push(chain.message);
+      issues += chain.altered.length + chain.broken.length;
+      if (chain.altered.length) findings.push(`altered audit entries: ${chain.altered.slice(0, 20).join(', ')}${chain.altered.length > 20 ? '…' : ''}`);
+      if (chain.broken.length) findings.push(`chain breaks at audit entries: ${chain.broken.slice(0, 20).join(', ')}${chain.broken.length > 20 ? '…' : ''}`);
+    }
     const orphanLinks = countSafe("SELECT COUNT(*) AS c FROM record_links WHERE source_record_id IS NULL OR target_record_id IS NULL");
     if (orphanLinks > 0) { findings.push(`orphaned record_links rows: ${orphanLinks}`); issues += orphanLinks; }
     recordsChecked += countSafe('SELECT COUNT(*) AS c FROM record_links');

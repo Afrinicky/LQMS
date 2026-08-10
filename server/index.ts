@@ -2,6 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
+import https from 'node:https';
 import { fileURLToPath } from 'node:url';
 import setupRoutes from './routes/setup.js';
 import authRoutes from './routes/auth.js';
@@ -59,7 +61,8 @@ import { pushRoutes } from './routes/push.js';
 import { optionalAuth } from './middleware/auth.js';
 import { ensureDataDirs, getDb } from './db/database.js';
 import { seedDefaults } from './db/seed.js';
-import { config } from './config/index.js';
+import { config, isLanExposed } from './config/index.js';
+import { SignatureRefused } from './services/signatureService.js';
 
 /**
  * Resolve the directory that holds the built renderer (dist/index.html).
@@ -81,11 +84,106 @@ function resolveRendererDir(): string | null {
   return candidates.find(dir => fs.existsSync(path.join(dir, 'index.html'))) ?? null;
 }
 
+/**
+ * Which origins may call this Host from a browser.
+ *
+ * The old policy reflected whatever Origin the caller sent and allowed
+ * credentials with it, which on a Host bound to the LAN removes the browser's
+ * same-origin protection for any page a member of staff happens to open
+ * (validation finding VF-16). The allow-list is: the Host's own addresses, the
+ * Vite dev server, anything the laboratory has configured as a public URL, and
+ * whatever it lists in SECH_LIMS_ALLOWED_ORIGINS.
+ *
+ * A request with no Origin header at all — the desktop shell, the mobile app,
+ * curl, the check scripts — is not a browser cross-origin request and is
+ * allowed through; the bearer token is what protects those.
+ */
+type CorsPolicy = NonNullable<Parameters<typeof cors>[0]>;
+
+function buildCorsPolicy(): CorsPolicy {
+  const allowed = new Set<string>();
+  const port = config.api.port;
+  for (const host of ['127.0.0.1', 'localhost']) {
+    allowed.add(`http://${host}:${port}`);
+    allowed.add(`https://${host}:${port}`);
+    allowed.add(`http://${host}:5173`); // Vite dev server
+  }
+  if (config.api.publicUrl) allowed.add(config.api.publicUrl.replace(/\/$/, ''));
+  for (const extra of (process.env.SECH_LIMS_ALLOWED_ORIGINS ?? '').split(',')) {
+    const trimmed = extra.trim().replace(/\/$/, '');
+    if (trimmed) allowed.add(trimmed);
+  }
+  // Serving the LAN means serving this Host's own addresses.
+  if (isLanExposed()) {
+    for (const nets of Object.values(os.networkInterfaces())) {
+      for (const net of nets ?? []) {
+        if (net.family === 'IPv4' && !net.internal) {
+          allowed.add(`http://${net.address}:${port}`);
+          allowed.add(`https://${net.address}:${port}`);
+        }
+      }
+    }
+  }
+  return {
+    credentials: true,
+    origin(origin, callback) {
+      if (!origin) return callback(null, true);
+      if (allowed.has(origin.replace(/\/$/, ''))) return callback(null, true);
+      callback(null, false); // no CORS headers: the browser refuses it
+    },
+  };
+}
+
+/**
+ * The handful of headers that cost nothing and close off a category of attack
+ * each (validation finding VF-15). Written by hand rather than pulling in
+ * another dependency for eleven lines — this Host already carries more
+ * third-party code than it needs.
+ */
+function securityHeaders(_req: express.Request, res: express.Response, next: express.NextFunction) {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Permissions-Policy', 'geolocation=(self), camera=(self), microphone=()');
+  // The renderer is a bundled SPA served from this origin. 'unsafe-inline' for
+  // styles is what Vite's injected styles need; scripts are not given it.
+  res.setHeader('Content-Security-Policy',
+    "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; " +
+    "script-src 'self'; connect-src 'self'; font-src 'self' data:; object-src 'none'; " +
+    "base-uri 'self'; frame-ancestors 'none'");
+  if (tlsOptions()) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+  next();
+}
+
+/**
+ * TLS material, when the laboratory has provided it.
+ *
+ * Serving the LAN over plain HTTP puts every password and every quality record
+ * on the wire in clear (validation finding VF-01). Point SECH_LIMS_TLS_CERT and
+ * SECH_LIMS_TLS_KEY at a certificate and the Host serves HTTPS instead. On a
+ * LAN an internally-issued certificate is enough, and is what the deployment
+ * runbook describes.
+ */
+export function tlsOptions(): { cert: Buffer; key: Buffer } | null {
+  const certPath = process.env.SECH_LIMS_TLS_CERT;
+  const keyPath = process.env.SECH_LIMS_TLS_KEY;
+  if (!certPath || !keyPath) return null;
+  try {
+    return { cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath) };
+  } catch (err) {
+    console.error('[tls] Certificate or key could not be read; refusing to start without the encryption that was asked for.', err);
+    throw err;
+  }
+}
+
 export function createApiServer() {
   ensureDataDirs();
   seedDefaults();
   const app = express();
-  app.use(cors({ origin: true, credentials: true }));
+  app.set('trust proxy', true); // so req.ip is the client, not the TLS terminator
+  app.use(cors(buildCorsPolicy()));
+  app.use(securityHeaders);
   // Controlled-document content can embed images (data URIs) and rich HTML, so
   // allow large JSON bodies for the document content save endpoints.
   app.use(express.json({ limit: '50mb' }));
@@ -188,6 +286,9 @@ export function createApiServer() {
   }
 
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    // A refused signature is the caller's problem to fix, not a server fault:
+    // it deserves the status that says so, wherever in the system it was raised.
+    if (err instanceof SignatureRefused) return res.status(err.status).json({ error: err.message });
     const message = err instanceof Error ? err.message : 'Unexpected server error';
     res.status(500).json({ error: message });
   });
@@ -197,8 +298,23 @@ export function createApiServer() {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port = config.api.port;
   const host = config.api.host;
-  createApiServer().listen(port, host, () => {
-    console.log(`SECH_LIMS host API listening on http://${host}:${port}`);
+  const app = createApiServer();
+  const tls = tlsOptions();
+
+  // Serving the LAN in clear text is what validation finding VF-01 was about.
+  // A laboratory that binds to the network without a certificate is warned in
+  // terms that say what is actually at stake, every time the Host starts.
+  if (!tls && isLanExposed()) {
+    console.warn(
+      '\n  ⚠  This Host is bound to the network WITHOUT TLS.\n' +
+      '     Passwords and quality records will cross the LAN in clear text and can be read\n' +
+      '     by anything on it. Set SECH_LIMS_TLS_CERT and SECH_LIMS_TLS_KEY before serving\n' +
+      '     desktop or mobile clients. See docs/DEPLOYMENT_RUNBOOK.md.\n');
+  }
+
+  const server = tls ? https.createServer(tls, app) : app;
+  server.listen(port, host, () => {
+    console.log(`SECH_LIMS host API listening on ${tls ? 'https' : 'http'}://${host}:${port}`);
     // Background environmental poller. It self-gates on environmental_settings
     // (polling_enabled), so it is idle until a lab turns automated polling on.
     try { new EnvironmentalPoller(getDb).start(); } catch (e) { console.error('Environmental poller failed to start', e); }

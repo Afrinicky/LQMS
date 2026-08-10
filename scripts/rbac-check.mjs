@@ -35,7 +35,7 @@ async function login(username, password) {
   return r.json;
 }
 
-const PW = 'Passw0rd!test';
+const PW = 'thistle harbour crane';
 
 async function main() {
   // ---- first-time setup ----

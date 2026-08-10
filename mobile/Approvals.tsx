@@ -9,6 +9,7 @@
  */
 import { useEffect, useState } from 'react';
 import { api } from '../src/services/api';
+import { requestSigningPassword } from '../src/components/SigningPassword';
 import { Back, Ico, Result, s, type Msg } from './ui';
 import { SignatureGate } from './SignatureOnFile';
 
@@ -67,11 +68,17 @@ function DecisionScreen({ item, onBack, onDone }: { item: Row; onBack: () => voi
     setRes(null);
     if (decision !== 'approve' && !comments.trim()) { setRes({ kind: 'err', msg: 'Please add a comment explaining the decision.' }); return; }
     if (!ready) { setRes({ kind: 'err', msg: 'Upload your signature first — it is applied to this decision.' }); return; }
+    // A decision is signed, so it takes the signer's password at the moment it
+    // is given — not merely a session somebody left open on the bench.
+    const password = await requestSigningPassword(
+      `${decision === 'approve' ? 'Approve' : decision === 'reject' ? 'Reject' : 'Return'}: ${s(item.title)}`,
+      'Your decision is recorded against your name, the time and this request.');
+    if (!password) return;
     setBusy(true);
     try {
       // The Host applies the signer's signature on file automatically.
       await api(`/mobile/approvals/${s(item.type)}/${s(item.id)}/decision`, {
-        method: 'POST', body: JSON.stringify({ decision, comments }),
+        method: 'POST', body: JSON.stringify({ decision, comments, password }),
       });
       setRes({ kind: 'ok', msg: 'Decision recorded and signed.' });
       setTimeout(onDone, 700);

@@ -10,6 +10,7 @@
  */
 import { useEffect, useState } from 'react';
 import { api, getApiBaseOverride, setApiBaseOverride, isNativeApp } from '../src/services/api';
+import { requestSigningPassword } from '../src/components/SigningPassword';
 import type { ApiUser } from '../shared/types/api';
 import { submit } from './net';
 import { Back, Field, Ico, ICO, Result, s, today, type Msg } from './ui';
@@ -529,10 +530,13 @@ function DeclarationsView({ records, onBack, onSigned }: { records: Row[]; onBac
   async function sign() {
     if (!active) return;
     if (!ready) { setRes({ kind: 'err', msg: 'Upload your signature first — it is applied here.' }); return; }
+    const password = await requestSigningPassword(
+      `Sign: ${s(active.title)}`, 'Signing records this declaration against your name and the time.');
+    if (!password) return;
     setBusy(true); setRes(null);
     try {
       // The Host applies your signature on file automatically.
-      await api(`/mobile/me/declarations/${s(active.id)}/sign`, { method: 'POST', body: JSON.stringify({}) });
+      await api(`/mobile/me/declarations/${s(active.id)}/sign`, { method: 'POST', body: JSON.stringify({ password }) });
       setRes({ kind: 'ok', msg: 'Signed.' }); setActive(null); onSigned();
     } catch (e) { setRes({ kind: 'err', msg: (e as Error).message }); } finally { setBusy(false); }
   }

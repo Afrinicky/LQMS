@@ -23,7 +23,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { requirePermission, viewableModulesOf } from '../middleware/permissions.js';
 import { getDb } from '../db/database.js';
 import { audit } from '../services/auditService.js';
-import { recordSignature } from '../services/signatureService.js';
+import { recordSignature, SignatureRefused } from '../services/signatureService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { getCurrentStaffId, parseIntNullable } from './routeHelpers.js';
 
@@ -203,7 +203,7 @@ export function formsRoutes() {
     if (template.requires_signature) {
       const sig = recordSignature(req, {
         moduleKey: template.module_key ?? 'records_reports', recordType: 'form_submission', recordId: id,
-        purpose: `form:${template.template_key}`, meaning: meaning ?? `Completion of ${template.title}`, signatureImageFileId: signatureImageFileId ?? null,
+        purpose: `form:${template.template_key}`, meaning: meaning ?? `Completion of ${template.title}`, signatureImageFileId: signatureImageFileId ?? null, password: req.body?.password,
       });
       db.prepare('UPDATE form_submissions SET signature_id = ? WHERE id = ?').run(sig.id, id);
     }

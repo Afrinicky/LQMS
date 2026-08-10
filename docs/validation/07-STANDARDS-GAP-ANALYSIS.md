@@ -1,5 +1,15 @@
 # 07 — Standards Gap Analysis
 
+> **Superseded in part.** This report records the validation of version 0.1.0 (`dc73f10`) and the
+> conditional release that followed. Twenty-one of its twenty-five findings have since been
+> closed and the system re-qualified as version 1.0.0 — see
+> [10 — Remediation and Re-qualification](10-REMEDIATION-AND-REQUALIFICATION.md), which carries
+> the current release position. This document is retained unchanged as the record of what was
+> found, because a validation history that quietly rewrites itself is not a history.
+
+---
+
+
 Clause-by-clause conformity of SECH_LIMS 0.1.0 (`dc73f10`) against the standards adopted in
 document 01 §3.
 

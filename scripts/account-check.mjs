@@ -5,7 +5,7 @@
  *   node scripts/account-check.mjs
  */
 const BASE = process.env.API || 'http://127.0.0.1:4420/api';
-const PW = 'Passw0rd!test';
+const PW = 'thistle harbour crane';
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = '') => {
@@ -69,10 +69,10 @@ console.log('\n[5] Setting the new password');
 const rt = afterApproval.json.resetToken;
 const tooShort = await j('/auth/password-reset/complete', { method: 'POST', body: { resetToken: rt, newPassword: 'abc' } });
 check('a short password is refused', tooShort.status === 400);
-const done = await j('/auth/password-reset/complete', { method: 'POST', body: { resetToken: rt, newPassword: 'ChangedIt9!' } });
+const done = await j('/auth/password-reset/complete', { method: 'POST', body: { resetToken: rt, newPassword: 'copper lantern ninety' } });
 check('the new password is accepted', done.status === 200, JSON.stringify(done.json));
 check('the old password no longer works', (await login('reset_target', PW)).status === 401);
-check('the new password works', (await login('reset_target', 'ChangedIt9!')).status === 200);
+check('the new password works', (await login('reset_target', 'copper lantern ninety')).status === 200);
 
 console.log('\n[6] An approval is single use');
 const replay = await j('/auth/password-reset/complete', { method: 'POST', body: { resetToken: rt, newPassword: 'AnotherOne9!' } });
@@ -90,7 +90,7 @@ check('the refusal note is passed on', denied.json.note === 'Could not confirm i
 check('their password is unchanged', (await login('deny_target', PW)).status === 200);
 
 console.log('\n[8] Only an approver may decide');
-const techToken = (await login('reset_target', 'ChangedIt9!')).json.token;
+const techToken = (await login('reset_target', 'copper lantern ninety')).json.token;
 check('a Technician cannot see the queue', (await j('/users/password-resets', { token: techToken })).status === 403);
 const sneak = await j('/auth/password-reset/request', { method: 'POST', body: { username: 'deny_target' } });
 const sneakQueue = await j('/users/password-resets', { token: A });
@@ -115,12 +115,12 @@ await j(`/users/${forced.id}/require-password-change`, { token: A, method: 'POST
 const forcedLogin = await login('forced_user');
 check('they can still sign in', forcedLogin.status === 200);
 check('and are flagged to choose a new password', forcedLogin.json.user.mustChangePassword === true, JSON.stringify(forcedLogin.json.user.mustChangePassword));
-await j('/auth/change-password', { token: forcedLogin.json.token, method: 'POST', body: { currentPassword: PW, newPassword: 'FreshOne9!' } });
-check('changing it clears the flag', (await login('forced_user', 'FreshOne9!')).json.user.mustChangePassword === false);
+await j('/auth/change-password', { token: forcedLogin.json.token, method: 'POST', body: { currentPassword: PW, newPassword: 'fresh meadow ninety' } });
+check('changing it clears the flag', (await login('forced_user', 'fresh meadow ninety')).json.user.mustChangePassword === false);
 
 const temp = await mk('temp_user', 'Temp User');
-await j(`/users/${temp.id}/reset-password`, { token: A, method: 'POST', body: { newPassword: 'Handover9!' } });
-const tempLogin = await login('temp_user', 'Handover9!');
+await j(`/users/${temp.id}/reset-password`, { token: A, method: 'POST', body: { newPassword: 'handover willow gate' } });
+const tempLogin = await login('temp_user', 'handover willow gate');
 check('a temporary password also forces a change', tempLogin.json.user.mustChangePassword === true);
 
 console.log('\n[11] Removing an account');
@@ -137,9 +137,9 @@ const refused = await j(`/users/${target.id}?mode=delete`, { token: A, method: '
 check('the server refuses and explains', refused.status === 409, `got ${refused.status}`);
 const deact = await j(`/users/${target.id}`, { token: A, method: 'DELETE' });
 check('but it can be deactivated', deact.status === 200);
-check('and then cannot sign in', (await login('reset_target', 'ChangedIt9!')).status === 401);
+check('and then cannot sign in', (await login('reset_target', 'copper lantern ninety')).status === 401);
 const react = await j(`/users/${target.id}/reactivate`, { token: A, method: 'POST', body: {} });
-check('reactivating restores access', react.status === 200 && (await login('reset_target', 'ChangedIt9!')).status === 200);
+check('reactivating restores access', react.status === 200 && (await login('reset_target', 'copper lantern ninety')).status === 200);
 
 console.log('\n[12] The administrator cannot lock the laboratory out');
 const me = (await j('/users', { token: A })).json.find(u => u.username === 'admin');

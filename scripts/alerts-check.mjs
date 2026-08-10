@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs';
 import { ALERT_TARGETS } from '../shared/constants/alertTargets.ts';
 
 const BASE = process.env.API || 'http://127.0.0.1:4431/api';
-const PW = 'Passw0rd!test';
+const PW = 'thistle harbour crane';
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = '') => {

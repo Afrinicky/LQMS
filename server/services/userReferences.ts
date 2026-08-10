@@ -35,6 +35,11 @@ export const DISPOSABLE_TABLES = new Set([
   'user_permission_overrides',
   'push_subscriptions',
   'notification_preferences',
+  // Credential bookkeeping. A person's old password hashes and their failed
+  // sign-in attempts are how the account was protected, not anything the
+  // laboratory did — they should never be the reason an unused account cannot
+  // be erased, and they must not outlive the account they belonged to.
+  'password_history',
 ]);
 
 export type UserReference = { table: string; column: string; rows: number };

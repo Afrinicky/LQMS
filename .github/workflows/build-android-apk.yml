@@ -36,8 +36,12 @@ permissions:
   contents: write
 
 jobs:
+  verify:
+    uses: ./.github/workflows/verify.yml
+
   build-apk:
     name: Build SECH_LIMS Staff APK
+    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 40
 

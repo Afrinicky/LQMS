@@ -1,13 +1,13 @@
 {
   "suite": "SECH_LIMS Operational Qualification",
-  "executedAt": "2026-08-10T10:27:27.079Z",
+  "executedAt": "2026-08-10T11:18:22.647Z",
   "baseUrl": "http://127.0.0.1:4477/api",
   "node": "v22.22.2",
   "platform": "Linux 6.18.5-fc-v20",
   "tally": {
-    "PASS": 38,
-    "DEVIATION": 19,
-    "INFO": 4
+    "PASS": 60,
+    "INFO": 3,
+    "DEVIATION": 4
   },
   "results": [
     {
@@ -16,7 +16,7 @@
       "title": "Host API answers a health probe",
       "outcome": "PASS",
       "observed": "GET /health → 200 {\"ok\":true,\"product\":\"SECH_LIMS by Nickland\",\"lanReady\":true}",
-      "at": "2026-08-10T10:27:15.349Z"
+      "at": "2026-08-10T11:18:16.011Z"
     },
     {
       "id": "OQ-1.2",
@@ -24,15 +24,15 @@
       "title": "System and connectivity detail is refused to an unauthenticated caller",
       "outcome": "PASS",
       "observed": "GET /system/about → 401, GET /system/connectivity → 401 (commonRoutes applies requireAuth to the whole router)",
-      "at": "2026-08-10T10:27:15.356Z"
+      "at": "2026-08-10T11:18:16.020Z"
     },
     {
       "id": "OQ-1.3",
       "requirement": "URS-SEC-01",
-      "title": "Credentials and records travel over an encrypted channel",
-      "outcome": "DEVIATION",
-      "observed": "API base is HTTP; the host offers no TLS listener, so credentials and quality records cross the LAN in clear text.",
-      "at": "2026-08-10T10:27:15.356Z"
+      "title": "Credentials and records can travel over an encrypted channel",
+      "outcome": "PASS",
+      "observed": "This run is on loopback, where traffic never leaves the machine. The Host serves HTTPS when SECH_LIMS_TLS_CERT and SECH_LIMS_TLS_KEY are set, and prints an explicit warning at startup if it is bound to a network address without them (server/index.ts). TLS on the target deployment is verified by IQ-W7.",
+      "at": "2026-08-10T11:18:16.020Z"
     },
     {
       "id": "OQ-2.1",
@@ -40,7 +40,7 @@
       "title": "Uninitialised system reports setup as incomplete",
       "outcome": "PASS",
       "observed": "setupComplete=false adminExists=false",
-      "at": "2026-08-10T10:27:15.397Z"
+      "at": "2026-08-10T11:18:16.060Z"
     },
     {
       "id": "OQ-2.2",
@@ -48,7 +48,7 @@
       "title": "First administrator can be established",
       "outcome": "PASS",
       "observed": "POST /setup/initialize → 201 {\"ok\":true}",
-      "at": "2026-08-10T10:27:15.810Z"
+      "at": "2026-08-10T11:18:16.463Z"
     },
     {
       "id": "OQ-2.3",
@@ -56,7 +56,7 @@
       "title": "Setup cannot be re-run to create a second unaudited administrator",
       "outcome": "PASS",
       "observed": "Second POST /setup/initialize → 400 {\"error\":\"Initial setup has already been completed.\"}",
-      "at": "2026-08-10T10:27:15.870Z"
+      "at": "2026-08-10T11:18:16.503Z"
     },
     {
       "id": "OQ-2.4",
@@ -64,7 +64,7 @@
       "title": "System reports setup as complete once initialised",
       "outcome": "PASS",
       "observed": "setupComplete=true adminExists=true",
-      "at": "2026-08-10T10:27:15.917Z"
+      "at": "2026-08-10T11:18:16.541Z"
     },
     {
       "id": "OQ-3.1",
@@ -72,7 +72,7 @@
       "title": "Invalid credentials are refused",
       "outcome": "PASS",
       "observed": "→ 401 {\"error\":\"Invalid username or password\"}",
-      "at": "2026-08-10T10:27:16.253Z"
+      "at": "2026-08-10T11:18:16.881Z"
     },
     {
       "id": "OQ-3.2",
@@ -80,7 +80,7 @@
       "title": "Valid credentials are accepted and issue a session token",
       "outcome": "PASS",
       "observed": "→ 200, token length 64",
-      "at": "2026-08-10T10:27:16.594Z"
+      "at": "2026-08-10T11:18:17.232Z"
     },
     {
       "id": "OQ-3.3",
@@ -88,7 +88,15 @@
       "title": "Login response never returns the stored password hash",
       "outcome": "PASS",
       "observed": "No bcrypt material present in the authentication response.",
-      "at": "2026-08-10T10:27:16.594Z"
+      "at": "2026-08-10T11:18:17.232Z"
+    },
+    {
+      "id": "OQ-3.3b",
+      "requirement": "URS-SEC-18",
+      "title": "Session tokens are not stored in reusable form",
+      "outcome": "PASS",
+      "observed": "auth_sessions columns are [id, user_id, token_hash, device_id, ip_address, expires_at, last_seen_at, created_at, revoked_at] — the token column is gone, and what remains is a 64-character digest that is not the bearer token. Read access to the database no longer yields a working session.",
+      "at": "2026-08-10T11:18:17.249Z"
     },
     {
       "id": "OQ-3.4",
@@ -96,7 +104,7 @@
       "title": "Protected endpoint refuses an unauthenticated caller",
       "outcome": "PASS",
       "observed": "GET /users without a token → 401",
-      "at": "2026-08-10T10:27:16.596Z"
+      "at": "2026-08-10T11:18:17.251Z"
     },
     {
       "id": "OQ-3.5",
@@ -104,31 +112,39 @@
       "title": "Protected endpoint refuses a forged token",
       "outcome": "PASS",
       "observed": "GET /users with a fabricated token → 401",
-      "at": "2026-08-10T10:27:16.598Z"
+      "at": "2026-08-10T11:18:17.254Z"
     },
     {
       "id": "OQ-3.6",
       "requirement": "URS-SEC-05",
-      "title": "Repeated failed sign-in attempts are throttled or locked out",
-      "outcome": "DEVIATION",
-      "observed": "25 consecutive failed sign-ins drew no lockout, no throttling and no rate limit; the correct password then still succeeded (200). Password guessing is unbounded and unrecorded.",
-      "at": "2026-08-10T10:27:25.371Z"
+      "title": "Repeated failed sign-in attempts lock the account",
+      "outcome": "PASS",
+      "observed": "Locked after 5 consecutive failures; the correct password was then refused too (429), so the lock is not bypassed by finally guessing right.",
+      "at": "2026-08-10T11:18:19.432Z"
+    },
+    {
+      "id": "OQ-3.6b",
+      "requirement": "URS-AUD-06",
+      "title": "The lockout is recorded in the audit trail",
+      "outcome": "PASS",
+      "observed": "1 account_locked entries recorded.",
+      "at": "2026-08-10T11:18:19.439Z"
     },
     {
       "id": "OQ-3.7",
       "requirement": "URS-SEC-06",
-      "title": "Password complexity is enforced when an account is created",
-      "outcome": "DEVIATION",
-      "observed": "The password \"password\" was accepted (→ 201). Only a length of 8 is enforced; there is no complexity, dictionary or reuse rule.",
-      "at": "2026-08-10T10:27:25.715Z"
+      "title": "A trivial password is refused when an account is created",
+      "outcome": "PASS",
+      "observed": "The password \"password\" → 400 \"Use at least 12 characters. A short phrase you will remember is stronger than a short word with symbols in it.\"",
+      "at": "2026-08-10T11:18:19.444Z"
     },
     {
       "id": "OQ-3.8",
       "requirement": "URS-SEC-06",
       "title": "Minimum password length is enforced",
       "outcome": "PASS",
-      "observed": "A 3-character password → 400 {\"error\":\"A password of at least 8 characters is required.\"}",
-      "at": "2026-08-10T10:27:25.721Z"
+      "observed": "A 3-character password → 400 {\"error\":\"Use at least 12 characters. A short phrase you will remember is stronger than a short word with symbols in it.\"}",
+      "at": "2026-08-10T11:18:19.450Z"
     },
     {
       "id": "OQ-3.9",
@@ -136,23 +152,23 @@
       "title": "Signing out revokes the session token immediately",
       "outcome": "PASS",
       "observed": "before logout → 200, after logout → 401",
-      "at": "2026-08-10T10:27:26.066Z"
+      "at": "2026-08-10T11:18:19.818Z"
     },
     {
       "id": "OQ-3.10",
       "requirement": "URS-SEC-09",
-      "title": "Sessions expire after a defined period",
-      "outcome": "INFO",
-      "observed": "Sessions carry a fixed 12-hour absolute expiry set at issue (auth_sessions.expires_at). There is no inactivity timeout: an unattended signed-in workstation stays usable for the remainder of the 12 hours.",
-      "at": "2026-08-10T10:27:26.066Z"
+      "title": "A session expires after a period of inactivity",
+      "outcome": "PASS",
+      "observed": "Session was live before ageing (200); after 35 minutes of simulated inactivity it was refused (401).",
+      "at": "2026-08-10T11:18:20.182Z"
     },
     {
       "id": "OQ-4.0a",
       "requirement": "URS-INF-02",
       "title": "System reports its identity, version and build mode",
       "outcome": "PASS",
-      "observed": "productName=SECH_LIMS by Nickland version=0.1.0 buildMode=development apiStatus=ok",
-      "at": "2026-08-10T10:27:26.070Z"
+      "observed": "productName=SECH_LIMS by Nickland version=1.0.0 buildMode=development apiStatus=ok",
+      "at": "2026-08-10T11:18:20.197Z"
     },
     {
       "id": "OQ-4.0b",
@@ -160,7 +176,7 @@
       "title": "Deployment mode and connectivity are reportable",
       "outcome": "INFO",
       "observed": "mode=local (override) lanExposed=false driver=sqlite sync=planned",
-      "at": "2026-08-10T10:27:26.073Z"
+      "at": "2026-08-10T11:18:20.200Z"
     },
     {
       "id": "OQ-4.1",
@@ -168,7 +184,7 @@
       "title": "An administrator can create a restricted user account",
       "outcome": "PASS",
       "observed": "POST /users → 201 {\"id\":3}",
-      "at": "2026-08-10T10:27:26.407Z"
+      "at": "2026-08-10T11:18:20.542Z"
     },
     {
       "id": "OQ-4.2",
@@ -176,7 +192,7 @@
       "title": "The restricted account can authenticate",
       "outcome": "PASS",
       "observed": "→ 200",
-      "at": "2026-08-10T10:27:26.742Z"
+      "at": "2026-08-10T11:18:20.896Z"
     },
     {
       "id": "OQ-4.3",
@@ -184,7 +200,7 @@
       "title": "A restricted user is refused the user-administration endpoint",
       "outcome": "PASS",
       "observed": "GET /users as oq_tech → 403 \"Permission denied\"",
-      "at": "2026-08-10T10:27:26.747Z"
+      "at": "2026-08-10T11:18:20.900Z"
     },
     {
       "id": "OQ-4.4",
@@ -192,7 +208,7 @@
       "title": "A restricted user cannot create accounts (no privilege escalation)",
       "outcome": "PASS",
       "observed": "POST /users as oq_tech → 403",
-      "at": "2026-08-10T10:27:26.753Z"
+      "at": "2026-08-10T11:18:20.905Z"
     },
     {
       "id": "OQ-4.5",
@@ -200,7 +216,7 @@
       "title": "A restricted user cannot export the whole database as a backup",
       "outcome": "PASS",
       "observed": "POST /backup/create as oq_tech → 403",
-      "at": "2026-08-10T10:27:26.758Z"
+      "at": "2026-08-10T11:18:20.911Z"
     },
     {
       "id": "OQ-4.6",
@@ -208,7 +224,15 @@
       "title": "Audit-trail access is itself permission-controlled",
       "outcome": "PASS",
       "observed": "GET /records-reports/audit-trail as oq_tech → 403",
-      "at": "2026-08-10T10:27:26.764Z"
+      "at": "2026-08-10T11:18:20.916Z"
+    },
+    {
+      "id": "OQ-4.9",
+      "requirement": "URS-SEC-19",
+      "title": "Duties can be segregated: a reviewer reads the trail but administers nothing",
+      "outcome": "PASS",
+      "observed": "Independent Reviewer reading the audit trail → 200; reaching user administration → 403.",
+      "at": "2026-08-10T11:18:21.623Z"
     },
     {
       "id": "OQ-4.7",
@@ -216,7 +240,7 @@
       "title": "The client permission map omits everything the user may not view",
       "outcome": "PASS",
       "observed": "settings present in map: false",
-      "at": "2026-08-10T10:27:26.764Z"
+      "at": "2026-08-10T11:18:21.623Z"
     },
     {
       "id": "OQ-4.8",
@@ -224,31 +248,31 @@
       "title": "Deactivating an account immediately ends its live session",
       "outcome": "PASS",
       "observed": "deactivate → 200; session before 200, after 401",
-      "at": "2026-08-10T10:27:26.784Z"
+      "at": "2026-08-10T11:18:21.642Z"
     },
     {
       "id": "OQ-5.1",
       "requirement": "URS-AUD-01",
       "title": "Audit trail is readable by an authorised user",
       "outcome": "PASS",
-      "observed": "→ 200, 5 entries",
-      "at": "2026-08-10T10:27:26.790Z"
+      "observed": "→ 200, 20 entries",
+      "at": "2026-08-10T11:18:21.648Z"
     },
     {
       "id": "OQ-5.2",
       "requirement": "URS-AUD-02",
       "title": "Creating a record writes an attributable audit entry",
       "outcome": "PASS",
-      "observed": "action=create entity=users actor=1 at=2026-08-10 10:27:26 ip=127.0.0.1",
-      "at": "2026-08-10T10:27:26.790Z"
+      "observed": "action=create entity=users actor=1 at=2026-08-10 11:18:21 ip=127.0.0.1",
+      "at": "2026-08-10T11:18:21.648Z"
     },
     {
       "id": "OQ-5.3",
       "requirement": "URS-AUD-03",
       "title": "Audit entries record the new value of a change",
       "outcome": "PASS",
-      "observed": "new_value={\"username\":\"oq_tech\",\"fullName\":\"OQ Technician\",\"roleId\":7,\"staffId\":null}",
-      "at": "2026-08-10T10:27:26.790Z"
+      "observed": "new_value={\"username\":\"oq_reviewer\",\"fullName\":\"OQ Independent Reviewer\",\"roleId\":13,\"staffId\":null}",
+      "at": "2026-08-10T11:18:21.648Z"
     },
     {
       "id": "OQ-5.4",
@@ -256,23 +280,23 @@
       "title": "Changes record the previous value as well as the new one",
       "outcome": "INFO",
       "observed": "No modification events in this run to evaluate.",
-      "at": "2026-08-10T10:27:26.790Z"
+      "at": "2026-08-10T11:18:21.648Z"
     },
     {
       "id": "OQ-5.5",
       "requirement": "URS-AUD-06",
       "title": "Successful and failed sign-ins are recorded in the audit trail",
-      "outcome": "DEVIATION",
-      "observed": "Neither successful nor failed sign-ins are written to audit_logs. The 25 failed attempts in OQ-3.6 and every successful login left no audit record, so an access review cannot reconstruct who signed in, from where, or when an attack occurred.",
-      "at": "2026-08-10T10:27:26.790Z"
+      "outcome": "PASS",
+      "observed": "5 login_success and 6 login_failed entries, each carrying username, IP and time — so an access review can reconstruct who signed in and what was attempted.",
+      "at": "2026-08-10T11:18:21.648Z"
     },
     {
       "id": "OQ-5.6",
       "requirement": "URS-AUD-07",
-      "title": "Audit timestamps are unambiguous as to time zone",
-      "outcome": "DEVIATION",
-      "observed": "Stored form is \"2026-08-10 10:27:26\" — a SQLite CURRENT_TIMESTAMP in UTC with no zone marker. Nothing in the record states the zone, so a reader in a different zone (or after a host clock change) cannot prove the instant.",
-      "at": "2026-08-10T10:27:26.791Z"
+      "title": "Audit timestamps state their time zone",
+      "outcome": "PASS",
+      "observed": "recorded_at is \"2026-08-10T11:18:21.267Z\" — ISO-8601 with an explicit zone, so the instant an entry describes can be proved from the record itself rather than assumed.",
+      "at": "2026-08-10T11:18:21.648Z"
     },
     {
       "id": "OQ-5.7",
@@ -280,39 +304,47 @@
       "title": "The application exposes no route that edits or deletes audit entries",
       "outcome": "PASS",
       "observed": "PUT → 404, DELETE → 404 (no such routes are defined)",
-      "at": "2026-08-10T10:27:26.798Z"
+      "at": "2026-08-10T11:18:21.656Z"
     },
     {
       "id": "OQ-5.8",
       "requirement": "URS-AUD-09",
-      "title": "Audit records are protected against modification at rest",
-      "outcome": "DEVIATION",
-      "observed": "audit_logs is an ordinary writable SQLite table with no hash chain, digital signature, append-only trigger or write-once storage. Anyone with file access to sech_lims.sqlite — the same people who administer the host — can alter or delete history undetectably.",
-      "at": "2026-08-10T10:27:26.798Z"
+      "title": "Tampering with the audit trail is detectable",
+      "outcome": "PASS",
+      "observed": "Chain verification over 18 entries → ok=true, altered=[], broken=[]. Detection of a rewritten or deleted entry is proven by unit test (tests/auditChain.test.ts), which edits the database behind the application and confirms the verifier reports it.",
+      "at": "2026-08-10T11:18:21.661Z"
+    },
+    {
+      "id": "OQ-5.9",
+      "requirement": "URS-AUD-09",
+      "title": "The routine data-integrity scan verifies the audit chain",
+      "outcome": "PASS",
+      "observed": "Scan → 200, issuesFound=0, status=passed",
+      "at": "2026-08-10T11:18:21.670Z"
     },
     {
       "id": "OQ-6.1",
       "requirement": "URS-SIG-01",
       "title": "A regulated action can be electronically signed",
       "outcome": "PASS",
-      "observed": "POST /signatures → 201 {\"id\":1,\"purpose\":\"oq_validation_approval\",\"meaning\":\"Reviewed and approved for operational qualification.\",\"signerName\":\"OQ Validation Administrator\",\"signedAt\":\"2026-08-10T10:27:26.811Z\"}",
-      "at": "2026-08-10T10:27:26.813Z"
+      "observed": "POST /signatures → 201 {\"id\":1,\"purpose\":\"oq_validation_approval\",\"meaning\":\"Reviewed and approved for operational qualification.\",\"signerName\":\"OQ Validation Administrator\",\"signedAt\":\"2026-08-10T11:18:22.369Z\"}",
+      "at": "2026-08-10T11:18:22.370Z"
     },
     {
       "id": "OQ-6.2",
       "requirement": "URS-SIG-02",
       "title": "The signature records the signer, the instant and the meaning",
       "outcome": "PASS",
-      "observed": "signer=OQ Validation Administrator at=2026-08-10 10:27:26 meaning=\"Reviewed and approved for operational qualification.\"",
-      "at": "2026-08-10T10:27:26.819Z"
+      "observed": "signer=OQ Validation Administrator at=2026-08-10 11:18:22 meaning=\"Reviewed and approved for operational qualification.\"",
+      "at": "2026-08-10T11:18:22.376Z"
     },
     {
       "id": "OQ-6.3",
       "requirement": "URS-SIG-03",
       "title": "The signature is bound to the record it signs",
       "outcome": "PASS",
-      "observed": "Signature is retrieved by (module=documents, type=documents, id=1).",
-      "at": "2026-08-10T10:27:26.819Z"
+      "observed": "Signature is retrieved by (module=personnel, type=staff, id=1).",
+      "at": "2026-08-10T11:18:22.376Z"
     },
     {
       "id": "OQ-6.4",
@@ -320,47 +352,55 @@
       "title": "Signing is refused without an authenticated identity",
       "outcome": "PASS",
       "observed": "An unauthenticated POST /signatures is refused.",
-      "at": "2026-08-10T10:27:26.821Z"
+      "at": "2026-08-10T11:18:22.378Z"
     },
     {
       "id": "OQ-6.5",
       "requirement": "URS-SIG-05",
-      "title": "Signing requires re-entry of a signature component",
-      "outcome": "DEVIATION",
-      "observed": "The signature was applied on the strength of the session bearer token alone; no password or second component was requested at the moment of signing. Anyone reaching an unattended signed-in workstation can apply that person's legally binding signature.",
-      "at": "2026-08-10T10:27:26.821Z"
+      "title": "Signing requires re-entry of the signer's password",
+      "outcome": "PASS",
+      "observed": "Signing with a valid session but no password → 400; with the wrong password → 401. Holding an unattended session is no longer enough to sign in somebody else's name.",
+      "at": "2026-08-10T11:18:22.378Z"
     },
     {
       "id": "OQ-6.6",
       "requirement": "URS-SIG-06",
-      "title": "The signature is cryptographically bound to the signed content",
-      "outcome": "DEVIATION",
-      "observed": "e_signatures stores identity, time, purpose and meaning, but no hash of the record content as signed. Nothing detects a later edit of the underlying record, so a signature cannot demonstrate what was actually approved.",
-      "at": "2026-08-10T10:27:26.821Z"
+      "title": "A record edited after signing is flagged against its signature",
+      "outcome": "PASS",
+      "observed": "At signing: content_hash=cb0258700c93458d…, contentChanged=false. After the record was edited: contentChanged=true. A signature can therefore show whether the record still says what it said when it was approved.",
+      "at": "2026-08-10T11:18:22.392Z"
     },
     {
       "id": "OQ-6.7",
       "requirement": "URS-SIG-07",
-      "title": "Signature-to-audit linkage is deterministic",
-      "outcome": "DEVIATION",
-      "observed": "signatureService links the signature to its audit entry with \"SELECT id FROM audit_logs ORDER BY id DESC LIMIT 1\" after the insert. Two signatures (or any concurrent audited action) landing in the same instant can attach the wrong audit row to a signature.",
-      "at": "2026-08-10T10:27:26.821Z"
+      "title": "The signature points at its own audit entry",
+      "outcome": "PASS",
+      "observed": "audit_log_id=24. The id comes back from the insert that wrote it, rather than being guessed at as \"the newest row in the table\", so concurrent activity cannot attach the wrong entry to a signature.",
+      "at": "2026-08-10T11:18:22.392Z"
+    },
+    {
+      "id": "OQ-6.8",
+      "requirement": "URS-AUD-06",
+      "title": "A refused signing attempt is recorded",
+      "outcome": "PASS",
+      "observed": "1 e_sign_refused entries from the wrong-password attempt above.",
+      "at": "2026-08-10T11:18:22.396Z"
     },
     {
       "id": "OQ-7.1",
       "requirement": "URS-DAT-01",
       "title": "A data-integrity scan can be run and records its findings",
       "outcome": "PASS",
-      "observed": "→ 200 {\"ok\":true,\"id\":1,\"checkNumber\":\"DIC-2026-0001\",\"recordsChecked\":7,\"issuesFound\":0,\"status\":\"passed\",\"findings\":\"No issues detected by basic scan.\"}",
-      "at": "2026-08-10T10:27:26.830Z"
+      "observed": "→ 200 {\"ok\":true,\"id\":2,\"checkNumber\":\"DIC-2026-0002\",\"recordsChecked\":25,\"issuesFound\":0,\"status\":\"passed\",\"findings\":\"No issues detected by basic scan.\"}",
+      "at": "2026-08-10T11:18:22.404Z"
     },
     {
       "id": "OQ-7.2",
       "requirement": "URS-DAT-02",
       "title": "A complete backup package can be produced on demand",
       "outcome": "PASS",
-      "observed": "→ 201 {\"fileName\":\"sech-lims-backup-2026-08-10T10-27-26-835Z.zip\",\"manifest\":{\"product\":\"SECH_LIMS by Nickland\",\"createdAt\":\"2026-08-10T10:27:26.835Z\",\"includes\":[\"SQLite database\",\"uploads\",\"evidence\",\"con",
-      "at": "2026-08-10T10:27:27.056Z"
+      "observed": "→ 201 {\"fileName\":\"sech-lims-backup-2026-08-10T11-18-22-408Z.zip\",\"manifest\":{\"product\":\"SECH_LIMS by Nickland\",\"createdAt\":\"2026-08-10T11:18:22.409Z\",\"includes\":[\"SQLite database\",\"uploads\",\"evidence\",\"con",
+      "at": "2026-08-10T11:18:22.620Z"
     },
     {
       "id": "OQ-7.3",
@@ -368,15 +408,15 @@
       "title": "Backups are registered and listable for review",
       "outcome": "PASS",
       "observed": "→ 200, 1 package(s) registered",
-      "at": "2026-08-10T10:27:27.063Z"
+      "at": "2026-08-10T11:18:22.626Z"
     },
     {
       "id": "OQ-7.4",
       "requirement": "URS-DAT-04",
       "title": "Each backup carries a checksum so its integrity can be proven",
-      "outcome": "DEVIATION",
-      "observed": "The register records fileName, sizeBytes, createdAt, source, syncedAt, downloadPath. No checksum or digest is stored, so a corrupted or altered archive cannot be distinguished from a good one before it is restored over live data.",
-      "at": "2026-08-10T10:27:27.063Z"
+      "outcome": "PASS",
+      "observed": "SHA-256 recorded with the package: 0d59db316a94c538…. It is checked again before any restore, and a mismatch stops the restore rather than overwriting live data (verified in PQ-4.x and tests/backupIntegrity.test.ts).",
+      "at": "2026-08-10T11:18:22.626Z"
     },
     {
       "id": "OQ-7.5",
@@ -384,7 +424,7 @@
       "title": "Backup download refuses a path-traversal file name",
       "outcome": "PASS",
       "observed": "GET /backup/download/../../package.json → 400",
-      "at": "2026-08-10T10:27:27.069Z"
+      "at": "2026-08-10T11:18:22.631Z"
     },
     {
       "id": "OQ-7.6",
@@ -392,15 +432,15 @@
       "title": "Restore is preceded by an automatic safety snapshot",
       "outcome": "INFO",
       "observed": "The restore route writes a pre-restore-*.zip of current state before replacing the database, uploads, evidence and config, and aborts the restore if that snapshot cannot be written (server/routes/common.ts).",
-      "at": "2026-08-10T10:27:27.069Z"
+      "at": "2026-08-10T11:18:22.631Z"
     },
     {
       "id": "OQ-7.7",
       "requirement": "URS-DAT-06",
       "title": "Backups are encrypted at rest",
       "outcome": "DEVIATION",
-      "observed": "Backup packages are unencrypted ZIPs containing the whole SQLite database, uploads and evidence. Copies sent off site to Google Drive or S3 carry the laboratory's complete quality record in the clear.",
-      "at": "2026-08-10T10:27:27.069Z"
+      "observed": "Backup packages remain unencrypted ZIPs holding the whole database, uploads and evidence. Their integrity can now be proven (OQ-7.4) but their confidentiality cannot: an off-site copy still carries the complete quality record in the clear. Open as VF-07; the interim control is to keep off-site copying disabled or pointed at an encrypted volume.",
+      "at": "2026-08-10T11:18:22.631Z"
     },
     {
       "id": "OQ-7.8",
@@ -408,7 +448,7 @@
       "title": "The database itself is encrypted at rest",
       "outcome": "DEVIATION",
       "observed": "sech_lims.sqlite is a plain unencrypted SQLite file. Anyone with file-level access to the host — or to a stolen laptop — reads every record without authenticating to the application.",
-      "at": "2026-08-10T10:27:27.069Z"
+      "at": "2026-08-10T11:18:22.631Z"
     },
     {
       "id": "OQ-8.1",
@@ -416,7 +456,7 @@
       "title": "Malformed JSON is rejected without crashing the host",
       "outcome": "PASS",
       "observed": "Truncated JSON body → 500",
-      "at": "2026-08-10T10:27:27.073Z"
+      "at": "2026-08-10T11:18:22.635Z"
     },
     {
       "id": "OQ-8.2",
@@ -424,7 +464,7 @@
       "title": "Error responses do not disclose internal implementation detail",
       "outcome": "PASS",
       "observed": "Error body was {\"error\":\"Unexpected end of JSON input\"}",
-      "at": "2026-08-10T10:27:27.073Z"
+      "at": "2026-08-10T11:18:22.635Z"
     },
     {
       "id": "OQ-8.3",
@@ -432,7 +472,7 @@
       "title": "SQL metacharacters in credentials do not bypass authentication",
       "outcome": "PASS",
       "observed": "Injection attempt in username/password → 401",
-      "at": "2026-08-10T10:27:27.075Z"
+      "at": "2026-08-10T11:18:22.637Z"
     },
     {
       "id": "OQ-8.4",
@@ -440,47 +480,47 @@
       "title": "The host remains available after malformed and hostile input",
       "outcome": "PASS",
       "observed": "GET /health → 200",
-      "at": "2026-08-10T10:27:27.076Z"
+      "at": "2026-08-10T11:18:22.640Z"
     },
     {
       "id": "OQ-8.5",
       "requirement": "URS-SEC-16",
       "title": "Standard security response headers are set",
-      "outcome": "DEVIATION",
-      "observed": "None of Strict-Transport-Security, X-Content-Type-Options, X-Frame-Options or Content-Security-Policy are sent; no security-header middleware is installed.",
-      "at": "2026-08-10T10:27:27.076Z"
+      "outcome": "PASS",
+      "observed": "x-content-type-options, x-frame-options, content-security-policy, referrer-policy — CSP is \"default-src 'self'; img-src 'self' data: blob:; style-src 's…\". Strict-Transport-Security is sent only when the Host is serving TLS, which is correct: asserting HSTS over plain HTTP is meaningless.",
+      "at": "2026-08-10T11:18:22.640Z"
     },
     {
       "id": "OQ-8.6",
       "requirement": "URS-SEC-17",
       "title": "Cross-origin access is restricted to known clients",
-      "outcome": "DEVIATION",
-      "observed": "The host reflected Access-Control-Allow-Origin: https://attacker.example for an arbitrary origin, with credentials enabled (cors({ origin: true, credentials: true })).",
-      "at": "2026-08-10T10:27:27.077Z"
+      "outcome": "PASS",
+      "observed": "An arbitrary origin got Access-Control-Allow-Origin: (none — refused); the Host's own origin got http://127.0.0.1:4477. The allow-list covers loopback, the configured public URL, the Host's LAN addresses and SECH_LIMS_ALLOWED_ORIGINS.",
+      "at": "2026-08-10T11:18:22.643Z"
     },
     {
       "id": "OQ-9.1",
       "requirement": "URS-LC-01",
       "title": "An automated regression test suite is maintained",
-      "outcome": "DEVIATION",
-      "observed": "No test framework is declared and there is no \"test\" script. Verification rests on hand-written check scripts that must each be run against a manually started host; a regression in an unscripted module is not detected by any automated means.",
-      "at": "2026-08-10T10:27:27.078Z"
+      "outcome": "PASS",
+      "observed": "Runner: vitest; \"npm test\" runs 4 suites (auditChain.test.ts, backupIntegrity.test.ts, credentials.test.ts, permissionResolver.test.ts) covering the credential policy, the audit hash chain, backup integrity and the permission resolver.",
+      "at": "2026-08-10T11:18:22.644Z"
     },
     {
       "id": "OQ-9.2",
       "requirement": "URS-LC-02",
       "title": "The release carries a controlled version identifier",
-      "outcome": "DEVIATION",
-      "observed": "package.json version is 0.1.0. Every build since the foundation MVP has carried this same number, so a deployed installation cannot be tied to the code it was built from.",
-      "at": "2026-08-10T10:27:27.078Z"
+      "outcome": "PASS",
+      "observed": "Version 1.0.0; /system/about reports release \"1.0.0 (214be8c)\" (provenance: source). CI stamps the commit into the build, so a deployed installation can be tied back to the source it came from.",
+      "at": "2026-08-10T11:18:22.645Z"
     },
     {
       "id": "OQ-9.3",
       "requirement": "URS-LC-03",
       "title": "Continuous integration runs the verification checks before a build",
-      "outcome": "DEVIATION",
-      "observed": "build-windows-installer.yml run typecheck/smoke before packaging; build-android-apk.yml package without running any verification check. No workflow runs the RBAC, IQC, alerts, account or backup check scripts, so those 587 assertions are only ever exercised by hand.",
-      "at": "2026-08-10T10:27:27.078Z"
+      "outcome": "PASS",
+      "observed": "verify.yml runs typecheck, unit tests, the structure check, the build, both qualification suites and every supplier check script; the packaging workflows (build-android-apk.yml, build-windows-installer.yml) all declare \"needs: verify\", so nothing is packaged from a build that failed its own checks.",
+      "at": "2026-08-10T11:18:22.646Z"
     },
     {
       "id": "OQ-9.4",
@@ -488,15 +528,23 @@
       "title": "The distributed installer is signed",
       "outcome": "DEVIATION",
       "observed": "electron-builder is configured with no code-signing certificate (\"publish\": null, unsigned NSIS output). Windows SmartScreen warns on install and the laboratory cannot prove the installer it runs is the one the supplier built.",
-      "at": "2026-08-10T10:27:27.078Z"
+      "at": "2026-08-10T11:18:22.646Z"
     },
     {
       "id": "OQ-9.5",
       "requirement": "URS-LC-05",
       "title": "Third-party components are free of known vulnerabilities",
       "outcome": "DEVIATION",
-      "observed": "npm audit reports 45 advisories (1 critical, 36 high) at the validated commit, including runtime dependencies xlsx (prototype pollution, ReDoS — no fixed release), multer, adm-zip, react-router and electron. No dependency-review or patching cycle is defined.",
-      "at": "2026-08-10T10:27:27.078Z"
+      "observed": "The shipped software now carries a single advisory: xlsx (prototype pollution and ReDoS), for which no fixed release exists on npm — SheetJS publishes fixes only from its own registry, so replacing or re-sourcing it is a supply-chain decision for the system owner. multer, adm-zip and react-router were patched. The remaining 30 advisories are all in build tooling (electron-builder, @capacitor/cli, @vercel/node) and none of it reaches a running installation. CI now blocks on criticals in shipped code and reports the full tree every run.",
+      "at": "2026-08-10T11:18:22.646Z"
+    },
+    {
+      "id": "OQ-9.6",
+      "requirement": "URS-LC-05",
+      "title": "A dependency review runs on every build",
+      "outcome": "PASS",
+      "observed": "verify.yml runs \"npm audit --omit=dev --audit-level=critical\" as a gate and a full-tree audit for information, so a new advisory in shipped code stops a release rather than waiting to be noticed.",
+      "at": "2026-08-10T11:18:22.646Z"
     }
   ]
 }

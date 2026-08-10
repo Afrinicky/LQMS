@@ -26,7 +26,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { resolvePermission } from '../services/permissionResolver.js';
 import { getDb, uploadRoot } from '../db/database.js';
 import { audit } from '../services/auditService.js';
-import { recordSignature } from '../services/signatureService.js';
+import { recordSignature, recordAcknowledgement, SignatureRefused } from '../services/signatureService.js';
 import { queuePush } from '../services/pushService.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
 import { getCurrentStaffId, requireCurrentStaffId, parseIntNullable } from './routeHelpers.js';
@@ -211,7 +211,7 @@ export function mobileRoutes() {
     if (decl.staff_id && Number(decl.staff_id) !== staffId) return res.status(403).json({ error: 'This declaration is assigned to another staff member.' });
     // Uses the signer's signature on file (attached automatically by the service).
     const onFile = db.prepare('SELECT signature_file_id FROM staff WHERE id = ?').get(staffId) as { signature_file_id?: number | null } | undefined;
-    const sig = recordSignature(req, { moduleKey: 'personnel', recordType: 'staff_declaration', recordId: req.params.id, purpose: 'declaration_sign', meaning: `Signed: ${String(decl.title ?? '')}` });
+    const sig = recordSignature(req, { moduleKey: 'personnel', recordType: 'staff_declaration', recordId: req.params.id, purpose: 'declaration_sign', meaning: `Signed: ${String(decl.title ?? '')}`, password: req.body?.password });
     db.prepare("UPDATE staff_declarations SET staff_id = ?, signed_at = CURRENT_TIMESTAMP, signature_file_id = ?, status = 'signed', updated_at = CURRENT_TIMESTAMP WHERE id = ?")
       .run(staffId, onFile?.signature_file_id ?? null, req.params.id);
     audit(req, { action: 'sign', entity: 'staff_declarations', entityId: req.params.id, newValue: { status: 'signed', signatureId: sig.id } });
@@ -286,7 +286,7 @@ export function mobileRoutes() {
         ON CONFLICT(announcement_id, user_id) DO UPDATE SET read_at = CURRENT_TIMESTAMP, acknowledged_at = COALESCE(excluded.acknowledged_at, announcement_reads.acknowledged_at)`)
       .run(req.params.id, getCurrentStaffId(req), req.user!.id, acknowledge ? new Date().toISOString() : null);
     if (acknowledge && ann.requires_acknowledgement) {
-      recordSignature(req, { moduleKey: 'notifications', recordType: 'announcement', recordId: req.params.id, purpose: 'announcement_ack', meaning: 'Acknowledged organisational announcement' });
+      recordAcknowledgement(req, { moduleKey: 'notifications', recordType: 'announcement', recordId: req.params.id, purpose: 'announcement_ack', meaning: 'Acknowledged organisational announcement' });
     }
     res.json({ ok: true });
   });
@@ -336,7 +336,7 @@ export function mobileRoutes() {
     const sig = recordSignature(req, {
       moduleKey: src.module, recordType: src.type, recordId: req.params.id,
       purpose: `${src.type}_${decision}`, meaning: `${decision.toUpperCase()} — ${src.label}`,
-      signatureImageFileId: req.body?.signatureImageFileId ?? null,
+      signatureImageFileId: req.body?.signatureImageFileId ?? null, password: req.body?.password,
     });
     audit(req, { action: `approval_${decision}`, entity: src.table, entityId: req.params.id, oldValue: { status: record.status }, newValue: { status, comments, signatureId: sig.id } });
 

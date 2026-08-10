@@ -15,6 +15,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { getDb, ensureDataDirs, uploadRoot, evidenceRoot, configRoot, dbPath } from '../db/database.js';
 import * as dest from './backupDestinations.js';
 
@@ -50,6 +51,57 @@ async function loadArchiver(): Promise<(format: string, options?: any) => any> {
 /** Only plain file names, so a caller can never reference a path outside the folder. */
 export function isSafeBackupName(name: string): boolean {
   return typeof name === 'string' && /^[A-Za-z0-9._-]+\.zip$/.test(name) && !name.includes('..');
+}
+
+/* --------------------------------------------------------------- integrity */
+
+/**
+ * The SHA-256 of a finished archive.
+ *
+ * Recorded when the backup is taken and checked again before a restore, so the
+ * laboratory can tell the difference between the archive it made and one that
+ * has since been corrupted on a failing disk, truncated by a half-finished
+ * copy, or swapped. The old restore checked only that the ZIP would open, which
+ * a damaged archive very often will (validation finding VF-08).
+ */
+export function checksumOf(filePath: string): string {
+  const hash = crypto.createHash('sha256');
+  hash.update(fs.readFileSync(filePath));
+  return hash.digest('hex');
+}
+
+export interface ChecksumVerdict {
+  ok: boolean;
+  expected: string | null;
+  actual: string;
+  message: string;
+}
+
+/**
+ * Check an archive against the digest recorded when it was made.
+ *
+ * An archive with no recorded digest — one taken before this existed, or one
+ * carried in from another machine — is reported as unverifiable rather than as
+ * good or bad, because that is what it is. The restore route lets it through
+ * and says so; it does not pretend to have checked something it could not.
+ */
+export function verifyChecksum(fileName: string): ChecksumVerdict {
+  const filePath = path.join(backupFolder(), fileName);
+  const actual = checksumOf(filePath);
+  const row = getDb().prepare('SELECT checksum FROM backup_logs WHERE file_name = ? ORDER BY id DESC LIMIT 1')
+    .get(fileName) as { checksum: string | null } | undefined;
+  const expected = row?.checksum ?? null;
+
+  if (!expected) {
+    return { ok: true, expected: null, actual, message: 'No digest was recorded for this archive, so its integrity could not be confirmed. It was accepted on the laboratory\'s judgement.' };
+  }
+  if (expected === actual) {
+    return { ok: true, expected, actual, message: 'Archive matches the digest recorded when it was taken.' };
+  }
+  return {
+    ok: false, expected, actual,
+    message: 'This archive does not match the digest recorded when it was taken. It has been altered, corrupted or replaced. Restoring it would overwrite live data with contents nobody can vouch for.',
+  };
 }
 
 /** Write the deployment to a ZIP at `targetPath`. */
@@ -139,7 +191,9 @@ export async function createBackup(trigger: 'manual' | 'scheduled' | 'pre-restor
   try { getDb().pragma('wal_checkpoint(TRUNCATE)'); } catch { /* best-effort */ }
   await writeBackupZip(fullPath, manifest);
   const sizeBytes = fs.existsSync(fullPath) ? fs.statSync(fullPath).size : 0;
-  getDb().prepare('INSERT INTO backup_logs (file_name, manifest, created_by) VALUES (?, ?, ?)').run(fileName, JSON.stringify(manifest), userId);
+  const checksum = checksumOf(fullPath);
+  getDb().prepare('INSERT INTO backup_logs (file_name, manifest, created_by, checksum) VALUES (?, ?, ?, ?)')
+    .run(fileName, JSON.stringify({ ...manifest, checksum }), userId, checksum);
   return { fileName, sizeBytes, createdAt: manifest.createdAt, source: 'system' };
 }
 

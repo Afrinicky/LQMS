@@ -10,6 +10,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../src/services/api';
+import { requestSigningPassword } from '../src/components/SigningPassword';
 import { submit } from './net';
 import { Back, Field, Ico, ICO, PhotoField, Result, s, type Msg } from './ui';
 import { SignatureGate } from './SignatureOnFile';
@@ -93,6 +94,13 @@ function FormFill({ templateKey, title, onBack }: { templateKey: string; title: 
       if (f.required && isEmpty(answers[f.key])) { setRes({ kind: 'err', msg: `"${f.label}" is required.` }); return; }
     }
     if (requiresSig && !sigReady) { setRes({ kind: 'err', msg: 'Upload your signature first — it is applied on submit.' }); return; }
+    // Only forms that carry a signature ask for the password; the rest submit
+    // as they always did.
+    let password: string | null = null;
+    if (requiresSig) {
+      password = await requestSigningPassword(`Sign and submit: ${title}`, 'Your signature is recorded against this submission.');
+      if (!password) return;
+    }
     setBusy(true);
     try {
       // Photo fields hold a File for preview; JSON can only carry a reference, so
@@ -101,7 +109,7 @@ function FormFill({ templateKey, title, onBack }: { templateKey: string; title: 
       const serializable: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(answers)) serializable[k] = v instanceof File ? `[photo] ${v.name}` : v;
       // The Host applies the signer's signature on file when the form requires one.
-      const out = await submit('/forms/submissions', { templateKey, answers: serializable }, `Form · ${title}`);
+      const out = await submit('/forms/submissions', { templateKey, answers: serializable, ...(password ? { password } : {}) }, `Form · ${title}`);
       if (out.queued) setRes({ kind: 'queued', msg: 'Saved offline — will submit automatically when back online.' });
       else { const no = s((out.data as { submissionNumber?: string })?.submissionNumber || ''); setRes({ kind: 'ok', msg: `Submitted${no ? ' (' + no + ')' : ''}.` }); setAnswers({}); }
     } catch (e) { setRes({ kind: 'err', msg: (e as Error).message }); } finally { setBusy(false); }

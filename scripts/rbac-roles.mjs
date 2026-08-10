@@ -1,6 +1,6 @@
 /** Dump the effective permission map for every seeded role. */
 const BASE = process.env.API || 'http://127.0.0.1:4402/api';
-const PW = 'Passw0rd!test';
+const PW = 'thistle harbour crane';
 const j = async (p, o = {}) => {
   const r = await fetch(`${BASE}${p}`, { headers: { 'Content-Type': 'application/json', ...(o.token ? { Authorization: `Bearer ${o.token}` } : {}) }, method: o.method || 'GET', body: o.body ? JSON.stringify(o.body) : undefined });
   return { status: r.status, json: await r.json().catch(() => null) };

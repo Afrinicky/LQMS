@@ -137,6 +137,10 @@ async function main() {
       Array.isArray(backup.json?.manifest?.includes) && backup.json.manifest.includes.length > 0,
       `manifest.includes = ${JSON.stringify(backup.json?.manifest?.includes)}`);
 
+    expect('PQ-2.4', 'URS-DAT-04', 'The backup carries a digest of what was written',
+      typeof backup.json?.checksum === 'string' && /^[a-f0-9]{64}$/.test(backup.json.checksum),
+      `SHA-256 ${String(backup.json?.checksum).slice(0, 24)}… recorded with the package.`);
+
     /* ------------------------------------------------- PQ-3  simulate a loss */
     console.log('\n[PQ-3] Simulate loss of data after the backup was taken');
 
@@ -203,9 +207,31 @@ async function main() {
     expect('PQ-5.2', 'URS-REL-03', 'The host remains operational after a restore',
       health.status === 200, `GET /health → ${health.status}`);
 
-    record('PQ-5.3', 'URS-DAT-04', 'The restored archive could be proven authentic before use',
-      'DEVIATION',
-      'No checksum is stored with the package and none is computed before the restore overwrites live data. The restore validates that the ZIP opens, not that it is the archive the laboratory took.');
+    // The point of a digest is to be believed when it disagrees. Take a fresh
+    // backup, damage it the way a failing disk or a half-finished copy would,
+    // and confirm the restore refuses it instead of overwriting live data.
+    const second = await call('/backup/create', { method: 'POST', token: token2, body: {} });
+    const victimName = second.json?.fileName;
+    const victimPath = path.join(DATA_DIR, 'backups', victimName ?? '');
+    const original = fs.readFileSync(victimPath);
+    fs.writeFileSync(victimPath, Buffer.concat([original, Buffer.from('corruption')]));
+
+    const refused = await call('/backup/restore', { method: 'POST', token: token2, body: { fileName: victimName } });
+    expect('PQ-5.3', 'URS-DAT-04', 'A tampered or corrupted archive is refused before live data is touched',
+      refused.status === 409,
+      `Restore of a modified archive → ${refused.status}: ${String(refused.json?.error).slice(0, 140)}`);
+
+    const survived = (await call('/staff', { token: token2 })).json ?? [];
+    expect('PQ-5.4', 'URS-DAT-04', 'The refused restore left the live system untouched',
+      survived.length === staffAfter.length,
+      `${survived.length} staff records still present (unchanged from the ${staffAfter.length} after the good restore).`);
+
+    // And the refusal is on the record, because a rejected restore is exactly
+    // the kind of event an assessor will ask about.
+    const refusalTrail = (await call('/records-reports/audit-trail?action=restore_refused', { token: token2 })).json ?? [];
+    expect('PQ-5.5', 'URS-AUD-11', 'The refused restore is recorded in the audit trail',
+      Array.isArray(refusalTrail) && refusalTrail.length > 0,
+      `${Array.isArray(refusalTrail) ? refusalTrail.length : 0} restore_refused entries recorded.`);
   } finally {
     stopHost();
   }

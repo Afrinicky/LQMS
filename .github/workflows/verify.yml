@@ -1,0 +1,119 @@
+name: Verify
+
+# Everything that has to be true before a build is worth packaging.
+#
+# Until August 2026 the only checks that ran in CI were a typecheck and a
+# structure check, inside the Windows installer job — so the RBAC, IQC, alerts,
+# account and backup scripts, and the qualification suites, were exercised only
+# when somebody remembered to run them by hand (validation finding VF-22).
+# This workflow runs the lot, and the packaging workflows wait for it.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_call:      # so the installer workflows can require this one first
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Structure check
+        run: npm run smoke
+
+      - name: Build
+        run: npm run build
+        env:
+          SECH_LIMS_BUILD_COMMIT: ${{ github.sha }}
+          SECH_LIMS_BUILD_DATE: ${{ github.event.repository.updated_at }}
+
+      # The qualification protocols from docs/validation. Each starts its own
+      # host on a scratch directory, so they are safe to run anywhere.
+      - name: Operational qualification
+        run: npm run validate:oq
+
+      - name: Performance qualification (backup and recovery)
+        run: npm run validate:pq
+
+      # The supplier verification scripts that need a live host. Ordering
+      # matters for two of them — rbac-matrix and rbac-selfservice read the
+      # probe users rbac-roles creates (validation finding VF-23).
+      - name: Verification scripts
+        run: |
+          set -e
+          start_host() {
+            rm -rf "/tmp/ci-$1" && mkdir -p "/tmp/ci-$1"
+            SECH_LIMS_DATA_DIR="/tmp/ci-$1" API_PORT="$2" SECH_LIMS_API_HOST=127.0.0.1 \
+              node_modules/.bin/tsx server/index.ts > "/tmp/ci-$1.log" 2>&1 &
+            echo $! > "/tmp/ci-$1.pid"
+            for _ in $(seq 1 60); do
+              curl -sf "http://127.0.0.1:$2/api/health" >/dev/null && return 0
+              sleep 1
+            done
+            echo "host $1 did not start"; cat "/tmp/ci-$1.log"; return 1
+          }
+          stop_host() { kill "$(cat "/tmp/ci-$1.pid")" 2>/dev/null || true; }
+
+          run_alone() {  # name port script [runner]
+            start_host "$1" "$2"
+            API="http://127.0.0.1:$2/api" ${4:-node} "$3"
+            stop_host "$1"
+          }
+
+          run_alone rbac    4399 scripts/rbac-check.mjs
+          run_alone account 4420 scripts/account-check.mjs
+          run_alone iqc     4430 scripts/iqc-check.mjs
+          run_alone iqcio   4434 scripts/iqc-io-check.mjs
+          run_alone iqcadm  4432 scripts/iqc-admin-check.mjs
+          run_alone alerts  4431 scripts/alerts-check.mjs "node_modules/.bin/tsx"
+          run_alone backup  4433 scripts/backup-check.mjs "node_modules/.bin/tsx"
+
+          # These three share one host: rbac-roles seeds the probe users the
+          # other two read.
+          start_host chain 4405
+          API=http://127.0.0.1:4405/api node scripts/rbac-roles.mjs
+          API=http://127.0.0.1:4405/api node scripts/rbac-matrix.mjs
+          API=http://127.0.0.1:4405/api node scripts/rbac-selfservice.mjs
+          stop_host chain
+
+      # In-process checks that start no host of their own.
+      - name: Backup scheduler and destinations
+        run: |
+          npm run check:backup-scheduler
+          npm run check:backup-destinations
+
+      # Two audits, because they answer different questions. The first is the
+      # one that can block a release: what is reachable in the software the
+      # laboratory actually runs. The second is the whole tree including build
+      # tooling — worth seeing every run, not worth failing a build over, since
+      # none of it ships.
+      - name: Dependency audit (shipped code)
+        run: npm audit --omit=dev --audit-level=critical
+
+      - name: Dependency audit (full tree, informational)
+        run: npm audit || true
+
+      - name: Retain qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-evidence
+          path: docs/validation/evidence/
+          retention-days: 90

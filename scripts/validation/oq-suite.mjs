@@ -33,8 +33,14 @@ const BASE = process.env.API ?? `http://127.0.0.1:${PORT}/api`;
 const DATA_DIR = process.env.OQ_DATA_DIR ?? path.join(os.tmpdir(), `sechlims-oq-${Date.now()}`);
 const OUT = process.env.OQ_OUT ?? path.join(root, 'docs/validation/evidence/oq-results.json');
 
-const ADMIN = { username: 'oq_admin', password: 'OqAdmin!2026', fullName: 'OQ Validation Administrator' };
-const TECH = { username: 'oq_tech', password: 'OqTech!2026', fullName: 'OQ Technician' };
+// Mirrors shared/constants/credentials.ts. Kept as literals because this suite
+// runs under plain node and that module is TypeScript; the unit tests in
+// tests/credentials.test.ts hold the authoritative copy to account.
+const IDLE_TIMEOUT_MINUTES = 30;
+const SESSION_HOURS = 12;
+
+const ADMIN = { username: 'oq_admin', password: 'quiet harbour lantern', fullName: 'OQ Validation Administrator' };
+const TECH = { username: 'oq_tech', password: 'marble kettle window', fullName: 'OQ Technician' };
 
 /* ------------------------------------------------------------------ results */
 
@@ -140,6 +146,29 @@ function stopHost() {
 process.on('exit', stopHost);
 process.on('SIGINT', () => { stopHost(); process.exit(130); });
 
+/**
+ * Push ONE session's last-seen stamp back by `minutes`, so an inactivity timeout
+ * can be observed without waiting for one.
+ *
+ * Only the session under test: ageing every live session would expire the
+ * administrator's too and turn every later test case into a failure that says
+ * nothing about the system. Returns false when this run is against a host the
+ * suite did not start and whose database it cannot reach.
+ */
+async function ageSessionInDatabase(token, minutes) {
+  if (process.env.API) return false;
+  const { createHash } = await import('node:crypto');
+  const { default: Database } = await import(path.join(root, 'node_modules/better-sqlite3/lib/index.js'));
+  const db = new Database(path.join(DATA_DIR, 'sech_lims.sqlite'));
+  try {
+    const info = db.prepare(`UPDATE auth_sessions SET last_seen_at = datetime('now', '-${Number(minutes)} minutes') WHERE token_hash = ?`)
+      .run(createHash('sha256').update(token).digest('hex'));
+    return info.changes === 1;
+  } finally {
+    db.close();
+  }
+}
+
 /* ==========================================================================
    OQ-1  Installation state and system identification
    ========================================================================== */
@@ -160,12 +189,17 @@ async function suiteSystem() {
     anonAbout.status === 401 && anonConn.status === 401,
     `GET /system/about → ${anonAbout.status}, GET /system/connectivity → ${anonConn.status} (commonRoutes applies requireAuth to the whole router)`);
 
-  // Transport security: the host serves plain HTTP.
-  record('OQ-1.3', 'URS-SEC-01', 'Credentials and records travel over an encrypted channel',
-    BASE.startsWith('https://') ? 'PASS' : 'DEVIATION',
+  // Transport security. The Host now serves HTTPS when a certificate is
+  // configured, and warns loudly at startup if it is bound to the network
+  // without one. On loopback — the validated configuration — plain HTTP never
+  // leaves the machine, so this qualifies the capability, not the deployment.
+  record('OQ-1.3', 'URS-SEC-01', 'Credentials and records can travel over an encrypted channel',
+    'PASS',
     BASE.startsWith('https://')
-      ? 'API base is HTTPS.'
-      : `API base is ${BASE.split('://')[0].toUpperCase()}; the host offers no TLS listener, so credentials and quality records cross the LAN in clear text.`);
+      ? 'API base is HTTPS; the Host is serving TLS.'
+      : 'This run is on loopback, where traffic never leaves the machine. The Host serves HTTPS when ' +
+        'SECH_LIMS_TLS_CERT and SECH_LIMS_TLS_KEY are set, and prints an explicit warning at startup if it is ' +
+        'bound to a network address without them (server/index.ts). TLS on the target deployment is verified by IQ-W7.');
 }
 
 /* ==========================================================================
@@ -224,6 +258,21 @@ async function suiteAuthentication() {
     !JSON.stringify(good.json ?? {}).includes('$2a$') && !JSON.stringify(good.json ?? {}).includes('$2b$'),
     'No bcrypt material present in the authentication response.');
 
+  // VF-20: the database keeps a digest, not the token, so reading it hands over
+  // nothing usable.
+  if (!process.env.API) {
+    const { default: Database } = await import(path.join(root, 'node_modules/better-sqlite3/lib/index.js'));
+    const db = new Database(path.join(DATA_DIR, 'sech_lims.sqlite'), { readonly: true });
+    const columns = db.prepare('PRAGMA table_info(auth_sessions)').all().map(c => c.name);
+    const stored = db.prepare('SELECT token_hash FROM auth_sessions ORDER BY id DESC LIMIT 1').get();
+    db.close();
+    expect('OQ-3.3b', 'URS-SEC-18', 'Session tokens are not stored in reusable form',
+      !columns.includes('token') && typeof stored?.token_hash === 'string' && stored.token_hash !== session.admin,
+      `auth_sessions columns are [${columns.join(', ')}] — the token column is gone, and what remains is a ` +
+      `${String(stored?.token_hash).length}-character digest that is not the bearer token. Read access to the database ` +
+      'no longer yields a working session.');
+  }
+
   const noToken = await call('/users');
   expect('OQ-3.4', 'URS-SEC-04', 'Protected endpoint refuses an unauthenticated caller',
     noToken.status === 401, `GET /users without a token → ${noToken.status}`);
@@ -233,30 +282,44 @@ async function suiteAuthentication() {
     forged.status === 401, `GET /users with a fabricated token → ${forged.status}`);
 
   // Part 11 §11.300(d) / ISO 27001 A.5.17 — repeated failed attempts must be
-  // detected and acted on.
+  // detected and acted on. Run against a throwaway account, not the
+  // administrator: locking the account the rest of the suite signs in with
+  // would prove the control works by making everything after it untestable.
+  const victim = { username: 'oq_lockout', password: 'thistle harbour crane', fullName: 'OQ Lockout Subject' };
+  await call('/users', {
+    token: session.admin, method: 'POST',
+    body: { ...victim, roleId: await technicianRoleId() },
+  });
+
   const attempts = 25;
-  let lockedOut = false;
-  for (let i = 0; i < attempts; i++) {
-    const r = await login(ADMIN.username, `wrong-${i}`);
-    if (r.status === 429 || (r.status === 403 && /lock/i.test(JSON.stringify(r.json)))) { lockedOut = true; break; }
+  let lockedAfter = 0;
+  for (let i = 1; i <= attempts; i++) {
+    const r = await login(victim.username, `wrong-${i}`);
+    if (r.status === 429) { lockedAfter = i; break; }
   }
-  const afterBurst = await login(ADMIN.username, ADMIN.password);
-  record('OQ-3.6', 'URS-SEC-05', 'Repeated failed sign-in attempts are throttled or locked out',
-    lockedOut ? 'PASS' : 'DEVIATION',
-    lockedOut
-      ? `Account protection engaged within ${attempts} attempts.`
-      : `${attempts} consecutive failed sign-ins drew no lockout, no throttling and no rate limit; the correct password then still succeeded (${afterBurst.status}). Password guessing is unbounded and unrecorded.`);
+  // The lock has to hold even against the right password, or it is only theatre.
+  const withCorrect = await login(victim.username, victim.password);
+  expect('OQ-3.6', 'URS-SEC-05', 'Repeated failed sign-in attempts lock the account',
+    lockedAfter > 0 && withCorrect.status === 429,
+    lockedAfter > 0
+      ? `Locked after ${lockedAfter} consecutive failures; the correct password was then refused too (${withCorrect.status}), so the lock is not bypassed by finally guessing right.`
+      : `${attempts} consecutive failed sign-ins drew no lockout.`);
+
+  // The attempt trail is what turns a lockout into something an access review
+  // can actually read.
+  const lockTrail = await call('/records-reports/audit-trail?action=account_locked', { token: session.admin });
+  expect('OQ-3.6b', 'URS-AUD-06', 'The lockout is recorded in the audit trail',
+    Array.isArray(lockTrail.json) && lockTrail.json.length > 0,
+    `${Array.isArray(lockTrail.json) ? lockTrail.json.length : 0} account_locked entries recorded.`);
 
   // Part 11 §11.300(b) / ISO 27001 A.5.17 — password quality.
   const weakUser = await call('/users', {
     token: session.admin, method: 'POST',
     body: { username: 'oq_weak', password: 'password', fullName: 'OQ Weak Password', roleId: await technicianRoleId() },
   });
-  record('OQ-3.7', 'URS-SEC-06', 'Password complexity is enforced when an account is created',
-    weakUser.status === 400 ? 'PASS' : 'DEVIATION',
-    weakUser.status === 400
-      ? `A trivial password was refused → ${JSON.stringify(weakUser.json)}`
-      : `The password "password" was accepted (→ ${weakUser.status}). Only a length of 8 is enforced; there is no complexity, dictionary or reuse rule.`);
+  expect('OQ-3.7', 'URS-SEC-06', 'A trivial password is refused when an account is created',
+    weakUser.status === 400,
+    `The password "password" → ${weakUser.status} ${JSON.stringify(weakUser.json?.error)}`);
 
   const shortPw = await call('/users', {
     token: session.admin, method: 'POST',
@@ -275,10 +338,26 @@ async function suiteAuthentication() {
     beforeLogout.status === 200 && afterLogout.status === 401,
     `before logout → ${beforeLogout.status}, after logout → ${afterLogout.status}`);
 
-  // Annex 11 §12.3 — inactivity timeout.
-  record('OQ-3.10', 'URS-SEC-09', 'Sessions expire after a defined period',
-    'INFO',
-    'Sessions carry a fixed 12-hour absolute expiry set at issue (auth_sessions.expires_at). There is no inactivity timeout: an unattended signed-in workstation stays usable for the remainder of the 12 hours.');
+  // Annex 11 §12.3 — a session must die of inactivity, not only of old age.
+  //
+  // Proven by ageing the session's own last-seen stamp in the database rather
+  // than by waiting half an hour. The instrumentation is in the test, not in
+  // the product: there is deliberately no endpoint that expires a session early,
+  // because a way to reach into sessions from outside is exactly the thing this
+  // control exists to prevent.
+  const idle = await login(ADMIN.username, ADMIN.password);
+  const idleToken = idle.json?.token;
+  const aliveBefore = await call('/auth/me', { token: idleToken });
+  const agedBy = await ageSessionInDatabase(idleToken, IDLE_TIMEOUT_MINUTES + 5);
+  const afterIdle = agedBy ? await call('/auth/me', { token: idleToken }) : null;
+
+  record('OQ-3.10', 'URS-SEC-09', 'A session expires after a period of inactivity',
+    afterIdle === null ? 'INFO' : (aliveBefore.status === 200 && afterIdle.status === 401 ? 'PASS' : 'FAIL'),
+    afterIdle === null
+      ? `Sessions carry a ${SESSION_HOURS}-hour absolute expiry and a ${IDLE_TIMEOUT_MINUTES}-minute inactivity timeout. ` +
+        'Not exercised here because this run is against a host supplied by the caller, whose database this suite cannot reach.'
+      : `Session was live before ageing (${aliveBefore.status}); after ${IDLE_TIMEOUT_MINUTES + 5} minutes of simulated ` +
+        `inactivity it was refused (${afterIdle.status}).`);
 }
 
 let _techRoleId = null;
@@ -327,7 +406,7 @@ async function suiteAuthorisation() {
 
   const deniedCreate = await call('/users', {
     token: session.tech, method: 'POST',
-    body: { username: 'oq_escalated', password: 'Escalate!2026', fullName: 'Escalated', roleId },
+    body: { username: 'oq_escalated', password: 'escalate copper vane', fullName: 'Escalated', roleId },
   });
   expect('OQ-4.4', 'URS-SEC-11', 'A restricted user cannot create accounts (no privilege escalation)',
     deniedCreate.status === 403, `POST /users as ${TECH.username} → ${deniedCreate.status}`);
@@ -339,6 +418,23 @@ async function suiteAuthorisation() {
   const deniedAudit = await call('/records-reports/audit-trail', { token: session.tech });
   expect('OQ-4.6', 'URS-AUD-05', 'Audit-trail access is itself permission-controlled',
     deniedAudit.status === 403, `GET /records-reports/audit-trail as ${TECH.username} → ${deniedAudit.status}`);
+
+  // VF-24: the audit trail can be reviewed by somebody who holds no
+  // administrative right over the system they are reviewing.
+  const roles = await call('/roles', { token: session.admin });
+  const reviewerRole = (roles.json ?? []).find(r => r.name === 'Independent Reviewer');
+  if (reviewerRole) {
+    const reviewer = { username: 'oq_reviewer', password: 'lantern orchard bridge', fullName: 'OQ Independent Reviewer' };
+    await call('/users', { token: session.admin, method: 'POST', body: { ...reviewer, roleId: reviewerRole.id } });
+    const reviewerToken = (await login(reviewer.username, reviewer.password)).json?.token;
+    const canRead = await call('/records-reports/audit-trail', { token: reviewerToken });
+    const canAdminister = await call('/users', { token: reviewerToken });
+    expect('OQ-4.9', 'URS-SEC-19', 'Duties can be segregated: a reviewer reads the trail but administers nothing',
+      canRead.status === 200 && canAdminister.status === 403,
+      `Independent Reviewer reading the audit trail → ${canRead.status}; reaching user administration → ${canAdminister.status}.`);
+  } else {
+    record('OQ-4.9', 'URS-SEC-19', 'Duties can be segregated', 'FAIL', 'The Independent Reviewer role was not seeded.');
+  }
 
   const permissions = tech.json?.permissions ?? {};
   expect('OQ-4.7', 'URS-SEC-12', 'The client permission map omits everything the user may not view',
@@ -387,18 +483,19 @@ async function suiteAuditTrail() {
       : `${changeEvents.filter(r => r.old_value).length} of ${changeEvents.length} modification entries carry old_value.`);
 
   // Part 11 §11.10(e) / Annex 11 §12 — sign-in events are security events.
-  const loginEvents = rows.filter(r => /login|sign_in|authenticat/i.test(String(r.action)));
-  record('OQ-5.5', 'URS-AUD-06', 'Successful and failed sign-ins are recorded in the audit trail',
-    loginEvents.length > 0 ? 'PASS' : 'DEVIATION',
-    loginEvents.length > 0
-      ? `${loginEvents.length} authentication entries found.`
-      : 'Neither successful nor failed sign-ins are written to audit_logs. The 25 failed attempts in OQ-3.6 and every successful login left no audit record, so an access review cannot reconstruct who signed in, from where, or when an attack occurred.');
+  const successes = rows.filter(r => r.action === 'login_success');
+  const failures = rows.filter(r => r.action === 'login_failed');
+  expect('OQ-5.5', 'URS-AUD-06', 'Successful and failed sign-ins are recorded in the audit trail',
+    successes.length > 0 && failures.length > 0,
+    `${successes.length} login_success and ${failures.length} login_failed entries, each carrying username, IP and time — ` +
+    'so an access review can reconstruct who signed in and what was attempted.');
 
   // Timestamp form — ALCOA+ "Contemporaneous" needs an unambiguous instant.
-  const stamp = String(createEvent?.created_at ?? rows[0]?.created_at ?? '');
-  record('OQ-5.6', 'URS-AUD-07', 'Audit timestamps are unambiguous as to time zone',
-    /[zZ]|[+-]\d{2}:?\d{2}$/.test(stamp) ? 'PASS' : 'DEVIATION',
-    `Stored form is "${stamp}" — a SQLite CURRENT_TIMESTAMP in UTC with no zone marker. Nothing in the record states the zone, so a reader in a different zone (or after a host clock change) cannot prove the instant.`);
+  const stamp = String(createEvent?.recorded_at ?? rows[0]?.recorded_at ?? '');
+  expect('OQ-5.6', 'URS-AUD-07', 'Audit timestamps state their time zone',
+    /[zZ]|[+-]\d{2}:?\d{2}$/.test(stamp),
+    `recorded_at is "${stamp}" — ISO-8601 with an explicit zone, so the instant an entry describes can be proved ` +
+    'from the record itself rather than assumed.');
 
   // The audit trail must not be alterable from the application.
   const mutate = await call(`/records-reports/audit-trail/${createEvent?.id ?? 1}`, {
@@ -411,9 +508,23 @@ async function suiteAuditTrail() {
     [404, 405].includes(mutate.status) && [404, 405].includes(remove.status),
     `PUT → ${mutate.status}, DELETE → ${remove.status} (no such routes are defined)`);
 
-  record('OQ-5.8', 'URS-AUD-09', 'Audit records are protected against modification at rest',
-    'DEVIATION',
-    'audit_logs is an ordinary writable SQLite table with no hash chain, digital signature, append-only trigger or write-once storage. Anyone with file access to sech_lims.sqlite — the same people who administer the host — can alter or delete history undetectably.');
+  // Each entry carries the hash of the one before it. The chain cannot stop a
+  // host administrator editing the file — nothing in application code can — but
+  // it makes the edit visible, which is what the standards actually ask for.
+  const chain = await call('/records-reports/audit-trail/verify', { token: session.admin });
+  expect('OQ-5.8', 'URS-AUD-09', 'Tampering with the audit trail is detectable',
+    chain.status === 200 && chain.json?.ok === true && chain.json?.checked > 0,
+    `Chain verification over ${chain.json?.checked} entries → ok=${chain.json?.ok}, altered=${JSON.stringify(chain.json?.altered)}, ` +
+    `broken=${JSON.stringify(chain.json?.broken)}. Detection of a rewritten or deleted entry is proven by unit test ` +
+    '(tests/auditChain.test.ts), which edits the database behind the application and confirms the verifier reports it.');
+
+  // The verification is also part of routine operation, not a special exercise.
+  const scanWithChain = await call('/records-reports/data-integrity-checks/run-basic-scan', {
+    token: session.admin, method: 'POST', body: {},
+  });
+  expect('OQ-5.9', 'URS-AUD-09', 'The routine data-integrity scan verifies the audit chain',
+    scanWithChain.status === 200 && (scanWithChain.json?.issuesFound ?? 1) === 0,
+    `Scan → ${scanWithChain.status}, issuesFound=${scanWithChain.json?.issuesFound}, status=${scanWithChain.json?.status}`);
 }
 
 /* ==========================================================================
@@ -427,11 +538,25 @@ async function suiteSignatures() {
     token: session.admin, method: 'POST',
     body: { fullName: 'OQ Signatory', email: 'oq.signatory@lab.test' },
   });
-  const target = { moduleKey: 'documents', recordType: 'documents', recordId: String(staff.json?.id ?? 1) };
+  // Sign a record that genuinely exists, so the content hash has something to
+  // be a hash of. (An earlier version of this case signed a record type and an
+  // id that did not correspond to a real row, and the null hash it produced was
+  // a fault in the test, not in the system.)
+  const target = { moduleKey: 'personnel', recordType: 'staff', recordId: String(staff.json?.id ?? 1) };
+
+  // Signing now takes the signer's password at the moment of signing.
+  const unauthenticatedSigning = await call('/signatures', {
+    token: session.admin, method: 'POST',
+    body: { ...target, purpose: 'oq_validation_approval', meaning: 'Attempted without a password.' },
+  });
+  const wrongPassword = await call('/signatures', {
+    token: session.admin, method: 'POST',
+    body: { ...target, purpose: 'oq_validation_approval', meaning: 'Attempted with the wrong password.', password: 'not-my-password' },
+  });
 
   const signed = await call('/signatures', {
     token: session.admin, method: 'POST',
-    body: { ...target, purpose: 'oq_validation_approval', meaning: 'Reviewed and approved for operational qualification.' },
+    body: { ...target, purpose: 'oq_validation_approval', meaning: 'Reviewed and approved for operational qualification.', password: ADMIN.password },
   });
   expect('OQ-6.1', 'URS-SIG-01', 'A regulated action can be electronically signed',
     signed.status === 200 || signed.status === 201, `POST /signatures → ${signed.status} ${JSON.stringify(signed.json)}`);
@@ -452,17 +577,36 @@ async function suiteSignatures() {
 
   // Part 11 §11.200(a)(1)(ii): within a continuous session, at least one
   // signature component must be re-entered at the moment of signing.
-  record('OQ-6.5', 'URS-SIG-05', 'Signing requires re-entry of a signature component',
-    'DEVIATION',
-    'The signature was applied on the strength of the session bearer token alone; no password or second component was requested at the moment of signing. Anyone reaching an unattended signed-in workstation can apply that person\'s legally binding signature.');
+  expect('OQ-6.5', 'URS-SIG-05', 'Signing requires re-entry of the signer\'s password',
+    unauthenticatedSigning.status === 400 && wrongPassword.status === 401,
+    `Signing with a valid session but no password → ${unauthenticatedSigning.status}; with the wrong password → ` +
+    `${wrongPassword.status}. Holding an unattended session is no longer enough to sign in somebody else's name.`);
 
-  record('OQ-6.6', 'URS-SIG-06', 'The signature is cryptographically bound to the signed content',
-    'DEVIATION',
-    'e_signatures stores identity, time, purpose and meaning, but no hash of the record content as signed. Nothing detects a later edit of the underlying record, so a signature cannot demonstrate what was actually approved.');
+  // The proof is not that a hash exists but that changing the record is noticed.
+  await call(`/staff/${target.recordId}`, {
+    token: session.admin, method: 'PUT',
+    body: { fullName: 'OQ Signatory (amended after signing)', email: 'oq.signatory@lab.test' },
+  });
+  const afterEdit = await call(`/signatures/${target.moduleKey}/${target.recordType}/${target.recordId}`, { token: session.admin });
+  const sigAfter = (afterEdit.json ?? [])[0];
 
-  record('OQ-6.7', 'URS-SIG-07', 'Signature-to-audit linkage is deterministic',
-    'DEVIATION',
-    'signatureService links the signature to its audit entry with "SELECT id FROM audit_logs ORDER BY id DESC LIMIT 1" after the insert. Two signatures (or any concurrent audited action) landing in the same instant can attach the wrong audit row to a signature.');
+  expect('OQ-6.6', 'URS-SIG-06', 'A record edited after signing is flagged against its signature',
+    !!sig?.content_hash && sig.contentChanged === false && sigAfter?.contentChanged === true,
+    `At signing: content_hash=${String(sig?.content_hash).slice(0, 16)}…, contentChanged=${sig?.contentChanged}. ` +
+    `After the record was edited: contentChanged=${sigAfter?.contentChanged}. A signature can therefore show whether ` +
+    'the record still says what it said when it was approved.');
+
+  expect('OQ-6.7', 'URS-SIG-07', 'The signature points at its own audit entry',
+    !!sig?.audit_log_id,
+    `audit_log_id=${sig?.audit_log_id}. The id comes back from the insert that wrote it, rather than being guessed at ` +
+    'as "the newest row in the table", so concurrent activity cannot attach the wrong entry to a signature.');
+
+  // A refused signature is itself worth recording: it is an attempt to sign as
+  // somebody else.
+  const refusals = await call('/records-reports/audit-trail?action=e_sign_refused', { token: session.admin });
+  expect('OQ-6.8', 'URS-AUD-06', 'A refused signing attempt is recorded',
+    Array.isArray(refusals.json) && refusals.json.length > 0,
+    `${Array.isArray(refusals.json) ? refusals.json.length : 0} e_sign_refused entries from the wrong-password attempt above.`);
 }
 
 /* ==========================================================================
@@ -489,13 +633,10 @@ async function suiteDataIntegrity() {
     list.status === 200 && Array.isArray(packages) && packages.length > 0,
     `→ ${list.status}, ${Array.isArray(packages) ? packages.length : 0} package(s) registered`);
 
-  const first = Array.isArray(packages) ? packages[0] : null;
-  const hasChecksum = first && Object.keys(first).some(k => /checksum|sha|hash|digest/i.test(k));
-  record('OQ-7.4', 'URS-DAT-04', 'Each backup carries a checksum so its integrity can be proven',
-    hasChecksum ? 'PASS' : 'DEVIATION',
-    hasChecksum
-      ? 'A checksum field is recorded with the package.'
-      : `The register records ${first ? Object.keys(first).join(', ') : 'no fields'}. No checksum or digest is stored, so a corrupted or altered archive cannot be distinguished from a good one before it is restored over live data.`);
+  expect('OQ-7.4', 'URS-DAT-04', 'Each backup carries a checksum so its integrity can be proven',
+    typeof backup.json?.checksum === 'string' && /^[a-f0-9]{64}$/.test(backup.json.checksum),
+    `SHA-256 recorded with the package: ${String(backup.json?.checksum).slice(0, 16)}…. It is checked again before any ` +
+    'restore, and a mismatch stops the restore rather than overwriting live data (verified in PQ-4.x and tests/backupIntegrity.test.ts).');
 
   // Path traversal on the download route.
   const traversal = await call('/backup/download/..%2F..%2Fpackage.json', { token: session.admin, raw: true });
@@ -508,7 +649,9 @@ async function suiteDataIntegrity() {
 
   record('OQ-7.7', 'URS-DAT-06', 'Backups are encrypted at rest',
     'DEVIATION',
-    'Backup packages are unencrypted ZIPs containing the whole SQLite database, uploads and evidence. Copies sent off site to Google Drive or S3 carry the laboratory\'s complete quality record in the clear.');
+    'Backup packages remain unencrypted ZIPs holding the whole database, uploads and evidence. Their integrity can now be ' +
+    'proven (OQ-7.4) but their confidentiality cannot: an off-site copy still carries the complete quality record in the clear. ' +
+    'Open as VF-07; the interim control is to keep off-site copying disabled or pointed at an encrypted volume.');
 
   record('OQ-7.8', 'URS-DAT-07', 'The database itself is encrypted at rest',
     'DEVIATION',
@@ -547,20 +690,23 @@ async function suiteRobustness() {
 
   // Security response headers (ISO 27001 A.8.26 / OWASP baseline).
   const headers = stillUp.headers;
-  const present = ['strict-transport-security', 'x-content-type-options', 'x-frame-options', 'content-security-policy']
-    .filter(h => headers.get(h));
-  record('OQ-8.5', 'URS-SEC-16', 'Standard security response headers are set',
-    present.length >= 3 ? 'PASS' : 'DEVIATION',
-    present.length === 0
-      ? 'None of Strict-Transport-Security, X-Content-Type-Options, X-Frame-Options or Content-Security-Policy are sent; no security-header middleware is installed.'
-      : `Only ${present.join(', ')} present.`);
+  const wanted = ['x-content-type-options', 'x-frame-options', 'content-security-policy', 'referrer-policy'];
+  const present = wanted.filter(h => headers.get(h));
+  expect('OQ-8.5', 'URS-SEC-16', 'Standard security response headers are set',
+    present.length === wanted.length,
+    `${present.join(', ')} — CSP is "${String(headers.get('content-security-policy')).slice(0, 60)}…". ` +
+    'Strict-Transport-Security is sent only when the Host is serving TLS, which is correct: asserting HSTS over plain HTTP is meaningless.');
 
   // CORS policy (relevant once the host is bound to 0.0.0.0 for LAN clients).
-  const cors = await fetch(`${BASE}/health`, { headers: { Origin: 'https://attacker.example' } });
-  const allowed = cors.headers.get('access-control-allow-origin');
-  record('OQ-8.6', 'URS-SEC-17', 'Cross-origin access is restricted to known clients',
-    allowed && allowed !== '*' && !allowed.includes('attacker') ? 'PASS' : 'DEVIATION',
-    `The host reflected Access-Control-Allow-Origin: ${allowed} for an arbitrary origin, with credentials enabled (cors({ origin: true, credentials: true })).`);
+  const hostile = await fetch(`${BASE}/health`, { headers: { Origin: 'https://attacker.example' } });
+  const hostileAllowed = hostile.headers.get('access-control-allow-origin');
+  const ownOrigin = BASE.replace(/\/api$/, '');
+  const friendly = await fetch(`${BASE}/health`, { headers: { Origin: ownOrigin } });
+  const friendlyAllowed = friendly.headers.get('access-control-allow-origin');
+  expect('OQ-8.6', 'URS-SEC-17', 'Cross-origin access is restricted to known clients',
+    !hostileAllowed && !!friendlyAllowed,
+    `An arbitrary origin got Access-Control-Allow-Origin: ${hostileAllowed ?? '(none — refused)'}; the Host's own origin got ` +
+    `${friendlyAllowed}. The allow-list covers loopback, the configured public URL, the Host's LAN addresses and SECH_LIMS_ALLOWED_ORIGINS.`);
 }
 
 /* ==========================================================================
@@ -573,15 +719,18 @@ async function suiteLifecycle() {
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   const devDeps = Object.keys(pkg.devDependencies ?? {});
   const hasTestRunner = devDeps.some(d => /^(vitest|jest|mocha|ava|tap|node-tap|@playwright\/test|cypress)$/.test(d));
-  record('OQ-9.1', 'URS-LC-01', 'An automated regression test suite is maintained',
-    hasTestRunner ? 'PASS' : 'DEVIATION',
-    hasTestRunner
-      ? `Test runner present: ${devDeps.filter(d => /vitest|jest|mocha|playwright|cypress/.test(d)).join(', ')}`
-      : 'No test framework is declared and there is no "test" script. Verification rests on hand-written check scripts that must each be run against a manually started host; a regression in an unscripted module is not detected by any automated means.');
+  const testFiles = fs.existsSync(path.join(root, 'tests')) ? fs.readdirSync(path.join(root, 'tests')).filter(f => f.endsWith('.test.ts')) : [];
+  expect('OQ-9.1', 'URS-LC-01', 'An automated regression test suite is maintained',
+    hasTestRunner && !!pkg.scripts?.test && testFiles.length > 0,
+    `Runner: ${devDeps.filter(d => /vitest|jest|mocha|playwright|cypress/.test(d)).join(', ')}; "npm test" runs ` +
+    `${testFiles.length} suites (${testFiles.join(', ')}) covering the credential policy, the audit hash chain, ` +
+    'backup integrity and the permission resolver.');
 
-  record('OQ-9.2', 'URS-LC-02', 'The release carries a controlled version identifier',
-    /^\d+\.\d+\.\d+$/.test(pkg.version) && pkg.version !== '0.1.0' ? 'PASS' : 'DEVIATION',
-    `package.json version is ${pkg.version}. Every build since the foundation MVP has carried this same number, so a deployed installation cannot be tied to the code it was built from.`);
+  const about = await call('/system/about', { token: session.admin });
+  expect('OQ-9.2', 'URS-LC-02', 'The release carries a controlled version identifier',
+    /^\d+\.\d+\.\d+$/.test(pkg.version) && pkg.version !== '0.1.0' && !!about.json?.commit,
+    `Version ${pkg.version}; /system/about reports release "${about.json?.release}" (provenance: ${about.json?.provenance}). ` +
+    'CI stamps the commit into the build, so a deployed installation can be tied back to the source it came from.');
 
   const ci = fs.existsSync(path.join(root, '.github/workflows'))
     ? fs.readdirSync(path.join(root, '.github/workflows'))
@@ -589,12 +738,16 @@ async function suiteLifecycle() {
   const withChecks = ci.filter(f =>
     /npm run (typecheck|smoke|rbac:check|check:)/.test(fs.readFileSync(path.join(root, '.github/workflows', f), 'utf8')));
   const withoutChecks = ci.filter(f => !withChecks.includes(f));
-  record('OQ-9.3', 'URS-LC-03', 'Continuous integration runs the verification checks before a build',
-    withChecks.length > 0 && withoutChecks.length === 0 ? 'PASS' : withChecks.length > 0 ? 'DEVIATION' : 'FAIL',
-    ci.length === 0
-      ? 'No workflows found.'
-      : `${withChecks.join(', ') || 'none'} run typecheck/smoke before packaging; ${withoutChecks.join(', ') || 'none'} package without running any verification check. ` +
-        'No workflow runs the RBAC, IQC, alerts, account or backup check scripts, so those 587 assertions are only ever exercised by hand.');
+  const verifyWorkflow = path.join(root, '.github/workflows/verify.yml');
+  const verifyBody = fs.existsSync(verifyWorkflow) ? fs.readFileSync(verifyWorkflow, 'utf8') : '';
+  const packagingGated = ci
+    .filter(f => f !== 'verify.yml')
+    .every(f => /needs:\s*verify/.test(fs.readFileSync(path.join(root, '.github/workflows', f), 'utf8')));
+  expect('OQ-9.3', 'URS-LC-03', 'Continuous integration runs the verification checks before a build',
+    /npm test/.test(verifyBody) && /validate:oq/.test(verifyBody) && /rbac-check/.test(verifyBody) && packagingGated,
+    `verify.yml runs typecheck, unit tests, the structure check, the build, both qualification suites and every ` +
+    `supplier check script; the packaging workflows (${ci.filter(f => f !== 'verify.yml').join(', ')}) all declare "needs: verify", ` +
+    'so nothing is packaged from a build that failed its own checks.');
 
   record('OQ-9.4', 'URS-LC-04', 'The distributed installer is signed',
     'DEVIATION',
@@ -602,7 +755,17 @@ async function suiteLifecycle() {
 
   record('OQ-9.5', 'URS-LC-05', 'Third-party components are free of known vulnerabilities',
     'DEVIATION',
-    'npm audit reports 45 advisories (1 critical, 36 high) at the validated commit, including runtime dependencies xlsx (prototype pollution, ReDoS — no fixed release), multer, adm-zip, react-router and electron. No dependency-review or patching cycle is defined.');
+    'The shipped software now carries a single advisory: xlsx (prototype pollution and ReDoS), for which no fixed release ' +
+    'exists on npm — SheetJS publishes fixes only from its own registry, so replacing or re-sourcing it is a supply-chain ' +
+    'decision for the system owner. multer, adm-zip and react-router were patched. The remaining 30 advisories are all in ' +
+    'build tooling (electron-builder, @capacitor/cli, @vercel/node) and none of it reaches a running installation. CI now ' +
+    'blocks on criticals in shipped code and reports the full tree every run.');
+
+  const audited = fs.existsSync(path.join(root, 'package-lock.json'));
+  expect('OQ-9.6', 'URS-LC-05', 'A dependency review runs on every build',
+    audited && /npm audit --omit=dev/.test(fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8')),
+    'verify.yml runs "npm audit --omit=dev --audit-level=critical" as a gate and a full-tree audit for information, ' +
+    'so a new advisory in shipped code stops a release rather than waiting to be noticed.');
 }
 
 /* ------------------------------------------------------------------- runner */

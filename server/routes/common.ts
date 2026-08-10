@@ -15,8 +15,11 @@ import { ACCESS_LEVELS, LEVEL_ACTIONS, type AccessLevel } from '../../shared/con
 import { pendingRequests, recentRequests, decideRequest } from '../services/passwordResetService.js';
 import { historicReferences, purgeDisposableRows } from '../services/userReferences.js';
 import { audit } from '../services/auditService.js';
-import { writeBackupZip, isSafeBackupName, createBackup } from '../services/backupService.js';
+import { writeBackupZip, isSafeBackupName, createBackup, checksumOf, verifyChecksum } from '../services/backupService.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
+import { buildInfo, releaseLabel } from '../utils/buildInfo.js';
+import { checkPassword } from '../../shared/constants/credentials.js';
+import { setPassword } from '../services/credentialService.js';
 import { parseIntNullable } from './routeHelpers.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import * as XLSX from 'xlsx';
@@ -580,12 +583,19 @@ export function commonRoutes() {
     const db = getDb();
     const staffId = idOrNull(req.body.staffId);
     if (!username || !String(username).trim()) return res.status(400).json({ error: 'A username is required.' });
-    if (!password || String(password).length < 8) return res.status(400).json({ error: 'A password of at least 8 characters is required.' });
+    const quality = checkPassword(String(password ?? ''), { username: String(username), fullName: String(fullName ?? '') });
+    if (!quality.ok) return res.status(400).json({ error: quality.error });
     if (!roleId) return res.status(400).json({ error: 'A role is required.' });
     if (db.prepare('SELECT id FROM users WHERE username = ? COLLATE NOCASE').get(username)) return res.status(400).json({ error: 'That username is already in use.' });
     if (staffId && db.prepare('SELECT id, username FROM users WHERE staff_id = ?').get(staffId)) return res.status(400).json({ error: 'That staff record is already linked to another user.' });
     const oldValue = null;
-    const result = db.prepare('INSERT INTO users (username, password_hash, full_name, role_id, staff_id) VALUES (?, ?, ?, ?, ?)').run(username, bcrypt.hashSync(password, 12), fullName, Number(roleId), staffId);
+    const passwordHash = bcrypt.hashSync(password, 12);
+    const result = db.prepare('INSERT INTO users (username, password_hash, full_name, role_id, staff_id) VALUES (?, ?, ?, ?, ?)')
+      .run(username, passwordHash, fullName, Number(roleId), staffId);
+    // Seed the reuse history with the password the account starts life on, so
+    // "choose one you have not used before" counts this one too.
+    db.prepare('INSERT INTO password_history (user_id, password_hash) VALUES (?, ?)')
+      .run(Number(result.lastInsertRowid), passwordHash);
     audit(req, { action: 'create', entity: 'users', entityId: result.lastInsertRowid, oldValue, newValue: { username, fullName, roleId, staffId } });
     res.status(201).json({ id: result.lastInsertRowid });
   });
@@ -611,12 +621,14 @@ export function commonRoutes() {
   router.post('/users/:id/reset-password', requirePermission('settings', 'edit'), (req, res) => {
     const db = getDb();
     const { newPassword } = req.body ?? {};
-    if (!newPassword || String(newPassword).length < 8) return res.status(400).json({ error: 'A temporary password of at least 8 characters is required.' });
     const user = db.prepare('SELECT id, username FROM users WHERE id = ?').get(req.params.id) as { id: number; username: string } | undefined;
     if (!user) return res.status(404).json({ error: 'User not found' });
+    // A temporary password is still a password: it is what protects the account
+    // between being handed over and being changed (validation finding VF-19).
+    const applied = setPassword(user.id, String(newPassword ?? ''), { mustChange: true });
+    if (!applied.ok) return res.status(400).json({ error: applied.error });
     // The password is temporary by definition, so the account is flagged to
     // choose its own on first use rather than living on the one handed over.
-    db.prepare('UPDATE users SET password_hash = ?, must_change_password = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(bcrypt.hashSync(String(newPassword), 12), user.id);
     db.prepare("UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL").run(user.id);
     audit(req, { action: 'reset_password', entity: 'users', entityId: user.id, newValue: { username: user.username } });
     res.json({ ok: true });
@@ -1287,7 +1299,8 @@ export function commonRoutes() {
     if (!composedName) return res.status(400).json({ error: 'A staff name is required (first name and surname, or full name).' });
     if (createUser) {
       if (!username || !String(username).trim()) return res.status(400).json({ error: 'A username is required to create a login account.' });
-      if (!password || String(password).length < 8) return res.status(400).json({ error: 'A password of at least 8 characters is required to create a login account.' });
+      const loginQuality = checkPassword(String(password ?? ''), { username: String(username ?? ''), fullName: String(fullName ?? '') });
+      if (!loginQuality.ok) return res.status(400).json({ error: loginQuality.error });
       if (!roleId) return res.status(400).json({ error: 'A role is required to create a login account.' });
       const taken = db.prepare('SELECT id FROM users WHERE username = ?').get(String(username));
       if (taken) return res.status(400).json({ error: 'That username is already in use.' });
@@ -2005,7 +2018,12 @@ export function commonRoutes() {
       return res.status(500).json({ error: 'Backup ZIP could not be created. See server log for details.' });
     }
     const sizeBytes = fs.existsSync(fullPath) ? fs.statSync(fullPath).size : 0;
-    getDb().prepare('INSERT INTO backup_logs (file_name, manifest, created_by) VALUES (?, ?, ?)').run(fileName, JSON.stringify(manifest), req.user!.id);
+    // The digest goes in with the archive, so a restore can later prove this is
+    // the same archive and not one that has rotted on a failing disk (VF-08).
+    const checksum = checksumOf(fullPath);
+    Object.assign(manifest as Record<string, unknown>, { checksum, checksumAlgorithm: 'sha256' });
+    getDb().prepare('INSERT INTO backup_logs (file_name, manifest, created_by, checksum) VALUES (?, ?, ?, ?)')
+      .run(fileName, JSON.stringify(manifest), req.user!.id, checksum);
 
     // Copy it out straight away. A backup that waits on this machine until
     // somebody remembers to press a second button is only half a backup, and
@@ -2019,7 +2037,7 @@ export function commonRoutes() {
     }
 
     audit(req, { action: 'create', entity: 'backup', entityId: fileName, newValue: { ...manifest, copies: copies.map(c => ({ to: c.destinationName, ok: c.ok })) } });
-    res.status(201).json({ fileName, manifest, sizeBytes, location: backupFolder(), copies, downloadPath: `/backup/download/${encodeURIComponent(fileName)}` });
+    res.status(201).json({ fileName, manifest, sizeBytes, checksum, location: backupFolder(), copies, downloadPath: `/backup/download/${encodeURIComponent(fileName)}` });
   });
 
   // List the backup ZIPs available on disk, newest first, merged with any
@@ -2076,6 +2094,21 @@ export function commonRoutes() {
       if (!fs.existsSync(sourceZip)) return res.status(404).json({ error: 'Selected backup was not found on the server.' });
     } else {
       return res.status(400).json({ error: 'No backup provided. Upload a ZIP file or choose an existing backup.' });
+    }
+
+    // Prove the archive is the one the laboratory took, before a byte of live
+    // data is touched. A mismatch stops the restore outright: the point of a
+    // digest is to be believed when it disagrees (VF-08).
+    let integrity: ReturnType<typeof verifyChecksum> | null = null;
+    if (!req.file) {
+      integrity = verifyChecksum(String(req.body.fileName));
+      if (!integrity.ok) {
+        audit(req, {
+          action: 'restore_refused', entity: 'backup', entityId: String(req.body.fileName),
+          newValue: { reason: 'checksum mismatch', expected: integrity.expected, actual: integrity.actual },
+        });
+        return res.status(409).json({ error: integrity.message, expected: integrity.expected, actual: integrity.actual });
+      }
     }
 
     const cleanupUpload = () => { if (uploadedTemp) { try { fs.rmSync(uploadedTemp, { force: true }); } catch { /* ignore */ } } };
@@ -2152,10 +2185,10 @@ export function commonRoutes() {
     fs.rmSync(tmpDir, { recursive: true, force: true });
     cleanupUpload();
     try {
-      audit(req, { action: 'restore', entity: 'backup', entityId: req.file ? `upload:${req.file.originalname}` : String(req.body.fileName), newValue: { restoredBy: actorId, safetyBackup } });
+      audit(req, { action: 'restore', entity: 'backup', entityId: req.file ? `upload:${req.file.originalname}` : String(req.body.fileName), newValue: { restoredBy: actorId, safetyBackup, integrity: integrity?.message ?? 'Uploaded archive; no recorded digest to check against.' } });
     } catch { /* audit table came from the restored DB; never block on it */ }
 
-    res.json({ ok: true, message: 'Restore completed. The database and files were replaced from the backup. Users may need to sign in again.', safetyBackup });
+    res.json({ ok: true, message: 'Restore completed. The database and files were replaced from the backup. Users may need to sign in again.', safetyBackup, integrity: integrity?.message ?? 'Uploaded archive; no recorded digest to check against.' });
   });
 
   // Factory reset: wipe the database and all data (uploads, evidence, config) and
@@ -2242,9 +2275,16 @@ export function commonRoutes() {
     const db = getDb();
     let dbOk = true;
     try { db.prepare('SELECT 1').get(); } catch { dbOk = false; }
+    const build = buildInfo();
     res.json({
       productName: 'SECH_LIMS by Nickland',
-      version: process.env.npm_package_version ?? '0.1.0',
+      version: build.version,
+      // Which build this actually is, so a laboratory can show an assessor that
+      // the system in front of them is the one that was validated (VF-11).
+      commit: build.commit,
+      builtAt: build.builtAt,
+      provenance: build.provenance,
+      release: releaseLabel(),
       buildMode: process.env.NODE_ENV ?? 'development',
       apiStatus: dbOk ? 'ok' : 'database_unavailable',
       databasePath: dbPath,

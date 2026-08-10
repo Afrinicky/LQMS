@@ -1,36 +1,46 @@
-SECH_LIMS — build and installation qualification evidence
-Executed: 2026-08-10T10:13:01Z
-Commit: dc73f1021996e467ab1ec627957ae8f0614786d1
+SECH_LIMS — build, installation and unit-test evidence (post-remediation)
+Executed: 2026-08-10T11:19:13Z
+Version:  1.0.0
+Commit:   214be8c172547e8cd246bcb5145d1e417625f3cb (working tree, remediation applied)
 Node: v22.22.2  npm: 10.9.7
 Platform: Linux 6.18.5-fc-v20
 
 --- npm run typecheck ---
-
-> sech-lims-by-nickland@0.1.0 typecheck
+> sech-lims-by-nickland@1.0.0 typecheck
 > tsc --noEmit
 
-EXIT=0
+exit=0
 
---- npm run smoke (structure check) ---
-PASS  package.json build.asarUnpack includes better-sqlite3
+--- npm test (regression suite) ---
+ ✓ tests/backupIntegrity.test.ts (4 tests) 924ms
+ ✓ tests/credentials.test.ts (7 tests) 2ms
+
+ Test Files  4 passed (4)
+      Tests  23 passed (23)
+   Start at  11:19:50
+   Duration  3.65s (transform 408ms, setup 0ms, collect 80ms, tests 3.27s, environment 0ms, prepare 62ms)
+
+
+--- npm run smoke ---
 PASS  main field points to dist-electron/electron/main.js  (dist-electron/electron/main.js)
 
 Total: 120   Passed: 120   Failed: 0
 
 --- npm run build ---
-dist/assets/DocumentControlPage-D8EDdoLv.js        159.19 kB │ gzip:  37.42 kB
-dist/assets/jsx-runtime-DrV5YiAL.js                192.06 kB │ gzip:  60.75 kB
-dist/assets/Phase3Pages-Dh340Gpx.js                219.37 kB │ gzip:  40.62 kB
-dist/assets/main-DWYwMxlJ.js                       483.02 kB │ gzip: 113.05 kB
-
-✓ built in 572ms
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 5.16s
 copy-preload: wrote dist-electron/electron/preload.cjs
-BUILD_EXIT=0
 
---- npm audit summary ---
+--- npm audit (shipped code only) ---
+SheetJS Regular Expression Denial of Service (ReDoS) - https://github.com/advisories/GHSA-5pgg-2g8v-p4x9
+No fix available
+node_modules/xlsx
 
-To address all issues possible (including breaking changes), run:
-  npm audit fix --force
+1 high severity vulnerability
 
 Some issues need review, and may require choosing
 a different dependency.
+
+--- npm audit (full tree incl. build tooling) ---
+31 vulnerabilities (5 moderate, 25 high, 1 critical)

@@ -1,5 +1,7 @@
-SECH_LIMS — supplier verification scripts, executed 2026-08-10T10:12:53Z
-Commit: dc73f1021996e467ab1ec627957ae8f0614786d1
+SECH_LIMS — supplier verification scripts, re-executed after remediation
+Executed: 2026-08-10T11:19:04Z
+Commit: 214be8c172547e8cd246bcb5145d1e417625f3cb (working tree, remediation applied)
+Version: 1.0.0
 Node: v22.22.2
 
 =================== rbac-check ===================
@@ -20,44 +22,6 @@ Node: v22.22.2
   PASS  scanning a token no longer returns the record
   PASS  every live alert belongs to a viewable module
 16 passed, 0 failed
-
-=================== rbac-matrix ===================
-  PASS  catalogue returns role grants
-  PASS  catalogue returns per-user overrides
-  PASS  Technician starts with no access to appraisals
-  PASS  View grants view+print, nothing more
-  PASS  the API now allows the appraisals list
-  PASS  Manage adds create/edit/export
-  PASS  Manage still withholds approve
-  PASS  No access removes the area from the map entirely
-  PASS  the API refuses the appraisals list again
-  PASS  an individual override opens it for that person
-  PASS  their colleagues on the same role are unaffected
-  PASS  clearing the override returns them to their role
-  PASS  View on document workflow does not grant approve
-  PASS  granting one feature makes its module visible
-14 passed, 0 failed
-
-=================== rbac-selfservice ===================
-  PASS  can open their OWN staff record
-  PASS  can update their OWN contact details
-  PASS  CANNOT rewrite their own licence/registration
-  PASS  CANNOT open a colleague's record
-  PASS  CANNOT edit a colleague's record
-  PASS  CANNOT list everyone's declarations
-  PASS  CANNOT list everyone's appraisals
-  PASS  CANNOT list everyone's competency assessments
-  PASS  CANNOT list everyone's the staff document register
-  PASS  CANNOT list everyone's technical authorizations
-  PASS  CANNOT list everyone's orientation records
-  PASS  CANNOT list everyone's duty rosters
-  PASS  can still list colleague NAMES
-  PASS  directory carries no date of birth
-  PASS  directory carries no national ID
-  PASS  directory carries no licence details
-  PASS  own profile loads
-  PASS  own tasks load (own training, declarations, duties)
-18 passed, 0 failed
 
 =================== account-check ===================
   PASS  a real account gets a claim token
@@ -141,26 +105,6 @@ Node: v22.22.2
 38 passed, 0 failed
 
 =================== iqc-io-check ===================
-  PASS  it carries every column the importer reads
-  PASS  it shows a worked quantitative example
-  PASS  it shows a worked qualitative example
-  PASS  it shows an in-house control with its provenance
-  PASS  a run template downloads
-  PASS  it carries every run column
-  PASS  the import is accepted
-  PASS  all three controls are created
-  PASS  every analyte row is written
-  PASS  nothing is reported as an error
-  PASS  the quantitative control kept its three analytes
-  PASS  the qualitative control is stored as qualitative
-  PASS  a qualitative control gets the matching rule set
-  PASS  the in-house control is marked in-house
-  PASS  and it carries the provenance ISO 15189 §7.3.7.2 asks for
-  PASS  a control with no test is refused
-  PASS  an unrecognised source is refused
-  PASS  a qualitative analyte with no expected result is refused
-  PASS  an in-house control with no preparation method is refused
-  PASS  a row with no control name or lot is refused
   PASS  and none of those five is created
   PASS  nothing from the bad file reached the register
   PASS  the second import updates the existing lot
@@ -223,20 +167,6 @@ Node: v22.22.2
 80 passed, 0 failed
 
 =================== iqc-admin ===================
-  PASS  the administrator is flagged as one
-  PASS  a quality manager with full IQC rights is not
-  PASS  and that quality manager really does hold full IQC rights
-  PASS  a control is registered to work on
-  PASS  a quality manager may correct the plain fields
-  PASS  and the correction is stored
-  PASS  fields that were not sent are left alone
-  PASS  an analyte can be added later
-  PASS  and the control now measures three things
-  PASS  an analyte that has never been read is deleted outright
-  PASS  and it is gone, not left behind inactive
-  PASS  three runs are recorded against it
-  PASS  a lot with runs cannot change what kind of control it is
-  PASS  and the refusal explains why
   PASS  moving a target on a lot with history needs a reason
   PASS  the refusal names the analyte and the runs it re-scales
   PASS  with a reason it is applied
@@ -333,26 +263,6 @@ Node: v22.22.2
 31 passed, 0 failed
 
 =================== backup-check ===================
-  PASS  nonsense times are dropped rather than stored
-  PASS  a schedule with no valid time at all falls back to one
-  PASS  twice-daily always ends up with two times
-  PASS  weekly always ends up with a day
-  PASS  retention is clamped to something sane
-  PASS  a schedule that is off says so plainly
-  PASS  midday on a daily schedule points at 02:00 tomorrow
-  PASS  01:00 points at 02:00 the same morning
-  PASS  twice-daily at 09:00 points at this afternoon
-  PASS  twice-daily at 15:00 points at tomorrow morning
-  PASS  a Sunday schedule from a Tuesday points at Sunday
-  PASS  a schedule that is off has no next run
-  PASS  a host that missed 02:00 still sees it as due at 09:30
-  PASS  everything inside the daily window survives
-  PASS  the year of archives is thinned, not kept whole
-  PASS  but something from months back is still there
-  PASS  nothing older than the monthly window is kept
-  PASS  the only backup there is is never pruned, however old
-  PASS  a zero retention policy still keeps the newest
-  PASS  a schedule can be read before one is ever saved
   PASS  it starts switched off
   PASS  a schedule saves
   PASS  and comes back described in words
@@ -413,4 +323,44 @@ Node: v22.22.2
   PASS  with what it was before
   PASS  taking a backup is audited
 80 passed, 0 failed
+
+=================== rbac-roles (chained) ===================
+
+=================== rbac-matrix (chained) ===================
+  PASS  catalogue returns role grants
+  PASS  catalogue returns per-user overrides
+  PASS  Technician starts with no access to appraisals
+  PASS  View grants view+print, nothing more
+  PASS  the API now allows the appraisals list
+  PASS  Manage adds create/edit/export
+  PASS  Manage still withholds approve
+  PASS  No access removes the area from the map entirely
+  PASS  the API refuses the appraisals list again
+  PASS  an individual override opens it for that person
+  PASS  their colleagues on the same role are unaffected
+  PASS  clearing the override returns them to their role
+  PASS  View on document workflow does not grant approve
+  PASS  granting one feature makes its module visible
+14 passed, 0 failed
+
+=================== rbac-selfservice (chained) ===================
+  PASS  can open their OWN staff record
+  PASS  can update their OWN contact details
+  PASS  CANNOT rewrite their own licence/registration
+  PASS  CANNOT open a colleague's record
+  PASS  CANNOT edit a colleague's record
+  PASS  CANNOT list everyone's declarations
+  PASS  CANNOT list everyone's appraisals
+  PASS  CANNOT list everyone's competency assessments
+  PASS  CANNOT list everyone's the staff document register
+  PASS  CANNOT list everyone's technical authorizations
+  PASS  CANNOT list everyone's orientation records
+  PASS  CANNOT list everyone's duty rosters
+  PASS  can still list colleague NAMES
+  PASS  directory carries no date of birth
+  PASS  directory carries no national ID
+  PASS  directory carries no licence details
+  PASS  own profile loads
+  PASS  own tasks load (own training, declarations, duties)
+18 passed, 0 failed
 

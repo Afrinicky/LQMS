@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import { DEFAULT_POSITIONS, MODULES, PERMISSION_ACTIONS } from '../../shared/constants/modules.js';
 import { FEATURES, LEVEL_ACTIONS, featuresOfModule, type AccessLevel } from '../../shared/constants/features.js';
 import { getDb } from './database.js';
+import { checkPassword } from '../../shared/constants/credentials.js';
 import { config } from '../config/index.js';
 
 export function seedDefaults() {
@@ -23,7 +24,12 @@ export function seedDefaults() {
       { name: 'Safety Manager', description: 'Oversees safety incidents and reviews blood bank adverse events.' },
       { name: 'Data Officer', description: 'Imports LHIMS raw data and prepares monthly reports.' },
       { name: 'POCT Officer', description: 'Oversees point-of-care testing sites, devices, operators, QC, EQA, and incidents.' },
-      { name: 'Quality User', description: 'General QMS user role.', is_system: 1 }
+      { name: 'Quality User', description: 'General QMS user role.', is_system: 1 },
+      // Somebody has to be able to read the audit trail without being the
+      // person who can also change what is in it. Until this existed, the only
+      // account that could review the trail was the administrator whose own
+      // actions fill it, which is not a review (validation finding VF-24).
+      { name: 'Independent Reviewer', description: 'Reads the audit trail, system-audit findings and records for independent review. Holds no administrative rights and cannot change what it reviews.' },
     ];
     for (const role of rolesToSeed) {
       db.prepare('INSERT OR IGNORE INTO roles (name, description, is_system) VALUES (?, ?, ?)').run(role.name, role.description, role.is_system ?? 0);
@@ -86,7 +92,7 @@ export function seedDefaults() {
     // Bump whenever the table below changes in a way an existing laboratory
     // must receive — a right withdrawn, or a new area added to a role. See the
     // note beside the application loop for why this exists.
-    const ROLE_DEFAULTS_VERSION = '2026.08-features.4-duty-activities';
+    const ROLE_DEFAULTS_VERSION = '2026.08-features.5-independent-reviewer';
 
     // Every member of staff, whatever their rank: their own record, their own
     // inbox, the launchpad, the ability to raise a safety incident or a
@@ -147,6 +153,21 @@ export function seedDefaults() {
           'monitoring.readings', 'equipment.maintenance', 'supplier_inventory.stock',
         ],
         view: ['assessments', 'meetings', 'notifications.calendar', 'documents.records'],
+      },
+
+      // ---- Independent reviewer ---------------------------------------------
+      // Reads the trail and the findings, and changes nothing. Exists so the
+      // periodic audit-trail review required by ISO 15189 §7.6.3 and Annex 11 §2
+      // can be done by somebody other than the administrator whose own actions
+      // are the thing being reviewed (validation finding VF-24).
+      'Independent Reviewer': {
+        view: [
+          'records_reports.audit', 'records_reports.evidence', 'records_reports.retention',
+          'system_audit.trail', 'system_audit.flags', 'system_audit.checks',
+          'documents.library', 'documents.records', 'assessments', 'meetings',
+          'management_review', 'quality_indicators', 'nc_capa', 'complaints', 'risks',
+          'iqc', 'eqa', 'equipment.register', 'personnel.register',
+        ],
       },
 
       // ---- Section / unit leadership ---------------------------------------
@@ -615,6 +636,10 @@ export function setupInitialSystem(input: { facilityName: string; shortName?: st
   const exists = db.prepare('SELECT COUNT(*) AS count FROM users').get() as { count: number };
   if (exists.count > 0) throw new Error('Initial setup has already been completed.');
   const adminRole = db.prepare('SELECT id FROM roles WHERE name = ?').get('System Administrator') as { id: number };
+  // The first administrator is the most privileged account the system will
+  // ever hold, so it is the last place to accept a weak password (VF-19).
+  const quality = checkPassword(input.password, { username: input.username, fullName: input.fullName });
+  if (!quality.ok) throw new Error(quality.error);
   const hash = bcrypt.hashSync(input.password, 12);
   const tx = db.transaction(() => {
     db.prepare('INSERT INTO users (username, password_hash, full_name, role_id) VALUES (?, ?, ?, ?)').run(input.username, hash, input.fullName, adminRole.id);

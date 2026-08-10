@@ -6,7 +6,7 @@
  *   node scripts/rbac-matrix.mjs
  */
 const BASE = process.env.API || 'http://127.0.0.1:4405/api';
-const PW = 'Passw0rd!test';
+const PW = 'thistle harbour crane';
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = '') => {

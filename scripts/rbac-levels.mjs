@@ -6,7 +6,7 @@
  *   node scripts/rbac-levels.mjs personnel  # one module
  */
 const BASE = process.env.API || 'http://127.0.0.1:4408/api';
-const PW = 'Passw0rd!test';
+const PW = 'thistle harbour crane';
 
 const LEVEL_ACTIONS = {
   none: [], view: ['view', 'print'], contribute: ['view', 'print', 'create'],

@@ -25,7 +25,7 @@ import { canViewModule } from '../services/permissionResolver.js';
 import { getDb, uploadRoot, evidenceRoot } from '../db/database.js';
 import { audit } from '../services/auditService.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
-import { recordSignature, signaturesFor } from '../services/signatureService.js';
+import { recordSignature, signaturesFor, SignatureRefused } from '../services/signatureService.js';
 import { requireCurrentStaffId } from './routeHelpers.js';
 
 const upload = multer({
@@ -104,12 +104,17 @@ export function signatureRoutes() {
   // Signing a record changes its evidence, so it takes the edit right on the
   // module that owns the record — not merely a valid session.
   router.post('/', requireResolvedPermission(req => (req.body?.moduleKey ? String(req.body.moduleKey) : null), 'edit'), (req, res) => {
-    const { moduleKey, recordType, recordId, purpose, meaning, staffId, signatureImageFileId } = req.body ?? {};
+    const { moduleKey, recordType, recordId, purpose, meaning, staffId, signatureImageFileId, password } = req.body ?? {};
     if (!moduleKey || !recordType || recordId === undefined || recordId === null || !purpose) {
       return res.status(400).json({ error: 'moduleKey, recordType, recordId and purpose are required' });
     }
-    const sig = recordSignature(req, { moduleKey, recordType, recordId, purpose, meaning, staffId, signatureImageFileId });
-    res.status(201).json(sig);
+    try {
+      const sig = recordSignature(req, { moduleKey, recordType, recordId, purpose, meaning, staffId, signatureImageFileId, password });
+      res.status(201).json(sig);
+    } catch (err) {
+      if (err instanceof SignatureRefused) return res.status(err.status).json({ error: err.message });
+      throw err;
+    }
   });
 
   router.get('/:module/:type/:id', requireResolvedPermission(req => req.params.module), (req, res) => {

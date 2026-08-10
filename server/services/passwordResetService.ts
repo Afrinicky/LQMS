@@ -23,6 +23,7 @@ import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import type { Request } from 'express';
 import { getDb } from '../db/database.js';
+import { checkPassword } from '../../shared/constants/credentials.js';
 import { resolvePermission } from './permissionResolver.js';
 
 /** How long an approval stays usable. Long enough to walk back to a bench. */
@@ -167,9 +168,8 @@ export function decideRequest(
 export function completeReset(resetToken: string, newPassword: string): { ok: true; userId: number; username: string } | { ok: false; error: string } {
   const db = getDb();
   expireStale();
-  if (!newPassword || String(newPassword).length < MIN_PASSWORD_LENGTH) {
-    return { ok: false, error: `The new password must be at least ${MIN_PASSWORD_LENGTH} characters.` };
-  }
+  const quality = checkPassword(String(newPassword ?? ''));
+  if (!quality.ok) return { ok: false, error: quality.error! };
   const row = db.prepare("SELECT * FROM password_reset_requests WHERE reset_token = ? AND status = 'approved'").get(resetToken) as ResetRequestRow | undefined;
   if (!row || !row.user_id) return { ok: false, error: 'This reset link is no longer valid. Ask an administrator to approve a new request.' };
   if (new Date(row.expires_at).getTime() < Date.now()) return { ok: false, error: 'This approval has expired. Ask an administrator to approve a new request.' };

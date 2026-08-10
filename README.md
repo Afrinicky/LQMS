@@ -132,22 +132,39 @@ master plan, user requirements, risk assessment, IQ/OQ/PQ protocols, traceabilit
 findings register, standards gap analysis and summary report — is in
 [`docs/validation/`](docs/validation/00-VALIDATION-PACKAGE-INDEX.md).
 
-Start with the [Validation Summary Report](docs/validation/08-VALIDATION-SUMMARY-REPORT.md). The
-system is under **conditional release**: approved for single-host offline operation, and not for
-LAN, mobile or remote deployment until the eight critical findings are closed.
+Start with [Remediation and Re-qualification](docs/validation/10-REMEDIATION-AND-REQUALIFICATION.md),
+which carries the current position: 21 of the 25 findings are closed, and the system is released
+for single-host and LAN operation subject to five conditions. The original
+[Validation Summary Report](docs/validation/08-VALIDATION-SUMMARY-REPORT.md) is retained as the
+record of what was found at 0.1.0.
 
-Two qualification protocols are executable, so re-qualifying after a change is a command:
+The qualification protocols are executable, so re-qualifying after a change is a command:
 
 ```bash
-npm run validate:oq   # 61 operational qualification test cases
-npm run validate:pq   # 16 backup and disaster-recovery test cases
-npm run validate      # both
+npm test              # 23 unit regression tests
+npm run validate:oq   # 67 operational qualification test cases
+npm run validate:pq   # 19 backup and disaster-recovery test cases
+npm run validate      # both qualification suites
 ```
 
-Each starts its own host on a scratch data directory and never touches `local-data/`. Both are
-required evidence after any change that touches authentication, permissions, the audit trail,
-electronic signatures, backup/restore or the database schema — see
+Each qualification suite starts its own host on a scratch data directory and never touches
+`local-data/`. All of it runs in CI on every push, and both packaging workflows wait for it, so
+nothing is packaged from a build that failed its own checks. They are required evidence after any
+change that touches authentication, permissions, the audit trail, electronic signatures,
+backup/restore or the database schema — see
 [docs/validation/09-PERIODIC-REVIEW-AND-CHANGE-CONTROL.md](docs/validation/09-PERIODIC-REVIEW-AND-CHANGE-CONTROL.md).
+
+### Security configuration
+
+| Variable | Purpose |
+|----------|---------|
+| `SECH_LIMS_TLS_CERT`, `SECH_LIMS_TLS_KEY` | Serve HTTPS. **Required before binding the Host to the network** — it warns at startup if they are missing |
+| `SECH_LIMS_ALLOWED_ORIGINS` | Extra browser origins allowed to call the API, comma-separated |
+
+Passwords must be at least 12 characters, may not be common or contain the person's own name, and
+may not repeat the last five. Five failed sign-ins lock an account for fifteen minutes. Sessions
+end after 30 minutes idle or 12 hours absolute. Electronic signatures require the signer's
+password at the moment of signing.
 
 ## Foundations now in place
 

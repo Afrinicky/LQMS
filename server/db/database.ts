@@ -5071,6 +5071,96 @@ CREATE TABLE IF NOT EXISTS system_audit_scans (
     if (!cols.has('published_at')) database.exec('ALTER TABLE bench_schedules ADD COLUMN published_at TEXT');
   }
 
+  // ── Security hardening (validation findings VF-02, VF-05, VF-18, VF-20) ──
+  //
+  // Four things the audit of August 2026 said were missing, in one place
+  // because they are one subject: proving who did something, and stopping
+  // someone else doing it in their name.
+  {
+    const sessionCols = new Set((database.prepare('PRAGMA table_info(auth_sessions)').all() as Array<{ name: string }>).map(c => c.name));
+    // Sessions now store a SHA-256 digest of the token instead of the token, so
+    // read access to the database no longer hands over live sessions (VF-20),
+    // and carry a last-seen stamp so a session can die of inactivity (VF-18).
+    //
+    // The table is rebuilt rather than altered, because the old `token` column
+    // is NOT NULL and SQLite cannot drop that constraint in place. Existing rows
+    // are deliberately not carried over: a token that has been stored in the
+    // clear should not survive the change that stops storing it in the clear.
+    // The cost is that everyone signs in again once, after an upgrade — which is
+    // the correct outcome anyway.
+    if (!sessionCols.has('token_hash')) {
+      database.exec(`
+DROP TABLE IF EXISTS auth_sessions;
+CREATE TABLE auth_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  token_hash TEXT NOT NULL UNIQUE,
+  device_id TEXT,
+  ip_address TEXT,
+  expires_at TEXT NOT NULL,
+  last_seen_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  revoked_at TEXT
+);`);
+    }
+    database.exec('CREATE INDEX IF NOT EXISTS idx_auth_sessions_token_hash ON auth_sessions(token_hash)');
+  }
+
+  // Failed sign-ins, so an account can be locked and an assessor can see the
+  // attempt that caused it (VF-02, VF-03).
+  database.exec(`
+CREATE TABLE IF NOT EXISTS auth_attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL,
+  ip_address TEXT,
+  succeeded INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_auth_attempts_lookup ON auth_attempts(username, created_at);
+CREATE TABLE IF NOT EXISTS password_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  password_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_password_history_user ON password_history(user_id, created_at);
+`);
+  {
+    const userCols = new Set((database.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!userCols.has('locked_until')) database.exec('ALTER TABLE users ADD COLUMN locked_until TEXT');
+  }
+
+  // The audit trail's own integrity (VF-05). Each entry carries the hash of the
+  // entry before it, so removing or rewriting one breaks the chain from that
+  // point on and the break is visible. It does not make tampering impossible —
+  // nothing in a file a host administrator owns can — but it makes tampering
+  // something the laboratory can detect and date, which is what the standards
+  // actually ask for.
+  {
+    const auditCols = new Set((database.prepare('PRAGMA table_info(audit_logs)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!auditCols.has('prev_hash')) database.exec('ALTER TABLE audit_logs ADD COLUMN prev_hash TEXT');
+    if (!auditCols.has('entry_hash')) database.exec('ALTER TABLE audit_logs ADD COLUMN entry_hash TEXT');
+    // Timestamps that say which zone they are in (VF-17). Existing rows keep
+    // the SQLite form they were written with; new rows are ISO-8601 UTC.
+    if (!auditCols.has('recorded_at')) database.exec('ALTER TABLE audit_logs ADD COLUMN recorded_at TEXT');
+  }
+
+  // A signature records the state of what was signed (VF-13), and points at its
+  // audit entry by id rather than by "whatever was written last" (VF-14).
+  {
+    const sigCols = new Set((database.prepare('PRAGMA table_info(e_signatures)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!sigCols.has('content_hash')) database.exec('ALTER TABLE e_signatures ADD COLUMN content_hash TEXT');
+    if (!sigCols.has('reauthenticated')) database.exec('ALTER TABLE e_signatures ADD COLUMN reauthenticated INTEGER NOT NULL DEFAULT 0');
+  }
+
+  // Backup packages carry a digest so a restore can prove the archive is the
+  // one the laboratory took (VF-08).
+  {
+    const backupCols = new Set((database.prepare('PRAGMA table_info(backup_logs)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!backupCols.has('checksum')) database.exec('ALTER TABLE backup_logs ADD COLUMN checksum TEXT');
+    if (!backupCols.has('encrypted')) database.exec('ALTER TABLE backup_logs ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0');
+  }
+
   seedNotificationSounds(database);
   seedFormTemplates(database);
 }
