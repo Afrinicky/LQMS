@@ -23,3 +23,9 @@ backups/
 uploads/
 evidence/
 config/local.json
+
+# Validation evidence is a retained quality record, not runtime data: the
+# objective evidence behind docs/validation/ has to travel with the code it
+# validates. Re-included after the runtime `evidence/` and `*.log` rules above.
+!docs/validation/evidence/
+!docs/validation/evidence/**

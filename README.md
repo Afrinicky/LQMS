@@ -124,6 +124,31 @@ npm run typecheck
 npm run build
 ```
 
+## Validation
+
+SECH_LIMS has been validated as a computerised system against ISO 15189:2022, ISO/IEC 17025:2017,
+ISO/IEC 27001:2022, GAMP 5, 21 CFR Part 11 and EU GMP Annex 11. The full package — validation
+master plan, user requirements, risk assessment, IQ/OQ/PQ protocols, traceability matrix,
+findings register, standards gap analysis and summary report — is in
+[`docs/validation/`](docs/validation/00-VALIDATION-PACKAGE-INDEX.md).
+
+Start with the [Validation Summary Report](docs/validation/08-VALIDATION-SUMMARY-REPORT.md). The
+system is under **conditional release**: approved for single-host offline operation, and not for
+LAN, mobile or remote deployment until the eight critical findings are closed.
+
+Two qualification protocols are executable, so re-qualifying after a change is a command:
+
+```bash
+npm run validate:oq   # 61 operational qualification test cases
+npm run validate:pq   # 16 backup and disaster-recovery test cases
+npm run validate      # both
+```
+
+Each starts its own host on a scratch data directory and never touches `local-data/`. Both are
+required evidence after any change that touches authentication, permissions, the audit trail,
+electronic signatures, backup/restore or the database schema — see
+[docs/validation/09-PERIODIC-REVIEW-AND-CHANGE-CONTROL.md](docs/validation/09-PERIODIC-REVIEW-AND-CHANGE-CONTROL.md).
+
 ## Foundations now in place
 
 NC/CAPA, Complaints, Risks, Actions, Equipment Management, Supplier & Inventory, Environmental Monitoring, Facilities & Safety, IQC, EQA, Method & Equipment Verification, Measurement Uncertainty, Blood Bank Quality & Inventory Handover, Monthly Reports & LHIMS Archive (CSV + XLSX import, mapping rules, exception review, draft/approve/export, TAT summary with per-section drill-down), Document Control (versioning, attestations, distribution inbox, watermarked print render), Personnel Management (staff documents, declarations, training, competency, technical authorisations, duty rosters with coverage/conflict detection, self-service profile), the Phase 8 governance modules: Internal Assessments & Findings (with flexible checklist library + optional internal audit marking + printable reports), Meetings & Minutes, Management Review (with one-click input generation across QMS modules), Quality Indicators (numerator/denominator with target/warning/critical thresholds + simple trend chart), and Continual Improvement Projects, the Phase 9 Customer Focus module covering stakeholders, service agreements, feedback intake with escalation to Complaints / Actions / NC / CAPA, satisfaction surveys with question library and response capture, customer communication log, and CSV/XLSX import batches, the Phase 10 POCT Oversight module covering POCT sites, devices linked to equipment records, test menu, operator authorisations linked to competency assessments, reagent lots linked to inventory batches, QC materials and results with automatic range-based interpretation, EQA events, maintenance logs that roll forward device service dates, incidents that can escalate to actions / NC / CAPA, and site-scoped monthly review generation, the Phase 11 Notifications & Review Calendar module providing a central due-date layer with cross-module scanning, in-app notifications with read/acknowledge/resolve/dismiss workflow, a personal task queue, a review calendar with status filters, notification rules and per-module preferences, and a topbar unread badge, the Phase 12 Records, Reports & Evidence module covering report templates, report requests with simple CSV/JSON/HTML export, controlled-copy print job logging, evidence packs with manual item addition and JSON summary generation, full audit-trail browsing and review records with action creation, retention rules and review records (no destructive automation), backup/restore check records, and a data-integrity basic scan endpoint that records its findings, and the Phase 13 Process Management module covering a lab test directory linked to documents/equipment with TAT targets, specimen acceptance criteria, a specimen rejection register that can escalate to NC / actions, critical result rules (with low/high values and notification timeframes), critical result notifications with automatic escalation flagging when the notification time exceeds the rule's timeframe, a referral laboratory register and per-lab test catalogue, referral sendouts with delayed-return detection and NC / action escalation, report amendment logs with authorise / communicate / NC / action workflow, and period-bounded process review records with one-click neutral count summaries across rejections, critical notifications, referral sendouts, and amendments. Patient testing and clinical result reporting remain with LHIMS/Lightwave: this module records only the QMS workflow and uses request/patient references rather than patient names.
