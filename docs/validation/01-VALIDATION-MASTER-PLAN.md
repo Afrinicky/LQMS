@@ -109,20 +109,34 @@ verification and design review.
 
 Approval signatures are collected on document 08.
 
-## 6. Known limitation of this validation
+## 6. The requirements baseline
 
-**No baseline specification existed before this validation.** The project holds design and
-planning documents (`docs/HYBRID_ARCHITECTURE_PLAN.md`, `docs/checklist-gap-analysis.md`, phase
-notes) but no controlled URS, functional specification or design specification, and no supplier
-assessment record. The requirements in document 02 were therefore **reconstructed** from the
-standards, the product documentation and the implemented behaviour, then approved as the
-baseline going forward.
+Validation is executed against **[NSD-SRS-001](../specifications/NSD-SRS-001-Software-Requirements-Specification.md)**,
+the controlled Software Requirements Specification for SECH_LIMS, approved before execution
+begins. It is structured to ISO/IEC/IEEE 29148:2018 and specifies 76 requirements, each
+singular and verifiable, each traced to at least one clause of the standards in §3, and each
+carrying a criticality, a verification method and an acceptance criterion.
 
-This is a legitimate retrospective-validation route under GAMP 5 for a system already built,
-and it is recorded as finding **VF-21**. Its consequence must be understood: this validation
-proves what the system *does*, and that what it does is fit for use; it cannot prove that what
-it does is what someone *specified in advance*. From this baseline onward, document 09 requires
-specification before change.
+Traceability runs in both directions: every test case traces to a requirement, and every
+requirement traces to at least one test case. A test tracing to no requirement, and a
+requirement covered by no test, are each treated as a defect in the specification and are
+resolved before the validation report is approved.
+
+NSD-SRS-001 records in its own document control how the baseline was established for a product
+that already existed — derived from the adopted standards, the laboratory's intended use, the
+product documentation and the implemented behaviour, then reviewed and approved. That provenance
+belongs in the specification rather than here, but it bears on how this package should be read:
+**the specification is the authority for what the software is required to do; this package is
+the record of whether it does it.**
+
+The specification also states, deliberately, where it sets no requirement — numeric performance
+and capacity targets, and usability and accessibility. Neither was agreed with the laboratory,
+so neither is a validation acceptance criterion and neither is verified. Their absence is a
+decision on the record, not an omission.
+
+From this baseline onward the sequence is the ordinary one: no change is made to SECH_LIMS
+until the requirement it satisfies has been written into NSD-SRS-001 and approved
+(document 09).
 
 ## 7. Acceptance criteria
 

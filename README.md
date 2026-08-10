@@ -126,17 +126,21 @@ npm run build
 
 ## Validation
 
-SECH_LIMS has been validated as a computerised system against ISO 15189:2022, ISO/IEC 17025:2017,
-ISO/IEC 27001:2022, GAMP 5, 21 CFR Part 11 and EU GMP Annex 11. The full package — validation
-master plan, user requirements, risk assessment, IQ/OQ/PQ protocols, traceability matrix,
-findings register, standards gap analysis and summary report — is in
-[`docs/validation/`](docs/validation/00-VALIDATION-PACKAGE-INDEX.md).
+SECH_LIMS is specified and validated as a computerised system against ISO 15189:2022,
+ISO/IEC 17025:2017, ISO/IEC 27001:2022, ISO/IEC/IEEE 29148, GAMP 5, 21 CFR Part 11 and
+EU GMP Annex 11.
 
-Start with [Remediation and Re-qualification](docs/validation/10-REMEDIATION-AND-REQUALIFICATION.md),
-which carries the current position: 21 of the 25 findings are closed, and the system is released
-for single-host and LAN operation subject to five conditions. The original
-[Validation Summary Report](docs/validation/08-VALIDATION-SUMMARY-REPORT.md) is retained as the
-record of what was found at 0.1.0.
+**The requirements baseline is
+[NSD-SRS-001, the Software Requirements Specification](docs/specifications/NSD-SRS-001-Software-Requirements-Specification.md)** —
+76 requirements to ISO/IEC/IEEE 29148:2018, each with a criticality, a verification method and
+an acceptance criterion. No change is made to SECH_LIMS until the requirement it satisfies has
+been written there and approved.
+
+**The result is [NSD-VR-001, the Validation Report](docs/validation/NSD-VR-001-Validation-Report.docx)**:
+version 1.0.0 meets 70 of the 76 requirements, fails none functionally, and is released for
+single-host and LAN operation subject to five conditions. The supporting package — validation
+master plan, risk assessment, IQ/OQ/PQ protocols, traceability matrix, findings register and
+standards gap analysis — is in [`docs/validation/`](docs/validation/00-VALIDATION-PACKAGE-INDEX.md).
 
 The qualification protocols are executable, so re-qualifying after a change is a command:
 
@@ -145,6 +149,7 @@ npm test              # 23 unit regression tests
 npm run validate:oq   # 67 operational qualification test cases
 npm run validate:pq   # 19 backup and disaster-recovery test cases
 npm run validate      # both qualification suites
+npm run validate:docs # regenerate the controlled specification and report as .docx
 ```
 
 Each qualification suite starts its own host on a scratch data directory and never touches

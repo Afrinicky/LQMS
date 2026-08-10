@@ -40,7 +40,9 @@
     "validate:oq": "node scripts/validation/oq-suite.mjs",
     "validate:pq": "node scripts/validation/pq-recovery.mjs",
     "validate": "npm run validate:oq && npm run validate:pq",
-    "validate:report": "node scripts/validation/build-report.cjs docs/validation/SECH_LIMS-Validation-Report.docx"
+    "validate:report": "node scripts/validation/build-report.cjs docs/validation/NSD-VR-001-Validation-Report.docx",
+    "validate:spec": "node scripts/validation/md2docx.cjs docs/specifications/NSD-SRS-001-Software-Requirements-Specification.md docs/specifications/NSD-SRS-001-Software-Requirements-Specification.docx \"NSD-SRS-001 \u2014 SECH_LIMS Software Requirements Specification\" \"NSD-SRS-001  \u00b7  SECH_LIMS Software Requirements Specification  \u00b7  v1.0\"",
+    "validate:docs": "npm run validate:spec && npm run validate:report"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.0",
