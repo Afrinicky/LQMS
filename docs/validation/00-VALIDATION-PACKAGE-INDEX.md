@@ -38,6 +38,11 @@ inspection rather than execution, it says so.
 | 09 | [Periodic Review & Change Control](09-PERIODIC-REVIEW-AND-CHANGE-CONTROL.md) | Keeping the system in a validated state |
 | 10 | [Remediation & Re-qualification](10-REMEDIATION-AND-REQUALIFICATION.md) | **What was fixed, what was not, and the re-run results** |
 
+A single consolidated report covering the whole exercise — validation, remediation and
+re-qualification — is available as a Word document:
+**[SECH_LIMS-Validation-Report.docx](SECH_LIMS-Validation-Report.docx)**. Regenerate it with
+`npm run validate:report`.
+
 ## Executable protocols
 
 Two of the protocols are scripts, so that re-qualification after a change is a command rather

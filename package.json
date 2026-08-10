@@ -39,7 +39,8 @@
     "check:backup-destinations": "tsx scripts/backup-destinations-check.mjs",
     "validate:oq": "node scripts/validation/oq-suite.mjs",
     "validate:pq": "node scripts/validation/pq-recovery.mjs",
-    "validate": "npm run validate:oq && npm run validate:pq"
+    "validate": "npm run validate:oq && npm run validate:pq",
+    "validate:report": "node scripts/validation/build-report.cjs docs/validation/SECH_LIMS-Validation-Report.docx"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.0",
@@ -82,6 +83,7 @@
     "@vercel/node": "^5.8.26",
     "concurrently": "latest",
     "cross-env": "latest",
+    "docx": "^9.7.1",
     "electron": "32.3.3",
     "electron-builder": "25.1.8",
     "tsx": "latest",

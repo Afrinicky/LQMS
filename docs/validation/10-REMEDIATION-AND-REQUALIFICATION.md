@@ -190,6 +190,54 @@ judged) and URS-DAT-15 (retention enforced by procedure, an accepted design deci
 
 ---
 
+## 5A. Clause-level position after remediation
+
+Every clause the original gap analysis (document 07) recorded as partial or failing, and where
+it stands now. Clauses that already conformed are not repeated.
+
+| Standard | Clause | Now | Basis |
+|----------|--------|-----|-------|
+| ISO 15189 | 4.2 Confidentiality of information | ◐ Partial | Transport closed (VF-01); storage at rest open (VF-06, VF-07) |
+| ISO 15189 | 7.6.2 Authorities and responsibilities | ✅ | VF-02, VF-03, VF-24 closed |
+| ISO 15189 | 7.6.3 Information system management | ◐ Partial | Tamper-evidence and access protection closed; encryption at rest open (VF-06) |
+| ISO 15189 | 7.8 Continuity and emergency preparedness | ◐ Partial | Archive authenticity closed (VF-08); off-site confidentiality open (VF-07) |
+| ISO 15189 | 8.4 Control of records | ✅ | VF-05 and VF-17 closed; retention accepted as procedural (VF-25) |
+| ISO 17025 | 7.11.2 Validated before introduction | ✅ | This package, with a version that identifies the build (VF-11) |
+| ISO 17025 | 7.11.3(a) Protected from unauthorised access | ◐ Partial | VF-01, VF-02, VF-19 closed; VF-06 open |
+| ISO 17025 | 7.11.3(b) Safeguarded against tampering and loss | ✅ | Loss proven by PQ; tampering now detectable (VF-05) |
+| ISO 17025 | 7.11.3(c)–(d) Supplier spec; maintained integrity | ✅ | VF-21 baseline adopted; VF-09 regression suite in place |
+| Part 11 | 11.10(c) Protection of records | ◐ Partial | VF-05 closed; VF-06 open |
+| Part 11 | 11.10(d) Limiting system access | ✅ | VF-01, VF-02, VF-19 closed |
+| Part 11 | 11.10(e) Secure, time-stamped audit trails | ✅ | VF-03, VF-05, VF-17 closed |
+| Part 11 | 11.10(h) Device checks | ◐ Partial | Device and IP captured; no device authorisation enforced |
+| Part 11 | 11.10(k) Systems documentation and change control | ✅ | VF-11, VF-21, VF-22 closed |
+| Part 11 | 11.70 Signature/record linking | ✅ | VF-13 closed — bound to a hash of what was signed |
+| Part 11 | 11.200 Signature components | ✅ | VF-04 closed — the only outright failure in Subpart C |
+| Part 11 | 11.300(b), (d) Credentials; transaction safeguards | ✅ | VF-19, VF-02, VF-03 closed |
+| Annex 11 | §3 Suppliers and service providers | ✖ | No supplier assessment of the developer recorded — see §6 |
+| Annex 11 | §7.1, §17 Data protection; archiving | ◐ Partial | Integrity closed; encryption at rest open (VF-06, VF-07) |
+| Annex 11 | §7.2 Backups checked for accuracy and completeness | ✅ | VF-08 closed, demonstrated by refusing a damaged archive |
+| Annex 11 | §9 Audit trails | ✅ | VF-03, VF-05 closed |
+| Annex 11 | §12.1, §12.3, §12.4 Security and access control | ✅ | VF-01, VF-02, VF-18, VF-03 closed |
+| Annex 11 | §14 Electronic signature | ✅ | VF-04, VF-13 closed |
+| ISO 27001 | A.5.3, A.5.17, A.5.18, A.8.5 Access and credentials | ✅ | VF-02, VF-19, VF-20, VF-24 closed |
+| ISO 27001 | A.8.8 Technical vulnerabilities | ✖ | VF-10 open — one advisory in shipped code, no fix on npm |
+| ISO 27001 | A.8.13 Information backup | ◐ Partial | Integrity closed (VF-08); encryption open (VF-07) |
+| ISO 27001 | A.8.15 Logging | ✅ | VF-03 closed |
+| ISO 27001 | A.8.19, A.8.30 Installation; outsourced development | ✖ | VF-12 open; supplier assessment outstanding |
+| ISO 27001 | A.8.23, A.8.25, A.8.26 Origin control; secure development | ✅ | VF-16, VF-09, VF-15, VF-22 closed |
+| ISO 27001 | A.8.24 Use of cryptography | ◐ Partial | In transit and for stored tokens closed; at rest open (VF-06, VF-07) |
+
+**Every remaining gap traces to one of the four open findings, plus the supplier assessment.**
+Three of the four are about cryptography at rest and the fourth is a certificate. Nothing that
+remains is a defect in how the system behaves.
+
+The electronic-signature provisions of Part 11 Subpart C — recorded as *not met* in document 07 —
+are now satisfied. Signatures may be described in laboratory procedures as electronic signatures
+rather than as system-recorded approvals.
+
+---
+
 ## 6. Revised release position
 
 The conditions in document 08 §6 are reduced to those that still apply:
