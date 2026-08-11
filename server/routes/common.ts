@@ -19,6 +19,7 @@ import { writeBackupZip, isSafeBackupName, createBackup } from '../services/back
 import { safeStoredFilename } from '../utils/safeFilename.js';
 import { parseIntNullable } from './routeHelpers.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
+import * as tailscale from '../services/tailscale.js';
 import * as XLSX from 'xlsx';
 
 // adm-zip is loaded lazily for the same packaging reasons as archiver above:
@@ -2282,8 +2283,15 @@ export function commonRoutes() {
     return urls;
   }
 
-  router.get('/system/connectivity', (_req, res) => {
+  router.get('/system/connectivity', async (_req, res) => {
     const { mode, source } = resolveMode();
+    // Whether anybody else can actually open this laboratory. Binding to
+    // loopback is the default and is invisible from the outside — a browser on
+    // another machine simply times out — so the host has to say so itself
+    // rather than leaving somebody to infer it from a bind address.
+    const reach = await tailscale.reachability({
+      host: config.api.host, port: config.api.port, lanExposed: isLanExposed(),
+    });
     res.json({
       mode,
       modeSource: source,
@@ -2292,6 +2300,7 @@ export function commonRoutes() {
       lanExposed: isLanExposed(),
       lanReady: true,
       lanUrls: lanUrls(),
+      reach,
       database: { driver: config.db.driver },
       sync: { enabled: config.sync.enabled, status: 'planned' },
       generatedAt: new Date().toISOString()

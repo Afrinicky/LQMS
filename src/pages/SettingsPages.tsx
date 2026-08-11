@@ -3076,6 +3076,89 @@ function QualityWorkflowSettings() {
 // cloud synchronization status. Switching mode never affects instruments,
 // monitoring, printers or workflows; the host stays fully functional offline.
 // ---------------------------------------------------------------------------
+/**
+ * Can anybody other than this computer open the laboratory?
+ *
+ * This card used to print a bind address and leave the reader to work out what
+ * it meant. That is the wrong way round: binding to loopback is invisible from
+ * outside — a browser on another machine simply times out with nothing to go on
+ * — so the one thing this card owes anybody is a plain yes or no, and the next
+ * step when the answer is no.
+ */
+function RemoteAccessCard({ info }: { info: SystemConnectivity }) {
+  const reach = info.reach;
+  const ts = reach?.tailscale;
+  const [copied, setCopied] = useState(false);
+
+  const command = `tailscale serve --bg ${info.api.port}`;
+  async function copyCommand() {
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch { /* a browser that refuses the clipboard still shows the text */ }
+  }
+
+  return (
+    <div className="card">
+      <div className="section-head"><h3>Access from other devices</h3></div>
+
+      {!reach ? (
+        <p className="muted">This host has not reported its reachability.</p>
+      ) : reach.reachable ? (
+        <>
+          <p className="notice-ok">
+            {reach.route === 'tailscale'
+              ? 'The laboratory is published over Tailscale. Any device signed in to the same tailnet can open it — nothing is exposed to the wider network.'
+              : 'The laboratory is open to every device on this network.'}
+          </p>
+          {reach.url && (
+            <p className="bk-folder-path">
+              <code><PathText value={reach.url} /></code>
+              <span className="chip">Open this from other devices</span>
+            </p>
+          )}
+          {reach.advice && <p className="hint">{reach.advice}</p>}
+        </>
+      ) : (
+        <>
+          <p className="notice-warn">Only this computer can open the laboratory.</p>
+          <p className="hint">{reach.advice}</p>
+          {ts?.installed && ts.running && (
+            <div className="bk-folder-path">
+              <code>{command}</code>
+              <button type="button" className="tiny secondary" onClick={copyCommand}>
+                {copied ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+          )}
+          {ts?.installed && ts.running && (
+            <p className="hint">
+              Run it once, in a Command Prompt on this computer. Tailscale remembers it, so the laboratory comes
+              back reachable after a restart without anybody doing anything.
+            </p>
+          )}
+        </>
+      )}
+
+      <table className="table" style={{ maxWidth: 640, marginTop: 12 }}><tbody>
+        <tr><td>Bind address</td><td><code>{info.api.host}</code>{info.api.host === '127.0.0.1' && <span className="hint"> — this computer only</span>}</td></tr>
+        <tr><td>Port</td><td><code>{info.api.port}</code></td></tr>
+        <tr>
+          <td>Tailscale</td>
+          <td>
+            {!ts?.installed ? <span className="muted">Not installed</span>
+              : !ts.running ? <span className="bad">{ts.error ?? 'Installed, not running'}</span>
+              : <>Signed in{ts.dnsName ? <> as <code>{ts.dnsName}</code></> : null}{ts.serving ? ' · publishing this laboratory' : ' · not publishing this laboratory yet'}</>}
+          </td>
+        </tr>
+        {info.lanUrls.length > 0 && <tr><td>LAN client URLs</td><td>{info.lanUrls.map(u => <div key={u}><code>{u}</code></div>)}</td></tr>}
+        {info.api.publicUrl && <tr><td>Public URL (remote)</td><td><code>{info.api.publicUrl}</code></td></tr>}
+      </tbody></table>
+    </div>
+  );
+}
+
 export function ConnectivityMode() {
   const { user } = useAuth();
   const { can } = usePermissions();
@@ -3141,18 +3224,7 @@ export function ConnectivityMode() {
       {error && <p className="error">{error}</p>}
     </div>
 
-    <div className="card">
-      <h3>LAN access</h3>
-      {info.lanExposed
-        ? <p className="notice-ok">The host API is bound to the LAN. Desktop browsers and the mobile PWA on this network can connect using the addresses below.</p>
-        : <p className="hint">The host API is bound to loopback only (private to this PC). To serve desktop and mobile clients over the LAN, start the host with <code>SECH_LIMS_API_HOST=0.0.0.0</code> and allow the port through the Windows firewall.</p>}
-      <table className="table" style={{ maxWidth: 640 }}><tbody>
-        <tr><td>Bind address</td><td><code>{info.api.host}</code></td></tr>
-        <tr><td>Port</td><td><code>{info.api.port}</code></td></tr>
-        {info.lanUrls.length > 0 && <tr><td>LAN client URLs</td><td>{info.lanUrls.map(u => <div key={u}><code>{u}</code></div>)}</td></tr>}
-        {info.api.publicUrl && <tr><td>Public URL (remote)</td><td><code>{info.api.publicUrl}</code></td></tr>}
-      </tbody></table>
-    </div>
+    <RemoteAccessCard info={info} />
 
     <div className="card">
       <h3>Cloud synchronization</h3>
