@@ -38,6 +38,16 @@ export const ALERT_TARGETS: Record<string, AlertTarget> = {
   roster_approval: { tab: 'Duty Roster' },
   roster_preparation: { tab: 'Duty Roster' },
   reassignment_preparation: { tab: 'Unit Reassignments' },
+  bench_preparation: { tab: 'Bench Schedules' },
+  schedule_carried_forward: { tab: 'Duty Roster' },
+
+  /* Unit activities — the recurring work the duty roster puts in front of
+     whoever is on the bench. The to-do itself lives on the dashboard, so the
+     alert lands on the register that lists every occurrence. */
+  activity_due: { route: '/dashboard' },
+  activity_overdue: { route: '/dashboard' },
+  activity_missed: { route: '/system-audit', tab: 'Not Done' },
+  activity_redesign: { route: '/settings/activities' },
 
   /* Equipment */
   // All three name an instrument, and the register is the one place every

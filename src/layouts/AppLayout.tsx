@@ -12,6 +12,7 @@ import { moduleIcon, sectionIcon } from '../components/ui/moduleIcons';
 import { DennisFloatingWidget } from '../components/DennisFloatingWidget';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
 import { SignatureModal } from '../components/SignatureModal';
+import DailyBriefing from '../components/DailyBriefing';
 
 const API_HOST = (() => {
   try { return new URL((window as any).sechLims?.apiBaseUrl ?? 'http://127.0.0.1:4317/api').host; }
@@ -92,9 +93,12 @@ export default function AppLayout() {
     return () => { cancelled = true; clearInterval(id); };
   }, [user, showInbox]);
 
-  // The Home route is a full-bleed launchpad with no persistent sidebar.
+  // The Home route is a full-bleed launchpad with no persistent sidebar. The
+  // briefing still belongs here: the launchpad is where most people land after
+  // signing in, and the day's list is the first thing they need.
   if (location.pathname === '/home') return <>
     <Outlet />
+    <DailyBriefing />
     <DennisFloatingWidget user={user} dennisEnabled={isEnabled('dennis')} />
   </>;
 
@@ -218,6 +222,7 @@ export default function AppLayout() {
 
         <section className="content"><Outlet /></section>
 
+        <DailyBriefing />
         <DennisFloatingWidget user={user} dennisEnabled={isEnabled('dennis')} />
 
         <footer className="statusbar">

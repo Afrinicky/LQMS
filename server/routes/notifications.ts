@@ -4,6 +4,7 @@ import { requirePermission, viewableModulesOf } from '../middleware/permissions.
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent, getCurrentStaffId } from './routeHelpers.js';
+import { currentObligations } from '../services/scheduleRollover.js';
 
 const NOTIFICATION_STATUSES = ['unread', 'read', 'acknowledged', 'resolved', 'dismissed'];
 const NOTIFICATION_SEVERITIES = ['info', 'low', 'medium', 'high', 'urgent'];
@@ -427,25 +428,75 @@ function collectScanCandidates(db: any): ScanCandidate[] {
     for (const r of rows) out.push({ moduleKey: 'information_management', recordType: 'data_correction_requests', recordId: String(r.id), title: `Data correction pending: ${r.request_number}`, message: 'Awaiting review/approval', dueDate: null, severity: 'low', notificationType: 'approval_required', itemType: 'data_correction_pending' });
   }
 
-  // Prepare next month's rosters & schedules — remind the manager a week before
-  // the next month begins if the department duty roster and/or unit reassignment
-  // schedule for that month is not yet started. Rosters are pasted in the lab, so
-  // they must be ready in advance.
-  if (tableExists(db, 'duty_rosters')) {
-    const now = new Date();
-    const daysInThisMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-    // Only raise from ~7 days before month end onwards.
-    if (now.getDate() >= daysInThisMonth - 7) {
-      const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-      const nextMonth = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`;
-      const nextStart = `${nextMonth}-01`;
-      const nextLabel = next.toLocaleString('en', { month: 'long', year: 'numeric' });
-      const hasRoster = (db.prepare('SELECT COUNT(*) c FROM duty_rosters WHERE month = ?').get(nextMonth) as { c: number }).c > 0;
-      if (!hasRoster) out.push({ moduleKey: 'personnel', recordType: 'duty_rosters', recordId: `next-${nextMonth}`, title: `Prepare ${nextLabel} duty roster`, message: `The department duty roster for ${nextLabel} has not been started. Prepare it before the month begins so it can be printed and posted.`, dueDate: nextStart, severity: 'high', notificationType: 'due_soon', itemType: 'roster_preparation' });
-      if (tableExists(db, 'reassignment_schedules')) {
-        const hasReassign = (db.prepare('SELECT COUNT(*) c FROM reassignment_schedules WHERE month = ?').get(nextMonth) as { c: number }).c > 0;
-        if (!hasReassign) out.push({ moduleKey: 'personnel', recordType: 'reassignment_schedules', recordId: `next-${nextMonth}`, title: `Prepare ${nextLabel} staff reassignment`, message: `The unit/staff reassignment schedule for ${nextLabel} has not been started.`, dueDate: nextStart, severity: 'medium', notificationType: 'due_soon', itemType: 'reassignment_preparation' });
+  // Rosters, unit reassignments and bench schedules that are due to be prepared.
+  // The deadlines, the lead time and the per-unit bench schedules all come from
+  // the laboratory's scheduling policy rather than being fixed here, so a
+  // laboratory that wants a fortnight's notice gets a fortnight's notice.
+  if (tableExists(db, 'duty_rosters') && tableExists(db, 'scheduling_policy')) {
+    try {
+      for (const obligation of currentObligations(db)) {
+        if (obligation.status !== 'due_soon' && obligation.status !== 'overdue' && obligation.status !== 'carried_forward') continue;
+        const itemType = obligation.kind === 'duty_roster' ? 'roster_preparation'
+          : obligation.kind === 'reassignment' ? 'reassignment_preparation'
+          : 'bench_preparation';
+        out.push({
+          moduleKey: 'personnel',
+          recordType: obligation.kind === 'duty_roster' ? 'duty_rosters' : obligation.kind === 'reassignment' ? 'reassignment_schedules' : 'bench_schedules',
+          recordId: String(obligation.scheduleId ?? `${obligation.kind}-${obligation.month}-${obligation.sectionId ?? 0}`),
+          title: `${obligation.status === 'carried_forward' ? 'Review carried-forward' : 'Prepare'} ${obligation.kindLabel.toLowerCase()} — ${obligation.monthLabel}${obligation.sectionName ? ` (${obligation.sectionName})` : ''}`,
+          message: obligation.message,
+          dueDate: obligation.dueDate,
+          severity: obligation.status === 'overdue' ? 'high' : 'medium',
+          notificationType: obligation.status === 'overdue' ? 'overdue' : 'due_soon',
+          itemType: obligation.status === 'carried_forward' ? 'schedule_carried_forward' : itemType,
+          responsibleStaffId: obligation.ownerStaffId,
+          sectionId: obligation.sectionId,
+        });
       }
+    } catch (err) {
+      // A scheduling problem must not take down the whole alert scan.
+      // eslint-disable-next-line no-console
+      console.error('[alerts] schedule obligations failed:', (err as Error).message);
+    }
+  }
+
+  // Unit activities the roster put on somebody and that were never done. The
+  // to-do itself lives on the assignee's dashboard; this is the escalation, so
+  // it is deliberately limited to what has actually been missed rather than
+  // repeating every pending item as an alert.
+  if (tableExists(db, 'activity_occurrences')) {
+    const missedSince = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10);
+    const rows = db.prepare(`SELECT o.id, o.occurrence_date, o.section_id, a.name, a.priority,
+         (SELECT ag.staff_id FROM activity_assignees ag WHERE ag.occurrence_id = o.id AND ag.is_watcher = 0 LIMIT 1) AS staff_id
+       FROM activity_occurrences o JOIN unit_activities a ON a.id = o.activity_id
+       WHERE o.status = 'missed' AND o.occurrence_date >= ?`).all(missedSince) as any[];
+    for (const r of rows) {
+      out.push({
+        moduleKey: 'personnel', recordType: 'activity_occurrences', recordId: String(r.id),
+        title: `Not done: ${r.name}`,
+        message: `The scheduled unit activity due ${r.occurrence_date} was never recorded as done.`,
+        dueDate: r.occurrence_date,
+        severity: r.priority === 'critical' ? 'urgent' : 'high',
+        notificationType: 'overdue', itemType: 'activity_missed',
+        responsibleStaffId: r.staff_id ?? null, sectionId: r.section_id ?? null,
+      });
+    }
+  }
+
+  // Activities staff have told us are hard to run. Compliance follows ease, so
+  // these are raised as design work for the quality office rather than as a
+  // failure by the bench.
+  if (tableExists(db, 'unit_activities')) {
+    const rows = db.prepare(`SELECT id, name, redesign_status, redesign_note, section_id FROM unit_activities
+       WHERE is_active = 1 AND redesign_status IN ('flagged', 'in_progress')`).all() as any[];
+    for (const r of rows) {
+      out.push({
+        moduleKey: 'personnel', recordType: 'unit_activities', recordId: String(r.id),
+        title: `Flagged for redesign: ${r.name}`,
+        message: r.redesign_note || 'This activity has been flagged as too hard to execute. Simplify it — staff comply with what is easy.',
+        dueDate: null, severity: 'low', notificationType: 'follow_up', itemType: 'activity_redesign',
+        sectionId: r.section_id ?? null,
+      });
     }
   }
 

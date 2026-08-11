@@ -1,0 +1,416 @@
+SECH_LIMS — supplier verification scripts, executed 2026-08-10T10:12:53Z
+Commit: dc73f1021996e467ab1ec627957ae8f0614786d1
+Node: v22.22.2
+
+=================== rbac-check ===================
+  PASS  admin login carries a permission map
+  PASS  admin may view settings
+  PASS  technician has no settings entry in the map
+  PASS  GET /users is refused
+  PASS  technician CAN see home + dashboard (shell stays usable)
+  PASS  technician CAN see organisation (seed gap fixed)
+  PASS  documents disappears from the map when view is denied
+  PASS  print endpoint is refused without view
+  PASS  export endpoint is refused without view
+  PASS  "View only" does not grant approve
+  PASS  expired authorization adds no rights
+  PASS  revocation is stored as allowed=0
+  PASS  QR lookup succeeds when the user may print that module
+  PASS  QR lookup is refused once equipment view is revoked
+  PASS  scanning a token no longer returns the record
+  PASS  every live alert belongs to a viewable module
+16 passed, 0 failed
+
+=================== rbac-matrix ===================
+  PASS  catalogue returns role grants
+  PASS  catalogue returns per-user overrides
+  PASS  Technician starts with no access to appraisals
+  PASS  View grants view+print, nothing more
+  PASS  the API now allows the appraisals list
+  PASS  Manage adds create/edit/export
+  PASS  Manage still withholds approve
+  PASS  No access removes the area from the map entirely
+  PASS  the API refuses the appraisals list again
+  PASS  an individual override opens it for that person
+  PASS  their colleagues on the same role are unaffected
+  PASS  clearing the override returns them to their role
+  PASS  View on document workflow does not grant approve
+  PASS  granting one feature makes its module visible
+14 passed, 0 failed
+
+=================== rbac-selfservice ===================
+  PASS  can open their OWN staff record
+  PASS  can update their OWN contact details
+  PASS  CANNOT rewrite their own licence/registration
+  PASS  CANNOT open a colleague's record
+  PASS  CANNOT edit a colleague's record
+  PASS  CANNOT list everyone's declarations
+  PASS  CANNOT list everyone's appraisals
+  PASS  CANNOT list everyone's competency assessments
+  PASS  CANNOT list everyone's the staff document register
+  PASS  CANNOT list everyone's technical authorizations
+  PASS  CANNOT list everyone's orientation records
+  PASS  CANNOT list everyone's duty rosters
+  PASS  can still list colleague NAMES
+  PASS  directory carries no date of birth
+  PASS  directory carries no national ID
+  PASS  directory carries no licence details
+  PASS  own profile loads
+  PASS  own tasks load (own training, declarations, duties)
+18 passed, 0 failed
+
+=================== account-check ===================
+  PASS  a real account gets a claim token
+  PASS  an unknown account answers identically
+  PASS  both report "pending" — no enumeration
+  PASS  the real request is queued
+  PASS  the unknown one is not
+  PASS  the administrator was notified
+  PASS  status carries no reset token while pending
+  PASS  a guessed token is refused
+  PASS  the administrator can approve
+  PASS  the waiting browser now receives a reset token
+  PASS  a different browser learns nothing
+  PASS  a short password is refused
+  PASS  the new password is accepted
+  PASS  the old password no longer works
+  PASS  the new password works
+  PASS  replaying the same token is refused
+  PASS  the requester is told it was refused
+  PASS  the refusal note is passed on
+  PASS  their password is unchanged
+  PASS  a Technician cannot see the queue
+  PASS  a Technician cannot approve one
+  PASS  a flood does not bury the administrator
+  PASS  throttled requests still look pending to the caller
+  PASS  they can still sign in
+  PASS  and are flagged to choose a new password
+  PASS  changing it clears the flag
+  PASS  a temporary password also forces a change
+  PASS  an unused account may be erased
+  PASS  erasing it succeeds
+  PASS  it is gone from the list
+  PASS  an account with history may NOT be erased
+  PASS  the server refuses and explains
+  PASS  but it can be deactivated
+  PASS  and then cannot sign in
+  PASS  reactivating restores access
+  PASS  you cannot remove your own account
+  PASS  and the screen says why
+37 passed, 0 failed
+
+=================== iqc-check ===================
+  PASS  an FBC control is created
+  PASS  it carries all three parameters
+  PASS  a run on target is in control
+  PASS  one run covers every parameter
+  PASS  patient results may be released
+  PASS  one parameter beyond 2 SD raises a 1₂ₛ warning
+  PASS  a warning does NOT stop patient results
+  PASS  beyond 3 SD is rejected as 1₃ₛ
+  PASS  a rejection withholds patient results
+  PASS  the run as a whole is out of control
+  PASS  two consecutive beyond +2 SD is caught as 2₂ₛ
+  PASS  two parameters in one run beyond 2 SD is caught across the run
+  PASS  outside the acceptable range is rejected regardless of SD
+  PASS  a qualitative control is created
+  PASS  it needs no mean or SD
+  PASS  and carries its expected result instead
+  PASS  a positive control reading reactive passes
+  PASS  patient results may be released
+  PASS  the same control reading non-reactive FAILS
+  PASS  and is reported as a mismatch, not a z-score
+  PASS  and withholds patient results
+  PASS  no z-score is invented for it
+  PASS  the rule profile is forced to expected-match
+  PASS  one without a preparation method is refused
+  PASS  with it, the control is accepted
+  PASS  the chart returns points
+  PASS  with the target it is measured against
+  PASS  an observed mean is computed
+  PASS  an observed SD is computed
+  PASS  CV% is computed
+  PASS  bias against target is computed
+  PASS  SD index is computed
+  PASS  rejections are marked on the series
+  PASS  signing off a failure without an action is refused
+  PASS  recording what was done allows sign-off
+  PASS  withholding results without a reason is refused
+  PASS  an expired lot cannot be run
+  PASS  an unknown control is refused
+38 passed, 0 failed
+
+=================== iqc-io-check ===================
+  PASS  it carries every column the importer reads
+  PASS  it shows a worked quantitative example
+  PASS  it shows a worked qualitative example
+  PASS  it shows an in-house control with its provenance
+  PASS  a run template downloads
+  PASS  it carries every run column
+  PASS  the import is accepted
+  PASS  all three controls are created
+  PASS  every analyte row is written
+  PASS  nothing is reported as an error
+  PASS  the quantitative control kept its three analytes
+  PASS  the qualitative control is stored as qualitative
+  PASS  a qualitative control gets the matching rule set
+  PASS  the in-house control is marked in-house
+  PASS  and it carries the provenance ISO 15189 §7.3.7.2 asks for
+  PASS  a control with no test is refused
+  PASS  an unrecognised source is refused
+  PASS  a qualitative analyte with no expected result is refused
+  PASS  an in-house control with no preparation method is refused
+  PASS  a row with no control name or lot is refused
+  PASS  and none of those five is created
+  PASS  nothing from the bad file reached the register
+  PASS  the second import updates the existing lot
+  PASS  the control is not duplicated
+  PASS  its other analytes survive the partial re-import
+  PASS  the edited target is applied
+  PASS  the register exports
+  PASS  one row per analyte
+  PASS  the export uses the same columns as the import
+  PASS  in-house provenance travels with it
+  PASS  a window that predates every control returns none
+  PASS  a window covering today returns them
+  PASS  a backlog of runs imports
+  PASS  rows sharing lot, date, time and instrument become one run
+  PASS  every reading is stored
+  PASS  none of them is rejected
+  PASS  an out-of-control reading is caught on import
+  PASS  the rejected run is recorded as such
+  PASS  and its patient results are withheld
+  PASS  the rule that rejected it is named
+  PASS  an imported failure still cannot be signed off blind
+  PASS  qualitative runs import
+  PASS  a positive control reading non-reactive is rejected
+  PASS  an unknown lot is refused
+  PASS  an analyte the control does not measure is refused
+  PASS  a non-numeric quantitative result is refused
+  PASS  an unrecognised qualitative result is refused
+  PASS  a row missing its lot is refused
+  PASS  a run dated after the lot expired is refused
+  PASS  runs export
+  PASS  with the outcome, not just the numbers
+  PASS  the rejection is visible in the file, in words
+  PASS  z-scores travel with the results
+  PASS  a date window narrows the export
+  PASS  and only that window is in it
+  PASS  the chart exports to Excel
+  PASS  the series is in it
+  PASS  the statistics travel with the series
+  PASS  so does the period it covers
+  PASS  a date range narrows the chart export
+  PASS  the printable chart renders
+  PASS  it draws the chart itself, not a placeholder
+  PASS  it shows the control limit lines
+  PASS  it names the control and lot
+  PASS  it carries the statistics
+  PASS  it lists the individual results
+  PASS  it has somewhere to sign
+  PASS  it is laid out for A4
+  PASS  the printed record states the period it covers
+  PASS  a bench account is created for the test
+  PASS  with the export right the register export is served
+  PASS  and the printable chart is served
+  PASS  revoking IQC blocks the control export
+  PASS  revoking IQC blocks the run export
+  PASS  revoking IQC blocks the chart export
+  PASS  revoking IQC blocks printing the chart
+  PASS  revoking IQC blocks the template
+  PASS  and blocks importing controls
+  PASS  and blocks importing runs
+80 passed, 0 failed
+
+=================== iqc-admin ===================
+  PASS  the administrator is flagged as one
+  PASS  a quality manager with full IQC rights is not
+  PASS  and that quality manager really does hold full IQC rights
+  PASS  a control is registered to work on
+  PASS  a quality manager may correct the plain fields
+  PASS  and the correction is stored
+  PASS  fields that were not sent are left alone
+  PASS  an analyte can be added later
+  PASS  and the control now measures three things
+  PASS  an analyte that has never been read is deleted outright
+  PASS  and it is gone, not left behind inactive
+  PASS  three runs are recorded against it
+  PASS  a lot with runs cannot change what kind of control it is
+  PASS  and the refusal explains why
+  PASS  moving a target on a lot with history needs a reason
+  PASS  the refusal names the analyte and the runs it re-scales
+  PASS  with a reason it is applied
+  PASS  and the response says what it touched
+  PASS  the new target is in force
+  PASS  dropping an analyte that has readings retires it
+  PASS  the analyte itself survives
+  PASS  but is no longer measured
+  PASS  and its chart still has its history
+  PASS  a control cannot be left measuring nothing
+  PASS  two controls cannot share a name and lot
+  PASS  an in-house control cannot have its provenance removed
+  PASS  the impact of removing it can be read first
+  PASS  and it recommends retiring a lot that has history
+  PASS  a quality manager may not erase a control
+  PASS  and is pointed at retiring instead
+  PASS  even an administrator must give a reason
+  PASS  erasing a lot with runs is refused without an explicit override
+  PASS  and says how much quality record it would destroy
+  PASS  retiring is available to a quality manager
+  PASS  the lot is inactive
+  PASS  its runs are untouched
+  PASS  and a retired lot cannot be run
+  PASS  a lot retired by mistake can be put back
+  PASS  a lot that was never run offers outright deletion
+  PASS  and an administrator can erase it
+  PASS  it is gone from the register
+  PASS  a quality manager cannot correct a run
+  PASS  and the refusal names the reserved capability
+  PASS  it is marked as administrator-only so the UI can hide it
+  PASS  an administrator still has to say why
+  PASS  the run reads in control before the correction
+  PASS  the correction is accepted
+  PASS  and the run is RE-EVALUATED, not just stored
+  PASS  the rule that now fails is named
+  PASS  patient results are withheld on the corrected verdict
+  PASS  the stored readings are the corrected ones
+  PASS  and the stored verdict matches
+  PASS  the corrected run can then be signed off
+  PASS  correcting a signed-off run sends it back for review
+  PASS  and it is genuinely unreviewed again
+  PASS  with the verdict back in control
+  PASS  a reading for an analyte the control does not measure is refused
+  PASS  a non-numeric reading is refused
+  PASS  a quality manager cannot remove a run
+  PASS  an administrator must say why
+  PASS  a token reason is not enough
+  PASS  with a real reason the run is removed
+  PASS  and the readings go with it
+  PASS  the run is gone
+  PASS  the register is two runs shorter
+  PASS  and its point has left the chart
+  PASS  the correction is in the audit trail
+  PASS  the removal is in the audit trail
+  PASS  a correction keeps the readings as they were before it
+  PASS  and records the reason given
+  PASS  a removal keeps the whole run that was erased
+  PASS  a parameter edit is recorded with what it was before
+  PASS  erasing a control keeps the control it erased
+73 passed, 0 failed
+
+=================== alerts-check ===================
+  PASS  the laboratory has a person alerts can be routed to
+  PASS  an instrument overdue for calibration exists
+  PASS  a stock item below its reorder level exists
+  PASS  an open nonconformity exists
+  PASS  a rejected control run exists
+  PASS  the live-alert feed returns alerts
+  PASS  none is a dead click
+  PASS  none falls back to the generic inbox
+  PASS  every kind of alert raised names the tab its record lives on
+  PASS  the alerts carry that tab in their URL
+  PASS  and the identity of the record itself
+  PASS  every alert route is declared in the router
+  PASS  every tab an alert names exists in a page
+  PASS  the equipment register can highlight an instrument
+  PASS  the stock register can highlight an item
+  PASS  the control-run review can highlight a run
+  PASS  the nonconformity register can highlight an event
+  PASS  the calibration alert opens the equipment register at that instrument
+  PASS  the low-stock alert opens the item register at that item
+  PASS  the nonconformity alert opens the nonconformity register at that event
+  PASS  the rejected control run opens IQC review at that run
+  PASS  a nonconformity opens its own route, not the shared module route
+  PASS  the control-run alert names the control and the rule that broke
+  PASS  one failing run raises one alert, not one per analyte
+  PASS  and it names the run, not a single result
+  PASS  the grouped feed returns modules
+  PASS  each group carries its own alerts to open
+  PASS  and each of those alerts has its destination
+  PASS  the group totals match the alerts they carry
+  PASS  the scan routed notifications with an action URL
+  PASS  and those URLs aim at a tab and a record
+31 passed, 0 failed
+
+=================== backup-check ===================
+  PASS  nonsense times are dropped rather than stored
+  PASS  a schedule with no valid time at all falls back to one
+  PASS  twice-daily always ends up with two times
+  PASS  weekly always ends up with a day
+  PASS  retention is clamped to something sane
+  PASS  a schedule that is off says so plainly
+  PASS  midday on a daily schedule points at 02:00 tomorrow
+  PASS  01:00 points at 02:00 the same morning
+  PASS  twice-daily at 09:00 points at this afternoon
+  PASS  twice-daily at 15:00 points at tomorrow morning
+  PASS  a Sunday schedule from a Tuesday points at Sunday
+  PASS  a schedule that is off has no next run
+  PASS  a host that missed 02:00 still sees it as due at 09:30
+  PASS  everything inside the daily window survives
+  PASS  the year of archives is thinned, not kept whole
+  PASS  but something from months back is still there
+  PASS  nothing older than the monthly window is kept
+  PASS  the only backup there is is never pruned, however old
+  PASS  a zero retention policy still keeps the newest
+  PASS  a schedule can be read before one is ever saved
+  PASS  it starts switched off
+  PASS  a schedule saves
+  PASS  and comes back described in words
+  PASS  with the next run computed
+  PASS  nonsense is normalised rather than refused
+  PASS  and the stored times are valid
+  PASS  the status endpoint answers
+  PASS  it knows automatic backups are on now
+  PASS  and when the next one is due
+  PASS  a backup runs on demand
+  PASS  and produces a real file
+  PASS  named so it sorts by date
+  PASS  nothing was copied off site, because no destination is configured
+  PASS  it appears in the register
+  PASS  the register says whether each copy is off site
+  PASS  the status now reports a recent backup
+  PASS  and counts what is on the shelf
+  PASS  pruning runs
+  PASS  a fresh backup is never pruned
+  PASS  and nothing was lost from a young collection
+  PASS  the screen can be told what may be added
+  PASS  and each kind says what it needs
+  PASS  at least one kind is off site
+  PASS  none are configured to begin with
+  PASS  an unknown kind is refused
+  PASS  a destination with nothing filled in is refused
+  PASS  naming the field that is missing
+  PASS  a path that is not a full path is refused
+  PASS  saying what a full path looks like
+  PASS  a key that is not JSON is refused
+  PASS  with an explanation of what to paste
+  PASS  an OAuth client key is refused with the right advice
+  PASS  a key with no key material in it is refused
+  PASS  a well-formed key for an account Google does not know is refused
+  PASS  and the refusal says what Google said, or that it is unreachable
+  PASS  it fails quickly rather than hanging
+  PASS  none of those attempts left a half-connected destination behind
+  PASS  a sync with nowhere to send says so plainly
+  PASS  the sync history is readable even when empty
+  PASS  it starts at the default
+  PASS  a relative folder is refused
+  PASS  with advice about what to give
+  PASS  and the folder is unchanged
+  PASS  a technician cannot read the backup status
+  PASS  a technician cannot change the schedule
+  PASS  a technician cannot take a backup
+  PASS  a technician cannot prune
+  PASS  a technician cannot add a destination
+  PASS  a technician cannot move the backup folder
+  PASS  a technician cannot read the sync history
+  PASS  and cannot download a backup
+  PASS  a manager with settings rights can read the status
+  PASS  and can take a backup
+  PASS  but cannot add a destination for the data to leave by
+  PASS  nor move where backups are written
+  PASS  and cannot prune backups away
+  PASS  saving a schedule is audited
+  PASS  with what it was before
+  PASS  taking a backup is audited
+80 passed, 0 failed
+

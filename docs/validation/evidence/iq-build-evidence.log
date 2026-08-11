@@ -1,0 +1,36 @@
+SECH_LIMS — build and installation qualification evidence
+Executed: 2026-08-10T10:13:01Z
+Commit: dc73f1021996e467ab1ec627957ae8f0614786d1
+Node: v22.22.2  npm: 10.9.7
+Platform: Linux 6.18.5-fc-v20
+
+--- npm run typecheck ---
+
+> sech-lims-by-nickland@0.1.0 typecheck
+> tsc --noEmit
+
+EXIT=0
+
+--- npm run smoke (structure check) ---
+PASS  package.json build.asarUnpack includes better-sqlite3
+PASS  main field points to dist-electron/electron/main.js  (dist-electron/electron/main.js)
+
+Total: 120   Passed: 120   Failed: 0
+
+--- npm run build ---
+dist/assets/DocumentControlPage-D8EDdoLv.js        159.19 kB │ gzip:  37.42 kB
+dist/assets/jsx-runtime-DrV5YiAL.js                192.06 kB │ gzip:  60.75 kB
+dist/assets/Phase3Pages-Dh340Gpx.js                219.37 kB │ gzip:  40.62 kB
+dist/assets/main-DWYwMxlJ.js                       483.02 kB │ gzip: 113.05 kB
+
+✓ built in 572ms
+copy-preload: wrote dist-electron/electron/preload.cjs
+BUILD_EXIT=0
+
+--- npm audit summary ---
+
+To address all issues possible (including breaking changes), run:
+  npm audit fix --force
+
+Some issues need review, and may require choosing
+a different dependency.

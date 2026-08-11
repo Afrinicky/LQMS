@@ -13,6 +13,7 @@ import { sectionIcon } from '../components/ui/moduleIcons';
 import { WaveBackground, MedicalLabBackgroundMarks, PageHeader, KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, AttentionCenter, AlertsByModule } from '../components/ui';
 import DashboardProfileCard from '../components/DashboardProfileCard';
 import DashboardInbox from '../components/DashboardInbox';
+import DutyTodoCard from '../components/DutyTodoCard';
 
 type CountRow = { count: number };
 type AnyRec = Record<string, any>;
@@ -286,6 +287,11 @@ export function Dashboard() {
         <DashboardProfileCard />
         {canView('notifications') && <DashboardInbox />}
       </div>
+
+      {/* 1b — what they are on duty to do. Deliberately above the laboratory's
+          numbers: the bench's own day comes before management's overview, and
+          it needs no permission because it is the person's own work. */}
+      <DutyTodoCard />
 
       {/* 2 — what needs attention across the laboratory. Both views read the
           live-alert feed, which is itself trimmed to the modules this reader

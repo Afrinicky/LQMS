@@ -116,6 +116,9 @@ export const FEATURES: FeatureDef[] = [
   { key: 'personnel.rosters', module: 'personnel', label: 'Rosters & scheduling',
     desc: 'Duty rosters, unit reassignments and bench schedules.',
     tabs: ['Duty Roster', 'Unit Reassignments', 'Bench Schedules'] },
+  { key: 'personnel.activities', module: 'personnel', label: 'Unit activities & reminders',
+    desc: 'The recurring unit work — environmental charting, equipment checks, controls, cleaning — and the reminders raised for whoever is on duty.',
+    tabs: ['Unit Activities'] },
   { key: 'personnel.reports', module: 'personnel', label: 'Personnel reports',
     desc: 'Personnel registers and summaries for management.', tabs: ['Reports'] },
 
@@ -292,6 +295,22 @@ export const FEATURES: FeatureDef[] = [
   { key: 'notifications.rules', module: 'notifications', label: 'Alert rules', sensitive: true,
     desc: 'Configuring which alerts are raised, to whom, and running a scan.',
     tabs: ['Notification Rules', 'Generate Alerts'] },
+  { key: 'notifications.sounds', module: 'notifications', label: 'Reminder sounds', personal: true,
+    desc: 'The chimes played on the desktop and mobile apps, and each person\'s own choice of them.',
+    tabs: ['Reminder Sounds'] },
+
+  // ── System Audit ────────────────────────────────────────────────────────
+  // Split three ways because they are three different jobs: reading the trail,
+  // working the flags, and running the checks that produce them.
+  { key: 'system_audit.trail', module: 'system_audit', label: 'Live audit trail', sensitive: true,
+    desc: 'The real-time record of every action taken in the system, by whom and from where.',
+    tabs: ['Live Trail'] },
+  { key: 'system_audit.flags', module: 'system_audit', label: 'Flags & omissions', sensitive: true,
+    desc: 'Everything that was due and not done, and every inconsistency found. Each flag opens the record behind it.',
+    tabs: ['Overview', 'Flags', 'Not Done', 'Schedules'] },
+  { key: 'system_audit.checks', module: 'system_audit', label: 'Audit checks & scans', sensitive: true,
+    desc: 'Running the audit scan and reviewing what each check covers.',
+    tabs: ['Checks'] },
 
   // ── Records, Reports & Evidence ─────────────────────────────────────────
   { key: 'records_reports.generate', module: 'records_reports', label: 'Reports',

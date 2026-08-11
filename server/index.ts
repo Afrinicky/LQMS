@@ -31,6 +31,8 @@ import { centralArchivesRoutes } from './routes/archives.js';
 import { organisationExtendedRoutes } from './routes/organisationExtended.js';
 import { personnelRoutes } from './routes/personnel.js';
 import { schedulingRoutes } from './routes/scheduling.js';
+import { dutyActivityRoutes } from './routes/dutyActivities.js';
+import { systemAuditRoutes } from './routes/systemAudit.js';
 import { scannedRecordsRoutes } from './routes/scannedRecords.js';
 import { assessmentsRoutes } from './routes/assessments.js';
 import { meetingsRoutes } from './routes/meetings.js';
@@ -125,6 +127,10 @@ export function createApiServer() {
   app.use('/api/dennis', dennisRoutes());
   app.use('/api/personnel', personnelRoutes());
   app.use('/api/scheduling', schedulingRoutes());
+  // Duty-driven unit activities, the reminders they raise and the sound catalogue.
+  app.use('/api/duty', dutyActivityRoutes());
+  // The system's audit of itself: the live trail, and everything not done.
+  app.use('/api/system-audit', systemAuditRoutes());
   app.use('/api/scanned-records', scannedRecordsRoutes());
   app.use('/api/assessments', assessmentsRoutes());
   app.use('/api/meetings', meetingsRoutes());
@@ -214,5 +220,29 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       setTimeout(tick, 20000);
       setInterval(tick, 15 * 60 * 1000);
     }).catch(e => console.error('Alert scheduler failed to start', e));
+    // Duty & activity scheduler. Three jobs on one timer:
+    //   * carry a month's schedules forward when nobody prepared them, and
+    //     remind the managers and unit heads who owe the next month's
+    //   * raise the coming fortnight's activity occurrences and re-resolve who
+    //     they belong to, so a mid-month roster change lands immediately
+    //   * close the window on anything never done, and put today's work on the
+    //     right dashboards with a sound
+    // It runs shortly after boot so a host switched on at the start of the shift
+    // has the day's lists ready, then every ten minutes. Every step is
+    // idempotent, so a restart mid-morning costs nothing.
+    Promise.all([
+      import('./services/scheduleRollover.js'),
+      import('./services/activityService.js'),
+      import('./services/systemAuditService.js'),
+    ]).then(([schedules, activities, systemAudit]) => {
+      const tick = () => {
+        const db = getDb();
+        try { schedules.runScheduleTick(db); } catch (e) { console.error('Schedule tick failed', e); }
+        try { activities.runActivityTick(db); } catch (e) { console.error('Activity tick failed', e); }
+        try { systemAudit.throttledAuditScan(db); } catch (e) { console.error('System audit scan failed', e); }
+      };
+      setTimeout(tick, 12000);
+      setInterval(tick, 10 * 60 * 1000);
+    }).catch(e => console.error('Duty & activity scheduler failed to start', e));
   });
 }

@@ -5,12 +5,14 @@ import SettingsLayout from './layouts/SettingsLayout';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { ModuleProvider } from './hooks/useModules';
 import { PermissionProvider, usePermissions } from './hooks/usePermissions';
+import { DutyReminderProvider } from './hooks/useDutyReminders';
 import { RequirePermission, RequireAnyPermission } from './components/RequirePermission';
 import { SETTINGS_TABS, visibleSettingsTabs } from './constants/settingsAccess';
 import { API_BASE, getSetupStatus } from './services/api';
 import { LoginPage, SetupPage } from './pages/AuthPages';
 import { Dashboard, Home, ModulePage } from './pages/CorePages';
 import { ActionTracker, DocumentImport, EvidenceUpload, MyLaboratory, PeopleAccess, SectionConfig, SystemSettings, RosterSettings } from './pages/SettingsPages';
+import { ActivitySettingsPage } from './pages/ActivitySettingsPage';
 import { ComplaintsPage, RisksPage, QmsActionTracker } from './pages/QMSPages';
 import { NcCapaPage } from './pages/NcCapaPages';
 import { MODULES } from '../shared/constants/modules';
@@ -43,6 +45,7 @@ const VerificationValidationPage = lazy(() => import('./pages/Phase4Pages').then
 const MeasurementUncertaintyPage = lazy(() => import('./pages/Phase4Pages').then(m => ({ default: m.MeasurementUncertaintyPage })));
 const BloodBankHandoverPage = lazy(() => import('./pages/BloodBankHandoverPage').then(m => ({ default: m.BloodBankHandoverPage })));
 const MonthlyReportsPage = lazy(() => import('./pages/MonthlyReportsPage').then(m => ({ default: m.MonthlyReportsPage })));
+const SystemAuditPage = lazy(() => import('./pages/SystemAuditPage').then(m => ({ default: m.SystemAuditPage })));
 
 const ModuleFallback = () => <div className="card">Loading module…</div>;
 
@@ -180,7 +183,7 @@ function AppRoutes() {
   return <Routes>
     <Route path="/setup" element={<SetupPage/>}/>
     <Route path="/login" element={<LoginPage/>}/>
-    <Route element={<ModuleProvider><PermissionProvider><AppLayout/></PermissionProvider></ModuleProvider>}>
+    <Route element={<ModuleProvider><PermissionProvider><DutyReminderProvider><AppLayout/></DutyReminderProvider></PermissionProvider></ModuleProvider>}>
       <Route index element={<Navigate to="/home"/>}/>
       <Route path="/home" element={<Home/>}/>
       <Route path="/dashboard" element={<RequirePermission module="dashboard" redirect="/home"><Dashboard/></RequirePermission>}/>
@@ -216,6 +219,9 @@ function AppRoutes() {
       <Route path="/poct" element={<RequirePermission module="poct"><Suspense fallback={<ModuleFallback/>}><POCTPage/></Suspense></RequirePermission>}/>
       <Route path="/notifications" element={<RequirePermission module="notifications"><Suspense fallback={<ModuleFallback/>}><NotificationsPage/></Suspense></RequirePermission>}/>
       <Route path="/records-reports" element={<RequirePermission module="records_reports"><Suspense fallback={<ModuleFallback/>}><RecordsReportsPage/></Suspense></RequirePermission>}/>
+      {/* System Audit — the live trail plus everything due and not done. Each
+          sub-tab is gated on its own feature inside the page. */}
+      <Route path="/system-audit" element={<RequirePermission module="system_audit"><Suspense fallback={<ModuleFallback/>}><SystemAuditPage/></Suspense></RequirePermission>}/>
       <Route path="/process-management" element={<RequirePermission module="process_management"><Suspense fallback={<ModuleFallback/>}><ProcessManagementPage/></Suspense></RequirePermission>}/>
       <Route path="/information-management" element={<RequirePermission module="information_management"><Suspense fallback={<ModuleFallback/>}><InformationManagementPage/></Suspense></RequirePermission>}/>
       {placeholders.map(m => <Route key={m.key} path={m.path.slice(1)} element={<ModulePage moduleKey={m.key} title={m.label} placeholder/>}/>)}
@@ -230,6 +236,7 @@ function AppRoutes() {
         <Route path="people" element={<RequirePermission module="settings" action="edit"><PeopleAccess/></RequirePermission>}/>
         <Route path="sections" element={<RequirePermission module="settings" action="edit"><SectionConfig/></RequirePermission>}/>
         <Route path="scheduling" element={<RequirePermission module="personnel" action="edit"><RosterSettings/></RequirePermission>}/>
+        <Route path="activities" element={<RequirePermission module="personnel.activities" action="view"><ActivitySettingsPage/></RequirePermission>}/>
         <Route path="system" element={<RequirePermission module="settings" action="edit"><SystemSettings/></RequirePermission>}/>
         <Route path="document-import" element={<RequirePermission module="documents" action="create"><DocumentImport/></RequirePermission>}/>
         <Route path="evidence" element={<RequirePermission module="records_reports" action="create"><EvidenceUpload/></RequirePermission>}/>
