@@ -8,6 +8,17 @@ export type SystemConnectivity = {
   lanExposed: boolean;
   lanReady: boolean;
   lanUrls: string[];
+  /** Whether anybody other than this computer can open the laboratory. */
+  reach: {
+    reachable: boolean;
+    route: 'tailscale' | 'lan' | 'none';
+    advice: string | null;
+    url: string | null;
+    tailscale: {
+      installed: boolean; running: boolean; serving: boolean;
+      dnsName: string | null; ip: string | null; error: string | null;
+    };
+  };
   database: { driver: 'sqlite' | 'postgres' };
   sync: { enabled: boolean; status: 'planned' | 'active' | 'disabled' };
   generatedAt: string;

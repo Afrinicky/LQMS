@@ -39,7 +39,14 @@ Default host API:
 http://127.0.0.1:4317/api
 ```
 
-By default the API binds to `127.0.0.1` (private to the host PC). To serve desktop and mobile clients over the LAN, start the host with `SECH_LIMS_API_HOST=0.0.0.0` and `SECH_LIMS_MODE=hybrid`, then allow the port through the firewall. Only the host process accesses SQLite directly; clients use the REST API. See the offline-first hybrid architecture below.
+By default the API binds to `127.0.0.1` — private to the host PC, so a browser on any other machine will simply time out. **Settings → System → Connectivity & Mode** says plainly whether anybody else can open the laboratory, and what to do when they cannot.
+
+There are two ways to let other devices in:
+
+- **Publish it over Tailscale (recommended).** Run `tailscale serve --bg 4317` once on the host. Tailscale proxies from your tailnet to loopback on the same machine, so the API stays bound to `127.0.0.1`, no firewall rule is needed, and no port is opened to the LAN. The setting is stored in your tailnet and survives reboots.
+- **Bind to the LAN.** Start the host with `SECH_LIMS_API_HOST=0.0.0.0` and `SECH_LIMS_MODE=hybrid`, then allow the port through the firewall. This exposes the laboratory to every device on the network.
+
+Only the host process accesses SQLite directly; clients use the REST API. See the offline-first hybrid architecture below.
 
 ## First-time setup
 
