@@ -14,6 +14,7 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import { MODULES, PERMISSION_ACTIONS, TECHNICAL_AUTHORIZATION_LEVELS } from '../../shared/constants/modules';
 import { AUTOMATION_LEVELS, AUTOMATION_LABELS, AUTOMATION_HINTS, automationUsesEquipment } from '../../shared/constants/tests';
+import XlsxToolbar from '../components/XlsxToolbar';
 import { usePermissions } from '../hooks/usePermissions';
 import { AccessControl } from './AccessControl';
 import UserAccountActions from '../components/UserAccountActions';
@@ -1108,6 +1109,15 @@ function SectionTestMenu({ detail, sectionId, call }: {
 
   return <>
     <p className="hint">Each unit has its own test menu. Enter a <strong>single test</strong> or a <strong>panel/profile</strong> (e.g. Renal Function → Urea, Creatinine) whose component tests are worked with together. Link an analyser only where one is used — manual and semi-automated tests need none. Tests appear in <Link to="/process-management">Process Management</Link> scoped to this unit.</p>
+
+    <XlsxToolbar
+      module="settings"
+      exportName="Test_Menu.xlsx"
+      exportPath={`/section-config/sections/${sectionId}/tests/export`}
+      templatePath={`/section-config/sections/${sectionId}/tests/template`}
+      importPath={`/section-config/sections/${sectionId}/tests/import`}
+      onImported={() => { void call(`/section-config/sections/${sectionId}`, { method: 'GET' }); }}
+    />
 
     <div className="tabs inline" style={{ marginBottom: 10 }}>
       <button type="button" className={kind === 'single' ? 'active' : ''} onClick={() => setKind('single')}>Single test</button>

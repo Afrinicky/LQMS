@@ -19,6 +19,7 @@ import { writeBackupZip, isSafeBackupName, createBackup } from '../services/back
 import { safeStoredFilename } from '../utils/safeFilename.js';
 import { parseIntNullable } from './routeHelpers.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
+import { buildWorkbook, sendWorkbook, readSheet, cell, numCell } from '../utils/xlsxRegister.js';
 import * as tailscale from '../services/tailscale.js';
 import * as XLSX from 'xlsx';
 
@@ -2032,6 +2033,100 @@ export function commonRoutes() {
     tx();
     audit(req, { action: 'edit', entity: 'lab_test_catalog', entityId: null, newValue: { bulkApply: true, count: updated, fields: f } });
     res.json({ ok: true, updated });
+  });
+
+  // --- Test menu — Excel export / template / import (scoped to one unit) ---
+  // One row per test. A row's Panel column names the profile it belongs to; a
+  // blank Panel is a standalone single test. Panels are created from the
+  // distinct Panel names so a whole menu — singles and grouped profiles alike —
+  // imports from one flat sheet, the same shape it exports as.
+  const TEST_MENU_HEADERS = ['Panel', 'Test name', 'Sample type', 'Automation', 'Analyser', 'Method', 'TAT (min)', 'Status'] as const;
+  const testMenuUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+
+  function testMenuWorkbook(sectionId: number, withData: boolean): Buffer {
+    const db = getDb();
+    const rows: unknown[][] = [];
+    if (withData) {
+      const tests = db.prepare(`SELECT t.*, e.name AS analyser, p.test_name AS panel_name
+        FROM lab_test_catalog t
+        LEFT JOIN equipment_items e ON e.id = t.equipment_id
+        LEFT JOIN lab_test_catalog p ON p.id = t.parent_test_id
+        WHERE t.section_id = ? ORDER BY COALESCE(t.parent_test_id, t.id), t.is_panel DESC, t.test_name`).all(sectionId) as any[];
+      for (const t of tests) {
+        if (t.is_panel) continue; // a panel is represented by its components' Panel column
+        rows.push([t.panel_name ?? '', t.test_name, t.sample_type ?? '', t.automation ?? '', t.analyser ?? '', t.method_name ?? '', t.tat_target_minutes ?? '', t.status ?? 'active']);
+      }
+    }
+    return buildWorkbook(TEST_MENU_HEADERS, rows, 'TEST MENU');
+  }
+  router.get('/section-config/sections/:id/tests/template', requirePermission('settings', 'view'), (req, res) => sendWorkbook(res, testMenuWorkbook(Number(req.params.id), false), 'Test_Menu_Template.xlsx'));
+  router.get('/section-config/sections/:id/tests/export', requirePermission('settings', 'export'), (req, res) => sendWorkbook(res, testMenuWorkbook(Number(req.params.id), true), 'Test_Menu.xlsx'));
+  router.post('/section-config/sections/:id/tests/import', requirePermission('settings', 'create'), testMenuUpload.single('file'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the Test Menu .xlsx file.' });
+    const db = getDb();
+    const section = db.prepare('SELECT department_id FROM sections WHERE id = ?').get(req.params.id) as { department_id: number | null } | undefined;
+    if (!section) return res.status(404).json({ error: 'Unit not found' });
+    const sectionId = Number(req.params.id);
+    try {
+      const rows = readSheet(req.file.buffer, 'TEST');
+      // The unit's diagnostic analysers, matched to the Analyser column by name.
+      const analyserByName = new Map<string, number>();
+      for (const e of db.prepare("SELECT id, name FROM equipment_items WHERE section_id = ? AND COALESCE(equipment_class, 'laboratory') != 'support'").all(sectionId) as any[]) {
+        analyserByName.set(String(e.name).trim().toLowerCase(), e.id);
+      }
+      const errors: string[] = []; let created = 0, updated = 0, panelsCreated = 0;
+      // Panels named in the sheet, created once and reused across their rows.
+      const panelId = new Map<string, number>();
+      const ensurePanel = (name: string): number => {
+        const key = name.toLowerCase();
+        const cached = panelId.get(key);
+        if (cached) return cached;
+        const existing = db.prepare('SELECT id FROM lab_test_catalog WHERE section_id = ? AND is_panel = 1 AND test_name = ? COLLATE NOCASE').get(sectionId, name) as { id: number } | undefined;
+        if (existing) { panelId.set(key, existing.id); return existing.id; }
+        const code = generateRecordNumber(db, 'lab_test_catalog', 'TEST', undefined, 'test_code');
+        const r = db.prepare('INSERT INTO lab_test_catalog (test_code, test_name, department_id, section_id, is_panel, status, created_by) VALUES (?, ?, ?, ?, 1, ?, ?)')
+          .run(code, name, section.department_id, sectionId, 'active', req.user!.id);
+        panelsCreated++; const id = Number(r.lastInsertRowid); panelId.set(key, id); return id;
+      };
+      const AUTO = ['manual', 'semi_automated', 'automated'];
+      const tx = db.transaction(() => {
+        rows.forEach((r, idx) => {
+          const rowNo = idx + 2;
+          const name = cell(r, 'Test name');
+          if (!name) { errors.push(`Row ${rowNo}: Test name is required.`); return; }
+          const panelName = cell(r, 'Panel');
+          const parent = panelName ? ensurePanel(panelName) : null;
+          let automation = String(cell(r, 'Automation') ?? '').trim().toLowerCase().replace(/[ -]/g, '_');
+          if (automation && !AUTO.includes(automation)) { errors.push(`Row ${rowNo}: Automation must be one of ${AUTO.join(', ')}.`); return; }
+          automation = automation || '';
+          const usesEq = automation === 'automated' || automation === 'semi_automated';
+          let equipmentId: number | null = null;
+          const analyser = cell(r, 'Analyser');
+          if (analyser && usesEq) {
+            equipmentId = analyserByName.get(analyser.trim().toLowerCase()) ?? null;
+            if (equipmentId === null) errors.push(`Row ${rowNo}: analyser "${analyser}" is not diagnostic equipment in this unit — left unlinked.`);
+          }
+          const status = /^(inactive|archived|under_review)$/i.test(String(cell(r, 'Status') ?? '')) ? String(cell(r, 'Status')).toLowerCase() : 'active';
+          try {
+            const existing = db.prepare('SELECT id FROM lab_test_catalog WHERE section_id = ? AND is_panel = 0 AND test_name = ? COLLATE NOCASE AND (parent_test_id IS ? OR parent_test_id = ?)')
+              .get(sectionId, name, parent, parent) as { id: number } | undefined;
+            if (existing) {
+              db.prepare('UPDATE lab_test_catalog SET sample_type = ?, method_name = ?, automation = ?, equipment_id = ?, tat_target_minutes = ?, parent_test_id = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+                .run(cell(r, 'Sample type'), cell(r, 'Method'), automation || null, equipmentId, numCell(r, 'TAT (min)'), parent, status, existing.id);
+              updated++;
+            } else {
+              const code = generateRecordNumber(db, 'lab_test_catalog', 'TEST', undefined, 'test_code');
+              db.prepare('INSERT INTO lab_test_catalog (test_code, test_name, department_id, section_id, sample_type, method_name, equipment_id, tat_target_minutes, is_panel, parent_test_id, automation, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)')
+                .run(code, name, section.department_id, sectionId, cell(r, 'Sample type'), cell(r, 'Method'), equipmentId, numCell(r, 'TAT (min)'), parent, automation || null, status, req.user!.id);
+              created++;
+            }
+          } catch (e) { errors.push(`Row ${rowNo}: ${(e as Error).message}`); }
+        });
+      });
+      tx();
+      audit(req, { action: 'import', entity: 'lab_test_catalog', entityId: null, newValue: { sectionId, created, updated, panelsCreated, errors: errors.length } });
+      res.json({ totalRows: rows.length, created, updated, panelsCreated, errors });
+    } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
 
   router.post('/section-config/tests/:testId/toggle', requirePermission('settings', 'edit'), (req, res) => {
