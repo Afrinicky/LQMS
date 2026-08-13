@@ -1713,6 +1713,16 @@ li.focus-flash, div.focus-flash { background-color: var(--accent-soft); box-shad
 .section-detail .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .section-detail .panel-head > div { display: flex; gap: 8px; }
 
+/* Test menu — segmented add toggle, panel builder, and the menu table */
+.section-detail .segmented button { padding: 6px 16px; font-size: 13px; box-shadow: none; }
+.section-detail .segmented button.secondary { background: transparent; box-shadow: none; }
+.section-detail .row-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.section-detail .row-actions button { padding: 4px 10px; font-size: 12px; }
+.section-detail tr.muted-row td:not(.row-actions) { opacity: .55; }
+.section-detail tr.panel-row td { border-top: 2px solid var(--border, rgba(127,127,127,.18)); }
+.section-detail tr.editing-row td { background: var(--accent-soft, rgba(80,140,255,.08)); }
+.section-detail .apply-bar input, .section-detail .apply-bar select { height: 30px; }
+
 /* ============================================================
    Positions — inline edit, authorization grid extras
    ============================================================ */
