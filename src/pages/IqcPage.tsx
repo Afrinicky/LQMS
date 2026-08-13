@@ -20,6 +20,7 @@ import {
   IQC_RULE_PROFILE_LABELS, IQC_RULE_PROFILE_HINTS, PROFILES_FOR_TYPE,
   QUALITATIVE_SCALES, QUALITATIVE_LABELS, ANALYTE_TEMPLATES,
   AST_INTERPRETATIONS, AST_INTERPRETATION_LABELS, AST_METHODS, AST_METHOD_LABELS,
+  CS_SCOPES, CS_SCOPE_LABELS, CS_SCOPE_HINTS, csNeedsOrganism, csNeedsPanel,
   RULE_LABELS, RULE_MEANING, isRejection,
   type IqcSource, type IqcControlType, type IqcRuleProfile, type QualitativeOutcome,
 } from '../../shared/constants/iqc';
@@ -52,7 +53,7 @@ type Material = {
   qc_frequency: string; rule_profile: IqcRuleProfile;
   prepared_by_name: string | null; preparation_date: string | null; preparation_method: string | null;
   base_material: string | null; validation_summary: string | null; open_vial_expiry: string | null;
-  expected_organism: string | null;
+  expected_organism: string | null; cs_scope: string | null;
   analyte_count: number; run_count: number; last_run_date: string | null;
 };
 
@@ -355,6 +356,7 @@ function ControlDetail({ material, analytes, canEdit, onChanged, sections, staff
         <div><dt>Rule set</dt><dd>{IQC_RULE_PROFILE_LABELS[material.rule_profile]}</dd></div>
         <div><dt>Frequency</dt><dd>{IQC_FREQUENCY_LABELS[material.qc_frequency as never] ?? material.qc_frequency}</dd></div>
         {material.equipment_name && <div><dt>Instrument</dt><dd>{material.equipment_name}</dd></div>}
+        {material.control_type === 'culture_sensitivity' && <div><dt>Confirms</dt><dd>{CS_SCOPE_LABELS[(material.cs_scope ?? 'both') as never] ?? 'Identification & susceptibility'}</dd></div>}
         {material.control_type === 'culture_sensitivity' && material.expected_organism && <div><dt>Reference strain</dt><dd>{material.expected_organism}</dd></div>}
         {material.section_name && <div><dt>Section</dt><dd>{material.section_name}</dd></div>}
         {material.source === 'commercial' && material.manufacturer && <div><dt>Manufacturer</dt><dd>{material.manufacturer}</dd></div>}
@@ -374,7 +376,9 @@ function ControlDetail({ material, analytes, canEdit, onChanged, sections, staff
         </div>
       )}
 
-      <table className="data-table compact">
+      {material.control_type === 'culture_sensitivity' && material.cs_scope === 'identification'
+        ? <p className="hint">Identification-only control — passes when the reference strain is identified as <strong>{material.expected_organism || 'the expected organism'}</strong>. No antimicrobial panel.</p>
+        : <table className="data-table compact">
         <thead><tr>
           <th>{material.control_type === 'culture_sensitivity' ? 'Antimicrobial agent' : 'Analyte'}</th>
           {material.control_type === 'culture_sensitivity'
@@ -410,7 +414,7 @@ function ControlDetail({ material, analytes, canEdit, onChanged, sections, staff
           ))}
           {analytes.length === 0 && <tr><td colSpan={6} className="muted">No analytes defined. This control cannot be run until it measures something.</td></tr>}
         </tbody>
-      </table>
+      </table>}
 
       {canEdit
         ? <ControlActions material={material} isAdmin={isAdmin} onEdit={() => setEditing(true)}
@@ -535,6 +539,9 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
 }) {
   const qualitative = material.control_type === 'qualitative';
   const isCs = material.control_type === 'culture_sensitivity';
+  const [csScope, setCsScope] = useState(material.cs_scope ?? 'both');
+  const wantsOrganism = isCs && csNeedsOrganism(csScope);
+  const wantsPanel = isCs && csNeedsPanel(csScope);
   const [form, setForm] = useState({
     materialName: material.material_name, testName: material.test_name, lotNumber: material.lot_number,
     levelLabel: material.level_label ?? '', manufacturer: material.manufacturer ?? '',
@@ -577,19 +584,20 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
   async function submit(e: FormEvent) {
     e.preventDefault();
     const kept = rows.filter(r => r.analyte.trim());
-    if (kept.length === 0) return onError('A control has to measure something — keep at least one analyte.');
+    if (kept.length === 0 && !(isCs && !wantsPanel)) return onError('A control has to measure something — keep at least one analyte.');
     if (qualitative && kept.some(r => !r.expectedResult)) {
       return onError('Every qualitative analyte needs the result the control is expected to give.');
     }
     if (isCs) {
-      if (!form.expectedOrganism.trim()) return onError('Name the reference strain this control is expected to identify.');
-      if (kept.some(r => !r.expectedInterpretation)) return onError('Every antimicrobial agent needs its expected category (S, SDD, I, R or NS).');
+      if (wantsOrganism && !form.expectedOrganism.trim()) return onError('Name the reference strain this control is expected to identify.');
+      if (wantsPanel && kept.some(r => !r.expectedInterpretation)) return onError('Every antimicrobial agent needs its expected category (S, SDD, I, R or NS).');
     }
+    const payloadAnalytes = isCs && !wantsPanel ? [] : kept;
     setBusy(true);
     try {
       const r = await api<{ targetsMoved: string[]; affectedRuns: number; analyteChanges: Record<string, number> }>(
         `/iqc/materials/${material.id}`,
-        { method: 'PUT', body: JSON.stringify({ ...form, analytes: kept, reason }) });
+        { method: 'PUT', body: JSON.stringify({ ...form, csScope, analytes: payloadAnalytes, reason }) });
       const notes = [
         r.analyteChanges?.added ? `${r.analyteChanges.added} analyte(s) added` : null,
         r.analyteChanges?.retired ? `${r.analyteChanges.retired} retired` : null,
@@ -629,7 +637,10 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
         <label>Rule set<select value={form.ruleProfile} onChange={e => set('ruleProfile', e.target.value)}>
           {PROFILES_FOR_TYPE[material.control_type].map(p => <option key={p} value={p}>{IQC_RULE_PROFILE_LABELS[p]}</option>)}
         </select></label>
-        {isCs && <label>Expected organism (reference strain)<input value={form.expectedOrganism} onChange={e => set('expectedOrganism', e.target.value)} placeholder="e.g. E. coli ATCC 25922" required /></label>}
+        {isCs && <label>This control confirms<select value={csScope} onChange={e => setCsScope(e.target.value)}>
+          {CS_SCOPES.map(s => <option key={s} value={s}>{CS_SCOPE_LABELS[s]}</option>)}
+        </select></label>}
+        {wantsOrganism && <label>Expected organism (reference strain)<input value={form.expectedOrganism} onChange={e => set('expectedOrganism', e.target.value)} placeholder="e.g. E. coli ATCC 25922" required /></label>}
       </div>
 
       {material.source === 'in_house' && (
@@ -648,6 +659,7 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
         </fieldset>
       )}
 
+      {(!isCs || wantsPanel) && <>
       <table className="data-table compact iqc-entry">
         <thead><tr>
           <th>{isCs ? 'Antimicrobial agent' : 'Analyte'}</th>
@@ -706,6 +718,8 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
         An analyte removed here stops being measured. If it already has readings it is retired rather than deleted, so its
         chart and history survive.
       </p>
+      </>}
+      {isCs && !wantsPanel && <p className="hint">Identification-only — no antimicrobial panel. This control passes when the reference strain is identified as the expected organism.</p>}
 
       {needsReason && (
         <div className="iqc-note warn">
@@ -765,12 +779,14 @@ function DefineControl({ sections, staff, equipment, onSaved, onError }: {
     expiryDate: '', openVialExpiry: '', storageCondition: '', sectionId: '', equipmentId: '',
     qcFrequency: 'each_run', ruleProfile: 'westgard_standard' as IqcRuleProfile,
     preparedByStaffId: '', preparationDate: '', preparationMethod: '', baseMaterial: '',
-    validationSummary: '', stabilityPeriod: '', instructions: '', expectedOrganism: '',
+    validationSummary: '', stabilityPeriod: '', instructions: '', expectedOrganism: '', csScope: 'both',
   });
   const [rows, setRows] = useState<AnalyteDraft[]>([emptyAnalyte()]);
   const [scale, setScale] = useState(QUALITATIVE_SCALES[0].key);
   const [busy, setBusy] = useState(false);
   const isCs = controlType === 'culture_sensitivity';
+  const wantsOrganism = isCs && csNeedsOrganism(form.csScope);
+  const wantsPanel = isCs && csNeedsPanel(form.csScope);
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
   const profiles = PROFILES_FOR_TYPE[controlType];
@@ -780,11 +796,12 @@ function DefineControl({ sections, staff, equipment, onSaved, onError }: {
     const t = ANALYTE_TEMPLATES.find(x => x.key === key);
     if (!t) return;
     setControlType(t.controlType);
+    if (t.csScope) set('csScope', t.csScope);
     if (t.expectedOrganism) set('expectedOrganism', t.expectedOrganism);
-    setRows(t.analytes.map(a => ({
+    setRows(t.analytes.length ? t.analytes.map(a => ({
       ...emptyAnalyte(), analyte: a.analyte, unit: a.unit ?? '',
       decimalPlaces: String(a.decimalPlaces ?? 2), astMethod: a.astMethod ?? '',
-    })));
+    })) : [emptyAnalyte()]);
   };
 
   const setRow = (i: number, k: keyof AnalyteDraft, v: string) =>
@@ -793,19 +810,22 @@ function DefineControl({ sections, staff, equipment, onSaved, onError }: {
   async function submit(e: FormEvent) {
     e.preventDefault();
     const analytes = rows.filter(r => r.analyte.trim());
-    if (analytes.length === 0) {
+    // An identification-only C&S control legitimately measures no agents.
+    if (analytes.length === 0 && !(isCs && !wantsPanel)) {
       return onError(isCs ? 'Add at least one antimicrobial agent to the panel.' : 'Add at least one analyte — what does this control measure?');
     }
     if (controlType === 'qualitative' && analytes.some(a => !a.expectedResult)) {
       return onError('Every qualitative analyte needs the result the control is expected to give.');
     }
     if (isCs) {
-      if (!form.expectedOrganism.trim()) return onError('Name the reference strain this control is expected to identify (e.g. E. coli ATCC 25922).');
-      if (analytes.some(a => !a.expectedInterpretation)) return onError('Every antimicrobial agent needs the category (S, SDD, I, R or NS) the reference strain is expected to give.');
+      if (wantsOrganism && !form.expectedOrganism.trim()) return onError('Name the reference strain this control is expected to identify (e.g. E. coli ATCC 25922).');
+      if (wantsPanel && analytes.some(a => !a.expectedInterpretation)) return onError('Every antimicrobial agent needs the category (S, SDD, I, R or NS) the reference strain is expected to give.');
     }
+    // For susceptibility-only, the organism is taken as known and not stored.
+    const payloadAnalytes = isCs && !wantsPanel ? [] : analytes;
     setBusy(true);
     try {
-      await api('/iqc/materials', { method: 'POST', body: JSON.stringify({ ...form, source, controlType, analytes }) });
+      await api('/iqc/materials', { method: 'POST', body: JSON.stringify({ ...form, source, controlType, analytes: payloadAnalytes }) });
       await onSaved();
       setForm(f => ({ ...f, materialName: '', lotNumber: '', levelLabel: '', expectedOrganism: '' }));
       setRows([emptyAnalyte()]);
@@ -901,14 +921,17 @@ function DefineControl({ sections, staff, equipment, onSaved, onError }: {
 
         {isCs && (
           <>
-            <label className="stack">Expected organism (reference strain) <em>(required)</em>
-              <input value={form.expectedOrganism} onChange={e => set('expectedOrganism', e.target.value)}
-                placeholder="e.g. Escherichia coli ATCC 25922" required />
-            </label>
+            <div className="form-grid">
+              <label>This control confirms
+                <select value={form.csScope} onChange={e => set('csScope', e.target.value)}>
+                  {CS_SCOPES.map(s => <option key={s} value={s}>{CS_SCOPE_LABELS[s]}</option>)}
+                </select>
+              </label>
+              {wantsOrganism && <label>Expected organism (reference strain)<input value={form.expectedOrganism} onChange={e => set('expectedOrganism', e.target.value)} placeholder="e.g. Escherichia coli ATCC 25922" required /></label>}
+            </div>
             <p className="iqc-note">
-              QC is run on a reference strain of known identity and known susceptibility. The strain must be identified
-              as the organism above, and each agent must give the expected category below. Report categories only —
-              S, SDD, I, R or NS (CLSI M100) — not zone diameters or MIC values.
+              {CS_SCOPE_HINTS[form.csScope as never]} Report categories only — S, SDD, I, R or NS (CLSI M100) —
+              not zone diameters or MIC values.
             </p>
           </>
         )}
@@ -921,6 +944,7 @@ function DefineControl({ sections, staff, equipment, onSaved, onError }: {
           </label>
         )}
 
+        {(!isCs || wantsPanel) && <>
         <table className="data-table compact iqc-analyte-table">
           <thead><tr>
             <th>{isCs ? 'Antimicrobial agent' : 'Analyte'}</th>
@@ -973,6 +997,8 @@ function DefineControl({ sections, staff, equipment, onSaved, onError }: {
           </tbody>
         </table>
         <button type="button" className="secondary" onClick={() => setRows(rs => [...rs, emptyAnalyte()])}><Plus size={13} /> {isCs ? 'Add agent' : 'Add analyte'}</button>
+        </>}
+        {isCs && !wantsPanel && <p className="hint">Identification-only — this control has no antimicrobial panel. It passes when the reference strain is identified as the expected organism.</p>}
         {controlType === 'quantitative' && (
           <p className="hint">
             Leave the mean and SD blank if you are establishing them from your own runs — the acceptable range still
@@ -1043,8 +1069,12 @@ function RunControl({ materials, equipment, staff, onRecorded, onError }: {
           : { analyteId: a.id, value: Number(raw) };
       })
       .filter(Boolean);
-    if (readings.length === 0) return onError('Enter at least one reading.');
-    if (isCs && !meta.observedOrganism.trim()) return onError('Record the organism the reference strain identified as.');
+    if (readings.length === 0 && !(isCs && meta.observedOrganism.trim())) {
+      return onError(isCs ? 'Record the organism identified and/or at least one susceptibility category.' : 'Enter at least one reading.');
+    }
+    if (isCs && csNeedsOrganism(material.cs_scope) && !meta.observedOrganism.trim()) {
+      return onError('Record the organism the reference strain identified as.');
+    }
 
     setBusy(true);
     try {
@@ -1121,13 +1151,16 @@ function RunControl({ materials, equipment, staff, onRecorded, onError }: {
         </div>
       )}
 
-      {material && material.control_type === 'culture_sensitivity' && (
+      {material && material.control_type === 'culture_sensitivity' && csNeedsOrganism(material.cs_scope) && (
         <div className="form-grid" style={{ marginTop: 8 }}>
           <label>Organism identified
             <input value={meta.observedOrganism} onChange={e => setMeta(m => ({ ...m, observedOrganism: e.target.value }))}
               placeholder={material.expected_organism ? `Expected: ${material.expected_organism}` : 'Organism the strain identified as'} />
           </label>
         </div>
+      )}
+      {material && material.control_type === 'culture_sensitivity' && material.cs_scope === 'identification' && (
+        <p className="hint" style={{ marginTop: 6 }}>Identification-only control — record the organism above; there is no susceptibility panel.</p>
       )}
 
       {material && analytes.length > 0 && (
@@ -1176,14 +1209,14 @@ function RunControl({ materials, equipment, staff, onRecorded, onError }: {
         </table>
       )}
 
-      {material && analytes.length === 0 && (
+      {material && analytes.length === 0 && material.control_type !== 'culture_sensitivity' && (
         <p className="iqc-note bad">This control has no analytes defined, so it cannot be run. Edit its definition first.</p>
       )}
 
       <label className="stack">Comment<textarea value={meta.comment} onChange={e => setMeta(m => ({ ...m, comment: e.target.value }))} rows={2} /></label>
 
       <div className="form-actions">
-        <button type="submit" disabled={busy || !material || analytes.length === 0}>{busy ? 'Evaluating…' : 'Record run'}</button>
+        <button type="submit" disabled={busy || !material || (analytes.length === 0 && material?.control_type !== 'culture_sensitivity')}>{busy ? 'Evaluating…' : 'Record run'}</button>
       </div>
 
       {outcome && (

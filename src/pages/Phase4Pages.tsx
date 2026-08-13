@@ -7,6 +7,7 @@ import DisabledModule from '../components/DisabledModule';
 import ScannedRecordUpload from '../components/ScannedRecordUpload';
 import XlsxToolbar from '../components/XlsxToolbar';
 import PermissionTabs from '../components/PermissionTabs';
+import { AST_INTERPRETATIONS, AST_INTERPRETATION_LABELS } from '../../shared/constants/iqc';
 import type {
   Location, Section, Staff, EquipmentItem,
   IqcMaterial, IqcResult, IqcLotChange,
@@ -344,7 +345,7 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
   const [selectedEvent, setSelectedEvent] = useState<(EqaEvent & { results?: EqaResultRow[] }) | null>(null);
   const [programForm, setProgramForm] = useState({ programName: '', provider: '', testArea: '', sectionId: '', frequency: '', contact: '', isActive: true });
   const [eventForm, setEventForm] = useState({ eqaProgramId: '', cycleName: '', receivedDate: '', submissionDueDate: '', submittedDate: '', resultReceivedDate: '', performanceStatus: '', score: '', findings: '', responsibleStaffId: '' });
-  const [resultForm, setResultForm] = useState({ analyteOrTest: '', reportedResult: '', expectedResult: '', performance: '', comment: '' });
+  const [resultForm, setResultForm] = useState({ resultKind: 'general', analyteOrTest: '', antimicrobial: '', reportedResult: '', expectedResult: '', performance: '', comment: '' });
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
@@ -390,7 +391,7 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
     if (!selectedEvent) return;
     try {
       await api(`/eqa/events/${selectedEvent.id}/results`, { method: 'POST', body: JSON.stringify(resultForm) });
-      setResultForm({ analyteOrTest: '', reportedResult: '', expectedResult: '', performance: '', comment: '' });
+      setResultForm({ resultKind: 'general', analyteOrTest: '', antimicrobial: '', reportedResult: '', expectedResult: '', performance: '', comment: '' });
       await openEvent(selectedEvent.id);
     } catch (e) { setError((e as Error).message); }
   }
@@ -475,16 +476,44 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
 
     {tab === 'Results' && selectedEvent && <>
       <h3>{selectedEvent.program_name} – {selectedEvent.cycle_name}</h3>
-      <form className="form-grid" onSubmit={submitResultRow}>
-        <label>Analyte or test<input value={resultForm.analyteOrTest} onChange={e => setResultForm({ ...resultForm, analyteOrTest: e.target.value })} required /></label>
-        <label>Reported result<input value={resultForm.reportedResult} onChange={e => setResultForm({ ...resultForm, reportedResult: e.target.value })} /></label>
-        <label>Expected result<input value={resultForm.expectedResult} onChange={e => setResultForm({ ...resultForm, expectedResult: e.target.value })} /></label>
-        <label>Performance<input value={resultForm.performance} onChange={e => setResultForm({ ...resultForm, performance: e.target.value })} /></label>
-        <label>Comment<textarea value={resultForm.comment} onChange={e => setResultForm({ ...resultForm, comment: e.target.value })} /></label>
-        <button type="submit">Add result row</button>
-      </form>
-      <table className="data-table"><thead><tr><th>Analyte</th><th>Reported</th><th>Expected</th><th>Performance</th><th>Comment</th></tr></thead><tbody>
-        {(selectedEvent.results || []).map(r => <tr key={r.id}><td>{r.analyte_or_test}</td><td>{r.reported_result || '—'}</td><td>{r.expected_result || '—'}</td><td>{r.performance || '—'}</td><td>{r.comment || '—'}</td></tr>)}
+      {(() => {
+        const kind = resultForm.resultKind;
+        const isOrg = kind === 'organism_id';
+        const isSus = kind === 'susceptibility';
+        const catSelect = (val: string, on: (v: string) => void) => (
+          <select value={val} onChange={e => on(e.target.value)}>
+            <option value="">—</option>
+            {AST_INTERPRETATIONS.map(o => <option key={o} value={o}>{AST_INTERPRETATION_LABELS[o]}</option>)}
+          </select>
+        );
+        return (
+          <form className="form-grid" onSubmit={submitResultRow}>
+            <label>Result kind<select value={kind} onChange={e => setResultForm({ ...resultForm, resultKind: e.target.value })}>
+              <option value="general">Analyte / test (quantitative or qualitative)</option>
+              <option value="organism_id">Organism identification</option>
+              <option value="susceptibility">Susceptibility (antimicrobial)</option>
+            </select></label>
+            <label>{isSus ? 'Organism' : isOrg ? 'Specimen / sample' : 'Analyte or test'}<input value={resultForm.analyteOrTest} onChange={e => setResultForm({ ...resultForm, analyteOrTest: e.target.value })} required placeholder={isSus ? 'e.g. Escherichia coli' : isOrg ? 'e.g. Sample M-3' : 'e.g. Glucose'} /></label>
+            {isSus && <label>Antimicrobial<input value={resultForm.antimicrobial} onChange={e => setResultForm({ ...resultForm, antimicrobial: e.target.value })} required placeholder="e.g. Ciprofloxacin" /></label>}
+            <label>{isOrg ? 'Reported organism' : 'Reported result'}{isSus
+              ? catSelect(resultForm.reportedResult, v => setResultForm({ ...resultForm, reportedResult: v }))
+              : <input value={resultForm.reportedResult} onChange={e => setResultForm({ ...resultForm, reportedResult: e.target.value })} placeholder={isOrg ? 'organism your lab reported' : ''} />}</label>
+            <label>{isOrg ? 'Expected organism' : 'Expected result'}{isSus
+              ? catSelect(resultForm.expectedResult, v => setResultForm({ ...resultForm, expectedResult: v }))
+              : <input value={resultForm.expectedResult} onChange={e => setResultForm({ ...resultForm, expectedResult: e.target.value })} placeholder={isOrg ? "provider's expected organism" : ''} />}</label>
+            <label>Performance<input value={resultForm.performance} onChange={e => setResultForm({ ...resultForm, performance: e.target.value })} placeholder="e.g. satisfactory / concordant" /></label>
+            <label>Comment<textarea value={resultForm.comment} onChange={e => setResultForm({ ...resultForm, comment: e.target.value })} /></label>
+            <button type="submit">Add result row</button>
+          </form>
+        );
+      })()}
+      <table className="data-table"><thead><tr><th>Kind</th><th>Analyte / organism</th><th>Agent</th><th>Reported</th><th>Expected</th><th>Performance</th><th>Comment</th></tr></thead><tbody>
+        {(selectedEvent.results || []).map(r => {
+          const kindLabel = r.result_kind === 'organism_id' ? 'Organism ID' : r.result_kind === 'susceptibility' ? 'Susceptibility' : 'Analyte';
+          const fmt = (v?: string) => (r.result_kind === 'susceptibility' && v ? (AST_INTERPRETATION_LABELS[v as never] ?? v) : (v || '—'));
+          return <tr key={r.id}><td>{kindLabel}</td><td>{r.analyte_or_test}</td><td>{r.antimicrobial || '—'}</td><td>{fmt(r.reported_result)}</td><td>{fmt(r.expected_result)}</td><td>{r.performance || '—'}</td><td>{r.comment || '—'}</td></tr>;
+        })}
+        {(selectedEvent.results || []).length === 0 && <tr><td colSpan={7} className="muted">No result rows yet.</td></tr>}
       </tbody></table>
     </>}
     {tab === 'Results' && !selectedEvent && <p>Open an event from the EQA Events tab.</p>}

@@ -147,8 +147,8 @@ export function iqcRoutes() {
           acceptable_low, acceptable_high, equipment_id, inventory_batch_id, is_active, created_by, created_at,
           source, control_type, level_label, unit, qc_frequency, rule_profile,
           prepared_by_staff_id, preparation_date, preparation_method, base_material, validation_summary,
-          stability_period, open_vial_expiry, instructions, expected_organism)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          stability_period, open_vial_expiry, instructions, expected_organism, cs_scope)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(
           materialCode, req.body.materialName, parseIntNullable(req.body.departmentId), parseIntNullable(req.body.sectionId),
           req.body.testName,
@@ -165,6 +165,9 @@ export function iqcRoutes() {
           req.body.preparationMethod ?? null, req.body.baseMaterial ?? null, req.body.validationSummary ?? null,
           req.body.stabilityPeriod ?? null, req.body.openVialExpiry ?? null, req.body.instructions ?? null,
           controlType === 'culture_sensitivity' ? (req.body.expectedOrganism ?? null) : null,
+          controlType === 'culture_sensitivity'
+            ? (['identification', 'susceptibility', 'both'].includes(req.body.csScope) ? req.body.csScope : 'both')
+            : null,
         );
       materialId = Number(result.lastInsertRowid);
 
