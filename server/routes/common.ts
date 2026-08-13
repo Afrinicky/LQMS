@@ -2129,6 +2129,41 @@ export function commonRoutes() {
     } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
 
+  // Remove a test or a whole panel. A test that is already cited elsewhere —
+  // acceptance criteria, a reference interval, a recorded result — cannot be
+  // erased without rewriting history, so it is deactivated instead and the
+  // caller is told. Deleting a panel takes its components with it.
+  router.delete('/section-config/tests/:testId', requirePermission('settings', 'void_archive'), (req, res) => {
+    const db = getDb();
+    const t = db.prepare('SELECT id, is_panel, test_name FROM lab_test_catalog WHERE id = ?').get(req.params.testId) as { id: number; is_panel: number; test_name: string } | undefined;
+    if (!t) return res.status(404).json({ error: 'Test not found' });
+    let deleted = 0, deactivated = 0;
+    const removeOne = (id: number) => {
+      try { db.prepare('DELETE FROM lab_test_catalog WHERE id = ?').run(id); deleted++; return true; }
+      catch (e) {
+        if (String((e as Error).message).includes('FOREIGN KEY')) {
+          db.prepare("UPDATE lab_test_catalog SET status = 'inactive', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+          deactivated++; return false;
+        }
+        throw e;
+      }
+    };
+    if (t.is_panel) {
+      const kids = db.prepare('SELECT id FROM lab_test_catalog WHERE parent_test_id = ?').all(t.id) as { id: number }[];
+      const allKidsGone = kids.map(k => removeOne(k.id)).every(Boolean);
+      // The panel can only be erased once no component still points at it.
+      if (allKidsGone) removeOne(t.id);
+      else { db.prepare("UPDATE lab_test_catalog SET status = 'inactive', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(t.id); deactivated++; }
+    } else {
+      removeOne(t.id);
+    }
+    audit(req, { action: 'delete', entity: 'lab_test_catalog', entityId: Number(req.params.testId), oldValue: t, newValue: { deleted, deactivated } });
+    const message = deactivated > 0
+      ? `Removed ${deleted} test(s); ${deactivated} kept as inactive because they are already used elsewhere.`
+      : `"${t.test_name}"${t.is_panel ? ' and its components' : ''} removed.`;
+    res.json({ ok: true, deleted, deactivated, message });
+  });
+
   router.post('/section-config/tests/:testId/toggle', requirePermission('settings', 'edit'), (req, res) => {
     const db = getDb();
     const t = db.prepare('SELECT id, status, is_panel FROM lab_test_catalog WHERE id = ?').get(req.params.testId) as { id: number; status: string; is_panel: number } | undefined;
