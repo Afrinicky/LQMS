@@ -72,6 +72,31 @@ export const AST_INTERPRETATION_HINTS: Record<AstInterpretation, string> = {
   NS: 'Used where only a susceptible breakpoint exists (no resistant/intermediate isolates yet).',
 };
 
+/**
+ * A culture & sensitivity control does not always do both jobs. Identification
+ * and susceptibility are often run as separate exercises — one panel confirms
+ * the organism, another confirms the antibiogram, and some do both on one
+ * strain. The scope decides what the control asks for and what a run records.
+ */
+export const CS_SCOPES = ['identification', 'susceptibility', 'both'] as const;
+export type CsScope = (typeof CS_SCOPES)[number];
+
+export const CS_SCOPE_LABELS: Record<CsScope, string> = {
+  identification: 'Identification only',
+  susceptibility: 'Susceptibility only',
+  both: 'Identification & susceptibility',
+};
+
+export const CS_SCOPE_HINTS: Record<CsScope, string> = {
+  identification: 'Confirms the organism only — the reference strain must be identified as expected. No antimicrobial panel.',
+  susceptibility: 'Confirms the antibiogram only — each agent must give its expected category. The organism is taken as known.',
+  both: 'Confirms the organism and its susceptibilities on one reference strain.',
+};
+
+/** Whether a scope needs the organism, the agent panel, or both. */
+export function csNeedsOrganism(scope?: string | null): boolean { return scope !== 'susceptibility'; }
+export function csNeedsPanel(scope?: string | null): boolean { return scope !== 'identification'; }
+
 /** How an agent's susceptibility is measured. Decides the QC range's unit. */
 export const AST_METHODS = ['disk_diffusion', 'mic', 'gradient'] as const;
 export type AstMethod = (typeof AST_METHODS)[number];
@@ -203,7 +228,7 @@ export function isRejection(rule?: string | null): boolean {
  * A starting set of analytes for common tests, so defining an FBC control is
  * picking a template rather than typing eight rows by hand.
  */
-export const ANALYTE_TEMPLATES: { key: string; label: string; controlType: IqcControlType; expectedOrganism?: string; analytes: { analyte: string; unit?: string; decimalPlaces?: number; astMethod?: AstMethod }[] }[] = [
+export const ANALYTE_TEMPLATES: { key: string; label: string; controlType: IqcControlType; csScope?: CsScope; expectedOrganism?: string; analytes: { analyte: string; unit?: string; decimalPlaces?: number; astMethod?: AstMethod }[] }[] = [
   {
     key: 'fbc', label: 'Full blood count (FBC)', controlType: 'quantitative',
     analytes: [
@@ -269,7 +294,7 @@ export const ANALYTE_TEMPLATES: { key: string; label: string; controlType: IqcCo
     // so the laboratory fills them from its current tables rather than trusting
     // a value baked into the software.
     key: 'ast_gram_negative', label: 'AST reference strain — Gram-negative panel (E. coli ATCC 25922)',
-    controlType: 'culture_sensitivity', expectedOrganism: 'Escherichia coli ATCC 25922',
+    controlType: 'culture_sensitivity', csScope: 'susceptibility', expectedOrganism: 'Escherichia coli ATCC 25922',
     analytes: [
       { analyte: 'Ampicillin', unit: 'mm', astMethod: 'disk_diffusion' },
       { analyte: 'Amoxicillin-clavulanate', unit: 'mm', astMethod: 'disk_diffusion' },
@@ -279,5 +304,10 @@ export const ANALYTE_TEMPLATES: { key: string; label: string; controlType: IqcCo
       { analyte: 'Meropenem', unit: 'mm', astMethod: 'disk_diffusion' },
       { analyte: 'Trimethoprim-sulfamethoxazole', unit: 'mm', astMethod: 'disk_diffusion' },
     ],
+  },
+  {
+    key: 'id_reference_strain', label: 'Identification reference strain (organism ID only)',
+    controlType: 'culture_sensitivity', csScope: 'identification', expectedOrganism: 'Staphylococcus aureus ATCC 25923',
+    analytes: [],
   },
 ];

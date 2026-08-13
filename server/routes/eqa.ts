@@ -183,7 +183,13 @@ export function eqaRoutes() {
     const db = getDb();
     const event = db.prepare('SELECT id FROM eqa_events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'EQA event not found' });
-    const result = db.prepare(`INSERT INTO eqa_results (eqa_event_id, analyte_or_test, reported_result, expected_result, performance, comment, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    // A reported line is a plain analyte, an organism identification, or a
+    // susceptibility category for one antimicrobial. The kind decides how the
+    // reported/expected values are read; susceptibility rows also name the agent.
+    const resultKind = ['general', 'organism_id', 'susceptibility'].includes(req.body.resultKind)
+      ? req.body.resultKind : 'general';
+    const antimicrobial = resultKind === 'susceptibility' ? (req.body.antimicrobial ?? null) : null;
+    const result = db.prepare(`INSERT INTO eqa_results (eqa_event_id, analyte_or_test, reported_result, expected_result, performance, comment, result_kind, antimicrobial, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(
         req.params.id,
         req.body.analyteOrTest,
@@ -191,6 +197,8 @@ export function eqaRoutes() {
         req.body.expectedResult ?? null,
         req.body.performance ?? null,
         req.body.comment ?? null,
+        resultKind,
+        antimicrobial,
         req.user!.id
       );
     audit(req, { action: 'create', entity: 'eqa_results', entityId: result.lastInsertRowid, newValue: { eqaEventId: req.params.id, ...req.body } });

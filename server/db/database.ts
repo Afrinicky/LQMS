@@ -915,6 +915,9 @@ CREATE INDEX IF NOT EXISTS idx_iqc_runs_status ON iqc_runs(status, run_date);
   // CLSI interpretive category alongside its zone/MIC QC range.
   const iqcMaterialCols = new Set((database.prepare("PRAGMA table_info(iqc_materials)").all() as Array<{ name: string }>).map(c => c.name));
   if (!iqcMaterialCols.has('expected_organism')) database.exec('ALTER TABLE iqc_materials ADD COLUMN expected_organism TEXT');
+  // A C&S control does one of three jobs: identification, susceptibility, or
+  // both. Null is read as 'both' for controls defined before this column.
+  if (!iqcMaterialCols.has('cs_scope')) database.exec('ALTER TABLE iqc_materials ADD COLUMN cs_scope TEXT');
   const iqcAnalyteCols = new Set((database.prepare("PRAGMA table_info(iqc_analytes)").all() as Array<{ name: string }>).map(c => c.name));
   if (!iqcAnalyteCols.has('ast_method')) database.exec('ALTER TABLE iqc_analytes ADD COLUMN ast_method TEXT');
   if (!iqcAnalyteCols.has('expected_interpretation')) database.exec('ALTER TABLE iqc_analytes ADD COLUMN expected_interpretation TEXT');
@@ -922,6 +925,13 @@ CREATE INDEX IF NOT EXISTS idx_iqc_runs_status ON iqc_runs(status, run_date);
   if (!iqcRunCols.has('observed_organism')) database.exec('ALTER TABLE iqc_runs ADD COLUMN observed_organism TEXT');
   const iqcResultObsCols = new Set((database.prepare("PRAGMA table_info(iqc_results)").all() as Array<{ name: string }>).map(c => c.name));
   if (!iqcResultObsCols.has('interpretation_result')) database.exec('ALTER TABLE iqc_results ADD COLUMN interpretation_result TEXT');
+
+  // EQA extended for microbiology. A reported line can be a plain analyte, an
+  // organism identification, or a susceptibility category for one agent, so the
+  // result carries its kind and (for susceptibility) the antimicrobial named.
+  const eqaResultCols = new Set((database.prepare("PRAGMA table_info(eqa_results)").all() as Array<{ name: string }>).map(c => c.name));
+  if (!eqaResultCols.has('result_kind')) database.exec('ALTER TABLE eqa_results ADD COLUMN result_kind TEXT');
+  if (!eqaResultCols.has('antimicrobial')) database.exec('ALTER TABLE eqa_results ADD COLUMN antimicrobial TEXT');
 
   // Phase 5: Blood Bank Quality & Inventory Handover
   database.exec(`

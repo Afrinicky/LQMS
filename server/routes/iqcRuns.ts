@@ -140,11 +140,18 @@ export function iqcRunRoutes() {
       return res.status(400).json({ error: `That control lot expired on ${material.expiry_date}. Use a current lot.` });
     }
 
+    const isCs = material.control_type === 'culture_sensitivity';
+    const observedOrganism = isCs ? (String(req.body?.observedOrganism ?? '').trim() || null) : null;
+
     const analytes = db.prepare('SELECT * FROM iqc_analytes WHERE iqc_material_id = ? AND is_active = 1 ORDER BY display_order, id').all(materialId) as AnalyteDef[];
-    if (analytes.length === 0) return res.status(400).json({ error: 'This control has no analytes defined yet. Define what it measures first.' });
+    // An identification-only C&S control has no antimicrobial panel — it is run
+    // on the organism alone, so the "must have analytes" rule is lifted for it.
+    if (analytes.length === 0 && !isCs) return res.status(400).json({ error: 'This control has no analytes defined yet. Define what it measures first.' });
 
     const readings = Array.isArray(req.body?.readings) ? req.body.readings : [];
-    if (readings.length === 0) return res.status(400).json({ error: 'Enter at least one reading.' });
+    if (readings.length === 0 && !(isCs && observedOrganism)) {
+      return res.status(400).json({ error: isCs ? 'Record the organism identified and/or at least one susceptibility category.' : 'Enter at least one reading.' });
+    }
 
     // Prior accepted readings per analyte, most recent first — the history the
     // run-length rules need. Rejected runs are excluded: they were investigated
@@ -162,12 +169,9 @@ export function iqcRunRoutes() {
         : [];
     }
 
-    const observedOrganism = material.control_type === 'culture_sensitivity'
-      ? (String(req.body?.observedOrganism ?? '').trim() || null)
-      : null;
     const expectedOrganism = (material as MaterialRow & { expected_organism?: string | null }).expected_organism ?? null;
     const verdict = evaluateRun(material.control_type, material.rule_profile, analytes, readings, history,
-      material.control_type === 'culture_sensitivity' ? { expected: expectedOrganism, observed: observedOrganism } : undefined);
+      isCs ? { expected: expectedOrganism, observed: observedOrganism } : undefined);
 
     const createdAt = new Date().toISOString();
     // The run number lands in a UNIQUE column, so derive it collision-safely.
@@ -193,7 +197,6 @@ export function iqcRunRoutes() {
         // The organism check rides as a synthetic verdict with analyteId 0; it
         // is recorded on the run itself, not as an analyte reading, so skip it.
         if (!v.analyteId) continue;
-        const isCs = material.control_type === 'culture_sensitivity';
         const qualitative = !isCs && v.qualitativeResult !== null && v.qualitativeResult !== undefined;
         insert.run(materialId, runId, v.analyteId, runDate, req.body?.runTime ?? null,
           // result_value is NOT NULL in the original schema; a qualitative or

@@ -102,9 +102,18 @@ export function iqcAdminRoutes() {
       .get(materialName, lotNumber, req.params.id) as { id: number } | undefined;
     if (clash) return res.status(409).json({ error: `Another control is already registered as "${materialName}" lot ${lotNumber}.` });
 
+    // A C&S control's scope — identification only, susceptibility only, or both.
+    const csScope = controlType === 'culture_sensitivity'
+      ? (['identification', 'susceptibility', 'both'].includes(String(req.body?.csScope ?? before.cs_scope))
+        ? String(req.body?.csScope ?? before.cs_scope) : 'both')
+      : null;
+    // An identification-only C&S control has no antimicrobial panel, so it is
+    // the one control that is allowed to measure nothing.
+    const panelOptional = controlType === 'culture_sensitivity' && csScope === 'identification';
+
     /* ---- analytes, if the caller sent them ---- */
     const sent = Array.isArray(req.body?.analytes) ? req.body.analytes as Record<string, unknown>[] : null;
-    if (sent && sent.filter(a => String(a.analyte ?? '').trim()).length === 0) {
+    if (sent && !panelOptional && sent.filter(a => String(a.analyte ?? '').trim()).length === 0) {
       return res.status(400).json({ error: 'A control has to measure something — keep at least one analyte.' });
     }
     if (sent && controlType === 'qualitative') {
@@ -161,6 +170,7 @@ export function iqcAdminRoutes() {
       expected_organism: controlType === 'culture_sensitivity'
         ? given(req.body?.expectedOrganism, before.expected_organism)
         : null,
+      cs_scope: csScope,
       is_active: req.body?.isActive === undefined ? before.is_active : (req.body.isActive ? 1 : 0),
     };
 
@@ -170,12 +180,12 @@ export function iqcAdminRoutes() {
           source = ?, control_type = ?, rule_profile = ?, qc_frequency = ?, manufacturer = ?, expiry_date = ?,
           open_vial_expiry = ?, storage_condition = ?, section_id = ?, equipment_id = ?, prepared_by_staff_id = ?,
           preparation_date = ?, preparation_method = ?, base_material = ?, validation_summary = ?,
-          stability_period = ?, instructions = ?, expected_organism = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+          stability_period = ?, instructions = ?, expected_organism = ?, cs_scope = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
         .run(after.material_name, after.test_name, after.lot_number, after.level_label, after.source,
           after.control_type, after.rule_profile, after.qc_frequency, after.manufacturer, after.expiry_date,
           after.open_vial_expiry, after.storage_condition, after.section_id, after.equipment_id,
           after.prepared_by_staff_id, after.preparation_date, after.preparation_method, after.base_material,
-          after.validation_summary, after.stability_period, after.instructions, after.expected_organism, after.is_active, req.params.id);
+          after.validation_summary, after.stability_period, after.instructions, after.expected_organism, after.cs_scope, after.is_active, req.params.id);
 
       if (!sent) return;
       const keep = new Set<number>();
