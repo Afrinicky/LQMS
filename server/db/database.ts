@@ -909,6 +909,20 @@ CREATE INDEX IF NOT EXISTS idx_iqc_runs_status ON iqc_runs(status, run_date);
   const iqcResultNames = new Set(iqcResultColumns.map(col => col.name));
   if (!iqcResultNames.has('z_score')) database.exec('ALTER TABLE iqc_results ADD COLUMN z_score REAL');
 
+  // Culture & sensitivity controls. A microbiology reference-strain control
+  // carries an expected organism identity at the material level, and each of
+  // its analytes is an antimicrobial agent with a test method and an expected
+  // CLSI interpretive category alongside its zone/MIC QC range.
+  const iqcMaterialCols = new Set((database.prepare("PRAGMA table_info(iqc_materials)").all() as Array<{ name: string }>).map(c => c.name));
+  if (!iqcMaterialCols.has('expected_organism')) database.exec('ALTER TABLE iqc_materials ADD COLUMN expected_organism TEXT');
+  const iqcAnalyteCols = new Set((database.prepare("PRAGMA table_info(iqc_analytes)").all() as Array<{ name: string }>).map(c => c.name));
+  if (!iqcAnalyteCols.has('ast_method')) database.exec('ALTER TABLE iqc_analytes ADD COLUMN ast_method TEXT');
+  if (!iqcAnalyteCols.has('expected_interpretation')) database.exec('ALTER TABLE iqc_analytes ADD COLUMN expected_interpretation TEXT');
+  const iqcRunCols = new Set((database.prepare("PRAGMA table_info(iqc_runs)").all() as Array<{ name: string }>).map(c => c.name));
+  if (!iqcRunCols.has('observed_organism')) database.exec('ALTER TABLE iqc_runs ADD COLUMN observed_organism TEXT');
+  const iqcResultObsCols = new Set((database.prepare("PRAGMA table_info(iqc_results)").all() as Array<{ name: string }>).map(c => c.name));
+  if (!iqcResultObsCols.has('interpretation_result')) database.exec('ALTER TABLE iqc_results ADD COLUMN interpretation_result TEXT');
+
   // Phase 5: Blood Bank Quality & Inventory Handover
   database.exec(`
 CREATE TABLE IF NOT EXISTS blood_units (

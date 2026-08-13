@@ -251,7 +251,7 @@ export function iqcImportExportRoutes() {
           materialId = existing.id;
           updated++;
         } else {
-          const code = generateRecordNumber(database, 'iqc_materials', 'IQCM', new Date().toISOString());
+          const code = generateRecordNumber(database, 'iqc_materials', 'IQCM', new Date().toISOString(), 'material_code');
           const r = database.prepare(`INSERT INTO iqc_materials (material_code, material_name, analyte, created_by,
               test_name, lot_number, manufacturer, expiry_date, storage_condition, section_id, equipment_id,
               source, control_type, level_label, qc_frequency, rule_profile, prepared_by_staff_id, preparation_date,
@@ -431,7 +431,7 @@ export function iqcImportExportRoutes() {
         }
 
         const verdict = evaluateRun(controlType, material.rule_profile as IqcRuleProfile, analytes, readings, history);
-        const runNumber = generateRecordNumber(database, 'iqc_runs', 'QCR', new Date().toISOString());
+        const runNumber = generateRecordNumber(database, 'iqc_runs', 'QCR', new Date().toISOString(), 'run_number');
         const equipmentId = g.equipment
           ? (database.prepare('SELECT id FROM equipment_items WHERE name = ? COLLATE NOCASE').get(g.equipment) as { id: number } | undefined)?.id ?? null
           : null;

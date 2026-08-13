@@ -118,11 +118,12 @@ export function iqcRoutes() {
     if (!req.body.lotNumber) return res.status(400).json({ error: 'A lot or batch number is required.' });
 
     const source = req.body.source === 'in_house' ? 'in_house' : 'commercial';
-    const controlType = ['quantitative', 'qualitative', 'semi_quantitative'].includes(req.body.controlType)
+    const controlType = ['quantitative', 'qualitative', 'semi_quantitative', 'culture_sensitivity'].includes(req.body.controlType)
       ? req.body.controlType : 'quantitative';
-    // A qualitative control is judged against its expected result; anything
-    // else would be meaningless, so the profile is fixed rather than offered.
-    const ruleProfile = controlType === 'qualitative'
+    // A qualitative or C&S control is judged against its expected result;
+    // anything else would be meaningless, so the profile is fixed rather than
+    // offered.
+    const ruleProfile = (controlType === 'qualitative' || controlType === 'culture_sensitivity')
       ? 'match_expected'
       : (['westgard_standard', 'westgard_simple', 'range_only', 'match_expected'].includes(req.body.ruleProfile)
         ? req.body.ruleProfile : (controlType === 'semi_quantitative' ? 'range_only' : 'westgard_standard'));
@@ -135,7 +136,8 @@ export function iqcRoutes() {
 
     const db = getDb();
     const createdAt = new Date().toISOString();
-    const materialCode = generateRecordNumber(db, 'iqc_materials', 'IQCM', createdAt);
+    // The number lands in a UNIQUE column, so derive it collision-safely.
+    const materialCode = generateRecordNumber(db, 'iqc_materials', 'IQCM', createdAt, 'material_code');
     const n = (v: unknown) => (v === undefined || v === '' || v === null || Number.isNaN(Number(v)) ? null : Number(v));
 
     let materialId = 0;
@@ -145,8 +147,8 @@ export function iqcRoutes() {
           acceptable_low, acceptable_high, equipment_id, inventory_batch_id, is_active, created_by, created_at,
           source, control_type, level_label, unit, qc_frequency, rule_profile,
           prepared_by_staff_id, preparation_date, preparation_method, base_material, validation_summary,
-          stability_period, open_vial_expiry, instructions)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          stability_period, open_vial_expiry, instructions, expected_organism)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(
           materialCode, req.body.materialName, parseIntNullable(req.body.departmentId), parseIntNullable(req.body.sectionId),
           req.body.testName,
@@ -162,6 +164,7 @@ export function iqcRoutes() {
           parseIntNullable(req.body.preparedByStaffId), req.body.preparationDate ?? null,
           req.body.preparationMethod ?? null, req.body.baseMaterial ?? null, req.body.validationSummary ?? null,
           req.body.stabilityPeriod ?? null, req.body.openVialExpiry ?? null, req.body.instructions ?? null,
+          controlType === 'culture_sensitivity' ? (req.body.expectedOrganism ?? null) : null,
         );
       materialId = Number(result.lastInsertRowid);
 
@@ -169,13 +172,14 @@ export function iqcRoutes() {
         ? req.body.analytes
         : [{ analyte: req.body.analyte || req.body.testName, unit: req.body.unit, targetMean: req.body.targetMean, targetSd: req.body.targetSd, acceptableLow: req.body.acceptableLow, acceptableHigh: req.body.acceptableHigh, expectedResult: req.body.expectedResult }];
       const insert = db.prepare(`INSERT INTO iqc_analytes (iqc_material_id, analyte, unit, target_mean, target_sd,
-          acceptable_low, acceptable_high, decimal_places, expected_result, display_order)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+          acceptable_low, acceptable_high, decimal_places, expected_result, ast_method, expected_interpretation, display_order)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
       analytes.forEach((a: Record<string, unknown>, i: number) => {
         const name = String(a.analyte ?? '').trim();
         if (!name) return;
         insert.run(materialId, name, a.unit ?? null, n(a.targetMean), n(a.targetSd),
-          n(a.acceptableLow), n(a.acceptableHigh), n(a.decimalPlaces) ?? 2, (a.expectedResult as string) || null, i);
+          n(a.acceptableLow), n(a.acceptableHigh), n(a.decimalPlaces) ?? 2, (a.expectedResult as string) || null,
+          (a.astMethod as string) || null, (a.expectedInterpretation as string) || null, i);
       });
     });
     tx();
@@ -217,7 +221,7 @@ export function iqcRoutes() {
                 .run(test, analyte, cell(r, 'Manufacturer'), cell(r, 'Expiry date'), cell(r, 'Storage condition'), numCell(r, 'Target mean'), numCell(r, 'Target SD'), numCell(r, 'Acceptable low'), numCell(r, 'Acceptable high'), secId, existing.id);
               updated++;
             } else {
-              const materialCode = generateRecordNumber(db, 'iqc_materials', 'IQCM', new Date().toISOString());
+              const materialCode = generateRecordNumber(db, 'iqc_materials', 'IQCM', new Date().toISOString(), 'material_code');
               db.prepare('INSERT INTO iqc_materials (material_code, material_name, section_id, test_name, analyte, lot_number, manufacturer, expiry_date, storage_condition, target_mean, target_sd, acceptable_low, acceptable_high, is_active, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)')
                 .run(materialCode, name, secId, test, analyte, lot, cell(r, 'Manufacturer'), cell(r, 'Expiry date'), cell(r, 'Storage condition'), numCell(r, 'Target mean'), numCell(r, 'Target SD'), numCell(r, 'Acceptable low'), numCell(r, 'Acceptable high'), req.user!.id, new Date().toISOString());
               created++;
