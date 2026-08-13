@@ -31,19 +31,61 @@ export const IQC_SOURCE_HINTS: Record<IqcSource, string> = {
   in_house: 'Prepared in this laboratory. Its preparation and validation must be recorded here.',
 };
 
-export const IQC_CONTROL_TYPES = ['quantitative', 'qualitative', 'semi_quantitative'] as const;
+export const IQC_CONTROL_TYPES = ['quantitative', 'qualitative', 'semi_quantitative', 'culture_sensitivity'] as const;
 export type IqcControlType = (typeof IQC_CONTROL_TYPES)[number];
 
 export const IQC_CONTROL_TYPE_LABELS: Record<IqcControlType, string> = {
   quantitative: 'Quantitative',
   qualitative: 'Qualitative',
   semi_quantitative: 'Semi-quantitative',
+  culture_sensitivity: 'Culture & sensitivity',
 };
 
 export const IQC_CONTROL_TYPE_HINTS: Record<IqcControlType, string> = {
   quantitative: 'Measured as a number — FBC, chemistry, coagulation. Uses mean, SD, Westgard rules and a Levey-Jennings chart.',
   qualitative: 'Reported as reactive/non-reactive or positive/negative — HBsAg, HIV, malaria RDT. Passes when it matches the expected result.',
   semi_quantitative: 'Graded or titred — urinalysis, agglutination titre. Checked against an acceptable range without statistical rules.',
+  culture_sensitivity: 'Microbiology culture, organism ID and antimicrobial susceptibility (AST). QC is run on a reference strain (e.g. E. coli ATCC 25922): the expected organism must be identified, and each agent must fall in its CLSI zone/MIC QC range and give the expected S/I/R category (CLSI M100/M02/M07).',
+};
+
+/**
+ * Antimicrobial susceptibility interpretive categories. Reported as an ordinal
+ * category, not a number, and defined by CLSI M100 (with the EUCAST reading of
+ * "I" noted, since laboratories following either standard use this system).
+ */
+export const AST_INTERPRETATIONS = ['S', 'SDD', 'I', 'R', 'NS'] as const;
+export type AstInterpretation = (typeof AST_INTERPRETATIONS)[number];
+
+export const AST_INTERPRETATION_LABELS: Record<AstInterpretation, string> = {
+  S: 'S — Susceptible',
+  SDD: 'SDD — Susceptible-dose dependent',
+  I: 'I — Intermediate',
+  R: 'R — Resistant',
+  NS: 'NS — Nonsusceptible',
+};
+
+export const AST_INTERPRETATION_HINTS: Record<AstInterpretation, string> = {
+  S: 'Inhibited by the usually achievable concentration at the recommended dose (CLSI M100).',
+  SDD: 'Susceptibility depends on the dosing regimen used — a higher/more frequent dose is required.',
+  I: 'CLSI: intermediate. EUCAST: "susceptible, increased exposure". Also a technical buffer zone.',
+  R: 'Not inhibited by the usually achievable concentration; likely treatment failure.',
+  NS: 'Used where only a susceptible breakpoint exists (no resistant/intermediate isolates yet).',
+};
+
+/** How an agent's susceptibility is measured. Decides the QC range's unit. */
+export const AST_METHODS = ['disk_diffusion', 'mic', 'gradient'] as const;
+export type AstMethod = (typeof AST_METHODS)[number];
+
+export const AST_METHOD_LABELS: Record<AstMethod, string> = {
+  disk_diffusion: 'Disk diffusion (zone)',
+  mic: 'MIC (broth/agar dilution)',
+  gradient: 'Gradient strip / Etest',
+};
+
+export const AST_METHOD_UNITS: Record<AstMethod, string> = {
+  disk_diffusion: 'mm',
+  mic: 'µg/mL',
+  gradient: 'µg/mL',
 };
 
 /** What a qualitative control is expected to produce. */
@@ -113,6 +155,10 @@ export const PROFILES_FOR_TYPE: Record<IqcControlType, IqcRuleProfile[]> = {
   quantitative: ['westgard_standard', 'westgard_simple', 'range_only'],
   qualitative: ['match_expected'],
   semi_quantitative: ['range_only', 'match_expected'],
+  // A C&S control is judged against what the reference strain is expected to
+  // give — the organism, and each agent's category and QC range — so the
+  // profile is fixed rather than offered.
+  culture_sensitivity: ['match_expected'],
 };
 
 /** Human-readable rule names, used on charts, tables and failure reports. */
@@ -127,6 +173,8 @@ export const RULE_LABELS: Record<string, string> = {
   reject_10x: '10ₓ',
   out_of_range: 'Outside acceptable range',
   expected_mismatch: 'Does not match expected result',
+  organism_mismatch: 'Organism not identified as expected',
+  interpretation_mismatch: 'Susceptibility category not as expected',
 };
 
 /** What each rule is telling the bench to look at. Shown beside a failure. */
@@ -140,18 +188,22 @@ export const RULE_MEANING: Record<string, string> = {
   reject_10x: 'Ten consecutive results on the same side of the mean. A shift — recalibrate or change reagent lot.',
   out_of_range: 'Outside the acceptable range set for this control.',
   expected_mismatch: 'The control did not give its expected result. The test system is not performing — do not report patient results.',
+  organism_mismatch: 'The reference strain did not identify as the expected organism. The medium, inoculum or identification system is not performing — do not report patient results.',
+  interpretation_mismatch: 'The agent gave a category other than the expected S/I/R for the reference strain. Check disk potency, inoculum density and incubation before reporting susceptibilities.',
 };
 
 /** Rules that stop patient results going out. A warning does not. */
 export function isRejection(rule?: string | null): boolean {
-  return Boolean(rule && rule.startsWith('reject_')) || rule === 'out_of_range' || rule === 'expected_mismatch';
+  return Boolean(rule && rule.startsWith('reject_'))
+    || rule === 'out_of_range' || rule === 'expected_mismatch'
+    || rule === 'organism_mismatch' || rule === 'interpretation_mismatch';
 }
 
 /**
  * A starting set of analytes for common tests, so defining an FBC control is
  * picking a template rather than typing eight rows by hand.
  */
-export const ANALYTE_TEMPLATES: { key: string; label: string; controlType: IqcControlType; analytes: { analyte: string; unit?: string; decimalPlaces?: number }[] }[] = [
+export const ANALYTE_TEMPLATES: { key: string; label: string; controlType: IqcControlType; expectedOrganism?: string; analytes: { analyte: string; unit?: string; decimalPlaces?: number; astMethod?: AstMethod }[] }[] = [
   {
     key: 'fbc', label: 'Full blood count (FBC)', controlType: 'quantitative',
     analytes: [
@@ -208,6 +260,24 @@ export const ANALYTE_TEMPLATES: { key: string; label: string; controlType: IqcCo
     analytes: [
       { analyte: 'Protein' }, { analyte: 'Glucose' }, { analyte: 'Blood' },
       { analyte: 'Leucocytes' }, { analyte: 'Nitrite' }, { analyte: 'Ketones' },
+    ],
+  },
+  {
+    // A starting agent panel for a Gram-negative reference strain. The zone/MIC
+    // QC ranges and expected categories are deliberately left blank — they are
+    // specific to the CLSI M100 edition in force and to the disk potency used,
+    // so the laboratory fills them from its current tables rather than trusting
+    // a value baked into the software.
+    key: 'ast_gram_negative', label: 'AST reference strain — Gram-negative panel (E. coli ATCC 25922)',
+    controlType: 'culture_sensitivity', expectedOrganism: 'Escherichia coli ATCC 25922',
+    analytes: [
+      { analyte: 'Ampicillin', unit: 'mm', astMethod: 'disk_diffusion' },
+      { analyte: 'Amoxicillin-clavulanate', unit: 'mm', astMethod: 'disk_diffusion' },
+      { analyte: 'Ceftriaxone', unit: 'mm', astMethod: 'disk_diffusion' },
+      { analyte: 'Ciprofloxacin', unit: 'mm', astMethod: 'disk_diffusion' },
+      { analyte: 'Gentamicin', unit: 'mm', astMethod: 'disk_diffusion' },
+      { analyte: 'Meropenem', unit: 'mm', astMethod: 'disk_diffusion' },
+      { analyte: 'Trimethoprim-sulfamethoxazole', unit: 'mm', astMethod: 'disk_diffusion' },
     ],
   },
 ];

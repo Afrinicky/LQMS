@@ -20,6 +20,10 @@ export type AnalyteDef = {
   acceptable_low: number | null;
   acceptable_high: number | null;
   expected_result: string | null;
+  // Culture & sensitivity: the agent's test method and the interpretive
+  // category (S/SDD/I/R/NS) the reference strain is expected to give.
+  ast_method?: string | null;
+  expected_interpretation?: string | null;
 };
 
 /** One reading being submitted for one analyte. */
@@ -27,7 +31,12 @@ export type Reading = {
   analyteId: number;
   value?: number | null;
   qualitativeResult?: string | null;
+  /** Culture & sensitivity: observed interpretive category for this agent. */
+  interpretation?: string | null;
 };
+
+/** The organism identity check for a culture & sensitivity run. */
+export type OrganismCheck = { expected: string | null; observed: string | null };
 
 /** Earlier accepted readings for the same analyte, most recent first. */
 export type History = Record<number, number[]>;
@@ -105,6 +114,66 @@ function westgard(
   return { status: 'accepted', rule: 'within_control' };
 }
 
+/**
+ * Culture & sensitivity, judged categorically.
+ *
+ * The reference strain has to identify as the expected organism, and each
+ * antimicrobial has to give the expected interpretive category (S/SDD/I/R/NS).
+ * A mismatch on either stops patient susceptibilities going out, the same way
+ * a rejected quantitative run stops numeric results. The organism check rides
+ * as a synthetic verdict with analyteId 0 so it appears in the summary without
+ * needing an analyte row of its own.
+ */
+function evaluateCultureSensitivity(
+  analytes: AnalyteDef[],
+  readings: Reading[],
+  organism?: OrganismCheck,
+): RunVerdict {
+  const byId = new Map(analytes.map(a => [a.id, a]));
+  const verdicts: AnalyteVerdict[] = [];
+
+  if (organism && (organism.expected ?? '').trim()) {
+    const expected = (organism.expected ?? '').trim();
+    const observed = (organism.observed ?? '').trim();
+    const ok = observed && observed.toLowerCase() === expected.toLowerCase();
+    verdicts.push({
+      analyteId: 0, analyte: 'Organism identification',
+      value: null, qualitativeResult: observed || null, expectedResult: expected,
+      zScore: null, status: ok ? 'accepted' : 'out_of_control', rule: ok ? 'within_control' : 'organism_mismatch',
+    });
+  }
+
+  for (const r of readings) {
+    const def = byId.get(r.analyteId);
+    if (!def) continue;
+    const observed = (r.interpretation ?? r.qualitativeResult ?? '').trim();
+    const expected = (def.expected_interpretation ?? '').trim();
+    const base = {
+      analyteId: def.id, analyte: def.analyte,
+      value: null, qualitativeResult: observed || null, expectedResult: expected || null, zScore: null,
+    };
+    if (!expected) {
+      // No expected category recorded for this agent — nothing to judge it
+      // against, so it is noted but does not fail the run.
+      verdicts.push({ ...base, status: 'accepted', rule: 'within_control' });
+    } else if (!observed) {
+      verdicts.push({ ...base, status: 'out_of_control', rule: 'interpretation_mismatch' });
+    } else {
+      const ok = observed.toLowerCase() === expected.toLowerCase();
+      verdicts.push({ ...base, status: ok ? 'accepted' : 'out_of_control', rule: ok ? 'within_control' : 'interpretation_mismatch' });
+    }
+  }
+
+  const rejected = verdicts.filter(v => v.status === 'out_of_control');
+  const say = (v: AnalyteVerdict) => `${v.analyte}: ${RULE_LABELS[v.rule ?? ''] ?? v.rule}`;
+  return {
+    status: rejected.length ? 'out_of_control' : 'in_control',
+    ruleSummary: rejected.length ? rejected.map(say).join('; ') : null,
+    analytes: verdicts,
+    mayReleasePatientResults: !verdicts.some(v => isRejection(v.rule)),
+  };
+}
+
 /** Evaluate a whole run: every analyte, then the run's overall verdict. */
 export function evaluateRun(
   controlType: IqcControlType,
@@ -112,7 +181,17 @@ export function evaluateRun(
   analytes: AnalyteDef[],
   readings: Reading[],
   history: History,
+  organism?: OrganismCheck,
 ): RunVerdict {
+  // ---- Culture & sensitivity: organism identity plus categorical AST -------
+  // Judged purely on the interpretive category the reference strain gives
+  // (S/SDD/I/R/NS) and on the organism identification — not on numeric zone or
+  // MIC breakpoints. Its own path, because it is neither a number nor a single
+  // reactive/non-reactive call.
+  if (controlType === 'culture_sensitivity') {
+    return evaluateCultureSensitivity(analytes, readings, organism);
+  }
+
   const byId = new Map(analytes.map(a => [a.id, a]));
 
   // z-scores for the run, computed first so each analyte can see its siblings.

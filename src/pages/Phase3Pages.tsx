@@ -325,10 +325,10 @@ export function EquipmentPage() {
         <label>Unique identifier<input value={equipForm.equipmentNumber} onChange={e => setEquipForm({ ...equipForm, equipmentNumber: e.target.value })} placeholder={nextNumber || 'auto'} /><small className="muted">Follows the configured pattern; edit only for items with their own identifier.</small></label>
         <label>Name<input value={equipForm.name} onChange={e => setEquipForm({ ...equipForm, name: e.target.value })} required /></label>
         <label>Category<input value={equipForm.category} onChange={e => setEquipForm({ ...equipForm, category: e.target.value })} /></label>
-        <label>Quality class<select value={equipForm.equipmentClass} onChange={e => setEquipForm({ ...equipForm, equipmentClass: e.target.value })}>
-          <option value="laboratory">Laboratory / measuring (IQC, verification, uncertainty)</option>
-          <option value="support">Support / ancillary (monitoring &amp; maintenance)</option>
-        </select><small className="muted">Analysers, pipettes, balances &amp; measuring devices are <em>laboratory</em>; fridges, freezers, incubators &amp; air-conditioners are <em>support</em>. Only laboratory equipment appears for IQC, verification, validation and measurement uncertainty.</small></label>
+        <label>Diagnostic use<select value={equipForm.equipmentClass} onChange={e => setEquipForm({ ...equipForm, equipmentClass: e.target.value })}>
+          <option value="laboratory">Diagnostic — laboratory / measuring (IQC, verification, uncertainty)</option>
+          <option value="support">Non-diagnostic — support / ancillary (monitoring &amp; maintenance)</option>
+        </select><small className="muted">Analysers, microscopes, pipettes, balances &amp; other measuring devices used to produce results are <em>diagnostic</em>; fridges, freezers, incubators, computers &amp; air-conditioners are <em>non-diagnostic</em>. Only diagnostic equipment appears in IQC, culture &amp; sensitivity, verification, validation and measurement uncertainty — a non-diagnostic item never shows up in anything diagnostic.</small></label>
         <label>Equipment type<input value={equipForm.equipmentType} onChange={e => setEquipForm({ ...equipForm, equipmentType: e.target.value })} /></label>
         <label>Manufacturer<input value={equipForm.manufacturer} onChange={e => setEquipForm({ ...equipForm, manufacturer: e.target.value })} /></label>
         <label>Model<input value={equipForm.model} onChange={e => setEquipForm({ ...equipForm, model: e.target.value })} /></label>
@@ -599,7 +599,7 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
         </form>
       : <>
         <div className="profile-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 18, marginTop: 14 }}>
-          <div><h4>Identity</h4>{dv('Unique identifier', item.equipment_number)}{dv('Category', item.category)}{dv('Quality class', item.equipment_class === 'support' ? 'Support / ancillary' : 'Laboratory / measuring')}{dv('Type', item.equipment_type)}{dv('Manufacturer', item.manufacturer)}{dv('Model', item.model)}{dv('Serial number', item.serial_number)}{dv('Country of origin', item.country_of_origin)}{dv('Condition received', item.condition_received)}{dv('Criticality', item.criticality?.replace(/_/g, ' '))}</div>
+          <div><h4>Identity</h4>{dv('Unique identifier', item.equipment_number)}{dv('Category', item.category)}{dv('Diagnostic use', item.equipment_class === 'support' ? 'Non-diagnostic (support / ancillary)' : 'Diagnostic (laboratory / measuring)')}{dv('Type', item.equipment_type)}{dv('Manufacturer', item.manufacturer)}{dv('Model', item.model)}{dv('Serial number', item.serial_number)}{dv('Country of origin', item.country_of_origin)}{dv('Condition received', item.condition_received)}{dv('Criticality', item.criticality?.replace(/_/g, ' '))}</div>
           <div><h4>Supplier</h4>{dv('Name', item.supplier_name)}{dv('Location', item.supplier_location)}{dv('Contact', item.supplier_contact)}
             <h4 style={{ marginTop: 16 }}>Placement</h4>{dv('Department', deptName)}{dv('Section', secName)}{dv('Location', locName)}{dv('Custodian', custodian)}</div>
           <div><h4>Lifecycle</h4>{dv('Date received', item.date_received)}{dv('Date into service', item.date_commissioned)}{dv('Date out of service', item.date_out_of_service)}

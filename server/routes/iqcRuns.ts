@@ -58,16 +58,18 @@ export function iqcRunRoutes() {
         const existing = db.prepare('SELECT id FROM iqc_analytes WHERE iqc_material_id = ? AND analyte = ?').get(req.params.id, name) as { id: number } | undefined;
         const values = [
           a.unit ?? null, num(a.targetMean), num(a.targetSd), num(a.acceptableLow), num(a.acceptableHigh),
-          num(a.decimalPlaces) ?? 2, (a.expectedResult as string) || null, i, a.isActive === false ? 0 : 1,
+          num(a.decimalPlaces) ?? 2, (a.expectedResult as string) || null,
+          (a.astMethod as string) || null, (a.expectedInterpretation as string) || null,
+          i, a.isActive === false ? 0 : 1,
         ];
         if (existing) {
           db.prepare(`UPDATE iqc_analytes SET unit = ?, target_mean = ?, target_sd = ?, acceptable_low = ?, acceptable_high = ?,
-              decimal_places = ?, expected_result = ?, display_order = ?, is_active = ? WHERE id = ?`).run(...values, existing.id);
+              decimal_places = ?, expected_result = ?, ast_method = ?, expected_interpretation = ?, display_order = ?, is_active = ? WHERE id = ?`).run(...values, existing.id);
           keep.add(existing.id);
         } else {
           const r = db.prepare(`INSERT INTO iqc_analytes (iqc_material_id, analyte, unit, target_mean, target_sd, acceptable_low,
-              acceptable_high, decimal_places, expected_result, display_order, is_active)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(req.params.id, name, ...values);
+              acceptable_high, decimal_places, expected_result, ast_method, expected_interpretation, display_order, is_active)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(req.params.id, name, ...values);
           keep.add(Number(r.lastInsertRowid));
         }
       });
@@ -113,7 +115,8 @@ export function iqcRunRoutes() {
       LEFT JOIN staff rev ON rev.id = r.reviewed_by_staff_id
       WHERE r.id = ?`).get(req.params.id);
     if (!run) return res.status(404).json({ error: 'Control run not found' });
-    const readings = db.prepare(`SELECT res.*, a.analyte, a.unit, a.target_mean, a.target_sd, a.acceptable_low, a.acceptable_high, a.decimal_places
+    const readings = db.prepare(`SELECT res.*, a.analyte, a.unit, a.target_mean, a.target_sd, a.acceptable_low, a.acceptable_high, a.decimal_places,
+        a.ast_method, a.expected_interpretation
       FROM iqc_results res LEFT JOIN iqc_analytes a ON a.id = res.iqc_analyte_id
       WHERE res.iqc_run_id = ? ORDER BY a.display_order, res.id`).all(req.params.id);
     res.json({ ...run, readings });
@@ -159,33 +162,45 @@ export function iqcRunRoutes() {
         : [];
     }
 
-    const verdict = evaluateRun(material.control_type, material.rule_profile, analytes, readings, history);
+    const observedOrganism = material.control_type === 'culture_sensitivity'
+      ? (String(req.body?.observedOrganism ?? '').trim() || null)
+      : null;
+    const expectedOrganism = (material as MaterialRow & { expected_organism?: string | null }).expected_organism ?? null;
+    const verdict = evaluateRun(material.control_type, material.rule_profile, analytes, readings, history,
+      material.control_type === 'culture_sensitivity' ? { expected: expectedOrganism, observed: observedOrganism } : undefined);
 
     const createdAt = new Date().toISOString();
-    const runNumber = generateRecordNumber(db, 'iqc_runs', 'QCR', createdAt);
+    // The run number lands in a UNIQUE column, so derive it collision-safely.
+    const runNumber = generateRecordNumber(db, 'iqc_runs', 'QCR', createdAt, 'run_number');
     const operatorStaffId = getStaffIdOrCurrent(req, req.body?.operatorStaffId);
 
     let runId = 0;
     const tx = db.transaction(() => {
       const r = db.prepare(`INSERT INTO iqc_runs (run_number, iqc_material_id, run_date, run_time, shift, equipment_id,
-          section_id, operator_staff_id, reagent_lot, status, rule_summary, patient_results_released, comment, created_by)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          section_id, operator_staff_id, reagent_lot, status, rule_summary, patient_results_released, comment, observed_organism, created_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(runNumber, materialId, runDate, req.body?.runTime ?? null, req.body?.shift ?? null,
           parseIntNullable(req.body?.equipmentId), parseIntNullable(req.body?.sectionId), operatorStaffId,
           req.body?.reagentLot ?? null, verdict.status, verdict.ruleSummary,
-          verdict.mayReleasePatientResults ? 1 : 0, req.body?.comment ?? null, req.user!.id);
+          verdict.mayReleasePatientResults ? 1 : 0, req.body?.comment ?? null, observedOrganism, req.user!.id);
       runId = Number(r.lastInsertRowid);
 
       const insert = db.prepare(`INSERT INTO iqc_results (iqc_material_id, iqc_run_id, iqc_analyte_id, run_date, run_time,
-          result_value, qualitative_result, expected_result, is_qualitative, entered_by_staff_id, equipment_id,
+          result_value, qualitative_result, expected_result, is_qualitative, interpretation_result, entered_by_staff_id, equipment_id,
           status, rule_violation, z_score, comment, created_by)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
       for (const v of verdict.analytes) {
-        const qualitative = v.qualitativeResult !== null && v.qualitativeResult !== undefined;
+        // The organism check rides as a synthetic verdict with analyteId 0; it
+        // is recorded on the run itself, not as an analyte reading, so skip it.
+        if (!v.analyteId) continue;
+        const isCs = material.control_type === 'culture_sensitivity';
+        const qualitative = !isCs && v.qualitativeResult !== null && v.qualitativeResult !== undefined;
         insert.run(materialId, runId, v.analyteId, runDate, req.body?.runTime ?? null,
-          // result_value is NOT NULL in the original schema; a qualitative
-          // reading stores 0 and carries its meaning in qualitative_result.
-          v.value ?? 0, v.qualitativeResult, v.expectedResult, qualitative ? 1 : 0,
+          // result_value is NOT NULL in the original schema; a qualitative or
+          // categorical reading stores 0 and carries its meaning elsewhere.
+          v.value ?? 0,
+          isCs ? null : v.qualitativeResult, v.expectedResult, qualitative ? 1 : 0,
+          isCs ? v.qualitativeResult : null,
           operatorStaffId, parseIntNullable(req.body?.equipmentId),
           v.status, v.rule, v.zScore, null, req.user!.id);
       }

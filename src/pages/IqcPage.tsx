@@ -19,6 +19,7 @@ import {
   IQC_FREQUENCIES, IQC_FREQUENCY_LABELS,
   IQC_RULE_PROFILE_LABELS, IQC_RULE_PROFILE_HINTS, PROFILES_FOR_TYPE,
   QUALITATIVE_SCALES, QUALITATIVE_LABELS, ANALYTE_TEMPLATES,
+  AST_INTERPRETATIONS, AST_INTERPRETATION_LABELS, AST_METHODS, AST_METHOD_LABELS,
   RULE_LABELS, RULE_MEANING, isRejection,
   type IqcSource, type IqcControlType, type IqcRuleProfile, type QualitativeOutcome,
 } from '../../shared/constants/iqc';
@@ -51,6 +52,7 @@ type Material = {
   qc_frequency: string; rule_profile: IqcRuleProfile;
   prepared_by_name: string | null; preparation_date: string | null; preparation_method: string | null;
   base_material: string | null; validation_summary: string | null; open_vial_expiry: string | null;
+  expected_organism: string | null;
   analyte_count: number; run_count: number; last_run_date: string | null;
 };
 
@@ -58,7 +60,9 @@ type Analyte = {
   id: number; iqc_material_id: number; analyte: string; unit: string | null;
   target_mean: number | null; target_sd: number | null;
   acceptable_low: number | null; acceptable_high: number | null;
-  decimal_places: number; expected_result: string | null; is_active: number; display_order: number;
+  decimal_places: number; expected_result: string | null;
+  ast_method: string | null; expected_interpretation: string | null;
+  is_active: number; display_order: number;
 };
 
 type Run = {
@@ -72,11 +76,12 @@ type Run = {
 type AnalyteDraft = {
   analyte: string; unit: string; targetMean: string; targetSd: string;
   acceptableLow: string; acceptableHigh: string; decimalPlaces: string; expectedResult: string;
+  astMethod: string; expectedInterpretation: string;
 };
 
 const emptyAnalyte = (): AnalyteDraft => ({
   analyte: '', unit: '', targetMean: '', targetSd: '', acceptableLow: '', acceptableHigh: '',
-  decimalPlaces: '2', expectedResult: '',
+  decimalPlaces: '2', expectedResult: '', astMethod: '', expectedInterpretation: '',
 });
 
 const STATUS_TONE: Record<string, string> = { in_control: 'ok', warning: 'warn', out_of_control: 'bad' };
@@ -89,7 +94,12 @@ function useLookups() {
   useEffect(() => {
     api<Section[]>('/sections').then(setSections).catch(() => setSections([]));
     api<Staff[]>('/staff').then(setStaff).catch(() => setStaff([]));
-    api<EquipmentItem[]>('/equipment').then(setEquipment).catch(() => setEquipment([]));
+    // Only diagnostic (laboratory / measuring) equipment belongs in quality
+    // control. Non-diagnostic support items — fridges, freezers, computers —
+    // are classified 'support' in Equipment Management and never appear here.
+    api<EquipmentItem[]>('/equipment')
+      .then(list => setEquipment(list.filter(e => e.equipment_class !== 'support')))
+      .catch(() => setEquipment([]));
   }, []);
   return { sections, staff, equipment };
 }
@@ -345,6 +355,7 @@ function ControlDetail({ material, analytes, canEdit, onChanged, sections, staff
         <div><dt>Rule set</dt><dd>{IQC_RULE_PROFILE_LABELS[material.rule_profile]}</dd></div>
         <div><dt>Frequency</dt><dd>{IQC_FREQUENCY_LABELS[material.qc_frequency as never] ?? material.qc_frequency}</dd></div>
         {material.equipment_name && <div><dt>Instrument</dt><dd>{material.equipment_name}</dd></div>}
+        {material.control_type === 'culture_sensitivity' && material.expected_organism && <div><dt>Reference strain</dt><dd>{material.expected_organism}</dd></div>}
         {material.section_name && <div><dt>Section</dt><dd>{material.section_name}</dd></div>}
         {material.source === 'commercial' && material.manufacturer && <div><dt>Manufacturer</dt><dd>{material.manufacturer}</dd></div>}
         {material.open_vial_expiry && <div><dt>Open-vial expiry</dt><dd>{material.open_vial_expiry}</dd></div>}
@@ -365,23 +376,34 @@ function ControlDetail({ material, analytes, canEdit, onChanged, sections, staff
 
       <table className="data-table compact">
         <thead><tr>
-          <th>Analyte</th><th>Unit</th>
-          {material.control_type === 'qualitative'
-            ? <th>Expected result</th>
-            : <><th>Target mean</th><th>Target SD</th><th>Acceptable range</th></>}
+          <th>{material.control_type === 'culture_sensitivity' ? 'Antimicrobial agent' : 'Analyte'}</th>
+          {material.control_type === 'culture_sensitivity'
+            ? <><th>Method</th><th>Expected category</th></>
+            : <><th>Unit</th>{material.control_type === 'qualitative'
+              ? <th>Expected result</th>
+              : <><th>Target mean</th><th>Target SD</th><th>Acceptable range</th></>}</>}
         </tr></thead>
         <tbody>
           {analytes.filter(a => a.is_active).map(a => (
             <tr key={a.id}>
               <td>{a.analyte}</td>
-              <td>{a.unit || '—'}</td>
-              {material.control_type === 'qualitative' ? (
-                <td>{a.expected_result ? QUALITATIVE_LABELS[a.expected_result as QualitativeOutcome] ?? a.expected_result : <span className="chip bad">not set</span>}</td>
+              {material.control_type === 'culture_sensitivity' ? (
+                <>
+                  <td>{a.ast_method ? AST_METHOD_LABELS[a.ast_method as never] ?? a.ast_method : '—'}</td>
+                  <td>{a.expected_interpretation ? <span className="chip">{AST_INTERPRETATION_LABELS[a.expected_interpretation as never] ?? a.expected_interpretation}</span> : <span className="chip bad">not set</span>}</td>
+                </>
               ) : (
                 <>
-                  <td>{a.target_mean ?? '—'}</td>
-                  <td>{a.target_sd ?? '—'}</td>
-                  <td>{a.acceptable_low ?? '—'} – {a.acceptable_high ?? '—'}</td>
+                  <td>{a.unit || '—'}</td>
+                  {material.control_type === 'qualitative' ? (
+                    <td>{a.expected_result ? QUALITATIVE_LABELS[a.expected_result as QualitativeOutcome] ?? a.expected_result : <span className="chip bad">not set</span>}</td>
+                  ) : (
+                    <>
+                      <td>{a.target_mean ?? '—'}</td>
+                      <td>{a.target_sd ?? '—'}</td>
+                      <td>{a.acceptable_low ?? '—'} – {a.acceptable_high ?? '—'}</td>
+                    </>
+                  )}
                 </>
               )}
             </tr>
@@ -512,6 +534,7 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
   onSaved: (message: string) => void | Promise<void>; onCancel: () => void; onError: (m: string) => void;
 }) {
   const qualitative = material.control_type === 'qualitative';
+  const isCs = material.control_type === 'culture_sensitivity';
   const [form, setForm] = useState({
     materialName: material.material_name, testName: material.test_name, lotNumber: material.lot_number,
     levelLabel: material.level_label ?? '', manufacturer: material.manufacturer ?? '',
@@ -522,7 +545,7 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
     qcFrequency: material.qc_frequency, ruleProfile: material.rule_profile as IqcRuleProfile,
     preparedByStaffId: '', preparationDate: material.preparation_date ?? '',
     preparationMethod: material.preparation_method ?? '', baseMaterial: material.base_material ?? '',
-    validationSummary: material.validation_summary ?? '',
+    validationSummary: material.validation_summary ?? '', expectedOrganism: material.expected_organism ?? '',
   });
   const [rows, setRows] = useState(() => analytes.filter(a => a.is_active).map(a => ({
     analyte: a.analyte, unit: a.unit ?? '',
@@ -531,6 +554,7 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
     acceptableLow: a.acceptable_low === null ? '' : String(a.acceptable_low),
     acceptableHigh: a.acceptable_high === null ? '' : String(a.acceptable_high),
     decimalPlaces: String(a.decimal_places ?? 2), expectedResult: a.expected_result ?? '',
+    astMethod: a.ast_method ?? '', expectedInterpretation: a.expected_interpretation ?? '',
   })));
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
@@ -556,6 +580,10 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
     if (kept.length === 0) return onError('A control has to measure something — keep at least one analyte.');
     if (qualitative && kept.some(r => !r.expectedResult)) {
       return onError('Every qualitative analyte needs the result the control is expected to give.');
+    }
+    if (isCs) {
+      if (!form.expectedOrganism.trim()) return onError('Name the reference strain this control is expected to identify.');
+      if (kept.some(r => !r.expectedInterpretation)) return onError('Every antimicrobial agent needs its expected category (S, SDD, I, R or NS).');
     }
     setBusy(true);
     try {
@@ -601,6 +629,7 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
         <label>Rule set<select value={form.ruleProfile} onChange={e => set('ruleProfile', e.target.value)}>
           {PROFILES_FOR_TYPE[material.control_type].map(p => <option key={p} value={p}>{IQC_RULE_PROFILE_LABELS[p]}</option>)}
         </select></label>
+        {isCs && <label>Expected organism (reference strain)<input value={form.expectedOrganism} onChange={e => set('expectedOrganism', e.target.value)} placeholder="e.g. E. coli ATCC 25922" required /></label>}
       </div>
 
       {material.source === 'in_house' && (
@@ -621,28 +650,45 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
 
       <table className="data-table compact iqc-entry">
         <thead><tr>
-          <th>Analyte</th><th>Unit</th>
-          {qualitative ? <th>Expected result</th> : <><th>Target mean</th><th>Target SD</th><th>Acceptable low</th><th>Acceptable high</th><th>Decimals</th></>}
+          <th>{isCs ? 'Antimicrobial agent' : 'Analyte'}</th>
+          {isCs
+            ? <><th>Method</th><th>Expected category</th></>
+            : <><th>Unit</th>{qualitative ? <th>Expected result</th> : <><th>Target mean</th><th>Target SD</th><th>Acceptable low</th><th>Acceptable high</th><th>Decimals</th></>}</>}
           <th />
         </tr></thead>
         <tbody>
           {rows.map((r, i) => (
             <tr key={i}>
               <td><input value={r.analyte} onChange={e => setRow(i, 'analyte', e.target.value)} required /></td>
-              <td><input value={r.unit} onChange={e => setRow(i, 'unit', e.target.value)} style={{ width: 80 }} /></td>
-              {qualitative ? (
-                <td><select value={r.expectedResult} onChange={e => setRow(i, 'expectedResult', e.target.value)} required>
-                  <option value="">—</option>
-                  {QUALITATIVE_SCALES.flatMap(s => s.outcomes).filter((o, idx, all) => all.indexOf(o) === idx)
-                    .map(o => <option key={o} value={o}>{QUALITATIVE_LABELS[o]}</option>)}
-                </select></td>
+              {isCs ? (
+                <>
+                  <td><select value={r.astMethod} onChange={e => setRow(i, 'astMethod', e.target.value)}>
+                    <option value="">—</option>
+                    {AST_METHODS.map(m => <option key={m} value={m}>{AST_METHOD_LABELS[m]}</option>)}
+                  </select></td>
+                  <td><select value={r.expectedInterpretation} onChange={e => setRow(i, 'expectedInterpretation', e.target.value)} required>
+                    <option value="">—</option>
+                    {AST_INTERPRETATIONS.map(o => <option key={o} value={o}>{AST_INTERPRETATION_LABELS[o]}</option>)}
+                  </select></td>
+                </>
               ) : (
                 <>
-                  <td><input type="number" step="any" value={r.targetMean} onChange={e => setRow(i, 'targetMean', e.target.value)} style={{ width: 96 }} /></td>
-                  <td><input type="number" step="any" value={r.targetSd} onChange={e => setRow(i, 'targetSd', e.target.value)} style={{ width: 96 }} /></td>
-                  <td><input type="number" step="any" value={r.acceptableLow} onChange={e => setRow(i, 'acceptableLow', e.target.value)} style={{ width: 96 }} /></td>
-                  <td><input type="number" step="any" value={r.acceptableHigh} onChange={e => setRow(i, 'acceptableHigh', e.target.value)} style={{ width: 96 }} /></td>
-                  <td><input type="number" min="0" max="4" value={r.decimalPlaces} onChange={e => setRow(i, 'decimalPlaces', e.target.value)} style={{ width: 64 }} /></td>
+                  <td><input value={r.unit} onChange={e => setRow(i, 'unit', e.target.value)} style={{ width: 80 }} /></td>
+                  {qualitative ? (
+                    <td><select value={r.expectedResult} onChange={e => setRow(i, 'expectedResult', e.target.value)} required>
+                      <option value="">—</option>
+                      {QUALITATIVE_SCALES.flatMap(s => s.outcomes).filter((o, idx, all) => all.indexOf(o) === idx)
+                        .map(o => <option key={o} value={o}>{QUALITATIVE_LABELS[o]}</option>)}
+                    </select></td>
+                  ) : (
+                    <>
+                      <td><input type="number" step="any" value={r.targetMean} onChange={e => setRow(i, 'targetMean', e.target.value)} style={{ width: 96 }} /></td>
+                      <td><input type="number" step="any" value={r.targetSd} onChange={e => setRow(i, 'targetSd', e.target.value)} style={{ width: 96 }} /></td>
+                      <td><input type="number" step="any" value={r.acceptableLow} onChange={e => setRow(i, 'acceptableLow', e.target.value)} style={{ width: 96 }} /></td>
+                      <td><input type="number" step="any" value={r.acceptableHigh} onChange={e => setRow(i, 'acceptableHigh', e.target.value)} style={{ width: 96 }} /></td>
+                      <td><input type="number" min="0" max="4" value={r.decimalPlaces} onChange={e => setRow(i, 'decimalPlaces', e.target.value)} style={{ width: 64 }} /></td>
+                    </>
+                  )}
                 </>
               )}
               <td>
@@ -653,8 +699,8 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
           ))}
         </tbody>
       </table>
-      <button type="button" className="secondary tiny" onClick={() => setRows(rs => [...rs, { analyte: '', unit: '', targetMean: '', targetSd: '', acceptableLow: '', acceptableHigh: '', decimalPlaces: '2', expectedResult: '' }])}>
-        <Plus size={12} /> Add an analyte
+      <button type="button" className="secondary tiny" onClick={() => setRows(rs => [...rs, { analyte: '', unit: '', targetMean: '', targetSd: '', acceptableLow: '', acceptableHigh: '', decimalPlaces: '2', expectedResult: '', astMethod: '', expectedInterpretation: '' }])}>
+        <Plus size={12} /> {isCs ? 'Add an agent' : 'Add an analyte'}
       </button>
       <p className="hint">
         An analyte removed here stops being measured. If it already has readings it is retired rather than deleted, so its
@@ -719,11 +765,12 @@ function DefineControl({ sections, staff, equipment, onSaved, onError }: {
     expiryDate: '', openVialExpiry: '', storageCondition: '', sectionId: '', equipmentId: '',
     qcFrequency: 'each_run', ruleProfile: 'westgard_standard' as IqcRuleProfile,
     preparedByStaffId: '', preparationDate: '', preparationMethod: '', baseMaterial: '',
-    validationSummary: '', stabilityPeriod: '', instructions: '',
+    validationSummary: '', stabilityPeriod: '', instructions: '', expectedOrganism: '',
   });
   const [rows, setRows] = useState<AnalyteDraft[]>([emptyAnalyte()]);
   const [scale, setScale] = useState(QUALITATIVE_SCALES[0].key);
   const [busy, setBusy] = useState(false);
+  const isCs = controlType === 'culture_sensitivity';
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
   const profiles = PROFILES_FOR_TYPE[controlType];
@@ -733,7 +780,11 @@ function DefineControl({ sections, staff, equipment, onSaved, onError }: {
     const t = ANALYTE_TEMPLATES.find(x => x.key === key);
     if (!t) return;
     setControlType(t.controlType);
-    setRows(t.analytes.map(a => ({ ...emptyAnalyte(), analyte: a.analyte, unit: a.unit ?? '', decimalPlaces: String(a.decimalPlaces ?? 2) })));
+    if (t.expectedOrganism) set('expectedOrganism', t.expectedOrganism);
+    setRows(t.analytes.map(a => ({
+      ...emptyAnalyte(), analyte: a.analyte, unit: a.unit ?? '',
+      decimalPlaces: String(a.decimalPlaces ?? 2), astMethod: a.astMethod ?? '',
+    })));
   };
 
   const setRow = (i: number, k: keyof AnalyteDraft, v: string) =>
@@ -742,15 +793,21 @@ function DefineControl({ sections, staff, equipment, onSaved, onError }: {
   async function submit(e: FormEvent) {
     e.preventDefault();
     const analytes = rows.filter(r => r.analyte.trim());
-    if (analytes.length === 0) return onError('Add at least one analyte — what does this control measure?');
+    if (analytes.length === 0) {
+      return onError(isCs ? 'Add at least one antimicrobial agent to the panel.' : 'Add at least one analyte — what does this control measure?');
+    }
     if (controlType === 'qualitative' && analytes.some(a => !a.expectedResult)) {
       return onError('Every qualitative analyte needs the result the control is expected to give.');
+    }
+    if (isCs) {
+      if (!form.expectedOrganism.trim()) return onError('Name the reference strain this control is expected to identify (e.g. E. coli ATCC 25922).');
+      if (analytes.some(a => !a.expectedInterpretation)) return onError('Every antimicrobial agent needs the category (S, SDD, I, R or NS) the reference strain is expected to give.');
     }
     setBusy(true);
     try {
       await api('/iqc/materials', { method: 'POST', body: JSON.stringify({ ...form, source, controlType, analytes }) });
       await onSaved();
-      setForm(f => ({ ...f, materialName: '', lotNumber: '', levelLabel: '' }));
+      setForm(f => ({ ...f, materialName: '', lotNumber: '', levelLabel: '', expectedOrganism: '' }));
       setRows([emptyAnalyte()]);
     } catch (err) { onError((err as Error).message); }
     finally { setBusy(false); }
@@ -778,7 +835,7 @@ function DefineControl({ sections, staff, equipment, onSaved, onError }: {
       {/* 2 — what kind of result it gives */}
       <fieldset className="iqc-step">
         <legend><span className="step-n">2</span> What kind of result does it give?</legend>
-        <div className="iqc-choice three">
+        <div className="iqc-choice four">
           {IQC_CONTROL_TYPES.map(t => (
             <button key={t} type="button" className={controlType === t ? 'active' : ''} onClick={() => setControlType(t)}>
               <strong>{IQC_CONTROL_TYPE_LABELS[t]}</strong>
@@ -832,7 +889,7 @@ function DefineControl({ sections, staff, equipment, onSaved, onError }: {
 
       {/* 4 — what it measures */}
       <fieldset className="iqc-step">
-        <legend><span className="step-n">4</span> What does it measure?</legend>
+        <legend><span className="step-n">4</span> {isCs ? 'Organism and susceptibility panel' : 'What does it measure?'}</legend>
         <div className="iqc-template">
           <span className="muted">Start from a template:</span>
           <select value="" onChange={e => e.target.value && applyTemplate(e.target.value)}>
@@ -841,6 +898,20 @@ function DefineControl({ sections, staff, equipment, onSaved, onError }: {
           </select>
           <span className="hint">One vial, many parameters — an FBC control reads eight, a serology control reads one.</span>
         </div>
+
+        {isCs && (
+          <>
+            <label className="stack">Expected organism (reference strain) <em>(required)</em>
+              <input value={form.expectedOrganism} onChange={e => set('expectedOrganism', e.target.value)}
+                placeholder="e.g. Escherichia coli ATCC 25922" required />
+            </label>
+            <p className="iqc-note">
+              QC is run on a reference strain of known identity and known susceptibility. The strain must be identified
+              as the organism above, and each agent must give the expected category below. Report categories only —
+              S, SDD, I, R or NS (CLSI M100) — not zone diameters or MIC values.
+            </p>
+          </>
+        )}
 
         {controlType === 'qualitative' && (
           <label className="iqc-scale">Result scale
@@ -852,17 +923,34 @@ function DefineControl({ sections, staff, equipment, onSaved, onError }: {
 
         <table className="data-table compact iqc-analyte-table">
           <thead><tr>
-            <th>Analyte</th>
-            {controlType === 'qualitative'
-              ? <th>Expected result</th>
-              : <><th>Unit</th><th>Target mean</th><th>Target SD</th><th>Low</th><th>High</th><th>Dec.</th></>}
+            <th>{isCs ? 'Antimicrobial agent' : 'Analyte'}</th>
+            {isCs
+              ? <><th>Method</th><th>Expected category</th></>
+              : controlType === 'qualitative'
+                ? <th>Expected result</th>
+                : <><th>Unit</th><th>Target mean</th><th>Target SD</th><th>Low</th><th>High</th><th>Dec.</th></>}
             <th></th>
           </tr></thead>
           <tbody>
             {rows.map((r, i) => (
               <tr key={i}>
-                <td><input value={r.analyte} onChange={e => setRow(i, 'analyte', e.target.value)} placeholder="e.g. Haemoglobin" /></td>
-                {controlType === 'qualitative' ? (
+                <td><input value={r.analyte} onChange={e => setRow(i, 'analyte', e.target.value)} placeholder={isCs ? 'e.g. Ciprofloxacin' : 'e.g. Haemoglobin'} /></td>
+                {isCs ? (
+                  <>
+                    <td>
+                      <select value={r.astMethod} onChange={e => setRow(i, 'astMethod', e.target.value)}>
+                        <option value="">—</option>
+                        {AST_METHODS.map(m => <option key={m} value={m}>{AST_METHOD_LABELS[m]}</option>)}
+                      </select>
+                    </td>
+                    <td>
+                      <select value={r.expectedInterpretation} onChange={e => setRow(i, 'expectedInterpretation', e.target.value)}>
+                        <option value="">Select…</option>
+                        {AST_INTERPRETATIONS.map(o => <option key={o} value={o}>{AST_INTERPRETATION_LABELS[o]}</option>)}
+                      </select>
+                    </td>
+                  </>
+                ) : controlType === 'qualitative' ? (
                   <td>
                     <select value={r.expectedResult} onChange={e => setRow(i, 'expectedResult', e.target.value)}>
                       <option value="">Select…</option>
@@ -884,7 +972,7 @@ function DefineControl({ sections, staff, equipment, onSaved, onError }: {
             ))}
           </tbody>
         </table>
-        <button type="button" className="secondary" onClick={() => setRows(rs => [...rs, emptyAnalyte()])}><Plus size={13} /> Add analyte</button>
+        <button type="button" className="secondary" onClick={() => setRows(rs => [...rs, emptyAnalyte()])}><Plus size={13} /> {isCs ? 'Add agent' : 'Add analyte'}</button>
         {controlType === 'quantitative' && (
           <p className="hint">
             Leave the mean and SD blank if you are establishing them from your own runs — the acceptable range still
@@ -927,7 +1015,7 @@ function RunControl({ materials, equipment, staff, onRecorded, onError }: {
   const [materialId, setMaterialId] = useState('');
   const [analytes, setAnalytes] = useState<Analyte[]>([]);
   const [values, setValues] = useState<Record<number, string>>({});
-  const [meta, setMeta] = useState({ runDate: new Date().toISOString().slice(0, 10), runTime: '', shift: '', equipmentId: '', reagentLot: '', operatorStaffId: '', comment: '' });
+  const [meta, setMeta] = useState({ runDate: new Date().toISOString().slice(0, 10), runTime: '', shift: '', equipmentId: '', reagentLot: '', operatorStaffId: '', comment: '', observedOrganism: '' });
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<{ status: string; ruleSummary: string | null; analytes: { analyte: string; status: string; rule: string | null; zScore: number | null }[]; mayReleasePatientResults: boolean } | null>(null);
 
@@ -944,16 +1032,19 @@ function RunControl({ materials, equipment, staff, onRecorded, onError }: {
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!material) return onError('Choose which control you are running.');
+    const isCs = material.control_type === 'culture_sensitivity';
     const readings = analytes
       .map(a => {
         const raw = values[a.id];
         if (raw === undefined || raw === '') return null;
+        if (isCs) return { analyteId: a.id, interpretation: raw };
         return material.control_type === 'qualitative'
           ? { analyteId: a.id, qualitativeResult: raw }
           : { analyteId: a.id, value: Number(raw) };
       })
       .filter(Boolean);
     if (readings.length === 0) return onError('Enter at least one reading.');
+    if (isCs && !meta.observedOrganism.trim()) return onError('Record the organism the reference strain identified as.');
 
     setBusy(true);
     try {
@@ -1016,7 +1107,7 @@ function RunControl({ materials, equipment, staff, onRecorded, onError }: {
         <label>Run date<input type="date" value={meta.runDate} onChange={e => setMeta(m => ({ ...m, runDate: e.target.value }))} required /></label>
         <label>Time<input type="time" value={meta.runTime} onChange={e => setMeta(m => ({ ...m, runTime: e.target.value }))} /></label>
         <label>Shift<select value={meta.shift} onChange={e => setMeta(m => ({ ...m, shift: e.target.value }))}><option value="">—</option><option>Morning</option><option>Afternoon</option><option>Night</option></select></label>
-        <label>Instrument<select value={meta.equipmentId} onChange={e => setMeta(m => ({ ...m, equipmentId: e.target.value }))}><option value="">—</option>{equipment.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
+        <label>Instrument<select value={meta.equipmentId} onChange={e => setMeta(m => ({ ...m, equipmentId: e.target.value }))}><option value="">— None (manual method) —</option>{equipment.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
         <label>Reagent lot<input value={meta.reagentLot} onChange={e => setMeta(m => ({ ...m, reagentLot: e.target.value }))} /></label>
         <label>Operator<select value={meta.operatorStaffId} onChange={e => setMeta(m => ({ ...m, operatorStaffId: e.target.value }))}><option value="">Me</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
       </div>
@@ -1030,17 +1121,38 @@ function RunControl({ materials, equipment, staff, onRecorded, onError }: {
         </div>
       )}
 
+      {material && material.control_type === 'culture_sensitivity' && (
+        <div className="form-grid" style={{ marginTop: 8 }}>
+          <label>Organism identified
+            <input value={meta.observedOrganism} onChange={e => setMeta(m => ({ ...m, observedOrganism: e.target.value }))}
+              placeholder={material.expected_organism ? `Expected: ${material.expected_organism}` : 'Organism the strain identified as'} />
+          </label>
+        </div>
+      )}
+
       {material && analytes.length > 0 && (
         <table className="data-table compact iqc-entry">
           <thead><tr>
-            <th>Analyte</th>
-            {material.control_type === 'qualitative' ? <><th>Expected</th><th>Observed</th></> : <><th>Target</th><th>Acceptable</th><th>Result</th></>}
+            <th>{material.control_type === 'culture_sensitivity' ? 'Agent' : 'Analyte'}</th>
+            {material.control_type === 'qualitative' || material.control_type === 'culture_sensitivity'
+              ? <><th>Expected</th><th>Observed</th></>
+              : <><th>Target</th><th>Acceptable</th><th>Result</th></>}
           </tr></thead>
           <tbody>
             {analytes.map(a => (
               <tr key={a.id}>
                 <td><strong>{a.analyte}</strong>{a.unit ? <span className="muted"> ({a.unit})</span> : null}</td>
-                {material.control_type === 'qualitative' ? (
+                {material.control_type === 'culture_sensitivity' ? (
+                  <>
+                    <td>{a.expected_interpretation ? AST_INTERPRETATION_LABELS[a.expected_interpretation as never] ?? a.expected_interpretation : '—'}</td>
+                    <td>
+                      <select value={values[a.id] ?? ''} onChange={e => setValues(v => ({ ...v, [a.id]: e.target.value }))}>
+                        <option value="">—</option>
+                        {AST_INTERPRETATIONS.map(o => <option key={o} value={o}>{AST_INTERPRETATION_LABELS[o]}</option>)}
+                      </select>
+                    </td>
+                  </>
+                ) : material.control_type === 'qualitative' ? (
                   <>
                     <td>{a.expected_result ? QUALITATIVE_LABELS[a.expected_result as QualitativeOutcome] : '—'}</td>
                     <td>
