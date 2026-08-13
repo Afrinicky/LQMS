@@ -13,6 +13,7 @@ import {
 } from '../../shared/constants/backupDestinations';
 import { useAuth } from '../hooks/useAuth';
 import { MODULES, PERMISSION_ACTIONS, TECHNICAL_AUTHORIZATION_LEVELS } from '../../shared/constants/modules';
+import { AUTOMATION_LEVELS, AUTOMATION_LABELS, AUTOMATION_HINTS, automationUsesEquipment } from '../../shared/constants/tests';
 import { usePermissions } from '../hooks/usePermissions';
 import { AccessControl } from './AccessControl';
 import UserAccountActions from '../components/UserAccountActions';
@@ -21,7 +22,7 @@ import type {
   OrgTree, OrgTreeNode, ProfessionalRank,
   Position, Staff, SystemModule, ApiUser, Permission, Section, Device,
   Department, PermissionMatrixData, TechnicalAuthorizationRow, StaffProfile,
-  SectionConfigRow, SectionConfigDetail,
+  SectionConfigRow, SectionConfigDetail, SectionTestRow,
   LaboratoryDocument, QualityPolicy, QualityObjective,
   EquipmentPattern, EquipmentSegment,
   SystemConnectivity, AppMode, SyncStatus, SyncResult, RemoteCloudUser,
@@ -862,7 +863,6 @@ function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onCl
   useEffect(() => { setProfile({ name: s.name, code: s.code || '', departmentId: s.department_id ? String(s.department_id) : '', headStaffId: s.head_staff_id ? String(s.head_staff_id) : '', operatingHours: s.operating_hours || '', serviceSummary: s.service_summary || '', description: s.description || '' }); }, [s.id]);
 
   const [svc, setSvc] = useState({ name: '', category: '', isOffered: 'yes', notes: '' });
-  const [test, setTest] = useState({ testName: '', sampleType: '', methodName: '', tatTargetMinutes: '' });
   const [equip, setEquip] = useState({ name: '', category: '', manufacturer: '', model: '', serialNumber: '' });
   const [item, setItem] = useState({ name: '', category: '', quantity: '', unit: '', reorderLevel: '', expiryDate: '' });
 
@@ -916,27 +916,7 @@ function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onCl
       </tbody></table>
     </>}
 
-    {subtab === 'Test Menu' && <>
-      <p className="hint">Each unit has its own test menu. Tests added here appear in <Link to="/process-management">Process Management</Link> scoped to this unit.</p>
-      <form className="form" onSubmit={e => { e.preventDefault(); call(`/section-config/sections/${sectionId}/tests`, { method: 'POST', body: JSON.stringify(test) }, 'Test added to menu.').then(ok => { if (ok) setTest({ testName: '', sampleType: '', methodName: '', tatTargetMinutes: '' }); }); }}>
-        <div className="form-grid">
-          <label>Test name<input value={test.testName} onChange={e => setTest({ ...test, testName: e.target.value })} required /></label>
-          <label>Sample type<input value={test.sampleType} onChange={e => setTest({ ...test, sampleType: e.target.value })} placeholder="e.g. EDTA blood, Serum" /></label>
-          <label>Method<input value={test.methodName} onChange={e => setTest({ ...test, methodName: e.target.value })} /></label>
-          <label>TAT target (min)<input type="number" value={test.tatTargetMinutes} onChange={e => setTest({ ...test, tatTargetMinutes: e.target.value })} /></label>
-        </div>
-        <button type="submit">Add test</button>
-      </form>
-      <table className="data-table"><thead><tr><th>Code</th><th>Test</th><th>Sample</th><th>Method</th><th>TAT</th><th>Status</th><th></th></tr></thead><tbody>
-        {detail.tests.map(t => <tr key={t.id}>
-          <td>{t.test_code || '—'}</td><td>{t.test_name}</td><td>{t.sample_type || '—'}</td><td>{t.method_name || '—'}</td>
-          <td>{t.tat_target_minutes != null ? `${t.tat_target_minutes}m` : '—'}</td>
-          <td>{t.status === 'active' ? <span className="badge active">active</span> : <span className="badge inactive">{t.status}</span>}</td>
-          <td><button onClick={() => call(`/section-config/tests/${t.id}/toggle`, { method: 'POST' })}>{t.status === 'active' ? 'Deactivate' : 'Activate'}</button></td>
-        </tr>)}
-        {detail.tests.length === 0 && <tr><td colSpan={7} className="hint">No tests in this unit's menu yet.</td></tr>}
-      </tbody></table>
-    </>}
+    {subtab === 'Test Menu' && <SectionTestMenu detail={detail} sectionId={sectionId} call={call} />}
 
     {subtab === 'Equipment' && <>
       <p className="hint">Equipment registered here is scoped to this unit and appears in the <Link to="/equipment">Equipment Management</Link> module for scheduling and maintenance.</p>
@@ -993,6 +973,234 @@ function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onCl
 
     {subtab === 'Benches' && <SectionBenches sectionId={sectionId} />}
   </div>;
+}
+
+/**
+ * A unit's test menu.
+ *
+ * A menu entry is either a single test or a panel/profile (Renal Function,
+ * Liver Function, FBC) that groups component tests the laboratory actually
+ * measures. A panel expands to its components; each component is a real test
+ * with its own sample type, method, automation level and — where an analyser
+ * is used — a linked instrument. Shared settings are applied to a whole panel
+ * at once when it is built, and to any set of tests afterwards.
+ */
+type CompDraft = { testName: string; sampleType: string; automation: string; equipmentId: string; methodName: string; tatTargetMinutes: string };
+const emptyComp = (): CompDraft => ({ testName: '', sampleType: '', automation: '', equipmentId: '', methodName: '', tatTargetMinutes: '' });
+
+function SectionTestMenu({ detail, sectionId, call }: {
+  detail: SectionConfigDetail; sectionId: number;
+  call: (path: string, options: RequestInit, okMsg?: string) => Promise<boolean>;
+}) {
+  // Only diagnostic (laboratory / measuring) equipment in this unit can be a
+  // test's analyser — a fridge or a computer never runs a test.
+  const analysers = detail.equipment.filter(e => (e.equipment_class ?? 'laboratory') !== 'support');
+  const analyserName = (id?: number | null) => analysers.find(a => a.id === id)?.name ?? detail.equipment.find(e => e.id === id)?.name ?? null;
+
+  const [kind, setKind] = useState<'single' | 'panel'>('single');
+  const [single, setSingle] = useState({ testName: '', sampleType: '', automation: '', equipmentId: '', methodName: '', tatTargetMinutes: '' });
+  const [panel, setPanel] = useState({ testName: '', sampleType: '' });
+  const [comps, setComps] = useState<CompDraft[]>([emptyComp()]);
+  const [applyAll, setApplyAll] = useState({ sampleType: '', automation: '', equipmentId: '', methodName: '' });
+
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [bulk, setBulk] = useState({ sampleType: '', methodName: '', automation: '', equipmentId: '' });
+  const [editing, setEditing] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState({ testName: '', sampleType: '', automation: '', equipmentId: '', methodName: '', tatTargetMinutes: '' });
+
+  const panels = detail.tests.filter(t => t.is_panel);
+  const childrenOf = (id: number) => detail.tests.filter(t => t.parent_test_id === id);
+  const singles = detail.tests.filter(t => !t.is_panel && !t.parent_test_id);
+
+  const toggleSet = (set: Set<number>, id: number) => { const n = new Set(set); n.has(id) ? n.delete(id) : n.add(id); return n; };
+
+  // --- analyser + automation cell, reused by add, components and edit ---
+  const autoSelect = (value: string, onChange: (v: string) => void, small = false) => (
+    <select value={value} onChange={e => onChange(e.target.value)} style={small ? { width: 130 } : undefined}>
+      <option value="">Automation…</option>
+      {AUTOMATION_LEVELS.map(a => <option key={a} value={a}>{AUTOMATION_LABELS[a]}</option>)}
+    </select>
+  );
+  const analyserSelect = (automation: string, value: string, onChange: (v: string) => void, small = false) => (
+    automationUsesEquipment(automation) ? (
+      <select value={value} onChange={e => onChange(e.target.value)} style={small ? { width: 150 } : undefined}>
+        <option value="">{analysers.length ? 'Analyser…' : 'No analyser in unit'}</option>
+        {analysers.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+      </select>
+    ) : <span className="hint" style={{ fontSize: 12 }}>{automation === 'manual' ? 'Manual — no analyser' : '—'}</span>
+  );
+
+  async function submitSingle(e: FormEvent) {
+    e.preventDefault();
+    const ok = await call(`/section-config/sections/${sectionId}/tests`, { method: 'POST', body: JSON.stringify({ isPanel: false, ...single }) }, 'Test added to the menu.');
+    if (ok) setSingle({ testName: '', sampleType: '', automation: '', equipmentId: '', methodName: '', tatTargetMinutes: '' });
+  }
+  async function submitPanel(e: FormEvent) {
+    e.preventDefault();
+    const components = comps.filter(c => c.testName.trim());
+    if (components.length === 0) return;
+    const ok = await call(`/section-config/sections/${sectionId}/tests`, { method: 'POST', body: JSON.stringify({ isPanel: true, testName: panel.testName, sampleType: panel.sampleType, components }) }, `Panel "${panel.testName}" added with ${components.length} component test(s).`);
+    if (ok) { setPanel({ testName: '', sampleType: '' }); setComps([emptyComp()]); setApplyAll({ sampleType: '', automation: '', equipmentId: '', methodName: '' }); }
+  }
+  function applyToComponents() {
+    setComps(cs => cs.map(c => ({
+      ...c,
+      sampleType: applyAll.sampleType || c.sampleType,
+      methodName: applyAll.methodName || c.methodName,
+      automation: applyAll.automation || c.automation,
+      equipmentId: applyAll.automation && !automationUsesEquipment(applyAll.automation) ? '' : (applyAll.equipmentId || c.equipmentId),
+    })));
+  }
+  async function bulkApply() {
+    const fields: Record<string, unknown> = {};
+    if (bulk.sampleType !== '') fields.sampleType = bulk.sampleType;
+    if (bulk.methodName !== '') fields.methodName = bulk.methodName;
+    if (bulk.automation !== '') fields.automation = bulk.automation;
+    if (bulk.equipmentId !== '') fields.equipmentId = bulk.equipmentId;
+    if (Object.keys(fields).length === 0) return;
+    const ok = await call('/section-config/tests/bulk-apply', { method: 'POST', body: JSON.stringify({ testIds: [...selected], fields }) }, `Applied to ${selected.size} test(s).`);
+    if (ok) { setSelected(new Set()); setBulk({ sampleType: '', methodName: '', automation: '', equipmentId: '' }); }
+  }
+  function beginEdit(t: SectionTestRow) {
+    setEditing(t.id);
+    setEditForm({ testName: t.test_name, sampleType: t.sample_type ?? '', automation: t.automation ?? '', equipmentId: t.equipment_id ? String(t.equipment_id) : '', methodName: t.method_name ?? '', tatTargetMinutes: t.tat_target_minutes != null ? String(t.tat_target_minutes) : '' });
+  }
+  async function saveEdit(id: number) {
+    const ok = await call(`/section-config/tests/${id}`, { method: 'PUT', body: JSON.stringify(editForm) }, 'Test updated.');
+    if (ok) setEditing(null);
+  }
+
+  const autoBadge = (a?: string | null) => a ? <span className="badge" style={{ textTransform: 'none' }}>{AUTOMATION_LABELS[a as never] ?? a}</span> : <span className="hint">—</span>;
+
+  // A single leaf test row (used for both a panel's components and standalone
+  // tests), with inline edit, analyser and selection for "apply to all".
+  const leafRow = (t: SectionTestRow, isComponent: boolean) => {
+    if (editing === t.id) return (
+      <tr key={t.id} className="editing-row">
+        <td></td>
+        <td style={isComponent ? { paddingLeft: 26 } : undefined}><input value={editForm.testName} onChange={e => setEditForm({ ...editForm, testName: e.target.value })} /></td>
+        <td><input value={editForm.sampleType} onChange={e => setEditForm({ ...editForm, sampleType: e.target.value })} style={{ width: 120 }} /></td>
+        <td><input value={editForm.methodName} onChange={e => setEditForm({ ...editForm, methodName: e.target.value })} style={{ width: 120 }} /></td>
+        <td>{autoSelect(editForm.automation, v => setEditForm({ ...editForm, automation: v, equipmentId: automationUsesEquipment(v) ? editForm.equipmentId : '' }), true)}</td>
+        <td>{analyserSelect(editForm.automation, editForm.equipmentId, v => setEditForm({ ...editForm, equipmentId: v }), true)}</td>
+        <td><input type="number" value={editForm.tatTargetMinutes} onChange={e => setEditForm({ ...editForm, tatTargetMinutes: e.target.value })} style={{ width: 64 }} /></td>
+        <td colSpan={2}><button onClick={() => saveEdit(t.id)}>Save</button> <button className="secondary" onClick={() => setEditing(null)}>Cancel</button></td>
+      </tr>
+    );
+    return (
+      <tr key={t.id} className={t.status !== 'active' ? 'muted-row' : undefined}>
+        <td><input type="checkbox" checked={selected.has(t.id)} onChange={() => setSelected(s => toggleSet(s, t.id))} /></td>
+        <td style={isComponent ? { paddingLeft: 26 } : undefined}>{isComponent && <span className="hint" style={{ marginRight: 6 }}>↳</span>}{t.test_name}<div className="hint" style={{ fontSize: 11 }}>{t.test_code}</div></td>
+        <td>{t.sample_type || '—'}</td>
+        <td>{t.method_name || '—'}</td>
+        <td>{autoBadge(t.automation)}</td>
+        <td>{automationUsesEquipment(t.automation) ? (analyserName(t.equipment_id) || <span className="badge inactive">no analyser</span>) : <span className="hint">—</span>}</td>
+        <td>{t.tat_target_minutes != null ? `${t.tat_target_minutes}m` : '—'}</td>
+        <td>{t.status === 'active' ? <span className="badge active">active</span> : <span className="badge inactive">{t.status}</span>}</td>
+        <td style={{ whiteSpace: 'nowrap' }}>
+          <button className="secondary" onClick={() => beginEdit(t)}>Edit</button>
+          <button onClick={() => call(`/section-config/tests/${t.id}/toggle`, { method: 'POST' })}>{t.status === 'active' ? 'Deactivate' : 'Activate'}</button>
+        </td>
+      </tr>
+    );
+  };
+
+  return <>
+    <p className="hint">Each unit has its own test menu. Enter a <strong>single test</strong> or a <strong>panel/profile</strong> (e.g. Renal Function → Urea, Creatinine) whose component tests are worked with together. Link an analyser only where one is used — manual and semi-automated tests need none. Tests appear in <Link to="/process-management">Process Management</Link> scoped to this unit.</p>
+
+    <div className="tabs inline" style={{ marginBottom: 10 }}>
+      <button type="button" className={kind === 'single' ? 'active' : ''} onClick={() => setKind('single')}>Single test</button>
+      <button type="button" className={kind === 'panel' ? 'active' : ''} onClick={() => setKind('panel')}>Panel / profile</button>
+    </div>
+
+    {kind === 'single' && <form className="form" onSubmit={submitSingle}>
+      <div className="form-grid">
+        <label>Test name<input value={single.testName} onChange={e => setSingle({ ...single, testName: e.target.value })} required placeholder="e.g. Sodium" /></label>
+        <label>Sample type<input value={single.sampleType} onChange={e => setSingle({ ...single, sampleType: e.target.value })} placeholder="e.g. Serum, EDTA blood" /></label>
+        <label>Automation<select value={single.automation} onChange={e => setSingle({ ...single, automation: e.target.value, equipmentId: automationUsesEquipment(e.target.value) ? single.equipmentId : '' })}>
+          <option value="">— select —</option>
+          {AUTOMATION_LEVELS.map(a => <option key={a} value={a}>{AUTOMATION_LABELS[a]}</option>)}
+        </select></label>
+        {automationUsesEquipment(single.automation) && <label>Analyser<select value={single.equipmentId} onChange={e => setSingle({ ...single, equipmentId: e.target.value })}>
+          <option value="">{analysers.length ? '— select analyser —' : 'No diagnostic equipment in this unit'}</option>
+          {analysers.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select></label>}
+        <label>Method<input value={single.methodName} onChange={e => setSingle({ ...single, methodName: e.target.value })} /></label>
+        <label>TAT target (min)<input type="number" value={single.tatTargetMinutes} onChange={e => setSingle({ ...single, tatTargetMinutes: e.target.value })} /></label>
+      </div>
+      {single.automation && <p className="hint">{AUTOMATION_HINTS[single.automation as never]}</p>}
+      <button type="submit">Add test</button>
+    </form>}
+
+    {kind === 'panel' && <form className="form" onSubmit={submitPanel}>
+      <div className="form-grid">
+        <label>Panel / profile name<input value={panel.testName} onChange={e => setPanel({ ...panel, testName: e.target.value })} required placeholder="e.g. Renal Function Test" /></label>
+        <label>Default sample type<input value={panel.sampleType} onChange={e => setPanel({ ...panel, sampleType: e.target.value })} placeholder="applied to components left blank" /></label>
+      </div>
+
+      <div className="apply-all-bar" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', background: 'var(--surface-2, rgba(127,127,127,.08))', padding: '8px 10px', borderRadius: 8, margin: '4px 0 10px' }}>
+        <strong style={{ fontSize: 13 }}>Apply to all components:</strong>
+        <input placeholder="Sample type" value={applyAll.sampleType} onChange={e => setApplyAll({ ...applyAll, sampleType: e.target.value })} style={{ width: 130 }} />
+        {autoSelect(applyAll.automation, v => setApplyAll({ ...applyAll, automation: v, equipmentId: automationUsesEquipment(v) ? applyAll.equipmentId : '' }), true)}
+        {automationUsesEquipment(applyAll.automation) && analyserSelect(applyAll.automation, applyAll.equipmentId, v => setApplyAll({ ...applyAll, equipmentId: v }), true)}
+        <input placeholder="Method" value={applyAll.methodName} onChange={e => setApplyAll({ ...applyAll, methodName: e.target.value })} style={{ width: 130 }} />
+        <button type="button" className="secondary" onClick={applyToComponents}>Apply</button>
+      </div>
+
+      <table className="data-table"><thead><tr><th>Component test</th><th>Sample</th><th>Automation</th><th>Analyser</th><th>Method</th><th>TAT</th><th></th></tr></thead><tbody>
+        {comps.map((c, i) => <tr key={i}>
+          <td><input value={c.testName} onChange={e => setComps(cs => cs.map((x, idx) => idx === i ? { ...x, testName: e.target.value } : x))} placeholder="e.g. Urea" /></td>
+          <td><input value={c.sampleType} onChange={e => setComps(cs => cs.map((x, idx) => idx === i ? { ...x, sampleType: e.target.value } : x))} style={{ width: 110 }} placeholder={panel.sampleType || ''} /></td>
+          <td>{autoSelect(c.automation, v => setComps(cs => cs.map((x, idx) => idx === i ? { ...x, automation: v, equipmentId: automationUsesEquipment(v) ? x.equipmentId : '' } : x)), true)}</td>
+          <td>{analyserSelect(c.automation, c.equipmentId, v => setComps(cs => cs.map((x, idx) => idx === i ? { ...x, equipmentId: v } : x)), true)}</td>
+          <td><input value={c.methodName} onChange={e => setComps(cs => cs.map((x, idx) => idx === i ? { ...x, methodName: e.target.value } : x))} style={{ width: 110 }} /></td>
+          <td><input type="number" value={c.tatTargetMinutes} onChange={e => setComps(cs => cs.map((x, idx) => idx === i ? { ...x, tatTargetMinutes: e.target.value } : x))} style={{ width: 60 }} /></td>
+          <td>{comps.length > 1 && <button type="button" className="secondary" onClick={() => setComps(cs => cs.filter((_, idx) => idx !== i))}>✕</button>}</td>
+        </tr>)}
+      </tbody></table>
+      <button type="button" className="secondary" onClick={() => setComps(cs => [...cs, emptyComp()])}><Plus size={13} /> Add component</button>
+      <div style={{ marginTop: 10 }}><button type="submit">Add panel</button></div>
+    </form>}
+
+    {selected.size > 0 && <div className="apply-all-bar" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', background: 'var(--accent-soft, rgba(80,140,255,.12))', padding: '10px 12px', borderRadius: 8, margin: '14px 0 6px' }}>
+      <strong style={{ fontSize: 13 }}>{selected.size} selected — apply:</strong>
+      <input placeholder="Sample type" value={bulk.sampleType} onChange={e => setBulk({ ...bulk, sampleType: e.target.value })} style={{ width: 130 }} />
+      <input placeholder="Method" value={bulk.methodName} onChange={e => setBulk({ ...bulk, methodName: e.target.value })} style={{ width: 130 }} />
+      {autoSelect(bulk.automation, v => setBulk({ ...bulk, automation: v, equipmentId: automationUsesEquipment(v) ? bulk.equipmentId : '' }), true)}
+      {automationUsesEquipment(bulk.automation) && analyserSelect(bulk.automation, bulk.equipmentId, v => setBulk({ ...bulk, equipmentId: v }), true)}
+      <button type="button" onClick={bulkApply}>Apply to selected</button>
+      <button type="button" className="secondary" onClick={() => setSelected(new Set())}>Clear</button>
+    </div>}
+
+    <table className="data-table" style={{ marginTop: 10 }}>
+      <thead><tr><th style={{ width: 28 }}></th><th>Test / panel</th><th>Sample</th><th>Method</th><th>Automation</th><th>Analyser</th><th>TAT</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        {panels.map(p => {
+          const kids = childrenOf(p.id);
+          const open = expanded.has(p.id);
+          return <Fragment key={p.id}>
+            <tr className="panel-row" style={{ background: 'var(--surface-2, rgba(127,127,127,.06))' }}>
+              <td></td>
+              <td>
+                <button type="button" className="secondary" style={{ padding: '0 8px', marginRight: 6 }} onClick={() => setExpanded(s => toggleSet(s, p.id))}>{open ? '▾' : '▸'}</button>
+                <strong>{p.test_name}</strong> <span className="badge" style={{ textTransform: 'none' }}>Panel · {kids.length}</span>
+                <div className="hint" style={{ fontSize: 11 }}>{p.test_code}</div>
+              </td>
+              <td>{p.sample_type || '—'}</td>
+              <td colSpan={4} className="hint">Profile grouping — worked with as a set</td>
+              <td>{p.status === 'active' ? <span className="badge active">active</span> : <span className="badge inactive">{p.status}</span>}</td>
+              <td><button onClick={() => call(`/section-config/tests/${p.id}/toggle`, { method: 'POST' })}>{p.status === 'active' ? 'Deactivate' : 'Activate'}</button></td>
+            </tr>
+            {open && kids.map(k => leafRow(k, true))}
+            {open && kids.length === 0 && <tr><td></td><td colSpan={8} className="hint">This panel has no component tests.</td></tr>}
+          </Fragment>;
+        })}
+        {singles.map(t => leafRow(t, false))}
+        {detail.tests.length === 0 && <tr><td colSpan={9} className="hint">No tests in this unit's menu yet. Add a single test or a panel above.</td></tr>}
+      </tbody>
+    </table>
+  </>;
 }
 
 // Benches / workspaces this unit assigns its staff to on the unit bench schedule

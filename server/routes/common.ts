@@ -1873,8 +1873,11 @@ export function commonRoutes() {
     const section = db.prepare(`SELECT s.*, d.name AS department_name, hs.full_name AS head_staff_name FROM sections s LEFT JOIN departments d ON d.id = s.department_id LEFT JOIN staff hs ON hs.id = s.head_staff_id WHERE s.id = ?`).get(req.params.id);
     if (!section) return res.status(404).json({ error: 'Unit not found' });
     const services = db.prepare('SELECT id, name, category, is_offered, notes FROM section_services WHERE section_id = ? ORDER BY is_offered DESC, name').all(req.params.id);
-    const tests = db.prepare('SELECT id, test_code, test_name, sample_type, method_name, tat_target_minutes, status FROM lab_test_catalog WHERE section_id = ? ORDER BY test_name').all(req.params.id);
-    const equipment = db.prepare('SELECT id, equipment_number, name, category, manufacturer, model, serial_number, status FROM equipment_items WHERE section_id = ? ORDER BY name').all(req.params.id);
+    const tests = db.prepare(`SELECT t.id, t.test_code, t.test_name, t.sample_type, t.method_name, t.tat_target_minutes,
+        t.status, t.is_panel, t.parent_test_id, t.automation, t.equipment_id, e.name AS equipment_name
+      FROM lab_test_catalog t LEFT JOIN equipment_items e ON e.id = t.equipment_id
+      WHERE t.section_id = ? ORDER BY COALESCE(t.parent_test_id, t.id), t.is_panel DESC, t.test_name`).all(req.params.id);
+    const equipment = db.prepare('SELECT id, equipment_number, name, category, equipment_class, manufacturer, model, serial_number, status FROM equipment_items WHERE section_id = ? ORDER BY name').all(req.params.id);
     const inventory = db.prepare('SELECT id, item_code, name, category, quantity, unit, reorder_level, expiry_date, status FROM inventory_items WHERE section_id = ? ORDER BY name').all(req.params.id);
     const staff = db.prepare('SELECT id, full_name, employee_no, is_active FROM staff WHERE section_id = ? ORDER BY is_active DESC, full_name').all(req.params.id);
     res.json({ section, services, tests, equipment, inventory, staff });
@@ -1909,24 +1912,140 @@ export function commonRoutes() {
   });
 
   // --- Test menu (writes to the shared lab_test_catalog, scoped to this unit) ---
+  // A test is one of two things: a single test, or a panel/profile that groups
+  // component tests. Both are catalogue rows; a component points to its panel
+  // through parent_test_id. Only automated / semi-automated tests carry an
+  // analyser (ISO 15189:2022 §6.4 — equipment used for examinations is linked).
+  const AUTOMATION = ['manual', 'semi_automated', 'automated'];
+  const normAutomation = (v: unknown) => (AUTOMATION.includes(String(v)) ? String(v) : null);
+  const usesEquipment = (a: string | null) => a === 'automated' || a === 'semi_automated';
+
   router.post('/section-config/sections/:id/tests', requirePermission('settings', 'create'), (req, res) => {
     const db = getDb();
     const section = db.prepare('SELECT department_id FROM sections WHERE id = ?').get(req.params.id) as { department_id: number | null } | undefined;
     if (!section) return res.status(404).json({ error: 'Unit not found' });
-    if (!req.body.testName || !String(req.body.testName).trim()) return res.status(400).json({ error: 'A test name is required.' });
-    const testCode = req.body.testCode || generateRecordNumber(db, 'lab_test_catalog', 'TEST');
-    const r = db.prepare(`INSERT INTO lab_test_catalog (test_code, test_name, department_id, section_id, sample_type, container_type, minimum_volume, method_name, method_summary, tat_target_minutes, critical_result_applicable, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(testCode, String(req.body.testName).trim(), section.department_id, req.params.id, req.body.sampleType || null, req.body.containerType || null, req.body.minimumVolume || null, req.body.methodName || null, req.body.methodSummary || null, parseIntNullable(req.body.tatTargetMinutes), req.body.criticalResultApplicable ? 1 : 0, req.body.status || 'active', req.user!.id);
-    audit(req, { action: 'create', entity: 'lab_test_catalog', entityId: Number(r.lastInsertRowid), newValue: { testCode, sectionId: req.params.id, ...req.body } });
-    res.status(201).json({ id: Number(r.lastInsertRowid), testCode });
+    const deptId = section.department_id;
+    const sectionId = Number(req.params.id);
+
+    // An equipment link is only honoured when the analyser belongs to this unit
+    // and is diagnostic — a fridge or a computer is never a test's analyser.
+    const resolveEquipment = (equipmentId: unknown, automation: string | null): number | null => {
+      const id = parseIntNullable(equipmentId);
+      if (!id || !usesEquipment(automation)) return null;
+      const eq = db.prepare("SELECT id FROM equipment_items WHERE id = ? AND section_id = ? AND COALESCE(equipment_class, 'laboratory') != 'support'").get(id, sectionId);
+      return eq ? id : null;
+    };
+    const insertTest = (t: Record<string, unknown>, isPanel: number, parentId: number | null) => {
+      const automation = isPanel ? null : normAutomation(t.automation);
+      const code = (t.testCode as string) || generateRecordNumber(db, 'lab_test_catalog', 'TEST', undefined, 'test_code');
+      const r = db.prepare(`INSERT INTO lab_test_catalog (test_code, test_name, department_id, section_id, sample_type,
+          container_type, minimum_volume, method_name, method_summary, equipment_id, tat_target_minutes,
+          critical_result_applicable, is_panel, parent_test_id, automation, status, created_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(code, String(t.testName).trim(), deptId, sectionId, (t.sampleType as string) || null,
+          (t.containerType as string) || null, (t.minimumVolume as string) || null, (t.methodName as string) || null,
+          (t.methodSummary as string) || null, resolveEquipment(t.equipmentId, automation), parseIntNullable(t.tatTargetMinutes),
+          t.criticalResultApplicable ? 1 : 0, isPanel, parentId, automation, (t.status as string) || 'active', req.user!.id);
+      return Number(r.lastInsertRowid);
+    };
+
+    const isPanel = req.body.isPanel === true || req.body.isPanel === 'true';
+    if (!req.body.testName || !String(req.body.testName).trim()) {
+      return res.status(400).json({ error: isPanel ? 'A panel name is required.' : 'A test name is required.' });
+    }
+    const components = Array.isArray(req.body.components)
+      ? req.body.components.filter((c: Record<string, unknown>) => String(c.testName ?? '').trim())
+      : [];
+    if (isPanel && components.length === 0) {
+      return res.status(400).json({ error: 'A panel needs at least one component test.' });
+    }
+
+    let panelId = 0;
+    const tx = db.transaction(() => {
+      if (!isPanel) { panelId = insertTest(req.body, 0, null); return; }
+      // The panel row carries the profile's own defaults; each component
+      // inherits any field it leaves blank, so a shared sample type or analyser
+      // is set once and cascades.
+      panelId = insertTest(req.body, 1, null);
+      for (const c of components as Record<string, unknown>[]) {
+        insertTest({
+          testName: c.testName,
+          sampleType: c.sampleType || req.body.sampleType,
+          methodName: c.methodName || req.body.methodName,
+          automation: c.automation || req.body.automation,
+          equipmentId: c.equipmentId ?? req.body.equipmentId,
+          tatTargetMinutes: c.tatTargetMinutes ?? req.body.tatTargetMinutes,
+        }, 0, panelId);
+      }
+    });
+    tx();
+    audit(req, { action: 'create', entity: 'lab_test_catalog', entityId: panelId, newValue: { sectionId, isPanel, components: components.length, ...req.body } });
+    res.status(201).json({ id: panelId });
   });
+
+  // Edit one test's fields (sample, method, automation, analyser, TAT).
+  router.put('/section-config/tests/:testId', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const t = db.prepare('SELECT * FROM lab_test_catalog WHERE id = ?').get(req.params.testId) as Record<string, any> | undefined;
+    if (!t) return res.status(404).json({ error: 'Test not found' });
+    const automation = req.body.automation === undefined ? t.automation : normAutomation(req.body.automation);
+    let equipmentId = req.body.equipmentId === undefined ? t.equipment_id : parseIntNullable(req.body.equipmentId);
+    if (!usesEquipment(automation)) equipmentId = null;
+    else if (equipmentId) {
+      const eq = db.prepare("SELECT id FROM equipment_items WHERE id = ? AND section_id = ? AND COALESCE(equipment_class, 'laboratory') != 'support'").get(equipmentId, t.section_id);
+      if (!eq) equipmentId = t.equipment_id && usesEquipment(automation) ? t.equipment_id : null;
+    }
+    db.prepare(`UPDATE lab_test_catalog SET test_name = ?, sample_type = ?, method_name = ?, automation = ?, equipment_id = ?, tat_target_minutes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(req.body.testName?.trim() || t.test_name, req.body.sampleType ?? t.sample_type, req.body.methodName ?? t.method_name,
+        automation, equipmentId, req.body.tatTargetMinutes === undefined ? t.tat_target_minutes : parseIntNullable(req.body.tatTargetMinutes), req.params.testId);
+    audit(req, { action: 'edit', entity: 'lab_test_catalog', entityId: Number(req.params.testId), oldValue: t, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  // Apply one or more fields to many tests at once — the "apply to all" the
+  // bench asks for when a whole panel shares a sample type or moves to a new
+  // analyser. Only the fields sent are touched.
+  router.post('/section-config/tests/bulk-apply', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const ids = Array.isArray(req.body.testIds) ? req.body.testIds.map((x: unknown) => parseIntNullable(x)).filter(Boolean) : [];
+    if (ids.length === 0) return res.status(400).json({ error: 'Select at least one test to apply to.' });
+    const f = req.body.fields ?? {};
+    const setSample = f.sampleType !== undefined, setMethod = f.methodName !== undefined;
+    const setAuto = f.automation !== undefined, setEquip = f.equipmentId !== undefined || setAuto;
+    let updated = 0;
+    const tx = db.transaction(() => {
+      for (const id of ids) {
+        const t = db.prepare('SELECT * FROM lab_test_catalog WHERE id = ?').get(id) as Record<string, any> | undefined;
+        if (!t || t.is_panel) continue; // a panel holds no results of its own
+        const automation = setAuto ? normAutomation(f.automation) : t.automation;
+        let equipmentId = setEquip ? (f.equipmentId !== undefined ? parseIntNullable(f.equipmentId) : t.equipment_id) : t.equipment_id;
+        if (!usesEquipment(automation)) equipmentId = null;
+        else if (equipmentId && (setEquip)) {
+          const eq = db.prepare("SELECT id FROM equipment_items WHERE id = ? AND section_id = ? AND COALESCE(equipment_class, 'laboratory') != 'support'").get(equipmentId, t.section_id);
+          if (!eq) equipmentId = t.equipment_id;
+        }
+        db.prepare('UPDATE lab_test_catalog SET sample_type = ?, method_name = ?, automation = ?, equipment_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+          .run(setSample ? (f.sampleType || null) : t.sample_type, setMethod ? (f.methodName || null) : t.method_name, automation, equipmentId, id);
+        updated++;
+      }
+    });
+    tx();
+    audit(req, { action: 'edit', entity: 'lab_test_catalog', entityId: null, newValue: { bulkApply: true, count: updated, fields: f } });
+    res.json({ ok: true, updated });
+  });
+
   router.post('/section-config/tests/:testId/toggle', requirePermission('settings', 'edit'), (req, res) => {
     const db = getDb();
-    const t = db.prepare('SELECT status FROM lab_test_catalog WHERE id = ?').get(req.params.testId) as { status: string } | undefined;
+    const t = db.prepare('SELECT id, status, is_panel FROM lab_test_catalog WHERE id = ?').get(req.params.testId) as { id: number; status: string; is_panel: number } | undefined;
     if (!t) return res.status(404).json({ error: 'Test not found' });
     const next = t.status === 'active' ? 'inactive' : 'active';
-    db.prepare('UPDATE lab_test_catalog SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(next, req.params.testId);
-    audit(req, { action: 'edit', entity: 'lab_test_catalog', entityId: req.params.testId, oldValue: { status: t.status }, newValue: { status: next } });
+    const tx = db.transaction(() => {
+      db.prepare('UPDATE lab_test_catalog SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(next, t.id);
+      // Toggling a panel carries its components with it — they are the panel.
+      if (t.is_panel) db.prepare('UPDATE lab_test_catalog SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE parent_test_id = ?').run(next, t.id);
+    });
+    tx();
+    audit(req, { action: 'edit', entity: 'lab_test_catalog', entityId: Number(req.params.testId), oldValue: { status: t.status }, newValue: { status: next } });
     res.json({ ok: true, status: next });
   });
 

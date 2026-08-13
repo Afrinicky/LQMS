@@ -2822,6 +2822,16 @@ CREATE TABLE IF NOT EXISTS information_management_reviews (
   if (!sectionNames.has('operating_hours')) database.exec('ALTER TABLE sections ADD COLUMN operating_hours TEXT');
   if (!sectionNames.has('head_staff_id')) database.exec('ALTER TABLE sections ADD COLUMN head_staff_id INTEGER REFERENCES staff(id)');
 
+  // Test catalogue: panels/profiles and how a test is performed. A panel is a
+  // catalogue row grouping component tests (parent_test_id points back to it);
+  // automation records whether an analyser is used, and equipment_id (already
+  // present) links the analyser where one is. Placed here, after lab_test_catalog
+  // is created, so the ALTERs run against an existing table.
+  const testCatCols = new Set((database.prepare("PRAGMA table_info(lab_test_catalog)").all() as Array<{ name: string }>).map(c => c.name));
+  if (!testCatCols.has('is_panel')) database.exec('ALTER TABLE lab_test_catalog ADD COLUMN is_panel INTEGER NOT NULL DEFAULT 0');
+  if (!testCatCols.has('parent_test_id')) database.exec('ALTER TABLE lab_test_catalog ADD COLUMN parent_test_id INTEGER REFERENCES lab_test_catalog(id)');
+  if (!testCatCols.has('automation')) database.exec('ALTER TABLE lab_test_catalog ADD COLUMN automation TEXT');
+
   database.exec(`
 CREATE TABLE IF NOT EXISTS section_services (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
