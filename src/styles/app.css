@@ -3001,3 +3001,16 @@ button.tiny.danger:hover:not(:disabled) { background: rgba(214, 66, 88, .12); bo
 .filters label.inline { flex-direction: row; align-items: center; gap: 6px; }
 .filters label > span { display: flex; align-items: center; gap: 4px; }
 .form-error { color: var(--danger); font-size: 12px; }
+
+/* ============================================================
+   Equipment duties — what a category owes, with its clause.
+   ============================================================ */
+.eq-duties { margin-top: 18px; }
+.eq-duties h4 { margin-bottom: 4px; }
+.eq-duty-list { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 10px; }
+.eq-duty-list li {
+  padding: 12px 14px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px;
+}
+.eq-duty-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.eq-duty-head .badge { text-transform: none; font-weight: 500; }
+.eq-duty-list li p { margin: 6px 0 0; font-size: 12.5px; }

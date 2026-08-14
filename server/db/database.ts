@@ -289,6 +289,26 @@ CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_reset_requests(u
          OR lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,'')) LIKE '%computer%'`);
   }
 
+  // The two-value class above answers "does analytical QC apply?" but not
+  // "what does this thing owe?" — a pipette needs traceable calibration and no
+  // IQC, a fridge needs monitoring and neither. equipment_category carries that
+  // distinction (see shared/constants/equipment.ts for the clauses); the legacy
+  // class is kept in step with it so nothing that still reads it breaks.
+  if (!equipmentNames.has('equipment_category')) {
+    database.exec("ALTER TABLE equipment_items ADD COLUMN equipment_category TEXT");
+    const hay = "lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,''))";
+    // Most specific first: an item matching several patterns takes the earliest.
+    database.exec(`UPDATE equipment_items SET equipment_category = CASE
+        WHEN ${hay} LIKE '%glucomet%' OR ${hay} LIKE '%point of care%' OR ${hay} LIKE '%poct%' THEN 'poct'
+        WHEN ${hay} LIKE '%pipette%' OR ${hay} LIKE '%balance%' OR ${hay} LIKE '%weighing%'
+          OR ${hay} LIKE '%thermometer%' OR ${hay} LIKE '%timer%' OR ${hay} LIKE '%ph meter%' THEN 'measuring_device'
+        WHEN ${hay} LIKE '%computer%' OR ${hay} LIKE '%laptop%' OR ${hay} LIKE '%server%'
+          OR ${hay} LIKE '%printer%' OR ${hay} LIKE '%ups%' OR ${hay} LIKE '%network%' THEN 'it'
+        WHEN equipment_class = 'support' THEN 'support'
+        ELSE 'analyser' END
+      WHERE equipment_category IS NULL`);
+  }
+
   // Phase 3: extend inventory_items
   const inventoryColumns = database.prepare("PRAGMA table_info(inventory_items)").all() as Array<{ name: string }>;
   const inventoryNames = new Set(inventoryColumns.map(col => col.name));

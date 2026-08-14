@@ -1878,7 +1878,7 @@ export function commonRoutes() {
         t.status, t.is_panel, t.parent_test_id, t.automation, t.equipment_id, e.name AS equipment_name
       FROM lab_test_catalog t LEFT JOIN equipment_items e ON e.id = t.equipment_id
       WHERE t.section_id = ? ORDER BY COALESCE(t.parent_test_id, t.id), t.is_panel DESC, t.test_name`).all(req.params.id);
-    const equipment = db.prepare('SELECT id, equipment_number, name, category, equipment_class, manufacturer, model, serial_number, status FROM equipment_items WHERE section_id = ? ORDER BY name').all(req.params.id);
+    const equipment = db.prepare('SELECT id, equipment_number, name, category, equipment_class, equipment_category, manufacturer, model, serial_number, status FROM equipment_items WHERE section_id = ? ORDER BY name').all(req.params.id);
     const inventory = db.prepare('SELECT id, item_code, name, category, quantity, unit, reorder_level, expiry_date, status FROM inventory_items WHERE section_id = ? ORDER BY name').all(req.params.id);
     const staff = db.prepare('SELECT id, full_name, employee_no, is_active FROM staff WHERE section_id = ? ORDER BY is_active DESC, full_name').all(req.params.id);
     res.json({ section, services, tests, equipment, inventory, staff });
@@ -1933,7 +1933,7 @@ export function commonRoutes() {
     const resolveEquipment = (equipmentId: unknown, automation: string | null): number | null => {
       const id = parseIntNullable(equipmentId);
       if (!id || !usesEquipment(automation)) return null;
-      const eq = db.prepare("SELECT id FROM equipment_items WHERE id = ? AND section_id = ? AND COALESCE(equipment_class, 'laboratory') != 'support'").get(id, sectionId);
+      const eq = db.prepare("SELECT id FROM equipment_items WHERE id = ? AND section_id = ? AND COALESCE(equipment_category, CASE WHEN equipment_class = 'support' THEN 'support' ELSE 'analyser' END) IN ('analyser','poct')").get(id, sectionId);
       return eq ? id : null;
     };
     const insertTest = (t: Record<string, unknown>, isPanel: number, parentId: number | null) => {
@@ -1993,7 +1993,7 @@ export function commonRoutes() {
     let equipmentId = req.body.equipmentId === undefined ? t.equipment_id : parseIntNullable(req.body.equipmentId);
     if (!usesEquipment(automation)) equipmentId = null;
     else if (equipmentId) {
-      const eq = db.prepare("SELECT id FROM equipment_items WHERE id = ? AND section_id = ? AND COALESCE(equipment_class, 'laboratory') != 'support'").get(equipmentId, t.section_id);
+      const eq = db.prepare("SELECT id FROM equipment_items WHERE id = ? AND section_id = ? AND COALESCE(equipment_category, CASE WHEN equipment_class = 'support' THEN 'support' ELSE 'analyser' END) IN ('analyser','poct')").get(equipmentId, t.section_id);
       if (!eq) equipmentId = t.equipment_id && usesEquipment(automation) ? t.equipment_id : null;
     }
     db.prepare(`UPDATE lab_test_catalog SET test_name = ?, sample_type = ?, method_name = ?, automation = ?, equipment_id = ?, tat_target_minutes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
@@ -2022,7 +2022,7 @@ export function commonRoutes() {
         let equipmentId = setEquip ? (f.equipmentId !== undefined ? parseIntNullable(f.equipmentId) : t.equipment_id) : t.equipment_id;
         if (!usesEquipment(automation)) equipmentId = null;
         else if (equipmentId && (setEquip)) {
-          const eq = db.prepare("SELECT id FROM equipment_items WHERE id = ? AND section_id = ? AND COALESCE(equipment_class, 'laboratory') != 'support'").get(equipmentId, t.section_id);
+          const eq = db.prepare("SELECT id FROM equipment_items WHERE id = ? AND section_id = ? AND COALESCE(equipment_category, CASE WHEN equipment_class = 'support' THEN 'support' ELSE 'analyser' END) IN ('analyser','poct')").get(equipmentId, t.section_id);
           if (!eq) equipmentId = t.equipment_id;
         }
         db.prepare('UPDATE lab_test_catalog SET sample_type = ?, method_name = ?, automation = ?, equipment_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
@@ -2071,7 +2071,7 @@ export function commonRoutes() {
       const rows = readSheet(req.file.buffer, 'TEST');
       // The unit's diagnostic analysers, matched to the Analyser column by name.
       const analyserByName = new Map<string, number>();
-      for (const e of db.prepare("SELECT id, name FROM equipment_items WHERE section_id = ? AND COALESCE(equipment_class, 'laboratory') != 'support'").all(sectionId) as any[]) {
+      for (const e of db.prepare("SELECT id, name FROM equipment_items WHERE section_id = ? AND COALESCE(equipment_category, CASE WHEN equipment_class = 'support' THEN 'support' ELSE 'analyser' END) IN ('analyser','poct')").all(sectionId) as any[]) {
         analyserByName.set(String(e.name).trim().toLowerCase(), e.id);
       }
       const errors: string[] = []; let created = 0, updated = 0, panelsCreated = 0;
