@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, BarChart, CHART_COLORS, ModuleAlerts } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, BarChart, CHART_COLORS, ModuleAlerts, DetailModal } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -1503,11 +1503,7 @@ export function InventoryPage() {
 }
 
 function InventoryDetailPanel({ item, staff, onClose, acceptBatch, createBatchNc }: { item: InventoryItemDetail; staff: Staff[]; onClose: () => void; acceptBatch: (id: number, status: string) => void; createBatchNc: (id: number) => void }) {
-  return <div className="card" style={{ marginTop: 16 }}>
-    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-      <h3>{item.item_code} — {item.name}</h3>
-      <button type="button" className="secondary" onClick={onClose}>Close</button>
-    </div>
+  return <DetailModal open onClose={onClose} title={<>{item.item_code} — {item.name}</>}>
     <p>Quantity: {item.quantity} {item.unit} | Minimum: {item.minimum_stock} | Reorder: {item.reorder_level} | Expiry: {item.expiry_date || '—'}</p>
     <h4>Batches (FEFO)</h4>
     {!item.batches?.length ? <p>No batches.</p> : <table className="table"><thead><tr><th>Batch</th><th>Lot</th><th>Available</th><th>Expiry</th><th>Acceptance</th><th>Actions</th></tr></thead><tbody>
@@ -1521,7 +1517,7 @@ function InventoryDetailPanel({ item, staff, onClose, acceptBatch, createBatchNc
     {!item.movements?.length ? <p>No movements.</p> : <table className="table"><thead><tr><th>Date</th><th>Type</th><th>Qty</th><th>Reason</th><th>Received by</th></tr></thead><tbody>
       {item.movements.map((m: any) => <tr key={m.id}><td>{m.movement_date}</td><td>{m.movement_type}</td><td>{m.quantity}</td><td>{m.reason || '—'}</td><td>{staffName(staff, m.received_by_staff_id)}</td></tr>)}
     </tbody></table>}
-  </div>;
+  </DetailModal>;
 }
 
 // ============= MONITORING =============
@@ -2012,11 +2008,7 @@ export function SafetyPage() {
 }
 
 function InspectionDetailPanel({ item, staff, onClose, createNc, createCapa, closeInspection }: { item: SafetyInspection & { links?: any[] }; staff: Staff[]; onClose: () => void; createNc: (id: number) => void; createCapa: (id: number) => void; closeInspection: (id: number) => void }) {
-  return <div className="card" style={{ marginTop: 16 }}>
-    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-      <h3>{item.inspection_number} — {(item.inspection_type || 'inspection').replace(/_/g, ' ')}</h3>
-      <button type="button" className="secondary" onClick={onClose}>Close panel</button>
-    </div>
+  return <DetailModal open onClose={onClose} title={<>{item.inspection_number} — {(item.inspection_type || 'inspection').replace(/_/g, ' ')}</>}>
     <p>Status: {formatBadge(item.status)} | Outcome: {item.outcome ? item.outcome.replace(/_/g, ' ') : '—'} | Conducted by: {staffName(staff, item.conducted_by_staff_id)} | Date: {item.inspection_date}</p>
     {item.scope && <p><strong>Scope:</strong> {item.scope}</p>}
     {item.findings_summary && <p><strong>Findings:</strong> {item.findings_summary}</p>}
@@ -2028,15 +2020,11 @@ function InspectionDetailPanel({ item, staff, onClose, createNc, createCapa, clo
     </div>
     <h4 style={{ marginTop: 16 }}>Linked records</h4>
     {!item.links?.length ? <p>No linked records.</p> : <ul>{item.links.map((l: any) => <li key={l.id}>{l.source_module_key}/{l.source_record_type}#{l.source_record_id} → {l.target_module_key}/{l.target_record_type}#{l.target_record_id}{l.notes ? ` (${l.notes})` : ''}</li>)}</ul>}
-  </div>;
+  </DetailModal>;
 }
 
 function SafetyDetailPanel({ item, staff, onClose, createNc, createCapa, closeIncident }: { item: SafetyIncident & { links?: any[] }; staff: Staff[]; onClose: () => void; createNc: (id: number) => void; createCapa: (id: number) => void; closeIncident: (id: number) => void }) {
-  return <div className="card" style={{ marginTop: 16 }}>
-    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-      <h3>{item.incident_number} — {item.title || (item.description || '').slice(0, 80)}</h3>
-      <button type="button" className="secondary" onClick={onClose}>Close panel</button>
-    </div>
+  return <DetailModal open onClose={onClose} title={<>{item.incident_number} — {item.title || (item.description || '').slice(0, 80)}</>}>
     <p>Status: {formatBadge(item.status)} | Severity: {item.severity || '—'} | Reported by: {staffName(staff, item.reported_by_staff_id)} | Date: {item.incident_date}</p>
     {item.description && <p><strong>Description:</strong> {item.description}</p>}
     {item.immediate_action && <p><strong>Immediate action:</strong> {item.immediate_action}</p>}
@@ -2048,5 +2036,5 @@ function SafetyDetailPanel({ item, staff, onClose, createNc, createCapa, closeIn
     </div>
     <h4 style={{ marginTop: 16 }}>Linked records</h4>
     {!item.links?.length ? <p>No linked records.</p> : <ul>{item.links.map((l: any) => <li key={l.id}>{l.source_module_key}/{l.source_record_type}#{l.source_record_id} → {l.target_module_key}/{l.target_record_type}#{l.target_record_id}{l.notes ? ` (${l.notes})` : ''}</li>)}</ul>}
-  </div>;
+  </DetailModal>;
 }

@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts, DetailModal } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -340,8 +340,7 @@ export function AssessmentsPage() {
       <table className="data-table"><thead><tr><th>Number</th><th>Title</th><th>Type</th><th>Start</th><th>Lead</th><th>Status</th><th></th></tr></thead><tbody>
         {programs.map(p => <tr key={p.id}><td>{p.program_number}</td><td>{p.title}</td><td>{p.assessment_type.replace(/_/g, ' ')}</td><td>{p.planned_start_date}</td><td>{staffName(staff, p.lead_assessor_staff_id)}</td><td>{formatBadge(p.status)}</td><td><button onClick={() => open(p.id)}>Open</button> {can('assessments', 'print') && <button onClick={() => openPrintPage(`/assessments/${p.id}/print`)}>Print</button>}</td></tr>)}
       </tbody></table>
-      {selected && <div className="card" style={{ marginTop: 16 }}>
-        <h3>{selected.program_number} — {selected.title}</h3>
+      {selected && <DetailModal open onClose={() => setSelected(null)} title={<>{selected.program_number} — {selected.title}</>}>
         <p>Type: {selected.assessment_type.replace(/_/g, ' ')} | Status: {formatBadge(selected.status)} | Lead: {staffName(staff, selected.lead_assessor_staff_id)}</p>
         {selected.scope && <p><strong>Scope:</strong> {selected.scope}</p>}
         {selected.objectives && <p><strong>Objectives:</strong> {selected.objectives}</p>}
@@ -359,8 +358,7 @@ export function AssessmentsPage() {
           <label>Responsible<select value={findForm.responsibleStaffId} onChange={e => setFindForm({ ...findForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           <button type="submit">Add finding</button>
         </form>
-        <button className="secondary" onClick={() => setSelected(null)}>Close panel</button>
-      </div>}
+      </DetailModal>}
     </>}
 
     {tab === 'New Assessment' && <form className="form-grid" onSubmit={submitProgram}>
@@ -418,8 +416,7 @@ export function AssessmentsPage() {
         <button type="submit">Create checklist</button>
       </form>
 
-      {selectedChecklist && <div className="card" style={{ marginTop: 16 }}>
-        <h3>{selectedChecklist.checklist_code ? selectedChecklist.checklist_code + ' — ' : ''}{selectedChecklist.checklist_name}</h3>
+      {selectedChecklist && <DetailModal open onClose={() => setSelectedChecklist(null)} title={<>{selectedChecklist.checklist_code ? selectedChecklist.checklist_code + ' — ' : ''}{selectedChecklist.checklist_name}</>}>
         <p>Status: {formatBadge(selectedChecklist.status)} | Type: {selectedChecklist.checklist_type.replace(/_/g, ' ')} | Marking: {selectedChecklist.marking_enabled ? 'enabled' : 'disabled'}</p>
         <h4>Sections</h4>
         <table className="data-table"><thead><tr><th>Order</th><th>Title</th><th>Possible marks</th><th>Weight</th><th></th></tr></thead><tbody>
@@ -456,8 +453,7 @@ export function AssessmentsPage() {
           <label>Scoring guidance<textarea value={qForm.scoringGuidance} onChange={e => setQForm({ ...qForm, scoringGuidance: e.target.value })} /></label>
           <button type="submit">Add question</button>
         </form>
-        <button className="secondary" onClick={() => setSelectedChecklist(null)}>Close panel</button>
-      </div>}
+      </DetailModal>}
     </>}
 
     {tab === 'Plan Assessment' && <>
@@ -610,8 +606,7 @@ export function MeetingsPage({ embedded = false }: { embedded?: boolean } = {}) 
       <table className="data-table"><thead><tr><th>Number</th><th>Type</th><th>Title</th><th>Date</th><th>Status</th><th></th></tr></thead><tbody>
         {meetings.map(m => <tr key={m.id}><td>{m.meeting_number}</td><td>{m.meeting_type.replace(/_/g, ' ')}</td><td>{m.title}</td><td>{m.meeting_date}</td><td>{formatBadge(m.status)}</td><td><button onClick={() => open(m.id)}>Open</button>{m.status !== 'closed' && <button onClick={() => closeMtg(m.id)}>Close</button>}</td></tr>)}
       </tbody></table>
-      {selected && <div className="card" style={{ marginTop: 16 }}>
-        <h3>{selected.meeting_number} — {selected.title}</h3>
+      {selected && <DetailModal open onClose={() => setSelected(null)} title={<>{selected.meeting_number} — {selected.title}</>}>
         <p>Date: {selected.meeting_date} | Chair: {staffName(staff, selected.chair_staff_id)} | Secretary: {staffName(staff, selected.secretary_staff_id)}</p>
         {selected.agenda && <p><strong>Agenda:</strong> {selected.agenda}</p>}
         {selected.minutes && <p><strong>Minutes:</strong> {selected.minutes}</p>}
@@ -636,8 +631,7 @@ export function MeetingsPage({ embedded = false }: { embedded?: boolean } = {}) 
           <label>Due date<input type="date" value={actForm.dueDate} onChange={e => setActForm({ ...actForm, dueDate: e.target.value })} /></label>
           <button type="submit">Create action</button>
         </form>
-        <button className="secondary" onClick={() => setSelected(null)}>Close panel</button>
-      </div>}
+      </DetailModal>}
     </>}
 
     {tab === 'New Meeting' && <form className="form-grid" onSubmit={submit}>
@@ -698,8 +692,7 @@ export function ManagementReviewPage({ embedded = false }: { embedded?: boolean 
       <table className="data-table"><thead><tr><th>Number</th><th>Period</th><th>Date</th><th>Chair</th><th>Status</th><th></th></tr></thead><tbody>
         {reviews.map(r => <tr key={r.id}><td>{r.review_number}</td><td>{r.review_period_start} → {r.review_period_end}</td><td>{r.review_date}</td><td>{staffName(staff, r.chair_staff_id)}</td><td>{formatBadge(r.status)}</td><td><button onClick={() => open(r.id)}>Open</button>{r.status !== 'approved' && r.status !== 'closed' && <button onClick={() => approve(r.id)}>Approve</button>}{r.status !== 'closed' && <button onClick={() => closeReview(r.id)}>Close</button>}</td></tr>)}
       </tbody></table>
-      {selected && <div className="card" style={{ marginTop: 16 }}>
-        <h3>{selected.review_number}</h3>
+      {selected && <DetailModal open onClose={() => setSelected(null)} title={<>{selected.review_number}</>}>
         <p>Period: {selected.review_period_start} → {selected.review_period_end} | Date: {selected.review_date} | Status: {formatBadge(selected.status)}</p>
         {selected.summary && <p><strong>Summary:</strong> {selected.summary}</p>}
         {selected.conclusions && <p><strong>Conclusions:</strong> {selected.conclusions}</p>}
@@ -724,8 +717,7 @@ export function ManagementReviewPage({ embedded = false }: { embedded?: boolean 
           <label>Due<input type="date" value={actForm.dueDate} onChange={e => setActForm({ ...actForm, dueDate: e.target.value })} /></label>
           <button type="submit">Create action</button>
         </form>
-        <button className="secondary" onClick={() => setSelected(null)}>Close panel</button>
-      </div>}
+      </DetailModal>}
     </>}
 
     {tab === 'New Review' && <form className="form-grid" onSubmit={submit}>
@@ -908,8 +900,7 @@ export function ContinualImprovementPage() {
       <table className="data-table"><thead><tr><th>Number</th><th>Title</th><th>Area</th><th>Status</th><th>Responsible</th><th></th></tr></thead><tbody>
         {projects.map(p => <tr key={p.id}><td>{p.project_number}</td><td>{p.title}</td><td>{p.improvement_area.replace(/_/g, ' ')}</td><td>{formatBadge(p.status)}</td><td>{staffName(staff, p.responsible_staff_id)}</td><td><button onClick={() => open(p.id)}>Open</button>{p.status !== 'closed' && <button onClick={() => closeProject(p.id)}>Close</button>}</td></tr>)}
       </tbody></table>
-      {selected && <div className="card" style={{ marginTop: 16 }}>
-        <h3>{selected.project_number} — {selected.title}</h3>
+      {selected && <DetailModal open onClose={() => setSelected(null)} title={<>{selected.project_number} — {selected.title}</>}>
         <p>Area: {selected.improvement_area.replace(/_/g, ' ')} | Status: {formatBadge(selected.status)} | Responsible: {staffName(staff, selected.responsible_staff_id)}</p>
         <p><strong>Aim:</strong> {selected.aim_statement}</p>
         {selected.baseline_measure && <p><strong>Baseline:</strong> {selected.baseline_measure}</p>}
@@ -933,8 +924,7 @@ export function ContinualImprovementPage() {
           <label>Due<input type="date" value={actForm.dueDate} onChange={e => setActForm({ ...actForm, dueDate: e.target.value })} /></label>
           <button type="submit">Create action</button>
         </form>
-        <button className="secondary" onClick={() => setSelected(null)}>Close panel</button>
-      </div>}
+      </DetailModal>}
     </>}
 
     {tab === 'New Project' && <form className="form-grid" onSubmit={submit}>

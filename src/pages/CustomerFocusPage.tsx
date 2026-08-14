@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts, DetailModal } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -430,8 +430,7 @@ export function CustomerFocusPage() {
           </td>
         </tr>)}
       </tbody></table>
-      {selectedSurvey && <div className="card" style={{ marginTop: 16 }}>
-        <h3>{selectedSurvey.survey_number} — {selectedSurvey.survey_title}</h3>
+      {selectedSurvey && <DetailModal open onClose={() => { setSelectedSurvey(null); setSurveyResponses([]); }} title={<>{selectedSurvey.survey_number} — {selectedSurvey.survey_title}</>}>
         <p>Status: {formatBadge(selectedSurvey.status)} | Type: {selectedSurvey.survey_type.replace(/_/g, ' ')} | Responses: {selectedSurvey.responseCount ?? 0}</p>
         {analytics && analytics.total_responses > 0 && <>
           <h4>Response analytics</h4>
@@ -461,8 +460,7 @@ export function CustomerFocusPage() {
           <label>Question text<textarea value={questionForm.questionText} onChange={e => setQuestionForm({ ...questionForm, questionText: e.target.value })} required /></label>
           <button type="submit">Add question</button>
         </form>}
-        <button className="secondary" onClick={() => { setSelectedSurvey(null); setSurveyResponses([]); }}>Close panel</button>
-      </div>}
+      </DetailModal>}
     </>}
 
     {tab === 'Survey Responses' && <>
