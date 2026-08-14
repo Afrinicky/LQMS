@@ -32,6 +32,22 @@ export const EQUIPMENT_CATEGORIES = [
 ] as const;
 export type EquipmentCategory = (typeof EQUIPMENT_CATEGORIES)[number];
 
+/**
+ * The six values above are the ARCHETYPES — the fixed behavioural classes the
+ * standards recognise. What a laboratory sees in the dropdown is a CATEGORY,
+ * and a category is configurable: "Chemistry analyser", "Molecular analyser"
+ * and "Blood gas analyser" can all be added, and each is pinned to one
+ * archetype so the system still knows a molecular analyser owes IQC and a cold
+ * room does not. The archetype carries the behaviour; the category carries the
+ * name. A built-in category's value equals its archetype, so a laboratory that
+ * never customises anything sees exactly these six.
+ */
+export const EQUIPMENT_ARCHETYPES = EQUIPMENT_CATEGORIES;
+export type EquipmentArchetype = EquipmentCategory;
+export function isArchetype(v?: string | null): v is EquipmentArchetype {
+  return (EQUIPMENT_ARCHETYPES as readonly string[]).includes(String(v));
+}
+
 export const EQUIPMENT_CATEGORY_LABELS: Record<EquipmentCategory, string> = {
   analyser: 'Diagnostic analyser',
   poct: 'Point-of-care testing device',
@@ -145,6 +161,18 @@ export function owes(category: string | null | undefined, duty: EquipmentDuty): 
  */
 export function isDiagnosticCategory(category?: string | null): boolean {
   return category === 'analyser' || category === 'poct';
+}
+
+/**
+ * The one place the front end asks "does analytical QC apply to this item?".
+ * The archetype is the truth; the category and the legacy class are fallbacks
+ * for rows written before each existed.
+ */
+export function equipmentIsDiagnostic(e: { equipment_archetype?: string | null; equipment_category?: string | null; equipment_class?: string | null; name?: string | null; category?: string | null }): boolean {
+  const archetype = e.equipment_archetype
+    ?? (isArchetype(e.equipment_category) ? e.equipment_category : null)
+    ?? categoryFromLegacy(e.equipment_class, e.name, e.category);
+  return isDiagnosticCategory(archetype);
 }
 
 /** Categories that carry traceable calibration, whether or not they report. */

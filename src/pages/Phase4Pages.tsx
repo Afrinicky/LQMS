@@ -8,7 +8,7 @@ import ScannedRecordUpload from '../components/ScannedRecordUpload';
 import XlsxToolbar from '../components/XlsxToolbar';
 import PermissionTabs from '../components/PermissionTabs';
 import { AST_INTERPRETATIONS, AST_INTERPRETATION_LABELS } from '../../shared/constants/iqc';
-import { isDiagnosticCategory, categoryFromLegacy } from '../../shared/constants/equipment';
+import { equipmentIsDiagnostic } from '../../shared/constants/equipment';
 import type {
   Location, Section, Staff, EquipmentItem,
   IqcMaterial, IqcResult, IqcLotChange,
@@ -40,7 +40,7 @@ function useLookups() {
     // verification, validation, measurement uncertainty). Support equipment
     // (fridges, air-conditioners, incubators …) is excluded here — it is quality
     // assured through environmental monitoring and preventive maintenance instead.
-    api<EquipmentItem[]>('/equipment').then(list => setEquipment(list.filter(e => isDiagnosticCategory(e.equipment_category ?? categoryFromLegacy(e.equipment_class, e.name, e.category))))).catch(() => setEquipment([]));
+    api<EquipmentItem[]>('/equipment').then(list => setEquipment(list.filter(equipmentIsDiagnostic))).catch(() => setEquipment([]));
   }, []);
   return { staff, sections, locations, equipment };
 }

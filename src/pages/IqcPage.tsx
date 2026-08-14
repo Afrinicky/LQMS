@@ -25,7 +25,7 @@ import {
   type IqcSource, type IqcControlType, type IqcRuleProfile, type QualitativeOutcome,
 } from '../../shared/constants/iqc';
 import type { Section, Staff, EquipmentItem } from '../../shared/types/api';
-import { isDiagnosticCategory, categoryFromLegacy } from '../../shared/constants/equipment';
+import { equipmentIsDiagnostic } from '../../shared/constants/equipment';
 
 /* ============================================================================
    IQC — internal quality control.
@@ -100,7 +100,7 @@ function useLookups() {
     // control. Non-diagnostic support items — fridges, freezers, computers —
     // are classified 'support' in Equipment Management and never appear here.
     api<EquipmentItem[]>('/equipment')
-      .then(list => setEquipment(list.filter(e => isDiagnosticCategory(e.equipment_category ?? categoryFromLegacy(e.equipment_class, e.name, e.category)))))
+      .then(list => setEquipment(list.filter(equipmentIsDiagnostic)))
       .catch(() => setEquipment([]));
   }, []);
   return { sections, staff, equipment };

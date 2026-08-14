@@ -14,7 +14,9 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import { MODULES, PERMISSION_ACTIONS, TECHNICAL_AUTHORIZATION_LEVELS } from '../../shared/constants/modules';
 import { AUTOMATION_LEVELS, AUTOMATION_LABELS, AUTOMATION_HINTS, automationUsesEquipment } from '../../shared/constants/tests';
-import { isDiagnosticCategory, categoryFromLegacy } from '../../shared/constants/equipment';
+import { EQUIPMENT_CATEGORY_LABELS } from '../../shared/constants/equipment';
+import type { ConfigOption } from '../../shared/constants/configLists';
+import { equipmentIsDiagnostic } from '../../shared/constants/equipment';
 import XlsxToolbar from '../components/XlsxToolbar';
 import { DetailModal } from '../components/ui';
 import { usePermissions } from '../hooks/usePermissions';
@@ -752,6 +754,111 @@ function OrgNodeEditor({ node, ctx }: { node: OrgNodeData; ctx: OrgCtx }) {
 // write to the same section-scoped tables used by Process Management,
 // Equipment and Supplier & Inventory, so the configuration stays linked.
 
+/**
+ * Configurable dropdown lists.
+ *
+ * The vocabularies the laboratory chooses from — equipment categories,
+ * criticality grades, condition on receipt — managed here rather than fixed in
+ * the software. One list is special: an equipment category decides whether an
+ * item carries IQC and EQA, so each category is pinned to a behavioural
+ * archetype the laboratory picks but cannot invent.
+ */
+type ConfigListView = { key: string; label: string; description: string; archetypeOf: string[] | null; options: ConfigOption[] };
+
+export function ConfigListsPage() {
+  const [lists, setLists] = useState<ConfigListView[]>([]);
+  const [activeKey, setActiveKey] = useState<string>('');
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [draft, setDraft] = useState({ label: '', value: '', archetype: '' });
+  const [editing, setEditing] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState({ label: '', archetype: '' });
+
+  function load() { api<ConfigListView[]>('/config/option-lists').then(ls => { setLists(ls); if (!activeKey && ls.length) setActiveKey(ls[0].key); }).catch(e => setError((e as Error).message)); }
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const list = lists.find(l => l.key === activeKey);
+
+  async function call(path: string, options: RequestInit, okMsg?: string) {
+    setError(null); setSuccess(null);
+    try { await api(path, options); if (okMsg) setSuccess(okMsg); load(); return true; }
+    catch (e) { setError((e as Error).message); return false; }
+  }
+  async function addOption(e: FormEvent) {
+    e.preventDefault();
+    if (!list) return;
+    if (list.archetypeOf && !draft.archetype) return setError('Choose the behaviour this option should follow.');
+    const ok = await call(`/config/option-lists/${list.key}`, { method: 'POST', body: JSON.stringify(draft) }, 'Option added.');
+    if (ok) setDraft({ label: '', value: '', archetype: '' });
+  }
+  function beginEdit(o: ConfigOption) { setEditing(o.id); setEditDraft({ label: o.label, archetype: (o.extra as any)?.archetype ?? '' }); }
+  async function saveEdit(id: number) {
+    const ok = await call(`/config/options/${id}`, { method: 'PUT', body: JSON.stringify(editDraft) }, 'Option updated.');
+    if (ok) setEditing(null);
+  }
+  async function removeOption(o: ConfigOption) {
+    if (!window.confirm(o.is_system ? `"${o.label}" is a built-in — it will be deactivated, not deleted. Continue?` : `Delete "${o.label}"?`)) return;
+    await call(`/config/options/${o.id}`, { method: 'DELETE' }, 'Menu updated.');
+  }
+
+  const archetypeLabel = (a: string) => EQUIPMENT_CATEGORY_LABELS[a as never] ?? a;
+
+  return <div className="section-config">
+    <div className="card">
+      <div className="panel-head"><h3>Dropdown Lists</h3></div>
+      <p>The words the laboratory chooses from in its forms. Rename or retire the ones you don't use, and add your own — these feed Equipment and the rest of the system straight away.</p>
+      {error && <div className="error">{error}</div>}
+      {success && <div className="notice-ok">{success}</div>}
+
+      <div className="tabs" style={{ marginTop: 8 }}>
+        {lists.map(l => <button key={l.key} className={activeKey === l.key ? 'active' : ''} onClick={() => { setActiveKey(l.key); setEditing(null); }}>{l.label}</button>)}
+      </div>
+
+      {list && <>
+        <p className="hint" style={{ marginTop: 10 }}>{list.description}</p>
+
+        <form className="form" onSubmit={addOption} style={{ marginTop: 10 }}>
+          <div className="form-grid">
+            <label>New option<input value={draft.label} onChange={e => setDraft({ ...draft, label: e.target.value })} required placeholder="e.g. Molecular analyser" /></label>
+            {list.archetypeOf && <label>Behaves as<select value={draft.archetype} onChange={e => setDraft({ ...draft, archetype: e.target.value })} required>
+              <option value="">— choose behaviour —</option>
+              {list.archetypeOf.map(a => <option key={a} value={a}>{archetypeLabel(a)}</option>)}
+            </select></label>}
+          </div>
+          {list.archetypeOf && <p className="hint" style={{ marginTop: -4 }}>The behaviour decides what the category owes — only a diagnostic analyser or point-of-care device carries IQC and EQA.</p>}
+          <button type="submit"><Plus size={14} style={{ verticalAlign: -2 }} /> Add option</button>
+        </form>
+
+        <table className="data-table" style={{ marginTop: 10 }}>
+          <thead><tr><th>Option</th>{list.archetypeOf && <th>Behaves as</th>}<th>Status</th><th></th></tr></thead>
+          <tbody>
+            {list.options.map(o => editing === o.id ? (
+              <tr key={o.id} className="editing-row">
+                <td><input value={editDraft.label} onChange={e => setEditDraft({ ...editDraft, label: e.target.value })} /></td>
+                {list.archetypeOf && <td><select value={editDraft.archetype} onChange={e => setEditDraft({ ...editDraft, archetype: e.target.value })}>{list.archetypeOf.map(a => <option key={a} value={a}>{archetypeLabel(a)}</option>)}</select></td>}
+                <td colSpan={2}><button onClick={() => saveEdit(o.id)}>Save</button> <button className="secondary" onClick={() => setEditing(null)}>Cancel</button></td>
+              </tr>
+            ) : (
+              <tr key={o.id} className={o.is_active ? undefined : 'muted-row'}>
+                <td>{o.label} {o.is_system ? <span className="badge" style={{ textTransform: 'none' }}>built-in</span> : null}</td>
+                {list.archetypeOf && <td>{(o.extra as any)?.archetype ? archetypeLabel((o.extra as any).archetype) : '—'}</td>}
+                <td>{o.is_active ? <span className="badge active">active</span> : <span className="badge inactive">inactive</span>}</td>
+                <td className="row-actions" style={{ whiteSpace: 'nowrap' }}>
+                  <button className="secondary" onClick={() => beginEdit(o)}>Edit</button>
+                  {o.is_active
+                    ? <button className="secondary" onClick={() => call(`/config/options/${o.id}`, { method: 'PUT', body: JSON.stringify({ isActive: false }) })}>Deactivate</button>
+                    : <button className="secondary" onClick={() => call(`/config/options/${o.id}`, { method: 'PUT', body: JSON.stringify({ isActive: true }) })}>Activate</button>}
+                  <button className="danger" onClick={() => removeOption(o)}>Delete</button>
+                </td>
+              </tr>
+            ))}
+            {list.options.length === 0 && <tr><td colSpan={4} className="hint">No options yet.</td></tr>}
+          </tbody>
+        </table>
+      </>}
+    </div>
+  </div>;
+}
+
 const SECTION_SUBTABS = ['Profile', 'Services', 'Test Menu', 'Equipment', 'Stock & Inventory', 'Staff', 'Benches'] as const;
 type SectionSubtab = typeof SECTION_SUBTABS[number];
 
@@ -1002,7 +1109,7 @@ function SectionTestMenu({ detail, sectionId, call }: {
 }) {
   // Only diagnostic (laboratory / measuring) equipment in this unit can be a
   // test's analyser — a fridge or a computer never runs a test.
-  const analysers = detail.equipment.filter(e => isDiagnosticCategory(e.equipment_category ?? categoryFromLegacy(e.equipment_class, e.name, e.category)));
+  const analysers = detail.equipment.filter(equipmentIsDiagnostic);
   const analyserName = (id?: number | null) => analysers.find(a => a.id === id)?.name ?? detail.equipment.find(e => e.id === id)?.name ?? null;
 
   const [kind, setKind] = useState<'single' | 'panel'>('single');

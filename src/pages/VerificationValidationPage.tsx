@@ -8,7 +8,7 @@ import { downloadXlsx } from '../services/xlsx';
 import type { Staff, Section, EquipmentItem } from '../../shared/types/api';
 import { usePermissions } from '../hooks/usePermissions';
 import PermissionTabs from '../components/PermissionTabs';
-import { isDiagnosticCategory, categoryFromLegacy } from '../../shared/constants/equipment';
+import { equipmentIsDiagnostic } from '../../shared/constants/equipment';
 
 // ==========================================================================
 // Method Verification & Validation — ISO 15189:2022 (§7.3.3) / CLSI EP series.
@@ -92,7 +92,7 @@ export function VerificationValidationPage({ embedded = false }: { embedded?: bo
   useEffect(() => {
     api<Staff[]>('/staff').then(setStaff).catch(() => setStaff([]));
     api<Section[]>('/sections').then(setSections).catch(() => setSections([]));
-    api<EquipmentItem[]>('/equipment').then(l => setEquipment(l.filter(e => isDiagnosticCategory(e.equipment_category ?? categoryFromLegacy(e.equipment_class, e.name, e.category))))).catch(() => setEquipment([]));
+    api<EquipmentItem[]>('/equipment').then(l => setEquipment(l.filter(equipmentIsDiagnostic))).catch(() => setEquipment([]));
     api<{ labels: Record<string, { label: string; stat: string; unit?: string }> }>('/verification-validation/parameter-catalogue').then(c => setCatalogue(c.labels)).catch(() => setCatalogue({}));
   }, []);
   async function load() {

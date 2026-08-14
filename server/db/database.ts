@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config/index.js';
 import { SYNCABLE_TABLES } from './syncableTables.js';
+import { CONFIG_LISTS } from '../../shared/constants/configLists.js';
 import { BUILTIN_SOUNDS, DEFAULT_SOUND_FOR_EVENT } from '../../shared/constants/activities.js';
 
 // Filesystem layout is sourced from the centralized config module so every path
@@ -294,6 +295,23 @@ CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_reset_requests(u
   // IQC, a fridge needs monitoring and neither. equipment_category carries that
   // distinction (see shared/constants/equipment.ts for the clauses); the legacy
   // class is kept in step with it so nothing that still reads it breaks.
+  // Configurable dropdown lists ("picklists"). Display vocabularies the
+  // laboratory owns — equipment categories, criticality, condition on receipt —
+  // live here so they can be edited in Settings instead of in the source.
+  database.exec(`CREATE TABLE IF NOT EXISTS config_options (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    list_key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    label TEXT NOT NULL,
+    extra TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    is_system INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT,
+    UNIQUE (list_key, value)
+  )`);
+
   if (!equipmentNames.has('equipment_category')) {
     database.exec("ALTER TABLE equipment_items ADD COLUMN equipment_category TEXT");
     const hay = "lower(COALESCE(name,'') || ' ' || COALESCE(category,'') || ' ' || COALESCE(equipment_type,''))";
@@ -307,6 +325,26 @@ CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_reset_requests(u
         WHEN equipment_class = 'support' THEN 'support'
         ELSE 'analyser' END
       WHERE equipment_category IS NULL`);
+  }
+
+  // The archetype carries the behaviour (does IQC/EQA apply?); the category
+  // carries the name. For every row written before categories became
+  // configurable the two are identical, so the backfill is a straight copy.
+  if (!equipmentNames.has('equipment_archetype')) {
+    database.exec("ALTER TABLE equipment_items ADD COLUMN equipment_archetype TEXT");
+    database.exec("UPDATE equipment_items SET equipment_archetype = equipment_category WHERE equipment_archetype IS NULL");
+  }
+
+  // Seed the configurable lists once. Options a laboratory adds later sit
+  // alongside these; the built-ins are marked is_system so they can be renamed
+  // or deactivated but not deleted out from under the behaviour that needs them.
+  {
+    const has = database.prepare('SELECT COUNT(*) AS n FROM config_options WHERE list_key = ?');
+    const ins = database.prepare('INSERT OR IGNORE INTO config_options (list_key, value, label, extra, sort_order, is_active, is_system) VALUES (?, ?, ?, ?, ?, 1, 1)');
+    for (const list of CONFIG_LISTS) {
+      if ((has.get(list.key) as { n: number }).n > 0) continue;
+      list.seed.forEach((o, i) => ins.run(list.key, o.value, o.label, o.extra ? JSON.stringify(o.extra) : null, i));
+    }
   }
 
   // Phase 3: extend inventory_items
