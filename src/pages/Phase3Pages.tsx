@@ -254,6 +254,7 @@ export function EquipmentPage() {
     try {
       const token = getToken();
       const res = await fetch(`${API_BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+      if (res.status === 401) throw new Error('Your session has expired. Sign out and sign in again, then retry the export.');
       if (!res.ok) throw new Error((await res.json().catch(() => ({ error: res.statusText }))).error ?? res.statusText);
       const blob = await res.blob();
       const m = (res.headers.get('Content-Disposition') || '').match(/filename="?([^"]+)"?/);
@@ -269,6 +270,7 @@ export function EquipmentPage() {
       const fd = new FormData(); fd.append('file', file);
       const token = getToken();
       const res = await fetch(`${API_BASE}/equipment/register/import`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
+      if (res.status === 401) throw new Error('Your session has expired. Sign out and sign in again, then retry the import.');
       const data = await res.json().catch(() => ({ error: res.statusText }));
       if (!res.ok) throw new Error(data.error ?? res.statusText);
       setRegResult(data); await load();
@@ -465,6 +467,14 @@ type ProfileProps = {
 function EquipmentProfile({ item, staff, sections, departments, locations, onBack, onSaved, setError, createBreakdownNc, createBreakdownCapa, returnToService }: ProfileProps) {
   const { can } = usePermissions();
   const [editing, setEditing] = useState(false);
+  // The same configurable dropdowns the New Equipment form uses.
+  const [optionLists, setOptionLists] = useState<Record<string, ConfigOption[]>>({});
+  const opt = (key: string) => (optionLists[key] ?? []).filter(o => o.is_active);
+  useEffect(() => {
+    Promise.all(['equipment_category', 'equipment_criticality', 'equipment_condition']
+      .map(k => api<ConfigOption[]>(`/config/option-lists/${k}`).then(o => [k, o] as const).catch(() => [k, []] as const)))
+      .then(pairs => setOptionLists(Object.fromEntries(pairs)));
+  }, []);
   const [saving, setSaving] = useState(false);
   const [showLabel, setShowLabel] = useState(false);
   const [showDecommission, setShowDecommission] = useState(false);
@@ -625,14 +635,15 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
       ? <form className="form" style={{ marginTop: 14 }} onSubmit={e => { e.preventDefault(); void save(); }}>
           <label>Unique identifier<input value={form.equipmentNumber} onChange={e => setForm({ ...form, equipmentNumber: e.target.value })} /></label>
           <label>Name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></label>
-          <label>Category<input value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} /></label>
-          <label>Equipment type<input value={form.equipmentType} onChange={e => setForm({ ...form, equipmentType: e.target.value })} /></label>
+          <label>Equipment category<select value={form.equipmentCategory} onChange={e => setForm({ ...form, equipmentCategory: e.target.value })}>
+            {opt('equipment_category').map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </select><small className="muted">{EQUIPMENT_CATEGORY_HINTS[(archetypeOfOption(opt('equipment_category'), form.equipmentCategory)) as never] ?? ''} <Link to="/settings/config-lists">Manage categories</Link></small></label>
           <label>Manufacturer<input value={form.manufacturer} onChange={e => setForm({ ...form, manufacturer: e.target.value })} /></label>
           <label>Model<input value={form.model} onChange={e => setForm({ ...form, model: e.target.value })} /></label>
           <label>Serial number<input value={form.serialNumber} onChange={e => setForm({ ...form, serialNumber: e.target.value })} /></label>
           <label>Country of origin<input value={form.countryOfOrigin} onChange={e => setForm({ ...form, countryOfOrigin: e.target.value })} /></label>
-          <label>Condition received<select value={form.conditionReceived} onChange={e => setForm({ ...form, conditionReceived: e.target.value })}><option value="">—</option>{CONDITION_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
-          <label>Criticality<select value={form.criticality} onChange={e => setForm({ ...form, criticality: e.target.value })}><option value="">—</option>{CRITICALITY_OPTIONS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></label>
+          <label>Condition received<select value={form.conditionReceived} onChange={e => setForm({ ...form, conditionReceived: e.target.value })}><option value="">—</option>{opt('equipment_condition').map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></label>
+          <label>Criticality<select value={form.criticality} onChange={e => setForm({ ...form, criticality: e.target.value })}><option value="">—</option>{opt('equipment_criticality').map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></label>
           <label>Supplier name<input value={form.supplierName} onChange={e => setForm({ ...form, supplierName: e.target.value })} /></label>
           <label>Supplier location<input value={form.supplierLocation} onChange={e => setForm({ ...form, supplierLocation: e.target.value })} /></label>
           <label>Supplier contact<input value={form.supplierContact} onChange={e => setForm({ ...form, supplierContact: e.target.value })} /></label>

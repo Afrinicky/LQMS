@@ -16,18 +16,27 @@ import { classForCategory, categoryFromLegacy, isArchetype, type EquipmentArchet
 function resolveCategory(db: any, value: unknown, name?: string | null, catText?: string | null): { category: string; archetype: EquipmentArchetype } {
   let category = String(value ?? '').trim();
   if (!category) category = categoryFromLegacy(null, name, catText);
-  const row = db.prepare("SELECT extra FROM config_options WHERE list_key = 'equipment_category' AND value = ?").get(category) as { extra: string | null } | undefined;
+  // Match on the stored code first, then on the human label (so an export that
+  // reads "Diagnostic analyser" imports back to the "analyser" code).
+  let row = db.prepare("SELECT value, extra FROM config_options WHERE list_key = 'equipment_category' AND value = ?").get(category) as { value: string; extra: string | null } | undefined;
+  if (!row) row = db.prepare("SELECT value, extra FROM config_options WHERE list_key = 'equipment_category' AND label = ? COLLATE NOCASE").get(category) as { value: string; extra: string | null } | undefined;
+  if (row) category = row.value;
   let archetype: string | null = null;
   if (row?.extra) { try { archetype = JSON.parse(row.extra).archetype; } catch { /* ignore */ } }
   if (!isArchetype(archetype)) archetype = isArchetype(category) ? category : 'other';
   return { category, archetype: archetype as EquipmentArchetype };
 }
 
+// The register mirrors the equipment profile — every heading the profile shows,
+// in the order it shows them — so an export is a full record, not a summary.
+// The decommission columns are read-only history: exported for the record, but
+// not written back on import (retiring an item is a lifecycle action of its own).
 const EQUIPMENT_REGISTER_HEADERS = [
   'Identifier', 'Name', 'Equipment category', 'Manufacturer', 'Model', 'Serial No.', 'Country of origin', 'Condition received',
-  'Criticality', 'Supplier name', 'Supplier location', 'Supplier contact', 'Department', 'Section', 'Custodian (employee no.)',
+  'Criticality', 'Supplier name', 'Supplier location', 'Supplier contact', 'Department', 'Section', 'Location', 'Custodian (employee no.)',
   'Status', 'Date received', 'Date in service', 'Date out of service', 'Maintenance frequency', 'Next maintenance due',
   'Calibration required', 'Calibration frequency', 'Next calibration due', 'Notes',
+  'Decommissioned', 'Decommissioned on', 'Decommission reason',
 ] as const;
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
@@ -74,13 +83,22 @@ export function equipmentRoutes() {
     const db = getDb();
     const rows: any[][] = [];
     if (withData) {
-      const items = db.prepare(`SELECT e.*, d.name AS dept_name, sec.name AS sec_name, st.employee_no AS staff_no FROM equipment_items e LEFT JOIN departments d ON d.id = e.department_id LEFT JOIN sections sec ON sec.id = e.section_id LEFT JOIN staff st ON st.id = COALESCE(e.responsible_staff_id, e.assigned_to_staff_id) ORDER BY e.equipment_number`).all() as any[];
+      const items = db.prepare(`SELECT e.*, d.name AS dept_name, sec.name AS sec_name, loc.name AS loc_name, st.employee_no AS staff_no,
+          cat.label AS category_label
+        FROM equipment_items e
+        LEFT JOIN departments d ON d.id = e.department_id
+        LEFT JOIN sections sec ON sec.id = e.section_id
+        LEFT JOIN locations loc ON loc.id = e.location_id
+        LEFT JOIN config_options cat ON cat.list_key = 'equipment_category' AND cat.value = e.equipment_category
+        LEFT JOIN staff st ON st.id = COALESCE(e.responsible_staff_id, e.assigned_to_staff_id)
+        ORDER BY e.equipment_number`).all() as any[];
       for (const i of items) {
         rows.push([
-          i.equipment_number, i.name, i.equipment_category ?? '', i.manufacturer ?? '', i.model ?? '', i.serial_number ?? '', i.country_of_origin ?? '', i.condition_received ?? '',
-          i.criticality ?? '', i.supplier_name ?? '', i.supplier_location ?? '', i.supplier_contact ?? '', i.dept_name ?? '', i.sec_name ?? '', i.staff_no ?? '',
+          i.equipment_number, i.name, i.category_label ?? i.equipment_category ?? '', i.manufacturer ?? '', i.model ?? '', i.serial_number ?? '', i.country_of_origin ?? '', i.condition_received ?? '',
+          i.criticality ?? '', i.supplier_name ?? '', i.supplier_location ?? '', i.supplier_contact ?? '', i.dept_name ?? '', i.sec_name ?? '', i.loc_name ?? '', i.staff_no ?? '',
           i.status ?? '', i.date_received ?? '', i.date_commissioned ?? '', i.date_out_of_service ?? '', i.maintenance_frequency ?? '', i.next_maintenance_due ?? '',
           i.calibration_required ? 'Yes' : 'No', i.calibration_frequency ?? '', i.next_calibration_due ?? '', i.notes ?? '',
+          i.decommissioned ? 'Yes' : 'No', i.decommissioned_at ?? '', i.decommission_reason ?? '',
         ]);
       }
     }
@@ -113,6 +131,8 @@ export function equipmentRoutes() {
       for (const s of db.prepare('SELECT id, name FROM sections').all() as any[]) secByName.set(String(s.name).toLowerCase(), s.id);
       const staffByNo = new Map<string, number>();
       for (const s of db.prepare('SELECT id, employee_no FROM staff WHERE employee_no IS NOT NULL').all() as any[]) staffByNo.set(String(s.employee_no).toLowerCase(), s.id);
+      const locByName = new Map<string, number>();
+      for (const l of db.prepare('SELECT id, name FROM locations').all() as any[]) locByName.set(String(l.name).toLowerCase(), l.id);
       const norm = (v: unknown) => { const s = String(v ?? '').trim(); return s === '' ? null : s; };
       const yn = (v: unknown) => { const s = String(v ?? '').trim().toLowerCase(); return s === 'yes' || s === 'y' || s === 'true' || s === '1' ? 1 : 0; };
 
@@ -127,13 +147,14 @@ export function equipmentRoutes() {
           const deptId = norm(r['Department']) ? (deptByName.get(String(r['Department']).toLowerCase()) ?? null) : null;
           const secId = norm(r['Section']) ? (secByName.get(String(r['Section']).toLowerCase()) ?? null) : null;
           const staffId = norm(r['Custodian (employee no.)']) ? (staffByNo.get(String(r['Custodian (employee no.)']).toLowerCase()) ?? null) : null;
+          const locId = norm(r['Location']) ? (locByName.get(String(r['Location']).toLowerCase()) ?? null) : null;
           const status = (norm(r['Status']) ?? 'operational').toLowerCase();
           const finalStatus = EQUIPMENT_STATUSES.includes(status) ? status : 'operational';
           const values = {
             name, equipmentCategory: norm(r['Equipment category']), manufacturer: norm(r['Manufacturer']), model: norm(r['Model']),
             serialNumber: norm(r['Serial No.']), countryOfOrigin: norm(r['Country of origin']), conditionReceived: norm(r['Condition received']),
             criticality: norm(r['Criticality']), supplierName: norm(r['Supplier name']), supplierLocation: norm(r['Supplier location']), supplierContact: norm(r['Supplier contact']),
-            departmentId: deptId, sectionId: secId, responsibleStaffId: staffId, status: finalStatus,
+            departmentId: deptId, sectionId: secId, locationId: locId, responsibleStaffId: staffId, status: finalStatus,
             dateReceived: norm(r['Date received']), dateCommissioned: norm(r['Date in service']), dateOutOfService: norm(r['Date out of service']),
             maintenanceFrequency: norm(r['Maintenance frequency']), nextMaintenanceDue: norm(r['Next maintenance due']),
             calibrationRequired: yn(r['Calibration required']), calibrationFrequency: norm(r['Calibration frequency']), nextCalibrationDue: norm(r['Next calibration due']),
@@ -143,15 +164,15 @@ export function equipmentRoutes() {
           try {
             const existing = identifier ? db.prepare('SELECT id FROM equipment_items WHERE equipment_number = ?').get(identifier) as any : null;
             if (existing) {
-              db.prepare(`UPDATE equipment_items SET name = ?, equipment_category = ?, equipment_archetype = ?, equipment_class = ?, manufacturer = ?, model = ?, serial_number = ?, country_of_origin = ?, condition_received = ?, criticality = ?, supplier_name = ?, supplier_location = ?, supplier_contact = ?, department_id = ?, section_id = ?, responsible_staff_id = ?, status = ?, date_received = ?, date_commissioned = ?, date_out_of_service = ?, maintenance_frequency = ?, next_maintenance_due = ?, calibration_required = ?, calibration_frequency = ?, next_calibration_due = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-                .run(values.name, impCat.category, impCat.archetype, classForCategory(impCat.archetype), values.manufacturer, values.model, values.serialNumber, values.countryOfOrigin, values.conditionReceived, values.criticality, values.supplierName, values.supplierLocation, values.supplierContact, values.departmentId, values.sectionId, values.responsibleStaffId, values.status, values.dateReceived, values.dateCommissioned, values.dateOutOfService, values.maintenanceFrequency, values.nextMaintenanceDue, values.calibrationRequired, values.calibrationFrequency, values.nextCalibrationDue, values.notes, existing.id);
+              db.prepare(`UPDATE equipment_items SET name = ?, equipment_category = ?, equipment_archetype = ?, equipment_class = ?, manufacturer = ?, model = ?, serial_number = ?, country_of_origin = ?, condition_received = ?, criticality = ?, supplier_name = ?, supplier_location = ?, supplier_contact = ?, department_id = ?, section_id = ?, location_id = ?, responsible_staff_id = ?, status = ?, date_received = ?, date_commissioned = ?, date_out_of_service = ?, maintenance_frequency = ?, next_maintenance_due = ?, calibration_required = ?, calibration_frequency = ?, next_calibration_due = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+                .run(values.name, impCat.category, impCat.archetype, classForCategory(impCat.archetype), values.manufacturer, values.model, values.serialNumber, values.countryOfOrigin, values.conditionReceived, values.criticality, values.supplierName, values.supplierLocation, values.supplierContact, values.departmentId, values.sectionId, values.locationId, values.responsibleStaffId, values.status, values.dateReceived, values.dateCommissioned, values.dateOutOfService, values.maintenanceFrequency, values.nextMaintenanceDue, values.calibrationRequired, values.calibrationFrequency, values.nextCalibrationDue, values.notes, existing.id);
               updated++;
             } else {
               const createdAt = new Date().toISOString();
               const equipmentNumber = identifier || generateEquipmentNumber(db, createdAt);
               if (db.prepare('SELECT 1 FROM equipment_items WHERE equipment_number = ?').get(equipmentNumber)) { errors.push(`Row ${rowNo}: identifier ${equipmentNumber} already in use.`); return; }
-              db.prepare(`INSERT INTO equipment_items (equipment_number, name, equipment_category, equipment_archetype, equipment_class, manufacturer, model, serial_number, country_of_origin, condition_received, criticality, supplier_name, supplier_location, supplier_contact, department_id, section_id, responsible_staff_id, status, date_received, date_commissioned, date_out_of_service, maintenance_frequency, next_maintenance_due, calibration_required, calibration_frequency, next_calibration_due, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-                .run(equipmentNumber, values.name, impCat.category, impCat.archetype, classForCategory(impCat.archetype), values.manufacturer, values.model, values.serialNumber, values.countryOfOrigin, values.conditionReceived, values.criticality, values.supplierName, values.supplierLocation, values.supplierContact, values.departmentId, values.sectionId, values.responsibleStaffId, values.status, values.dateReceived, values.dateCommissioned, values.dateOutOfService, values.maintenanceFrequency, values.nextMaintenanceDue, values.calibrationRequired, values.calibrationFrequency, values.nextCalibrationDue, values.notes, req.user!.id, createdAt);
+              db.prepare(`INSERT INTO equipment_items (equipment_number, name, equipment_category, equipment_archetype, equipment_class, manufacturer, model, serial_number, country_of_origin, condition_received, criticality, supplier_name, supplier_location, supplier_contact, department_id, section_id, location_id, responsible_staff_id, status, date_received, date_commissioned, date_out_of_service, maintenance_frequency, next_maintenance_due, calibration_required, calibration_frequency, next_calibration_due, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+                .run(equipmentNumber, values.name, impCat.category, impCat.archetype, classForCategory(impCat.archetype), values.manufacturer, values.model, values.serialNumber, values.countryOfOrigin, values.conditionReceived, values.criticality, values.supplierName, values.supplierLocation, values.supplierContact, values.departmentId, values.sectionId, values.locationId, values.responsibleStaffId, values.status, values.dateReceived, values.dateCommissioned, values.dateOutOfService, values.maintenanceFrequency, values.nextMaintenanceDue, values.calibrationRequired, values.calibrationFrequency, values.nextCalibrationDue, values.notes, req.user!.id, createdAt);
               created++;
             }
           } catch (e) {
