@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts, DetailModal } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -273,8 +273,7 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
           </td>
         </tr>)}
       </tbody></table>
-      {selectedImport && <div className="card" style={{ marginTop: 16 }}>
-        <h3>{selectedImport.batch_number} — {selectedImport.original_filename}</h3>
+      {selectedImport && <DetailModal open onClose={() => setSelectedImport(null)} title={<>{selectedImport.batch_number} — {selectedImport.original_filename}</>}>
         <p>Status: {formatBadge(selectedImport.status)} | Rows: {selectedImport.total_rows} | Exceptions: {selectedImport.exception_count}</p>
         <p>File hash: {selectedImport.file_hash ? <code>{selectedImport.file_hash.slice(0, 16)}…</code> : '—'}</p>
         {selectedImport.rows && <>
@@ -283,8 +282,7 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
             {selectedImport.rows.map(r => <tr key={r.id}><td>{r.row_number}</td><td>{r.patient_type || '—'}</td><td>{r.test_name || '—'}</td><td>{r.parameter_name || '—'}</td><td>{r.result_value || '—'}</td><td>{formatBadge(r.mapping_status)}</td><td>{r.exception_reason || '—'}</td></tr>)}
           </tbody></table>
         </>}
-        <button className="secondary" onClick={() => setSelectedImport(null)}>Close panel</button>
-      </div>}
+      </DetailModal>}
     </>}
 
     {tab === 'Mapping Rules' && <>
@@ -364,8 +362,7 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
           </td>
         </tr>)}
       </tbody></table>
-      {selectedReport && <div className="card" style={{ marginTop: 16 }}>
-        <h3>{selectedReport.report_number}</h3>
+      {selectedReport && <DetailModal open onClose={() => setSelectedReport(null)} title={<>{selectedReport.report_number}</>}>
         <p>Period: {selectedReport.report_year}-{String(selectedReport.report_month).padStart(2, '0')} | Type: {selectedReport.report_type.replace(/_/g, ' ')} | Status: {formatBadge(selectedReport.status)} | Exceptions: {selectedReport.exception_count}</p>
         <table className="data-table"><thead><tr><th>Section</th><th>Row</th><th>Category</th><th>Value</th><th>Source count</th><th>Notes</th></tr></thead><tbody>
           {(selectedReport.lines || []).map(l => <tr key={l.id}><td>{l.report_section}</td><td>{l.report_row}</td><td>{l.category || '—'}</td><td>{l.value_text ?? l.value_number ?? '—'}</td><td>{l.source_count}</td><td>{l.notes || '—'}</td></tr>)}
@@ -374,8 +371,7 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
           <h4>Linked records</h4>
           <ul>{selectedReport.links.map(l => <li key={l.id}>{l.source_module_key}/{l.source_record_type}#{l.source_record_id} → {l.target_module_key}/{l.target_record_type}#{l.target_record_id}{l.notes ? ` — ${l.notes}` : ''}</li>)}</ul>
         </>}
-        <button className="secondary" onClick={() => setSelectedReport(null)}>Close panel</button>
-      </div>}
+      </DetailModal>}
     </>}
 
     {tab === 'TAT Summary' && <>

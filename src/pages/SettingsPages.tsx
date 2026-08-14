@@ -15,6 +15,7 @@ import { useAuth } from '../hooks/useAuth';
 import { MODULES, PERMISSION_ACTIONS, TECHNICAL_AUTHORIZATION_LEVELS } from '../../shared/constants/modules';
 import { AUTOMATION_LEVELS, AUTOMATION_LABELS, AUTOMATION_HINTS, automationUsesEquipment } from '../../shared/constants/tests';
 import XlsxToolbar from '../components/XlsxToolbar';
+import { DetailModal } from '../components/ui';
 import { usePermissions } from '../hooks/usePermissions';
 import { AccessControl } from './AccessControl';
 import UserAccountActions from '../components/UserAccountActions';
@@ -867,16 +868,18 @@ function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onCl
   const [equip, setEquip] = useState({ name: '', category: '', manufacturer: '', model: '', serialNumber: '' });
   const [item, setItem] = useState({ name: '', category: '', quantity: '', unit: '', reorderLevel: '', expiryDate: '' });
 
-  return <div className="card section-detail">
-    <div className="panel-head">
-      <h3>{s.name} {s.is_active ? '' : <span className="badge inactive">inactive</span>}</h3>
-      <div>
-        <button className="secondary" onClick={() => call(`/section-config/sections/${sectionId}/toggle`, { method: 'POST' }, s.is_active ? 'Unit deactivated.' : 'Unit activated.')}>{s.is_active ? 'Deactivate unit' : 'Activate unit'}</button>
-        <button className="secondary" onClick={onDelete}>Delete unit</button>
-        <button className="secondary" onClick={onClose}>Close</button>
-      </div>
-    </div>
-
+  return <DetailModal
+    open
+    onClose={onClose}
+    title={s.name}
+    subtitle={[s.code, s.department_name].filter(Boolean).join(' · ') || undefined}
+    header={<>
+      {!s.is_active && <span className="badge inactive">inactive</span>}
+      <button className="secondary" onClick={() => call(`/section-config/sections/${sectionId}/toggle`, { method: 'POST' }, s.is_active ? 'Unit deactivated.' : 'Unit activated.')}>{s.is_active ? 'Deactivate' : 'Activate'}</button>
+      <button className="danger" onClick={onDelete}>Delete unit</button>
+    </>}
+  >
+  <div className="card section-detail">
     <div className="tabs">{SECTION_SUBTABS.map(t => <button key={t} className={subtab === t ? 'active' : ''} onClick={() => onSubtab(t)}>{t}</button>)}</div>
 
     {subtab === 'Profile' && <form className="form" onSubmit={e => { e.preventDefault(); call(`/section-config/sections/${sectionId}`, { method: 'PUT', body: JSON.stringify(profile) }, 'Unit profile updated.'); }}>
@@ -973,7 +976,8 @@ function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onCl
     </>}
 
     {subtab === 'Benches' && <SectionBenches sectionId={sectionId} />}
-  </div>;
+  </div>
+  </DetailModal>;
 }
 
 /**
@@ -1019,15 +1023,17 @@ function SectionTestMenu({ detail, sectionId, call }: {
   // Automation + analyser, the one pairing reused across the single form, the
   // component builder and inline edit: the analyser only shows once the test is
   // marked automated or semi-automated.
-  const autoSelect = (value: string, onChange: (v: string) => void, w = 150) => (
-    <select value={value} onChange={e => onChange(e.target.value)} style={{ width: w }}>
-      <option value="">Automation…</option>
+  // Widths are left to the content: a fixed pixel width clipped the longer
+  // labels ("Semi-automated", an analyser's full name) mid-word.
+  const autoSelect = (value: string, onChange: (v: string) => void) => (
+    <select value={value} onChange={e => onChange(e.target.value)} className="tm-select">
+      <option value="">How performed…</option>
       {AUTOMATION_LEVELS.map(a => <option key={a} value={a}>{AUTOMATION_LABELS[a]}</option>)}
     </select>
   );
-  const analyserSelect = (automation: string, value: string, onChange: (v: string) => void, w = 160) => (
+  const analyserSelect = (automation: string, value: string, onChange: (v: string) => void) => (
     automationUsesEquipment(automation) ? (
-      <select value={value} onChange={e => onChange(e.target.value)} style={{ width: w }}>
+      <select value={value} onChange={e => onChange(e.target.value)} className="tm-select">
         <option value="">{analysers.length ? 'Analyser…' : 'No analyser in unit'}</option>
         {analysers.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
       </select>
@@ -1093,8 +1099,8 @@ function SectionTestMenu({ detail, sectionId, call }: {
         <td style={isComponent ? { paddingLeft: 22 } : undefined}><input value={editForm.testName} onChange={e => setEditForm({ ...editForm, testName: e.target.value })} /></td>
         <td><input value={editForm.sampleType} onChange={e => setEditForm({ ...editForm, sampleType: e.target.value })} style={{ width: 120 }} /></td>
         <td><input value={editForm.methodName} onChange={e => setEditForm({ ...editForm, methodName: e.target.value })} style={{ width: 120 }} /></td>
-        <td>{autoSelect(editForm.automation, v => setEditForm({ ...editForm, automation: v, equipmentId: automationUsesEquipment(v) ? editForm.equipmentId : '' }), 130)}</td>
-        <td>{analyserSelect(editForm.automation, editForm.equipmentId, v => setEditForm({ ...editForm, equipmentId: v }), 140)}</td>
+        <td>{autoSelect(editForm.automation, v => setEditForm({ ...editForm, automation: v, equipmentId: automationUsesEquipment(v) ? editForm.equipmentId : '' }))}</td>
+        <td>{analyserSelect(editForm.automation, editForm.equipmentId, v => setEditForm({ ...editForm, equipmentId: v }))}</td>
         <td><input type="number" value={editForm.tatTargetMinutes} onChange={e => setEditForm({ ...editForm, tatTargetMinutes: e.target.value })} style={{ width: 60 }} /></td>
         <td colSpan={2}><button onClick={() => saveEdit(t.id)}>Save</button> <button className="secondary" onClick={() => setEditing(null)}>Cancel</button></td>
       </tr>
@@ -1163,8 +1169,8 @@ function SectionTestMenu({ detail, sectionId, call }: {
       <div className="apply-bar" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', background: 'var(--surface-2, rgba(127,127,127,.08))', padding: '8px 10px', borderRadius: 8, marginBottom: 8 }}>
         <span style={{ fontSize: 13, fontWeight: 600 }}>Apply to ticked:</span>
         <input placeholder="Specimen" value={apply.sampleType} onChange={e => setApply({ ...apply, sampleType: e.target.value })} style={{ width: 120 }} />
-        {autoSelect(apply.automation, v => setApply({ ...apply, automation: v, equipmentId: automationUsesEquipment(v) ? apply.equipmentId : '' }), 130)}
-        {automationUsesEquipment(apply.automation) && analyserSelect(apply.automation, apply.equipmentId, v => setApply({ ...apply, equipmentId: v }), 140)}
+        {autoSelect(apply.automation, v => setApply({ ...apply, automation: v, equipmentId: automationUsesEquipment(v) ? apply.equipmentId : '' }))}
+        {automationUsesEquipment(apply.automation) && analyserSelect(apply.automation, apply.equipmentId, v => setApply({ ...apply, equipmentId: v }))}
         <input placeholder="Method" value={apply.methodName} onChange={e => setApply({ ...apply, methodName: e.target.value })} style={{ width: 120 }} />
         <button type="button" onClick={applyToSelected} disabled={applyDisabled}>Apply to ticked ({compSel.size})</button>
       </div>
@@ -1177,8 +1183,8 @@ function SectionTestMenu({ detail, sectionId, call }: {
           <td><input type="checkbox" checked={compSel.has(c.key)} onChange={() => setCompSel(s => toggleSet(s, c.key))} /></td>
           <td><input value={c.testName} onChange={e => setComp(c.key, { testName: e.target.value })} placeholder="e.g. Urea" /></td>
           <td><input value={c.sampleType} onChange={e => setComp(c.key, { sampleType: e.target.value })} style={{ width: 110 }} /></td>
-          <td>{autoSelect(c.automation, v => setComp(c.key, { automation: v, equipmentId: automationUsesEquipment(v) ? c.equipmentId : '' }), 130)}</td>
-          <td>{analyserSelect(c.automation, c.equipmentId, v => setComp(c.key, { equipmentId: v }), 140)}</td>
+          <td>{autoSelect(c.automation, v => setComp(c.key, { automation: v, equipmentId: automationUsesEquipment(v) ? c.equipmentId : '' }))}</td>
+          <td>{analyserSelect(c.automation, c.equipmentId, v => setComp(c.key, { equipmentId: v }))}</td>
           <td><input value={c.methodName} onChange={e => setComp(c.key, { methodName: e.target.value })} style={{ width: 110 }} /></td>
           <td><input type="number" value={c.tatTargetMinutes} onChange={e => setComp(c.key, { tatTargetMinutes: e.target.value })} style={{ width: 56 }} /></td>
           <td>{comps.length > 1 && <button type="button" className="danger" title="Remove component" onClick={() => removeComp(c.key)}>✕</button>}</td>

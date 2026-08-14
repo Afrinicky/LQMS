@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ModuleAlerts } from '../components/ui';
+import { KpiStrip, ModuleAlerts, DetailModal } from '../components/ui';
 import { api, API_BASE, getToken } from '../services/api';
 import { useModules } from '../hooks/useModules';
 import DisabledModule from '../components/DisabledModule';
@@ -471,15 +471,13 @@ function NcDetail({ nc, staff, sections, cfg, capa, onClose, onChanged, onError,
     catch (e) { onError((e as Error).message); }
   }
 
-  return <div className="card" style={{ marginTop: 16, borderTop: '3px solid var(--primary, #2563eb)' }}>
-    <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-      <h3 style={{ margin: 0 }}>{nc.nc_number} {formatBadge(nc.status)} {n.risk_score != null ? <>{n.risk_score} {riskLevelBadge(n.risk_level)}</> : null}
-        {n.affects_patient_safety ? <span className="badge badge--danger" style={{ marginLeft: 6 }}>patient safety</span> : null}</h3>
-      <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-        {can('nc_capa', 'print') && <button className="secondary" onClick={() => openPrintWindow(`/nonconformities/${nc.id}/print`, onError)}>Print report</button>}
-        <button className="secondary" onClick={onClose}>Close</button>
-      </div>
-    </div>
+  return <DetailModal
+    open
+    onClose={onClose}
+    title={<>{nc.nc_number} {formatBadge(nc.status)} {n.risk_score != null ? <>{n.risk_score} {riskLevelBadge(n.risk_level)}</> : null}
+      {n.affects_patient_safety ? <span className="badge badge--danger" style={{ marginLeft: 6 }}>patient safety</span> : null}</>}
+    header={can('nc_capa', 'print') ? <button className="secondary" onClick={() => openPrintWindow(`/nonconformities/${nc.id}/print`, onError)}>Print report</button> : undefined}
+  >
     <p className="muted" style={{ fontSize: 12 }}>{nc.event_date}{n.time_of_event ? ` ${n.time_of_event}` : ''} · {(n.nc_type || '—').replace(/_/g, ' ')} · {sections.find(s => s.id === nc.section_id)?.name || '—'} · reported by {staff.find(s => s.id === nc.detected_by_staff_id)?.fullName || n.detected_by_name || '—'}</p>
     <WorkflowStepper active={n.workflow_stage || (nc.status === 'closed' ? 'closed' : 'risk_assessment')} />
     {n.escalation_reason && <Banner kind="info"><strong>Auto-escalated:</strong> {n.escalation_reason}</Banner>}
@@ -526,7 +524,7 @@ function NcDetail({ nc, staff, sections, cfg, capa, onClose, onChanged, onError,
       {!cfg.canAmend && <span className="muted" style={{ fontSize: 12 }}>Amending the logged details is restricted to {cfg.amendRoles.join(', ') || 'senior quality roles'}.</span>}
       {nc.status !== 'closed' && cfg.canFollowUp && <button className="secondary" onClick={closeNc}>Close nonconformity</button>}
     </div>
-  </div>;
+  </DetailModal>;
 }
 
 // ==========================================================================
@@ -901,12 +899,12 @@ function CapaDetailPanel({ capa, staff, cfg, onClose, onChanged, onError, onMsg 
     catch (e) { onError((e as Error).message); } finally { setBusy(false); }
   }
 
-  return <div className="card" style={{ marginTop: 16, borderTop: '3px solid var(--primary, #2563eb)' }}>
-    <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-      <h3 style={{ margin: 0 }}>{capa.capa_number} {formatBadge(capa.status)}
-        {c.effectiveness_status === 'not_effective' ? <span className="badge badge--danger" style={{ marginLeft: 6 }}>not effective</span> : null}</h3>
-      <button style={{ marginLeft: 'auto' }} className="secondary" onClick={onClose}>Close</button>
-    </div>
+  return <DetailModal
+    open
+    onClose={onClose}
+    title={<>{capa.capa_number} {formatBadge(capa.status)}
+      {c.effectiveness_status === 'not_effective' ? <span className="badge badge--danger" style={{ marginLeft: 6 }}>not effective</span> : null}</>}
+  >
     <p className="muted" style={{ fontSize: 12 }}>
       Raised from {capaSourceLabel(c)}{c.nc_number || c.incident_number || c.complaint_number ? ` ${c.nc_number || c.incident_number || c.complaint_number}` : ''}
       {' '}· created {fmtDate(c.created_at)}{c.responsible_name ? ` · owner ${c.responsible_name}` : ''}
@@ -1001,5 +999,5 @@ function CapaDetailPanel({ capa, staff, cfg, onClose, onChanged, onError, onMsg 
         {capa.updates.map(u => <tr key={u.id}><td>{fmtDate(u.update_date)}</td><td>{formatBadge(u.status)}</td><td>{u.update_text}</td></tr>)}
       </tbody></table>
       : <p className="muted">No updates recorded yet.</p>}
-  </div>;
+  </DetailModal>;
 }

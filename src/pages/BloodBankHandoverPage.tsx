@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts, DetailModal } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -351,8 +351,7 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
           </td>
         </tr>)}
       </tbody></table>
-      {selectedHandover && <div className="card" style={{ marginTop: 16 }}>
-        <h3>{selectedHandover.handover_number}</h3>
+      {selectedHandover && <DetailModal open onClose={() => setSelectedHandover(null)} title={<>{selectedHandover.handover_number}</>}>
         <p>Date: {selectedHandover.handover_date} | Period: {selectedHandover.period_start} → {selectedHandover.period_end} | Status: {formatBadge(selectedHandover.status)}</p>
         <p>Outgoing: {selectedHandover.outgoing_staff_name || staffName(staff, selectedHandover.outgoing_staff_id)} {selectedHandover.outgoing_staff_signed_at ? `✓ ${selectedHandover.outgoing_staff_signed_at}` : '(unsigned)'}</p>
         <p>Incoming: {selectedHandover.incoming_staff_name || staffName(staff, selectedHandover.incoming_staff_id)} {selectedHandover.incoming_staff_signed_at ? `✓ ${selectedHandover.incoming_staff_signed_at}` : '(unsigned)'}</p>
@@ -406,9 +405,8 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
         <div style={{ marginTop: 12 }}>
           <button onClick={() => createHandoverAction(selectedHandover.id)}>Create action</button>{' '}
           <button onClick={() => createHandoverNc(selectedHandover.id)}>Create NC</button>{' '}
-          <button className="secondary" onClick={() => setSelectedHandover(null)}>Close panel</button>
         </div>
-      </div>}
+      </DetailModal>}
     </>}
 
     {tab === 'Donation Campaigns' && <>

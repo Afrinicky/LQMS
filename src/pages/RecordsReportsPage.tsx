@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, DetailModal } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -310,8 +310,7 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
             {p.status === 'approved' && <button onClick={() => packAction(p.id, 'archive')}>Archive</button>}
           </td></tr>)}
       </tbody></table>
-      {selectedPack && <div className="card" style={{ marginTop: 16 }}>
-        <h3>{selectedPack.pack_number} — {selectedPack.pack_title}</h3>
+      {selectedPack && <DetailModal open onClose={() => setSelectedPack(null)} title={<>{selectedPack.pack_number} — {selectedPack.pack_title}</>}>
         <p>Purpose: {selectedPack.pack_purpose} | Status: {formatBadge(selectedPack.status)}</p>
         <LinkedRecordsPanel moduleKey="records_reports" recordType="evidence_packs" recordId={selectedPack.id} title="Cross-module links for this evidence pack" />
         <h4>Items</h4>
@@ -326,8 +325,7 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
           <label>Summary<textarea value={packItemForm.itemSummary} onChange={e => setPackItemForm({ ...packItemForm, itemSummary: e.target.value })} /></label>
           <button type="submit">Add item</button>
         </form>
-        <button className="secondary" onClick={() => setSelectedPack(null)}>Close panel</button>
-      </div>}
+      </DetailModal>}
     </>}
 
     {tab === 'Audit Trail' && <>

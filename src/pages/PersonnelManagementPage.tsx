@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, BarMeter, BarChart, CHART_COLORS, ModuleAlerts } from '../components/ui';
+import { KpiStrip, ChartCard, BarMeter, BarChart, CHART_COLORS, ModuleAlerts, DetailModal } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { Download, Upload } from 'lucide-react';
 import { api, API_BASE, getToken } from '../services/api';
@@ -597,8 +597,7 @@ export function PersonnelManagementPage() {
           <td><button onClick={() => openTraining(t.id)}>Open</button></td>
         </tr>)}
       </tbody></table>
-      {selectedTraining && <div className="card" style={{ marginTop: 16 }}>
-        <h3>{selectedTraining.training_number} — {selectedTraining.title}</h3>
+      {selectedTraining && <DetailModal open onClose={() => setSelectedTraining(null)} title={<>{selectedTraining.training_number} — {selectedTraining.title}</>}>
         <h4>Attendance</h4>
         <table className="data-table"><thead><tr><th>Staff</th><th>Status</th><th>Signed</th><th>Remarks</th></tr></thead><tbody>
           {(selectedTraining.attendance || []).map(a => <tr key={a.id}><td>{a.staff_name || staffName(staff, a.staff_id)}</td><td>{formatBadge(a.attendance_status)}</td><td>{a.signed_at || '—'}</td><td>{a.remarks || '—'}</td></tr>)}
@@ -609,8 +608,7 @@ export function PersonnelManagementPage() {
           <label>Remarks<input value={attendanceForm.remarks} onChange={e => setAttendanceForm({ ...attendanceForm, remarks: e.target.value })} /></label>
           <button type="submit">Record attendance</button>
         </form>
-        <button className="secondary" onClick={() => setSelectedTraining(null)}>Close panel</button>
-      </div>}
+      </DetailModal>}
     </>}
 
     {tab === 'Competency Assessments' && <>
@@ -633,8 +631,7 @@ export function PersonnelManagementPage() {
           <td><button onClick={() => openCompetency(c.id)}>Open</button></td>
         </tr>)}
       </tbody></table>
-      {selectedComp && <div className="card" style={{ marginTop: 16 }}>
-        <h3>{selectedComp.competency_number} — {selectedComp.activity}</h3>
+      {selectedComp && <DetailModal open onClose={() => setSelectedComp(null)} title={<>{selectedComp.competency_number} — {selectedComp.activity}</>}>
         <p>Staff: {selectedComp.staff_name || staffName(staff, selectedComp.staff_id)} | Status: {formatBadge(selectedComp.status)} | Outcome: {formatBadge(selectedComp.outcome)}</p>
         {selectedComp.status !== 'completed' && <>
           <h4>Complete assessment</h4>
@@ -662,8 +659,7 @@ export function PersonnelManagementPage() {
           <h4>Linked records</h4>
           <ul>{selectedComp.links.map(l => <li key={l.id}>{l.source_module_key}/{l.source_record_type}#{l.source_record_id} → {l.target_module_key}/{l.target_record_type}#{l.target_record_id}{l.notes ? ` — ${l.notes}` : ''}</li>)}</ul>
         </>}
-        <button className="secondary" onClick={() => setSelectedComp(null)}>Close panel</button>
-      </div>}
+      </DetailModal>}
     </>}
 
     {tab === 'Performance Appraisals' && <>

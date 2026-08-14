@@ -1721,7 +1721,12 @@ li.focus-flash, div.focus-flash { background-color: var(--accent-soft); box-shad
 .section-detail tr.muted-row td:not(.row-actions) { opacity: .55; }
 .section-detail tr.panel-row td { border-top: 2px solid var(--border, rgba(127,127,127,.18)); }
 .section-detail tr.editing-row td { background: var(--accent-soft, rgba(80,140,255,.08)); }
-.section-detail .apply-bar input, .section-detail .apply-bar select { height: 30px; }
+/* Sized by content, never clipped: a fixed width cut "Semi-automated" and the
+   longer analyser names off mid-word, and a fixed height clipped descenders. */
+.section-detail .apply-bar input, .section-detail .apply-bar select { min-height: 34px; height: auto; }
+.section-detail .tm-select { width: auto; min-width: 150px; max-width: 100%; }
+.section-detail .apply-bar { row-gap: 8px; }
+.section-detail .iqc-analyte-table select, .section-detail .data-table select { min-height: 34px; }
 
 /* ============================================================
    Positions — inline edit, authorization grid extras
@@ -1949,6 +1954,65 @@ button.tiny { padding: 2px 8px; font-size: 11px; }
   width: 26px; height: 26px; border-radius: 50%; font-size: 10.5px; font-weight: 700;
   background: linear-gradient(140deg, var(--accent), #1B49C0); color: #fff;
   border: 1px solid rgba(255,255,255,0.18);
+}
+
+/* ============================================================
+   DetailModal — the one way a record opens across SECH_LIMS.
+   A record opens over the page, never below it, so the user is
+   never left wondering whether the click registered.
+   ============================================================ */
+.modal-scrim {
+  position: fixed; inset: 0; z-index: 1200;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 40px 20px;
+  background: rgba(6, 10, 20, 0.62);
+  backdrop-filter: blur(3px);
+  animation: modal-fade .14s ease-out;
+  overflow: auto;
+}
+.modal-panel {
+  position: relative;
+  width: min(1080px, 100%);
+  max-height: calc(100vh - 80px);
+  display: flex; flex-direction: column;
+  background: linear-gradient(180deg, var(--card), var(--surface));
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
+  animation: modal-rise .16s cubic-bezier(.2, .8, .3, 1);
+  outline: none;
+}
+.modal-panel.narrow { width: min(680px, 100%); }
+.modal-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.modal-title h3 { margin: 0; font-size: 18px; letter-spacing: -0.01em; }
+.modal-title .modal-sub { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+.modal-head-actions { display: flex; align-items: center; gap: 8px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+.modal-x {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; padding: 0; flex: none;
+  background: transparent; border: 1px solid var(--border); border-radius: 9px;
+  color: var(--muted); box-shadow: none;
+}
+.modal-x:hover { background: var(--panel-2); color: var(--text); }
+.modal-body { padding: 18px 22px 22px; overflow: auto; flex: 1 1 auto; }
+.modal-body > .card { background: none; border: none; box-shadow: none; padding: 0; }
+.modal-foot {
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding: 14px 22px; border-top: 1px solid var(--border); flex: none;
+}
+@keyframes modal-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modal-rise { from { opacity: 0; transform: translateY(10px) scale(.99); } to { opacity: 1; transform: none; } }
+@media (max-width: 720px) {
+  .modal-scrim { padding: 0; }
+  .modal-panel, .modal-panel.narrow { width: 100%; max-height: 100vh; min-height: 100vh; border-radius: 0; border: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .modal-scrim, .modal-panel { animation: none; }
 }
 
 .dm-modal-overlay {
