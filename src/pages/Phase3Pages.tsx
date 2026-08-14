@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, BarChart, CHART_COLORS, ModuleAlerts, DetailModal } from '../components/ui';
 import { useModules } from '../hooks/useModules';
@@ -23,9 +24,10 @@ import type {
   StorageInspection
 } from '../../shared/types/api';
 import {
-  EQUIPMENT_CATEGORIES, EQUIPMENT_CATEGORY_LABELS, EQUIPMENT_CATEGORY_HINTS, EQUIPMENT_CATEGORY_EXAMPLES,
-  DUTY_LABELS, DUTY_CLAUSES, DUTY_HINTS, dutiesFor, categoryFromLegacy,
+  EQUIPMENT_CATEGORY_LABELS, EQUIPMENT_CATEGORY_HINTS,
+  DUTY_LABELS, DUTY_CLAUSES, DUTY_HINTS, dutiesFor, categoryFromLegacy, isArchetype,
 } from '../../shared/constants/equipment';
+import type { ConfigOption } from '../../shared/constants/configLists';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
@@ -142,6 +144,23 @@ function printHtml(title: string, bodyHtml: string, extraCss = '') {
  * Each duty is shown with the clause it answers to, so the answer to "why are
  * we doing this?" is on the same screen as the duty.
  */
+
+// The archetype an equipment-category option is pinned to (its behaviour).
+function archetypeOfOption(options: ConfigOption[], value: string): string {
+  const found = options.find(o => o.value === value);
+  const a = found?.extra && (found.extra as any).archetype;
+  return isArchetype(a) ? a : (isArchetype(value) ? value : 'other');
+}
+// How an item's category reads on its profile: the configured label if we can
+// see it, otherwise the archetype's standard name.
+function equipmentCategoryLabel(item: { equipment_category?: string | null; equipment_archetype?: string | null; equipment_class?: string | null; name?: string | null; category?: string | null }): string {
+  const archetype = item.equipment_archetype ?? (isArchetype(item.equipment_category) ? item.equipment_category! : categoryFromLegacy(item.equipment_class, item.name, item.category));
+  const base = EQUIPMENT_CATEGORY_LABELS[archetype as never] ?? 'Equipment';
+  const value = item.equipment_category;
+  if (value && !isArchetype(value)) return value.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  return base;
+}
+
 function EquipmentDuties({ item }: { item: EquipmentItem }) {
   const category = (item.equipment_category ?? categoryFromLegacy(item.equipment_class, item.name, item.category)) as string;
   const duties = dutiesFor(category);
@@ -176,6 +195,15 @@ export function EquipmentPage() {
   const [regResult, setRegResult] = useState<{ created: number; updated: number; totalRows: number; errors: string[] } | null>(null);
   const equipImportRef = useRef<HTMLInputElement>(null);
   const [equipForm, setEquipForm] = useState({ ...emptyEquipForm });
+  // Configurable dropdowns — categories, criticality, condition — come from
+  // Settings, so the laboratory's own vocabulary drives the form.
+  const [optionLists, setOptionLists] = useState<Record<string, ConfigOption[]>>({});
+  const opt = (key: string) => (optionLists[key] ?? []).filter(o => o.is_active);
+  useEffect(() => {
+    Promise.all(['equipment_category', 'equipment_criticality', 'equipment_condition']
+      .map(k => api<ConfigOption[]>(`/config/option-lists/${k}`).then(o => [k, o] as const).catch(() => [k, []] as const)))
+      .then(pairs => setOptionLists(Object.fromEntries(pairs)));
+  }, []);
   const [newIfuFile, setNewIfuFile] = useState<File | null>(null);
   const [breakdownForm, setBreakdownForm] = useState({ equipmentId: '', breakdownDate: '', reportedByStaffId: '', description: '', serviceImpact: '', immediateAction: '', equipmentStatus: 'out_of_service', repairAction: '', serviceProvider: '' });
   const [loading, setLoading] = useState(false);
@@ -354,17 +382,15 @@ export function EquipmentPage() {
       <form className="form" onSubmit={submitEquipment}>
         <label>Unique identifier<input value={equipForm.equipmentNumber} onChange={e => setEquipForm({ ...equipForm, equipmentNumber: e.target.value })} placeholder={nextNumber || 'auto'} /><small className="muted">Follows the configured pattern; edit only for items with their own identifier.</small></label>
         <label>Name<input value={equipForm.name} onChange={e => setEquipForm({ ...equipForm, name: e.target.value })} required /></label>
-        <label>Category<input value={equipForm.category} onChange={e => setEquipForm({ ...equipForm, category: e.target.value })} /></label>
         <label>Equipment category<select value={equipForm.equipmentCategory} onChange={e => setEquipForm({ ...equipForm, equipmentCategory: e.target.value })}>
-          {EQUIPMENT_CATEGORIES.map(c => <option key={c} value={c}>{EQUIPMENT_CATEGORY_LABELS[c]}</option>)}
-        </select><small className="muted">{EQUIPMENT_CATEGORY_HINTS[equipForm.equipmentCategory as never] ?? ''} <em>e.g. {EQUIPMENT_CATEGORY_EXAMPLES[equipForm.equipmentCategory as never] ?? ''}</em></small></label>
-        <label>Equipment type<input value={equipForm.equipmentType} onChange={e => setEquipForm({ ...equipForm, equipmentType: e.target.value })} /></label>
+          {opt('equipment_category').map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+        </select><small className="muted">{EQUIPMENT_CATEGORY_HINTS[(archetypeOfOption(opt('equipment_category'), equipForm.equipmentCategory)) as never] ?? ''} <Link to="/settings/config-lists">Manage categories</Link></small></label>
         <label>Manufacturer<input value={equipForm.manufacturer} onChange={e => setEquipForm({ ...equipForm, manufacturer: e.target.value })} /></label>
         <label>Model<input value={equipForm.model} onChange={e => setEquipForm({ ...equipForm, model: e.target.value })} /></label>
         <label>Serial number<input value={equipForm.serialNumber} onChange={e => setEquipForm({ ...equipForm, serialNumber: e.target.value })} /></label>
         <label>Country of origin<input value={equipForm.countryOfOrigin} onChange={e => setEquipForm({ ...equipForm, countryOfOrigin: e.target.value })} /></label>
-        <label>Condition received<select value={equipForm.conditionReceived} onChange={e => setEquipForm({ ...equipForm, conditionReceived: e.target.value })}><option value="">—</option>{CONDITION_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
-        <label>Criticality<select value={equipForm.criticality} onChange={e => setEquipForm({ ...equipForm, criticality: e.target.value })}><option value="">—</option>{CRITICALITY_OPTIONS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></label>
+        <label>Condition received<select value={equipForm.conditionReceived} onChange={e => setEquipForm({ ...equipForm, conditionReceived: e.target.value })}><option value="">—</option>{opt('equipment_condition').map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></label>
+        <label>Criticality<select value={equipForm.criticality} onChange={e => setEquipForm({ ...equipForm, criticality: e.target.value })}><option value="">—</option>{opt('equipment_criticality').map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></label>
         <label>Supplier name<input value={equipForm.supplierName} onChange={e => setEquipForm({ ...equipForm, supplierName: e.target.value })} /></label>
         <label>Supplier location<input value={equipForm.supplierLocation} onChange={e => setEquipForm({ ...equipForm, supplierLocation: e.target.value })} /></label>
         <label>Supplier contact<input value={equipForm.supplierContact} onChange={e => setEquipForm({ ...equipForm, supplierContact: e.target.value })} placeholder="phone / email" /></label>
@@ -628,7 +654,7 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
         </form>
       : <>
         <div className="profile-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 18, marginTop: 14 }}>
-          <div><h4>Identity</h4>{dv('Unique identifier', item.equipment_number)}{dv('Category', item.category)}{dv('Equipment category', EQUIPMENT_CATEGORY_LABELS[(item.equipment_category ?? categoryFromLegacy(item.equipment_class, item.name, item.category)) as never])}{dv('Type', item.equipment_type)}{dv('Manufacturer', item.manufacturer)}{dv('Model', item.model)}{dv('Serial number', item.serial_number)}{dv('Country of origin', item.country_of_origin)}{dv('Condition received', item.condition_received)}{dv('Criticality', item.criticality?.replace(/_/g, ' '))}</div>
+          <div><h4>Identity</h4>{dv('Unique identifier', item.equipment_number)}{dv('Equipment category', equipmentCategoryLabel(item))}{dv('Manufacturer', item.manufacturer)}{dv('Model', item.model)}{dv('Serial number', item.serial_number)}{dv('Country of origin', item.country_of_origin)}{dv('Condition received', item.condition_received)}{dv('Criticality', item.criticality?.replace(/_/g, ' '))}</div>
           <div><h4>Supplier</h4>{dv('Name', item.supplier_name)}{dv('Location', item.supplier_location)}{dv('Contact', item.supplier_contact)}
             <h4 style={{ marginTop: 16 }}>Placement</h4>{dv('Department', deptName)}{dv('Section', secName)}{dv('Location', locName)}{dv('Custodian', custodian)}</div>
           <div><h4>Lifecycle</h4>{dv('Date received', item.date_received)}{dv('Date into service', item.date_commissioned)}{dv('Date out of service', item.date_out_of_service)}

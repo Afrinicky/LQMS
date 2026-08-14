@@ -7,26 +7,24 @@ import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { generateEquipmentNumber, previewEquipmentNumber, getEquipmentPattern, saveEquipmentPattern } from '../utils/equipmentNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
-import { EQUIPMENT_CATEGORIES, classForCategory, categoryFromLegacy, type EquipmentCategory } from '../../shared/constants/equipment.js';
+import { classForCategory, categoryFromLegacy, isArchetype, type EquipmentArchetype } from '../../shared/constants/equipment.js';
 
-// The category decides what the item owes and where it may appear; the legacy
-// two-value class is derived from it so nothing still reading it goes stale.
-// An imported row may name its category explicitly or leave it to be read
-// from the name, the way the add form does.
-function impCategory(v: Record<string, any>): EquipmentCategory {
-  return normaliseCategory(v.equipmentCategory, categoryFromLegacy(null, v.name, v.category ?? v.equipmentType));
-}
-
-function normaliseCategory(value: unknown, fallback?: string | null): EquipmentCategory {
-  const v = String(value ?? '').trim();
-  if ((EQUIPMENT_CATEGORIES as readonly string[]).includes(v)) return v as EquipmentCategory;
-  const f = String(fallback ?? '').trim();
-  if ((EQUIPMENT_CATEGORIES as readonly string[]).includes(f)) return f as EquipmentCategory;
-  return 'other';
+// A category is a configurable label; the archetype pinned to it is what the
+// system acts on. Resolve the archetype from the configured list, falling back
+// to the value itself when it is already an archetype, and to a name-based
+// guess when nothing was sent (an import, an older client).
+function resolveCategory(db: any, value: unknown, name?: string | null, catText?: string | null): { category: string; archetype: EquipmentArchetype } {
+  let category = String(value ?? '').trim();
+  if (!category) category = categoryFromLegacy(null, name, catText);
+  const row = db.prepare("SELECT extra FROM config_options WHERE list_key = 'equipment_category' AND value = ?").get(category) as { extra: string | null } | undefined;
+  let archetype: string | null = null;
+  if (row?.extra) { try { archetype = JSON.parse(row.extra).archetype; } catch { /* ignore */ } }
+  if (!isArchetype(archetype)) archetype = isArchetype(category) ? category : 'other';
+  return { category, archetype: archetype as EquipmentArchetype };
 }
 
 const EQUIPMENT_REGISTER_HEADERS = [
-  'Identifier', 'Name', 'Equipment category', 'Category', 'Type', 'Manufacturer', 'Model', 'Serial No.', 'Country of origin', 'Condition received',
+  'Identifier', 'Name', 'Equipment category', 'Manufacturer', 'Model', 'Serial No.', 'Country of origin', 'Condition received',
   'Criticality', 'Supplier name', 'Supplier location', 'Supplier contact', 'Department', 'Section', 'Custodian (employee no.)',
   'Status', 'Date received', 'Date in service', 'Date out of service', 'Maintenance frequency', 'Next maintenance due',
   'Calibration required', 'Calibration frequency', 'Next calibration due', 'Notes',
@@ -79,7 +77,7 @@ export function equipmentRoutes() {
       const items = db.prepare(`SELECT e.*, d.name AS dept_name, sec.name AS sec_name, st.employee_no AS staff_no FROM equipment_items e LEFT JOIN departments d ON d.id = e.department_id LEFT JOIN sections sec ON sec.id = e.section_id LEFT JOIN staff st ON st.id = COALESCE(e.responsible_staff_id, e.assigned_to_staff_id) ORDER BY e.equipment_number`).all() as any[];
       for (const i of items) {
         rows.push([
-          i.equipment_number, i.name, i.equipment_category ?? '', i.category ?? '', i.equipment_type ?? '', i.manufacturer ?? '', i.model ?? '', i.serial_number ?? '', i.country_of_origin ?? '', i.condition_received ?? '',
+          i.equipment_number, i.name, i.equipment_category ?? '', i.manufacturer ?? '', i.model ?? '', i.serial_number ?? '', i.country_of_origin ?? '', i.condition_received ?? '',
           i.criticality ?? '', i.supplier_name ?? '', i.supplier_location ?? '', i.supplier_contact ?? '', i.dept_name ?? '', i.sec_name ?? '', i.staff_no ?? '',
           i.status ?? '', i.date_received ?? '', i.date_commissioned ?? '', i.date_out_of_service ?? '', i.maintenance_frequency ?? '', i.next_maintenance_due ?? '',
           i.calibration_required ? 'Yes' : 'No', i.calibration_frequency ?? '', i.next_calibration_due ?? '', i.notes ?? '',
@@ -132,7 +130,7 @@ export function equipmentRoutes() {
           const status = (norm(r['Status']) ?? 'operational').toLowerCase();
           const finalStatus = EQUIPMENT_STATUSES.includes(status) ? status : 'operational';
           const values = {
-            name, category: norm(r['Category']), equipmentCategory: norm(r['Equipment category']), equipmentType: norm(r['Type']), manufacturer: norm(r['Manufacturer']), model: norm(r['Model']),
+            name, equipmentCategory: norm(r['Equipment category']), manufacturer: norm(r['Manufacturer']), model: norm(r['Model']),
             serialNumber: norm(r['Serial No.']), countryOfOrigin: norm(r['Country of origin']), conditionReceived: norm(r['Condition received']),
             criticality: norm(r['Criticality']), supplierName: norm(r['Supplier name']), supplierLocation: norm(r['Supplier location']), supplierContact: norm(r['Supplier contact']),
             departmentId: deptId, sectionId: secId, responsibleStaffId: staffId, status: finalStatus,
@@ -141,18 +139,19 @@ export function equipmentRoutes() {
             calibrationRequired: yn(r['Calibration required']), calibrationFrequency: norm(r['Calibration frequency']), nextCalibrationDue: norm(r['Next calibration due']),
             notes: norm(r['Notes']),
           };
+          const impCat = resolveCategory(db, values.equipmentCategory, values.name, null);
           try {
             const existing = identifier ? db.prepare('SELECT id FROM equipment_items WHERE equipment_number = ?').get(identifier) as any : null;
             if (existing) {
-              db.prepare(`UPDATE equipment_items SET name = ?, category = ?, equipment_category = ?, equipment_class = ?, equipment_type = ?, manufacturer = ?, model = ?, serial_number = ?, country_of_origin = ?, condition_received = ?, criticality = ?, supplier_name = ?, supplier_location = ?, supplier_contact = ?, department_id = ?, section_id = ?, responsible_staff_id = ?, status = ?, date_received = ?, date_commissioned = ?, date_out_of_service = ?, maintenance_frequency = ?, next_maintenance_due = ?, calibration_required = ?, calibration_frequency = ?, next_calibration_due = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-                .run(values.name, values.category, impCategory(values), classForCategory(impCategory(values)), values.equipmentType, values.manufacturer, values.model, values.serialNumber, values.countryOfOrigin, values.conditionReceived, values.criticality, values.supplierName, values.supplierLocation, values.supplierContact, values.departmentId, values.sectionId, values.responsibleStaffId, values.status, values.dateReceived, values.dateCommissioned, values.dateOutOfService, values.maintenanceFrequency, values.nextMaintenanceDue, values.calibrationRequired, values.calibrationFrequency, values.nextCalibrationDue, values.notes, existing.id);
+              db.prepare(`UPDATE equipment_items SET name = ?, equipment_category = ?, equipment_archetype = ?, equipment_class = ?, manufacturer = ?, model = ?, serial_number = ?, country_of_origin = ?, condition_received = ?, criticality = ?, supplier_name = ?, supplier_location = ?, supplier_contact = ?, department_id = ?, section_id = ?, responsible_staff_id = ?, status = ?, date_received = ?, date_commissioned = ?, date_out_of_service = ?, maintenance_frequency = ?, next_maintenance_due = ?, calibration_required = ?, calibration_frequency = ?, next_calibration_due = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+                .run(values.name, impCat.category, impCat.archetype, classForCategory(impCat.archetype), values.manufacturer, values.model, values.serialNumber, values.countryOfOrigin, values.conditionReceived, values.criticality, values.supplierName, values.supplierLocation, values.supplierContact, values.departmentId, values.sectionId, values.responsibleStaffId, values.status, values.dateReceived, values.dateCommissioned, values.dateOutOfService, values.maintenanceFrequency, values.nextMaintenanceDue, values.calibrationRequired, values.calibrationFrequency, values.nextCalibrationDue, values.notes, existing.id);
               updated++;
             } else {
               const createdAt = new Date().toISOString();
               const equipmentNumber = identifier || generateEquipmentNumber(db, createdAt);
               if (db.prepare('SELECT 1 FROM equipment_items WHERE equipment_number = ?').get(equipmentNumber)) { errors.push(`Row ${rowNo}: identifier ${equipmentNumber} already in use.`); return; }
-              db.prepare(`INSERT INTO equipment_items (equipment_number, name, category, equipment_category, equipment_class, equipment_type, manufacturer, model, serial_number, country_of_origin, condition_received, criticality, supplier_name, supplier_location, supplier_contact, department_id, section_id, responsible_staff_id, status, date_received, date_commissioned, date_out_of_service, maintenance_frequency, next_maintenance_due, calibration_required, calibration_frequency, next_calibration_due, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-                .run(equipmentNumber, values.name, values.category, impCategory(values), classForCategory(impCategory(values)), values.equipmentType, values.manufacturer, values.model, values.serialNumber, values.countryOfOrigin, values.conditionReceived, values.criticality, values.supplierName, values.supplierLocation, values.supplierContact, values.departmentId, values.sectionId, values.responsibleStaffId, values.status, values.dateReceived, values.dateCommissioned, values.dateOutOfService, values.maintenanceFrequency, values.nextMaintenanceDue, values.calibrationRequired, values.calibrationFrequency, values.nextCalibrationDue, values.notes, req.user!.id, createdAt);
+              db.prepare(`INSERT INTO equipment_items (equipment_number, name, equipment_category, equipment_archetype, equipment_class, manufacturer, model, serial_number, country_of_origin, condition_received, criticality, supplier_name, supplier_location, supplier_contact, department_id, section_id, responsible_staff_id, status, date_received, date_commissioned, date_out_of_service, maintenance_frequency, next_maintenance_due, calibration_required, calibration_frequency, next_calibration_due, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+                .run(equipmentNumber, values.name, impCat.category, impCat.archetype, classForCategory(impCat.archetype), values.manufacturer, values.model, values.serialNumber, values.countryOfOrigin, values.conditionReceived, values.criticality, values.supplierName, values.supplierLocation, values.supplierContact, values.departmentId, values.sectionId, values.responsibleStaffId, values.status, values.dateReceived, values.dateCommissioned, values.dateOutOfService, values.maintenanceFrequency, values.nextMaintenanceDue, values.calibrationRequired, values.calibrationFrequency, values.nextCalibrationDue, values.notes, req.user!.id, createdAt);
               created++;
             }
           } catch (e) {
@@ -688,19 +687,16 @@ export function equipmentRoutes() {
     }
     const responsibleStaffId = parseIntNullable(req.body.responsibleStaffId ?? req.body.assignedToStaffId);
     const nextMaintenanceDue = req.body.nextMaintenanceDue ?? req.body.nextServiceDue ?? null;
-    // Fall back to reading the name when no category is sent, so an import or an
-    // older client still lands the item in a sensible place rather than 'other'.
-    const newCategory = normaliseCategory(
-      req.body.equipmentCategory,
-      categoryFromLegacy(req.body.equipmentClass, req.body.name, req.body.category ?? req.body.equipmentType),
-    );
-    const result = db.prepare(`INSERT INTO equipment_items (equipment_number, name, category, equipment_class, equipment_category, manufacturer, model, serial_number, location_id, department_id, section_id, status, calibration_due_date, last_service_date, next_service_due, assigned_to_staff_id, equipment_type, maintenance_frequency, calibration_frequency, next_maintenance_due, next_calibration_due, responsible_staff_id, date_received, date_commissioned, calibration_required, notes, supplier_name, supplier_location, supplier_contact, country_of_origin, condition_received, date_out_of_service, criticality, ifu_file_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    // The chosen category is a configurable label; resolve the archetype it is
+    // pinned to, and derive the legacy class from that.
+    const cat = resolveCategory(db, req.body.equipmentCategory, req.body.name, req.body.category ?? req.body.equipmentType);
+    const result = db.prepare(`INSERT INTO equipment_items (equipment_number, name, equipment_class, equipment_category, equipment_archetype, manufacturer, model, serial_number, location_id, department_id, section_id, status, calibration_due_date, last_service_date, next_service_due, assigned_to_staff_id, equipment_type, maintenance_frequency, calibration_frequency, next_maintenance_due, next_calibration_due, responsible_staff_id, date_received, date_commissioned, calibration_required, notes, supplier_name, supplier_location, supplier_contact, country_of_origin, condition_received, date_out_of_service, criticality, ifu_file_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(
         equipmentNumber,
         req.body.name,
-        req.body.category ?? null,
-        classForCategory(newCategory),
-        newCategory,
+        classForCategory(cat.archetype),
+        cat.category,
+        cat.archetype,
         req.body.manufacturer ?? null,
         req.body.model ?? null,
         req.body.serialNumber ?? null,
@@ -753,14 +749,16 @@ export function equipmentRoutes() {
         return res.status(409).json({ error: `Equipment identifier ${equipmentNumber} is already in use.` });
       }
     }
-    const updCategory = normaliseCategory(req.body.equipmentCategory, oldValue.equipment_category);
-    db.prepare(`UPDATE equipment_items SET equipment_number = ?, name = ?, category = ?, equipment_class = ?, equipment_category = ?, manufacturer = ?, model = ?, serial_number = ?, location_id = ?, department_id = ?, section_id = ?, status = ?, calibration_due_date = ?, last_service_date = ?, next_service_due = ?, assigned_to_staff_id = ?, equipment_type = ?, maintenance_frequency = ?, calibration_frequency = ?, next_maintenance_due = ?, next_calibration_due = ?, responsible_staff_id = ?, date_received = ?, date_commissioned = ?, calibration_required = ?, notes = ?, supplier_name = ?, supplier_location = ?, supplier_contact = ?, country_of_origin = ?, condition_received = ?, date_out_of_service = ?, criticality = ?, ifu_file_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+    const cat = req.body.equipmentCategory === undefined
+      ? { category: oldValue.equipment_category, archetype: oldValue.equipment_archetype ?? oldValue.equipment_category ?? 'other' }
+      : resolveCategory(db, req.body.equipmentCategory, req.body.name ?? oldValue.name, null);
+    db.prepare(`UPDATE equipment_items SET equipment_number = ?, name = ?, equipment_class = ?, equipment_category = ?, equipment_archetype = ?, manufacturer = ?, model = ?, serial_number = ?, location_id = ?, department_id = ?, section_id = ?, status = ?, calibration_due_date = ?, last_service_date = ?, next_service_due = ?, assigned_to_staff_id = ?, equipment_type = ?, maintenance_frequency = ?, calibration_frequency = ?, next_maintenance_due = ?, next_calibration_due = ?, responsible_staff_id = ?, date_received = ?, date_commissioned = ?, calibration_required = ?, notes = ?, supplier_name = ?, supplier_location = ?, supplier_contact = ?, country_of_origin = ?, condition_received = ?, date_out_of_service = ?, criticality = ?, ifu_file_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
       .run(
         equipmentNumber,
         req.body.name ?? oldValue.name,
-        req.body.category ?? oldValue.category,
-        classForCategory(updCategory),
-        updCategory,
+        classForCategory(cat.archetype as never),
+        cat.category,
+        cat.archetype,
         req.body.manufacturer ?? oldValue.manufacturer,
         req.body.model ?? oldValue.model,
         req.body.serialNumber ?? oldValue.serial_number,

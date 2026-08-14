@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import setupRoutes from './routes/setup.js';
 import authRoutes from './routes/auth.js';
 import { commonRoutes } from './routes/common.js';
+import { configOptionsRoutes } from './routes/configOptions.js';
 import { nonconformityRoutes } from './routes/nonconformities.js';
 import { incidentRoutes } from './routes/incidents.js';
 import { capaRoutes } from './routes/capa.js';
@@ -156,6 +157,7 @@ export function createApiServer() {
   // Scheduling and off-site copies mount before commonRoutes so their more
   // specific /backup/* paths win over the archive endpoints that share the prefix.
   app.use('/api', backupSyncRoutes());
+  app.use('/api', configOptionsRoutes());
   app.use('/api', commonRoutes());
 
   // Serve the built single-page renderer so the packaged Electron window can
