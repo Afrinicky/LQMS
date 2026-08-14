@@ -14,6 +14,7 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import { MODULES, PERMISSION_ACTIONS, TECHNICAL_AUTHORIZATION_LEVELS } from '../../shared/constants/modules';
 import { AUTOMATION_LEVELS, AUTOMATION_LABELS, AUTOMATION_HINTS, automationUsesEquipment } from '../../shared/constants/tests';
+import { isDiagnosticCategory, categoryFromLegacy } from '../../shared/constants/equipment';
 import XlsxToolbar from '../components/XlsxToolbar';
 import { DetailModal } from '../components/ui';
 import { usePermissions } from '../hooks/usePermissions';
@@ -1001,7 +1002,7 @@ function SectionTestMenu({ detail, sectionId, call }: {
 }) {
   // Only diagnostic (laboratory / measuring) equipment in this unit can be a
   // test's analyser — a fridge or a computer never runs a test.
-  const analysers = detail.equipment.filter(e => (e.equipment_class ?? 'laboratory') !== 'support');
+  const analysers = detail.equipment.filter(e => isDiagnosticCategory(e.equipment_category ?? categoryFromLegacy(e.equipment_class, e.name, e.category)));
   const analyserName = (id?: number | null) => analysers.find(a => a.id === id)?.name ?? detail.equipment.find(e => e.id === id)?.name ?? null;
 
   const [kind, setKind] = useState<'single' | 'panel'>('single');

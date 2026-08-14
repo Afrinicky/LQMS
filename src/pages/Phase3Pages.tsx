@@ -22,6 +22,10 @@ import type {
   SafetyEquipment, SafetyInspection, WasteDisposalRecord, HazardousChemical, StaffImmunization, FacilitiesSafetySummary,
   StorageInspection
 } from '../../shared/types/api';
+import {
+  EQUIPMENT_CATEGORIES, EQUIPMENT_CATEGORY_LABELS, EQUIPMENT_CATEGORY_HINTS, EQUIPMENT_CATEGORY_EXAMPLES,
+  DUTY_LABELS, DUTY_CLAUSES, DUTY_HINTS, dutiesFor, categoryFromLegacy,
+} from '../../shared/constants/equipment';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
@@ -78,7 +82,7 @@ async function uploadEquipFile(file: File | null): Promise<string | null> {
 const RESPONSE_OPTIONS = [{ v: 'yes', l: 'Yes' }, { v: 'no', l: 'No' }, { v: 'na', l: 'N/A' }];
 
 const emptyEquipForm = {
-  equipmentNumber: '', name: '', category: '', equipmentClass: 'laboratory', equipmentType: '', manufacturer: '', model: '', serialNumber: '',
+  equipmentNumber: '', name: '', category: '', equipmentClass: 'laboratory', equipmentCategory: 'analyser', equipmentType: '', manufacturer: '', model: '', serialNumber: '',
   supplierName: '', supplierLocation: '', supplierContact: '', countryOfOrigin: '', conditionReceived: '',
   locationId: '', departmentId: '', sectionId: '', status: 'operational', criticality: '',
   maintenanceFrequency: '', calibrationFrequency: '', nextMaintenanceDue: '', nextCalibrationDue: '',
@@ -125,6 +129,32 @@ function printHtml(title: string, bodyHtml: string, extraCss = '') {
   win.document.close();
   win.focus();
   setTimeout(() => { win.print(); }, 250);
+}
+
+
+/**
+ * What this item owes, and why.
+ *
+ * The point of categorising equipment is not to label it — it is to say which
+ * quality activities keep it fit for use. An analyser earns calibration,
+ * verification, uncertainty, IQC and EQA; a refrigerator earns acceptance,
+ * continuous monitoring, maintenance and certification. Neither is unmanaged.
+ * Each duty is shown with the clause it answers to, so the answer to "why are
+ * we doing this?" is on the same screen as the duty.
+ */
+function EquipmentDuties({ item }: { item: EquipmentItem }) {
+  const category = (item.equipment_category ?? categoryFromLegacy(item.equipment_class, item.name, item.category)) as string;
+  const duties = dutiesFor(category);
+  return <div className="eq-duties">
+    <h4>Quality programme for a {String(EQUIPMENT_CATEGORY_LABELS[category as never] ?? 'item').toLowerCase()}</h4>
+    <p className="muted" style={{ marginTop: -4 }}>{EQUIPMENT_CATEGORY_HINTS[category as never]}</p>
+    <ul className="eq-duty-list">
+      {duties.map(d => <li key={d}>
+        <div className="eq-duty-head"><strong>{DUTY_LABELS[d]}</strong><span className="badge">{DUTY_CLAUSES[d]}</span></div>
+        <p className="muted">{DUTY_HINTS[d]}</p>
+      </li>)}
+    </ul>
+  </div>;
 }
 
 export function EquipmentPage() {
@@ -325,10 +355,9 @@ export function EquipmentPage() {
         <label>Unique identifier<input value={equipForm.equipmentNumber} onChange={e => setEquipForm({ ...equipForm, equipmentNumber: e.target.value })} placeholder={nextNumber || 'auto'} /><small className="muted">Follows the configured pattern; edit only for items with their own identifier.</small></label>
         <label>Name<input value={equipForm.name} onChange={e => setEquipForm({ ...equipForm, name: e.target.value })} required /></label>
         <label>Category<input value={equipForm.category} onChange={e => setEquipForm({ ...equipForm, category: e.target.value })} /></label>
-        <label>Diagnostic use<select value={equipForm.equipmentClass} onChange={e => setEquipForm({ ...equipForm, equipmentClass: e.target.value })}>
-          <option value="laboratory">Diagnostic — laboratory / measuring (IQC, verification, uncertainty)</option>
-          <option value="support">Non-diagnostic — support / ancillary (monitoring &amp; maintenance)</option>
-        </select><small className="muted">Analysers, microscopes, pipettes, balances &amp; other measuring devices used to produce results are <em>diagnostic</em>; fridges, freezers, incubators, computers &amp; air-conditioners are <em>non-diagnostic</em>. Only diagnostic equipment appears in IQC, culture &amp; sensitivity, verification, validation and measurement uncertainty — a non-diagnostic item never shows up in anything diagnostic.</small></label>
+        <label>Equipment category<select value={equipForm.equipmentCategory} onChange={e => setEquipForm({ ...equipForm, equipmentCategory: e.target.value })}>
+          {EQUIPMENT_CATEGORIES.map(c => <option key={c} value={c}>{EQUIPMENT_CATEGORY_LABELS[c]}</option>)}
+        </select><small className="muted">{EQUIPMENT_CATEGORY_HINTS[equipForm.equipmentCategory as never] ?? ''} <em>e.g. {EQUIPMENT_CATEGORY_EXAMPLES[equipForm.equipmentCategory as never] ?? ''}</em></small></label>
         <label>Equipment type<input value={equipForm.equipmentType} onChange={e => setEquipForm({ ...equipForm, equipmentType: e.target.value })} /></label>
         <label>Manufacturer<input value={equipForm.manufacturer} onChange={e => setEquipForm({ ...equipForm, manufacturer: e.target.value })} /></label>
         <label>Model<input value={equipForm.model} onChange={e => setEquipForm({ ...equipForm, model: e.target.value })} /></label>
@@ -420,7 +449,7 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
   const [labelSize, setLabelSize] = useState(LABEL_SIZES[1].key);
   const [labelFields, setLabelFields] = useState<string[]>(['identifier', 'name', 'serial', 'nextCalibration']);
   const toForm = (it: EquipmentItem) => ({
-    equipmentNumber: it.equipment_number ?? '', name: it.name ?? '', category: it.category ?? '', equipmentClass: it.equipment_class ?? 'laboratory', equipmentType: it.equipment_type ?? '',
+    equipmentNumber: it.equipment_number ?? '', name: it.name ?? '', category: it.category ?? '', equipmentClass: it.equipment_class ?? 'laboratory', equipmentCategory: it.equipment_category ?? categoryFromLegacy(it.equipment_class, it.name, it.category), equipmentType: it.equipment_type ?? '',
     manufacturer: it.manufacturer ?? '', model: it.model ?? '', serialNumber: it.serial_number ?? '',
     supplierName: it.supplier_name ?? '', supplierLocation: it.supplier_location ?? '', supplierContact: it.supplier_contact ?? '',
     countryOfOrigin: it.country_of_origin ?? '', conditionReceived: it.condition_received ?? '', criticality: it.criticality ?? '',
@@ -599,12 +628,13 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
         </form>
       : <>
         <div className="profile-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 18, marginTop: 14 }}>
-          <div><h4>Identity</h4>{dv('Unique identifier', item.equipment_number)}{dv('Category', item.category)}{dv('Diagnostic use', item.equipment_class === 'support' ? 'Non-diagnostic (support / ancillary)' : 'Diagnostic (laboratory / measuring)')}{dv('Type', item.equipment_type)}{dv('Manufacturer', item.manufacturer)}{dv('Model', item.model)}{dv('Serial number', item.serial_number)}{dv('Country of origin', item.country_of_origin)}{dv('Condition received', item.condition_received)}{dv('Criticality', item.criticality?.replace(/_/g, ' '))}</div>
+          <div><h4>Identity</h4>{dv('Unique identifier', item.equipment_number)}{dv('Category', item.category)}{dv('Equipment category', EQUIPMENT_CATEGORY_LABELS[(item.equipment_category ?? categoryFromLegacy(item.equipment_class, item.name, item.category)) as never])}{dv('Type', item.equipment_type)}{dv('Manufacturer', item.manufacturer)}{dv('Model', item.model)}{dv('Serial number', item.serial_number)}{dv('Country of origin', item.country_of_origin)}{dv('Condition received', item.condition_received)}{dv('Criticality', item.criticality?.replace(/_/g, ' '))}</div>
           <div><h4>Supplier</h4>{dv('Name', item.supplier_name)}{dv('Location', item.supplier_location)}{dv('Contact', item.supplier_contact)}
             <h4 style={{ marginTop: 16 }}>Placement</h4>{dv('Department', deptName)}{dv('Section', secName)}{dv('Location', locName)}{dv('Custodian', custodian)}</div>
           <div><h4>Lifecycle</h4>{dv('Date received', item.date_received)}{dv('Date into service', item.date_commissioned)}{dv('Date out of service', item.date_out_of_service)}
             <h4 style={{ marginTop: 16 }}>Service &amp; calibration</h4>{dv('Maintenance frequency', item.maintenance_frequency)}{dv('Next maintenance', item.next_maintenance_due || item.next_service_due)}{dv('Calibration required', item.calibration_required ? 'Yes' : 'No')}{dv('Calibration frequency', item.calibration_frequency)}{dv('Next calibration', item.next_calibration_due || item.calibration_due_date)}</div>
         </div>
+        <EquipmentDuties item={item} />
         {item.notes && <><h4>Notes</h4><p className="muted">{item.notes}</p></>}
       </>}
 
