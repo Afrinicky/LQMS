@@ -70,9 +70,17 @@ check('a single row is described in the singular', !realImpact.json.historicRefe
   JSON.stringify(realImpact.json.historicReferences.filter(r => r.rows === 1)));
 const refused = await j(`/staff/${real.id}?mode=delete`, { token: A, method: 'DELETE' });
 check('erasing is refused', refused.status === 409, `got ${refused.status}`);
-const retired = await j(`/staff/${real.id}`, { token: A, method: 'DELETE' });
-check('retiring succeeds', retired.status === 200 && retired.json.mode === 'deactivate', JSON.stringify(retired.json));
-check('the record is retired, not gone', (await j('/staff?status=all', { token: A })).json.some(s => s.id === real.id));
+check('a departure with no stated reason is refused',
+  (await j(`/staff/${real.id}`, { token: A, method: 'DELETE', body: {} })).status === 400);
+const retired = await j(`/staff/${real.id}`, { token: A, method: 'DELETE', body: { exitReason: 'Transfer to another facility', exitDate: '2026-08-01', notes: 'Moved to Regional Hospital' } });
+check('recording the departure succeeds', retired.status === 200 && retired.json.mode === 'deactivate', JSON.stringify(retired.json));
+check('the record is kept, not gone', (await j('/staff?status=all', { token: A })).json.some(s => s.id === real.id));
+{
+  const gone = (await j('/staff?status=retired', { token: A })).json.find(s => s.id === real.id);
+  check('the reason is on the record', gone?.exitReason === 'Transfer to another facility', JSON.stringify(gone?.exitReason));
+  check('so is the date', gone?.exitDate === '2026-08-01', JSON.stringify(gone?.exitDate));
+  check('and the note', gone?.exitNotes === 'Moved to Regional Hospital');
+}
 
 console.log('\n[2b] A retired person leaves the register, the export and the import');
 const activeNow = (await j('/staff', { token: A })).json;
@@ -86,7 +94,19 @@ check('?status=all still sees both', (await j('/staff?status=all', { token: A })
   const wb = XLSXmod.read(Buffer.from(await res.arrayBuffer()), { type: 'buffer' });
   const sheet = XLSXmod.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '', raw: false });
   const ids = sheet.map(r => String(Object.values(r)[0] ?? '')).concat(sheet.map(r => JSON.stringify(r)));
-  check('the export omits the retired record', !ids.some(v => v.includes(`REAL-${stamp}`)), `REAL-${stamp}`);
+  check('the export omits the departed record', !ids.some(v => v.includes(`REAL-${stamp}`)), `REAL-${stamp}`);
+}
+{
+  const XLSXmod = await import('xlsx');
+  const res = await fetch(`${BASE}/staff/export?status=former`, { headers: { Authorization: `Bearer ${A}` } });
+  check('the former-staff list has its own export', res.ok, String(res.status));
+  const wb = XLSXmod.read(Buffer.from(await res.arrayBuffer()), { type: 'buffer' });
+  check('on its own sheet', wb.SheetNames[0] === 'FORMER PERSONNEL', wb.SheetNames[0]);
+  const rows = XLSXmod.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '', raw: false });
+  const mine = rows.find(r => JSON.stringify(r).includes(`REAL-${stamp}`));
+  check('it carries the departed person', !!mine);
+  check('with the reason and date', JSON.stringify(mine).includes('Transfer to another facility') && JSON.stringify(mine).includes('2026-08-01'),
+    JSON.stringify(mine).slice(0, 200));
 }
 // An import row naming a retired Staff ID is refused rather than silently applied.
 {
@@ -105,6 +125,7 @@ check('?status=all still sees both', (await j('/staff?status=all', { token: A })
 const restored = await j(`/staff/${real.id}/reactivate`, { token: A, method: 'POST', body: {} });
 check('restoring brings them back into the register', restored.status === 200
   && (await j('/staff', { token: A })).json.some(s => s.id === real.id));
+check('and clears the departure', !(await j('/staff', { token: A })).json.find(s => s.id === real.id)?.exitReason);
 
 console.log('\n[2c] A demonstration record the live system grew around can be force-erased');
 await j('/staff', { token: A, method: 'POST', body: { firstName: 'Demo', surname: `Legacy${stamp}`, employeeNo: `LEG-${stamp}` } });
@@ -141,6 +162,31 @@ const demoted = await j(`/users/${account.id}`, { token: A, method: 'PUT', body:
 check('and it can be moved back', demoted.status === 200);
 check('linking a staff record still works alongside it',
   (await j(`/users/${account.id}`, { token: A, method: 'PUT', body: { staffId: real.id } })).status === 200);
+
+console.log('\n[3b] A demonstration login account can be force-erased too');
+await j('/users', { token: A, method: 'POST', body: { username: `demo${stamp}`, password: PW, fullName: 'Demo Account', roleId: qm.id } });
+const demoAcct = (await j('/users', { token: A })).json.find(u => u.username === `demo${stamp}`);
+// Give it laboratory history of the kind that blocks an ordinary erase.
+const demoNotif = await j('/notifications', { token: A, method: 'POST', body: { assignedToUserId: demoAcct.id, moduleKey: 'personnel', title: 'For the demo account', message: 'Assigned while the system was being set up', notificationType: 'task_assigned', severity: 'low' } });
+check('the demo account has laboratory history', demoNotif.status === 201, JSON.stringify(demoNotif.json));
+const acctImpact = await j(`/users/${demoAcct.id}/deletion-impact`, { token: A });
+check('an ordinary erase is refused', acctImpact.json.canDelete === false, JSON.stringify(acctImpact.json.historicReferences));
+check('but a force erase is offered', acctImpact.json.canForceDelete === true);
+check('a force erase without a reason is refused',
+  (await j(`/users/${demoAcct.id}?mode=purge`, { token: A, method: 'DELETE', body: { reason: 'demo' } })).status === 400);
+// Something the account itself authored, so the audit trail can be checked after.
+const trailBefore = (await j('/permissions/matrix', { token: A })).json.auditHistory.length;
+const acctPurge = await j(`/users/${demoAcct.id}?mode=purge`, { token: A, method: 'DELETE', body: { reason: 'Demonstration login created while setting the system up' } });
+check('with one, it succeeds', acctPurge.status === 200 && acctPurge.json.mode === 'purge', JSON.stringify(acctPurge.json));
+check('the account is gone', !(await j('/users', { token: A })).json.some(u => u.id === demoAcct.id));
+{
+  const trail = (await j('/permissions/matrix', { token: A })).json.auditHistory;
+  check('the audit trail did not shrink', trail.length >= trailBefore, `${trail.length} vs ${trailBefore}`);
+  const rec = trail.find(a => a.action === 'purge' && a.entity === 'users');
+  check('and it names the erased account and the reason',
+    !!rec && (rec.old_value || '').includes(`demo${stamp}`) && (rec.new_value || '').includes('Demonstration login'),
+    JSON.stringify(rec?.old_value || '').slice(0, 120));
+}
 
 console.log('\n[4] A Word document is handed to Office and saves back');
 // A minimal but real .docx: a zip whose first entry is [Content_Types].xml.

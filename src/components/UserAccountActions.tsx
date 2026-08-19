@@ -18,6 +18,7 @@ type Impact = {
   blockers: string[];
   canDeactivate: boolean;
   canDelete: boolean;
+  canForceDelete: boolean;
   historicReferences: { table: string; column: string; rows: number }[];
   totalHistoricRows: number;
 };
@@ -33,9 +34,20 @@ const PRETTY_TABLE: Record<string, string> = {
 };
 const pretty = (t: string) => PRETTY_TABLE[t] ?? t.replace(/_/g, ' ');
 
-export default function UserAccountActions({ user, onChanged }: { user: ApiUser & { mustChangePassword?: boolean }; onChanged: () => void }) {
+export default function UserAccountActions({ user, onChanged }: {
+  user: ApiUser & { mustChangePassword?: boolean };
+  /** Reload the list. The message is passed up because erasing an account
+   *  takes its row — and this panel with it — off the screen, so a confirmation
+   *  shown in here would vanish before anybody read it. */
+  onChanged: (message?: string) => void;
+}) {
   const [impact, setImpact] = useState<Impact | null>(null);
   const [confirming, setConfirming] = useState<'deactivate' | 'delete' | null>(null);
+  // Force erase is for a demonstration login the live system grew around. It is
+  // deliberately behind one more step than the ordinary erase, and costs a
+  // written reason.
+  const [forcing, setForcing] = useState(false);
+  const [forceReason, setForceReason] = useState('');
   const [tempPassword, setTempPassword] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +68,7 @@ export default function UserAccountActions({ user, onChanged }: { user: ApiUser 
 
   const run = async (label: string, fn: () => Promise<unknown>, done: string) => {
     setBusy(label); setError(null); setNotice(null);
-    try { await fn(); setNotice(done); onChanged(); }
+    try { await fn(); setNotice(done); onChanged(done); }
     catch (e) { setError((e as Error).message); }
     finally { setBusy(''); setConfirming(null); }
   };
@@ -158,11 +170,12 @@ export default function UserAccountActions({ user, onChanged }: { user: ApiUser 
           )}
           {impact && !impact.canDelete && impact.blockers.length === 0 && (
             <p>
-              <ShieldAlert size={13} /> Cannot be erased: this account is attached to{' '}
+              <ShieldAlert size={13} /> This account is attached to{' '}
               <strong>{impact.totalHistoricRows.toLocaleString()}</strong> record{impact.totalHistoricRows === 1 ? '' : 's'} the
               laboratory has to keep —{' '}
               {impact.historicReferences.slice(0, 3).map(r => `${r.rows.toLocaleString()} ${pretty(r.table)}`).join(', ')}
-              {impact.historicReferences.length > 3 ? ', and more' : ''}. Deactivate it instead.
+              {impact.historicReferences.length > 3 ? ', and more' : ''}. If this was a real person, deactivate it
+              instead. If it was a demonstration account created while setting the system up, it can still be erased.
             </p>
           )}
           {impact && impact.blockers.length > 0 && <p><ShieldAlert size={13} /> {impact.blockers.join(' ')}</p>}
@@ -175,9 +188,33 @@ export default function UserAccountActions({ user, onChanged }: { user: ApiUser 
                 onClick={() => run('del', () => api(`/users/${user.id}?mode=delete`, { method: 'DELETE' }), 'Account erased.')}>Yes, erase</button>
               <button type="button" className="secondary" onClick={() => setConfirming(null)}>Cancel</button>
             </>
+          ) : impact?.canDelete ? (
+            <button type="button" className="danger" disabled={busy !== ''} onClick={() => setConfirming('delete')}>Erase permanently</button>
+          ) : impact?.canForceDelete && !forcing ? (
+            <button type="button" className="secondary" disabled={busy !== ''} onClick={() => setForcing(true)}>
+              This was a demonstration account — erase it anyway
+            </button>
+          ) : impact?.canForceDelete && forcing ? (
+            <div className="uaa-force">
+              <p>
+                The account is removed and every record that pointed at it lets go. The audit trail is kept
+                intact — its entries stay exactly as they are, and this erasure records whose account they
+                belonged to. This cannot be undone.
+              </p>
+              <input value={forceReason} onChange={e => setForceReason(e.target.value)}
+                placeholder="Why is this account being erased?" />
+              <div className="uaa-force-acts">
+                <button type="button" className="secondary" onClick={() => { setForcing(false); setForceReason(''); }}>Cancel</button>
+                <button type="button" className="danger" disabled={busy !== '' || forceReason.trim().length < 10}
+                  onClick={() => run('purge',
+                    () => api(`/users/${user.id}?mode=purge`, { method: 'DELETE', body: JSON.stringify({ reason: forceReason.trim() }) }),
+                    'Account erased. The audit trail is unchanged.')}>
+                  {busy === 'purge' ? <Loader2 size={13} className="spin" /> : null} Erase and detach
+                </button>
+              </div>
+            </div>
           ) : (
-            <button type="button" className="danger" disabled={!impact?.canDelete || busy !== ''}
-              onClick={() => setConfirming('delete')}>Erase permanently</button>
+            <button type="button" className="danger" disabled>Erase permanently</button>
           )}
         </div>
       </div>

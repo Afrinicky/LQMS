@@ -360,7 +360,11 @@ export function UsersAccess(){
       <label>Link to Staff Record (Optional)<select name="staffId"><option value="">Not linked</option>{unlinkedStaff.map(s=><option value={s.id} key={s.id}>{s.fullName}{s.employeeNo?` (${s.employeeNo})`:''}</option>)}</select></label>
       <button>Create user</button>
     </form>
-    <table className="table"><thead><tr><th>Username</th><th>Full Name</th><th>Role</th><th>Linked Staff</th><th>Active</th><th></th></tr></thead><tbody>
+    {/* The account panel below opens inside a row, so the table is the widest
+        thing on this screen. Scroll it in its own box rather than letting it
+        push the whole page sideways. */}
+    <div className="table-scroll">
+    <table className="table users-table"><thead><tr><th>Username</th><th>Full Name</th><th>Role</th><th>Linked Staff</th><th>Active</th><th></th></tr></thead><tbody>
       {users.map(u=>{
         const linkable = staff.filter(s => !s.userId || s.userId === u.id);
         const open = openUser===u.id;
@@ -388,11 +392,12 @@ export function UsersAccess(){
             </div>
           </td></tr>}
           {manage && <tr className="link-editor-row"><td colSpan={6}>
-            <UserAccountActions user={u} onChanged={load} />
+            <UserAccountActions user={u} onChanged={(m) => { if (m) setSuccess(m); load(); }} />
           </td></tr>}
         </Fragment>;
       })}
     </tbody></table>
+    </div>
   </div></>;
 }
 

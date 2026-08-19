@@ -2389,11 +2389,20 @@ button.tiny { padding: 2px 8px; font-size: 11px; }
 }
 .uaa-row:last-child { border-bottom: 0; }
 .uaa-row.danger-zone { background: linear-gradient(90deg, rgba(255,107,125,.05), transparent 55%); }
-.uaa-what { flex: 1; min-width: 260px; }
+/* Erasing an account the record still names: one more step than the ordinary
+   erase, and a written reason before the button will do anything. */
+.uaa-force { display: flex; flex-direction: column; gap: 8px; min-width: 220px; max-width: 340px; }
+.uaa-force p { margin: 0; font-size: 11.5px; line-height: 1.6; color: var(--muted); }
+.uaa-force-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+/* Small enough that the account panel never widens the table it opens
+   inside — a table that scrolls sideways to reveal a focused input reads as
+   broken, even though it is only doing what a scroll container does. */
+.uaa-what { flex: 1; min-width: 200px; }
 .uaa-what strong { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; }
 .uaa-what p { margin: 4px 0 0; font-size: 12px; color: var(--muted); line-height: 1.55; max-width: 64ch; }
 .uaa-do { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: none; }
 .uaa-do input { max-width: 180px; }
+.uaa-do select { max-width: 210px; }
 .uaa-do button { font-size: 12.5px; display: inline-flex; align-items: center; gap: 6px; }
 .uaa-ask { font-size: 12.5px; color: var(--danger); font-weight: 600; }
 .uaa-flag { font-size: 11.5px; color: var(--warning); }
@@ -3059,12 +3068,14 @@ button.tiny.danger:hover:not(:disabled) { background: rgba(214, 66, 88, .12); bo
 
 /* Retiring and erasing live behind this, not beside Edit — a destructive verb
    on every row of a register is an accident waiting to be clicked. */
-.reg-menuwrap { position: relative; display: inline-flex; }
 .reg-more { padding: 2px 6px; line-height: 1; color: var(--muted); }
 .reg-more:hover { color: var(--text); }
-.reg-menu-scrim { position: fixed; inset: 0; z-index: 40; }
+/* The menu is portalled to <body> and positioned in viewport coordinates, so
+   the register's horizontal scroller cannot clip it — see RowMenu in
+   components/PersonnelRegisterAdmin.tsx for why that mattered. */
+.reg-menu-scrim { position: fixed; inset: 0; z-index: 1200; }
 .reg-menu {
-  position: absolute; right: 0; top: calc(100% + 5px); z-index: 41; min-width: 214px;
+  position: fixed; z-index: 1201;
   display: flex; flex-direction: column; padding: 5px;
   background: var(--panel); border: 1px solid var(--border-strong); border-radius: 10px;
   box-shadow: 0 14px 34px rgba(0,0,0,.45);
@@ -3088,6 +3099,8 @@ button.tiny.danger:hover:not(:disabled) { background: rgba(214, 66, 88, .12); bo
 .remove-note p:last-child { margin-bottom: 0; }
 .remove-note ul { margin: 0 0 8px; }
 .remove-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+/* A field that wants the whole width of a dialog's form grid. */
+.modal-body .form-grid label.wide { flex-basis: 100%; }
 
 .table-scroll { overflow-x: auto; }
 /* Five columns of substance and one of verbs. Each cell carries its own

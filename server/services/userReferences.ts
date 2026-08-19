@@ -73,6 +73,66 @@ export function historicReferences(userId: number): UserReference[] {
   return referencesToUser(userId).filter(r => !DISPOSABLE_TABLES.has(r.table));
 }
 
+/**
+ * Erase an account the laboratory record still names.
+ *
+ * The counterpart of purgeStaffEverywhere, and for the same one situation: a
+ * system set up with demonstration logins that has since gone live. Those
+ * accounts are not people, but weeks of routed notifications, document
+ * distribution and audit entries have grown against them, so the ordinary
+ * "erase only what left no trace" rule refuses them for good.
+ *
+ * It deliberately treats two kinds of reference differently.
+ *
+ * Columns with a DECLARED foreign key to users(id) must let go — SQLite has
+ * foreign keys switched on, so the delete would simply fail otherwise. Those
+ * are emptied where the schema allows a null, and the row is removed where it
+ * cannot exist without an account.
+ *
+ * Columns that merely hold a user id — `audit_logs.actor_user_id` above all —
+ * are left exactly as they are. The audit trail is the one thing an accredited
+ * laboratory may not lose, and blanking the actor would turn a thousand entries
+ * into anonymous ones. The id stays, the entries stay, and the purge record the
+ * caller writes names which id was erased and who it was, so the trail can
+ * still be read end to end afterwards.
+ */
+export function purgeUserEverywhere(userId: number): {
+  detached: { table: string; column: string; rows: number; action: 'detached' | 'deleted' }[];
+  keptWithId: { table: string; column: string; rows: number }[];
+} {
+  const db = getDb();
+  const detached: { table: string; column: string; rows: number; action: 'detached' | 'deleted' }[] = [];
+  const keptWithId: { table: string; column: string; rows: number }[] = [];
+
+  for (const ref of referencesToUser(userId)) {
+    if (DISPOSABLE_TABLES.has(ref.table)) continue;   // handled by purgeDisposableRows
+
+    // Does the schema actually force this column to let go?
+    let declaredFk = false;
+    let nullable = true;
+    try {
+      declaredFk = (db.prepare(`PRAGMA foreign_key_list("${ref.table}")`).all() as { table: string; from: string }[])
+        .some(fk => fk.table === 'users' && fk.from === ref.column);
+      const col = (db.prepare(`PRAGMA table_info("${ref.table}")`).all() as { name: string; notnull: number }[])
+        .find(c => c.name === ref.column);
+      nullable = !col || col.notnull === 0;
+    } catch { continue; }
+
+    if (!declaredFk) { keptWithId.push(ref); continue; }
+
+    try {
+      if (nullable) {
+        db.prepare(`UPDATE "${ref.table}" SET "${ref.column}" = NULL WHERE "${ref.column}" = ?`).run(userId);
+        detached.push({ ...ref, action: 'detached' });
+      } else {
+        db.prepare(`DELETE FROM "${ref.table}" WHERE "${ref.column}" = ?`).run(userId);
+        detached.push({ ...ref, action: 'deleted' });
+      }
+    } catch { /* surfaces on the delete itself */ }
+  }
+  return { detached, keptWithId };
+}
+
 /** Remove the plumbing rows for an account that is about to be erased. */
 export function purgeDisposableRows(userId: number): void {
   const db = getDb();

@@ -75,7 +75,9 @@ export type Staff = { id: number; employeeNo?: string; fullName: string; email?:
   qualifications?: string; unit?: string; personnelCategory?: string; appointmentType?: string;
   appointmentDate?: string; nationalIdType?: string; nationalIdNumber?: string;
   emergencyContact?: string; staffFileLocation?: string;
-  cadre?: string; professionalRank?: string; availabilityStatus?: string };
+  cadre?: string; professionalRank?: string; availabilityStatus?: string;
+  // Present only for somebody who has left: why, when, and any note.
+  exitReason?: string | null; exitDate?: string | null; exitNotes?: string | null; exitRecordedAt?: string | null };
 export type ProfessionalRank = { id: number; name: string; sortOrder: number; isActive: number };
 export type OrgTreeNode = {
   key: string; kind: 'position' | 'staff'; positionId?: number; staffId?: number;

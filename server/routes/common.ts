@@ -13,7 +13,7 @@ import { requirePermission, viewableModulesOf } from '../middleware/permissions.
 import { resolvePermission } from '../services/permissionResolver.js';
 import { ACCESS_LEVELS, LEVEL_ACTIONS, type AccessLevel } from '../../shared/constants/features.js';
 import { pendingRequests, recentRequests, decideRequest } from '../services/passwordResetService.js';
-import { historicReferences, purgeDisposableRows } from '../services/userReferences.js';
+import { historicReferences, purgeDisposableRows, purgeUserEverywhere } from '../services/userReferences.js';
 import { historicStaffReferences, purgeDisposableStaffRows, describeStaffReference, purgeStaffEverywhere } from '../services/staffReferences.js';
 import { audit } from '../services/auditService.js';
 import { mintViewTicket, VIEW_TICKET_MS } from '../services/viewTickets.js';
@@ -745,6 +745,9 @@ export function commonRoutes() {
       blockers,
       canDeactivate: blockers.length === 0,
       canDelete: blockers.length === 0 && historic.length === 0,
+      // Offered when the refusal is history rather than a blocker (your own
+      // account, the last administrator). Costs a written reason.
+      canForceDelete: blockers.length === 0 && historic.length > 0,
       historicReferences: historic,
       totalHistoricRows: historic.reduce((n, r) => n + r.rows, 0),
     });
@@ -754,7 +757,7 @@ export function commonRoutes() {
   // trace in the record — the client is told to deactivate instead.
   router.delete('/users/:id', requirePermission('settings', 'void_archive'), (req, res) => {
     const db = getDb();
-    const mode = req.query.mode === 'delete' ? 'delete' : 'deactivate';
+    const mode = req.query.mode === 'delete' ? 'delete' : req.query.mode === 'purge' ? 'purge' : 'deactivate';
     const user = db.prepare('SELECT id, username, full_name, role_id, is_active FROM users WHERE id = ?').get(req.params.id) as
       { id: number; username: string; full_name: string; role_id: number; is_active: number } | undefined;
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -775,6 +778,53 @@ export function commonRoutes() {
       tx();
       audit(req, { action: 'deactivate', entity: 'users', entityId: user.id, oldValue: { isActive: 1 }, newValue: { isActive: 0, username: user.username } });
       return res.json({ ok: true, mode: 'deactivate' });
+    }
+
+    // Force erase — for a demonstration login the live system grew around.
+    //
+    // Same situation as the register's force erase, and the same bargain: an
+    // account created to try the system out is not a person, but a month of
+    // routed notifications and document distribution has accumulated against
+    // it, so the ordinary rule refuses it for good.
+    //
+    // What it does NOT do is blank the audit trail. Columns with a declared
+    // foreign key have to let go for the delete to succeed; `actor_user_id`,
+    // which has none, keeps its value, so every entry the account wrote stays
+    // exactly as it was and this purge record says whose id that was.
+    if (mode === 'purge') {
+      const reason = String((req.body ?? {}).reason ?? '').trim();
+      if (reason.length < 10) {
+        return res.status(400).json({ error: 'A written reason of at least 10 characters is required to erase an account the laboratory record still names.' });
+      }
+      const before = historicReferences(user.id).map(r => `${r.rows} × ${r.table}.${r.column}`);
+      let outcome: ReturnType<typeof purgeUserEverywhere>;
+      try {
+        const tx = db.transaction(() => {
+          outcome = purgeUserEverywhere(user.id);
+          purgeDisposableRows(user.id);
+          db.prepare("DELETE FROM record_links WHERE (source_record_type = 'users' AND source_record_id = ?) OR (target_record_type = 'users' AND target_record_id = ?)").run(String(user.id), String(user.id));
+          db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+        });
+        tx();
+      } catch (err) {
+        return res.status(409).json({ error: err instanceof Error ? `The account could not be erased: ${err.message}` : 'The account could not be erased.' });
+      }
+      audit(req, {
+        action: 'purge', entity: 'users', entityId: user.id,
+        oldValue: { username: user.username, fullName: user.full_name, userId: user.id, referencedIn: before },
+        newValue: {
+          reason,
+          detached: outcome!.detached.map(d => `${d.action} ${d.rows} × ${d.table}.${d.column}`),
+          // Named explicitly so a later reader knows these entries were left
+          // pointing at an id that no longer resolves, and whose it was.
+          keptPointingAtErasedId: outcome!.keptWithId.map(k => `${k.rows} × ${k.table}.${k.column}`),
+        },
+      });
+      return res.json({
+        ok: true, mode: 'purge',
+        detached: outcome!.detached.reduce((n, d) => n + d.rows, 0),
+        keptWithId: outcome!.keptWithId.reduce((n, k) => n + k.rows, 0),
+      });
     }
 
     // Permanent erase — only for an account with no laboratory history.
@@ -1281,6 +1331,7 @@ export function commonRoutes() {
       s.appointment_type appointmentType, s.appointment_date appointmentDate, s.national_id_type nationalIdType,
       s.national_id_number nationalIdNumber, s.emergency_contact emergencyContact, s.staff_file_location staffFileLocation,
       s.cadre, s.professional_rank professionalRank, s.availability_status availabilityStatus,
+      s.exit_reason exitReason, s.exit_date exitDate, s.exit_notes exitNotes, s.exit_recorded_at exitRecordedAt,
       (SELECT p.title FROM staff_position_assignments spa JOIN positions p ON p.id = spa.position_id WHERE spa.staff_id = s.id AND spa.is_active = 1 ORDER BY CASE spa.assignment_type WHEN 'primary' THEN 0 ELSE 1 END, spa.id LIMIT 1) primaryPosition,
       u.id userId, u.username, r.name roleName, u.is_active userActive
     FROM staff s
@@ -1412,16 +1463,21 @@ export function commonRoutes() {
 
   // Export the full staff register as an Excel workbook (matches the import template).
   // Build the Master Personnel Register workbook (blank template or populated).
-  function buildRegisterWorkbook(includeData: boolean): Buffer {
+  function buildRegisterWorkbook(includeData: boolean, population: 'active' | 'former' = 'active'): Buffer {
     const db = getDb();
-    const aoa: (string | number)[][] = [REGISTER_HEADER_ROW.slice()];
+    // The former-staff workbook is the register plus why each person left —
+    // the three columns that turn a list of absent names into a record.
+    const header = population === 'former'
+      ? [...REGISTER_HEADER_ROW, 'REASON FOR LEAVING', 'DATE OF LEAVING', 'NOTES']
+      : REGISTER_HEADER_ROW.slice();
+    const aoa: (string | number)[][] = [header];
     if (includeData) {
       const rows = db.prepare(`
         SELECT s.*, sec.name AS section_name,
           (SELECT p.title FROM staff_position_assignments spa JOIN positions p ON p.id = spa.position_id WHERE spa.staff_id = s.id AND spa.is_active = 1 ORDER BY CASE spa.assignment_type WHEN 'primary' THEN 0 ELSE 1 END, spa.id LIMIT 1) AS position_title
         FROM staff s LEFT JOIN sections sec ON sec.id = s.section_id
-        WHERE s.is_active = 1
-        ORDER BY s.employee_no, s.full_name`).all() as any[];
+        WHERE s.is_active = ${population === 'former' ? 0 : 1}
+        ORDER BY ${population === 'former' ? 's.exit_date DESC, ' : ''}s.employee_no, s.full_name`).all() as any[];
       for (const r of rows) {
         const row: (string | number)[] = REGISTER_COLUMNS.map(c => {
           if (c.col === null) return '';
@@ -1434,13 +1490,14 @@ export function commonRoutes() {
         // Spread up to 5 qualifications across the L–P columns.
         const quals = String(r.qualifications || '').split('|').map((q: string) => q.trim()).filter(Boolean).slice(0, 5);
         quals.forEach((q: string, i: number) => { row[QUAL_COL_INDEX + i] = q; });
+        if (population === 'former') row.push(r.exit_reason || '', r.exit_date || '', r.exit_notes || '');
         aoa.push(row);
       }
     }
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = REGISTER_HEADER_ROW.map(h => ({ wch: Math.max(12, Math.min(40, (h || 'QUALIFICATION').length + 3)) }));
+    ws['!cols'] = header.map(h => ({ wch: Math.max(12, Math.min(40, (h || 'QUALIFICATION').length + 3)) }));
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'MASTER PERSONNEL REGISTER');
+    XLSX.utils.book_append_sheet(wb, ws, population === 'former' ? 'FORMER PERSONNEL' : 'MASTER PERSONNEL REGISTER');
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
   }
 
@@ -1450,10 +1507,15 @@ export function commonRoutes() {
     res.setHeader('Content-Disposition', 'attachment; filename="Staff_Register_Template.xlsx"');
     res.send(buildRegisterWorkbook(false));
   });
-  router.get('/staff/export', requirePermission('personnel.register', 'export'), (_req, res) => {
+  // ?status=former exports the people who have left, with the reason and date
+  // they left — a record a laboratory is asked for at assessment, and which the
+  // register itself no longer carries.
+  router.get('/staff/export', requirePermission('personnel.register', 'export'), (req, res) => {
+    const former = String(req.query.status || '') === 'former' || String(req.query.status || '') === 'retired';
+    const stamp = new Date().toISOString().slice(0, 10);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="Master_Personnel_Register-${new Date().toISOString().slice(0, 10)}.xlsx"`);
-    res.send(buildRegisterWorkbook(true));
+    res.setHeader('Content-Disposition', `attachment; filename="${former ? 'Former_Personnel' : 'Master_Personnel_Register'}-${stamp}.xlsx"`);
+    res.send(buildRegisterWorkbook(true, former ? 'former' : 'active'));
   });
 
   // Full linkage profile for a staff member — surfaces every place the person is
@@ -1552,8 +1614,17 @@ export function commonRoutes() {
     }
 
     if (mode === 'deactivate') {
+      // Why they left is part of the record, not a detail. "Retired" is one
+      // reason among several and the register has to be able to say which.
+      const body = (req.body ?? {}) as { exitReason?: string; exitDate?: string; notes?: string };
+      const exitReason = String(body.exitReason ?? '').trim();
+      if (!exitReason) return res.status(400).json({ error: 'A reason for leaving is required — retirement, transfer, end of contract, and so on.' });
+      const exitDate = String(body.exitDate ?? '').trim() || new Date().toISOString().slice(0, 10);
+      const notes = String(body.notes ?? '').trim() || null;
       const tx = db.transaction(() => {
-        db.prepare('UPDATE staff SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(staff.id);
+        db.prepare(`UPDATE staff SET is_active = 0, exit_reason = ?, exit_date = ?, exit_notes = ?,
+          exit_recorded_at = CURRENT_TIMESTAMP, exit_recorded_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+          .run(exitReason, exitDate, notes, req.user!.id, staff.id);
         db.prepare("UPDATE staff_position_assignments SET is_active = 0, ends_at = CURRENT_TIMESTAMP WHERE staff_id = ? AND is_active = 1").run(staff.id);
         db.prepare('UPDATE technical_authorizations SET is_active = 0 WHERE staff_id = ? AND is_active = 1').run(staff.id);
         if (account) {
@@ -1562,8 +1633,8 @@ export function commonRoutes() {
         }
       });
       tx();
-      audit(req, { action: 'deactivate', entity: 'staff', entityId: staff.id, oldValue: { isActive: 1 }, newValue: { isActive: 0, fullName: staff.full_name } });
-      return res.json({ ok: true, mode: 'deactivate', accountDeactivated: !!account });
+      audit(req, { action: 'record_exit', entity: 'staff', entityId: staff.id, oldValue: { isActive: 1 }, newValue: { isActive: 0, fullName: staff.full_name, exitReason, exitDate, notes } });
+      return res.json({ ok: true, mode: 'deactivate', exitReason, exitDate, accountDeactivated: !!account });
     }
 
     // Force erase — for a demonstration record the live system has grown around.
@@ -1658,7 +1729,10 @@ export function commonRoutes() {
     const db = getDb();
     const staff = db.prepare('SELECT id, full_name FROM staff WHERE id = ?').get(req.params.id) as { id: number; full_name: string } | undefined;
     if (!staff) return res.status(404).json({ error: 'Staff record not found' });
-    db.prepare('UPDATE staff SET is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(staff.id);
+    // Coming back means the departure did not stand, so it stops being part of
+    // the current record. The audit trail keeps that it was ever recorded.
+    db.prepare(`UPDATE staff SET is_active = 1, exit_reason = NULL, exit_date = NULL, exit_notes = NULL,
+      exit_recorded_at = NULL, exit_recorded_by = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(staff.id);
     audit(req, { action: 'reactivate', entity: 'staff', entityId: staff.id, newValue: { fullName: staff.full_name } });
     res.json({ ok: true });
   });
