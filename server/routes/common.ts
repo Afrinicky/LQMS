@@ -14,6 +14,7 @@ import { resolvePermission } from '../services/permissionResolver.js';
 import { ACCESS_LEVELS, LEVEL_ACTIONS, type AccessLevel } from '../../shared/constants/features.js';
 import { pendingRequests, recentRequests, decideRequest } from '../services/passwordResetService.js';
 import { historicReferences, purgeDisposableRows } from '../services/userReferences.js';
+import { historicStaffReferences, purgeDisposableStaffRows, describeStaffReference } from '../services/staffReferences.js';
 import { audit } from '../services/auditService.js';
 import { writeBackupZip, isSafeBackupName, createBackup } from '../services/backupService.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
@@ -591,19 +592,75 @@ export function commonRoutes() {
     audit(req, { action: 'create', entity: 'users', entityId: result.lastInsertRowid, oldValue, newValue: { username, fullName, roleId, staffId } });
     res.status(201).json({ id: result.lastInsertRowid });
   });
+  // Edits an account: which staff record it belongs to, the name it signs with,
+  // and the role it holds. The role is the one that moves someone between
+  // cohorts — promoting a quality manager to System Administrator, standing an
+  // officer down to a read-only role — so it is applied here rather than by
+  // deleting and re-creating the account, which would orphan their history.
+  //
+  // Only the keys actually sent are touched, so the existing "link a staff
+  // record" call keeps working unchanged.
   router.put('/users/:id', requirePermission('settings', 'edit'), (req, res) => {
     const db = getDb();
-    const sid = idOrNull(req.body.staffId);
-    if (!db.prepare('SELECT id FROM users WHERE id = ?').get(req.params.id)) return res.status(404).json({ error: 'User not found' });
-    if (sid) {
-      if (!db.prepare('SELECT id FROM staff WHERE id = ?').get(sid)) return res.status(400).json({ error: 'Staff record not found.' });
-      const taken = db.prepare('SELECT id, username FROM users WHERE staff_id = ? AND id != ?').get(sid, req.params.id) as { username: string } | undefined;
-      if (taken) return res.status(400).json({ error: `That staff record is already linked to user “${taken.username}”. Unlink it first.` });
+    const body = req.body ?? {};
+    const current = db.prepare('SELECT id, username, full_name fullName, role_id roleId, staff_id staffId, is_active isActive FROM users WHERE id = ?').get(req.params.id) as
+      { id: number; username: string; fullName: string; roleId: number; staffId: number | null; isActive: number } | undefined;
+    if (!current) return res.status(404).json({ error: 'User not found' });
+
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    const changed: Record<string, unknown> = {};
+
+    if ('staffId' in body) {
+      const sid = idOrNull(body.staffId);
+      if (sid) {
+        if (!db.prepare('SELECT id FROM staff WHERE id = ?').get(sid)) return res.status(400).json({ error: 'Staff record not found.' });
+        const taken = db.prepare('SELECT id, username FROM users WHERE staff_id = ? AND id != ?').get(sid, req.params.id) as { username: string } | undefined;
+        if (taken) return res.status(400).json({ error: `That staff record is already linked to user “${taken.username}”. Unlink it first.` });
+      }
+      sets.push('staff_id = ?'); params.push(sid); changed.staffId = sid;
     }
-    const oldValue = db.prepare('SELECT staff_id staffId FROM users WHERE id = ?').get(req.params.id);
-    db.prepare('UPDATE users SET staff_id = ? WHERE id = ?').run(sid, req.params.id);
-    audit(req, { action: 'link_staff', entity: 'users', entityId: req.params.id, oldValue, newValue: { staffId: sid } });
-    res.json({ ok: true });
+
+    if ('fullName' in body) {
+      const name = String(body.fullName ?? '').trim();
+      if (!name) return res.status(400).json({ error: 'A full name is required.' });
+      sets.push('full_name = ?'); params.push(name); changed.fullName = name;
+    }
+
+    if ('roleId' in body) {
+      const roleId = idOrNull(body.roleId);
+      if (!roleId) return res.status(400).json({ error: 'A role is required.' });
+      const role = db.prepare('SELECT id, name FROM roles WHERE id = ?').get(roleId) as { id: number; name: string } | undefined;
+      if (!role) return res.status(400).json({ error: 'That role no longer exists.' });
+      if (roleId !== current.roleId) {
+        // A laboratory that has locked itself out of its own settings cannot be
+        // repaired from inside the application, so the last administrator is
+        // never allowed to move — by anyone, including themselves.
+        const adminRole = db.prepare("SELECT id FROM roles WHERE name = 'System Administrator'").get() as { id: number } | undefined;
+        if (adminRole && current.roleId === adminRole.id && roleId !== adminRole.id) {
+          const others = (db.prepare('SELECT COUNT(*) c FROM users WHERE role_id = ? AND is_active = 1 AND id != ?').get(adminRole.id, current.id) as { c: number }).c;
+          if (others === 0) return res.status(400).json({ error: 'This is the only active System Administrator. Give another account that role first.' });
+        }
+        sets.push('role_id = ?'); params.push(roleId); changed.roleId = roleId; changed.roleName = role.name;
+      }
+    }
+
+    if (!sets.length) return res.json({ ok: true, changed: {} });
+    db.prepare(`UPDATE users SET ${sets.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...params, req.params.id);
+
+    // A role change rewrites what this person may reach, so the sessions they
+    // are holding are ended and the new rights are picked up on next sign-in
+    // rather than at some unpredictable point mid-shift.
+    if (changed.roleId !== undefined) {
+      db.prepare('UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL').run(current.id);
+    }
+    audit(req, {
+      action: changed.roleId !== undefined ? 'change_role' : 'link_staff',
+      entity: 'users', entityId: req.params.id,
+      oldValue: { staffId: current.staffId, roleId: current.roleId, fullName: current.fullName },
+      newValue: changed,
+    });
+    res.json({ ok: true, changed });
   });
 
   // Administrator password reset. For when a staff member has forgotten their
@@ -1418,6 +1475,119 @@ export function commonRoutes() {
       .run(req.params.id, Number(req.body.positionId), req.body.assignmentType ?? 'secondary');
     audit(req, { action: 'assign', entity: 'staff_position_assignments', entityId: Number(r.lastInsertRowid), newValue: { staffId: req.params.id, ...req.body } });
     res.status(201).json({ id: Number(r.lastInsertRowid) });
+  });
+
+  // ===== Removing a member of staff =====
+  //
+  // The register is the spine of the record: a person is the reviewer of a
+  // nonconformity, the owner of a CAPA, the name on a roster. Where any of that
+  // exists the record is retired, not erased — access and rosters end, the
+  // history keeps naming them. A record that never did anything (a
+  // demonstration row, a duplicate import) can be erased outright. This says
+  // which of the two applies, and why.
+  router.get('/staff/:id/deletion-impact', requirePermission('personnel.register', 'edit'), (req, res) => {
+    const db = getDb();
+    const staff = db.prepare('SELECT id, full_name fullName, employee_no employeeNo, is_active isActive FROM staff WHERE id = ?').get(req.params.id) as
+      { id: number; fullName: string; employeeNo: string | null; isActive: number } | undefined;
+    if (!staff) return res.status(404).json({ error: 'Staff record not found' });
+
+    const blockers: string[] = [];
+    if (Number(req.params.id) === Number(req.user?.staffId ?? -1)) blockers.push('This is your own staff record.');
+    const account = db.prepare('SELECT u.id, u.username, u.is_active isActive FROM users u WHERE u.staff_id = ?').get(req.params.id) as
+      { id: number; username: string; isActive: number } | undefined;
+
+    const historic = historicStaffReferences(staff.id).filter(r => r.table !== 'users');
+
+    res.json({
+      staff: { id: staff.id, fullName: staff.fullName, employeeNo: staff.employeeNo, isActive: staff.isActive === 1 },
+      account: account ? { id: account.id, username: account.username, isActive: account.isActive === 1 } : null,
+      blockers,
+      canDeactivate: blockers.length === 0,
+      canDelete: blockers.length === 0 && historic.length === 0,
+      historicReferences: historic.map(r => ({ ...r, label: describeStaffReference(r) })),
+      totalHistoricRows: historic.reduce((n, r) => n + r.rows, 0),
+    });
+  });
+
+  // Retire (default) or erase. Erasing is refused the moment the person left a
+  // trace in the laboratory record — the client is told to retire instead.
+  // A linked login account follows the staff record: retiring one deactivates
+  // the account, erasing one erases the account when it too has no history.
+  router.delete('/staff/:id', requirePermission('personnel.register', 'void_archive'), (req, res) => {
+    const db = getDb();
+    const mode = req.query.mode === 'delete' ? 'delete' : 'deactivate';
+    const staff = db.prepare('SELECT id, full_name, employee_no, is_active FROM staff WHERE id = ?').get(req.params.id) as
+      { id: number; full_name: string; employee_no: string | null; is_active: number } | undefined;
+    if (!staff) return res.status(404).json({ error: 'Staff record not found' });
+    if (Number(staff.id) === Number(req.user?.staffId ?? -1)) return res.status(400).json({ error: 'You cannot remove your own staff record.' });
+    const account = db.prepare('SELECT id, username, role_id FROM users WHERE staff_id = ?').get(staff.id) as
+      { id: number; username: string; role_id: number } | undefined;
+
+    // Never leave the laboratory without an administrator, whichever mode runs.
+    if (account) {
+      const adminRole = db.prepare("SELECT id FROM roles WHERE name = 'System Administrator'").get() as { id: number } | undefined;
+      if (adminRole && account.role_id === adminRole.id) {
+        const others = (db.prepare('SELECT COUNT(*) c FROM users WHERE role_id = ? AND is_active = 1 AND id != ?').get(adminRole.id, account.id) as { c: number }).c;
+        if (others === 0) return res.status(400).json({ error: 'This person holds the only active System Administrator account. Give another account that role first.' });
+      }
+    }
+
+    if (mode === 'deactivate') {
+      const tx = db.transaction(() => {
+        db.prepare('UPDATE staff SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(staff.id);
+        db.prepare("UPDATE staff_position_assignments SET is_active = 0, ends_at = CURRENT_TIMESTAMP WHERE staff_id = ? AND is_active = 1").run(staff.id);
+        db.prepare('UPDATE technical_authorizations SET is_active = 0 WHERE staff_id = ? AND is_active = 1').run(staff.id);
+        if (account) {
+          db.prepare('UPDATE users SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(account.id);
+          db.prepare('UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL').run(account.id);
+        }
+      });
+      tx();
+      audit(req, { action: 'deactivate', entity: 'staff', entityId: staff.id, oldValue: { isActive: 1 }, newValue: { isActive: 0, fullName: staff.full_name } });
+      return res.json({ ok: true, mode: 'deactivate', accountDeactivated: !!account });
+    }
+
+    // Permanent erase — only for a record with no laboratory history.
+    const blocking = historicStaffReferences(staff.id).filter(r => r.table !== 'users');
+    if (blocking.length) {
+      return res.status(409).json({
+        error: 'This person appears in the laboratory record and cannot be erased. Retire the record instead — rosters and access end immediately and the history stays intact.',
+        references: blocking.map(r => describeStaffReference(r)),
+      });
+    }
+    // The account is erased with the record, but only when it is itself clean.
+    if (account) {
+      const accountHistory = historicReferences(account.id);
+      if (accountHistory.length) {
+        return res.status(409).json({
+          error: `The login account “${account.username}” linked to this person has laboratory history and cannot be erased. Retire the record instead.`,
+          references: accountHistory.map(r => `${r.table} (${r.rows})`),
+        });
+      }
+    }
+
+    const tx = db.transaction(() => {
+      purgeDisposableStaffRows(staff.id);
+      if (account) {
+        purgeDisposableRows(account.id);
+        db.prepare('DELETE FROM users WHERE id = ?').run(account.id);
+      }
+      db.prepare("DELETE FROM record_links WHERE (source_record_type = 'staff' AND source_record_id = ?) OR (target_record_type = 'staff' AND target_record_id = ?)").run(String(staff.id), String(staff.id));
+      db.prepare('DELETE FROM staff WHERE id = ?').run(staff.id);
+    });
+    tx();
+    audit(req, { action: 'delete', entity: 'staff', entityId: staff.id, oldValue: { fullName: staff.full_name, employeeNo: staff.employee_no }, newValue: null });
+    res.json({ ok: true, mode: 'delete', accountDeleted: !!account });
+  });
+
+  // Bring a retired staff record back into the register.
+  router.post('/staff/:id/reactivate', requirePermission('personnel.register', 'edit'), (req, res) => {
+    const db = getDb();
+    const staff = db.prepare('SELECT id, full_name FROM staff WHERE id = ?').get(req.params.id) as { id: number; full_name: string } | undefined;
+    if (!staff) return res.status(404).json({ error: 'Staff record not found' });
+    db.prepare('UPDATE staff SET is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(staff.id);
+    audit(req, { action: 'reactivate', entity: 'staff', entityId: staff.id, newValue: { fullName: staff.full_name } });
+    res.json({ ok: true });
   });
 
   router.get('/system-modules', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT id, key, label, path, enabled, alerts_paused alertsPaused FROM system_modules ORDER BY id').all()));

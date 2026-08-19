@@ -9,10 +9,11 @@ import { useModules } from '../hooks/useModules';
 import { usePermissions } from '../hooks/usePermissions';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import { api, API_BASE, getToken } from '../services/api';
-import type { OfficeFileChangedPayload } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import DocumentScanner from '../components/DocumentScanner';
 import PermissionTabs from '../components/PermissionTabs';
+import OfficeHandoff, { isOfficeDocument, officeAppName } from '../components/OfficeHandoff';
+import { openStoredFile } from '../services/files';
 import type {
   Section, Department, Staff, Position,
   DocumentRecord, DocumentAttestation, DocumentControlSummary, DistributionInboxEntry, VersionContent,
@@ -1101,20 +1102,10 @@ function LaboratoryProfileView({ staff, documents, onOpenDoc, onPreview, onError
       {p?.legal_identity_notes && <p>{p.legal_identity_notes}</p>}
       {legal.length === 0 ? <p className="hint">No legal identity documents uploaded yet.</p> :
         <table className="data-table"><thead><tr><th>Type</th><th>Title</th><th>Reference</th><th>Issuer</th><th>Expiry</th><th>File</th></tr></thead><tbody>
-          {legal.map(d => <tr key={d.id}><td>{d.doc_type || '—'}</td><td>{d.title}</td><td>{d.reference_number || '—'}</td><td>{d.issuing_authority || '—'}</td><td>{d.expiry_date || '—'}</td><td>{d.file_id ? <button type="button" className="secondary" onClick={() => openLabDocFile(d.file_id!)}>Open</button> : '—'}</td></tr>)}
+          {legal.map(d => <tr key={d.id}><td>{d.doc_type || '—'}</td><td>{d.title}</td><td>{d.reference_number || '—'}</td><td>{d.issuing_authority || '—'}</td><td>{d.expiry_date || '—'}</td><td>{d.file_id ? <button type="button" className="secondary" onClick={() => openStoredFile(d.file_id!, d.file_name, d.file_mime)}>Open</button> : '—'}</td></tr>)}
         </tbody></table>}
     </div>
   </div>;
-}
-
-// Open an uploaded file's bytes in a new tab (auth-aware blob fetch).
-async function openLabDocFile(fileId: number) {
-  const token = getToken();
-  const res = await fetch(`${API_BASE}/files/${fileId}/raw`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
-  if (!res.ok) return;
-  const url = URL.createObjectURL(await res.blob());
-  window.open(url, '_blank');
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
 // ============================================================================
@@ -1336,6 +1327,10 @@ function WordToolbar({ editorRef }: { editorRef: { current: HTMLDivElement | nul
 
 function DocumentViewer(props: { docId: number; versionId: number; attestationId?: number; workflowStatus?: string; documents?: DocumentRecord[]; onWorkflowAction?: (action: string) => Promise<void>; onClose: () => void; onAttest: (attId: number, docId: number) => void; onSaved: () => void; onError: (m: string) => void }) {
   const { docId, versionId, attestationId, workflowStatus, documents, onWorkflowAction, onClose, onAttest, onSaved, onError } = props;
+  const { can } = usePermissions();
+  // Writing a new version of a controlled document — including one that arrives
+  // back from Microsoft Word — is an authoring right, not a reading one.
+  const canAuthor = can('documents.authoring', 'edit');
   // Tracks which version is actually being viewed/edited. Starts at the version
   // the caller opened, but is advanced in-place when an "Open in Microsoft
   // Office" sync lands a new version, so the viewer reflects the saved edits
@@ -1347,8 +1342,6 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState<'download' | 'save' | null>(null);
-  const [officeWatch, setOfficeWatch] = useState<{ watchId: string; fileName: string } | null>(null);
-  const [officeStatus, setOfficeStatus] = useState<string | null>(null);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [maximized, setMaximized] = useState(true);
   const [minimized, setMinimized] = useState(false);
@@ -1499,62 +1492,6 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
     } catch (e) { onError((e as Error).message); } finally { setExportBusy(null); }
   }
 
-  // "Open in Microsoft Office" — Electron-only. Opens the stored file with the
-  // OS's default application (Word/Excel/etc.) and watches it for saves; each
-  // save is delivered back here and uploaded as a new document version.
-  async function openInOffice() {
-    if (!content?.file_id || !window.sechLims?.openInOffice) return;
-    setOfficeStatus('Opening…');
-    try {
-      const meta = await api<{ storage_area: string; stored_name: string; original_name: string }>(`/files/${content.file_id}/meta`);
-      const result = await window.sechLims.openInOffice({
-        storageArea: meta.storage_area, storedName: meta.stored_name, originalName: meta.original_name || content.file_name || 'document',
-        docId, versionId: activeVersionId,
-      });
-      if (!result.ok) { setOfficeStatus(null); onError(result.error || 'Could not open the file in its default application.'); return; }
-      setOfficeWatch({ watchId: result.watchId!, fileName: meta.original_name || content.file_name || 'document' });
-      setOfficeStatus(`Watching “${meta.original_name || content.file_name}” — saving it in Office will sync it back here automatically as a new version.`);
-    } catch (e) { setOfficeStatus(null); onError((e as Error).message); }
-  }
-  function stopOfficeWatchNow() {
-    if (officeWatch) window.sechLims?.stopOfficeWatch?.(officeWatch.watchId);
-    setOfficeWatch(null); setOfficeStatus(null);
-  }
-  // Manual fallback: forces the main process to re-read the scratch file right
-  // now instead of waiting for the automatic watch/poll, for cases where the
-  // user wants an immediate confirmation that a save landed.
-  async function checkOfficeNow() {
-    if (!officeWatch || !window.sechLims?.checkOfficeNow) return;
-    setOfficeStatus('Checking for a saved change…');
-    const r = await window.sechLims.checkOfficeNow(officeWatch.watchId);
-    if (!r.ok) { setOfficeStatus(r.error || 'Could not check for changes.'); return; }
-  }
-  useEffect(() => {
-    if (!window.sechLims?.onOfficeFileChanged) return;
-    const unsubscribe = window.sechLims.onOfficeFileChanged(async (payload: OfficeFileChangedPayload) => {
-      if (!officeWatch || payload.watchId !== officeWatch.watchId) return;
-      setOfficeStatus('Saved in Office — syncing back to SECH_LIMS…');
-      try {
-        const fd = new FormData();
-        fd.append('file', new Blob([new Uint8Array(payload.bytes)], { type: payload.mimeGuess || 'application/octet-stream' }), payload.originalName);
-        const token = getToken();
-        const fr = await fetch(`${API_BASE}/files`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
-        if (!fr.ok) throw new Error((await fr.json().catch(() => ({ error: fr.statusText }))).error ?? fr.statusText);
-        const fdata = await fr.json();
-        const stamp = new Date().toISOString().slice(11, 19).replace(/:/g, '');
-        const nextVersionNumber = `office-sync-${stamp}`;
-        const created = await api<{ id: number }>(`/documents/${docId}/versions`, { method: 'POST', body: JSON.stringify({ versionNumber: nextVersionNumber, fileId: fdata.id, revisionSummary: 'Synced automatically from Microsoft Office', makeCurrent: true }) });
-        setOfficeStatus(`Synced as a new version (${nextVersionNumber}) — now viewing the saved edits.`);
-        setActiveVersionId(created.id);
-        onSaved();
-      } catch (e) { setOfficeStatus(null); onError((e as Error).message); }
-    });
-    return unsubscribe;
-  }, [officeWatch, docId]);
-  // Stop watching when the viewer closes, so the main process doesn't keep a
-  // file watcher open for a document the user is no longer looking at.
-  useEffect(() => () => { if (officeWatch) window.sechLims?.stopOfficeWatch?.(officeWatch.watchId); }, [officeWatch]);
-
   const isPdf = content?.file_mime === 'application/pdf' || /\.pdf$/i.test(content?.file_name || '');
   const isImage = (content?.file_mime || '').startsWith('image/');
   const WORD_MIMES = ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/msword'];
@@ -1566,11 +1503,18 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
   const isWordSource = !content?.file_id || WORD_MIMES.includes(content?.file_mime || '') || /\.docx?$/i.test(content?.file_name || '');
   const isSpreadsheet = SPREADSHEET_MIMES.includes(content?.file_mime || '') || /\.xlsx?$|\.xlsm$/i.test(content?.file_name || '');
 
+  // A Word, Excel or PowerPoint file belongs to Office, not to a preview this
+  // application draws. When one is open the viewer stands aside entirely: no
+  // tabs, no zoom, no in-app editor, no "download as Word" — just the handoff
+  // (src/components/OfficeHandoff.tsx), because an approximate rendering of an
+  // accredited document is worse than no rendering at all.
+  const isOfficeFile = !!content?.file_id && isOfficeDocument(content?.file_name, content?.file_mime);
+  const appName = officeAppName(content?.file_name, content?.file_mime);
+
   const zoomPct = Math.round(zoom * 100);
   // The embedded browser PDF viewer ships its own zoom/print/download toolbar,
   // so our zoom controls would just duplicate (and fight) it there.
-  const showZoom = !(mode === 'original' && (isPdf || isImage)) || isImage;
-  const officeAppName = isSpreadsheet ? 'Microsoft Excel' : isWordSource ? 'Microsoft Word' : 'Microsoft Office';
+  const showZoom = !isOfficeFile && (!(mode === 'original' && (isPdf || isImage)) || isImage);
   const windowTitle = content ? `${content.version_label || content.version_number || 'Version'} · ${content.file_name || 'Controlled content'}` : 'Loading…';
 
   if (minimized) {
@@ -1657,6 +1601,28 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
 .dv-strip{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 10px;background:#12281b;border-bottom:1px solid #1f5334;font-size:12px;color:#a8c7b6;flex:none}
 .dv-content{flex:1;min-height:0;display:flex;flex-direction:column;background:#0b1428;padding:8px}
 .dv-fidelity{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;margin-bottom:8px;background:#12233f;border:1px solid #294066;border-radius:8px;color:#b9cbe8;font-size:12px;flex:none}
+.dv-owner{display:inline-flex;align-items:center;height:30px;padding:0 12px;border:1px solid #2c416f;border-radius:7px;background:#0a1226;color:#9fb0d4;font-size:12.5px;font-weight:600;white-space:nowrap}
+/* The Office handoff panel: one document, one obvious action, one line of
+   state. Deliberately quiet — the document itself is elsewhere, in Word. */
+.oh{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:auto;padding:24px}
+.oh-card{width:min(620px,100%);text-align:center;background:#101c36;border:1px solid #22345c;border-radius:14px;padding:32px 30px;box-shadow:0 14px 40px rgba(0,0,0,.35)}
+.oh-icon{width:62px;height:62px;margin:0 auto 16px;display:flex;align-items:center;justify-content:center;border-radius:16px;background:linear-gradient(180deg,#1d3257,#16243f);border:1px solid #2c416f;color:#8fb4ff}
+.oh-name{margin:0 0 8px;font-size:17px;color:#eaf1ff;word-break:break-word}
+.oh-lead{margin:0 auto 22px;max-width:52ch;font-size:12.8px;line-height:1.7;color:#9fb0d4}
+.oh-actions{display:flex;flex-wrap:wrap;gap:9px;justify-content:center}
+.oh-actions button{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.oh-primary{height:40px;padding:0 20px;background:var(--accent,#2f6bff);border:1px solid transparent;border-radius:9px;color:#fff;font-size:13.5px;font-weight:600;cursor:pointer;box-shadow:0 6px 18px rgba(47,107,255,.28)}
+.oh-primary:hover:not(:disabled){filter:brightness(1.1)}
+.oh-primary:disabled{opacity:.6;cursor:default}
+.oh-actions .secondary{height:40px;padding:0 16px;border-radius:9px;font-size:12.8px}
+.oh-state{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:22px;padding:9px 13px;border-radius:9px;background:#12281b;border:1px solid #1f5334;color:#a8c7b6;font-size:12px;text-align:left}
+.oh-link{background:none;border:0;box-shadow:none;padding:2px 4px;color:#8fb4ff;font-size:11.5px;cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+.oh-link:hover{text-decoration:underline}
+.oh-warn{margin-top:20px;padding:12px 14px;border-radius:9px;background:rgba(214,66,88,.08);border:1px solid rgba(214,66,88,.4);text-align:left}
+.oh-warn p{margin:0 0 6px;font-size:12.3px;line-height:1.65;color:#f3c9cf}
+.oh-warn p.muted{margin:0;color:#9fb0d4}
+.oh-note{margin-top:16px;font-size:12px;color:#9fb0d4}
+.oh-fine{margin:16px 0 0;font-size:11px;color:#6f81a5;line-height:1.6}
 .dv-fidelity span{flex:1;min-width:220px}
 .dv-drawer{flex:none;max-height:38%;overflow:auto;border-top:1px solid #22345c;background:#0d1830;padding:10px 12px}
 .dv-footer{display:flex;align-items:center;gap:8px;padding:6px 10px;border-top:1px solid #22345c;background:#0e1930;flex:none;flex-wrap:wrap}
@@ -1695,17 +1661,14 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
 
       {/* Toolbar: view tabs, the primary open action, then compact controls. */}
       <div className="dv-toolbar">
-        <div className="dv-tabs">
+        {!isOfficeFile && <div className="dv-tabs">
           <button type="button" className={mode === 'content' ? 'on' : ''} onClick={() => setMode('content')}>Preview</button>
           {content?.file_id && <button type="button" className={mode === 'original' ? 'on' : ''} onClick={() => setMode('original')}>Original file</button>}
-        </div>
-        {content?.file_id && !isPdf && !isImage && window.sechLims?.openInOffice && !officeWatch &&
-          <button className="dv-btn" onClick={openInOffice} disabled={officeStatus === 'Opening…'} title="Open in the native application — saved changes sync back automatically as a new version">
-            {officeStatus === 'Opening…' ? 'Opening…' : `Open in ${officeAppName}`}
-          </button>}
-        {mode === 'content' && content && !editing && <button className="dv-ghost" onClick={() => setEditing(true)}>✎ Edit</button>}
-        {mode === 'content' && editing && <button className="dv-btn" onClick={saveContent} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>}
-        {mode === 'content' && editing && <button className="dv-ghost" onClick={() => setEditing(false)}>Cancel</button>}
+        </div>}
+        {isOfficeFile && <span className="dv-owner">Opens in {appName}</span>}
+        {!isOfficeFile && mode === 'content' && content && !editing && <button className="dv-ghost" onClick={() => setEditing(true)}>✎ Edit</button>}
+        {!isOfficeFile && mode === 'content' && editing && <button className="dv-btn" onClick={saveContent} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>}
+        {!isOfficeFile && mode === 'content' && editing && <button className="dv-ghost" onClick={() => setEditing(false)}>Cancel</button>}
         <span style={{ flex: 1 }} />
         {showZoom && <span className="dv-zoom">
           <button title="Zoom out" onClick={() => setZoom(z => Math.max(0.5, +(z - 0.1).toFixed(2)))}>−</button>
@@ -1719,10 +1682,10 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
             <div style={{ position: 'fixed', inset: 0, zIndex: 35 }} onClick={() => setMenuOpen(false)} />
             <div className="dv-menu" onClick={() => setMenuOpen(false)}>
               {content?.file_id && <button onClick={() => fetchBlobUrl(`/files/${content.file_id}/download`).then(u => { const a = document.createElement('a'); a.href = u; a.download = content.file_name || 'document'; a.click(); })}>⬇ Download original file</button>}
-              {content?.file_id && <button onClick={reExtract} disabled={busy}>{busy ? 'Reading…' : '⟳ Re-read content from file'}</button>}
-              {!!content?.content_html && isWordSource && <div className="dv-menu-sep" />}
-              {!!content?.content_html && isWordSource && <button onClick={downloadAsWord} disabled={!!exportBusy}>{exportBusy === 'download' ? 'Building…' : '⬇ Download as Word (.docx)'}</button>}
-              {!!content?.content_html && isWordSource && <button onClick={saveAsWordVersion} disabled={!!exportBusy}>{exportBusy === 'save' ? 'Saving…' : '＋ Save as new Word version'}</button>}
+              {content?.file_id && !isOfficeFile && <button onClick={reExtract} disabled={busy}>{busy ? 'Reading…' : '⟳ Re-read content from file'}</button>}
+              {!isOfficeFile && !!content?.content_html && isWordSource && <div className="dv-menu-sep" />}
+              {!isOfficeFile && !!content?.content_html && isWordSource && <button onClick={downloadAsWord} disabled={!!exportBusy}>{exportBusy === 'download' ? 'Building…' : '⬇ Download as Word (.docx)'}</button>}
+              {!isOfficeFile && !!content?.content_html && isWordSource && <button onClick={saveAsWordVersion} disabled={!!exportBusy}>{exportBusy === 'save' ? 'Saving…' : '＋ Save as new Word version'}</button>}
               <div className="dv-menu-sep" />
               <button onClick={() => window.dispatchEvent(new CustomEvent('dennis:ask', { detail: { question: `Summarise and explain this document: ${content?.file_name || content?.version_label || 'the open document'}` } }))}>🤖 Ask Dennis about this document</button>
             </div>
@@ -1730,25 +1693,21 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
         </div>
       </div>
 
-      {/* Office sync status strip — only visible while a round-trip is active. */}
-      {(officeWatch || officeStatus) && <div className="dv-strip">
-        <span>{officeStatus || `Watching “${officeWatch?.fileName}” for saves…`}</span>
-        {officeWatch && <>
-          <button className="dv-ghost" style={{ height: 24, fontSize: 11.5 }} onClick={checkOfficeNow} title="Force an immediate check for a saved change">Check now</button>
-          <button className="dv-ghost" style={{ height: 24, fontSize: 11.5 }} onClick={stopOfficeWatchNow}>Stop watching</button>
-          <span style={{ fontSize: 11, color: '#7c9b88' }}>If Word shows “Protected View”, click “Enable Editing” there first.</span>
-        </>}
-      </div>}
-
-      {/* Content — fills all remaining window height. */}
+      {/* Content — fills all remaining window height. An Office document is
+          handed to Office and nothing else is drawn: no approximate preview
+          to be mistaken for the controlled document. */}
       <div className="dv-content">
-        {isWordSource && content?.file_id && !editing && !officeWatch && <div className="dv-fidelity">
-          <span>ℹ This is a Word document. The in-app preview shows the text and tables but may not reproduce diagrams, drawings or exact formatting.{isPdf ? '' : ' For the exact document, open it in Microsoft Word.'}</span>
-          {window.sechLims?.openInOffice
-            ? <button className="dv-ghost" onClick={openInOffice} disabled={officeStatus === 'Opening…'}>{officeStatus === 'Opening…' ? 'Opening…' : `Open in ${officeAppName}`}</button>
-            : content.file_id && <button className="dv-ghost" onClick={() => fetchBlobUrl(`/files/${content.file_id}/download`).then(u => { const a = document.createElement('a'); a.href = u; a.download = content.file_name || 'document'; a.click(); })}>Download original</button>}
-        </div>}
-        {mode === 'content' && content && (editing
+        {isOfficeFile && content && <OfficeHandoff
+          docId={docId}
+          versionId={activeVersionId}
+          fileId={content.file_id!}
+          fileName={content.file_name || 'document'}
+          fileMime={content.file_mime}
+          canEdit={canAuthor}
+          onSavedVersion={id => { setActiveVersionId(id); onSaved(); }}
+          onError={onError}
+        />}
+        {!isOfficeFile && mode === 'content' && content && (editing
           ? <div className="word-editor" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
               {!isSpreadsheet && <WordToolbar editorRef={editorRef} />}
               <div className="doc-scroll" style={{ flex: 1, minHeight: 0 }}>
@@ -1762,7 +1721,7 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
                   ? <pre style={{ whiteSpace: 'pre-wrap', border: '1px solid #22345c', borderRadius: 8, padding: 16, flex: 1, minHeight: 0, overflow: 'auto', background: '#fff', color: '#111', zoom, margin: 0 }}>{content.content_text}</pre>
                   : <p className="muted" style={{ padding: 16 }}>No readable content was captured. Use “Edit” to author it in-app, or open the original file.</p>)))}
 
-        {mode === 'original' && (isPdf || isImage
+        {!isOfficeFile && mode === 'original' && (isPdf || isImage
           ? <div style={{ flex: 1, minHeight: 0, border: '1px solid #22345c', borderRadius: 8, overflow: 'hidden', background: '#525659' }}>
               {!fileUrl ? <p style={{ color: '#fff', padding: 16 }}>Loading file…</p>
                 : isPdf ? <iframe title="document" src={fileUrl} style={{ width: '100%', height: '100%', border: 'none', display: 'block' }} />
@@ -1805,10 +1764,14 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
         </button>
         {wf && <button className="dv-btn" onClick={() => doWorkflow(wf.action)} disabled={busy}>{busy ? 'Working…' : wf.label}</button>}
         {attestationId && <button className="dv-btn" title="By signing you confirm you have read and understood this controlled document" onClick={() => { onAttest(attestationId, docId); onClose(); }}>✔ I have read &amp; understood — Attest</button>}
-        {content && <span className="dv-meta">
-          {content.extraction_method && content.extraction_method !== 'none' ? `Read by SECH_LIMS (${content.extraction_method}${content.page_count ? `, ${content.page_count} pages` : ''})` : 'Content not read automatically'}
-          {content.content_updated_at ? ` · edited ${String(content.content_updated_at).slice(0, 16).replace('T', ' ')}${content.content_updated_by_name ? ` by ${content.content_updated_by_name}` : ''}` : ''}
-        </span>}
+        {/* For an Office file the extraction is search plumbing, not something
+            the reader needs told; what matters is the version they are on. */}
+        {content && (isOfficeFile
+          ? <span className="dv-meta">{content.version_label || content.version_number || 'Version'}{content.file_size ? ` · ${Math.max(1, Math.round(content.file_size / 1024))} KB` : ''}</span>
+          : <span className="dv-meta">
+              {content.extraction_method && content.extraction_method !== 'none' ? `Read by SECH_LIMS (${content.extraction_method}${content.page_count ? `, ${content.page_count} pages` : ''})` : 'Content not read automatically'}
+              {content.content_updated_at ? ` · edited ${String(content.content_updated_at).slice(0, 16).replace('T', ' ')}${content.content_updated_by_name ? ` by ${content.content_updated_by_name}` : ''}` : ''}
+            </span>)}
       </div>
     </div>
   </div>;

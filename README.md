@@ -79,15 +79,21 @@ Foundation workflows are wired for every non-placeholder module above. Settings 
 
 Settings contains:
 
-- Users & Access
-- Positions & Organogram
-- Permission Matrix
+- People & Access — Register New Staff, the **Master Personnel Register** (edit, retire,
+  erase, and the Excel import/export of the register), Users & Access (including changing
+  the role an account holds), Positions & Organogram, Access Control and the Advanced Matrix
 - System Modules Toggle
 - Document Master List Import
 - Evidence Upload
 - Action Tracker
 - Backup & Restore
 - Device Access / Pairing
+
+Removing a member of staff is two different acts. **Retiring** ends their access, roster
+places and technical authorizations while everything they signed, reviewed or wrote keeps
+their name on it — the right answer for anyone who worked, and reversible. **Erasing** is
+offered only for a record that left no trace in the laboratory record, which is what clears
+demonstration rows and duplicate imports. The screen checks which applies and says why.
 
 Module toggles hide disabled modules from the main sidebar, pause alerts by flag, preserve data, and show a clean disabled-module page for direct route access.
 
@@ -124,11 +130,32 @@ Backup creation uses the Node `archiver` ZIP library. Backup packages include:
 
 Backups are listed in Settings → System → Backup & Restore, where each package can be downloaded to keep an off-server copy. Restore is fully supported: pick an existing backup or upload a backup ZIP from disk. Before any restore the system writes an automatic `pre-restore-*.zip` safety snapshot of the current state, then replaces the SQLite database, uploads, evidence, and config from the backup. Users may need to sign in again afterwards.
 
+## Editing controlled documents in Microsoft Office
+
+A Word, Excel or PowerPoint document opens in Office rather than in an in-app preview, so
+what people read is the approved document — diagrams, headers, pagination and all — not an
+approximation of it. Two routes, chosen automatically:
+
+- **At the host machine** (the desktop application) the file is copied to a scratch folder,
+  handed to the operating system's default application, and watched. Every save is picked up
+  and uploaded as a new version.
+- **Over the LAN or the internet** the document is handed to Office as a URL it can open
+  *and save back to* — the `ms-word:ofe|u|…` Office URI against this host's own small WebDAV
+  endpoint (`server/routes/officeEdit.ts`, mounted at `/office`). Word saves straight into
+  the register.
+
+The URL carries a single-purpose token: one file, one version, one person, expiring after
+12 hours, revoked the moment the handoff is closed or the account is deactivated. Every save
+arrives as a new, attributed version of that controlled document — the same record a manual
+upload would leave. Where neither route is available (no Office installed, a phone) the same
+panel offers **Download a copy** and **Upload an edited copy**, which ends in the same place.
+
 ## Build checks
 
 ```bash
 npm run typecheck
 npm run build
+npm run check:people-office   # staff removal, role changes, the Office round-trip (needs a running host)
 ```
 
 ## Validation

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { UserX, UserCheck, KeyRound, Trash2, ShieldAlert, Loader2 } from 'lucide-react';
+import { UserX, UserCheck, KeyRound, Trash2, ShieldAlert, Loader2, ShieldCheck } from 'lucide-react';
 import { api } from '../services/api';
 import type { ApiUser } from '../../shared/types/api';
 
@@ -40,11 +40,19 @@ export default function UserAccountActions({ user, onChanged }: { user: ApiUser 
   const [busy, setBusy] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [roles, setRoles] = useState<{ id: number; name: string; description?: string }[]>([]);
+  const [roleId, setRoleId] = useState<string>(String(user.roleId));
 
   useEffect(() => {
     setImpact(null);
     api<Impact>(`/users/${user.id}/deletion-impact`).then(setImpact).catch(e => setError((e as Error).message));
   }, [user.id]);
+
+  useEffect(() => { setRoleId(String(user.roleId)); }, [user.roleId, user.id]);
+  useEffect(() => { api<{ id: number; name: string; description?: string }[]>('/roles').then(setRoles).catch(() => setRoles([])); }, []);
+
+  const selectedRole = roles.find(r => String(r.id) === roleId);
+  const roleChanged = String(user.roleId) !== roleId;
 
   const run = async (label: string, fn: () => Promise<unknown>, done: string) => {
     setBusy(label); setError(null); setNotice(null);
@@ -57,6 +65,35 @@ export default function UserAccountActions({ user, onChanged }: { user: ApiUser 
     <div className="uaa">
       {error && <div className="error">{error}</div>}
       {notice && <div className="notice-ok">{notice}</div>}
+
+      {/* The role is what actually moves somebody between cohorts — a quality
+          manager becoming a System Administrator, an officer standing down to
+          a read-only role. It changes here rather than by deleting and
+          re-creating the account, which would orphan everything they signed. */}
+      <div className="uaa-row">
+        <div className="uaa-what">
+          <strong><ShieldCheck size={14} /> Role</strong>
+          <p>
+            The role decides what this person can reach across the whole system. Changing it applies
+            immediately and signs them out, so the new rights are in force the next time they sign in.
+            Anything granted to them personally in <em>Access Control</em> still overrides the role.
+            {selectedRole?.description && <> <span className="muted">{selectedRole.description}</span></>}
+          </p>
+        </div>
+        <div className="uaa-do">
+          <select value={roleId} onChange={e => setRoleId(e.target.value)} aria-label="Role">
+            {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            {roles.length === 0 && <option value={String(user.roleId)}>{user.roleName ?? 'Current role'}</option>}
+          </select>
+          <button type="button" disabled={!roleChanged || busy !== ''}
+            onClick={() => run('role', () => api(`/users/${user.id}`, { method: 'PUT', body: JSON.stringify({ roleId: Number(roleId) }) }),
+              `${user.username} is now ${selectedRole?.name ?? 'in the new role'}. They have been signed out and will pick the new rights up at their next sign-in.`)}>
+            {busy === 'role' ? <Loader2 size={13} className="spin" /> : null} Change role
+          </button>
+          {roleChanged && <button type="button" className="secondary" onClick={() => setRoleId(String(user.roleId))}>Cancel</button>}
+          {!roleChanged && <span className="uaa-flag">Currently {user.roleName ?? selectedRole?.name ?? '—'}</span>}
+        </div>
+      </div>
 
       <div className="uaa-row">
         <div className="uaa-what">

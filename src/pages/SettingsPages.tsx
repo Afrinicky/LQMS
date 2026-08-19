@@ -22,6 +22,8 @@ import { DetailModal } from '../components/ui';
 import { usePermissions } from '../hooks/usePermissions';
 import { AccessControl } from './AccessControl';
 import UserAccountActions from '../components/UserAccountActions';
+import PersonnelRegisterAdmin from '../components/PersonnelRegisterAdmin';
+import { openStoredFile } from '../services/files';
 import PasswordResetApprovals from '../components/PasswordResetApprovals';
 import type {
   OrgTree, OrgTreeNode, ProfessionalRank,
@@ -347,7 +349,7 @@ export function UsersAccess(){
   const unlinkedStaff = staff.filter(s => !s.userId);
   return <><PasswordResetApprovals />
   <div className="card"><h3>Users &amp; Access</h3>
-    <p>Create login accounts and link them to staff records. To onboard a whole new person (staff + account + positions) use <Link to="/settings/people">Register New Staff</Link>. Click any user below to link or change its staff record.</p>
+    <p>Create login accounts, link them to staff records, and change what role somebody holds. To onboard a whole new person (staff + account + positions) use the <strong>Register New Staff</strong> tab. Click a row to link its staff record, or <strong>Manage account</strong> to change the role, hand over a password, or deactivate it.</p>
     {error && <div className="error">{error}</div>}
     {success && <div className="notice-ok">{success}</div>}
     <form className="form" onSubmit={submit}>
@@ -370,7 +372,7 @@ export function UsersAccess(){
             <td>{u.isActive?'Yes':<span className="badge inactive">Deactivated</span>}</td>
             <td style={{whiteSpace:'nowrap'}}>
               <button type="button" className="tiny" onClick={e=>{ e.stopPropagation(); setOpenUser(open?null:u.id); setLinkSel(u.staffId?String(u.staffId):''); setError(null); setSuccess(null); }}>{open?'Close':(u.staffId?'Change link':'Link staff')}</button>{' '}
-              <button type="button" className="tiny" onClick={e=>{ e.stopPropagation(); setManageUser(manage?null:u.id); setError(null); setSuccess(null); }}>{manage?'Close':'Account…'}</button>
+              <button type="button" className="tiny" onClick={e=>{ e.stopPropagation(); setManageUser(manage?null:u.id); setError(null); setSuccess(null); }}>{manage?'Close':'Manage account'}</button>
             </td>
           </tr>
           {open && <tr className="link-editor-row"><td colSpan={6}>
@@ -2573,7 +2575,7 @@ export function Devices(){
 // People & Access  (merged module: everything about staff, users, positions,
 // the organogram, the permission matrix, and staff Excel import/export)
 // ---------------------------------------------------------------------------
-const PEOPLE_TABS = ['Register New Staff', 'Users & Access', 'Positions & Organogram', 'Access Control', 'Advanced Matrix', 'Import / Export'] as const;
+const PEOPLE_TABS = ['Register New Staff', 'Personnel Register', 'Users & Access', 'Positions & Organogram', 'Access Control', 'Advanced Matrix'] as const;
 type PeopleTab = typeof PEOPLE_TABS[number];
 
 export function PeopleAccess() {
@@ -2581,75 +2583,16 @@ export function PeopleAccess() {
   return <div className="settings-module">
     <div className="settings-module-head">
       <h2>People &amp; Access</h2>
-      <p>One place for everyone who works in the laboratory: register staff, manage login accounts, the positions &amp; organogram, who can do what, and bulk import/export of the staff register.</p>
+      <p>One place for everyone who works in the laboratory: register staff, maintain the Master Personnel Register (including its Excel import and export), manage login accounts and roles, the positions &amp; organogram, and who can do what.</p>
     </div>
     <div className="tabs">{PEOPLE_TABS.map(t => <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>)}</div>
     <div className="people-tab-body">
       {tab === 'Register New Staff' && <RegisterStaff />}
+      {tab === 'Personnel Register' && <PersonnelRegisterAdmin />}
       {tab === 'Users & Access' && <UsersAccess />}
       {tab === 'Positions & Organogram' && <Positions />}
       {tab === 'Access Control' && <AccessControl />}
       {tab === 'Advanced Matrix' && <PermissionMatrix />}
-      {tab === 'Import / Export' && <StaffImportExport />}
-    </div>
-  </div>;
-}
-
-// Staff register Excel import / export.
-function StaffImportExport() {
-  const { can } = usePermissions();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ created: number; updated: number; skipped: number; errors: string[] } | null>(null);
-  const [file, setFile] = useState<File | null>(null);
-
-  async function download(path: string, fallback: string) {
-    setError(null);
-    try {
-      const token = getToken();
-      const res = await fetch(`${API_BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({ error: res.statusText }))).error ?? res.statusText);
-      const blob = await res.blob();
-      const m = (res.headers.get('Content-Disposition') || '').match(/filename="?([^"]+)"?/);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = m ? m[1] : fallback;
-      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-    } catch (e) { setError((e as Error).message); }
-  }
-
-  async function upload(e: FormEvent) {
-    e.preventDefault(); setError(null); setResult(null);
-    if (!file) { setError('Choose a .xlsx file first.'); return; }
-    setBusy(true);
-    try {
-      const fd = new FormData(); fd.append('file', file);
-      const token = getToken();
-      const res = await fetch(`${API_BASE}/staff/import`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? res.statusText);
-      setResult(data); setFile(null);
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
-  }
-
-  return <div className="grid cols-2">
-    <div className="card">
-      <h3>Master Personnel Register — Export</h3>
-      <p>Download the <strong>Master Personnel Register</strong> workbook. It carries every personnel field — Staff ID, full name parts and initials, date of birth, gender, designation and position, professional regulator, licence and qualifications, unit, personnel category, appointment type and date, years of experience, national ID, emergency contact, phone, email and file location. Use the blank template to prepare a bulk upload, or export the current register.</p>
-      <div className="quick-actions" style={{ marginTop: 8 }}>
-        <button type="button" onClick={() => download('/staff/template', 'Staff_Register_Template.xlsx')}>Download blank template</button>
-        {can('personnel', 'export') && <button type="button" className="secondary" onClick={() => download('/staff/export', 'Master_Personnel_Register.xlsx')}>Export current register</button>}
-      </div>
-    </div>
-    <div className="card">
-      <h3>Master Personnel Register — Import</h3>
-      <p>Upload a completed Master Personnel Register workbook. Rows are matched by <strong>Staff ID</strong> — existing records are updated, new ones are created. Every column maps to its field, the <strong>Unit</strong> links to the matching section, and the <strong>Position</strong> is created in the organogram and assigned automatically.</p>
-      {error && <div className="error">{error}</div>}
-      <form className="form" onSubmit={upload}>
-        <label>Excel file (.xlsx)<input type="file" accept=".xlsx,.xls" onChange={e => setFile(e.target.files?.[0] ?? null)} /></label>
-        <button type="submit" disabled={busy}>{busy ? 'Importing…' : 'Import staff'}</button>
-      </form>
-      {result && <div className="notice-ok">Import complete — {result.created} created, {result.updated} updated, {result.skipped} skipped{result.errors.length ? `, ${result.errors.length} error(s)` : ''}.{result.errors.length > 0 && <ul className="link-list">{result.errors.slice(0, 8).map((er, i) => <li key={i}>{er}</li>)}</ul>}</div>}
     </div>
   </div>;
 }
@@ -2667,14 +2610,6 @@ async function uploadLabFile(file: File): Promise<number> {
   return Number((await res.json()).id);
 }
 
-async function openLabFile(fileId: number) {
-  const token = getToken();
-  const res = await fetch(`${API_BASE}/files/${fileId}/raw`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
-  if (!res.ok) return;
-  const url = URL.createObjectURL(await res.blob());
-  window.open(url, '_blank');
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
-}
 
 const LAB_TABS = ['Identity & Legal', 'Mission & Vision', 'Core Documents', 'Quality Policy & Objectives', 'Annual Objectives', 'Departments', 'Equipment Numbering'] as const;
 type LabTab = typeof LAB_TABS[number];
@@ -2835,7 +2770,7 @@ function LabDocuments({ category, docTypes, onChanged }: { category: string; doc
         <td>{isManual ? (r.version || '—') : (r.issuing_authority || '—')}</td>
         <td>{(isManual ? r.effective_date : r.issue_date) || '—'}</td>
         <td>{isManual ? '' : (r.expiry_date || '—')}</td>
-        <td>{r.file_id ? <button type="button" className="secondary" onClick={() => openLabFile(r.file_id!)}>Open {r.file_name ? `(${r.file_name})` : ''}</button> : '—'}</td>
+        <td>{r.file_id ? <button type="button" className="secondary" onClick={() => openStoredFile(r.file_id!, r.file_name, r.file_mime)}>Open {r.file_name ? `(${r.file_name})` : ''}</button> : '—'}</td>
         <td><button type="button" className="secondary" onClick={() => remove(r.id)}>Remove</button></td>
       </tr>)}
       {rows.length === 0 && <tr><td colSpan={8} className="hint">No documents uploaded yet.</td></tr>}

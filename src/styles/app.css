@@ -1380,7 +1380,11 @@ li.focus-flash, div.focus-flash { background-color: var(--accent-soft); box-shad
 /* ============================================================================
    SETTINGS
    ========================================================================= */
-.settings-layout { display: grid; grid-template-columns: 248px 1fr; gap: 22px; align-items: start; }
+/* A grid track defaults to min-width:auto, so a wide child (a register table,
+   a long tab strip) pushed this column past the page instead of fitting in it
+   — which is why the right-hand end of Settings was being cut off. */
+.settings-layout { display: grid; grid-template-columns: 248px minmax(0, 1fr); gap: 22px; align-items: start; }
+.settings-layout > * { min-width: 0; }
 .settings-nav {
   background: linear-gradient(180deg, var(--card), var(--surface));
   border: 1px solid var(--border);
@@ -1561,6 +1565,8 @@ li.focus-flash, div.focus-flash { background-color: var(--accent-soft); box-shad
 }
 .spinner.sm { width: 18px; height: 18px; border-width: 2px; }
 @keyframes spin { to { transform: rotate(360deg); } }
+/* A working icon, wherever one is shown inside a button. */
+.spin { animation: spin 0.9s linear infinite; }
 
 .boot-error-ico {
   width: 54px; height: 54px;
@@ -3014,3 +3020,55 @@ button.tiny.danger:hover:not(:disabled) { background: rgba(214, 66, 88, .12); bo
 .eq-duty-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .eq-duty-head .badge { text-transform: none; font-weight: 500; }
 .eq-duty-list li p { margin: 6px 0 0; font-size: 12.5px; }
+
+/* ============================================================
+   Master Personnel Register — administration (Settings → People
+   & Access → Personnel Register).
+
+   One header row carries the whole workbook round-trip and the
+   search, so the table starts high on the screen instead of
+   below a stack of cards. Row actions stay on one line and do
+   not reflow as names get longer.
+   ============================================================ */
+.reg-head { display: flex; align-items: flex-start; gap: 18px; flex-wrap: wrap; margin-bottom: 4px; }
+.reg-head-text { flex: 1 1 340px; min-width: 0; }
+.reg-head-text h3 { margin: 0 0 4px; }
+.reg-head-text p { margin: 0; max-width: 72ch; font-size: 12.5px; line-height: 1.6; }
+.reg-head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.reg-head-actions button { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+
+.reg-search { display: flex; align-items: center; gap: 7px; padding: 0 10px; min-width: 250px;
+  border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--panel-2); color: var(--faint); }
+.reg-search input { border: 0; background: transparent; box-shadow: none; padding: 8px 0; min-width: 0; flex: 1; font-size: 12.5px; }
+.reg-search input:focus { outline: none; box-shadow: none; }
+
+.reg-filters { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 14px 0 8px; font-size: 12px; }
+.reg-filters .toggle { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); }
+.reg-filters .toggle input { width: auto; margin: 0; }
+
+.table-scroll { overflow-x: auto; }
+/* Five columns of substance and one of verbs. Each cell carries its own
+   secondary line rather than claiming a column of its own, so the register
+   reads at a glance and the actions stay on screen without scrolling. */
+.reg-table { min-width: 760px; }
+.reg-table tbody td { vertical-align: top; font-size: 12.5px; padding-top: 10px; padding-bottom: 10px; }
+.reg-primary { display: block; font-weight: 600; color: var(--text); }
+.reg-sub { display: block; margin-top: 2px; font-size: 11px; color: var(--faint); }
+.reg-table .badge { margin-left: 6px; }
+.reg-actions-col { width: 1%; white-space: nowrap; text-align: right; }
+.reg-row-actions { display: inline-flex; gap: 6px; justify-content: flex-end; }
+.reg-row-actions button { display: inline-flex; align-items: center; gap: 4px; }
+.reg-table tr.row-retired td { opacity: .62; }
+
+/* Removing a person: two clearly separated answers, with the safe
+   one first and the irreversible one gated behind typing the name. */
+.remove-flow { display: flex; flex-direction: column; gap: 14px; }
+.remove-option { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 16px; background: var(--panel-2); }
+.remove-option.danger { border-color: rgba(214, 66, 88, .38); background: rgba(214, 66, 88, .045); }
+.remove-option.disabled { opacity: .72; }
+.remove-option-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-bottom: 6px; }
+.remove-option-head h4 { margin: 0; font-size: 14px; }
+.remove-option.danger .remove-option-head svg { color: var(--danger); }
+.remove-option p { margin: 0 0 12px; font-size: 12.5px; line-height: 1.65; color: var(--muted); }
+.remove-option ul { margin: 0; }
+.remove-confirm { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--muted); margin-bottom: 12px; }
