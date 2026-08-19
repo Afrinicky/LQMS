@@ -1,10 +1,11 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Download, Upload, FileSpreadsheet, Search, Pencil, Archive, RotateCcw, Trash2, AlertTriangle, ShieldAlert, MoreHorizontal, Users } from 'lucide-react';
 import { api, API_BASE, getToken } from '../services/api';
 import { usePermissions } from '../hooks/usePermissions';
 import { DetailModal } from './ui';
 import {
-  GENDERS, PERSONNEL_CATEGORIES, APPOINTMENT_TYPES, NATIONAL_ID_TYPES, CADRES, AVAILABILITY_STATUSES,
+  GENDERS, PERSONNEL_CATEGORIES, APPOINTMENT_TYPES, NATIONAL_ID_TYPES, CADRES, AVAILABILITY_STATUSES, EXIT_REASONS,
   emptyStaffForm, staffFormFrom, yearsOfService, type StaffFormValues,
 } from '../../shared/constants/personnel';
 import type { Staff, Section, Position, ProfessionalRank } from '../../shared/types/api';
@@ -20,25 +21,97 @@ import type { Staff, Section, Position, ProfessionalRank } from '../../shared/ty
    real staff with the demo rows still in the roster.
 
    So this is the whole register, in Settings, with the three verbs that were
-   missing: edit, retire, erase. Import/export sits on the same screen, using
-   the same one approved workbook as Personnel Management.
+   missing: edit, record a departure, erase. Import/export sits on the same
+   screen, using the same one approved workbook as Personnel Management.
 
-   Retire and erase are deliberately different things:
-     · Retire  — access, rosters and authorizations end; the history keeps
-                 naming them. This is the right answer for anyone who worked.
-     · Erase   — the row disappears. Offered only when the person left no trace
-                 in the laboratory record, which is exactly the demonstration
-                 rows this screen exists to clear.
+   Leaving and erasing are deliberately different things:
+     · Departure — access, rosters and authorizations end and the person moves
+                   to Former staff WITH THE REASON STATED. "Retired" is one
+                   reason among several; a transfer, the end of an internship
+                   and a dismissal are different events and the register has to
+                   be able to say which. The history keeps naming them.
+     · Erase     — the row disappears. Offered freely only when the person left
+                   no trace in the laboratory record; where they did, it takes a
+                   written reason, for the demonstration rows a live system has
+                   grown around.
    ========================================================================= */
 
 /**
- * Has this person left?
+ * Has this person left the laboratory?
  *
  * SQLite has no boolean, so `is_active` comes back as 0 or 1 and a `=== false`
- * test silently matches nothing — which is how a retired row can end up
- * offering "Retire…" and hiding "Return to the register".
+ * test silently matches nothing — which is how a departed row can end up
+ * offering "Record departure…" and hiding "Return to the register".
  */
-const hasRetired = (s: Staff) => !s.isActive;
+const hasLeft = (s: Staff) => !s.isActive;
+
+/**
+ * A row's overflow menu.
+ *
+ * Drawn through a portal rather than inside the row, because the register
+ * scrolls sideways on a narrow screen and a horizontal scroller clips its
+ * children on BOTH axes — `overflow-x: auto` computes `overflow-y` to `auto`,
+ * not `visible`. Positioned inside the table, the menu on the last row was cut
+ * off at the bottom edge of the scroller: the items were still in the document,
+ * so the scrim that closes the menu was what a click actually landed on, and
+ * "Erase permanently" appeared to do nothing.
+ *
+ * It also flips above the button when there is no room below, so the bottom row
+ * of a long register behaves like the first.
+ */
+function RowMenu({ label, children }: { label: string; children: (close: () => void) => ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const MENU_W = 218;
+
+  // Measured after paint, so the real height decides whether it flips.
+  useLayoutEffect(() => {
+    if (!open || !trigger.current) return;
+    const place = () => {
+      const btn = trigger.current?.getBoundingClientRect();
+      if (!btn) return;
+      // Scrolled out of sight entirely — there is nothing left to anchor to.
+      if (btn.bottom < 0 || btn.top > window.innerHeight) { setOpen(false); return; }
+      const height = panel.current?.offsetHeight ?? 90;
+      const below = window.innerHeight - btn.bottom;
+      const top = below < height + 12 && btn.top > height + 12 ? btn.top - height - 6 : btn.bottom + 6;
+      const left = Math.max(8, Math.min(btn.right - MENU_W, window.innerWidth - MENU_W - 8));
+      setPos({ top, left });
+    };
+    place();
+    // Anything that moves the row moves the menu with it. It must NOT simply
+    // close on scroll: opening a menu on a row near the bottom scrolls that row
+    // into view, and a close-on-scroll handler then shuts the menu the instant
+    // it appears — which is indistinguishable from the button not working.
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } };
+    document.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+      document.removeEventListener('keydown', onKey, true);
+    };
+  }, [open]);
+
+  useEffect(() => { if (!open) setPos(null); }, [open]);
+
+  return <>
+    <button type="button" ref={trigger} className="tiny reg-more" aria-label={label} aria-haspopup="menu" aria-expanded={open}
+      onClick={() => setOpen(o => !o)}>
+      <MoreHorizontal size={14} />
+    </button>
+    {open && createPortal(<>
+      <div className="reg-menu-scrim" onClick={() => setOpen(false)} />
+      <div ref={panel} className="reg-menu" role="menu"
+        style={{ top: pos?.top ?? -9999, left: pos?.left ?? -9999, width: MENU_W, visibility: pos ? 'visible' : 'hidden' }}>
+        {children(() => setOpen(false))}
+      </div>
+    </>, document.body)}
+  </>;
+}
 
 type ImportResult = { created: number; updated: number; skipped?: number; errors: string[] };
 type DeletionImpact = {
@@ -58,23 +131,23 @@ export default function PersonnelRegisterAdmin() {
   const [sections, setSections] = useState<Section[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
   const [ranks, setRanks] = useState<ProfessionalRank[]>([]);
-  const [retired, setRetired] = useState<Staff[]>([]);
+  const [former, setFormer] = useState<Staff[]>([]);
   const [query, setQuery] = useState('');
-  // Retired people are not colleagues you can roster or assign work to, so they
-  // are not in the register at all — they are a list of their own, closed until
-  // somebody goes looking for them.
-  const [view, setView] = useState<'active' | 'retired'>('active');
+  // People who have left are not colleagues you can roster or assign work to,
+  // so they are not in the register at all — they are a list of their own,
+  // closed until somebody goes looking for them.
+  const [view, setView] = useState<'active' | 'former'>('active');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [rowMenu, setRowMenu] = useState<number | null>(null);
 
   const [editing, setEditing] = useState<Staff | null>(null);
   const [form, setForm] = useState<StaffFormValues>(emptyStaffForm());
-  // Retiring and erasing are different decisions with different consequences,
-  // so they are different dialogs. Neither is reachable by mis-clicking the
-  // other.
-  const [retiring, setRetiring] = useState<Staff | null>(null);
+  // Recording a departure and erasing a record are different decisions with
+  // different consequences, so they are different dialogs. Neither is reachable
+  // by mis-clicking the other.
+  const [departing, setDeparting] = useState<Staff | null>(null);
+  const [exitForm, setExitForm] = useState({ exitReason: '', exitDate: new Date().toISOString().slice(0, 10), notes: '' });
   const [deleting, setDeleting] = useState<DeletionImpact | null>(null);
   const [confirmName, setConfirmName] = useState('');
   const [forceReason, setForceReason] = useState('');
@@ -90,7 +163,7 @@ export default function PersonnelRegisterAdmin() {
 
   const load = () => Promise.all([
     api<Staff[]>('/staff').then(setStaff),
-    api<Staff[]>('/staff?status=retired').then(setRetired).catch(() => setRetired([])),
+    api<Staff[]>('/staff?status=retired').then(setFormer).catch(() => setFormer([])),
   ]).catch(e => setError((e as Error).message));
   useEffect(() => {
     void load();
@@ -101,10 +174,10 @@ export default function PersonnelRegisterAdmin() {
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const source = view === 'retired' ? retired : staff;
+    const source = view === 'former' ? former : staff;
     return source.filter(s => !q || [s.fullName, s.employeeNo, s.jobTitle, s.designation, s.unit, s.sectionName, s.username]
       .some(v => v?.toLowerCase().includes(q)));
-  }, [staff, retired, query, view]);
+  }, [staff, former, query, view]);
 
   // ---- Excel round-trip (the same workbook Personnel Management uses) ------
   async function download(path: string, fallback: string) {
@@ -156,7 +229,7 @@ export default function PersonnelRegisterAdmin() {
     finally { setBusy(null); }
   }
 
-  // ---- Retire / restore ----------------------------------------------------
+  // ---- Return somebody to the register -------------------------------------
   async function restore(s: Staff) {
     setBusy(`restore-${s.id}`); setError(null);
     try {
@@ -167,14 +240,22 @@ export default function PersonnelRegisterAdmin() {
     finally { setBusy(null); }
   }
 
-  // ---- Retire (the ordinary answer for somebody who has left) -------------
-  async function doRetire() {
-    if (!retiring) return;
-    setBusy('retire'); setError(null);
+  // ---- Record a departure (the ordinary answer for somebody who has left) --
+  function openDeparture(s: Staff) {
+    setDeparting(s);
+    setExitForm({ exitReason: '', exitDate: new Date().toISOString().slice(0, 10), notes: '' });
+    setError(null); setNotice(null);
+  }
+  async function doDeparture() {
+    if (!departing) return;
+    setBusy('depart'); setError(null);
     try {
-      const r = await api<{ accountDeactivated?: boolean }>(`/staff/${retiring.id}`, { method: 'DELETE' });
-      setNotice(`${retiring.fullName} was retired${r.accountDeactivated ? ' and their login account deactivated' : ''}. Their history is unchanged.`);
-      setRetiring(null);
+      const r = await api<{ accountDeactivated?: boolean; exitReason?: string }>(`/staff/${departing.id}`, {
+        method: 'DELETE', body: JSON.stringify(exitForm),
+      });
+      setNotice(`${departing.fullName} was recorded as having left — ${(r.exitReason || exitForm.exitReason).toLowerCase()}`
+        + `${r.accountDeactivated ? ', and their login account deactivated' : ''}. Their history is unchanged.`);
+      setDeparting(null);
       await load();
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(null); }
@@ -216,9 +297,10 @@ export default function PersonnelRegisterAdmin() {
           <h3>Master Personnel Register</h3>
           <p className="muted">
             Everyone currently working in the laboratory, with the same record Personnel Management holds.
-            Somebody who has left is retired and moves to the <strong>Retired</strong> list, out of the
-            register, the roster and the export. Import and export use the one approved workbook — rows are
-            matched on Staff ID, so existing people are updated and new ones created.
+            Somebody who leaves is recorded with the reason — retirement, transfer, end of contract — and moves
+            to <strong>Former staff</strong>, out of the register, the roster and the export, where that list can
+            be exported in its own right. Import and export use the one approved workbook — rows are matched on
+            Staff ID, so existing people are updated and new ones created.
           </p>
         </div>
         <div className="reg-head-actions">
@@ -226,13 +308,17 @@ export default function PersonnelRegisterAdmin() {
             <Search size={15} />
             <input placeholder="Search name, Staff ID, position, unit…" value={query} onChange={e => setQuery(e.target.value)} />
           </label>
-          <button type="button" className="secondary" disabled={busy === '/staff/template'} onClick={() => download('/staff/template', 'Staff_Register_Template.xlsx')}>
+          {view === 'active' && <button type="button" className="secondary" disabled={busy === '/staff/template'} onClick={() => download('/staff/template', 'Staff_Register_Template.xlsx')}>
             <FileSpreadsheet size={15} /> {busy === '/staff/template' ? 'Preparing…' : 'Blank template'}
-          </button>
-          {mayExport && <button type="button" className="secondary" disabled={busy === '/staff/export'} onClick={() => download('/staff/export', 'Master_Personnel_Register.xlsx')}>
-            <Download size={15} /> {busy === '/staff/export' ? 'Exporting…' : 'Export'}
           </button>}
-          {mayImport && <>
+          {mayExport && <button type="button" className="secondary" disabled={!!busy?.startsWith('/staff/export')}
+            title={view === 'former' ? 'Download the former-staff list, with the reason and date each person left' : 'Download the Master Personnel Register'}
+            onClick={() => (view === 'former'
+              ? download('/staff/export?status=former', 'Former_Personnel.xlsx')
+              : download('/staff/export', 'Master_Personnel_Register.xlsx'))}>
+            <Download size={15} /> {busy?.startsWith('/staff/export') ? 'Exporting…' : view === 'former' ? 'Export former staff' : 'Export'}
+          </button>}
+          {mayImport && view === 'active' && <>
             <button type="button" disabled={busy === 'import'} onClick={() => importInput.current?.click()}>
               <Upload size={15} /> {busy === 'import' ? 'Importing…' : 'Import'}
             </button>
@@ -252,11 +338,11 @@ export default function PersonnelRegisterAdmin() {
 
       <div className="reg-filters">
         <div className="reg-seg" role="tablist" aria-label="Register section">
-          <button type="button" role="tab" aria-selected={view === 'active'} className={view === 'active' ? 'on' : ''} onClick={() => { setView('active'); setRowMenu(null); }}>
+          <button type="button" role="tab" aria-selected={view === 'active'} className={view === 'active' ? 'on' : ''} onClick={() => setView('active')}>
             <Users size={14} /> Register <span className="reg-count">{staff.length}</span>
           </button>
-          <button type="button" role="tab" aria-selected={view === 'retired'} className={view === 'retired' ? 'on' : ''} onClick={() => { setView('retired'); setRowMenu(null); }}>
-            <Archive size={14} /> Retired <span className="reg-count">{retired.length}</span>
+          <button type="button" role="tab" aria-selected={view === 'former'} className={view === 'former' ? 'on' : ''} onClick={() => setView('former')}>
+            <Archive size={14} /> Former staff <span className="reg-count">{former.length}</span>
           </button>
         </div>
         <span className="muted">{rows.length} {rows.length === 1 ? 'person' : 'people'}</span>
@@ -265,7 +351,9 @@ export default function PersonnelRegisterAdmin() {
       <div className="table-scroll">
         <table className="data-table reg-table">
           <thead><tr>
-            <th>Person</th><th>Role</th><th>Unit</th><th>Licence</th><th>Login account</th>
+            <th>Person</th><th>Role</th><th>Unit</th>
+            {view === 'former' ? <th>Reason for leaving</th> : <th>Licence</th>}
+            {view === 'former' ? <th>Left</th> : <th>Login account</th>}
             <th className="reg-actions-col">Actions</th>
           </tr></thead>
           <tbody>
@@ -274,14 +362,14 @@ export default function PersonnelRegisterAdmin() {
               const soon = new Date(Date.now() + 60 * 864e5).toISOString().slice(0, 10);
               const licExpired = s.licenceExpiryDate && s.licenceExpiryDate < today;
               const licSoon = s.licenceExpiryDate && !licExpired && s.licenceExpiryDate <= soon;
-              const retiredRow = hasRetired(s);
-              return <tr key={s.id} className={retiredRow ? 'row-retired' : ''}>
+              const departed = hasLeft(s);
+              return <tr key={s.id} className={departed ? 'row-retired' : ''}>
                 <td>
                   <span className="reg-primary">{s.fullName}{s.initials ? <span className="muted"> ({s.initials})</span> : null}</span>
                   <span className="reg-sub">
                     {s.employeeNo || 'No Staff ID'}
                     {s.personnelCategory ? ` · ${s.personnelCategory}` : ''}
-                    {retiredRow ? <span className="badge inactive">retired</span> : null}
+                    {departed && view !== 'former' ? <span className="badge inactive">{s.exitReason || 'left'}</span> : null}
                   </span>
                 </td>
                 <td>
@@ -292,49 +380,52 @@ export default function PersonnelRegisterAdmin() {
                   </span>
                 </td>
                 <td>{s.unit || s.sectionName || '—'}</td>
-                <td>
-                  <span className="reg-primary">{s.professionalLicence || '—'}</span>
-                  {s.licenceExpiryDate && <span className="reg-sub">
-                    expires {s.licenceExpiryDate}
-                    {licExpired && <span className="badge danger">expired</span>}
-                    {licSoon && <span className="badge warning">soon</span>}
-                  </span>}
-                </td>
-                <td>
-                  {s.username
-                    ? <><span className="reg-primary">{s.username}</span><span className="reg-sub">{s.roleName || 'No role'}</span></>
-                    : <span className="muted">None</span>}
-                </td>
+                {view === 'former'
+                  ? <td>
+                      <span className="reg-primary">{s.exitReason || '—'}</span>
+                      {s.exitNotes && <span className="reg-sub">{s.exitNotes}</span>}
+                    </td>
+                  : <td>
+                      <span className="reg-primary">{s.professionalLicence || '—'}</span>
+                      {s.licenceExpiryDate && <span className="reg-sub">
+                        expires {s.licenceExpiryDate}
+                        {licExpired && <span className="badge danger">expired</span>}
+                        {licSoon && <span className="badge warning">soon</span>}
+                      </span>}
+                    </td>}
+                {view === 'former'
+                  ? <td>
+                      <span className="reg-primary">{s.exitDate || '—'}</span>
+                      {s.username && <span className="reg-sub">account {s.username}</span>}
+                    </td>
+                  : <td>
+                      {s.username
+                        ? <><span className="reg-primary">{s.username}</span><span className="reg-sub">{s.roleName || 'No role'}</span></>
+                        : <span className="muted">None</span>}
+                    </td>}
                 <td className="reg-actions-col">
                   {/* Editing is the everyday act, so it is a button. Retiring
                       and erasing are not, so they sit under the menu where a
                       slipped click cannot reach them. */}
                   <div className="reg-row-actions">
                     {mayEdit && <button type="button" className="tiny" onClick={() => openEdit(s)}><Pencil size={13} /> Edit</button>}
-                    {(mayEdit || mayRemove) && <div className="reg-menuwrap">
-                      <button type="button" className="tiny reg-more" aria-label={`More actions for ${s.fullName}`} aria-haspopup="menu"
-                        aria-expanded={rowMenu === s.id} onClick={() => setRowMenu(m => (m === s.id ? null : s.id))}>
-                        <MoreHorizontal size={14} />
-                      </button>
-                      {rowMenu === s.id && <>
-                        <div className="reg-menu-scrim" onClick={() => setRowMenu(null)} />
-                        <div className="reg-menu" role="menu">
-                          {mayEdit && retiredRow && <button type="button" role="menuitem" disabled={busy === `restore-${s.id}`}
-                            onClick={() => { setRowMenu(null); void restore(s); }}><RotateCcw size={13} /> Return to the register</button>}
-                          {mayRemove && !retiredRow && <button type="button" role="menuitem"
-                            onClick={() => { setRowMenu(null); setRetiring(s); setError(null); setNotice(null); }}><Archive size={13} /> Retire…</button>}
-                          {mayRemove && <button type="button" role="menuitem" className="danger" disabled={busy === `impact-${s.id}`}
-                            onClick={() => { setRowMenu(null); void openDelete(s); }}><Trash2 size={13} /> Erase permanently…</button>}
-                        </div>
+                    {(mayEdit || mayRemove) && <RowMenu label={`More actions for ${s.fullName}`}>
+                      {close => <>
+                        {mayEdit && departed && <button type="button" role="menuitem" disabled={busy === `restore-${s.id}`}
+                          onClick={() => { close(); void restore(s); }}><RotateCcw size={13} /> Return to the register</button>}
+                        {mayRemove && !departed && <button type="button" role="menuitem"
+                          onClick={() => { close(); openDeparture(s); }}><Archive size={13} /> Record departure…</button>}
+                        {mayRemove && <button type="button" role="menuitem" className="danger" disabled={busy === `impact-${s.id}`}
+                          onClick={() => { close(); void openDelete(s); }}><Trash2 size={13} /> Erase permanently…</button>}
                       </>}
-                    </div>}
+                    </RowMenu>}
                   </div>
                 </td>
               </tr>;
             })}
             {rows.length === 0 && <tr><td colSpan={6} className="muted" style={{ padding: 18, textAlign: 'center' }}>
               {query.trim() ? 'Nobody matches that search.'
-                : view === 'retired' ? 'Nobody has been retired.'
+                : view === 'former' ? 'Nobody has left the laboratory.'
                 : 'No staff records yet — register someone on the Register New Staff tab, or import the workbook above.'}
             </td></tr>}
           </tbody>
@@ -385,25 +476,44 @@ export default function PersonnelRegisterAdmin() {
       </form>
     </DetailModal>
 
-    {/* --- Retire ----------------------------------------------------------- */}
+    {/* --- Record a departure ----------------------------------------------- */}
     <DetailModal
-      open={!!retiring}
-      onClose={() => setRetiring(null)}
+      open={!!departing}
+      onClose={() => setDeparting(null)}
       width="narrow"
-      title={retiring ? `Retire ${retiring.fullName}` : ''}
-      subtitle={retiring?.employeeNo ? `Staff ID ${retiring.employeeNo}` : undefined}
+      title={departing ? `Record ${departing.fullName}’s departure` : ''}
+      subtitle={departing?.employeeNo ? `Staff ID ${departing.employeeNo}` : undefined}
       footer={<>
-        <button type="button" className="secondary" onClick={() => setRetiring(null)}>Cancel</button>
-        <button type="button" disabled={busy === 'retire'} onClick={doRetire}>{busy === 'retire' ? 'Retiring…' : 'Retire from the register'}</button>
+        <button type="button" className="secondary" onClick={() => setDeparting(null)}>Cancel</button>
+        <button type="button" disabled={busy === 'depart' || !exitForm.exitReason} onClick={doDeparture}>
+          {busy === 'depart' ? 'Recording…' : 'Record departure'}
+        </button>
       </>}
     >
       {error && <div className="error">{error}</div>}
       <p className="dialog-lead">
-        They leave the register and the Excel export, their access and roster places end, and their
-        technical authorizations are withdrawn. Everything they signed, reviewed or wrote keeps their
-        name on it.
+        They leave the register, the roster and the Excel export, their access ends and their technical
+        authorizations are withdrawn. Everything they signed, reviewed or wrote keeps their name on it.
       </p>
-      <p className="dialog-lead muted">They move to the <strong>Retired</strong> list and can be brought back at any time.</p>
+      <div className="form-grid">
+        <label>Reason for leaving
+          <select value={exitForm.exitReason} onChange={e => setExitForm(f => ({ ...f, exitReason: e.target.value }))} required>
+            <option value="">Select a reason…</option>
+            {EXIT_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+        </label>
+        <label>Date of leaving
+          <input type="date" value={exitForm.exitDate} onChange={e => setExitForm(f => ({ ...f, exitDate: e.target.value }))} />
+        </label>
+        <label className="wide">Notes <span className="muted">(optional)</span>
+          <input value={exitForm.notes} onChange={e => setExitForm(f => ({ ...f, notes: e.target.value }))}
+            placeholder="e.g. Transferred to Regional Hospital laboratory" />
+        </label>
+      </div>
+      <p className="dialog-lead muted">
+        They move to <strong>Former staff</strong>, where the reason and date are kept and can be exported. If they
+        come back, returning them to the register clears the departure.
+      </p>
     </DetailModal>
 
     {/* --- Erase ------------------------------------------------------------ */}
@@ -435,7 +545,7 @@ export default function PersonnelRegisterAdmin() {
           </button>
         </>}
 
-        {/* Named in the record: retire is the answer, unless this is one of the
+        {/* Named in the record: a departure is the answer, unless this is one of the
             demonstration rows a live system grew around — then the force erase
             below cuts the name out and leaves the records standing. */}
         {!deleting.canDelete && deleting.blockers.length === 0 && <>
@@ -447,7 +557,7 @@ export default function PersonnelRegisterAdmin() {
                 {deleting.historicReferences.slice(0, 6).map(r => <li key={`${r.table}.${r.column}`}>{r.label}</li>)}
                 {deleting.historicReferences.length > 6 && <li className="muted">…and {deleting.historicReferences.length - 6} more</li>}
               </ul>
-              <p className="muted">If this was a real colleague, retire them instead — the record keeps their name and the trail stays intact.</p>
+              <p className="muted">If this was a real colleague, record their departure instead — the record keeps their name and the trail stays intact.</p>
             </div>
           </div>
 

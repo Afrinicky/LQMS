@@ -91,17 +91,28 @@ Settings contains:
 
 Removing a member of staff is two separate acts, offered separately from the row menu.
 
-**Retiring** takes somebody out of the register, the roster, the Excel export and every
-picker in the system — they move to the **Retired** list, where they can be brought back at
-any time. Everything they signed, reviewed or wrote keeps their name on it.
+**Recording a departure** takes somebody out of the register, the roster, the Excel export
+and every picker in the system, *with the reason stated* — retirement, resignation, transfer
+to another facility, end of contract, end of internship, dismissal, deceased, and so on.
+Retirement is one reason among several, not the name for all of them. They move to the
+**Former staff** list, which keeps the reason, the date and any note, exports in its own
+right, and can return them to the register at any time. Everything they signed, reviewed or
+wrote keeps their name on it.
 
 **Erasing** deletes the row. For a record that never appeared anywhere it is a plain
 confirmation. For a record the laboratory record does name, the screen says where and
-recommends retiring instead — but a system that was set up with demonstration staff and has
-since gone live can still erase one: the name is removed from every record that carried it,
-those records stay and simply no longer name anybody, and the audit trail keeps who was
-erased and the written reason given. Rows that cannot exist without a person (attestation
-assignments, roster slots) go with them.
+recommends recording a departure instead — but a system that was set up with demonstration
+staff and has since gone live can still erase one: the name is removed from every record
+that carried it, those records stay and simply no longer name anybody, and the audit trail
+keeps who was erased and the written reason given. Rows that cannot exist without a person
+(attestation assignments, roster slots) go with them.
+
+Login accounts in **Users & Access** work the same way. Deactivating is the normal answer;
+an account that never did anything can be erased outright; and a demonstration login the
+live system grew around can be erased with a written reason. That last one deliberately
+leaves the audit trail alone — only columns with a declared foreign key let go, so every
+entry the account wrote stays exactly as it was and the erasure record says whose account
+it was.
 
 Module toggles hide disabled modules from the main sidebar, pause alerts by flag, preserve data, and show a clean disabled-module page for direct route access.
 

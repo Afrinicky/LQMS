@@ -12,6 +12,27 @@ export const NATIONAL_ID_TYPES = ['GHANA CARD', 'PASSPORT', 'VOTER ID', 'DRIVERS
 export const CADRES = ['Scientist', 'Technician', 'Assistant', 'Other'] as const;
 export const AVAILABILITY_STATUSES = ['available', 'on_leave', 'transferred', 'inactive', 'unavailable'] as const;
 
+/**
+ * Why somebody left the laboratory.
+ *
+ * Retirement is one of these, not the name for all of them. An intern whose
+ * placement ended, a scientist transferred to another facility and a dismissal
+ * are different events, and the register has to be able to say which.
+ */
+export const EXIT_REASONS = [
+  'Retirement',
+  'Resignation',
+  'Transfer to another facility',
+  'End of contract',
+  'End of internship / national service',
+  'Secondment ended',
+  'Study leave',
+  'Dismissal',
+  'Deceased',
+  'Other',
+] as const;
+export type ExitReason = typeof EXIT_REASONS[number];
+
 /** The shape of the staff add/edit form, and its empty value. */
 export type StaffFormValues = {
   employeeNo: string; surname: string; middleName: string; firstName: string; initials: string;

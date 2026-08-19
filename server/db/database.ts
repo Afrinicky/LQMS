@@ -4934,6 +4934,21 @@ CREATE INDEX IF NOT EXISTS idx_form_sub_template ON form_submissions(template_ke
   // then reused for every electronic signing in place of drawing one each time.
   if (!staffSelfCols.has('signature_file_id')) database.exec('ALTER TABLE staff ADD COLUMN signature_file_id INTEGER REFERENCES files(id)');
 
+  // Why somebody left, and when.
+  //
+  // "Retired" is a specific thing in a laboratory — a career ending at pension
+  // age — and it is not what happens to most people who leave. A transfer to
+  // another facility, the end of an internship, a dismissal and a death are
+  // different events with different consequences for the record, and an
+  // assessor asking why a name disappeared from the roster is entitled to the
+  // real answer. So leaving the active register is one act with a stated
+  // reason, rather than a single flag called "retired".
+  if (!staffSelfCols.has('exit_reason')) database.exec('ALTER TABLE staff ADD COLUMN exit_reason TEXT');
+  if (!staffSelfCols.has('exit_date')) database.exec('ALTER TABLE staff ADD COLUMN exit_date TEXT');
+  if (!staffSelfCols.has('exit_notes')) database.exec('ALTER TABLE staff ADD COLUMN exit_notes TEXT');
+  if (!staffSelfCols.has('exit_recorded_at')) database.exec('ALTER TABLE staff ADD COLUMN exit_recorded_at TEXT');
+  if (!staffSelfCols.has('exit_recorded_by')) database.exec('ALTER TABLE staff ADD COLUMN exit_recorded_by INTEGER REFERENCES users(id)');
+
   // ===================================================================
   // Unit activities, duty reminders and the sound catalogue
   // -------------------------------------------------------------------
