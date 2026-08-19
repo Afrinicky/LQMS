@@ -218,6 +218,40 @@ CREATE TABLE IF NOT EXISTS password_reset_requests (
 CREATE INDEX IF NOT EXISTS idx_password_resets_status ON password_reset_requests(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_reset_requests(user_id, status);
 `);
+  // ---------------------------------------------------------------------
+  // Editing a controlled document in Microsoft Word from a browser.
+  //
+  // The desktop application can hand a file to Word directly and watch it for
+  // saves. A browser cannot: it has no path on disk to give, and Word will not
+  // send the application's bearer token. So Word is handed a URL instead, and
+  // the right to open and save through that URL travels in the URL itself as a
+  // single-purpose token — bound to one file, one version, one person, and
+  // expiring on its own.
+  //
+  // Nothing here is a second way in. The token names exactly one file, and the
+  // save it authorises lands as a new document version attributed to the person
+  // the token was minted for, exactly as a manual upload would.
+  // ---------------------------------------------------------------------
+  database.exec(`
+CREATE TABLE IF NOT EXISTS office_edit_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  token TEXT NOT NULL UNIQUE,
+  document_id INTEGER NOT NULL REFERENCES documents(id),
+  version_id INTEGER NOT NULL REFERENCES document_versions(id),
+  file_id INTEGER NOT NULL REFERENCES files(id),
+  file_name TEXT NOT NULL,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  lock_token TEXT,
+  saves INTEGER NOT NULL DEFAULT 0,
+  last_saved_at TEXT,
+  last_version_id INTEGER REFERENCES document_versions(id),
+  expires_at TEXT NOT NULL,
+  closed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_office_sessions_doc ON office_edit_sessions(document_id, version_id);
+CREATE INDEX IF NOT EXISTS idx_office_sessions_expiry ON office_edit_sessions(expires_at);
+`);
   const actionColumns = database.prepare("PRAGMA table_info(actions)").all() as Array<{ name: string }>;
   const actionNames = new Set(actionColumns.map(col => col.name));
   if (!actionNames.has('source_module')) database.exec('ALTER TABLE actions ADD COLUMN source_module TEXT');

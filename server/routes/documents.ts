@@ -8,11 +8,16 @@ import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent, getCurrentStaffId } from './routeHelpers.js';
 import { extractDocument, deriveDocumentCodeFromName } from '../utils/documentExtract.js';
+import { extractIntoVersion } from '../services/documentContent.js';
 import { indexDocument } from '../services/dennisService.js';
 import { recordSignature } from '../services/signatureService.js';
 import { buildDocxFromHtml } from '../utils/documentBuild.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
 import { recordCentralArchive } from './archives.js';
+import {
+  createOfficeSession, closeOfficeSession, getOfficeSession, publicBaseUrl,
+  officeUriFor, officeAppNameFor, OFFICE_EDITABLE, OFFICE_SESSION_HOURS,
+} from './officeEdit.js';
 
 // Make a document readable by the Dennis AI assistant (best-effort). Called after
 // a document's content is extracted so every uploaded document is fully read into
@@ -90,18 +95,6 @@ function htmlEscape(v: unknown) { return String(v ?? '').replace(/&/g, '&amp;').
 // Read the file behind a document version and store its extracted content
 // (full text + editable HTML + parsed SOP sections) so the document can be read
 // and edited inside SECH_LIMS. Best-effort: a failure leaves the version usable.
-function extractIntoVersion(db: any, versionId: number, fileId: number) {
-  try {
-    const file = db.prepare('SELECT * FROM files WHERE id = ?').get(fileId) as any;
-    if (!file) return;
-    const root = file.storage_area === 'evidence' ? evidenceRoot : uploadRoot;
-    const fp = path.join(root, file.stored_name);
-    const result = extractDocument(fp, file.original_name, file.mime_type);
-    db.prepare(`UPDATE document_versions SET content_text = ?, content_html = ?, content_sections = ?, page_count = ?, extraction_method = ?, extracted_at = CURRENT_TIMESTAMP WHERE id = ?`)
-      .run(result.text || null, result.html || null, result.sections.length ? JSON.stringify(result.sections) : null, result.pageCount, result.method, versionId);
-    return result;
-  } catch { /* best-effort extraction */ }
-}
 
 // Active staff who should attest to a newly issued controlled document.
 function activeStaffIds(db: any): number[] {
@@ -929,6 +922,68 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     db.prepare('UPDATE document_versions SET content_html = ?, content_text = ?, content_sections = ?, content_updated_by = ?, content_updated_at = CURRENT_TIMESTAMP WHERE id = ?')
       .run(req.body.contentHtml ?? v.content_html, req.body.contentText ?? v.content_text, sections, staffId, v.id);
     audit(req, { action: 'edit_content', entity: 'document_versions', entityId: v.id, newValue: { length: (req.body.contentHtml ?? '').length } });
+    res.json({ ok: true });
+  });
+
+  // -------- Handing a document to Microsoft Word from a browser --------
+  //
+  // The desktop application opens the file on disk and watches it. A browser
+  // cannot, so it asks for a handoff instead: a short-lived, single-file URL
+  // Word can open and save straight back to (see routes/officeEdit.ts). Every
+  // save that arrives through it becomes a new version of this document, so a
+  // person editing over the LAN or the internet leaves exactly the record a
+  // person editing at the host machine would.
+  router.post('/:id/versions/:versionId/office-session', requirePermission('documents.authoring', 'edit'), (req, res) => {
+    const db = getDb();
+    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    const resolvedId = resolveVersionId(db, req.params.id, req.params.versionId);
+    const v = resolvedId ? db.prepare('SELECT * FROM document_versions WHERE id = ?').get(resolvedId) as any : null;
+    if (!v) return res.status(404).json({ error: 'Version not found' });
+    if (!v.file_id) return res.status(400).json({ error: 'This version has no attached file to open. Upload the document file first.' });
+    const file = db.prepare('SELECT id, original_name, mime_type FROM files WHERE id = ?').get(v.file_id) as
+      { id: number; original_name: string; mime_type: string | null } | undefined;
+    if (!file) return res.status(404).json({ error: 'The file for this version is missing from the store.' });
+    const fileName = file.original_name || 'document.docx';
+    if (!OFFICE_EDITABLE.test(fileName)) {
+      return res.status(400).json({ error: 'This file is not a Word, Excel or PowerPoint document, so it cannot be opened for editing in Office.' });
+    }
+
+    const session = createOfficeSession({
+      documentId: Number(req.params.id), versionId: Number(v.id), fileId: Number(file.id), fileName, userId: req.user!.id,
+    });
+    const url = `${publicBaseUrl(req)}/office/edit/${session.token}/${encodeURIComponent(fileName)}`;
+    audit(req, { action: 'office_session', entity: 'document_versions', entityId: v.id, newValue: { documentId: req.params.id, fileName } });
+    res.status(201).json({
+      token: session.token,
+      fileName,
+      url,
+      officeUri: officeUriFor(fileName, url),
+      appName: officeAppNameFor(fileName),
+      expiresAt: session.expires_at,
+      expiresInHours: OFFICE_SESSION_HOURS,
+    });
+  });
+
+  // How the handoff is getting on — the viewer polls this so it can say "saved"
+  // and move itself onto the version Word just wrote.
+  router.get('/office-session/:token', requirePermission('documents.library', 'view'), (req, res) => {
+    const session = getOfficeSession(String(req.params.token));
+    if (!session) return res.json({ active: false });
+    res.json({
+      active: true,
+      saves: session.saves,
+      lastSavedAt: session.last_saved_at,
+      versionId: session.last_version_id,
+      fileName: session.file_name,
+      expiresAt: session.expires_at,
+    });
+  });
+
+  // Finished editing. Ends the handoff so the URL stops working immediately
+  // rather than at its own expiry.
+  router.delete('/office-session/:token', requirePermission('documents.library', 'view'), (req, res) => {
+    closeOfficeSession(String(req.params.token));
     res.json({ ok: true });
   });
 

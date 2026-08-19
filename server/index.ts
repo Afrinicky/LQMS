@@ -28,6 +28,7 @@ import { measurementUncertaintyRoutes } from './routes/measurementUncertainty.js
 import { bloodBankHandoverRoutes } from './routes/bloodBankHandover.js';
 import { monthlyReportsRoutes } from './routes/monthlyReports.js';
 import { documentControlRoutes } from './routes/documents.js';
+import { officeEditRoutes } from './routes/officeEdit.js';
 import { centralArchivesRoutes } from './routes/archives.js';
 import { organisationExtendedRoutes } from './routes/organisationExtended.js';
 import { personnelRoutes } from './routes/personnel.js';
@@ -86,6 +87,13 @@ export function createApiServer() {
   ensureDataDirs();
   seedDefaults();
   const app = express();
+  // Microsoft Office's WebDAV handoff mounts FIRST, ahead of CORS and the JSON
+  // body parser. Word speaks its own dialect here — OPTIONS to discover the
+  // server, PROPFIND/LOCK with XML bodies, PUT of raw document bytes — and the
+  // CORS middleware answers every OPTIONS itself, which left Word seeing a
+  // server with no `DAV:` header and quietly opening the document read-only.
+  // Nothing in a browser calls these paths, so they need no CORS headers.
+  app.use('/office', officeEditRoutes());
   app.use(cors({ origin: true, credentials: true }));
   // Controlled-document content can embed images (data URIs) and rich HTML, so
   // allow large JSON bodies for the document content save endpoints.
