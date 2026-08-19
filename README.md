@@ -89,11 +89,19 @@ Settings contains:
 - Backup & Restore
 - Device Access / Pairing
 
-Removing a member of staff is two different acts. **Retiring** ends their access, roster
-places and technical authorizations while everything they signed, reviewed or wrote keeps
-their name on it — the right answer for anyone who worked, and reversible. **Erasing** is
-offered only for a record that left no trace in the laboratory record, which is what clears
-demonstration rows and duplicate imports. The screen checks which applies and says why.
+Removing a member of staff is two separate acts, offered separately from the row menu.
+
+**Retiring** takes somebody out of the register, the roster, the Excel export and every
+picker in the system — they move to the **Retired** list, where they can be brought back at
+any time. Everything they signed, reviewed or wrote keeps their name on it.
+
+**Erasing** deletes the row. For a record that never appeared anywhere it is a plain
+confirmation. For a record the laboratory record does name, the screen says where and
+recommends retiring instead — but a system that was set up with demonstration staff and has
+since gone live can still erase one: the name is removed from every record that carried it,
+those records stay and simply no longer name anybody, and the audit trail keeps who was
+erased and the written reason given. Rows that cannot exist without a person (attestation
+assignments, roster slots) go with them.
 
 Module toggles hide disabled modules from the main sidebar, pause alerts by flag, preserve data, and show a clean disabled-module page for direct route access.
 
@@ -129,6 +137,12 @@ Backup creation uses the Node `archiver` ZIP library. Backup packages include:
 - `backup-manifest.json`
 
 Backups are listed in Settings → System → Backup & Restore, where each package can be downloaded to keep an off-server copy. Restore is fully supported: pick an existing backup or upload a backup ZIP from disk. Before any restore the system writes an automatic `pre-restore-*.zip` safety snapshot of the current state, then replaces the SQLite database, uploads, evidence, and config from the backup. Users may need to sign in again afterwards.
+
+## Opening documents
+
+A PDF opens straight into the reader, the way any PDF application opens one — no preview to
+choose between, no tabs. Leaving for an external reader, or putting an edited copy back, is
+under **More**.
 
 ## Editing controlled documents in Microsoft Office
 

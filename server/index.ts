@@ -29,6 +29,7 @@ import { bloodBankHandoverRoutes } from './routes/bloodBankHandover.js';
 import { monthlyReportsRoutes } from './routes/monthlyReports.js';
 import { documentControlRoutes } from './routes/documents.js';
 import { officeEditRoutes } from './routes/officeEdit.js';
+import { fileViewRoutes } from './routes/fileView.js';
 import { centralArchivesRoutes } from './routes/archives.js';
 import { organisationExtendedRoutes } from './routes/organisationExtended.js';
 import { personnelRoutes } from './routes/personnel.js';
@@ -94,6 +95,9 @@ export function createApiServer() {
   // server with no `DAV:` header and quietly opening the document read-only.
   // Nothing in a browser calls these paths, so they need no CORS headers.
   app.use('/office', officeEditRoutes());
+  // Inline file reads for an <iframe>, which cannot send a bearer token. Outside
+  // the authenticated API for that reason; authority is the ticket in the path.
+  app.use('/file-view', fileViewRoutes());
   app.use(cors({ origin: true, credentials: true }));
   // Controlled-document content can embed images (data URIs) and rich HTML, so
   // allow large JSON bodies for the document content save endpoints.

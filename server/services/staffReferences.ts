@@ -61,8 +61,13 @@ const CONDITIONAL_STAFF_TABLES: Record<string, string> = {
 
 export type StaffReference = { table: string; column: string; rows: number };
 
-/** Every (table, column) that currently points at this staff record. */
-export function referencesToStaff(staffId: number): StaffReference[] {
+/**
+ * Every (table, column) that currently points at this staff record.
+ *
+ * `countAll` ignores the conditional rules — a purge has to find every row that
+ * names the person, not just the ones that would block an ordinary erase.
+ */
+export function referencesToStaff(staffId: number, countAll = false): StaffReference[] {
   const db = getDb();
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[];
   const found: StaffReference[] = [];
@@ -80,7 +85,7 @@ export function referencesToStaff(staffId: number): StaffReference[] {
       }
     } catch { continue; }
 
-    const onlyIf = CONDITIONAL_STAFF_TABLES[name];
+    const onlyIf = countAll ? undefined : CONDITIONAL_STAFF_TABLES[name];
     for (const column of columns) {
       try {
         const rows = (db.prepare(`SELECT COUNT(*) c FROM "${name}" WHERE "${column}" = ?${onlyIf ? ` AND (${onlyIf})` : ''}`).get(staffId) as { c: number }).c;
@@ -118,6 +123,54 @@ export function purgeDisposableStaffRows(staffId: number): void {
       try { db.prepare(`DELETE FROM "${table}" WHERE "${column}" = ?`).run(staffId); } catch { /* absent */ }
     }
   }
+}
+
+/**
+ * Erase a person the laboratory record still names.
+ *
+ * This exists for one situation and should be used for no other: a system that
+ * was set up with demonstration staff and has since gone live. Those rows are
+ * not people — nobody performed that work, signed that record or held that
+ * licence — but a month of alerts, attestations and roster entries has grown
+ * around them, so the ordinary "erase only what left no trace" rule refuses to
+ * clear them. Retiring merely hides them, and the laboratory ends up carrying
+ * invented colleagues in its register for good.
+ *
+ * So this cuts the person out and leaves the surrounding records standing:
+ * every column that named them is emptied where the schema allows it, and rows
+ * that cannot exist without a person (an attestation, a roster slot) go with
+ * them. What it does NOT do is quietly rewrite history — the caller writes an
+ * audit entry naming who was purged, why, and exactly what was touched, so the
+ * trail says a purge happened even though the name is gone.
+ *
+ * Anything a person actually did is a reason to retire them instead. That
+ * judgement belongs to the caller and to the person clicking, not here.
+ */
+export function purgeStaffEverywhere(staffId: number): { table: string; column: string; rows: number; action: 'detached' | 'deleted' }[] {
+  const db = getDb();
+  const done: { table: string; column: string; rows: number; action: 'detached' | 'deleted' }[] = [];
+
+  for (const ref of referencesToStaff(staffId, true)) {
+    // Is the column allowed to forget who it pointed at?
+    let nullable = true;
+    try {
+      const col = (db.prepare(`PRAGMA table_info("${ref.table}")`).all() as { name: string; notnull: number }[])
+        .find(c => c.name === ref.column);
+      nullable = !col || col.notnull === 0;
+    } catch { continue; }
+
+    try {
+      if (nullable) {
+        db.prepare(`UPDATE "${ref.table}" SET "${ref.column}" = NULL WHERE "${ref.column}" = ?`).run(staffId);
+        done.push({ ...ref, action: 'detached' });
+      } else {
+        // The row is about this person and cannot be about nobody.
+        db.prepare(`DELETE FROM "${ref.table}" WHERE "${ref.column}" = ?`).run(staffId);
+        done.push({ ...ref, action: 'deleted' });
+      }
+    } catch { /* a view, or a constraint that will surface on the delete below */ }
+  }
+  return done;
 }
 
 /**

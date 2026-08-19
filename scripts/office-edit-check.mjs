@@ -72,10 +72,61 @@ const refused = await j(`/staff/${real.id}?mode=delete`, { token: A, method: 'DE
 check('erasing is refused', refused.status === 409, `got ${refused.status}`);
 const retired = await j(`/staff/${real.id}`, { token: A, method: 'DELETE' });
 check('retiring succeeds', retired.status === 200 && retired.json.mode === 'deactivate', JSON.stringify(retired.json));
-check('the record is retired, not gone', (await j('/staff', { token: A })).json.find(s => s.id === real.id)?.isActive === 0
-  || (await j('/staff', { token: A })).json.find(s => s.id === real.id)?.isActive === false);
+check('the record is retired, not gone', (await j('/staff?status=all', { token: A })).json.some(s => s.id === real.id));
+
+console.log('\n[2b] A retired person leaves the register, the export and the import');
+const activeNow = (await j('/staff', { token: A })).json;
+check('the retired record is gone from the register', !activeNow.some(s => s.id === real.id));
+const retiredList = (await j('/staff?status=retired', { token: A })).json;
+check('and is in the retired list instead', retiredList.some(s => s.id === real.id));
+check('?status=all still sees both', (await j('/staff?status=all', { token: A })).json.some(s => s.id === real.id));
+{
+  const XLSXmod = await import('xlsx');
+  const res = await fetch(`${BASE}/staff/export`, { headers: { Authorization: `Bearer ${A}` } });
+  const wb = XLSXmod.read(Buffer.from(await res.arrayBuffer()), { type: 'buffer' });
+  const sheet = XLSXmod.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '', raw: false });
+  const ids = sheet.map(r => String(Object.values(r)[0] ?? '')).concat(sheet.map(r => JSON.stringify(r)));
+  check('the export omits the retired record', !ids.some(v => v.includes(`REAL-${stamp}`)), `REAL-${stamp}`);
+}
+// An import row naming a retired Staff ID is refused rather than silently applied.
+{
+  const XLSXmod = await import('xlsx');
+  const aoa = [['STAFF ID', 'SURNAME', 'FIRSTNAME(S)'], [`REAL-${stamp}`, 'Ghost', 'Edit']];
+  const wb = XLSXmod.utils.book_new();
+  XLSXmod.utils.book_append_sheet(wb, XLSXmod.utils.aoa_to_sheet(aoa), 'MASTER PERSONNEL REGISTER');
+  const buf = XLSXmod.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  const fd = new FormData();
+  fd.append('file', new Blob([buf]), 'retired.xlsx');
+  const r = await fetch(`${BASE}/staff/import`, { method: 'POST', headers: { Authorization: `Bearer ${A}` }, body: fd });
+  const out = await r.json();
+  check('an import row for a retired person is skipped', out.skipped === 1 && out.updated === 0, JSON.stringify(out));
+  check('and it says why', (out.errors[0] || '').includes('retired'), JSON.stringify(out.errors));
+}
 const restored = await j(`/staff/${real.id}/reactivate`, { token: A, method: 'POST', body: {} });
-check('and it comes back', restored.status === 200);
+check('restoring brings them back into the register', restored.status === 200
+  && (await j('/staff', { token: A })).json.some(s => s.id === real.id));
+
+console.log('\n[2c] A demonstration record the live system grew around can be force-erased');
+await j('/staff', { token: A, method: 'POST', body: { firstName: 'Demo', surname: `Legacy${stamp}`, employeeNo: `LEG-${stamp}` } });
+const legacy = (await j('/staff', { token: A })).json.find(s => s.employeeNo === `LEG-${stamp}`);
+await j('/actions', { token: A, method: 'POST', body: { title: 'Demo-era action', moduleKey: 'personnel', assignedToStaffId: legacy.id } });
+const legacyAction = (await j('/actions', { token: A })).json.find(a => a.assigned_to_staff_id === legacy.id);
+const legacyImpact = await j(`/staff/${legacy.id}/deletion-impact`, { token: A });
+check('an ordinary erase is still refused', legacyImpact.json.canDelete === false);
+check('but a force erase is offered', legacyImpact.json.canForceDelete === true, JSON.stringify(legacyImpact.json));
+check('a force erase without a reason is refused',
+  (await j(`/staff/${legacy.id}?mode=purge`, { token: A, method: 'DELETE', body: { reason: 'demo' } })).status === 400);
+const purged = await j(`/staff/${legacy.id}?mode=purge`, { token: A, method: 'DELETE', body: { reason: 'Demonstration record created during setup, never a member of staff' } });
+check('with one, it succeeds', purged.status === 200 && purged.json.mode === 'purge', JSON.stringify(purged.json));
+check('the record is gone', !(await j('/staff?status=all', { token: A })).json.some(s => s.id === legacy.id));
+const survivor = (await j('/actions', { token: A })).json.find(a => a.id === legacyAction.id);
+check('the record it was named in survives', !!survivor, `action ${legacyAction.id}`);
+check('and no longer names anybody', survivor && (survivor.assigned_to_staff_id === null || survivor.assigned_to_staff_id === undefined),
+  JSON.stringify(survivor?.assigned_to_staff_id));
+const purgeTrail = (await j('/permissions/matrix', { token: A })).json.auditHistory.find(a => a.action === 'purge' && a.entity === 'staff');
+check('the audit trail records the purge and its reason',
+  !!purgeTrail && (purgeTrail.new_value || '').includes('Demonstration record'), JSON.stringify(purgeTrail?.new_value || '').slice(0, 120));
+check('and who was erased', (purgeTrail?.old_value || '').includes(`LEG-${stamp}`));
 
 console.log('\n[3] A role can be changed on an existing account');
 const qm = roles.find(r => /quality manager/i.test(r.name)) || roles.find(r => r.name !== 'System Administrator');
