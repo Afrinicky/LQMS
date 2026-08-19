@@ -5,29 +5,22 @@ import { api, API_BASE, getToken, type OfficeFileChangedPayload } from '../servi
 /* ============================================================================
    OPENING A CONTROLLED DOCUMENT IN MICROSOFT OFFICE
 
-   A Word document belongs in Word. The application used to render its own
-   approximation of one — text and tables, but not the diagrams, the headers,
-   the exact pagination a laboratory's accredited SOP is laid out in — and
-   offered editing in that approximation, which meant the controlled record and
-   what people actually saw could drift apart. So for a Word, Excel or
-   PowerPoint file the preview is gone: opening it opens it in Office, and the
-   record is whatever Office saved.
+   A Word file belongs to Word. The in-app preview rendered an approximation of
+   one — text and tables, but not diagrams, headers or pagination — and let
+   people edit that approximation, so the controlled record and what they read
+   could drift. An Office file now goes to Office and the record is whatever
+   Office saved.
 
-   Two routes, one screen:
+   Two routes. At the host machine the desktop application copies the file to a
+   scratch folder, hands it to the OS, and watches it for saves. Over the LAN or
+   the internet Word is given a URL it can open and save back to — the
+   `ms-word:ofe|u|…` scheme against this host's WebDAV endpoint
+   (server/routes/officeEdit.ts). Where neither is available: download, edit,
+   upload. All three land as a new attributed version.
 
-     · At the host machine (the desktop application) the file is copied to a
-       scratch folder, handed to the operating system's default application,
-       and watched. Every save is picked up and uploaded as a new version.
-
-     · Over the LAN or the internet the browser cannot reach the disk, so the
-       document is handed to Office as a URL it can open AND save back to — the
-       `ms-word:ofe|u|…` scheme against this host's own small WebDAV endpoint
-       (server/routes/officeEdit.ts). Word saves straight into the register.
-
-   Where neither applies — a machine with no Office, a phone — the same panel
-   offers the honest fallback: download it, edit it in whatever is installed,
-   and put the edited file back. All three end in the same place: a new,
-   attributed version of the controlled document.
+   The panel itself says as little as possible. Somebody opening an SOP knows
+   what a Word file is; what they need is the filename, one button, and — once
+   it is open — whether their last save arrived.
    ========================================================================= */
 
 export type OfficeSession = {
@@ -62,19 +55,30 @@ export function officeAppName(fileName?: string | null, mime?: string | null): s
 
 type Phase = 'idle' | 'opening' | 'open' | 'saving' | 'failed';
 
-export default function OfficeHandoff(props: {
+export type RoundTripOptions = {
   docId: number;
   versionId: number;
   fileId: number;
   fileName: string;
   fileMime?: string | null;
-  /** May this person write a new version, or are they only allowed to read it? */
-  canEdit: boolean;
+  /** Auto-open on mount. The Office panel does; a PDF, which reads in place, does not. */
+  autoOpen?: boolean;
   /** Called with the id of the version a save created, so the viewer follows it. */
   onSavedVersion: (versionId: number) => void;
   onError: (message: string) => void;
-}) {
-  const { docId, versionId, fileId, fileName, fileMime, canEdit, onSavedVersion, onError } = props;
+};
+
+/**
+ * The round trip out to a native application and back, without any of the
+ * screen around it.
+ *
+ * A Word file needs this because it has nowhere else to be read; a PDF needs it
+ * only when somebody chooses to leave — it reads perfectly well in place. Both
+ * want identical behaviour once they do leave, so the behaviour lives here and
+ * the two screens differ only in what they draw.
+ */
+export function useOfficeRoundTrip(opts: RoundTripOptions) {
+  const { docId, versionId, fileId, fileName, fileMime, autoOpen = false, onSavedVersion, onError } = opts;
   const appName = officeAppName(fileName, fileMime);
   // The desktop application can hand the file to the OS directly; a browser has
   // to go through the URL handoff.
@@ -195,13 +199,13 @@ export default function OfficeHandoff(props: {
 
   const open = onDesktop ? openOnDesktop : openInBrowser;
 
-  // Opening the document opens the document. The whole point of this screen is
-  // that a Word file goes to Word, so it does not wait to be asked twice.
+  // Where the native application is the only way to read the file, opening the
+  // document opens the document — it does not wait to be asked twice.
   useEffect(() => {
-    if (autoOpened.current || !canEdit) return;
+    if (autoOpened.current || !autoOpen) return;
     autoOpened.current = true;
     void open();
-  }, [open, canEdit]);
+  }, [open, autoOpen]);
 
   function finish() {
     if (watchId) window.sechLims?.stopOfficeWatch?.(watchId);
@@ -246,25 +250,62 @@ export default function OfficeHandoff(props: {
   }
 
   const live = phase === 'open' || phase === 'saving';
+  const shortApp = appName.replace('Microsoft ', '');
+
+  return {
+    phase, message, saves, lastSavedAt, session, uploading, uploadInput,
+    onDesktop, appName, shortApp, live,
+    open, finish, checkNow, downloadCopy, uploadEdited,
+  };
+}
+
+/** Bytes, the way a file manager writes them. */
+function fileSizeLabel(bytes?: number | null): string | null {
+  if (!bytes) return null;
+  return bytes < 1048576 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1048576).toFixed(1)} MB`;
+}
+
+/**
+ * The screen a Word, Excel or PowerPoint document shows instead of a preview:
+ * what the file is, one button, and — once it is open — whether the last save
+ * arrived. Nothing else; the document itself is in Office.
+ */
+export default function OfficeHandoff(props: {
+  docId: number;
+  versionId: number;
+  fileId: number;
+  fileName: string;
+  fileMime?: string | null;
+  versionLabel?: string | null;
+  fileSize?: number | null;
+  /** May this person write a new version, or are they only allowed to read it? */
+  canEdit: boolean;
+  onSavedVersion: (versionId: number) => void;
+  onError: (message: string) => void;
+}) {
+  const { fileName, versionLabel, fileSize, canEdit } = props;
+  const rt = useOfficeRoundTrip({ ...props, autoOpen: canEdit });
+  const {
+    phase, message, saves, lastSavedAt, uploading, uploadInput,
+    onDesktop, shortApp, live, open, finish, checkNow, downloadCopy, uploadEdited,
+  } = rt;
+
+  const meta = [versionLabel, fileSizeLabel(fileSize), shortApp].filter(Boolean).join(' · ');
 
   return <div className="oh">
     <div className="oh-card">
-      <div className="oh-icon"><FileText size={30} /></div>
+      <div className="oh-icon"><FileText size={26} /></div>
       <h3 className="oh-name" title={fileName}>{fileName}</h3>
-      <p className="oh-lead">
-        {canEdit
-          ? <>This is a {appName} document, so it opens in {appName} — with its diagrams, headers and layout exactly as they were approved. Anything you save there comes straight back here as a new version of this document.</>
-          : <>This is a {appName} document. You may open a copy to read; saving a new version of a controlled document needs authoring rights.</>}
-      </p>
+      {meta && <p className="oh-meta">{meta}</p>}
 
       <div className="oh-actions">
         {canEdit && <button type="button" className="oh-primary" onClick={open} disabled={phase === 'opening'}>
-          {phase === 'opening' ? <><Loader2 size={16} className="spin" /> Opening…</> : <><ExternalLink size={16} /> Open in {appName}</>}
+          {phase === 'opening' ? <><Loader2 size={16} className="spin" /> Opening…</> : <><ExternalLink size={16} /> Open in {shortApp}</>}
         </button>}
-        <button type="button" className="secondary" onClick={downloadCopy}><Download size={15} /> Download a copy</button>
+        <button type="button" className="secondary" onClick={downloadCopy}><Download size={15} /> Download</button>
         {canEdit && <>
           <button type="button" className="secondary" onClick={() => uploadInput.current?.click()} disabled={uploading}>
-            <Upload size={15} /> {uploading ? 'Uploading…' : 'Upload an edited copy'}
+            <Upload size={15} /> {uploading ? 'Uploading…' : 'Upload edit'}
           </button>
           <input ref={uploadInput} type="file" style={{ display: 'none' }}
             accept=".doc,.docx,.rtf,.odt,.xls,.xlsx,.ppt,.pptx,.pdf"
@@ -272,32 +313,24 @@ export default function OfficeHandoff(props: {
         </>}
       </div>
 
-      {/* One line of state, never a wall of instructions. */}
+      {/* Once it is open the only question is whether the last save arrived. */}
       {live && <div className="oh-state">
         {phase === 'saving'
-          ? <><Loader2 size={14} className="spin" /> Saving what {appName} wrote…</>
+          ? <><Loader2 size={13} className="spin" /> Saving…</>
           : saves > 0
-            ? <><CheckCircle2 size={14} /> Saved {saves === 1 ? 'once' : `${saves} times`}{lastSavedAt ? ` · last at ${new Date(lastSavedAt).toLocaleTimeString()}` : ''} — this document now points at the newest version.</>
-            : <><CheckCircle2 size={14} /> Open in {appName}. Save there and it lands here automatically{onDesktop ? '' : ' — keep this window open while you edit'}.</>}
+            ? <><CheckCircle2 size={13} /> Saved{lastSavedAt ? ` ${new Date(lastSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}{saves > 1 ? ` · ${saves} versions` : ''}</>
+            : <><span className="oh-dot" /> Opened in {shortApp}</>}
         <span style={{ flex: 1 }} />
         {onDesktop && <button type="button" className="oh-link" onClick={checkNow}><RefreshCw size={12} /> Check now</button>}
-        <button type="button" className="oh-link" onClick={finish}><X size={12} /> Done editing</button>
+        <button type="button" className="oh-link" onClick={finish}>Done</button>
       </div>}
 
       {phase === 'failed' && <div className="oh-warn">
-        <p>{message || `Could not open the document in ${appName}.`}</p>
-        <p className="muted">
-          {onDesktop
-            ? 'Check that Office is installed on this machine, or download the copy above and put the edited file back.'
-            : `If nothing happened, this browser has no ${appName} handler installed. Download the copy above, edit it, then upload the edited copy — it becomes the next version just the same.`}
-        </p>
+        <p>{message || `${shortApp} did not open.`}</p>
+        <p className="muted">{onDesktop ? 'Use Download, then Upload edit.' : `No ${shortApp} handler on this device — use Download, then Upload edit.`}</p>
       </div>}
 
       {phase !== 'failed' && message && <div className="oh-note">{message}</div>}
-
-      {!onDesktop && session && <p className="oh-fine">
-        The link handed to {appName} works for {session.expiresInHours} hours and opens this document only. “Done editing” ends it immediately.
-      </p>}
     </div>
   </div>;
 }

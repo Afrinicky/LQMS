@@ -12,7 +12,7 @@ import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import DocumentScanner from '../components/DocumentScanner';
 import PermissionTabs from '../components/PermissionTabs';
-import OfficeHandoff, { isOfficeDocument, officeAppName } from '../components/OfficeHandoff';
+import OfficeHandoff, { isOfficeDocument, officeAppName, useOfficeRoundTrip } from '../components/OfficeHandoff';
 import { openStoredFile } from '../services/files';
 import type {
   Section, Department, Staff, Position,
@@ -803,7 +803,7 @@ export function DocumentControlPage() {
           <label>New owner / author
             <select value={transferModal.ownerStaffId} onChange={e => setTransferModal({ ...transferModal, ownerStaffId: e.target.value })}>
               <option value="">— choose staff member —</option>
-              {staff.filter(s => s.isActive !== false).map(s => <option key={s.id} value={s.id}>{s.fullName}{s.sectionName ? ` (${s.sectionName})` : ''}</option>)}
+              {staff.filter(s => !!s.isActive).map(s => <option key={s.id} value={s.id}>{s.fullName}{s.sectionName ? ` (${s.sectionName})` : ''}</option>)}
             </select>
           </label>
           <label>Note (optional, included in the notification)
@@ -1021,7 +1021,7 @@ function LaboratoryProfileView({ staff, documents, onOpenDoc, onPreview, onError
   const standing = config.objectives.filter(o => o.year === null || o.year === undefined);
   const annual = config.objectives.filter(o => o.year != null);
   const years = Array.from(new Set(annual.map(o => o.year as number))).sort((a: number, b: number) => b - a);
-  const leaders = staff.filter(s => s.isActive !== false && (s as any).primaryPosition);
+  const leaders = staff.filter(s => !!s.isActive && (s as any).primaryPosition);
   const coreLabel: Record<string, string> = { quality_manual: 'Quality Manual', laboratory_handbook: 'Laboratory Handbook', safety_manual: 'Safety Manual' };
 
   return <div className="lab-profile">
@@ -1416,6 +1416,19 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
     try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* already released */ }
   }
 
+  // The round trip out to a native reader/editor and back. A PDF reads in
+  // place, so this stays dormant until somebody chooses it from More; the same
+  // hook drives the Office panel, so a save comes home the same way either way.
+  const external = useOfficeRoundTrip({
+    docId,
+    versionId: activeVersionId,
+    fileId: content?.file_id ?? 0,
+    fileName: content?.file_name || 'document',
+    fileMime: content?.file_mime,
+    onSavedVersion: id => { setActiveVersionId(id); onSaved(); },
+    onError,
+  });
+
   const loadComments = () => api<DocumentComment[]>(`/documents/${docId}/comments`).then(setComments).catch(() => {});
   useEffect(() => { void loadComments(); }, [docId]);
 
@@ -1451,7 +1464,17 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
         // Faithful formats render natively, so open the original by default;
         // otherwise show the in-app (rich HTML) content.
         if (c.file_id && (pdfish || imgish || !c.content_html)) setMode('original');
-        if (c.file_id) fetchBlobUrl(`/files/${c.file_id}/raw`).then(u => { url = u; setFileUrl(u); }).catch(() => {});
+        if (!c.file_id) return;
+        if (pdfish) {
+          // A PDF goes into the browser's own reader through a named URL, so
+          // its toolbar titles the document properly instead of showing the
+          // bare UUID of a blob: URL — and "Save as" offers the real filename.
+          api<{ path: string }>(`/files/${c.file_id}/view-ticket`, { method: 'POST', body: JSON.stringify({}) })
+            .then(t => setFileUrl(new URL(t.path, API_BASE).toString()))
+            .catch(() => fetchBlobUrl(`/files/${c.file_id}/raw`).then(u => { url = u; setFileUrl(u); }).catch(() => {}));
+        } else {
+          fetchBlobUrl(`/files/${c.file_id}/raw`).then(u => { url = u; setFileUrl(u); }).catch(() => {});
+        }
       })
       .catch(e => onError((e as Error).message));
     return () => { if (url) URL.revokeObjectURL(url); };
@@ -1510,6 +1533,14 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
   // accredited document is worse than no rendering at all.
   const isOfficeFile = !!content?.file_id && isOfficeDocument(content?.file_name, content?.file_mime);
   const appName = officeAppName(content?.file_name, content?.file_mime);
+
+  // A PDF renders exactly as it was signed, so it opens the way any PDF reader
+  // opens one: straight into the document. There is nothing to choose between
+  // — the extracted text is search plumbing, not a second edition — so the
+  // Preview / Original file switch is not drawn for one. Leaving for an
+  // external reader or an edit is a deliberate act, and lives under More.
+  const isPdfFile = !!content?.file_id && isPdf;
+  const readsInPlace = isPdfFile || isImage;
 
   const zoomPct = Math.round(zoom * 100);
   // The embedded browser PDF viewer ships its own zoom/print/download toolbar,
@@ -1605,24 +1636,24 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
 /* The Office handoff panel: one document, one obvious action, one line of
    state. Deliberately quiet — the document itself is elsewhere, in Word. */
 .oh{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:auto;padding:24px}
-.oh-card{width:min(620px,100%);text-align:center;background:#101c36;border:1px solid #22345c;border-radius:14px;padding:32px 30px;box-shadow:0 14px 40px rgba(0,0,0,.35)}
-.oh-icon{width:62px;height:62px;margin:0 auto 16px;display:flex;align-items:center;justify-content:center;border-radius:16px;background:linear-gradient(180deg,#1d3257,#16243f);border:1px solid #2c416f;color:#8fb4ff}
-.oh-name{margin:0 0 8px;font-size:17px;color:#eaf1ff;word-break:break-word}
-.oh-lead{margin:0 auto 22px;max-width:52ch;font-size:12.8px;line-height:1.7;color:#9fb0d4}
-.oh-actions{display:flex;flex-wrap:wrap;gap:9px;justify-content:center}
-.oh-actions button{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
-.oh-primary{height:40px;padding:0 20px;background:var(--accent,#2f6bff);border:1px solid transparent;border-radius:9px;color:#fff;font-size:13.5px;font-weight:600;cursor:pointer;box-shadow:0 6px 18px rgba(47,107,255,.28)}
+.oh-card{width:min(430px,100%);text-align:center;background:#101c36;border:1px solid #22345c;border-radius:12px;padding:28px 26px}
+.oh-icon{width:50px;height:50px;margin:0 auto 14px;display:flex;align-items:center;justify-content:center;border-radius:12px;background:#16243f;border:1px solid #2c416f;color:#8fb4ff}
+.oh-name{margin:0;font-size:15px;font-weight:600;color:#eaf1ff;word-break:break-word;line-height:1.4}
+.oh-meta{margin:5px 0 0;font-size:11.5px;color:#7c8db0}
+.oh-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:20px}
+.oh-actions button{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;height:34px;border-radius:8px;font-size:12.5px}
+.oh-primary{padding:0 16px;background:var(--accent,#2f6bff);border:1px solid transparent;color:#fff;font-weight:600;cursor:pointer;box-shadow:none}
 .oh-primary:hover:not(:disabled){filter:brightness(1.1)}
 .oh-primary:disabled{opacity:.6;cursor:default}
-.oh-actions .secondary{height:40px;padding:0 16px;border-radius:9px;font-size:12.8px}
-.oh-state{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:22px;padding:9px 13px;border-radius:9px;background:#12281b;border:1px solid #1f5334;color:#a8c7b6;font-size:12px;text-align:left}
+.oh-actions .secondary{padding:0 13px}
+.oh-state{display:flex;align-items:center;gap:7px;margin-top:18px;padding:7px 11px;border-radius:8px;background:#12281b;border:1px solid #1f5334;color:#a8c7b6;font-size:11.5px;text-align:left}
+.oh-dot{width:7px;height:7px;border-radius:50%;background:#3fbf72;flex:none}
 .oh-link{background:none;border:0;box-shadow:none;padding:2px 4px;color:#8fb4ff;font-size:11.5px;cursor:pointer;display:inline-flex;align-items:center;gap:4px}
 .oh-link:hover{text-decoration:underline}
-.oh-warn{margin-top:20px;padding:12px 14px;border-radius:9px;background:rgba(214,66,88,.08);border:1px solid rgba(214,66,88,.4);text-align:left}
-.oh-warn p{margin:0 0 6px;font-size:12.3px;line-height:1.65;color:#f3c9cf}
-.oh-warn p.muted{margin:0;color:#9fb0d4}
-.oh-note{margin-top:16px;font-size:12px;color:#9fb0d4}
-.oh-fine{margin:16px 0 0;font-size:11px;color:#6f81a5;line-height:1.6}
+.oh-warn{margin-top:16px;padding:10px 12px;border-radius:8px;background:rgba(214,66,88,.08);border:1px solid rgba(214,66,88,.4);text-align:left}
+.oh-warn p{margin:0;font-size:12px;line-height:1.6;color:#f3c9cf}
+.oh-warn p.muted{margin-top:4px;color:#9fb0d4}
+.oh-note{margin-top:14px;font-size:11.5px;color:#9fb0d4}
 .dv-fidelity span{flex:1;min-width:220px}
 .dv-drawer{flex:none;max-height:38%;overflow:auto;border-top:1px solid #22345c;background:#0d1830;padding:10px 12px}
 .dv-footer{display:flex;align-items:center;gap:8px;padding:6px 10px;border-top:1px solid #22345c;background:#0e1930;flex:none;flex-wrap:wrap}
@@ -1661,14 +1692,14 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
 
       {/* Toolbar: view tabs, the primary open action, then compact controls. */}
       <div className="dv-toolbar">
-        {!isOfficeFile && <div className="dv-tabs">
+        {!isOfficeFile && !readsInPlace && <div className="dv-tabs">
           <button type="button" className={mode === 'content' ? 'on' : ''} onClick={() => setMode('content')}>Preview</button>
           {content?.file_id && <button type="button" className={mode === 'original' ? 'on' : ''} onClick={() => setMode('original')}>Original file</button>}
         </div>}
         {isOfficeFile && <span className="dv-owner">Opens in {appName}</span>}
-        {!isOfficeFile && mode === 'content' && content && !editing && <button className="dv-ghost" onClick={() => setEditing(true)}>✎ Edit</button>}
-        {!isOfficeFile && mode === 'content' && editing && <button className="dv-btn" onClick={saveContent} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>}
-        {!isOfficeFile && mode === 'content' && editing && <button className="dv-ghost" onClick={() => setEditing(false)}>Cancel</button>}
+        {!isOfficeFile && !readsInPlace && mode === 'content' && content && !editing && <button className="dv-ghost" onClick={() => setEditing(true)}>✎ Edit</button>}
+        {!isOfficeFile && !readsInPlace && mode === 'content' && editing && <button className="dv-btn" onClick={saveContent} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>}
+        {!isOfficeFile && !readsInPlace && mode === 'content' && editing && <button className="dv-ghost" onClick={() => setEditing(false)}>Cancel</button>}
         <span style={{ flex: 1 }} />
         {showZoom && <span className="dv-zoom">
           <button title="Zoom out" onClick={() => setZoom(z => Math.max(0.5, +(z - 0.1).toFixed(2)))}>−</button>
@@ -1682,6 +1713,10 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
             <div style={{ position: 'fixed', inset: 0, zIndex: 35 }} onClick={() => setMenuOpen(false)} />
             <div className="dv-menu" onClick={() => setMenuOpen(false)}>
               {content?.file_id && <button onClick={() => fetchBlobUrl(`/files/${content.file_id}/download`).then(u => { const a = document.createElement('a'); a.href = u; a.download = content.file_name || 'document'; a.click(); })}>⬇ Download original file</button>}
+              {/* A PDF reads in place, so leaving for an external reader or an
+                  edit is offered here rather than pushed at the reader. */}
+              {isPdfFile && external.onDesktop && <button onClick={() => void external.open()}>↗ Open in the default PDF application</button>}
+              {isPdfFile && canAuthor && <button onClick={() => external.uploadInput.current?.click()} disabled={external.uploading}>{external.uploading ? 'Uploading…' : '⬆ Upload an edited copy'}</button>}
               {content?.file_id && !isOfficeFile && <button onClick={reExtract} disabled={busy}>{busy ? 'Reading…' : '⟳ Re-read content from file'}</button>}
               {!isOfficeFile && !!content?.content_html && isWordSource && <div className="dv-menu-sep" />}
               {!isOfficeFile && !!content?.content_html && isWordSource && <button onClick={downloadAsWord} disabled={!!exportBusy}>{exportBusy === 'download' ? 'Building…' : '⬇ Download as Word (.docx)'}</button>}
@@ -1696,6 +1731,18 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
       {/* Content — fills all remaining window height. An Office document is
           handed to Office and nothing else is drawn: no approximate preview
           to be mistaken for the controlled document. */}
+      {/* Only while a PDF is out at an external reader — the Office panel keeps
+          its own status, so this would otherwise say the same thing twice. */}
+      {isPdfFile && external.live && <div className="dv-strip">
+        <span>{external.phase === 'saving' ? 'Saving…' : external.saves > 0
+          ? `Saved${external.lastSavedAt ? ` ${new Date(external.lastSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}${external.saves > 1 ? ` · ${external.saves} versions` : ''}`
+          : `Open in the default PDF application`}</span>
+        {external.onDesktop && <button className="dv-ghost" style={{ height: 24, fontSize: 11.5 }} onClick={external.checkNow}>Check now</button>}
+        <button className="dv-ghost" style={{ height: 24, fontSize: 11.5 }} onClick={external.finish}>Done</button>
+      </div>}
+      {isPdfFile && <input ref={external.uploadInput} type="file" accept=".pdf" style={{ display: 'none' }}
+        onChange={e => { const f = e.target.files?.[0]; if (f) void external.uploadEdited(f); }} />}
+
       <div className="dv-content">
         {isOfficeFile && content && <OfficeHandoff
           docId={docId}
@@ -1703,6 +1750,8 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
           fileId={content.file_id!}
           fileName={content.file_name || 'document'}
           fileMime={content.file_mime}
+          versionLabel={content.version_label || content.version_number}
+          fileSize={content.file_size}
           canEdit={canAuthor}
           onSavedVersion={id => { setActiveVersionId(id); onSaved(); }}
           onError={onError}

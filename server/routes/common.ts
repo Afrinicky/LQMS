@@ -14,8 +14,9 @@ import { resolvePermission } from '../services/permissionResolver.js';
 import { ACCESS_LEVELS, LEVEL_ACTIONS, type AccessLevel } from '../../shared/constants/features.js';
 import { pendingRequests, recentRequests, decideRequest } from '../services/passwordResetService.js';
 import { historicReferences, purgeDisposableRows } from '../services/userReferences.js';
-import { historicStaffReferences, purgeDisposableStaffRows, describeStaffReference } from '../services/staffReferences.js';
+import { historicStaffReferences, purgeDisposableStaffRows, describeStaffReference, purgeStaffEverywhere } from '../services/staffReferences.js';
 import { audit } from '../services/auditService.js';
+import { mintViewTicket, VIEW_TICKET_MS } from '../services/viewTickets.js';
 import { writeBackupZip, isSafeBackupName, createBackup } from '../services/backupService.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
 import { parseIntNullable } from './routeHelpers.js';
@@ -1254,7 +1255,17 @@ export function commonRoutes() {
   // and appointment terms. Anyone may need a colleague's NAME — to assign an
   // action, record attendance, pick a reviewer — so a minimal directory is
   // served to everyone and the full record only to the personnel register.
+  // Somebody who has left the laboratory is not a colleague you can assign work
+  // to, roster, or name as a reviewer — so the register serves the people who
+  // are actually here, and a retired record has to be asked for by name. This
+  // is what keeps former staff out of every picker in the system at once, and
+  // out of the Master Personnel Register and its Excel export.
+  //   (default)        active staff
+  //   ?status=retired  the retired list, for the register's own Retired section
+  //   ?status=all      both, for anything that genuinely needs the full history
   router.get('/staff', requirePermission('personnel.self', 'view'), (req, res) => {
+    const status = String(req.query.status || 'active');
+    const activeFilter = status === 'retired' ? 's.is_active = 0' : status === 'all' ? '1 = 1' : 's.is_active = 1';
     if (!resolvePermission(req.user!.id, 'personnel.register', 'view').allowed) {
       return res.json(getDb().prepare(`
         SELECT s.id, s.employee_no employeeNo, s.full_name fullName, s.section_id sectionId,
@@ -1276,6 +1287,7 @@ export function commonRoutes() {
     LEFT JOIN sections sec ON sec.id = s.section_id
     LEFT JOIN users u ON u.staff_id = s.id
     LEFT JOIN roles r ON r.id = u.role_id
+    WHERE ${activeFilter}
     ORDER BY s.is_active DESC, s.full_name`).all());
   });
 
@@ -1407,7 +1419,9 @@ export function commonRoutes() {
       const rows = db.prepare(`
         SELECT s.*, sec.name AS section_name,
           (SELECT p.title FROM staff_position_assignments spa JOIN positions p ON p.id = spa.position_id WHERE spa.staff_id = s.id AND spa.is_active = 1 ORDER BY CASE spa.assignment_type WHEN 'primary' THEN 0 ELSE 1 END, spa.id LIMIT 1) AS position_title
-        FROM staff s LEFT JOIN sections sec ON sec.id = s.section_id ORDER BY s.employee_no, s.full_name`).all() as any[];
+        FROM staff s LEFT JOIN sections sec ON sec.id = s.section_id
+        WHERE s.is_active = 1
+        ORDER BY s.employee_no, s.full_name`).all() as any[];
       for (const r of rows) {
         const row: (string | number)[] = REGISTER_COLUMNS.map(c => {
           if (c.col === null) return '';
@@ -1504,6 +1518,11 @@ export function commonRoutes() {
       blockers,
       canDeactivate: blockers.length === 0,
       canDelete: blockers.length === 0 && historic.length === 0,
+      // Force erase is for a demonstration record the live system grew around.
+      // It is offered whenever an ordinary erase is refused for history rather
+      // than for a blocker (your own record, the last administrator), and it
+      // costs a written reason.
+      canForceDelete: blockers.length === 0 && historic.length > 0,
       historicReferences: historic.map(r => ({ ...r, label: describeStaffReference(r) })),
       totalHistoricRows: historic.reduce((n, r) => n + r.rows, 0),
     });
@@ -1515,7 +1534,7 @@ export function commonRoutes() {
   // the account, erasing one erases the account when it too has no history.
   router.delete('/staff/:id', requirePermission('personnel.register', 'void_archive'), (req, res) => {
     const db = getDb();
-    const mode = req.query.mode === 'delete' ? 'delete' : 'deactivate';
+    const mode = req.query.mode === 'delete' ? 'delete' : req.query.mode === 'purge' ? 'purge' : 'deactivate';
     const staff = db.prepare('SELECT id, full_name, employee_no, is_active FROM staff WHERE id = ?').get(req.params.id) as
       { id: number; full_name: string; employee_no: string | null; is_active: number } | undefined;
     if (!staff) return res.status(404).json({ error: 'Staff record not found' });
@@ -1545,6 +1564,60 @@ export function commonRoutes() {
       tx();
       audit(req, { action: 'deactivate', entity: 'staff', entityId: staff.id, oldValue: { isActive: 1 }, newValue: { isActive: 0, fullName: staff.full_name } });
       return res.json({ ok: true, mode: 'deactivate', accountDeactivated: !!account });
+    }
+
+    // Force erase — for a demonstration record the live system has grown around.
+    //
+    // A laboratory that set the system up with example staff and then went live
+    // cannot clear them the ordinary way: a month of routed alerts, attestation
+    // assignments and roster slots has accumulated against names that were
+    // never people, and the "erase only what left no trace" rule refuses. This
+    // cuts the record out and leaves the surrounding rows standing — every
+    // column that named them is emptied, and rows that cannot exist without a
+    // person go with them.
+    //
+    // The name disappears; the fact that it was removed does not. A reason is
+    // required and the audit entry keeps the person's identity, the reason, and
+    // every table touched, so the trail can still answer "what happened to this
+    // record" long after the row is gone.
+    if (mode === 'purge') {
+      const reason = String((req.body ?? {}).reason ?? '').trim();
+      if (reason.length < 10) {
+        return res.status(400).json({ error: 'A written reason of at least 10 characters is required to erase a record the laboratory record still names.' });
+      }
+      const before = historicStaffReferences(staff.id).map(r => describeStaffReference(r));
+      // A demonstration person usually came with a demonstration login. It goes
+      // with them when it too has done nothing; when the account itself has
+      // history it stays, unlinked, for Users & Access to deal with — an
+      // account is the author of records in its own right.
+      const accountIsClean = !!account && historicReferences(account.id).length === 0;
+      let detached: { table: string; column: string; rows: number; action: string }[] = [];
+      try {
+        const tx = db.transaction(() => {
+          if (account && accountIsClean) {
+            purgeDisposableRows(account.id);
+            db.prepare('DELETE FROM users WHERE id = ?').run(account.id);
+          }
+          detached = purgeStaffEverywhere(staff.id);
+          db.prepare("DELETE FROM record_links WHERE (source_record_type = 'staff' AND source_record_id = ?) OR (target_record_type = 'staff' AND target_record_id = ?)").run(String(staff.id), String(staff.id));
+          db.prepare('DELETE FROM staff WHERE id = ?').run(staff.id);
+        });
+        tx();
+      } catch (err) {
+        return res.status(409).json({ error: err instanceof Error ? `The record could not be erased: ${err.message}` : 'The record could not be erased.' });
+      }
+      audit(req, {
+        action: 'purge', entity: 'staff', entityId: staff.id,
+        oldValue: { fullName: staff.full_name, employeeNo: staff.employee_no, referencedIn: before },
+        newValue: { reason, detached: detached.map(d => `${d.action} ${d.rows} × ${d.table}.${d.column}`) },
+      });
+      return res.json({
+        ok: true, mode: 'purge',
+        detached: detached.reduce((n, d) => n + d.rows, 0),
+        tables: detached.length,
+        accountDeleted: !!account && accountIsClean,
+        accountUnlinked: !!account && !accountIsClean ? account.username : null,
+      });
     }
 
     // Permanent erase — only for a record with no laboratory history.
@@ -1687,8 +1760,18 @@ export function commonRoutes() {
         };
         if (sectionId) cols.section_id = String(sectionId);
         try {
-          const existing = employeeNo ? db.prepare('SELECT id FROM staff WHERE employee_no = ?').get(employeeNo) as any : null;
+          const existing = employeeNo ? db.prepare('SELECT id, full_name, is_active FROM staff WHERE employee_no = ?').get(employeeNo) as any : null;
           let staffId: number;
+          // A retired record is out of the register on purpose, and the export
+          // this workbook came from does not carry one — so a row matching a
+          // retired Staff ID is somebody typing a number that has been retired,
+          // not an update anybody meant. Say so rather than silently editing a
+          // record nobody can see.
+          if (existing && existing.is_active === 0) {
+            result.skipped++;
+            result.errors.push(`Row ${idx + 2}: “${existing.full_name}” (${employeeNo}) is retired. Restore them from the register first if this row is meant for them.`);
+            return;
+          }
           if (existing) {
             const keys = Object.keys(cols).filter(k => cols[k] !== null);
             if (keys.length) db.prepare(`UPDATE staff SET ${keys.map(k => `${k} = ?`).join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...keys.map(k => cols[k]), existing.id);
@@ -1751,6 +1834,24 @@ export function commonRoutes() {
     if (!file) return res.status(404).json({ error: 'File not found' });
     res.json(file);
   });
+  // ===== Reading a file inline, with its own name =====
+  //
+  // Mints the ticket; the bytes are served from an unauthenticated route (see
+  // routes/fileView.ts) because the <iframe> that will ask for them cannot
+  // carry this request's Authorization header. Minting is the authenticated
+  // half: only somebody already allowed to read the file gets a ticket for it.
+  router.post('/files/:id/view-ticket', requirePermission('documents', 'view'), (req, res) => {
+    const resolved = resolveFileOnDisk(req.params.id);
+    if (!resolved) return res.status(404).json({ error: 'File not found' });
+    const token = mintViewTicket(Number(req.params.id), req.user!.id);
+    res.status(201).json({
+      // Absolute from the site root, not from the API base: the bytes are
+      // served outside /api, where no bearer token is expected.
+      path: `/file-view/${token}/${encodeURIComponent(resolved.file.original_name || 'document')}`,
+      expiresInMinutes: VIEW_TICKET_MS / 60000,
+    });
+  });
+
   router.get('/files/:id/raw', requirePermission('documents', 'view'), (req, res) => {
     const resolved = resolveFileOnDisk(req.params.id);
     if (!resolved) return res.status(404).json({ error: 'File not found' });

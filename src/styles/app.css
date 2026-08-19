@@ -3042,9 +3042,52 @@ button.tiny.danger:hover:not(:disabled) { background: rgba(214, 66, 88, .12); bo
 .reg-search input { border: 0; background: transparent; box-shadow: none; padding: 8px 0; min-width: 0; flex: 1; font-size: 12.5px; }
 .reg-search input:focus { outline: none; box-shadow: none; }
 
-.reg-filters { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 14px 0 8px; font-size: 12px; }
-.reg-filters .toggle { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); }
-.reg-filters .toggle input { width: auto; margin: 0; }
+.reg-filters { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 16px 0 10px; font-size: 12px; }
+
+/* Two lists, not one list with a checkbox: somebody who has left the laboratory
+   is not a colleague with a flag on them, and the register should not have to
+   be read past them. */
+.reg-seg { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--panel-2); }
+.reg-seg button {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 13px; border: 0; box-shadow: none;
+  background: transparent; color: var(--muted); font-size: 12.5px; font-weight: 600; border-radius: var(--radius-pill); cursor: pointer;
+}
+.reg-seg button:hover { color: var(--text); background: rgba(255,255,255,.04); }
+.reg-seg button.on { background: var(--accent-soft); color: #fff; }
+.reg-count { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: var(--radius-pill); background: rgba(255,255,255,.08); }
+.reg-seg button.on .reg-count { background: rgba(255,255,255,.18); }
+
+/* Retiring and erasing live behind this, not beside Edit — a destructive verb
+   on every row of a register is an accident waiting to be clicked. */
+.reg-menuwrap { position: relative; display: inline-flex; }
+.reg-more { padding: 2px 6px; line-height: 1; color: var(--muted); }
+.reg-more:hover { color: var(--text); }
+.reg-menu-scrim { position: fixed; inset: 0; z-index: 40; }
+.reg-menu {
+  position: absolute; right: 0; top: calc(100% + 5px); z-index: 41; min-width: 214px;
+  display: flex; flex-direction: column; padding: 5px;
+  background: var(--panel); border: 1px solid var(--border-strong); border-radius: 10px;
+  box-shadow: 0 14px 34px rgba(0,0,0,.45);
+}
+.reg-menu button {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  padding: 8px 10px; border: 0; box-shadow: none; background: transparent;
+  color: var(--text); font-size: 12.5px; font-weight: 500; border-radius: 7px; cursor: pointer; white-space: nowrap;
+}
+.reg-menu button:hover:not(:disabled) { background: rgba(255,255,255,.06); }
+.reg-menu button.danger { color: var(--danger); background: transparent; }
+.reg-menu button.danger:hover:not(:disabled) { background: rgba(214, 66, 88, .12); }
+.reg-menu button:disabled { opacity: .5; cursor: default; }
+
+.dialog-lead { margin: 0 0 12px; font-size: 13px; line-height: 1.7; }
+.dialog-lead.muted { color: var(--muted); font-size: 12.5px; }
+.remove-note { display: flex; gap: 10px; padding: 12px 14px; margin-bottom: 14px; border-radius: var(--radius-sm);
+  border: 1px solid rgba(214, 66, 88, .35); background: rgba(214, 66, 88, .05); }
+.remove-note svg { flex: none; margin-top: 2px; color: var(--danger); }
+.remove-note p { margin: 0 0 6px; font-size: 12.5px; line-height: 1.6; }
+.remove-note p:last-child { margin-bottom: 0; }
+.remove-note ul { margin: 0 0 8px; }
+.remove-acts { display: flex; gap: 8px; flex-wrap: wrap; }
 
 .table-scroll { overflow-x: auto; }
 /* Five columns of substance and one of verbs. Each cell carries its own
@@ -3072,3 +3115,4 @@ button.tiny.danger:hover:not(:disabled) { background: rgba(214, 66, 88, .12); bo
 .remove-option p { margin: 0 0 12px; font-size: 12.5px; line-height: 1.65; color: var(--muted); }
 .remove-option ul { margin: 0; }
 .remove-confirm { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+.remove-confirm > span { display: block; }

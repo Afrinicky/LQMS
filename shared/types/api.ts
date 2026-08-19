@@ -60,7 +60,15 @@ export type ApiUser = { id: number; username: string; fullName: string; roleId: 
 export type PermissionMap = Record<string, string[]>;
 export type SystemModule = { id: number; key: string; label: string; path: string; enabled: boolean; alertsPaused: boolean };
 export type Position = { id: number; title: string; description?: string; reportsToPositionId?: number | null; isActive: boolean; archivedAt?: string | null };
-export type Staff = { id: number; employeeNo?: string; fullName: string; email?: string; phone?: string; isActive: boolean; sectionId?: number | null; sectionName?: string | null; primaryPosition?: string | null; userId?: number | null; username?: string | null; roleName?: string | null; userActive?: number | null;
+/**
+ * A member of laboratory personnel.
+ *
+ * `isActive` is 0/1 rather than a boolean because SQLite has no boolean and the
+ * API passes the column straight through. It was typed `boolean` here, which
+ * compiled `isActive === false` happily while matching nothing at runtime — a
+ * retired person then kept every action a serving one has. Test it for truth.
+ */
+export type Staff = { id: number; employeeNo?: string; fullName: string; email?: string; phone?: string; isActive: 0 | 1; sectionId?: number | null; sectionName?: string | null; primaryPosition?: string | null; userId?: number | null; username?: string | null; roleName?: string | null; userActive?: number | null;
   surname?: string; middleName?: string; firstName?: string; initials?: string;
   dateOfBirth?: string; gender?: string; designation?: string; jobTitle?: string;
   professionalRegulator?: string; professionalLicence?: string; licenceExpiryDate?: string;

@@ -202,7 +202,7 @@ export function RegisterStaff() {
           <legend>Positions &amp; organogram</legend>
           <p className="hint">Select one or more organogram positions. The primary position drives reporting lines and position-based permissions.</p>
           <div className="chip-select">
-            {positions.filter(p => p.isActive !== false).map(p => (
+            {positions.filter(p => !!p.isActive).map(p => (
               <label key={p.id} className={`pick ${positionIds.includes(p.id) ? 'on' : ''}`}>
                 <input type="checkbox" checked={positionIds.includes(p.id)} onChange={() => togglePosition(p.id)} />{p.title}
               </label>
@@ -695,7 +695,7 @@ function OrgNodeEditor({ node, ctx }: { node: OrgNodeData; ctx: OrgCtx }) {
   function removeOcc(staffId:number){ ctx.call(`/positions/${node.id}/occupant/${staffId}`,{method:'DELETE'},'Removed.'); }
   function addChildRole(e:FormEvent){ e.preventDefault(); const t=child.trim(); if(!t) return; ctx.call('/positions',{method:'POST',body:JSON.stringify({title:t, reportsToPositionId:node.id})},'Subordinate role added.').then(ok=>{ if(ok) setChild(''); }); }
 
-  const freeStaff = ctx.staff.filter(s => s.isActive !== false);
+  const freeStaff = ctx.staff.filter(s => !!s.isActive);
 
   return <div className={`org-node org-node-edit rt-${rt}`}>
     <input className="org-title-input" value={title} onChange={e=>setTitle(e.target.value)} onBlur={saveTitle} onKeyDown={e=>{ if(e.key==='Enter'){ e.preventDefault(); (e.target as HTMLInputElement).blur(); } }} aria-label="Role title" />

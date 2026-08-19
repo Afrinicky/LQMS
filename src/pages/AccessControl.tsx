@@ -95,7 +95,7 @@ export function AccessControl() {
 
   const subjects: Subject[] = useMemo(() => {
     if (scope === 'role') return roles.map(r => ({ id: r.id, name: r.name, sub: r.description }));
-    if (scope === 'position') return positions.filter(p => p.isActive !== false).map(p => ({ id: p.id, name: p.title }));
+    if (scope === 'position') return positions.filter(p => !!p.isActive).map(p => ({ id: p.id, name: p.title }));
     return users.map(u => ({ id: u.id, name: u.fullName || u.username, sub: u.roleName ?? undefined }));
   }, [scope, roles, positions, users]);
 

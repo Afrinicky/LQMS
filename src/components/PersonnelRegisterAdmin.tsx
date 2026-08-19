@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Upload, FileSpreadsheet, Search, Pencil, Archive, RotateCcw, Trash2, AlertTriangle, ShieldAlert } from 'lucide-react';
+import { Download, Upload, FileSpreadsheet, Search, Pencil, Archive, RotateCcw, Trash2, AlertTriangle, ShieldAlert, MoreHorizontal, Users } from 'lucide-react';
 import { api, API_BASE, getToken } from '../services/api';
 import { usePermissions } from '../hooks/usePermissions';
 import { DetailModal } from './ui';
@@ -31,6 +31,15 @@ import type { Staff, Section, Position, ProfessionalRank } from '../../shared/ty
                  rows this screen exists to clear.
    ========================================================================= */
 
+/**
+ * Has this person left?
+ *
+ * SQLite has no boolean, so `is_active` comes back as 0 or 1 and a `=== false`
+ * test silently matches nothing — which is how a retired row can end up
+ * offering "Retire…" and hiding "Return to the register".
+ */
+const hasRetired = (s: Staff) => !s.isActive;
+
 type ImportResult = { created: number; updated: number; skipped?: number; errors: string[] };
 type DeletionImpact = {
   staff: { id: number; fullName: string; employeeNo: string | null; isActive: boolean };
@@ -38,6 +47,7 @@ type DeletionImpact = {
   blockers: string[];
   canDeactivate: boolean;
   canDelete: boolean;
+  canForceDelete: boolean;
   historicReferences: { table: string; column: string; rows: number; label: string }[];
   totalHistoricRows: number;
 };
@@ -48,16 +58,27 @@ export default function PersonnelRegisterAdmin() {
   const [sections, setSections] = useState<Section[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
   const [ranks, setRanks] = useState<ProfessionalRank[]>([]);
+  const [retired, setRetired] = useState<Staff[]>([]);
   const [query, setQuery] = useState('');
-  const [showRetired, setShowRetired] = useState(false);
+  // Retired people are not colleagues you can roster or assign work to, so they
+  // are not in the register at all — they are a list of their own, closed until
+  // somebody goes looking for them.
+  const [view, setView] = useState<'active' | 'retired'>('active');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [rowMenu, setRowMenu] = useState<number | null>(null);
 
   const [editing, setEditing] = useState<Staff | null>(null);
   const [form, setForm] = useState<StaffFormValues>(emptyStaffForm());
-  const [removing, setRemoving] = useState<DeletionImpact | null>(null);
+  // Retiring and erasing are different decisions with different consequences,
+  // so they are different dialogs. Neither is reachable by mis-clicking the
+  // other.
+  const [retiring, setRetiring] = useState<Staff | null>(null);
+  const [deleting, setDeleting] = useState<DeletionImpact | null>(null);
   const [confirmName, setConfirmName] = useState('');
+  const [forceReason, setForceReason] = useState('');
+  const [forcing, setForcing] = useState(false);
 
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const importInput = useRef<HTMLInputElement>(null);
@@ -67,7 +88,10 @@ export default function PersonnelRegisterAdmin() {
   const mayImport = can('personnel.register', 'create');
   const mayExport = can('personnel.register', 'export') || can('personnel', 'export');
 
-  const load = () => api<Staff[]>('/staff').then(setStaff).catch(e => setError((e as Error).message));
+  const load = () => Promise.all([
+    api<Staff[]>('/staff').then(setStaff),
+    api<Staff[]>('/staff?status=retired').then(setRetired).catch(() => setRetired([])),
+  ]).catch(e => setError((e as Error).message));
   useEffect(() => {
     void load();
     api<Section[]>('/sections').then(setSections).catch(() => setSections([]));
@@ -77,13 +101,10 @@ export default function PersonnelRegisterAdmin() {
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return staff
-      .filter(s => (showRetired ? true : s.isActive !== false))
-      .filter(s => !q || [s.fullName, s.employeeNo, s.jobTitle, s.designation, s.unit, s.sectionName, s.username]
-        .some(v => v?.toLowerCase().includes(q)));
-  }, [staff, query, showRetired]);
-
-  const retiredCount = staff.filter(s => s.isActive === false).length;
+    const source = view === 'retired' ? retired : staff;
+    return source.filter(s => !q || [s.fullName, s.employeeNo, s.jobTitle, s.designation, s.unit, s.sectionName, s.username]
+      .some(v => v?.toLowerCase().includes(q)));
+  }, [staff, retired, query, view]);
 
   // ---- Excel round-trip (the same workbook Personnel Management uses) ------
   async function download(path: string, fallback: string) {
@@ -146,23 +167,41 @@ export default function PersonnelRegisterAdmin() {
     finally { setBusy(null); }
   }
 
-  // ---- Remove (the screen decides retire vs erase from the impact) ---------
-  async function openRemove(s: Staff) {
-    setBusy(`impact-${s.id}`); setError(null); setNotice(null); setConfirmName('');
+  // ---- Retire (the ordinary answer for somebody who has left) -------------
+  async function doRetire() {
+    if (!retiring) return;
+    setBusy('retire'); setError(null);
     try {
-      setRemoving(await api<DeletionImpact>(`/staff/${s.id}/deletion-impact`));
+      const r = await api<{ accountDeactivated?: boolean }>(`/staff/${retiring.id}`, { method: 'DELETE' });
+      setNotice(`${retiring.fullName} was retired${r.accountDeactivated ? ' and their login account deactivated' : ''}. Their history is unchanged.`);
+      setRetiring(null);
+      await load();
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(null); }
   }
-  async function doRemove(mode: 'deactivate' | 'delete') {
-    if (!removing) return;
+
+  // ---- Erase (what the record leaves behind decides how it is offered) ----
+  async function openDelete(s: Staff) {
+    setBusy(`impact-${s.id}`); setError(null); setNotice(null);
+    setConfirmName(''); setForceReason(''); setForcing(false);
+    try {
+      setDeleting(await api<DeletionImpact>(`/staff/${s.id}/deletion-impact`));
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(null); }
+  }
+  async function doDelete(mode: 'delete' | 'purge') {
+    if (!deleting) return;
     setBusy(mode); setError(null);
     try {
-      const r = await api<{ mode: string; accountDeleted?: boolean; accountDeactivated?: boolean }>(`/staff/${removing.staff.id}?mode=${mode}`, { method: 'DELETE' });
-      setNotice(mode === 'delete'
-        ? `${removing.staff.fullName} was permanently removed from the register${r.accountDeleted ? ', along with their login account' : ''}.`
-        : `${removing.staff.fullName} was retired${r.accountDeactivated ? ' and their login account deactivated' : ''}. Their history is unchanged.`);
-      setRemoving(null);
+      const r = await api<{ accountDeleted?: boolean; accountUnlinked?: string | null; detached?: number }>(
+        `/staff/${deleting.staff.id}?mode=${mode}`,
+        { method: 'DELETE', body: JSON.stringify(mode === 'purge' ? { reason: forceReason.trim() } : {}) },
+      );
+      setNotice(`${deleting.staff.fullName} was erased from the register${r.accountDeleted ? ' with their login account' : ''}`
+        + (mode === 'purge' && r.detached ? `, and their name removed from ${r.detached} record${r.detached === 1 ? '' : 's'}` : '')
+        + (r.accountUnlinked ? `. The login account “${r.accountUnlinked}” has its own history and was left in Users & Access` : '')
+        + '.');
+      setDeleting(null);
       await load();
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(null); }
@@ -176,10 +215,10 @@ export default function PersonnelRegisterAdmin() {
         <div className="reg-head-text">
           <h3>Master Personnel Register</h3>
           <p className="muted">
-            Every member of laboratory personnel, with the same record Personnel Management holds.
-            Correct a record here, retire someone who has left, or remove a row that was never real.
-            Import and export use the one approved workbook — rows are matched on Staff ID, so existing
-            people are updated and new ones created.
+            Everyone currently working in the laboratory, with the same record Personnel Management holds.
+            Somebody who has left is retired and moves to the <strong>Retired</strong> list, out of the
+            register, the roster and the export. Import and export use the one approved workbook — rows are
+            matched on Staff ID, so existing people are updated and new ones created.
           </p>
         </div>
         <div className="reg-head-actions">
@@ -212,11 +251,15 @@ export default function PersonnelRegisterAdmin() {
       </div>}
 
       <div className="reg-filters">
-        <span className="muted">{rows.length} {rows.length === 1 ? 'person' : 'people'} shown</span>
-        {retiredCount > 0 && <label className="toggle">
-          <input type="checkbox" checked={showRetired} onChange={e => setShowRetired(e.target.checked)} />
-          Show retired ({retiredCount})
-        </label>}
+        <div className="reg-seg" role="tablist" aria-label="Register section">
+          <button type="button" role="tab" aria-selected={view === 'active'} className={view === 'active' ? 'on' : ''} onClick={() => { setView('active'); setRowMenu(null); }}>
+            <Users size={14} /> Register <span className="reg-count">{staff.length}</span>
+          </button>
+          <button type="button" role="tab" aria-selected={view === 'retired'} className={view === 'retired' ? 'on' : ''} onClick={() => { setView('retired'); setRowMenu(null); }}>
+            <Archive size={14} /> Retired <span className="reg-count">{retired.length}</span>
+          </button>
+        </div>
+        <span className="muted">{rows.length} {rows.length === 1 ? 'person' : 'people'}</span>
       </div>
 
       <div className="table-scroll">
@@ -231,13 +274,14 @@ export default function PersonnelRegisterAdmin() {
               const soon = new Date(Date.now() + 60 * 864e5).toISOString().slice(0, 10);
               const licExpired = s.licenceExpiryDate && s.licenceExpiryDate < today;
               const licSoon = s.licenceExpiryDate && !licExpired && s.licenceExpiryDate <= soon;
-              return <tr key={s.id} className={s.isActive === false ? 'row-retired' : ''}>
+              const retiredRow = hasRetired(s);
+              return <tr key={s.id} className={retiredRow ? 'row-retired' : ''}>
                 <td>
                   <span className="reg-primary">{s.fullName}{s.initials ? <span className="muted"> ({s.initials})</span> : null}</span>
                   <span className="reg-sub">
                     {s.employeeNo || 'No Staff ID'}
                     {s.personnelCategory ? ` · ${s.personnelCategory}` : ''}
-                    {s.isActive === false ? <span className="badge inactive">retired</span> : null}
+                    {retiredRow ? <span className="badge inactive">retired</span> : null}
                   </span>
                 </td>
                 <td>
@@ -262,16 +306,36 @@ export default function PersonnelRegisterAdmin() {
                     : <span className="muted">None</span>}
                 </td>
                 <td className="reg-actions-col">
+                  {/* Editing is the everyday act, so it is a button. Retiring
+                      and erasing are not, so they sit under the menu where a
+                      slipped click cannot reach them. */}
                   <div className="reg-row-actions">
                     {mayEdit && <button type="button" className="tiny" onClick={() => openEdit(s)}><Pencil size={13} /> Edit</button>}
-                    {mayEdit && s.isActive === false && <button type="button" className="tiny secondary" disabled={busy === `restore-${s.id}`} onClick={() => restore(s)}><RotateCcw size={13} /> Restore</button>}
-                    {mayRemove && <button type="button" className="tiny danger" disabled={busy === `impact-${s.id}`} onClick={() => openRemove(s)}><Trash2 size={13} /> Remove</button>}
+                    {(mayEdit || mayRemove) && <div className="reg-menuwrap">
+                      <button type="button" className="tiny reg-more" aria-label={`More actions for ${s.fullName}`} aria-haspopup="menu"
+                        aria-expanded={rowMenu === s.id} onClick={() => setRowMenu(m => (m === s.id ? null : s.id))}>
+                        <MoreHorizontal size={14} />
+                      </button>
+                      {rowMenu === s.id && <>
+                        <div className="reg-menu-scrim" onClick={() => setRowMenu(null)} />
+                        <div className="reg-menu" role="menu">
+                          {mayEdit && retiredRow && <button type="button" role="menuitem" disabled={busy === `restore-${s.id}`}
+                            onClick={() => { setRowMenu(null); void restore(s); }}><RotateCcw size={13} /> Return to the register</button>}
+                          {mayRemove && !retiredRow && <button type="button" role="menuitem"
+                            onClick={() => { setRowMenu(null); setRetiring(s); setError(null); setNotice(null); }}><Archive size={13} /> Retire…</button>}
+                          {mayRemove && <button type="button" role="menuitem" className="danger" disabled={busy === `impact-${s.id}`}
+                            onClick={() => { setRowMenu(null); void openDelete(s); }}><Trash2 size={13} /> Erase permanently…</button>}
+                        </div>
+                      </>}
+                    </div>}
                   </div>
                 </td>
               </tr>;
             })}
             {rows.length === 0 && <tr><td colSpan={6} className="muted" style={{ padding: 18, textAlign: 'center' }}>
-              {staff.length === 0 ? 'No staff records yet — register someone on the Register New Staff tab, or import the workbook above.' : 'Nobody matches that search.'}
+              {query.trim() ? 'Nobody matches that search.'
+                : view === 'retired' ? 'Nobody has been retired.'
+                : 'No staff records yet — register someone on the Register New Staff tab, or import the workbook above.'}
             </td></tr>}
           </tbody>
         </table>
@@ -316,65 +380,110 @@ export default function PersonnelRegisterAdmin() {
         <label>Cadre<select value={form.cadre} onChange={set('cadre')}><option value="">Auto (from designation)</option>{CADRES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
         <label>Professional rank<select value={form.professionalRank} onChange={set('professionalRank')}><option value="">Auto (from designation)</option>{ranks.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}</select></label>
         <label>Availability<select value={form.availabilityStatus} onChange={set('availabilityStatus')}>{AVAILABILITY_STATUSES.map(a => <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>)}</select></label>
-        <label>Assign position<select value={form.positionId} onChange={set('positionId')}><option value="">— keep current —</option>{positions.filter(p => p.isActive !== false).map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>
+        <label>Assign position<select value={form.positionId} onChange={set('positionId')}><option value="">— keep current —</option>{positions.filter(p => !!p.isActive).map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>
         <label>Staff file location<input value={form.staffFileLocation} onChange={set('staffFileLocation')} placeholder="e.g. /SECH-LAB-PERSONNEL-FILES/SNO-001/" /></label>
       </form>
     </DetailModal>
 
-    {/* --- Retire or erase -------------------------------------------------- */}
+    {/* --- Retire ----------------------------------------------------------- */}
     <DetailModal
-      open={!!removing}
-      onClose={() => setRemoving(null)}
+      open={!!retiring}
+      onClose={() => setRetiring(null)}
       width="narrow"
-      title={removing ? `Remove ${removing.staff.fullName}` : ''}
-      subtitle={removing?.staff.employeeNo ? `Staff ID ${removing.staff.employeeNo}` : undefined}
+      title={retiring ? `Retire ${retiring.fullName}` : ''}
+      subtitle={retiring?.employeeNo ? `Staff ID ${retiring.employeeNo}` : undefined}
+      footer={<>
+        <button type="button" className="secondary" onClick={() => setRetiring(null)}>Cancel</button>
+        <button type="button" disabled={busy === 'retire'} onClick={doRetire}>{busy === 'retire' ? 'Retiring…' : 'Retire from the register'}</button>
+      </>}
     >
-      {removing && <div className="remove-flow">
+      {error && <div className="error">{error}</div>}
+      <p className="dialog-lead">
+        They leave the register and the Excel export, their access and roster places end, and their
+        technical authorizations are withdrawn. Everything they signed, reviewed or wrote keeps their
+        name on it.
+      </p>
+      <p className="dialog-lead muted">They move to the <strong>Retired</strong> list and can be brought back at any time.</p>
+    </DetailModal>
+
+    {/* --- Erase ------------------------------------------------------------ */}
+    <DetailModal
+      open={!!deleting}
+      onClose={() => setDeleting(null)}
+      width="narrow"
+      title={deleting ? `Erase ${deleting.staff.fullName}` : ''}
+      subtitle={deleting?.staff.employeeNo ? `Staff ID ${deleting.staff.employeeNo}` : undefined}
+    >
+      {deleting && <div className="remove-flow">
         {error && <div className="error">{error}</div>}
-        {removing.blockers.length > 0 && <div className="error">
-          <ShieldAlert size={15} /> {removing.blockers.join(' ')}
-        </div>}
+        {deleting.blockers.length > 0 && <div className="error"><ShieldAlert size={15} /> {deleting.blockers.join(' ')}</div>}
 
-        <div className={`remove-option${removing.canDeactivate ? '' : ' disabled'}`}>
-          <div className="remove-option-head"><Archive size={17} /><h4>Retire this person</h4><span className="badge">Recommended</span></div>
-          <p>
-            Their access, roster places and technical authorizations end immediately, and they leave the
-            active register. Everything they signed, reviewed or wrote keeps their name on it — which is
-            what an assessor expects to find.
-            {removing.account && <> Their login account <strong>{removing.account.username}</strong> is deactivated with them.</>}
+        {/* Nothing to lose: the ordinary erase. */}
+        {deleting.canDelete && <>
+          <p className="dialog-lead">
+            This person is named nowhere in the laboratory record, so the row can simply go.
+            {deleting.account && <> Their unused login account <strong>{deleting.account.username}</strong> goes with it.</>}
+            {' '}This cannot be undone.
           </p>
-          <button type="button" disabled={!removing.canDeactivate || busy === 'deactivate' || !removing.staff.isActive} onClick={() => doRemove('deactivate')}>
-            {busy === 'deactivate' ? 'Retiring…' : removing.staff.isActive ? 'Retire from the register' : 'Already retired'}
+          <label className="remove-confirm">
+            <span>Type <strong>{deleting.staff.fullName}</strong> to confirm</span>
+            <input value={confirmName} onChange={e => setConfirmName(e.target.value)} placeholder={deleting.staff.fullName} />
+          </label>
+          <button type="button" className="danger" disabled={busy === 'delete' || confirmName.trim().toLowerCase() !== deleting.staff.fullName.trim().toLowerCase()}
+            onClick={() => doDelete('delete')}>
+            {busy === 'delete' ? 'Erasing…' : 'Erase permanently'}
           </button>
-        </div>
+        </>}
 
-        <div className={`remove-option danger${removing.canDelete ? '' : ' disabled'}`}>
-          <div className="remove-option-head"><Trash2 size={17} /><h4>Erase permanently</h4></div>
-          {removing.canDelete
-            ? <>
+        {/* Named in the record: retire is the answer, unless this is one of the
+            demonstration rows a live system grew around — then the force erase
+            below cuts the name out and leaves the records standing. */}
+        {!deleting.canDelete && deleting.blockers.length === 0 && <>
+          <div className="remove-note">
+            <AlertTriangle size={15} />
+            <div>
+              <p><strong>{deleting.staff.fullName}</strong> is named in <strong>{deleting.totalHistoricRows}</strong> record{deleting.totalHistoricRows === 1 ? '' : 's'}.</p>
+              <ul className="link-list">
+                {deleting.historicReferences.slice(0, 6).map(r => <li key={`${r.table}.${r.column}`}>{r.label}</li>)}
+                {deleting.historicReferences.length > 6 && <li className="muted">…and {deleting.historicReferences.length - 6} more</li>}
+              </ul>
+              <p className="muted">If this was a real colleague, retire them instead — the record keeps their name and the trail stays intact.</p>
+            </div>
+          </div>
+
+          {deleting.canForceDelete && (!forcing
+            ? <button type="button" className="secondary" onClick={() => setForcing(true)}>
+                This was a demonstration record — erase it anyway
+              </button>
+            : <div className="remove-option danger">
+                <div className="remove-option-head"><Trash2 size={17} /><h4>Erase anyway</h4></div>
                 <p>
-                  This person has left no trace in the laboratory record, so the row can simply go — this is
-                  the way to clear demonstration entries and duplicate imports.
-                  {removing.account && <> Their unused login account <strong>{removing.account.username}</strong> goes with it.</>}
-                  {' '}It cannot be undone.
+                  Their name is removed from all {deleting.totalHistoricRows} record{deleting.totalHistoricRows === 1 ? '' : 's'} and
+                  the row is deleted. The records themselves stay — they simply no longer name anybody. Rows that
+                  cannot exist without a person, such as attestation assignments and roster slots, are removed with them.
+                  The audit trail keeps who was erased and why. This cannot be undone.
                 </p>
                 <label className="remove-confirm">
-                  Type <strong>{removing.staff.fullName}</strong> to confirm
-                  <input value={confirmName} onChange={e => setConfirmName(e.target.value)} placeholder={removing.staff.fullName} />
+                  <span>Why is this record being erased?</span>
+                  <input value={forceReason} onChange={e => setForceReason(e.target.value)}
+                    placeholder="e.g. Demonstration record created during setup, never a member of staff" />
                 </label>
-                <button type="button" className="danger" disabled={busy === 'delete' || confirmName.trim().toLowerCase() !== removing.staff.fullName.trim().toLowerCase()} onClick={() => doRemove('delete')}>
-                  {busy === 'delete' ? 'Erasing…' : 'Erase permanently'}
-                </button>
-              </>
-            : <>
-                <p><AlertTriangle size={14} /> This person appears in <strong>{removing.totalHistoricRows}</strong> laboratory record{removing.totalHistoricRows === 1 ? '' : 's'}, so erasing them would break the trail. Retire them instead.</p>
-                <ul className="link-list">
-                  {removing.historicReferences.slice(0, 8).map(r => <li key={`${r.table}.${r.column}`}>{r.label}</li>)}
-                  {removing.historicReferences.length > 8 && <li className="muted">…and {removing.historicReferences.length - 8} more</li>}
-                </ul>
-              </>}
-        </div>
+                <label className="remove-confirm">
+                  <span>Type <strong>{deleting.staff.fullName}</strong> to confirm</span>
+                  <input value={confirmName} onChange={e => setConfirmName(e.target.value)} placeholder={deleting.staff.fullName} />
+                </label>
+                <div className="remove-acts">
+                  <button type="button" className="secondary" onClick={() => { setForcing(false); setForceReason(''); setConfirmName(''); }}>Cancel</button>
+                  <button type="button" className="danger"
+                    disabled={busy === 'purge' || forceReason.trim().length < 10 || confirmName.trim().toLowerCase() !== deleting.staff.fullName.trim().toLowerCase()}
+                    onClick={() => doDelete('purge')}>
+                    {busy === 'purge' ? 'Erasing…' : 'Erase and remove the name'}
+                  </button>
+                </div>
+              </div>)}
+        </>}
       </div>}
     </DetailModal>
+
   </div>;
 }
