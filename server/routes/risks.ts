@@ -4,12 +4,8 @@ import { getStore } from '../db/store.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
-import { getStaffIdOrCurrent } from './routeHelpers.js';
+import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 
-function parseIntNullable(value: unknown) {
-  const num = Number(value);
-  return Number.isFinite(num) ? num : null;
-}
 
 function calculateRiskScore(likelihood: number, severity: number, detectability: number) {
   return likelihood * severity * detectability;
