@@ -3269,3 +3269,40 @@ label.toggle input { width: auto; flex: none; margin: 0; }
 }
 .bc-pick-row label.on { border-color: var(--accent-bright); color: var(--accent-bright); font-weight: 600; }
 .bc-pick-row input { margin: 0; }
+
+/* ---------- Registers and records ---------- */
+
+/* A row in a register opens the record — clicking a row IS how a record is
+   opened, so it has to look like it can be clicked. */
+tr.row-clickable { cursor: pointer; }
+tr.row-clickable:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: -2px; }
+tr.row-retired { opacity: .62; }
+
+/* The figures a storekeeper came to the record for, before anything else. */
+.stock-figures {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px;
+  padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2, transparent);
+}
+.stock-figures > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.stock-figures .fig { font-size: 20px; font-weight: 650; line-height: 1.15; color: var(--text); overflow-wrap: anywhere; }
+.stock-figures .fig-label { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+
+/* What a record is, as label-and-value pairs rather than a paragraph. */
+.fact-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px 20px; margin: 16px 0 4px; }
+.fact-grid > div { min-width: 0; }
+.fact-grid dt { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 3px; }
+.fact-grid dd { margin: 0; font-size: 13.5px; color: var(--text); overflow-wrap: anywhere; }
+
+/* Removing something: each button followed by what it actually does, so the
+   safe one and the irreversible one cannot be confused for each other. */
+.danger-actions { display: flex; flex-direction: column; gap: 4px; margin-top: 18px; }
+.danger-actions button { align-self: flex-start; }
+.danger-actions p { margin: 0 0 12px; font-size: 12px; }
+.danger-actions button.danger { background: var(--danger); color: #fff; }
+.danger-actions button.danger:disabled { opacity: .5; }
+
+.badge.warn { background: #fff7df; color: #6b4b05; }
+
+/* A date is one thing; it must not be broken across two lines in a table. */
+.data-table td time, .data-table .nowrap { white-space: nowrap; }
+.stock-figures .fig small { font-size: 12px; font-weight: 500; color: var(--muted); }
