@@ -175,13 +175,51 @@ arrives as a new, attributed version of that controlled document — the same re
 upload would leave. Where neither route is available (no Office installed, a phone) the same
 panel offers **Download a copy** and **Upload an edited copy**, which ends in the same place.
 
+## Complaints — ISO 15189:2022 §7.4
+
+The clause asks for a process, not a text box: receive and evaluate the complaint, acknowledge
+receipt, keep a record of what was done about it, have the decision made or reviewed by people
+**not involved** in the activity complained about, and formally tell the complainant when
+handling has ended.
+
+A complaint therefore walks a stated path — received → acknowledged → under investigation →
+awaiting independent review → outcome to be communicated → closed — and can also be recorded as
+withdrawn. Acknowledgement and resolution are dated against targets the laboratory sets in
+**Process targets** to match its own documented procedure. Every step is written to a
+`complaint_events` trail rather than overwriting a column, so "the actions taken" is a record
+rather than a current value.
+
+The server refuses the steps that would skip a requirement: the investigator cannot review their
+own complaint, and closing is refused until the complaint has been independently reviewed **and**
+the complainant has been told the outcome.
+
+## Core laboratory documents
+
+The Quality Manual, Laboratory Handbook and Safety Manual are ordinary controlled documents that
+live in Documents & Records. Settings → My Laboratory → **Core Documents** is a set of named
+places, each pointing at one of them: choose the document already in the register (whatever its
+document type), open it from there, or add core documents of your own — an ethics policy, a
+biobank manual — beside the three standard ones.
+
+## Background jobs
+
+Automatic backups, the alert scan, the duty and activity rollover, environmental polling and the
+sync engine all start from `server/services/backgroundJobs.ts`, which both the standalone host
+and the packaged desktop application call. Each job self-gates on its own stored settings, so a
+laboratory that has not turned one on simply has a timer that decides there is nothing to do.
+
 ## Build checks
 
 ```bash
 npm run typecheck
 npm run build
-npm run check:people-office   # staff removal, role changes, the Office round-trip (needs a running host)
+npm run check:people-office   # staff removal, role changes, the Office round-trip
+npm run check:complaints      # the §7.4 handling process, including every refusal
+npm run check:core-docs       # core documents pointing at the register
+npm run check:jobs            # a due schedule producing a backup on its own
 ```
+
+The `check:*` scripts run against a live host (`npm run api`).
 
 ## Validation
 

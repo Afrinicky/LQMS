@@ -1,8 +1,9 @@
 import { Fragment, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { createPortal } from 'react-dom';
 import {
   ShieldCheck, AlertTriangle, CheckCircle2, Cloud, HardDrive, Archive, FolderOpen,
-  Download, Upload, Plus,
+  Download, Upload, Plus, FileText, Search,
 } from 'lucide-react';
 import { api, API_BASE, getToken } from '../services/api';
 import {
@@ -2783,40 +2784,259 @@ function LabDocuments({ category, docTypes, onChanged }: { category: string; doc
   </>;
 }
 
-// Core documents are registered through the full Documents & Records workflow so
-// they carry complete controlled-document metadata. This tab shows their status
-// and launches the New Document form (pre-set to the right type).
-const CORE_DOC_LAUNCH = [
-  { label: 'Quality Manual', type: 'Quality Manual' },
-  { label: 'Laboratory Handbook', type: 'Handbook' },
-  { label: 'Safety Manual', type: 'Safety Manual' },
-];
+/* ----------------------------------------------------------------------------
+   CORE LABORATORY DOCUMENTS
+
+   The Quality Manual, the Laboratory Handbook and the Safety Manual are the
+   documents a laboratory is asked for first — and every one of them is an
+   ordinary controlled document that already lives in Documents & Records.
+
+   This screen used to match them by their document TYPE string, so a manual
+   filed as "Policy" or "Manual" never appeared here, and the only thing on
+   offer was to upload it again. Now each core document is a named place that
+   POINTS AT one document in the register: pick the one already there, open it
+   from here, and add places of your own for whatever else this laboratory
+   treats as foundational.
+   -------------------------------------------------------------------------- */
+type CoreSlot = {
+  id: number; slotKey: string; label: string; description?: string | null; documentType?: string | null;
+  documentId?: number | null; displayOrder: number; isSystem: number; assignedAt?: string | null;
+  documentCode?: string | null; documentTitle?: string | null; documentStatus?: string | null;
+  currentVersionId?: number | null; versionNumber?: string | null;
+  fileId?: number | null; fileName?: string | null; fileMime?: string | null;
+};
+
 function CoreDocumentsTab({ qualityManualSummary, onSummaryChange, onSaveSummary }: { qualityManualSummary: string; onSummaryChange: (v: string) => void; onSaveSummary: () => void }) {
   const nav = useNavigate();
-  const [docs, setDocs] = useState<Array<{ id: number; document_code?: string; title: string; document_type?: string; status: string; current_version_number?: string }>>([]);
-  useEffect(() => { api<typeof docs>('/documents').then(setDocs).catch(() => setDocs([])); }, []);
+  const [slots, setSlots] = useState<CoreSlot[]>([]);
+  const [docs, setDocs] = useState<Array<{ id: number; document_code?: string; title: string; document_type?: string; status: string; core_slot_key?: string | null }>>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [picking, setPicking] = useState<CoreSlot | null>(null);
+  const [pickQuery, setPickQuery] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [newSlot, setNewSlot] = useState({ label: '', description: '' });
+  const [renaming, setRenaming] = useState<CoreSlot | null>(null);
+  const [renameTo, setRenameTo] = useState('');
+
+  const load = () => Promise.all([
+    api<CoreSlot[]>('/laboratory/core-documents').then(setSlots),
+    api<typeof docs>('/documents').then(setDocs).catch(() => setDocs([])),
+  ]).catch(e => setError((e as Error).message));
+  useEffect(() => { void load(); }, []);
+
+  async function run(label: string, fn: () => Promise<unknown>, done: string) {
+    setBusy(label); setError(null); setNotice(null);
+    try { await fn(); setNotice(done); await load(); }
+    catch (e) { setError((e as Error).message); }
+    finally { setBusy(null); }
+  }
+
+  const assign = (slot: CoreSlot, documentId: number | null) =>
+    run(`assign-${slot.id}`, () => api(`/laboratory/core-documents/${slot.id}/document`, { method: 'PUT', body: JSON.stringify({ documentId }) }),
+      documentId ? `${slot.label} set.` : `${slot.label} cleared.`).then(() => setPicking(null));
+
+  // Opening a core document opens the document itself, in the register's viewer.
+  const openDoc = (slot: CoreSlot) => { if (slot.documentId) nav(`/documents?open=${slot.documentId}`); };
+
+  const candidates = useMemo(() => {
+    const q = pickQuery.trim().toLowerCase();
+    return docs
+      .filter(d => d.status !== 'obsolete' && d.status !== 'archived')
+      .filter(d => !d.core_slot_key || (picking && d.core_slot_key === picking.slotKey))
+      .filter(d => !q || [d.title, d.document_code, d.document_type].some(v => v?.toLowerCase().includes(q)))
+      // The type the slot expects first, so the obvious choice is at the top.
+      .sort((a, b) => {
+        const want = picking?.documentType;
+        const rank = (d: typeof a) => (want && d.document_type === want ? 0 : 1);
+        return rank(a) - rank(b) || a.title.localeCompare(b.title);
+      });
+  }, [docs, pickQuery, picking]);
+
   return <div>
+    {error && <div className="error">{error}</div>}
+    {notice && <div className="notice-ok">{notice}</div>}
+
     <div className="card">
-      <h3>Core laboratory documents</h3>
-      <p>Register your three foundational controlled documents — <strong>Quality Manual</strong>, <strong>Laboratory Handbook</strong> and <strong>Safety Manual</strong> — through Documents &amp; Records so each carries full controlled-document detail (owner, section, review schedule, versions, attestations). They then appear in the register and on the Laboratory Profile.</p>
-      <label className="form"><span>Quality manual summary</span><textarea value={qualityManualSummary} onChange={e => onSummaryChange(e.target.value)} placeholder="Scope, structure and references of the quality manual." /></label>
+      <div className="reg-head">
+        <div className="reg-head-text">
+          <h3>Core laboratory documents</h3>
+          <p className="muted">
+            The documents an assessor asks for first. Each one points at a controlled document already in
+            Documents &amp; Records, so it keeps its owner, review schedule, versions and attestations —
+            and opening it here opens the document itself.
+          </p>
+        </div>
+        <div className="reg-head-actions">
+          <button type="button" className="secondary" onClick={() => { setAdding(true); setNewSlot({ label: '', description: '' }); }}>
+            <Plus size={15} /> Add a core document
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div className="core-grid">
+      {slots.map(slot => {
+        const filled = !!slot.documentId;
+        return <div className={`card core-card${filled ? '' : ' empty'}`} key={slot.id}>
+          <div className="core-head">
+            <h4>{slot.label}</h4>
+            {filled
+              ? <span className="badge active">{slot.documentStatus || 'registered'}</span>
+              : <span className="badge inactive">not set</span>}
+          </div>
+          {slot.description && <p className="core-desc">{slot.description}</p>}
+
+          {filled ? <div className="core-doc">
+            <button type="button" className="core-open" onClick={() => openDoc(slot)} title="Open this document">
+              <FileText size={17} />
+              <span>
+                <strong>{slot.documentTitle}</strong>
+                <em>{[slot.documentCode, slot.versionNumber ? `v${slot.versionNumber}` : null, slot.fileName].filter(Boolean).join(' · ') || 'Open'}</em>
+              </span>
+            </button>
+          </div> : <p className="core-none">No document assigned yet.</p>}
+
+          <div className="core-acts">
+            <button type="button" className="tiny" onClick={() => { setPicking(slot); setPickQuery(''); }}>
+              {filled ? 'Change document' : 'Choose from the register'}
+            </button>
+            <button type="button" className="tiny secondary" onClick={() => nav(`/documents?new=${encodeURIComponent(slot.documentType || slot.label)}`)}>Register a new one</button>
+            <RowMenuLite label={`More for ${slot.label}`}>
+              {close => <>
+                <button type="button" role="menuitem" onClick={() => { close(); setRenaming(slot); setRenameTo(slot.label); }}>Rename…</button>
+                {filled && <button type="button" role="menuitem" disabled={busy === `assign-${slot.id}`}
+                  onClick={() => { close(); void assign(slot, null); }}>Clear the assignment</button>}
+                {!slot.isSystem && <button type="button" role="menuitem" className="danger" disabled={busy === `del-${slot.id}`}
+                  onClick={() => { close(); void run(`del-${slot.id}`, () => api(`/laboratory/core-documents/${slot.id}`, { method: 'DELETE' }), `${slot.label} removed.`); }}>Remove this core document</button>}
+              </>}
+            </RowMenuLite>
+          </div>
+        </div>;
+      })}
+    </div>
+
+    <div className="card" style={{ marginTop: 16 }}>
+      <h3>Quality manual summary</h3>
+      <p className="muted" style={{ marginTop: 0 }}>Scope, structure and references of the quality manual — shown on the laboratory profile.</p>
+      <label className="form"><textarea value={qualityManualSummary} onChange={e => onSummaryChange(e.target.value)} rows={3} /></label>
       <div style={{ marginTop: 8 }}><button type="button" onClick={onSaveSummary}>Save summary</button></div>
     </div>
-    {CORE_DOC_LAUNCH.map(ct => {
-      const existing = docs.filter(d => (d.document_type || '') === ct.type && d.status !== 'obsolete');
-      return <div className="card" key={ct.type} style={{ marginTop: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <h3 style={{ margin: 0 }}>{ct.label}</h3>
-          <button type="button" onClick={() => nav(`/documents?new=${encodeURIComponent(ct.type)}`)}>{existing.length ? 'Register another' : 'Register in Documents & Records'}</button>
-        </div>
-        {existing.length === 0
-          ? <p className="hint" style={{ marginBottom: 0 }}>Not registered yet.</p>
-          : <table className="data-table" style={{ marginTop: 10 }}><thead><tr><th>Code</th><th>Title</th><th>Version</th><th>Status</th><th></th></tr></thead><tbody>
-              {existing.map(d => <tr key={d.id}><td>{d.document_code || '—'}</td><td>{d.title}</td><td>{d.current_version_number || '—'}</td><td><span className="badge">{d.status}</span></td><td><Link className="hint" to="/documents">Open in Documents &amp; Records</Link></td></tr>)}
-            </tbody></table>}
-      </div>;
-    })}
+
+    {/* --- Choose a document already in the register --------------------- */}
+    <DetailModal
+      open={!!picking}
+      onClose={() => setPicking(null)}
+      width="narrow"
+      title={picking ? `Choose the ${picking.label}` : ''}
+      subtitle="From the controlled documents already in Documents & Records"
+    >
+      {picking && <>
+        {error && <div className="error">{error}</div>}
+        <label className="reg-search" style={{ width: '100%', marginBottom: 12 }}>
+          <Search size={15} />
+          <input value={pickQuery} onChange={e => setPickQuery(e.target.value)} placeholder="Search title, code or type…" autoFocus />
+        </label>
+        <ul className="core-pick">
+          {candidates.map(d => <li key={d.id}>
+            <button type="button" disabled={busy === `assign-${picking.id}`} onClick={() => void assign(picking, d.id)}>
+              <span className="core-pick-title">{d.title}</span>
+              <span className="core-pick-sub">{[d.document_code, d.document_type, d.status].filter(Boolean).join(' · ')}</span>
+            </button>
+          </li>)}
+          {candidates.length === 0 && <li className="muted" style={{ padding: 12 }}>
+            {docs.length === 0
+              ? 'No controlled documents are registered yet.'
+              : 'Nothing matches, or every document is already assigned to another core place.'}
+          </li>}
+        </ul>
+        <p className="hint" style={{ marginTop: 12 }}>
+          Not there? <button type="button" className="linklike" onClick={() => { setPicking(null); nav(`/documents?new=${encodeURIComponent(picking.documentType || picking.label)}`); }}>Register it in Documents &amp; Records</button> first.
+        </p>
+      </>}
+    </DetailModal>
+
+    {/* --- Add a core document of the laboratory's own ------------------- */}
+    <DetailModal
+      open={adding}
+      onClose={() => setAdding(false)}
+      width="narrow"
+      title="Add a core document"
+      footer={<>
+        <button type="button" className="secondary" onClick={() => setAdding(false)}>Cancel</button>
+        <button type="button" disabled={!newSlot.label.trim() || busy === 'add'}
+          onClick={() => void run('add', () => api('/laboratory/core-documents', { method: 'POST', body: JSON.stringify(newSlot) }), `${newSlot.label} added.`).then(() => setAdding(false))}>
+          {busy === 'add' ? 'Adding…' : 'Add'}
+        </button>
+      </>}
+    >
+      <p className="dialog-lead muted">
+        A place for a document this laboratory treats as foundational — an ethics policy, a biobank manual,
+        a service-level agreement. You then point it at a document in the register.
+      </p>
+      <div className="form-grid">
+        <label className="wide">Name<input value={newSlot.label} onChange={e => setNewSlot({ ...newSlot, label: e.target.value })} placeholder="e.g. Ethics Policy" /></label>
+        <label className="wide">What it is <span className="muted">(optional)</span><input value={newSlot.description} onChange={e => setNewSlot({ ...newSlot, description: e.target.value })} /></label>
+      </div>
+    </DetailModal>
+
+    {/* --- Rename ------------------------------------------------------- */}
+    <DetailModal
+      open={!!renaming}
+      onClose={() => setRenaming(null)}
+      width="narrow"
+      title={renaming ? `Rename ${renaming.label}` : ''}
+      footer={<>
+        <button type="button" className="secondary" onClick={() => setRenaming(null)}>Cancel</button>
+        <button type="button" disabled={!renameTo.trim() || busy === 'rename'}
+          onClick={() => renaming && void run('rename', () => api(`/laboratory/core-documents/${renaming.id}`, { method: 'PUT', body: JSON.stringify({ label: renameTo }) }), 'Renamed.').then(() => setRenaming(null))}>
+          Save
+        </button>
+      </>}
+    >
+      <div className="form-grid"><label className="wide">Name<input value={renameTo} onChange={e => setRenameTo(e.target.value)} /></label></div>
+    </DetailModal>
   </div>;
+}
+
+/** The same overflow menu the personnel register uses, portalled so a card
+ *  cannot clip it. Kept small and local — one menu, three items. */
+function RowMenuLite({ label, children }: { label: string; children: (close: () => void) => React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const W = 232;
+  useEffect(() => {
+    if (!open) { setPos(null); return; }
+    const place = () => {
+      const r = trigger.current?.getBoundingClientRect();
+      if (!r) return;
+      if (r.bottom < 0 || r.top > window.innerHeight) { setOpen(false); return; }
+      const top = window.innerHeight - r.bottom < 130 && r.top > 130 ? r.top - 130 : r.bottom + 6;
+      setPos({ top, left: Math.max(8, Math.min(r.right - W, window.innerWidth - W - 8)) });
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+      document.removeEventListener('keydown', onKey, true);
+    };
+  }, [open]);
+  return <>
+    <button type="button" ref={trigger} className="tiny reg-more" aria-label={label} aria-haspopup="menu" aria-expanded={open}
+      onClick={() => setOpen(o => !o)}>⋯</button>
+    {open && createPortal(<>
+      <div className="reg-menu-scrim" onClick={() => setOpen(false)} />
+      <div className="reg-menu" role="menu" style={{ top: pos?.top ?? -9999, left: pos?.left ?? -9999, width: W, visibility: pos ? 'visible' : 'hidden' }}>
+        {children(() => setOpen(false))}
+      </div>
+    </>, document.body)}
+  </>;
 }
 
 // Laboratory logo — uploaded once and embedded on printed rosters, schedules

@@ -1216,6 +1216,100 @@ export function commonRoutes() {
     return docId;
   }
 
+  // ===== Core laboratory documents =====
+  //
+  // A slot is a named place a laboratory expects a document to be — Quality
+  // Manual, Laboratory Handbook, Safety Manual, and whatever else it calls
+  // core. It points at ONE controlled document that already lives in the
+  // register, so a manual is registered once and appears wherever it is
+  // expected, rather than being uploaded again for each screen that wants it.
+  router.get('/laboratory/core-documents', requireAuth, (_req, res) => {
+    res.json(getDb().prepare(`
+      SELECT s.id, s.slot_key slotKey, s.label, s.description, s.document_type documentType,
+        s.document_id documentId, s.display_order displayOrder, s.is_system isSystem, s.assigned_at assignedAt,
+        d.document_code documentCode, d.title documentTitle, d.status documentStatus,
+        d.current_version_id currentVersionId, d.next_review_date nextReviewDate,
+        v.version_number versionNumber, v.file_id fileId, f.original_name fileName, f.mime_type fileMime
+      FROM core_document_slots s
+      LEFT JOIN documents d ON d.id = s.document_id
+      LEFT JOIN document_versions v ON v.id = d.current_version_id
+      LEFT JOIN files f ON f.id = v.file_id
+      ORDER BY s.display_order, s.id`).all());
+  });
+
+  // Add a slot of the laboratory's own — "Ethics Policy", "Biobank Manual",
+  // whatever this laboratory treats as foundational.
+  router.post('/laboratory/core-documents', requirePermission('settings', 'edit'), (req, res) => {
+    const label = String(req.body?.label ?? '').trim();
+    if (!label) return res.status(400).json({ error: 'A name for the core document is required.' });
+    const slotKey = (String(req.body?.slotKey ?? label).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || `core_${Date.now()}`).slice(0, 60);
+    const db = getDb();
+    if (db.prepare('SELECT id FROM core_document_slots WHERE slot_key = ?').get(slotKey)) {
+      return res.status(400).json({ error: 'There is already a core document with that name.' });
+    }
+    const order = (db.prepare('SELECT COALESCE(MAX(display_order), 0) + 1 n FROM core_document_slots').get() as { n: number }).n;
+    const r = db.prepare('INSERT INTO core_document_slots (slot_key, label, description, document_type, display_order, is_system) VALUES (?, ?, ?, ?, ?, 0)')
+      .run(slotKey, label, req.body?.description ?? null, req.body?.documentType ?? null, order);
+    audit(req, { action: 'create', entity: 'core_document_slots', entityId: r.lastInsertRowid, newValue: { slotKey, label } });
+    res.status(201).json({ id: Number(r.lastInsertRowid), slotKey });
+  });
+
+  router.put('/laboratory/core-documents/:id', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const slot = db.prepare('SELECT * FROM core_document_slots WHERE id = ?').get(req.params.id) as any;
+    if (!slot) return res.status(404).json({ error: 'Core document not found' });
+    const sets: string[] = []; const params: unknown[] = [];
+    if (req.body?.label !== undefined) {
+      const label = String(req.body.label).trim();
+      if (!label) return res.status(400).json({ error: 'A name is required.' });
+      sets.push('label = ?'); params.push(label);
+    }
+    if (req.body?.description !== undefined) { sets.push('description = ?'); params.push(req.body.description || null); }
+    if (req.body?.documentType !== undefined) { sets.push('document_type = ?'); params.push(req.body.documentType || null); }
+    if (req.body?.displayOrder !== undefined) { sets.push('display_order = ?'); params.push(Number(req.body.displayOrder) || 0); }
+    if (!sets.length) return res.json({ ok: true });
+    db.prepare(`UPDATE core_document_slots SET ${sets.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...params, slot.id);
+    audit(req, { action: 'edit', entity: 'core_document_slots', entityId: slot.id, oldValue: slot, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  router.delete('/laboratory/core-documents/:id', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const slot = db.prepare('SELECT * FROM core_document_slots WHERE id = ?').get(req.params.id) as any;
+    if (!slot) return res.status(404).json({ error: 'Core document not found' });
+    // The three standard ones stay: a laboratory without a place for its
+    // quality manual is not a state worth being able to reach by accident.
+    if (slot.is_system === 1) return res.status(400).json({ error: `“${slot.label}” is one of the standard core documents and cannot be removed. You can rename it, or clear the document assigned to it.` });
+    if (slot.document_id) db.prepare('UPDATE documents SET core_slot_key = NULL WHERE id = ?').run(slot.document_id);
+    db.prepare('DELETE FROM core_document_slots WHERE id = ?').run(slot.id);
+    audit(req, { action: 'delete', entity: 'core_document_slots', entityId: slot.id, oldValue: slot });
+    res.json({ ok: true });
+  });
+
+  // Point a slot at a document already in the register — the whole reason this
+  // exists. `documentId: null` clears it.
+  router.put('/laboratory/core-documents/:id/document', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const slot = db.prepare('SELECT * FROM core_document_slots WHERE id = ?').get(req.params.id) as any;
+    if (!slot) return res.status(404).json({ error: 'Core document not found' });
+    const documentId = idOrNull(req.body?.documentId);
+    if (documentId) {
+      const doc = db.prepare('SELECT id, title FROM documents WHERE id = ?').get(documentId) as { id: number; title: string } | undefined;
+      if (!doc) return res.status(400).json({ error: 'That document is not in the register.' });
+      const taken = db.prepare('SELECT label FROM core_document_slots WHERE document_id = ? AND id != ?').get(documentId, slot.id) as { label: string } | undefined;
+      if (taken) return res.status(400).json({ error: `“${doc.title}” is already the ${taken.label}. A document fills one core place at a time.` });
+    }
+    const tx = db.transaction(() => {
+      if (slot.document_id) db.prepare('UPDATE documents SET core_slot_key = NULL WHERE id = ?').run(slot.document_id);
+      db.prepare('UPDATE core_document_slots SET document_id = ?, assigned_at = CURRENT_TIMESTAMP, assigned_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .run(documentId, documentId ? req.user!.id : null, slot.id);
+      if (documentId) db.prepare('UPDATE documents SET core_slot_key = ? WHERE id = ?').run(slot.slot_key, documentId);
+    });
+    tx();
+    audit(req, { action: 'edit', entity: 'core_document_slots', entityId: slot.id, oldValue: { documentId: slot.document_id }, newValue: { documentId } });
+    res.json({ ok: true });
+  });
+
   router.get('/laboratory-documents', requireAuth, (req, res) => {
     const category = typeof req.query.category === 'string' ? req.query.category : null;
     const sql = `SELECT d.*, f.original_name AS file_name, f.mime_type AS file_mime, f.size_bytes AS file_size FROM laboratory_documents d LEFT JOIN files f ON f.id = d.file_id ${category ? 'WHERE d.category = ?' : ''} ORDER BY d.created_at DESC`;

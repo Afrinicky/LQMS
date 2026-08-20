@@ -5014,6 +5014,62 @@ CREATE INDEX IF NOT EXISTS idx_complaint_events_complaint ON complaint_events(co
 `);
 
   // ===================================================================
+  // Core laboratory documents
+  // -------------------------------------------------------------------
+  // The Quality Manual, the Laboratory Handbook and the Safety Manual are the
+  // documents a laboratory is asked for first, and every one of them is an
+  // ordinary controlled document that already lives in the register. What was
+  // missing was the connection: the Core Documents screen matched on the
+  // document TYPE string, so a manual filed as "Policy" or "Manual" simply did
+  // not appear, and the only offered remedy was to upload it a second time.
+  //
+  // A slot is a named place a laboratory expects a document to be. It points at
+  // one document in the register — chosen from what is already there — and the
+  // set of slots is the laboratory's own, because the three standard ones are
+  // not the only documents a laboratory calls core.
+  // ===================================================================
+  database.exec(`
+CREATE TABLE IF NOT EXISTS core_document_slots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  slot_key TEXT NOT NULL UNIQUE,
+  label TEXT NOT NULL,
+  description TEXT,
+  document_type TEXT,
+  document_id INTEGER REFERENCES documents(id),
+  display_order INTEGER NOT NULL DEFAULT 0,
+  is_system INTEGER NOT NULL DEFAULT 0,
+  assigned_at TEXT,
+  assigned_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+`);
+  // The three every laboratory has. `is_system` only stops them being deleted;
+  // they can be renamed and re-pointed like any other.
+  const seedSlot = database.prepare(`INSERT OR IGNORE INTO core_document_slots (slot_key, label, description, document_type, display_order, is_system)
+    VALUES (?, ?, ?, ?, ?, 1)`);
+  seedSlot.run('quality_manual', 'Quality Manual', 'The scope, structure and policy of the quality management system.', 'Quality Manual', 1);
+  seedSlot.run('laboratory_handbook', 'Laboratory Handbook', 'What the laboratory offers and how to use it — the users\' guide to the service.', 'Handbook', 2);
+  seedSlot.run('safety_manual', 'Safety Manual', 'How the laboratory keeps its people and its visitors safe.', 'Safety Manual', 3);
+
+  // A document that already sits in a slot should say so on its own record, so
+  // the register can mark it and the viewer can be reached from either side.
+  const docCoreCols = new Set((database.prepare('PRAGMA table_info(documents)').all() as Array<{ name: string }>).map(c => c.name));
+  if (!docCoreCols.has('core_slot_key')) database.exec('ALTER TABLE documents ADD COLUMN core_slot_key TEXT');
+  // Adopt whatever already matches a slot's document type, so a laboratory that
+  // registered its manuals before this existed finds them already in place.
+  database.exec(`UPDATE core_document_slots SET document_id = (
+      SELECT d.id FROM documents d
+      WHERE d.document_type = core_document_slots.document_type
+        AND d.status NOT IN ('obsolete', 'archived')
+      ORDER BY d.id DESC LIMIT 1)
+    WHERE document_id IS NULL AND document_type IS NOT NULL`);
+  database.exec(`UPDATE documents SET core_slot_key = (
+      SELECT s.slot_key FROM core_document_slots s WHERE s.document_id = documents.id)
+    WHERE core_slot_key IS NULL
+      AND EXISTS (SELECT 1 FROM core_document_slots s WHERE s.document_id = documents.id)`);
+
+  // ===================================================================
   // Unit activities, duty reminders and the sound catalogue
   // -------------------------------------------------------------------
   // The recurring work a unit does — environmental charting, equipment checks,
