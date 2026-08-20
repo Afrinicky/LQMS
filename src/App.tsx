@@ -12,6 +12,7 @@ import { API_BASE, getSetupStatus } from './services/api';
 import { LoginPage, SetupPage } from './pages/AuthPages';
 import { Dashboard, Home, ModulePage } from './pages/CorePages';
 import { ActionTracker, DocumentImport, EvidenceUpload, MyLaboratory, PeopleAccess, SectionConfig, ConfigListsPage, SystemSettings, RosterSettings } from './pages/SettingsPages';
+import StockSettingsPage from './pages/StockSettingsPage';
 import { ActivitySettingsPage } from './pages/ActivitySettingsPage';
 import { ComplaintsPage, RisksPage, QmsActionTracker } from './pages/QMSPages';
 import { NcCapaPage } from './pages/NcCapaPages';
@@ -236,6 +237,7 @@ function AppRoutes() {
         <Route path="people" element={<RequirePermission module="settings" action="edit"><PeopleAccess/></RequirePermission>}/>
         <Route path="sections" element={<RequirePermission module="settings" action="edit"><SectionConfig/></RequirePermission>}/>
         <Route path="config-lists" element={<RequirePermission module="settings" action="edit"><ConfigListsPage/></RequirePermission>}/>
+        <Route path="stock" element={<RequirePermission module="supplier_inventory" action="edit"><StockSettingsPage/></RequirePermission>}/>
         <Route path="scheduling" element={<RequirePermission module="personnel" action="edit"><RosterSettings/></RequirePermission>}/>
         <Route path="activities" element={<RequirePermission module="personnel.activities" action="view"><ActivitySettingsPage/></RequirePermission>}/>
         <Route path="system" element={<RequirePermission module="settings" action="edit"><SystemSettings/></RequirePermission>}/>

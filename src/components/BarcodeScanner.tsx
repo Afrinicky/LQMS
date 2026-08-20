@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 // Barcode input that works with the two common lab setups:
 //   1. USB "keyboard-wedge" scanners — they type the code into the focused
@@ -22,8 +22,11 @@ export default function BarcodeScanner({ onScan, placeholder = 'Scan or type a b
 
   useEffect(() => { if (autoFocus) inputRef.current?.focus(); }, [autoFocus]);
 
-  function submit(e: FormEvent) {
-    e.preventDefault();
+  // Not a <form>. A scanner is often placed inside another form — adding an
+  // item while scanning the barcode off the box — and a form inside a form is
+  // invalid, so Enter is handled on the field itself and kept from reaching
+  // whatever form surrounds it.
+  function submit() {
     const v = value.trim();
     if (v) { onScan(v); setValue(''); inputRef.current?.focus(); }
   }
@@ -62,12 +65,13 @@ export default function BarcodeScanner({ onScan, placeholder = 'Scan or type a b
   useEffect(() => () => stopCam(), []);
 
   return <div>
-    <form onSubmit={submit} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-      <input ref={inputRef} value={value} onChange={e => setValue(e.target.value)} placeholder={placeholder} style={{ minWidth: 220 }} />
-      <button type="submit">Enter</button>
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+      <input ref={inputRef} value={value} onChange={e => setValue(e.target.value)} placeholder={placeholder} style={{ minWidth: 220 }}
+        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }} />
+      <button type="button" onClick={submit}>Enter</button>
       <button type="button" className="secondary" onClick={() => (camOn ? stopCam() : startCam())}>{camOn ? 'Stop camera' : '📷 Scan with camera'}</button>
       <span className="muted" style={{ fontSize: 12 }}>USB scanners type into the box automatically.</span>
-    </form>
+    </div>
     {camError && <div className="error" style={{ marginTop: 6 }}>{camError}</div>}
     {camOn && <div style={{ marginTop: 8 }}><video ref={videoRef} style={{ width: '100%', maxWidth: 360, borderRadius: 8, border: '1px solid #ccc' }} muted playsInline /></div>}
   </div>;

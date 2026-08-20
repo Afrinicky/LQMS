@@ -37,6 +37,7 @@
     "check:backup-destinations": "tsx scripts/backup-destinations-check.mjs",
     "check:people-office": "node scripts/office-edit-check.mjs",
     "check:complaints": "node scripts/complaints-check.mjs",
+    "check:inventory": "node scripts/inventory-check.mjs",
     "check:core-docs": "node scripts/core-documents-check.mjs",
     "check:jobs": "node scripts/background-jobs-check.mjs",
     "validate:oq": "node scripts/validation/oq-suite.mjs",

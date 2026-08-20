@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, BarChart, CHART_COLORS, ModuleAlerts, DetailModal } from '../components/ui';
 import { useModules } from '../hooks/useModules';
-import { api, API_BASE, getToken } from '../services/api';
+import { api, API_BASE, getToken, ApiError } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import ScannedRecordUpload from '../components/ScannedRecordUpload';
 import XlsxToolbar from '../components/XlsxToolbar';
@@ -28,6 +28,8 @@ import {
   DUTY_LABELS, DUTY_CLAUSES, DUTY_HINTS, dutiesFor, categoryFromLegacy, isArchetype,
 } from '../../shared/constants/equipment';
 import type { ConfigOption } from '../../shared/constants/configLists';
+import { BARCODE_SOURCE_LABELS, MOVEMENT_LABELS, STORAGE_KIND_LABELS, effectiveBarcode } from '../../shared/constants/inventory';
+import type { BarcodePolicy } from '../../shared/constants/inventory';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
@@ -1278,7 +1280,30 @@ export function InventoryPage() {
   useFocusTarget(items.length + batches.length + suppliers.length);
   const [summary, setSummary] = useState<OperationsSummary | null>(null);
   const [selected, setSelected] = useState<InventoryItemDetail | null>(null);
-  const [itemForm, setItemForm] = useState({ name: '', category: '', supplierId: '', locationId: '', sectionId: '', quantity: 0, unit: '', minimumStock: 0, reorderLevel: 0, expiryDate: '', storageRequirement: '', status: 'available' });
+  const [itemForm, setItemForm] = useState({
+    name: '', category: '', supplierId: '', storageLocationId: '', sectionId: '', quantity: 0, unit: '',
+    minimumStock: 0, reorderLevel: 0, expiryDate: '', storageRequirement: '', status: 'available',
+    manufacturer: '', catalogueNumber: '', barcodeSource: 'system', productBarcode: '',
+  });
+  // Where stock lives, and what a stock item may be called — both the
+  // laboratory's own, configured in Settings → Stock & Storage and Dropdown Lists.
+  const [storagePlaces, setStoragePlaces] = useState<Array<{ id: number; path: string; kind: string }>>([]);
+  const [categories, setCategories] = useState<ConfigOption[]>([]);
+  const [units, setUnits] = useState<ConfigOption[]>([]);
+  const [barcodePolicy, setBarcodePolicy] = useState<BarcodePolicy>({ defaultSource: 'system', allowPerItem: true });
+  const [regBusy, setRegBusy] = useState('');
+  const [regResult, setRegResult] = useState<{ created: number; updated: number; skipped: number; errors: string[] } | null>(null);
+  const importRef = useRef<HTMLInputElement>(null);
+  const [itemSearch, setItemSearch] = useState('');
+  const [fefoWarning, setFefoWarning] = useState<{ message: string; batchId: number } | null>(null);
+  // The register is searched over what a storekeeper can see on the shelf —
+  // the name, the code, either barcode, the category and where it is kept.
+  const itemRows = useMemo(() => {
+    const q = itemSearch.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter(i => [i.name, i.item_code, i.product_barcode, i.category, i.storage_path, i.manufacturer, i.catalogue_number]
+      .some(v => String(v ?? '').toLowerCase().includes(q)));
+  }, [items, itemSearch]);
   const [batchForm, setBatchForm] = useState({ itemId: '', batchNumber: '', lotNumber: '', supplierId: '', quantityReceived: 0, quantityAvailable: 0, dateReceived: '', expiryDate: '', storageLocationId: '' });
   const [movementForm, setMovementForm] = useState({ batchId: '', movementType: 'issue', quantity: 0, movementDate: '', issuedToSectionId: '', receivedByStaffId: '', reason: '' });
   const [supplierForm, setSupplierForm] = useState({ name: '', contactPerson: '', phone: '', email: '', address: '', itemCategory: '', evaluationRequired: false });
@@ -1300,6 +1325,12 @@ export function InventoryPage() {
       setItems(its); setBatches(bts); setSuppliers(sups);
       if (ops) setSummary(ops);
       api<StorageInspection[]>('/supplier-inventory/storage-inspections').then(setStorageInspections).catch(() => setStorageInspections([]));
+      api<Array<{ id: number; path: string; kind: string }>>('/supplier-inventory/storage-locations').then(setStoragePlaces).catch(() => setStoragePlaces([]));
+      api<ConfigOption[]>('/config/option-lists/inventory_category').then(setCategories).catch(() => setCategories([]));
+      api<ConfigOption[]>('/config/option-lists/inventory_unit').then(setUnits).catch(() => setUnits([]));
+      api<BarcodePolicy>('/supplier-inventory/barcode-policy')
+        .then(p => { setBarcodePolicy(p); setItemForm(f => ({ ...f, barcodeSource: p.defaultSource })); })
+        .catch(() => undefined);
     } catch (e) { setError((e as Error).message); }
     finally { setLoading(false); }
   }
@@ -1312,6 +1343,8 @@ export function InventoryPage() {
 
   if (!isEnabled('supplier_inventory')) return <DisabledModule />;
 
+  const categoryLabel = (value?: string) => categories.find(c => c.value === value)?.label ?? value ?? '—';
+
   async function openDetail(id: number) {
     try { setSelected(await api<InventoryItemDetail>(`/supplier-inventory/items/${id}`)); }
     catch (e) { setError((e as Error).message); }
@@ -1321,8 +1354,54 @@ export function InventoryPage() {
     e.preventDefault(); setError(null);
     try {
       await api('/supplier-inventory/items', { method: 'POST', body: JSON.stringify(itemForm) });
-      setItemForm({ name: '', category: '', supplierId: '', locationId: '', sectionId: '', quantity: 0, unit: '', minimumStock: 0, reorderLevel: 0, expiryDate: '', storageRequirement: '', status: 'available' });
+      setItemForm({
+        name: '', category: '', supplierId: '', storageLocationId: '', sectionId: '', quantity: 0, unit: '',
+        minimumStock: 0, reorderLevel: 0, expiryDate: '', storageRequirement: '', status: 'available',
+        manufacturer: '', catalogueNumber: '', barcodeSource: barcodePolicy.defaultSource, productBarcode: '',
+      });
       await load(); setTab('Item Register');
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  // The register as a spreadsheet — the laboratory's own rows, not a blank
+  // template: exporting gives back exactly what importing accepts, so the file
+  // that comes out can be edited and put straight back in.
+  async function downloadRegister() {
+    setError(null); setRegBusy('export'); setRegResult(null);
+    try {
+      const res = await fetch(`${API_BASE}/supplier-inventory/items/export`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : undefined });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({ error: res.statusText }))).error ?? res.statusText);
+      const named = (res.headers.get('Content-Disposition') || '').match(/filename="?([^"]+)"?/);
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement('a');
+      a.href = url; a.download = named ? named[1] : 'Stock_Item_Register.xlsx';
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    } catch (e) { setError((e as Error).message); }
+    finally { setRegBusy(''); }
+  }
+
+  async function importRegister(file: File) {
+    setError(null); setRegBusy('import'); setRegResult(null);
+    try {
+      const fd = new FormData(); fd.append('file', file);
+      const res = await fetch(`${API_BASE}/supplier-inventory/items/import`, {
+        method: 'POST', headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : undefined, body: fd,
+      });
+      const data = await res.json().catch(() => ({ error: res.statusText }));
+      if (!res.ok) throw new Error(data.error ?? res.statusText);
+      setRegResult(data);
+      await load();
+    } catch (e) { setError((e as Error).message); }
+    finally { setRegBusy(''); if (importRef.current) importRef.current.value = ''; }
+  }
+
+  // A scan is answered by the register, not by the list on screen — the code on
+  // the box and the code SECH_LIMS printed both resolve to the same item.
+  async function scanStock(code: string) {
+    setError(null);
+    try {
+      const hit = await api<{ kind: string; id: number; itemId?: number }>(`/supplier-inventory/scan/${encodeURIComponent(code.trim())}`);
+      await openDetail(hit.kind === 'batch' ? (hit.itemId ?? hit.id) : hit.id);
     } catch (e) { setError((e as Error).message); }
   }
 
@@ -1336,14 +1415,22 @@ export function InventoryPage() {
     } catch (e) { setError((e as Error).message); }
   }
 
-  async function submitMovement(e: FormEvent) {
+  async function submitMovement(e: FormEvent, overrideFefo = false) {
     e.preventDefault(); setError(null);
     if (!movementForm.batchId) return setError('Select a batch');
     try {
-      await api(`/supplier-inventory/batches/${movementForm.batchId}/movement`, { method: 'POST', body: JSON.stringify(movementForm) });
+      await api(`/supplier-inventory/batches/${movementForm.batchId}/movement`, { method: 'POST', body: JSON.stringify({ ...movementForm, overrideFefo }) });
       setMovementForm({ batchId: '', movementType: 'issue', quantity: 0, movementDate: '', issuedToSectionId: '', receivedByStaffId: '', reason: '' });
+      setFefoWarning(null);
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (err) {
+      // 409 is not a failure — it is the store telling the person there is an
+      // older box behind this one. They may still have a reason to skip it,
+      // and the reason is written into the movement when they do.
+      if (err instanceof ApiError && err.status === 409 && err.data.fefo) {
+        setFefoWarning({ message: err.message, batchId: (err.data.fefo as { batchId: number }).batchId });
+      } else setError((err as Error).message);
+    }
   }
 
   async function submitSupplier(e: FormEvent) {
@@ -1406,18 +1493,43 @@ export function InventoryPage() {
     {tab === 'Item Register' && <div className="card">
       <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <h3 style={{ margin: 0 }}>Items</h3>
-        {can('supplier_inventory', 'print') && <button style={{ marginLeft: 'auto' }} type="button" className="secondary" title="Print Code 128 barcode labels for all stock items" onClick={() => printLabelSheet(items.map(it => ({ barcodeValue: it.item_code, title: it.name, lines: [it.item_code, it.category || ''].filter(Boolean) })), { widthMm: 50, heightMm: 25, title: 'Stock barcode labels' })}>🏷️ Print barcode labels</button>}
+        <div className="reg-head-actions" style={{ marginLeft: 'auto' }}>
+          {can('supplier_inventory', 'export') && <button type="button" className="secondary" disabled={regBusy === 'export'}
+            title="Download the register the laboratory actually holds — the same file the import accepts"
+            onClick={downloadRegister}>{regBusy === 'export' ? 'Exporting…' : 'Export register'}</button>}
+          {can('supplier_inventory', 'create') && <>
+            <button type="button" disabled={regBusy === 'import'} onClick={() => importRef.current?.click()}>
+              {regBusy === 'import' ? 'Importing…' : 'Import'}
+            </button>
+            <input ref={importRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }}
+              onChange={e => { const f = e.target.files?.[0]; if (f) void importRegister(f); }} />
+          </>}
+          {can('supplier_inventory', 'print') && <button type="button" className="secondary" title="Print Code 128 labels — each item's own barcode, whether the product's or one SECH_LIMS generated" onClick={() => printLabelSheet(itemRows.map(it => ({ barcodeValue: effectiveBarcode(it), title: it.name, lines: [effectiveBarcode(it), it.storage_path || it.category || ''].filter(Boolean) })), { widthMm: 50, heightMm: 25, title: 'Stock barcode labels' })}>🏷️ Print barcode labels</button>}
+        </div>
       </div>
-      <div style={{ margin: '4px 0 10px' }}><BarcodeScanner placeholder="Scan a stock item barcode…" autoFocus={false} onScan={code => { const m = items.find(i => i.item_code?.toLowerCase() === code.trim().toLowerCase()); if (m) openDetail(m.id); else setError(`No item found for barcode "${code}".`); }} /></div>
-      {loading ? <p>Loading…</p> : items.length === 0 ? <p>No items yet.</p> :
-        <table className="table"><thead><tr><th>Code</th><th>Name</th><th>Category</th><th>Qty</th><th>Unit</th><th>Min</th><th>Reorder</th><th>Expiry</th><th></th></tr></thead><tbody>
-          {items.map(i => <tr key={i.id} {...focusAttr('inventory_items', i.id)}><td>{i.item_code}</td><td>{i.name}</td><td>{i.category || '—'}</td>
+      <p className="muted" style={{ marginTop: 0 }}>Rows are matched on item code — a code the register already holds is updated, a blank one is created. Export first, edit that file, import it back.</p>
+      {regResult && <div className="notice-ok">
+        Import complete — <strong>{regResult.created}</strong> created, <strong>{regResult.updated}</strong> updated, <strong>{regResult.skipped}</strong> skipped
+        {regResult.errors.length > 0 && <ul className="link-list">{regResult.errors.slice(0, 8).map((er, i) => <li key={i}>{er}</li>)}</ul>}
+      </div>}
+      <div className="reg-head-actions" style={{ margin: '4px 0 10px', gap: 10 }}>
+        <label className="reg-search" style={{ flex: '1 1 240px' }}>
+          <input placeholder="Search name, code, category, storage place…" value={itemSearch} onChange={e => setItemSearch(e.target.value)} />
+        </label>
+        <div style={{ flex: '1 1 240px' }}><BarcodeScanner placeholder="Scan a stock item barcode…" autoFocus={false} onScan={scanStock} /></div>
+      </div>
+      {loading ? <p>Loading…</p> : items.length === 0 ? <p>No items yet.</p> : itemRows.length === 0 ? <p>Nothing matches “{itemSearch}”.</p> :
+        <div className="table-scroll"><table className="table"><thead><tr><th>Barcode</th><th>Name</th><th>Category</th><th>Where it is kept</th><th>Qty</th><th>Unit</th><th>Min</th><th>Reorder</th><th>Expiry</th><th></th></tr></thead><tbody>
+          {itemRows.map(i => <tr key={i.id} {...focusAttr('inventory_items', i.id)}>
+            <td>{effectiveBarcode(i) || i.item_code}{i.barcode_source === 'product' && <span className="badge" style={{ marginLeft: 6 }}>product</span>}</td>
+            <td>{i.name}</td><td>{categoryLabel(i.category)}</td>
+            <td>{i.storage_path || '—'}</td>
             <td>{i.quantity}{i.low_stock && <span className="badge" style={{ marginLeft: 6, background: '#fff7df', color: '#6b4b05' }}>low</span>}</td>
             <td>{i.unit || '—'}</td><td>{i.minimum_stock || 0}</td><td>{i.reorder_level || 0}</td>
             <td>{i.expiry_date || '—'} {i.expiry_status && i.expiry_status !== 'valid' && <span className="badge" style={{ background: i.expiry_status === 'expired' ? '#fde2e2' : '#fff7df', color: i.expiry_status === 'expired' ? 'var(--danger)' : '#6b4b05' }}>{i.expiry_status.replace('_', ' ')}</span>}</td>
             <td><button type="button" className="secondary" onClick={() => openDetail(i.id)}>Open</button></td>
           </tr>)}
-        </tbody></table>}
+        </tbody></table></div>}
       {selected && <InventoryDetailPanel item={selected} staff={staff} onClose={() => setSelected(null)} acceptBatch={acceptBatch} createBatchNc={createBatchNc} />}
     </div>}
 
@@ -1425,15 +1537,50 @@ export function InventoryPage() {
       <h3>New inventory item</h3>
       <form className="form" onSubmit={submitItem}>
         <label>Name<input value={itemForm.name} onChange={e => setItemForm({ ...itemForm, name: e.target.value })} required /></label>
-        <label>Category<input value={itemForm.category} onChange={e => setItemForm({ ...itemForm, category: e.target.value })} required /></label>
-        <label>Unit of measure<input value={itemForm.unit} onChange={e => setItemForm({ ...itemForm, unit: e.target.value })} required /></label>
+        <label>Category<select value={itemForm.category} onChange={e => setItemForm({ ...itemForm, category: e.target.value })} required>
+          <option value="">Select category</option>
+          {categories.map(c => <option key={c.id} value={c.value}>{c.label}</option>)}
+        </select>{categories.length === 0 && <span className="muted">No categories yet — add them in Settings → Dropdown Lists.</span>}</label>
+        <label>Unit of measure<select value={itemForm.unit} onChange={e => setItemForm({ ...itemForm, unit: e.target.value })} required>
+          <option value="">Select unit</option>
+          {units.map(u => <option key={u.id} value={u.value}>{u.label}</option>)}
+        </select></label>
+        <label>Manufacturer<input value={itemForm.manufacturer} onChange={e => setItemForm({ ...itemForm, manufacturer: e.target.value })} /></label>
+        <label>Catalogue number<input value={itemForm.catalogueNumber} onChange={e => setItemForm({ ...itemForm, catalogueNumber: e.target.value })} placeholder="Manufacturer's reference" /></label>
         <label>Supplier<select value={itemForm.supplierId} onChange={e => setItemForm({ ...itemForm, supplierId: e.target.value })}><option value="">Select supplier</option>{suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-        <label>Location<select value={itemForm.locationId} onChange={e => setItemForm({ ...itemForm, locationId: e.target.value })}><option value="">Select location</option>{locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
+        <label>Where it is kept<select value={itemForm.storageLocationId} onChange={e => setItemForm({ ...itemForm, storageLocationId: e.target.value })}>
+          <option value="">Select a store, shelf or fridge</option>
+          {storagePlaces.map(pl => <option key={pl.id} value={pl.id}>{pl.path}{pl.kind && pl.kind !== 'shelf' ? ` (${STORAGE_KIND_LABELS[pl.kind] ?? pl.kind})` : ''}</option>)}
+        </select>{storagePlaces.length === 0 && <span className="muted">No storage places yet — add the stores, shelves and fridges in Settings → Stock &amp; Storage.</span>}</label>
         <label>Section<select value={itemForm.sectionId} onChange={e => setItemForm({ ...itemForm, sectionId: e.target.value })}><option value="">Select section</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Minimum stock<input type="number" value={itemForm.minimumStock} onChange={e => setItemForm({ ...itemForm, minimumStock: Number(e.target.value) })} /></label>
         <label>Reorder level<input type="number" value={itemForm.reorderLevel} onChange={e => setItemForm({ ...itemForm, reorderLevel: Number(e.target.value) })} /></label>
         <label>Storage requirement<input value={itemForm.storageRequirement} onChange={e => setItemForm({ ...itemForm, storageRequirement: e.target.value })} placeholder="e.g. 2-8°C" /></label>
         <label>Status<select value={itemForm.status} onChange={e => setItemForm({ ...itemForm, status: e.target.value })}><option value="available">Available</option><option value="reserved">Reserved</option><option value="unavailable">Unavailable</option></select></label>
+
+        {/* Some boxes arrive with a barcode already on them and some do not.
+            Which one this item answers to is decided here, once. */}
+        <fieldset className="bc-pick">
+          <legend>Barcode</legend>
+          {barcodePolicy.allowPerItem
+            ? <div className="bc-pick-row">
+                {(['system', 'product'] as const).map(src => <label key={src} className={itemForm.barcodeSource === src ? 'on' : ''}>
+                  <input type="radio" name="barcodeSource" value={src} checked={itemForm.barcodeSource === src}
+                    onChange={() => setItemForm({ ...itemForm, barcodeSource: src })} />
+                  <span>{BARCODE_SOURCE_LABELS[src]}</span>
+                </label>)}
+              </div>
+            : <p className="muted">This laboratory uses <strong>{BARCODE_SOURCE_LABELS[barcodePolicy.defaultSource]}</strong> for every item. Change that in Settings → Stock &amp; Storage.</p>}
+          {itemForm.barcodeSource === 'product'
+            ? <>
+                <label>Product barcode<input value={itemForm.productBarcode} onChange={e => setItemForm({ ...itemForm, productBarcode: e.target.value })} required placeholder="Scan or type the barcode on the box"
+                  onKeyDown={e => { if (e.key === 'Enter') e.preventDefault(); }} /></label>
+                <BarcodeScanner placeholder="…or scan it here" autoFocus={false} onScan={code => setItemForm(f => ({ ...f, productBarcode: code.trim() }))} />
+              </>
+            : <label>Product barcode <span className="muted">(optional — recorded so a scan of the box still finds the item)</span>
+                <input value={itemForm.productBarcode} onChange={e => setItemForm({ ...itemForm, productBarcode: e.target.value })} />
+              </label>}
+        </fieldset>
         <button type="submit">Save item</button>
       </form>
     </div>}
@@ -1450,12 +1597,13 @@ export function InventoryPage() {
           <label>Quantity available<input type="number" value={batchForm.quantityAvailable} onChange={e => setBatchForm({ ...batchForm, quantityAvailable: Number(e.target.value) })} required /></label>
           <label>Date received<input type="date" value={batchForm.dateReceived} onChange={e => setBatchForm({ ...batchForm, dateReceived: e.target.value })} required /></label>
           <label>Expiry date<input type="date" value={batchForm.expiryDate} onChange={e => setBatchForm({ ...batchForm, expiryDate: e.target.value })} /></label>
-          <label>Storage location<select value={batchForm.storageLocationId} onChange={e => setBatchForm({ ...batchForm, storageLocationId: e.target.value })}><option value="">Select location</option>{locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
+          <label>Where it is put away<select value={batchForm.storageLocationId} onChange={e => setBatchForm({ ...batchForm, storageLocationId: e.target.value })}><option value="">Select a store, shelf or fridge</option>{storagePlaces.map(pl => <option key={pl.id} value={pl.id}>{pl.path}{pl.kind && pl.kind !== 'shelf' ? ` (${STORAGE_KIND_LABELS[pl.kind] ?? pl.kind})` : ''}</option>)}</select></label>
           <button type="submit">Save batch</button>
         </form>
       </div>
       <div className="card">
         <h3>Batches (FEFO order)</h3>
+        <p className="muted" style={{ marginTop: 0 }}>A delivery is quarantined until it has been inspected and accepted. Until then it cannot be issued — only discarded or returned. Stock is issued oldest-expiry-first.</p>
         {batches.length === 0 ? <p>No batches recorded.</p> :
           <table className="table"><thead><tr><th>Item</th><th>Batch</th><th>Lot</th><th>Available</th><th>Expiry</th><th>Acceptance</th><th>Actions</th></tr></thead><tbody>
             {batches.map(b => <tr key={b.id} {...focusAttr('inventory_batches', b.id)}><td>{b.item_name || b.item_id}</td><td>{b.batch_number || '—'}</td><td>{b.lot_number || '—'}</td>
@@ -1477,13 +1625,31 @@ export function InventoryPage() {
     {tab === 'Stock Movements' && <div className="card">
       <h3>Record stock movement</h3>
       <form className="form" onSubmit={submitMovement}>
-        <label>Batch<select value={movementForm.batchId} onChange={e => setMovementForm({ ...movementForm, batchId: e.target.value })} required><option value="">Select batch</option>{batches.map(b => <option key={b.id} value={b.id}>{b.item_name} — {b.batch_number || `Batch #${b.id}`} (avail {b.quantity_available})</option>)}</select></label>
-        <label>Movement type<select value={movementForm.movementType} onChange={e => setMovementForm({ ...movementForm, movementType: e.target.value })}>{['issue', 'consume', 'discard', 'waste', 'transfer_out', 'receive', 'return', 'adjust_in', 'transfer_in'].map(t => <option key={t} value={t}>{t.replace('_', ' ')}</option>)}</select></label>
+        {/* The state of a batch is on the option itself, so a storekeeper is
+            not offered a quarantined or expired box and refused a click later. */}
+        <label>Batch<select value={movementForm.batchId} onChange={e => { setMovementForm({ ...movementForm, batchId: e.target.value }); setFefoWarning(null); }} required>
+          <option value="">Select batch</option>
+          {batches.map(b => {
+            const flag = b.acceptance_status === 'rejected' ? 'rejected on receipt'
+              : (b.acceptance_status === 'pending' || b.acceptance_status === 'quarantined') ? 'in quarantine'
+              : b.expiry_status === 'expired' ? 'expired'
+              : b.expiry_status === 'expiring_soon' ? 'expires soon' : '';
+            return <option key={b.id} value={b.id}>
+              {b.item_name} — {b.batch_number || `Batch #${b.id}`} · {b.quantity_available} available{flag ? ` · ${flag}` : ''}
+            </option>;
+          })}
+        </select></label>
+        <label>Movement type<select value={movementForm.movementType} onChange={e => { setMovementForm({ ...movementForm, movementType: e.target.value }); setFefoWarning(null); }}>{['issue', 'consume', 'discard', 'waste', 'transfer_out', 'receive', 'return', 'adjust_in', 'transfer_in'].map(t => <option key={t} value={t}>{MOVEMENT_LABELS[t] ?? t.replace('_', ' ')}</option>)}</select></label>
         <label>Quantity<input type="number" value={movementForm.quantity} onChange={e => setMovementForm({ ...movementForm, quantity: Number(e.target.value) })} required min={0.0001} step="any" /></label>
         <label>Movement date<input type="date" value={movementForm.movementDate} onChange={e => setMovementForm({ ...movementForm, movementDate: e.target.value })} /></label>
         <label>Issued to section<select value={movementForm.issuedToSectionId} onChange={e => setMovementForm({ ...movementForm, issuedToSectionId: e.target.value })}><option value="">Select section</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Received by<select value={movementForm.receivedByStaffId} onChange={e => setMovementForm({ ...movementForm, receivedByStaffId: e.target.value })}><option value="">Select staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Reason<input value={movementForm.reason} onChange={e => setMovementForm({ ...movementForm, reason: e.target.value })} /></label>
+        {fefoWarning && <div className="notice-warn">
+          <p style={{ margin: '0 0 8px' }}>{fefoWarning.message}</p>
+          <button type="button" className="secondary" onClick={() => { setMovementForm({ ...movementForm, batchId: String(fefoWarning.batchId) }); setFefoWarning(null); }}>Issue the older batch instead</button>{' '}
+          <button type="button" className="secondary" onClick={e => void submitMovement(e as unknown as FormEvent, true)}>Skip it anyway — record the reason</button>
+        </div>}
         <button type="submit">Record movement</button>
       </form>
     </div>}

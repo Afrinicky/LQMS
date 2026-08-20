@@ -34,6 +34,7 @@ export const SETTINGS_TABS: SettingsTab[] = [
   { to: '/settings/people', label: 'People & Access', module: 'settings', action: 'edit', administration: true, grantsEntry: true },
   { to: '/settings/sections', label: 'Section/Unit Configuration', module: 'settings', action: 'edit', administration: true, grantsEntry: true },
   { to: '/settings/config-lists', label: 'Dropdown Lists', module: 'settings', action: 'edit', administration: true, grantsEntry: true },
+  { to: '/settings/stock', label: 'Stock & Storage', module: 'supplier_inventory', action: 'edit', grantsEntry: true },
   { to: '/settings/scheduling', label: 'Roster & Scheduling', module: 'personnel', action: 'edit', grantsEntry: true },
   { to: '/settings/activities', label: 'Unit Activities & Reminders', module: 'personnel.activities', action: 'view', grantsEntry: true },
   { to: '/settings/system', label: 'System', module: 'settings', action: 'edit', administration: true, grantsEntry: true },
