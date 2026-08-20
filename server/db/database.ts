@@ -671,7 +671,9 @@ CREATE TABLE IF NOT EXISTS inventory_batches (
   acceptance_status TEXT NOT NULL DEFAULT 'pending',
   acceptance_checked_by_staff_id INTEGER REFERENCES staff(id),
   acceptance_date TEXT,
-  storage_location_id INTEGER REFERENCES locations(id),
+  -- The shelf, fridge or store this delivery was put away on. See
+  -- storage_locations, created further down this migration.
+  storage_location_id INTEGER REFERENCES storage_locations(id),
   status TEXT NOT NULL DEFAULT 'available',
   created_by INTEGER REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -5051,6 +5053,108 @@ CREATE TABLE IF NOT EXISTS core_document_slots (
   seedSlot.run('quality_manual', 'Quality Manual', 'The scope, structure and policy of the quality management system.', 'Quality Manual', 1);
   seedSlot.run('laboratory_handbook', 'Laboratory Handbook', 'What the laboratory offers and how to use it — the users\' guide to the service.', 'Handbook', 2);
   seedSlot.run('safety_manual', 'Safety Manual', 'How the laboratory keeps its people and its visitors safe.', 'Safety Manual', 3);
+
+  // ===================================================================
+  // Where stock physically is
+  // -------------------------------------------------------------------
+  // "Location" was a flat list nobody could add to, so the field on a new
+  // stock item was an empty dropdown. But a laboratory does not store reagents
+  // "somewhere" — it stores them on a named shelf, in a named fridge, in a
+  // named store or unit, and an assessor asks to be taken to them.
+  //
+  // So a storage location is a place inside a place: Main Store › Shelf B3,
+  // Haematology › Fridge 1 › Door shelf. The tree is the laboratory's own, and
+  // a cold-storage place carries the temperature range it is supposed to hold,
+  // because that is what the storage-condition record is checked against.
+  // ===================================================================
+  database.exec(`
+CREATE TABLE IF NOT EXISTS storage_locations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'shelf',
+  parent_id INTEGER REFERENCES storage_locations(id),
+  section_id INTEGER REFERENCES sections(id),
+  code TEXT,
+  description TEXT,
+  temp_min REAL,
+  temp_max REAL,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_storage_locations_parent ON storage_locations(parent_id, display_order);
+`);
+
+  // Stock points at a storage location as well as a unit, and may carry the
+  // manufacturer's own barcode — see the barcode policy in routes/inventory.ts.
+  const invCols = new Set((database.prepare('PRAGMA table_info(inventory_items)').all() as Array<{ name: string }>).map(c => c.name));
+  if (!invCols.has('storage_location_id')) database.exec('ALTER TABLE inventory_items ADD COLUMN storage_location_id INTEGER REFERENCES storage_locations(id)');
+  // The barcode printed on the product by whoever made it. Some reagents carry
+  // one and some do not, so an item may use its own or the system's — never a
+  // guess, and never both meaning different things.
+  if (!invCols.has('product_barcode')) database.exec('ALTER TABLE inventory_items ADD COLUMN product_barcode TEXT');
+  if (!invCols.has('barcode_source')) database.exec("ALTER TABLE inventory_items ADD COLUMN barcode_source TEXT NOT NULL DEFAULT 'system'");
+  if (!invCols.has('catalogue_number')) database.exec('ALTER TABLE inventory_items ADD COLUMN catalogue_number TEXT');
+  if (!invCols.has('manufacturer')) database.exec('ALTER TABLE inventory_items ADD COLUMN manufacturer TEXT');
+  {
+    const batchCols = new Set((database.prepare('PRAGMA table_info(inventory_batches)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!batchCols.has('storage_location_id')) database.exec('ALTER TABLE inventory_batches ADD COLUMN storage_location_id INTEGER REFERENCES storage_locations(id)');
+    if (!batchCols.has('product_barcode')) database.exec('ALTER TABLE inventory_batches ADD COLUMN product_barcode TEXT');
+
+    // A batch has always had a storage_location_id, but it pointed at the old
+    // `locations` stub — a table nothing could add a row to, so every attempt
+    // to say where a delivery was put away failed the foreign key. SQLite
+    // cannot re-point a foreign key in place, so the table is rebuilt against
+    // the storage register.
+    //
+    // The new table is the old table's own CREATE statement with one word
+    // changed, so every column any other migration has added comes across
+    // untouched; the indexes and triggers are replayed from their own stored
+    // definitions afterwards. Any value that does not name a real place is
+    // dropped rather than carried forward as a dangling reference.
+    const wrongTarget = (database.prepare('PRAGMA foreign_key_list(inventory_batches)').all() as Array<{ from: string; table: string }>)
+      .some(fk => fk.from === 'storage_location_id' && fk.table !== 'storage_locations');
+    if (wrongTarget) {
+      const objects = database.prepare("SELECT type, name, sql FROM sqlite_master WHERE tbl_name = 'inventory_batches' AND sql IS NOT NULL")
+        .all() as Array<{ type: string; name: string; sql: string }>;
+      const tableSql = objects.find(o => o.type === 'table')!.sql;
+      const rebuiltSql = tableSql
+        .replace(/CREATE\s+TABLE\s+("inventory_batches"|inventory_batches)/i, 'CREATE TABLE inventory_batches__rebuilt')
+        .replace(/(storage_location_id\b[^,)]*?REFERENCES\s+)("locations"|locations)\b/i, '$1storage_locations');
+      const carried = (database.prepare('PRAGMA table_info(inventory_batches)').all() as Array<{ name: string }>)
+        .map(c => c.name).join(', ');
+      database.pragma('foreign_keys = OFF');
+      try {
+        database.exec(`
+DROP TABLE IF EXISTS inventory_batches__rebuilt;
+${rebuiltSql};
+INSERT INTO inventory_batches__rebuilt (${carried}) SELECT ${carried} FROM inventory_batches;
+UPDATE inventory_batches__rebuilt SET storage_location_id = NULL
+  WHERE storage_location_id IS NOT NULL
+    AND storage_location_id NOT IN (SELECT id FROM storage_locations);
+DROP TABLE inventory_batches;
+ALTER TABLE inventory_batches__rebuilt RENAME TO inventory_batches;
+`);
+        for (const o of objects) if (o.type !== 'table') database.exec(o.sql);
+      } finally {
+        database.pragma('foreign_keys = ON');
+      }
+    }
+  }
+  // A laboratory that has never set one up gets a store to put things in, so
+  // the field is never an empty dropdown again.
+  const anyStorage = database.prepare('SELECT COUNT(*) c FROM storage_locations').get() as { c: number };
+  if (anyStorage.c === 0) {
+    const main = database.prepare("INSERT INTO storage_locations (name, kind, code, description, display_order) VALUES (?, 'store', ?, ?, 1)")
+      .run('Main Store', 'STORE', 'The laboratory\'s central store.');
+    const storeId = Number(main.lastInsertRowid);
+    const shelf = database.prepare("INSERT INTO storage_locations (name, kind, parent_id, code, display_order) VALUES (?, 'shelf', ?, ?, ?)");
+    shelf.run('Shelf A', storeId, 'A', 1);
+    shelf.run('Shelf B', storeId, 'B', 2);
+    database.prepare("INSERT INTO storage_locations (name, kind, parent_id, code, temp_min, temp_max, display_order) VALUES (?, 'refrigerator', ?, ?, 2, 8, 3)")
+      .run('Store refrigerator', storeId, 'FR1');
+  }
 
   // A document that already sits in a slot should say so on its own record, so
   // the register can mark it and the viewer can be reached from either side.

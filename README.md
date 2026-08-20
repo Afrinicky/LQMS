@@ -201,6 +201,36 @@ places, each pointing at one of them: choose the document already in the registe
 document type), open it from there, or add core documents of your own — an ethics policy, a
 biobank manual — beside the three standard ones.
 
+## Supply and inventory control — ISO 15189:2022 §6.6
+
+Stock is kept somewhere real. **Settings → Stock & Storage** holds the laboratory's own storage
+register — stores, rooms, shelves, fridges and freezers, put inside one another, so an item
+records that it is on *Main Store › Shelf B3* rather than "in the lab". A cold place carries the
+temperature range it is meant to hold. Item categories and units of measure are ordinary
+configurable lists in **Settings → Dropdown Lists**, and both are chosen from when an item is
+added.
+
+Barcodes follow what actually arrives. Some reagents come with a barcode printed on the box and
+some come with nothing, so the same screen sets what the laboratory does by default — generate
+our own, or use the product's — and whether an individual item may differ. An item set to use the
+product's barcode must be given that barcode when it is added; a scan then resolves against
+both, so a storekeeper scans a box without having to know which kind it is, and printed labels
+carry whichever barcode that item actually answers to.
+
+The register goes out and comes back as a spreadsheet: **Export register** gives the rows the
+laboratory holds — not a blank template — and **Import** takes that same file back, matching on
+item code so an existing item is updated and a blank code creates a new one. Storage places and
+suppliers are matched by name, so "Main Store › Shelf B" or just "Shelf B" both land correctly.
+
+The controls the clause asks for are enforced by the server, not by the screen:
+
+- a delivery is **quarantined on receipt** and cannot be issued until it has been inspected and
+  accepted — though it can always be discarded or returned;
+- a batch **rejected on receipt** or **past its expiry date** cannot be put into use at all;
+- stock leaves **first expiry, first out**. Opening a newer box while an older one sits behind it
+  is stopped with the older batch named, and can be overridden deliberately — the movement record
+  then says the rotation was skipped on purpose, and by whom.
+
 ## Background jobs
 
 Automatic backups, the alert scan, the duty and activity rollover, environmental polling and the
@@ -217,6 +247,7 @@ npm run check:people-office   # staff removal, role changes, the Office round-tr
 npm run check:complaints      # the §7.4 handling process, including every refusal
 npm run check:core-docs       # core documents pointing at the register
 npm run check:jobs            # a due schedule producing a backup on its own
+npm run check:inventory       # storage, barcodes, the register spreadsheet, and the §6.6 controls
 ```
 
 The `check:*` scripts run against a live host (`npm run api`).

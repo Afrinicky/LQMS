@@ -76,13 +76,29 @@ console.log('[renderer] API_BASE resolved to', API_BASE);
 export function getToken() { return localStorage.getItem('sech_lims_token'); }
 export function setToken(token: string | null) { if (token) localStorage.setItem('sech_lims_token', token); else localStorage.removeItem('sech_lims_token'); }
 
+/**
+ * A call the server refused. The status and the server's own payload travel
+ * with the message, because some refusals carry an answer with them — a FEFO
+ * warning names the older batch that should have been issued, and the screen
+ * can only offer "issue that one instead" if it can see which one.
+ */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number, readonly data: Record<string, unknown>) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
   if (!(options.body instanceof FormData)) headers.set('Content-Type', 'application/json');
   const token = getToken();
   if (token) headers.set('Authorization', `Bearer ${token}`);
   const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
-  if (!response.ok) throw new Error((await response.json().catch(() => ({ error: response.statusText }))).error ?? response.statusText);
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({ error: response.statusText })) as Record<string, unknown>;
+    throw new ApiError(String(body.error ?? response.statusText), response.status, body);
+  }
   return response.json() as Promise<T>;
 }
 
