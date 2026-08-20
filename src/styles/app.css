@@ -3129,3 +3129,110 @@ button.tiny.danger:hover:not(:disabled) { background: rgba(214, 66, 88, .12); bo
 .remove-option ul { margin: 0; }
 .remove-confirm { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--muted); margin-bottom: 12px; }
 .remove-confirm > span { display: block; }
+
+
+/* ============================================================
+   Complaints — the handling process ISO 15189 §7.4 describes.
+   One record, the path it walks, and the one thing it owes next.
+   ============================================================ */
+.cx { display: flex; flex-direction: column; gap: 16px; }
+
+.cx-trail { display: flex; flex-wrap: wrap; gap: 6px; }
+.cx-step {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px;
+  border-radius: var(--radius-pill); border: 1px solid var(--border);
+  background: var(--panel-2); color: var(--faint); font-size: 11.5px; font-weight: 600;
+}
+.cx-step svg { flex: none; }
+.cx-step.done { color: var(--success, #3fbf72); border-color: rgba(63,191,114,.35); background: rgba(63,191,114,.08); }
+.cx-step.now { color: #fff; border-color: var(--accent-bright); background: var(--accent-soft); }
+
+.cx-next {
+  display: flex; align-items: center; gap: 8px; margin: 0;
+  padding: 10px 13px; border-radius: var(--radius-sm);
+  background: var(--accent-soft); border: 1px solid rgba(78,141,255,.3);
+  font-size: 12.5px; color: var(--text);
+}
+.cx-next svg { flex: none; }
+
+.cx-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px 18px; }
+.cx-facts span { display: block; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.cx-facts strong { display: block; font-size: 12.5px; font-weight: 600; margin-top: 2px; }
+.cx-said {
+  margin: 0; padding: 12px 14px; border-radius: var(--radius-sm);
+  background: var(--panel-2); border-left: 3px solid var(--border-strong);
+  font-size: 13px; line-height: 1.65;
+}
+
+.cx-act { border-top: 1px solid var(--border); padding-top: 14px; }
+.cx-act h4 { display: flex; align-items: center; gap: 7px; margin: 0 0 4px; font-size: 13.5px; }
+.cx-act > p.muted { margin: 0 0 10px; font-size: 12px; line-height: 1.6; }
+.cx-act .form-grid { margin: 10px 0; }
+.cx-act .form-grid label.wide { flex-basis: 100%; }
+.cx-review { border-left: 3px solid var(--warning); padding-left: 13px; }
+.cx-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+.cx-field { display: flex; flex-direction: column; gap: 5px; margin: 10px 0; font-size: 12px; color: var(--muted); }
+
+.cx-done {
+  display: flex; align-items: center; gap: 8px; margin: 0;
+  font-size: 12px; color: var(--success, #3fbf72);
+}
+.cx-done svg { flex: none; }
+
+.cx-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.cx-log li {
+  display: grid; grid-template-columns: 116px 1fr auto; gap: 10px; align-items: baseline;
+  padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 12px;
+}
+.cx-log li:last-child { border-bottom: 0; }
+.cx-log-when { color: var(--faint); font-size: 11px; }
+.cx-log-what { color: var(--text); }
+.cx-log-who { color: var(--faint); font-size: 11px; text-align: right; }
+@media (max-width: 620px) {
+  .cx-log li { grid-template-columns: 1fr; gap: 2px; }
+  .cx-log-who { text-align: left; }
+}
+
+
+/* ============================================================
+   Core laboratory documents — each a named place pointing at a
+   controlled document that already lives in the register.
+   ============================================================ */
+.core-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; margin-top: 14px; }
+.core-card { display: flex; flex-direction: column; gap: 9px; margin: 0; }
+.core-card.empty { border-style: dashed; }
+.core-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.core-head h4 { margin: 0; font-size: 14.5px; flex: 1; min-width: 0; }
+.core-desc { margin: 0; font-size: 12px; line-height: 1.6; color: var(--muted); }
+.core-none { margin: 0; font-size: 12.5px; color: var(--faint); font-style: italic; }
+
+.core-doc { margin: 2px 0; }
+.core-open {
+  display: flex; align-items: center; gap: 11px; width: 100%; text-align: left;
+  padding: 11px 13px; border-radius: var(--radius-sm); cursor: pointer;
+  background: var(--panel-2); border: 1px solid var(--border); box-shadow: none; color: var(--text);
+}
+.core-open:hover { border-color: var(--accent-bright); background: var(--accent-soft); }
+.core-open svg { flex: none; color: #8fb4ff; }
+.core-open span { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.core-open strong { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.core-open em { font-style: normal; font-size: 11px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.core-acts { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: auto; padding-top: 4px; }
+
+/* Picking the document a core place points at. */
+.core-pick { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; max-height: 46vh; overflow: auto; }
+.core-pick button {
+  display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left;
+  padding: 10px 12px; border-radius: var(--radius-sm); cursor: pointer;
+  background: var(--panel-2); border: 1px solid var(--border); box-shadow: none; color: var(--text);
+}
+.core-pick button:hover:not(:disabled) { border-color: var(--accent-bright); background: var(--accent-soft); }
+.core-pick-title { font-size: 13px; font-weight: 600; }
+.core-pick-sub { font-size: 11px; color: var(--faint); }
+
+/* A button that reads as a link, inside running text. */
+.linklike {
+  background: none; border: 0; box-shadow: none; padding: 0;
+  color: var(--accent-bright); font: inherit; cursor: pointer; text-decoration: underline;
+}

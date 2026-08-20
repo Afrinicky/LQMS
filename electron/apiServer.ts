@@ -1,7 +1,7 @@
 import type { Server } from 'node:http';
 import { createApiServer } from '../server/index.js';
 import { getDb } from '../server/db/database.js';
-import { EnvironmentalPoller } from '../server/services/environmental/monitorService.js';
+import { startBackgroundServices } from '../server/services/backgroundJobs.js';
 import { config } from '../server/config/index.js';
 
 export type ApiState = { host: string; port: number; baseUrl: string; reused: boolean };
@@ -82,10 +82,12 @@ export function startLocalApi(): Promise<ApiState> {
         process.env.SECH_LIMS_API_URL = resolved.baseUrl;
         process.env.SECH_LIMS_API_PORT = String(port);
         console.log('[boot] startLocalApi listening', resolved);
-        // Start the environmental poller (idle until polling is enabled in settings).
-        try { new EnvironmentalPoller(getDb).start(); } catch (e) { console.error('[boot] environmental poller start failed', e); }
-        // Start the sync engine stub (self-gates on SECH_LIMS_SYNC_ENABLED; a no-op while disabled).
-        try { import('../server/sync/syncEngine.js').then(({ getSyncEngine }) => getSyncEngine().start()).catch(() => {}); } catch (e) { console.error('[boot] sync engine start failed', e); }
+        // Everything the host does on its own: automatic backups, the alert
+        // scan, the duty and activity rollover, environmental polling, sync.
+        // These used to be started only by the standalone entry point, so on a
+        // packaged desktop host — the machine a laboratory actually runs — the
+        // backup schedule was accepted and never acted on.
+        try { startBackgroundServices(getDb); } catch (e) { console.error('[boot] background jobs failed to start', e); }
         return resolved;
       } catch (err) {
         lastErr = err;

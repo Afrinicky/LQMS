@@ -4950,6 +4950,126 @@ CREATE INDEX IF NOT EXISTS idx_form_sub_template ON form_submissions(template_ke
   if (!staffSelfCols.has('exit_recorded_by')) database.exec('ALTER TABLE staff ADD COLUMN exit_recorded_by INTEGER REFERENCES users(id)');
 
   // ===================================================================
+  // Complaints — ISO 15189:2022 §7.4
+  // -------------------------------------------------------------------
+  // The clause asks for more than a description and a status. It asks the
+  // laboratory to acknowledge receipt, to keep a record of what was done, to
+  // have the decision taken by people NOT involved in the activity complained
+  // about, and to formally tell the complainant when handling has finished.
+  // None of that could be recorded before, so none of it could be shown to an
+  // assessor. Each column below is one of those obligations.
+  // ===================================================================
+  const complaintCols = new Set((database.prepare('PRAGMA table_info(complaints)').all() as Array<{ name: string }>).map(c => c.name));
+  // How serious, and whether a patient was affected — this is what decides
+  // priority and whether a nonconformity has to be raised alongside.
+  if (!complaintCols.has('severity')) database.exec("ALTER TABLE complaints ADD COLUMN severity TEXT NOT NULL DEFAULT 'moderate'");
+  if (!complaintCols.has('patient_affected')) database.exec('ALTER TABLE complaints ADD COLUMN patient_affected INTEGER NOT NULL DEFAULT 0');
+  // Where the record has got to, and what it owes by when.
+  if (!complaintCols.has('stage')) database.exec("ALTER TABLE complaints ADD COLUMN stage TEXT NOT NULL DEFAULT 'received'");
+  if (!complaintCols.has('acknowledgement_due_date')) database.exec('ALTER TABLE complaints ADD COLUMN acknowledgement_due_date TEXT');
+  if (!complaintCols.has('resolution_due_date')) database.exec('ALTER TABLE complaints ADD COLUMN resolution_due_date TEXT');
+  // Acknowledgement of receipt.
+  if (!complaintCols.has('acknowledged_at')) database.exec('ALTER TABLE complaints ADD COLUMN acknowledged_at TEXT');
+  if (!complaintCols.has('acknowledged_by_staff_id')) database.exec('ALTER TABLE complaints ADD COLUMN acknowledged_by_staff_id INTEGER REFERENCES staff(id)');
+  if (!complaintCols.has('acknowledgement_method')) database.exec('ALTER TABLE complaints ADD COLUMN acknowledgement_method TEXT');
+  if (!complaintCols.has('acknowledgement_note')) database.exec('ALTER TABLE complaints ADD COLUMN acknowledgement_note TEXT');
+  // The independent review. The reviewer must not be the investigator, and the
+  // system refuses to record it otherwise — that is the whole point of it.
+  if (!complaintCols.has('reviewed_by_staff_id')) database.exec('ALTER TABLE complaints ADD COLUMN reviewed_by_staff_id INTEGER REFERENCES staff(id)');
+  if (!complaintCols.has('reviewed_at')) database.exec('ALTER TABLE complaints ADD COLUMN reviewed_at TEXT');
+  if (!complaintCols.has('review_notes')) database.exec('ALTER TABLE complaints ADD COLUMN review_notes TEXT');
+  if (!complaintCols.has('outcome')) database.exec('ALTER TABLE complaints ADD COLUMN outcome TEXT');
+  // Telling the complainant the outcome — the formal end of handling.
+  if (!complaintCols.has('outcome_communicated_at')) database.exec('ALTER TABLE complaints ADD COLUMN outcome_communicated_at TEXT');
+  if (!complaintCols.has('outcome_communicated_by_staff_id')) database.exec('ALTER TABLE complaints ADD COLUMN outcome_communicated_by_staff_id INTEGER REFERENCES staff(id)');
+  if (!complaintCols.has('outcome_method')) database.exec('ALTER TABLE complaints ADD COLUMN outcome_method TEXT');
+  if (!complaintCols.has('outcome_summary')) database.exec('ALTER TABLE complaints ADD COLUMN outcome_summary TEXT');
+  if (!complaintCols.has('investigated_at')) database.exec('ALTER TABLE complaints ADD COLUMN investigated_at TEXT');
+  if (!complaintCols.has('investigated_by_staff_id')) database.exec('ALTER TABLE complaints ADD COLUMN investigated_by_staff_id INTEGER REFERENCES staff(id)');
+  if (!complaintCols.has('closed_by_user_id')) database.exec('ALTER TABLE complaints ADD COLUMN closed_by_user_id INTEGER REFERENCES users(id)');
+  // Records already in the table pre-date the stage column; place them by what
+  // they already carry so an existing register does not all read "received".
+  database.exec(`UPDATE complaints SET stage = CASE
+      WHEN closed_at IS NOT NULL OR status = 'closed' THEN 'closed'
+      WHEN investigation_summary IS NOT NULL AND TRIM(investigation_summary) != '' THEN 'awaiting_review'
+      WHEN assigned_to_staff_id IS NOT NULL THEN 'under_investigation'
+      ELSE 'received' END
+    WHERE stage IS NULL OR stage = ''`);
+
+  // Every step anybody took on a complaint, in order. The clause wants the
+  // record of "the actions taken"; a column that gets overwritten is not that.
+  database.exec(`
+CREATE TABLE IF NOT EXISTS complaint_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  complaint_id INTEGER NOT NULL REFERENCES complaints(id),
+  event_type TEXT NOT NULL,
+  from_stage TEXT,
+  to_stage TEXT,
+  note TEXT,
+  actor_staff_id INTEGER REFERENCES staff(id),
+  actor_user_id INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_complaint_events_complaint ON complaint_events(complaint_id, id);
+`);
+
+  // ===================================================================
+  // Core laboratory documents
+  // -------------------------------------------------------------------
+  // The Quality Manual, the Laboratory Handbook and the Safety Manual are the
+  // documents a laboratory is asked for first, and every one of them is an
+  // ordinary controlled document that already lives in the register. What was
+  // missing was the connection: the Core Documents screen matched on the
+  // document TYPE string, so a manual filed as "Policy" or "Manual" simply did
+  // not appear, and the only offered remedy was to upload it a second time.
+  //
+  // A slot is a named place a laboratory expects a document to be. It points at
+  // one document in the register — chosen from what is already there — and the
+  // set of slots is the laboratory's own, because the three standard ones are
+  // not the only documents a laboratory calls core.
+  // ===================================================================
+  database.exec(`
+CREATE TABLE IF NOT EXISTS core_document_slots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  slot_key TEXT NOT NULL UNIQUE,
+  label TEXT NOT NULL,
+  description TEXT,
+  document_type TEXT,
+  document_id INTEGER REFERENCES documents(id),
+  display_order INTEGER NOT NULL DEFAULT 0,
+  is_system INTEGER NOT NULL DEFAULT 0,
+  assigned_at TEXT,
+  assigned_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+`);
+  // The three every laboratory has. `is_system` only stops them being deleted;
+  // they can be renamed and re-pointed like any other.
+  const seedSlot = database.prepare(`INSERT OR IGNORE INTO core_document_slots (slot_key, label, description, document_type, display_order, is_system)
+    VALUES (?, ?, ?, ?, ?, 1)`);
+  seedSlot.run('quality_manual', 'Quality Manual', 'The scope, structure and policy of the quality management system.', 'Quality Manual', 1);
+  seedSlot.run('laboratory_handbook', 'Laboratory Handbook', 'What the laboratory offers and how to use it — the users\' guide to the service.', 'Handbook', 2);
+  seedSlot.run('safety_manual', 'Safety Manual', 'How the laboratory keeps its people and its visitors safe.', 'Safety Manual', 3);
+
+  // A document that already sits in a slot should say so on its own record, so
+  // the register can mark it and the viewer can be reached from either side.
+  const docCoreCols = new Set((database.prepare('PRAGMA table_info(documents)').all() as Array<{ name: string }>).map(c => c.name));
+  if (!docCoreCols.has('core_slot_key')) database.exec('ALTER TABLE documents ADD COLUMN core_slot_key TEXT');
+  // Adopt whatever already matches a slot's document type, so a laboratory that
+  // registered its manuals before this existed finds them already in place.
+  database.exec(`UPDATE core_document_slots SET document_id = (
+      SELECT d.id FROM documents d
+      WHERE d.document_type = core_document_slots.document_type
+        AND d.status NOT IN ('obsolete', 'archived')
+      ORDER BY d.id DESC LIMIT 1)
+    WHERE document_id IS NULL AND document_type IS NOT NULL`);
+  database.exec(`UPDATE documents SET core_slot_key = (
+      SELECT s.slot_key FROM core_document_slots s WHERE s.document_id = documents.id)
+    WHERE core_slot_key IS NULL
+      AND EXISTS (SELECT 1 FROM core_document_slots s WHERE s.document_id = documents.id)`);
+
+  // ===================================================================
   // Unit activities, duty reminders and the sound catalogue
   // -------------------------------------------------------------------
   // The recurring work a unit does — environmental charting, equipment checks,

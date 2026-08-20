@@ -49,10 +49,8 @@ import { recordsReportsRoutes } from './routes/recordsReports.js';
 import { processManagementRoutes } from './routes/processManagement.js';
 import { informationManagementRoutes } from './routes/informationManagement.js';
 import { environmentalRoutes } from './routes/environmental.js';
-import { EnvironmentalPoller } from './services/environmental/monitorService.js';
 import { dennisRoutes } from './routes/dennis.js';
 import { syncRoutes } from './routes/sync.js';
-import { getSyncEngine } from './sync/syncEngine.js';
 import { remoteAccessRoutes } from './routes/remoteAccess.js';
 import { mobileRoutes } from './routes/mobile.js';
 import { formsRoutes } from './routes/forms.js';
@@ -61,6 +59,7 @@ import { qrRoutes } from './routes/qr.js';
 import { pushRoutes } from './routes/push.js';
 import { optionalAuth } from './middleware/auth.js';
 import { ensureDataDirs, getDb } from './db/database.js';
+import { startBackgroundServices } from './services/backgroundJobs.js';
 import { seedDefaults } from './db/seed.js';
 import { config } from './config/index.js';
 
@@ -213,50 +212,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const host = config.api.host;
   createApiServer().listen(port, host, () => {
     console.log(`SECH_LIMS host API listening on http://${host}:${port}`);
-    // Background environmental poller. It self-gates on environmental_settings
-    // (polling_enabled), so it is idle until a lab turns automated polling on.
-    try { new EnvironmentalPoller(getDb).start(); } catch (e) { console.error('Environmental poller failed to start', e); }
-    // Automatic backups. Self-gates on the stored schedule, so it is idle until
-    // a laboratory turns them on, and it takes a missed backup shortly after a
-    // host that was switched off overnight comes back.
-    import('./services/backupService.js').then(({ BackupScheduler }) => {
-      new BackupScheduler().start();
-    }).catch(e => console.error('Backup scheduler failed to start', e));
-    // Synchronization engine (stub). Self-gates on SECH_LIMS_SYNC_ENABLED and
-    // does nothing while sync is disabled — reserved for the future cloud phase.
-    try { getSyncEngine().start(); } catch (e) { console.error('Sync engine failed to start', e); }
-    // Background alert scheduler: automatically scans every module for due,
-    // overdue, expiring, excursion and pending items and routes notifications
-    // to the right staff by section + role. Runs shortly after boot and then
-    // every 15 minutes (the routed scan itself is idempotent/deduplicated).
-    import('./services/alertService.js').then(({ runAlertScanAndRoute }) => {
-      const tick = () => { try { runAlertScanAndRoute(getDb(), null); } catch (e) { console.error('Alert scan failed', e); } };
-      setTimeout(tick, 20000);
-      setInterval(tick, 15 * 60 * 1000);
-    }).catch(e => console.error('Alert scheduler failed to start', e));
-    // Duty & activity scheduler. Three jobs on one timer:
-    //   * carry a month's schedules forward when nobody prepared them, and
-    //     remind the managers and unit heads who owe the next month's
-    //   * raise the coming fortnight's activity occurrences and re-resolve who
-    //     they belong to, so a mid-month roster change lands immediately
-    //   * close the window on anything never done, and put today's work on the
-    //     right dashboards with a sound
-    // It runs shortly after boot so a host switched on at the start of the shift
-    // has the day's lists ready, then every ten minutes. Every step is
-    // idempotent, so a restart mid-morning costs nothing.
-    Promise.all([
-      import('./services/scheduleRollover.js'),
-      import('./services/activityService.js'),
-      import('./services/systemAuditService.js'),
-    ]).then(([schedules, activities, systemAudit]) => {
-      const tick = () => {
-        const db = getDb();
-        try { schedules.runScheduleTick(db); } catch (e) { console.error('Schedule tick failed', e); }
-        try { activities.runActivityTick(db); } catch (e) { console.error('Activity tick failed', e); }
-        try { systemAudit.throttledAuditScan(db); } catch (e) { console.error('System audit scan failed', e); }
-      };
-      setTimeout(tick, 12000);
-      setInterval(tick, 10 * 60 * 1000);
-    }).catch(e => console.error('Duty & activity scheduler failed to start', e));
+    // The same jobs the packaged desktop application starts — see
+    // services/backgroundJobs.ts for why they are not written out here.
+    startBackgroundServices(getDb);
   });
 }

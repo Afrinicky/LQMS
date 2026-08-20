@@ -224,6 +224,17 @@ export function DocumentControlPage() {
     const focus = searchParams.get('focus');
     if (focus && focus.startsWith('documents:')) { setSection('Documents'); setTab('Document Register'); }
   }, [searchParams]);
+  // Deep link from Settings → Core Documents: ?open=<id> opens the document
+  // itself, because clicking the laboratory's Quality Manual should show the
+  // Quality Manual, not a register row that happens to mention it.
+  useEffect(() => {
+    const openId = Number(searchParams.get('open'));
+    if (!openId || !documents.length) return;
+    const doc = documents.find(d => d.id === openId);
+    setSection('Documents'); setTab('Document Register');
+    if (doc) setViewer({ docId: doc.id, versionId: doc.current_version_id || 0, workflowStatus: doc.status });
+    setSearchParams({}, { replace: true });
+  }, [searchParams, documents]);
   useFocusTarget(documents);
   if (!isEnabled('documents')) return <DisabledModule />;
 
@@ -1338,6 +1349,9 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
   const [activeVersionId, setActiveVersionId] = useState(versionId);
   useEffect(() => setActiveVersionId(versionId), [versionId]);
   const [content, setContent] = useState<VersionContent | null>(null);
+  // A document registered but never given a file has nothing to show. Saying so
+  // in the window beats leaving it on "Loading…" for ever.
+  const [contentError, setContentError] = useState<string | null>(null);
   const [mode, setMode] = useState<'content' | 'original'>('content');
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -1453,6 +1467,7 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
 
   useEffect(() => {
     let url: string | null = null;
+    setContentError(null);
     api<VersionContent>(`/documents/${docId}/versions/${activeVersionId}/content`)
       .then(c => {
         setContent(c);
@@ -1476,7 +1491,7 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
           fetchBlobUrl(`/files/${c.file_id}/raw`).then(u => { url = u; setFileUrl(u); }).catch(() => {});
         }
       })
-      .catch(e => onError((e as Error).message));
+      .catch(e => { setContentError((e as Error).message); onError((e as Error).message); });
     return () => { if (url) URL.revokeObjectURL(url); };
   }, [docId, activeVersionId]);
 
@@ -1546,7 +1561,9 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
   // The embedded browser PDF viewer ships its own zoom/print/download toolbar,
   // so our zoom controls would just duplicate (and fight) it there.
   const showZoom = !isOfficeFile && (!(mode === 'original' && (isPdf || isImage)) || isImage);
-  const windowTitle = content ? `${content.version_label || content.version_number || 'Version'} · ${content.file_name || 'Controlled content'}` : 'Loading…';
+  const windowTitle = content
+    ? `${content.version_label || content.version_number || 'Version'} · ${content.file_name || 'Controlled content'}`
+    : contentError ? 'Nothing to show yet' : 'Loading…';
 
   if (minimized) {
     // Docked restore pill — kept clear of the Dennis chat bubble that floats
@@ -1744,6 +1761,16 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
         onChange={e => { const f = e.target.files?.[0]; if (f) void external.uploadEdited(f); }} />}
 
       <div className="dv-content">
+        {contentError && !content && <div className="oh">
+          <div className="oh-card">
+            <div className="oh-icon"><FileText size={26} /></div>
+            <h3 className="oh-name">Nothing to show yet</h3>
+            <p className="oh-meta">{contentError}</p>
+            <div className="oh-actions">
+              <button type="button" className="secondary" onClick={onClose}>Close</button>
+            </div>
+          </div>
+        </div>}
         {isOfficeFile && content && <OfficeHandoff
           docId={docId}
           versionId={activeVersionId}

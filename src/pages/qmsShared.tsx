@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, API_BASE, getToken } from '../services/api';
-import type { CapaRecord, ComplaintRecord, NonconformingEvent, RiskRecord, Section, Staff } from '../../shared/types/api';
+import type { CapaRecord, ComplaintEvent, ComplaintRecord, NonconformingEvent, RiskRecord, Section, Staff } from '../../shared/types/api';
 
 // Shared vocabulary and helpers for the quality modules (nonconformities,
 // incidents, CAPA, complaints and risks) so every register speaks the same
@@ -32,7 +32,7 @@ export const RCA_METHOD_OPTIONS = [
 export type RecordLink = { id: number; source_module_key: string; source_record_type: string; source_record_id: string; target_module_key: string; target_record_type: string; target_record_id: string; notes?: string };
 export type NonconformingEventDetail = NonconformingEvent & { links?: RecordLink[] };
 export type CapaDetail = CapaRecord & { links?: RecordLink[]; updates?: { id: number; update_date: string; update_text: string; status: string }[] };
-export type ComplaintDetail = ComplaintRecord & { links?: RecordLink[] };
+export type ComplaintDetail = ComplaintRecord & { links?: RecordLink[]; events?: ComplaintEvent[]; targets?: { acknowledgeDays: number; resolveDays: number } };
 export type RiskDetail = RiskRecord & { links?: RecordLink[]; reviews?: { id: number; review_date: string; review_notes: string; risk_score: number; risk_level: string; next_review_date?: string }[] };
 export type LoadState = { loading: boolean; error: string | null };
 
