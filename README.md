@@ -210,12 +210,28 @@ temperature range it is meant to hold. Item categories and units of measure are 
 configurable lists in **Settings → Dropdown Lists**, and both are chosen from when an item is
 added.
 
-Barcodes follow what actually arrives. Some reagents come with a barcode printed on the box and
-some come with nothing, so the same screen sets what the laboratory does by default — generate
-our own, or use the product's — and whether an individual item may differ. An item set to use the
-product's barcode must be given that barcode when it is added; a scan then resolves against
-both, so a storekeeper scans a box without having to know which kind it is, and printed labels
-carry whichever barcode that item actually answers to.
+### Barcodes: the product, and the delivery
+
+Two different questions, answered at two different levels, because that is what the standards
+do.
+
+**What is this?** — the trade item. Under GS1 that is the **GTIN**, printed on every box of that
+product and identical across every delivery of it. This is the item-level barcode. Some reagents
+carry one and some carry nothing, so **Settings → Stock & Storage** sets what the laboratory does
+by default — generate our own, or use the product's — and whether an individual item may differ.
+An item set to use the product's barcode must be given it when the item is added.
+
+**Which one is this?** — the delivery. The **batch/lot number and expiry date**, which differ from
+box to box of the same product. This is the batch-level barcode, recorded when the delivery is
+received. ISO 15189:2022 §6.6.2 asks for the lot code of every reagent to be recorded and §6.6.3
+for a new lot to be verified before use: the traceability the clause is after runs from a result
+back to a *lot*, not to a product type.
+
+So SECH_LIMS keeps both, and they are not alternatives. A modern reagent box carries both in one
+symbol — GS1-128 or GS1 DataMatrix, as Application Identifiers `(01)` GTIN, `(10)` batch/lot,
+`(17)` expiry. Scanning one at the receiving bench fills the item, the lot and the expiry in a
+single pass, so a lot number is never retyped by eye; scanning an ordinary EAN-13 still resolves
+the product, and a GTIN-14 matches the EAN-13 printed beneath it. Labels print at either level.
 
 The register goes out and comes back as a spreadsheet: **Export register** gives the rows the
 laboratory holds — not a blank template — and **Import** takes that same file back, matching on
@@ -230,6 +246,32 @@ The controls the clause asks for are enforced by the server, not by the screen:
 - stock leaves **first expiry, first out**. Opening a newer box while an older one sits behind it
   is stopped with the older batch named, and can be overridden deliberately — the movement record
   then says the rotation was skipped on purpose, and by whom.
+
+Stock is what is on the shelf, so the register reads it off the shelf. **Expiry belongs to the
+delivery, not to the product** — a box of strips does not expire, a particular lot of them does —
+so the register shows the earliest expiry among the batches actually in stock, which is the date
+FEFO will reach first. Quantity on hand is the sum of those batches. Opening an item shows what it
+is, who supplies it, where it is kept, every lot with its acceptance state, and every movement
+against it, editable in place.
+
+Every issue, receipt and disposal lands in the **movement register** — searchable, filterable to
+one item, and exportable — because a movement that cannot be looked up afterwards is not a record.
+
+Removing anything says what it would cost first. **Withdrawing** an item, or **suspending** a
+supplier, is the normal answer: they leave the working register and everything they ever recorded
+stays, which is what a recall would be traced through. Erasing is for something entered by
+mistake, costs a written reason, and takes a second confirmation once there is history behind it.
+Erasing a supplier detaches the stock they supplied rather than deleting it — and the batch keeps
+their name, so the trail survives them. Both live behind the row's **⋯** menu, not beside the
+everyday actions.
+
+### Suppliers — ISO 15189:2022 §6.6.4
+
+Selecting, evaluating and monitoring the suppliers of what affects a result are four different
+jobs, so the tab has four places to do them: the **Register** (with import and export of the one
+workbook), **New registration**, **Evaluation** (the form and the evaluation register beside it),
+and **Management** — the same register sorted by what needs doing, so who is overdue and who has
+never been evaluated is visible without reading every row.
 
 ## Background jobs
 
@@ -248,6 +290,7 @@ npm run check:complaints      # the §7.4 handling process, including every refu
 npm run check:core-docs       # core documents pointing at the register
 npm run check:jobs            # a due schedule producing a backup on its own
 npm run check:inventory       # storage, barcodes, the register spreadsheet, and the §6.6 controls
+npm run check:inventory-records  # derived expiry, the movement register, GS1 scanning, suppliers
 ```
 
 The `check:*` scripts run against a live host (`npm run api`).

@@ -1,9 +1,8 @@
-import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
-import { Download, Upload, FileSpreadsheet, Search, Pencil, Archive, RotateCcw, Trash2, AlertTriangle, ShieldAlert, MoreHorizontal, Users } from 'lucide-react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { Download, Upload, FileSpreadsheet, Search, Pencil, Archive, RotateCcw, Trash2, AlertTriangle, ShieldAlert, Users } from 'lucide-react';
 import { api, API_BASE, getToken } from '../services/api';
 import { usePermissions } from '../hooks/usePermissions';
-import { DetailModal } from './ui';
+import { DetailModal, RowMenu } from './ui';
 import {
   GENDERS, PERSONNEL_CATEGORIES, APPOINTMENT_TYPES, NATIONAL_ID_TYPES, CADRES, AVAILABILITY_STATUSES, EXIT_REASONS,
   emptyStaffForm, staffFormFrom, yearsOfService, type StaffFormValues,
@@ -45,73 +44,6 @@ import type { Staff, Section, Position, ProfessionalRank } from '../../shared/ty
  */
 const hasLeft = (s: Staff) => !s.isActive;
 
-/**
- * A row's overflow menu.
- *
- * Drawn through a portal rather than inside the row, because the register
- * scrolls sideways on a narrow screen and a horizontal scroller clips its
- * children on BOTH axes — `overflow-x: auto` computes `overflow-y` to `auto`,
- * not `visible`. Positioned inside the table, the menu on the last row was cut
- * off at the bottom edge of the scroller: the items were still in the document,
- * so the scrim that closes the menu was what a click actually landed on, and
- * "Erase permanently" appeared to do nothing.
- *
- * It also flips above the button when there is no room below, so the bottom row
- * of a long register behaves like the first.
- */
-function RowMenu({ label, children }: { label: string; children: (close: () => void) => ReactNode }) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const panel = useRef<HTMLDivElement>(null);
-  const MENU_W = 218;
-
-  // Measured after paint, so the real height decides whether it flips.
-  useLayoutEffect(() => {
-    if (!open || !trigger.current) return;
-    const place = () => {
-      const btn = trigger.current?.getBoundingClientRect();
-      if (!btn) return;
-      // Scrolled out of sight entirely — there is nothing left to anchor to.
-      if (btn.bottom < 0 || btn.top > window.innerHeight) { setOpen(false); return; }
-      const height = panel.current?.offsetHeight ?? 90;
-      const below = window.innerHeight - btn.bottom;
-      const top = below < height + 12 && btn.top > height + 12 ? btn.top - height - 6 : btn.bottom + 6;
-      const left = Math.max(8, Math.min(btn.right - MENU_W, window.innerWidth - MENU_W - 8));
-      setPos({ top, left });
-    };
-    place();
-    // Anything that moves the row moves the menu with it. It must NOT simply
-    // close on scroll: opening a menu on a row near the bottom scrolls that row
-    // into view, and a close-on-scroll handler then shuts the menu the instant
-    // it appears — which is indistinguishable from the button not working.
-    window.addEventListener('resize', place);
-    window.addEventListener('scroll', place, true);
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } };
-    document.addEventListener('keydown', onKey, true);
-    return () => {
-      window.removeEventListener('resize', place);
-      window.removeEventListener('scroll', place, true);
-      document.removeEventListener('keydown', onKey, true);
-    };
-  }, [open]);
-
-  useEffect(() => { if (!open) setPos(null); }, [open]);
-
-  return <>
-    <button type="button" ref={trigger} className="tiny reg-more" aria-label={label} aria-haspopup="menu" aria-expanded={open}
-      onClick={() => setOpen(o => !o)}>
-      <MoreHorizontal size={14} />
-    </button>
-    {open && createPortal(<>
-      <div className="reg-menu-scrim" onClick={() => setOpen(false)} />
-      <div ref={panel} className="reg-menu" role="menu"
-        style={{ top: pos?.top ?? -9999, left: pos?.left ?? -9999, width: MENU_W, visibility: pos ? 'visible' : 'hidden' }}>
-        {children(() => setOpen(false))}
-      </div>
-    </>, document.body)}
-  </>;
-}
 
 type ImportResult = { created: number; updated: number; skipped?: number; errors: string[] };
 type DeletionImpact = {

@@ -86,3 +86,100 @@ export const MOVEMENT_LABELS: Record<string, string> = {
 
 /** What a batch is allowed to be. Quarantine is the state on arrival. */
 export const ACCEPTANCE_STATES = ['pending', 'accepted', 'rejected', 'quarantined'] as const;
+
+/**
+ * What a barcode on a box of reagent actually identifies.
+ *
+ * Two different questions, and the standards answer them at two different
+ * levels:
+ *
+ *   · WHAT is this? — the trade item. Under GS1 that is the GTIN, printed on
+ *     every box of that product, identical across every delivery of it. This
+ *     is the item-level barcode: "Abbott Bioline HIV 1/2, 30-test box".
+ *
+ *   · WHICH ONE is this? — the delivery. The batch/lot number and the expiry
+ *     date, which differ from box to box of the same product. This is the
+ *     batch-level barcode.
+ *
+ * ISO 15189:2022 §6.6.2 asks the laboratory to record the lot code of every
+ * reagent and consumable it uses, and §6.6.3 to verify a new lot before it is
+ * put into service; the traceability the clause is after runs from a patient
+ * result back to a *lot*, not to a product type. So a laboratory needs both,
+ * and they are not alternatives.
+ *
+ * A modern reagent box carries both in one symbol — GS1-128 or GS1 DataMatrix
+ * — as Application Identifiers: (01) GTIN, (10) batch/lot, (17) expiry as
+ * YYMMDD. A scanner types the lot and the product code as one long string, so
+ * it is read apart here rather than being demanded field by field.
+ */
+export type Gs1Scan = { gtin?: string; lot?: string; serial?: string; expiry?: string; raw: string };
+
+/** The FNC1 group separator a scanner emits between variable-length fields. */
+const GS = '\x1d';
+/** Fixed-length AIs, so the parser knows where each field ends without a separator. */
+const GS1_FIXED: Record<string, number> = { '00': 18, '01': 14, '02': 14, '11': 6, '12': 6, '13': 6, '15': 6, '16': 6, '17': 6, '20': 2 };
+/** Variable-length AIs run to the next group separator, or to the end. */
+const GS1_VARIABLE = new Set(['10', '21', '22', '30', '240', '241', '400', '401', '414', '710']);
+
+/** A GS1 expiry is YYMMDD; a day of 00 means "the end of that month". */
+function gs1Date(v: string): string | undefined {
+  if (!/^\d{6}$/.test(v)) return undefined;
+  const year = 2000 + Number(v.slice(0, 2));
+  const month = Number(v.slice(2, 4));
+  if (month < 1 || month > 12) return undefined;
+  const day = Number(v.slice(4, 6)) || new Date(year, month, 0).getDate();
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/**
+ * Read a scanned string as GS1 element strings, if that is what it is.
+ *
+ * Returns undefined for an ordinary barcode — a plain EAN-13, or a code the
+ * laboratory printed itself — so the caller falls back to matching the whole
+ * string, which is what most consumables still need.
+ */
+export function parseGs1(input: string): Gs1Scan | undefined {
+  const raw = String(input ?? '').trim();
+  if (!raw) return undefined;
+  // Some scanners emit the group separator, some print the AIs in brackets,
+  // some do neither. Brackets are stripped so both notations parse the same.
+  const bracketed = /^\(\d{2,4}\)/.test(raw);
+  const s = bracketed ? raw.replace(/[()]/g, '') : raw;
+  // A bare 13-digit EAN is not GS1 element strings, however much it looks like
+  // one starting "01"; only a string long enough to carry an AI and its value
+  // is worth taking apart.
+  if (!bracketed && !/^(01|00|10|17|21)/.test(s)) return undefined;
+
+  const out: Gs1Scan = { raw };
+  let i = 0, found = 0;
+  while (i < s.length) {
+    const ai = [2, 3, 4].map(n => s.slice(i, i + n)).find(c => GS1_FIXED[c] !== undefined || GS1_VARIABLE.has(c));
+    if (!ai) break;
+    i += ai.length;
+    let value: string;
+    if (GS1_FIXED[ai] !== undefined) {
+      value = s.slice(i, i + GS1_FIXED[ai]);
+      i += GS1_FIXED[ai];
+    } else {
+      const end = s.indexOf(GS, i);
+      value = end === -1 ? s.slice(i) : s.slice(i, end);
+      i = end === -1 ? s.length : end + 1;
+    }
+    if (!value) break;
+    found++;
+    if (ai === '01' || ai === '02') out.gtin = value;
+    else if (ai === '10') out.lot = value;
+    else if (ai === '21') out.serial = value;
+    else if (ai === '17') out.expiry = gs1Date(value);
+  }
+  return found > 0 && (out.gtin || out.lot) ? out : undefined;
+}
+
+/**
+ * A GTIN-14 and the EAN-13 printed beneath it are the same product written to
+ * different widths, so comparing them as strings says they differ. Both are
+ * reduced to their significant digits before matching.
+ */
+export function normaliseGtin(code: string): string {
+  return String(code ?? '').trim().replace(/^0+/, '');
+}

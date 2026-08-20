@@ -37,13 +37,25 @@ export default function DetailModal({
   const panelRef = useRef<HTMLDivElement>(null);
   const returnFocusTo = useRef<HTMLElement | null>(null);
 
+  // onClose is nearly always written inline at the call site — `onClose={() =>
+  // setSelected(null)}` — so it is a different function on every render of the
+  // page behind the dialog. Depending on it would tear this effect down and
+  // set it up again on every one of those renders, and typing into a field in
+  // the dialog is exactly what causes them: each keystroke updates state on
+  // the page, the effect re-runs, and its cleanup hands focus back to the
+  // panel. The caret leaves the box mid-word and the rest of the sentence goes
+  // nowhere. So the callback is held in a ref and the effect runs on `open`
+  // alone — set up when the dialog opens, torn down when it closes.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+
   useEffect(() => {
     if (!open) return;
     // Remember what opened this, so closing puts the caret back where it was.
     returnFocusTo.current = document.activeElement as HTMLElement | null;
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.stopPropagation(); onClose(); return; }
+      if (e.key === 'Escape') { e.stopPropagation(); closeRef.current(); return; }
       if (e.key !== 'Tab' || !panelRef.current) return;
       // Keep Tab inside the dialog: the page behind it is inert while it is up.
       const focusable = panelRef.current.querySelectorAll<HTMLElement>(
@@ -69,7 +81,7 @@ export default function DetailModal({
       window.clearTimeout(t);
       returnFocusTo.current?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 

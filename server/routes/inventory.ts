@@ -7,7 +7,7 @@ import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import {
   STORAGE_KINDS, normaliseBarcodePolicy, DEFAULT_BARCODE_POLICY, BARCODE_SOURCES,
-  ISSUING_MOVEMENTS, ACCEPTANCE_STATES, effectiveBarcode, type BarcodePolicy,
+  ISSUING_MOVEMENTS, ACCEPTANCE_STATES, MOVEMENT_LABELS, effectiveBarcode, parseGs1, normaliseGtin, type BarcodePolicy,
 } from '../../shared/constants/inventory.js';
 
 import { buildWorkbook, sendWorkbook, readSheet, cell, numCell } from '../utils/xlsxRegister.js';
@@ -23,6 +23,35 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 
  * what is already recorded. Rows are matched on Item code: a row that carries
  * one updates that item, a row without one creates a new item.
  */
+/**
+ * One stock row, told the way a storekeeper would tell it.
+ *
+ * The dates and quantities a laboratory acts on live on the batches, not on
+ * the item: a product does not expire, a lot of it does. This puts the derived
+ * facts beside the stored ones so every screen agrees on what "expiry" and
+ * "on hand" mean, rather than each one working it out again.
+ */
+function decorateItem(row: any, paths: Map<number, string>) {
+  const expiry = row.batch_expiry || row.expiry_date || null;
+  const onHand = row.batch_count > 0 ? Number(row.batch_quantity) : Number(row.quantity ?? 0);
+  return {
+    ...row,
+    item_name: row.name,
+    unit_of_measure: row.unit,
+    storage_path: row.storage_location_id ? paths.get(row.storage_location_id) ?? row.storage_name ?? null : null,
+    barcode: effectiveBarcode(row),
+    effective_expiry: expiry,
+    expiry_status: computeExpiryStatus(expiry),
+    stock_on_hand: onHand,
+    low_stock: onHand <= (row.minimum_stock || row.reorder_level || 0),
+  };
+}
+
+const SUPPLIER_COLUMNS = [
+  'Supplier code', 'Name', 'Contact person', 'Phone', 'Email', 'Address',
+  'Supplies', 'Status', 'Evaluation required', 'Last evaluated', 'Next evaluation due',
+] as const;
+
 const REGISTER_COLUMNS = [
   'Item code', 'Name', 'Category', 'Unit', 'Manufacturer', 'Catalogue number',
   'Product barcode', 'Barcode source', 'Supplier', 'Storage location', 'Unit / section',
@@ -164,17 +193,47 @@ export function inventoryRoutes() {
   });
 
   // Find an item by whatever was scanned — its own barcode or ours.
+  /**
+   * What did somebody just scan?
+   *
+   * Answered most-specific-first, because a scan of a box should land on that
+   * box. A GS1 symbol carries the product and the lot together, so it can
+   * identify the exact delivery; a plain barcode usually only says which
+   * product it is. Either way the caller gets back what was recognised, plus
+   * whatever the symbol said, so a receiving screen can fill the lot and the
+   * expiry from the box instead of asking somebody to read them off it.
+   */
   router.get('/scan/:code', requirePermission('supplier_inventory.stock', 'view'), (req, res) => {
     const code = String(req.params.code).trim();
     const db = getDb();
-    const item = db.prepare(`SELECT * FROM inventory_items
-      WHERE item_code = ? COLLATE NOCASE OR (product_barcode IS NOT NULL AND product_barcode = ? COLLATE NOCASE)`).get(code, code) as any;
-    if (item) return res.json({ kind: 'item', id: item.id, name: item.name, itemCode: item.item_code });
-    // A scan may also be a batch's own barcode, which is how a delivery is checked in.
-    const batch = db.prepare(`SELECT b.*, i.name item_name FROM inventory_batches b LEFT JOIN inventory_items i ON i.id = b.item_id
-      WHERE b.product_barcode = ? COLLATE NOCASE OR b.batch_number = ? COLLATE NOCASE`).get(code, code) as any;
-    if (batch) return res.json({ kind: 'batch', id: batch.id, itemId: batch.item_id, name: batch.item_name });
-    res.status(404).json({ error: `Nothing in the register answers to “${code}”.` });
+    const gs1 = parseGs1(code);
+    const gtin = gs1?.gtin ?? code;
+    const parsed = gs1 ? { lot: gs1.lot ?? null, expiry: gs1.expiry ?? null, gtin: gs1.gtin ?? null } : null;
+
+    // The batch first: the lot is the level traceability runs at.
+    const batchByCode = db.prepare(`SELECT b.*, i.name item_name FROM inventory_batches b LEFT JOIN inventory_items i ON i.id = b.item_id
+      WHERE b.product_barcode = ? COLLATE NOCASE OR b.batch_number = ? COLLATE NOCASE OR b.lot_number = ? COLLATE NOCASE`)
+      .get(code, code, code) as any;
+    if (batchByCode) return res.json({ kind: 'batch', id: batchByCode.id, itemId: batchByCode.item_id, name: batchByCode.item_name, batchNumber: batchByCode.batch_number, parsed });
+
+    // Then the product, matched on either barcode. A GTIN-14 and the EAN-13
+    // beneath it are the same product, so leading zeros are not a difference.
+    const target = normaliseGtin(gtin);
+    const item = (db.prepare(`SELECT * FROM inventory_items
+      WHERE item_code = ? COLLATE NOCASE OR product_barcode IS NOT NULL`).all(gtin) as any[])
+      .find(r => String(r.item_code).toLowerCase() === gtin.toLowerCase()
+        || (r.product_barcode && normaliseGtin(r.product_barcode) === target));
+    if (item) {
+      // The symbol named a lot of this product — say whether that lot is one
+      // the laboratory already holds.
+      const lot = gs1?.lot
+        ? db.prepare('SELECT * FROM inventory_batches WHERE item_id = ? AND (batch_number = ? COLLATE NOCASE OR lot_number = ? COLLATE NOCASE)')
+            .get(item.id, gs1.lot, gs1.lot) as any
+        : undefined;
+      if (lot) return res.json({ kind: 'batch', id: lot.id, itemId: item.id, name: item.name, batchNumber: lot.batch_number, parsed });
+      return res.json({ kind: 'item', id: item.id, name: item.name, itemCode: item.item_code, parsed });
+    }
+    res.status(404).json({ error: `Nothing in the register answers to “${code}”.`, parsed });
   });
 
   // ===== The register as a spreadsheet =====
@@ -332,19 +391,25 @@ export function inventoryRoutes() {
   router.get('/items', requirePermission('supplier_inventory.stock', 'view'), (_req, res) => {
     const db = getDb();
     const paths = storagePaths();
-    const rows = db.prepare(`SELECT i.*, s.name AS supplier_name, sec.name AS section_name, l.name AS storage_name
+    // Expiry belongs to the delivery, not to the product: a box of strips does
+    // not expire, a particular lot of them does. The register therefore shows
+    // the earliest expiry among the stock actually on the shelf, which is the
+    // date that matters — it is what will be reached first, and what FEFO
+    // issues against. The item's own expiry_date is only a fallback for stock
+    // recorded before batches were kept.
+    const rows = db.prepare(`SELECT i.*, s.name AS supplier_name, sec.name AS section_name, l.name AS storage_name,
+        (SELECT MIN(b.expiry_date) FROM inventory_batches b
+          WHERE b.item_id = i.id AND b.quantity_available > 0
+            AND b.expiry_date IS NOT NULL AND b.expiry_date != ''
+            AND b.acceptance_status != 'rejected') AS batch_expiry,
+        (SELECT COUNT(*) FROM inventory_batches b WHERE b.item_id = i.id AND b.quantity_available > 0) AS batch_count,
+        (SELECT COALESCE(SUM(b.quantity_available), 0) FROM inventory_batches b WHERE b.item_id = i.id) AS batch_quantity
       FROM inventory_items i
       LEFT JOIN suppliers s ON s.id = i.supplier_id
       LEFT JOIN sections sec ON sec.id = i.section_id
       LEFT JOIN storage_locations l ON l.id = i.storage_location_id
       ORDER BY i.name`).all() as any[];
-    res.json(rows.map(row => ({
-      ...row, item_name: row.name, unit_of_measure: row.unit,
-      storage_path: row.storage_location_id ? paths.get(row.storage_location_id) ?? row.storage_name : null,
-      barcode: effectiveBarcode(row),
-      expiry_status: computeExpiryStatus(row.expiry_date),
-      low_stock: row.quantity <= (row.minimum_stock || row.reorder_level || 0),
-    })));
+    res.json(rows.map(row => decorateItem(row, paths)));
   });
 
   router.post('/items', requirePermission('supplier_inventory.stock', 'create'), (req, res) => {
@@ -400,11 +465,46 @@ export function inventoryRoutes() {
 
   router.get('/items/:id', requirePermission('supplier_inventory.stock', 'view'), (req, res) => {
     const db = getDb();
-    const item = db.prepare(`SELECT i.*, s.name AS supplier_name FROM inventory_items i LEFT JOIN suppliers s ON s.id = i.supplier_id WHERE i.id = ?`).get(req.params.id) as any;
+    const paths = storagePaths();
+    // Every id on the record is resolved to the name it stands for. A panel
+    // that reads "supplier 4, section 2, location 11" is a database row on a
+    // screen, not a record anybody can act on.
+    const item = db.prepare(`SELECT i.*, s.name AS supplier_name, s.contact_person AS supplier_contact,
+        s.phone AS supplier_phone, s.email AS supplier_email, sec.name AS section_name, l.name AS storage_name,
+        u.full_name AS created_by_name,
+        (SELECT MIN(b.expiry_date) FROM inventory_batches b
+          WHERE b.item_id = i.id AND b.quantity_available > 0
+            AND b.expiry_date IS NOT NULL AND b.expiry_date != ''
+            AND b.acceptance_status != 'rejected') AS batch_expiry,
+        (SELECT COUNT(*) FROM inventory_batches b WHERE b.item_id = i.id AND b.quantity_available > 0) AS batch_count,
+        (SELECT COALESCE(SUM(b.quantity_available), 0) FROM inventory_batches b WHERE b.item_id = i.id) AS batch_quantity
+      FROM inventory_items i
+      LEFT JOIN suppliers s ON s.id = i.supplier_id
+      LEFT JOIN sections sec ON sec.id = i.section_id
+      LEFT JOIN storage_locations l ON l.id = i.storage_location_id
+      LEFT JOIN users u ON u.id = i.created_by
+      WHERE i.id = ?`).get(req.params.id) as any;
     if (!item) return res.status(404).json({ error: 'Inventory item not found' });
-    const batches = db.prepare('SELECT * FROM inventory_batches WHERE item_id = ? ORDER BY expiry_date ASC, date_received ASC').all(req.params.id);
-    const movements = db.prepare('SELECT * FROM inventory_movements WHERE item_id = ? ORDER BY movement_date DESC LIMIT 100').all(req.params.id);
-    res.json({ ...item, item_name: item.name, unit_of_measure: item.unit, expiry_status: computeExpiryStatus(item.expiry_date), low_stock: item.quantity <= (item.minimum_stock || item.reorder_level || 0), batches, movements });
+    const batches = (db.prepare(`SELECT b.*, sup.name AS supplier_name_resolved, st.full_name AS accepted_by_name
+      FROM inventory_batches b
+      LEFT JOIN suppliers sup ON sup.id = b.supplier_id
+      LEFT JOIN staff st ON st.id = b.acceptance_checked_by_staff_id
+      WHERE b.item_id = ? ORDER BY b.expiry_date ASC, b.date_received ASC`).all(req.params.id) as any[])
+      .map(b => ({
+        ...b,
+        supplier_name: b.supplier_name ?? b.supplier_name_resolved,
+        storage_path: b.storage_location_id ? paths.get(b.storage_location_id) ?? null : null,
+        expiry_status: computeExpiryStatus(b.expiry_date),
+      }));
+    const movements = db.prepare(`SELECT m.*, b.batch_number, b.lot_number, sec.name AS issued_to_section_name,
+        st.full_name AS received_by_name, u.full_name AS recorded_by_name
+      FROM inventory_movements m
+      LEFT JOIN inventory_batches b ON b.id = m.batch_id
+      LEFT JOIN sections sec ON sec.id = m.issued_to_section_id
+      LEFT JOIN staff st ON st.id = m.received_by_staff_id
+      LEFT JOIN users u ON u.id = m.created_by
+      WHERE m.item_id = ? ORDER BY m.movement_date DESC, m.id DESC LIMIT 200`).all(req.params.id);
+    res.json({ ...decorateItem(item, paths), batches, movements });
   });
 
   router.put('/items/:id', requirePermission('supplier_inventory.stock', 'edit'), (req, res) => {
@@ -453,6 +553,129 @@ export function inventoryRoutes() {
     res.json({ ok: true });
   });
 
+  /* -------------------------------------------------- removing a stock item */
+
+  /** What removing this item would take with it, so the choice is informed. */
+  router.get('/items/:id/deletion-impact', requirePermission('supplier_inventory.stock', 'view'), (req, res) => {
+    const db = getDb();
+    const item = db.prepare('SELECT * FROM inventory_items WHERE id = ?').get(req.params.id) as any;
+    if (!item) return res.status(404).json({ error: 'Inventory item not found' });
+    const count = (sql: string) => (db.prepare(sql).get(req.params.id) as { n: number }).n;
+    const batches = count('SELECT COUNT(*) AS n FROM inventory_batches WHERE item_id = ?');
+    const movements = count('SELECT COUNT(*) AS n FROM inventory_movements WHERE item_id = ?');
+    const onHand = (db.prepare('SELECT COALESCE(SUM(quantity_available), 0) AS n FROM inventory_batches WHERE item_id = ?').get(req.params.id) as { n: number }).n;
+    res.json({
+      item: { id: item.id, itemCode: item.item_code, name: item.name, isActive: Number(item.is_active) === 1 },
+      batches, movements, quantityOnHand: onHand,
+      // Withdrawing is always safe: the item stops being offered for new stock
+      // and everything it ever recorded stays put. Erasing destroys the
+      // traceability the standard asks for, so it is offered plainly only when
+      // there is none to destroy.
+      canDeleteOutright: batches === 0 && movements === 0,
+      recommendation: batches > 0 || movements > 0 ? 'withdraw' : 'delete',
+    });
+  });
+
+  /**
+   * Remove a stock item.
+   *
+   * `withdraw` is the normal answer — the item leaves the working register and
+   * its batches and movements stay on the record, which is what ISO 15189
+   * §6.6.2 traceability rests on. `delete` erases it and everything it holds,
+   * and is for an item entered by mistake: it needs a written reason, and a
+   * second confirmation once there is history behind it.
+   */
+  router.delete('/items/:id', requirePermission('supplier_inventory.stock', 'void_archive'), (req, res) => {
+    const db = getDb();
+    const item = db.prepare('SELECT * FROM inventory_items WHERE id = ?').get(req.params.id) as any;
+    if (!item) return res.status(404).json({ error: 'Inventory item not found' });
+    const mode = String(req.query.mode ?? 'withdraw');
+
+    if (mode === 'withdraw') {
+      db.prepare("UPDATE inventory_items SET is_active = 0, status = 'unavailable', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
+      audit(req, { action: 'retire', entity: 'inventory_items', entityId: req.params.id, oldValue: item, newValue: { is_active: 0, reason: String(req.body?.reason ?? '').trim() || null } });
+      return res.json({ ok: true, mode: 'withdrawn', message: `${item.name} is withdrawn from the register. Its batches and movements remain on the record.` });
+    }
+    if (mode !== 'delete') return res.status(400).json({ error: "mode must be 'withdraw' or 'delete'" });
+
+    const reason = String(req.body?.reason ?? '').trim();
+    if (reason.length < 8) {
+      return res.status(400).json({ error: 'Say why this item is being erased. The reason is kept in the audit trail.', needsReason: true });
+    }
+    const batches = (db.prepare('SELECT COUNT(*) AS n FROM inventory_batches WHERE item_id = ?').get(req.params.id) as { n: number }).n;
+    const movements = (db.prepare('SELECT COUNT(*) AS n FROM inventory_movements WHERE item_id = ?').get(req.params.id) as { n: number }).n;
+    if ((batches > 0 || movements > 0) && req.query.force !== '1') {
+      return res.status(409).json({
+        error: `${item.name} has ${batches} batch(es) and ${movements} movement(s) on record. Erasing it destroys that traceability — withdraw it instead, or confirm if it was entered in error.`,
+        batches, movements, needsForce: true,
+      });
+    }
+    const removed = { batches: 0, movements: 0 };
+    db.transaction(() => {
+      removed.movements = db.prepare('DELETE FROM inventory_movements WHERE item_id = ?').run(req.params.id).changes;
+      removed.batches = db.prepare('DELETE FROM inventory_batches WHERE item_id = ?').run(req.params.id).changes;
+      db.prepare('DELETE FROM inventory_items WHERE id = ?').run(req.params.id);
+    })();
+    audit(req, { action: 'delete', entity: 'inventory_items', entityId: req.params.id, oldValue: item, newValue: { reason, removed } });
+    res.json({ ok: true, mode: 'deleted', removed, message: `${item.name} was erased from the register.` });
+  });
+
+  /* ------------------------------------------------ the movement register */
+
+  /**
+   * Every issue, receipt and disposal, newest first.
+   *
+   * Recording a movement and then having nowhere to see it is not a record.
+   * ISO 15189 §6.6.2 asks the laboratory to keep the receipt and use of each
+   * lot; this is that list, with the batch, the unit it went to and the person
+   * who took it named rather than left as ids.
+   */
+  router.get('/movements', requirePermission('supplier_inventory.stock', 'view'), (req, res) => {
+    const db = getDb();
+    const where: string[] = [];
+    const args: unknown[] = [];
+    if (req.query.itemId) { where.push('m.item_id = ?'); args.push(Number(req.query.itemId)); }
+    if (req.query.batchId) { where.push('m.batch_id = ?'); args.push(Number(req.query.batchId)); }
+    if (req.query.from) { where.push('date(m.movement_date) >= date(?)'); args.push(String(req.query.from)); }
+    if (req.query.to) { where.push('date(m.movement_date) <= date(?)'); args.push(String(req.query.to)); }
+    const rows = db.prepare(`SELECT m.*, i.name AS item_name, i.item_code, i.unit AS unit_of_measure,
+        b.batch_number, b.lot_number, b.expiry_date AS batch_expiry,
+        sec.name AS issued_to_section_name, st.full_name AS received_by_name, u.full_name AS recorded_by_name
+      FROM inventory_movements m
+      LEFT JOIN inventory_items i ON i.id = m.item_id
+      LEFT JOIN inventory_batches b ON b.id = m.batch_id
+      LEFT JOIN sections sec ON sec.id = m.issued_to_section_id
+      LEFT JOIN staff st ON st.id = m.received_by_staff_id
+      LEFT JOIN users u ON u.id = m.created_by
+      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+      ORDER BY m.movement_date DESC, m.id DESC
+      LIMIT ?`).all(...args, Number(req.query.limit) || 500);
+    res.json(rows);
+  });
+
+  router.get('/movements/export', requirePermission('supplier_inventory.stock', 'export'), (_req, res) => {
+    const db = getDb();
+    const rows = db.prepare(`SELECT m.*, i.name AS item_name, i.item_code, i.unit AS unit_of_measure,
+        b.batch_number, b.lot_number, sec.name AS issued_to_section_name, st.full_name AS received_by_name, u.full_name AS recorded_by_name
+      FROM inventory_movements m
+      LEFT JOIN inventory_items i ON i.id = m.item_id
+      LEFT JOIN inventory_batches b ON b.id = m.batch_id
+      LEFT JOIN sections sec ON sec.id = m.issued_to_section_id
+      LEFT JOIN staff st ON st.id = m.received_by_staff_id
+      LEFT JOIN users u ON u.id = m.created_by
+      ORDER BY m.movement_date DESC, m.id DESC`).all() as any[];
+    const headers = ['Date', 'Item code', 'Item', 'Batch', 'Lot', 'Movement', 'Quantity', 'Unit', 'Issued to', 'Received by', 'Reason', 'Recorded by'];
+    const aoa = rows.map(r => [
+      String(r.movement_date ?? '').slice(0, 10), r.item_code ?? '', r.item_name ?? '',
+      r.batch_number ?? '', r.lot_number ?? '',
+      MOVEMENT_LABELS[r.movement_type] ?? String(r.movement_type ?? '').replace(/_/g, ' '),
+      Number(r.quantity ?? 0), r.unit_of_measure ?? '',
+      r.issued_to_section_name ?? '', r.received_by_name ?? '', r.reason ?? '', r.recorded_by_name ?? '',
+    ]);
+    sendWorkbook(res, buildWorkbook(headers, aoa, 'STOCK MOVEMENTS'),
+      `Stock_Movements-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  });
+
   // Batches
   router.post('/items/:id/batches', requirePermission('supplier_inventory.stock', 'create'), (req, res) => {
     if (req.body.quantityReceived === undefined || req.body.quantityReceived === '' || req.body.quantityReceived === null) return res.status(400).json({ error: 'quantityReceived is required' });
@@ -463,7 +686,17 @@ export function inventoryRoutes() {
     const qtyReceived = Number(req.body.quantityReceived);
     const qtyAvailable = req.body.quantityAvailable !== undefined ? Number(req.body.quantityAvailable) : qtyReceived;
     if (qtyReceived < 0 || qtyAvailable < 0) return res.status(400).json({ error: 'Quantities cannot be negative' });
-    const result = db.prepare(`INSERT INTO inventory_batches (item_id, batch_number, lot_number, supplier_id, supplier_name, quantity_received, quantity_available, date_received, expiry_date, acceptance_status, acceptance_checked_by_staff_id, acceptance_date, storage_location_id, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    // The barcode read off this particular box. Under GS1 that symbol carries
+    // the product AND the lot AND the expiry, which is the level ISO 15189
+    // §6.6.2 traceability actually runs at, so it is kept on the batch.
+    const batchBarcode = String(req.body.productBarcode ?? '').trim() || null;
+    if (batchBarcode) {
+      const clash = db.prepare(`SELECT b.batch_number, i.name FROM inventory_batches b
+        JOIN inventory_items i ON i.id = b.item_id
+        WHERE b.product_barcode = ? COLLATE NOCASE`).get(batchBarcode) as { batch_number: string | null; name: string } | undefined;
+      if (clash) return res.status(400).json({ error: `That barcode is already on ${clash.name} batch ${clash.batch_number || '(unnumbered)'}.` });
+    }
+    const result = db.prepare(`INSERT INTO inventory_batches (item_id, batch_number, lot_number, supplier_id, supplier_name, quantity_received, quantity_available, date_received, expiry_date, acceptance_status, acceptance_checked_by_staff_id, acceptance_date, storage_location_id, product_barcode, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(
         req.params.id,
         req.body.batchNumber ?? null,
@@ -478,6 +711,7 @@ export function inventoryRoutes() {
         parseIntNullable(req.body.acceptanceCheckedByStaffId),
         req.body.acceptanceDate ?? null,
         parseIntNullable(req.body.storageLocationId) ?? item.location_id,
+        batchBarcode,
         req.body.status ?? 'available',
         req.user!.id
       );
@@ -619,7 +853,161 @@ export function inventoryRoutes() {
   // Suppliers
   router.get('/suppliers', requirePermission('supplier_inventory.suppliers', 'view'), (_req, res) => {
     const db = getDb();
-    res.json(db.prepare('SELECT * FROM suppliers ORDER BY name').all());
+    const today = new Date().toISOString().slice(0, 10);
+    // ISO 15189 §6.6.4 asks the laboratory to evaluate and monitor the
+    // suppliers of what affects its results, so the register has to show at a
+    // glance who is due — not just who exists.
+    const rows = db.prepare(`SELECT s.*,
+        (SELECT COUNT(*) FROM inventory_items i WHERE i.supplier_id = s.id) AS item_count,
+        (SELECT COUNT(*) FROM inventory_batches b WHERE b.supplier_id = s.id) AS batch_count,
+        (SELECT COUNT(*) FROM supplier_evaluations e WHERE e.supplier_id = s.id) AS evaluation_count,
+        (SELECT rating FROM supplier_evaluations e WHERE e.supplier_id = s.id ORDER BY e.evaluation_date DESC LIMIT 1) AS last_rating
+      FROM suppliers s ORDER BY s.name`).all() as any[];
+    res.json(rows.map(r => ({
+      ...r,
+      evaluation_status: !r.evaluation_required ? 'not_required'
+        : !r.last_evaluation_date ? 'never_evaluated'
+        : r.next_evaluation_due && r.next_evaluation_due.slice(0, 10) < today ? 'overdue'
+        : 'current',
+    })));
+  });
+
+  router.get('/suppliers/export', requirePermission('supplier_inventory.suppliers', 'export'), (_req, res) => {
+    const db = getDb();
+    const rows = db.prepare('SELECT * FROM suppliers ORDER BY name').all() as any[];
+    const aoa = rows.map(r => [
+      r.supplier_code ?? '', r.name ?? '', r.contact_person ?? '', r.phone ?? '', r.email ?? '',
+      r.address ?? '', r.item_category ?? '', r.status ?? 'active',
+      r.evaluation_required ? 'Yes' : 'No',
+      String(r.last_evaluation_date ?? '').slice(0, 10), String(r.next_evaluation_due ?? '').slice(0, 10),
+    ]);
+    sendWorkbook(res, buildWorkbook(SUPPLIER_COLUMNS, aoa, 'SUPPLIER REGISTER'),
+      `Supplier_Register-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  });
+
+  router.post('/suppliers/import', requirePermission('supplier_inventory.suppliers', 'create'), upload.single('file'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded.' });
+    let rows: Record<string, unknown>[];
+    try { rows = readSheet(req.file.buffer, 'SUPPLIER'); }
+    catch { return res.status(400).json({ error: 'Could not read that spreadsheet. Export the register first and edit that file.' }); }
+
+    const db = getDb();
+    const result = { created: 0, updated: 0, skipped: 0, errors: [] as string[] };
+    const yes = (v: string | null) => /^(y|yes|true|1)$/i.test(String(v ?? '').trim());
+    db.transaction(() => {
+      rows.forEach((row, n) => {
+        const line = n + 2;
+        const name = cell(row, 'Name');
+        if (!name) { result.skipped++; return; }
+        const code = cell(row, 'Supplier code');
+        // Matched on the code the register issued; a row without one is new.
+        const existing = code
+          ? db.prepare('SELECT * FROM suppliers WHERE supplier_code = ? COLLATE NOCASE').get(code) as any
+          : db.prepare('SELECT * FROM suppliers WHERE name = ? COLLATE NOCASE').get(name) as any;
+        const values = [
+          name, cell(row, 'Contact person'), cell(row, 'Phone'), cell(row, 'Email'), cell(row, 'Address'),
+          cell(row, 'Supplies'), (cell(row, 'Status') ?? 'active').toLowerCase(),
+          yes(cell(row, 'Evaluation required')) ? 1 : 0,
+          cell(row, 'Last evaluated'), cell(row, 'Next evaluation due'),
+        ];
+        try {
+          if (existing) {
+            db.prepare(`UPDATE suppliers SET name = ?, contact_person = ?, phone = ?, email = ?, address = ?,
+              item_category = ?, status = ?, evaluation_required = ?, last_evaluation_date = ?, next_evaluation_due = ?,
+              updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...values, existing.id);
+            result.updated++;
+          } else {
+            const createdAt = new Date().toISOString();
+            db.prepare(`INSERT INTO suppliers (supplier_code, name, contact_person, phone, email, address,
+              item_category, status, evaluation_required, last_evaluation_date, next_evaluation_due, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+              .run(code || generateRecordNumber(db, 'suppliers', 'SUP', createdAt), ...values, createdAt);
+            result.created++;
+          }
+        } catch (e) { result.errors.push(`Row ${line}: ${(e as Error).message}`); result.skipped++; }
+      });
+    })();
+    audit(req, { action: 'import', entity: 'suppliers', entityId: 0, newValue: result });
+    res.json(result);
+  });
+
+  /** Every evaluation ever recorded — the §6.6.4 monitoring record in one list. */
+  router.get('/supplier-evaluations', requirePermission('supplier_inventory.suppliers', 'view'), (req, res) => {
+    const db = getDb();
+    const args: unknown[] = [];
+    let where = '';
+    if (req.query.supplierId) { where = 'WHERE e.supplier_id = ?'; args.push(Number(req.query.supplierId)); }
+    res.json(db.prepare(`SELECT e.*, s.name AS supplier_name, s.supplier_code, st.full_name AS evaluated_by_name
+      FROM supplier_evaluations e
+      LEFT JOIN suppliers s ON s.id = e.supplier_id
+      LEFT JOIN staff st ON st.id = e.evaluated_by_staff_id
+      ${where} ORDER BY e.evaluation_date DESC, e.id DESC`).all(...args));
+  });
+
+  router.get('/suppliers/:id/deletion-impact', requirePermission('supplier_inventory.suppliers', 'view'), (req, res) => {
+    const db = getDb();
+    const supplier = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id) as any;
+    if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
+    const count = (sql: string) => (db.prepare(sql).get(req.params.id) as { n: number }).n;
+    const items = count('SELECT COUNT(*) AS n FROM inventory_items WHERE supplier_id = ?');
+    const batches = count('SELECT COUNT(*) AS n FROM inventory_batches WHERE supplier_id = ?');
+    const evaluations = count('SELECT COUNT(*) AS n FROM supplier_evaluations WHERE supplier_id = ?');
+    res.json({
+      supplier: { id: supplier.id, supplierCode: supplier.supplier_code, name: supplier.name, status: supplier.status },
+      items, batches, evaluations,
+      canDeleteOutright: items === 0 && batches === 0 && evaluations === 0,
+      recommendation: items > 0 || batches > 0 || evaluations > 0 ? 'suspend' : 'delete',
+    });
+  });
+
+  /**
+   * Remove a supplier.
+   *
+   * `suspend` is the normal answer: they stop being offered for new orders and
+   * everything they ever supplied keeps their name, which is what a recall
+   * depends on. `delete` is for one entered by mistake — the stock they supply
+   * is detached rather than deleted, so no reagent loses its record along with
+   * them.
+   */
+  router.delete('/suppliers/:id', requirePermission('supplier_inventory.suppliers', 'void_archive'), (req, res) => {
+    const db = getDb();
+    const supplier = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id) as any;
+    if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
+    const mode = String(req.query.mode ?? 'suspend');
+
+    if (mode === 'suspend') {
+      db.prepare("UPDATE suppliers SET status = 'suspended', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
+      audit(req, { action: 'retire', entity: 'suppliers', entityId: req.params.id, oldValue: supplier, newValue: { status: 'suspended', reason: String(req.body?.reason ?? '').trim() || null } });
+      return res.json({ ok: true, mode: 'suspended', message: `${supplier.name} is suspended. Everything they supplied keeps their name.` });
+    }
+    if (mode !== 'delete') return res.status(400).json({ error: "mode must be 'suspend' or 'delete'" });
+
+    const reason = String(req.body?.reason ?? '').trim();
+    if (reason.length < 8) {
+      return res.status(400).json({ error: 'Say why this supplier is being erased. The reason is kept in the audit trail.', needsReason: true });
+    }
+    const items = (db.prepare('SELECT COUNT(*) AS n FROM inventory_items WHERE supplier_id = ?').get(req.params.id) as { n: number }).n;
+    const batches = (db.prepare('SELECT COUNT(*) AS n FROM inventory_batches WHERE supplier_id = ?').get(req.params.id) as { n: number }).n;
+    const evaluations = (db.prepare('SELECT COUNT(*) AS n FROM supplier_evaluations WHERE supplier_id = ?').get(req.params.id) as { n: number }).n;
+    if ((items > 0 || batches > 0 || evaluations > 0) && req.query.force !== '1') {
+      return res.status(409).json({
+        error: `${supplier.name} supplies ${items} item(s), ${batches} delivered batch(es) and has ${evaluations} evaluation(s). Suspend them instead, or confirm if they were entered in error.`,
+        items, batches, evaluations, needsForce: true,
+      });
+    }
+    const detached = { items: 0, batches: 0, evaluations: 0 };
+    db.transaction(() => {
+      // The stock stays; only the pointer to a supplier that should never have
+      // existed goes. A batch keeps the supplier's name in its own column, so
+      // a recall can still be traced.
+      db.prepare('UPDATE inventory_batches SET supplier_name = COALESCE(supplier_name, ?) WHERE supplier_id = ?').run(supplier.name, req.params.id);
+      detached.batches = db.prepare('UPDATE inventory_batches SET supplier_id = NULL WHERE supplier_id = ?').run(req.params.id).changes;
+      detached.items = db.prepare('UPDATE inventory_items SET supplier_id = NULL WHERE supplier_id = ?').run(req.params.id).changes;
+      detached.evaluations = db.prepare('DELETE FROM supplier_evaluations WHERE supplier_id = ?').run(req.params.id).changes;
+      db.prepare('DELETE FROM suppliers WHERE id = ?').run(req.params.id);
+    })();
+    audit(req, { action: 'delete', entity: 'suppliers', entityId: req.params.id, oldValue: supplier, newValue: { reason, detached } });
+    res.json({ ok: true, mode: 'deleted', detached, message: `${supplier.name} was erased. ${detached.items} item(s) and ${detached.batches} batch(es) kept their records.` });
   });
 
   router.post('/suppliers', requirePermission('supplier_inventory.suppliers', 'create'), (req, res) => {
