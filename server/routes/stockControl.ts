@@ -107,19 +107,31 @@ export function stockControlRoutes() {
   /**
    * Somebody from a unit comes for a reagent.
    *
-   * One request, one voucher. The storekeeper names the unit and the person,
-   * lists what they are taking, and the store works out which lots it comes
-   * from — oldest expiry first — and writes a movement per lot. Nobody picks a
-   * batch by hand, because that is the step that made people stop using the
-   * system and write it on a card instead.
+   * One request, one voucher. The storekeeper names the requesting unit and
+   * the member of staff collecting, lists what they are taking, and the store
+   * allocates the lots — earliest expiry first — writing a movement per lot.
+   * Nobody picks a batch by hand.
+   *
+   * The collector is a member of staff, not a name typed at the counter: an
+   * issue that cannot be traced to a person on the staff register is not a
+   * record of who took the stock. A name is still accepted for records written
+   * before that, and for a collector who is not on the register at all.
    */
   router.post('/issues', requirePermission('supplier_inventory.stock', 'create'), (req, res) => {
     const db = getDb();
     const lines = Array.isArray(req.body.lines) ? req.body.lines : [];
     if (lines.length === 0) return res.status(400).json({ error: 'Add at least one item to issue.' });
     const sectionId = parseIntNullable(req.body.sectionId);
-    if (!sectionId && !String(req.body.issuedToName ?? '').trim()) {
-      return res.status(400).json({ error: 'Say which unit this is going to, or who is taking it.' });
+    const collectorId = parseIntNullable(req.body.receivedByStaffId);
+    // The collector's name is carried on the voucher so it reads on its own,
+    // and so the register survives the staff record being renamed.
+    const collector = collectorId
+      ? db.prepare('SELECT full_name FROM staff WHERE id = ?').get(collectorId) as { full_name?: string } | undefined
+      : undefined;
+    if (collectorId && !collector) return res.status(400).json({ error: 'That member of staff is not on the staff register.' });
+    const collectedBy = String(req.body.issuedToName ?? '').trim() || collector?.full_name || '';
+    if (!sectionId && !collectedBy) {
+      return res.status(400).json({ error: 'Say which unit this is going to, or who is collecting it.' });
     }
 
     // Everything is checked before anything moves, so a request for five items
@@ -147,14 +159,15 @@ export function stockControlRoutes() {
     const issueDate = req.body.issueDate || new Date().toISOString().slice(0, 10);
     const createdAt = new Date().toISOString();
     const issueNumber = generateRecordNumber(db, 'stock_issues', 'ISS', createdAt);
-    const receivedBy = parseIntNullable(req.body.receivedByStaffId);
+    const receivedBy = collectorId;
+    const purposeLabel = optionLabel(db, 'stock_issue_reason', req.body.purpose);
 
     let issueId = 0;
     db.transaction(() => {
       issueId = Number(db.prepare(`INSERT INTO stock_issues
         (issue_number, issue_date, section_id, issued_to_name, received_by_staff_id, issued_by_user_id, purpose, note, status, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'issued', ?)`)
-        .run(issueNumber, issueDate, sectionId, String(req.body.issuedToName ?? '').trim() || null,
+        .run(issueNumber, issueDate, sectionId, collectedBy || null,
           receivedBy, req.user!.id, req.body.purpose ?? null, req.body.note ?? null, createdAt).lastInsertRowid);
 
       for (const p of planned) {
@@ -164,7 +177,7 @@ export function stockControlRoutes() {
           postMovement(db, {
             itemId: p.itemId, batchId: a.batchId, movementType: 'issue', quantity: a.quantity,
             movementDate: issueDate, issuedToSectionId: sectionId, receivedByStaffId: receivedBy,
-            reason: req.body.purpose || `Issued on ${issueNumber}`, issueId, unitCost: p.unitCost, userId: req.user!.id,
+            reason: purposeLabel || `Issued on ${issueNumber}`, issueId, unitCost: p.unitCost, userId: req.user!.id,
           });
         }
       }
@@ -192,8 +205,8 @@ export function stockControlRoutes() {
       LEFT JOIN staff st ON st.id = i.received_by_staff_id
       LEFT JOIN users u ON u.id = i.issued_by_user_id
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-      ORDER BY date(i.issue_date) DESC, i.id DESC LIMIT ?`).all(...args, Number(req.query.limit) || 300);
-    res.json(rows);
+      ORDER BY date(i.issue_date) DESC, i.id DESC LIMIT ?`).all(...args, Number(req.query.limit) || 300) as any[];
+    res.json(rows.map(r => ({ ...r, purpose_label: optionLabel(db, 'stock_issue_reason', r.purpose) })));
   });
 
   router.get('/issues/:id', requirePermission('supplier_inventory.stock', 'view'), (req, res) => {
@@ -207,7 +220,7 @@ export function stockControlRoutes() {
     const lines = (db.prepare(`SELECT l.*, it.name AS item_name, it.item_code FROM stock_issue_lines l
       LEFT JOIN inventory_items it ON it.id = l.item_id WHERE l.issue_id = ?`).all(req.params.id) as any[])
       .map(l => ({ ...l, allocation: safeJson(l.allocation) }));
-    res.json({ ...issue, lines });
+    res.json({ ...issue, purpose_label: optionLabel(db, 'stock_issue_reason', issue.purpose), lines });
   });
 
   /**
@@ -471,7 +484,9 @@ export function stockControlRoutes() {
    * consumption trend means one thing beside a healthy stock position and quite
    * another beside a stockout list.
    */
-  router.get('/reports', requirePermission('supplier_inventory.stock', 'view'), (req, res) => {
+  // Reporting is its own feature — it is read on the module dashboard by
+  // whoever holds it, which is not everyone who may work the store.
+  router.get('/reports', requirePermission('supplier_inventory.reports', 'view'), (req, res) => {
     const db = getDb();
     const monthsBack = Number(req.query.months) || 12;
     const { months, rows } = stockPositions({ monthsBack });
@@ -567,4 +582,20 @@ export function stockControlRoutes() {
 
 function safeJson(v: unknown) {
   try { return typeof v === 'string' ? JSON.parse(v) : v; } catch { return null; }
+}
+
+/**
+ * The words behind a picklist code.
+ *
+ * Issue reasons are the laboratory's own list, held as codes so a rename in
+ * Settings does not orphan the records that used them. A movement, though, is
+ * read as a line of text on a bin card long after the fact, so it carries the
+ * label as it read on the day.
+ */
+function optionLabel(db: ReturnType<typeof getDb>, listKey: string, value: unknown): string | null {
+  const code = String(value ?? '').trim();
+  if (!code) return null;
+  const row = db.prepare('SELECT label FROM config_options WHERE list_key = ? AND value = ?')
+    .get(listKey, code) as { label?: string } | undefined;
+  return row?.label ?? code;
 }

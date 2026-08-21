@@ -8,9 +8,9 @@ import { ForecastingPanel } from './inventory/Forecasting';
 import { InventoryReports } from './inventory/Reports';
 import { STOCK_STATUS_LABELS, NEEDS_ACTION } from '../../shared/constants/stockControl';
 
-// The store's day, in order: what is held, what came in, what is going out,
-// what the count found, and the trail of all of it.
-const INVENTORY_TABS = ['Stock ledger', 'Receiving', 'Issuing', 'Batches & lots', 'Stock take', 'Movement register'] as const;
+// Receiving is one job done in two places: the delivery is booked in, and the
+// lots it created are then inspected, accepted and watched for expiry.
+const RECEIVING_TABS = ['Goods receipt', 'Batches & lots'] as const;
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken, ApiError } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -24,6 +24,7 @@ import { EnvironmentalMonitoringPage, EnvLiveCards } from './EnvironmentalMonito
 import { usePermissions } from '../hooks/usePermissions';
 import PermissionTabs from '../components/PermissionTabs';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
+import { useTabParam } from '../hooks/useTabParam';
 import type {
   Location, Section, Department, Staff, Supplier, EquipmentItem, InventoryItem, MonitoringRecord, SafetyIncident,
   EquipmentMaintenanceRecord, EquipmentBreakdown, MonitoringItem, MonitoringReading,
@@ -40,8 +41,8 @@ import type { ConfigOption } from '../../shared/constants/configLists';
 import { BARCODE_SOURCE_LABELS, MOVEMENT_LABELS, STORAGE_KIND_LABELS, effectiveBarcode } from '../../shared/constants/inventory';
 import type { BarcodePolicy } from '../../shared/constants/inventory';
 
-// ISO 15189 §6.6.4 monitoring, in one word. Ordered worst-first so the
-// management view can simply sort by it.
+// Where a supplier stands on evaluation, in one word. Ordered worst-first so
+// the management view can simply sort by it.
 const EVALUATION_TONE: Record<string, { label: string; style: Record<string, string> }> = {
   overdue: { label: 'overdue', style: { background: '#fde2e2', color: 'var(--danger)' } },
   never_evaluated: { label: 'never evaluated', style: { background: '#fff7df', color: '#6b4b05' } },
@@ -1326,6 +1327,10 @@ export function InventoryPage() {
   const [storagePlaces, setStoragePlaces] = useState<Array<{ id: number; path: string; kind: string }>>([]);
   const [categories, setCategories] = useState<ConfigOption[]>([]);
   const [units, setUnits] = useState<ConfigOption[]>([]);
+  // Why stock leaves the store, in the laboratory's own words — configured in
+  // Settings → Dropdown Lists rather than typed afresh at every counter.
+  const [issueReasons, setIssueReasons] = useState<ConfigOption[]>([]);
+  const [movementReasons, setMovementReasons] = useState<ConfigOption[]>([]);
   const [barcodePolicy, setBarcodePolicy] = useState<BarcodePolicy>({ defaultSource: 'system', allowPerItem: true });
   const [regBusy, setRegBusy] = useState('');
   const [regResult, setRegResult] = useState<{ created: number; updated: number; skipped: number; errors: string[] } | null>(null);
@@ -1333,7 +1338,10 @@ export function InventoryPage() {
   const supplierImportRef = useRef<HTMLInputElement>(null);
   const [itemSearch, setItemSearch] = useState('');
   const [fefoWarning, setFefoWarning] = useState<{ message: string; batchId: number } | null>(null);
-  const [invTab, setInvTab] = useState<typeof INVENTORY_TABS[number]>('Stock ledger');
+  const [recvTab, setRecvTab] = useState<typeof RECEIVING_TABS[number]>('Goods receipt');
+  // A link to a batch lands on the bench that holds it, not on the module's
+  // front page: ?tab=Receiving&subtab=Batches & lots.
+  useTabParam(RECEIVING_TABS as unknown as string[], t => setRecvTab(t as typeof RECEIVING_TABS[number]), 'subtab');
   // Bumped whenever stock moves, so every panel showing a balance re-reads it.
   const [stockKey, setStockKey] = useState(0);
   const [ledgerRows, setLedgerRows] = useState<LedgerRow[]>([]);
@@ -1388,7 +1396,7 @@ export function InventoryPage() {
   }, [suppliers, supplierSearch]);
   const [batchForm, setBatchForm] = useState({ itemId: '', batchNumber: '', lotNumber: '', supplierId: '', quantityReceived: 0, quantityAvailable: 0, dateReceived: '', expiryDate: '', storageLocationId: '', productBarcode: '' });
   const [receiptNote, setReceiptNote] = useState<string | null>(null);
-  const [movementForm, setMovementForm] = useState({ batchId: '', movementType: 'issue', quantity: 0, movementDate: '', issuedToSectionId: '', receivedByStaffId: '', reason: '' });
+  const [movementForm, setMovementForm] = useState({ batchId: '', movementType: 'issue', quantity: 0, movementDate: '', issuedToSectionId: '', receivedByStaffId: '', reason: '', reasonNote: '' });
   const [supplierForm, setSupplierForm] = useState({ name: '', contactPerson: '', phone: '', email: '', address: '', itemCategory: '', evaluationRequired: false });
   const [evalForm, setEvalForm] = useState({ supplierId: '', evaluationDate: '', rating: '', findings: '', actionRequired: '', nextEvaluationDate: '' });
   const [storageInspections, setStorageInspections] = useState<StorageInspection[]>([]);
@@ -1414,6 +1422,8 @@ export function InventoryPage() {
       api<Array<{ id: number; path: string; kind: string }>>('/supplier-inventory/storage-locations').then(setStoragePlaces).catch(() => setStoragePlaces([]));
       api<ConfigOption[]>('/config/option-lists/inventory_category').then(setCategories).catch(() => setCategories([]));
       api<ConfigOption[]>('/config/option-lists/inventory_unit').then(setUnits).catch(() => setUnits([]));
+      api<ConfigOption[]>('/config/option-lists/stock_issue_reason').then(setIssueReasons).catch(() => setIssueReasons([]));
+      api<ConfigOption[]>('/config/option-lists/stock_movement_reason').then(setMovementReasons).catch(() => setMovementReasons([]));
       api<BarcodePolicy>('/supplier-inventory/barcode-policy')
         .then(p => { setBarcodePolicy(p); setItemForm(f => ({ ...f, barcodeSource: p.defaultSource })); })
         .catch(() => undefined);
@@ -1559,7 +1569,7 @@ export function InventoryPage() {
     if (!movementForm.batchId) return setError('Select a batch');
     try {
       await api(`/supplier-inventory/batches/${movementForm.batchId}/movement`, { method: 'POST', body: JSON.stringify({ ...movementForm, overrideFefo }) });
-      setMovementForm({ batchId: '', movementType: 'issue', quantity: 0, movementDate: '', issuedToSectionId: '', receivedByStaffId: '', reason: '' });
+      setMovementForm({ batchId: '', movementType: 'issue', quantity: 0, movementDate: '', issuedToSectionId: '', receivedByStaffId: '', reason: '', reasonNote: '' });
       setFefoWarning(null);
       setStockKey(k => k + 1);
       await load();
@@ -1603,38 +1613,44 @@ export function InventoryPage() {
   }
 
   return <div>
-    <PageHeader eyebrow="Supplier &amp; Inventory Management" title="Supplier &amp; Inventory Management" subtitle="Suppliers, reagents, stock levels, batches, and expiry control." />
+    <PageHeader eyebrow="Supplier &amp; Inventory Management" title="Supplier &amp; Inventory Management" subtitle="Suppliers, stock items, receiving, issuing, stock counts and expiry control." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
     {notice && <div className="card notice-ok" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
       <span style={{ flex: 1 }}>{notice}</span>
       <button type="button" className="secondary tiny" onClick={() => setNotice(null)}>Dismiss</button>
     </div>}
-    {tabBarFor('supplier_inventory')(tab, ['Dashboard', 'Item Register', 'New Item', 'Inventory', 'Suppliers', 'Storage Inspections', 'Barcode Labels', 'Forecasting', 'Reports'], setTab)}
+    {/* The store's day, in the order it runs: what is held, what came in, what
+        is going out, what the count found, and the trail of all of it. */}
+    {tabBarFor('supplier_inventory')(tab, ['Dashboard', 'Item Register', 'New Item', 'Stock Ledger', 'Receiving', 'Issuing', 'Stock Take', 'Stock Movements', 'Suppliers', 'Storage Inspections', 'Barcode Labels', 'Forecasting'], setTab)}
 
-    {/* The store's own position, not a count of catalogue rows. What a
-        storekeeper needs before anything else is: can I serve the bench today,
-        and what am I about to lose off the shelf. */}
+    {/* The store's own position, not a count of catalogue rows: can the bench
+        be served today, and what is about to be lost off the shelf. The
+        reporting that used to sit on its own tab is the second half of the
+        same question, so it is read here rather than hunted for. */}
     {tab === 'Dashboard' && <><ModuleAlerts moduleKey="supplier_inventory" /><KpiStrip items={[
-      { label: 'Items held', value: ledgerRows.length, onClick: () => { setTab('Inventory'); setInvTab('Stock ledger'); } },
-      { label: 'Need ordering', value: stockSummary.needOrdering, tone: stockSummary.needOrdering ? 'warning' : undefined, onClick: () => { setTab('Inventory'); setInvTab('Stock ledger'); } },
-      { label: 'Cannot be issued', value: stockSummary.unavailable, tone: stockSummary.unavailable ? 'danger' : undefined, onClick: () => { setTab('Inventory'); setInvTab('Stock ledger'); } },
-      { label: 'Expiring or expired', value: stockSummary.expiring, tone: stockSummary.expiring ? 'warning' : undefined, onClick: () => { setTab('Inventory'); setInvTab('Batches & lots'); } },
-      { label: 'Awaiting inspection', value: stockSummary.quarantined, onClick: () => { setTab('Inventory'); setInvTab('Batches & lots'); } },
+      { label: 'Items held', value: ledgerRows.length, onClick: () => setTab('Stock Ledger') },
+      { label: 'Below reorder level', value: stockSummary.needOrdering, tone: stockSummary.needOrdering ? 'warning' : undefined, onClick: () => setTab('Stock Ledger') },
+      { label: 'Nothing available to issue', value: stockSummary.unavailable, tone: stockSummary.unavailable ? 'danger' : undefined, onClick: () => setTab('Stock Ledger') },
+      { label: 'Expiring or expired', value: stockSummary.expiring, tone: stockSummary.expiring ? 'warning' : undefined, onClick: () => { setTab('Receiving'); setRecvTab('Batches & lots'); } },
+      { label: 'Quarantined', value: stockSummary.quarantined, onClick: () => { setTab('Receiving'); setRecvTab('Batches & lots'); } },
     ]} />
     <div className="grid cols-2" style={{ marginTop: 18 }}>
-      <ChartCard title="Where the stock stands" subtitle="Every item by what it can actually supply">
+      <ChartCard title="Stock status" subtitle="Every item by what it can actually supply">
         <DonutChart centerLabel="Items" data={stockSummary.byStatus} />
       </ChartCard>
-      <ChartCard title="What needs doing" subtitle="Ranked by how badly a shortage would hurt — the bar is roughly what to order for three months' cover">
+      <ChartCard title="Replenishment priority" subtitle="Ranked by how badly a shortage would hurt — the bar is roughly the quantity for three months' cover">
         {stockSummary.urgent.length === 0
           ? <p className="muted">Nothing is below its reorder level.</p>
           : <BarMeter data={stockSummary.urgent} />}
       </ChartCard>
-    </div></>}
+    </div>
+    {can('supplier_inventory.reports', 'view') && <div style={{ marginTop: 22 }}>
+      <InventoryReports refreshKey={stockKey} />
+    </div>}</>}
 
     {tab === 'Item Register' && <div className="card">
       <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-        <h3 style={{ margin: 0 }}>Items</h3>
+        <h3 style={{ margin: 0 }}>Stock item register</h3>
         <div className="reg-head-actions" style={{ marginLeft: 'auto' }}>
           {can('supplier_inventory', 'export') && <button type="button" className="secondary" disabled={regBusy === 'export'}
             title="Download the register the laboratory actually holds — the same file the import accepts"
@@ -1662,7 +1678,7 @@ export function InventoryPage() {
       </div>
       {loading ? <p>Loading…</p> : items.length === 0 ? <p>No items yet.</p> : itemRows.length === 0 ? <p>Nothing matches “{itemSearch}”.</p> :
         <div className="table-scroll"><table className="data-table reg-table"><thead><tr>
-          <th>Item</th><th>Category</th><th>Where it is kept</th><th>On hand</th><th>Min / reorder</th><th>Expires</th><th className="reg-actions-col"></th>
+          <th>Item</th><th>Category</th><th>Storage location</th><th>On hand</th><th>Min / reorder</th><th>Expires</th><th className="reg-actions-col"></th>
         </tr></thead><tbody>
           {/* The whole row opens the item — clicking a record is how a record
               is opened, and the "Open" button was the only thing that worked. */}
@@ -1686,7 +1702,7 @@ export function InventoryPage() {
               <RowMenu label={`Manage ${i.name}`}>{close => <>
                 <button type="button" role="menuitem" onClick={() => { close(); openDetail(i.id); }}><FileText size={14} /> Open</button>
                 {can('supplier_inventory', 'edit') && <button type="button" role="menuitem" onClick={() => { close(); openDetail(i.id, 'edit'); }}><Pencil size={14} /> Edit details</button>}
-                {can('supplier_inventory', 'create') && <button type="button" role="menuitem" onClick={() => { close(); setBatchForm(f => ({ ...f, itemId: String(i.id) })); setTab('Batches/Lots'); }}><PackagePlus size={14} /> Receive a delivery</button>}
+                {can('supplier_inventory', 'create') && <button type="button" role="menuitem" onClick={() => { close(); setBatchForm(f => ({ ...f, itemId: String(i.id) })); setRecvTab('Goods receipt'); setTab('Receiving'); }}><PackagePlus size={14} /> Book in a delivery</button>}
                 {can('supplier_inventory', 'print') && <button type="button" role="menuitem" onClick={() => { close(); printLabelSheet([{ barcodeValue: effectiveBarcode(i), title: i.name, lines: [effectiveBarcode(i), i.storage_path || ''].filter(Boolean) }], { widthMm: 50, heightMm: 25, title: i.name }); }}><Tag size={14} /> Print its label</button>}
                 {can('supplier_inventory', 'void_archive') && <button type="button" role="menuitem" className="danger" onClick={() => { close(); void openItemRemoval(i); }}><Trash2 size={14} /> Remove…</button>}
               </>}</RowMenu>
@@ -1702,25 +1718,25 @@ export function InventoryPage() {
     </div>}
 
     {tab === 'New Item' && <div className="card">
-      <h3>New inventory item</h3>
+      <h3>Register a stock item</h3>
       <form className="form" onSubmit={submitItem}>
         <label>Name<input value={itemForm.name} onChange={e => setItemForm({ ...itemForm, name: e.target.value })} required /></label>
         <label>Category<select value={itemForm.category} onChange={e => setItemForm({ ...itemForm, category: e.target.value })} required>
-          <option value="">Select category</option>
+          <option value="">Select the category</option>
           {categories.map(c => <option key={c.id} value={c.value}>{c.label}</option>)}
         </select>{categories.length === 0 && <span className="muted">No categories yet — add them in Settings → Dropdown Lists.</span>}</label>
         <label>Unit of measure<select value={itemForm.unit} onChange={e => setItemForm({ ...itemForm, unit: e.target.value })} required>
-          <option value="">Select unit</option>
+          <option value="">Select the unit of measure</option>
           {units.map(u => <option key={u.id} value={u.value}>{u.label}</option>)}
         </select></label>
         <label>Manufacturer<input value={itemForm.manufacturer} onChange={e => setItemForm({ ...itemForm, manufacturer: e.target.value })} /></label>
         <label>Catalogue number<input value={itemForm.catalogueNumber} onChange={e => setItemForm({ ...itemForm, catalogueNumber: e.target.value })} placeholder="Manufacturer's reference" /></label>
-        <label>Supplier<select value={itemForm.supplierId} onChange={e => setItemForm({ ...itemForm, supplierId: e.target.value })}><option value="">Select supplier</option>{suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-        <label>Where it is kept<select value={itemForm.storageLocationId} onChange={e => setItemForm({ ...itemForm, storageLocationId: e.target.value })}>
+        <label>Supplier<select value={itemForm.supplierId} onChange={e => setItemForm({ ...itemForm, supplierId: e.target.value })}><option value="">Select the supplier</option>{suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+        <label>Storage location<select value={itemForm.storageLocationId} onChange={e => setItemForm({ ...itemForm, storageLocationId: e.target.value })}>
           <option value="">Select a store, shelf or fridge</option>
           {storagePlaces.map(pl => <option key={pl.id} value={pl.id}>{pl.path}{pl.kind && pl.kind !== 'shelf' ? ` (${STORAGE_KIND_LABELS[pl.kind] ?? pl.kind})` : ''}</option>)}
         </select>{storagePlaces.length === 0 && <span className="muted">No storage places yet — add the stores, shelves and fridges in Settings → Stock &amp; Storage.</span>}</label>
-        <label>Section<select value={itemForm.sectionId} onChange={e => setItemForm({ ...itemForm, sectionId: e.target.value })}><option value="">Select section</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+        <label>Unit<select value={itemForm.sectionId} onChange={e => setItemForm({ ...itemForm, sectionId: e.target.value })}><option value="">Select the unit</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Minimum stock<input type="number" value={itemForm.minimumStock} onChange={e => setItemForm({ ...itemForm, minimumStock: Number(e.target.value) })} /></label>
         <label>Reorder level<input type="number" value={itemForm.reorderLevel} onChange={e => setItemForm({ ...itemForm, reorderLevel: Number(e.target.value) })} /></label>
         <label>Storage requirement<input value={itemForm.storageRequirement} onChange={e => setItemForm({ ...itemForm, storageRequirement: e.target.value })} placeholder="e.g. 2-8°C" /></label>
@@ -1749,64 +1765,65 @@ export function InventoryPage() {
                 <input value={itemForm.productBarcode} onChange={e => setItemForm({ ...itemForm, productBarcode: e.target.value })} />
               </label>}
         </fieldset>
-        <button type="submit">Save item</button>
+        <button type="submit">Register the item</button>
       </form>
     </div>}
 
-    {/* Running the store, in the order the day runs: what is held, what came
-        in, what is going out, what the count found, and the trail of it all. */}
-    {tab === 'Inventory' && <div className="card" style={{ paddingBottom: 6 }}>
-      <div className="reg-seg" role="tablist" aria-label="Inventory">
-        {INVENTORY_TABS.map(t => <button key={t} type="button" role="tab" aria-selected={invTab === t}
-          className={invTab === t ? 'on' : ''} onClick={() => setInvTab(t)}>{t}</button>)}
-      </div>
-    </div>}
-
-    {tab === 'Inventory' && invTab === 'Stock ledger' &&
+    {tab === 'Stock Ledger' &&
       <StockLedger refreshKey={stockKey} onOpenItem={id => void openDetail(id)} />}
 
-    {tab === 'Inventory' && invTab === 'Issuing' && <>
-      <IssueDesk items={ledgerRows} sections={sections} staff={staff} onIssued={() => { setStockKey(k => k + 1); void load(); }} />
+    {tab === 'Issuing' && <>
+      <IssueDesk items={ledgerRows} sections={sections} staff={staff} reasons={issueReasons}
+        onIssued={() => { setStockKey(k => k + 1); void load(); }} />
       <IssueRegister refreshKey={stockKey} />
     </>}
 
-    {tab === 'Inventory' && invTab === 'Stock take' &&
+    {tab === 'Stock Take' &&
       <StockTake places={storagePlaces} staff={staff} onPosted={() => { setStockKey(k => k + 1); void load(); }} />}
 
-    {tab === 'Inventory' && invTab === 'Receiving' && <div>
+    {/* Receiving is booking the delivery in and then dealing with the lots it
+        created — one job, so one tab with two benches. */}
+    {tab === 'Receiving' && <div className="card" style={{ paddingBottom: 6 }}>
+      <div className="reg-seg" role="tablist" aria-label="Receiving">
+        {RECEIVING_TABS.map(t => <button key={t} type="button" role="tab" aria-selected={recvTab === t}
+          className={recvTab === t ? 'on' : ''} onClick={() => setRecvTab(t)}>{t}</button>)}
+      </div>
+    </div>}
+
+    {tab === 'Receiving' && recvTab === 'Goods receipt' && <div>
       <div className="card">
-        <h3>Receive a delivery</h3>
+        <h3>Book in a delivery</h3>
         <p className="muted" style={{ marginTop: 0 }}>
-          The lot is what ISO 15189 §6.6.2 traces a result back to, so this is where the barcode on the box belongs.
-          Scanning a GS1 symbol reads the product, the lot and the expiry off it in one go.
+          A delivery is booked in against its lot and expiry — the level traceability runs at. Scanning the box
+          fills in the product, the lot and the expiry.
         </p>
         <div style={{ margin: '0 0 12px' }}>
           <BarcodeScanner placeholder="Scan the box to fill this form…" autoFocus={false} onScan={scanForReceipt} />
           {receiptNote && <p className="notice-ok" style={{ marginTop: 8 }}>{receiptNote}</p>}
         </div>
         <form className="form" onSubmit={submitBatch}>
-          <label>Item<select value={batchForm.itemId} onChange={e => setBatchForm({ ...batchForm, itemId: e.target.value })} required><option value="">Select item</option>{items.map(i => <option key={i.id} value={i.id}>{i.item_code} — {i.name}</option>)}</select></label>
+          <label>Item<select value={batchForm.itemId} onChange={e => setBatchForm({ ...batchForm, itemId: e.target.value })} required><option value="">Select the item</option>{items.map(i => <option key={i.id} value={i.id}>{i.item_code} — {i.name}</option>)}</select></label>
           <label>Batch number<input value={batchForm.batchNumber} onChange={e => setBatchForm({ ...batchForm, batchNumber: e.target.value })} /></label>
           <label>Lot number<input value={batchForm.lotNumber} onChange={e => setBatchForm({ ...batchForm, lotNumber: e.target.value })} /></label>
-          <label>Supplier<select value={batchForm.supplierId} onChange={e => setBatchForm({ ...batchForm, supplierId: e.target.value })}><option value="">Select supplier</option>{suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+          <label>Supplier<select value={batchForm.supplierId} onChange={e => setBatchForm({ ...batchForm, supplierId: e.target.value })}><option value="">Select the supplier</option>{suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
           <label>Quantity received<input type="number" value={batchForm.quantityReceived} onChange={e => setBatchForm({ ...batchForm, quantityReceived: Number(e.target.value), quantityAvailable: Number(e.target.value) })} required /></label>
           <label>Quantity available<input type="number" value={batchForm.quantityAvailable} onChange={e => setBatchForm({ ...batchForm, quantityAvailable: Number(e.target.value) })} required /></label>
           <label>Date received<input type="date" value={batchForm.dateReceived} onChange={e => setBatchForm({ ...batchForm, dateReceived: e.target.value })} required /></label>
           <label>Expiry date<input type="date" value={batchForm.expiryDate} onChange={e => setBatchForm({ ...batchForm, expiryDate: e.target.value })} /></label>
-          <label>Where it is put away<select value={batchForm.storageLocationId} onChange={e => setBatchForm({ ...batchForm, storageLocationId: e.target.value })}><option value="">Select a store, shelf or fridge</option>{storagePlaces.map(pl => <option key={pl.id} value={pl.id}>{pl.path}{pl.kind && pl.kind !== 'shelf' ? ` (${STORAGE_KIND_LABELS[pl.kind] ?? pl.kind})` : ''}</option>)}</select></label>
+          <label>Storage location<select value={batchForm.storageLocationId} onChange={e => setBatchForm({ ...batchForm, storageLocationId: e.target.value })}><option value="">Select a store, shelf or fridge</option>{storagePlaces.map(pl => <option key={pl.id} value={pl.id}>{pl.path}{pl.kind && pl.kind !== 'shelf' ? ` (${STORAGE_KIND_LABELS[pl.kind] ?? pl.kind})` : ''}</option>)}</select></label>
           <label>Barcode on this box <span className="muted">(optional — scanning it later finds this exact delivery)</span>
             <input value={batchForm.productBarcode} onChange={e => setBatchForm({ ...batchForm, productBarcode: e.target.value })}
               onKeyDown={e => { if (e.key === 'Enter') e.preventDefault(); }} />
           </label>
-          <button type="submit">Receive delivery</button>
+          <button type="submit">Book in the delivery</button>
         </form>
       </div>
     </div>}
 
-    {tab === 'Inventory' && invTab === 'Batches & lots' && <div>
+    {tab === 'Receiving' && recvTab === 'Batches & lots' && <div>
       <div className="card">
         <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-          <h3 style={{ margin: 0 }}>Batches and lots <span className="muted">— in FEFO order</span></h3>
+          <h3 style={{ margin: 0 }}>Batches and lots <span className="muted">— earliest expiry first</span></h3>
           {can('supplier_inventory', 'print') && batches.length > 0 && <button type="button" className="secondary" style={{ marginLeft: 'auto' }}
             title="A label per delivery, carrying its own barcode, lot and expiry"
             onClick={() => printLabelSheet(batches.map(b => ({
@@ -1815,7 +1832,7 @@ export function InventoryPage() {
               lines: [b.batch_number ? `Batch ${b.batch_number}` : '', b.expiry_date ? `Exp ${String(b.expiry_date).slice(0, 10)}` : ''].filter(Boolean),
             })), { widthMm: 50, heightMm: 25, title: 'Batch labels' })}>🏷️ Print batch labels</button>}
         </div>
-        <p className="muted" style={{ marginTop: 0 }}>A delivery is quarantined until it has been inspected and accepted. Until then it cannot be issued — only discarded or returned. Stock is issued oldest-expiry-first.</p>
+        <p className="muted" style={{ marginTop: 0 }}>A delivery is quarantined until it has been inspected and accepted. Until then it cannot be issued — only discarded or returned. Stock is issued earliest-expiry-first.</p>
         {batches.length === 0 ? <p className="muted">Nothing has been received yet.</p> :
           <div className="table-scroll"><table className="data-table reg-table"><thead><tr>
             <th>Item</th><th>Batch / lot</th><th>Available</th><th>Received</th><th>Expires</th><th>Acceptance</th><th className="reg-actions-col"></th>
@@ -1845,18 +1862,18 @@ export function InventoryPage() {
       </div>
     </div>}
 
-    {tab === 'Inventory' && invTab === 'Movement register' && <>
+    {tab === 'Stock Movements' && <>
     <div className="card">
       <h3>Record a one-off movement</h3>
       <p className="muted" style={{ marginTop: 0 }}>
-        For anything that is not a plain issue — a disposal, a transfer, a correction. Issuing to a unit is quicker
-        on the <button type="button" className="linklike" onClick={() => setInvTab('Issuing')}>Issuing</button> tab.
+        For anything that is not an ordinary issue — a disposal, a transfer, an adjustment. Issuing to a unit is
+        quicker on the <button type="button" className="linklike" onClick={() => setTab('Issuing')}>Issuing</button> tab.
       </p>
       <form className="form" onSubmit={submitMovement}>
         {/* The state of a batch is on the option itself, so a storekeeper is
             not offered a quarantined or expired box and refused a click later. */}
         <label>Batch<select value={movementForm.batchId} onChange={e => { setMovementForm({ ...movementForm, batchId: e.target.value }); setFefoWarning(null); }} required>
-          <option value="">Select batch</option>
+          <option value="">Select the batch</option>
           {batches.map(b => {
             const flag = b.acceptance_status === 'rejected' ? 'rejected on receipt'
               : (b.acceptance_status === 'pending' || b.acceptance_status === 'quarantined') ? 'in quarantine'
@@ -1870,9 +1887,13 @@ export function InventoryPage() {
         <label>Movement type<select value={movementForm.movementType} onChange={e => { setMovementForm({ ...movementForm, movementType: e.target.value }); setFefoWarning(null); }}>{['issue', 'consume', 'discard', 'waste', 'transfer_out', 'receive', 'return', 'adjust_in', 'transfer_in'].map(t => <option key={t} value={t}>{MOVEMENT_LABELS[t] ?? t.replace('_', ' ')}</option>)}</select></label>
         <label>Quantity<input type="number" value={movementForm.quantity} onChange={e => setMovementForm({ ...movementForm, quantity: Number(e.target.value) })} required min={0.0001} step="any" /></label>
         <label>Movement date<input type="date" value={movementForm.movementDate} onChange={e => setMovementForm({ ...movementForm, movementDate: e.target.value })} /></label>
-        <label>Issued to section<select value={movementForm.issuedToSectionId} onChange={e => setMovementForm({ ...movementForm, issuedToSectionId: e.target.value })}><option value="">Select section</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-        <label>Received by<select value={movementForm.receivedByStaffId} onChange={e => setMovementForm({ ...movementForm, receivedByStaffId: e.target.value })}><option value="">Select staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-        <label>Reason<input value={movementForm.reason} onChange={e => setMovementForm({ ...movementForm, reason: e.target.value })} /></label>
+        <label>Issued to unit<select value={movementForm.issuedToSectionId} onChange={e => setMovementForm({ ...movementForm, issuedToSectionId: e.target.value })}><option value="">Select the unit</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+        <label>Received by<select value={movementForm.receivedByStaffId} onChange={e => setMovementForm({ ...movementForm, receivedByStaffId: e.target.value })}><option value="">Select the member of staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        <label>Reason<select value={movementForm.reason} onChange={e => setMovementForm({ ...movementForm, reason: e.target.value })} required>
+          <option value="">Select a reason</option>
+          {movementReasons.map(r => <option key={r.id} value={r.value}>{r.label}</option>)}
+        </select>{movementReasons.length === 0 && <span className="muted">No reasons configured — add them in Settings → Dropdown Lists.</span>}</label>
+        <label>Detail <span className="muted">(optional)</span><input value={movementForm.reasonNote} onChange={e => setMovementForm({ ...movementForm, reasonNote: e.target.value })} placeholder="Anything the movement record should carry" /></label>
         {fefoWarning && <div className="notice-warn">
           <p style={{ margin: '0 0 8px' }}>{fefoWarning.message}</p>
           <button type="button" className="secondary" onClick={() => { setMovementForm({ ...movementForm, batchId: String(fefoWarning.batchId) }); setFefoWarning(null); }}>Issue the older batch instead</button>{' '}
@@ -1883,11 +1904,10 @@ export function InventoryPage() {
     </div>
 
     {/* Recording a movement and then having nowhere to see it is not a record.
-        ISO 15189 §6.6.2 asks for the receipt and the use of every lot to be
-        kept; this is that list. */}
+        The receipt and the use of every lot is kept here. */}
     <div className="card">
       <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-        <h3 style={{ margin: 0 }}>Movement register</h3>
+        <h3 style={{ margin: 0 }}>Stock movement register</h3>
         <div className="reg-head-actions" style={{ marginLeft: 'auto' }}>
           <label className="reg-search"><input placeholder="Search item, batch, unit, reason…" value={moveSearch} onChange={e => setMoveSearch(e.target.value)} /></label>
           {can('supplier_inventory', 'export') && <button type="button" className="secondary" disabled={regBusy === 'movements'}
@@ -1913,10 +1933,9 @@ export function InventoryPage() {
         </tbody></table></div>}
     </div></>}
 
-    {/* ISO 15189 §6.6.4 asks the laboratory to select, evaluate and monitor the
-        suppliers of what affects its results, and to keep records of it. Four
-        different jobs, so four places to do them rather than three stacked
-        forms. */}
+    {/* Selecting a supplier, registering them, evaluating them and monitoring
+        them are four different jobs, so they get four places rather than three
+        stacked forms. */}
     {tab === 'Suppliers' && <>
       <div className="card" style={{ paddingBottom: 6 }}>
         <div className="reg-seg" role="tablist" aria-label="Suppliers">
@@ -2022,7 +2041,7 @@ export function InventoryPage() {
 
       {supplierTab === 'Management' && <div className="card">
         <h3>Who is due, and who is not being watched</h3>
-        <p className="muted" style={{ marginTop: 0 }}>Monitoring is the part of §6.6.4 that slips. This is the same register, sorted by what needs doing.</p>
+        <p className="muted" style={{ marginTop: 0 }}>Monitoring is the part that slips. This is the same register, sorted by what needs doing.</p>
         {suppliers.length === 0 ? <p className="muted">No suppliers registered yet.</p> : <>
           <KpiStrip items={[
             { label: 'Suppliers', value: suppliers.length },
@@ -2094,8 +2113,6 @@ export function InventoryPage() {
 
     {tab === 'Forecasting' && <ForecastingPanel canEdit={can('supplier_inventory', 'edit')} refreshKey={stockKey}
       onApplied={() => { setStockKey(k => k + 1); void load(); }} />}
-
-    {tab === 'Reports' && <InventoryReports refreshKey={stockKey} />}
   </div>;
 }
 
@@ -2155,8 +2172,8 @@ function InventoryDetailPanel({
     ['Supplier', item.supplier_name
       ? <>{item.supplier_name}{item.supplier_phone ? <span className="reg-sub">{item.supplier_phone}</span> : null}</>
       : '—'],
-    ['Where it is kept', item.storage_path || '—'],
-    ['Unit / section', item.section_name || '—'],
+    ['Storage location', item.storage_path || '—'],
+    ['Unit', item.section_name || '—'],
     ['Storage requirement', item.storage_requirement || '—'],
     ['Added by', item.created_by_name || '—'],
   ];
@@ -2202,11 +2219,11 @@ function InventoryDetailPanel({
       <label>Supplier<select value={form.supplierId} onChange={e => setForm({ ...form, supplierId: e.target.value })}>
         <option value="">No supplier recorded</option>{suppliers.map(sp => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
       </select></label>
-      <label>Where it is kept<select value={form.storageLocationId} onChange={e => setForm({ ...form, storageLocationId: e.target.value })}>
+      <label>Storage location<select value={form.storageLocationId} onChange={e => setForm({ ...form, storageLocationId: e.target.value })}>
         <option value="">Select a store, shelf or fridge</option>{storagePlaces.map(pl => <option key={pl.id} value={pl.id}>{pl.path}</option>)}
       </select></label>
-      <label>Section<select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })}>
-        <option value="">Select section</option>{sections.map(sec => <option key={sec.id} value={sec.id}>{sec.name}</option>)}
+      <label>Unit<select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })}>
+        <option value="">Select the unit</option>{sections.map(sec => <option key={sec.id} value={sec.id}>{sec.name}</option>)}
       </select></label>
       <label>Minimum stock<input type="number" value={form.minimumStock} onChange={e => setForm({ ...form, minimumStock: Number(e.target.value) })} /></label>
       <label>Reorder level<input type="number" value={form.reorderLevel} onChange={e => setForm({ ...form, reorderLevel: Number(e.target.value) })} /></label>
@@ -2283,10 +2300,10 @@ function InventoryDetailPanel({
  * Taking a stock item off the register.
  *
  * Withdrawing is the answer almost every time: the item stops being offered
- * and its batches and movements stay, which is the traceability ISO 15189
- * §6.6.2 rests on. Erasing is for something typed in by mistake, so it costs a
- * written reason and — once there is history behind it — a second confirmation
- * that names exactly what is about to be destroyed.
+ * and its batches and movements stay, which is what lot traceability rests on.
+ * Erasing is for something typed in by mistake, so it costs a written reason
+ * and — once there is history behind it — a second confirmation that names
+ * exactly what is about to be destroyed.
  */
 function ItemRemovalModal({ impact, busy, onClose, onDone, setError }: {
   impact: ItemDeletionImpact; busy: string; onClose: () => void;

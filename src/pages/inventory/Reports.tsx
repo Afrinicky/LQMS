@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../services/api';
 import { KpiStrip, ChartCard, DonutChart, BarChart, BarMeter, Sparkline, CHART_COLORS } from '../../components/ui';
-import { STOCK_STATUS_LABELS, type StockStatus } from '../../../shared/constants/stockControl';
+import type { StockStatus } from '../../../shared/constants/stockControl';
 import { StatusBadge, qty } from './StockControl';
 
 /**
@@ -9,8 +9,10 @@ import { StatusBadge, qty } from './StockControl';
  *
  * Read together rather than one at a time: a rising consumption trend means
  * one thing beside a healthy stock position and quite another beside a
- * shortage list, so they are on one page in that order — what is happening,
- * what is at risk, what is being wasted, and who is supplying it.
+ * shortage list, so they run in that order — what is happening, what is at
+ * risk, what is being wasted, and who is supplying it. They sit under the
+ * module dashboard, because the position and the reporting on it are one
+ * question asked twice.
  */
 
 type Reports = {
@@ -56,9 +58,9 @@ export function InventoryReports({ refreshKey }: { refreshKey: number }) {
   ];
 
   return <>
-    <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+    <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 12, borderTop: '1px solid var(--border)', paddingTop: 18 }}>
       <div>
-        <h3 style={{ margin: 0 }}>Inventory reports</h3>
+        <h3 style={{ margin: 0 }}>Stock reporting</h3>
         <p className="muted" style={{ margin: '2px 0 0' }}>
           Live from the ledger — as at {new Date(data.generatedAt).toLocaleString()}.
         </p>
@@ -68,40 +70,39 @@ export function InventoryReports({ refreshKey }: { refreshKey: number }) {
       </select>
     </div>
 
+    {/* The position itself is on the strip above this section; these are the
+        figures the position does not show — what the stock is worth, what
+        moved, and how much of it was lost. */}
     <KpiStrip items={[
-      { label: 'Items held', value: t.items },
       { label: 'Stock value', value: Math.round(t.stockValue).toLocaleString() },
-      { label: 'Below reorder level', value: t.belowReorder, tone: t.belowReorder ? 'warning' : undefined },
-      { label: 'Out of stock', value: t.stockoutItems, tone: t.stockoutItems ? 'danger' : undefined },
+      { label: 'Issued in the window', value: Math.round(t.issuedUnits).toLocaleString() },
+      { label: 'Received in the window', value: Math.round(t.receivedUnits).toLocaleString() },
       { label: 'Wastage rate', value: `${t.wastageRate}%`, tone: t.wastageRate > 5 ? 'warning' : undefined },
-      { label: 'Stock turns a year', value: t.turnover ?? '—' },
+      { label: 'Stock turnover a year', value: t.turnover ?? '—' },
     ]} />
 
-    <div className="grid cols-2" style={{ marginTop: 18 }}>
-      <ChartCard title="Consumption and receipts" subtitle="What went out against what came in">
+    {/* Where every item stands is already on the strip and the donut above
+        this section, so it is not drawn a second time. What the position
+        cannot show is movement over time, which is what starts here. */}
+    <div style={{ marginTop: 18 }}>
+      <ChartCard title="Consumption against receipts" subtitle="What was issued each month against what was received">
         <BarChart data={data.trend.map(m => ({ label: shortMonth(m.month), value: m.issued, color: CHART_COLORS[0] }))} height={180} />
         <div style={{ marginTop: 10 }}>
           <p className="muted" style={{ margin: '0 0 4px' }}>Received</p>
           <Sparkline data={data.trend.map(m => m.received)} height={44} color={CHART_COLORS[1]} />
         </div>
       </ChartCard>
-
-      <ChartCard title="Where the stock stands" subtitle="Every item by its stock position">
-        <DonutChart centerLabel="Items" data={(['stockout', 'blocked', 'critical', 'low', 'adequate', 'overstock', 'unknown'] as StockStatus[])
-          .filter(s => (data.statusCounts[s] ?? 0) > 0)
-          .map((s, i) => ({ label: STOCK_STATUS_LABELS[s], value: data.statusCounts[s] ?? 0, color: CHART_COLORS[i % CHART_COLORS.length] }))} />
-      </ChartCard>
     </div>
 
     <div className="grid cols-2" style={{ marginTop: 18 }}>
-      <ChartCard title="What is about to turn" subtitle="Batches by how long they have left">
+      <ChartCard title="Expiry risk" subtitle="Batches by the shelf life they have left">
         <BarMeter data={expiryBands} />
         <p className="muted" style={{ marginTop: 10 }}>
           Value at risk within 90 days: <strong>{Math.round((data.expiry.value.expired ?? 0) + (data.expiry.value.within30 ?? 0) + (data.expiry.value.within90 ?? 0)).toLocaleString()}</strong>
         </p>
       </ChartCard>
 
-      <ChartCard title="Wastage" subtitle="What was discarded rather than used">
+      <ChartCard title="Wastage" subtitle="What was discarded rather than issued">
         <BarChart data={data.trend.map(m => ({ label: shortMonth(m.month), value: m.wasted, color: CHART_COLORS[3] }))} height={180} />
         <p className="muted" style={{ marginTop: 8 }}>
           {t.wastedUnits} unit{t.wastedUnits === 1 ? '' : 's'} discarded against {t.receivedUnits} received — a wastage rate of {t.wastageRate}%.
@@ -111,7 +112,7 @@ export function InventoryReports({ refreshKey }: { refreshKey: number }) {
     </div>
 
     <div className="card" style={{ marginTop: 18 }}>
-      <h3>What needs ordering</h3>
+      <h3>Replenishment list</h3>
       {data.shortages.length === 0 ? <p className="muted">Nothing is below its reorder level.</p> :
         <div className="table-scroll"><table className="data-table reg-table"><thead><tr>
           <th>Item</th><th>On hand</th><th>Issuable</th><th>Used per month</th><th>Cover</th><th>Supplier</th><th>Status</th>
@@ -131,12 +132,12 @@ export function InventoryReports({ refreshKey }: { refreshKey: number }) {
 
     <div className="grid cols-2" style={{ marginTop: 18 }}>
       <div className="card">
-        <h3>Most used</h3>
+        <h3>Highest consumption</h3>
         {data.topConsumers.length === 0 ? <p className="muted">Nothing has been issued yet.</p> :
           <BarMeter data={data.topConsumers.slice(0, 8).map(c => ({ label: c.name, value: c.total }))} />}
       </div>
       <div className="card">
-        <h3>Not moving</h3>
+        <h3>Slow-moving stock</h3>
         <p className="muted" style={{ marginTop: 0 }}>Stock held that nothing has been issued from over the window — capital on a shelf, and a candidate for expiry.</p>
         {data.slowMovers.length === 0 ? <p className="muted">Everything held is moving.</p> :
           <div className="table-scroll"><table className="data-table"><thead><tr><th>Item</th><th>On hand</th><th>Value</th><th>Last issued</th></tr></thead><tbody>
@@ -150,11 +151,11 @@ export function InventoryReports({ refreshKey }: { refreshKey: number }) {
     </div>
 
     <div className="grid cols-2" style={{ marginTop: 18 }}>
-      <ChartCard title="Value concentration" subtitle="Where the money sits — A is the few items carrying most of it">
+      <ChartCard title="ABC analysis" subtitle="Where the money sits — class A is the few items carrying most of it">
         <BarMeter data={data.abcMix.map((a, i) => ({ label: `Class ${a.abc} — ${a.items} item${a.items === 1 ? '' : 's'}`, value: a.value, color: CHART_COLORS[i] }))} />
         <p className="muted" style={{ marginTop: 8 }}>Class A deserves the tightest control and the most frequent counting.</p>
       </ChartCard>
-      <ChartCard title="How critical the catalogue is" subtitle="Vital items are chased whatever they cost">
+      <ChartCard title="VEN classification" subtitle="Vital items are chased whatever they cost">
         <DonutChart centerLabel="Items" data={data.venMix.map((v, i) => ({ label: v.ven, value: v.items, color: CHART_COLORS[i] }))} />
       </ChartCard>
     </div>
@@ -163,7 +164,7 @@ export function InventoryReports({ refreshKey }: { refreshKey: number }) {
       <h3>Supplier performance</h3>
       {data.supplierPerformance.length === 0 ? <p className="muted">No suppliers registered.</p> :
         <div className="table-scroll"><table className="data-table"><thead><tr>
-          <th>Supplier</th><th>Deliveries in the window</th><th>Rejected on receipt</th><th>Still awaiting inspection</th><th>Rejection rate</th><th>Next evaluation</th>
+          <th>Supplier</th><th>Deliveries in the window</th><th>Rejected on receipt</th><th>In quarantine</th><th>Rejection rate</th><th>Next evaluation</th>
         </tr></thead><tbody>
           {data.supplierPerformance.map(s => {
             const rate = s.deliveries > 0 ? Math.round((s.rejected / s.deliveries) * 1000) / 10 : 0;
@@ -179,7 +180,7 @@ export function InventoryReports({ refreshKey }: { refreshKey: number }) {
     </div>
 
     {data.expiry.batches.length > 0 && <div className="card" style={{ marginTop: 18 }}>
-      <h3>Lots turning within six months</h3>
+      <h3>Lots expiring within six months</h3>
       <div className="table-scroll"><table className="data-table"><thead><tr>
         <th>Item</th><th>Batch</th><th>Expires</th><th>Still on the shelf</th><th>Value</th>
       </tr></thead><tbody>

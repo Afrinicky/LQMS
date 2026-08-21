@@ -6,15 +6,16 @@ import BarcodeScanner from '../../components/BarcodeScanner';
 import type { Section, Staff } from '../../../shared/types/api';
 import { STOCK_STATUS_LABELS, NEEDS_ACTION, type StockStatus } from '../../../shared/constants/stockControl';
 import { MOVEMENT_LABELS } from '../../../shared/constants/inventory';
+import type { ConfigOption } from '../../../shared/constants/configLists';
 
 /**
  * Running the store.
  *
  * The item register says what the laboratory stocks. These screens are about
- * what it has: what is on the shelf right now, what came in, what went out to
+ * what it holds: what is on the shelf now, what came in, what went out and to
  * whom, what the count found, and what to order next. They are written for the
- * person standing at the store counter with somebody waiting, which is why
- * issuing is one screen and not a tour of three.
+ * person at the issuing counter with somebody waiting, which is why issuing is
+ * one screen and not a tour of three.
  */
 
 // ─────────────────────────────────────────────────────────────── shared bits
@@ -118,7 +119,7 @@ export function StockLedger({ onOpenItem, refreshKey }: { onOpenItem: (id: numbe
       { label: 'Need ordering', value: totals.attention, tone: totals.attention ? 'warning' : undefined, onClick: () => setFilter('attention') },
       { label: 'Out of stock', value: totals.stockout, tone: 'danger', onClick: () => setFilter('attention') },
       { label: 'Expiring or expired', value: totals.expiring, tone: totals.expiring ? 'warning' : undefined, onClick: () => setFilter('expiring') },
-      { label: 'Awaiting inspection', value: totals.quarantined, onClick: () => setFilter('quarantine') },
+      { label: 'Quarantined', value: totals.quarantined, onClick: () => setFilter('quarantine') },
     ]} />
 
     <div className="card" style={{ marginTop: 16 }}>
@@ -207,7 +208,7 @@ export function BinCard({ itemId, onClose, onOpenItem }: { itemId: number; onClo
     {!data ? <p>Loading…</p> : <>
       <div className="stock-figures">
         <div><span className="fig">{qty(data.onHand)} <small>{data.item.unit || ''}</small></span><span className="fig-label">on the shelf</span></div>
-        <div><span className="fig">{qty(p?.issuable)}</span><span className="fig-label">can be issued</span></div>
+        <div><span className="fig">{qty(p?.issuable)}</span><span className="fig-label">available to issue</span></div>
         <div><span className="fig">{qty(p?.amc ?? 0)}</span><span className="fig-label">used per month</span></div>
         <div><span className="fig">{cover(p?.months_of_stock ?? null)}</span><span className="fig-label">cover left</span></div>
         <div><span className="fig">{dateOnly(p?.earliest_expiry)}</span><span className="fig-label">expires first</span></div>
@@ -247,21 +248,21 @@ export function BinCard({ itemId, onClose, onOpenItem }: { itemId: number; onClo
 type BasketLine = { itemId: string; quantity: string };
 
 /**
- * The store counter.
+ * The issuing counter.
  *
- * Somebody from a unit is standing there. Name the unit and the person, add
- * what they are taking, press issue. The store works out which lots it comes
- * out of, oldest expiry first, and prints a voucher. Nothing here asks the
- * storekeeper to choose a batch, because that was the step that made people
- * give up and write it on a card instead.
+ * Somebody from a unit is standing there. Name the unit, the member of staff
+ * collecting and why the stock is wanted, add the lines, and issue. The store
+ * allocates the lots — earliest expiry first — and writes a numbered voucher.
+ * Nothing here asks the storekeeper to choose a batch, because that was the
+ * step that made people give up and write it on a card instead.
  */
-export function IssueDesk({ items, sections, staff, onIssued }: {
-  items: LedgerRow[]; sections: Section[]; staff: Staff[]; onIssued: () => void;
+export function IssueDesk({ items, sections, staff, reasons, onIssued }: {
+  items: LedgerRow[]; sections: Section[]; staff: Staff[]; reasons: ConfigOption[]; onIssued: () => void;
 }) {
   const [sectionId, setSectionId] = useState('');
-  const [issuedToName, setIssuedToName] = useState('');
   const [receivedByStaffId, setReceivedByStaffId] = useState('');
   const [purpose, setPurpose] = useState('');
+  const [note, setNote] = useState('');
   const [lines, setLines] = useState<BasketLine[]>([{ itemId: '', quantity: '' }]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -270,6 +271,30 @@ export function IssueDesk({ items, sections, staff, onIssued }: {
   const byId = useMemo(() => new Map(items.map(i => [String(i.id), i])), [items]);
   const setLine = (i: number, patch: Partial<BasketLine>) =>
     setLines(ls => ls.map((l, n) => (n === i ? { ...l, ...patch } : l)));
+
+  /**
+   * Every item on the register is offered, not only the ones with stock.
+   *
+   * A storekeeper who cannot find an item in the list assumes it was never
+   * registered and registers it again. So the whole catalogue is here, split
+   * into what can go out today and what cannot, with the reason it cannot on
+   * the option itself.
+   */
+  const groups = useMemo(() => {
+    const available = items.filter(i => i.issuable > 0);
+    const held = items.filter(i => i.issuable <= 0);
+    const label = (i: LedgerRow) => i.issuable > 0
+      ? `${i.name} — ${qty(i.issuable)} ${i.unit || ''} available`.replace(/\s+/g, ' ')
+      : `${i.name} — ${i.quarantined > 0 ? 'awaiting inspection'
+        : i.expired_on_hand > 0 ? 'expired on the shelf'
+        : i.on_hand > 0 ? 'on hand but not released' : 'out of stock'}`;
+    return { available, held, label };
+  }, [items]);
+
+  const shortLines = lines.filter(l => {
+    const item = byId.get(l.itemId);
+    return item ? Number(l.quantity) > item.issuable : false;
+  }).length;
 
   /** A scan at the counter drops the item straight into the basket. */
   async function scanIn(code: string) {
@@ -294,18 +319,24 @@ export function IssueDesk({ items, sections, staff, onIssued }: {
   }
 
   async function submit(e: FormEvent) {
-    e.preventDefault(); setError(null); setBusy(true);
+    e.preventDefault(); setError(null);
     const payload = lines
       .filter(l => l.itemId && Number(l.quantity) > 0)
       .map(l => ({ itemId: Number(l.itemId), quantity: Number(l.quantity) }));
-    if (payload.length === 0) { setError('Add at least one item.'); setBusy(false); return; }
+    if (payload.length === 0) { setError('Add at least one item.'); return; }
+    if (!sectionId && !receivedByStaffId) { setError('Say which unit this is going to, or who is collecting it.'); return; }
+    // Nothing is sent while a line asks for more than can go out: the whole
+    // voucher would be refused, and the storekeeper would be told at the
+    // counter rather than on the screen in front of them.
+    if (shortLines > 0) { setError('One or more lines ask for more than can be issued. Reduce them, or take the item off the voucher.'); return; }
+    setBusy(true);
     try {
       const r = await api<any>('/supplier-inventory/issues', {
         method: 'POST',
-        body: JSON.stringify({ sectionId: sectionId || null, issuedToName, receivedByStaffId: receivedByStaffId || null, purpose, lines: payload }),
+        body: JSON.stringify({ sectionId: sectionId || null, receivedByStaffId: receivedByStaffId || null, purpose, note, lines: payload }),
       });
       setVoucher(r);
-      setLines([{ itemId: '', quantity: '' }]); setPurpose('');
+      setLines([{ itemId: '', quantity: '' }]); setPurpose(''); setNote('');
       onIssued();
     } catch (err) { setError((err as Error).message); }
     finally { setBusy(false); }
@@ -313,25 +344,29 @@ export function IssueDesk({ items, sections, staff, onIssued }: {
 
   return <>
     <div className="card">
-      <h3>Issue to a unit</h3>
+      <h3>Issue stock to a unit</h3>
       <p className="muted" style={{ marginTop: 0 }}>
-        Name who it is going to, add what they are taking, and issue. The store picks the lots —
-        oldest expiry first — so nothing on the shelf is left to turn.
+        Name the unit, the member of staff collecting and why. The store allocates the lots — earliest expiry
+        first — and writes a numbered issue voucher.
       </p>
       {error && <div className="error">{error}</div>}
 
       <form onSubmit={submit}>
         <div className="issue-head">
-          <label>Unit<select value={sectionId} onChange={e => setSectionId(e.target.value)}>
+          <label>Issued to unit<select value={sectionId} onChange={e => setSectionId(e.target.value)}>
             <option value="">Select the unit</option>
             {sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select></label>
-          <label>Collected by<input value={issuedToName} onChange={e => setIssuedToName(e.target.value)} placeholder="Who came for it" /></label>
-          <label>On the staff register<select value={receivedByStaffId} onChange={e => setReceivedByStaffId(e.target.value)}>
-            <option value="">Not recorded</option>
+          <label>Collected by<select value={receivedByStaffId} onChange={e => setReceivedByStaffId(e.target.value)}>
+            <option value="">Select the member of staff</option>
             {staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
           </select></label>
-          <label>What for<input value={purpose} onChange={e => setPurpose(e.target.value)} placeholder="Culture bench, morning run…" /></label>
+          <label>Reason for issue<select value={purpose} onChange={e => setPurpose(e.target.value)}>
+            <option value="">Select a reason</option>
+            {reasons.map(r => <option key={r.id} value={r.value}>{r.label}</option>)}
+          </select>
+          {reasons.length === 0 && <span className="muted">No reasons configured — add them in Settings → Dropdown Lists.</span>}</label>
+          <label>Remarks<input value={note} onChange={e => setNote(e.target.value)} placeholder="Optional — anything the voucher should carry" /></label>
         </div>
 
         <div style={{ margin: '12px 0' }}>
@@ -339,7 +374,7 @@ export function IssueDesk({ items, sections, staff, onIssued }: {
         </div>
 
         <div className="table-scroll"><table className="data-table issue-lines"><thead><tr>
-          <th style={{ width: '46%' }}>Item</th><th>Can be issued</th><th style={{ width: 140 }}>Quantity</th><th>Comes out of</th><th></th>
+          <th style={{ width: '46%' }}>Item</th><th>Available</th><th style={{ width: 140 }}>Quantity</th><th>Issued from</th><th></th>
         </tr></thead><tbody>
           {lines.map((l, i) => {
             const item = byId.get(l.itemId);
@@ -349,17 +384,23 @@ export function IssueDesk({ items, sections, staff, onIssued }: {
               <td>
                 <select value={l.itemId} onChange={e => setLine(i, { itemId: e.target.value })}>
                   <option value="">Select an item</option>
-                  {items.filter(it => it.issuable > 0 || it.id === Number(l.itemId)).map(it =>
-                    <option key={it.id} value={it.id}>{it.name} — {it.issuable} {it.unit || ''} available</option>)}
+                  {groups.available.length > 0 && <optgroup label="Available to issue">
+                    {groups.available.map(it => <option key={it.id} value={it.id}>{groups.label(it)}</option>)}
+                  </optgroup>}
+                  {groups.held.length > 0 && <optgroup label="Nothing available to issue">
+                    {groups.held.map(it => <option key={it.id} value={it.id}>{groups.label(it)}</option>)}
+                  </optgroup>}
                 </select>
+                {item && item.storage_path && <span className="reg-sub">{item.storage_path}</span>}
               </td>
-              <td>{item ? <><span className="reg-primary">{item.issuable} {item.unit || ''}</span>
-                {item.quarantined > 0 && <span className="reg-sub">{item.quarantined} still in quarantine</span>}</> : <span className="muted">—</span>}</td>
+              <td>{item ? <><span className="reg-primary">{qty(item.issuable)} {item.unit || ''}</span>
+                {item.quarantined > 0 && <span className="reg-sub">{qty(item.quarantined)} awaiting inspection</span>}
+                {item.expired_on_hand > 0 && <span className="reg-sub">{qty(item.expired_on_hand)} expired on the shelf</span>}</> : <span className="muted">—</span>}</td>
               <td><input type="number" min={0} step="any" value={l.quantity} onChange={e => setLine(i, { quantity: e.target.value })}
                 className={short ? 'input-error' : ''} /></td>
               <td>{item && want > 0
-                ? (short ? <span className="badge" style={{ background: '#fde2e2', color: '#b42318' }}>only {item.issuable} available</span>
-                  : <span className="muted">{item.earliest_expiry ? `oldest lot, expiring ${dateOnly(item.earliest_expiry)}` : 'oldest lot'}</span>)
+                ? (short ? <span className="badge" style={{ background: '#fde2e2', color: '#b42318' }}>only {qty(item.issuable)} available</span>
+                  : <span className="muted">{item.earliest_expiry ? `earliest expiry ${dateOnly(item.earliest_expiry)}` : 'earliest-expiry lot'}</span>)
                 : <span className="muted">—</span>}</td>
               <td>{lines.length > 1 && <button type="button" className="tiny danger" aria-label="Remove line"
                 onClick={() => setLines(ls => ls.filter((_, n) => n !== i))}><Trash2 size={13} /></button>}</td>
@@ -369,7 +410,7 @@ export function IssueDesk({ items, sections, staff, onIssued }: {
 
         <div className="reg-head-actions" style={{ marginTop: 12 }}>
           <button type="button" className="secondary" onClick={() => setLines(ls => [...ls, { itemId: '', quantity: '' }])}><Plus size={14} /> Add another item</button>
-          <button type="submit" disabled={busy} style={{ marginLeft: 'auto' }}>{busy ? 'Issuing…' : 'Issue it'}</button>
+          <button type="submit" disabled={busy || shortLines > 0} style={{ marginLeft: 'auto' }}>{busy ? 'Issuing…' : 'Issue it'}</button>
         </div>
       </form>
     </div>
@@ -384,7 +425,7 @@ function IssueVoucher({ voucher, onClose }: { voucher: any; onClose: () => void 
     header={<button type="button" className="secondary" onClick={() => window.print()}><Printer size={14} /> Print</button>}
     footer={<button type="button" onClick={onClose}>Done</button>}>
     <p className="notice-ok">Stock has left the store and the balances are updated.</p>
-    <table className="data-table"><thead><tr><th>Item</th><th>Quantity</th><th>From which lots</th></tr></thead><tbody>
+    <table className="data-table"><thead><tr><th>Item</th><th>Quantity</th><th>Lots issued from</th></tr></thead><tbody>
       {voucher.lines.map((l: any) => <tr key={l.itemId}>
         <td><span className="reg-primary">{l.name}</span></td>
         <td>{l.quantity} {l.unit || ''}</td>
@@ -406,25 +447,27 @@ export function IssueRegister({ refreshKey }: { refreshKey: number }) {
   const shown = rows.filter(r => {
     const q = query.trim().toLowerCase();
     if (!q) return true;
-    return [r.issue_number, r.section_name, r.issued_to_name, r.purpose, r.issued_by_name].some(v => String(v ?? '').toLowerCase().includes(q));
+    return [r.issue_number, r.section_name, r.issued_to_name, r.received_by_name, r.purpose_label, r.purpose, r.issued_by_name]
+      .some(v => String(v ?? '').toLowerCase().includes(q));
   });
 
   return <div className="card">
     <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-      <h3 style={{ margin: 0 }}>Issue vouchers</h3>
+      <h3 style={{ margin: 0 }}>Issue register</h3>
       <label className="reg-search" style={{ marginLeft: 'auto' }}><Search size={15} />
         <input placeholder="Search voucher, unit, person…" value={query} onChange={e => setQuery(e.target.value)} /></label>
     </div>
     {shown.length === 0 ? <p className="muted">Nothing has been issued yet.</p> :
       <div className="table-scroll"><table className="data-table reg-table"><thead><tr>
-        <th>Voucher</th><th>Date</th><th>Unit</th><th>Collected by</th><th>Items</th><th>Quantity</th><th>Issued by</th><th>Status</th>
+        <th>Voucher</th><th>Date</th><th>Unit</th><th>Collected by</th><th>Reason</th><th>Lines</th><th>Quantity</th><th>Issued by</th><th>Status</th>
       </tr></thead><tbody>
         {shown.map(r => <tr key={r.id} className="row-clickable" onClick={() => setOpen(r.id)} tabIndex={0} role="button"
           onKeyDown={e => { if (e.key === 'Enter') setOpen(r.id); }}>
           <td><span className="reg-primary">{r.issue_number}</span></td>
           <td className="nowrap">{dateOnly(r.issue_date)}</td>
           <td>{r.section_name || <span className="muted">—</span>}</td>
-          <td>{r.issued_to_name || r.received_by_name || <span className="muted">—</span>}</td>
+          <td>{r.received_by_name || r.issued_to_name || <span className="muted">—</span>}</td>
+          <td>{r.purpose_label || r.purpose || <span className="muted">—</span>}</td>
           <td>{r.line_count}</td>
           <td>{r.total_quantity}</td>
           <td>{r.issued_by_name || <span className="muted">—</span>}</td>
@@ -461,14 +504,15 @@ function IssueDetail({ id, onClose }: { id: number; onClose: () => void }) {
     {error && <div className="error">{error}</div>}
     {!data ? <p>Loading…</p> : <>
       <dl className="fact-grid">
-        <div><dt>Unit</dt><dd>{data.section_name || '—'}</dd></div>
-        <div><dt>Collected by</dt><dd>{data.issued_to_name || data.received_by_name || '—'}</dd></div>
-        <div><dt>What for</dt><dd>{data.purpose || '—'}</dd></div>
+        <div><dt>Issued to unit</dt><dd>{data.section_name || '—'}</dd></div>
+        <div><dt>Collected by</dt><dd>{data.received_by_name || data.issued_to_name || '—'}</dd></div>
+        <div><dt>Reason for issue</dt><dd>{data.purpose_label || data.purpose || '—'}</dd></div>
         <div><dt>Issued by</dt><dd>{data.issued_by_name || '—'}</dd></div>
+        {data.note && <div><dt>Remarks</dt><dd>{data.note}</dd></div>}
       </dl>
-      <h4>What went out</h4>
+      <h4>Lines issued</h4>
       <div className="table-scroll"><table className="data-table"><thead><tr>
-        <th>Item</th><th>Quantity</th><th>From which lots</th><th>Returning</th>
+        <th>Item</th><th>Quantity</th><th>Lots issued from</th><th>Returning</th>
       </tr></thead><tbody>
         {data.lines.map((l: any) => <tr key={l.id}>
           <td><span className="reg-primary">{l.item_name}</span><span className="reg-sub">{l.item_code}</span></td>
@@ -523,7 +567,7 @@ export function StockTake({ places, staff, onPosted }: {
 
   return <>
     <div className="card">
-      <h3>Start a count</h3>
+      <h3>Start a stock count</h3>
       <p className="muted" style={{ marginTop: 0 }}>
         A sheet is drawn up per lot on the shelf, pre-filled with what the register believes. Count, enter what
         you found, and post it — every difference becomes an adjustment with your reason on it.
@@ -549,7 +593,7 @@ export function StockTake({ places, staff, onPosted }: {
     </div>
 
     <div className="card">
-      <h3>Counts</h3>
+      <h3>Stock counts</h3>
       {counts.length === 0 ? <p className="muted">Nothing has been counted yet.</p> :
         <div className="table-scroll"><table className="data-table reg-table"><thead><tr>
           <th>Count</th><th>Date</th><th>Scope</th><th>Counted by</th><th>Progress</th><th>Differences</th><th>Status</th>
@@ -622,7 +666,7 @@ function CountSheet({ id, onClose, onPosted }: { id: number; onClose: () => void
           : 'Enter what you actually found. Leave a line blank if it was not counted — only counted lines are posted.'}
       </p>
       <div className="table-scroll"><table className="data-table"><thead><tr>
-        <th>Item</th><th>Batch / lot</th><th>Expires</th><th>Register says</th><th>Counted</th><th>Difference</th><th>Reason</th>
+        <th>Item</th><th>Batch / lot</th><th>Expires</th><th>Book balance</th><th>Counted</th><th>Variance</th><th>Reason</th>
       </tr></thead><tbody>
         {data.lines.map((l: any) => {
           const v = varianceOf(l);

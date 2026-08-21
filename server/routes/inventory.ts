@@ -200,8 +200,8 @@ export function inventoryRoutes() {
    * What did somebody just scan?
    *
    * Answered most-specific-first, because a scan of a box should land on that
-   * box. A GS1 symbol carries the product and the lot together, so it can
-   * identify the exact delivery; a plain barcode usually only says which
+   * box. A two-dimensional symbol carries the product and the lot together, so
+   * it can identify the exact delivery; a plain barcode usually only says which
    * product it is. Either way the caller gets back what was recognised, plus
    * whatever the symbol said, so a receiving screen can fill the lot and the
    * expiry from the box instead of asking somebody to read them off it.
@@ -604,8 +604,8 @@ export function inventoryRoutes() {
    * Remove a stock item.
    *
    * `withdraw` is the normal answer — the item leaves the working register and
-   * its batches and movements stay on the record, which is what ISO 15189
-   * §6.6.2 traceability rests on. `delete` erases it and everything it holds,
+   * its batches and movements stay on the record, which is what lot
+   * traceability rests on. `delete` erases it and everything it holds,
    * and is for an item entered by mistake: it needs a written reason, and a
    * second confirmation once there is history behind it.
    */
@@ -650,9 +650,8 @@ export function inventoryRoutes() {
    * Every issue, receipt and disposal, newest first.
    *
    * Recording a movement and then having nowhere to see it is not a record.
-   * ISO 15189 §6.6.2 asks the laboratory to keep the receipt and use of each
-   * lot; this is that list, with the batch, the unit it went to and the person
-   * who took it named rather than left as ids.
+   * The receipt and use of every lot belongs in one list, with the batch, the
+   * unit it went to and the person who took it named rather than left as ids.
    */
   router.get('/movements', requirePermission('supplier_inventory.stock', 'view'), (req, res) => {
     const db = getDb();
@@ -710,9 +709,9 @@ export function inventoryRoutes() {
     const qtyReceived = Number(req.body.quantityReceived);
     const qtyAvailable = req.body.quantityAvailable !== undefined ? Number(req.body.quantityAvailable) : qtyReceived;
     if (qtyReceived < 0 || qtyAvailable < 0) return res.status(400).json({ error: 'Quantities cannot be negative' });
-    // The barcode read off this particular box. Under GS1 that symbol carries
-    // the product AND the lot AND the expiry, which is the level ISO 15189
-    // §6.6.2 traceability actually runs at, so it is kept on the batch.
+    // The barcode read off this particular box. A two-dimensional symbol
+    // carries the product, the lot and the expiry together — the level
+    // traceability runs at — so it is kept on the batch.
     const batchBarcode = String(req.body.productBarcode ?? '').trim() || null;
     if (batchBarcode) {
       const clash = db.prepare(`SELECT b.batch_number, i.name FROM inventory_batches b
@@ -779,10 +778,9 @@ export function inventoryRoutes() {
 
     // ---- The three controls that make this stock control rather than a tally.
     //
-    // ISO 15189 §6.6 asks that externally provided products are not used until
-    // they have been verified as meeting the laboratory's requirements, and
-    // §6.4.3 that reagents are used within their expiry. Discarding is the one
-    // thing you MUST still be able to do to a bad batch, so it is never blocked.
+    // A delivery is not put into use until it has been inspected and accepted,
+    // and nothing is issued past its expiry. Discarding is the one thing you
+    // MUST still be able to do to a bad batch, so it is never blocked.
     const disposal = ['discard', 'waste'].includes(req.body.movementType);
     if (isOut && !disposal) {
       if (batch.acceptance_status === 'pending' || batch.acceptance_status === 'quarantined') {
@@ -822,14 +820,23 @@ export function inventoryRoutes() {
     // One posting path for every movement, so the balance on the bin card is
     // written the same way whoever recorded it and whichever screen they used.
     const movementDate = req.body.movementDate ?? new Date().toISOString().slice(0, 10);
+    // The reason comes from the laboratory's own list as a code; a bin card is
+    // read years later, so what is stored is the words, plus any detail typed
+    // beside them. Free text from older screens passes through untouched.
+    const reasonCode = String(req.body.reason ?? '').trim();
+    const reasonOption = reasonCode
+      ? db.prepare('SELECT label FROM config_options WHERE list_key = ? AND value = ?').get('stock_movement_reason', reasonCode) as { label?: string } | undefined
+      : undefined;
+    const reasonNote = String(req.body.reasonNote ?? '').trim();
+    const reasonText = [reasonOption?.label ?? reasonCode, reasonNote].filter(Boolean).join(' — ') || null;
     const posted = postMovement(db, {
       itemId: batch.item_id, batchId: Number(req.params.id), movementType: req.body.movementType, quantity: qty,
       movementDate,
       issuedToSectionId: parseIntNullable(req.body.issuedToSectionId),
       receivedByStaffId: parseIntNullable(req.body.receivedByStaffId),
       reason: req.body.overrideFefo === true
-        ? `${req.body.reason ?? ''}${req.body.reason ? ' — ' : ''}FEFO skipped deliberately`.trim()
-        : (req.body.reason ?? null),
+        ? `${reasonText ?? ''}${reasonText ? ' — ' : ''}FEFO skipped deliberately`.trim()
+        : reasonText,
       userId: req.user!.id,
     });
     audit(req, { action: 'create', entity: 'inventory_movements', entityId: posted.id, newValue: { batchId: req.params.id, ...req.body } });
@@ -887,9 +894,8 @@ export function inventoryRoutes() {
   router.get('/suppliers', requirePermission('supplier_inventory.suppliers', 'view'), (_req, res) => {
     const db = getDb();
     const today = new Date().toISOString().slice(0, 10);
-    // ISO 15189 §6.6.4 asks the laboratory to evaluate and monitor the
-    // suppliers of what affects its results, so the register has to show at a
-    // glance who is due — not just who exists.
+    // Suppliers of anything that affects a result are evaluated and monitored,
+    // so the register has to show at a glance who is due — not just who exists.
     const rows = db.prepare(`SELECT s.*,
         (SELECT COUNT(*) FROM inventory_items i WHERE i.supplier_id = s.id) AS item_count,
         (SELECT COUNT(*) FROM inventory_batches b WHERE b.supplier_id = s.id) AS batch_count,
@@ -964,7 +970,7 @@ export function inventoryRoutes() {
     res.json(result);
   });
 
-  /** Every evaluation ever recorded — the §6.6.4 monitoring record in one list. */
+  /** Every evaluation ever recorded — the supplier monitoring record in one list. */
   router.get('/supplier-evaluations', requirePermission('supplier_inventory.suppliers', 'view'), (req, res) => {
     const db = getDb();
     const args: unknown[] = [];

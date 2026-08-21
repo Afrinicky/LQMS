@@ -55,7 +55,7 @@ const ENTITY_ROUTES: Record<string, (id: string) => string> = {
   equipment_maintenance_records: id => `/equipment?tab=Maintenance&focus=equipment_maintenance_records:${id}`,
   equipment_schedules: () => '/equipment?tab=Equipment%20Register',
   inventory_items: id => `/supplier-inventory?tab=Item%20Register&focus=inventory_items:${id}`,
-  inventory_batches: id => `/supplier-inventory?tab=Batches%2FLots&focus=inventory_batches:${id}`,
+  inventory_batches: id => `/supplier-inventory?tab=Receiving&subtab=Batches%20%26%20lots&focus=inventory_batches:${id}`,
   suppliers: id => `/supplier-inventory?tab=Suppliers&focus=suppliers:${id}`,
   documents: id => `/documents?tab=Documents&focus=documents:${id}`,
   document_versions: () => '/documents?tab=Documents',

@@ -267,8 +267,9 @@ everyday actions.
 
 ### Running the store
 
-The **Item Register** says what the laboratory stocks. **Inventory** is about what it *has*, in the
-order the day runs:
+The **Item Register** says what the laboratory stocks. The tabs beside it are about what it *has*,
+one per job, in the order the day runs — **Stock Ledger**, **Receiving**, **Issuing**, **Stock
+Take** and **Stock Movements**:
 
 **Stock ledger** — everything held, with the numbers a store actually runs on. The distinction the
 screen insists on is between what is *on hand* and what is *issuable*: a reagent with four hundred
@@ -279,20 +280,34 @@ reagent and two years of another. Opening a row gives its **bin card** — the t
 movement in date order with the balance it left behind, and a warning if that balance and the shelf
 have parted company.
 
-**Receiving** — a delivery is booked in against a lot, and posts a receipt movement, so the bin card
-shows stock arriving as well as leaving.
+**Receiving** — two benches under one tab. **Goods receipt** books a delivery in against its lot
+and posts a receipt movement, so the bin card shows stock arriving as well as leaving.
+**Batches & lots** is what that created: every lot in earliest-expiry order, with its acceptance
+state, ready to be inspected, accepted, rejected or labelled.
 
-**Issuing** — somebody from a unit is at the counter. Name the unit and the person, add what they
-are taking, press issue. The store allocates across lots oldest-expiry-first and writes a numbered
-voucher; nobody picks a batch by hand. A request that is short on any one line issues nothing at
-all, so a five-line request cannot leave three of them out and two not. Anything returned unused
-goes back into the lot it came from, so that lot's expiry still applies.
+**Issuing** — somebody from a unit is at the counter. Name the unit, pick the member of staff
+collecting from the staff register, pick why from the laboratory's own list of issue reasons
+(**Settings → Dropdown Lists → Stock issue reasons**), add the lines, press issue. Every item on
+the register is offered, grouped into what can go out today and what cannot with the reason it
+cannot — an item is never missing from the picker just because the shelf is empty. The store
+allocates across lots earliest-expiry-first and writes a numbered voucher; nobody picks a batch by
+hand. A request that is short on any one line issues nothing at all, so a five-line request cannot
+leave three of them out and two not. Anything returned unused goes back into the lot it came from,
+so that lot's expiry still applies.
 
 **Stock take** — a sheet per lot, pre-filled with what the register believes. Enter what was found,
 post it, and every difference becomes an adjustment movement carrying its reason, so a correction is
 part of the record rather than a balance that changed overnight.
 
-**Movement register** — every issue, receipt, disposal and adjustment, searchable and exportable.
+**Stock movements** — every issue, receipt, disposal and adjustment, searchable and exportable,
+with the one-off movement form above it. A movement's reason is chosen from **Stock movement
+reasons** in Dropdown Lists and stored as the words it read on the day, with any detail typed
+beside it.
+
+The module's **Dashboard** carries both halves of the same question: the operating position — what
+is held, what is below its reorder level, what cannot be issued, what is turning — and, under it,
+the reporting on that position: consumption against receipts, expiry risk, wastage, the
+replenishment list, ABC and VEN, and supplier performance over a window you choose.
 
 ### Forecasting — what to order, and what the levels should be
 
@@ -318,12 +333,13 @@ consumption to reorder against.
 Proposed levels can be applied to selected items in one action, and an item whose levels were set by
 hand can be locked so no forecast overwrites them.
 
-### Reports
+### Reporting
 
-Live from the ledger: consumption and receipts by month, where every item stands, what is about to
-turn (by 30/90/180 days and by value), wastage rate, stock turnover, the shortage list ranked by
-ABC/VEN priority, the biggest consumers, stock that never moves, the value concentration, and
-supplier delivery and rejection rates.
+Reporting is not a tab of its own — it is the lower half of the module **Dashboard**, under the
+operating position it explains. Live from the ledger: consumption against receipts by month, where
+every item stands, expiry risk (by 30/90/180 days and by value), wastage rate, stock turnover, the
+replenishment list ranked by ABC/VEN priority, the highest consumers, slow-moving stock, the ABC
+value concentration, the VEN mix, and supplier delivery and rejection rates.
 
 ### Suppliers — ISO 15189:2022 §6.6.4
 
