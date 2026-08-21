@@ -90,6 +90,19 @@ export const CONFIG_LISTS: ConfigListDef[] = [
     ],
   },
   {
+    key: 'stock_issue_destination',
+    label: 'Issue destinations outside the laboratory',
+    description: 'Facilities, programmes and outside units the laboratory issues stock to — anything that is neither one of its own units nor a hospital department. Chosen on an issue voucher.',
+    seed: [
+      { value: 'health_centre', label: 'Health centre / CHPS compound' },
+      { value: 'partner_laboratory', label: 'Partner laboratory' },
+      { value: 'referring_facility', label: 'Referring facility' },
+      { value: 'outreach_team', label: 'Outreach / campaign team' },
+      { value: 'district_office', label: 'District health office' },
+      { value: 'training_institution', label: 'Training institution' },
+    ],
+  },
+  {
     key: 'stock_movement_reason',
     label: 'Stock movement reasons',
     description: 'Why stock moved outside a normal issue — a disposal, a transfer, a correction. Chosen when a one-off movement is recorded.',

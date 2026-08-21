@@ -9,6 +9,8 @@
  *   4. a revoked role permission survives a re-seed
  *   5. QR token resolution is gated on the target module
  *   6. the effective-permission map matches what the API actually allows
+ *   7. correcting the store — reversing, cancelling, abandoning — is a
+ *      manager's right and is refused to the bench roles
  */
 const BASE = process.env.API || 'http://127.0.0.1:4399/api';
 
@@ -136,6 +138,37 @@ async function main() {
       JSON.stringify([...new Set(alerts.map(a => a.module))].filter(m => !visible.has(m))));
   } else {
     check('live alerts readable or refused cleanly', true);
+  }
+
+  console.log('\n[8] Correcting the store is a manager\'s right, not a storekeeper\'s');
+  // Reversing a receipt, cancelling a voucher, undoing a movement and
+  // abandoning a count all destroy or restate something already recorded, so
+  // they are gated on void_archive — which the Laboratory Manager holds on the
+  // store and the bench roles do not.
+  const storeMatrix = (await call('/permissions/matrix', { token: A })).json;
+  const permById = new Map(storeMatrix.permissions.map(p => [p.id, p]));
+  const storeActions = roleName => {
+    const role = roles.find(r => r.name === roleName);
+    if (!role) return null;
+    return new Set(storeMatrix.rolePermissions
+      .filter(rp => rp.role_id === role.id && rp.allowed
+        && permById.get(rp.permission_id)?.module_key === 'supplier_inventory.stock')
+      .map(rp => permById.get(rp.permission_id).action));
+  };
+  const managerActions = storeActions('Laboratory Manager');
+  check('the Laboratory Manager may correct the store', Boolean(managerActions?.has('void_archive')),
+    JSON.stringify([...(managerActions ?? [])]));
+  for (const bench of ['Technician', 'Biomedical Scientist']) {
+    const held = storeActions(bench);
+    check(`  a ${bench} may not`, Boolean(held) && !held.has('void_archive'), JSON.stringify([...(held ?? [])]));
+  }
+
+  // And the routes enforce it, not just the matrix.
+  const batches = (await call('/supplier-inventory/batches', { token: T })).json;
+  if (Array.isArray(batches) && batches.length > 0) {
+    const refused = await call(`/supplier-inventory/batches/${batches[0].id}/reverse`,
+      { token: T, method: 'POST', body: { reason: 'attempted by a bench role' } });
+    check('  and the route refuses a bench role outright', refused.status === 403, `got ${refused.status}`);
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

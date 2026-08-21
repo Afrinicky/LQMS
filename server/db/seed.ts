@@ -86,7 +86,7 @@ export function seedDefaults() {
     // Bump whenever the table below changes in a way an existing laboratory
     // must receive — a right withdrawn, or a new area added to a role. See the
     // note beside the application loop for why this exists.
-    const ROLE_DEFAULTS_VERSION = '2026.08-features.4-duty-activities';
+    const ROLE_DEFAULTS_VERSION = '2026.08-features.5-stock-corrections';
 
     // Every member of staff, whatever their rank: their own record, their own
     // inbox, the launchpad, the ability to raise a safety incident or a
@@ -291,11 +291,16 @@ export function seedDefaults() {
           'records_reports.audit', 'records_reports.retention',
           'notifications.calendar', 'notifications.rules',
           'system_audit.trail', 'system_audit.flags', 'system_audit.checks',
+          // Correcting the store — reversing a receipt, cancelling a voucher,
+          // undoing a movement, abandoning a count — is the manager's job, not
+          // the storekeeper's, so the stock feature is held at Full here and
+          // at Manage or below everywhere else.
+          'supplier_inventory.stock',
         ],
         manage: [
           'equipment.register', 'equipment.maintenance', 'equipment.verification',
           'equipment.training', 'equipment.files', 'equipment.adverse', 'equipment.reports',
-          'supplier_inventory.stock', 'supplier_inventory.suppliers',
+          'supplier_inventory.suppliers',
           'supplier_inventory.storage', 'supplier_inventory.labels', 'supplier_inventory.reports',
           'process_management.receipt', 'process_management.directory',
           'process_management.rejections', 'process_management.intervals',

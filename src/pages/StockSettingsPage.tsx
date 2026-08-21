@@ -1,10 +1,12 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { Plus, Warehouse, Thermometer, Barcode, Trash2, Pencil } from 'lucide-react';
+import { Plus, Warehouse, Thermometer, Barcode, Trash2, Pencil, Truck } from 'lucide-react';
 import { api } from '../services/api';
 import { DetailModal } from '../components/ui';
 import {
   STORAGE_KINDS, STORAGE_KIND_LABELS, isColdStorage,
   BARCODE_SOURCE_LABELS, normaliseBarcodePolicy, type BarcodePolicy,
+  SUPPLY_SOURCE_KINDS, SUPPLY_SOURCE_KIND_LABELS, PROCUREMENT_MODES, PROCUREMENT_MODE_LABELS,
+  PROCUREMENT_MODE_HINTS, normaliseProcurementPolicy, allowsStore, type ProcurementPolicy,
 } from '../../shared/constants/inventory';
 import type { Section } from '../../shared/types/api';
 
@@ -34,6 +36,13 @@ export type StorageLocation = {
 };
 
 const blankPlace = { name: '', kind: 'shelf', parentId: '', sectionId: '', code: '', description: '', tempMin: '', tempMax: '' };
+const blankSource = { name: '', kind: 'main_store', code: '', contactPerson: '', phone: '', email: '', address: '', note: '' };
+
+export type SupplySource = {
+  id: number; name: string; kind: string; kind_label?: string; code?: string | null;
+  contact_person?: string | null; phone?: string | null; email?: string | null;
+  address?: string | null; note?: string | null; is_active: number; receipt_count: number;
+};
 
 export default function StockSettingsPage() {
   const [places, setPlaces] = useState<StorageLocation[]>([]);
@@ -45,11 +54,20 @@ export default function StockSettingsPage() {
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState(blankPlace);
   const [editing, setEditing] = useState<StorageLocation | null>(null);
+  // Where deliveries come from, and whether this laboratory draws from a store
+  // at all. A hospital laboratory usually does; a standalone one usually does not.
+  const [procurement, setProcurement] = useState<ProcurementPolicy>({ mode: 'direct', defaultSourceType: 'supplier' });
+  const [sources, setSources] = useState<SupplySource[]>([]);
+  const [addingSource, setAddingSource] = useState(false);
+  const [sourceForm, setSourceForm] = useState(blankSource);
+  const [editingSource, setEditingSource] = useState<SupplySource | null>(null);
 
   const load = () => Promise.all([
     api<StorageLocation[]>('/supplier-inventory/storage-locations?includeInactive=true').then(setPlaces),
     api<BarcodePolicy>('/supplier-inventory/barcode-policy').then(p => setPolicy(normaliseBarcodePolicy(p))),
     api<Section[]>('/sections').then(setSections).catch(() => setSections([])),
+    api<ProcurementPolicy>('/supplier-inventory/procurement-policy').then(p => setProcurement(normaliseProcurementPolicy(p))).catch(() => undefined),
+    api<SupplySource[]>('/supplier-inventory/supply-sources?includeInactive=true').then(setSources).catch(() => setSources([])),
   ]).catch(e => setError((e as Error).message));
   useEffect(() => { void load(); }, []);
 
@@ -65,6 +83,26 @@ export default function StockSettingsPage() {
     const ok = await run('add', () => api('/supplier-inventory/storage-locations', { method: 'POST', body: JSON.stringify(form) }), `${form.name} added.`);
     if (ok) { setAdding(false); setForm(blankPlace); }
   }
+  async function addSource(e: FormEvent) {
+    e.preventDefault();
+    const ok = await run('add-source', () => api('/supplier-inventory/supply-sources', { method: 'POST', body: JSON.stringify(sourceForm) }), `${sourceForm.name} added.`);
+    if (ok) { setAddingSource(false); setSourceForm(blankSource); }
+  }
+  async function saveSource(e: FormEvent) {
+    e.preventDefault();
+    if (!editingSource) return;
+    const ok = await run('edit-source', () => api(`/supplier-inventory/supply-sources/${editingSource.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        name: editingSource.name, kind: editingSource.kind, code: editingSource.code ?? '',
+        contactPerson: editingSource.contact_person ?? '', phone: editingSource.phone ?? '',
+        email: editingSource.email ?? '', address: editingSource.address ?? '',
+        note: editingSource.note ?? '', isActive: editingSource.is_active === 1,
+      }),
+    }), 'Source updated.');
+    if (ok) setEditingSource(null);
+  }
+
   async function saveEdit(e: FormEvent) {
     e.preventDefault();
     if (!editing) return;
@@ -86,7 +124,7 @@ export default function StockSettingsPage() {
   return <div className="settings-module">
     <div className="settings-module-head">
       <h2>Stock &amp; Storage</h2>
-      <p>Where the laboratory keeps its reagents and consumables, and how its stock is barcoded. Stock item categories, units of measure, issue reasons and movement reasons live in <strong>Dropdown Lists</strong>.</p>
+      <p>Where the laboratory keeps its reagents and consumables, where deliveries come from, and how its stock is barcoded. Stock item categories, units of measure, issue reasons, movement reasons and outside issue destinations live in <strong>Dropdown Lists</strong>.</p>
     </div>
 
     {error && <div className="error">{error}</div>}
@@ -146,6 +184,83 @@ export default function StockSettingsPage() {
       </div>
     </div>
 
+    {/* ---- Where deliveries come from ------------------------------------- */}
+    <div className="card" style={{ marginTop: 16 }}>
+      <h3><Truck size={17} style={{ verticalAlign: '-3px', marginRight: 7 }} />Where stock comes from</h3>
+      <p className="muted" style={{ marginTop: 0 }}>
+        A standalone laboratory buys what it uses. A hospital laboratory usually draws most of its reagents
+        from the hospital's main store and buys only a few items direct — and may also receive from a district,
+        regional or national medical store. Say which of those happens here, and the receiving screen asks for
+        the right thing instead of pretending every delivery came from a supplier.
+      </p>
+      <div className="bc-choice">
+        {PROCUREMENT_MODES.map(mode => (
+          <button key={mode} type="button" className={procurement.mode === mode ? 'active' : ''}
+            onClick={() => setProcurement(p => normaliseProcurementPolicy({ ...p, mode }))}>
+            <strong>{PROCUREMENT_MODE_LABELS[mode]}</strong>
+            <span>{PROCUREMENT_MODE_HINTS[mode]}</span>
+          </button>
+        ))}
+      </div>
+      {procurement.mode === 'both' && <label style={{ marginTop: 12, display: 'block', maxWidth: 420 }}>
+        Which one a receipt starts on
+        <select value={procurement.defaultSourceType} onChange={e => setProcurement(p => ({ ...p, defaultSourceType: e.target.value === 'store' ? 'store' : 'supplier' }))}>
+          <option value="supplier">Bought direct from a supplier</option>
+          <option value="store">Drawn from a store</option>
+        </select>
+      </label>}
+      <div style={{ marginTop: 12 }}>
+        <button type="button" disabled={busy === 'procurement'}
+          onClick={() => void run('procurement', () => api('/supplier-inventory/procurement-policy', { method: 'PUT', body: JSON.stringify(procurement) }), 'Saved — the receiving screen follows this now.')}>
+          {busy === 'procurement' ? 'Saving…' : 'Save how stock is obtained'}
+        </button>
+      </div>
+
+      {allowsStore(procurement) && <>
+        <div className="reg-head" style={{ marginTop: 20 }}>
+          <div className="reg-head-text">
+            <h4 style={{ margin: 0 }}>Stores this laboratory draws from</h4>
+            <p className="muted" style={{ margin: '2px 0 0' }}>
+              Every store a delivery can be received from — the hospital's own main store, and any district,
+              regional, national or partner store that supplies this laboratory. More than one is normal.
+            </p>
+          </div>
+          <div className="reg-head-actions">
+            <button type="button" onClick={() => { setSourceForm(blankSource); setAddingSource(true); }}><Plus size={15} /> Add a store</button>
+          </div>
+        </div>
+        <div className="table-scroll" style={{ marginTop: 10 }}>
+          <table className="data-table">
+            <thead><tr><th>Store</th><th>Kind</th><th>Contact</th><th>Deliveries</th><th className="reg-actions-col"></th></tr></thead>
+            <tbody>
+              {sources.map(src => <tr key={src.id} className={src.is_active ? '' : 'row-retired'}>
+                <td>
+                  <span className="reg-primary">{src.name}{!src.is_active && <span className="badge inactive">not in use</span>}</span>
+                  {src.code && <span className="reg-sub">{src.code}</span>}
+                </td>
+                <td>{SUPPLY_SOURCE_KIND_LABELS[src.kind] ?? src.kind}</td>
+                <td>{src.contact_person || <span className="muted">—</span>}
+                  {(src.phone || src.email) && <span className="reg-sub">{[src.phone, src.email].filter(Boolean).join(' · ')}</span>}</td>
+                <td>{src.receipt_count ? `${src.receipt_count}` : <span className="muted">none yet</span>}</td>
+                <td className="reg-actions-col">
+                  <div className="reg-row-actions">
+                    <button type="button" className="tiny" onClick={() => setEditingSource({ ...src })}><Pencil size={13} /> Edit</button>
+                    <button type="button" className="tiny danger" disabled={busy === `del-src-${src.id}`}
+                      onClick={() => void run(`del-src-${src.id}`, () => api(`/supplier-inventory/supply-sources/${src.id}`, { method: 'DELETE' }), `${src.name} removed.`)}>
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </td>
+              </tr>)}
+              {sources.length === 0 && <tr><td colSpan={5} className="muted" style={{ padding: 18, textAlign: 'center' }}>
+                No stores yet — add the one this laboratory draws most of its stock from.
+              </td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </>}
+    </div>
+
     {/* ---- Barcodes ------------------------------------------------------- */}
     <div className="card" style={{ marginTop: 16 }}>
       <h3><Barcode size={17} style={{ verticalAlign: '-3px', marginRight: 7 }} />Barcodes on stock</h3>
@@ -202,6 +317,46 @@ export default function StockSettingsPage() {
           <label>Warmest allowed °C<input type="number" step="any" value={form.tempMax} onChange={e => setForm({ ...form, tempMax: e.target.value })} placeholder="8" /></label>
         </>}
       </form>
+    </DetailModal>
+
+    <DetailModal open={addingSource} onClose={() => setAddingSource(false)} width="narrow" title="Add a store"
+      footer={<>
+        <button type="button" className="secondary" onClick={() => setAddingSource(false)}>Cancel</button>
+        <button type="submit" form="add-source" disabled={!sourceForm.name.trim() || busy === 'add-source'}>{busy === 'add-source' ? 'Adding…' : 'Add'}</button>
+      </>}>
+      {error && <div className="error">{error}</div>}
+      <form id="add-source" className="form-grid" onSubmit={addSource}>
+        <label className="wide">Name<input value={sourceForm.name} onChange={e => setSourceForm({ ...sourceForm, name: e.target.value })} placeholder="e.g. Hospital Main Store, Regional Medical Store" /></label>
+        <label>Kind<select value={sourceForm.kind} onChange={e => setSourceForm({ ...sourceForm, kind: e.target.value })}>
+          {SUPPLY_SOURCE_KINDS.map(k => <option key={k} value={k}>{SUPPLY_SOURCE_KIND_LABELS[k]}</option>)}</select></label>
+        <label>Code <span className="muted">(optional)</span><input value={sourceForm.code} onChange={e => setSourceForm({ ...sourceForm, code: e.target.value })} /></label>
+        <label>Contact person<input value={sourceForm.contactPerson} onChange={e => setSourceForm({ ...sourceForm, contactPerson: e.target.value })} /></label>
+        <label>Phone<input value={sourceForm.phone} onChange={e => setSourceForm({ ...sourceForm, phone: e.target.value })} /></label>
+        <label className="wide">Note<input value={sourceForm.note} onChange={e => setSourceForm({ ...sourceForm, note: e.target.value })} placeholder="Requisition day, who signs for it…" /></label>
+      </form>
+    </DetailModal>
+
+    <DetailModal open={!!editingSource} onClose={() => setEditingSource(null)} width="narrow" title={editingSource ? `Edit ${editingSource.name}` : ''}
+      footer={<>
+        <button type="button" className="secondary" onClick={() => setEditingSource(null)}>Cancel</button>
+        <button type="submit" form="edit-source" disabled={busy === 'edit-source'}>{busy === 'edit-source' ? 'Saving…' : 'Save'}</button>
+      </>}>
+      {editingSource && <>
+        {error && <div className="error">{error}</div>}
+        <form id="edit-source" className="form-grid" onSubmit={saveSource}>
+          <label className="wide">Name<input value={editingSource.name} onChange={e => setEditingSource({ ...editingSource, name: e.target.value })} /></label>
+          <label>Kind<select value={editingSource.kind} onChange={e => setEditingSource({ ...editingSource, kind: e.target.value })}>
+            {SUPPLY_SOURCE_KINDS.map(k => <option key={k} value={k}>{SUPPLY_SOURCE_KIND_LABELS[k]}</option>)}</select></label>
+          <label>Code<input value={editingSource.code ?? ''} onChange={e => setEditingSource({ ...editingSource, code: e.target.value })} /></label>
+          <label>Contact person<input value={editingSource.contact_person ?? ''} onChange={e => setEditingSource({ ...editingSource, contact_person: e.target.value })} /></label>
+          <label>Phone<input value={editingSource.phone ?? ''} onChange={e => setEditingSource({ ...editingSource, phone: e.target.value })} /></label>
+          <label className="wide">Note<input value={editingSource.note ?? ''} onChange={e => setEditingSource({ ...editingSource, note: e.target.value })} /></label>
+          <label className="toggle wide">
+            <input type="checkbox" checked={editingSource.is_active === 1} onChange={e => setEditingSource({ ...editingSource, is_active: e.target.checked ? 1 : 0 })} />
+            Still drawn from
+          </label>
+        </form>
+      </>}
     </DetailModal>
 
     <DetailModal open={!!editing} onClose={() => setEditing(null)} width="narrow" title={editing ? `Edit ${editing.name}` : ''}

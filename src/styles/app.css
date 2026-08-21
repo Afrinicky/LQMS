@@ -3311,6 +3311,23 @@ tr.row-retired { opacity: .62; }
 
 /* The issue desk: who it is going to, across the top, then the basket. */
 .issue-head { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+
+/* ---- Stock count -------------------------------------------------------
+   A count sheet is worked standing at a shelf, so the row a person is on has
+   to stay findable: the quantity column is wide enough to read at arm's
+   length, and a line added at the shelf is tinted so it is obvious it was not
+   what the register drew up. */
+.count-bar { display: block; height: 5px; border-radius: 3px; background: var(--border); margin-top: 5px; overflow: hidden; }
+.count-bar > span { display: block; height: 100%; background: var(--accent, #3b82f6); transition: width .2s ease; }
+.count-sheet td { vertical-align: top; }
+.count-sheet tr.row-added td { background: color-mix(in srgb, var(--accent, #3b82f6) 7%, transparent); }
+.count-picker { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; }
+.count-picker-list { max-height: 260px; overflow-y: auto; display: grid; gap: 2px; }
+.count-pick { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; margin: 0; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.count-pick:hover { background: color-mix(in srgb, var(--accent, #3b82f6) 8%, transparent); }
+.count-pick input { margin: 0; }
+.count-pick span { display: flex; flex-direction: column; }
+.count-pick small { opacity: .65; font-size: .78em; }
 .issue-head label { margin: 0; }
 .issue-lines td { vertical-align: top; }
 .issue-lines select, .issue-lines input { width: 100%; }

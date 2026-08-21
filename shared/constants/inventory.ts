@@ -178,3 +178,107 @@ export function parseGs1(input: string): Gs1Scan | undefined {
 export function normaliseGtin(code: string): string {
   return String(code ?? '').trim().replace(/^0+/, '');
 }
+
+/* ============================================================================
+   WHERE STOCK COMES FROM
+
+   A laboratory that buys everything it uses is the exception. Most hospital
+   laboratories draw the bulk of their reagents from the hospital's main store
+   and buy only a few items direct; some also receive from a district, regional
+   or national medical store. So a receipt records two different facts — who
+   SUPPLIED the goods, and who the laboratory actually RECEIVED them FROM — and
+   the laboratory says in Settings which of those it needs to be asked for.
+   ========================================================================= */
+
+/** The kinds of place a delivery can be received from, besides a supplier. */
+export const SUPPLY_SOURCE_KINDS = [
+  'main_store', 'external_store', 'district_store', 'regional_store',
+  'national_store', 'partner_facility', 'donation', 'other',
+] as const;
+export type SupplySourceKind = typeof SUPPLY_SOURCE_KINDS[number];
+
+export const SUPPLY_SOURCE_KIND_LABELS: Record<string, string> = {
+  main_store: 'Hospital / facility main store',
+  external_store: 'External store',
+  district_store: 'District medical store',
+  regional_store: 'Regional medical store',
+  national_store: 'National medical store',
+  partner_facility: 'Partner facility',
+  donation: 'Donation / programme supply',
+  other: 'Other',
+};
+
+/**
+ * How this laboratory gets its stock.
+ *
+ * `direct` — it buys from suppliers itself, and a receipt asks for a supplier.
+ * `stores` — it draws from a main store, and a receipt asks which store.
+ * `both`  — both happen, and a receipt asks which of the two this one was.
+ */
+export const PROCUREMENT_MODES = ['direct', 'stores', 'both'] as const;
+export type ProcurementMode = typeof PROCUREMENT_MODES[number];
+
+export const PROCUREMENT_MODE_LABELS: Record<ProcurementMode, string> = {
+  direct: 'The laboratory buys direct from suppliers',
+  stores: 'The laboratory draws from a main store',
+  both: 'Both — some bought direct, some drawn from a store',
+};
+
+export const PROCUREMENT_MODE_HINTS: Record<ProcurementMode, string> = {
+  direct: 'A receipt asks which supplier the goods came from.',
+  stores: 'A receipt asks which store the goods were drawn from. Typical of a hospital laboratory.',
+  both: 'A receipt asks whether this delivery was bought direct or drawn from a store, and then which.',
+};
+
+export type ProcurementPolicy = {
+  mode: ProcurementMode;
+  /** Which source a receipt starts on when both are possible. */
+  defaultSourceType: 'supplier' | 'store';
+};
+
+export const DEFAULT_PROCUREMENT_POLICY: ProcurementPolicy = { mode: 'direct', defaultSourceType: 'supplier' };
+
+export function normaliseProcurementPolicy(input: unknown): ProcurementPolicy {
+  const raw = (input ?? {}) as Partial<ProcurementPolicy>;
+  const mode = PROCUREMENT_MODES.includes(raw.mode as never) ? raw.mode as ProcurementMode : 'direct';
+  const wanted = raw.defaultSourceType === 'store' ? 'store' : 'supplier';
+  return {
+    mode,
+    // A policy cannot default to a source it does not admit.
+    defaultSourceType: mode === 'stores' ? 'store' : mode === 'direct' ? 'supplier' : wanted,
+  };
+}
+
+/** Whether a receipt may name a supplier / a store under a given policy. */
+export const allowsSupplier = (p: ProcurementPolicy) => p.mode !== 'stores';
+export const allowsStore = (p: ProcurementPolicy) => p.mode !== 'direct';
+
+/* ============================================================================
+   WHERE STOCK GOES
+
+   Not everything issued goes to a bench. A hospital laboratory issues to its
+   own units, to other departments of the hospital, to another facility
+   entirely, and now and then to something that fits none of those — which has
+   to be written down rather than forced into the nearest box.
+   ========================================================================= */
+export const ISSUE_DESTINATION_TYPES = ['unit', 'department', 'facility', 'other'] as const;
+export type IssueDestinationType = typeof ISSUE_DESTINATION_TYPES[number];
+
+export const ISSUE_DESTINATION_LABELS: Record<string, string> = {
+  unit: 'Laboratory unit',
+  department: 'Hospital department',
+  facility: 'Another facility',
+  other: 'Other',
+};
+
+/** How the destination picker encodes a choice, and how the server reads it. */
+export function encodeDestination(type: IssueDestinationType, id?: number | string | null): string {
+  return type === 'other' ? 'other' : `${type}:${id ?? ''}`;
+}
+export function decodeDestination(value: string): { type: IssueDestinationType; id: string } {
+  const [head, id = ''] = String(value ?? '').split(':');
+  return {
+    type: ISSUE_DESTINATION_TYPES.includes(head as never) ? head as IssueDestinationType : 'unit',
+    id,
+  };
+}
