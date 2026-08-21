@@ -1,6 +1,6 @@
 import { FormEvent, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { FlaskConical, User, Lock, Building2, IdCard, ArrowRight, KeyRound } from 'lucide-react';
+import { FlaskConical, User, Lock, Building2, IdCard, ArrowRight, KeyRound, Eye, EyeOff } from 'lucide-react';
 import { api } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import { WaveBackground, MedicalLabBackgroundMarks } from '../components/ui';
@@ -25,6 +25,42 @@ function Field({ icon, label, ...props }: { icon: React.ReactNode; label: string
       <span className="auth-input">
         <span className="ai-ico">{icon}</span>
         <input {...props} />
+      </span>
+    </label>
+  );
+}
+
+/**
+ * A password box you can look at.
+ *
+ * Typing a password blind is where sign-in goes wrong: a stuck caps lock, a
+ * keyboard layout that puts the symbols somewhere else, a long passphrase on a
+ * laboratory keyboard that is missing a keycap. Being able to check what was
+ * actually typed turns a failed login into a corrected one.
+ *
+ * It reveals rather than stores: the field is a normal password box again the
+ * moment the eye is clicked off, it starts hidden every time, and the button is
+ * skipped by Tab so the keyboard path from password to Sign in is unchanged.
+ */
+function PasswordField({ icon, label, ...props }: { icon: React.ReactNode; label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+  const [shown, setShown] = useState(false);
+  return (
+    <label className="auth-field">
+      <span>{label}</span>
+      <span className="auth-input">
+        <span className="ai-ico">{icon}</span>
+        <input {...props} type={shown ? 'text' : 'password'} />
+        <button
+          type="button"
+          className="ai-reveal"
+          onClick={() => setShown(v => !v)}
+          tabIndex={-1}
+          aria-pressed={shown}
+          aria-label={shown ? 'Hide the password' : 'Show the password'}
+          title={shown ? 'Hide the password' : 'Show the password'}
+        >
+          {shown ? <EyeOff size={16} /> : <Eye size={16} />}
+        </button>
       </span>
     </label>
   );
@@ -65,7 +101,7 @@ export function LoginPage() {
         </div>
         <Field icon={<User size={16} />} label="Username" name="username" required autoFocus autoComplete="username" placeholder="Enter your username"
           onChange={e => setLastUsername(e.currentTarget.value)} />
-        <Field icon={<Lock size={16} />} label="Password" name="password" type="password" required autoComplete="current-password" placeholder="Enter your password" />
+        <PasswordField icon={<Lock size={16} />} label="Password" name="password" required autoComplete="current-password" placeholder="Enter your password" />
         {error && <div className="error">{error}</div>}
         <button className="auth-submit" disabled={busy}>
           {busy ? <><span className="spinner sm" /> Signing in…</> : <>Sign in <ArrowRight size={16} /></>}
@@ -116,7 +152,7 @@ export function SetupPage() {
         <Field icon={<Building2 size={16} />} label="Short name" name="shortName" defaultValue="SECH Laboratory" />
         <Field icon={<IdCard size={16} />} label="Administrator full name" name="fullName" required />
         <Field icon={<User size={16} />} label="Admin username" name="username" required autoComplete="username" />
-        <Field icon={<Lock size={16} />} label="Admin password" name="password" type="password" minLength={8} required autoComplete="new-password" />
+        <PasswordField icon={<Lock size={16} />} label="Admin password" name="password" minLength={8} required autoComplete="new-password" />
         {error && <div className="error">{error}</div>}
         <button className="auth-submit" disabled={busy}>
           {busy ? <><span className="spinner sm" /> Initializing…</> : <>Initialize workspace <ArrowRight size={16} /></>}

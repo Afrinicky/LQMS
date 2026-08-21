@@ -1,7 +1,8 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { Lock, LockOpen, Search, TrendingUp } from 'lucide-react';
+import { Lock, LockOpen, TrendingUp } from 'lucide-react';
 import { api } from '../../services/api';
-import { DetailModal, KpiStrip, ChartCard, Sparkline, BarChart, CHART_COLORS } from '../../components/ui';
+import { DetailModal, KpiStrip, ChartCard, Sparkline, BarChart, RegisterSearch, CHART_COLORS } from '../../components/ui';
+import { useCappedRows } from '../../hooks/useCappedRows';
 import { STOCK_STATUS_LABELS, VEN_CLASSES, VEN_LABELS, SERVICE_LEVEL_Z, type StockStatus } from '../../../shared/constants/stockControl';
 import { StatusBadge, qty } from './StockControl';
 
@@ -69,6 +70,7 @@ export function ForecastingPanel({ canEdit, refreshKey, onApplied }: { canEdit: 
       return [r.item.name, r.item.itemCode, r.item.category, r.item.supplierName].some(v => String(v ?? '').toLowerCase().includes(q));
     }).sort((a, b) => a.item.priority - b.item.priority || b.suggestedOrder - a.suggestedOrder);
   }, [rows, query, only]);
+  const page = useCappedRows(shown);
 
   const totals = useMemo(() => ({
     toOrder: rows.filter(r => r.suggestedOrder > 0).length,
@@ -115,8 +117,7 @@ export function ForecastingPanel({ canEdit, refreshKey, onApplied }: { canEdit: 
           </p>
         </div>
         <div className="reg-head-actions" style={{ marginLeft: 'auto' }}>
-          <label className="reg-search"><Search size={15} />
-            <input placeholder="Search item, supplier…" value={query} onChange={e => setQuery(e.target.value)} /></label>
+          <RegisterSearch onQuery={setQuery} placeholder="Search item, supplier…" />
           <select value={months} onChange={e => setMonths(Number(e.target.value))} aria-label="History window">
             {[6, 12, 18, 24, 36].map(m => <option key={m} value={m}>{m} months of history</option>)}
           </select>
@@ -140,13 +141,13 @@ export function ForecastingPanel({ canEdit, refreshKey, onApplied }: { canEdit: 
 
       {loading ? <p>Loading…</p> : shown.length === 0 ? <p className="muted">
         {only === 'order' ? 'Nothing needs ordering — every item is above its reorder level.' : 'Nothing here.'}
-      </p> :
+      </p> : <>
         <div className="table-scroll"><table className="data-table reg-table"><thead><tr>
           {canEdit && <th style={{ width: 32 }}></th>}
           <th>Item</th><th>Used per month</th><th>Cover</th>
           <th>Forecast next month</th><th>Proposed min / reorder / max</th><th>Order now</th>
         </tr></thead><tbody>
-          {shown.map(r => <tr key={r.item.id} className="row-clickable" onClick={() => setTuning(r)} tabIndex={0} role="button"
+          {page.shown.map(r => <tr key={r.item.id} className="row-clickable" onClick={() => setTuning(r)} tabIndex={0} role="button"
             onKeyDown={e => { if (e.key === 'Enter') setTuning(r); }}>
             {canEdit && <td onClick={e => e.stopPropagation()}>
               <input type="checkbox" checked={picked.has(r.item.id)} disabled={!!r.item.planningLocked}
@@ -181,7 +182,11 @@ export function ForecastingPanel({ canEdit, refreshKey, onApplied }: { canEdit: 
                 {r.item.unitCost ? <span className="reg-sub">≈ {Math.round(r.suggestedOrder * r.item.unitCost).toLocaleString()}</span> : null}</>
               : <span className="muted">—</span>}</td>
           </tr>)}
-        </tbody></table></div>}
+        </tbody></table></div>
+        {page.hidden > 0 && <p className="muted list-capped">
+          Showing the first {page.shown.length.toLocaleString()} of {page.total.toLocaleString()} items, highest priority first.
+        </p>}
+      </>}
     </div>
 
     {tuning && <PlanningPanel advice={tuning} canEdit={canEdit} onClose={() => setTuning(null)}

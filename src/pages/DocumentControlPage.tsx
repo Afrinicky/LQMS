@@ -1,9 +1,10 @@
-import { FormEvent, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { FileText } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import { SignatureThumb } from '../components/SignatureThumb';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts, RegisterSearch } from '../components/ui';
+import { useCappedRows } from '../hooks/useCappedRows';
 import { useAuth } from '../hooks/useAuth';
 import { useModules } from '../hooks/useModules';
 import { usePermissions } from '../hooks/usePermissions';
@@ -2116,11 +2117,12 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
     catch (err) { onError((err as Error).message); }
   }
 
-  const filteredRegister = register.filter(r => {
+  const filteredRegister = useMemo(() => register.filter(r => {
     if (!registerSearch.trim()) return true;
     const q = registerSearch.toLowerCase();
     return [r.record_code, r.title, r.record_category, r.linked_document_code, r.section_name, r.status].some(v => (v || '').toLowerCase().includes(q));
-  });
+  }), [register, registerSearch]);
+  const registerPage = useCappedRows(filteredRegister);
 
   const subs = ['Records Register', 'Retention Schedule', 'Review Log', 'Destruction Log', 'Backup & Archive'];
   return <div>
@@ -2129,14 +2131,14 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
 
     {sub === 'Records Register' && <>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
-        <input placeholder="Search code, title, category, source, status…" value={registerSearch} onChange={e => setRegisterSearch(e.target.value)} style={{ minWidth: 320 }} />
+        <RegisterSearch style={{ minWidth: 320 }} onQuery={setRegisterSearch} placeholder="Search code, title, category, source, status…" />
         <span className="muted">{filteredRegister.length} record(s)</span>
         <span style={{ flex: 1 }} />
         {can('documents.masterlist', 'export') && <button className="secondary" disabled={!!exportBusy} onClick={() => onExport('/documents/records/register/export', 'Records_Register.xlsx')}>{exportBusy === '/documents/records/register/export' ? 'Preparing…' : 'Export register (Excel)'}</button>}
       </div>
       <div style={{ overflowX: 'auto' }}>
       <table className="data-table"><thead><tr><th>No.</th><th>Code</th><th>Record type / title</th><th>Category</th><th>Source document</th><th>Format / medium</th><th>Unit / section</th><th>Storage location</th><th>Access</th><th>Retention</th><th>Disposal method</th><th>Status</th><th>Record file</th></tr></thead><tbody>
-        {filteredRegister.map((r, i) => <tr key={r.id}>
+        {registerPage.shown.map((r, i) => <tr key={r.id}>
           <td>{i + 1}</td>
           <td>{r.record_code || '—'}</td><td>{r.title}</td><td>{recordCategoryLabel(r.record_category)}</td>
           <td>{r.linked_document_code || (r.origin === 'system' ? `Generated${r.source_module ? ` in ${r.source_module}` : ' in system'}` : '—')}</td>
@@ -2148,6 +2150,10 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
         </tr>)}{filteredRegister.length === 0 && <tr><td colSpan={13} className="muted">No records registered yet.</td></tr>}
       </tbody></table>
       </div>
+      {registerPage.hidden > 0 && <p className="muted list-capped">
+        Showing the first {registerPage.shown.length.toLocaleString()} of {registerPage.total.toLocaleString()} records.
+        Search to narrow it down, or export the register for the whole list.
+      </p>}
       <h4>Register a controlled record</h4>
       <p className="muted" style={{ marginTop: 0 }}>Records completed on paper are indexed here; electronic records can be uploaded and stored in the register; records generated inside the system are linked to their source module.</p>
       <form className="form-grid" onSubmit={submitRecord}>

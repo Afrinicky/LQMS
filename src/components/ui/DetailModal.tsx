@@ -1,6 +1,39 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
+
+/**
+ * Two facts about dialogs that only one dialog can own.
+ *
+ * A record often opens another one over it — an item opens an adjustment, a
+ * voucher opens its cancellation. Each of those is a DetailModal, so each was
+ * separately saving and restoring `body.overflow` and separately answering
+ * Escape. Both went wrong the moment there were two:
+ *
+ *   · the scroll lock was restored in whatever order React unmounted them, and
+ *     the wrong order left `overflow: hidden` on the body with NO dialog open.
+ *     The page could not be scrolled again until the app was restarted.
+ *   · one Escape closed both, because `stopPropagation` does not stop other
+ *     listeners already registered on the same node.
+ *
+ * So the lock is reference-counted — the first dialog takes it, the last one
+ * gives it back — and a stack decides who Escape belongs to: the top one.
+ */
+let lockDepth = 0;
+let lockedFrom = '';
+const modalStack: string[] = [];
+
+function lockScroll() {
+  if (lockDepth === 0) {
+    lockedFrom = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+  }
+  lockDepth++;
+}
+function releaseScroll() {
+  lockDepth = Math.max(0, lockDepth - 1);
+  if (lockDepth === 0) document.body.style.overflow = lockedFrom;
+}
 
 /**
  * The one way a record opens in SECH_LIMS.
@@ -48,15 +81,26 @@ export default function DetailModal({
   // alone — set up when the dialog opens, torn down when it closes.
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  const id = useId();
 
   useEffect(() => {
     if (!open) return;
     // Remember what opened this, so closing puts the caret back where it was.
     returnFocusTo.current = document.activeElement as HTMLElement | null;
+    modalStack.push(id);
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.stopPropagation(); closeRef.current(); return; }
+      // Escape belongs to the dialog on top. Without this every open dialog
+      // answers the same keypress and one Escape shuts the whole stack.
+      if (e.key === 'Escape') {
+        if (modalStack[modalStack.length - 1] !== id) return;
+        e.stopPropagation();
+        closeRef.current();
+        return;
+      }
       if (e.key !== 'Tab' || !panelRef.current) return;
+      // A dialog with another one over it is not the one being tabbed through.
+      if (modalStack[modalStack.length - 1] !== id) return;
       // Keep Tab inside the dialog: the page behind it is inert while it is up.
       const focusable = panelRef.current.querySelectorAll<HTMLElement>(
         'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
@@ -69,19 +113,23 @@ export default function DetailModal({
     };
 
     document.addEventListener('keydown', onKeyDown, true);
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    lockScroll();
     // Focus the panel itself rather than its first field, so opening a record
     // does not immediately put a cursor in an editable box.
     const t = window.setTimeout(() => panelRef.current?.focus(), 0);
 
     return () => {
       document.removeEventListener('keydown', onKeyDown, true);
-      document.body.style.overflow = previousOverflow;
+      releaseScroll();
+      const at = modalStack.lastIndexOf(id);
+      if (at >= 0) modalStack.splice(at, 1);
       window.clearTimeout(t);
-      returnFocusTo.current?.focus?.();
+      // Only the dialog closing back to the page restores focus. A dialog
+      // unmounting underneath another one would otherwise pull the caret out
+      // of the dialog still on screen.
+      if (modalStack.length === 0) returnFocusTo.current?.focus?.();
     };
-  }, [open]);
+  }, [open, id]);
 
   if (!open) return null;
 
