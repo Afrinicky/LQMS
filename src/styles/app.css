@@ -3346,3 +3346,240 @@ tr.row-retired { opacity: .62; }
 /* Badges are title-cased by default, which is right for a one-word state and
    wrong for a phrase — "Out Of Stock" is not English. */
 .badge.plain { text-transform: none; }
+
+/* ============================================================================
+   COMPETENCE AND PERFORMANCE
+   ----------------------------------------------------------------------------
+   Scoring a bench checklist is different work from filling in a form: the
+   assessor is going down forty lines choosing one of four ratings on each,
+   with the criteria in front of them. These rules are what make that readable
+   — the rating row rather than a dropdown, the running score at the top, and
+   the sign-off trail that shows how far the record has got.
+   ========================================================================= */
+
+/* ---------- Section headers with an action on the right ---------- */
+.workspace-head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 20px; flex-wrap: wrap; margin: 4px 0 14px;
+}
+.workspace-head h3 { margin: 0 0 4px; }
+.workspace-head p { margin: 0; max-width: 78ch; font-size: 13px; }
+.workspace-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.inline-filter { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--faint); }
+.inline-filter select { min-width: 150px; }
+.inline-error { margin-left: 10px; padding: 4px 10px; font-size: 12px; }
+
+/* A second tier of tabs inside a tab. Quieter than the module tab bar so the
+   two do not compete for the same attention. */
+.tabs.sub { background: transparent; border: 0; padding: 0; gap: 4px; margin: 2px 0 14px; border-bottom: 1px solid var(--border); border-radius: 0; }
+.tabs.sub button { border-radius: 8px 8px 0 0; padding: 8px 14px; font-size: 12.5px; border-bottom: 2px solid transparent; }
+.tabs.sub button.active { background: transparent; color: var(--text); box-shadow: none; border-bottom-color: var(--accent-bright); }
+.tabs.sub button { display: inline-flex; align-items: center; gap: 7px; }
+.tab-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  background: var(--accent-soft); color: var(--accent-bright); font-size: 10.5px; font-weight: 700;
+}
+.view-switch { margin-bottom: 18px; }
+
+/* ---------- The running score at the top of a record ---------- */
+.record-summary {
+  display: flex; align-items: center; gap: 26px; flex-wrap: wrap;
+  padding: 16px 18px; margin: 0 0 16px;
+  background: linear-gradient(180deg, var(--card), var(--surface));
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.score-dial { display: flex; align-items: center; gap: 14px; }
+.score-dial .dial {
+  width: 86px; height: 86px; border-radius: 50%;
+  display: grid; place-items: center; flex: none;
+  transition: background 0.3s ease;
+}
+.score-dial .dial-inner {
+  width: 68px; height: 68px; border-radius: 50%;
+  background: var(--surface); display: grid; place-items: center;
+}
+.score-dial .dial-inner strong { font-size: 19px; letter-spacing: -0.02em; }
+.dial-caption { display: flex; flex-direction: column; gap: 2px; }
+.dial-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--faint); }
+.dial-sub { font-size: 12.5px; color: var(--muted); }
+
+.summary-stats { display: flex; gap: 22px; flex-wrap: wrap; flex: 1; }
+.stat-cell { display: flex; flex-direction: column; gap: 2px; min-width: 120px; }
+.sc-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--faint); }
+.sc-value { font-size: 15px; font-weight: 700; color: var(--text); }
+.stat-cell.good .sc-value { color: var(--success); }
+.stat-cell.warn .sc-value { color: var(--warning); }
+.stat-cell.bad .sc-value { color: var(--danger); }
+.sc-hint { font-size: 11px; color: var(--faint); }
+
+/* Section scores on an appraisal — four short bars beat four numbers. */
+.section-scores { display: grid; gap: 8px; margin: 0 0 16px; }
+.ss-item { display: grid; grid-template-columns: minmax(150px, 220px) 1fr 52px; align-items: center; gap: 12px; }
+.ss-label { font-size: 12.5px; color: var(--muted); }
+.ss-bar { height: 7px; border-radius: 4px; background: rgba(255, 255, 255, 0.07); overflow: hidden; }
+.ss-bar span { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--accent), var(--accent-bright)); transition: width 0.3s ease; }
+.ss-value { font-size: 12.5px; font-weight: 700; text-align: right; color: var(--text); }
+
+/* ---------- The rating row ---------- */
+.rating-picker { display: inline-flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+.rating-picker .rp-dot, .rating-picker .rp-na {
+  width: 32px; height: 30px; padding: 0; border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05); color: var(--muted);
+  border: 1px solid var(--border); box-shadow: none;
+  font-size: 12.5px; font-weight: 700; line-height: 1;
+}
+.rating-picker .rp-na { width: auto; padding: 0 9px; font-size: 11px; }
+.rating-picker button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); color: var(--text); box-shadow: none; transform: none; }
+.rating-picker button:disabled { opacity: 0.45; cursor: default; }
+/* The scale reads low-to-high in colour as well as in number, so a row of
+   ratings can be scanned without reading every figure. */
+.rating-picker .rp-dot.on.rp-1, .sl-dot.rp-1, .cell-mark.not_competent { background: var(--danger-bg); color: var(--danger); border-color: rgba(255, 107, 125, 0.4); }
+.rating-picker .rp-dot.on.rp-2, .sl-dot.rp-2 { background: var(--warning-bg); color: var(--warning); border-color: rgba(245, 181, 68, 0.4); }
+.rating-picker .rp-dot.on.rp-3, .sl-dot.rp-3 { background: var(--success-bg); color: var(--success); border-color: rgba(52, 211, 153, 0.4); }
+.rating-picker .rp-dot.on.rp-4, .rating-picker .rp-dot.on.rp-5, .sl-dot.rp-4, .sl-dot.rp-5 { background: var(--info-bg); color: var(--accent-bright); border-color: rgba(78, 141, 255, 0.4); }
+.rating-picker .rp-na.on { background: rgba(168, 179, 199, 0.22); color: var(--text); border-color: var(--border-strong); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.rating-picker.na .rp-dot { opacity: 0.3; }
+
+.scale-legend { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--muted); }
+.sl-item { display: inline-flex; align-items: center; gap: 6px; }
+.sl-dot {
+  display: inline-grid; place-items: center; width: 22px; height: 22px;
+  border-radius: 6px; border: 1px solid var(--border);
+  font-style: normal; font-size: 11.5px; font-weight: 700;
+}
+
+/* ---------- The scoring grid ---------- */
+.scoring-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 20px; flex-wrap: wrap; padding: 12px 14px; margin-bottom: 14px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  position: sticky; top: 0; z-index: 2;
+}
+.scoring-bar-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.segmented.perspective { display: inline-flex; gap: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.segmented.perspective button { border-radius: 0; box-shadow: none; font-size: 12px; padding: 7px 13px; }
+.segmented.perspective button.secondary { background: transparent; border: 0; }
+.saved-flag { font-size: 12px; color: var(--success); }
+
+.score-group { margin: 0 0 20px; }
+.score-group > header { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; margin: 0 0 6px; }
+.score-group > header h4 { margin: 0; font-size: 13.5px; letter-spacing: 0.01em; }
+.score-group > header .muted { font-size: 12px; }
+.scoring-table td { vertical-align: top; }
+.scoring-table tr.row-na td { opacity: 0.5; }
+.scoring-table input, .scoring-table select { width: 100%; font-size: 12.5px; }
+.inline-badge { margin-left: 8px; vertical-align: 1px; }
+.badge.critical { background: rgba(255, 107, 125, 0.12); color: var(--danger); border-color: rgba(255, 107, 125, 0.28); }
+.gap-flag { color: var(--warning); }
+.score-pass { color: var(--success); }
+.score-fail { color: var(--danger); }
+.scoring-foot { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-top: 6px; }
+
+/* ---------- Building a framework or template ---------- */
+.element-group { margin: 0 0 18px; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; }
+.element-group > header { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.element-group > header .link-button { display: inline-flex; align-items: center; gap: 8px; }
+.eg-title { font-weight: 700; font-size: 13.5px; color: var(--text); }
+.eg-actions { display: flex; align-items: center; gap: 8px; }
+.eg-desc { font-size: 12.5px; margin: 6px 0 8px; }
+.element-table td { vertical-align: top; }
+.element-add {
+  display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  padding: 14px; margin: 10px 0 4px;
+  background: var(--surface); border: 1px dashed var(--border-strong); border-radius: var(--radius-sm);
+}
+.element-add label.wide, .form-grid label.wide { grid-column: 1 / -1; }
+.element-add-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; }
+.group-add { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.group-add label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--faint); min-width: 260px; }
+.field-hint { display: block; font-size: 11px; color: var(--faint); font-weight: 400; margin-top: 3px; line-height: 1.4; }
+
+/* ---------- Facts on a closed record ---------- */
+.record-facts { display: grid; gap: 14px 26px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); margin: 0; }
+.record-facts > div.wide { grid-column: 1 / -1; }
+.record-facts dt { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--faint); margin-bottom: 3px; }
+.record-facts dd { margin: 0; font-size: 13.5px; color: var(--text); }
+.prewrap { white-space: pre-wrap; }
+
+/* ---------- Sign-off ---------- */
+.workflow-track { display: flex; gap: 0; list-style: none; margin: 0 0 18px; padding: 0; flex-wrap: wrap; }
+.workflow-track li {
+  flex: 1 1 150px; position: relative; padding: 10px 14px 10px 26px;
+  border-top: 2px solid var(--border); display: flex; flex-direction: column; gap: 2px;
+}
+.workflow-track li::before {
+  content: ""; position: absolute; left: 8px; top: -6px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--surface); border: 2px solid var(--border);
+}
+.workflow-track li.done { border-top-color: var(--success); }
+.workflow-track li.done::before { background: var(--success); border-color: var(--success); }
+.wt-label { font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.workflow-track li.done .wt-label { color: var(--text); }
+.wt-detail { font-size: 11.5px; color: var(--faint); }
+
+.signoff-card {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 14px 16px; margin: 0 0 14px;
+  background: linear-gradient(180deg, var(--card), var(--surface));
+}
+.signoff-card h4 { margin: 0 0 4px; font-size: 13.5px; }
+.signoff-card > p { margin: 0 0 10px; font-size: 12.5px; }
+.signoff-card .form-grid { background: transparent; border: 0; padding: 0; }
+.signoff-card.done { border-left: 3px solid var(--success); }
+.danger-text { color: var(--danger); }
+.modal-foot-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; flex-wrap: wrap; }
+.modal-foot-row .foot-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* ---------- Evidence ---------- */
+.evidence-panel .evidence-add {
+  display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  align-items: end; padding: 14px; margin-top: 14px;
+  background: var(--surface); border: 1px dashed var(--border-strong); border-radius: var(--radius-sm);
+}
+.evidence-panel .evidence-add button { grid-column: 1 / -1; justify-self: start; }
+.staff-picker { margin: 10px 0; }
+.staff-picker summary { cursor: pointer; font-size: 12.5px; color: var(--accent-bright); }
+.staff-picker .chip-select { margin-top: 10px; max-height: 220px; overflow: auto; }
+
+/* ---------- Coverage matrix ---------- */
+.matrix-legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin: 0 0 12px; }
+.ml-item { display: inline-flex; align-items: center; gap: 7px; }
+.matrix-scroll { overflow-x: auto; }
+.matrix-table { min-width: 640px; }
+.matrix-table th.matrix-head { vertical-align: bottom; text-align: center; max-width: 110px; }
+.matrix-table th.matrix-head span { display: block; white-space: normal; line-height: 1.3; }
+.matrix-table td.matrix-cell { text-align: center; }
+.matrix-table .sticky-col { position: sticky; left: 0; background: var(--card); z-index: 1; }
+.cell-mark {
+  display: inline-grid; place-items: center; width: 26px; height: 26px;
+  border-radius: 7px; border: 1px solid var(--border); box-shadow: none;
+  font-style: normal; font-size: 12.5px; font-weight: 700; padding: 0;
+  background: rgba(255, 255, 255, 0.05); color: var(--muted);
+}
+.cell-mark.competent { background: var(--success-bg); color: var(--success); border-color: rgba(52, 211, 153, 0.3); }
+.cell-mark.supervised { background: var(--warning-bg); color: var(--warning); border-color: rgba(245, 181, 68, 0.3); }
+.cell-mark.expired { background: rgba(255, 107, 125, 0.1); color: var(--danger); border-color: rgba(255, 107, 125, 0.28); }
+.cell-mark.not_assessed { opacity: 0.55; }
+button.cell-mark.clickable:hover { border-color: var(--border-strong); transform: none; }
+button.cell-mark:disabled { cursor: default; }
+
+@media (max-width: 900px) {
+  .record-summary { gap: 16px; }
+  .summary-stats { gap: 14px; }
+  .scoring-bar { position: static; }
+  .ss-item { grid-template-columns: 1fr; gap: 4px; }
+  .ss-value { text-align: left; }
+}
+
+/* On paper, the workspace chrome is noise: what belongs on a printed page is
+   the record itself, and that is rendered server-side for print. */
+@media print {
+  .view-switch, .scoring-bar-actions, .workspace-actions, .filters, .tabs.sub { display: none; }
+}
+
+/* A register with ten columns scrolls inside its own box rather than pushing
+   the last column — which is where the action button lives — off the page. */
+.register-table { min-width: 1080px; }
+.register-table th:last-child, .register-table td:last-child { white-space: nowrap; }

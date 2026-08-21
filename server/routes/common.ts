@@ -400,7 +400,21 @@ export function commonRoutes() {
       certificatesExpiringSoon: count("SELECT COUNT(*) count FROM staff_documents WHERE expiry_date IS NOT NULL AND expiry_date <= ? AND expiry_date >= ?", expiryCutoff, todayIso),
       pendingDeclarations: count("SELECT COUNT(*) count FROM staff_declarations WHERE status = 'pending'"),
       plannedTrainingEvents: count("SELECT COUNT(*) count FROM training_events WHERE status = 'planned'"),
-      competencyAssessmentsDue: count("SELECT COUNT(*) count FROM competency_assessments WHERE next_assessment_due IS NOT NULL AND next_assessment_due <= ?", expiryCutoff),
+      // Due means the person's most recent closed assessment against a scope
+      // has run out and nothing is open to replace it — an earlier assessment
+      // that has since been superseded is history, not a task.
+      competencyAssessmentsDue: count(`SELECT COUNT(*) count FROM competency_assessments c
+        WHERE c.next_assessment_due IS NOT NULL AND c.next_assessment_due <= ?
+          AND c.status IN ('completed','acknowledged')
+          AND c.id = (SELECT c2.id FROM competency_assessments c2
+                      WHERE c2.staff_id = c.staff_id
+                        AND COALESCE(CAST(c2.framework_id AS TEXT), c2.activity) = COALESCE(CAST(c.framework_id AS TEXT), c.activity)
+                        AND c2.status IN ('completed','acknowledged')
+                      ORDER BY c2.assessment_date DESC, c2.id DESC LIMIT 1)
+          AND NOT EXISTS (SELECT 1 FROM competency_assessments c3
+                          WHERE c3.staff_id = c.staff_id
+                            AND COALESCE(CAST(c3.framework_id AS TEXT), c3.activity) = COALESCE(CAST(c.framework_id AS TEXT), c.activity)
+                            AND c3.status IN ('planned','in_progress','pending_review'))`, expiryCutoff),
       authorizationsDueReview: count("SELECT COUNT(*) count FROM technical_authorizations WHERE expires_at IS NOT NULL AND expires_at <= ? AND is_active = 1", expiryCutoff),
       rostersThisMonth: count("SELECT COUNT(*) count FROM duty_rosters WHERE roster_start_date <= ? AND roster_end_date >= ?", monthEnd, monthStart),
       totalStaff: count("SELECT COUNT(*) count FROM staff WHERE is_active = 1"),
@@ -408,7 +422,14 @@ export function commonRoutes() {
       orientationsInProgress: count("SELECT COUNT(*) count FROM staff_orientations WHERE orientation_complete = 0 AND status != 'cancelled'"),
       ethicsReviewsDue: count("SELECT COUNT(*) count FROM staff_declarations WHERE next_review_date IS NOT NULL AND next_review_date <= ?", expiryCutoff),
       appraisalsThisYear: count("SELECT COUNT(*) count FROM performance_appraisals WHERE strftime('%Y', appraisal_date) = strftime('%Y','now')"),
-      appraisalsDue: count("SELECT COUNT(*) count FROM performance_appraisals WHERE next_appraisal_due IS NOT NULL AND next_appraisal_due <= ?", todayIso)
+      appraisalsDue: count(`SELECT COUNT(*) count FROM performance_appraisals a
+        WHERE a.next_appraisal_due IS NOT NULL AND a.next_appraisal_due <= ?
+          AND a.status IN ('completed','acknowledged')
+          AND a.id = (SELECT a2.id FROM performance_appraisals a2 WHERE a2.staff_id = a.staff_id
+                      AND a2.status IN ('completed','acknowledged') ORDER BY a2.appraisal_date DESC, a2.id DESC LIMIT 1)
+          AND NOT EXISTS (SELECT 1 FROM performance_appraisals a3 WHERE a3.staff_id = a.staff_id
+                          AND a3.status IN ('draft','self_assessment','appraiser_review','pending_moderation'))`, todayIso),
+      appraisalsInProgress: count("SELECT COUNT(*) count FROM performance_appraisals WHERE status IN ('self_assessment','appraiser_review','pending_moderation')")
     });
   });
 

@@ -34,6 +34,7 @@ export const ALERT_TARGETS: Record<string, AlertTarget> = {
   /* Personnel */
   staff_document_expiry: { tab: 'Staff Documents' },
   competency_due: { tab: 'Competency Assessments' },
+  appraisal_due: { tab: 'Performance Appraisals' },
   authorization_expiry: { tab: 'Technical Authorizations' },
   roster_approval: { tab: 'Duty Roster' },
   roster_preparation: { tab: 'Duty Roster' },

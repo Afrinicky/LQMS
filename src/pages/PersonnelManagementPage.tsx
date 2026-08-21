@@ -10,10 +10,12 @@ import DisabledModule from '../components/DisabledModule';
 import { usePermissions } from '../hooks/usePermissions';
 import PermissionTabs from '../components/PermissionTabs';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
+import CompetencyWorkspace from './personnel/CompetencyWorkspace';
+import AppraisalWorkspace from './personnel/AppraisalWorkspace';
 import type {
   Section, Department, Staff, Position,
-  StaffDocument, StaffDeclaration, TrainingEvent, CompetencyAssessment, DutyRoster,
-  PersonnelSummary, MyTasks, MyProfile, RosterCoverage, StaffSuggestionsResponse, StaffOrientation, ProfessionalRank, PerformanceAppraisal
+  StaffDocument, StaffDeclaration, TrainingEvent, DutyRoster,
+  PersonnelSummary, MyTasks, MyProfile, RosterCoverage, StaffSuggestionsResponse, StaffOrientation, ProfessionalRank
 } from '../../shared/types/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
@@ -27,9 +29,6 @@ const tabBar = (active: string, tabs: string[], onChange: (name: string) => void
 const STAFF_DOC_TYPES = ['CV', 'Qualification', 'Licence', 'Certificate', 'Contract', 'Job description', 'ID', 'Reference', 'Other'];
 const DECLARATION_TYPES = ['confidentiality', 'ethical_declaration', 'conflict_of_interest', 'safety_commitment', 'other'];
 const ATTENDANCE_STATUSES = ['invited', 'attended', 'absent', 'excused'];
-const COMPETENCY_METHODS = ['direct_observation', 'record_review', 'blind_sample', 'split_sample', 'problem_solving', 'result_interpretation', 'interview', 'other'];
-const COMPETENCY_OUTCOMES = ['competent', 'competent_with_supervision', 'not_yet_competent'];
-const AUTHORIZATION_LEVELS = ['View only', 'Perform', 'Review', 'Verify', 'Approve', 'Supervise', 'Train others'];
 const GENDERS = ['MALE', 'FEMALE', 'OTHER'];
 const PERSONNEL_CATEGORIES = ['STAFF', 'INTERN', 'NSS', 'LOCUM', 'STUDENT', 'CONTRACTOR'];
 const APPOINTMENT_TYPES = ['FULL TIME', 'PART TIME', 'CONTRACT', 'INTERN', 'NSS', 'LOCUM'];
@@ -99,11 +98,10 @@ export function PersonnelManagementPage() {
   const [declarations, setDeclarations] = useState<StaffDeclaration[]>([]);
   const [trainings, setTrainings] = useState<TrainingEvent[]>([]);
   const [selectedTraining, setSelectedTraining] = useState<TrainingEvent | null>(null);
-  const [competencies, setCompetencies] = useState<CompetencyAssessment[]>([]);
   // A dashboard alert arrives with ?tab= and ?focus=; the tab bar opens the tab,
-  // this scrolls to the record and flashes it.
-  useFocusTarget(staffDocs.length + competencies.length);
-  const [selectedComp, setSelectedComp] = useState<CompetencyAssessment | null>(null);
+  // this scrolls to the record and flashes it. Competence and appraisal records
+  // carry their own focus targets inside their workspaces.
+  useFocusTarget(staffDocs.length);
   const [rosters, setRosters] = useState<DutyRoster[]>([]);
   const [selectedRoster, setSelectedRoster] = useState<DutyRoster | null>(null);
   const [myProfile, setMyProfile] = useState<MyProfile | null>(null);
@@ -126,33 +124,21 @@ export function PersonnelManagementPage() {
   useEffect(() => { api<ProfessionalRank[]>('/professional-ranks').then(setRanks).catch(() => setRanks([])); }, []);
   const [trainingForm, setTrainingForm] = useState({ title: '', description: '', trainingType: '', sectionId: '', trainerStaffId: '', trainingDate: '', startTime: '', endTime: '', location: '' });
   const [attendanceForm, setAttendanceForm] = useState({ staffId: '', attendanceStatus: 'attended', remarks: '' });
-  const [compForm, setCompForm] = useState({ staffId: '', sectionId: '', activity: '', assessmentMethod: 'direct_observation', assessorStaffId: '', assessmentDate: '', findings: '', authorizationRecommendation: '' });
-  const [completeForm, setCompleteForm] = useState({ outcome: 'competent', findings: '', authorizationRecommendation: '', nextAssessmentDue: '', createRetrainingAction: true });
-  const [authForm, setAuthForm] = useState({ moduleKey: 'documents', level: 'Perform', expiresAt: '', positionId: '', notes: '' });
   const [rosterForm, setRosterForm] = useState({ departmentId: '', sectionId: '', rosterStartDate: '', rosterEndDate: '', notes: '' });
   const [assignForm, setAssignForm] = useState({ staffId: '', dutyDate: '', shiftName: '', startTime: '', endTime: '', dutyRole: '', notes: '' });
-  const [appraisals, setAppraisals] = useState<PerformanceAppraisal[]>([]);
-  const [apprForm, setApprForm] = useState({ staffId: '', appraisalDate: '', period: '', appraiserStaffId: '', rating: '', outcome: '', strengths: '', developmentAreas: '', objectives: '', nextAppraisalDue: '' });
 
   async function load() {
     try {
-      const [sum, sd, decl, tr, comp, rs] = await Promise.all([
+      const [sum, sd, decl, tr, rs] = await Promise.all([
         api<PersonnelSummary>('/dashboard/personnel-summary').catch(() => null),
         api<StaffDocument[]>('/personnel/staff-documents'),
         api<StaffDeclaration[]>('/personnel/declarations'),
         api<TrainingEvent[]>('/personnel/training'),
-        api<CompetencyAssessment[]>('/personnel/competency'),
         api<DutyRoster[]>('/personnel/rosters')
       ]);
       if (sum) setSummary(sum);
-      setStaffDocs(sd); setDeclarations(decl); setTrainings(tr); setCompetencies(comp); setRosters(rs);
-      api<PerformanceAppraisal[]>('/personnel/appraisals').then(setAppraisals).catch(() => setAppraisals([]));
+      setStaffDocs(sd); setDeclarations(decl); setTrainings(tr); setRosters(rs);
     } catch (e) { setError((e as Error).message); }
-  }
-  async function submitAppraisal(e: FormEvent) {
-    e.preventDefault(); setError(null);
-    try { await api('/personnel/appraisals', { method: 'POST', body: JSON.stringify(apprForm) }); setApprForm({ staffId: '', appraisalDate: '', period: '', appraiserStaffId: '', rating: '', outcome: '', strengths: '', developmentAreas: '', objectives: '', nextAppraisalDue: '' }); await load(); }
-    catch (e) { setError((e as Error).message); }
   }
   useEffect(() => { if (isEnabled('personnel')) void load(); }, [isEnabled]);
   useEffect(() => {
@@ -311,40 +297,6 @@ export function PersonnelManagementPage() {
     } catch (e) { setError((e as Error).message); }
   }
 
-  async function submitCompetency(e: FormEvent) {
-    e.preventDefault(); setError(null);
-    try {
-      await api('/personnel/competency', { method: 'POST', body: JSON.stringify(compForm) });
-      setCompForm({ staffId: '', sectionId: '', activity: '', assessmentMethod: 'direct_observation', assessorStaffId: '', assessmentDate: '', findings: '', authorizationRecommendation: '' });
-      await load();
-    } catch (e) { setError((e as Error).message); }
-  }
-
-  async function openCompetency(id: number) {
-    try { setSelectedComp(await api<CompetencyAssessment>(`/personnel/competency/${id}`)); }
-    catch (e) { setError((e as Error).message); }
-  }
-
-  async function submitComplete(e: FormEvent) {
-    e.preventDefault(); setError(null);
-    if (!selectedComp) return;
-    try {
-      await api(`/personnel/competency/${selectedComp.id}/complete`, { method: 'POST', body: JSON.stringify(completeForm) });
-      setCompleteForm({ outcome: 'competent', findings: '', authorizationRecommendation: '', nextAssessmentDue: '', createRetrainingAction: true });
-      await openCompetency(selectedComp.id); await load();
-    } catch (e) { setError((e as Error).message); }
-  }
-
-  async function submitAuth(e: FormEvent) {
-    e.preventDefault(); setError(null);
-    if (!selectedComp) return;
-    try {
-      await api(`/personnel/competency/${selectedComp.id}/create-authorization`, { method: 'POST', body: JSON.stringify(authForm) });
-      setAuthForm({ moduleKey: 'documents', level: 'Perform', expiresAt: '', positionId: '', notes: '' });
-      await openCompetency(selectedComp.id); await load();
-    } catch (e) { setError((e as Error).message); }
-  }
-
   async function submitRoster(e: FormEvent) {
     e.preventDefault(); setError(null);
     try {
@@ -388,7 +340,6 @@ export function PersonnelManagementPage() {
   }
 
   const tabs = ['Dashboard', 'Master Personnel Register', 'Add Staff', 'Staff Documents', 'Orientation & Induction', 'Declarations', 'Training Events', 'Competency Assessments', 'Performance Appraisals', 'Technical Authorizations', 'Duty Roster', 'Unit Reassignments', 'Bench Schedules', 'My Profile', 'Reports'];
-  const staffName2 = (id?: number) => staff.find(s => s.id === id)?.fullName || '—';
 
   return <div className="module-page">
     <PageHeader eyebrow="Personnel Management" title="Personnel Management" subtitle="Personnel records — competence, authorisation, training, induction, and ethics." />
@@ -403,7 +354,7 @@ export function PersonnelManagementPage() {
       { label: 'Licences expiring', value: summary.licencesExpiringSoon ?? 0, tone: 'warning', onClick: () => setTab('Master Personnel Register') },
       { label: 'Pending declarations', value: summary.pendingDeclarations, onClick: () => setTab('Declarations') },
       { label: 'Orientations in progress', value: summary.orientationsInProgress ?? 0, onClick: () => setTab('Orientation & Induction') },
-      { label: 'Competency due', value: summary.competencyAssessmentsDue, onClick: () => setTab('Competency Assessments') },
+      { label: 'Competency due', value: summary.competencyAssessmentsDue, tone: summary.competencyAssessmentsDue ? 'warning' : undefined, onClick: () => setTab('Competency Assessments') },
       { label: 'Appraisals due', value: summary.appraisalsDue ?? 0, tone: (summary.appraisalsDue ?? 0) ? 'warning' : undefined, onClick: () => setTab('Performance Appraisals') },
       { label: 'Authorisations due', value: summary.authorizationsDueReview, onClick: () => setTab('Technical Authorizations') },
     ]} /> : <p>Loading summary…</p>)}
@@ -421,6 +372,7 @@ export function PersonnelManagementPage() {
         <BarChart data={[
           { label: 'Training', value: summary.plannedTrainingEvents, color: CHART_COLORS[0] },
           { label: 'Competency due', value: summary.competencyAssessmentsDue, color: CHART_COLORS[2] },
+          { label: 'Appraisals in progress', value: summary.appraisalsInProgress ?? 0, color: CHART_COLORS[3] },
           { label: 'Rosters', value: summary.rostersThisMonth, color: CHART_COLORS[1] },
         ]} />
       </ChartCard>
@@ -611,83 +563,11 @@ export function PersonnelManagementPage() {
       </DetailModal>}
     </>}
 
-    {tab === 'Competency Assessments' && <>
-      <form className="form-grid" onSubmit={submitCompetency}>
-        <label>Staff<select value={compForm.staffId} onChange={e => setCompForm({ ...compForm, staffId: e.target.value })} required><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-        <label>Section<select value={compForm.sectionId} onChange={e => setCompForm({ ...compForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-        <label>Activity<input value={compForm.activity} onChange={e => setCompForm({ ...compForm, activity: e.target.value })} required /></label>
-        <label>Assessment method<select value={compForm.assessmentMethod} onChange={e => setCompForm({ ...compForm, assessmentMethod: e.target.value })}>{COMPETENCY_METHODS.map(m => <option key={m} value={m}>{m.replace(/_/g, ' ')}</option>)}</select></label>
-        <label>Assessor<select value={compForm.assessorStaffId} onChange={e => setCompForm({ ...compForm, assessorStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-        <label>Assessment date<input type="date" value={compForm.assessmentDate} onChange={e => setCompForm({ ...compForm, assessmentDate: e.target.value })} required /></label>
-        <label>Findings<textarea value={compForm.findings} onChange={e => setCompForm({ ...compForm, findings: e.target.value })} /></label>
-        <label>Authorisation recommendation<input value={compForm.authorizationRecommendation} onChange={e => setCompForm({ ...compForm, authorizationRecommendation: e.target.value })} /></label>
-        <button type="submit">Create competency assessment</button>
-      </form>
-      <table className="data-table"><thead><tr><th>Number</th><th>Staff</th><th>Activity</th><th>Method</th><th>Date</th><th>Outcome</th><th>Status</th><th></th></tr></thead><tbody>
-        {competencies.map(c => <tr key={c.id} {...focusAttr('competency_assessments', c.id)}>
-          <td>{c.competency_number}</td><td>{c.staff_name || staffName(staff, c.staff_id)}</td>
-          <td>{c.activity}</td><td>{c.assessment_method.replace(/_/g, ' ')}</td>
-          <td>{c.assessment_date}</td><td>{formatBadge(c.outcome)}</td><td>{formatBadge(c.status)}</td>
-          <td><button onClick={() => openCompetency(c.id)}>Open</button></td>
-        </tr>)}
-      </tbody></table>
-      {selectedComp && <DetailModal open onClose={() => setSelectedComp(null)} title={<>{selectedComp.competency_number} — {selectedComp.activity}</>}>
-        <p>Staff: {selectedComp.staff_name || staffName(staff, selectedComp.staff_id)} | Status: {formatBadge(selectedComp.status)} | Outcome: {formatBadge(selectedComp.outcome)}</p>
-        {selectedComp.status !== 'completed' && <>
-          <h4>Complete assessment</h4>
-          <form className="form-grid" onSubmit={submitComplete}>
-            <label>Outcome<select value={completeForm.outcome} onChange={e => setCompleteForm({ ...completeForm, outcome: e.target.value })}>{COMPETENCY_OUTCOMES.map(o => <option key={o} value={o}>{o.replace(/_/g, ' ')}</option>)}</select></label>
-            <label>Findings<textarea value={completeForm.findings} onChange={e => setCompleteForm({ ...completeForm, findings: e.target.value })} /></label>
-            <label>Authorisation recommendation<input value={completeForm.authorizationRecommendation} onChange={e => setCompleteForm({ ...completeForm, authorizationRecommendation: e.target.value })} /></label>
-            <label>Next assessment due<input type="date" value={completeForm.nextAssessmentDue} onChange={e => setCompleteForm({ ...completeForm, nextAssessmentDue: e.target.value })} /></label>
-            <label><input type="checkbox" checked={completeForm.createRetrainingAction} onChange={e => setCompleteForm({ ...completeForm, createRetrainingAction: e.target.checked })} /> Auto-create retraining action if not_yet_competent</label>
-            <button type="submit">Mark complete</button>
-          </form>
-        </>}
-        {selectedComp.status === 'completed' && selectedComp.outcome !== 'not_yet_competent' && <>
-          <h4>Create technical authorisation</h4>
-          <form className="form-grid" onSubmit={submitAuth}>
-            <label>Module key<input value={authForm.moduleKey} onChange={e => setAuthForm({ ...authForm, moduleKey: e.target.value })} required placeholder="e.g. iqc, monitoring" /></label>
-            <label>Level<select value={authForm.level} onChange={e => setAuthForm({ ...authForm, level: e.target.value })}>{AUTHORIZATION_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}</select></label>
-            <label>Position<select value={authForm.positionId} onChange={e => setAuthForm({ ...authForm, positionId: e.target.value })}><option value="">—</option>{positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>
-            <label>Expires at<input type="date" value={authForm.expiresAt} onChange={e => setAuthForm({ ...authForm, expiresAt: e.target.value })} /></label>
-            <label>Notes<input value={authForm.notes} onChange={e => setAuthForm({ ...authForm, notes: e.target.value })} /></label>
-            <button type="submit">Grant authorisation</button>
-          </form>
-        </>}
-        {selectedComp.links && selectedComp.links.length > 0 && <>
-          <h4>Linked records</h4>
-          <ul>{selectedComp.links.map(l => <li key={l.id}>{l.source_module_key}/{l.source_record_type}#{l.source_record_id} → {l.target_module_key}/{l.target_record_type}#{l.target_record_id}{l.notes ? ` — ${l.notes}` : ''}</li>)}</ul>
-        </>}
-      </DetailModal>}
-    </>}
+    {tab === 'Competency Assessments' &&
+      <CompetencyWorkspace staff={staff} sections={sections} departments={departments} positions={positions} />}
 
-    {tab === 'Performance Appraisals' && <>
-      <div className="card">
-        <h3>Record performance appraisal</h3>
-        <p className="muted" style={{ marginTop: 0 }}>Periodic staff performance review, distinct from competency assessment.</p>
-        <form className="form-grid" onSubmit={submitAppraisal}>
-          <label>Staff<select value={apprForm.staffId} onChange={e => setApprForm({ ...apprForm, staffId: e.target.value })} required><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-          <label>Appraisal date<input type="date" value={apprForm.appraisalDate} onChange={e => setApprForm({ ...apprForm, appraisalDate: e.target.value })} required /></label>
-          <label>Period<input value={apprForm.period} onChange={e => setApprForm({ ...apprForm, period: e.target.value })} placeholder="e.g. 2026 H1" /></label>
-          <label>Appraiser<select value={apprForm.appraiserStaffId} onChange={e => setApprForm({ ...apprForm, appraiserStaffId: e.target.value })}><option value="">Me</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-          <label>Rating<input value={apprForm.rating} onChange={e => setApprForm({ ...apprForm, rating: e.target.value })} /></label>
-          <label>Outcome<input value={apprForm.outcome} onChange={e => setApprForm({ ...apprForm, outcome: e.target.value })} /></label>
-          <label>Next appraisal due<input type="date" value={apprForm.nextAppraisalDue} onChange={e => setApprForm({ ...apprForm, nextAppraisalDue: e.target.value })} /></label>
-          <label>Strengths<textarea value={apprForm.strengths} onChange={e => setApprForm({ ...apprForm, strengths: e.target.value })} /></label>
-          <label>Development areas<textarea value={apprForm.developmentAreas} onChange={e => setApprForm({ ...apprForm, developmentAreas: e.target.value })} /></label>
-          <label>Objectives<textarea value={apprForm.objectives} onChange={e => setApprForm({ ...apprForm, objectives: e.target.value })} /></label>
-          <button type="submit">Record appraisal</button>
-        </form>
-      </div>
-      <div className="card" style={{ marginTop: 16 }}>
-        <h3>Appraisal register</h3>
-        {appraisals.length === 0 ? <p>No appraisals recorded.</p> :
-          <table className="data-table"><thead><tr><th>No.</th><th>Staff</th><th>Date</th><th>Period</th><th>Appraiser</th><th>Rating</th><th>Next due</th></tr></thead><tbody>
-            {appraisals.map(a => <tr key={a.id}><td>{a.record_number}</td><td>{staffName2(a.staff_id)}</td><td>{a.appraisal_date}</td><td>{a.period || '—'}</td><td>{staffName2(a.appraiser_staff_id)}</td><td>{a.rating || '—'}</td><td>{a.next_appraisal_due || '—'}</td></tr>)}
-          </tbody></table>}
-      </div>
-    </>}
+    {tab === 'Performance Appraisals' &&
+      <AppraisalWorkspace staff={staff} sections={sections} departments={departments} positions={positions} />}
 
     {tab === 'Technical Authorizations' && <p>Technical authorisations are created from completed competency assessments via the Competency Assessments tab. They appear on each staff member's profile under <em>My Profile</em>.</p>}
 
@@ -740,6 +620,18 @@ export function PersonnelManagementPage() {
       </>}
     </>}
 
-    {tab === 'Reports' && <p>Personnel reports (training hours per staff, competency coverage, authorisation expiry trend) will be added in a later phase.</p>}
+    {tab === 'Reports' && <div className="card">
+      <h3>Personnel reports</h3>
+      <p className="muted" style={{ marginTop: 0 }}>Printable summaries are produced from the register that holds the data:</p>
+      <ul>
+        <li><strong>Competency coverage matrix</strong> — who is covered for what, by unit. <em>Competency Assessments → Coverage matrix → Print matrix.</em></li>
+        <li><strong>Competency assessment record</strong> — the full scored record with its evidence and signatures. <em>Open any assessment → Print record.</em></li>
+        <li><strong>Blank assessment form</strong> — a framework printed as a form to complete away from a screen. <em>Competency Assessments → Frameworks → open one → Print blank form.</em></li>
+        <li><strong>Performance appraisal record</strong> — ratings, objectives, development plan and signatures. <em>Open any appraisal → Print record.</em></li>
+        <li><strong>Appraisal cycle summary</strong> — who is outstanding in a round. <em>Performance Appraisals → Setup → open a cycle → Print cycle summary.</em></li>
+        <li><strong>Master Personnel Register</strong> — export to Excel from the register tab.</li>
+      </ul>
+      <p className="muted">Training-hours-per-member-of-staff and authorisation expiry trend reports follow in a later phase.</p>
+    </div>}
   </div>;
 }

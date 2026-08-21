@@ -33,6 +33,8 @@ import { fileViewRoutes } from './routes/fileView.js';
 import { centralArchivesRoutes } from './routes/archives.js';
 import { organisationExtendedRoutes } from './routes/organisationExtended.js';
 import { personnelRoutes } from './routes/personnel.js';
+import { competencyRoutes } from './routes/competency.js';
+import { appraisalRoutes } from './routes/appraisals.js';
 import { schedulingRoutes } from './routes/scheduling.js';
 import { dutyActivityRoutes } from './routes/dutyActivities.js';
 import { systemAuditRoutes } from './routes/systemAudit.js';
@@ -137,6 +139,10 @@ export function createApiServer() {
   // records review workspace.
   app.use('/api/organisation', organisationExtendedRoutes());
   app.use('/api/dennis', dennisRoutes());
+  // Competence and appraisal mount ahead of the rest of Personnel so their
+  // specific paths win over the register's generic ones.
+  app.use('/api/personnel', competencyRoutes());
+  app.use('/api/personnel', appraisalRoutes());
   app.use('/api/personnel', personnelRoutes());
   app.use('/api/scheduling', schedulingRoutes());
   // Duty-driven unit activities, the reminders they raise and the sound catalogue.
