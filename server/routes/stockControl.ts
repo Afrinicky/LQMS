@@ -7,9 +7,9 @@ import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import { buildWorkbook, sendWorkbook } from '../utils/xlsxRegister.js';
 import {
   stockPositions, planFor, allocateFefo, issuableQuantity, postMovement, storagePathMap,
-  monthWindow, isOutMovement, WASTAGE,
+  monthWindow, isOutMovement, syncItemQuantity, WASTAGE,
 } from '../services/stockLedger.js';
-import { MOVEMENT_LABELS } from '../../shared/constants/inventory.js';
+import { MOVEMENT_LABELS, ISSUE_DESTINATION_LABELS, decodeDestination } from '../../shared/constants/inventory.js';
 import { STOCK_STATUS_LABELS, VEN_CLASSES, NEEDS_ACTION, sum } from '../../shared/constants/stockControl.js';
 
 /**
@@ -121,7 +121,11 @@ export function stockControlRoutes() {
     const db = getDb();
     const lines = Array.isArray(req.body.lines) ? req.body.lines : [];
     if (lines.length === 0) return res.status(400).json({ error: 'Add at least one item to issue.' });
-    const sectionId = parseIntNullable(req.body.sectionId);
+
+    const destination = resolveDestination(db, req.body);
+    if ('error' in destination) return res.status(400).json({ error: destination.error });
+    const sectionId = destination.sectionId;
+
     const collectorId = parseIntNullable(req.body.receivedByStaffId);
     // The collector's name is carried on the voucher so it reads on its own,
     // and so the register survives the staff record being renamed.
@@ -130,8 +134,12 @@ export function stockControlRoutes() {
       : undefined;
     if (collectorId && !collector) return res.status(400).json({ error: 'That member of staff is not on the staff register.' });
     const collectedBy = String(req.body.issuedToName ?? '').trim() || collector?.full_name || '';
-    if (!sectionId && !collectedBy) {
-      return res.status(400).json({ error: 'Say which unit this is going to, or who is collecting it.' });
+    // Somebody from outside the laboratory has no staff record, so their name
+    // is typed instead of picked. One of the two has to be there: a voucher
+    // that names neither a destination nor a person records nothing at all.
+    // The issuing screen asks for both; this is the floor beneath it.
+    if (!sectionId && !destination.name && !collectedBy) {
+      return res.status(400).json({ error: 'Say where this is going, or who is collecting it.' });
     }
 
     // Everything is checked before anything moves, so a request for five items
@@ -165,10 +173,11 @@ export function stockControlRoutes() {
     let issueId = 0;
     db.transaction(() => {
       issueId = Number(db.prepare(`INSERT INTO stock_issues
-        (issue_number, issue_date, section_id, issued_to_name, received_by_staff_id, issued_by_user_id, purpose, note, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'issued', ?)`)
-        .run(issueNumber, issueDate, sectionId, collectedBy || null,
-          receivedBy, req.user!.id, req.body.purpose ?? null, req.body.note ?? null, createdAt).lastInsertRowid);
+        (issue_number, issue_date, section_id, department_id, destination_type, destination_name,
+         issued_to_name, received_by_staff_id, issued_by_user_id, purpose, note, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'issued', ?)`)
+        .run(issueNumber, issueDate, sectionId, destination.departmentId, destination.type, destination.name,
+          collectedBy || null, receivedBy, req.user!.id, req.body.purpose ?? null, req.body.note ?? null, createdAt).lastInsertRowid);
 
       for (const p of planned) {
         db.prepare('INSERT INTO stock_issue_lines (issue_id, item_id, quantity, unit, unit_cost, allocation) VALUES (?, ?, ?, ?, ?, ?)')
@@ -197,30 +206,138 @@ export function stockControlRoutes() {
     if (req.query.sectionId) { where.push('i.section_id = ?'); args.push(Number(req.query.sectionId)); }
     if (req.query.from) { where.push('date(i.issue_date) >= date(?)'); args.push(String(req.query.from)); }
     if (req.query.to) { where.push('date(i.issue_date) <= date(?)'); args.push(String(req.query.to)); }
-    const rows = db.prepare(`SELECT i.*, sec.name AS section_name, st.full_name AS received_by_name, u.full_name AS issued_by_name,
+    const rows = db.prepare(`SELECT i.*, sec.name AS section_name, dep.name AS department_name,
+        st.full_name AS received_by_name, u.full_name AS issued_by_name, cu.full_name AS cancelled_by_name,
         (SELECT COUNT(*) FROM stock_issue_lines l WHERE l.issue_id = i.id) AS line_count,
         (SELECT COALESCE(SUM(l.quantity), 0) FROM stock_issue_lines l WHERE l.issue_id = i.id) AS total_quantity
       FROM stock_issues i
       LEFT JOIN sections sec ON sec.id = i.section_id
+      LEFT JOIN departments dep ON dep.id = i.department_id
       LEFT JOIN staff st ON st.id = i.received_by_staff_id
       LEFT JOIN users u ON u.id = i.issued_by_user_id
+      LEFT JOIN users cu ON cu.id = i.cancelled_by_user_id
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
       ORDER BY date(i.issue_date) DESC, i.id DESC LIMIT ?`).all(...args, Number(req.query.limit) || 300) as any[];
-    res.json(rows.map(r => ({ ...r, purpose_label: optionLabel(db, 'stock_issue_reason', r.purpose) })));
+    res.json(rows.map(r => ({
+      ...r,
+      purpose_label: optionLabel(db, 'stock_issue_reason', r.purpose),
+      destination_label: issueDestinationLabel(r),
+    })));
   });
 
   router.get('/issues/:id', requirePermission('supplier_inventory.stock', 'view'), (req, res) => {
     const db = getDb();
-    const issue = db.prepare(`SELECT i.*, sec.name AS section_name, st.full_name AS received_by_name, u.full_name AS issued_by_name
+    const issue = db.prepare(`SELECT i.*, sec.name AS section_name, dep.name AS department_name,
+        st.full_name AS received_by_name, u.full_name AS issued_by_name, cu.full_name AS cancelled_by_name
       FROM stock_issues i
       LEFT JOIN sections sec ON sec.id = i.section_id
+      LEFT JOIN departments dep ON dep.id = i.department_id
       LEFT JOIN staff st ON st.id = i.received_by_staff_id
-      LEFT JOIN users u ON u.id = i.issued_by_user_id WHERE i.id = ?`).get(req.params.id) as any;
+      LEFT JOIN users u ON u.id = i.issued_by_user_id
+      LEFT JOIN users cu ON cu.id = i.cancelled_by_user_id WHERE i.id = ?`).get(req.params.id) as any;
     if (!issue) return res.status(404).json({ error: 'Issue voucher not found' });
     const lines = (db.prepare(`SELECT l.*, it.name AS item_name, it.item_code FROM stock_issue_lines l
       LEFT JOIN inventory_items it ON it.id = l.item_id WHERE l.issue_id = ?`).all(req.params.id) as any[])
       .map(l => ({ ...l, allocation: safeJson(l.allocation) }));
-    res.json({ ...issue, purpose_label: optionLabel(db, 'stock_issue_reason', issue.purpose), lines });
+    res.json({
+      ...issue,
+      purpose_label: optionLabel(db, 'stock_issue_reason', issue.purpose),
+      destination_label: issueDestinationLabel(issue),
+      lines,
+    });
+  });
+
+  /**
+   * Cancelling a voucher issued in error.
+   *
+   * A return is for stock that came back; this is for a voucher that should
+   * never have been written — the wrong item, the wrong unit, a duplicate of
+   * one already issued. Every line goes back to the exact lot it came out of,
+   * so that lot's expiry still governs it, and the voucher stays on the
+   * register marked cancelled with the reason on it. Nothing is deleted: a
+   * voucher that vanishes is indistinguishable from one that was never
+   * written, and the numbering would then lie.
+   */
+  router.post('/issues/:id/cancel', requirePermission('supplier_inventory.stock', 'void_archive'), (req, res) => {
+    const db = getDb();
+    const issue = db.prepare('SELECT * FROM stock_issues WHERE id = ?').get(req.params.id) as any;
+    if (!issue) return res.status(404).json({ error: 'Issue voucher not found' });
+    if (issue.status === 'cancelled') return res.status(400).json({ error: 'This voucher has already been cancelled.' });
+    const reason = String(req.body?.reason ?? '').trim();
+    if (!reason) return res.status(400).json({ error: 'Say why the voucher is being cancelled — it goes on the record.' });
+
+    const movements = db.prepare(`SELECT * FROM inventory_movements
+      WHERE issue_id = ? AND movement_type = 'issue' AND reversed_by_id IS NULL`).all(issue.id) as any[];
+    if (movements.length === 0) {
+      return res.status(400).json({ error: 'Nothing on this voucher is still out — it has already been returned in full.' });
+    }
+
+    const date = req.body?.date || new Date().toISOString().slice(0, 10);
+    let putBack = 0;
+    db.transaction(() => {
+      for (const m of movements) {
+        const posted = postMovement(db, {
+          itemId: m.item_id, batchId: m.batch_id, movementType: 'return', quantity: Math.abs(Number(m.quantity)),
+          movementDate: date, issuedToSectionId: issue.section_id, receivedByStaffId: issue.received_by_staff_id,
+          reason: `Voucher ${issue.issue_number} cancelled — ${reason}`, issueId: issue.id, userId: req.user!.id,
+        });
+        db.prepare('UPDATE inventory_movements SET reversal_of_id = ? WHERE id = ?').run(m.id, posted.id);
+        db.prepare('UPDATE inventory_movements SET reversed_by_id = ? WHERE id = ?').run(posted.id, m.id);
+        putBack += Math.abs(Number(m.quantity));
+      }
+      db.prepare(`UPDATE stock_issues SET status = 'cancelled', cancelled_at = CURRENT_TIMESTAMP,
+        cancelled_by_user_id = ?, cancellation_reason = ? WHERE id = ?`).run(req.user!.id, reason, issue.id);
+    })();
+
+    audit(req, { action: 'void_archive', entity: 'stock_issues', entityId: issue.id, oldValue: issue, newValue: { cancelled: true, reason, putBack } });
+    res.json({ ok: true, putBack, lines: movements.length, message: `${issue.issue_number} cancelled — ${putBack} put back on the shelf.` });
+  });
+
+  /**
+   * Correcting what a voucher SAYS.
+   *
+   * The lines are the stock movement and cannot be edited here — a wrong line
+   * is cancelled and re-issued. The header is a different matter: a unit
+   * chosen in haste, a reason left blank, a collector recorded as the wrong
+   * person. Those are corrections to the paperwork, not to the shelf.
+   */
+  router.put('/issues/:id', requirePermission('supplier_inventory.stock', 'edit'), (req, res) => {
+    const db = getDb();
+    const issue = db.prepare('SELECT * FROM stock_issues WHERE id = ?').get(req.params.id) as any;
+    if (!issue) return res.status(404).json({ error: 'Issue voucher not found' });
+    if (issue.status === 'cancelled') return res.status(400).json({ error: 'A cancelled voucher cannot be edited.' });
+
+    const destination = req.body?.destination !== undefined || req.body?.sectionId !== undefined
+      ? resolveDestination(db, req.body)
+      : { type: issue.destination_type, sectionId: issue.section_id, departmentId: issue.department_id, name: issue.destination_name };
+    if ('error' in destination) return res.status(400).json({ error: destination.error });
+
+    const collectorId = req.body?.receivedByStaffId !== undefined ? parseIntNullable(req.body.receivedByStaffId) : issue.received_by_staff_id;
+    const collector = collectorId
+      ? db.prepare('SELECT full_name FROM staff WHERE id = ?').get(collectorId) as { full_name?: string } | undefined
+      : undefined;
+    if (collectorId && !collector) return res.status(400).json({ error: 'That member of staff is not on the staff register.' });
+    const collectedBy = req.body?.issuedToName !== undefined
+      ? (String(req.body.issuedToName).trim() || collector?.full_name || null)
+      : (collector?.full_name ?? issue.issued_to_name);
+
+    db.transaction(() => {
+      db.prepare(`UPDATE stock_issues SET section_id = ?, department_id = ?, destination_type = ?, destination_name = ?,
+        issued_to_name = ?, received_by_staff_id = ?, purpose = ?, note = ? WHERE id = ?`)
+        .run(destination.sectionId, destination.departmentId, destination.type, destination.name,
+          collectedBy, collectorId,
+          req.body?.purpose !== undefined ? (req.body.purpose || null) : issue.purpose,
+          req.body?.note !== undefined ? (req.body.note || null) : issue.note,
+          issue.id);
+      // The movements carry the unit and the collector too, so a correction to
+      // the voucher that did not reach them would leave the bin card saying
+      // something the voucher no longer says.
+      db.prepare('UPDATE inventory_movements SET issued_to_section_id = ?, received_by_staff_id = ? WHERE issue_id = ?')
+        .run(destination.sectionId, collectorId, issue.id);
+    })();
+
+    audit(req, { action: 'edit', entity: 'stock_issues', entityId: issue.id, oldValue: issue, newValue: req.body });
+    res.json({ ok: true });
   });
 
   /**
@@ -235,6 +352,7 @@ export function stockControlRoutes() {
     const issue = db.prepare('SELECT * FROM stock_issues WHERE id = ?').get(req.params.id) as any;
     if (!issue) return res.status(404).json({ error: 'Issue voucher not found' });
     if (issue.status === 'returned') return res.status(400).json({ error: 'This voucher has already been returned in full.' });
+    if (issue.status === 'cancelled') return res.status(400).json({ error: 'This voucher was cancelled — every line already went back to its lot.' });
     const returns = Array.isArray(req.body.lines) ? req.body.lines : [];
     if (returns.length === 0) return res.status(400).json({ error: 'Say what is coming back.' });
 
@@ -285,33 +403,139 @@ export function stockControlRoutes() {
     const createdAt = new Date().toISOString();
     const number = generateRecordNumber(db, 'stock_counts', 'CNT', createdAt);
     const locationId = parseIntNullable(req.body.storageLocationId);
-    const scope = ['full', 'location', 'category', 'cycle'].includes(req.body.scope) ? req.body.scope : 'full';
+    const scope = ['full', 'location', 'category', 'cycle', 'items'].includes(req.body.scope) ? req.body.scope : 'full';
+    const itemIds = Array.isArray(req.body.itemIds) ? req.body.itemIds.map((n: unknown) => Number(n)).filter(Number.isFinite) : [];
+    if (scope === 'items' && itemIds.length === 0) {
+      return res.status(400).json({ error: 'Choose at least one item to count.' });
+    }
+    // Counting only what the register already believes is there cannot find
+    // stock the register has lost — the very thing a count is for. So a count
+    // may include the items it says are empty, and the counter either confirms
+    // the zero or writes down what is actually on the shelf.
+    const includeEmpty = req.body.includeEmpty === true || req.body.includeEmpty === 'true';
+    // A blind count does not show the book balance while counting. It is the
+    // honest way to count, because a number already on the page is very hard
+    // not to simply agree with.
+    const blind = req.body.blind === true || req.body.blind === 'true';
 
     let countId = 0;
+    let lineCount = 0;
     db.transaction(() => {
       countId = Number(db.prepare(`INSERT INTO stock_counts
-        (count_number, count_date, storage_location_id, counted_by_staff_id, scope, scope_value, status, note, created_by, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)`)
+        (count_number, count_date, storage_location_id, counted_by_staff_id, scope, scope_value, status, note,
+         blind, include_empty, created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?)`)
         .run(number, req.body.countDate || createdAt.slice(0, 10), locationId,
           getStaffIdOrCurrent(req, req.body.countedByStaffId), scope, req.body.scopeValue ?? null,
-          req.body.note ?? null, req.user!.id, createdAt).lastInsertRowid);
+          req.body.note ?? null, blind ? 1 : 0, includeEmpty ? 1 : 0, req.user!.id, createdAt).lastInsertRowid);
 
       // The sheet is drawn up per BATCH, because that is the unit sitting on the
       // shelf — a count of "48 tests" says nothing about which lot they are.
-      const where: string[] = ['i.is_active = 1', 'b.quantity_available > 0'];
+      const where: string[] = ['i.is_active = 1', 'b.reversed_at IS NULL'];
       const args: unknown[] = [];
+      if (!includeEmpty) where.push('b.quantity_available > 0');
       if (scope === 'location' && locationId) { where.push('(b.storage_location_id = ? OR i.storage_location_id = ?)'); args.push(locationId, locationId); }
       if (scope === 'category' && req.body.scopeValue) { where.push('i.category = ?'); args.push(req.body.scopeValue); }
       if (scope === 'cycle') where.push("i.abc_class = 'A'");
+      if (scope === 'items') { where.push(`i.id IN (${itemIds.map(() => '?').join(', ')})`); args.push(...itemIds); }
       const batches = db.prepare(`SELECT b.id, b.item_id, b.quantity_available FROM inventory_batches b
         JOIN inventory_items i ON i.id = b.item_id WHERE ${where.join(' AND ')}
         ORDER BY i.name, b.expiry_date`).all(...args) as any[];
       const insert = db.prepare('INSERT INTO stock_count_lines (count_id, item_id, batch_id, system_quantity) VALUES (?, ?, ?, ?)');
       for (const b of batches) insert.run(countId, b.item_id, b.id, b.quantity_available);
+      lineCount = batches.length;
+
+      // An item with no lots at all has nothing to hang a batch line on, but it
+      // is exactly the item most likely to be found sitting on a shelf. It gets
+      // a line of its own with no lot behind it.
+      if (includeEmpty) {
+        const itemWhere: string[] = ['i.is_active = 1', 'NOT EXISTS (SELECT 1 FROM inventory_batches b WHERE b.item_id = i.id AND b.reversed_at IS NULL)'];
+        const itemArgs: unknown[] = [];
+        if (scope === 'location' && locationId) { itemWhere.push('i.storage_location_id = ?'); itemArgs.push(locationId); }
+        if (scope === 'category' && req.body.scopeValue) { itemWhere.push('i.category = ?'); itemArgs.push(req.body.scopeValue); }
+        if (scope === 'cycle') itemWhere.push("i.abc_class = 'A'");
+        if (scope === 'items') { itemWhere.push(`i.id IN (${itemIds.map(() => '?').join(', ')})`); itemArgs.push(...itemIds); }
+        const bare = db.prepare(`SELECT i.id FROM inventory_items i WHERE ${itemWhere.join(' AND ')} ORDER BY i.name`).all(...itemArgs) as any[];
+        const insertBare = db.prepare('INSERT INTO stock_count_lines (count_id, item_id, batch_id, system_quantity) VALUES (?, ?, NULL, 0)');
+        for (const it of bare) insertBare.run(countId, it.id);
+        lineCount += bare.length;
+      }
     })();
 
-    audit(req, { action: 'create', entity: 'stock_counts', entityId: countId, newValue: { number, scope } });
-    res.status(201).json({ id: countId, countNumber: number });
+    audit(req, { action: 'create', entity: 'stock_counts', entityId: countId, newValue: { number, scope, blind, includeEmpty, lines: lineCount } });
+    res.status(201).json({ id: countId, countNumber: number, lines: lineCount });
+  });
+
+  /**
+   * Something found on the shelf that is not on the sheet.
+   *
+   * A count that can only confirm or contradict what the register already
+   * listed is half a count. This is the other half: a box behind another box,
+   * a lot nobody booked in, an item moved from a unit's own cupboard. It goes
+   * on the sheet as a line of its own, marked as added at the shelf, and posts
+   * like any other variance.
+   */
+  router.post('/counts/:id/lines', requirePermission('supplier_inventory.stock', 'edit'), (req, res) => {
+    const db = getDb();
+    const count = db.prepare('SELECT * FROM stock_counts WHERE id = ?').get(req.params.id) as any;
+    if (!count) return res.status(404).json({ error: 'Stock count not found' });
+    if (count.status !== 'open') return res.status(400).json({ error: 'This count is closed and cannot be added to.' });
+
+    const itemId = parseIntNullable(req.body.itemId);
+    if (!itemId) return res.status(400).json({ error: 'Choose the item that was found.' });
+    const item = db.prepare('SELECT id, name FROM inventory_items WHERE id = ?').get(itemId) as any;
+    if (!item) return res.status(400).json({ error: 'That item is not on the register.' });
+
+    const batchId = parseIntNullable(req.body.batchId);
+    let systemQuantity = 0;
+    if (batchId) {
+      const batch = db.prepare('SELECT id, item_id, quantity_available FROM inventory_batches WHERE id = ?').get(batchId) as any;
+      if (!batch || batch.item_id !== itemId) return res.status(400).json({ error: 'That lot does not belong to this item.' });
+      const already = db.prepare('SELECT id FROM stock_count_lines WHERE count_id = ? AND batch_id = ?').get(count.id, batchId);
+      if (already) return res.status(400).json({ error: 'That lot is already on this sheet.' });
+      systemQuantity = Number(batch.quantity_available) || 0;
+    }
+
+    const counted = req.body.countedQuantity === '' || req.body.countedQuantity == null ? null : Number(req.body.countedQuantity);
+    const r = db.prepare(`INSERT INTO stock_count_lines
+      (count_id, item_id, batch_id, system_quantity, counted_quantity, reason, note, added_manually, counted_at, counted_by_user_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`)
+      .run(count.id, itemId, batchId, systemQuantity, counted,
+        req.body.reason ?? null, req.body.note ?? null,
+        counted == null ? null : new Date().toISOString(), counted == null ? null : req.user!.id);
+    audit(req, { action: 'create', entity: 'stock_count_lines', entityId: r.lastInsertRowid, newValue: { countId: count.id, itemId, batchId, counted } });
+    res.status(201).json({ id: Number(r.lastInsertRowid) });
+  });
+
+  /** Taking a line off a sheet — only one added at the shelf by mistake. */
+  router.delete('/counts/:id/lines/:lineId', requirePermission('supplier_inventory.stock', 'edit'), (req, res) => {
+    const db = getDb();
+    const count = db.prepare('SELECT * FROM stock_counts WHERE id = ?').get(req.params.id) as any;
+    if (!count) return res.status(404).json({ error: 'Stock count not found' });
+    if (count.status !== 'open') return res.status(400).json({ error: 'This count is closed and cannot be changed.' });
+    const line = db.prepare('SELECT * FROM stock_count_lines WHERE id = ? AND count_id = ?').get(req.params.lineId, count.id) as any;
+    if (!line) return res.status(404).json({ error: 'That line is not on this sheet.' });
+    if (!line.added_manually) {
+      return res.status(400).json({ error: 'This line is what the register drew up. Leave it uncounted rather than removing it — a line taken off the sheet is not evidence that it was checked.' });
+    }
+    db.prepare('DELETE FROM stock_count_lines WHERE id = ?').run(line.id);
+    audit(req, { action: 'delete', entity: 'stock_count_lines', entityId: line.id, oldValue: line });
+    res.json({ ok: true });
+  });
+
+  /** Abandoning a count without posting it. */
+  router.post('/counts/:id/cancel', requirePermission('supplier_inventory.stock', 'void_archive'), (req, res) => {
+    const db = getDb();
+    const count = db.prepare('SELECT * FROM stock_counts WHERE id = ?').get(req.params.id) as any;
+    if (!count) return res.status(404).json({ error: 'Stock count not found' });
+    if (count.status === 'posted') return res.status(400).json({ error: 'This count has been posted — its adjustments are on the bin cards and would have to be reversed one by one.' });
+    if (count.status === 'cancelled') return res.status(400).json({ error: 'This count has already been abandoned.' });
+    const reason = String(req.body?.reason ?? '').trim();
+    if (!reason) return res.status(400).json({ error: 'Say why the count is being abandoned.' });
+    db.prepare("UPDATE stock_counts SET status = 'cancelled', cancelled_at = CURRENT_TIMESTAMP, cancellation_reason = ? WHERE id = ?")
+      .run(reason, count.id);
+    audit(req, { action: 'void_archive', entity: 'stock_counts', entityId: count.id, oldValue: count, newValue: { cancelled: true, reason } });
+    res.json({ ok: true });
   });
 
   router.get('/counts', requirePermission('supplier_inventory.stock', 'view'), (_req, res) => {
@@ -320,26 +544,91 @@ export function stockControlRoutes() {
     const rows = db.prepare(`SELECT c.*, st.full_name AS counted_by_name, u.full_name AS posted_by_name,
         (SELECT COUNT(*) FROM stock_count_lines l WHERE l.count_id = c.id) AS line_count,
         (SELECT COUNT(*) FROM stock_count_lines l WHERE l.count_id = c.id AND l.counted_quantity IS NOT NULL) AS counted_lines,
-        (SELECT COUNT(*) FROM stock_count_lines l WHERE l.count_id = c.id AND l.counted_quantity IS NOT NULL AND l.counted_quantity != l.system_quantity) AS variance_lines
+        (SELECT COUNT(*) FROM stock_count_lines l WHERE l.count_id = c.id AND l.counted_quantity IS NOT NULL AND l.counted_quantity != l.system_quantity) AS variance_lines,
+        (SELECT COALESCE(SUM((l.counted_quantity - l.system_quantity) * COALESCE(i.unit_cost, 0)), 0)
+           FROM stock_count_lines l JOIN inventory_items i ON i.id = l.item_id
+          WHERE l.count_id = c.id AND l.counted_quantity IS NOT NULL) AS variance_value
       FROM stock_counts c
       LEFT JOIN staff st ON st.id = c.counted_by_staff_id
       LEFT JOIN users u ON u.id = c.posted_by_user_id
       ORDER BY date(c.count_date) DESC, c.id DESC`).all() as any[];
-    res.json(rows.map(r => ({ ...r, storage_path: r.storage_location_id ? paths.get(r.storage_location_id) ?? null : null })));
+    res.json(rows.map(r => ({
+      ...r,
+      storage_path: r.storage_location_id ? paths.get(r.storage_location_id) ?? null : null,
+      variance_value: Math.round(Number(r.variance_value) * 100) / 100,
+    })));
   });
 
   router.get('/counts/:id', requirePermission('supplier_inventory.stock', 'view'), (req, res) => {
     const db = getDb();
-    const count = db.prepare(`SELECT c.*, st.full_name AS counted_by_name FROM stock_counts c
-      LEFT JOIN staff st ON st.id = c.counted_by_staff_id WHERE c.id = ?`).get(req.params.id) as any;
+    const paths = storagePathMap(db);
+    const count = db.prepare(`SELECT c.*, st.full_name AS counted_by_name, u.full_name AS posted_by_name
+      FROM stock_counts c
+      LEFT JOIN staff st ON st.id = c.counted_by_staff_id
+      LEFT JOIN users u ON u.id = c.posted_by_user_id WHERE c.id = ?`).get(req.params.id) as any;
     if (!count) return res.status(404).json({ error: 'Stock count not found' });
-    const lines = db.prepare(`SELECT l.*, i.name AS item_name, i.item_code, i.unit,
+    const lines = db.prepare(`SELECT l.*, i.name AS item_name, i.item_code, i.unit, i.category, i.unit_cost,
+        b.batch_number, b.lot_number, b.expiry_date, b.acceptance_status,
+        COALESCE(b.storage_location_id, i.storage_location_id) AS location_id,
+        cu.full_name AS counted_by_name
+      FROM stock_count_lines l
+      LEFT JOIN inventory_items i ON i.id = l.item_id
+      LEFT JOIN inventory_batches b ON b.id = l.batch_id
+      LEFT JOIN users cu ON cu.id = l.counted_by_user_id
+      WHERE l.count_id = ? ORDER BY i.name, (b.expiry_date IS NULL), b.expiry_date`).all(req.params.id) as any[];
+
+    const decorated = lines.map(l => {
+      const variance = l.counted_quantity == null ? null : Number(l.counted_quantity) - Number(l.system_quantity);
+      return {
+        ...l,
+        storage_path: l.location_id ? paths.get(l.location_id) ?? null : null,
+        variance,
+        variance_value: variance == null ? null : Math.round(variance * Number(l.unit_cost ?? 0) * 100) / 100,
+      };
+    });
+    const counted = decorated.filter(l => l.counted_quantity != null);
+    const variances = counted.filter(l => Math.abs(l.variance ?? 0) > 0.0001);
+    res.json({
+      ...count,
+      storage_path: count.storage_location_id ? paths.get(count.storage_location_id) ?? null : null,
+      lines: decorated,
+      totals: {
+        lines: decorated.length,
+        counted: counted.length,
+        outstanding: decorated.length - counted.length,
+        variances: variances.length,
+        gains: variances.filter(l => (l.variance ?? 0) > 0).length,
+        losses: variances.filter(l => (l.variance ?? 0) < 0).length,
+        varianceValue: Math.round(variances.reduce((n, l) => n + (l.variance_value ?? 0), 0) * 100) / 100,
+        // Accuracy is the figure a manager is actually asked for: of the lines
+        // counted, how many the register already had right.
+        accuracy: counted.length === 0 ? null : Math.round(((counted.length - variances.length) / counted.length) * 1000) / 10,
+      },
+    });
+  });
+
+  /** The variance sheet as a workbook — what a count is signed off from. */
+  router.get('/counts/:id/export', requirePermission('supplier_inventory.stock', 'export'), (req, res) => {
+    const db = getDb();
+    const count = db.prepare('SELECT * FROM stock_counts WHERE id = ?').get(req.params.id) as any;
+    if (!count) return res.status(404).json({ error: 'Stock count not found' });
+    const lines = db.prepare(`SELECT l.*, i.name AS item_name, i.item_code, i.unit, i.unit_cost,
         b.batch_number, b.lot_number, b.expiry_date
       FROM stock_count_lines l
       LEFT JOIN inventory_items i ON i.id = l.item_id
       LEFT JOIN inventory_batches b ON b.id = l.batch_id
-      WHERE l.count_id = ? ORDER BY i.name, b.expiry_date`).all(req.params.id) as any[];
-    res.json({ ...count, lines: lines.map(l => ({ ...l, variance: l.counted_quantity == null ? null : l.counted_quantity - l.system_quantity })) });
+      WHERE l.count_id = ? ORDER BY i.name`).all(count.id) as any[];
+    const headers = ['Item code', 'Item', 'Batch / lot', 'Expires', 'Unit', 'Book balance', 'Counted', 'Variance', 'Variance value', 'Reason', 'Note', 'Added at the shelf'];
+    const aoa = lines.map(l => {
+      const variance = l.counted_quantity == null ? '' : Number(l.counted_quantity) - Number(l.system_quantity);
+      return [
+        l.item_code ?? '', l.item_name ?? '', l.batch_number ?? '', String(l.expiry_date ?? '').slice(0, 10),
+        l.unit ?? '', l.system_quantity, l.counted_quantity ?? '', variance,
+        variance === '' ? '' : Math.round(Number(variance) * Number(l.unit_cost ?? 0) * 100) / 100,
+        l.reason ?? '', l.note ?? '', l.added_manually ? 'yes' : '',
+      ];
+    });
+    sendWorkbook(res, buildWorkbook(headers, aoa, 'STOCK COUNT'), `${count.count_number}-variance-sheet.xlsx`);
   });
 
   router.put('/counts/:id/lines', requirePermission('supplier_inventory.stock', 'edit'), (req, res) => {
@@ -348,11 +637,19 @@ export function stockControlRoutes() {
     if (!count) return res.status(404).json({ error: 'Stock count not found' });
     if (count.status !== 'open') return res.status(400).json({ error: 'This count has been posted and cannot be changed.' });
     const updates = Array.isArray(req.body.lines) ? req.body.lines : [];
-    const stmt = db.prepare('UPDATE stock_count_lines SET counted_quantity = ?, reason = ? WHERE id = ? AND count_id = ?');
+    // A counted line records who counted it and when. Two people working the
+    // same sheet is normal, and "who said there were four?" is the first
+    // question asked of any variance worth arguing about.
+    const stmt = db.prepare(`UPDATE stock_count_lines
+      SET counted_quantity = ?, reason = ?, note = ?, counted_at = ?, counted_by_user_id = ?
+      WHERE id = ? AND count_id = ?`);
+    const now = new Date().toISOString();
     db.transaction(() => {
       for (const u of updates) {
         const q = u.countedQuantity === '' || u.countedQuantity == null ? null : Number(u.countedQuantity);
-        stmt.run(q, u.reason ?? null, parseIntNullable(u.id), count.id);
+        stmt.run(q, u.reason ?? null, u.note ?? null,
+          q == null ? null : now, q == null ? null : req.user!.id,
+          parseIntNullable(u.id), count.id);
       }
     })();
     res.json({ ok: true, updated: updates.length });
@@ -369,30 +666,74 @@ export function stockControlRoutes() {
     const db = getDb();
     const count = db.prepare('SELECT * FROM stock_counts WHERE id = ?').get(req.params.id) as any;
     if (!count) return res.status(404).json({ error: 'Stock count not found' });
+    if (count.status === 'cancelled') return res.status(400).json({ error: 'This count was abandoned.' });
     if (count.status !== 'open') return res.status(400).json({ error: 'This count has already been posted.' });
-    const lines = db.prepare('SELECT * FROM stock_count_lines WHERE count_id = ? AND counted_quantity IS NOT NULL').all(count.id) as any[];
+    const lines = db.prepare(`SELECT l.*, i.name AS item_name, i.unit_cost FROM stock_count_lines l
+      LEFT JOIN inventory_items i ON i.id = l.item_id
+      WHERE l.count_id = ? AND l.counted_quantity IS NOT NULL`).all(count.id) as any[];
     if (lines.length === 0) return res.status(400).json({ error: 'Nothing has been counted yet.' });
 
-    const date = new Date().toISOString().slice(0, 10);
-    const adjustments: unknown[] = [];
+    // A count is normally posted whole. When some lines were never reached,
+    // posting anyway is a decision somebody has to take deliberately, because
+    // the uncounted lines keep whatever the register believed.
+    const outstanding = (db.prepare('SELECT COUNT(*) AS n FROM stock_count_lines WHERE count_id = ? AND counted_quantity IS NULL')
+      .get(count.id) as { n: number }).n;
+    if (outstanding > 0 && req.body?.postPartial !== true) {
+      return res.status(409).json({
+        error: `${outstanding} line${outstanding === 1 ? ' has' : 's have'} not been counted. Post anyway and they keep the balance the register believes.`,
+        outstanding, needsConfirmation: true,
+      });
+    }
+
+    const date = req.body?.date || new Date().toISOString().slice(0, 10);
+    const adjustments: Array<{ itemId: number; batchId: number | null; variance: number; itemName: string }> = [];
+    const failures: Array<{ itemId: number; itemName: string; reason: string }> = [];
     db.transaction(() => {
       for (const l of lines) {
         const variance = Number(l.counted_quantity) - Number(l.system_quantity);
         if (Math.abs(variance) < 0.0001) continue;
+
+        // Stock found for an item with no lot on the sheet has to land
+        // somewhere. It goes on the lot that expires first, because that is
+        // what a storekeeper would reach for; if the item has no lot at all,
+        // the count says so rather than inventing one silently.
+        let batchId: number | null = l.batch_id;
+        if (!batchId && variance > 0) {
+          const lot = db.prepare(`SELECT id FROM inventory_batches WHERE item_id = ? AND reversed_at IS NULL
+            ORDER BY (expiry_date IS NULL), expiry_date, date_received LIMIT 1`).get(l.item_id) as { id: number } | undefined;
+          if (!lot) {
+            failures.push({ itemId: l.item_id, itemName: l.item_name, reason: 'found on the shelf but has no lot on the register — book it in as a delivery so its expiry is recorded' });
+            continue;
+          }
+          batchId = lot.id;
+        }
+
         postMovement(db, {
-          itemId: l.item_id, batchId: l.batch_id,
+          itemId: l.item_id, batchId,
           movementType: variance > 0 ? 'adjust_in' : 'adjust_out',
           quantity: Math.abs(variance), movementDate: date,
-          reason: `Stock count ${count.count_number}${l.reason ? ` — ${l.reason}` : ''}`,
-          countId: count.id, userId: req.user!.id,
+          reason: `Stock count ${count.count_number}${l.reason ? ` — ${l.reason}` : ''}${l.note ? ` (${l.note})` : ''}`,
+          countId: count.id, unitCost: l.unit_cost ?? null, userId: req.user!.id,
         });
-        adjustments.push({ itemId: l.item_id, batchId: l.batch_id, variance });
+        adjustments.push({ itemId: l.item_id, batchId, variance, itemName: l.item_name });
       }
       db.prepare("UPDATE stock_counts SET status = 'posted', posted_at = CURRENT_TIMESTAMP, posted_by_user_id = ? WHERE id = ?")
         .run(req.user!.id, count.id);
+      // Every item the count touched is brought back in step with its batches,
+      // so the cached total cannot drift away from what was just posted.
+      for (const itemId of new Set(lines.map(l => l.item_id))) syncItemQuantity(db, itemId);
     })();
-    audit(req, { action: 'edit', entity: 'stock_counts', entityId: count.id, oldValue: count, newValue: { posted: adjustments.length } });
-    res.json({ ok: true, adjustments: adjustments.length, detail: adjustments });
+
+    audit(req, { action: 'edit', entity: 'stock_counts', entityId: count.id, oldValue: count, newValue: { posted: adjustments.length, failures: failures.length } });
+    res.json({
+      ok: true,
+      adjustments: adjustments.length,
+      gains: adjustments.filter(a => a.variance > 0).length,
+      losses: adjustments.filter(a => a.variance < 0).length,
+      outstanding,
+      failures,
+      detail: adjustments,
+    });
   });
 
   /* ────────────────────────────────────────────────────────── forecasting */
@@ -578,6 +919,69 @@ export function stockControlRoutes() {
   });
 
   return router;
+}
+
+/** The one line a voucher shows for where it went. */
+function issueDestinationLabel(row: any): string {
+  const named = row.destination_name || row.section_name || row.department_name;
+  const type = row.destination_type || 'unit';
+  if (type === 'unit') return named || 'A laboratory unit';
+  const kind = ISSUE_DESTINATION_LABELS[type] ?? type;
+  return named ? `${named} (${kind})` : kind;
+}
+
+/**
+ * Where a voucher is going.
+ *
+ * A laboratory issues to its own benches, but also to a hospital department,
+ * to another facility, and now and then to something that fits none of those.
+ * The screen sends one encoded choice; this turns it into the three things the
+ * record actually needs — which kind of destination, which row it points at,
+ * and the name to print on the voucher so it still reads years later.
+ *
+ * "Other" always costs a name. A destination nobody wrote down is exactly the
+ * hole in a register that makes a stock-out impossible to explain afterwards.
+ */
+function resolveDestination(db: ReturnType<typeof getDb>, body: any):
+  | { type: string; sectionId: number | null; departmentId: number | null; name: string }
+  | { error: string } {
+  const raw = String(body?.destination ?? '').trim();
+  const typed = String(body?.destinationName ?? '').trim();
+
+  // A caller that predates destinations (or the mobile app) sends only a
+  // sectionId, and that has always meant a laboratory unit.
+  if (!raw) {
+    const sectionId = parseIntNullable(body?.sectionId);
+    if (!sectionId) {
+      if (typed) return { type: 'other', sectionId: null, departmentId: null, name: typed };
+      return { error: 'Say where this is going.' };
+    }
+    const section = db.prepare('SELECT name FROM sections WHERE id = ?').get(sectionId) as { name: string } | undefined;
+    if (!section) return { error: 'That unit is not on the register.' };
+    return { type: 'unit', sectionId, departmentId: null, name: section.name };
+  }
+
+  const { type, id } = decodeDestination(raw);
+  if (type === 'other') {
+    if (!typed) return { error: 'You chose “Other” — say who or where it is going to.' };
+    return { type: 'other', sectionId: null, departmentId: null, name: typed };
+  }
+  if (type === 'unit') {
+    const section = db.prepare('SELECT name FROM sections WHERE id = ?').get(Number(id)) as { name: string } | undefined;
+    if (!section) return { error: 'That unit is not on the register.' };
+    return { type: 'unit', sectionId: Number(id), departmentId: null, name: section.name };
+  }
+  if (type === 'department') {
+    const dept = db.prepare('SELECT name FROM departments WHERE id = ?').get(Number(id)) as { name: string } | undefined;
+    if (!dept) return { error: 'That department is not on the register.' };
+    return { type: 'department', sectionId: null, departmentId: Number(id), name: dept.name };
+  }
+  // A facility comes from the laboratory's own configured list, so the voucher
+  // carries the words the laboratory chose rather than a code.
+  const option = db.prepare('SELECT label FROM config_options WHERE list_key = ? AND value = ?')
+    .get('stock_issue_destination', id) as { label?: string } | undefined;
+  if (!option && !typed) return { error: 'That destination is not on the configured list. Add it in Settings → Dropdown Lists, or choose “Other”.' };
+  return { type: 'facility', sectionId: null, departmentId: null, name: option?.label ?? typed };
 }
 
 function safeJson(v: unknown) {

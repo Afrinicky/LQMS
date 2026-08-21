@@ -160,7 +160,7 @@ export const FEATURES: FeatureDef[] = [
   // ── Supplier & Inventory ────────────────────────────────────────────────
   { key: 'supplier_inventory.stock', module: 'supplier_inventory', label: 'Stock & batches',
     desc: 'The item catalogue, and running the store — receiving, issuing, counting and the stock ledger.',
-    tabs: ['Item Register', 'New Item', 'Stock Ledger', 'Receiving', 'Issuing', 'Stock Take', 'Stock Movements'] },
+    tabs: ['Item Register', 'New Item', 'Stock Ledger', 'Receiving', 'Issuing', 'Stock Management'] },
   { key: 'supplier_inventory.planning', module: 'supplier_inventory', label: 'Forecasting & levels',
     desc: 'Demand forecasting, reorder levels, minimum and maximum stock.', tabs: ['Forecasting'] },
   { key: 'supplier_inventory.suppliers', module: 'supplier_inventory', label: 'Suppliers', sensitive: true,

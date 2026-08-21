@@ -331,6 +331,21 @@ export function issuableQuantity(db: Database, itemId: number): number {
  * the movements would give a different answer the moment anything is corrected
  * or backdated, and then the card and the shelf no longer agree.
  */
+/**
+ * Put the item's cached quantity back in step with its batches.
+ *
+ * `inventory_items.quantity` is a running total kept for speed; the batches
+ * are the truth. A correction that changes a batch outside a movement — a
+ * receipt whose quantity was keyed wrong — has to bring the total back, or the
+ * register and the shelf disagree from then on.
+ */
+export function syncItemQuantity(db: Database, itemId: number): number {
+  const onHand = Number((db.prepare('SELECT COALESCE(SUM(quantity_available), 0) AS n FROM inventory_batches WHERE item_id = ?')
+    .get(itemId) as { n: number }).n) || 0;
+  db.prepare('UPDATE inventory_items SET quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(onHand, itemId);
+  return onHand;
+}
+
 export function postMovement(db: Database, input: {
   itemId: number; batchId: number | null; movementType: string; quantity: number; movementDate: string;
   issuedToSectionId?: number | null; receivedByStaffId?: number | null; reason?: string | null;

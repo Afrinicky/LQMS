@@ -154,6 +154,9 @@ export type StockMovement = {
   item_name?:string; item_code?:string; unit_of_measure?:string|null;
   batch_number?:string|null; lot_number?:string|null; batch_expiry?:string|null;
   issued_to_section_name?:string|null; received_by_name?:string|null; recorded_by_name?:string|null;
+  issue_id?:number|null; issue_number?:string|null; issue_destination_name?:string|null;
+  /** A movement is corrected by its mirror; both rows point at each other. */
+  reversal_of_id?:number|null; reversed_by_id?:number|null;
 };
 
 /** A supplier evaluation as it appears in the evaluation register (ISO 15189 §6.6.4). */
@@ -178,7 +181,14 @@ export type SupplierDeletionImpact = {
 };
 
 export type InventoryItem = { id:number; item_code:string; name:string; item_name?:string; category?:string; supplier_id?:number; supplier_name?:string; supplier_contact?:string; location_id?:number; quantity:number; unit?:string; unit_of_measure?:string; status:string; reorder_level:number; expiry_date?:string; storage_requirement?:string; department_id?:number; section_id?:number; minimum_stock?:number; is_active?:number; expiry_status?:string; low_stock?:boolean; storage_location_id?:number; storage_path?:string|null; section_name?:string|null; storage_name?:string|null; effective_expiry?:string|null; batch_expiry?:string|null; batch_count?:number; batch_quantity?:number; stock_on_hand?:number; created_by_name?:string|null; supplier_phone?:string|null; supplier_email?:string|null; product_barcode?:string|null; barcode_source?:string; barcode?:string; catalogue_number?:string|null; manufacturer?:string|null; created_by:number; created_at:string; updated_at?:string };
-export type InventoryBatch = { id:number; item_id:number; item_name?:string; batch_number?:string; lot_number?:string; supplier_id?:number; supplier_name?:string; quantity_received:number; quantity_available:number; date_received:string; expiry_date?:string; acceptance_status:string; acceptance_checked_by_staff_id?:number; acceptance_date?:string; storage_location_id?:number; storage_path?:string|null; product_barcode?:string|null; accepted_by_name?:string|null; status:string; expiry_status?:string; unit_of_measure?:string; created_by:number; created_at:string; updated_at?:string };
+export type InventoryBatch = { id:number; item_id:number; item_name?:string; item_code?:string|null; batch_number?:string; lot_number?:string; supplier_id?:number; supplier_name?:string; quantity_received:number; quantity_available:number; date_received:string; expiry_date?:string; acceptance_status:string; acceptance_checked_by_staff_id?:number; acceptance_date?:string; storage_location_id?:number; storage_path?:string|null; product_barcode?:string|null; accepted_by_name?:string|null; status:string; expiry_status?:string; unit_of_measure?:string;
+  /** Where the laboratory received it from — 'supplier' when bought direct, otherwise the kind of store. */
+  source_type?:string|null; source_id?:number|null; source_name?:string|null; source_label?:string|null;
+  /** The waybill, requisition or invoice this delivery is traced by. */
+  reference?:string|null; unit_cost?:number|null;
+  /** A receipt entered in error is reversed, never erased. */
+  reversed_at?:string|null; reversed_by_user_id?:number|null; reversal_reason?:string|null;
+  created_by:number; created_at:string; updated_at?:string };
 export type InventoryMovement = { id:number; item_id:number; batch_id?:number; movement_type:string; quantity:number; movement_date:string; issued_to_section_id?:number; received_by_staff_id?:number; reason?:string; created_by:number; created_at:string };
 export type MonitoringItem = { id:number; item_code:string; name:string; monitoring_type?:string; parameter:string; unit?:string; department_id?:number; section_id?:number; location_id?:number; lower_limit?:number; upper_limit?:number; warning_lower_limit?:number; warning_upper_limit?:number; critical_lower_limit?:number; critical_upper_limit?:number; frequency?:string; responsible_staff_id?:number; reviewer_staff_id?:number; nc_trigger_enabled?:number; is_active?:number; created_by:number; created_at:string; updated_at?:string };
 export type MonitoringReading = { id:number; monitoring_item_id:number; item_name?:string; item_unit?:string; reading_date:string; reading_time?:string; value:number; entered_by_staff_id?:number; status:string; comment?:string; immediate_action?:string; reviewed_by_staff_id?:number; reviewed_at?:string; nc_id?:number; capa_id?:number; created_by:number; created_at:string };

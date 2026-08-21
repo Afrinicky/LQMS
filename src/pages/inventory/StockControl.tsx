@@ -1,12 +1,13 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Trash2, Search, ClipboardList, PackageCheck, Printer, Lock, LockOpen } from 'lucide-react';
-import { api, API_BASE, getToken } from '../../services/api';
-import { DetailModal, KpiStrip, ChartCard, DonutChart, BarChart, BarMeter, Sparkline, CHART_COLORS } from '../../components/ui';
+import { Plus, Trash2, Search, ClipboardList, PackageCheck, Printer, Lock, LockOpen, Undo2, FileText, X, ScanLine } from 'lucide-react';
+import { api, API_BASE, getToken, ApiError } from '../../services/api';
+import { DetailModal, KpiStrip, ChartCard, DonutChart, BarChart, BarMeter, Sparkline, RowMenu, CHART_COLORS } from '../../components/ui';
 import BarcodeScanner from '../../components/BarcodeScanner';
-import type { Section, Staff } from '../../../shared/types/api';
+import type { Section, Staff, Department } from '../../../shared/types/api';
 import { STOCK_STATUS_LABELS, NEEDS_ACTION, type StockStatus } from '../../../shared/constants/stockControl';
 import { MOVEMENT_LABELS } from '../../../shared/constants/inventory';
 import type { ConfigOption } from '../../../shared/constants/configLists';
+import { encodeDestination, decodeDestination } from '../../../shared/constants/inventory';
 
 /**
  * Running the store.
@@ -256,13 +257,25 @@ type BasketLine = { itemId: string; quantity: string };
  * Nothing here asks the storekeeper to choose a batch, because that was the
  * step that made people give up and write it on a card instead.
  */
-export function IssueDesk({ items, sections, staff, reasons, onIssued }: {
-  items: LedgerRow[]; sections: Section[]; staff: Staff[]; reasons: ConfigOption[]; onIssued: () => void;
+export function IssueDesk({ items, sections, staff, departments, reasons, destinations, onIssued }: {
+  items: LedgerRow[]; sections: Section[]; staff: Staff[]; departments: Department[];
+  reasons: ConfigOption[]; destinations: ConfigOption[]; onIssued: () => void;
 }) {
-  const [sectionId, setSectionId] = useState('');
+  // Where it is going, encoded as "unit:3", "department:7", "facility:code"
+  // or the bare word "other". A laboratory issues beyond its own benches all
+  // the time — to a ward, to a health centre, to an outreach team — and a
+  // picker that only lists units forces all of that into the wrong box.
+  const [destination, setDestination] = useState('');
+  const [destinationName, setDestinationName] = useState('');
   const [receivedByStaffId, setReceivedByStaffId] = useState('');
+  // "Other" for the collector too: somebody from outside the laboratory has no
+  // staff record, and issuing to nobody at all is not a record of anything.
+  const [collectorOther, setCollectorOther] = useState(false);
+  const [collectedByName, setCollectedByName] = useState('');
   const [purpose, setPurpose] = useState('');
   const [note, setNote] = useState('');
+  const chosen = decodeDestination(destination);
+  const needsDestinationName = destination === 'other';
   const [lines, setLines] = useState<BasketLine[]>([{ itemId: '', quantity: '' }]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -324,7 +337,9 @@ export function IssueDesk({ items, sections, staff, reasons, onIssued }: {
       .filter(l => l.itemId && Number(l.quantity) > 0)
       .map(l => ({ itemId: Number(l.itemId), quantity: Number(l.quantity) }));
     if (payload.length === 0) { setError('Add at least one item.'); return; }
-    if (!sectionId && !receivedByStaffId) { setError('Say which unit this is going to, or who is collecting it.'); return; }
+    if (!destination) { setError('Say where this is going.'); return; }
+    if (needsDestinationName && !destinationName.trim()) { setError('You chose “Other” — say who or where it is going to.'); return; }
+    if (!receivedByStaffId && !collectedByName.trim()) { setError('Say who is collecting it.'); return; }
     // Nothing is sent while a line asks for more than can go out: the whole
     // voucher would be refused, and the storekeeper would be told at the
     // counter rather than on the screen in front of them.
@@ -333,7 +348,14 @@ export function IssueDesk({ items, sections, staff, reasons, onIssued }: {
     try {
       const r = await api<any>('/supplier-inventory/issues', {
         method: 'POST',
-        body: JSON.stringify({ sectionId: sectionId || null, receivedByStaffId: receivedByStaffId || null, purpose, note, lines: payload }),
+        body: JSON.stringify({
+          destination,
+          destinationName: needsDestinationName ? destinationName.trim() : '',
+          sectionId: chosen.type === 'unit' ? chosen.id : null,
+          receivedByStaffId: collectorOther ? null : (receivedByStaffId || null),
+          issuedToName: collectorOther ? collectedByName.trim() : '',
+          purpose, note, lines: payload,
+        }),
       });
       setVoucher(r);
       setLines([{ itemId: '', quantity: '' }]); setPurpose(''); setNote('');
@@ -344,23 +366,54 @@ export function IssueDesk({ items, sections, staff, reasons, onIssued }: {
 
   return <>
     <div className="card">
-      <h3>Issue stock to a unit</h3>
+      <h3>Issue stock</h3>
       <p className="muted" style={{ marginTop: 0 }}>
-        Name the unit, the member of staff collecting and why. The store allocates the lots — earliest expiry
-        first — and writes a numbered issue voucher.
+        Name where it is going, who is collecting it and why. It need not be one of the laboratory's own benches —
+        a hospital department, another facility or anything else can be named. The store allocates the lots —
+        earliest expiry first — and writes a numbered issue voucher.
       </p>
       {error && <div className="error">{error}</div>}
 
       <form onSubmit={submit}>
         <div className="issue-head">
-          <label>Issued to unit<select value={sectionId} onChange={e => setSectionId(e.target.value)}>
-            <option value="">Select the unit</option>
-            {sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          {/* Not everything goes to a bench. The groups are what a storekeeper
+              would say out loud: one of our units, a department of the
+              hospital, another facility, or something else entirely. */}
+          <label>Issued to<select value={destination} onChange={e => { setDestination(e.target.value); setDestinationName(''); }}>
+            <option value="">Select where it is going</option>
+            {sections.length > 0 && <optgroup label="Laboratory units">
+              {sections.map(sec => <option key={sec.id} value={encodeDestination('unit', sec.id)}>{sec.name}</option>)}
+            </optgroup>}
+            {departments.length > 0 && <optgroup label="Hospital departments">
+              {departments.map(d => <option key={d.id} value={encodeDestination('department', d.id)}>{d.name}</option>)}
+            </optgroup>}
+            {destinations.length > 0 && <optgroup label="Other facilities">
+              {destinations.map(d => <option key={d.id} value={encodeDestination('facility', d.value)}>{d.label}</option>)}
+            </optgroup>}
+            <optgroup label="Anything else">
+              <option value="other">Other — say who</option>
+            </optgroup>
           </select></label>
-          <label>Collected by<select value={receivedByStaffId} onChange={e => setReceivedByStaffId(e.target.value)}>
-            <option value="">Select the member of staff</option>
-            {staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
-          </select></label>
+          {needsDestinationName && <label>Who or where <span className="muted">(required)</span>
+            <input value={destinationName} onChange={e => setDestinationName(e.target.value)}
+              placeholder="Name the unit, facility or programme" autoFocus /></label>}
+
+          <label>Collected by
+            {collectorOther
+              ? <input value={collectedByName} onChange={e => setCollectedByName(e.target.value)}
+                  placeholder="Name the person collecting" autoFocus />
+              : <select value={receivedByStaffId} onChange={e => {
+                  if (e.target.value === '__other') { setCollectorOther(true); setReceivedByStaffId(''); setCollectedByName(''); return; }
+                  setReceivedByStaffId(e.target.value);
+                }}>
+                  <option value="">Select the member of staff</option>
+                  {staff.map(st => <option key={st.id} value={st.id}>{st.fullName}</option>)}
+                  <option value="__other">Other — someone not on the staff register</option>
+                </select>}
+            {collectorOther && <button type="button" className="linklike" style={{ alignSelf: 'start' }}
+              onClick={() => { setCollectorOther(false); setCollectedByName(''); }}>Pick from the staff register instead</button>}
+          </label>
+
           <label>Reason for issue<select value={purpose} onChange={e => setPurpose(e.target.value)}>
             <option value="">Select a reason</option>
             {reasons.map(r => <option key={r.id} value={r.value}>{r.label}</option>)}
@@ -438,16 +491,20 @@ function IssueVoucher({ voucher, onClose }: { voucher: any; onClose: () => void 
 }
 
 /** Every voucher the store has written. */
-export function IssueRegister({ refreshKey }: { refreshKey: number }) {
+export function IssueRegister({ refreshKey, canVoid, onChanged }: {
+  refreshKey: number; canVoid?: boolean; onChanged?: () => void;
+}) {
   const [rows, setRows] = useState<any[]>([]);
   const [open, setOpen] = useState<number | null>(null);
+  const [cancelling, setCancelling] = useState<any>(null);
   const [query, setQuery] = useState('');
 
-  useEffect(() => { api<any[]>('/supplier-inventory/issues').then(setRows).catch(() => setRows([])); }, [refreshKey]);
+  const load = () => api<any[]>('/supplier-inventory/issues').then(setRows).catch(() => setRows([]));
+  useEffect(() => { void load(); }, [refreshKey]);
   const shown = rows.filter(r => {
     const q = query.trim().toLowerCase();
     if (!q) return true;
-    return [r.issue_number, r.section_name, r.issued_to_name, r.received_by_name, r.purpose_label, r.purpose, r.issued_by_name]
+    return [r.issue_number, r.section_name, r.destination_label, r.destination_name, r.issued_to_name, r.received_by_name, r.purpose_label, r.purpose, r.issued_by_name]
       .some(v => String(v ?? '').toLowerCase().includes(q));
   });
 
@@ -459,30 +516,84 @@ export function IssueRegister({ refreshKey }: { refreshKey: number }) {
     </div>
     {shown.length === 0 ? <p className="muted">Nothing has been issued yet.</p> :
       <div className="table-scroll"><table className="data-table reg-table"><thead><tr>
-        <th>Voucher</th><th>Date</th><th>Unit</th><th>Collected by</th><th>Reason</th><th>Lines</th><th>Quantity</th><th>Issued by</th><th>Status</th>
+        <th>Voucher</th><th>Date</th><th>Issued to</th><th>Collected by</th><th>Reason</th><th>Lines</th><th>Quantity</th><th>Issued by</th><th>Status</th><th className="reg-actions-col"></th>
       </tr></thead><tbody>
-        {shown.map(r => <tr key={r.id} className="row-clickable" onClick={() => setOpen(r.id)} tabIndex={0} role="button"
+        {shown.map(r => <tr key={r.id} className={`row-clickable${r.status === 'cancelled' ? ' row-retired' : ''}`} onClick={() => setOpen(r.id)} tabIndex={0} role="button"
           onKeyDown={e => { if (e.key === 'Enter') setOpen(r.id); }}>
           <td><span className="reg-primary">{r.issue_number}</span></td>
           <td className="nowrap">{dateOnly(r.issue_date)}</td>
-          <td>{r.section_name || <span className="muted">—</span>}</td>
+          <td>{r.destination_label || r.section_name || <span className="muted">—</span>}</td>
           <td>{r.received_by_name || r.issued_to_name || <span className="muted">—</span>}</td>
           <td>{r.purpose_label || r.purpose || <span className="muted">—</span>}</td>
           <td>{r.line_count}</td>
           <td>{r.total_quantity}</td>
           <td>{r.issued_by_name || <span className="muted">—</span>}</td>
-          <td>{r.status === 'returned' ? <span className="badge">part returned</span> : <span className="badge" style={{ background: '#e4f7ec', color: '#155c34' }}>issued</span>}</td>
+          <td>{r.status === 'cancelled' ? <span className="badge" style={{ background: '#fde2e2', color: '#b42318' }}>cancelled</span>
+            : r.status === 'returned' ? <span className="badge">part returned</span>
+            : <span className="badge" style={{ background: '#e4f7ec', color: '#155c34' }}>issued</span>}</td>
+          <td className="reg-actions-col" onClick={e => e.stopPropagation()}>
+            <RowMenu label={`Manage ${r.issue_number}`}>{close => <>
+              <button type="button" role="menuitem" onClick={() => { close(); setOpen(r.id); }}><FileText size={14} /> Open the voucher</button>
+              {/* Cancelling puts every line back on the lot it came from. It
+                  is not offered to everyone, and it costs a written reason. */}
+              {canVoid && r.status !== 'cancelled' && <button type="button" role="menuitem" className="danger"
+                onClick={() => { close(); setCancelling(r); }}><Undo2 size={14} /> Cancel this voucher…</button>}
+            </>}</RowMenu>
+          </td>
         </tr>)}
       </tbody></table></div>}
-    {open != null && <IssueDetail id={open} onClose={() => setOpen(null)} />}
+    {open != null && <IssueDetail id={open} onClose={() => setOpen(null)} onChanged={() => { void load(); onChanged?.(); }} canVoid={canVoid} />}
+    {cancelling && <CancelVoucherPrompt voucher={cancelling} onClose={() => setCancelling(null)}
+      onDone={() => { setCancelling(null); void load(); onChanged?.(); }} />}
   </div>;
 }
 
-function IssueDetail({ id, onClose }: { id: number; onClose: () => void }) {
+/**
+ * Cancelling a voucher that should never have been written.
+ *
+ * Every line goes back to the exact lot it came out of, so that lot's expiry
+ * still governs it, and the voucher stays on the register marked cancelled.
+ * Nothing is deleted: a voucher that vanishes is indistinguishable from one
+ * that was never written, and the numbering would then be lying.
+ */
+function CancelVoucherPrompt({ voucher, onClose, onDone }: { voucher: any; onClose: () => void; onDone: () => void }) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function go() {
+    if (!reason.trim()) { setError('A reason is required — it goes onto the voucher.'); return; }
+    setBusy(true); setError(null);
+    try {
+      await api(`/supplier-inventory/issues/${voucher.id}/cancel`, { method: 'POST', body: JSON.stringify({ reason: reason.trim() }) });
+      onDone();
+    } catch (e) { setError((e as Error).message); setBusy(false); }
+  }
+
+  return <DetailModal open onClose={onClose} width="narrow" title={`Cancel ${voucher.issue_number}`}
+    footer={<>
+      <button type="button" className="secondary" onClick={onClose}>Keep the voucher</button>
+      <button type="button" className="danger" disabled={busy} onClick={() => void go()}>{busy ? 'Cancelling…' : 'Cancel the voucher'}</button>
+    </>}>
+    {error && <div className="error">{error}</div>}
+    <p className="muted" style={{ marginTop: 0 }}>
+      All {voucher.total_quantity} on this voucher goes back to the lots it came out of, and the voucher stays on
+      the register marked cancelled. Use this for a voucher issued in error — if the stock was taken and some of
+      it came back, record a return on the voucher instead.
+    </p>
+    <label>Reason<textarea value={reason} onChange={e => setReason(e.target.value)} rows={3}
+      placeholder="Issued to the wrong unit, duplicate of ISS-…, wrong item picked" autoFocus /></label>
+  </DetailModal>;
+}
+
+function IssueDetail({ id, onClose, onChanged, canVoid }: {
+  id: number; onClose: () => void; onChanged?: () => void; canVoid?: boolean;
+}) {
   const [data, setData] = useState<any>(null);
   const [returning, setReturning] = useState<Record<number, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const load = () => api(`/supplier-inventory/issues/${id}`).then(setData).catch(e => setError((e as Error).message));
   useEffect(() => { void load(); }, [id]);
 
@@ -494,17 +605,30 @@ function IssueDetail({ id, onClose }: { id: number; onClose: () => void }) {
     setBusy(true); setError(null);
     try {
       await api(`/supplier-inventory/issues/${id}/return`, { method: 'POST', body: JSON.stringify({ lines, reason: 'Returned unused' }) });
-      setReturning({}); await load();
+      setReturning({}); await load(); onChanged?.();
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   }
 
   return <DetailModal open onClose={onClose} title={data ? data.issue_number : 'Issue voucher'}
-    subtitle={data ? `${dateOnly(data.issue_date)} · ${data.section_name || data.issued_to_name || ''}` : ''}>
+    subtitle={data ? `${dateOnly(data.issue_date)} · ${data.destination_label || data.section_name || data.issued_to_name || ''}` : ''}
+    header={data && <>
+      {data.status === 'cancelled' && <span className="badge" style={{ background: '#fde2e2', color: '#b42318' }}>cancelled</span>}
+      <button type="button" className="secondary" onClick={() => window.print()}><Printer size={14} /> Print</button>
+      {canVoid && data.status !== 'cancelled' && <RowMenu label={`Manage ${data.issue_number}`}>{close => <>
+        <button type="button" role="menuitem" className="danger" onClick={() => { close(); setCancelling(true); }}>
+          <Undo2 size={14} /> Cancel this voucher…
+        </button>
+      </>}</RowMenu>}
+    </>}>
     {error && <div className="error">{error}</div>}
     {!data ? <p>Loading…</p> : <>
+      {data.status === 'cancelled' && <div className="notice-warn" style={{ marginTop: 0 }}>
+        This voucher was cancelled{data.cancelled_by_name ? ` by ${data.cancelled_by_name}` : ''} — every line went back
+        to the lot it came from.{data.cancellation_reason ? ` Reason: ${data.cancellation_reason}` : ''}
+      </div>}
       <dl className="fact-grid">
-        <div><dt>Issued to unit</dt><dd>{data.section_name || '—'}</dd></div>
+        <div><dt>Issued to</dt><dd>{data.destination_label || data.section_name || '—'}</dd></div>
         <div><dt>Collected by</dt><dd>{data.received_by_name || data.issued_to_name || '—'}</dd></div>
         <div><dt>Reason for issue</dt><dd>{data.purpose_label || data.purpose || '—'}</dd></div>
         <div><dt>Issued by</dt><dd>{data.issued_by_name || '—'}</dd></div>
@@ -523,12 +647,14 @@ function IssueDetail({ id, onClose }: { id: number; onClose: () => void }) {
             value={returning[l.id] ?? ''} onChange={e => setReturning(r => ({ ...r, [l.id]: e.target.value }))} /></td>
         </tr>)}
       </tbody></table></div>
-      <div className="reg-head-actions" style={{ marginTop: 12 }}>
+      {cancelling && <CancelVoucherPrompt voucher={data} onClose={() => setCancelling(false)}
+        onDone={() => { setCancelling(false); void load(); onChanged?.(); }} />}
+      {data.status !== 'cancelled' && <div className="reg-head-actions" style={{ marginTop: 12 }}>
         <button type="button" className="secondary" disabled={busy} onClick={sendReturn}>
           {busy ? 'Returning…' : 'Put the returned stock back'}
         </button>
         <span className="muted">It goes back into the lot it came out of, so that lot's expiry still applies.</span>
-      </div>
+      </div>}
     </>}
   </DetailModal>;
 }
@@ -536,156 +662,537 @@ function IssueDetail({ id, onClose }: { id: number; onClose: () => void }) {
 // ─────────────────────────────────────────────────────────────── stock take
 
 /**
- * Counting the shelf.
+ * Counting the shelf, and putting right what the count finds.
  *
  * The register and the shelf drift apart — breakages, an issue nobody wrote
- * down, a miscount on receipt. A count freezes what the register believes,
- * records what was found, and posts the difference as an adjustment with a
- * reason, so the correction is part of the record rather than a balance that
- * changed overnight.
+ * down, a miscount on receipt, a box moved to a unit's own cupboard. A count
+ * freezes what the register believes, records what was actually found, and
+ * posts every difference as an adjustment carrying a reason, so the correction
+ * is part of the record rather than a balance that changed overnight.
+ *
+ * Three things make this a real count rather than a form:
+ *
+ *   · it can include the items the register says are EMPTY, because stock the
+ *     register has lost is exactly what a count is for and a sheet of only
+ *     non-zero rows can never find it;
+ *   · it can be counted BLIND, with the book balance hidden, because a number
+ *     already printed on the page is very hard not to simply agree with;
+ *   · anything found that is not on the sheet can be ADDED at the shelf.
  */
-export function StockTake({ places, staff, onPosted }: {
-  places: Array<{ id: number; path: string }>; staff: Staff[]; onPosted: () => void;
+export function StockTake({ places, staff, items, categories, canVoid, onPosted }: {
+  places: Array<{ id: number; path: string }>;
+  staff: Staff[];
+  items: LedgerRow[];
+  categories: ConfigOption[];
+  canVoid?: boolean;
+  onPosted: () => void;
 }) {
   const [counts, setCounts] = useState<any[]>([]);
   const [open, setOpen] = useState<number | null>(null);
+  const [cancelling, setCancelling] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [form, setForm] = useState({ scope: 'full', storageLocationId: '', countedByStaffId: '', note: '' });
+  const [showClosed, setShowClosed] = useState(false);
+  const [form, setForm] = useState({
+    scope: 'full', storageLocationId: '', scopeValue: '', countedByStaffId: '', note: '',
+    includeEmpty: true, blind: false,
+  });
+  const [pickedItems, setPickedItems] = useState<number[]>([]);
+  const [itemQuery, setItemQuery] = useState('');
 
   const load = () => api<any[]>('/supplier-inventory/counts').then(setCounts).catch(() => setCounts([]));
   useEffect(() => { void load(); }, []);
 
+  const openCounts = counts.filter(c => c.status === 'open');
+  const shownCounts = showClosed ? counts : counts.filter(c => c.status !== 'cancelled');
+  const pickable = useMemo(() => {
+    const q = itemQuery.trim().toLowerCase();
+    const rows = q ? items.filter(i => [i.name, i.item_code, i.category, i.storage_path].some(v => String(v ?? '').toLowerCase().includes(q))) : items;
+    return rows.slice(0, 60);
+  }, [items, itemQuery]);
+
   async function start(e: FormEvent) {
-    e.preventDefault(); setBusy(true); setError(null);
+    e.preventDefault(); setBusy(true); setError(null); setNotice(null);
     try {
-      const r = await api<{ id: number }>('/supplier-inventory/counts', { method: 'POST', body: JSON.stringify(form) });
-      await load(); setOpen(r.id);
+      const r = await api<{ id: number; lines: number }>('/supplier-inventory/counts', {
+        method: 'POST',
+        body: JSON.stringify({ ...form, itemIds: form.scope === 'items' ? pickedItems : undefined }),
+      });
+      await load();
+      if (r.lines === 0) {
+        setNotice('That sheet came out empty — nothing matched what you asked to count. Widen the scope, or tick “include items the register says are empty”.');
+      }
+      setOpen(r.id);
+      setPickedItems([]);
     } catch (err) { setError((err as Error).message); }
     finally { setBusy(false); }
   }
 
+  const scopeWords = (c: any) => c.scope === 'location' ? (c.storage_path || 'one place')
+    : c.scope === 'cycle' ? 'high-value items'
+    : c.scope === 'category' ? `category: ${c.scope_value || '—'}`
+    : c.scope === 'items' ? 'selected items'
+    : 'everything';
+
   return <>
+    {/* An open count is the thing you came here to finish, so it is offered
+        before the form that would start another one. */}
+    {openCounts.length > 0 && <div className="card">
+      <h3>Counts in progress</h3>
+      <p className="muted" style={{ marginTop: 0 }}>Pick up where the count was left. A sheet stays open until it is posted or abandoned.</p>
+      <div className="table-scroll"><table className="data-table reg-table"><thead><tr>
+        <th>Count</th><th>Started</th><th>Scope</th><th>Counted by</th><th>Progress</th><th>Variances</th><th></th>
+      </tr></thead><tbody>
+        {openCounts.map(c => {
+          const done = Number(c.counted_lines) || 0;
+          const total = Number(c.line_count) || 0;
+          const pct = total === 0 ? 0 : Math.round((done / total) * 100);
+          return <tr key={c.id} className="row-clickable" onClick={() => setOpen(c.id)} tabIndex={0} role="button"
+            onKeyDown={e => { if (e.key === 'Enter') setOpen(c.id); }}>
+            <td><span className="reg-primary">{c.count_number}</span><span className="reg-sub">{c.note || ''}</span></td>
+            <td className="nowrap">{dateOnly(c.count_date)}</td>
+            <td>{scopeWords(c)}{c.blind ? <span className="badge">blind</span> : null}</td>
+            <td>{c.counted_by_name || <span className="muted">—</span>}</td>
+            <td>
+              <span className="reg-primary">{done} of {total}</span>
+              <span className="count-bar"><span style={{ width: `${pct}%` }} /></span>
+            </td>
+            <td>{c.variance_lines > 0 ? <span className="badge warn">{c.variance_lines}</span> : <span className="muted">none yet</span>}</td>
+            <td><button type="button" className="tiny" onClick={e => { e.stopPropagation(); setOpen(c.id); }}>Continue</button></td>
+          </tr>;
+        })}
+      </tbody></table></div>
+    </div>}
+
     <div className="card">
       <h3>Start a stock count</h3>
       <p className="muted" style={{ marginTop: 0 }}>
-        A sheet is drawn up per lot on the shelf, pre-filled with what the register believes. Count, enter what
-        you found, and post it — every difference becomes an adjustment with your reason on it.
+        A sheet is drawn up per lot on the shelf. Count it, enter what you found, and post it — every difference
+        becomes an adjustment with your reason on it, and lands on the item's bin card.
       </p>
       {error && <div className="error">{error}</div>}
+      {notice && <div className="notice-warn">{notice}</div>}
       <form className="form" onSubmit={start}>
         <label>What to count<select value={form.scope} onChange={e => setForm({ ...form, scope: e.target.value })}>
           <option value="full">Everything in the store</option>
           <option value="location">One store, shelf or fridge</option>
-          <option value="cycle">Cycle count — the high-value items only</option>
+          <option value="category">One category of item</option>
+          <option value="cycle">Cycle count — the high-value (class A) items</option>
+          <option value="items">Just the items I pick</option>
         </select></label>
-        {form.scope === 'location' && <label>Which place<select value={form.storageLocationId} onChange={e => setForm({ ...form, storageLocationId: e.target.value })}>
+
+        {form.scope === 'location' && <label>Which place<select value={form.storageLocationId} onChange={e => setForm({ ...form, storageLocationId: e.target.value })} required>
           <option value="">Select a place</option>
           {places.map(p => <option key={p.id} value={p.id}>{p.path}</option>)}
         </select></label>}
+
+        {form.scope === 'category' && <label>Which category<select value={form.scopeValue} onChange={e => setForm({ ...form, scopeValue: e.target.value })} required>
+          <option value="">Select a category</option>
+          {categories.map(c => <option key={c.id} value={c.value}>{c.label}</option>)}
+        </select></label>}
+
+        {form.scope === 'items' && <div className="count-picker">
+          <label className="reg-search"><Search size={15} />
+            <input placeholder="Search the register…" value={itemQuery} onChange={e => setItemQuery(e.target.value)} />
+          </label>
+          <p className="muted" style={{ margin: '6px 0' }}>
+            {pickedItems.length === 0 ? 'Nothing picked yet.' : `${pickedItems.length} item${pickedItems.length === 1 ? '' : 's'} picked.`}
+            {pickedItems.length > 0 && <> <button type="button" className="linklike" onClick={() => setPickedItems([])}>Clear</button></>}
+          </p>
+          <div className="count-picker-list">
+            {pickable.map(i => <label key={i.id} className="count-pick">
+              <input type="checkbox" checked={pickedItems.includes(i.id)}
+                onChange={e => setPickedItems(ids => e.target.checked ? [...ids, i.id] : ids.filter(n => n !== i.id))} />
+              <span>{i.name}<small>{[i.item_code, i.storage_path].filter(Boolean).join(' · ')}</small></span>
+              <span className="muted">{qty(i.on_hand)} {i.unit || ''}</span>
+            </label>)}
+            {pickable.length === 0 && <p className="muted">Nothing matches that.</p>}
+          </div>
+        </div>}
+
         <label>Counted by<select value={form.countedByStaffId} onChange={e => setForm({ ...form, countedByStaffId: e.target.value })}>
           <option value="">Me</option>
           {staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
         </select></label>
         <label>Note<input value={form.note} onChange={e => setForm({ ...form, note: e.target.value })} placeholder="Month-end count, handover…" /></label>
-        <button type="submit" disabled={busy}><ClipboardList size={15} /> {busy ? 'Drawing up the sheet…' : 'Start the count'}</button>
+
+        <label className="toggle">
+          <input type="checkbox" checked={form.includeEmpty} onChange={e => setForm({ ...form, includeEmpty: e.target.checked })} />
+          Include items the register says are empty
+        </label>
+        <p className="hint" style={{ margin: '-6px 0 4px' }}>
+          Leave this on. Stock the register has lost still sits on the shelf, and a sheet of only non-zero rows can
+          never find it.
+        </p>
+
+        <label className="toggle">
+          <input type="checkbox" checked={form.blind} onChange={e => setForm({ ...form, blind: e.target.checked })} />
+          Count blind — hide what the register believes
+        </label>
+        <p className="hint" style={{ margin: '-6px 0 4px' }}>
+          The honest way to count: the book balance is hidden until the sheet is posted, so the count is what was on
+          the shelf rather than what the page suggested.
+        </p>
+
+        <button type="submit" disabled={busy || (form.scope === 'items' && pickedItems.length === 0)}>
+          <ClipboardList size={15} /> {busy ? 'Drawing up the sheet…' : 'Start the count'}
+        </button>
       </form>
     </div>
 
     <div className="card">
-      <h3>Stock counts</h3>
-      {counts.length === 0 ? <p className="muted">Nothing has been counted yet.</p> :
+      <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <h3 style={{ margin: 0 }}>Stock counts</h3>
+        <label className="toggle" style={{ marginLeft: 'auto' }}>
+          <input type="checkbox" checked={showClosed} onChange={e => setShowClosed(e.target.checked)} />
+          Show abandoned counts
+        </label>
+      </div>
+      {shownCounts.length === 0 ? <p className="muted">Nothing has been counted yet.</p> :
         <div className="table-scroll"><table className="data-table reg-table"><thead><tr>
-          <th>Count</th><th>Date</th><th>Scope</th><th>Counted by</th><th>Progress</th><th>Differences</th><th>Status</th>
+          <th>Count</th><th>Date</th><th>Scope</th><th>Counted by</th><th>Progress</th><th>Variances</th><th>Value</th><th>Status</th><th className="reg-actions-col"></th>
         </tr></thead><tbody>
-          {counts.map(c => <tr key={c.id} className="row-clickable" onClick={() => setOpen(c.id)} tabIndex={0} role="button"
+          {shownCounts.map(c => <tr key={c.id} className={`row-clickable${c.status === 'cancelled' ? ' row-retired' : ''}`}
+            onClick={() => setOpen(c.id)} tabIndex={0} role="button"
             onKeyDown={e => { if (e.key === 'Enter') setOpen(c.id); }}>
             <td><span className="reg-primary">{c.count_number}</span><span className="reg-sub">{c.note || ''}</span></td>
             <td className="nowrap">{dateOnly(c.count_date)}</td>
-            <td>{c.scope === 'location' ? (c.storage_path || 'one place') : c.scope === 'cycle' ? 'high-value items' : 'everything'}</td>
+            <td>{scopeWords(c)}{c.blind ? <span className="badge">blind</span> : null}</td>
             <td>{c.counted_by_name || <span className="muted">—</span>}</td>
             <td>{c.counted_lines} of {c.line_count}</td>
             <td>{c.variance_lines > 0 ? <span className="badge warn">{c.variance_lines}</span> : <span className="muted">none</span>}</td>
-            <td>{c.status === 'posted'
-              ? <span className="badge" style={{ background: '#e4f7ec', color: '#155c34' }}>posted</span>
+            <td className="nowrap">{c.variance_value ? Math.round(c.variance_value).toLocaleString() : <span className="muted">—</span>}</td>
+            <td>{c.status === 'posted' ? <span className="badge" style={{ background: '#e4f7ec', color: '#155c34' }}>posted</span>
+              : c.status === 'cancelled' ? <span className="badge" style={{ background: '#fde2e2', color: '#b42318' }}>abandoned</span>
               : <span className="badge warn">open</span>}</td>
+            <td className="reg-actions-col" onClick={e => e.stopPropagation()}>
+              <RowMenu label={`Manage ${c.count_number}`}>{close => <>
+                <button type="button" role="menuitem" onClick={() => { close(); setOpen(c.id); }}><FileText size={14} /> Open the sheet</button>
+                <button type="button" role="menuitem" onClick={() => { close(); void download(`/supplier-inventory/counts/${c.id}/export`, `${c.count_number}.xlsx`).catch(e => setError((e as Error).message)); }}>
+                  <Printer size={14} /> Export the variance sheet
+                </button>
+                {canVoid && c.status === 'open' && <button type="button" role="menuitem" className="danger" onClick={() => { close(); setCancelling(c); }}>
+                  <X size={14} /> Abandon this count…
+                </button>}
+              </>}</RowMenu>
+            </td>
           </tr>)}
         </tbody></table></div>}
     </div>
 
-    {open != null && <CountSheet id={open} onClose={() => setOpen(null)} onPosted={() => { void load(); onPosted(); }} />}
+    {open != null && <CountSheet id={open} items={items} canVoid={canVoid}
+      onClose={() => setOpen(null)} onPosted={() => { void load(); onPosted(); }} />}
+    {cancelling && <AbandonCountPrompt count={cancelling} onClose={() => setCancelling(null)}
+      onDone={() => { setCancelling(null); void load(); }} />}
   </>;
 }
 
-function CountSheet({ id, onClose, onPosted }: { id: number; onClose: () => void; onPosted: () => void }) {
-  const [data, setData] = useState<any>(null);
-  const [edits, setEdits] = useState<Record<number, { counted: string; reason: string }>>({});
+/** Abandoning a count that will not be finished. */
+function AbandonCountPrompt({ count, onClose, onDone }: { count: any; onClose: () => void; onDone: () => void }) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  async function go() {
+    if (!reason.trim()) { setError('Say why — an abandoned count with no explanation looks like a count that was hidden.'); return; }
+    setBusy(true); setError(null);
+    try {
+      await api(`/supplier-inventory/counts/${count.id}/cancel`, { method: 'POST', body: JSON.stringify({ reason: reason.trim() }) });
+      onDone();
+    } catch (e) { setError((e as Error).message); setBusy(false); }
+  }
+
+  return <DetailModal open onClose={onClose} width="narrow" title={`Abandon ${count.count_number}`}
+    footer={<>
+      <button type="button" className="secondary" onClick={onClose}>Keep the count</button>
+      <button type="button" className="danger" disabled={busy} onClick={() => void go()}>{busy ? 'Abandoning…' : 'Abandon the count'}</button>
+    </>}>
+    {error && <div className="error">{error}</div>}
+    <p className="muted" style={{ marginTop: 0 }}>
+      Nothing is posted and no balance moves. The sheet stays on the register marked abandoned, with what had been
+      counted still on it.
+    </p>
+    <label>Reason<textarea value={reason} onChange={e => setReason(e.target.value)} rows={3}
+      placeholder="Started in the wrong place, superseded by CNT-…, interrupted" autoFocus /></label>
+  </DetailModal>;
+}
+
+/**
+ * The sheet itself.
+ *
+ * Written for somebody standing at a shelf with a tablet: a search, a filter
+ * down to what is still uncounted, a scanner that jumps to the row, and a
+ * running tally of what the count has found so far. Posting is the last step
+ * and says plainly what it is about to do.
+ */
+function CountSheet({ id, items, canVoid, onClose, onPosted }: {
+  id: number; items: LedgerRow[]; canVoid?: boolean; onClose: () => void; onPosted: () => void;
+}) {
+  const [data, setData] = useState<any>(null);
+  const [edits, setEdits] = useState<Record<number, { counted: string; reason: string; note: string }>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState('');
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<'all' | 'todo' | 'variance'>('all');
+  const [revealed, setRevealed] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [addForm, setAddForm] = useState({ itemId: '', batchId: '', countedQuantity: '', reason: '', note: '' });
+
   const load = () => api(`/supplier-inventory/counts/${id}`).then(d => { setData(d); setEdits({}); }).catch(e => setError((e as Error).message));
   useEffect(() => { void load(); }, [id]);
+
+  const posted = data?.status === 'posted';
+  const abandoned = data?.status === 'cancelled';
+  const locked = posted || abandoned;
+  // A blind count hides the book balance until it is posted. It can be
+  // revealed deliberately — a supervisor checking a wild variance — and the
+  // sheet says so on the screen when it has been.
+  const hideBook = Boolean(data?.blind) && !posted && !revealed;
 
   const value = (l: any) => edits[l.id]?.counted ?? (l.counted_quantity == null ? '' : String(l.counted_quantity));
   const varianceOf = (l: any) => {
     const v = value(l);
     return v === '' ? null : Number(v) - Number(l.system_quantity);
   };
+  const patch = (l: any, part: Partial<{ counted: string; reason: string; note: string }>) =>
+    setEdits(x => ({
+      ...x,
+      [l.id]: {
+        counted: part.counted ?? x[l.id]?.counted ?? value(l),
+        reason: part.reason ?? x[l.id]?.reason ?? l.reason ?? '',
+        note: part.note ?? x[l.id]?.note ?? l.note ?? '',
+      },
+    }));
+
+  const lines: any[] = data?.lines ?? [];
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return lines.filter(l => {
+      if (filter === 'todo' && value(l) !== '') return false;
+      if (filter === 'variance' && !(varianceOf(l) != null && Math.abs(varianceOf(l) as number) > 0.0001)) return false;
+      if (!q) return true;
+      return [l.item_name, l.item_code, l.batch_number, l.lot_number, l.storage_path].some(v => String(v ?? '').toLowerCase().includes(q));
+    });
+  }, [lines, query, filter, edits]);
+
+  // The tally is worked out from what is on screen right now, including edits
+  // not yet saved — otherwise the figures lag a step behind the person typing.
+  const live = useMemo(() => {
+    let counted = 0, variances = 0, gain = 0, loss = 0, varianceValue = 0;
+    for (const l of lines) {
+      const v = value(l);
+      if (v === '') continue;
+      counted++;
+      const diff = Number(v) - Number(l.system_quantity);
+      if (Math.abs(diff) > 0.0001) {
+        variances++;
+        if (diff > 0) gain++; else loss++;
+        varianceValue += diff * Number(l.unit_cost ?? 0);
+      }
+    }
+    return {
+      counted, variances, gain, loss,
+      outstanding: lines.length - counted,
+      varianceValue: Math.round(varianceValue * 100) / 100,
+      accuracy: counted === 0 ? null : Math.round(((counted - variances) / counted) * 1000) / 10,
+    };
+  }, [lines, edits]);
 
   async function save(then?: () => Promise<void>) {
     setBusy('save'); setError(null);
     try {
-      const lines = Object.entries(edits).map(([lineId, e]) => ({ id: Number(lineId), countedQuantity: e.counted === '' ? null : Number(e.counted), reason: e.reason }));
-      if (lines.length) await api(`/supplier-inventory/counts/${id}/lines`, { method: 'PUT', body: JSON.stringify({ lines }) });
+      const payload = Object.entries(edits).map(([lineId, e]) => ({
+        id: Number(lineId),
+        countedQuantity: e.counted === '' ? null : Number(e.counted),
+        reason: e.reason || null,
+        note: e.note || null,
+      }));
+      if (payload.length) await api(`/supplier-inventory/counts/${id}/lines`, { method: 'PUT', body: JSON.stringify({ lines: payload }) });
       if (then) await then();
       await load();
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(''); }
   }
 
-  async function post() {
+  async function post(postPartial = false) {
     await save(async () => {
-      const r = await api<{ adjustments: number }>(`/supplier-inventory/counts/${id}/post`, { method: 'POST', body: JSON.stringify({}) });
-      onPosted();
-      setError(null);
-      alert(`Count posted — ${r.adjustments} adjustment${r.adjustments === 1 ? '' : 's'} written to the ledger.`);
+      try {
+        const r = await api<{ adjustments: number; gains: number; losses: number; failures: Array<{ itemName: string; reason: string }> }>(
+          `/supplier-inventory/counts/${id}/post`, { method: 'POST', body: JSON.stringify({ postPartial }) });
+        onPosted();
+        setError(null);
+        setNotice(`Posted — ${r.adjustments} adjustment${r.adjustments === 1 ? '' : 's'} written to the bin cards (${r.gains} found, ${r.losses} missing).`
+          + (r.failures.length ? ` ${r.failures.length} could not be posted: ${r.failures.map(f => `${f.itemName} — ${f.reason}`).join('; ')}` : ''));
+      } catch (e) {
+        // A partial post is a decision, not an error: the server asks first.
+        if (e instanceof ApiError && e.status === 409 && (e.data as any)?.needsConfirmation) {
+          if (window.confirm(`${e.message}\n\nPost the count anyway?`)) await post(true);
+          return;
+        }
+        throw e;
+      }
     });
   }
 
-  const posted = data?.status === 'posted';
+  async function addLine(e: FormEvent) {
+    e.preventDefault(); setBusy('add'); setError(null);
+    try {
+      await api(`/supplier-inventory/counts/${id}/lines`, { method: 'POST', body: JSON.stringify(addForm) });
+      setAdding(false); setAddForm({ itemId: '', batchId: '', countedQuantity: '', reason: '', note: '' });
+      await load();
+    } catch (err) { setError((err as Error).message); }
+    finally { setBusy(''); }
+  }
+
+  const chosenItem = items.find(i => String(i.id) === addForm.itemId);
+
   return <DetailModal open onClose={onClose} title={data ? `${data.count_number} — count sheet` : 'Count sheet'}
-    subtitle={data ? `${dateOnly(data.count_date)}${data.counted_by_name ? ` · counted by ${data.counted_by_name}` : ''}` : ''}
-    header={data && (posted ? <span className="badge" style={{ background: '#e4f7ec', color: '#155c34' }}>posted</span> : <span className="badge warn">open</span>)}
-    footer={data && !posted && <>
-      <button type="button" className="secondary" disabled={!!busy} onClick={() => void save()}>{busy === 'save' ? 'Saving…' : 'Save what I have counted'}</button>
-      <button type="button" disabled={!!busy} onClick={() => void post()}><PackageCheck size={15} /> Post the count</button>
+    subtitle={data ? `${dateOnly(data.count_date)}${data.counted_by_name ? ` · counted by ${data.counted_by_name}` : ''}${data.storage_path ? ` · ${data.storage_path}` : ''}` : ''}
+    header={data && <>
+      {posted ? <span className="badge" style={{ background: '#e4f7ec', color: '#155c34' }}>posted</span>
+        : abandoned ? <span className="badge" style={{ background: '#fde2e2', color: '#b42318' }}>abandoned</span>
+        : <span className="badge warn">open</span>}
+      {Boolean(data.blind) && <span className="badge">blind count</span>}
+      <button type="button" className="secondary" onClick={() => void download(`/supplier-inventory/counts/${id}/export`, `${data.count_number}.xlsx`).catch(e => setError((e as Error).message))}>
+        <Printer size={14} /> Export
+      </button>
+    </>}
+    footer={data && !locked && <>
+      <button type="button" className="secondary" disabled={!!busy} onClick={() => setAdding(true)}>
+        <Plus size={15} /> Found something not on the sheet
+      </button>
+      <button type="button" className="secondary" disabled={!!busy || Object.keys(edits).length === 0} onClick={() => void save()}>
+        {busy === 'save' ? 'Saving…' : 'Save what I have counted'}
+      </button>
+      <button type="button" disabled={!!busy || live.counted === 0} onClick={() => void post()}>
+        <PackageCheck size={15} /> Post the count
+      </button>
     </>}>
     {error && <div className="error">{error}</div>}
+    {notice && <div className="notice-ok">{notice}</div>}
     {!data ? <p>Loading…</p> : <>
-      <p className="muted">
+      {abandoned && <div className="notice-warn" style={{ marginTop: 0 }}>
+        This count was abandoned and nothing was posted.{data.cancellation_reason ? ` Reason: ${data.cancellation_reason}` : ''}
+      </div>}
+
+      {/* What the count has found so far, in the four figures a manager asks
+          for: how far through it is, how many lines disagree, which way, and
+          what that is worth. */}
+      <div className="stock-figures">
+        <div><span className="fig">{live.counted} <small>of {lines.length}</small></span><span className="fig-label">counted</span></div>
+        <div><span className="fig">{live.variances}</span><span className="fig-label">disagree</span></div>
+        <div><span className="fig">{live.gain} / {live.loss}</span><span className="fig-label">found / missing</span></div>
+        <div><span className="fig">{live.varianceValue ? Math.round(live.varianceValue).toLocaleString() : '—'}</span><span className="fig-label">value of the difference</span></div>
+        <div><span className="fig">{live.accuracy == null ? '—' : `${live.accuracy}%`}</span><span className="fig-label">register accuracy</span></div>
+      </div>
+
+      <p className="muted" style={{ marginTop: 12 }}>
         {posted ? 'This count has been posted; the differences are on the bin cards.'
+          : abandoned ? 'Nothing here was posted.'
           : 'Enter what you actually found. Leave a line blank if it was not counted — only counted lines are posted.'}
       </p>
-      <div className="table-scroll"><table className="data-table"><thead><tr>
-        <th>Item</th><th>Batch / lot</th><th>Expires</th><th>Book balance</th><th>Counted</th><th>Variance</th><th>Reason</th>
+
+      {!locked && <div className="reg-head-actions" style={{ margin: '10px 0', gap: 10, flexWrap: 'wrap' }}>
+        <label className="reg-search" style={{ flex: '1 1 220px' }}><Search size={15} />
+          <input placeholder="Search item, lot, shelf…" value={query} onChange={e => setQuery(e.target.value)} />
+        </label>
+        <div className="reg-seg" role="tablist" aria-label="Filter the sheet">
+          {([['all', `All ${lines.length}`], ['todo', `Still to count ${live.outstanding}`], ['variance', `Disagreeing ${live.variances}`]] as const)
+            .map(([k, label]) => <button key={k} type="button" role="tab" aria-selected={filter === k}
+              className={filter === k ? 'on' : ''} onClick={() => setFilter(k)}>{label}</button>)}
+        </div>
+        <div style={{ flex: '1 1 220px' }}>
+          <BarcodeScanner placeholder="Scan a box to find its row…" autoFocus={false} onScan={code => { setQuery(code.trim()); setFilter('all'); }} />
+        </div>
+        {Boolean(data.blind) && <button type="button" className="secondary" onClick={() => setRevealed(r => !r)}>
+          {hideBook ? <><LockOpen size={14} /> Reveal the book balance</> : <><Lock size={14} /> Hide it again</>}
+        </button>}
+      </div>}
+
+      {hideBook && <p className="hint" style={{ marginTop: 0 }}>
+        This is a blind count — what the register believes is hidden until the sheet is posted.
+      </p>}
+      {Boolean(data.blind) && revealed && !posted && <div className="notice-warn">
+        The book balance has been revealed on a blind count. That is recorded against nothing — but the point of
+        counting blind is lost for any line counted from here on.
+      </div>}
+
+      <div className="table-scroll"><table className="data-table count-sheet"><thead><tr>
+        <th>Item</th><th>Batch / lot</th><th>Expires</th><th>Where</th>
+        <th>{hideBook ? <span className="muted">hidden</span> : 'Book balance'}</th>
+        <th>Counted</th><th>Variance</th><th>Reason</th><th></th>
       </tr></thead><tbody>
-        {data.lines.map((l: any) => {
+        {shown.map(l => {
           const v = varianceOf(l);
-          return <tr key={l.id}>
-            <td><span className="reg-primary">{l.item_name}</span><span className="reg-sub">{l.item_code}</span></td>
-            <td>{l.batch_number || <span className="muted">—</span>}</td>
+          return <tr key={l.id} className={l.added_manually ? 'row-added' : ''}>
+            <td>
+              <span className="reg-primary">{l.item_name}{l.added_manually && <span className="badge">found at the shelf</span>}</span>
+              <span className="reg-sub">{l.item_code}</span>
+            </td>
+            <td>{l.batch_number || <span className="muted">{l.batch_id ? `#${l.batch_id}` : 'no lot'}</span>}
+              {l.lot_number && <span className="reg-sub">lot {l.lot_number}</span>}</td>
             <td className="nowrap">{dateOnly(l.expiry_date)}</td>
-            <td>{l.system_quantity} {l.unit || ''}</td>
-            <td><input type="number" step="any" style={{ width: 100 }} disabled={posted} value={value(l)}
-              onChange={e => setEdits(x => ({ ...x, [l.id]: { counted: e.target.value, reason: x[l.id]?.reason ?? l.reason ?? '' } }))} /></td>
+            <td>{l.storage_path || <span className="muted">—</span>}</td>
+            <td>{hideBook ? <span className="muted">—</span> : <>{l.system_quantity} {l.unit || ''}</>}</td>
+            <td><input type="number" step="any" style={{ width: 110 }} disabled={locked} value={value(l)}
+              onChange={e => patch(l, { counted: e.target.value })} /></td>
             <td>{v == null ? <span className="muted">—</span>
+              : hideBook ? <span className="muted">on posting</span>
               : v === 0 ? <span className="badge" style={{ background: '#e4f7ec', color: '#155c34' }}>agrees</span>
-              : <span className="badge" style={{ background: '#fde2e2', color: '#b42318' }}>{v > 0 ? '+' : ''}{v}</span>}</td>
-            <td><input disabled={posted} placeholder={v ? 'Why?' : ''} style={{ minWidth: 150 }}
+              : <span className="badge" style={{ background: '#fde2e2', color: '#b42318' }}>{v > 0 ? '+' : ''}{Math.round(v * 100) / 100}</span>}</td>
+            <td><input disabled={locked} placeholder={v ? 'Why?' : ''} style={{ minWidth: 160 }}
               value={edits[l.id]?.reason ?? l.reason ?? ''}
-              onChange={e => setEdits(x => ({ ...x, [l.id]: { counted: x[l.id]?.counted ?? value(l), reason: e.target.value } }))} /></td>
+              onChange={e => patch(l, { reason: e.target.value })} /></td>
+            <td className="reg-actions-col">
+              {!locked && <div className="reg-row-actions">
+                {!hideBook && <button type="button" className="tiny" title="Record it as agreeing with the register"
+                  onClick={() => patch(l, { counted: String(l.system_quantity) })}>Agrees</button>}
+                {l.added_manually && <button type="button" className="tiny danger" title="Take this line off the sheet"
+                  onClick={() => void api(`/supplier-inventory/counts/${id}/lines/${l.id}`, { method: 'DELETE' }).then(load).catch(e => setError((e as Error).message))}>
+                  <Trash2 size={13} />
+                </button>}
+              </div>}
+            </td>
           </tr>;
         })}
+        {shown.length === 0 && <tr><td colSpan={9} className="muted" style={{ padding: 18, textAlign: 'center' }}>
+          {lines.length === 0
+            ? 'This sheet is empty — nothing matched the scope it was drawn up for. Add what is on the shelf, or abandon it and start one with a wider scope.'
+            : 'Nothing matches that filter.'}
+        </td></tr>}
       </tbody></table></div>
+
+      {/* Something on the shelf that the register never listed. This is the
+          half of a count that finds stock rather than confirming it. */}
+      {adding && <DetailModal open onClose={() => setAdding(false)} width="narrow" title="Add what was found"
+        footer={<>
+          <button type="button" className="secondary" onClick={() => setAdding(false)}>Cancel</button>
+          <button type="submit" form="add-count-line" disabled={busy === 'add' || !addForm.itemId}>{busy === 'add' ? 'Adding…' : 'Add it to the sheet'}</button>
+        </>}>
+        {error && <div className="error">{error}</div>}
+        <p className="muted" style={{ marginTop: 0 }}>
+          For stock the sheet did not list — a box behind another box, a lot nobody booked in, something moved
+          from a unit's own cupboard. It posts as a variance like any other line.
+        </p>
+        <form id="add-count-line" className="form" onSubmit={addLine}>
+          <label>Item<select value={addForm.itemId} onChange={e => setAddForm({ ...addForm, itemId: e.target.value, batchId: '' })} required>
+            <option value="">Select the item</option>
+            {items.map(i => <option key={i.id} value={i.id}>{i.name} — {i.item_code}</option>)}
+          </select></label>
+          <label>Quantity found<input type="number" step="any" min={0} value={addForm.countedQuantity}
+            onChange={e => setAddForm({ ...addForm, countedQuantity: e.target.value })} /></label>
+          <label>Reason<input value={addForm.reason} onChange={e => setAddForm({ ...addForm, reason: e.target.value })}
+            placeholder="Found behind the fridge, never booked in…" /></label>
+          <label>Note<input value={addForm.note} onChange={e => setAddForm({ ...addForm, note: e.target.value })} /></label>
+          {chosenItem && <p className="hint">
+            The register holds {qty(chosenItem.on_hand)} {chosenItem.unit || ''} of this across {chosenItem.batch_count} lot
+            {chosenItem.batch_count === 1 ? '' : 's'}. What is entered here is counted against nothing, so the whole
+            quantity posts as stock found.
+          </p>}
+        </form>
+      </DetailModal>}
     </>}
   </DetailModal>;
 }

@@ -5240,6 +5240,107 @@ CREATE INDEX IF NOT EXISTS idx_stock_count_lines_count ON stock_count_lines(coun
 CREATE INDEX IF NOT EXISTS idx_inventory_movements_item_date ON inventory_movements(item_id, movement_date);
 `);
 
+  // ===================================================================
+  // WHERE STOCK COMES FROM, AND WHERE IT GOES
+  //
+  // A hospital laboratory rarely buys everything itself. Most draw the
+  // bulk of their reagents from the hospital's own main store, and some
+  // also receive from a district, regional or national medical store,
+  // while still buying a few items direct from a supplier. A receipt
+  // that can only name a supplier cannot describe any of that, so the
+  // source of a delivery is its own register — configured by the
+  // laboratory, alongside a policy saying which kinds it actually uses.
+  //
+  // The same is true of the other end. Stock is issued to a bench, but
+  // also to a hospital department, to another facility, and sometimes to
+  // somebody who does not fit any of those and has to be written down.
+  // ===================================================================
+  database.exec(`
+CREATE TABLE IF NOT EXISTS supply_sources (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  -- main_store | external_store | district_store | regional_store |
+  -- national_store | donation | other. A supplier is NOT a source here:
+  -- suppliers have their own register and are chosen beside this.
+  kind TEXT NOT NULL DEFAULT 'main_store',
+  code TEXT,
+  contact_person TEXT,
+  phone TEXT,
+  email TEXT,
+  address TEXT,
+  note TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_supply_sources_active ON supply_sources(is_active, display_order);
+`);
+
+  // A delivery says where it came from as well as who supplied it.
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(inventory_batches)').all() as Array<{ name: string }>).map(c => c.name));
+    // 'supplier' when the laboratory bought it direct, otherwise the kind of
+    // store it was drawn from. Kept beside the id so a receipt still reads
+    // correctly after a source is renamed or retired.
+    if (!cols.has('source_type')) database.exec("ALTER TABLE inventory_batches ADD COLUMN source_type TEXT NOT NULL DEFAULT 'supplier'");
+    if (!cols.has('source_id')) database.exec('ALTER TABLE inventory_batches ADD COLUMN source_id INTEGER REFERENCES supply_sources(id)');
+    if (!cols.has('source_name')) database.exec('ALTER TABLE inventory_batches ADD COLUMN source_name TEXT');
+    // The store's own reference for the delivery — a waybill, a requisition
+    // number, an invoice. It is what a query about this receipt is traced by.
+    if (!cols.has('reference')) database.exec('ALTER TABLE inventory_batches ADD COLUMN reference TEXT');
+    if (!cols.has('unit_cost')) database.exec('ALTER TABLE inventory_batches ADD COLUMN unit_cost REAL');
+    // A receipt entered in error is reversed, not erased: the batch stays with
+    // its movements and is marked so nothing can be issued from it again.
+    if (!cols.has('reversed_at')) database.exec('ALTER TABLE inventory_batches ADD COLUMN reversed_at TEXT');
+    if (!cols.has('reversed_by_user_id')) database.exec('ALTER TABLE inventory_batches ADD COLUMN reversed_by_user_id INTEGER REFERENCES users(id)');
+    if (!cols.has('reversal_reason')) database.exec('ALTER TABLE inventory_batches ADD COLUMN reversal_reason TEXT');
+  }
+
+  // An issue names where it went, which is not always a laboratory unit.
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(stock_issues)').all() as Array<{ name: string }>).map(c => c.name));
+    // unit | department | facility | other
+    if (!cols.has('destination_type')) database.exec("ALTER TABLE stock_issues ADD COLUMN destination_type TEXT NOT NULL DEFAULT 'unit'");
+    if (!cols.has('destination_name')) database.exec('ALTER TABLE stock_issues ADD COLUMN destination_name TEXT');
+    if (!cols.has('department_id')) database.exec('ALTER TABLE stock_issues ADD COLUMN department_id INTEGER REFERENCES departments(id)');
+    // Cancelling a voucher returns every line to the lot it came from and
+    // leaves the voucher on the register, marked, with the reason on it.
+    if (!cols.has('cancelled_at')) database.exec('ALTER TABLE stock_issues ADD COLUMN cancelled_at TEXT');
+    if (!cols.has('cancelled_by_user_id')) database.exec('ALTER TABLE stock_issues ADD COLUMN cancelled_by_user_id INTEGER REFERENCES users(id)');
+    if (!cols.has('cancellation_reason')) database.exec('ALTER TABLE stock_issues ADD COLUMN cancellation_reason TEXT');
+    // Backfill: every voucher written before destinations existed went to a
+    // laboratory unit, because that was the only thing it could name.
+    database.exec("UPDATE stock_issues SET destination_type = 'unit' WHERE destination_type IS NULL OR destination_type = ''");
+  }
+
+  // A movement posted in error is reversed by its mirror, and both rows say so.
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(inventory_movements)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!cols.has('reversal_of_id')) database.exec('ALTER TABLE inventory_movements ADD COLUMN reversal_of_id INTEGER REFERENCES inventory_movements(id)');
+    if (!cols.has('reversed_by_id')) database.exec('ALTER TABLE inventory_movements ADD COLUMN reversed_by_id INTEGER REFERENCES inventory_movements(id)');
+  }
+
+  // A stock count is counted blind when the sheet is not to show what the
+  // register believes, and can be abandoned without being posted.
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(stock_counts)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!cols.has('blind')) database.exec('ALTER TABLE stock_counts ADD COLUMN blind INTEGER NOT NULL DEFAULT 0');
+    if (!cols.has('include_empty')) database.exec('ALTER TABLE stock_counts ADD COLUMN include_empty INTEGER NOT NULL DEFAULT 0');
+    if (!cols.has('cancelled_at')) database.exec('ALTER TABLE stock_counts ADD COLUMN cancelled_at TEXT');
+    if (!cols.has('cancellation_reason')) database.exec('ALTER TABLE stock_counts ADD COLUMN cancellation_reason TEXT');
+  }
+
+  // A counted line says who counted it and when, and a line added at the
+  // shelf says it was not on the sheet the register drew up.
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(stock_count_lines)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!cols.has('counted_at')) database.exec('ALTER TABLE stock_count_lines ADD COLUMN counted_at TEXT');
+    if (!cols.has('counted_by_user_id')) database.exec('ALTER TABLE stock_count_lines ADD COLUMN counted_by_user_id INTEGER REFERENCES users(id)');
+    if (!cols.has('added_manually')) database.exec('ALTER TABLE stock_count_lines ADD COLUMN added_manually INTEGER NOT NULL DEFAULT 0');
+    if (!cols.has('note')) database.exec('ALTER TABLE stock_count_lines ADD COLUMN note TEXT');
+  }
+
   // A laboratory that has never set one up gets a store to put things in, so
   // the field is never an empty dropdown again.
   const anyStorage = database.prepare('SELECT COUNT(*) c FROM storage_locations').get() as { c: number };

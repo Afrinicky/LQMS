@@ -176,7 +176,13 @@ check("each line is pre-filled with what the register believes",
 # Two are missing off the shelf — a breakage nobody recorded.
 call(f"/supplier-inventory/counts/{count['id']}/lines", "PUT",
      {"lines": [{"id": target["id"], "countedQuantity": 398, "reason": "Two broken in transit"}]}, A)
-st, posted = call(f"/supplier-inventory/counts/{count['id']}/post", "POST", {}, A)
+# Posting a sheet with lines nobody reached is a decision, not an accident:
+# it is refused once, saying how many, and taken only when confirmed.
+st, refused = call(f"/supplier-inventory/counts/{count['id']}/post", "POST", {}, A)
+check("posting a half-counted sheet is refused until it is confirmed",
+      st == 409 and refused.get("needsConfirmation") is True, f"{st} {json.dumps(refused)[:120]}")
+check("  and it says how many lines were never reached", refused.get("outstanding", 0) > 0, str(refused.get("outstanding")))
+st, posted = call(f"/supplier-inventory/counts/{count['id']}/post", "POST", {"postPartial": True}, A)
 check("posting the count writes the differences", st == 200 and posted["adjustments"] == 1, json.dumps(posted)[:140])
 row = next(r for r in call("/supplier-inventory/ledger", token=A)[1]["rows"] if r["id"] == item_id)
 check("the register now agrees with the shelf", row["on_hand"] == 648, str(row["on_hand"]))
@@ -336,6 +342,163 @@ discards = [l for l in call(f"/supplier-inventory/ledger/{item_id}", token=A)[1]
 check("the reason is stored as the words plus the detail typed beside them",
       discards and discards[0]["reason"] == f"{movement_reasons[0]['label']} — found on the floor",
       str(discards[0]["reason"] if discards else None))
+
+print("\n[16] Stock goes out to more than the laboratory's own benches")
+destinations = call("/config/option-lists/stock_issue_destination", token=A)[1] or []
+check("outside destinations are a configurable list", len(destinations) > 2, str(len(destinations)))
+
+st, out_facility = call("/supplier-inventory/issues", "POST", {
+    "destination": f"facility:{destinations[0]['value']}", "receivedByStaffId": collector,
+    "purpose": reasons[0]["value"], "lines": [{"itemId": item_id, "quantity": 2}]}, A)
+check("stock can be issued to another facility", st == 201, json.dumps(out_facility)[:140])
+voucher = call(f"/supplier-inventory/issues/{out_facility['id']}", token=A)[1]
+check("  the voucher says it went outside the laboratory", voucher.get("destination_type") == "facility", str(voucher.get("destination_type")))
+check("  and names it in the words the laboratory configured",
+      voucher.get("destination_name") == destinations[0]["label"], str(voucher.get("destination_name")))
+check("  and it is NOT counted against a laboratory unit", voucher.get("section_id") is None, str(voucher.get("section_id")))
+
+st, err = call("/supplier-inventory/issues", "POST", {
+    "destination": "other", "receivedByStaffId": collector,
+    "purpose": reasons[0]["value"], "lines": [{"itemId": item_id, "quantity": 1}]}, A)
+check("choosing “Other” without saying who is refused", st == 400, f"{st} {json.dumps(err)[:100]}")
+
+st, out_other = call("/supplier-inventory/issues", "POST", {
+    "destination": "other", "destinationName": "Mobile screening van",
+    "issuedToName": "A. Mensah (not on the staff register)",
+    "purpose": reasons[0]["value"], "lines": [{"itemId": item_id, "quantity": 1}]}, A)
+check("“Other”, once specified, is accepted", st == 201, json.dumps(out_other)[:140])
+voucher = call(f"/supplier-inventory/issues/{out_other['id']}", token=A)[1]
+check("  the specified destination is on the voucher", voucher.get("destination_name") == "Mobile screening van", str(voucher.get("destination_name")))
+check("  and so is a collector who is not on the staff register",
+      "Mensah" in str(voucher.get("issued_to_name")), str(voucher.get("issued_to_name")))
+
+print("\n[17] A voucher issued in error is cancelled, not deleted")
+before = next(r for r in call("/supplier-inventory/ledger", token=A)[1]["rows"] if r["id"] == item_id)["on_hand"]
+st, cancelled = call(f"/supplier-inventory/issues/{out_other['id']}/cancel", "POST", {"reason": "Issued against the wrong item"}, A)
+check("cancelling works", st == 200, json.dumps(cancelled)[:140])
+after = next(r for r in call("/supplier-inventory/ledger", token=A)[1]["rows"] if r["id"] == item_id)["on_hand"]
+check("  the stock goes back on the shelf", after == before + 1, f"{before} -> {after}")
+voucher = call(f"/supplier-inventory/issues/{out_other['id']}", token=A)[1]
+check("  the voucher stays on the register, marked", voucher.get("status") == "cancelled", str(voucher.get("status")))
+check("  carrying the reason it was cancelled", "wrong item" in str(voucher.get("cancellation_reason")), str(voucher.get("cancellation_reason")))
+check("  and cancelling twice is refused",
+      call(f"/supplier-inventory/issues/{out_other['id']}/cancel", "POST", {"reason": "again"}, A)[0] == 400)
+check("  a cancellation with no reason is refused",
+      call(f"/supplier-inventory/issues/{out_facility['id']}/cancel", "POST", {}, A)[0] == 400)
+
+print("\n[18] A receipt booked in wrong is corrected, or reversed")
+_, fix_item = call("/supplier-inventory/items", "POST", {
+    "name": f"Correction reagent {stamp}", "category": "reagent", "unit": "box", "unitCost": 5}, A)
+_, fix_batch = call(f"/supplier-inventory/items/{fix_item['id']}/batches", "POST", {
+    "batchNumber": f"FIX-{stamp}", "quantityReceived": 100, "quantityAvailable": 100,
+    "dateReceived": day(-1), "expiryDate": day(400)}, A)
+call(f"/supplier-inventory/batches/{fix_batch['id']}/acceptance", "POST", {"acceptanceStatus": "accepted"}, A)
+
+st, _ = call(f"/supplier-inventory/batches/{fix_batch['id']}", "PUT", {"quantityReceived": 10, "lotNumber": "L-9"}, A)
+check("a quantity keyed with an extra zero can be corrected", st == 200, str(st))
+row = next(r for r in call("/supplier-inventory/ledger", token=A)[1]["rows"] if r["id"] == fix_item["id"])
+check("  and the shelf follows the correction", row["on_hand"] == 10, str(row["on_hand"]))
+
+call("/supplier-inventory/issues", "POST", {
+    "sectionId": unit, "receivedByStaffId": collector, "purpose": reasons[0]["value"],
+    "lines": [{"itemId": fix_item["id"], "quantity": 4}]}, A)
+st, err = call(f"/supplier-inventory/batches/{fix_batch['id']}", "PUT", {"quantityReceived": 2}, A)
+check("it cannot be corrected below what has already been issued", st == 400, f"{st} {json.dumps(err)[:110]}")
+check("  and it says how much that is", err.get("alreadyIssued") == 4, str(err.get("alreadyIssued")))
+
+st, reversed_receipt = call(f"/supplier-inventory/batches/{fix_batch['id']}/reverse", "POST", {"reason": "Wrong item on the waybill"}, A)
+check("the whole receipt can be reversed instead", st == 200, json.dumps(reversed_receipt)[:140])
+check("  what was left comes off the shelf", reversed_receipt.get("removed") == 6, str(reversed_receipt.get("removed")))
+check("  what had already gone stays gone", reversed_receipt.get("alreadyIssued") == 4, str(reversed_receipt.get("alreadyIssued")))
+st, err = call(f"/supplier-inventory/batches/{fix_batch['id']}", "PUT", {"lotNumber": "nope"}, A)
+check("  and a reversed receipt can no longer be edited", st == 400, str(st))
+
+print("\n[19] Stock is debited and credited, with a reason, on the bin card")
+_, adj_item = call("/supplier-inventory/items", "POST", {
+    "name": f"Adjustable reagent {stamp}", "category": "reagent", "unit": "vial"}, A)
+_, adj_batch = call(f"/supplier-inventory/items/{adj_item['id']}/batches", "POST", {
+    "batchNumber": f"ADJ-{stamp}", "quantityReceived": 40, "quantityAvailable": 40,
+    "dateReceived": day(-2), "expiryDate": day(300)}, A)
+call(f"/supplier-inventory/batches/{adj_batch['id']}/acceptance", "POST", {"acceptanceStatus": "accepted"}, A)
+
+st, err = call(f"/supplier-inventory/items/{adj_item['id']}/adjust", "POST", {"direction": "debit", "quantity": 3}, A)
+check("a debit with no reason is refused", st == 400, str(st))
+st, debit = call(f"/supplier-inventory/items/{adj_item['id']}/adjust", "POST",
+                 {"direction": "debit", "quantity": 3, "reason": movement_reasons[0]["value"], "note": "Dropped"}, A)
+check("a debit takes stock off the shelf", st == 201 and debit["balanceAfter"] == 37, json.dumps(debit)[:140])
+check("  and it is allocated to a lot, not to thin air", len(debit["allocation"]) == 1, json.dumps(debit["allocation"]))
+st, err = call(f"/supplier-inventory/items/{adj_item['id']}/adjust", "POST",
+               {"direction": "debit", "quantity": 999, "reason": movement_reasons[0]["value"]}, A)
+check("a debit larger than the shelf is refused", st == 400 and err.get("available") == 37, json.dumps(err)[:110])
+st, credit = call(f"/supplier-inventory/items/{adj_item['id']}/adjust", "POST",
+                  {"direction": "credit", "quantity": 5, "reason": movement_reasons[0]["value"], "note": "Found behind the fridge"}, A)
+check("a credit puts stock back", st == 201 and credit["balanceAfter"] == 42, json.dumps(credit)[:140])
+card = call(f"/supplier-inventory/ledger/{adj_item['id']}", token=A)[1]
+kinds = [l["movement_type"] for l in card["lines"]]
+check("  both land on the bin card", "adjust_out" in kinds and "adjust_in" in kinds, str(kinds))
+check("  reading as words, not codes", any("Dropped" in str(l.get("reason")) for l in card["lines"]))
+
+print("\n[20] A movement posted in error is reversed by its mirror")
+out_move = next(l for l in card["lines"] if l["movement_type"] == "adjust_out")
+st, err = call(f"/supplier-inventory/movements/{out_move['id']}/reverse", "POST", {}, A)
+check("a reversal with no reason is refused", st == 400, str(st))
+st, rev = call(f"/supplier-inventory/movements/{out_move['id']}/reverse", "POST", {"reason": "Nothing was actually dropped"}, A)
+check("the mirror is posted", st == 201, json.dumps(rev)[:120])
+card = call(f"/supplier-inventory/ledger/{adj_item['id']}", token=A)[1]
+check("  the shelf is back to where it was", card["onHand"] == 45, str(card["onHand"]))
+original = next(l for l in card["lines"] if l["id"] == out_move["id"])
+check("  the original says it was reversed", original.get("reversed_by_id") == rev["id"], str(original.get("reversed_by_id")))
+check("  and reversing it twice is refused",
+      call(f"/supplier-inventory/movements/{out_move['id']}/reverse", "POST", {"reason": "again"}, A)[0] == 400)
+
+print("\n[21] A count can find stock the register lost")
+_, lost_item = call("/supplier-inventory/items", "POST", {
+    "name": f"Lost reagent {stamp}", "category": "reagent", "unit": "box"}, A)
+st, empty_count = call("/supplier-inventory/counts", "POST",
+                       {"scope": "full", "includeEmpty": True, "blind": True, "note": "Blind full count"}, A)
+check("a count including empty items is drawn up", st == 201 and empty_count["lines"] > 0, json.dumps(empty_count))
+sheet = call(f"/supplier-inventory/counts/{empty_count['id']}", token=A)[1]
+check("  it is marked blind", sheet.get("blind") == 1, str(sheet.get("blind")))
+check("  and an item with no lots at all is still on the sheet",
+      any(l["item_id"] == lost_item["id"] for l in sheet["lines"]), str(lost_item["id"]))
+check("  the sheet reports how far through it is", sheet["totals"]["lines"] == len(sheet["lines"]), json.dumps(sheet["totals"]))
+call(f"/supplier-inventory/counts/{empty_count['id']}/cancel", "POST", {"reason": "Only checking the sheet"}, A)
+check("an abandoned count posts nothing",
+      call(f"/supplier-inventory/counts/{empty_count['id']}/post", "POST", {"postPartial": True}, A)[0] == 400)
+
+print("\n[22] Anything found at the shelf goes onto the sheet")
+st, found_count = call("/supplier-inventory/counts", "POST", {"scope": "items", "itemIds": [adj_item["id"]]}, A)
+check("a count of just the items I pick is drawn up", st == 201, json.dumps(found_count))
+st, added = call(f"/supplier-inventory/counts/{found_count['id']}/lines", "POST",
+                 {"itemId": adj_item["id"], "batchId": adj_batch["id"], "countedQuantity": 50, "reason": "Recounted"}, A)
+check("a lot already on the sheet cannot be added twice", st == 400, str(st))
+st, added = call(f"/supplier-inventory/counts/{found_count['id']}/lines", "POST",
+                 {"itemId": lost_item["id"], "countedQuantity": 7, "reason": "Found behind another box"}, A)
+check("something not on the sheet can be added at the shelf", st == 201, json.dumps(added)[:120])
+sheet = call(f"/supplier-inventory/counts/{found_count['id']}", token=A)[1]
+line = next(l for l in sheet["lines"] if l["item_id"] == lost_item["id"])
+check("  and it is marked as added there", line["added_manually"] == 1, str(line["added_manually"]))
+st, posted = call(f"/supplier-inventory/counts/{found_count['id']}/post", "POST", {"postPartial": True}, A)
+check("posting reports what could not be posted", st == 200 and len(posted["failures"]) == 1, json.dumps(posted)[:200])
+check("  naming the item with no lot to put it on",
+      posted["failures"][0]["itemId"] == lost_item["id"], json.dumps(posted["failures"]))
+
+print("\n[23] Where a delivery came from is recorded, not assumed")
+st, src = call("/supplier-inventory/supply-sources", "POST",
+               {"name": f"Hospital Main Store {stamp}", "kind": "main_store", "code": "HMS"}, A)
+check("a store can be registered", st == 201, json.dumps(src))
+st, policy = call("/supplier-inventory/procurement-policy", "PUT", {"mode": "both", "defaultSourceType": "store"}, A)
+check("the laboratory can say it uses both routes", st == 200 and policy["mode"] == "both", json.dumps(policy))
+_, hosp_batch = call(f"/supplier-inventory/items/{adj_item['id']}/batches", "POST", {
+    "batchNumber": f"HMS-{stamp}", "quantityReceived": 20, "quantityAvailable": 20,
+    "dateReceived": day(0), "expiryDate": day(500), "sourceType": "store", "sourceId": src["id"],
+    "reference": "WB-4471"}, A)
+batches = call("/supplier-inventory/batches", token=A)[1]
+booked = next(b for b in batches if b["id"] == hosp_batch["id"])
+check("a delivery drawn from a store records the store", booked["source_id"] == src["id"], str(booked.get("source_id")))
+check("  and its kind, not just 'supplier'", booked["source_type"] == "main_store", str(booked.get("source_type")))
+check("  and reads as one line on the register", "Hospital Main Store" in str(booked.get("source_label")), str(booked.get("source_label")))
+check("  carrying the waybill it is traced by", booked.get("reference") == "WB-4471", str(booked.get("reference")))
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

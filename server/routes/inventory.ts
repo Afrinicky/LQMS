@@ -8,14 +8,16 @@ import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import {
   STORAGE_KINDS, normaliseBarcodePolicy, DEFAULT_BARCODE_POLICY, BARCODE_SOURCES,
   ISSUING_MOVEMENTS, ACCEPTANCE_STATES, MOVEMENT_LABELS, effectiveBarcode, parseGs1, normaliseGtin, type BarcodePolicy,
+  SUPPLY_SOURCE_KINDS, SUPPLY_SOURCE_KIND_LABELS, normaliseProcurementPolicy, allowsStore, type ProcurementPolicy,
 } from '../../shared/constants/inventory.js';
 
 import { buildWorkbook, sendWorkbook, readSheet, cell, numCell } from '../utils/xlsxRegister.js';
 import { stockControlRoutes } from './stockControl.js';
-import { postMovement } from '../services/stockLedger.js';
+import { postMovement, syncItemQuantity, isOutMovement } from '../services/stockLedger.js';
 import { VEN_CLASSES } from '../../shared/constants/stockControl.js';
 
 const BARCODE_POLICY_KEY = 'inventory.barcodePolicy';
+const PROCUREMENT_POLICY_KEY = 'inventory.procurementPolicy';
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 
 /**
@@ -67,6 +69,45 @@ function getBarcodePolicy(): BarcodePolicy {
     const row = getDb().prepare('SELECT value FROM settings WHERE key = ?').get(BARCODE_POLICY_KEY) as { value: string } | undefined;
     return row ? normaliseBarcodePolicy(JSON.parse(row.value)) : { ...DEFAULT_BARCODE_POLICY };
   } catch { return { ...DEFAULT_BARCODE_POLICY }; }
+}
+
+/** How this laboratory gets its stock — bought direct, drawn from a store, or both. */
+function getProcurementPolicy(): ProcurementPolicy {
+  try {
+    const row = getDb().prepare('SELECT value FROM settings WHERE key = ?').get(PROCUREMENT_POLICY_KEY) as { value: string } | undefined;
+    return normaliseProcurementPolicy(row ? JSON.parse(row.value) : null);
+  } catch { return normaliseProcurementPolicy(null); }
+}
+
+/**
+ * Where a delivery was received from, read off whatever the screen sent.
+ *
+ * A store is looked up on the register so the receipt keeps its name even
+ * after the store is renamed or retired; anything else is a direct purchase.
+ */
+function resolveReceiptSource(db: ReturnType<typeof getDb>, body: any): { type: string; id: number | null; name: string | null } {
+  const wanted = String(body?.sourceType ?? '').trim();
+  const sourceId = parseIntNullable(body?.sourceId);
+  if (wanted === 'store' || sourceId) {
+    const row = sourceId
+      ? db.prepare('SELECT id, name, kind FROM supply_sources WHERE id = ?').get(sourceId) as { id: number; name: string; kind: string } | undefined
+      : undefined;
+    if (row) return { type: row.kind, id: row.id, name: row.name };
+    // A store was meant but none was named — the receipt still records that it
+    // did not come straight from a supplier, so it is not silently miscounted.
+    return { type: 'other', id: null, name: String(body?.sourceName ?? '').trim() || null };
+  }
+  return { type: 'supplier', id: null, name: String(body?.sourceName ?? '').trim() || null };
+}
+
+/** The one line a receipt shows for where it came from. */
+function receiptSourceLabel(row: any): string {
+  if (!row.source_type || row.source_type === 'supplier') {
+    return row.supplier_register_name || row.supplier_name || 'Bought direct';
+  }
+  const named = row.source_register_name || row.source_name;
+  const kind = SUPPLY_SOURCE_KIND_LABELS[row.source_type] ?? row.source_type;
+  return named ? `${named} (${kind})` : kind;
 }
 
 /**
@@ -192,6 +233,80 @@ export function inventoryRoutes() {
     getDb().prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
       .run(BARCODE_POLICY_KEY, JSON.stringify(policy));
     audit(req, { action: 'edit', entity: 'settings', entityId: BARCODE_POLICY_KEY, newValue: policy });
+    res.json(policy);
+  });
+
+  // ===== Where deliveries come from =====
+  //
+  // The laboratory's own register of stores it draws from, and the policy
+  // saying whether it draws from stores at all. Both are Settings, so reading
+  // them needs only the stock right and changing them needs settings rights.
+  router.get('/supply-sources', requirePermission('supplier_inventory.stock', 'view'), (req, res) => {
+    const includeInactive = String(req.query.includeInactive || '') === 'true';
+    const rows = getDb().prepare(`SELECT s.*,
+        (SELECT COUNT(*) FROM inventory_batches b WHERE b.source_id = s.id) AS receipt_count
+      FROM supply_sources s
+      ${includeInactive ? '' : 'WHERE s.is_active = 1'}
+      ORDER BY s.display_order, s.name`).all() as any[];
+    res.json(rows.map(r => ({ ...r, kind_label: SUPPLY_SOURCE_KIND_LABELS[r.kind] ?? r.kind })));
+  });
+
+  router.post('/supply-sources', requirePermission('settings', 'edit'), (req, res) => {
+    const name = String(req.body?.name ?? '').trim();
+    if (!name) return res.status(400).json({ error: 'A name is required — the store as people call it.' });
+    const kind = SUPPLY_SOURCE_KINDS.includes(req.body?.kind) ? req.body.kind : 'main_store';
+    const db = getDb();
+    const order = (db.prepare('SELECT COALESCE(MAX(display_order), 0) + 1 n FROM supply_sources').get() as { n: number }).n;
+    const r = db.prepare(`INSERT INTO supply_sources (name, kind, code, contact_person, phone, email, address, note, display_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(name, kind, req.body?.code || null, req.body?.contactPerson || null, req.body?.phone || null,
+        req.body?.email || null, req.body?.address || null, req.body?.note || null, order);
+    audit(req, { action: 'create', entity: 'supply_sources', entityId: r.lastInsertRowid, newValue: { name, kind } });
+    res.status(201).json({ id: Number(r.lastInsertRowid) });
+  });
+
+  router.put('/supply-sources/:id', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const row = db.prepare('SELECT * FROM supply_sources WHERE id = ?').get(req.params.id) as any;
+    if (!row) return res.status(404).json({ error: 'That source is not on the register.' });
+    const pick = (key: string, column: string) => (req.body?.[key] !== undefined ? (req.body[key] || null) : row[column]);
+    db.prepare(`UPDATE supply_sources SET name = ?, kind = ?, code = ?, contact_person = ?, phone = ?, email = ?,
+      address = ?, note = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(
+        req.body?.name !== undefined ? String(req.body.name).trim() || row.name : row.name,
+        SUPPLY_SOURCE_KINDS.includes(req.body?.kind) ? req.body.kind : row.kind,
+        pick('code', 'code'), pick('contactPerson', 'contact_person'), pick('phone', 'phone'),
+        pick('email', 'email'), pick('address', 'address'), pick('note', 'note'),
+        req.body?.isActive !== undefined ? (req.body.isActive ? 1 : 0) : row.is_active,
+        row.id);
+    audit(req, { action: 'edit', entity: 'supply_sources', entityId: row.id, oldValue: row, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  router.delete('/supply-sources/:id', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const row = db.prepare('SELECT * FROM supply_sources WHERE id = ?').get(req.params.id) as any;
+    if (!row) return res.status(404).json({ error: 'That source is not on the register.' });
+    // A source that deliveries were received against is part of their record,
+    // so it is retired rather than erased — the receipts keep reading correctly.
+    const used = (db.prepare('SELECT COUNT(*) c FROM inventory_batches WHERE source_id = ?').get(row.id) as { c: number }).c;
+    if (used) {
+      db.prepare('UPDATE supply_sources SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(row.id);
+      audit(req, { action: 'edit', entity: 'supply_sources', entityId: row.id, oldValue: row, newValue: { is_active: 0 } });
+      return res.json({ ok: true, mode: 'retired', message: `${row.name} has ${used} delivery${used === 1 ? '' : 'ies'} recorded against it, so it has been retired rather than deleted.` });
+    }
+    db.prepare('DELETE FROM supply_sources WHERE id = ?').run(row.id);
+    audit(req, { action: 'delete', entity: 'supply_sources', entityId: row.id, oldValue: row });
+    res.json({ ok: true, mode: 'deleted' });
+  });
+
+  router.get('/procurement-policy', requirePermission('supplier_inventory.stock', 'view'), (_req, res) =>
+    res.json(getProcurementPolicy()));
+  router.put('/procurement-policy', requirePermission('settings', 'edit'), (req, res) => {
+    const policy = normaliseProcurementPolicy(req.body);
+    getDb().prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+      .run(PROCUREMENT_POLICY_KEY, JSON.stringify(policy));
+    audit(req, { action: 'edit', entity: 'settings', entityId: PROCUREMENT_POLICY_KEY, newValue: policy });
     res.json(policy);
   });
 
@@ -663,13 +778,15 @@ export function inventoryRoutes() {
     if (req.query.to) { where.push('date(m.movement_date) <= date(?)'); args.push(String(req.query.to)); }
     const rows = db.prepare(`SELECT m.*, i.name AS item_name, i.item_code, i.unit AS unit_of_measure,
         b.batch_number, b.lot_number, b.expiry_date AS batch_expiry,
-        sec.name AS issued_to_section_name, st.full_name AS received_by_name, u.full_name AS recorded_by_name
+        sec.name AS issued_to_section_name, st.full_name AS received_by_name, u.full_name AS recorded_by_name,
+        iss.issue_number, iss.destination_name AS issue_destination_name
       FROM inventory_movements m
       LEFT JOIN inventory_items i ON i.id = m.item_id
       LEFT JOIN inventory_batches b ON b.id = m.batch_id
       LEFT JOIN sections sec ON sec.id = m.issued_to_section_id
       LEFT JOIN staff st ON st.id = m.received_by_staff_id
       LEFT JOIN users u ON u.id = m.created_by
+      LEFT JOIN stock_issues iss ON iss.id = m.issue_id
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
       ORDER BY m.movement_date DESC, m.id DESC
       LIMIT ?`).all(...args, Number(req.query.limit) || 500);
@@ -719,7 +836,11 @@ export function inventoryRoutes() {
         WHERE b.product_barcode = ? COLLATE NOCASE`).get(batchBarcode) as { batch_number: string | null; name: string } | undefined;
       if (clash) return res.status(400).json({ error: `That barcode is already on ${clash.name} batch ${clash.batch_number || '(unnumbered)'}.` });
     }
-    const result = db.prepare(`INSERT INTO inventory_batches (item_id, batch_number, lot_number, supplier_id, supplier_name, quantity_received, quantity_available, date_received, expiry_date, acceptance_status, acceptance_checked_by_staff_id, acceptance_date, storage_location_id, product_barcode, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    // Where the laboratory actually received this from. A store is named from
+    // the register when one is given; anything else is a direct purchase, and
+    // the supplier beside it says who from.
+    const source = resolveReceiptSource(db, req.body);
+    const result = db.prepare(`INSERT INTO inventory_batches (item_id, batch_number, lot_number, supplier_id, supplier_name, quantity_received, quantity_available, date_received, expiry_date, acceptance_status, acceptance_checked_by_staff_id, acceptance_date, storage_location_id, product_barcode, status, source_type, source_id, source_name, reference, unit_cost, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(
         req.params.id,
         req.body.batchNumber ?? null,
@@ -736,6 +857,9 @@ export function inventoryRoutes() {
         parseIntNullable(req.body.storageLocationId) ?? item.location_id,
         batchBarcode,
         req.body.status ?? 'available',
+        source.type, source.id, source.name,
+        String(req.body.reference ?? '').trim() || null,
+        req.body.unitCost != null && req.body.unitCost !== '' ? Number(req.body.unitCost) : null,
         req.user!.id
       );
     // A receipt is a movement. Without one the bin card shows stock leaving and
@@ -761,8 +885,20 @@ export function inventoryRoutes() {
 
   router.get('/batches', requirePermission('supplier_inventory.stock', 'view'), (_req, res) => {
     const db = getDb();
-    const rows = db.prepare(`SELECT b.*, i.name AS item_name, i.unit AS unit_of_measure FROM inventory_batches b JOIN inventory_items i ON i.id = b.item_id ORDER BY b.expiry_date ASC, b.date_received ASC`).all() as any[];
-    res.json(rows.map(row => ({ ...row, expiry_status: computeExpiryStatus(row.expiry_date) })));
+    const rows = db.prepare(`SELECT b.*, i.name AS item_name, i.item_code, i.unit AS unit_of_measure,
+        sup.name AS supplier_register_name, src.name AS source_register_name,
+        (SELECT COALESCE(SUM(m.quantity), 0) FROM inventory_movements m
+          WHERE m.batch_id = b.id AND m.movement_type NOT IN ('receive', 'adjust_in', 'transfer_in', 'return')) AS quantity_moved
+      FROM inventory_batches b
+      JOIN inventory_items i ON i.id = b.item_id
+      LEFT JOIN suppliers sup ON sup.id = b.supplier_id
+      LEFT JOIN supply_sources src ON src.id = b.source_id
+      ORDER BY b.expiry_date ASC, b.date_received ASC`).all() as any[];
+    res.json(rows.map(row => ({
+      ...row,
+      expiry_status: computeExpiryStatus(row.expiry_date),
+      source_label: receiptSourceLabel(row),
+    })));
   });
 
   router.post('/batches/:id/movement', requirePermission('supplier_inventory.stock', 'create'), (req, res) => {
@@ -841,6 +977,286 @@ export function inventoryRoutes() {
     });
     audit(req, { action: 'create', entity: 'inventory_movements', entityId: posted.id, newValue: { batchId: req.params.id, ...req.body } });
     res.status(201).json({ id: posted.id, balanceAfter: posted.balanceAfter });
+  });
+
+  /**
+   * Taking stock off, or putting it back on, without a delivery or an issue.
+   *
+   * Every store needs this. A bottle is broken, a box is found behind another,
+   * a quantity was keyed wrong three weeks ago and only noticed now. A DEBIT
+   * takes stock off the shelf; a CREDIT puts it back. Neither is a way around
+   * the controls: both are movements, both carry a reason, both land on the
+   * bin card, and a debit is allocated across lots earliest-expiry-first
+   * exactly as an issue would be, so it cannot quietly come off the newest box.
+   */
+  router.post('/items/:id/adjust', requirePermission('supplier_inventory.stock', 'edit'), (req, res) => {
+    const db = getDb();
+    const item = db.prepare('SELECT * FROM inventory_items WHERE id = ?').get(req.params.id) as any;
+    if (!item) return res.status(404).json({ error: 'Inventory item not found' });
+
+    const direction = req.body?.direction === 'credit' ? 'credit' : 'debit';
+    const quantity = Number(req.body?.quantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) return res.status(400).json({ error: 'Say how much, as a number greater than zero.' });
+
+    const reasonCode = String(req.body?.reason ?? '').trim();
+    if (!reasonCode) return res.status(400).json({ error: 'An adjustment needs a reason — it is the whole point of recording it.' });
+    const reasonOption = db.prepare('SELECT label FROM config_options WHERE list_key = ? AND value = ?')
+      .get('stock_movement_reason', reasonCode) as { label?: string } | undefined;
+    const note = String(req.body?.note ?? '').trim();
+    const reason = [reasonOption?.label ?? reasonCode, note].filter(Boolean).join(' — ');
+    const date = req.body?.movementDate || new Date().toISOString().slice(0, 10);
+    const batchId = parseIntNullable(req.body?.batchId);
+
+    if (direction === 'credit') {
+      // Stock put back has to go onto a lot, because a quantity with no lot
+      // behind it cannot be traced or expired. The caller names the lot, or
+      // the store puts it on the one that expires first.
+      const batch = batchId
+        ? db.prepare('SELECT * FROM inventory_batches WHERE id = ? AND item_id = ?').get(batchId, item.id) as any
+        : db.prepare(`SELECT * FROM inventory_batches WHERE item_id = ? AND reversed_at IS NULL
+            ORDER BY (expiry_date IS NULL), expiry_date, date_received LIMIT 1`).get(item.id) as any;
+      if (!batch) return res.status(400).json({ error: 'There is no lot to credit this to. Book the stock in as a delivery instead.' });
+      const posted = postMovement(db, {
+        itemId: item.id, batchId: batch.id, movementType: 'adjust_in', quantity,
+        movementDate: date, reason: `Stock credited — ${reason}`, userId: req.user!.id,
+      });
+      audit(req, { action: 'edit', entity: 'inventory_movements', entityId: posted.id, newValue: { adjust: 'credit', itemId: item.id, quantity, reason } });
+      return res.status(201).json({ ok: true, direction, balanceAfter: posted.balanceAfter, allocation: [{ batchId: batch.id, quantity }] });
+    }
+
+    // A debit cannot take out more than is actually there. It is allowed to
+    // reach quarantined and expired stock, though — a broken bottle is broken
+    // whether or not it had been released for use.
+    const onHand = Number((db.prepare(`SELECT COALESCE(SUM(quantity_available), 0) AS n FROM inventory_batches
+      WHERE item_id = ? AND reversed_at IS NULL`).get(item.id) as { n: number }).n) || 0;
+    if (quantity > onHand) {
+      return res.status(400).json({ error: `There ${onHand === 1 ? 'is' : 'are'} only ${onHand} ${item.unit ?? ''} on the shelf.`.replace(/\s+/g, ' '), available: onHand });
+    }
+
+    const lots = batchId
+      ? [db.prepare('SELECT * FROM inventory_batches WHERE id = ? AND item_id = ?').get(batchId, item.id) as any].filter(Boolean)
+      : db.prepare(`SELECT * FROM inventory_batches WHERE item_id = ? AND quantity_available > 0 AND reversed_at IS NULL
+          ORDER BY (expiry_date IS NULL), expiry_date, date_received`).all(item.id) as any[];
+    if (lots.length === 0) return res.status(400).json({ error: 'There is nothing on the shelf to take off.' });
+    if (batchId && Number(lots[0].quantity_available) < quantity) {
+      return res.status(400).json({ error: `That lot only holds ${lots[0].quantity_available}.`, available: lots[0].quantity_available });
+    }
+
+    const allocation: Array<{ batchId: number; quantity: number; batchNumber: string | null }> = [];
+    let outstanding = quantity;
+    let balanceAfter = onHand;
+    db.transaction(() => {
+      for (const lot of lots) {
+        if (outstanding <= 0) break;
+        const take = Math.min(outstanding, Number(lot.quantity_available));
+        if (take <= 0) continue;
+        const posted = postMovement(db, {
+          itemId: item.id, batchId: lot.id, movementType: 'adjust_out', quantity: take,
+          movementDate: date, reason: `Stock debited — ${reason}`, userId: req.user!.id,
+        });
+        balanceAfter = posted.balanceAfter;
+        allocation.push({ batchId: lot.id, quantity: take, batchNumber: lot.batch_number });
+        outstanding -= take;
+      }
+    })();
+
+    audit(req, { action: 'edit', entity: 'inventory_movements', entityId: item.id, newValue: { adjust: 'debit', itemId: item.id, quantity, reason, allocation } });
+    res.status(201).json({ ok: true, direction, balanceAfter, allocation });
+  });
+
+  /**
+   * Undoing a movement posted in error.
+   *
+   * A movement is never edited away and never deleted: the bin card is a
+   * running record, and rewriting a line of it invalidates every balance
+   * printed after that line. The correction is its mirror — a movement the
+   * same size in the opposite direction, pointed at the one it reverses, so
+   * the card reads "10 out, 10 back, because…" rather than showing nothing at
+   * all where a mistake used to be.
+   */
+  router.post('/movements/:id/reverse', requirePermission('supplier_inventory.stock', 'void_archive'), (req, res) => {
+    const db = getDb();
+    const move = db.prepare('SELECT * FROM inventory_movements WHERE id = ?').get(req.params.id) as any;
+    if (!move) return res.status(404).json({ error: 'That movement is not on the record.' });
+    if (move.reversed_by_id) return res.status(400).json({ error: 'This movement has already been reversed.' });
+    if (move.reversal_of_id) return res.status(400).json({ error: 'This movement is itself a reversal — reversing it would only put the mistake back.' });
+    if (move.issue_id) {
+      return res.status(400).json({
+        error: 'This movement belongs to an issue voucher. Cancel the voucher instead, so every line on it goes back together.',
+        issueId: move.issue_id,
+      });
+    }
+    const reason = String(req.body?.reason ?? '').trim();
+    if (!reason) return res.status(400).json({ error: 'Say why the movement is being reversed — it goes on the bin card.' });
+
+    const mirror = isOutMovement(move.movement_type) ? 'adjust_in' : 'adjust_out';
+    const quantity = Math.abs(Number(move.quantity));
+
+    if (mirror === 'adjust_out' && move.batch_id) {
+      const available = Number((db.prepare('SELECT quantity_available AS n FROM inventory_batches WHERE id = ?').get(move.batch_id) as { n: number } | undefined)?.n ?? 0);
+      if (available < quantity) {
+        return res.status(400).json({
+          error: `Only ${available} of that delivery is still on the shelf, so a receipt of ${quantity} cannot be taken back. Record an adjustment for what is actually there.`,
+          available,
+        });
+      }
+    }
+
+    let reversalId = 0;
+    db.transaction(() => {
+      const posted = postMovement(db, {
+        itemId: move.item_id, batchId: move.batch_id, movementType: mirror, quantity,
+        movementDate: new Date().toISOString().slice(0, 10),
+        reason: `Reversal of ${MOVEMENT_LABELS[move.movement_type] ?? move.movement_type} on ${String(move.movement_date).slice(0, 10)} — ${reason}`,
+        userId: req.user!.id,
+      });
+      reversalId = posted.id;
+      db.prepare('UPDATE inventory_movements SET reversal_of_id = ? WHERE id = ?').run(move.id, posted.id);
+      db.prepare('UPDATE inventory_movements SET reversed_by_id = ? WHERE id = ?').run(posted.id, move.id);
+    })();
+
+    audit(req, { action: 'void_archive', entity: 'inventory_movements', entityId: move.id, oldValue: move, newValue: { reversedBy: reversalId, reason } });
+    res.status(201).json({ ok: true, id: reversalId });
+  });
+
+  /** Correcting what a movement SAYS, which is not the same as undoing it. */
+  router.put('/movements/:id', requirePermission('supplier_inventory.stock', 'edit'), (req, res) => {
+    const db = getDb();
+    const move = db.prepare('SELECT * FROM inventory_movements WHERE id = ?').get(req.params.id) as any;
+    if (!move) return res.status(404).json({ error: 'That movement is not on the record.' });
+    // The quantity, the type and the lot are what the balances were worked out
+    // from; changing them here would leave every balance after this line wrong.
+    // Only the words are editable — to correct those, reverse and re-post.
+    const reason = req.body?.reason !== undefined ? (String(req.body.reason).trim() || null) : move.reason;
+    db.prepare('UPDATE inventory_movements SET reason = ?, issued_to_section_id = ?, received_by_staff_id = ? WHERE id = ?')
+      .run(reason,
+        req.body?.issuedToSectionId !== undefined ? parseIntNullable(req.body.issuedToSectionId) : move.issued_to_section_id,
+        req.body?.receivedByStaffId !== undefined ? parseIntNullable(req.body.receivedByStaffId) : move.received_by_staff_id,
+        move.id);
+    audit(req, { action: 'edit', entity: 'inventory_movements', entityId: move.id, oldValue: move, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  /**
+   * Correcting a receipt that was entered wrong.
+   *
+   * A lot number typed from the wrong box, an expiry a year out, a quantity
+   * keyed as 100 instead of 10 — these are ordinary mistakes, and a store that
+   * cannot fix them ends up with a second, "correct" batch beside the wrong
+   * one. What may be changed depends on what has already happened: the lot
+   * details and where it is kept are always editable, but the quantity can
+   * only be corrected down to what is still on the shelf, because anything
+   * already issued cannot be un-received.
+   */
+  router.put('/batches/:id', requirePermission('supplier_inventory.stock', 'edit'), (req, res) => {
+    const db = getDb();
+    const batch = db.prepare('SELECT * FROM inventory_batches WHERE id = ?').get(req.params.id) as any;
+    if (!batch) return res.status(404).json({ error: 'That delivery is not on the register.' });
+    if (batch.reversed_at) return res.status(400).json({ error: 'This receipt has been reversed and can no longer be changed.' });
+
+    const issued = Number(batch.quantity_received) - Number(batch.quantity_available);
+    const patch = (key: string, column: string) => (req.body?.[key] !== undefined ? (req.body[key] === '' ? null : req.body[key]) : batch[column]);
+
+    let received = batch.quantity_received;
+    let available = batch.quantity_available;
+    if (req.body?.quantityReceived !== undefined && req.body.quantityReceived !== '') {
+      received = Number(req.body.quantityReceived);
+      if (!Number.isFinite(received) || received < 0) return res.status(400).json({ error: 'The quantity received cannot be negative.' });
+      if (received < issued) {
+        return res.status(400).json({
+          error: `${issued} has already gone out of this delivery, so it cannot be corrected to ${received}. Reverse the receipt instead, or record an adjustment.`,
+          alreadyIssued: issued,
+        });
+      }
+      // What is left on the shelf moves with the correction: the difference
+      // between what was received and what has gone out is what is still there.
+      available = received - issued;
+    }
+
+    const barcode = req.body?.productBarcode !== undefined ? (String(req.body.productBarcode).trim() || null) : batch.product_barcode;
+    if (barcode && barcode !== batch.product_barcode) {
+      const clash = db.prepare(`SELECT b.id FROM inventory_batches b WHERE b.product_barcode = ? COLLATE NOCASE AND b.id != ?`).get(barcode, batch.id);
+      if (clash) return res.status(400).json({ error: 'That barcode is already on another delivery.' });
+    }
+
+    const source = req.body?.sourceType !== undefined || req.body?.sourceId !== undefined
+      ? resolveReceiptSource(db, req.body)
+      : { type: batch.source_type, id: batch.source_id, name: batch.source_name };
+
+    db.transaction(() => {
+      db.prepare(`UPDATE inventory_batches SET batch_number = ?, lot_number = ?, supplier_id = ?, quantity_received = ?,
+        quantity_available = ?, date_received = ?, expiry_date = ?, storage_location_id = ?, product_barcode = ?,
+        source_type = ?, source_id = ?, source_name = ?, reference = ?, unit_cost = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?`)
+        .run(
+          patch('batchNumber', 'batch_number'), patch('lotNumber', 'lot_number'),
+          req.body?.supplierId !== undefined ? parseIntNullable(req.body.supplierId) : batch.supplier_id,
+          received, available,
+          req.body?.dateReceived || batch.date_received,
+          patch('expiryDate', 'expiry_date'),
+          req.body?.storageLocationId !== undefined ? parseIntNullable(req.body.storageLocationId) : batch.storage_location_id,
+          barcode, source.type, source.id, source.name,
+          patch('reference', 'reference'),
+          req.body?.unitCost !== undefined && req.body.unitCost !== '' ? Number(req.body.unitCost) : batch.unit_cost,
+          batch.id);
+
+      // The receipt movement is the bin card's record of this delivery, so a
+      // corrected quantity has to reach it too — otherwise the card and the
+      // shelf disagree for ever.
+      if (received !== batch.quantity_received) {
+        db.prepare(`UPDATE inventory_movements SET quantity = ?,
+            reason = COALESCE(reason, '') || ' — quantity corrected'
+          WHERE batch_id = ? AND movement_type = 'receive'`).run(received, batch.id);
+        syncItemQuantity(db, batch.item_id);
+      }
+    })();
+
+    audit(req, { action: 'edit', entity: 'inventory_batches', entityId: batch.id, oldValue: batch, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  /**
+   * Reversing a receipt booked in by mistake.
+   *
+   * The delivery is not erased — its movements are the record that it was
+   * entered, and erasing them would leave a bin card that cannot be
+   * reconciled. What happens instead is that whatever is still on the shelf is
+   * taken back off it as a reversal movement, and the batch is marked reversed
+   * so nothing more can be issued from it. Anything already issued stays
+   * issued: that stock physically left, whatever the paperwork said.
+   */
+  router.post('/batches/:id/reverse', requirePermission('supplier_inventory.stock', 'void_archive'), (req, res) => {
+    const db = getDb();
+    const batch = db.prepare('SELECT * FROM inventory_batches WHERE id = ?').get(req.params.id) as any;
+    if (!batch) return res.status(404).json({ error: 'That delivery is not on the register.' });
+    if (batch.reversed_at) return res.status(400).json({ error: 'This receipt has already been reversed.' });
+    const reason = String(req.body?.reason ?? '').trim();
+    if (!reason) return res.status(400).json({ error: 'Say why the receipt is being reversed — it goes on the record.' });
+
+    const issued = Number(batch.quantity_received) - Number(batch.quantity_available);
+    const remaining = Number(batch.quantity_available);
+    const date = new Date().toISOString().slice(0, 10);
+
+    db.transaction(() => {
+      if (remaining > 0) {
+        postMovement(db, {
+          itemId: batch.item_id, batchId: batch.id, movementType: 'adjust_out', quantity: remaining,
+          movementDate: date, reason: `Receipt reversed — ${reason}`, userId: req.user!.id,
+        });
+      }
+      db.prepare(`UPDATE inventory_batches SET reversed_at = CURRENT_TIMESTAMP, reversed_by_user_id = ?,
+        reversal_reason = ?, status = 'reversed', acceptance_status = 'rejected', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?`).run(req.user!.id, reason, batch.id);
+      syncItemQuantity(db, batch.item_id);
+    })();
+
+    audit(req, { action: 'void_archive', entity: 'inventory_batches', entityId: batch.id, oldValue: batch, newValue: { reversed: true, reason, remaining } });
+    res.json({
+      ok: true, removed: remaining, alreadyIssued: issued,
+      message: issued > 0
+        ? `Receipt reversed. ${remaining} was taken back off the shelf; ${issued} had already been issued and stays on the record.`
+        : `Receipt reversed — ${remaining} taken back off the shelf.`,
+    });
   });
 
   router.post('/batches/:id/acceptance', requirePermission('supplier_inventory.stock', 'edit'), (req, res) => {

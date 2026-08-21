@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState, type ReactNode } from 
 import { Link } from 'react-router-dom';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, BarChart, CHART_COLORS, ModuleAlerts, DetailModal, RowMenu } from '../components/ui';
-import { FileText, Pencil, PackagePlus, Tag, Trash2, ShieldAlert, Star } from 'lucide-react';
+import { FileText, Pencil, PackagePlus, Tag, Trash2, ShieldAlert, Star, Undo2, Scale, Plus, Search } from 'lucide-react';
 import { StockLedger, IssueDesk, IssueRegister, StockTake, type LedgerRow } from './inventory/StockControl';
 import { ForecastingPanel } from './inventory/Forecasting';
 import { InventoryReports } from './inventory/Reports';
@@ -11,6 +11,9 @@ import { STOCK_STATUS_LABELS, NEEDS_ACTION } from '../../shared/constants/stockC
 // Receiving is one job done in two places: the delivery is booked in, and the
 // lots it created are then inspected, accepted and watched for expiry.
 const RECEIVING_TABS = ['Goods receipt', 'Batches & lots'] as const;
+// Counting the shelf and correcting what is on it are the same job seen from
+// two ends, so they share a tab rather than competing for the top bar.
+const STOCK_MANAGEMENT_TABS = ['Stock take', 'Stock movements'] as const;
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken, ApiError } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -38,8 +41,12 @@ import {
   DUTY_LABELS, DUTY_CLAUSES, DUTY_HINTS, dutiesFor, categoryFromLegacy, isArchetype,
 } from '../../shared/constants/equipment';
 import type { ConfigOption } from '../../shared/constants/configLists';
-import { BARCODE_SOURCE_LABELS, MOVEMENT_LABELS, STORAGE_KIND_LABELS, effectiveBarcode } from '../../shared/constants/inventory';
-import type { BarcodePolicy } from '../../shared/constants/inventory';
+import {
+  BARCODE_SOURCE_LABELS, MOVEMENT_LABELS, STORAGE_KIND_LABELS, effectiveBarcode,
+  SUPPLY_SOURCE_KIND_LABELS, normaliseProcurementPolicy, allowsSupplier, allowsStore,
+} from '../../shared/constants/inventory';
+import type { BarcodePolicy, ProcurementPolicy } from '../../shared/constants/inventory';
+import type { SupplySource } from './StockSettingsPage';
 
 // Where a supplier stands on evaluation, in one word. Ordered worst-first so
 // the management view can simply sort by it.
@@ -1331,6 +1338,13 @@ export function InventoryPage() {
   // Settings → Dropdown Lists rather than typed afresh at every counter.
   const [issueReasons, setIssueReasons] = useState<ConfigOption[]>([]);
   const [movementReasons, setMovementReasons] = useState<ConfigOption[]>([]);
+  // Where stock can be issued to beyond the laboratory's own benches, and
+  // where deliveries can come from besides a supplier. Both are the
+  // laboratory's own registers, configured in Settings.
+  const [issueDestinations, setIssueDestinations] = useState<ConfigOption[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [supplySources, setSupplySources] = useState<SupplySource[]>([]);
+  const [procurement, setProcurement] = useState<ProcurementPolicy>({ mode: 'direct', defaultSourceType: 'supplier' });
   const [barcodePolicy, setBarcodePolicy] = useState<BarcodePolicy>({ defaultSource: 'system', allowPerItem: true });
   const [regBusy, setRegBusy] = useState('');
   const [regResult, setRegResult] = useState<{ created: number; updated: number; skipped: number; errors: string[] } | null>(null);
@@ -1339,9 +1353,11 @@ export function InventoryPage() {
   const [itemSearch, setItemSearch] = useState('');
   const [fefoWarning, setFefoWarning] = useState<{ message: string; batchId: number } | null>(null);
   const [recvTab, setRecvTab] = useState<typeof RECEIVING_TABS[number]>('Goods receipt');
+  const [manageTab, setManageTab] = useState<typeof STOCK_MANAGEMENT_TABS[number]>('Stock take');
   // A link to a batch lands on the bench that holds it, not on the module's
   // front page: ?tab=Receiving&subtab=Batches & lots.
   useTabParam(RECEIVING_TABS as unknown as string[], t => setRecvTab(t as typeof RECEIVING_TABS[number]), 'subtab');
+  useTabParam(STOCK_MANAGEMENT_TABS as unknown as string[], t => setManageTab(t as typeof STOCK_MANAGEMENT_TABS[number]), 'subtab');
   // Bumped whenever stock moves, so every panel showing a balance re-reads it.
   const [stockKey, setStockKey] = useState(0);
   const [ledgerRows, setLedgerRows] = useState<LedgerRow[]>([]);
@@ -1355,6 +1371,11 @@ export function InventoryPage() {
   const [evaluations, setEvaluations] = useState<SupplierEvaluationRow[]>([]);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [removingSupplier, setRemovingSupplier] = useState<SupplierDeletionImpact | null>(null);
+  // Corrections to what is already recorded. Each is deliberately a separate
+  // piece of state, because each asks a different question before it acts.
+  const [editingBatch, setEditingBatch] = useState<InventoryBatch | null>(null);
+  const [reversingBatch, setReversingBatch] = useState<InventoryBatch | null>(null);
+  const [reversingMovement, setReversingMovement] = useState<StockMovement | null>(null);
   // The register is searched over what a storekeeper can see on the shelf —
   // the name, the code, either barcode, the category and where it is kept.
   const itemRows = useMemo(() => {
@@ -1394,7 +1415,11 @@ export function InventoryPage() {
     return suppliers.filter(sp => [sp.name, sp.supplier_code, sp.contact_person, sp.contact, sp.phone, sp.email, sp.item_category]
       .some(v => String(v ?? '').toLowerCase().includes(q)));
   }, [suppliers, supplierSearch]);
-  const [batchForm, setBatchForm] = useState({ itemId: '', batchNumber: '', lotNumber: '', supplierId: '', quantityReceived: 0, quantityAvailable: 0, dateReceived: '', expiryDate: '', storageLocationId: '', productBarcode: '' });
+  const [batchForm, setBatchForm] = useState({
+    itemId: '', batchNumber: '', lotNumber: '', supplierId: '', quantityReceived: 0, quantityAvailable: 0,
+    dateReceived: '', expiryDate: '', storageLocationId: '', productBarcode: '',
+    sourceType: 'supplier' as 'supplier' | 'store', sourceId: '', reference: '', unitCost: '',
+  });
   const [receiptNote, setReceiptNote] = useState<string | null>(null);
   const [movementForm, setMovementForm] = useState({ batchId: '', movementType: 'issue', quantity: 0, movementDate: '', issuedToSectionId: '', receivedByStaffId: '', reason: '', reasonNote: '' });
   const [supplierForm, setSupplierForm] = useState({ name: '', contactPerson: '', phone: '', email: '', address: '', itemCategory: '', evaluationRequired: false });
@@ -1424,6 +1449,12 @@ export function InventoryPage() {
       api<ConfigOption[]>('/config/option-lists/inventory_unit').then(setUnits).catch(() => setUnits([]));
       api<ConfigOption[]>('/config/option-lists/stock_issue_reason').then(setIssueReasons).catch(() => setIssueReasons([]));
       api<ConfigOption[]>('/config/option-lists/stock_movement_reason').then(setMovementReasons).catch(() => setMovementReasons([]));
+      api<ConfigOption[]>('/config/option-lists/stock_issue_destination').then(setIssueDestinations).catch(() => setIssueDestinations([]));
+      api<Department[]>('/departments').then(setDepartments).catch(() => setDepartments([]));
+      api<SupplySource[]>('/supplier-inventory/supply-sources').then(setSupplySources).catch(() => setSupplySources([]));
+      api<ProcurementPolicy>('/supplier-inventory/procurement-policy')
+        .then(p => { setProcurement(normaliseProcurementPolicy(p)); setBatchForm(f => ({ ...f, sourceType: normaliseProcurementPolicy(p).defaultSourceType })); })
+        .catch(() => undefined);
       api<BarcodePolicy>('/supplier-inventory/barcode-policy')
         .then(p => { setBarcodePolicy(p); setItemForm(f => ({ ...f, barcodeSource: p.defaultSource })); })
         .catch(() => undefined);
@@ -1557,7 +1588,11 @@ export function InventoryPage() {
     if (!batchForm.itemId) return setError('Select an item');
     try {
       await api(`/supplier-inventory/items/${batchForm.itemId}/batches`, { method: 'POST', body: JSON.stringify(batchForm) });
-      setBatchForm({ itemId: '', batchNumber: '', lotNumber: '', supplierId: '', quantityReceived: 0, quantityAvailable: 0, dateReceived: '', expiryDate: '', storageLocationId: '', productBarcode: '' });
+      setBatchForm(f => ({
+        itemId: '', batchNumber: '', lotNumber: '', supplierId: '', quantityReceived: 0, quantityAvailable: 0,
+        dateReceived: '', expiryDate: '', storageLocationId: '', productBarcode: '',
+        sourceType: f.sourceType, sourceId: '', reference: '', unitCost: '',
+      }));
       setReceiptNote(null);
       setStockKey(k => k + 1);
       await load();
@@ -1621,7 +1656,7 @@ export function InventoryPage() {
     </div>}
     {/* The store's day, in the order it runs: what is held, what came in, what
         is going out, what the count found, and the trail of all of it. */}
-    {tabBarFor('supplier_inventory')(tab, ['Dashboard', 'Item Register', 'New Item', 'Stock Ledger', 'Receiving', 'Issuing', 'Stock Take', 'Stock Movements', 'Suppliers', 'Storage Inspections', 'Barcode Labels', 'Forecasting'], setTab)}
+    {tabBarFor('supplier_inventory')(tab, ['Dashboard', 'Stock Ledger', 'Issuing', 'Receiving', 'Item Register', 'New Item', 'Stock Management', 'Suppliers', 'Storage Inspections', 'Barcode Labels', 'Forecasting'], setTab)}
 
     {/* The store's own position, not a count of catalogue rows: can the bench
         be served today, and what is about to be lost off the shelf. The
@@ -1709,12 +1744,6 @@ export function InventoryPage() {
             </td>
           </tr>)}
         </tbody></table></div>}
-      {selected && <InventoryDetailPanel item={selected} staff={staff} suppliers={suppliers} sections={sections}
-        storagePlaces={storagePlaces} categories={categories} units={units} barcodePolicy={barcodePolicy}
-        mode={detailMode} setMode={setDetailMode} can={can}
-        onClose={() => { setSelected(null); setDetailMode('view'); }} onSaved={async () => { await load(); await openDetail(selected.id, 'view'); }}
-        acceptBatch={acceptBatch} createBatchNc={createBatchNc} onRemove={() => void openItemRemoval(selected)} />}
-      {removing && <ItemRemovalModal impact={removing} busy={regBusy} onClose={() => setRemoving(null)} onDone={async msg => { setRemoving(null); setSelected(null); setNotice(msg); await load(); }} setError={setError} />}
     </div>}
 
     {tab === 'New Item' && <div className="card">
@@ -1773,13 +1802,25 @@ export function InventoryPage() {
       <StockLedger refreshKey={stockKey} onOpenItem={id => void openDetail(id)} />}
 
     {tab === 'Issuing' && <>
-      <IssueDesk items={ledgerRows} sections={sections} staff={staff} reasons={issueReasons}
+      <IssueDesk items={ledgerRows} sections={sections} staff={staff} departments={departments}
+        reasons={issueReasons} destinations={issueDestinations}
         onIssued={() => { setStockKey(k => k + 1); void load(); }} />
-      <IssueRegister refreshKey={stockKey} />
+      <IssueRegister refreshKey={stockKey} canVoid={can('supplier_inventory.stock', 'void_archive')}
+        onChanged={() => { setStockKey(k => k + 1); void load(); }} />
     </>}
 
-    {tab === 'Stock Take' &&
-      <StockTake places={storagePlaces} staff={staff} onPosted={() => { setStockKey(k => k + 1); void load(); }} />}
+    {/* Counting the shelf, and putting right what the count found. */}
+    {tab === 'Stock Management' && <div className="card" style={{ paddingBottom: 6 }}>
+      <div className="reg-seg" role="tablist" aria-label="Stock management">
+        {STOCK_MANAGEMENT_TABS.map(t => <button key={t} type="button" role="tab" aria-selected={manageTab === t}
+          className={manageTab === t ? 'on' : ''} onClick={() => setManageTab(t)}>{t}</button>)}
+      </div>
+    </div>}
+
+    {tab === 'Stock Management' && manageTab === 'Stock take' &&
+      <StockTake places={storagePlaces} staff={staff} items={ledgerRows} categories={categories}
+        canVoid={can('supplier_inventory.stock', 'void_archive')}
+        onPosted={() => { setStockKey(k => k + 1); void load(); }} />}
 
     {/* Receiving is booking the delivery in and then dealing with the lots it
         created — one job, so one tab with two benches. */}
@@ -1805,11 +1846,37 @@ export function InventoryPage() {
           <label>Item<select value={batchForm.itemId} onChange={e => setBatchForm({ ...batchForm, itemId: e.target.value })} required><option value="">Select the item</option>{items.map(i => <option key={i.id} value={i.id}>{i.item_code} — {i.name}</option>)}</select></label>
           <label>Batch number<input value={batchForm.batchNumber} onChange={e => setBatchForm({ ...batchForm, batchNumber: e.target.value })} /></label>
           <label>Lot number<input value={batchForm.lotNumber} onChange={e => setBatchForm({ ...batchForm, lotNumber: e.target.value })} /></label>
-          <label>Supplier<select value={batchForm.supplierId} onChange={e => setBatchForm({ ...batchForm, supplierId: e.target.value })}><option value="">Select the supplier</option>{suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+
+          {/* Who supplied the goods and who the laboratory received them FROM
+              are two different facts. A hospital laboratory draws most of its
+              stock from the hospital store, and a receipt that can only name a
+              supplier cannot say so. What is asked for here follows the policy
+              set in Settings → Stock & Storage. */}
+          {procurement.mode === 'both' && <label>How this delivery was obtained
+            <select value={batchForm.sourceType} onChange={e => setBatchForm({ ...batchForm, sourceType: e.target.value as 'supplier' | 'store', sourceId: '' })}>
+              <option value="supplier">Bought direct from a supplier</option>
+              <option value="store">Drawn from a store</option>
+            </select></label>}
+          {allowsStore(procurement) && (procurement.mode === 'stores' || batchForm.sourceType === 'store') &&
+            <label>Received from<select value={batchForm.sourceId} onChange={e => setBatchForm({ ...batchForm, sourceId: e.target.value, sourceType: 'store' })} required>
+              <option value="">Select the store</option>
+              {supplySources.map(src => <option key={src.id} value={src.id}>{src.name} — {SUPPLY_SOURCE_KIND_LABELS[src.kind] ?? src.kind}</option>)}
+            </select>{supplySources.length === 0 && <span className="muted">No stores configured yet — add them in Settings → Stock &amp; Storage.</span>}</label>}
+          {allowsSupplier(procurement) && (procurement.mode === 'direct' || batchForm.sourceType === 'supplier') &&
+            <label>Supplier<select value={batchForm.supplierId} onChange={e => setBatchForm({ ...batchForm, supplierId: e.target.value, sourceType: 'supplier' })}><option value="">Select the supplier</option>{suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>}
+          {allowsStore(procurement) && batchForm.sourceType === 'store' &&
+            <label>Supplier <span className="muted">(optional — who made or sold it, if it is known)</span>
+              <select value={batchForm.supplierId} onChange={e => setBatchForm({ ...batchForm, supplierId: e.target.value })}>
+                <option value="">Not recorded</option>{suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select></label>}
+          <label>Waybill / invoice reference <span className="muted">(optional)</span>
+            <input value={batchForm.reference} onChange={e => setBatchForm({ ...batchForm, reference: e.target.value })} placeholder="What this delivery is traced by" /></label>
           <label>Quantity received<input type="number" value={batchForm.quantityReceived} onChange={e => setBatchForm({ ...batchForm, quantityReceived: Number(e.target.value), quantityAvailable: Number(e.target.value) })} required /></label>
           <label>Quantity available<input type="number" value={batchForm.quantityAvailable} onChange={e => setBatchForm({ ...batchForm, quantityAvailable: Number(e.target.value) })} required /></label>
           <label>Date received<input type="date" value={batchForm.dateReceived} onChange={e => setBatchForm({ ...batchForm, dateReceived: e.target.value })} required /></label>
           <label>Expiry date<input type="date" value={batchForm.expiryDate} onChange={e => setBatchForm({ ...batchForm, expiryDate: e.target.value })} /></label>
+          <label>Unit cost <span className="muted">(optional — what the stock is valued at)</span>
+            <input type="number" step="any" min={0} value={batchForm.unitCost} onChange={e => setBatchForm({ ...batchForm, unitCost: e.target.value })} /></label>
           <label>Storage location<select value={batchForm.storageLocationId} onChange={e => setBatchForm({ ...batchForm, storageLocationId: e.target.value })}><option value="">Select a store, shelf or fridge</option>{storagePlaces.map(pl => <option key={pl.id} value={pl.id}>{pl.path}{pl.kind && pl.kind !== 'shelf' ? ` (${STORAGE_KIND_LABELS[pl.kind] ?? pl.kind})` : ''}</option>)}</select></label>
           <label>Barcode on this box <span className="muted">(optional — scanning it later finds this exact delivery)</span>
             <input value={batchForm.productBarcode} onChange={e => setBatchForm({ ...batchForm, productBarcode: e.target.value })}
@@ -1835,13 +1902,14 @@ export function InventoryPage() {
         <p className="muted" style={{ marginTop: 0 }}>A delivery is quarantined until it has been inspected and accepted. Until then it cannot be issued — only discarded or returned. Stock is issued earliest-expiry-first.</p>
         {batches.length === 0 ? <p className="muted">Nothing has been received yet.</p> :
           <div className="table-scroll"><table className="data-table reg-table"><thead><tr>
-            <th>Item</th><th>Batch / lot</th><th>Available</th><th>Received</th><th>Expires</th><th>Acceptance</th><th className="reg-actions-col"></th>
+            <th>Item</th><th>Batch / lot</th><th>Received from</th><th>Available</th><th>Received</th><th>Expires</th><th>Acceptance</th><th className="reg-actions-col"></th>
           </tr></thead><tbody>
-            {batches.map(b => <tr key={b.id} className={`row-clickable${b.quantity_available > 0 ? '' : ' row-retired'}`} {...focusAttr('inventory_batches', b.id)}
+            {batches.map(b => <tr key={b.id} className={`row-clickable${b.quantity_available > 0 && !b.reversed_at ? '' : ' row-retired'}`} {...focusAttr('inventory_batches', b.id)}
               onClick={() => openDetail(b.item_id)} tabIndex={0} role="button"
               onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(b.item_id); } }}>
-              <td><span className="reg-primary">{b.item_name || `Item #${b.item_id}`}</span></td>
-              <td><span className="reg-primary">{b.batch_number || `#${b.id}`}</span><span className="reg-sub">{[b.lot_number && `lot ${b.lot_number}`, b.product_barcode].filter(Boolean).join(' · ')}</span></td>
+              <td><span className="reg-primary">{b.item_name || `Item #${b.item_id}`}</span><span className="reg-sub">{b.item_code || ''}</span></td>
+              <td><span className="reg-primary">{b.batch_number || `#${b.id}`}{b.reversed_at && <span className="badge inactive">reversed</span>}</span><span className="reg-sub">{[b.lot_number && `lot ${b.lot_number}`, b.product_barcode].filter(Boolean).join(' · ')}</span></td>
+              <td>{b.source_label || <span className="muted">—</span>}{b.reference && <span className="reg-sub">{b.reference}</span>}</td>
               <td>{b.quantity_available} {b.unit_of_measure || ''}<span className="reg-sub">of {b.quantity_received} received</span></td>
               <td className="nowrap">{String(b.date_received ?? '').slice(0, 10) || '—'}</td>
               <td>{expiryCell(b.expiry_date, b.expiry_status)}</td>
@@ -1849,20 +1917,38 @@ export function InventoryPage() {
               <td className="reg-actions-col" onClick={e => e.stopPropagation()}>
                 <RowMenu label={`Manage batch ${b.batch_number || b.id}`}>{close => <>
                   <button type="button" role="menuitem" onClick={() => { close(); openDetail(b.item_id); }}><FileText size={14} /> Open the item</button>
-                  {(b.acceptance_status === 'pending' || b.acceptance_status === 'quarantined') && can('supplier_inventory', 'edit') && <>
+                  {(b.acceptance_status === 'pending' || b.acceptance_status === 'quarantined') && can('supplier_inventory', 'edit') && !b.reversed_at && <>
                     <button type="button" role="menuitem" onClick={() => { close(); acceptBatch(b.id, 'accepted'); }}>Accept on receipt</button>
                     <button type="button" role="menuitem" className="danger" onClick={() => { close(); acceptBatch(b.id, 'rejected'); }}>Reject on receipt</button>
                   </>}
+                  {can('supplier_inventory', 'edit') && !b.reversed_at && <button type="button" role="menuitem" onClick={() => { close(); setEditingBatch(b); }}><Pencil size={14} /> Correct this receipt…</button>}
                   <button type="button" role="menuitem" onClick={() => { close(); createBatchNc(b.id); }}><ShieldAlert size={14} /> Raise a nonconformity</button>
                   {can('supplier_inventory', 'print') && <button type="button" role="menuitem" onClick={() => { close(); printLabelSheet([{ barcodeValue: b.product_barcode || b.batch_number || String(b.id), title: b.item_name || '', lines: [b.batch_number ? `Batch ${b.batch_number}` : '', b.expiry_date ? `Exp ${String(b.expiry_date).slice(0, 10)}` : ''].filter(Boolean) }], { widthMm: 50, heightMm: 25, title: 'Batch label' }); }}><Tag size={14} /> Print its label</button>}
+                  {/* Reversing a receipt is not an everyday action and is not
+                      offered to everyone, so it sits at the bottom of the menu
+                      behind a confirmation that asks for a reason. */}
+                  {can('supplier_inventory.stock', 'void_archive') && !b.reversed_at &&
+                    <button type="button" role="menuitem" className="danger" onClick={() => { close(); setReversingBatch(b); }}><Undo2 size={14} /> Reverse this receipt…</button>}
                 </>}</RowMenu>
               </td>
             </tr>)}
           </tbody></table></div>}
+        {editingBatch && <BatchEditModal batch={editingBatch} suppliers={suppliers} storagePlaces={storagePlaces}
+          supplySources={supplySources} procurement={procurement} onClose={() => setEditingBatch(null)}
+          onSaved={async msg => { setEditingBatch(null); setNotice(msg); setStockKey(k => k + 1); await load(); }} />}
+        {reversingBatch && <ReasonPrompt
+          title={`Reverse the receipt of ${reversingBatch.item_name || 'this delivery'}`}
+          intro={`Whatever is still on the shelf from ${reversingBatch.batch_number ? `batch ${reversingBatch.batch_number}` : 'this delivery'} is taken back off it, and the delivery is marked reversed so nothing more can be issued from it. Anything already issued stays issued — that stock physically left.`}
+          confirmLabel="Reverse the receipt" danger
+          onClose={() => setReversingBatch(null)}
+          onConfirm={async reason => {
+            const r = await api<{ message: string }>(`/supplier-inventory/batches/${reversingBatch.id}/reverse`, { method: 'POST', body: JSON.stringify({ reason }) });
+            setReversingBatch(null); setNotice(r.message); setStockKey(k => k + 1); await load();
+          }} />}
       </div>
     </div>}
 
-    {tab === 'Stock Movements' && <>
+    {tab === 'Stock Management' && manageTab === 'Stock movements' && <>
     <div className="card">
       <h3>Record a one-off movement</h3>
       <p className="muted" style={{ marginTop: 0 }}>
@@ -1916,21 +2002,42 @@ export function InventoryPage() {
         </div>
       </div>
       {movements.length === 0 ? <p className="muted">Nothing has been issued or received yet.</p> : movementRows.length === 0 ? <p className="muted">Nothing matches “{moveSearch}”.</p> :
-        <div className="table-scroll"><table className="data-table"><thead><tr>
-          <th>Date</th><th>Item</th><th>Movement</th><th>Quantity</th><th>Batch / lot</th><th>To</th><th>Received by</th><th>Reason</th><th>Recorded by</th>
+        <div className="table-scroll"><table className="data-table reg-table"><thead><tr>
+          <th>Date</th><th>Item</th><th>Movement</th><th>Quantity</th><th>Batch / lot</th><th>To</th><th>Received by</th><th>Reason</th><th>Recorded by</th><th className="reg-actions-col"></th>
         </tr></thead><tbody>
-          {movementRows.map(m => <tr key={m.id} className="row-clickable" onClick={() => openDetail(m.item_id)}>
+          {movementRows.map(m => <tr key={m.id} className={`row-clickable${(m as any).reversed_by_id ? ' row-retired' : ''}`} onClick={() => openDetail(m.item_id)}>
             <td className="nowrap">{String(m.movement_date ?? '').slice(0, 10)}</td>
             <td><span className="reg-primary">{m.item_name || `Item #${m.item_id}`}</span><span className="reg-sub">{m.item_code}</span></td>
-            <td>{MOVEMENT_LABELS[m.movement_type] ?? String(m.movement_type).replace(/_/g, ' ')}</td>
+            <td>{MOVEMENT_LABELS[m.movement_type] ?? String(m.movement_type).replace(/_/g, ' ')}
+              {(m as any).reversed_by_id ? <span className="badge inactive">reversed</span> : null}
+              {(m as any).reversal_of_id ? <span className="badge">a reversal</span> : null}</td>
             <td>{m.quantity} {m.unit_of_measure || ''}</td>
             <td>{m.batch_number || <span className="muted">—</span>}{m.lot_number && <span className="reg-sub">lot {m.lot_number}</span>}</td>
-            <td>{m.issued_to_section_name || <span className="muted">—</span>}</td>
+            <td>{(m as any).issue_destination_name || m.issued_to_section_name || <span className="muted">—</span>}</td>
             <td>{m.received_by_name || <span className="muted">—</span>}</td>
             <td>{m.reason || <span className="muted">—</span>}</td>
             <td>{m.recorded_by_name || <span className="muted">—</span>}</td>
+            <td className="reg-actions-col" onClick={e => e.stopPropagation()}>
+              <RowMenu label={`Manage this movement`}>{close => <>
+                <button type="button" role="menuitem" onClick={() => { close(); openDetail(m.item_id); }}><FileText size={14} /> Open the item</button>
+                {/* A movement is never edited away and never deleted: the bin
+                    card is a running record. The correction is its mirror. */}
+                {can('supplier_inventory.stock', 'void_archive') && !(m as any).reversed_by_id && !(m as any).reversal_of_id &&
+                  <button type="button" role="menuitem" className="danger" onClick={() => { close(); setReversingMovement(m); }}><Undo2 size={14} /> Reverse this movement…</button>}
+              </>}</RowMenu>
+            </td>
           </tr>)}
         </tbody></table></div>}
+      {reversingMovement && <ReasonPrompt
+        title="Reverse this movement"
+        intro={`A movement is not deleted — the bin card is a running record and rewriting a line of it invalidates every balance printed after it. What is posted instead is the mirror: ${reversingMovement.quantity} ${reversingMovement.unit_of_measure || ''} back the other way, pointed at this movement.`}
+        confirmLabel="Post the reversal" danger
+        onClose={() => setReversingMovement(null)}
+        onConfirm={async reason => {
+          await api(`/supplier-inventory/movements/${reversingMovement.id}/reverse`, { method: 'POST', body: JSON.stringify({ reason }) });
+          setReversingMovement(null); setNotice('The movement has been reversed — both lines are on the bin card.');
+          setStockKey(k => k + 1); await load();
+        }} />}
     </div></>}
 
     {/* Selecting a supplier, registering them, evaluating them and monitoring
@@ -2113,7 +2220,233 @@ export function InventoryPage() {
 
     {tab === 'Forecasting' && <ForecastingPanel canEdit={can('supplier_inventory', 'edit')} refreshKey={stockKey}
       onApplied={() => { setStockKey(k => k + 1); void load(); }} />}
+
+    {/* The item's own page, opened from wherever the item was found — the
+        register, a bin card, a search result, an alert. It used to live inside
+        the Item Register tab, so opening an item from the ledger set it and
+        then drew nothing, which read as the button doing nothing at all. */}
+    {selected && <InventoryDetailPanel item={selected} staff={staff} suppliers={suppliers} sections={sections}
+      storagePlaces={storagePlaces} categories={categories} units={units} barcodePolicy={barcodePolicy}
+      movementReasons={movementReasons} supplySources={supplySources} procurement={procurement}
+      mode={detailMode} setMode={setDetailMode} can={can}
+      onClose={() => { setSelected(null); setDetailMode('view'); }}
+      onSaved={async () => { await load(); await openDetail(selected.id, 'view'); }}
+      onChanged={async (message?: string) => { setStockKey(k => k + 1); if (message) setNotice(message); await load(); await openDetail(selected.id, detailMode); }}
+      acceptBatch={acceptBatch} createBatchNc={createBatchNc} onRemove={() => void openItemRemoval(selected)} />}
+    {removing && <ItemRemovalModal impact={removing} busy={regBusy} onClose={() => setRemoving(null)}
+      onDone={async msg => { setRemoving(null); setSelected(null); setNotice(msg); await load(); }} setError={setError} />}
   </div>;
+}
+
+/* ============================================================================
+   CORRECTING WHAT IS ALREADY RECORDED
+
+   Mistakes happen at a counter: the wrong lot number, a quantity keyed with an
+   extra zero, a voucher written for the wrong unit. A store that cannot fix
+   those ends up with a second "correct" record beside the wrong one, and a
+   balance nobody trusts.
+
+   Two rules shape everything here. Nothing that has moved stock is deleted —
+   the correction is a movement of its own, so the bin card shows what happened
+   and what was done about it. And nothing destructive is offered in plain
+   sight: these live behind a row's ⋯ menu, and every one of them costs a
+   written reason.
+   ========================================================================= */
+
+/**
+ * "Are you sure, and why?" — asked once, properly.
+ *
+ * A confirmation that only asks whether you are sure collects nothing. The
+ * reason typed here goes onto the record itself, which is what makes a
+ * reversal an explanation rather than a hole.
+ */
+function ReasonPrompt({ title, intro, confirmLabel, danger, placeholder, onClose, onConfirm }: {
+  title: string; intro: string; confirmLabel: string; danger?: boolean; placeholder?: string;
+  onClose: () => void; onConfirm: (reason: string) => Promise<void>;
+}) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function go() {
+    if (!reason.trim()) { setError('A reason is required — it is what the record will say.'); return; }
+    setBusy(true); setError(null);
+    try { await onConfirm(reason.trim()); }
+    catch (e) { setError((e as Error).message); setBusy(false); }
+  }
+
+  return <DetailModal open onClose={onClose} width="narrow" title={title}
+    footer={<>
+      <button type="button" className="secondary" onClick={onClose}>Cancel</button>
+      <button type="button" className={danger ? 'danger' : ''} disabled={busy} onClick={() => void go()}>
+        {busy ? 'Working…' : confirmLabel}
+      </button>
+    </>}>
+    {error && <div className="error">{error}</div>}
+    <p className="muted" style={{ marginTop: 0 }}>{intro}</p>
+    <label>Reason<textarea value={reason} onChange={e => setReason(e.target.value)} rows={3}
+      placeholder={placeholder ?? 'What went wrong, and how it was noticed'} autoFocus /></label>
+  </DetailModal>;
+}
+
+/**
+ * Correcting a delivery that was booked in wrong.
+ *
+ * The quantity is the delicate one. Anything already issued out of this
+ * delivery cannot be un-received — that stock physically left — so the
+ * quantity can only be corrected down as far as what is still on the shelf,
+ * and the server refuses anything lower with the figure it would need to be.
+ */
+function BatchEditModal({ batch, suppliers, storagePlaces, supplySources, procurement, onClose, onSaved }: {
+  batch: InventoryBatch; suppliers: Supplier[];
+  storagePlaces: Array<{ id: number; path: string; kind: string }>;
+  supplySources: SupplySource[]; procurement: ProcurementPolicy;
+  onClose: () => void; onSaved: (message: string) => void | Promise<void>;
+}) {
+  const anyBatch = batch as any;
+  const [form, setForm] = useState({
+    batchNumber: batch.batch_number ?? '', lotNumber: batch.lot_number ?? '',
+    supplierId: batch.supplier_id ? String(batch.supplier_id) : '',
+    sourceType: (anyBatch.source_type && anyBatch.source_type !== 'supplier' ? 'store' : 'supplier') as 'supplier' | 'store',
+    sourceId: anyBatch.source_id ? String(anyBatch.source_id) : '',
+    reference: anyBatch.reference ?? '',
+    quantityReceived: String(batch.quantity_received ?? 0),
+    dateReceived: String(batch.date_received ?? '').slice(0, 10),
+    expiryDate: String(batch.expiry_date ?? '').slice(0, 10),
+    storageLocationId: anyBatch.storage_location_id ? String(anyBatch.storage_location_id) : '',
+    productBarcode: batch.product_barcode ?? '',
+    unitCost: anyBatch.unit_cost != null ? String(anyBatch.unit_cost) : '',
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const issued = Number(batch.quantity_received ?? 0) - Number(batch.quantity_available ?? 0);
+
+  async function save(e: FormEvent) {
+    e.preventDefault(); setBusy(true); setError(null);
+    try {
+      await api(`/supplier-inventory/batches/${batch.id}`, { method: 'PUT', body: JSON.stringify(form) });
+      await onSaved(`${batch.batch_number ? `Batch ${batch.batch_number}` : 'The delivery'} was corrected.`);
+    } catch (err) { setError((err as Error).message); setBusy(false); }
+  }
+
+  return <DetailModal open onClose={onClose} title={`Correct the receipt of ${batch.item_name ?? 'this delivery'}`}
+    subtitle={batch.batch_number ? `Batch ${batch.batch_number}` : `Delivery #${batch.id}`}
+    footer={<>
+      <button type="button" className="secondary" onClick={onClose}>Cancel</button>
+      <button type="submit" form="edit-batch" disabled={busy}>{busy ? 'Saving…' : 'Save the correction'}</button>
+    </>}>
+    {error && <div className="error">{error}</div>}
+    {issued > 0 && <div className="notice-warn" style={{ marginTop: 0 }}>
+      {issued} {batch.unit_of_measure || ''} has already gone out of this delivery, so the quantity received cannot be
+      corrected below that. If the whole receipt was wrong, reverse it instead.
+    </div>}
+    <form id="edit-batch" className="form" onSubmit={save}>
+      <label>Batch number<input value={form.batchNumber} onChange={e => setForm({ ...form, batchNumber: e.target.value })} /></label>
+      <label>Lot number<input value={form.lotNumber} onChange={e => setForm({ ...form, lotNumber: e.target.value })} /></label>
+      {procurement.mode === 'both' && <label>How it was obtained
+        <select value={form.sourceType} onChange={e => setForm({ ...form, sourceType: e.target.value as 'supplier' | 'store', sourceId: '' })}>
+          <option value="supplier">Bought direct from a supplier</option>
+          <option value="store">Drawn from a store</option>
+        </select></label>}
+      {allowsStore(procurement) && (procurement.mode === 'stores' || form.sourceType === 'store') &&
+        <label>Received from<select value={form.sourceId} onChange={e => setForm({ ...form, sourceId: e.target.value, sourceType: 'store' })}>
+          <option value="">Select the store</option>
+          {supplySources.map(src => <option key={src.id} value={src.id}>{src.name}</option>)}
+        </select></label>}
+      <label>Supplier<select value={form.supplierId} onChange={e => setForm({ ...form, supplierId: e.target.value })}>
+        <option value="">Not recorded</option>{suppliers.map(sp => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
+      </select></label>
+      <label>Waybill / invoice reference<input value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })} /></label>
+      <label>Quantity received<input type="number" step="any" min={issued} value={form.quantityReceived}
+        onChange={e => setForm({ ...form, quantityReceived: e.target.value })} />
+        <span className="muted">{issued > 0 ? `At least ${issued} — that much has already been issued.` : 'What is on the shelf moves with this correction.'}</span></label>
+      <label>Date received<input type="date" value={form.dateReceived} onChange={e => setForm({ ...form, dateReceived: e.target.value })} /></label>
+      <label>Expiry date<input type="date" value={form.expiryDate} onChange={e => setForm({ ...form, expiryDate: e.target.value })} /></label>
+      <label>Unit cost<input type="number" step="any" min={0} value={form.unitCost} onChange={e => setForm({ ...form, unitCost: e.target.value })} /></label>
+      <label>Storage location<select value={form.storageLocationId} onChange={e => setForm({ ...form, storageLocationId: e.target.value })}>
+        <option value="">Not recorded</option>
+        {storagePlaces.map(pl => <option key={pl.id} value={pl.id}>{pl.path}</option>)}
+      </select></label>
+      <label>Barcode on this box<input value={form.productBarcode} onChange={e => setForm({ ...form, productBarcode: e.target.value })}
+        onKeyDown={e => { if (e.key === 'Enter') e.preventDefault(); }} /></label>
+    </form>
+  </DetailModal>;
+}
+
+/**
+ * Taking stock off the shelf, or putting it back, without a delivery or an issue.
+ *
+ * Every store needs this and every store does it — on paper, in the margin of
+ * a bin card, if the system will not. A bottle breaks, a box is found behind
+ * another, a figure was keyed wrong last month. Both directions are ordinary
+ * movements: allocated earliest-expiry-first, carrying a reason, landing on
+ * the bin card where anyone can see what was done and why.
+ */
+function StockAdjustModal({ item, reasons, onClose, onDone }: {
+  item: InventoryItemDetail; reasons: ConfigOption[];
+  onClose: () => void; onDone: (message: string) => void | Promise<void>;
+}) {
+  const [direction, setDirection] = useState<'debit' | 'credit'>('debit');
+  const [quantity, setQuantity] = useState('');
+  const [reason, setReason] = useState('');
+  const [note, setNote] = useState('');
+  const [batchId, setBatchId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const onHand = item.stock_on_hand ?? item.quantity ?? 0;
+  const lots = (item.batches ?? []).filter(b => (b as any).reversed_at == null);
+
+  async function go(e: FormEvent) {
+    e.preventDefault();
+    if (!(Number(quantity) > 0)) { setError('Say how much.'); return; }
+    if (!reason) { setError('Choose a reason — an adjustment without one is just a changed number.'); return; }
+    setBusy(true); setError(null);
+    try {
+      const r = await api<{ allocation: Array<{ batchId: number; quantity: number; batchNumber?: string | null }> }>(
+        `/supplier-inventory/items/${item.id}/adjust`,
+        { method: 'POST', body: JSON.stringify({ direction, quantity: Number(quantity), reason, note, batchId: batchId || null }) });
+      const lotWords = r.allocation.map(a => `${a.quantity} from ${a.batchNumber || `lot #${a.batchId}`}`).join(', ');
+      await onDone(`${quantity} ${item.unit || ''} ${direction === 'debit' ? 'taken off' : 'put back on'} the shelf — ${lotWords}.`.replace(/\s+/g, ' '));
+    } catch (err) { setError((err as Error).message); setBusy(false); }
+  }
+
+  return <DetailModal open onClose={onClose} width="narrow" title={`Adjust the stock of ${item.name}`}
+    subtitle={`${onHand} ${item.unit || ''} on hand`}
+    footer={<>
+      <button type="button" className="secondary" onClick={onClose}>Cancel</button>
+      <button type="submit" form="adjust-stock" disabled={busy} className={direction === 'debit' ? 'danger' : ''}>
+        {busy ? 'Posting…' : direction === 'debit' ? 'Debit the stock' : 'Credit the stock'}
+      </button>
+    </>}>
+    {error && <div className="error">{error}</div>}
+    <form id="adjust-stock" className="form" onSubmit={go}>
+      <div className="bc-choice">
+        <button type="button" className={direction === 'debit' ? 'active' : ''} onClick={() => setDirection('debit')}>
+          <strong>Debit — take stock off</strong>
+          <span>Breakage, loss, expiry found on the shelf, a quantity recorded too high.</span>
+        </button>
+        <button type="button" className={direction === 'credit' ? 'active' : ''} onClick={() => setDirection('credit')}>
+          <strong>Credit — put stock back</strong>
+          <span>Stock found, or a quantity recorded too low.</span>
+        </button>
+      </div>
+      <label>Quantity<input type="number" step="any" min={0} value={quantity} onChange={e => setQuantity(e.target.value)} autoFocus />
+        {direction === 'debit' && <span className="muted">There {onHand === 1 ? 'is' : 'are'} {onHand} {item.unit || ''} on the shelf.</span>}</label>
+      <label>Reason<select value={reason} onChange={e => setReason(e.target.value)} required>
+        <option value="">Select a reason</option>
+        {reasons.map(r => <option key={r.id} value={r.value}>{r.label}</option>)}
+      </select>{reasons.length === 0 && <span className="muted">No reasons configured — add them in Settings → Dropdown Lists.</span>}</label>
+      <label>Detail <span className="muted">(optional)</span>
+        <input value={note} onChange={e => setNote(e.target.value)} placeholder="Anything the bin card should carry" /></label>
+      <label>Which lot <span className="muted">(optional)</span>
+        <select value={batchId} onChange={e => setBatchId(e.target.value)}>
+          <option value="">{direction === 'debit' ? 'Take it off earliest-expiry-first' : 'Put it on the lot that expires first'}</option>
+          {lots.map(b => <option key={b.id} value={b.id}>
+            {b.batch_number || `Lot #${b.id}`} — {b.quantity_available} available{b.expiry_date ? `, expires ${String(b.expiry_date).slice(0, 10)}` : ''}
+          </option>)}
+        </select></label>
+    </form>
+  </DetailModal>;
 }
 
 /**
@@ -2128,14 +2461,17 @@ export function InventoryPage() {
  */
 function InventoryDetailPanel({
   item, staff, suppliers, sections, storagePlaces, categories, units, barcodePolicy,
-  mode, setMode, can, onClose, onSaved, acceptBatch, createBatchNc, onRemove,
+  movementReasons, supplySources, procurement,
+  mode, setMode, can, onClose, onSaved, onChanged, acceptBatch, createBatchNc, onRemove,
 }: {
   item: InventoryItemDetail; staff: Staff[]; suppliers: Supplier[]; sections: Section[];
   storagePlaces: Array<{ id: number; path: string; kind: string }>;
   categories: ConfigOption[]; units: ConfigOption[]; barcodePolicy: BarcodePolicy;
+  movementReasons: ConfigOption[]; supplySources: SupplySource[]; procurement: ProcurementPolicy;
   mode: 'view' | 'edit'; setMode: (m: 'view' | 'edit') => void;
   can: (module: string, action: string) => boolean;
   onClose: () => void; onSaved: () => void | Promise<void>;
+  onChanged: (message?: string) => void | Promise<void>;
   acceptBatch: (id: number, status: string) => void; createBatchNc: (id: number) => void; onRemove: () => void;
 }) {
   const [form, setForm] = useState({
@@ -2150,7 +2486,13 @@ function InventoryDetailPanel({
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [adjusting, setAdjusting] = useState(false);
+  const [editingBatch, setEditingBatch] = useState<InventoryBatch | null>(null);
+  const [reversingBatch, setReversingBatch] = useState<InventoryBatch | null>(null);
+  const [reversingMovement, setReversingMovement] = useState<any>(null);
   const label = (list: ConfigOption[], value?: string | null) => list.find(o => o.value === value)?.label ?? value ?? '—';
+  const mayCorrect = can('supplier_inventory', 'edit');
+  const mayReverse = can('supplier_inventory.stock', 'void_archive');
 
   async function save(e: FormEvent) {
     e.preventDefault(); setBusy(true); setError(null);
@@ -2187,6 +2529,7 @@ function InventoryDetailPanel({
       {/* Removing is not an everyday action, so it lives under the menu with
           the rest of the management actions rather than beside Edit. */}
       <RowMenu label={`Manage ${item.name}`}>{close => <>
+        {mayCorrect && <button type="button" role="menuitem" onClick={() => { close(); setAdjusting(true); }}><Scale size={14} /> Adjust the stock — debit or credit…</button>}
         {can('supplier_inventory', 'print') && <button type="button" role="menuitem" onClick={() => { close(); printLabelSheet([{ barcodeValue: effectiveBarcode(item), title: item.name, lines: [effectiveBarcode(item), item.storage_path || ''].filter(Boolean) }], { widthMm: 50, heightMm: 25, title: item.name }); }}><Tag size={14} /> Print its label</button>}
         {can('supplier_inventory', 'void_archive') && <button type="button" role="menuitem" className="danger" onClick={() => { close(); onRemove(); }}><Trash2 size={14} /> Remove…</button>}
       </>}</RowMenu>
@@ -2252,14 +2595,18 @@ function InventoryDetailPanel({
 
     <h4>Batches and lots <span className="muted">— issued oldest-expiry-first</span></h4>
     {!item.batches?.length ? <p className="muted">Nothing received against this item yet.</p> :
-      <div className="table-scroll"><table className="data-table"><thead><tr>
-        <th>Batch / lot</th><th>Available</th><th>Received</th><th>Expires</th><th>Where</th><th>Acceptance</th><th></th>
+      <div className="table-scroll"><table className="data-table reg-table"><thead><tr>
+        <th>Batch / lot</th><th>Received from</th><th>Available</th><th>Received</th><th>Expires</th><th>Where</th><th>Acceptance</th><th className="reg-actions-col"></th>
       </tr></thead><tbody>
-        {item.batches.map(b => <tr key={b.id} className={b.quantity_available > 0 ? '' : 'row-retired'}>
+        {item.batches.map(b => <tr key={b.id} className={b.quantity_available > 0 && !b.reversed_at ? '' : 'row-retired'}>
           <td>
-            <span className="reg-primary">{b.batch_number || `Batch #${b.id}`}</span>
+            <span className="reg-primary">{b.batch_number || `Batch #${b.id}`}{b.reversed_at && <span className="badge inactive">reversed</span>}</span>
             <span className="reg-sub">{[b.lot_number && `lot ${b.lot_number}`, b.product_barcode].filter(Boolean).join(' · ') || '—'}</span>
           </td>
+          <td>{b.source_label || (b.source_type && b.source_type !== 'supplier'
+            ? `${b.source_name || ''} ${SUPPLY_SOURCE_KIND_LABELS[b.source_type] ?? ''}`.trim()
+            : b.supplier_name) || <span className="muted">—</span>}
+            {b.reference && <span className="reg-sub">{b.reference}</span>}</td>
           <td>{b.quantity_available} {item.unit || ''}<span className="reg-sub">of {b.quantity_received} received</span></td>
           <td className="nowrap">{String(b.date_received ?? '').slice(0, 10) || '—'}</td>
           <td>{expiryCell(b.expiry_date, b.expiry_status)}</td>
@@ -2267,12 +2614,14 @@ function InventoryDetailPanel({
           <td>{formatBadge(b.acceptance_status)}{b.accepted_by_name && <span className="reg-sub">{b.accepted_by_name}</span>}</td>
           <td className="reg-actions-col">
             <RowMenu label={`Manage batch ${b.batch_number || b.id}`}>{close => <>
-              {(b.acceptance_status === 'pending' || b.acceptance_status === 'quarantined') && <>
+              {(b.acceptance_status === 'pending' || b.acceptance_status === 'quarantined') && !b.reversed_at && <>
                 <button type="button" role="menuitem" onClick={() => { close(); acceptBatch(b.id, 'accepted'); }}>Accept on receipt</button>
                 <button type="button" role="menuitem" className="danger" onClick={() => { close(); acceptBatch(b.id, 'rejected'); }}>Reject on receipt</button>
               </>}
+              {mayCorrect && !b.reversed_at && <button type="button" role="menuitem" onClick={() => { close(); setEditingBatch({ ...b, item_id: item.id, item_name: item.name, unit_of_measure: item.unit ?? undefined } as InventoryBatch); }}><Pencil size={14} /> Correct this receipt…</button>}
               <button type="button" role="menuitem" onClick={() => { close(); createBatchNc(b.id); }}><ShieldAlert size={14} /> Raise a nonconformity</button>
               <button type="button" role="menuitem" onClick={() => { close(); printLabelSheet([{ barcodeValue: b.product_barcode || b.batch_number || String(b.id), title: item.name, lines: [b.batch_number ? `Batch ${b.batch_number}` : '', b.expiry_date ? `Exp ${String(b.expiry_date).slice(0, 10)}` : ''].filter(Boolean) }], { widthMm: 50, heightMm: 25, title: `${item.name} batch label` }); }}><Tag size={14} /> Print a batch label</button>
+              {mayReverse && !b.reversed_at && <button type="button" role="menuitem" className="danger" onClick={() => { close(); setReversingBatch({ ...b, item_id: item.id, item_name: item.name, unit_of_measure: item.unit ?? undefined } as InventoryBatch); }}><Undo2 size={14} /> Reverse this receipt…</button>}
             </>}</RowMenu>
           </td>
         </tr>)}
@@ -2280,19 +2629,53 @@ function InventoryDetailPanel({
 
     <h4>Movements</h4>
     {!item.movements?.length ? <p className="muted">Nothing has been issued or received against this item yet.</p> :
-      <div className="table-scroll"><table className="data-table"><thead><tr>
-        <th>Date</th><th>Movement</th><th>Quantity</th><th>Batch</th><th>To</th><th>Received by</th><th>Reason</th>
+      <div className="table-scroll"><table className="data-table reg-table"><thead><tr>
+        <th>Date</th><th>Movement</th><th>Quantity</th><th>Batch</th><th>To</th><th>Received by</th><th>Reason</th><th className="reg-actions-col"></th>
       </tr></thead><tbody>
-        {item.movements.map(m => <tr key={m.id}>
+        {item.movements.map(m => <tr key={m.id} className={(m as any).reversed_by_id ? 'row-retired' : ''}>
           <td className="nowrap">{String(m.movement_date ?? '').slice(0, 10)}</td>
-          <td>{MOVEMENT_LABELS[m.movement_type] ?? String(m.movement_type).replace(/_/g, ' ')}</td>
+          <td>{MOVEMENT_LABELS[m.movement_type] ?? String(m.movement_type).replace(/_/g, ' ')}
+            {(m as any).reversed_by_id ? <span className="badge inactive">reversed</span> : null}
+            {(m as any).reversal_of_id ? <span className="badge">a reversal</span> : null}</td>
           <td>{m.quantity} {item.unit || ''}</td>
           <td>{m.batch_number || <span className="muted">—</span>}</td>
           <td>{m.issued_to_section_name || <span className="muted">—</span>}</td>
           <td>{m.received_by_name || staffName(staff, m.received_by_staff_id ?? undefined) || <span className="muted">—</span>}</td>
           <td>{m.reason || <span className="muted">—</span>}</td>
+          <td className="reg-actions-col">
+            {mayReverse && !(m as any).reversed_by_id && !(m as any).reversal_of_id && !(m as any).issue_id &&
+              <RowMenu label="Manage this movement">{close => <>
+                <button type="button" role="menuitem" className="danger" onClick={() => { close(); setReversingMovement(m); }}><Undo2 size={14} /> Reverse this movement…</button>
+              </>}</RowMenu>}
+          </td>
         </tr>)}
       </tbody></table></div>}
+
+    {adjusting && <StockAdjustModal item={item} reasons={movementReasons}
+      onClose={() => setAdjusting(false)}
+      onDone={async msg => { setAdjusting(false); await onChanged(msg); }} />}
+    {editingBatch && <BatchEditModal batch={editingBatch} suppliers={suppliers} storagePlaces={storagePlaces}
+      supplySources={supplySources} procurement={procurement}
+      onClose={() => setEditingBatch(null)}
+      onSaved={async msg => { setEditingBatch(null); await onChanged(msg); }} />}
+    {reversingBatch && <ReasonPrompt
+      title={`Reverse the receipt of ${reversingBatch.batch_number || 'this delivery'}`}
+      intro="Whatever is still on the shelf from this delivery is taken back off it, and the delivery is marked reversed so nothing more can be issued from it. Anything already issued stays issued."
+      confirmLabel="Reverse the receipt" danger
+      onClose={() => setReversingBatch(null)}
+      onConfirm={async reason => {
+        const r = await api<{ message: string }>(`/supplier-inventory/batches/${reversingBatch.id}/reverse`, { method: 'POST', body: JSON.stringify({ reason }) });
+        setReversingBatch(null); await onChanged(r.message);
+      }} />}
+    {reversingMovement && <ReasonPrompt
+      title="Reverse this movement"
+      intro={`The mirror of this movement is posted — ${reversingMovement.quantity} ${item.unit || ''} back the other way — so the bin card shows both the mistake and the correction.`}
+      confirmLabel="Post the reversal" danger
+      onClose={() => setReversingMovement(null)}
+      onConfirm={async reason => {
+        await api(`/supplier-inventory/movements/${reversingMovement.id}/reverse`, { method: 'POST', body: JSON.stringify({ reason }) });
+        setReversingMovement(null); await onChanged('The movement has been reversed — both lines are on the bin card.');
+      }} />}
   </DetailModal>;
 }
 

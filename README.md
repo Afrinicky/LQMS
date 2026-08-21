@@ -268,8 +268,8 @@ everyday actions.
 ### Running the store
 
 The **Item Register** says what the laboratory stocks. The tabs beside it are about what it *has*,
-one per job, in the order the day runs — **Stock Ledger**, **Receiving**, **Issuing**, **Stock
-Take** and **Stock Movements**:
+one per job, in the order the day runs — **Stock Ledger**, **Issuing**, **Receiving** and **Stock
+Management** (stock takes and stock movements):
 
 **Stock ledger** — everything held, with the numbers a store actually runs on. The distinction the
 screen insists on is between what is *on hand* and what is *issuable*: a reagent with four hundred
@@ -285,9 +285,21 @@ and posts a receipt movement, so the bin card shows stock arriving as well as le
 **Batches & lots** is what that created: every lot in earliest-expiry order, with its acceptance
 state, ready to be inspected, accepted, rejected or labelled.
 
-**Issuing** — somebody from a unit is at the counter. Name the unit, pick the member of staff
-collecting from the staff register, pick why from the laboratory's own list of issue reasons
-(**Settings → Dropdown Lists → Stock issue reasons**), add the lines, press issue. Every item on
+A receipt records two different facts: who **supplied** the goods, and who the laboratory actually
+**received them from**. Most hospital laboratories draw the bulk of their reagents from the
+hospital's main store and buy only a few items direct; some also receive from a district, regional
+or national medical store. **Settings → Stock & Storage** says which of those happens here — buys
+direct, draws from a store, or both — and holds the register of stores. The receiving screen then
+asks for the right thing instead of pretending every delivery came from a supplier, and each
+receipt carries the waybill or requisition it is traced by.
+
+**Issuing** — somebody is at the counter. Name where it is going, pick who is collecting it, pick
+why from the laboratory's own list of issue reasons (**Settings → Dropdown Lists → Stock issue
+reasons**), add the lines, press issue. Stock does not only go to a bench: the destination picker
+offers the laboratory's own units, the hospital's departments, the outside facilities configured in
+**Stock issue destinations**, and **Other** — which costs a typed name, because a destination
+nobody wrote down is the hole that makes a stock-out impossible to explain later. The collector is
+picked from the staff register, or typed the same way when they are not on it. Every item on
 the register is offered, grouped into what can go out today and what cannot with the reason it
 cannot — an item is never missing from the picker just because the shelf is empty. The store
 allocates across lots earliest-expiry-first and writes a numbered voucher; nobody picks a batch by
@@ -297,12 +309,50 @@ so that lot's expiry still applies.
 
 **Stock take** — a sheet per lot, pre-filled with what the register believes. Enter what was found,
 post it, and every difference becomes an adjustment movement carrying its reason, so a correction is
-part of the record rather than a balance that changed overnight.
+part of the record rather than a balance that changed overnight. Three things make it a count
+rather than a form: it can **include the items the register says are empty**, because stock the
+register has lost is exactly what a count is for and a sheet of only non-zero rows can never find
+it; it can be counted **blind**, with the book balance hidden, because a number already on the page
+is very hard not to simply agree with; and anything **found at the shelf** that is not on the sheet
+can be added to it. The sheet is scoped to everything, one place, one category, the class A items,
+or just the items you pick; it shows a live tally of how far through it is, how many lines
+disagree, which way, what that is worth and the register's accuracy; and posting a half-counted
+sheet is refused once, saying how many lines were never reached, before it is taken. A count that
+will not be finished is **abandoned** with a reason rather than left open for ever.
 
 **Stock movements** — every issue, receipt, disposal and adjustment, searchable and exportable,
-with the one-off movement form above it. A movement's reason is chosen from **Stock movement
+with the one-off movement form above it. It shares the **Stock Management** tab with the stock take. A movement's reason is chosen from **Stock movement
 reasons** in Dropdown Lists and stored as the words it read on the day, with any detail typed
 beside it.
+
+### Fixing what was recorded wrong
+
+Mistakes happen at a counter, and a store that cannot fix them ends up with a second "correct"
+record beside the wrong one and a balance nobody trusts. Two rules shape all of it: nothing that
+has moved stock is ever deleted — the correction is a movement of its own, so the bin card shows
+what happened and what was done about it — and nothing destructive is offered in plain sight. Each
+lives behind a row's **⋯** menu and costs a written reason.
+
+- **Correct a receipt** — a lot number from the wrong box, an expiry a year out, a quantity keyed
+  with an extra zero. The quantity can only be corrected down as far as what is still on the shelf:
+  anything already issued cannot be un-received, and the refusal says how much that is.
+- **Reverse a receipt** — for a delivery that should never have been booked in. What is still on
+  the shelf comes off it, the delivery is marked reversed so nothing more can be issued from it,
+  and anything already issued stays issued, because that stock physically left.
+- **Cancel an issue voucher** — every line goes back to the exact lot it came out of, so that lot's
+  expiry still governs it, and the voucher stays on the register marked cancelled. A voucher that
+  vanished would leave the numbering lying.
+- **Reverse a movement** — posted as its mirror, pointed at the movement it reverses, so the card
+  reads "10 out, 10 back, because…" rather than showing nothing where a mistake used to be.
+- **Debit or credit stock** — the everyday adjustment every store makes on paper if the system will
+  not let it: a bottle broken, a box found behind another, a figure keyed wrong last month. A debit
+  is allocated across lots earliest-expiry-first exactly as an issue would be.
+
+Who may do them is a permission, not a convention. All five are gated on `void_archive` over
+`supplier_inventory.stock`, which the **System Administrator** and the **Laboratory Manager** hold
+and the bench roles do not — a Technician or Biomedical Scientist can work the store all day and is
+refused by the route itself, not merely by a hidden button. Correcting the *words* on a record
+(a reason, a remark, the unit on a voucher) needs only `edit`.
 
 The module's **Dashboard** carries both halves of the same question: the operating position — what
 is held, what is below its reorder level, what cannot be issued, what is turning — and, under it,
