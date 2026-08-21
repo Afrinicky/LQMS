@@ -286,5 +286,56 @@ with urllib.request.urlopen(req) as r:
     blob = r.read()
 check("as a real workbook", blob[:2] == b"PK" and len(blob) > 2000, f"{len(blob)} bytes")
 
+print("\n[13] The issuing counter names a unit, a member of staff and a reason")
+reasons = call("/config/option-lists/stock_issue_reason", token=A)[1] or []
+check("issue reasons are the laboratory's own configurable list", len(reasons) > 5, str(len(reasons)))
+movement_reasons = call("/config/option-lists/stock_movement_reason", token=A)[1] or []
+check("so are movement reasons", len(movement_reasons) > 5, str(len(movement_reasons)))
+
+people = call("/staff", token=A)[1] or []
+if not people:
+    call("/staff", "POST", {"fullName": "K. Boateng", "staffNumber": f"ST-{stamp}"}, A)
+    people = call("/staff", token=A)[1] or []
+collector = people[0]["id"]
+
+st, staffed = call("/supplier-inventory/issues", "POST", {
+    "sectionId": unit, "receivedByStaffId": collector, "purpose": reasons[0]["value"],
+    "note": "morning round", "lines": [{"itemId": item_id, "quantity": 10}]}, A)
+check("an issue names the collector from the staff register, with no name typed", st == 201, json.dumps(staffed)[:160])
+voucher = call(f"/supplier-inventory/issues/{staffed['id']}", token=A)[1]
+check("  the collector is that member of staff", voucher.get("received_by_staff_id") == collector, str(voucher.get("received_by_staff_id")))
+check("  and the voucher reads their name without being told it", voucher.get("issued_to_name") == people[0]["fullName"], str(voucher.get("issued_to_name")))
+check("  the reason is kept as a code", voucher.get("purpose") == reasons[0]["value"], str(voucher.get("purpose")))
+check("  and read back as the words the laboratory chose", voucher.get("purpose_label") == reasons[0]["label"], str(voucher.get("purpose_label")))
+
+carded = [l for l in call(f"/supplier-inventory/ledger/{item_id}", token=A)[1]["lines"] if l["movement_type"] == "issue"]
+check("the bin card reads the reason in words, not a code",
+      any(reasons[0]["label"] in str(l["reason"]) for l in carded), str(carded[0]["reason"] if carded else None))
+
+st, _ = call("/supplier-inventory/issues", "POST", {
+    "sectionId": unit, "receivedByStaffId": 999999, "purpose": reasons[0]["value"],
+    "lines": [{"itemId": item_id, "quantity": 1}]}, A)
+check("a collector who is not on the staff register is refused", st == 400, str(st))
+st, _ = call("/supplier-inventory/issues", "POST", {
+    "purpose": reasons[0]["value"], "lines": [{"itemId": item_id, "quantity": 1}]}, A)
+check("an issue naming neither a unit nor a collector is refused", st == 400, str(st))
+
+print("\n[14] Every registered item reaches the issuing picker, stocked or not")
+_, never = call("/supplier-inventory/items", "POST", {
+    "name": f"Never received {stamp}", "category": "reagent", "unit": "box"}, A)
+rows = call("/supplier-inventory/ledger", token=A)[1]["rows"]
+check("an item that has never been received is still on the ledger the picker reads",
+      any(r["id"] == never["id"] and r["issuable"] == 0 for r in rows), str(never["id"]))
+
+print("\n[15] A one-off movement carries its reason in words")
+_, disposal = call(f"/supplier-inventory/batches/{good['id']}/movement", "POST", {
+    "movementType": "discard", "quantity": 1, "movementDate": day(0),
+    "reason": movement_reasons[0]["value"], "reasonNote": "found on the floor"}, A)
+discards = [l for l in call(f"/supplier-inventory/ledger/{item_id}", token=A)[1]["lines"]
+            if l["movement_type"] == "discard" and l["id"] == disposal["id"]]
+check("the reason is stored as the words plus the detail typed beside them",
+      discards and discards[0]["reason"] == f"{movement_reasons[0]['label']} — found on the floor",
+      str(discards[0]["reason"] if discards else None))
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

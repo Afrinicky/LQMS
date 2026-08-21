@@ -58,7 +58,9 @@ export const ALERT_TARGETS: Record<string, AlertTarget> = {
   breakdown_open: { tab: 'Breakdowns' },
 
   /* Supplier & inventory */
-  inventory_batch_expiry: { tab: 'Batches/Lots' },
+  // Lots live on the Receiving tab, on the bench that deals with what a
+  // delivery created.
+  inventory_batch_expiry: { tab: 'Receiving', subtab: 'Batches & lots' },
   inventory_low_stock: { tab: 'Item Register' },
   supplier_evaluation_due: { tab: 'Suppliers' },
 

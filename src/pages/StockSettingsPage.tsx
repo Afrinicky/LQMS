@@ -86,7 +86,7 @@ export default function StockSettingsPage() {
   return <div className="settings-module">
     <div className="settings-module-head">
       <h2>Stock &amp; Storage</h2>
-      <p>Where the laboratory keeps its reagents and consumables, and how its stock is barcoded. Stock item categories and units live in <strong>Dropdown Lists</strong>.</p>
+      <p>Where the laboratory keeps its reagents and consumables, and how its stock is barcoded. Stock item categories, units of measure, issue reasons and movement reasons live in <strong>Dropdown Lists</strong>.</p>
     </div>
 
     {error && <div className="error">{error}</div>}

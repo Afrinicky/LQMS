@@ -1,12 +1,10 @@
 /**
  * Supply and inventory control — the vocabulary and the rules.
  *
- * ISO 15189:2022 asks a laboratory to control what it buys and what it holds:
- * §6.6 for externally provided products and services, and §6.4/§6.5 for the
- * reagents and consumables themselves — received and inspected, stored as the
- * manufacturer requires, verified before use where performance depends on it,
- * traceable by lot and expiry, and used oldest-first so nothing expires on a
- * shelf while a newer box is opened.
+ * A laboratory controls what it buys and what it holds: goods are received and
+ * inspected before use, stored as the manufacturer requires, traceable by lot
+ * and expiry, and issued earliest-expiry-first so nothing turns on a shelf
+ * while a newer box is opened.
  *
  * These constants are the parts of that a laboratory sees and chooses.
  */
@@ -101,16 +99,13 @@ export const ACCEPTANCE_STATES = ['pending', 'accepted', 'rejected', 'quarantine
  *     date, which differ from box to box of the same product. This is the
  *     batch-level barcode.
  *
- * ISO 15189:2022 §6.6.2 asks the laboratory to record the lot code of every
- * reagent and consumable it uses, and §6.6.3 to verify a new lot before it is
- * put into service; the traceability the clause is after runs from a patient
- * result back to a *lot*, not to a product type. So a laboratory needs both,
- * and they are not alternatives.
+ * Traceability runs from a result back to a *lot*, not to a product type, so a
+ * store needs both and they are not alternatives.
  *
- * A modern reagent box carries both in one symbol — GS1-128 or GS1 DataMatrix
- * — as Application Identifiers: (01) GTIN, (10) batch/lot, (17) expiry as
- * YYMMDD. A scanner types the lot and the product code as one long string, so
- * it is read apart here rather than being demanded field by field.
+ * A modern reagent box carries both in one symbol, as application identifiers:
+ * (01) product code, (10) batch/lot, (17) expiry as YYMMDD. A scanner types
+ * the lot and the product code as one long string, so it is read apart here
+ * rather than being demanded field by field.
  */
 export type Gs1Scan = { gtin?: string; lot?: string; serial?: string; expiry?: string; raw: string };
 
