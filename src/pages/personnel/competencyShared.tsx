@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { Paperclip, Printer, Trash2, Upload } from 'lucide-react';
 import { api, API_BASE, getToken } from '../../services/api';
 import { openPrintable } from '../../services/xlsx';
@@ -20,7 +20,7 @@ export const badgeFor = (value?: string | null, label?: string) =>
   <span className={`badge ${label ? 'plain ' : ''}${value ? value.toLowerCase().replace(/[\s_]+/g, '-') : 'unknown'}`}>{label ?? labelise(value)}</span>;
 
 /** Days between today and a due date, negative when it has passed. */
-export function daysUntil(date?: string | null): number | null {
+function daysUntil(date?: string | null): number | null {
   if (!date) return null;
   const then = new Date(`${date}T00:00:00`);
   if (Number.isNaN(then.getTime())) return null;
@@ -258,31 +258,4 @@ export async function downloadFile(fileId: number, name: string) {
   link.href = url; link.download = name;
   document.body.appendChild(link); link.click(); link.remove();
   URL.revokeObjectURL(url);
-}
-
-/* ── Forms ──────────────────────────────────────────────────────────────── */
-
-/** A labelled field that spans the full width of a form grid. */
-export function WideField({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  return <label className="wide">
-    {label}{hint && <small className="field-hint">{hint}</small>}
-    {children}
-  </label>;
-}
-
-/** Debounced local state that writes back to the parent, for text fields in a
- *  large grid where a keystroke should not re-render every row. */
-export function useDebounced<T>(value: T, onCommit: (value: T) => void, delay = 400) {
-  const [local, setLocal] = useState(value);
-  const committed = useRef(value);
-  useEffect(() => { setLocal(value); committed.current = value; }, [value]);
-  useEffect(() => {
-    if (local === committed.current) return;
-    const timer = window.setTimeout(() => { committed.current = local; onCommit(local); }, delay);
-    return () => window.clearTimeout(timer);
-    // onCommit is written inline at nearly every call site, so depending on it
-    // would restart the timer on every render of the parent.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [local, delay]);
-  return [local, setLocal] as const;
 }
