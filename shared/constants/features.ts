@@ -159,8 +159,10 @@ export const FEATURES: FeatureDef[] = [
 
   // ── Supplier & Inventory ────────────────────────────────────────────────
   { key: 'supplier_inventory.stock', module: 'supplier_inventory', label: 'Stock & batches',
-    desc: 'Stock items, batches/lots and stock movements.',
-    tabs: ['Item Register', 'New Item', 'Batches/Lots', 'Stock Movements'] },
+    desc: 'The item catalogue, and running the store — receiving, issuing, counting and the stock ledger.',
+    tabs: ['Item Register', 'New Item', 'Inventory'] },
+  { key: 'supplier_inventory.planning', module: 'supplier_inventory', label: 'Forecasting & levels',
+    desc: 'Demand forecasting, reorder levels, minimum and maximum stock.', tabs: ['Forecasting'] },
   { key: 'supplier_inventory.suppliers', module: 'supplier_inventory', label: 'Suppliers', sensitive: true,
     desc: 'The approved supplier register and supplier evaluation.', tabs: ['Suppliers'] },
   { key: 'supplier_inventory.storage', module: 'supplier_inventory', label: 'Storage inspections',
@@ -168,7 +170,7 @@ export const FEATURES: FeatureDef[] = [
   { key: 'supplier_inventory.labels', module: 'supplier_inventory', label: 'Barcode labels',
     desc: 'Printing barcode labels for stock.', tabs: ['Barcode Labels'] },
   { key: 'supplier_inventory.reports', module: 'supplier_inventory', label: 'Inventory reports',
-    desc: 'Stock registers and summaries.', tabs: ['Reports placeholder'] },
+    desc: 'Consumption trends, stock status, expiry risk, wastage and supplier performance.', tabs: ['Reports'] },
 
   // ── Process Management ──────────────────────────────────────────────────
   { key: 'process_management.receipt', module: 'process_management', label: 'Sample receipt',
