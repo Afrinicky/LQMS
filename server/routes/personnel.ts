@@ -38,9 +38,6 @@ const DECLARATION_TYPES = ['confidentiality', 'ethical_declaration', 'conflict_o
 const DECLARATION_STATUSES = ['pending', 'signed', 'withdrawn'];
 const TRAINING_STATUSES = ['planned', 'completed', 'cancelled'];
 const ATTENDANCE_STATUSES = ['invited', 'attended', 'absent', 'excused'];
-const COMPETENCY_METHODS = ['direct_observation', 'record_review', 'blind_sample', 'split_sample', 'problem_solving', 'result_interpretation', 'interview', 'other'];
-const COMPETENCY_OUTCOMES = ['competent', 'competent_with_supervision', 'not_yet_competent'];
-const COMPETENCY_STATUSES = ['planned', 'in_progress', 'completed', 'cancelled'];
 const STAFF_DOC_VERIFICATION = ['pending', 'verified', 'rejected', 'expired'];
 const ROSTER_STATUSES = ['draft', 'published', 'approved', 'archived'];
 
@@ -197,82 +194,8 @@ export function personnelRoutes() {
     res.status(201).json({ id });
   });
 
-  // ============= Competency =============
-  router.get('/competency', requirePermission('personnel.training', 'view'), (req, res) => {
-    const db = getDb();
-    const filters: string[] = [];
-    const params: unknown[] = [];
-    if (req.query.staffId) { filters.push('c.staff_id = ?'); params.push(Number(req.query.staffId)); }
-    if (req.query.status) { filters.push('c.status = ?'); params.push(String(req.query.status)); }
-    let query = 'SELECT c.*, s.full_name AS staff_name, a.full_name AS assessor_name FROM competency_assessments c LEFT JOIN staff s ON s.id = c.staff_id LEFT JOIN staff a ON a.id = c.assessor_staff_id';
-    if (filters.length) query += ` WHERE ${filters.join(' AND ')}`;
-    query += ' ORDER BY c.assessment_date DESC';
-    res.json(db.prepare(query).all(...params));
-  });
-
-  router.post('/competency', requirePermission('personnel.training', 'create'), (req, res) => {
-    if (!parseIntNullable(req.body.staffId)) return res.status(400).json({ error: 'staffId is required' });
-    if (!req.body.activity) return res.status(400).json({ error: 'activity is required' });
-    if (!req.body.assessmentMethod) return res.status(400).json({ error: 'assessmentMethod is required' });
-    if (!COMPETENCY_METHODS.includes(req.body.assessmentMethod)) return res.status(400).json({ error: `assessmentMethod must be one of: ${COMPETENCY_METHODS.join(', ')}` });
-    if (!req.body.assessmentDate) return res.status(400).json({ error: 'assessmentDate is required' });
-    const status = req.body.status ?? 'planned';
-    if (!COMPETENCY_STATUSES.includes(status)) return res.status(400).json({ error: `status must be one of: ${COMPETENCY_STATUSES.join(', ')}` });
-    const outcome = req.body.outcome ?? null;
-    if (outcome && !COMPETENCY_OUTCOMES.includes(outcome)) return res.status(400).json({ error: `outcome must be one of: ${COMPETENCY_OUTCOMES.join(', ')}` });
-    const db = getDb();
-    const createdAt = new Date().toISOString();
-    const competencyNumber = generateRecordNumber(db, 'competency_assessments', 'COMP', createdAt);
-    const result = db.prepare(`INSERT INTO competency_assessments (competency_number, staff_id, department_id, section_id, activity, assessment_method, assessor_staff_id, assessment_date, outcome, findings, retraining_required, next_assessment_due, evidence_file_id, authorization_recommendation, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(competencyNumber, parseIntNullable(req.body.staffId), parseIntNullable(req.body.departmentId), parseIntNullable(req.body.sectionId), req.body.activity, req.body.assessmentMethod, getStaffIdOrCurrent(req, req.body.assessorStaffId), req.body.assessmentDate, outcome, req.body.findings ?? null, req.body.retrainingRequired ? 1 : 0, req.body.nextAssessmentDue ?? null, parseIntNullable(req.body.evidenceFileId), req.body.authorizationRecommendation ?? null, status, req.user!.id, createdAt);
-    const id = Number(result.lastInsertRowid);
-    audit(req, { action: 'create', entity: 'competency_assessments', entityId: id, newValue: { competencyNumber, ...req.body } });
-    res.status(201).json({ id, competencyNumber });
-  });
-
-  router.get('/competency/:id', requirePermission('personnel.training', 'view'), (req, res) => {
-    const db = getDb();
-    const record = db.prepare('SELECT c.*, s.full_name AS staff_name, a.full_name AS assessor_name FROM competency_assessments c LEFT JOIN staff s ON s.id = c.staff_id LEFT JOIN staff a ON a.id = c.assessor_staff_id WHERE c.id = ?').get(req.params.id);
-    if (!record) return res.status(404).json({ error: 'Competency assessment not found' });
-    const links = db.prepare('SELECT * FROM record_links WHERE source_module_key = ? AND source_record_type = ? AND source_record_id = ?').all('personnel', 'competency_assessments', String(req.params.id));
-    res.json({ ...record, links });
-  });
-
-  router.post('/competency/:id/complete', requirePermission('personnel.training', 'edit'), (req, res) => {
-    if (!req.body.outcome) return res.status(400).json({ error: 'outcome is required' });
-    if (!COMPETENCY_OUTCOMES.includes(req.body.outcome)) return res.status(400).json({ error: `outcome must be one of: ${COMPETENCY_OUTCOMES.join(', ')}` });
-    const db = getDb();
-    const assessment = db.prepare('SELECT * FROM competency_assessments WHERE id = ?').get(req.params.id) as any;
-    if (!assessment) return res.status(404).json({ error: 'Competency assessment not found' });
-    const retraining = req.body.outcome === 'not_yet_competent' ? 1 : (req.body.retrainingRequired ? 1 : 0);
-    db.prepare("UPDATE competency_assessments SET outcome = ?, findings = COALESCE(?, findings), retraining_required = ?, next_assessment_due = COALESCE(?, next_assessment_due), evidence_file_id = COALESCE(?, evidence_file_id), authorization_recommendation = COALESCE(?, authorization_recommendation), status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-      .run(req.body.outcome, req.body.findings ?? null, retraining, req.body.nextAssessmentDue ?? null, parseIntNullable(req.body.evidenceFileId), req.body.authorizationRecommendation ?? null, req.params.id);
-
-    if (retraining && req.body.createRetrainingAction) {
-      const r = db.prepare('INSERT INTO actions (title, module_key, source_module, source_record_id, description, priority, assigned_to_staff_id, status, evidence_required, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(`Retraining required: ${assessment.activity}`, 'personnel', 'personnel', String(req.params.id), `Competency assessment ${assessment.competency_number} outcome was not_yet_competent.`, 'high', assessment.staff_id, 'Not started', 1, req.user!.id);
-      const actionId = Number(r.lastInsertRowid);
-      db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run('personnel', 'competency_assessments', String(req.params.id), 'actions', 'actions', String(actionId), 'Retraining action');
-    }
-
-    audit(req, { action: 'complete', entity: 'competency_assessments', entityId: req.params.id, oldValue: { status: assessment.status, outcome: assessment.outcome }, newValue: { outcome: req.body.outcome, retraining_required: retraining } });
-    res.json({ ok: true });
-  });
-
-  router.post('/competency/:id/create-authorization', requirePermission('personnel.training', 'approve'), (req, res) => {
-    if (!req.body.moduleKey) return res.status(400).json({ error: 'moduleKey is required' });
-    if (!req.body.level) return res.status(400).json({ error: 'level is required' });
-    const db = getDb();
-    const assessment = db.prepare('SELECT * FROM competency_assessments WHERE id = ?').get(req.params.id) as any;
-    if (!assessment) return res.status(404).json({ error: 'Competency assessment not found' });
-    if (assessment.outcome === 'not_yet_competent') return res.status(400).json({ error: 'Cannot authorise a not_yet_competent assessment.' });
-    const result = db.prepare('INSERT INTO technical_authorizations (staff_id, position_id, module_key, section_id, level, is_active, expires_at, competency_assessment_id, created_by, notes) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)')
-      .run(assessment.staff_id, parseIntNullable(req.body.positionId), req.body.moduleKey, assessment.section_id, req.body.level, req.body.expiresAt ?? null, req.params.id, req.user!.id, req.body.notes ?? null);
-    const authId = Number(result.lastInsertRowid);
-    db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run('personnel', 'competency_assessments', String(req.params.id), 'personnel', 'technical_authorizations', String(authId), 'Authorisation granted from competency assessment');
-    audit(req, { action: 'create_authorization', entity: 'technical_authorizations', entityId: authId, newValue: { competencyAssessmentId: req.params.id, ...req.body } });
-    res.status(201).json({ id: authId });
-  });
+  // Competency assessment lives in routes/competency.ts — a framework, a
+  // scored record and its evidence, mounted on this same /personnel prefix.
 
   // ============= Duty rosters =============
   router.get('/rosters', requirePermission('personnel.rosters', 'view'), (req, res) => {
@@ -634,31 +557,11 @@ export function personnelRoutes() {
     res.json({ ok: true });
   });
 
-  // ============= Performance appraisals =============
-  router.get('/appraisals', requirePermission('personnel.appraisals', 'view'), (_req, res) => {
-    res.json(getDb().prepare('SELECT * FROM performance_appraisals ORDER BY appraisal_date DESC, created_at DESC').all());
-  });
-  router.post('/appraisals', requirePermission('personnel.appraisals', 'create'), (req, res) => {
-    if (!req.body.appraisalDate) return res.status(400).json({ error: 'appraisalDate is required' });
-    const db = getDb();
-    const createdAt = new Date().toISOString();
-    const number = generateRecordNumber(db, 'performance_appraisals', 'APR', createdAt);
-    const r = db.prepare(`INSERT INTO performance_appraisals (record_number, staff_id, appraisal_date, period, appraiser_staff_id, rating, outcome, strengths, development_areas, objectives, next_appraisal_due, status, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(number, parseIntNullable(req.body.staffId), req.body.appraisalDate, req.body.period ?? null, parseIntNullable(req.body.appraiserStaffId) ?? getStaffIdOrCurrent(req, null), req.body.rating ?? null, req.body.outcome ?? null, req.body.strengths ?? null, req.body.developmentAreas ?? null, req.body.objectives ?? null, req.body.nextAppraisalDue ?? null, req.body.status ?? 'completed', req.body.notes ?? null, req.user!.id, createdAt);
-    audit(req, { action: 'create', entity: 'performance_appraisals', entityId: r.lastInsertRowid, newValue: { number, ...req.body } });
-    res.status(201).json({ id: r.lastInsertRowid, recordNumber: number });
-  });
-  router.put('/appraisals/:id', requirePermission('personnel.appraisals', 'edit'), (req, res) => {
-    const db = getDb();
-    const old = db.prepare('SELECT * FROM performance_appraisals WHERE id = ?').get(req.params.id) as any;
-    if (!old) return res.status(404).json({ error: 'Appraisal not found' });
-    db.prepare(`UPDATE performance_appraisals SET staff_id = ?, appraisal_date = ?, period = ?, appraiser_staff_id = ?, rating = ?, outcome = ?, strengths = ?, development_areas = ?, objectives = ?, next_appraisal_due = ?, status = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-      .run(parseIntNullable(req.body.staffId) ?? old.staff_id, req.body.appraisalDate ?? old.appraisal_date, req.body.period ?? old.period, parseIntNullable(req.body.appraiserStaffId) ?? old.appraiser_staff_id, req.body.rating ?? old.rating, req.body.outcome ?? old.outcome, req.body.strengths ?? old.strengths, req.body.developmentAreas ?? old.development_areas, req.body.objectives ?? old.objectives, req.body.nextAppraisalDue ?? old.next_appraisal_due, req.body.status ?? old.status, req.body.notes ?? old.notes, req.params.id);
-    audit(req, { action: 'edit', entity: 'performance_appraisals', entityId: req.params.id, oldValue: old, newValue: req.body });
-    res.json({ ok: true });
-  });
+  // Performance appraisal lives in routes/appraisals.ts — a template, a
+  // scored record with self-assessment and moderation, mounted on this same
+  // /personnel prefix.
 
   return router;
 }
 
-export { DECLARATION_TYPES, TRAINING_STATUSES, ATTENDANCE_STATUSES, COMPETENCY_METHODS, COMPETENCY_OUTCOMES, COMPETENCY_STATUSES, STAFF_DOC_VERIFICATION, ROSTER_STATUSES, DECLARATION_STATUSES };
+export { DECLARATION_TYPES, TRAINING_STATUSES, ATTENDANCE_STATUSES, STAFF_DOC_VERIFICATION, ROSTER_STATUSES, DECLARATION_STATUSES };

@@ -5,6 +5,7 @@ import { config } from '../config/index.js';
 import { SYNCABLE_TABLES } from './syncableTables.js';
 import { CONFIG_LISTS } from '../../shared/constants/configLists.js';
 import { BUILTIN_SOUNDS, DEFAULT_SOUND_FOR_EVENT } from '../../shared/constants/activities.js';
+import { seedCompetencyFrameworks } from './seedCompetency.js';
 
 // Filesystem layout is sourced from the centralized config module so every path
 // is env-configurable (SECH_LIMS_DATA_DIR / SECH_LIMS_DB_PATH) from one place.
@@ -5534,8 +5535,343 @@ CREATE TABLE IF NOT EXISTS system_audit_scans (
     if (!cols.has('published_at')) database.exec('ALTER TABLE bench_schedules ADD COLUMN published_at TEXT');
   }
 
+  // ===================================================================
+  // Competence and performance — frameworks, structured assessments and
+  // appraisals.
+  //
+  // A competency record used to be one row: an activity, a method, a date and
+  // an outcome somebody typed. That records the conclusion but not the
+  // evidence, so nothing in it answers "against what was this person judged,
+  // and what did the assessor actually see?".
+  //
+  // A framework holds the answer to the first question — the elements of a
+  // job, grouped by bench, each with the performance criteria that define
+  // competent work and the evidence expected. An assessment takes a copy of
+  // that framework at the moment it is raised, so a later edit to the
+  // framework never rewrites history. Each element is then scored, evidenced
+  // and remarked on individually, and the record carries a signature from the
+  // assessor, a technical reviewer and the member of staff themselves.
+  // -------------------------------------------------------------------
+  database.exec(`
+CREATE TABLE IF NOT EXISTS competency_frameworks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  framework_code TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  applies_to TEXT NOT NULL DEFAULT 'all_staff',   -- new_hire|existing_staff|intern_attachee|locum|student|all_staff
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  cadre TEXT,
+  version_label TEXT NOT NULL DEFAULT '1.0',
+  purpose TEXT,
+  scope TEXT,
+  max_score INTEGER NOT NULL DEFAULT 4,           -- top of the rating scale
+  pass_threshold_percent REAL NOT NULL DEFAULT 75,
+  minimum_element_score REAL,                     -- no single element may fall below this
+  critical_elements_must_pass INTEGER NOT NULL DEFAULT 1,
+  validity_months INTEGER NOT NULL DEFAULT 12,
+  requires_technical_review INTEGER NOT NULL DEFAULT 1,
+  requires_staff_acknowledgement INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'draft',           -- draft|active|archived
+  is_default INTEGER NOT NULL DEFAULT 0,
+  effective_date TEXT,
+  next_review_date TEXT,
+  approved_by_staff_id INTEGER REFERENCES staff(id),
+  approved_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_comp_frameworks_status ON competency_frameworks(status, applies_to);
+
+CREATE TABLE IF NOT EXISTS competency_framework_groups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  framework_id INTEGER NOT NULL REFERENCES competency_frameworks(id) ON DELETE CASCADE,
+  group_title TEXT NOT NULL,
+  group_description TEXT,
+  weight REAL NOT NULL DEFAULT 1,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_comp_groups_framework ON competency_framework_groups(framework_id, display_order);
+
+CREATE TABLE IF NOT EXISTS competency_framework_elements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  framework_id INTEGER NOT NULL REFERENCES competency_frameworks(id) ON DELETE CASCADE,
+  group_id INTEGER REFERENCES competency_framework_groups(id) ON DELETE CASCADE,
+  element_code TEXT,
+  element_text TEXT NOT NULL,
+  performance_criteria TEXT,
+  expected_evidence TEXT,
+  default_method TEXT NOT NULL DEFAULT 'direct_observation',
+  weight REAL NOT NULL DEFAULT 1,
+  is_critical INTEGER NOT NULL DEFAULT 0,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_comp_elements_framework ON competency_framework_elements(framework_id, group_id, display_order);
+
+-- One scored line of an assessment. Text is copied from the framework element
+-- so the record stays readable after the framework is revised.
+CREATE TABLE IF NOT EXISTS competency_assessment_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  assessment_id INTEGER NOT NULL REFERENCES competency_assessments(id) ON DELETE CASCADE,
+  framework_element_id INTEGER REFERENCES competency_framework_elements(id),
+  group_title TEXT,
+  element_code TEXT,
+  element_text TEXT NOT NULL,
+  performance_criteria TEXT,
+  expected_evidence TEXT,
+  method TEXT,
+  score REAL,                                    -- NULL until assessed
+  max_score REAL NOT NULL DEFAULT 4,
+  weight REAL NOT NULL DEFAULT 1,
+  is_critical INTEGER NOT NULL DEFAULT 0,
+  not_applicable INTEGER NOT NULL DEFAULT 0,
+  observed_date TEXT,
+  evidence_note TEXT,
+  remarks TEXT,
+  evidence_file_id INTEGER REFERENCES files(id),
+  assessed_by_staff_id INTEGER REFERENCES staff(id),
+  assessed_at TEXT,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_comp_items_assessment ON competency_assessment_items(assessment_id, display_order);
+
+-- Objective proof of examination performance: a proficiency-testing sample, a
+-- previously examined sample re-run, a split or a blind sample.
+CREATE TABLE IF NOT EXISTS competency_sample_checks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  assessment_id INTEGER NOT NULL REFERENCES competency_assessments(id) ON DELETE CASCADE,
+  check_type TEXT NOT NULL DEFAULT 'proficiency_testing', -- proficiency_testing|previously_examined|split_sample|blind_sample
+  sample_id TEXT,
+  date_tested TEXT,
+  test_performed TEXT,
+  staff_result TEXT,
+  reference_result TEXT,
+  agreement TEXT,                                -- acceptable|unacceptable|not_evaluated
+  remarks TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_comp_samples_assessment ON competency_sample_checks(assessment_id);
+
+CREATE TABLE IF NOT EXISTS competency_assessment_attachments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  assessment_id INTEGER NOT NULL REFERENCES competency_assessments(id) ON DELETE CASCADE,
+  file_id INTEGER NOT NULL REFERENCES files(id),
+  title TEXT,
+  description TEXT,
+  uploaded_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_comp_attachments_assessment ON competency_assessment_attachments(assessment_id);
+
+-- ---- Performance appraisal ----------------------------------------------
+-- An appraisal template carries the weighting the laboratory has agreed
+-- between what somebody delivered (objectives) and how they worked
+-- (behaviours, quality and compliance), so two appraisers scoring the same
+-- person are answering the same questions against the same scale.
+CREATE TABLE IF NOT EXISTS appraisal_templates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  template_code TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  applies_to TEXT NOT NULL DEFAULT 'all_staff',
+  cadre TEXT,
+  version_label TEXT NOT NULL DEFAULT '1.0',
+  description TEXT,
+  max_score INTEGER NOT NULL DEFAULT 5,
+  self_assessment_required INTEGER NOT NULL DEFAULT 1,
+  second_level_review_required INTEGER NOT NULL DEFAULT 1,
+  objectives_required INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'draft',          -- draft|active|archived
+  is_default INTEGER NOT NULL DEFAULT 0,
+  effective_date TEXT,
+  next_review_date TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS appraisal_template_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  template_id INTEGER NOT NULL REFERENCES appraisal_templates(id) ON DELETE CASCADE,
+  section TEXT NOT NULL DEFAULT 'competency',    -- delivery|competency|quality_compliance|leadership
+  item_title TEXT NOT NULL,
+  item_description TEXT,
+  success_measure TEXT,
+  weight REAL NOT NULL DEFAULT 1,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_appraisal_tpl_items ON appraisal_template_items(template_id, section, display_order);
+
+-- A cycle is the laboratory's appraisal round: one period, one template, one
+-- closing date, so the register shows who is outstanding rather than each
+-- appraisal being an isolated event.
+CREATE TABLE IF NOT EXISTS appraisal_cycles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cycle_name TEXT NOT NULL,
+  cycle_type TEXT NOT NULL DEFAULT 'annual',     -- annual|mid_year|probation|quarterly
+  period_start TEXT NOT NULL,
+  period_end TEXT NOT NULL,
+  template_id INTEGER REFERENCES appraisal_templates(id),
+  self_assessment_due TEXT,
+  appraisal_due TEXT,
+  status TEXT NOT NULL DEFAULT 'planned',        -- planned|open|in_review|closed
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  notes TEXT,
+  opened_at TEXT,
+  closed_at TEXT,
+  closed_by_staff_id INTEGER REFERENCES staff(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_appraisal_cycles_status ON appraisal_cycles(status, period_end);
+
+CREATE TABLE IF NOT EXISTS appraisal_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  appraisal_id INTEGER NOT NULL REFERENCES performance_appraisals(id) ON DELETE CASCADE,
+  template_item_id INTEGER REFERENCES appraisal_template_items(id),
+  section TEXT NOT NULL DEFAULT 'competency',
+  item_title TEXT NOT NULL,
+  item_description TEXT,
+  success_measure TEXT,
+  weight REAL NOT NULL DEFAULT 1,
+  max_score REAL NOT NULL DEFAULT 5,
+  self_score REAL,
+  self_comment TEXT,
+  appraiser_score REAL,
+  appraiser_comment TEXT,
+  evidence_note TEXT,
+  evidence_file_id INTEGER REFERENCES files(id),
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_appraisal_items_appraisal ON appraisal_items(appraisal_id, section, display_order);
+
+-- Objectives agreed for the period ahead, each with the measure that will
+-- decide whether it was met.
+CREATE TABLE IF NOT EXISTS appraisal_objectives (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  appraisal_id INTEGER NOT NULL REFERENCES performance_appraisals(id) ON DELETE CASCADE,
+  objective TEXT NOT NULL,
+  success_measure TEXT,
+  target_date TEXT,
+  weight REAL NOT NULL DEFAULT 1,
+  achievement_percent REAL,
+  status TEXT NOT NULL DEFAULT 'agreed',         -- agreed|in_progress|achieved|partially_achieved|not_achieved|carried_forward
+  comments TEXT,
+  carried_from_id INTEGER REFERENCES appraisal_objectives(id),
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_appraisal_objectives ON appraisal_objectives(appraisal_id, display_order);
+
+CREATE TABLE IF NOT EXISTS appraisal_development_actions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  appraisal_id INTEGER NOT NULL REFERENCES performance_appraisals(id) ON DELETE CASCADE,
+  action TEXT NOT NULL,
+  action_type TEXT NOT NULL DEFAULT 'training',  -- training|mentoring|rotation|competency_assessment|qualification|other
+  development_need TEXT,
+  target_date TEXT,
+  responsible_staff_id INTEGER REFERENCES staff(id),
+  status TEXT NOT NULL DEFAULT 'planned',        -- planned|in_progress|completed|cancelled
+  linked_action_id INTEGER REFERENCES actions(id),
+  notes TEXT,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_appraisal_dev_actions ON appraisal_development_actions(appraisal_id, display_order);
+
+CREATE TABLE IF NOT EXISTS appraisal_attachments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  appraisal_id INTEGER NOT NULL REFERENCES performance_appraisals(id) ON DELETE CASCADE,
+  file_id INTEGER NOT NULL REFERENCES files(id),
+  title TEXT,
+  description TEXT,
+  uploaded_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_appraisal_attachments ON appraisal_attachments(appraisal_id);
+`);
+
+  // The two register tables pre-date the framework, so they are widened in
+  // place: an existing record keeps its number, its dates and its outcome, and
+  // simply has no scored elements behind it.
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(competency_assessments)').all() as Array<{ name: string }>).map(c => c.name));
+    const add = (name: string, ddl: string) => { if (!cols.has(name)) database.exec(`ALTER TABLE competency_assessments ADD COLUMN ${ddl}`); };
+    add('framework_id', 'framework_id INTEGER REFERENCES competency_frameworks(id)');
+    add('framework_title', 'framework_title TEXT');
+    add('framework_version', 'framework_version TEXT');
+    add('assessment_type', "assessment_type TEXT NOT NULL DEFAULT 'initial'");
+    add('assessment_reason', 'assessment_reason TEXT');
+    add('period_label', 'period_label TEXT');
+    add('position_id', 'position_id INTEGER REFERENCES positions(id)');
+    add('max_score', 'max_score REAL');
+    add('total_score', 'total_score REAL');
+    add('score_percent', 'score_percent REAL');
+    add('pass_threshold_percent', 'pass_threshold_percent REAL');
+    add('elements_assessed', 'elements_assessed INTEGER NOT NULL DEFAULT 0');
+    add('elements_total', 'elements_total INTEGER NOT NULL DEFAULT 0');
+    add('critical_failures', 'critical_failures INTEGER NOT NULL DEFAULT 0');
+    add('supervision_level', 'supervision_level TEXT');
+    add('assessor_comments', 'assessor_comments TEXT');
+    add('development_plan', 'development_plan TEXT');
+    add('reviewer_staff_id', 'reviewer_staff_id INTEGER REFERENCES staff(id)');
+    add('reviewer_comments', 'reviewer_comments TEXT');
+    add('reviewed_at', 'reviewed_at TEXT');
+    add('staff_comments', 'staff_comments TEXT');
+    add('staff_acknowledged_at', 'staff_acknowledged_at TEXT');
+    add('staff_acknowledged_by', 'staff_acknowledged_by INTEGER REFERENCES users(id)');
+    add('completed_at', 'completed_at TEXT');
+    add('completed_by_staff_id', 'completed_by_staff_id INTEGER REFERENCES staff(id)');
+  }
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(performance_appraisals)').all() as Array<{ name: string }>).map(c => c.name));
+    const add = (name: string, ddl: string) => { if (!cols.has(name)) database.exec(`ALTER TABLE performance_appraisals ADD COLUMN ${ddl}`); };
+    add('cycle_id', 'cycle_id INTEGER REFERENCES appraisal_cycles(id)');
+    add('template_id', 'template_id INTEGER REFERENCES appraisal_templates(id)');
+    add('template_title', 'template_title TEXT');
+    add('appraisal_type', "appraisal_type TEXT NOT NULL DEFAULT 'annual'");
+    add('period_start', 'period_start TEXT');
+    add('period_end', 'period_end TEXT');
+    add('section_id', 'section_id INTEGER REFERENCES sections(id)');
+    add('position_id', 'position_id INTEGER REFERENCES positions(id)');
+    add('max_score', 'max_score REAL');
+    add('delivery_score_percent', 'delivery_score_percent REAL');
+    add('competency_score_percent', 'competency_score_percent REAL');
+    add('overall_score', 'overall_score REAL');
+    add('overall_percent', 'overall_percent REAL');
+    add('rating_band', 'rating_band TEXT');
+    add('recommendation', 'recommendation TEXT');
+    add('self_assessment_submitted_at', 'self_assessment_submitted_at TEXT');
+    add('self_overall_comments', 'self_overall_comments TEXT');
+    add('appraiser_comments', 'appraiser_comments TEXT');
+    add('appraiser_submitted_at', 'appraiser_submitted_at TEXT');
+    add('reviewer_staff_id', 'reviewer_staff_id INTEGER REFERENCES staff(id)');
+    add('reviewer_comments', 'reviewer_comments TEXT');
+    add('reviewed_at', 'reviewed_at TEXT');
+    add('employee_comments', 'employee_comments TEXT');
+    add('employee_acknowledged_at', 'employee_acknowledged_at TEXT');
+    add('employee_acknowledged_by', 'employee_acknowledged_by INTEGER REFERENCES users(id)');
+    add('training_needs', 'training_needs TEXT');
+    add('completed_at', 'completed_at TEXT');
+  }
+
   seedNotificationSounds(database);
   seedFormTemplates(database);
+  seedCompetencyFrameworks(database);
 }
 
 /**

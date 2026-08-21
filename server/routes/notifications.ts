@@ -97,10 +97,71 @@ function collectScanCandidates(db: any): ScanCandidate[] {
     }
   }
 
-  // Competency next assessment
+  // Competency re-assessment.
+  //
+  // Only the most recent closed assessment of a person against a given scope
+  // can fall due: an earlier one is history, and alerting on it would leave
+  // somebody permanently overdue for work that has since been re-assessed. An
+  // assessment already open against the same scope is the re-assessment, so
+  // that scope is not chased either.
   if (tableExists(db, 'competency_assessments') && columnExists(db, 'competency_assessments', 'next_assessment_due')) {
-    const rows = db.prepare("SELECT id, staff_id, activity, next_assessment_due FROM competency_assessments WHERE next_assessment_due IS NOT NULL AND next_assessment_due <= ?").all(soonIso) as any[];
-    for (const r of rows) out.push({ moduleKey: 'personnel', recordType: 'competency_assessments', recordId: String(r.id), title: `Competency due: ${r.activity}`, message: `Next assessment ${r.next_assessment_due}`, dueDate: r.next_assessment_due, severity: 'medium', notificationType: 'review_required', itemType: 'competency_due', responsibleStaffId: r.staff_id });
+    // "Scope" is the framework where there is one, and the free-text activity
+    // where an assessment was raised without one.
+    const framework = columnExists(db, 'competency_assessments', 'framework_id');
+    const scopeOf = (alias: string) => framework
+      ? `COALESCE(CAST(${alias}.framework_id AS TEXT), ${alias}.activity)`
+      : `${alias}.activity`;
+    const title = framework ? 'COALESCE(c.framework_title, c.activity)' : 'c.activity';
+    const rows = db.prepare(`SELECT c.id, c.staff_id, c.next_assessment_due, ${title} AS scope_title
+      FROM competency_assessments c
+      WHERE c.next_assessment_due IS NOT NULL AND c.next_assessment_due <= ?
+        AND c.status IN ('completed','acknowledged')
+        AND c.id = (SELECT c2.id FROM competency_assessments c2
+                    WHERE c2.staff_id = c.staff_id AND ${scopeOf('c2')} = ${scopeOf('c')}
+                      AND c2.status IN ('completed','acknowledged')
+                    ORDER BY c2.assessment_date DESC, c2.id DESC LIMIT 1)
+        AND NOT EXISTS (SELECT 1 FROM competency_assessments c3
+                        WHERE c3.staff_id = c.staff_id AND ${scopeOf('c3')} = ${scopeOf('c')}
+                          AND c3.status IN ('planned','in_progress','pending_review'))`).all(soonIso) as any[];
+    for (const r of rows) {
+      out.push({
+        moduleKey: 'personnel', recordType: 'competency_assessments', recordId: String(r.id),
+        title: `Competency re-assessment due: ${r.scope_title}`, message: `Due ${r.next_assessment_due}`,
+        dueDate: r.next_assessment_due, severity: 'medium', notificationType: 'review_required',
+        itemType: 'competency_due', responsibleStaffId: r.staff_id,
+      });
+    }
+  }
+
+  // Performance appraisal falling due, and appraisals stuck part-way.
+  if (tableExists(db, 'performance_appraisals') && columnExists(db, 'performance_appraisals', 'next_appraisal_due')) {
+    const rows = db.prepare(`SELECT a.id, a.staff_id, a.record_number, a.next_appraisal_due
+      FROM performance_appraisals a
+      WHERE a.next_appraisal_due IS NOT NULL AND a.next_appraisal_due <= ?
+        AND a.status IN ('completed','acknowledged')
+        AND a.id = (SELECT a2.id FROM performance_appraisals a2 WHERE a2.staff_id = a.staff_id
+                    AND a2.status IN ('completed','acknowledged') ORDER BY a2.appraisal_date DESC, a2.id DESC LIMIT 1)
+        AND NOT EXISTS (SELECT 1 FROM performance_appraisals a3 WHERE a3.staff_id = a.staff_id
+                        AND a3.status IN ('draft','self_assessment','appraiser_review','pending_moderation'))`).all(soonIso) as any[];
+    for (const r of rows) out.push({ moduleKey: 'personnel', recordType: 'performance_appraisals', recordId: String(r.id), title: 'Performance appraisal due', message: `Last appraisal ${r.record_number}; next due ${r.next_appraisal_due}`, dueDate: r.next_appraisal_due, severity: 'medium', notificationType: 'review_required', itemType: 'appraisal_due', responsibleStaffId: r.staff_id });
+
+    if (columnExists(db, 'performance_appraisals', 'self_assessment_submitted_at')) {
+      const stuck = db.prepare(`SELECT a.id, a.staff_id, a.record_number, a.status, c.self_assessment_due, c.appraisal_due
+        FROM performance_appraisals a
+        LEFT JOIN appraisal_cycles c ON c.id = a.cycle_id
+        WHERE (a.status = 'self_assessment' AND c.self_assessment_due IS NOT NULL AND c.self_assessment_due <= ?)
+           OR (a.status IN ('appraiser_review','pending_moderation') AND c.appraisal_due IS NOT NULL AND c.appraisal_due <= ?)`).all(soonIso, soonIso) as any[];
+      for (const r of stuck) {
+        const waitingOnStaff = r.status === 'self_assessment';
+        out.push({
+          moduleKey: 'personnel', recordType: 'performance_appraisals', recordId: String(r.id),
+          title: waitingOnStaff ? 'Self-assessment outstanding' : 'Appraisal outstanding',
+          message: `${r.record_number} is at "${String(r.status).replace(/_/g, ' ')}"`,
+          dueDate: waitingOnStaff ? r.self_assessment_due : r.appraisal_due,
+          severity: 'medium', notificationType: 'review_required', itemType: 'appraisal_due', responsibleStaffId: r.staff_id,
+        });
+      }
+    }
   }
 
   // Technical authorizations expiry
