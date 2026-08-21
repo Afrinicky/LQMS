@@ -11,6 +11,9 @@ import {
 } from '../../shared/constants/inventory.js';
 
 import { buildWorkbook, sendWorkbook, readSheet, cell, numCell } from '../utils/xlsxRegister.js';
+import { stockControlRoutes } from './stockControl.js';
+import { postMovement } from '../services/stockLedger.js';
+import { VEN_CLASSES } from '../../shared/constants/stockControl.js';
 
 const BARCODE_POLICY_KEY = 'inventory.barcodePolicy';
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
@@ -387,6 +390,11 @@ export function inventoryRoutes() {
     res.status(201).json({ id: result.lastInsertRowid, itemCode });
   });
 
+  // Running the store — the ledger, issuing, counting, forecasting and the
+  // reports. Mounted here so it shares the module's permissions and base path,
+  // and ahead of the legacy numeric catch-all further down.
+  router.use(stockControlRoutes());
+
   // Items
   router.get('/items', requirePermission('supplier_inventory.stock', 'view'), (_req, res) => {
     const db = getDb();
@@ -452,6 +460,15 @@ export function inventoryRoutes() {
       barcode_source: requested,
       catalogue_number: req.body.catalogueNumber || null,
       manufacturer: req.body.manufacturer || null,
+      // Planning parameters, set at registration rather than needing a second
+      // visit: what it costs, how badly it is needed, and how long it takes to
+      // arrive are all known when the item is first written down.
+      unit_cost: req.body.unitCost === '' || req.body.unitCost == null ? null : Number(req.body.unitCost),
+      maximum_stock: req.body.maximumStock === '' || req.body.maximumStock == null ? null : Number(req.body.maximumStock),
+      ven_class: VEN_CLASSES.includes(req.body.venClass) ? req.body.venClass : 'essential',
+      lead_time_days: Math.max(1, Number(req.body.leadTimeDays) || 30),
+      review_period_days: Math.max(1, Number(req.body.reviewPeriodDays) || 30),
+      service_level: Math.min(0.999, Math.max(0.5, Number(req.body.serviceLevel) || 0.95)),
       is_active: req.body.isActive === false ? 0 : 1,
       created_by: req.user!.id,
       created_at: createdAt,
@@ -546,9 +563,16 @@ export function inventoryRoutes() {
       }
       db.prepare('UPDATE inventory_items SET product_barcode = ?, barcode_source = ? WHERE id = ?').run(barcode, source, req.params.id);
     }
-    for (const [key, col] of [['catalogueNumber', 'catalogue_number'], ['manufacturer', 'manufacturer']] as const) {
-      if (req.body[key] !== undefined) db.prepare(`UPDATE inventory_items SET ${col} = ? WHERE id = ?`).run(req.body[key] || null, req.params.id);
+    // Blankable fields: an empty box means "not recorded".
+    for (const [key, col] of [
+      ['catalogueNumber', 'catalogue_number'], ['manufacturer', 'manufacturer'],
+      ['unitCost', 'unit_cost'], ['maximumStock', 'maximum_stock'],
+    ] as const) {
+      if (req.body[key] !== undefined) db.prepare(`UPDATE inventory_items SET ${col} = ? WHERE id = ?`).run(req.body[key] === '' || req.body[key] == null ? null : req.body[key], req.params.id);
     }
+    // These always hold a value, so a blank leaves what was already there.
+    if (VEN_CLASSES.includes(req.body.venClass)) db.prepare('UPDATE inventory_items SET ven_class = ? WHERE id = ?').run(req.body.venClass, req.params.id);
+    if (Number(req.body.leadTimeDays) > 0) db.prepare('UPDATE inventory_items SET lead_time_days = ? WHERE id = ?').run(Number(req.body.leadTimeDays), req.params.id);
     audit(req, { action: 'edit', entity: 'inventory_items', entityId: req.params.id, oldValue, newValue: req.body });
     res.json({ ok: true });
   });
@@ -715,9 +739,25 @@ export function inventoryRoutes() {
         req.body.status ?? 'available',
         req.user!.id
       );
-    db.prepare('UPDATE inventory_items SET quantity = quantity + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(qtyAvailable, req.params.id);
+    // A receipt is a movement. Without one the bin card shows stock leaving and
+    // never arriving, which is not a tally card — it is half of one.
+    const posted = postMovement(db, {
+      itemId: Number(req.params.id), batchId: Number(result.lastInsertRowid), movementType: 'receive',
+      quantity: qtyAvailable, movementDate: req.body.dateReceived,
+      reason: req.body.batchNumber ? `Received batch ${req.body.batchNumber}` : 'Delivery received',
+      unitCost: req.body.unitCost != null && req.body.unitCost !== '' ? Number(req.body.unitCost) : item.unit_cost,
+      userId: req.user!.id,
+      // The batch row above already carries the quantity, so this posting only
+      // records the receipt and the balance it left — it must not add it again.
+      applyToStock: false,
+    });
+    db.prepare('UPDATE inventory_items SET quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(posted.balanceAfter, req.params.id);
+    if (req.body.unitCost != null && req.body.unitCost !== '') {
+      db.prepare('UPDATE inventory_items SET unit_cost = ? WHERE id = ?').run(Number(req.body.unitCost), req.params.id);
+    }
     audit(req, { action: 'create', entity: 'inventory_batches', entityId: result.lastInsertRowid, newValue: { itemId: req.params.id, ...req.body } });
-    res.status(201).json({ id: result.lastInsertRowid });
+    res.status(201).json({ id: result.lastInsertRowid, balanceAfter: posted.balanceAfter });
   });
 
   router.get('/batches', requirePermission('supplier_inventory.stock', 'view'), (_req, res) => {
@@ -735,7 +775,6 @@ export function inventoryRoutes() {
     const qty = Number(req.body.quantity);
     if (!Number.isFinite(qty) || qty <= 0) return res.status(400).json({ error: 'quantity must be positive' });
     const isOut = ISSUING_MOVEMENTS.includes(req.body.movementType);
-    const isIn = ['receive', 'return', 'adjust_in', 'transfer_in'].includes(req.body.movementType);
     if (isOut && batch.quantity_available < qty) return res.status(400).json({ error: 'Insufficient batch stock; movement would create negative stock' });
 
     // ---- The three controls that make this stock control rather than a tally.
@@ -780,27 +819,21 @@ export function inventoryRoutes() {
         });
       }
     }
-    const delta = isOut ? -qty : isIn ? qty : 0;
-    const movementDate = req.body.movementDate ?? new Date().toISOString();
-    const receivedBy = getStaffIdOrCurrent(req, req.body.receivedByStaffId);
-    const result = db.prepare(`INSERT INTO inventory_movements (item_id, batch_id, movement_type, quantity, movement_date, issued_to_section_id, received_by_staff_id, reason, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(
-        batch.item_id,
-        req.params.id,
-        req.body.movementType,
-        qty,
-        movementDate,
-        parseIntNullable(req.body.issuedToSectionId),
-        receivedBy,
-        req.body.overrideFefo === true ? `${req.body.reason ?? ''}${req.body.reason ? ' — ' : ''}FEFO skipped deliberately`.trim() : (req.body.reason ?? null),
-        req.user!.id
-      );
-    if (delta !== 0) {
-      db.prepare('UPDATE inventory_batches SET quantity_available = quantity_available + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(delta, req.params.id);
-      db.prepare('UPDATE inventory_items SET quantity = quantity + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(delta, batch.item_id);
-    }
-    audit(req, { action: 'create', entity: 'inventory_movements', entityId: result.lastInsertRowid, newValue: { batchId: req.params.id, ...req.body } });
-    res.status(201).json({ id: result.lastInsertRowid });
+    // One posting path for every movement, so the balance on the bin card is
+    // written the same way whoever recorded it and whichever screen they used.
+    const movementDate = req.body.movementDate ?? new Date().toISOString().slice(0, 10);
+    const posted = postMovement(db, {
+      itemId: batch.item_id, batchId: Number(req.params.id), movementType: req.body.movementType, quantity: qty,
+      movementDate,
+      issuedToSectionId: parseIntNullable(req.body.issuedToSectionId),
+      receivedByStaffId: parseIntNullable(req.body.receivedByStaffId),
+      reason: req.body.overrideFefo === true
+        ? `${req.body.reason ?? ''}${req.body.reason ? ' — ' : ''}FEFO skipped deliberately`.trim()
+        : (req.body.reason ?? null),
+      userId: req.user!.id,
+    });
+    audit(req, { action: 'create', entity: 'inventory_movements', entityId: posted.id, newValue: { batchId: req.params.id, ...req.body } });
+    res.status(201).json({ id: posted.id, balanceAfter: posted.balanceAfter });
   });
 
   router.post('/batches/:id/acceptance', requirePermission('supplier_inventory.stock', 'edit'), (req, res) => {

@@ -3,6 +3,14 @@ import { Link } from 'react-router-dom';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, BarChart, CHART_COLORS, ModuleAlerts, DetailModal, RowMenu } from '../components/ui';
 import { FileText, Pencil, PackagePlus, Tag, Trash2, ShieldAlert, Star } from 'lucide-react';
+import { StockLedger, IssueDesk, IssueRegister, StockTake, type LedgerRow } from './inventory/StockControl';
+import { ForecastingPanel } from './inventory/Forecasting';
+import { InventoryReports } from './inventory/Reports';
+import { STOCK_STATUS_LABELS, NEEDS_ACTION } from '../../shared/constants/stockControl';
+
+// The store's day, in order: what is held, what came in, what is going out,
+// what the count found, and the trail of all of it.
+const INVENTORY_TABS = ['Stock ledger', 'Receiving', 'Issuing', 'Batches & lots', 'Stock take', 'Movement register'] as const;
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken, ApiError } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -1325,6 +1333,10 @@ export function InventoryPage() {
   const supplierImportRef = useRef<HTMLInputElement>(null);
   const [itemSearch, setItemSearch] = useState('');
   const [fefoWarning, setFefoWarning] = useState<{ message: string; batchId: number } | null>(null);
+  const [invTab, setInvTab] = useState<typeof INVENTORY_TABS[number]>('Stock ledger');
+  // Bumped whenever stock moves, so every panel showing a balance re-reads it.
+  const [stockKey, setStockKey] = useState(0);
+  const [ledgerRows, setLedgerRows] = useState<LedgerRow[]>([]);
   const [detailMode, setDetailMode] = useState<'view' | 'edit'>('view');
   const [removing, setRemoving] = useState<ItemDeletionImpact | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -1349,6 +1361,25 @@ export function InventoryPage() {
     return movements.filter(m => [m.item_name, m.item_code, m.batch_number, m.lot_number, m.issued_to_section_name, m.received_by_name, m.reason, m.movement_type]
       .some(v => String(v ?? '').toLowerCase().includes(q)));
   }, [movements, moveSearch]);
+  // The store's position, worked out once for the dashboard.
+  const stockSummary = useMemo(() => {
+    const count = (st: string) => ledgerRows.filter(r => r.status === st).length;
+    const byStatus = (['stockout', 'blocked', 'critical', 'low', 'adequate', 'overstock', 'unknown'] as const)
+      .map((st, i) => ({ label: STOCK_STATUS_LABELS[st], value: count(st), color: CHART_COLORS[i % CHART_COLORS.length] }))
+      .filter(d => d.value > 0);
+    return {
+      needOrdering: ledgerRows.filter(r => NEEDS_ACTION.includes(r.status)).length,
+      unavailable: ledgerRows.filter(r => r.issuable <= 0).length,
+      expiring: ledgerRows.filter(r => ['expired', 'expiring_soon'].includes(r.expiry_status ?? '')).length,
+      quarantined: ledgerRows.filter(r => r.quarantined > 0).length,
+      byStatus,
+      urgent: [...ledgerRows].filter(r => NEEDS_ACTION.includes(r.status))
+        .sort((a, b) => a.priority - b.priority || (a.months_of_stock ?? 0) - (b.months_of_stock ?? 0))
+        .slice(0, 8)
+        .map(r => ({ label: `${r.name} — ${r.months_of_stock == null ? 'no use recorded' : `${r.months_of_stock} months left`}`, value: Math.max(1, Math.round((r.amc || 1) * 3 - r.issuable)) })),
+    };
+  }, [ledgerRows]);
+
   const supplierRows = useMemo(() => {
     const q = supplierSearch.trim().toLowerCase();
     if (!q) return suppliers;
@@ -1378,6 +1409,7 @@ export function InventoryPage() {
       if (ops) setSummary(ops);
       api<StorageInspection[]>('/supplier-inventory/storage-inspections').then(setStorageInspections).catch(() => setStorageInspections([]));
       api<StockMovement[]>('/supplier-inventory/movements').then(setMovements).catch(() => setMovements([]));
+      api<{ rows: LedgerRow[] }>('/supplier-inventory/ledger').then(d => setLedgerRows(d.rows)).catch(() => setLedgerRows([]));
       api<SupplierEvaluationRow[]>('/supplier-inventory/supplier-evaluations').then(setEvaluations).catch(() => setEvaluations([]));
       api<Array<{ id: number; path: string; kind: string }>>('/supplier-inventory/storage-locations').then(setStoragePlaces).catch(() => setStoragePlaces([]));
       api<ConfigOption[]>('/config/option-lists/inventory_category').then(setCategories).catch(() => setCategories([]));
@@ -1517,6 +1549,7 @@ export function InventoryPage() {
       await api(`/supplier-inventory/items/${batchForm.itemId}/batches`, { method: 'POST', body: JSON.stringify(batchForm) });
       setBatchForm({ itemId: '', batchNumber: '', lotNumber: '', supplierId: '', quantityReceived: 0, quantityAvailable: 0, dateReceived: '', expiryDate: '', storageLocationId: '', productBarcode: '' });
       setReceiptNote(null);
+      setStockKey(k => k + 1);
       await load();
     } catch (e) { setError((e as Error).message); }
   }
@@ -1528,6 +1561,7 @@ export function InventoryPage() {
       await api(`/supplier-inventory/batches/${movementForm.batchId}/movement`, { method: 'POST', body: JSON.stringify({ ...movementForm, overrideFefo }) });
       setMovementForm({ batchId: '', movementType: 'issue', quantity: 0, movementDate: '', issuedToSectionId: '', receivedByStaffId: '', reason: '' });
       setFefoWarning(null);
+      setStockKey(k => k + 1);
       await load();
     } catch (err) {
       // 409 is not a failure — it is the store telling the person there is an
@@ -1575,28 +1609,26 @@ export function InventoryPage() {
       <span style={{ flex: 1 }}>{notice}</span>
       <button type="button" className="secondary tiny" onClick={() => setNotice(null)}>Dismiss</button>
     </div>}
-    {tabBarFor('supplier_inventory')(tab, ['Dashboard', 'Item Register', 'New Item', 'Batches/Lots', 'Stock Movements', 'Suppliers', 'Storage Inspections', 'Barcode Labels', 'Reports placeholder'], setTab)}
+    {tabBarFor('supplier_inventory')(tab, ['Dashboard', 'Item Register', 'New Item', 'Inventory', 'Suppliers', 'Storage Inspections', 'Barcode Labels', 'Forecasting', 'Reports'], setTab)}
 
+    {/* The store's own position, not a count of catalogue rows. What a
+        storekeeper needs before anything else is: can I serve the bench today,
+        and what am I about to lose off the shelf. */}
     {tab === 'Dashboard' && <><ModuleAlerts moduleKey="supplier_inventory" /><KpiStrip items={[
-      { label: 'Inventory items', value: items.length, onClick: () => setTab('Item Register') },
-      { label: 'Low stock', value: summary?.inventoryLowStock ?? items.filter(i => i.low_stock).length, tone: 'warning', onClick: () => setTab('Item Register') },
-      { label: 'Expiring soon', value: summary?.inventoryExpiringSoon, onClick: () => setTab('Batches/Lots') },
-      { label: 'Expired', value: summary?.inventoryExpired, tone: 'danger', onClick: () => setTab('Batches/Lots') },
+      { label: 'Items held', value: ledgerRows.length, onClick: () => { setTab('Inventory'); setInvTab('Stock ledger'); } },
+      { label: 'Need ordering', value: stockSummary.needOrdering, tone: stockSummary.needOrdering ? 'warning' : undefined, onClick: () => { setTab('Inventory'); setInvTab('Stock ledger'); } },
+      { label: 'Cannot be issued', value: stockSummary.unavailable, tone: stockSummary.unavailable ? 'danger' : undefined, onClick: () => { setTab('Inventory'); setInvTab('Stock ledger'); } },
+      { label: 'Expiring or expired', value: stockSummary.expiring, tone: stockSummary.expiring ? 'warning' : undefined, onClick: () => { setTab('Inventory'); setInvTab('Batches & lots'); } },
+      { label: 'Awaiting inspection', value: stockSummary.quarantined, onClick: () => { setTab('Inventory'); setInvTab('Batches & lots'); } },
     ]} />
     <div className="grid cols-2" style={{ marginTop: 18 }}>
-      <ChartCard title="Stock health" subtitle="Items by supply risk">
-        <DonutChart centerLabel="Items" data={[
-          { label: 'Healthy', value: Math.max(0, items.length - (summary?.inventoryLowStock ?? items.filter(i => i.low_stock).length) - (summary?.inventoryExpired ?? 0)), color: CHART_COLORS[1] },
-          { label: 'Low stock', value: summary?.inventoryLowStock ?? items.filter(i => i.low_stock).length, color: CHART_COLORS[2] },
-          { label: 'Expired', value: summary?.inventoryExpired ?? 0, color: CHART_COLORS[3] },
-        ]} />
+      <ChartCard title="Where the stock stands" subtitle="Every item by what it can actually supply">
+        <DonutChart centerLabel="Items" data={stockSummary.byStatus} />
       </ChartCard>
-      <ChartCard title="Replenishment signals" subtitle="Stock requiring action">
-        <BarMeter data={[
-          { label: 'Low stock', value: summary?.inventoryLowStock ?? items.filter(i => i.low_stock).length, color: CHART_COLORS[2] },
-          { label: 'Expiring soon', value: summary?.inventoryExpiringSoon, color: CHART_COLORS[0] },
-          { label: 'Expired', value: summary?.inventoryExpired, color: CHART_COLORS[3] },
-        ]} />
+      <ChartCard title="What needs doing" subtitle="Ranked by how badly a shortage would hurt — the bar is roughly what to order for three months' cover">
+        {stockSummary.urgent.length === 0
+          ? <p className="muted">Nothing is below its reorder level.</p>
+          : <BarMeter data={stockSummary.urgent} />}
       </ChartCard>
     </div></>}
 
@@ -1721,7 +1753,27 @@ export function InventoryPage() {
       </form>
     </div>}
 
-    {tab === 'Batches/Lots' && <div>
+    {/* Running the store, in the order the day runs: what is held, what came
+        in, what is going out, what the count found, and the trail of it all. */}
+    {tab === 'Inventory' && <div className="card" style={{ paddingBottom: 6 }}>
+      <div className="reg-seg" role="tablist" aria-label="Inventory">
+        {INVENTORY_TABS.map(t => <button key={t} type="button" role="tab" aria-selected={invTab === t}
+          className={invTab === t ? 'on' : ''} onClick={() => setInvTab(t)}>{t}</button>)}
+      </div>
+    </div>}
+
+    {tab === 'Inventory' && invTab === 'Stock ledger' &&
+      <StockLedger refreshKey={stockKey} onOpenItem={id => void openDetail(id)} />}
+
+    {tab === 'Inventory' && invTab === 'Issuing' && <>
+      <IssueDesk items={ledgerRows} sections={sections} staff={staff} onIssued={() => { setStockKey(k => k + 1); void load(); }} />
+      <IssueRegister refreshKey={stockKey} />
+    </>}
+
+    {tab === 'Inventory' && invTab === 'Stock take' &&
+      <StockTake places={storagePlaces} staff={staff} onPosted={() => { setStockKey(k => k + 1); void load(); }} />}
+
+    {tab === 'Inventory' && invTab === 'Receiving' && <div>
       <div className="card">
         <h3>Receive a delivery</h3>
         <p className="muted" style={{ marginTop: 0 }}>
@@ -1749,6 +1801,9 @@ export function InventoryPage() {
           <button type="submit">Receive delivery</button>
         </form>
       </div>
+    </div>}
+
+    {tab === 'Inventory' && invTab === 'Batches & lots' && <div>
       <div className="card">
         <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
           <h3 style={{ margin: 0 }}>Batches and lots <span className="muted">— in FEFO order</span></h3>
@@ -1790,9 +1845,13 @@ export function InventoryPage() {
       </div>
     </div>}
 
-    {tab === 'Stock Movements' && <>
+    {tab === 'Inventory' && invTab === 'Movement register' && <>
     <div className="card">
-      <h3>Record stock movement</h3>
+      <h3>Record a one-off movement</h3>
+      <p className="muted" style={{ marginTop: 0 }}>
+        For anything that is not a plain issue — a disposal, a transfer, a correction. Issuing to a unit is quicker
+        on the <button type="button" className="linklike" onClick={() => setInvTab('Issuing')}>Issuing</button> tab.
+      </p>
       <form className="form" onSubmit={submitMovement}>
         {/* The state of a batch is on the option itself, so a storekeeper is
             not offered a quarantined or expired box and refused a click later. */}
@@ -2033,7 +2092,10 @@ export function InventoryPage() {
 
     {tab === 'Barcode Labels' && <BarcodeLabelGenerator />}
 
-    {tab === 'Reports placeholder' && <div className="card"><p>Reports for inventory will be added in a later phase.</p></div>}
+    {tab === 'Forecasting' && <ForecastingPanel canEdit={can('supplier_inventory', 'edit')} refreshKey={stockKey}
+      onApplied={() => { setStockKey(k => k + 1); void load(); }} />}
+
+    {tab === 'Reports' && <InventoryReports refreshKey={stockKey} />}
   </div>;
 }
 

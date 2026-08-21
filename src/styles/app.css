@@ -3306,3 +3306,26 @@ tr.row-retired { opacity: .62; }
 /* A date is one thing; it must not be broken across two lines in a table. */
 .data-table td time, .data-table .nowrap { white-space: nowrap; }
 .stock-figures .fig small { font-size: 12px; font-weight: 500; color: var(--muted); }
+
+/* ---------- Running the store ---------- */
+
+/* The issue desk: who it is going to, across the top, then the basket. */
+.issue-head { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.issue-head label { margin: 0; }
+.issue-lines td { vertical-align: top; }
+.issue-lines select, .issue-lines input { width: 100%; }
+.input-error { border-color: var(--danger) !important; }
+
+/* Why a level is what it is — shown beside the level, not in a manual. */
+.plan-explain { margin-top: 18px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; }
+.plan-steps { margin: 8px 0 0; padding-left: 20px; display: grid; gap: 6px; font-size: 13px; line-height: 1.55; }
+.plan-steps strong { color: var(--text); }
+
+/* The ledger carries a lot of columns; the item can take the slack so the
+   status — the column somebody actually came for — is never pushed off. */
+.ledger-table th:first-child, .ledger-table td:first-child { min-width: 210px; }
+.ledger-table th:last-child, .ledger-table td:last-child { white-space: nowrap; }
+
+/* Badges are title-cased by default, which is right for a one-word state and
+   wrong for a phrase — "Out Of Stock" is not English. */
+.badge.plain { text-transform: none; }

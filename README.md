@@ -265,6 +265,66 @@ Erasing a supplier detaches the stock they supplied rather than deleting it — 
 their name, so the trail survives them. Both live behind the row's **⋯** menu, not beside the
 everyday actions.
 
+### Running the store
+
+The **Item Register** says what the laboratory stocks. **Inventory** is about what it *has*, in the
+order the day runs:
+
+**Stock ledger** — everything held, with the numbers a store actually runs on. The distinction the
+screen insists on is between what is *on hand* and what is *issuable*: a reagent with four hundred
+tests in the fridge still awaiting inspection cannot serve a single patient this morning, so the
+status is judged on what can go out, and stock that is present but not released is called exactly
+that rather than "adequate". Cover is shown in months, because "40 units" is a fortnight of one
+reagent and two years of another. Opening a row gives its **bin card** — the tally card, every
+movement in date order with the balance it left behind, and a warning if that balance and the shelf
+have parted company.
+
+**Receiving** — a delivery is booked in against a lot, and posts a receipt movement, so the bin card
+shows stock arriving as well as leaving.
+
+**Issuing** — somebody from a unit is at the counter. Name the unit and the person, add what they
+are taking, press issue. The store allocates across lots oldest-expiry-first and writes a numbered
+voucher; nobody picks a batch by hand. A request that is short on any one line issues nothing at
+all, so a five-line request cannot leave three of them out and two not. Anything returned unused
+goes back into the lot it came from, so that lot's expiry still applies.
+
+**Stock take** — a sheet per lot, pre-filled with what the register believes. Enter what was found,
+post it, and every difference becomes an adjustment movement carrying its reason, so a correction is
+part of the record rather than a balance that changed overnight.
+
+**Movement register** — every issue, receipt, disposal and adjustment, searchable and exportable.
+
+### Forecasting — what to order, and what the levels should be
+
+A minimum somebody typed in once is a guess that ages. Levels are worked out from what the
+laboratory actually consumed, by the standard continuous-review chain:
+
+- **Demand** is forecast from the item's own history. Several methods — moving average, weighted
+  moving average, Holt's linear trend, and a seasonal variant once two full years exist — are each
+  walked through that history, scored on the error they *would* have made, and the best fit wins.
+  The method and its error are shown beside every number. Months before the item was first used and
+  the current, part-finished month are excluded: neither is evidence of demand.
+- **Safety stock** = z × σ × √(lead time ÷ period), sized from how uneven demand has been and the
+  service level set for the item.
+- **Reorder level** = lead-time demand + safety stock. **Maximum** covers the lead time and the
+  ordering cycle together. **EOQ** is offered as advice, with the caveat that pack size and shelf
+  life usually decide instead.
+- **ABC** follows a Pareto split of annual consumption value; **VEN** (vital / essential /
+  desirable) is set per item. Together they rank whose shortage gets chased first.
+
+Wastage never counts as demand — a lot discarded because it expired is a loss to report, not
+consumption to reorder against.
+
+Proposed levels can be applied to selected items in one action, and an item whose levels were set by
+hand can be locked so no forecast overwrites them.
+
+### Reports
+
+Live from the ledger: consumption and receipts by month, where every item stands, what is about to
+turn (by 30/90/180 days and by value), wastage rate, stock turnover, the shortage list ranked by
+ABC/VEN priority, the biggest consumers, stock that never moves, the value concentration, and
+supplier delivery and rejection rates.
+
 ### Suppliers — ISO 15189:2022 §6.6.4
 
 Selecting, evaluating and monitoring the suppliers of what affects a result are four different
@@ -291,6 +351,8 @@ npm run check:core-docs       # core documents pointing at the register
 npm run check:jobs            # a due schedule producing a backup on its own
 npm run check:inventory       # storage, barcodes, the register spreadsheet, and the §6.6 controls
 npm run check:inventory-records  # derived expiry, the movement register, GS1 scanning, suppliers
+npm run check:stock              # running the store: issuing, the bin card, counts, forecasting, reports
+npm run check:stock-math         # the arithmetic on its own — forecasting, safety stock, ABC/VEN (no server)
 ```
 
 The `check:*` scripts run against a live host (`npm run api`).

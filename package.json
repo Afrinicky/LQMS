@@ -39,6 +39,8 @@
     "check:complaints": "node scripts/complaints-check.mjs",
     "check:inventory": "node scripts/inventory-check.mjs",
     "check:inventory-records": "node scripts/inventory-records-check.mjs",
+    "check:stock": "python3 scripts/stock_control_check.py",
+    "check:stock-math": "tsx scripts/stock-math-check.mjs",
     "check:core-docs": "node scripts/core-documents-check.mjs",
     "check:jobs": "node scripts/background-jobs-check.mjs",
     "validate:oq": "node scripts/validation/oq-suite.mjs",

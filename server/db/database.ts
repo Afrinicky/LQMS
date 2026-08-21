@@ -5142,6 +5142,104 @@ ALTER TABLE inventory_batches__rebuilt RENAME TO inventory_batches;
       }
     }
   }
+  // ===================================================================
+  // Running a store, not just listing what is in it.
+  //
+  // Three things a stock register cannot do without:
+  //
+  //   · a BIN CARD. Every movement records the balance it left behind, the
+  //     way a tally card on the shelf does. Recomputing the balance from the
+  //     movements afterwards is not the same thing — a correction, a stock
+  //     count or a backdated entry would silently rewrite history.
+  //   · an ISSUE VOUCHER. Somebody from a unit comes for a reagent; what
+  //     leaves the store is one numbered document naming who took what for
+  //     which unit, not a scattering of per-batch movements.
+  //   · a STOCK COUNT. What the register says and what is on the shelf part
+  //     company, and the difference has to be counted, explained and posted.
+  // ===================================================================
+  {
+    const moveCols = new Set((database.prepare('PRAGMA table_info(inventory_movements)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!moveCols.has('balance_after')) database.exec('ALTER TABLE inventory_movements ADD COLUMN balance_after REAL');
+    if (!moveCols.has('issue_id')) database.exec('ALTER TABLE inventory_movements ADD COLUMN issue_id INTEGER');
+    if (!moveCols.has('unit_cost')) database.exec('ALTER TABLE inventory_movements ADD COLUMN unit_cost REAL');
+    if (!moveCols.has('count_id')) database.exec('ALTER TABLE inventory_movements ADD COLUMN count_id INTEGER');
+  }
+
+  // Planning parameters. A minimum on its own cannot say when to order: that
+  // needs how long the supplier takes, how uncertain demand is, and how often
+  // ordering happens. See shared/constants/inventory.ts for the arithmetic.
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(inventory_items)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!cols.has('maximum_stock')) database.exec('ALTER TABLE inventory_items ADD COLUMN maximum_stock REAL');
+    if (!cols.has('lead_time_days')) database.exec('ALTER TABLE inventory_items ADD COLUMN lead_time_days INTEGER NOT NULL DEFAULT 30');
+    if (!cols.has('review_period_days')) database.exec('ALTER TABLE inventory_items ADD COLUMN review_period_days INTEGER NOT NULL DEFAULT 30');
+    if (!cols.has('service_level')) database.exec('ALTER TABLE inventory_items ADD COLUMN service_level REAL NOT NULL DEFAULT 0.95');
+    if (!cols.has('unit_cost')) database.exec('ALTER TABLE inventory_items ADD COLUMN unit_cost REAL');
+    // A is the few items that carry most of the spend; V is what the
+    // laboratory cannot run without. The two together decide how hard a
+    // stockout hurts — the standard ABC/VEN pairing used in medical stores.
+    if (!cols.has('abc_class')) database.exec('ALTER TABLE inventory_items ADD COLUMN abc_class TEXT');
+    if (!cols.has('ven_class')) database.exec("ALTER TABLE inventory_items ADD COLUMN ven_class TEXT NOT NULL DEFAULT 'essential'");
+    // Set when somebody has decided the levels by hand and does not want the
+    // forecast writing over them.
+    if (!cols.has('planning_locked')) database.exec('ALTER TABLE inventory_items ADD COLUMN planning_locked INTEGER NOT NULL DEFAULT 0');
+  }
+
+  database.exec(`
+CREATE TABLE IF NOT EXISTS stock_issues (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  issue_number TEXT NOT NULL UNIQUE,
+  issue_date TEXT NOT NULL,
+  section_id INTEGER REFERENCES sections(id),
+  issued_to_name TEXT,                       -- who actually came for it
+  received_by_staff_id INTEGER REFERENCES staff(id),
+  issued_by_user_id INTEGER REFERENCES users(id),
+  purpose TEXT,
+  note TEXT,
+  status TEXT NOT NULL DEFAULT 'issued',     -- issued|returned|cancelled
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS stock_issue_lines (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  issue_id INTEGER NOT NULL REFERENCES stock_issues(id) ON DELETE CASCADE,
+  item_id INTEGER NOT NULL REFERENCES inventory_items(id),
+  quantity REAL NOT NULL,
+  unit TEXT,
+  unit_cost REAL,
+  -- Which lots the quantity actually came out of, oldest expiry first.
+  allocation TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_stock_issue_lines_issue ON stock_issue_lines(issue_id);
+CREATE INDEX IF NOT EXISTS idx_stock_issues_date ON stock_issues(issue_date);
+
+CREATE TABLE IF NOT EXISTS stock_counts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  count_number TEXT NOT NULL UNIQUE,
+  count_date TEXT NOT NULL,
+  storage_location_id INTEGER REFERENCES storage_locations(id),
+  counted_by_staff_id INTEGER REFERENCES staff(id),
+  scope TEXT NOT NULL DEFAULT 'full',        -- full|location|category|cycle
+  scope_value TEXT,
+  status TEXT NOT NULL DEFAULT 'open',       -- open|posted|cancelled
+  note TEXT,
+  posted_at TEXT,
+  posted_by_user_id INTEGER REFERENCES users(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS stock_count_lines (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  count_id INTEGER NOT NULL REFERENCES stock_counts(id) ON DELETE CASCADE,
+  item_id INTEGER NOT NULL REFERENCES inventory_items(id),
+  batch_id INTEGER REFERENCES inventory_batches(id),
+  system_quantity REAL NOT NULL DEFAULT 0,
+  counted_quantity REAL,
+  reason TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_stock_count_lines_count ON stock_count_lines(count_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_movements_item_date ON inventory_movements(item_id, movement_date);
+`);
+
   // A laboratory that has never set one up gets a store to put things in, so
   // the field is never an empty dropdown again.
   const anyStorage = database.prepare('SELECT COUNT(*) c FROM storage_locations').get() as { c: number };
