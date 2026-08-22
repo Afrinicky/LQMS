@@ -7,6 +7,8 @@ export type { KpiItem } from './KpiStrip';
 export { default as EmptyState } from './EmptyState';
 export { default as DetailModal } from './DetailModal';
 export { default as RowMenu } from './RowMenu';
+export { default as RegisterSearch } from './RegisterSearch';
+export { default as NumberField } from './NumberField';
 export { MODULE_ICONS, moduleIcon, SECTION_ICONS, sectionIcon } from './moduleIcons';
 export { DonutChart, BarChart, BarMeter, RadialGauge, Sparkline, ChartCard, CHART_COLORS } from './Charts';
 export { AlertCard, AlertGrid, ModuleAlerts, AlertSummary } from './AlertCard';

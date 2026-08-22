@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts, DetailModal } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts, DetailModal, NumberField } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -251,8 +251,8 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
     </tbody></table>}
 
     {tab === 'New Import' && <form className="form-grid" onSubmit={submitImport}>
-      <label>Report month<input type="number" min={1} max={12} value={importForm.reportMonth} onChange={e => setImportForm({ ...importForm, reportMonth: Number(e.target.value) })} required /></label>
-      <label>Report year<input type="number" min={2000} max={2100} value={importForm.reportYear} onChange={e => setImportForm({ ...importForm, reportYear: Number(e.target.value) })} required /></label>
+      <label>Report month<NumberField min={1} max={12} value={importForm.reportMonth} onValue={n => setImportForm({ ...importForm, reportMonth: n ?? 0 })} required /></label>
+      <label>Report year<NumberField min={2000} max={2100} value={importForm.reportYear} onValue={n => setImportForm({ ...importForm, reportYear: n ?? 0 })} required /></label>
       <label>Import type<select value={importForm.importType} onChange={e => setImportForm({ ...importForm, importType: e.target.value })} required>{IMPORT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
       <label>Source file<input type="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={e => setImportForm({ ...importForm, file: e.target.files?.[0] ?? null })} required /></label>
       <label>Notes<textarea value={importForm.notes} onChange={e => setImportForm({ ...importForm, notes: e.target.value })} /></label>
@@ -329,8 +329,8 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
     </>}
 
     {tab === 'Generate Report' && <form className="form-grid" onSubmit={submitGenerate}>
-      <label>Report month<input type="number" min={1} max={12} value={generateForm.reportMonth} onChange={e => setGenerateForm({ ...generateForm, reportMonth: Number(e.target.value) })} required /></label>
-      <label>Report year<input type="number" min={2000} max={2100} value={generateForm.reportYear} onChange={e => setGenerateForm({ ...generateForm, reportYear: Number(e.target.value) })} required /></label>
+      <label>Report month<NumberField min={1} max={12} value={generateForm.reportMonth} onValue={n => setGenerateForm({ ...generateForm, reportMonth: n ?? 0 })} required /></label>
+      <label>Report year<NumberField min={2000} max={2100} value={generateForm.reportYear} onValue={n => setGenerateForm({ ...generateForm, reportYear: n ?? 0 })} required /></label>
       <label>Report type<select value={generateForm.reportType} onChange={e => setGenerateForm({ ...generateForm, reportType: e.target.value })} required>{REPORT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
       <label>Import batches (processed only)<select multiple size={Math.min(8, Math.max(3, imports.length))} value={generateForm.importBatchIds.map(String)} onChange={e => setGenerateForm({ ...generateForm, importBatchIds: Array.from(e.target.selectedOptions).map(o => Number(o.value)) })} required>
         {imports.filter(b => b.status === 'processed').map(b => <option key={b.id} value={b.id}>{b.batch_number} — {b.report_year}-{String(b.report_month).padStart(2, '0')} ({b.import_type})</option>)}
@@ -376,8 +376,8 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
 
     {tab === 'TAT Summary' && <>
       <div className="form-grid">
-        <label>Month<input type="number" min={1} max={12} value={tatFilter.month} onChange={e => setTatFilter({ ...tatFilter, month: Number(e.target.value) })} /></label>
-        <label>Year<input type="number" min={2000} max={2100} value={tatFilter.year} onChange={e => setTatFilter({ ...tatFilter, year: Number(e.target.value) })} /></label>
+        <label>Month<NumberField min={1} max={12} value={tatFilter.month} onValue={n => setTatFilter({ ...tatFilter, month: n ?? 0 })} /></label>
+        <label>Year<NumberField min={2000} max={2100} value={tatFilter.year} onValue={n => setTatFilter({ ...tatFilter, year: n ?? 0 })} /></label>
         <button type="button" onClick={loadTatSummary}>Load summary</button>
       </div>
       {tatSummary && <>

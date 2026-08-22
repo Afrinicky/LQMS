@@ -4,6 +4,7 @@ import {
   Sparkles, Volume2, Wand2,
 } from 'lucide-react';
 import { api } from '../services/api';
+import { NumberField } from '../components/ui';
 import { usePermissions } from '../hooks/usePermissions';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import { configureSound, playEvent, playSpec, primeAudio } from '../services/sound';
@@ -686,7 +687,7 @@ function ReminderSounds() {
           <span className="muted">{Math.round(Number(draft.volume ?? 0.7) * 100)}%</span>
         </label>
         <label>Ring this many times
-          <input type="number" min={1} max={5} value={Number(draft.repeat_count ?? 1)} onChange={e => setDraft({ ...draft, repeat_count: Number(e.target.value) })} /></label>
+          <NumberField min={1} max={5} value={Number(draft.repeat_count ?? 1)} onValue={n => setDraft({ ...draft, repeat_count: n ?? 1 })} /></label>
         <label>Quiet from
           <input type="time" value={String(draft.quiet_hours_start ?? '')} onChange={e => setDraft({ ...draft, quiet_hours_start: e.target.value })} /></label>
         <label>Quiet until

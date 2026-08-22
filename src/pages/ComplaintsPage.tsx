@@ -1,7 +1,8 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Circle, AlertTriangle, MessageSquare, Search } from 'lucide-react';
+import { CheckCircle2, Circle, AlertTriangle, MessageSquare } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts, DetailModal } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts, DetailModal, NumberField, RegisterSearch } from '../components/ui';
+import { useCappedRows } from '../hooks/useCappedRows';
 import { api } from '../services/api';
 import { useModules } from '../hooks/useModules';
 import { usePermissions } from '../hooks/usePermissions';
@@ -153,6 +154,7 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
       .some(v => v?.toLowerCase().includes(term));
     return matches && (!stageFilter || stageOf(c) === stageFilter);
   }), [complaints, search, stageFilter]);
+  const page = useCappedRows(filtered);
 
   const staffName = (id?: number | null) => staff.find(s => s.id === id)?.fullName ?? (id ? `Staff #${id}` : '—');
 
@@ -194,8 +196,7 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
 
     {tab === 'Complaints Register' && <div className="card">
       <div className="reg-filters">
-        <label className="reg-search"><Search size={15} />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search number, title, complainant…" /></label>
+        <RegisterSearch onQuery={setSearch} placeholder="Search number, title, complainant…" />
         <label className="inline">Stage
           <select value={stageFilter} onChange={e => setStageFilter(e.target.value)}>
             <option value="">All</option>
@@ -208,7 +209,7 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
         <table className="data-table"><thead><tr>
           <th>Complaint</th><th>Complainant</th><th>Stage</th><th>Acknowledged</th><th>Due</th><th>Outcome</th><th></th>
         </tr></thead><tbody>
-          {filtered.map(c => {
+          {page.shown.map(c => {
             const lateAck = isOverdue(c.acknowledgement_due_date, c.acknowledged_at);
             const lateRes = isOverdue(c.resolution_due_date, c.closed_at);
             return <tr key={c.id} {...focusAttr('complaints', c.id)}>
@@ -236,6 +237,9 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
               <td><button type="button" className="tiny" onClick={() => open(c.id)}>Open</button></td>
             </tr>;
           })}
+          {page.hidden > 0 && <tr><td colSpan={7} className="muted list-capped">
+            Showing the most recent {page.shown.length.toLocaleString()} of {page.total.toLocaleString()} — search or filter to narrow it down.
+          </td></tr>}
           {filtered.length === 0 && <tr><td colSpan={7} className="muted" style={{ padding: 18, textAlign: 'center' }}>
             {complaints.length === 0 ? 'No complaints have been logged.' : 'Nothing matches those filters.'}
           </td></tr>}
@@ -298,11 +302,11 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
       </p>
       <form className="form-grid" onSubmit={saveTargets}>
         <label>Acknowledge receipt within
-          <input type="number" min={1} max={365} value={targets.acknowledgeDays}
-            onChange={e => setTargets(t => ({ ...t, acknowledgeDays: Number(e.target.value) }))} /> </label>
+          <NumberField min={1} max={365} value={targets.acknowledgeDays}
+            onValue={n => setTargets(t => ({ ...t, acknowledgeDays: n ?? 0 }))} /> </label>
         <label>Resolve within
-          <input type="number" min={1} max={365} value={targets.resolveDays}
-            onChange={e => setTargets(t => ({ ...t, resolveDays: Number(e.target.value) }))} /></label>
+          <NumberField min={1} max={365} value={targets.resolveDays}
+            onValue={n => setTargets(t => ({ ...t, resolveDays: n ?? 0 }))} /></label>
         <button type="submit" disabled={busy === 'targets'}>{busy === 'targets' ? 'Saving…' : 'Save targets'}</button>
       </form>
     </div>}

@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, BarChart, CHART_COLORS, ModuleAlerts, DetailModal, RowMenu } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, BarChart, CHART_COLORS, ModuleAlerts, DetailModal, RowMenu, RegisterSearch, NumberField } from '../components/ui';
 import { FileText, Pencil, PackagePlus, Tag, Trash2, ShieldAlert, Star, Undo2, Scale, Plus, Search } from 'lucide-react';
 import { StockLedger, IssueDesk, IssueRegister, StockTake, type LedgerRow } from './inventory/StockControl';
 import { ForecastingPanel } from './inventory/Forecasting';
@@ -27,6 +27,7 @@ import { EnvironmentalMonitoringPage, EnvLiveCards } from './EnvironmentalMonito
 import { usePermissions } from '../hooks/usePermissions';
 import PermissionTabs from '../components/PermissionTabs';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
+import { useCappedRows } from '../hooks/useCappedRows';
 import { useTabParam } from '../hooks/useTabParam';
 import type {
   Location, Section, Department, Staff, Supplier, EquipmentItem, InventoryItem, MonitoringRecord, SafetyIncident,
@@ -1350,7 +1351,9 @@ export function InventoryPage() {
   const [regResult, setRegResult] = useState<{ created: number; updated: number; skipped: number; errors: string[] } | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const supplierImportRef = useRef<HTMLInputElement>(null);
-  const [itemSearch, setItemSearch] = useState('');
+  // Only the settled query lives here. The box holds what is being typed, so
+  // a keystroke does not re-render this whole page — see RegisterSearch.
+  const [itemQuery, setItemQuery] = useState('');
   const [fefoWarning, setFefoWarning] = useState<{ message: string; batchId: number } | null>(null);
   const [recvTab, setRecvTab] = useState<typeof RECEIVING_TABS[number]>('Goods receipt');
   const [manageTab, setManageTab] = useState<typeof STOCK_MANAGEMENT_TABS[number]>('Stock take');
@@ -1365,9 +1368,9 @@ export function InventoryPage() {
   const [removing, setRemoving] = useState<ItemDeletionImpact | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [movements, setMovements] = useState<StockMovement[]>([]);
-  const [moveSearch, setMoveSearch] = useState('');
+  const [moveQuery, setMoveQuery] = useState('');
   const [supplierTab, setSupplierTab] = useState('Register');
-  const [supplierSearch, setSupplierSearch] = useState('');
+  const [supplierQuery, setSupplierQuery] = useState('');
   const [evaluations, setEvaluations] = useState<SupplierEvaluationRow[]>([]);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [removingSupplier, setRemovingSupplier] = useState<SupplierDeletionImpact | null>(null);
@@ -1379,17 +1382,20 @@ export function InventoryPage() {
   // The register is searched over what a storekeeper can see on the shelf —
   // the name, the code, either barcode, the category and where it is kept.
   const itemRows = useMemo(() => {
-    const q = itemSearch.trim().toLowerCase();
+    const q = itemQuery.trim().toLowerCase();
     if (!q) return items;
     return items.filter(i => [i.name, i.item_code, i.product_barcode, i.category, i.storage_path, i.manufacturer, i.catalogue_number]
       .some(v => String(v ?? '').toLowerCase().includes(q)));
-  }, [items, itemSearch]);
+  }, [items, itemQuery]);
+  const shownItems = useCappedRows(itemRows);
+  const shownBatches = useCappedRows(batches);
   const movementRows = useMemo(() => {
-    const q = moveSearch.trim().toLowerCase();
+    const q = moveQuery.trim().toLowerCase();
     if (!q) return movements;
     return movements.filter(m => [m.item_name, m.item_code, m.batch_number, m.lot_number, m.issued_to_section_name, m.received_by_name, m.reason, m.movement_type]
       .some(v => String(v ?? '').toLowerCase().includes(q)));
-  }, [movements, moveSearch]);
+  }, [movements, moveQuery]);
+  const shownMovements = useCappedRows(movementRows);
   // The store's position, worked out once for the dashboard.
   const stockSummary = useMemo(() => {
     const count = (st: string) => ledgerRows.filter(r => r.status === st).length;
@@ -1410,11 +1416,11 @@ export function InventoryPage() {
   }, [ledgerRows]);
 
   const supplierRows = useMemo(() => {
-    const q = supplierSearch.trim().toLowerCase();
+    const q = supplierQuery.trim().toLowerCase();
     if (!q) return suppliers;
     return suppliers.filter(sp => [sp.name, sp.supplier_code, sp.contact_person, sp.contact, sp.phone, sp.email, sp.item_category]
       .some(v => String(v ?? '').toLowerCase().includes(q)));
-  }, [suppliers, supplierSearch]);
+  }, [suppliers, supplierQuery]);
   const [batchForm, setBatchForm] = useState({
     itemId: '', batchNumber: '', lotNumber: '', supplierId: '', quantityReceived: 0, quantityAvailable: 0,
     dateReceived: '', expiryDate: '', storageLocationId: '', productBarcode: '',
@@ -1706,18 +1712,18 @@ export function InventoryPage() {
         {regResult.errors.length > 0 && <ul className="link-list">{regResult.errors.slice(0, 8).map((er, i) => <li key={i}>{er}</li>)}</ul>}
       </div>}
       <div className="reg-head-actions" style={{ margin: '4px 0 10px', gap: 10 }}>
-        <label className="reg-search" style={{ flex: '1 1 240px' }}>
-          <input placeholder="Search name, code, category, storage place…" value={itemSearch} onChange={e => setItemSearch(e.target.value)} />
-        </label>
+        <RegisterSearch style={{ flex: '1 1 240px' }} onQuery={setItemQuery}
+          placeholder="Search name, code, category, storage place…" />
         <div style={{ flex: '1 1 240px' }}><BarcodeScanner placeholder="Scan a stock item barcode…" autoFocus={false} onScan={scanStock} /></div>
       </div>
-      {loading ? <p>Loading…</p> : items.length === 0 ? <p>No items yet.</p> : itemRows.length === 0 ? <p>Nothing matches “{itemSearch}”.</p> :
+      {loading ? <p>Loading…</p> : items.length === 0 ? <p>No items yet.</p> : itemRows.length === 0 ? <p>Nothing matches “{itemQuery}”.</p> :
+        <div>
         <div className="table-scroll"><table className="data-table reg-table"><thead><tr>
           <th>Item</th><th>Category</th><th>Storage location</th><th>On hand</th><th>Min / reorder</th><th>Expires</th><th className="reg-actions-col"></th>
         </tr></thead><tbody>
           {/* The whole row opens the item — clicking a record is how a record
               is opened, and the "Open" button was the only thing that worked. */}
-          {itemRows.map(i => <tr key={i.id} className={`row-clickable${i.is_active === 0 ? ' row-retired' : ''}`} {...focusAttr('inventory_items', i.id)}
+          {shownItems.shown.map(i => <tr key={i.id} className={`row-clickable${i.is_active === 0 ? ' row-retired' : ''}`} {...focusAttr('inventory_items', i.id)}
             onClick={() => openDetail(i.id)} tabIndex={0} role="button"
             onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(i.id); } }}>
             <td>
@@ -1743,7 +1749,12 @@ export function InventoryPage() {
               </>}</RowMenu>
             </td>
           </tr>)}
-        </tbody></table></div>}
+        </tbody></table></div>
+        {shownItems.hidden > 0 && <p className="muted list-capped">
+          Showing the first {shownItems.shown.length.toLocaleString()} of {shownItems.total.toLocaleString()} items.
+          Search to narrow it down — the register is not cut short, only what is drawn at once.
+        </p>}
+        </div>}
     </div>}
 
     {tab === 'New Item' && <div className="card">
@@ -1766,8 +1777,8 @@ export function InventoryPage() {
           {storagePlaces.map(pl => <option key={pl.id} value={pl.id}>{pl.path}{pl.kind && pl.kind !== 'shelf' ? ` (${STORAGE_KIND_LABELS[pl.kind] ?? pl.kind})` : ''}</option>)}
         </select>{storagePlaces.length === 0 && <span className="muted">No storage places yet — add the stores, shelves and fridges in Settings → Stock &amp; Storage.</span>}</label>
         <label>Unit<select value={itemForm.sectionId} onChange={e => setItemForm({ ...itemForm, sectionId: e.target.value })}><option value="">Select the unit</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-        <label>Minimum stock<input type="number" value={itemForm.minimumStock} onChange={e => setItemForm({ ...itemForm, minimumStock: Number(e.target.value) })} /></label>
-        <label>Reorder level<input type="number" value={itemForm.reorderLevel} onChange={e => setItemForm({ ...itemForm, reorderLevel: Number(e.target.value) })} /></label>
+        <label>Minimum stock<NumberField value={itemForm.minimumStock} onValue={n => setItemForm({ ...itemForm, minimumStock: n ?? 0 })} min={0} /></label>
+        <label>Reorder level<NumberField value={itemForm.reorderLevel} onValue={n => setItemForm({ ...itemForm, reorderLevel: n ?? 0 })} min={0} /></label>
         <label>Storage requirement<input value={itemForm.storageRequirement} onChange={e => setItemForm({ ...itemForm, storageRequirement: e.target.value })} placeholder="e.g. 2-8°C" /></label>
         <label>Status<select value={itemForm.status} onChange={e => setItemForm({ ...itemForm, status: e.target.value })}><option value="available">Available</option><option value="reserved">Reserved</option><option value="unavailable">Unavailable</option></select></label>
 
@@ -1871,8 +1882,10 @@ export function InventoryPage() {
               </select></label>}
           <label>Waybill / invoice reference <span className="muted">(optional)</span>
             <input value={batchForm.reference} onChange={e => setBatchForm({ ...batchForm, reference: e.target.value })} placeholder="What this delivery is traced by" /></label>
-          <label>Quantity received<input type="number" value={batchForm.quantityReceived} onChange={e => setBatchForm({ ...batchForm, quantityReceived: Number(e.target.value), quantityAvailable: Number(e.target.value) })} required /></label>
-          <label>Quantity available<input type="number" value={batchForm.quantityAvailable} onChange={e => setBatchForm({ ...batchForm, quantityAvailable: Number(e.target.value) })} required /></label>
+          <label>Quantity received<NumberField value={batchForm.quantityReceived} required min={0} step="any"
+            onValue={n => setBatchForm({ ...batchForm, quantityReceived: n ?? 0, quantityAvailable: n ?? 0 })} /></label>
+          <label>Quantity available<NumberField value={batchForm.quantityAvailable} required min={0} step="any"
+            onValue={n => setBatchForm({ ...batchForm, quantityAvailable: n ?? 0 })} /></label>
           <label>Date received<input type="date" value={batchForm.dateReceived} onChange={e => setBatchForm({ ...batchForm, dateReceived: e.target.value })} required /></label>
           <label>Expiry date<input type="date" value={batchForm.expiryDate} onChange={e => setBatchForm({ ...batchForm, expiryDate: e.target.value })} /></label>
           <label>Unit cost <span className="muted">(optional — what the stock is valued at)</span>
@@ -1900,11 +1913,11 @@ export function InventoryPage() {
             })), { widthMm: 50, heightMm: 25, title: 'Batch labels' })}>🏷️ Print batch labels</button>}
         </div>
         <p className="muted" style={{ marginTop: 0 }}>A delivery is quarantined until it has been inspected and accepted. Until then it cannot be issued — only discarded or returned. Stock is issued earliest-expiry-first.</p>
-        {batches.length === 0 ? <p className="muted">Nothing has been received yet.</p> :
+        {batches.length === 0 ? <p className="muted">Nothing has been received yet.</p> : <>
           <div className="table-scroll"><table className="data-table reg-table"><thead><tr>
             <th>Item</th><th>Batch / lot</th><th>Received from</th><th>Available</th><th>Received</th><th>Expires</th><th>Acceptance</th><th className="reg-actions-col"></th>
           </tr></thead><tbody>
-            {batches.map(b => <tr key={b.id} className={`row-clickable${b.quantity_available > 0 && !b.reversed_at ? '' : ' row-retired'}`} {...focusAttr('inventory_batches', b.id)}
+            {shownBatches.shown.map(b => <tr key={b.id} className={`row-clickable${b.quantity_available > 0 && !b.reversed_at ? '' : ' row-retired'}`} {...focusAttr('inventory_batches', b.id)}
               onClick={() => openDetail(b.item_id)} tabIndex={0} role="button"
               onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(b.item_id); } }}>
               <td><span className="reg-primary">{b.item_name || `Item #${b.item_id}`}</span><span className="reg-sub">{b.item_code || ''}</span></td>
@@ -1932,7 +1945,12 @@ export function InventoryPage() {
                 </>}</RowMenu>
               </td>
             </tr>)}
-          </tbody></table></div>}
+          </tbody></table></div>
+          {shownBatches.hidden > 0 && <p className="muted list-capped">
+            Showing the first {shownBatches.shown.length.toLocaleString()} of {shownBatches.total.toLocaleString()} deliveries,
+            earliest expiry first.
+          </p>}
+        </>}
         {editingBatch && <BatchEditModal batch={editingBatch} suppliers={suppliers} storagePlaces={storagePlaces}
           supplySources={supplySources} procurement={procurement} onClose={() => setEditingBatch(null)}
           onSaved={async msg => { setEditingBatch(null); setNotice(msg); setStockKey(k => k + 1); await load(); }} />}
@@ -1971,7 +1989,7 @@ export function InventoryPage() {
           })}
         </select></label>
         <label>Movement type<select value={movementForm.movementType} onChange={e => { setMovementForm({ ...movementForm, movementType: e.target.value }); setFefoWarning(null); }}>{['issue', 'consume', 'discard', 'waste', 'transfer_out', 'receive', 'return', 'adjust_in', 'transfer_in'].map(t => <option key={t} value={t}>{MOVEMENT_LABELS[t] ?? t.replace('_', ' ')}</option>)}</select></label>
-        <label>Quantity<input type="number" value={movementForm.quantity} onChange={e => setMovementForm({ ...movementForm, quantity: Number(e.target.value) })} required min={0.0001} step="any" /></label>
+        <label>Quantity<NumberField value={movementForm.quantity} onValue={n => setMovementForm({ ...movementForm, quantity: n ?? 0 })} required min={0.0001} step="any" /></label>
         <label>Movement date<input type="date" value={movementForm.movementDate} onChange={e => setMovementForm({ ...movementForm, movementDate: e.target.value })} /></label>
         <label>Issued to unit<select value={movementForm.issuedToSectionId} onChange={e => setMovementForm({ ...movementForm, issuedToSectionId: e.target.value })}><option value="">Select the unit</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Received by<select value={movementForm.receivedByStaffId} onChange={e => setMovementForm({ ...movementForm, receivedByStaffId: e.target.value })}><option value="">Select the member of staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
@@ -1995,17 +2013,18 @@ export function InventoryPage() {
       <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <h3 style={{ margin: 0 }}>Stock movement register</h3>
         <div className="reg-head-actions" style={{ marginLeft: 'auto' }}>
-          <label className="reg-search"><input placeholder="Search item, batch, unit, reason…" value={moveSearch} onChange={e => setMoveSearch(e.target.value)} /></label>
+          <RegisterSearch onQuery={setMoveQuery} placeholder="Search item, batch, unit, reason…" />
           {can('supplier_inventory', 'export') && <button type="button" className="secondary" disabled={regBusy === 'movements'}
             onClick={() => void downloadFile('/supplier-inventory/movements/export', 'Stock_Movements.xlsx', 'movements')}>
             {regBusy === 'movements' ? 'Exporting…' : 'Export'}</button>}
         </div>
       </div>
-      {movements.length === 0 ? <p className="muted">Nothing has been issued or received yet.</p> : movementRows.length === 0 ? <p className="muted">Nothing matches “{moveSearch}”.</p> :
+      {movements.length === 0 ? <p className="muted">Nothing has been issued or received yet.</p> : movementRows.length === 0 ? <p className="muted">Nothing matches “{moveQuery}”.</p> :
+        <div>
         <div className="table-scroll"><table className="data-table reg-table"><thead><tr>
           <th>Date</th><th>Item</th><th>Movement</th><th>Quantity</th><th>Batch / lot</th><th>To</th><th>Received by</th><th>Reason</th><th>Recorded by</th><th className="reg-actions-col"></th>
         </tr></thead><tbody>
-          {movementRows.map(m => <tr key={m.id} className={`row-clickable${(m as any).reversed_by_id ? ' row-retired' : ''}`} onClick={() => openDetail(m.item_id)}>
+          {shownMovements.shown.map(m => <tr key={m.id} className={`row-clickable${(m as any).reversed_by_id ? ' row-retired' : ''}`} onClick={() => openDetail(m.item_id)}>
             <td className="nowrap">{String(m.movement_date ?? '').slice(0, 10)}</td>
             <td><span className="reg-primary">{m.item_name || `Item #${m.item_id}`}</span><span className="reg-sub">{m.item_code}</span></td>
             <td>{MOVEMENT_LABELS[m.movement_type] ?? String(m.movement_type).replace(/_/g, ' ')}
@@ -2027,7 +2046,12 @@ export function InventoryPage() {
               </>}</RowMenu>
             </td>
           </tr>)}
-        </tbody></table></div>}
+        </tbody></table></div>
+        {shownMovements.hidden > 0 && <p className="muted list-capped">
+          Showing the most recent {shownMovements.shown.length.toLocaleString()} of {shownMovements.total.toLocaleString()} movements.
+          Search, or export the register for the whole trail.
+        </p>}
+        </div>}
       {reversingMovement && <ReasonPrompt
         title="Reverse this movement"
         intro={`A movement is not deleted — the bin card is a running record and rewriting a line of it invalidates every balance printed after it. What is posted instead is the mirror: ${reversingMovement.quantity} ${reversingMovement.unit_of_measure || ''} back the other way, pointed at this movement.`}
@@ -2059,7 +2083,7 @@ export function InventoryPage() {
         <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
           <h3 style={{ margin: 0 }}>Approved suppliers</h3>
           <div className="reg-head-actions" style={{ marginLeft: 'auto' }}>
-            <label className="reg-search"><input placeholder="Search name, code, contact…" value={supplierSearch} onChange={e => setSupplierSearch(e.target.value)} /></label>
+            <RegisterSearch onQuery={setSupplierQuery} placeholder="Search name, code, contact…" />
             {can('supplier_inventory', 'export') && <button type="button" className="secondary" disabled={regBusy === 'suppliers'}
               onClick={() => void downloadFile('/supplier-inventory/suppliers/export', 'Supplier_Register.xlsx', 'suppliers')}>
               {regBusy === 'suppliers' ? 'Exporting…' : 'Export'}</button>}
@@ -2072,7 +2096,7 @@ export function InventoryPage() {
           </div>
         </div>
         <p className="muted" style={{ marginTop: 0 }}>Rows are matched on supplier code — a code the register already holds is updated, a blank one is created.</p>
-        {suppliers.length === 0 ? <p className="muted">No suppliers registered yet.</p> : supplierRows.length === 0 ? <p className="muted">Nothing matches “{supplierSearch}”.</p> :
+        {suppliers.length === 0 ? <p className="muted">No suppliers registered yet.</p> : supplierRows.length === 0 ? <p className="muted">Nothing matches “{supplierQuery}”.</p> :
           <div className="table-scroll"><table className="data-table reg-table"><thead><tr>
             <th>Supplier</th><th>Contact</th><th>Supplies</th><th>Items</th><th>Evaluation</th><th>Status</th><th className="reg-actions-col"></th>
           </tr></thead><tbody>
@@ -2568,8 +2592,8 @@ function InventoryDetailPanel({
       <label>Unit<select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })}>
         <option value="">Select the unit</option>{sections.map(sec => <option key={sec.id} value={sec.id}>{sec.name}</option>)}
       </select></label>
-      <label>Minimum stock<input type="number" value={form.minimumStock} onChange={e => setForm({ ...form, minimumStock: Number(e.target.value) })} /></label>
-      <label>Reorder level<input type="number" value={form.reorderLevel} onChange={e => setForm({ ...form, reorderLevel: Number(e.target.value) })} /></label>
+      <label>Minimum stock<NumberField value={form.minimumStock} onValue={n => setForm({ ...form, minimumStock: n ?? 0 })} min={0} /></label>
+      <label>Reorder level<NumberField value={form.reorderLevel} onValue={n => setForm({ ...form, reorderLevel: n ?? 0 })} min={0} /></label>
       <label>Storage requirement<input value={form.storageRequirement} onChange={e => setForm({ ...form, storageRequirement: e.target.value })} placeholder="e.g. 2-8°C" /></label>
       <label>Status<select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
         <option value="available">Available</option><option value="reserved">Reserved</option><option value="unavailable">Unavailable</option>

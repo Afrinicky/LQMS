@@ -19,7 +19,7 @@ import { EQUIPMENT_CATEGORY_LABELS } from '../../shared/constants/equipment';
 import type { ConfigOption } from '../../shared/constants/configLists';
 import { equipmentIsDiagnostic } from '../../shared/constants/equipment';
 import XlsxToolbar from '../components/XlsxToolbar';
-import { DetailModal } from '../components/ui';
+import { DetailModal, NumberField } from '../components/ui';
 import { usePermissions } from '../hooks/usePermissions';
 import { AccessControl } from './AccessControl';
 import UserAccountActions from '../components/UserAccountActions';
@@ -2176,18 +2176,18 @@ function ScheduleCard({ status, readOnly, onSaved, onError }: {
           <p className="hint">{describeRetention(schedule.retention)}</p>
           <div className="bk-retention-row">
             <label>Daily, for
-              <input type="number" min={0} max={90} value={schedule.retention.daily} disabled={readOnly}
-                onChange={e => set({ retention: { ...schedule.retention, daily: Number(e.target.value) } })} />
+              <NumberField min={0} max={90} value={schedule.retention.daily} disabled={readOnly}
+                onValue={n => set({ retention: { ...schedule.retention, daily: n ?? 0 } })} />
               <span>days</span>
             </label>
             <label>Then weekly, for
-              <input type="number" min={0} max={52} value={schedule.retention.weekly} disabled={readOnly}
-                onChange={e => set({ retention: { ...schedule.retention, weekly: Number(e.target.value) } })} />
+              <NumberField min={0} max={52} value={schedule.retention.weekly} disabled={readOnly}
+                onValue={n => set({ retention: { ...schedule.retention, weekly: n ?? 0 } })} />
               <span>weeks</span>
             </label>
             <label>Then monthly, for
-              <input type="number" min={0} max={120} value={schedule.retention.monthly} disabled={readOnly}
-                onChange={e => set({ retention: { ...schedule.retention, monthly: Number(e.target.value) } })} />
+              <NumberField min={0} max={120} value={schedule.retention.monthly} disabled={readOnly}
+                onValue={n => set({ retention: { ...schedule.retention, monthly: n ?? 0 } })} />
               <span>months</span>
             </label>
           </div>
@@ -2697,7 +2697,7 @@ function EquipmentNumbering() {
           <td>
             {seg.type === 'text' && <input value={seg.value} onChange={e => setSeg(i, { type: 'text', value: e.target.value })} placeholder="e.g. SECH" style={{ maxWidth: 160 }} />}
             {seg.type === 'year' && <select value={seg.digits} onChange={e => setSeg(i, { type: 'year', digits: Number(e.target.value) === 2 ? 2 : 4 })}><option value={4}>4-digit (2026)</option><option value={2}>2-digit (26)</option></select>}
-            {seg.type === 'sequence' && <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>Padding <input type="number" min={1} max={8} value={seg.padding} onChange={e => setSeg(i, { type: 'sequence', padding: Math.min(8, Math.max(1, Number(e.target.value) || 1)) })} style={{ width: 64 }} /></label>}
+            {seg.type === 'sequence' && <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>Padding <NumberField min={1} max={8} value={seg.padding} onValue={n => setSeg(i, { type: 'sequence', padding: Math.min(8, Math.max(1, n ?? 1)) })} style={{ width: 64 }} /></label>}
           </td>
           <td>
             <button type="button" className="secondary" disabled={i === 0} onClick={() => moveSeg(i, -1)} title="Move up">↑</button>{' '}

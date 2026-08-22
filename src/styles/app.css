@@ -1595,6 +1595,18 @@ li.focus-flash, div.focus-flash { background-color: var(--accent-soft); box-shad
 .auth-input { position: relative; display: flex; align-items: center; }
 .auth-input .ai-ico { position: absolute; left: 13px; color: var(--faint); display: grid; place-items: center; pointer-events: none; }
 .auth-input input { padding-left: 40px; height: 44px; }
+/* Room for the eye, so a long password does not run underneath it. */
+.auth-input:has(.ai-reveal) input { padding-right: 42px; }
+.ai-reveal {
+  position: absolute; right: 6px;
+  display: grid; place-items: center;
+  width: 32px; height: 32px; padding: 0;
+  background: transparent; border: 0; border-radius: 8px;
+  color: var(--faint); cursor: pointer;
+  transition: color .12s ease, background .12s ease;
+}
+.ai-reveal:hover { color: var(--text); background: var(--surface); }
+.ai-reveal:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .auth-submit { height: 46px; justify-content: center; font-size: 14px; margin-top: 4px; }
 .auth-foot { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 4px; color: var(--faint); font-size: 12px; }
 .auth-foot .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--success); box-shadow: 0 0 6px var(--success); }
@@ -3311,6 +3323,17 @@ tr.row-retired { opacity: .62; }
 
 /* The issue desk: who it is going to, across the top, then the basket. */
 .issue-head { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+
+/* A register whose rows are a moment behind the box being typed into. The
+   list is dimmed rather than blanked: the rows underneath are still the right
+   rows, just for the previous keystroke, and blanking them makes the table
+   flicker on every character. */
+.list-catching-up { opacity: .55; transition: opacity .12s ease; }
+.list-capped {
+  margin: 10px 2px 0; padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  font-size: 12.5px;
+}
 
 /* ---- Stock count -------------------------------------------------------
    A count sheet is worked standing at a shelf, so the row a person is on has

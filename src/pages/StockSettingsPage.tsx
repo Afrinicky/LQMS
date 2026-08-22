@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Plus, Warehouse, Thermometer, Barcode, Trash2, Pencil, Truck } from 'lucide-react';
 import { api } from '../services/api';
-import { DetailModal } from '../components/ui';
+import { DetailModal, NumberField } from '../components/ui';
 import {
   STORAGE_KINDS, STORAGE_KIND_LABELS, isColdStorage,
   BARCODE_SOURCE_LABELS, normaliseBarcodePolicy, type BarcodePolicy,
@@ -378,8 +378,8 @@ export default function StockSettingsPage() {
             {sections.map(sec => <option key={sec.id} value={sec.id}>{sec.name}</option>)}</select></label>
           <label>Label / code<input value={editing.code ?? ''} onChange={e => setEditing({ ...editing, code: e.target.value })} /></label>
           {isColdStorage(editing.kind) && <>
-            <label>Coldest allowed °C<input type="number" step="any" value={editing.temp_min ?? ''} onChange={e => setEditing({ ...editing, temp_min: e.target.value === '' ? null : Number(e.target.value) })} /></label>
-            <label>Warmest allowed °C<input type="number" step="any" value={editing.temp_max ?? ''} onChange={e => setEditing({ ...editing, temp_max: e.target.value === '' ? null : Number(e.target.value) })} /></label>
+            <label>Coldest allowed °C<NumberField step="any" value={editing.temp_min ?? null} onValue={n => setEditing({ ...editing, temp_min: n })} /></label>
+            <label>Warmest allowed °C<NumberField step="any" value={editing.temp_max ?? null} onValue={n => setEditing({ ...editing, temp_max: n })} /></label>
           </>}
           <label className="toggle wide">
             <input type="checkbox" checked={editing.is_active === 1} onChange={e => setEditing({ ...editing, is_active: e.target.checked ? 1 : 0 })} />

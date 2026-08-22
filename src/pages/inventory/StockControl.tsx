@@ -1,12 +1,13 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Trash2, Search, ClipboardList, PackageCheck, Printer, Lock, LockOpen, Undo2, FileText, X, ScanLine } from 'lucide-react';
+import { Plus, Trash2, ClipboardList, PackageCheck, Printer, Lock, LockOpen, Undo2, FileText, X } from 'lucide-react';
 import { api, API_BASE, getToken, ApiError } from '../../services/api';
-import { DetailModal, KpiStrip, ChartCard, DonutChart, BarChart, BarMeter, Sparkline, RowMenu, CHART_COLORS } from '../../components/ui';
+import { DetailModal, KpiStrip, ChartCard, DonutChart, BarChart, BarMeter, Sparkline, RowMenu, RegisterSearch, CHART_COLORS } from '../../components/ui';
 import BarcodeScanner from '../../components/BarcodeScanner';
 import type { Section, Staff, Department } from '../../../shared/types/api';
 import { STOCK_STATUS_LABELS, NEEDS_ACTION, type StockStatus } from '../../../shared/constants/stockControl';
 import { MOVEMENT_LABELS } from '../../../shared/constants/inventory';
 import type { ConfigOption } from '../../../shared/constants/configLists';
+import { useCappedRows } from '../../hooks/useCappedRows';
 import { encodeDestination, decodeDestination } from '../../../shared/constants/inventory';
 
 /**
@@ -81,7 +82,8 @@ export function StockLedger({ onOpenItem, refreshKey }: { onOpenItem: (id: numbe
   const [rows, setRows] = useState<LedgerRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState('');
+  // Only the settled query lives here; the box holds what is being typed.
+  const [deferred, setDeferred] = useState('');
   const [filter, setFilter] = useState<'all' | 'attention' | 'expiring' | 'quarantine' | 'idle'>('all');
   const [card, setCard] = useState<number | null>(null);
 
@@ -94,7 +96,7 @@ export function StockLedger({ onOpenItem, refreshKey }: { onOpenItem: (id: numbe
   }, [refreshKey]);
 
   const shown = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = deferred.trim().toLowerCase();
     return rows.filter(r => {
       if (filter === 'attention' && !NEEDS_ACTION.includes(r.status)) return false;
       if (filter === 'expiring' && !['expired', 'expiring_soon'].includes(r.expiry_status ?? '')) return false;
@@ -103,7 +105,8 @@ export function StockLedger({ onOpenItem, refreshKey }: { onOpenItem: (id: numbe
       if (!q) return true;
       return [r.name, r.item_code, r.category, r.storage_path, r.supplier_name].some(v => String(v ?? '').toLowerCase().includes(q));
     }).sort((a, b) => a.priority - b.priority || a.name.localeCompare(b.name));
-  }, [rows, query, filter]);
+  }, [rows, deferred, filter]);
+  const page = useCappedRows(shown);
 
   const totals = useMemo(() => ({
     items: rows.length,
@@ -133,9 +136,7 @@ export function StockLedger({ onOpenItem, refreshKey }: { onOpenItem: (id: numbe
           </p>
         </div>
         <div className="reg-head-actions" style={{ marginLeft: 'auto' }}>
-          <label className="reg-search"><Search size={15} />
-            <input placeholder="Search item, code, category, shelf…" value={query} onChange={e => setQuery(e.target.value)} />
-          </label>
+          <RegisterSearch onQuery={setDeferred} placeholder="Search item, code, category, shelf…" />
           <button type="button" className="secondary" onClick={() => void download('/supplier-inventory/ledger/export', 'Stock_Control_Ledger.xlsx').catch(e => setError((e as Error).message))}>Export</button>
         </div>
       </div>
@@ -147,11 +148,12 @@ export function StockLedger({ onOpenItem, refreshKey }: { onOpenItem: (id: numbe
 
       {error && <div className="error">{error}</div>}
       {loading ? <p>Loading…</p> : shown.length === 0 ? <p className="muted">Nothing here.</p> :
+        <div>
         <div className="table-scroll"><table className="data-table reg-table ledger-table"><thead><tr>
           <th>Item</th><th>Available</th><th>Used / month</th><th>Cover</th>
           <th>Min / reorder / max</th><th>Expires first</th><th>Status</th>
         </tr></thead><tbody>
-          {shown.map(r => <tr key={r.id} className="row-clickable" onClick={() => setCard(r.id)} tabIndex={0} role="button"
+          {page.shown.map(r => <tr key={r.id} className="row-clickable" onClick={() => setCard(r.id)} tabIndex={0} role="button"
             onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCard(r.id); } }}>
             <td>
               <span className="reg-primary">{r.name}</span>
@@ -174,7 +176,12 @@ export function StockLedger({ onOpenItem, refreshKey }: { onOpenItem: (id: numbe
               : <span className="muted">—</span>}</td>
             <td><StatusBadge status={r.status} /></td>
           </tr>)}
-        </tbody></table></div>}
+        </tbody></table></div>
+        {page.hidden > 0 && <p className="muted list-capped">
+          Showing the first {page.shown.length.toLocaleString()} of {page.total.toLocaleString()} items. Search or
+          filter to narrow it down.
+        </p>}
+        </div>}
     </div>
 
     {card != null && <BinCard itemId={card} onClose={() => setCard(null)} onOpenItem={onOpenItem} />}
@@ -497,28 +504,29 @@ export function IssueRegister({ refreshKey, canVoid, onChanged }: {
   const [rows, setRows] = useState<any[]>([]);
   const [open, setOpen] = useState<number | null>(null);
   const [cancelling, setCancelling] = useState<any>(null);
-  const [query, setQuery] = useState('');
+  const [deferred, setDeferred] = useState('');
 
   const load = () => api<any[]>('/supplier-inventory/issues').then(setRows).catch(() => setRows([]));
   useEffect(() => { void load(); }, [refreshKey]);
-  const shown = rows.filter(r => {
-    const q = query.trim().toLowerCase();
-    if (!q) return true;
-    return [r.issue_number, r.section_name, r.destination_label, r.destination_name, r.issued_to_name, r.received_by_name, r.purpose_label, r.purpose, r.issued_by_name]
-      .some(v => String(v ?? '').toLowerCase().includes(q));
-  });
+  const shown = useMemo(() => {
+    const q = deferred.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter(r => [r.issue_number, r.section_name, r.destination_label, r.destination_name, r.issued_to_name, r.received_by_name, r.purpose_label, r.purpose, r.issued_by_name]
+      .some(v => String(v ?? '').toLowerCase().includes(q)));
+  }, [rows, deferred]);
+  const page = useCappedRows(shown);
 
   return <div className="card">
     <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
       <h3 style={{ margin: 0 }}>Issue register</h3>
-      <label className="reg-search" style={{ marginLeft: 'auto' }}><Search size={15} />
-        <input placeholder="Search voucher, unit, person…" value={query} onChange={e => setQuery(e.target.value)} /></label>
+      <RegisterSearch style={{ marginLeft: 'auto' }} onQuery={setDeferred} placeholder="Search voucher, unit, person…" />
     </div>
     {shown.length === 0 ? <p className="muted">Nothing has been issued yet.</p> :
+      <div>
       <div className="table-scroll"><table className="data-table reg-table"><thead><tr>
         <th>Voucher</th><th>Date</th><th>Issued to</th><th>Collected by</th><th>Reason</th><th>Lines</th><th>Quantity</th><th>Issued by</th><th>Status</th><th className="reg-actions-col"></th>
       </tr></thead><tbody>
-        {shown.map(r => <tr key={r.id} className={`row-clickable${r.status === 'cancelled' ? ' row-retired' : ''}`} onClick={() => setOpen(r.id)} tabIndex={0} role="button"
+        {page.shown.map(r => <tr key={r.id} className={`row-clickable${r.status === 'cancelled' ? ' row-retired' : ''}`} onClick={() => setOpen(r.id)} tabIndex={0} role="button"
           onKeyDown={e => { if (e.key === 'Enter') setOpen(r.id); }}>
           <td><span className="reg-primary">{r.issue_number}</span></td>
           <td className="nowrap">{dateOnly(r.issue_date)}</td>
@@ -541,7 +549,11 @@ export function IssueRegister({ refreshKey, canVoid, onChanged }: {
             </>}</RowMenu>
           </td>
         </tr>)}
-      </tbody></table></div>}
+      </tbody></table></div>
+      {page.hidden > 0 && <p className="muted list-capped">
+        Showing the most recent {page.shown.length.toLocaleString()} of {page.total.toLocaleString()} vouchers.
+      </p>}
+      </div>}
     {open != null && <IssueDetail id={open} onClose={() => setOpen(null)} onChanged={() => { void load(); onChanged?.(); }} canVoid={canVoid} />}
     {cancelling && <CancelVoucherPrompt voucher={cancelling} onClose={() => setCancelling(null)}
       onDone={() => { setCancelling(null); void load(); onChanged?.(); }} />}
@@ -793,9 +805,7 @@ export function StockTake({ places, staff, items, categories, canVoid, onPosted 
         </select></label>}
 
         {form.scope === 'items' && <div className="count-picker">
-          <label className="reg-search"><Search size={15} />
-            <input placeholder="Search the register…" value={itemQuery} onChange={e => setItemQuery(e.target.value)} />
-          </label>
+          <RegisterSearch onQuery={setItemQuery} placeholder="Search the register…" />
           <p className="muted" style={{ margin: '6px 0' }}>
             {pickedItems.length === 0 ? 'Nothing picked yet.' : `${pickedItems.length} item${pickedItems.length === 1 ? '' : 's'} picked.`}
             {pickedItems.length > 0 && <> <button type="button" className="linklike" onClick={() => setPickedItems([])}>Clear</button></>}
@@ -967,7 +977,7 @@ function CountSheet({ id, items, canVoid, onClose, onPosted }: {
     }));
 
   const lines: any[] = data?.lines ?? [];
-  const shown = useMemo(() => {
+  const sheet = useMemo(() => {
     const q = query.trim().toLowerCase();
     return lines.filter(l => {
       if (filter === 'todo' && value(l) !== '') return false;
@@ -976,6 +986,12 @@ function CountSheet({ id, items, canVoid, onClose, onPosted }: {
       return [l.item_name, l.item_code, l.batch_number, l.lot_number, l.storage_path].some(v => String(v ?? '').toLowerCase().includes(q));
     });
   }, [lines, query, filter, edits]);
+  // A full count of a large store runs to thousands of lines, each carrying two
+  // inputs. Drawing them all makes the sheet unusable on the tablet it is meant
+  // to be worked on, so it draws a screenful at a time and the filters above
+  // move through the rest.
+  const shownPage = useCappedRows(sheet);
+  const shown = shownPage.shown;
 
   // The tally is worked out from what is on screen right now, including edits
   // not yet saved — otherwise the figures lag a step behind the person typing.
@@ -1095,9 +1111,7 @@ function CountSheet({ id, items, canVoid, onClose, onPosted }: {
       </p>
 
       {!locked && <div className="reg-head-actions" style={{ margin: '10px 0', gap: 10, flexWrap: 'wrap' }}>
-        <label className="reg-search" style={{ flex: '1 1 220px' }}><Search size={15} />
-          <input placeholder="Search item, lot, shelf…" value={query} onChange={e => setQuery(e.target.value)} />
-        </label>
+        <RegisterSearch style={{ flex: '1 1 220px' }} onQuery={setQuery} placeholder="Search item, lot, shelf…" />
         <div className="reg-seg" role="tablist" aria-label="Filter the sheet">
           {([['all', `All ${lines.length}`], ['todo', `Still to count ${live.outstanding}`], ['variance', `Disagreeing ${live.variances}`]] as const)
             .map(([k, label]) => <button key={k} type="button" role="tab" aria-selected={filter === k}
@@ -1163,6 +1177,10 @@ function CountSheet({ id, items, canVoid, onClose, onPosted }: {
             : 'Nothing matches that filter.'}
         </td></tr>}
       </tbody></table></div>
+      {shownPage.hidden > 0 && <p className="muted list-capped">
+        Showing {shownPage.shown.length.toLocaleString()} of {shownPage.total.toLocaleString()} lines on this sheet.
+        Use “Still to count” to work through the rest, or search for the shelf you are standing at.
+      </p>}
 
       {/* Something on the shelf that the register never listed. This is the
           half of a count that finds stock rather than confirming it. */}
