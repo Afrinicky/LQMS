@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts, NumberField } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -431,8 +431,8 @@ export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
 
     {tab === 'Monthly Reviews' && <>
       <form className="form-grid" onSubmit={submitReview}>
-        <label>Month<input type="number" min={1} max={12} value={reviewForm.reviewMonth} onChange={e => setReviewForm({ ...reviewForm, reviewMonth: Number(e.target.value) })} required /></label>
-        <label>Year<input type="number" min={2000} value={reviewForm.reviewYear} onChange={e => setReviewForm({ ...reviewForm, reviewYear: Number(e.target.value) })} required /></label>
+        <label>Month<NumberField min={1} max={12} value={reviewForm.reviewMonth} onValue={n => setReviewForm({ ...reviewForm, reviewMonth: n ?? 0 })} required /></label>
+        <label>Year<NumberField min={2000} value={reviewForm.reviewYear} onValue={n => setReviewForm({ ...reviewForm, reviewYear: n ?? 0 })} required /></label>
         <label>Site<select value={reviewForm.siteId} onChange={e => setReviewForm({ ...reviewForm, siteId: e.target.value })}><option value="">All sites</option>{sites.map(s => <option key={s.id} value={s.id}>{s.site_name}</option>)}</select></label>
         <label>Summary<textarea value={reviewForm.summary} onChange={e => setReviewForm({ ...reviewForm, summary: e.target.value })} /></label>
         <button type="submit">Create review</button>

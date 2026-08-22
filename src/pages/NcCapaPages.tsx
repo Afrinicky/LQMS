@@ -1,7 +1,8 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ModuleAlerts, DetailModal } from '../components/ui';
+import { KpiStrip, ModuleAlerts, DetailModal, RegisterSearch } from '../components/ui';
+import { useCappedRows } from '../hooks/useCappedRows';
 import { api, API_BASE, getToken } from '../services/api';
 import { useModules } from '../hooks/useModules';
 import DisabledModule from '../components/DisabledModule';
@@ -364,6 +365,7 @@ export function NonconformitiesPage({ embedded = false }: { embedded?: boolean }
     const okSearch = !t || n.nc_number.toLowerCase().includes(t) || n.title.toLowerCase().includes(t) || (n.description || '').toLowerCase().includes(t);
     return okSearch && (!statusFilter || n.status === statusFilter);
   }), [list, search, statusFilter]);
+  const page = useCappedRows(filtered);
 
   if (!isEnabled('nc_capa')) return <DisabledModule />;
   const TABS = ['Register', 'Log Event', 'Risk Assessment', 'Root Cause Analysis'];
@@ -391,13 +393,13 @@ export function NonconformitiesPage({ embedded = false }: { embedded?: boolean }
         </div>
         <XlsxToolbar module="nc_capa" exportPath="/nonconformities/register/export" templatePath="/nonconformities/register/template" importPath="/nonconformities/register/import" exportName="Nonconformities.xlsx" onImported={load} />
         <div className="form" style={{ gridTemplateColumns: '1fr auto', alignItems: 'end' }}>
-          <label>Search<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search number, title or description" /></label>
+          <label>Search<RegisterSearch onQuery={setSearch} placeholder="Search number, title or description" /></label>
           <label>Status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All</option>{['open', 'reviewed', 'capa_required', 'closed'].map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select></label>
         </div>
         <table className="table"><thead><tr>
           <th>NC No.</th><th>Date</th><th>Category</th><th>Unit</th><th>Title</th><th>Risk</th><th>Stage</th><th>CAPA</th><th></th>
         </tr></thead><tbody>
-          {filtered.map(n => { const nc = n as any; const capa = capas.find(c => c.nc_id === n.id); return <tr key={n.id} {...focusAttr('nonconforming_events', n.id)}>
+          {page.shown.map(n => { const nc = n as any; const capa = capas.find(c => c.nc_id === n.id); return <tr key={n.id} {...focusAttr('nonconforming_events', n.id)}>
             <td>{n.nc_number}{nc.affects_patient_safety ? <div><span className="badge badge--danger" style={{ fontSize: 10 }}>patient safety</span></div> : null}</td>
             <td>{n.event_date}</td>
             <td>{(n.nc_type || '—').replace(/_/g, ' ')}</td>
@@ -412,6 +414,9 @@ export function NonconformitiesPage({ embedded = false }: { embedded?: boolean }
             </td>
           </tr>; })}
           {filtered.length === 0 && <EmptyRow colSpan={9}>No nonconformities match the current filters.</EmptyRow>}
+          {page.hidden > 0 && <tr><td colSpan={9} className="muted list-capped">
+            Showing the most recent {page.shown.length.toLocaleString()} of {page.total.toLocaleString()} — search or filter to narrow it down.
+          </td></tr>}
         </tbody></table>
       </div>
     </>}
@@ -571,6 +576,7 @@ export function IncidentsPage({ embedded = false }: { embedded?: boolean } = {})
     const t = search.toLowerCase();
     return !t || i.incident_number.toLowerCase().includes(t) || (i.description || '').toLowerCase().includes(t);
   }), [list, search]);
+  const page = useCappedRows(filtered);
 
   if (!isEnabled('nc_capa')) return <DisabledModule />;
   const TABS = ['Register', 'Report Incident', 'Risk Assessment', 'Investigation'];
@@ -597,12 +603,12 @@ export function IncidentsPage({ embedded = false }: { embedded?: boolean } = {})
         </div>
         <XlsxToolbar module="nc_capa" exportPath="/incidents/register/export" templatePath="/incidents/register/template" importPath="/incidents/register/import" exportName="Incidents.xlsx" onImported={load} />
         <div className="form" style={{ gridTemplateColumns: '1fr', alignItems: 'end' }}>
-          <label>Search<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search number or description" /></label>
+          <label>Search<RegisterSearch onQuery={setSearch} placeholder="Search number or description" /></label>
         </div>
         <table className="table"><thead><tr>
           <th>No.</th><th>Date</th><th>Type</th><th>Unit</th><th>Harm</th><th>Risk</th><th>Stage</th><th>CAPA</th><th></th>
         </tr></thead><tbody>
-          {filtered.map(i => <tr key={i.id}>
+          {page.shown.map(i => <tr key={i.id}>
             <td>{i.incident_number}{i.is_near_miss ? <div><span className="badge" style={{ fontSize: 10 }}>near miss</span></div> : null}</td>
             <td>{(i.incident_datetime || '').slice(0, 16).replace('T', ' ')}</td>
             <td>{(i.incident_type || '—').replace(/_/g, ' ')}</td>
@@ -614,6 +620,9 @@ export function IncidentsPage({ embedded = false }: { embedded?: boolean } = {})
             <td><button onClick={() => openDetail(i.id)}>View</button></td>
           </tr>)}
           {filtered.length === 0 && <EmptyRow colSpan={9}>No incidents reported yet.</EmptyRow>}
+          {page.hidden > 0 && <tr><td colSpan={9} className="muted list-capped">
+            Showing the most recent {page.shown.length.toLocaleString()} of {page.total.toLocaleString()} — search to narrow it down.
+          </td></tr>}
         </tbody></table>
       </div>
     </>}
@@ -799,6 +808,7 @@ export function CapaPage({ embedded = false }: { embedded?: boolean } = {}) {
     const okSource = !sourceFilter || (sourceFilter === 'manual' ? capaSourceLabel(c) === 'Manual' : (c.source_module || '') === sourceFilter);
     return okSearch && okStatus && okSource;
   }), [list, search, statusFilter, sourceFilter]);
+  const page = useCappedRows(filtered);
 
   if (!isEnabled('nc_capa')) return <DisabledModule />;
   const TABS = ['Register', 'My Worklist', 'Overdue', 'Effectiveness Reviews'];
@@ -823,11 +833,14 @@ export function CapaPage({ embedded = false }: { embedded?: boolean } = {}) {
       <div className="card" style={{ marginTop: 16 }}>
         <h3 style={{ marginTop: 0 }}>CAPA register</h3>
         <div className="form" style={{ gridTemplateColumns: '1fr auto auto', alignItems: 'end' }}>
-          <label>Search<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search CAPA number, title or problem" /></label>
+          <label>Search<RegisterSearch onQuery={setSearch} placeholder="Search CAPA number, title or problem" /></label>
           <label>Source<select value={sourceFilter} onChange={e => setSourceFilter(e.target.value)}><option value="">All</option><option value="nonconformities">Nonconformity</option><option value="incidents">Incident</option><option value="complaints">Complaint</option><option value="manual">Manual</option></select></label>
           <label>Status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All</option>{['open', 'in_progress', 'completed', 'verified', 'reopened', 'closed'].map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select></label>
         </div>
-        <CapaTable rows={filtered} today={today} onOpen={openDetail} />
+        <CapaTable rows={page.shown} today={today} onOpen={openDetail} />
+        {page.hidden > 0 && <p className="muted list-capped">
+          Showing the most recent {page.shown.length.toLocaleString()} of {page.total.toLocaleString()} — search or filter to narrow it down.
+        </p>}
       </div>
     </>}
 

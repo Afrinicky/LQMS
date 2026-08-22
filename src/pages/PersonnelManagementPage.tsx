@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, BarMeter, BarChart, CHART_COLORS, ModuleAlerts, DetailModal } from '../components/ui';
+import { KpiStrip, ChartCard, BarMeter, BarChart, CHART_COLORS, ModuleAlerts, DetailModal, RegisterSearch } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { Download, Upload } from 'lucide-react';
 import { api, API_BASE, getToken } from '../services/api';
@@ -436,7 +436,7 @@ export function PersonnelManagementPage() {
               <button type="button" className="secondary" disabled={!!regBusy} title="Upload a completed register workbook" onClick={() => importInputRef.current?.click()}><Upload size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />{regBusy === 'import' ? 'Importing…' : 'Import'}</button>
               <input ref={importInputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) void importRegister(f); }} />
             </>}
-            <input placeholder="Search name, ID, position…" value={staffSearch} onChange={e => setStaffSearch(e.target.value)} style={{ maxWidth: 240 }} />
+            <RegisterSearch style={{ maxWidth: 240 }} onQuery={setStaffSearch} placeholder="Search name, ID, position…" />
           </div>
         </div>
         <p className="muted" style={{ marginTop: 0 }}>The complete register of laboratory personnel. Export or import uses the single approved workbook — rows are matched on Staff ID, so existing staff are updated and new ones created.</p>

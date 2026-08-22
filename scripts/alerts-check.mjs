@@ -118,10 +118,16 @@ check('every alert route is declared in the router', badRoutes.length === 0, bad
 
 // And the tab names have to be tabs the pages really render, or the link opens
 // the module and silently does nothing.
+// Every page that renders a workspace tab bar. A page missing from this list
+// makes the check below fail for a tab that genuinely exists — which is worse
+// than not checking at all, because a permanently red check gets ignored and
+// then hides the real breakage it was written to catch. ComplaintsPage was
+// missing, so "Complaints Register" had been failing since the check was added.
 const pageSource = ['Phase3Pages', 'Phase4Pages', 'Phase8Pages', 'PersonnelManagementPage', 'DocumentControlPage',
   'IqcPage', 'QMSPages', 'NcCapaPages', 'OrganisationPage', 'CustomerFocusPage', 'POCTPage',
   'InformationManagementPage', 'ProcessManagementPage', 'MonthlyReportsPage', 'BloodBankHandoverPage',
-  'VerificationValidationPage', 'EnvironmentalMonitoringPage', 'SystemAuditPage']
+  'VerificationValidationPage', 'EnvironmentalMonitoringPage', 'SystemAuditPage', 'ComplaintsPage',
+  'CorePages', 'NotificationsPage']
   .map(f => readFileSync(new URL(`../src/pages/${f}.tsx`, import.meta.url), 'utf8')).join('\n');
 
 const namedTabs = [...new Set(Object.values(ALERT_TARGETS).flatMap(t => [t.tab, t.subtab]).filter(Boolean))];

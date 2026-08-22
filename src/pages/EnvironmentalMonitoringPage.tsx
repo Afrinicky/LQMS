@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip } from '../components/ui';
+import { KpiStrip, NumberField } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -437,9 +437,9 @@ function SettingsTab({ settings, onSaved, onError, onFlash }: any) {
     <form className="form-grid" onSubmit={save}>
       <label><input type="checkbox" checked={f.pollingEnabled} onChange={e => setF({ ...f, pollingEnabled: e.target.checked })} /> Enable automated polling</label>
       <label>Default poll interval<select value={f.defaultPollIntervalSeconds} onChange={e => setF({ ...f, defaultPollIntervalSeconds: Number(e.target.value) })}>{[[30, '30 seconds'], [60, '1 minute'], [300, '5 minutes'], [600, '10 minutes'], [1800, '30 minutes'], [3600, 'Hourly']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
-      <label>Excursion → NC after (minutes)<input type="number" value={f.excursionNcMinutes} onChange={e => setF({ ...f, excursionNcMinutes: Number(e.target.value) })} /></label>
-      <label>Battery low threshold (%)<input type="number" value={f.batteryLowThreshold} onChange={e => setF({ ...f, batteryLowThreshold: Number(e.target.value) })} /></label>
-      <label>No-communication alert after (minutes)<input type="number" value={f.noCommMinutes} onChange={e => setF({ ...f, noCommMinutes: Number(e.target.value) })} /></label>
+      <label>Excursion → NC after (minutes)<NumberField min={0} value={f.excursionNcMinutes} onValue={n => setF({ ...f, excursionNcMinutes: n ?? 0 })} /></label>
+      <label>Battery low threshold (%)<NumberField min={0} max={100} value={f.batteryLowThreshold} onValue={n => setF({ ...f, batteryLowThreshold: n ?? 0 })} /></label>
+      <label>No-communication alert after (minutes)<NumberField min={0} value={f.noCommMinutes} onValue={n => setF({ ...f, noCommMinutes: n ?? 0 })} /></label>
       <label><input type="checkbox" checked={f.preventExpiredDevices} onChange={e => setF({ ...f, preventExpiredDevices: e.target.checked })} /> Prevent use of calibration-expired devices</label>
       <label>Webhook URL (Teams/Slack incoming webhook)<input value={f.webhookUrl} onChange={e => setF({ ...f, webhookUrl: e.target.value })} placeholder="https://…" /></label>
       <button type="submit">Save settings</button>

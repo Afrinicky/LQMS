@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, BarChart, CHART_COLORS, ModuleAlerts, DetailModal, RowMenu, RegisterSearch } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, BarChart, CHART_COLORS, ModuleAlerts, DetailModal, RowMenu, RegisterSearch, NumberField } from '../components/ui';
 import { FileText, Pencil, PackagePlus, Tag, Trash2, ShieldAlert, Star, Undo2, Scale, Plus, Search } from 'lucide-react';
 import { StockLedger, IssueDesk, IssueRegister, StockTake, type LedgerRow } from './inventory/StockControl';
 import { ForecastingPanel } from './inventory/Forecasting';
@@ -1777,8 +1777,8 @@ export function InventoryPage() {
           {storagePlaces.map(pl => <option key={pl.id} value={pl.id}>{pl.path}{pl.kind && pl.kind !== 'shelf' ? ` (${STORAGE_KIND_LABELS[pl.kind] ?? pl.kind})` : ''}</option>)}
         </select>{storagePlaces.length === 0 && <span className="muted">No storage places yet — add the stores, shelves and fridges in Settings → Stock &amp; Storage.</span>}</label>
         <label>Unit<select value={itemForm.sectionId} onChange={e => setItemForm({ ...itemForm, sectionId: e.target.value })}><option value="">Select the unit</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-        <label>Minimum stock<input type="number" value={itemForm.minimumStock} onChange={e => setItemForm({ ...itemForm, minimumStock: Number(e.target.value) })} /></label>
-        <label>Reorder level<input type="number" value={itemForm.reorderLevel} onChange={e => setItemForm({ ...itemForm, reorderLevel: Number(e.target.value) })} /></label>
+        <label>Minimum stock<NumberField value={itemForm.minimumStock} onValue={n => setItemForm({ ...itemForm, minimumStock: n ?? 0 })} min={0} /></label>
+        <label>Reorder level<NumberField value={itemForm.reorderLevel} onValue={n => setItemForm({ ...itemForm, reorderLevel: n ?? 0 })} min={0} /></label>
         <label>Storage requirement<input value={itemForm.storageRequirement} onChange={e => setItemForm({ ...itemForm, storageRequirement: e.target.value })} placeholder="e.g. 2-8°C" /></label>
         <label>Status<select value={itemForm.status} onChange={e => setItemForm({ ...itemForm, status: e.target.value })}><option value="available">Available</option><option value="reserved">Reserved</option><option value="unavailable">Unavailable</option></select></label>
 
@@ -1882,8 +1882,10 @@ export function InventoryPage() {
               </select></label>}
           <label>Waybill / invoice reference <span className="muted">(optional)</span>
             <input value={batchForm.reference} onChange={e => setBatchForm({ ...batchForm, reference: e.target.value })} placeholder="What this delivery is traced by" /></label>
-          <label>Quantity received<input type="number" value={batchForm.quantityReceived} onChange={e => setBatchForm({ ...batchForm, quantityReceived: Number(e.target.value), quantityAvailable: Number(e.target.value) })} required /></label>
-          <label>Quantity available<input type="number" value={batchForm.quantityAvailable} onChange={e => setBatchForm({ ...batchForm, quantityAvailable: Number(e.target.value) })} required /></label>
+          <label>Quantity received<NumberField value={batchForm.quantityReceived} required min={0} step="any"
+            onValue={n => setBatchForm({ ...batchForm, quantityReceived: n ?? 0, quantityAvailable: n ?? 0 })} /></label>
+          <label>Quantity available<NumberField value={batchForm.quantityAvailable} required min={0} step="any"
+            onValue={n => setBatchForm({ ...batchForm, quantityAvailable: n ?? 0 })} /></label>
           <label>Date received<input type="date" value={batchForm.dateReceived} onChange={e => setBatchForm({ ...batchForm, dateReceived: e.target.value })} required /></label>
           <label>Expiry date<input type="date" value={batchForm.expiryDate} onChange={e => setBatchForm({ ...batchForm, expiryDate: e.target.value })} /></label>
           <label>Unit cost <span className="muted">(optional — what the stock is valued at)</span>
@@ -1987,7 +1989,7 @@ export function InventoryPage() {
           })}
         </select></label>
         <label>Movement type<select value={movementForm.movementType} onChange={e => { setMovementForm({ ...movementForm, movementType: e.target.value }); setFefoWarning(null); }}>{['issue', 'consume', 'discard', 'waste', 'transfer_out', 'receive', 'return', 'adjust_in', 'transfer_in'].map(t => <option key={t} value={t}>{MOVEMENT_LABELS[t] ?? t.replace('_', ' ')}</option>)}</select></label>
-        <label>Quantity<input type="number" value={movementForm.quantity} onChange={e => setMovementForm({ ...movementForm, quantity: Number(e.target.value) })} required min={0.0001} step="any" /></label>
+        <label>Quantity<NumberField value={movementForm.quantity} onValue={n => setMovementForm({ ...movementForm, quantity: n ?? 0 })} required min={0.0001} step="any" /></label>
         <label>Movement date<input type="date" value={movementForm.movementDate} onChange={e => setMovementForm({ ...movementForm, movementDate: e.target.value })} /></label>
         <label>Issued to unit<select value={movementForm.issuedToSectionId} onChange={e => setMovementForm({ ...movementForm, issuedToSectionId: e.target.value })}><option value="">Select the unit</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Received by<select value={movementForm.receivedByStaffId} onChange={e => setMovementForm({ ...movementForm, receivedByStaffId: e.target.value })}><option value="">Select the member of staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
@@ -2590,8 +2592,8 @@ function InventoryDetailPanel({
       <label>Unit<select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })}>
         <option value="">Select the unit</option>{sections.map(sec => <option key={sec.id} value={sec.id}>{sec.name}</option>)}
       </select></label>
-      <label>Minimum stock<input type="number" value={form.minimumStock} onChange={e => setForm({ ...form, minimumStock: Number(e.target.value) })} /></label>
-      <label>Reorder level<input type="number" value={form.reorderLevel} onChange={e => setForm({ ...form, reorderLevel: Number(e.target.value) })} /></label>
+      <label>Minimum stock<NumberField value={form.minimumStock} onValue={n => setForm({ ...form, minimumStock: n ?? 0 })} min={0} /></label>
+      <label>Reorder level<NumberField value={form.reorderLevel} onValue={n => setForm({ ...form, reorderLevel: n ?? 0 })} min={0} /></label>
       <label>Storage requirement<input value={form.storageRequirement} onChange={e => setForm({ ...form, storageRequirement: e.target.value })} placeholder="e.g. 2-8°C" /></label>
       <label>Status<select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
         <option value="available">Available</option><option value="reserved">Reserved</option><option value="unavailable">Unavailable</option>

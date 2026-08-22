@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
-import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
+import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts, RegisterSearch } from '../components/ui';
 import { api } from '../services/api';
 import { useModules } from '../hooks/useModules';
 import DisabledModule from '../components/DisabledModule';
@@ -175,7 +175,7 @@ export function RisksPage({ embedded = false }: { embedded?: boolean } = {}) {
     </div></>}
     {tab === 'Risk Register' && <div className="card">
       <div className="form" style={{ gridTemplateColumns: '1fr auto', alignItems: 'end' }}>
-        <label>Search<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search risk number, area" /></label>
+        <label>Search<RegisterSearch onQuery={setSearch} placeholder="Search risk number, area" /></label>
         <label>Status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All</option>{statusOptions.map(status => <option key={status} value={status}>{status.replace(/_/g, ' ')}</option>)}</select></label>
       </div>
       {filteredRisks.length === 0 ? <p>No risks match the current filters.</p> : <table className="table"><thead><tr><th>Risk No.</th><th>Area</th><th>Description</th><th>Score</th><th>Level</th><th>Responsible</th><th>Review Due</th><th>Status</th><th>Actions</th></tr></thead><tbody>{filteredRisks.map(r => <tr key={r.id} {...focusAttr('risks', r.id)}><td>{r.risk_number}</td><td>{r.risk_area}</td><td>{r.risk_description}</td><td>{r.risk_score || '—'}</td><td>{r.risk_level || '—'}</td><td>{staff.find(s => s.id === r.responsible_staff_id)?.fullName || toDisplay(r.responsible_staff_id)}</td><td>{r.review_due_date || 'N/A'}</td><td>{formatBadge(r.status)}</td><td><button onClick={() => loadRiskDetail(r.id)}>View</button></td></tr>)}</tbody></table>}
