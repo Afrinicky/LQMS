@@ -743,5 +743,149 @@ export function schedulingRoutes() {
     res.send(printShell(`${bs.schedule_number} — Bench Schedule`, headHtml, table + legend, req.query.autoprint !== '0'));
   });
 
+  // ==================== Acting unit heads & effective supervisors ====================
+  // A unit's substantive head sits on the section record. When they are away
+  // for a short spell, another member of staff acts up for a fixed period; the
+  // appointment reverts on its own once the end date passes, because the
+  // in-force test is nothing more than today falling inside the period.
+
+  const isoDate = (v: unknown): string | null => { const s = String(v ?? '').trim(); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null; };
+  const trimOrNull = (v: unknown): string | null => (String(v ?? '').trim() || null);
+  const todayIso = () => new Date().toISOString().slice(0, 10);
+
+  // Past appointments are flipped to 'ended' so the register reads true, but the
+  // effective-head test never relies on this having run.
+  function sweepActingHeads(db: any) {
+    db.prepare("UPDATE acting_unit_heads SET status = 'ended', updated_at = CURRENT_TIMESTAMP WHERE status = 'active' AND end_date < date('now')").run();
+  }
+
+  function effectiveHead(db: any, section: any, onDate: string) {
+    const substName = section.head_staff_id
+      ? (db.prepare('SELECT full_name FROM staff WHERE id = ?').get(section.head_staff_id) as any)?.full_name ?? null : null;
+    const acting = db.prepare(`SELECT a.*, s.full_name AS acting_name FROM acting_unit_heads a
+      JOIN staff s ON s.id = a.acting_staff_id
+      WHERE a.section_id = ? AND a.status = 'active' AND a.start_date <= ? AND a.end_date >= ?
+      ORDER BY a.start_date DESC, a.id DESC LIMIT 1`).get(section.id, onDate, onDate) as any;
+    return {
+      section_id: section.id, section_name: section.name, department_name: section.department_name ?? null,
+      substantive_head_staff_id: section.head_staff_id ?? null, substantive_head_name: substName,
+      acting: !!acting,
+      acting_id: acting?.id ?? null,
+      effective_staff_id: acting ? acting.acting_staff_id : (section.head_staff_id ?? null),
+      effective_name: acting ? acting.acting_name : substName,
+      acting_from: acting?.start_date ?? null, acting_until: acting?.end_date ?? null, reason: acting?.reason ?? null,
+    };
+  }
+
+  router.get('/unit-supervisors', requirePermission('personnel.rosters', 'view'), (req, res) => {
+    const db = getDb();
+    sweepActingHeads(db);
+    const onDate = isoDate(req.query.onDate) ?? todayIso();
+    const sections = db.prepare(`SELECT s.id, s.name, s.head_staff_id, d.name AS department_name
+      FROM sections s LEFT JOIN departments d ON d.id = s.department_id WHERE s.is_active = 1 ORDER BY d.name, s.name`).all() as any[];
+    res.json({ onDate, units: sections.map(sec => effectiveHead(db, sec, onDate)) });
+  });
+
+  router.get('/acting-unit-heads', requirePermission('personnel.rosters', 'view'), (req, res) => {
+    const db = getDb();
+    sweepActingHeads(db);
+    const cond: string[] = []; const params: unknown[] = [];
+    if (req.query.sectionId) { cond.push('a.section_id = ?'); params.push(Number(req.query.sectionId)); }
+    if (req.query.status) { cond.push('a.status = ?'); params.push(String(req.query.status)); }
+    const where = cond.length ? `WHERE ${cond.join(' AND ')}` : '';
+    const today = todayIso();
+    const rows = db.prepare(`SELECT a.*, sec.name AS section_name, s.full_name AS acting_name, h.full_name AS substantive_head_name
+      FROM acting_unit_heads a
+      JOIN sections sec ON sec.id = a.section_id
+      JOIN staff s ON s.id = a.acting_staff_id
+      LEFT JOIN staff h ON h.id = a.substantive_head_staff_id
+      ${where} ORDER BY (a.status = 'active') DESC, a.start_date DESC, a.id DESC`).all(...params) as any[];
+    res.json(rows.map(r => ({ ...r, in_force: r.status === 'active' && r.start_date <= today && r.end_date >= today })));
+  });
+
+  router.post('/acting-unit-heads', requirePermission('personnel.rosters', 'create'), (req, res) => {
+    const db = getDb();
+    const sectionId = parseIntNullable(req.body.sectionId);
+    const actingStaffId = parseIntNullable(req.body.actingStaffId);
+    const startDate = isoDate(req.body.startDate);
+    const endDate = isoDate(req.body.endDate);
+    if (!sectionId) return res.status(400).json({ error: 'Choose the unit.' });
+    if (!actingStaffId) return res.status(400).json({ error: 'Choose the member of staff who will act as unit head.' });
+    if (!startDate || !endDate) return res.status(400).json({ error: 'Give the start and end dates of the acting period.' });
+    if (endDate < startDate) return res.status(400).json({ error: 'The end date cannot be before the start date.' });
+    const section = db.prepare('SELECT * FROM sections WHERE id = ?').get(sectionId) as any;
+    if (!section) return res.status(404).json({ error: 'Unit not found' });
+    if (section.head_staff_id && section.head_staff_id === actingStaffId) {
+      return res.status(400).json({ error: 'That member of staff is already the substantive unit head.' });
+    }
+    const clash = db.prepare(`SELECT 1 FROM acting_unit_heads WHERE section_id = ? AND status = 'active' AND NOT (end_date < ? OR start_date > ?)`).get(sectionId, startDate, endDate);
+    if (clash) return res.status(400).json({ error: 'Another acting appointment already covers part of that period for this unit.' });
+    const result = db.prepare(`INSERT INTO acting_unit_heads (section_id, acting_staff_id, substantive_head_staff_id, start_date, end_date, reason, status, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, 'active', ?)`)
+      .run(sectionId, actingStaffId, section.head_staff_id ?? null, startDate, endDate, trimOrNull(req.body.reason), req.user!.id);
+    const id = Number(result.lastInsertRowid);
+    audit(req, { action: 'create', entity: 'acting_unit_heads', entityId: id, newValue: { sectionId, actingStaffId, startDate, endDate } });
+    res.status(201).json({ id });
+  });
+
+  router.put('/acting-unit-heads/:id', requirePermission('personnel.rosters', 'edit'), (req, res) => {
+    const db = getDb();
+    const old = db.prepare('SELECT * FROM acting_unit_heads WHERE id = ?').get(req.params.id) as any;
+    if (!old) return res.status(404).json({ error: 'Acting appointment not found' });
+    const startDate = isoDate(req.body.startDate) ?? old.start_date;
+    const endDate = isoDate(req.body.endDate) ?? old.end_date;
+    if (endDate < startDate) return res.status(400).json({ error: 'The end date cannot be before the start date.' });
+    const actingStaffId = parseIntNullable(req.body.actingStaffId) ?? old.acting_staff_id;
+    const clash = db.prepare(`SELECT 1 FROM acting_unit_heads WHERE section_id = ? AND id <> ? AND status = 'active' AND NOT (end_date < ? OR start_date > ?)`).get(old.section_id, old.id, startDate, endDate);
+    if (clash) return res.status(400).json({ error: 'Another acting appointment already covers part of that period for this unit.' });
+    db.prepare("UPDATE acting_unit_heads SET acting_staff_id = ?, start_date = ?, end_date = ?, reason = ?, status = CASE WHEN end_date < date('now') THEN status ELSE 'active' END, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .run(actingStaffId, startDate, endDate, trimOrNull(req.body.reason) ?? old.reason, req.params.id);
+    audit(req, { action: 'edit', entity: 'acting_unit_heads', entityId: req.params.id, oldValue: old, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  // End an acting period now — the substantive head resumes from today.
+  router.post('/acting-unit-heads/:id/end', requirePermission('personnel.rosters', 'edit'), (req, res) => {
+    const db = getDb();
+    const old = db.prepare('SELECT * FROM acting_unit_heads WHERE id = ?').get(req.params.id) as any;
+    if (!old) return res.status(404).json({ error: 'Acting appointment not found' });
+    db.prepare("UPDATE acting_unit_heads SET status = 'ended', end_date = date('now'), updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
+    audit(req, { action: 'edit', entity: 'acting_unit_heads', entityId: req.params.id, oldValue: { status: old.status }, newValue: { status: 'ended', reason: 'ended early' } });
+    res.json({ ok: true });
+  });
+
+  router.delete('/acting-unit-heads/:id', requirePermission('personnel.rosters', 'void_archive'), (req, res) => {
+    const db = getDb();
+    const old = db.prepare('SELECT * FROM acting_unit_heads WHERE id = ?').get(req.params.id) as any;
+    if (!old) return res.status(404).json({ error: 'Acting appointment not found' });
+    db.prepare('DELETE FROM acting_unit_heads WHERE id = ?').run(req.params.id);
+    audit(req, { action: 'delete', entity: 'acting_unit_heads', entityId: req.params.id, oldValue: old });
+    res.json({ ok: true });
+  });
+
+  router.get('/unit-supervisors/print', requirePermission('personnel.rosters', 'view'), (req, res) => {
+    const db = getDb();
+    sweepActingHeads(db);
+    const onDate = isoDate(req.query.onDate) ?? todayIso();
+    const h = labHeader(db);
+    const sections = db.prepare(`SELECT s.id, s.name, s.head_staff_id, d.name AS department_name
+      FROM sections s LEFT JOIN departments d ON d.id = s.department_id WHERE s.is_active = 1 ORDER BY d.name, s.name`).all() as any[];
+    const rows = sections.map(sec => {
+      const e = effectiveHead(db, sec, onDate);
+      const acting = e.acting
+        ? `${escHtml(e.effective_name || '—')}<br/><small>Acting until ${escHtml(e.acting_until)}${e.reason ? ` · ${escHtml(e.reason)}` : ''}</small>`
+        : '<span style="color:#94a3b8">—</span>';
+      return `<tr><td><b>${escHtml(sec.name)}</b>${sec.department_name ? `<br/><small>${escHtml(sec.department_name)}</small>` : ''}</td>
+        <td>${escHtml(e.substantive_head_name || '—')}</td>
+        <td>${acting}</td>
+        <td><b>${escHtml(e.effective_name || '—')}</b></td></tr>`;
+    }).join('');
+    const orgLines = escHtml(h.org) + (h.facility ? `<br/>${escHtml(h.facility)}` : '');
+    const headHtml = mastheadHtml(h, orgLines, `UNIT SUPERVISORS — AS AT ${onDate}`);
+    const body = `<table><thead><tr><th>Unit</th><th>Substantive head</th><th>Acting supervisor</th><th>Effective supervisor today</th></tr></thead><tbody>${rows || '<tr><td colspan="4">No units.</td></tr>'}</tbody></table>`;
+    audit(req, { action: 'print', entity: 'acting_unit_heads', newValue: { report: 'unit_supervisors', onDate } });
+    res.send(printShell(`Unit supervisors — ${onDate}`, '', body, req.query.autoprint !== '0'));
+  });
+
   return router;
 }

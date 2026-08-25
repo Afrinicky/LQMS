@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { api, API_BASE, getToken } from '../services/api';
-import type { Staff, Section } from '../../shared/types/api';
+import type { Staff, Section, ActingUnitHead, UnitSupervisors } from '../../shared/types/api';
 import { usePermissions } from '../hooks/usePermissions';
 
 // ==========================================================================
@@ -451,5 +451,130 @@ export function BenchScheduleBoard({ sections, canEdit }: { sections: Section[];
       {bs.benches.length > 0 && <div style={{ marginTop: 10, fontSize: 12, fontFamily: 'monospace' }}>{bs.benches.map(b => <span key={b.id} style={{ marginRight: 20 }}><b>{b.code || b.name}</b>: {b.name}</span>)}</div>}
       {!canEdit && <p className="muted" style={{ marginTop: 12 }}>Read-only.</p>}
     </div>}
+  </div>;
+}
+
+// ========================= Unit supervisors & acting heads =========================
+// The substantive head of a unit lives on the unit record (Settings → Sections).
+// This board shows who is effectively in charge of each unit today, and lets a
+// manager appoint an Acting Unit Head for a fixed period when a head is away.
+// The acting role reverts on its own once the period ends — the server judges it
+// in force purely by today's date.
+const emptyActing = { sectionId: '', actingStaffId: '', startDate: '', endDate: '', reason: '' };
+
+export function ActingSupervisorsBoard({ staff, sections, canEdit }: { staff: Staff[]; sections: Section[]; canEdit: boolean }) {
+  const { can } = usePermissions();
+  const mayDelete = can('personnel', 'void_archive');
+  const mayPrint = can('personnel', 'print');
+  const [sups, setSups] = useState<UnitSupervisors | null>(null);
+  const [appts, setAppts] = useState<ActingUnitHead[]>([]);
+  const [form, setForm] = useState(emptyActing);
+  const [showForm, setShowForm] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  function load() {
+    api<UnitSupervisors>('/scheduling/unit-supervisors').then(setSups).catch(e => setError((e as Error).message));
+    api<ActingUnitHead[]>('/scheduling/acting-unit-heads').then(setAppts).catch(e => setError((e as Error).message));
+  }
+  useEffect(() => { load(); }, []);
+
+  async function create(e: FormEvent) {
+    e.preventDefault(); setError(null); setMsg(null);
+    try {
+      await api('/scheduling/acting-unit-heads', { method: 'POST', body: JSON.stringify(form) });
+      setForm(emptyActing); setShowForm(false); setMsg('Acting unit head appointed.'); load();
+    } catch (err) { setError((err as Error).message); }
+  }
+  async function endNow(id: number) {
+    setError(null); setMsg(null);
+    try { await api(`/scheduling/acting-unit-heads/${id}/end`, { method: 'POST', body: JSON.stringify({}) }); setMsg('Acting period ended; the substantive head resumes.'); load(); }
+    catch (err) { setError((err as Error).message); }
+  }
+  async function remove(id: number) {
+    if (!confirm('Delete this acting appointment for good?')) return;
+    setError(null);
+    try { await api(`/scheduling/acting-unit-heads/${id}`, { method: 'DELETE' }); load(); }
+    catch (err) { setError((err as Error).message); }
+  }
+
+  const startForSection = (sectionId: number | null | undefined) => {
+    setForm({ ...emptyActing, sectionId: sectionId ? String(sectionId) : '' });
+    setShowForm(true); setMsg(null); setError(null);
+  };
+
+  return <div>
+    {error && <div className="error">{error}</div>}
+    {msg && <div className="notice-ok">{msg}</div>}
+
+    <div className="card">
+      <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+        <h3 style={{ margin: 0 }}>Unit supervisors</h3>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {mayPrint && <button className="secondary" onClick={() => openPrintPage('/scheduling/unit-supervisors/print', setError)}>Print</button>}
+          {canEdit && <button onClick={() => startForSection(null)}>+ Appoint acting head</button>}
+        </div>
+      </div>
+      <p className="muted" style={{ marginTop: 0 }}>
+        Who is effectively in charge of each unit today{sups ? ` (as at ${sups.onDate})` : ''}. The substantive head is set under Settings → Sections;
+        an acting head stands in for a fixed period and reverts on its own once it ends.
+      </p>
+      <table className="data-table"><thead><tr><th>Unit</th><th>Substantive head</th><th>In charge today</th>{canEdit && <th></th>}</tr></thead><tbody>
+        {(sups?.units ?? []).map(u => <tr key={u.section_id}>
+          <td>{u.section_name}{u.department_name ? <><br /><small className="muted">{u.department_name}</small></> : null}</td>
+          <td>{u.substantive_head_name || <span className="muted">—</span>}</td>
+          <td>
+            {u.effective_name || <span className="muted">—</span>}
+            {u.acting && <span className="badge acting" style={{ marginLeft: 6 }}>Acting</span>}
+            {u.acting && u.acting_until && <><br /><small className="muted">until {u.acting_until}{u.reason ? ` · ${u.reason}` : ''}</small></>}
+          </td>
+          {canEdit && <td>{!u.acting && <button className="secondary" onClick={() => startForSection(u.section_id)}>Appoint acting</button>}</td>}
+        </tr>)}
+        {(sups?.units ?? []).length === 0 && <tr><td colSpan={canEdit ? 4 : 3} className="muted">No active units.</td></tr>}
+      </tbody></table>
+    </div>
+
+    {canEdit && showForm && <div className="card" style={{ marginTop: 16 }}>
+      <h3 style={{ marginTop: 0 }}>Appoint an acting unit head</h3>
+      <form className="form-grid" onSubmit={create}>
+        <label>Unit
+          <select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })} required>
+            <option value="">—</option>
+            {sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </label>
+        <label>Acting unit head
+          <select value={form.actingStaffId} onChange={e => setForm({ ...form, actingStaffId: e.target.value })} required>
+            <option value="">—</option>
+            {staff.map(s => <option key={s.id} value={s.id}>{s.fullName}{s.employeeNo ? ` (${s.employeeNo})` : ''}</option>)}
+          </select>
+        </label>
+        <label>From<input type="date" value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })} required /></label>
+        <label>Until<input type="date" value={form.endDate} onChange={e => setForm({ ...form, endDate: e.target.value })} required /></label>
+        <label style={{ gridColumn: '1 / -1' }}>Reason (optional)<input value={form.reason} onChange={e => setForm({ ...form, reason: e.target.value })} placeholder="e.g. Substantive head on annual leave" /></label>
+        <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8 }}>
+          <button type="submit">Appoint</button>
+          <button type="button" className="secondary" onClick={() => setShowForm(false)}>Cancel</button>
+        </div>
+      </form>
+    </div>}
+
+    <div className="card" style={{ marginTop: 16 }}>
+      <h3 style={{ marginTop: 0 }}>Acting appointments</h3>
+      <table className="data-table"><thead><tr><th>Unit</th><th>Acting head</th><th>Standing in for</th><th>Period</th><th>Status</th>{canEdit && <th></th>}</tr></thead><tbody>
+        {appts.map(a => <tr key={a.id}>
+          <td>{a.section_name}</td>
+          <td>{a.acting_name}</td>
+          <td>{a.substantive_head_name || <span className="muted">—</span>}</td>
+          <td>{a.start_date} → {a.end_date}</td>
+          <td>{a.in_force ? <span className="badge acting">In force</span> : <span className="badge">{a.status}</span>}</td>
+          {canEdit && <td>
+            {a.status === 'active' && a.in_force && <button className="secondary" onClick={() => endNow(a.id)}>End now</button>}
+            {mayDelete && <> <button className="secondary" onClick={() => remove(a.id)}>Delete</button></>}
+          </td>}
+        </tr>)}
+        {appts.length === 0 && <tr><td colSpan={canEdit ? 6 : 5} className="muted">No acting appointments recorded.</td></tr>}
+      </tbody></table>
+    </div>
   </div>;
 }

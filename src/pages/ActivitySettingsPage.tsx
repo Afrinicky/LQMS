@@ -496,6 +496,14 @@ function Simplification({ onChanged }: { onChanged: () => void }) {
 /* ============================================================================
    Scheduling policy
    ========================================================================= */
+const ROTATION_FREQ = [
+  { key: 'monthly', label: 'Every month' },
+  { key: 'quarterly', label: 'Every 3 months (quarterly)' },
+  { key: 'biannual', label: 'Every 6 months' },
+  { key: 'annual', label: 'Once a year' },
+  { key: 'none', label: 'No fixed interval' },
+];
+
 function SchedulingPolicyTab() {
   const { can } = usePermissions();
   const mayEdit = can('settings', 'edit');
@@ -524,6 +532,11 @@ function SchedulingPolicyTab() {
           missedGraceHours: policy.missed_grace_hours,
           notifyLeadershipDaily: policy.notify_leadership_daily === 1,
           briefingHour: policy.briefing_hour,
+          rotationEnabled: policy.rotation_enabled === 1,
+          rotationStaffFrequency: policy.rotation_staff_frequency,
+          rotationRotateUnitHeads: policy.rotation_rotate_unit_heads === 1,
+          rotationHeadFrequency: policy.rotation_head_frequency,
+          rotationNotes: policy.rotation_notes ?? '',
         }),
       });
       setPolicy(saved); setNotice('Policy saved.');
@@ -573,6 +586,33 @@ function SchedulingPolicyTab() {
           <span>When benches are carried forward, place newly assigned staff into the benches that leavers vacated</span></label>
         <label className="inline"><input type="checkbox" checked={policy.notify_leadership_daily === 1} onChange={flag('notify_leadership_daily')} disabled={!mayEdit} />
           <span>Show unit activities to the unit head and managers as oversight</span></label>
+
+        <fieldset className="policy-section">
+          <legend>Unit rotation</legend>
+          <p className="muted">
+            How this laboratory staffs its units. Some keep people in one unit permanently; others rotate them, and may or may not move
+            the unit heads on the same cadence. This sets the model — the reassignment schedule and acting-supervisor tools follow it.
+          </p>
+          <label className="inline"><input type="checkbox" checked={policy.rotation_enabled === 1} onChange={flag('rotation_enabled')} disabled={!mayEdit} />
+            <span>This laboratory rotates staff between units (leave off to keep staff in one unit permanently)</span></label>
+          {policy.rotation_enabled === 1 && <>
+            <label>How often other staff rotate
+              <select value={policy.rotation_staff_frequency} onChange={e => setPolicy({ ...policy, rotation_staff_frequency: e.target.value })} disabled={!mayEdit}>
+                {ROTATION_FREQ.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
+              </select>
+            </label>
+            <label className="inline"><input type="checkbox" checked={policy.rotation_rotate_unit_heads === 1} onChange={flag('rotation_rotate_unit_heads')} disabled={!mayEdit} />
+              <span>Unit heads rotate too (leave off — the common case — to keep unit heads in place while other staff rotate)</span></label>
+            {policy.rotation_rotate_unit_heads === 1 && <label>How often unit heads rotate
+              <select value={policy.rotation_head_frequency} onChange={e => setPolicy({ ...policy, rotation_head_frequency: e.target.value })} disabled={!mayEdit}>
+                {ROTATION_FREQ.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
+              </select>
+            </label>}
+          </>}
+          <label className="wide">Notes on the rotation arrangement (optional)
+            <textarea rows={2} value={policy.rotation_notes ?? ''} onChange={e => setPolicy({ ...policy, rotation_notes: e.target.value })} disabled={!mayEdit}
+              placeholder="e.g. Heads fixed; scientists rotate monthly; interns rotate every posting." /></label>
+        </fieldset>
 
         {mayEdit && (
           <div className="duty-actions">

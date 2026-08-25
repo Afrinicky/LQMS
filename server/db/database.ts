@@ -5636,6 +5636,47 @@ CREATE TABLE IF NOT EXISTS system_audit_scans (
     if (!cols.has('published_at')) database.exec('ALTER TABLE bench_schedules ADD COLUMN published_at TEXT');
   }
 
+  // Unit rotation policy and acting unit heads.
+  //
+  // Laboratories differ in how they staff a unit: some keep people in one unit
+  // permanently, others rotate them — monthly, quarterly, twice a year or
+  // yearly — and may or may not rotate the unit heads on the same cadence. In
+  // the common case the head stays put while everyone else moves, but the model
+  // is the laboratory's to choose, so the cadence lives on the scheduling
+  // policy where the rest of the rostering rules are set.
+  //
+  // Separately, when a head is away for a short spell (leave, a short duty
+  // elsewhere) another member of staff acts up for a set period. That is an
+  // acting appointment with its own start and end; it is judged "in force"
+  // purely by today's date, so the role reverts on its own when the period ends
+  // with nothing to run and nothing to remember to undo.
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(scheduling_policy)').all() as Array<{ name: string }>).map(c => c.name));
+    const add = (name: string, ddl: string) => { if (!cols.has(name)) database.exec(`ALTER TABLE scheduling_policy ADD COLUMN ${ddl}`); };
+    add('rotation_enabled', 'rotation_enabled INTEGER NOT NULL DEFAULT 0');
+    add('rotation_staff_frequency', "rotation_staff_frequency TEXT NOT NULL DEFAULT 'monthly'");
+    add('rotation_rotate_unit_heads', 'rotation_rotate_unit_heads INTEGER NOT NULL DEFAULT 0');
+    add('rotation_head_frequency', "rotation_head_frequency TEXT NOT NULL DEFAULT 'annual'");
+    add('rotation_notes', 'rotation_notes TEXT');
+  }
+  database.exec(`
+CREATE TABLE IF NOT EXISTS acting_unit_heads (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  section_id INTEGER NOT NULL REFERENCES sections(id),
+  acting_staff_id INTEGER NOT NULL REFERENCES staff(id),
+  substantive_head_staff_id INTEGER REFERENCES staff(id),  -- snapshot of who is being stood in for
+  start_date TEXT NOT NULL,                                -- YYYY-MM-DD (inclusive)
+  end_date TEXT NOT NULL,                                  -- YYYY-MM-DD (inclusive)
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'active',                   -- active | ended | cancelled
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_acting_unit_heads_section ON acting_unit_heads(section_id);
+CREATE INDEX IF NOT EXISTS idx_acting_unit_heads_dates ON acting_unit_heads(start_date, end_date);
+`);
+
   // ===================================================================
   // Competence and performance — frameworks, structured assessments and
   // appraisals.
