@@ -5677,6 +5677,116 @@ CREATE INDEX IF NOT EXISTS idx_acting_unit_heads_section ON acting_unit_heads(se
 CREATE INDEX IF NOT EXISTS idx_acting_unit_heads_dates ON acting_unit_heads(start_date, end_date);
 `);
 
+  // Supplier evaluation on the same footing as competency assessment: a
+  // framework states, once, what a supplier is judged against — a set of
+  // questions grouped by theme, each with the standard that defines an
+  // acceptable answer — and an evaluation is raised against a copy of that
+  // framework, scored question by question, concluded with a rating and
+  // printed. Reusing the shape means a supplier is assessed against a written
+  // standard rather than one evaluator's impression, and last month's rating
+  // survives a later edit to the framework.
+  database.exec(`
+CREATE TABLE IF NOT EXISTS supplier_eval_frameworks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  framework_code TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  category TEXT,                                   -- item/service category it applies to
+  version_label TEXT NOT NULL DEFAULT '1.0',
+  purpose TEXT,
+  scope TEXT,
+  max_score INTEGER NOT NULL DEFAULT 4,
+  pass_threshold_percent REAL NOT NULL DEFAULT 70,
+  minimum_element_score REAL,
+  critical_elements_must_pass INTEGER NOT NULL DEFAULT 1,
+  validity_months INTEGER NOT NULL DEFAULT 12,
+  requires_review INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'draft',            -- draft | active | archived
+  effective_date TEXT,
+  next_review_date TEXT,
+  approved_by_staff_id INTEGER REFERENCES staff(id),
+  approved_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS supplier_eval_framework_groups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  framework_id INTEGER NOT NULL REFERENCES supplier_eval_frameworks(id) ON DELETE CASCADE,
+  group_title TEXT NOT NULL,
+  group_description TEXT,
+  weight REAL NOT NULL DEFAULT 1,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS supplier_eval_framework_elements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  framework_id INTEGER NOT NULL REFERENCES supplier_eval_frameworks(id) ON DELETE CASCADE,
+  group_id INTEGER REFERENCES supplier_eval_framework_groups(id) ON DELETE SET NULL,
+  element_code TEXT,
+  element_text TEXT NOT NULL,
+  performance_criteria TEXT,
+  weight REAL NOT NULL DEFAULT 1,
+  is_critical INTEGER NOT NULL DEFAULT 0,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_supplier_eval_groups_fw ON supplier_eval_framework_groups(framework_id);
+CREATE INDEX IF NOT EXISTS idx_supplier_eval_elements_fw ON supplier_eval_framework_elements(framework_id);
+
+CREATE TABLE IF NOT EXISTS supplier_eval_assessments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  evaluation_number TEXT NOT NULL UNIQUE,
+  supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+  framework_id INTEGER REFERENCES supplier_eval_frameworks(id),
+  framework_title TEXT,
+  framework_version TEXT,
+  evaluation_date TEXT NOT NULL,
+  period_label TEXT,
+  purpose TEXT,
+  evaluator_staff_id INTEGER REFERENCES staff(id),
+  reviewer_staff_id INTEGER REFERENCES staff(id),
+  max_score INTEGER NOT NULL DEFAULT 4,
+  pass_threshold_percent REAL NOT NULL DEFAULT 70,
+  total_score REAL,
+  score_percent REAL,
+  elements_total INTEGER NOT NULL DEFAULT 0,
+  elements_assessed INTEGER NOT NULL DEFAULT 0,
+  critical_failures INTEGER NOT NULL DEFAULT 0,
+  rating TEXT,                                     -- approved | approved_conditional | not_approved
+  status TEXT NOT NULL DEFAULT 'planned',          -- planned | in_progress | completed
+  findings TEXT,
+  action_required TEXT,
+  next_evaluation_due TEXT,
+  reviewer_comments TEXT,
+  reviewed_at TEXT,
+  completed_at TEXT,
+  completed_by_staff_id INTEGER REFERENCES staff(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS supplier_eval_assessment_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  assessment_id INTEGER NOT NULL REFERENCES supplier_eval_assessments(id) ON DELETE CASCADE,
+  framework_element_id INTEGER,
+  group_title TEXT,
+  element_code TEXT,
+  element_text TEXT NOT NULL,
+  performance_criteria TEXT,
+  score REAL,
+  max_score INTEGER NOT NULL DEFAULT 4,
+  weight REAL NOT NULL DEFAULT 1,
+  is_critical INTEGER NOT NULL DEFAULT 0,
+  not_applicable INTEGER NOT NULL DEFAULT 0,
+  remarks TEXT,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_supplier_eval_assess_supplier ON supplier_eval_assessments(supplier_id);
+CREATE INDEX IF NOT EXISTS idx_supplier_eval_items_assess ON supplier_eval_assessment_items(assessment_id);
+`);
+
   // ===================================================================
   // Competence and performance — frameworks, structured assessments and
   // appraisals.

@@ -14,6 +14,7 @@ import { complaintsRoutes } from './routes/complaints.js';
 import { riskRoutes } from './routes/risks.js';
 import { equipmentRoutes } from './routes/equipment.js';
 import { inventoryRoutes } from './routes/inventory.js';
+import { supplierEvaluationRoutes } from './routes/supplierEvaluation.js';
 import { monitoringRoutes } from './routes/monitoring.js';
 import { safetyRoutes } from './routes/safety.js';
 import { organisationRoutes } from './routes/organisation.js';
@@ -114,6 +115,7 @@ export function createApiServer() {
   app.use('/api/risks', riskRoutes());
   app.use('/api/equipment', equipmentRoutes());
   app.use('/api/supplier-inventory', inventoryRoutes());
+  app.use('/api/supplier-inventory', supplierEvaluationRoutes());
   app.use('/api/monitoring', monitoringRoutes());
   app.use('/api/facilities-safety', safetyRoutes());
   app.use('/api/organisation', organisationRoutes());
