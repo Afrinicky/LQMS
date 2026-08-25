@@ -258,7 +258,7 @@ function MemberPicker({ staff, selected, exclude = [], onChange }: { staff: Staf
   </div>;
 }
 
-export function ReassignmentBoard({ staff, sections, canEdit }: { staff: Staff[]; sections: Section[]; canEdit: boolean }) {
+export function ReassignmentBoard({ staff, sections, canEdit, onNavigate }: { staff: Staff[]; sections: Section[]; canEdit: boolean; onNavigate?: (tab: string) => void }) {
   const { can } = usePermissions();
   const [list, setList] = useState<Array<{ id: number; schedule_number: string; month: string; status: string; subject: string }>>([]);
   const [sched, setSched] = useState<Reassign | null>(null);
@@ -266,15 +266,13 @@ export function ReassignmentBoard({ staff, sections, canEdit }: { staff: Staff[]
   const [msg, setMsg] = useState<string | null>(null);
   const [newMonth, setNewMonth] = useState(nextMonthValue());
   const [copyFrom, setCopyFrom] = useState('');
-  const [rowForm, setRowForm] = useState(emptyReRow);
+  const [editingRow, setEditingRow] = useState<ReRow | null>(null);
   const [heads, setHeads] = useState<Record<number, UnitSupervisor>>({});
-  const staffName = (id: number | string) => staff.find(s => String(s.id) === String(id))?.fullName || '';
 
   function loadList() { api<typeof list>('/scheduling/reassignments').then(setList).catch(e => setError((e as Error).message)); }
   useEffect(() => { loadList(); }, []);
   useEffect(() => { api<UnitSupervisors>('/scheduling/unit-supervisors').then(r => setHeads(Object.fromEntries(r.units.map(u => [u.section_id, u])))).catch(() => setHeads({})); }, []);
-  const linkedHead = rowForm.sectionId ? heads[Number(rowForm.sectionId)] : undefined;
-  async function open(id: number) { setError(null); setMsg(null); try { setSched(await api<Reassign>(`/scheduling/reassignments/${id}`)); } catch (e) { setError((e as Error).message); } }
+  async function open(id: number) { setError(null); setMsg(null); setEditingRow(null); try { setSched(await api<Reassign>(`/scheduling/reassignments/${id}`)); } catch (e) { setError((e as Error).message); } }
   async function create(e: FormEvent) {
     e.preventDefault(); setError(null);
     try { const r = await api<{ id: number }>('/scheduling/reassignments', { method: 'POST', body: JSON.stringify({ month: newMonth, copyFromId: copyFrom || undefined }) }); setCopyFrom(''); loadList(); await open(r.id); }
@@ -283,15 +281,18 @@ export function ReassignmentBoard({ staff, sections, canEdit }: { staff: Staff[]
   async function saveHeader(patch: Record<string, unknown>) {
     if (!sched) return; try { await api(`/scheduling/reassignments/${sched.id}`, { method: 'PUT', body: JSON.stringify(patch) }); await open(sched.id); setMsg('Saved.'); } catch (e) { setError((e as Error).message); }
   }
-  async function addRow(e: FormEvent) {
-    e.preventDefault(); if (!sched) return; if (!rowForm.unitLabel) { setError('Unit label required.'); return; }
-    const membersText = rowForm.memberIds.map(staffName).filter(Boolean).join(', ');
-    const body = { unitLabel: rowForm.unitLabel, sectionId: rowForm.sectionId || null, isSpan: rowForm.isSpan, spanText: rowForm.spanText,
-      supervisorStaffId: rowForm.supervisorStaffId || null, deputyStaffId: rowForm.deputyStaffId || null, memberIds: rowForm.memberIds, membersText };
-    try { await api(`/scheduling/reassignments/${sched.id}/rows`, { method: 'POST', body: JSON.stringify(body) }); setRowForm(emptyReRow); await open(sched.id); }
-    catch (e) { setError((e as Error).message); }
+  // Add or update a unit row — same form, in place, so an existing row can be
+  // corrected rather than deleted and retyped.
+  async function submitRow(body: Record<string, unknown>, editingId: number | null) {
+    if (!sched) return;
+    setError(null);
+    try {
+      if (editingId) await api(`/scheduling/reassignment-rows/${editingId}`, { method: 'PUT', body: JSON.stringify(body) });
+      else await api(`/scheduling/reassignments/${sched.id}/rows`, { method: 'POST', body: JSON.stringify(body) });
+      setEditingRow(null); await open(sched.id);
+    } catch (e) { setError((e as Error).message); throw e; }
   }
-  async function delRow(id: number) { if (!sched) return; try { await api(`/scheduling/reassignment-rows/${id}`, { method: 'DELETE' }); await open(sched.id); } catch (e) { setError((e as Error).message); } }
+  async function delRow(id: number) { if (!sched) return; try { await api(`/scheduling/reassignment-rows/${id}`, { method: 'DELETE' }); if (editingRow?.id === id) setEditingRow(null); await open(sched.id); } catch (e) { setError((e as Error).message); } }
   async function act(path: string, ok: string) { if (!sched) return; try { const r = await api<{ staffReassigned?: number[] }>(`/scheduling/reassignments/${sched.id}/${path}`, { method: 'POST', body: JSON.stringify({}) }); setMsg(ok + (r?.staffReassigned?.length ? ` ${r.staffReassigned.length} staff moved to their new unit on the register.` : '')); loadList(); await open(sched.id); } catch (e) { setError((e as Error).message); } }
   async function remove(id: number) { if (!confirm('Delete this schedule?')) return; try { await api(`/scheduling/reassignments/${id}`, { method: 'DELETE' }); if (sched?.id === id) setSched(null); loadList(); } catch (e) { setError((e as Error).message); } }
 
@@ -339,51 +340,103 @@ export function ReassignmentBoard({ staff, sections, canEdit }: { staff: Staff[]
       </div>}
 
       <table className="data-table re-table"><thead><tr><th>Unit</th><th>Supervisor</th><th>Deputy</th><th>Member(s)</th>{canEdit && <th></th>}</tr></thead><tbody>
-        {sched.rows.map(r => <tr key={r.id}>
+        {sched.rows.map(r => <tr key={r.id} className={editingRow?.id === r.id ? 'row-editing' : ''}>
           <td><strong>{r.unit_label}</strong></td>
           {r.is_span ? <td colSpan={3}>{r.span_text || r.members_text || ''}</td> : <>
             <td>{r.supervisor_text || r.supervisor_name || '—'}{r.supervisor_is_acting ? <span className="badge acting" style={{ marginLeft: 6 }}>Acting</span> : null}</td>
             <td>{r.deputy_text || r.deputy_name || '—'}</td>
             <td>{r.members_text || '—'}</td>
           </>}
-          {canEdit && <td><button className="secondary tiny" onClick={() => delRow(r.id)} aria-label="Remove row">×</button></td>}
+          {canEdit && <td className="re-row-actions">
+            <button className="secondary tiny" onClick={() => setEditingRow(r)}>Edit</button>
+            <button className="secondary tiny" onClick={() => delRow(r.id)} aria-label="Remove row">×</button>
+          </td>}
         </tr>)}
         {sched.rows.length === 0 && <tr><td colSpan={canEdit ? 5 : 4} className="muted">No unit rows yet.</td></tr>}
       </tbody></table>
 
-      {canEdit && <form onSubmit={addRow} className="re-rowform">
-        <div className="rf-line">
-          <label className="rf-unit">Unit
-            <select value={rowForm.sectionId} onChange={e => { const sid = e.target.value; const nm = sections.find(s => String(s.id) === sid)?.name; setRowForm({ ...rowForm, sectionId: sid, unitLabel: sid ? (nm || rowForm.unitLabel) : rowForm.unitLabel }); }}>
-              <option value="">— not linked —</option>
-              {sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          </label>
-          <label className="rf-label">Label as printed
-            <input value={rowForm.unitLabel} onChange={e => setRowForm({ ...rowForm, unitLabel: e.target.value })} placeholder="e.g. Microbiology & GeneXpert" required />
-          </label>
-          <label className="rf-span check-inline"><input type="checkbox" checked={rowForm.isSpan} onChange={e => setRowForm({ ...rowForm, isSpan: e.target.checked })} /> Wide cell</label>
-        </div>
-
-        {rowForm.isSpan ? <label className="rf-full">People<input value={rowForm.spanText} onChange={e => setRowForm({ ...rowForm, spanText: e.target.value })} placeholder="e.g. Evans Owusu, Nicholas Afriyie" /></label> : <>
-          <div className="rf-line">
-            <div className="rf-sup">
-              <span className="rf-cap">{linkedHead?.acting ? 'Acting Unit Supervisor' : 'Supervisor'}</span>
-              {rowForm.sectionId
-                ? <div className="rf-locked">{linkedHead?.effective_name || '— no head set —'}{linkedHead?.acting && <span className="badge acting">Acting</span>}</div>
-                : <select value={rowForm.supervisorStaffId} onChange={e => setRowForm({ ...rowForm, supervisorStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select>}
-            </div>
-            <label className="rf-dep">Deputy
-              <select value={rowForm.deputyStaffId} onChange={e => setRowForm({ ...rowForm, deputyStaffId: e.target.value })}><option value="">—</option>{staff.filter(s => String(s.id) !== String(linkedHead?.effective_staff_id ?? '')).map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select>
-            </label>
-          </div>
-          <MemberPicker staff={staff} selected={rowForm.memberIds} exclude={[String(linkedHead?.effective_staff_id ?? ''), rowForm.deputyStaffId]} onChange={ids => setRowForm({ ...rowForm, memberIds: ids })} />
-        </>}
-        <div className="rf-actions"><button type="submit">Add row</button></div>
-      </form>}
+      {canEdit && <ReRowForm staff={staff} sections={sections} heads={heads} editing={editingRow}
+        onSubmit={submitRow} onCancel={() => setEditingRow(null)}
+        onNavigateSupervisors={onNavigate ? () => onNavigate('Unit Supervisors') : undefined} />}
       {!canEdit && <p className="muted" style={{ marginTop: 12 }}>Read-only.</p>}
     </div>}
   </div>;
+}
+
+// The add / edit row form, kept in its own component so a keystroke only
+// re-renders the form — not the whole board and its tables. (A controlled input
+// living on a large parent is what made the box feel frozen: every character
+// reconciled the entire page before it could paint.)
+function ReRowForm({ staff, sections, heads, editing, onSubmit, onCancel, onNavigateSupervisors }: {
+  staff: Staff[]; sections: Section[]; heads: Record<number, UnitSupervisor>;
+  editing: ReRow | null;
+  onSubmit: (body: Record<string, unknown>, editingId: number | null) => Promise<void>;
+  onCancel: () => void;
+  onNavigateSupervisors?: () => void;
+}) {
+  const [form, setForm] = useState(emptyReRow);
+  const staffName = (id: number | string) => staff.find(s => String(s.id) === String(id))?.fullName || '';
+
+  useEffect(() => {
+    if (!editing) { setForm(emptyReRow); return; }
+    let members: string[] = [];
+    try { members = JSON.parse(editing.member_ids || '[]').map((x: unknown) => String(x)); } catch { members = []; }
+    setForm({
+      unitLabel: editing.unit_label || '', sectionId: editing.section_id ? String(editing.section_id) : '',
+      supervisorStaffId: editing.supervisor_staff_id ? String(editing.supervisor_staff_id) : '',
+      deputyStaffId: editing.deputy_staff_id ? String(editing.deputy_staff_id) : '',
+      memberIds: members, isSpan: !!editing.is_span, spanText: editing.span_text || '',
+    });
+  }, [editing]);
+
+  const linkedHead = form.sectionId ? heads[Number(form.sectionId)] : undefined;
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!form.unitLabel.trim()) return;
+    const membersText = form.memberIds.map(staffName).filter(Boolean).join(', ');
+    const body = { unitLabel: form.unitLabel, sectionId: form.sectionId || null, isSpan: form.isSpan, spanText: form.spanText,
+      supervisorStaffId: form.supervisorStaffId || null, deputyStaffId: form.deputyStaffId || null, memberIds: form.memberIds, membersText };
+    try { await onSubmit(body, editing ? editing.id : null); setForm(emptyReRow); } catch { /* parent shows the error */ }
+  }
+
+  return <form onSubmit={submit} className={`re-rowform${editing ? ' editing' : ''}`}>
+    {editing && <div className="rf-editing-tag">Editing <strong>{editing.unit_label}</strong></div>}
+    <div className="rf-line">
+      <label className="rf-unit">Unit
+        <select value={form.sectionId} onChange={e => { const sid = e.target.value; const nm = sections.find(s => String(s.id) === sid)?.name; setForm({ ...form, sectionId: sid, unitLabel: sid ? (nm || form.unitLabel) : form.unitLabel }); }}>
+          <option value="">— not linked —</option>
+          {sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+      </label>
+      <label className="rf-label">Label as printed
+        <input value={form.unitLabel} onChange={e => setForm({ ...form, unitLabel: e.target.value })} placeholder="e.g. Microbiology & GeneXpert" required />
+      </label>
+      <label className="rf-span check-inline"><input type="checkbox" checked={form.isSpan} onChange={e => setForm({ ...form, isSpan: e.target.checked })} /> Wide cell</label>
+    </div>
+
+    {form.isSpan ? <label className="rf-full">People<input value={form.spanText} onChange={e => setForm({ ...form, spanText: e.target.value })} placeholder="e.g. Evans Owusu, Nicholas Afriyie" /></label> : <>
+      <div className="rf-line">
+        <div className="rf-sup">
+          <span className="rf-cap">{linkedHead?.acting ? 'Acting Unit Supervisor' : 'Supervisor'}</span>
+          {form.sectionId
+            ? <div className="rf-locked">
+                {linkedHead?.effective_name || '— no head set —'}{linkedHead?.acting && <span className="badge acting">Acting</span>}
+                {onNavigateSupervisors && <button type="button" className="link-button rf-change" onClick={onNavigateSupervisors}>Change? Appoint an acting supervisor →</button>}
+              </div>
+            : <select value={form.supervisorStaffId} onChange={e => setForm({ ...form, supervisorStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select>}
+        </div>
+        <label className="rf-dep">Deputy
+          <select value={form.deputyStaffId} onChange={e => setForm({ ...form, deputyStaffId: e.target.value })}><option value="">—</option>{staff.filter(s => String(s.id) !== String(linkedHead?.effective_staff_id ?? '')).map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select>
+        </label>
+      </div>
+      <MemberPicker staff={staff} selected={form.memberIds} exclude={[String(linkedHead?.effective_staff_id ?? ''), form.deputyStaffId]} onChange={ids => setForm({ ...form, memberIds: ids })} />
+    </>}
+    <div className="rf-actions">
+      {editing && <button type="button" className="secondary" onClick={onCancel}>Cancel</button>}
+      <button type="submit">{editing ? 'Save changes' : 'Add row'}</button>
+    </div>
+  </form>;
 }
 
 // ========================= Bench Schedule Board =========================
