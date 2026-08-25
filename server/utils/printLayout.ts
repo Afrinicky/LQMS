@@ -37,12 +37,23 @@ export function printedAt(): string {
   return new Date().toISOString().slice(0, 16).replace('T', ' ');
 }
 
-/** A signature block: a ruled line, a printed name and a date field. */
-export function signatureBlock(role: string, name?: string | null, dated?: string | null): string {
+/**
+ * A signature block: a ruled line, a printed name and a date field.
+ *
+ * When a signature image on file is supplied (a data URI), it is printed on the
+ * "Signature:" line in place of the blank rule, so a record that has actually
+ * been signed carries the signatures rather than empty lines. With no image the
+ * output is unchanged — a blank line to sign by hand — which is what a blank
+ * form and every other caller wants.
+ */
+export function signatureBlock(role: string, name?: string | null, dated?: string | null, signatureImg?: string | null): string {
+  const sigCell = signatureImg
+    ? `<img class="sig-img" src="${signatureImg}" alt="signature" />`
+    : '______________________';
   return `<div class="sign">
   <div class="rule">${name ? htmlEscape(name) : ''}</div>
   <div class="role">${htmlEscape(role)}</div>
-  <div class="date">Signature: ______________________ &nbsp; Date: ${dated ? htmlEscape(String(dated).slice(0, 10)) : '____________'}</div>
+  <div class="date">Signature: ${sigCell} &nbsp; Date: ${dated ? htmlEscape(String(dated).slice(0, 10)) : '____________'}</div>
 </div>`;
 }
 
@@ -79,6 +90,7 @@ table.meta td { width: 33%; }
 .sign .rule { border-bottom: 1px solid #16202e; min-height: 22px; font-weight: 600; padding-bottom: 2px; }
 .sign .role { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b; margin-top: 3px; }
 .sign .date { font-size: 9.5px; color: #40546f; margin-top: 8px; }
+.sign .sig-img { height: 30px; max-width: 150px; vertical-align: middle; background: #fff; }
 .sheet-foot { margin-top: 22px; border-top: 1px solid #c9d8ef; padding-top: 5px; font-size: 9.5px; color: #64748b; display: flex; justify-content: space-between; gap: 16px; }
 .legend { font-size: 9.5px; color: #4a5b70; margin: 2px 0 10px; }
 .page-break { page-break-before: always; }

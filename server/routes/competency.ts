@@ -2,7 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import fs from 'node:fs';
 import path from 'node:path';
-import { getDb, evidenceRoot } from '../db/database.js';
+import { getDb, evidenceRoot, uploadRoot } from '../db/database.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { canReachPersonalRecord, resolvePermission } from '../services/permissionResolver.js';
@@ -207,6 +207,25 @@ function loadAssessment(db: any, id: number | string) {
     LEFT JOIN sections sec ON sec.id = t.section_id WHERE t.competency_assessment_id = ? ORDER BY t.id DESC`).all(id);
   record.score_summary = scoreAssessment(db, id);
   return record;
+}
+
+/**
+ * A staff member's signature on file, as a data URI, for embedding directly in
+ * a printed record. Printed sheets are fetched into a new window and can't send
+ * an auth header, so the image is inlined here rather than linked. Returns null
+ * when the person has no signature on file or the file is missing.
+ */
+function staffSignatureDataUri(db: any, staffId: number | null | undefined): string | null {
+  if (!staffId) return null;
+  const staff = db.prepare('SELECT signature_file_id FROM staff WHERE id = ?').get(staffId) as Row | undefined;
+  if (!staff?.signature_file_id) return null;
+  const file = db.prepare('SELECT stored_name, mime_type, storage_area FROM files WHERE id = ?').get(staff.signature_file_id) as Row | undefined;
+  if (!file) return null;
+  const root = file.storage_area === 'evidence' ? evidenceRoot : uploadRoot;
+  try {
+    const bytes = fs.readFileSync(path.join(root, file.stored_name));
+    return `data:${file.mime_type || 'image/png'};base64,${bytes.toString('base64')}`;
+  } catch { return null; }
 }
 
 export function competencyRoutes() {
@@ -941,9 +960,14 @@ export function competencyRoutes() {
     if (!['pending_review', 'completed', 'acknowledged'].includes(record.status)) {
       return res.status(400).json({ error: 'Only a submitted or completed assessment can be reviewed.' });
     }
-    const reviewerStaffId = getStaffIdOrCurrent(req, req.body.reviewerStaffId);
-    if (reviewerStaffId && reviewerStaffId === record.assessor_staff_id) {
-      return res.status(400).json({ error: 'The technical review must be carried out by somebody other than the assessor.' });
+    // A countersignature is worth nothing if the assessor can sign it for the
+    // reviewer, so the reviewer is always the person actually doing this — the
+    // signed-in user — never a name they pick from a list. Their account has to
+    // be linked to a staff record, and it must not be the assessor's.
+    const reviewerStaffId = getCurrentStaffId(req);
+    if (!reviewerStaffId) return res.status(400).json({ error: 'Your user account is not linked to a staff record, so you cannot countersign this.' });
+    if (reviewerStaffId === record.assessor_staff_id) {
+      return res.status(400).json({ error: 'The technical review must be carried out by somebody other than the assessor. Sign in as the reviewer to countersign it.' });
     }
     db.prepare('UPDATE competency_assessments SET reviewer_staff_id = ?, reviewer_comments = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
       .run(reviewerStaffId, nullableText(req.body.reviewerComments), req.params.id);
@@ -1193,9 +1217,9 @@ ${authorizationsHtml}
 ${attachmentsHtml}
 
 <div class="signatures">
-  ${signatureBlock('Assessor', record.assessor_name, record.completed_at)}
-  ${signatureBlock('Technical reviewer', record.reviewer_name, record.reviewed_at)}
-  ${signatureBlock('Member of staff', record.staff_name, record.staff_acknowledged_at)}
+  ${signatureBlock('Assessor', record.assessor_name, record.completed_at, record.completed_at ? staffSignatureDataUri(db, record.assessor_staff_id) : null)}
+  ${signatureBlock('Technical reviewer', record.reviewer_name, record.reviewed_at, record.reviewed_at ? staffSignatureDataUri(db, record.reviewer_staff_id) : null)}
+  ${signatureBlock('Member of staff', record.staff_name, record.staff_acknowledged_at, record.staff_acknowledged_at ? staffSignatureDataUri(db, record.staff_id) : null)}
 </div>`;
 
     audit(req, { action: 'print', entity: 'competency_assessments', entityId: req.params.id });
