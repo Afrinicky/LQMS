@@ -1,6 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
-import { ClipboardCheck, Grid3x3, LayoutList, Plus, Trash2 } from 'lucide-react';
-import { DetailModal, EmptyState, KpiStrip } from '../../components/ui';
+import { ClipboardCheck, Grid3x3, LayoutList, Pencil, Plus, ShieldAlert, Trash2 } from 'lucide-react';
+import { DetailModal, EmptyState, KpiStrip, RowMenu } from '../../components/ui';
 import { api } from '../../services/api';
 import { useAuth } from '../../hooks/useAuth';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -294,6 +294,11 @@ function AssessmentEditor({ assessmentId, staff, sections, positions, mayEdit, m
   const [tab, setTab] = useState<EditorTab>('Scoring');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Editing or deleting a completed record is an administrative override, off
+  // by default and switched on per record from the management menu — see
+  // requirement 4. Reset whenever a different record is opened.
+  const [adminUnlock, setAdminUnlock] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const load = useCallback(async () => {
     try { setRecord(await api<CompetencyAssessment>(`/personnel/competency/${assessmentId}`)); }
@@ -301,6 +306,7 @@ function AssessmentEditor({ assessmentId, staff, sections, positions, mayEdit, m
   }, [assessmentId]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { setAdminUnlock(false); setConfirmDelete(false); }, [assessmentId]);
 
   const refresh = useCallback(async () => { await load(); await onChanged(); }, [load, onChanged]);
 
@@ -313,7 +319,10 @@ function AssessmentEditor({ assessmentId, staff, sections, positions, mayEdit, m
   const summary = record.score_summary;
   const open = record.status === 'planned' || record.status === 'in_progress';
   const closed = record.status === 'completed' || record.status === 'acknowledged';
-  const scorable = mayEdit && (open || record.status === 'pending_review');
+  // The override only bites on a closed record and only for someone with
+  // archival rights; on an open record editing is already allowed.
+  const override = closed && adminUnlock && mayArchive;
+  const scorable = mayEdit && (open || record.status === 'pending_review' || override);
   const isSubject = !!user?.staffId && user.staffId === record.staff_id;
   const maxScore = record.max_score ?? 4;
 
@@ -324,6 +333,15 @@ function AssessmentEditor({ assessmentId, staff, sections, positions, mayEdit, m
       setNotice(message);
       await refresh();
     } catch (e) { setError((e as Error).message); }
+  }
+
+  async function removeRecord() {
+    setError(null); setNotice(null);
+    try {
+      await api(`/personnel/competency/${assessmentId}`, { method: 'DELETE', body: JSON.stringify({ adminOverride: true }) });
+      onClose();
+      await onChanged();
+    } catch (e) { setError((e as Error).message); setConfirmDelete(false); }
   }
 
   const tabs: EditorTab[] = ['Scoring', 'Sample performance', 'Evidence', 'Assessment', 'Sign-off'];
@@ -338,10 +356,29 @@ function AssessmentEditor({ assessmentId, staff, sections, positions, mayEdit, m
       {badgeFor(record.status, COMPETENCY_STATUS_LABELS[record.status])}
       {record.outcome && badgeFor(record.outcome, COMPETENCY_OUTCOME_LABELS[record.outcome])}
       {mayPrint && <PrintButton path={`/personnel/competency/${assessmentId}/print`} label="Print record" />}
+      {mayArchive && closed && <RowMenu label="Manage this record">{close => <>
+        <button type="button" role="menuitem" onClick={() => { close(); setAdminUnlock(v => !v); }}>
+          <Pencil size={14} /> {adminUnlock ? 'Lock this record again' : 'Edit this submitted record'}
+        </button>
+        <button type="button" role="menuitem" className="danger" onClick={() => { close(); setConfirmDelete(true); }}>
+          <Trash2 size={14} /> Delete this record
+        </button>
+      </>}</RowMenu>}
     </>}
   >
     {error && <div className="error">{error}</div>}
     {notice && <div className="notice-ok">{notice}</div>}
+    {override && <p className="notice-warn">
+      <ShieldAlert size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />
+      This is a completed record, unlocked for editing. A competency record is normally left as it was signed — change it only to correct a mistake or clear demonstration data. Every change is audited as an override.
+    </p>}
+    {confirmDelete && <div className="notice-warn confirm-bar">
+      <span><ShieldAlert size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />Delete {record.competency_number} for good? This removes the record, its scores, sample checks, evidence and any authorisation granted from it. It cannot be undone.</span>
+      <span className="element-add-actions">
+        <button type="button" className="secondary danger-text" onClick={() => void removeRecord()}>Delete permanently</button>
+        <button type="button" className="secondary" onClick={() => setConfirmDelete(false)}>Keep it</button>
+      </span>
+    </div>}
 
     <div className="record-summary">
       <ScoreDial percent={summary?.percent ?? null} threshold={summary?.passThreshold ?? record.pass_threshold_percent ?? null} />
@@ -363,9 +400,9 @@ function AssessmentEditor({ assessmentId, staff, sections, positions, mayEdit, m
       </button>)}
     </div>
 
-    {tab === 'Scoring' && <ScoringGrid record={record} maxScore={maxScore} scorable={scorable} onError={setError} onChanged={refresh} />}
+    {tab === 'Scoring' && <ScoringGrid record={record} maxScore={maxScore} scorable={scorable} override={override} onError={setError} onChanged={refresh} />}
 
-    {tab === 'Sample performance' && <SampleChecks record={record} scorable={scorable} onError={setError} onChanged={refresh} />}
+    {tab === 'Sample performance' && <SampleChecks record={record} scorable={scorable} override={override} onError={setError} onChanged={refresh} />}
 
     {tab === 'Evidence' && <EvidencePanel
       basePath={`/personnel/competency/${assessmentId}`}
@@ -380,7 +417,8 @@ function AssessmentEditor({ assessmentId, staff, sections, positions, mayEdit, m
       staff={staff}
       sections={sections}
       positions={positions}
-      editable={mayEdit && !closed}
+      editable={mayEdit && (!closed || override)}
+      override={override}
       onError={setError}
       onChanged={refresh}
     />}
@@ -402,10 +440,11 @@ function AssessmentEditor({ assessmentId, staff, sections, positions, mayEdit, m
 
 type Draft = Record<number, { score?: number | null; notApplicable?: boolean; remarks?: string; method?: string; observedDate?: string; evidenceNote?: string }>;
 
-function ScoringGrid({ record, maxScore, scorable, onError, onChanged }: {
+function ScoringGrid({ record, maxScore, scorable, override, onError, onChanged }: {
   record: CompetencyAssessment;
   maxScore: number;
   scorable: boolean;
+  override?: boolean;
   onError: (message: string | null) => void;
   onChanged: () => Promise<void>;
 }) {
@@ -446,7 +485,7 @@ function ScoringGrid({ record, maxScore, scorable, onError, onChanged }: {
           evidenceNote: patch.evidenceNote ?? item?.evidence_note ?? '',
         };
       });
-      await api(`/personnel/competency/${record.id}/items`, { method: 'PUT', body: JSON.stringify({ items: payload }) });
+      await api(`/personnel/competency/${record.id}/items`, { method: 'PUT', body: JSON.stringify({ items: payload, adminOverride: override }) });
       setDraft({}); setSavedAt(new Date().toLocaleTimeString());
       await onChanged();
     } catch (e) { onError((e as Error).message); }
@@ -457,7 +496,7 @@ function ScoringGrid({ record, maxScore, scorable, onError, onChanged }: {
     if (!extra.elementText.trim()) { onError('An element description is required.'); return; }
     onError(null);
     try {
-      await api(`/personnel/competency/${record.id}/items`, { method: 'POST', body: JSON.stringify(extra) });
+      await api(`/personnel/competency/${record.id}/items`, { method: 'POST', body: JSON.stringify({ ...extra, adminOverride: override }) });
       setExtra({ elementText: '', groupTitle: '', performanceCriteria: '', method: 'direct_observation', isCritical: false });
       setAdding(false);
       await onChanged();
@@ -466,7 +505,7 @@ function ScoringGrid({ record, maxScore, scorable, onError, onChanged }: {
 
   async function removeElement(id: number) {
     onError(null);
-    try { await api(`/personnel/competency/${record.id}/items/${id}`, { method: 'DELETE' }); await onChanged(); }
+    try { await api(`/personnel/competency/${record.id}/items/${id}`, { method: 'DELETE', body: JSON.stringify({ adminOverride: override }) }); await onChanged(); }
     catch (e) { onError((e as Error).message); }
   }
 
@@ -611,9 +650,10 @@ function ExtraElementForm({ extra, setExtra, onAdd, onCancel, alwaysOpen }: {
 
 /* ── Objective sample performance ───────────────────────────────────────── */
 
-function SampleChecks({ record, scorable, onError, onChanged }: {
+function SampleChecks({ record, scorable, override, onError, onChanged }: {
   record: CompetencyAssessment;
   scorable: boolean;
+  override?: boolean;
   onError: (message: string | null) => void;
   onChanged: () => Promise<void>;
 }) {
@@ -623,7 +663,7 @@ function SampleChecks({ record, scorable, onError, onChanged }: {
   async function add(event: FormEvent) {
     event.preventDefault(); onError(null);
     try {
-      await api(`/personnel/competency/${record.id}/sample-checks`, { method: 'POST', body: JSON.stringify(form) });
+      await api(`/personnel/competency/${record.id}/sample-checks`, { method: 'POST', body: JSON.stringify({ ...form, adminOverride: override }) });
       setForm({ checkType: form.checkType, sampleId: '', dateTested: form.dateTested, testPerformed: '', staffResult: '', referenceResult: '', agreement: 'acceptable', remarks: '' });
       await onChanged();
     } catch (e) { onError((e as Error).message); }
@@ -684,12 +724,13 @@ function SampleChecks({ record, scorable, onError, onChanged }: {
 
 /* ── Details ────────────────────────────────────────────────────────────── */
 
-function AssessmentDetails({ record, staff, sections, positions, editable, onError, onChanged }: {
+function AssessmentDetails({ record, staff, sections, positions, editable, override, onError, onChanged }: {
   record: CompetencyAssessment;
   staff: Staff[];
   sections: Section[];
   positions: Position[];
   editable: boolean;
+  override?: boolean;
   onError: (message: string | null) => void;
   onChanged: () => Promise<void>;
 }) {
@@ -714,7 +755,7 @@ function AssessmentDetails({ record, staff, sections, positions, editable, onErr
   async function save(event: FormEvent) {
     event.preventDefault(); onError(null); setSaved(false);
     try {
-      await api(`/personnel/competency/${record.id}`, { method: 'PUT', body: JSON.stringify(form) });
+      await api(`/personnel/competency/${record.id}`, { method: 'PUT', body: JSON.stringify({ ...form, adminOverride: override }) });
       setSaved(true);
       await onChanged();
     } catch (e) { onError((e as Error).message); }

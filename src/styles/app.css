@@ -3518,6 +3518,29 @@ tr.row-retired { opacity: .62; }
 .group-add label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--faint); min-width: 260px; }
 .field-hint { display: block; font-size: 11px; color: var(--faint); font-weight: 400; margin-top: 3px; line-height: 1.4; }
 
+/* ---------- Cloning elements from another framework ---------- */
+.import-panel {
+  margin: 14px 0 4px; padding: 16px;
+  background: var(--surface); border: 1px dashed var(--border-strong); border-radius: var(--radius-sm);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.import-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.import-head h4 { margin: 0 0 2px; font-size: 14px; }
+.import-head p { margin: 0; }
+.import-panel > label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--faint); }
+.import-all { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.import-tree { display: flex; flex-direction: column; gap: 10px; max-height: 360px; overflow-y: auto; padding-right: 4px; }
+.import-tree.dimmed { opacity: .5; pointer-events: none; }
+.import-group { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; }
+.import-group-head { font-size: 13px; }
+.import-group-body { margin-top: 6px; padding-left: 22px; display: flex; flex-direction: column; gap: 4px; }
+.import-element { font-size: 12.5px; align-items: flex-start; gap: 8px; }
+.import-element span { line-height: 1.4; }
+
+/* ---------- Administrative confirm bar ---------- */
+.confirm-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.confirm-bar .element-add-actions { grid-column: auto; flex: 0 0 auto; }
+
 /* ---------- Facts on a closed record ---------- */
 .record-facts { display: grid; gap: 14px 26px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); margin: 0; }
 .record-facts > div.wide { grid-column: 1 / -1; }
