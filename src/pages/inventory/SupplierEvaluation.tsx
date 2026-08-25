@@ -18,9 +18,10 @@ import type { Supplier, SupplierEvalFramework, SupplierEvalAssessment, SupplierE
 
 const BASE = '/supplier-inventory';
 const SUPPLIER_SCALE = [
-  { score: 4, label: 'Excellent', descriptor: 'Consistently exceeds the standard.' },
+  { score: 5, label: 'Excellent', descriptor: 'Consistently exceeds the standard.' },
+  { score: 4, label: 'Very good', descriptor: 'Meets the standard well.' },
   { score: 3, label: 'Good', descriptor: 'Meets the standard.' },
-  { score: 2, label: 'Marginal', descriptor: 'Falls short in places; watch and follow up.' },
+  { score: 2, label: 'Fair', descriptor: 'Falls short in places; watch and follow up.' },
   { score: 1, label: 'Poor', descriptor: 'Does not meet the standard.' },
 ];
 const SCALE_LABELS = Object.fromEntries(SUPPLIER_SCALE.map(s => [s.score, s.label])) as Record<number, string>;

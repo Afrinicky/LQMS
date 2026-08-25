@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { api, API_BASE, getToken } from '../services/api';
-import type { Staff, Section, ActingUnitHead, UnitSupervisors } from '../../shared/types/api';
+import type { Staff, Section, ActingUnitHead, UnitSupervisor, UnitSupervisors } from '../../shared/types/api';
 import { usePermissions } from '../hooks/usePermissions';
 
 // ==========================================================================
@@ -236,10 +236,27 @@ const gridHead: CSSProperties = { border: '1px solid #6b7280', color: '#fff', ba
 const gridCell: CSSProperties = { border: '1px solid #6b7280', textAlign: 'center', padding: 1, height: 20 };
 
 // ========================= Reassignment (memo) Board =========================
-type ReRow = { id: number; unit_label: string; is_span: number; section_id: number | null; supervisor_staff_id: number | null; supervisor_text: string | null; supervisor_name?: string | null; deputy_staff_id: number | null; deputy_text: string | null; deputy_name?: string | null; members_text: string | null; member_ids: string | null; span_text: string | null; display_order: number };
+type ReRow = { id: number; unit_label: string; is_span: number; section_id: number | null; supervisor_staff_id: number | null; supervisor_text: string | null; supervisor_name?: string | null; supervisor_is_acting?: number; supervisor_locked?: number; deputy_staff_id: number | null; deputy_text: string | null; deputy_name?: string | null; members_text: string | null; member_ids: string | null; span_text: string | null; display_order: number };
 type Reassign = { id: number; schedule_number: string; month: string; effective_date: string; memo_to: string; memo_from: string; memo_date: string; subject: string; intro_text: string; nb_notes: string; signatory_name: string; status: string; rows: ReRow[] };
 
 const emptyReRow = { unitLabel: '', sectionId: '', supervisorStaffId: '', deputyStaffId: '', memberIds: [] as string[], isSpan: false, spanText: '' };
+
+function MemberPicker({ staff, selected, exclude = [], onChange }: { staff: Staff[]; selected: string[]; exclude?: string[]; onChange: (ids: string[]) => void }) {
+  const [q, setQ] = useState('');
+  const ex = new Set(exclude.filter(Boolean).map(String));
+  const list = staff.filter(s => !ex.has(String(s.id)) && s.fullName.toLowerCase().includes(q.toLowerCase()));
+  const toggle = (id: string) => onChange(selected.includes(id) ? selected.filter(x => x !== id) : [...selected, id]);
+  const nameOf = (id: string) => staff.find(s => String(s.id) === id)?.fullName || '';
+  return <div className="member-picker">
+    <span className="rf-cap">Members{selected.length ? ` · ${selected.length}` : ''}</span>
+    {selected.length > 0 && <div className="mp-chips">{selected.map(id => <span key={id} className="mp-chip">{nameOf(id)}<button type="button" onClick={() => toggle(id)} aria-label="Remove">×</button></span>)}</div>}
+    <input className="mp-search" value={q} onChange={e => setQ(e.target.value)} placeholder="Search staff…" />
+    <div className="mp-list">
+      {list.map(s => { const id = String(s.id); const on = selected.includes(id); return <label key={id} className={`mp-item${on ? ' on' : ''}`}><input type="checkbox" checked={on} onChange={() => toggle(id)} /><span>{s.fullName}</span></label>; })}
+      {list.length === 0 && <div className="muted mp-empty">No match.</div>}
+    </div>
+  </div>;
+}
 
 export function ReassignmentBoard({ staff, sections, canEdit }: { staff: Staff[]; sections: Section[]; canEdit: boolean }) {
   const { can } = usePermissions();
@@ -250,10 +267,13 @@ export function ReassignmentBoard({ staff, sections, canEdit }: { staff: Staff[]
   const [newMonth, setNewMonth] = useState(nextMonthValue());
   const [copyFrom, setCopyFrom] = useState('');
   const [rowForm, setRowForm] = useState(emptyReRow);
+  const [heads, setHeads] = useState<Record<number, UnitSupervisor>>({});
   const staffName = (id: number | string) => staff.find(s => String(s.id) === String(id))?.fullName || '';
 
   function loadList() { api<typeof list>('/scheduling/reassignments').then(setList).catch(e => setError((e as Error).message)); }
   useEffect(() => { loadList(); }, []);
+  useEffect(() => { api<UnitSupervisors>('/scheduling/unit-supervisors').then(r => setHeads(Object.fromEntries(r.units.map(u => [u.section_id, u])))).catch(() => setHeads({})); }, []);
+  const linkedHead = rowForm.sectionId ? heads[Number(rowForm.sectionId)] : undefined;
   async function open(id: number) { setError(null); setMsg(null); try { setSched(await api<Reassign>(`/scheduling/reassignments/${id}`)); } catch (e) { setError((e as Error).message); } }
   async function create(e: FormEvent) {
     e.preventDefault(); setError(null);
@@ -301,6 +321,7 @@ export function ReassignmentBoard({ staff, sections, canEdit }: { staff: Staff[]
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {can('personnel', 'print') && <button className="secondary" onClick={() => openPrintPage(`/scheduling/reassignments/${sched.id}/print`, setError)}>Print / PDF</button>}
           {canEdit && sched.status !== 'published' && <button className="secondary" onClick={() => act('publish', 'Published to all staff.')}>Publish</button>}
+          {canEdit && <button className="secondary" onClick={() => act('apply-to-register', 'Applied.')}>Apply to register</button>}
           {canEdit && sched.status !== 'approved' && <button className="secondary" onClick={() => act('approve', 'Approved.')}>Approve</button>}
           <button className="secondary" onClick={() => setSched(null)}>Close</button>
         </div>
@@ -317,36 +338,50 @@ export function ReassignmentBoard({ staff, sections, canEdit }: { staff: Staff[]
         <label style={{ gridColumn: '1 / -1' }}>NB notes (one per line)<textarea defaultValue={sched.nb_notes || ''} rows={4} onBlur={e => saveHeader({ nbNotes: e.target.value })} /></label>
       </div>}
 
-      <table className="data-table"><thead><tr><th>UNIT</th><th>SUPERVISOR</th><th>DEPUTY SUPERVISOR</th><th>MEMBER(S)</th>{canEdit && <th></th>}</tr></thead><tbody>
+      <table className="data-table re-table"><thead><tr><th>Unit</th><th>Supervisor</th><th>Deputy</th><th>Member(s)</th>{canEdit && <th></th>}</tr></thead><tbody>
         {sched.rows.map(r => <tr key={r.id}>
           <td><strong>{r.unit_label}</strong></td>
           {r.is_span ? <td colSpan={3}>{r.span_text || r.members_text || ''}</td> : <>
-            <td>{r.supervisor_text || r.supervisor_name || '—'}</td>
+            <td>{r.supervisor_text || r.supervisor_name || '—'}{r.supervisor_is_acting ? <span className="badge acting" style={{ marginLeft: 6 }}>Acting</span> : null}</td>
             <td>{r.deputy_text || r.deputy_name || '—'}</td>
             <td>{r.members_text || '—'}</td>
           </>}
-          {canEdit && <td><button className="secondary" onClick={() => delRow(r.id)}>×</button></td>}
+          {canEdit && <td><button className="secondary tiny" onClick={() => delRow(r.id)} aria-label="Remove row">×</button></td>}
         </tr>)}
         {sched.rows.length === 0 && <tr><td colSpan={canEdit ? 5 : 4} className="muted">No unit rows yet.</td></tr>}
       </tbody></table>
 
-      {canEdit && <form onSubmit={addRow} className="form-grid" style={{ marginTop: 12 }}>
-        <label>Link to unit / section<select value={rowForm.sectionId} onChange={e => { const sid = e.target.value; const nm = sections.find(s => String(s.id) === sid)?.name; setRowForm({ ...rowForm, sectionId: sid, unitLabel: rowForm.unitLabel || nm || '' }); }}><option value="">— not linked —</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-        <label>Unit label (as printed)<input value={rowForm.unitLabel} onChange={e => setRowForm({ ...rowForm, unitLabel: e.target.value })} placeholder="e.g. Microbiology & GeneXpert" required /></label>
-        <label className="check-inline"><input type="checkbox" checked={rowForm.isSpan} onChange={e => setRowForm({ ...rowForm, isSpan: e.target.checked })} /> Single wide cell (e.g. QMS Desk, Manager)</label>
-        {rowForm.isSpan ? <label style={{ gridColumn: '1 / -1' }}>People (free text)<input value={rowForm.spanText} onChange={e => setRowForm({ ...rowForm, spanText: e.target.value })} placeholder="e.g. Evans Agyapong Owusu, Nicholas Afriyie" /></label> : <>
-          <label>Supervisor<select value={rowForm.supervisorStaffId} onChange={e => setRowForm({ ...rowForm, supervisorStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-          <label>Deputy supervisor<select value={rowForm.deputyStaffId} onChange={e => setRowForm({ ...rowForm, deputyStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-          <label style={{ gridColumn: '1 / -1' }}>Member(s) — select one or more (Ctrl/Cmd-click)
-            <select multiple value={rowForm.memberIds} size={Math.min(6, Math.max(3, staff.length))} onChange={e => setRowForm({ ...rowForm, memberIds: Array.from(e.target.selectedOptions).map(o => o.value) })} style={{ minHeight: 90 }}>
-              {staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
+      {canEdit && <form onSubmit={addRow} className="re-rowform">
+        <div className="rf-line">
+          <label className="rf-unit">Unit
+            <select value={rowForm.sectionId} onChange={e => { const sid = e.target.value; const nm = sections.find(s => String(s.id) === sid)?.name; setRowForm({ ...rowForm, sectionId: sid, unitLabel: sid ? (nm || rowForm.unitLabel) : rowForm.unitLabel }); }}>
+              <option value="">— not linked —</option>
+              {sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </label>
-          {rowForm.memberIds.length > 0 && <div className="muted" style={{ gridColumn: '1 / -1', fontSize: 12 }}>Members: {rowForm.memberIds.map(staffName).filter(Boolean).join(', ')}</div>}
+          <label className="rf-label">Label as printed
+            <input value={rowForm.unitLabel} onChange={e => setRowForm({ ...rowForm, unitLabel: e.target.value })} placeholder="e.g. Microbiology & GeneXpert" required />
+          </label>
+          <label className="rf-span check-inline"><input type="checkbox" checked={rowForm.isSpan} onChange={e => setRowForm({ ...rowForm, isSpan: e.target.checked })} /> Wide cell</label>
+        </div>
+
+        {rowForm.isSpan ? <label className="rf-full">People<input value={rowForm.spanText} onChange={e => setRowForm({ ...rowForm, spanText: e.target.value })} placeholder="e.g. Evans Owusu, Nicholas Afriyie" /></label> : <>
+          <div className="rf-line">
+            <div className="rf-sup">
+              <span className="rf-cap">{linkedHead?.acting ? 'Acting Unit Supervisor' : 'Supervisor'}</span>
+              {rowForm.sectionId
+                ? <div className="rf-locked">{linkedHead?.effective_name || '— no head set —'}{linkedHead?.acting && <span className="badge acting">Acting</span>}</div>
+                : <select value={rowForm.supervisorStaffId} onChange={e => setRowForm({ ...rowForm, supervisorStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select>}
+            </div>
+            <label className="rf-dep">Deputy
+              <select value={rowForm.deputyStaffId} onChange={e => setRowForm({ ...rowForm, deputyStaffId: e.target.value })}><option value="">—</option>{staff.filter(s => String(s.id) !== String(linkedHead?.effective_staff_id ?? '')).map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select>
+            </label>
+          </div>
+          <MemberPicker staff={staff} selected={rowForm.memberIds} exclude={[String(linkedHead?.effective_staff_id ?? ''), rowForm.deputyStaffId]} onChange={ids => setRowForm({ ...rowForm, memberIds: ids })} />
         </>}
-        <button type="submit">+ Add unit row</button>
+        <div className="rf-actions"><button type="submit">Add row</button></div>
       </form>}
-      {!canEdit && <p className="muted" style={{ marginTop: 12 }}>Read-only. Prepared by the laboratory manager.</p>}
+      {!canEdit && <p className="muted" style={{ marginTop: 12 }}>Read-only.</p>}
     </div>}
   </div>;
 }

@@ -42,6 +42,23 @@ function monthMeta(month: string) {
   };
 }
 
+// The effective head of a unit on a given date: the acting head if one is in
+// force, otherwise the substantive head recorded on the section. Shared by the
+// reassignment memo (so a unit's supervisor is always the real head) and the
+// unit-supervisors board.
+function computeEffectiveHead(db: any, sectionId: number, onDate: string) {
+  const section = db.prepare('SELECT id, name, head_staff_id FROM sections WHERE id = ?').get(sectionId) as any;
+  if (!section) return null;
+  const substName = section.head_staff_id
+    ? (db.prepare('SELECT full_name FROM staff WHERE id = ?').get(section.head_staff_id) as any)?.full_name ?? null : null;
+  const acting = db.prepare(`SELECT a.*, s.full_name AS acting_name FROM acting_unit_heads a
+    JOIN staff s ON s.id = a.acting_staff_id
+    WHERE a.section_id = ? AND a.status = 'active' AND a.start_date <= ? AND a.end_date >= ?
+    ORDER BY a.start_date DESC, a.id DESC LIMIT 1`).get(sectionId, onDate, onDate) as any;
+  if (acting) return { staffId: acting.acting_staff_id, name: acting.acting_name, acting: true, actingUntil: acting.end_date, reason: acting.reason ?? null, substantiveHeadStaffId: section.head_staff_id ?? null, substantiveName: substName };
+  return { staffId: section.head_staff_id ?? null, name: substName, acting: false, actingUntil: null, reason: null, substantiveHeadStaffId: section.head_staff_id ?? null, substantiveName: substName };
+}
+
 // Read the laboratory masthead + logo (as a data URI) for printed documents.
 function labHeader(db: any): { org: string; facility: string; subtitle: string; logo: string | null; signatory: string } {
   const p = db.prepare('SELECT * FROM laboratory_profile WHERE id = 1').get() as any;
@@ -459,11 +476,22 @@ export function schedulingRoutes() {
   });
 
   function loadReassignment(db: any, id: unknown) {
-    const s = db.prepare('SELECT * FROM reassignment_schedules WHERE id = ?').get(id);
+    const s = db.prepare('SELECT * FROM reassignment_schedules WHERE id = ?').get(id) as any;
     if (!s) return null;
     const rows = db.prepare(`SELECT rr.*, sup.full_name AS supervisor_name, dep.full_name AS deputy_name
       FROM reassignment_rows rr LEFT JOIN staff sup ON sup.id = rr.supervisor_staff_id LEFT JOIN staff dep ON dep.id = rr.deputy_staff_id
-      WHERE rr.schedule_id = ? ORDER BY rr.display_order, rr.id`).all(id);
+      WHERE rr.schedule_id = ? ORDER BY rr.display_order, rr.id`).all(id) as any[];
+    // A linked unit's supervisor is always its real head — the acting head when
+    // one is in force, otherwise the substantive head — never a free choice, so
+    // it is resolved here as of the memo's effective date and locked.
+    const onDate = /^\d{4}-\d{2}-\d{2}$/.test(String(s.effective_date)) ? s.effective_date : new Date().toISOString().slice(0, 10);
+    for (const row of rows) {
+      if (row.section_id && !row.is_span) {
+        const eh = computeEffectiveHead(db, row.section_id, onDate);
+        if (eh) { row.supervisor_staff_id = eh.staffId; row.supervisor_name = eh.name; row.supervisor_text = null; row.supervisor_is_acting = eh.acting ? 1 : 0; }
+        row.supervisor_locked = 1;
+      } else { row.supervisor_is_acting = 0; row.supervisor_locked = 0; }
+    }
     return { ...s, rows };
   }
   router.get('/reassignments/:id', requirePermission('personnel.rosters', 'view'), (req, res) => {
@@ -536,9 +564,15 @@ export function schedulingRoutes() {
     if (!req.body.unitLabel) return res.status(400).json({ error: 'A unit label is required.' });
     const order = parseIntNullable(req.body.displayOrder) ?? (db.prepare('SELECT COALESCE(MAX(display_order),0)+1 n FROM reassignment_rows WHERE schedule_id = ?').get(req.params.id) as { n: number }).n;
     const memberIds = Array.isArray(req.body.memberIds) ? req.body.memberIds.map((x: unknown) => parseIntNullable(x)).filter((x: number | null) => x !== null) : null;
+    // A linked unit takes its supervisor from the unit head (or acting head),
+    // never from the form; only an unlinked row carries a chosen supervisor.
+    const sectionId = parseIntNullable(req.body.sectionId);
+    const today = new Date().toISOString().slice(0, 10);
+    const supervisorStaffId = sectionId && !req.body.isSpan ? (computeEffectiveHead(db, sectionId, today)?.staffId ?? null) : parseIntNullable(req.body.supervisorStaffId);
+    const supervisorText = sectionId && !req.body.isSpan ? null : (req.body.supervisorText || null);
     const r = db.prepare(`INSERT INTO reassignment_rows (schedule_id, unit_label, is_span, section_id, supervisor_staff_id, supervisor_text, deputy_staff_id, deputy_text, members_text, member_ids, span_text, display_order)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(req.params.id, req.body.unitLabel, req.body.isSpan ? 1 : 0, parseIntNullable(req.body.sectionId), parseIntNullable(req.body.supervisorStaffId), req.body.supervisorText || null,
+      .run(req.params.id, req.body.unitLabel, req.body.isSpan ? 1 : 0, sectionId, supervisorStaffId, supervisorText,
         parseIntNullable(req.body.deputyStaffId), req.body.deputyText || null, req.body.membersText || null, memberIds ? JSON.stringify(memberIds) : null, req.body.spanText || null, order);
     res.status(201).json({ id: Number(r.lastInsertRowid) });
   });
@@ -548,10 +582,16 @@ export function schedulingRoutes() {
     if (!ex) return res.status(404).json({ error: 'Row not found' });
     const b = req.body;
     const memberIds = b.memberIds !== undefined ? (Array.isArray(b.memberIds) ? JSON.stringify(b.memberIds.map((x: unknown) => parseIntNullable(x)).filter((x: number | null) => x !== null)) : null) : ex.member_ids;
+    const isSpan = b.isSpan === undefined ? ex.is_span : (b.isSpan ? 1 : 0);
+    const sectionId = b.sectionId !== undefined ? parseIntNullable(b.sectionId) : ex.section_id;
+    // A linked, non-span row's supervisor is always the unit head/acting head.
+    const today = new Date().toISOString().slice(0, 10);
+    const supervisorStaffId = sectionId && !isSpan
+      ? (computeEffectiveHead(db, sectionId, today)?.staffId ?? null)
+      : (b.supervisorStaffId !== undefined ? parseIntNullable(b.supervisorStaffId) : ex.supervisor_staff_id);
+    const supervisorText = sectionId && !isSpan ? null : (b.supervisorText !== undefined ? b.supervisorText : ex.supervisor_text);
     db.prepare(`UPDATE reassignment_rows SET unit_label = ?, is_span = ?, section_id = ?, supervisor_staff_id = ?, supervisor_text = ?, deputy_staff_id = ?, deputy_text = ?, members_text = ?, member_ids = ?, span_text = ?, display_order = ? WHERE id = ?`)
-      .run(b.unitLabel ?? ex.unit_label, b.isSpan === undefined ? ex.is_span : (b.isSpan ? 1 : 0),
-        b.sectionId !== undefined ? parseIntNullable(b.sectionId) : ex.section_id,
-        b.supervisorStaffId !== undefined ? parseIntNullable(b.supervisorStaffId) : ex.supervisor_staff_id, b.supervisorText !== undefined ? b.supervisorText : ex.supervisor_text,
+      .run(b.unitLabel ?? ex.unit_label, isSpan, sectionId, supervisorStaffId, supervisorText,
         b.deputyStaffId !== undefined ? parseIntNullable(b.deputyStaffId) : ex.deputy_staff_id, b.deputyText !== undefined ? b.deputyText : ex.deputy_text,
         b.membersText !== undefined ? b.membersText : ex.members_text, memberIds, b.spanText !== undefined ? b.spanText : ex.span_text,
         parseIntNullable(b.displayOrder) ?? ex.display_order, req.params.rowId);
@@ -567,7 +607,10 @@ export function schedulingRoutes() {
     const s = loadReassignment(db, req.params.id) as any;
     if (!s) return res.status(404).send('Schedule not found');
     const h = labHeader(db);
-    const supervisor = (r: any) => escHtml(r.supervisor_text || r.supervisor_name || '');
+    const supervisor = (r: any) => {
+      const name = escHtml(r.supervisor_text || r.supervisor_name || '');
+      return r.supervisor_is_acting ? `${name}<br/><small>(Acting Unit Supervisor)</small>` : name;
+    };
     const deputy = (r: any) => escHtml(r.deputy_text || r.deputy_name || '');
     let rowsHtml = '';
     for (const r of s.rows) {

@@ -6,6 +6,7 @@ import { SYNCABLE_TABLES } from './syncableTables.js';
 import { CONFIG_LISTS } from '../../shared/constants/configLists.js';
 import { BUILTIN_SOUNDS, DEFAULT_SOUND_FOR_EVENT } from '../../shared/constants/activities.js';
 import { seedCompetencyFrameworks } from './seedCompetency.js';
+import { seedSupplierEvaluationFrameworks } from './seedSupplierEvaluation.js';
 
 // Filesystem layout is sourced from the centralized config module so every path
 // is env-configurable (SECH_LIMS_DATA_DIR / SECH_LIMS_DB_PATH) from one place.
@@ -6124,6 +6125,7 @@ CREATE INDEX IF NOT EXISTS idx_appraisal_attachments ON appraisal_attachments(ap
   seedNotificationSounds(database);
   seedFormTemplates(database);
   seedCompetencyFrameworks(database);
+  seedSupplierEvaluationFrameworks(database);
 }
 
 /**
