@@ -3480,6 +3480,13 @@ tr.row-retired { opacity: .62; }
   position: sticky; top: 0; z-index: 2;
 }
 .scoring-bar-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.badge.acting { background: rgba(217, 138, 43, .16); color: #d98a2b; border: 1px solid rgba(217, 138, 43, .35); }
+.policy-section { grid-column: 1 / -1; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 14px 14px; margin: 6px 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.policy-section > legend { font-size: 12px; font-weight: 700; color: var(--accent-bright, var(--text)); padding: 0 6px; }
+.policy-section > p, .policy-section > label.inline, .policy-section > label.wide { grid-column: 1 / -1; }
+.fill-remaining { display: inline-flex; align-items: center; gap: 8px; }
+.fill-remaining label { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--faint); }
+.fill-remaining select { font-size: 12px; }
 .segmented.perspective { display: inline-flex; gap: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .segmented.perspective button { border-radius: 0; box-shadow: none; font-size: 12px; padding: 7px 13px; }
 .segmented.perspective button.secondary { background: transparent; border: 0; }

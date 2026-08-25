@@ -6,6 +6,7 @@ import { FileText, Pencil, PackagePlus, Tag, Trash2, ShieldAlert, Star, Undo2, S
 import { StockLedger, IssueDesk, IssueRegister, StockTake, type LedgerRow } from './inventory/StockControl';
 import { ForecastingPanel } from './inventory/Forecasting';
 import { InventoryReports } from './inventory/Reports';
+import SupplierEvaluationWorkspace from './inventory/SupplierEvaluation';
 import { STOCK_STATUS_LABELS, NEEDS_ACTION } from '../../shared/constants/stockControl';
 
 // Receiving is one job done in two places: the delivery is booked in, and the
@@ -2070,7 +2071,7 @@ export function InventoryPage() {
     {tab === 'Suppliers' && <>
       <div className="card" style={{ paddingBottom: 6 }}>
         <div className="reg-seg" role="tablist" aria-label="Suppliers">
-          {['Register', 'New registration', 'Evaluation', 'Management'].map(t =>
+          {['Register', 'New registration', 'Evaluation', 'Scored evaluation', 'Management'].map(t =>
             <button key={t} type="button" role="tab" aria-selected={supplierTab === t} className={supplierTab === t ? 'on' : ''}
               onClick={() => setSupplierTab(t)}>
               {t}{t === 'Register' && <span className="reg-count">{suppliers.length}</span>}
@@ -2169,6 +2170,8 @@ export function InventoryPage() {
             </tbody></table></div>}
         </div>
       </>}
+
+      {supplierTab === 'Scored evaluation' && <SupplierEvaluationWorkspace suppliers={suppliers} />}
 
       {supplierTab === 'Management' && <div className="card">
         <h3>Who is due, and who is not being watched</h3>

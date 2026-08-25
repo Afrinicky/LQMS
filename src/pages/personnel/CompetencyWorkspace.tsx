@@ -324,6 +324,7 @@ function AssessmentEditor({ assessmentId, staff, sections, positions, mayEdit, m
   const override = closed && adminUnlock && mayArchive;
   const scorable = mayEdit && (open || record.status === 'pending_review' || override);
   const isSubject = !!user?.staffId && user.staffId === record.staff_id;
+  const isAssessor = !!user?.staffId && user.staffId === record.assessor_staff_id;
   const maxScore = record.max_score ?? 4;
 
   async function act(path: string, body: unknown, message: string) {
@@ -431,6 +432,7 @@ function AssessmentEditor({ assessmentId, staff, sections, positions, mayEdit, m
       mayApprove={mayApprove}
       mayArchive={mayArchive}
       isSubject={isSubject}
+      isAssessor={isAssessor}
       onAct={act}
     />}
   </DetailModal>;
@@ -454,6 +456,9 @@ function ScoringGrid({ record, maxScore, scorable, override, onError, onChanged 
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [showRemarks, setShowRemarks] = useState(false);
   const [adding, setAdding] = useState(false);
+  // Which rating the bulk "fill unscored" applies. Some assessors set the
+  // baseline at Competent, others at Proficient — so it is chosen, not fixed.
+  const [fillScore, setFillScore] = useState(3);
   const [extra, setExtra] = useState({ elementText: '', groupTitle: '', performanceCriteria: '', method: 'direct_observation', isCritical: false });
 
   useEffect(() => { setDraft({}); }, [record.id]);
@@ -546,7 +551,14 @@ function ScoringGrid({ record, maxScore, scorable, override, onError, onChanged 
       <div className="scoring-bar-actions">
         <label className="check-inline"><input type="checkbox" checked={showRemarks} onChange={e => setShowRemarks(e.target.checked)} /> Show remarks and method</label>
         {scorable && <>
-          <button type="button" className="secondary" onClick={() => markRemaining(3)} title="Give every element still unscored the standard competent rating">Fill remaining as {SCALE_LABELS[3]}</button>
+          <span className="fill-remaining">
+            <label>Fill unscored as
+              <select value={fillScore} onChange={e => setFillScore(Number(e.target.value))}>
+                {Array.from({ length: maxScore }, (_, i) => maxScore - i).map(p => <option key={p} value={p}>{p} — {SCALE_LABELS[p] ?? `Level ${p}`}</option>)}
+              </select>
+            </label>
+            <button type="button" className="secondary" onClick={() => markRemaining(fillScore)} title={`Give every element still unscored a rating of ${fillScore}`}>Apply to remaining</button>
+          </span>
           <button type="button" disabled={!dirty || saving} onClick={() => void save()}>{saving ? 'Saving…' : dirty ? `Save ${Object.keys(draft).length} change(s)` : 'Save changes'}</button>
         </>}
         {savedAt && !dirty && <span className="saved-flag">Saved at {savedAt}</span>}
@@ -828,7 +840,7 @@ function AssessmentDetails({ record, staff, sections, positions, editable, overr
 
 /* ── Sign-off ───────────────────────────────────────────────────────────── */
 
-function SignOff({ record, staff, summary, mayEdit, mayApprove, mayArchive, isSubject, onAct }: {
+function SignOff({ record, staff, summary, mayEdit, mayApprove, mayArchive, isSubject, isAssessor, onAct }: {
   record: CompetencyAssessment;
   staff: Staff[];
   summary?: CompetencyAssessment['score_summary'];
@@ -836,6 +848,7 @@ function SignOff({ record, staff, summary, mayEdit, mayApprove, mayArchive, isSu
   mayApprove: boolean;
   mayArchive: boolean;
   isSubject: boolean;
+  isAssessor: boolean;
   onAct: (path: string, body: unknown, message: string) => Promise<void>;
 }) {
   const [recommended, setRecommended] = useState<string | null>(null);
@@ -921,17 +934,18 @@ function SignOff({ record, staff, summary, mayEdit, mayApprove, mayArchive, isSu
 
     {(record.status === 'pending_review' || closed) && mayApprove && !record.reviewed_at && <section className="signoff-card">
       <h4>Technical review</h4>
-      <p className="muted">A second pair of eyes on the assessment and its evidence. The reviewer cannot be the assessor.</p>
-      <div className="form-grid">
-        <label>Reviewer
-          <select value={review.reviewerStaffId} onChange={e => setReview({ ...review, reviewerStaffId: e.target.value })}>
-            <option value="">Me</option>
-            {staff.filter(s => s.id !== record.assessor_staff_id).map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
-          </select>
-        </label>
-        <label className="wide">Reviewer's comments<textarea rows={2} value={review.reviewerComments} onChange={e => setReview({ ...review, reviewerComments: e.target.value })} /></label>
-        <button type="button" onClick={() => void onAct('/review', review, 'Technical review recorded.')}>Record technical review</button>
-      </div>
+      {isAssessor
+        ? <p className="notice-warn">
+            <ShieldAlert size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />
+            You carried out this assessment, so you cannot also countersign it. The technical review has to be recorded by another approver, signed in as themselves.
+          </p>
+        : <>
+          <p className="muted">A second pair of eyes on the assessment and its evidence. It is recorded as you, the signed-in reviewer — it cannot be signed on someone else's behalf.</p>
+          <div className="form-grid">
+            <label className="wide">Reviewer's comments<textarea rows={2} value={review.reviewerComments} onChange={e => setReview({ ...review, reviewerComments: e.target.value })} /></label>
+            <button type="button" onClick={() => void onAct('/review', { reviewerComments: review.reviewerComments }, 'Technical review recorded.')}>Countersign as technical reviewer</button>
+          </div>
+        </>}
     </section>}
 
     {record.reviewed_at && <section className="signoff-card done">

@@ -5636,6 +5636,157 @@ CREATE TABLE IF NOT EXISTS system_audit_scans (
     if (!cols.has('published_at')) database.exec('ALTER TABLE bench_schedules ADD COLUMN published_at TEXT');
   }
 
+  // Unit rotation policy and acting unit heads.
+  //
+  // Laboratories differ in how they staff a unit: some keep people in one unit
+  // permanently, others rotate them — monthly, quarterly, twice a year or
+  // yearly — and may or may not rotate the unit heads on the same cadence. In
+  // the common case the head stays put while everyone else moves, but the model
+  // is the laboratory's to choose, so the cadence lives on the scheduling
+  // policy where the rest of the rostering rules are set.
+  //
+  // Separately, when a head is away for a short spell (leave, a short duty
+  // elsewhere) another member of staff acts up for a set period. That is an
+  // acting appointment with its own start and end; it is judged "in force"
+  // purely by today's date, so the role reverts on its own when the period ends
+  // with nothing to run and nothing to remember to undo.
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(scheduling_policy)').all() as Array<{ name: string }>).map(c => c.name));
+    const add = (name: string, ddl: string) => { if (!cols.has(name)) database.exec(`ALTER TABLE scheduling_policy ADD COLUMN ${ddl}`); };
+    add('rotation_enabled', 'rotation_enabled INTEGER NOT NULL DEFAULT 0');
+    add('rotation_staff_frequency', "rotation_staff_frequency TEXT NOT NULL DEFAULT 'monthly'");
+    add('rotation_rotate_unit_heads', 'rotation_rotate_unit_heads INTEGER NOT NULL DEFAULT 0');
+    add('rotation_head_frequency', "rotation_head_frequency TEXT NOT NULL DEFAULT 'annual'");
+    add('rotation_notes', 'rotation_notes TEXT');
+  }
+  database.exec(`
+CREATE TABLE IF NOT EXISTS acting_unit_heads (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  section_id INTEGER NOT NULL REFERENCES sections(id),
+  acting_staff_id INTEGER NOT NULL REFERENCES staff(id),
+  substantive_head_staff_id INTEGER REFERENCES staff(id),  -- snapshot of who is being stood in for
+  start_date TEXT NOT NULL,                                -- YYYY-MM-DD (inclusive)
+  end_date TEXT NOT NULL,                                  -- YYYY-MM-DD (inclusive)
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'active',                   -- active | ended | cancelled
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_acting_unit_heads_section ON acting_unit_heads(section_id);
+CREATE INDEX IF NOT EXISTS idx_acting_unit_heads_dates ON acting_unit_heads(start_date, end_date);
+`);
+
+  // Supplier evaluation on the same footing as competency assessment: a
+  // framework states, once, what a supplier is judged against — a set of
+  // questions grouped by theme, each with the standard that defines an
+  // acceptable answer — and an evaluation is raised against a copy of that
+  // framework, scored question by question, concluded with a rating and
+  // printed. Reusing the shape means a supplier is assessed against a written
+  // standard rather than one evaluator's impression, and last month's rating
+  // survives a later edit to the framework.
+  database.exec(`
+CREATE TABLE IF NOT EXISTS supplier_eval_frameworks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  framework_code TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  category TEXT,                                   -- item/service category it applies to
+  version_label TEXT NOT NULL DEFAULT '1.0',
+  purpose TEXT,
+  scope TEXT,
+  max_score INTEGER NOT NULL DEFAULT 4,
+  pass_threshold_percent REAL NOT NULL DEFAULT 70,
+  minimum_element_score REAL,
+  critical_elements_must_pass INTEGER NOT NULL DEFAULT 1,
+  validity_months INTEGER NOT NULL DEFAULT 12,
+  requires_review INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'draft',            -- draft | active | archived
+  effective_date TEXT,
+  next_review_date TEXT,
+  approved_by_staff_id INTEGER REFERENCES staff(id),
+  approved_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS supplier_eval_framework_groups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  framework_id INTEGER NOT NULL REFERENCES supplier_eval_frameworks(id) ON DELETE CASCADE,
+  group_title TEXT NOT NULL,
+  group_description TEXT,
+  weight REAL NOT NULL DEFAULT 1,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS supplier_eval_framework_elements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  framework_id INTEGER NOT NULL REFERENCES supplier_eval_frameworks(id) ON DELETE CASCADE,
+  group_id INTEGER REFERENCES supplier_eval_framework_groups(id) ON DELETE SET NULL,
+  element_code TEXT,
+  element_text TEXT NOT NULL,
+  performance_criteria TEXT,
+  weight REAL NOT NULL DEFAULT 1,
+  is_critical INTEGER NOT NULL DEFAULT 0,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_supplier_eval_groups_fw ON supplier_eval_framework_groups(framework_id);
+CREATE INDEX IF NOT EXISTS idx_supplier_eval_elements_fw ON supplier_eval_framework_elements(framework_id);
+
+CREATE TABLE IF NOT EXISTS supplier_eval_assessments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  evaluation_number TEXT NOT NULL UNIQUE,
+  supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+  framework_id INTEGER REFERENCES supplier_eval_frameworks(id),
+  framework_title TEXT,
+  framework_version TEXT,
+  evaluation_date TEXT NOT NULL,
+  period_label TEXT,
+  purpose TEXT,
+  evaluator_staff_id INTEGER REFERENCES staff(id),
+  reviewer_staff_id INTEGER REFERENCES staff(id),
+  max_score INTEGER NOT NULL DEFAULT 4,
+  pass_threshold_percent REAL NOT NULL DEFAULT 70,
+  total_score REAL,
+  score_percent REAL,
+  elements_total INTEGER NOT NULL DEFAULT 0,
+  elements_assessed INTEGER NOT NULL DEFAULT 0,
+  critical_failures INTEGER NOT NULL DEFAULT 0,
+  rating TEXT,                                     -- approved | approved_conditional | not_approved
+  status TEXT NOT NULL DEFAULT 'planned',          -- planned | in_progress | completed
+  findings TEXT,
+  action_required TEXT,
+  next_evaluation_due TEXT,
+  reviewer_comments TEXT,
+  reviewed_at TEXT,
+  completed_at TEXT,
+  completed_by_staff_id INTEGER REFERENCES staff(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS supplier_eval_assessment_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  assessment_id INTEGER NOT NULL REFERENCES supplier_eval_assessments(id) ON DELETE CASCADE,
+  framework_element_id INTEGER,
+  group_title TEXT,
+  element_code TEXT,
+  element_text TEXT NOT NULL,
+  performance_criteria TEXT,
+  score REAL,
+  max_score INTEGER NOT NULL DEFAULT 4,
+  weight REAL NOT NULL DEFAULT 1,
+  is_critical INTEGER NOT NULL DEFAULT 0,
+  not_applicable INTEGER NOT NULL DEFAULT 0,
+  remarks TEXT,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_supplier_eval_assess_supplier ON supplier_eval_assessments(supplier_id);
+CREATE INDEX IF NOT EXISTS idx_supplier_eval_items_assess ON supplier_eval_assessment_items(assessment_id);
+`);
+
   // ===================================================================
   // Competence and performance — frameworks, structured assessments and
   // appraisals.

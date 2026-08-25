@@ -482,10 +482,14 @@ export function dutyActivityRoutes() {
       return Math.min(max, Math.max(min, value));
     };
     const flag = (key: string, fallback: number) => (b[key] === undefined ? fallback : (b[key] ? 1 : 0));
+    const ROTATION_FREQUENCIES = ['none', 'monthly', 'quarterly', 'biannual', 'annual'];
+    const freq = (key: string, fallback: string) => (typeof b[key] === 'string' && ROTATION_FREQUENCIES.includes(b[key]) ? b[key] : fallback);
+    const notes = b.rotationNotes === undefined ? existing.rotation_notes : (String(b.rotationNotes).trim() || null);
 
     db.prepare(`UPDATE scheduling_policy SET roster_due_days_before = ?, reassignment_due_days_before = ?,
          bench_due_days_before = ?, reminder_lead_days = ?, auto_carry_forward = ?, bench_inherit_gaps = ?,
          activity_generation_days = ?, missed_grace_hours = ?, notify_leadership_daily = ?, briefing_hour = ?,
+         rotation_enabled = ?, rotation_staff_frequency = ?, rotation_rotate_unit_heads = ?, rotation_head_frequency = ?, rotation_notes = ?,
          updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1`)
       .run(num('rosterDueDaysBefore', existing.roster_due_days_before, 0, 60),
         num('reassignmentDueDaysBefore', existing.reassignment_due_days_before, 0, 60),
@@ -497,6 +501,11 @@ export function dutyActivityRoutes() {
         num('missedGraceHours', existing.missed_grace_hours, 0, 48),
         flag('notifyLeadershipDaily', existing.notify_leadership_daily),
         num('briefingHour', existing.briefing_hour, 0, 23),
+        flag('rotationEnabled', existing.rotation_enabled),
+        freq('rotationStaffFrequency', existing.rotation_staff_frequency),
+        flag('rotationRotateUnitHeads', existing.rotation_rotate_unit_heads),
+        freq('rotationHeadFrequency', existing.rotation_head_frequency),
+        notes,
         req.user!.id);
 
     audit(req, { action: 'edit', entity: 'scheduling_policy', entityId: 1, oldValue: existing, newValue: req.body });

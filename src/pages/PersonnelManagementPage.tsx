@@ -5,7 +5,7 @@ import { useModules } from '../hooks/useModules';
 import { Download, Upload } from 'lucide-react';
 import { api, API_BASE, getToken } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
-import { DutyRosterBoard, ReassignmentBoard, BenchScheduleBoard } from './SchedulingBoards';
+import { DutyRosterBoard, ReassignmentBoard, BenchScheduleBoard, ActingSupervisorsBoard } from './SchedulingBoards';
 import DisabledModule from '../components/DisabledModule';
 import { usePermissions } from '../hooks/usePermissions';
 import PermissionTabs from '../components/PermissionTabs';
@@ -339,7 +339,7 @@ export function PersonnelManagementPage() {
     catch (e) { setError((e as Error).message); }
   }
 
-  const tabs = ['Dashboard', 'Master Personnel Register', 'Add Staff', 'Staff Documents', 'Orientation & Induction', 'Declarations', 'Training Events', 'Competency Assessments', 'Performance Appraisals', 'Technical Authorizations', 'Duty Roster', 'Unit Reassignments', 'Bench Schedules', 'My Profile', 'Reports'];
+  const tabs = ['Dashboard', 'Master Personnel Register', 'Add Staff', 'Staff Documents', 'Orientation & Induction', 'Declarations', 'Training Events', 'Competency Assessments', 'Performance Appraisals', 'Technical Authorizations', 'Duty Roster', 'Unit Reassignments', 'Unit Supervisors', 'Bench Schedules', 'My Profile', 'Reports'];
 
   return <div className="module-page">
     <PageHeader eyebrow="Personnel Management" title="Personnel Management" subtitle="Personnel records — competence, authorisation, training, induction, and ethics." />
@@ -573,6 +573,7 @@ export function PersonnelManagementPage() {
 
     {tab === 'Duty Roster' && <DutyRosterBoard staff={staff} canEdit={canEditRosters} />}
     {tab === 'Unit Reassignments' && <ReassignmentBoard staff={staff} sections={sections} canEdit={canEditRosters} />}
+    {tab === 'Unit Supervisors' && <ActingSupervisorsBoard staff={staff} sections={sections} canEdit={canEditRosters} />}
     {tab === 'Bench Schedules' && <BenchScheduleBoard sections={sections} canEdit={canEditRosters} />}
 
     {tab === 'My Profile' && <>

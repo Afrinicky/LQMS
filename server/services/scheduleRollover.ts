@@ -45,6 +45,11 @@ export type SchedulingPolicy = {
   missed_grace_hours: number;
   notify_leadership_daily: number;
   briefing_hour: number;
+  rotation_enabled: number;
+  rotation_staff_frequency: string;
+  rotation_rotate_unit_heads: number;
+  rotation_head_frequency: string;
+  rotation_notes: string | null;
 };
 
 const POLICY_DEFAULTS: SchedulingPolicy = {
@@ -59,6 +64,11 @@ const POLICY_DEFAULTS: SchedulingPolicy = {
   missed_grace_hours: 6,
   notify_leadership_daily: 1,
   briefing_hour: 5,
+  rotation_enabled: 0,
+  rotation_staff_frequency: 'monthly',
+  rotation_rotate_unit_heads: 0,
+  rotation_head_frequency: 'annual',
+  rotation_notes: null,
 };
 
 export function schedulingPolicy(db: Db): SchedulingPolicy {
