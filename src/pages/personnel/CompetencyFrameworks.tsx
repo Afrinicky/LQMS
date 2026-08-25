@@ -1,6 +1,6 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight, Copy, Plus, Trash2 } from 'lucide-react';
-import { DetailModal, EmptyState } from '../../components/ui';
+import { Archive, ChevronDown, ChevronRight, Copy, CopyPlus, Pencil, Plus, RotateCcw, ShieldAlert, Trash2 } from 'lucide-react';
+import { DetailModal, EmptyState, RowMenu } from '../../components/ui';
 import { api } from '../../services/api';
 import { usePermissions } from '../../hooks/usePermissions';
 import { PrintButton, ScaleLegend, badgeFor, labelise } from './competencyShared';
@@ -215,13 +215,20 @@ function FrameworkEditor({ framework, sections, departments, mayEdit, mayCreate,
 }) {
   const [tab, setTab] = useState<'Elements' | 'Details'>('Elements');
   const [error, setError] = useState<string | null>(null);
+  // Editing a live framework is off by default and switched on, per record,
+  // from the management menu — see requirement 4. Kept out of plain sight so
+  // the everyday answer to "revise a live framework" stays "take a new version".
+  const [adminEdit, setAdminEdit] = useState(false);
   const groups = framework.groups ?? [];
   const elements = framework.elements ?? [];
   const inUse = (framework.assessments_raised ?? 0) > 0;
+  const isDraft = framework.status === 'draft';
   // Editing is refused once a framework is live so an assessment already
   // raised against it keeps meaning what it meant. Revising means a new
-  // version, which is what Duplicate produces.
-  const editable = mayEdit && framework.status === 'draft';
+  // version, which is what Duplicate produces — unless somebody with archival
+  // rights deliberately unlocks this record to correct a mistake or clear demo
+  // data.
+  const editable = mayEdit && (isDraft || (adminEdit && mayArchive));
 
   const refresh = async () => { await onReload(); onListChanged(); };
 
@@ -238,17 +245,35 @@ function FrameworkEditor({ framework, sections, departments, mayEdit, mayCreate,
     footer={<div className="modal-foot-row">
       <div className="foot-left">
         {framework.status === 'draft' && mayApprove && <button type="button" onClick={() => void onSetStatus(framework.id, 'active')}>Activate framework</button>}
-        {framework.status === 'active' && mayApprove && <button type="button" className="secondary" onClick={() => void onSetStatus(framework.id, 'archived')}>Archive</button>}
-        {framework.status === 'archived' && mayApprove && <button type="button" className="secondary" onClick={() => void onSetStatus(framework.id, 'draft')}>Return to draft</button>}
         {mayCreate && <button type="button" className="secondary" onClick={() => void onDuplicate(framework.id)}>
           <Copy size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />New version
         </button>}
       </div>
-      {mayArchive && !inUse && <button type="button" className="secondary danger-text" onClick={() => void onDelete(framework.id)}>Delete</button>}
+      {(mayApprove || mayArchive) && <RowMenu label="Manage this framework">{close => <>
+        {!isDraft && mayArchive && <button type="button" role="menuitem" onClick={() => { close(); setAdminEdit(v => !v); setTab('Elements'); }}>
+          <Pencil size={14} /> {adminEdit ? 'Stop editing this framework' : 'Edit this framework in place'}
+        </button>}
+        {framework.status === 'active' && mayApprove && <button type="button" role="menuitem" onClick={() => { close(); void onSetStatus(framework.id, 'archived'); }}>
+          <Archive size={14} /> Archive framework
+        </button>}
+        {framework.status === 'archived' && mayApprove && <button type="button" role="menuitem" onClick={() => { close(); void onSetStatus(framework.id, 'draft'); }}>
+          <RotateCcw size={14} /> Return to draft
+        </button>}
+        {mayArchive && !inUse && <button type="button" role="menuitem" className="danger" onClick={() => { close(); void onDelete(framework.id); }}>
+          <Trash2 size={14} /> Delete framework
+        </button>}
+        {mayArchive && inUse && <button type="button" role="menuitem" disabled title="Assessments have been raised against this framework — archive it instead.">
+          <Trash2 size={14} /> Delete (raised against)
+        </button>}
+      </>}</RowMenu>}
     </div>}
   >
     {error && <div className="error">{error}</div>}
-    {framework.status === 'active' && <p className="notice-ok">
+    {!isDraft && adminEdit && editable && <p className="notice-warn">
+      <ShieldAlert size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />
+      You are editing a framework that is already in force. Changes here do not rewrite the {framework.assessments_raised ?? 0} assessment(s) already raised against it — those keep the wording they were judged by — but they do change the standard from now on. Use this only to correct a mistake or clear demonstration data.
+    </p>}
+    {framework.status === 'active' && !adminEdit && <p className="notice-ok">
       This framework is in force. To change what it asks for, take a new version — the assessments already raised against this one keep the wording they were judged by.
     </p>}
     {framework.status === 'draft' && elements.length === 0 && <p className="notice-warn">
@@ -294,6 +319,7 @@ function ElementBuilder({ framework, groups, elements, editable, onError, onChan
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>({});
   const [newGroup, setNewGroup] = useState('');
   const [addingTo, setAddingTo] = useState<number | 'none' | null>(null);
+  const [importing, setImporting] = useState(false);
   const [element, setElement] = useState({ elementText: '', performanceCriteria: '', expectedEvidence: '', defaultMethod: 'direct_observation', weight: '1', isCritical: false });
   const ungrouped = elements.filter(e => !e.group_id);
 
@@ -422,8 +448,149 @@ function ElementBuilder({ framework, groups, elements, editable, onError, onChan
       </label>
       <button type="button" className="secondary" onClick={() => void addGroup()}>Add group</button>
       <button type="button" className="secondary" onClick={() => setAddingTo('none')}>Add ungrouped element</button>
+      <button type="button" className="secondary" onClick={() => setImporting(v => !v)}>
+        <CopyPlus size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Clone from another framework
+      </button>
     </div>}
     {addingTo === 'none' && addForm('none')}
+    {editable && importing && <ImportElements
+      targetId={framework.id}
+      onError={onError}
+      onClose={() => setImporting(false)}
+      onChanged={async () => { await onChanged(); }}
+    />}
+  </div>;
+}
+
+/* ── Cloning elements from another framework ────────────────────────────── */
+
+/**
+ * Pull whole groups, single elements, or an entire framework across from
+ * another one, so a laboratory states a group of elements once and reuses it
+ * rather than retyping it into every framework that needs it.
+ */
+function ImportElements({ targetId, onError, onClose, onChanged }: {
+  targetId: number;
+  onError: (message: string | null) => void;
+  onClose: () => void;
+  onChanged: () => Promise<void>;
+}) {
+  const [options, setOptions] = useState<CompetencyFramework[]>([]);
+  const [sourceId, setSourceId] = useState('');
+  const [source, setSource] = useState<CompetencyFramework | null>(null);
+  const [entire, setEntire] = useState(false);
+  const [groups, setGroups] = useState<Set<number>>(new Set());
+  const [elements, setElements] = useState<Set<number>>(new Set());
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api<CompetencyFramework[]>('/personnel/competency-frameworks')
+      .then(list => setOptions(list.filter(f => f.id !== targetId)))
+      .catch(e => onError((e as Error).message));
+  }, [targetId, onError]);
+
+  useEffect(() => {
+    setSource(null); setEntire(false); setGroups(new Set()); setElements(new Set());
+    if (!sourceId) return;
+    setLoading(true);
+    api<CompetencyFramework>(`/personnel/competency-frameworks/${sourceId}`)
+      .then(setSource).catch(e => onError((e as Error).message)).finally(() => setLoading(false));
+  }, [sourceId, onError]);
+
+  const sourceGroups = source?.groups ?? [];
+  const sourceElements = (source?.elements ?? []).filter(e => e.is_active);
+  const ungrouped = sourceElements.filter(e => !e.group_id);
+
+  const toggleGroup = (id: number) => setGroups(prev => {
+    const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next;
+  });
+  const toggleElement = (id: number) => setElements(prev => {
+    const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next;
+  });
+
+  // What the current selection would actually copy, so the button can say so.
+  const selectedCount = entire ? sourceElements.length
+    : sourceElements.filter(e => (e.group_id && groups.has(e.group_id)) || elements.has(e.id)).length;
+  const nothingChosen = !entire && groups.size === 0 && elements.size === 0;
+
+  async function runImport() {
+    if (!sourceId || nothingChosen) return;
+    onError(null); setBusy(true);
+    try {
+      await api(`/personnel/competency-frameworks/${targetId}/import-elements`, {
+        method: 'POST',
+        body: JSON.stringify({
+          sourceFrameworkId: Number(sourceId),
+          importAll: entire,
+          groupIds: entire ? [] : Array.from(groups),
+          elementIds: entire ? [] : Array.from(elements),
+        }),
+      });
+      await onChanged();
+      onClose();
+    } catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  const elementRow = (e: NonNullable<CompetencyFramework['elements']>[number], covered: boolean) =>
+    <label key={e.id} className="check-inline import-element">
+      <input type="checkbox" disabled={entire || covered} checked={entire || covered || elements.has(e.id)} onChange={() => toggleElement(e.id)} />
+      <span>{e.element_text}{e.is_critical ? <span className="badge critical inline-badge">Critical</span> : null}</span>
+    </label>;
+
+  return <div className="import-panel">
+    <div className="import-head">
+      <div>
+        <h4>Clone questions from another framework</h4>
+        <p className="muted">Pick a framework, then take the whole thing, whole groups, or single elements. A group merges into one of the same name if this framework already has it.</p>
+      </div>
+      <button type="button" className="link-button" onClick={onClose} aria-label="Close import">Close</button>
+    </div>
+
+    <label>Copy from
+      <select value={sourceId} onChange={e => setSourceId(e.target.value)}>
+        <option value="">Choose a framework…</option>
+        {options.map(f => <option key={f.id} value={f.id}>{f.framework_code} — {f.title} (v{f.version_label}, {labelise(f.status)})</option>)}
+      </select>
+    </label>
+
+    {loading && <p className="muted">Loading…</p>}
+
+    {source && <>
+      <label className="check-inline import-all">
+        <input type="checkbox" checked={entire} onChange={e => setEntire(e.target.checked)} />
+        <strong>Clone the entire framework</strong> — every group and element ({sourceElements.length})
+      </label>
+
+      <div className={`import-tree${entire ? ' dimmed' : ''}`}>
+        {sourceGroups.filter(g => g.is_active).map(group => {
+          const rows = sourceElements.filter(e => e.group_id === group.id);
+          const groupChosen = groups.has(group.id);
+          return <section key={group.id} className="import-group">
+            <label className="check-inline import-group-head">
+              <input type="checkbox" disabled={entire} checked={entire || groupChosen} onChange={() => toggleGroup(group.id)} />
+              <strong>{group.group_title}</strong><span className="muted"> · {rows.length} element(s)</span>
+            </label>
+            <div className="import-group-body">
+              {rows.map(e => elementRow(e, groupChosen))}
+              {rows.length === 0 && <p className="muted eg-desc">No elements in this group.</p>}
+            </div>
+          </section>;
+        })}
+        {ungrouped.length > 0 && <section className="import-group">
+          <div className="import-group-head"><strong>Ungrouped elements</strong></div>
+          <div className="import-group-body">{ungrouped.map(e => elementRow(e, false))}</div>
+        </section>}
+      </div>
+
+      <div className="element-add-actions">
+        <button type="button" disabled={busy || nothingChosen} onClick={() => void runImport()}>
+          {busy ? 'Copying…' : nothingChosen ? 'Select what to copy' : `Copy ${selectedCount} element(s)`}
+        </button>
+        <button type="button" className="secondary" onClick={onClose}>Cancel</button>
+      </div>
+    </>}
   </div>;
 }
 

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { getDb, evidenceRoot } from '../db/database.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
-import { canReachPersonalRecord } from '../services/permissionResolver.js';
+import { canReachPersonalRecord, resolvePermission } from '../services/permissionResolver.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
@@ -68,6 +68,24 @@ const parseNumber = (value: unknown) => {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
 };
+
+/**
+ * The administrative override.
+ *
+ * Editing or removing a closed assessment, and editing a framework that is
+ * already in force, are refused as a matter of course: a competence record is
+ * meant to stay as it was signed. But mistakes get made and demonstration data
+ * gets left behind, so somebody trusted with archival rights
+ * (`personnel.training.void_archive`) may ask for the lock to be lifted for one
+ * call. The request has to say so explicitly — the flag is never assumed — and
+ * every such call is audited as an override so the departure from the norm is
+ * on the record.
+ */
+const overrideRequested = (req: any) =>
+  req.body?.adminOverride === true || req.body?.adminOverride === 'true' || req.query?.adminOverride === 'true';
+const mayOverride = (req: any) =>
+  !!req.user && resolvePermission(req.user.id, 'personnel.training', 'void_archive').allowed;
+const adminOverride = (req: any) => overrideRequested(req) && mayOverride(req);
 
 /**
  * Roll the scored elements up into a result.
@@ -421,6 +439,88 @@ export function competencyRoutes() {
     res.json({ ok: true });
   });
 
+  /**
+   * Pull elements across from another framework.
+   *
+   * Frameworks overlap — half of what a bench is assessed on is the same
+   * general laboratory practice assessed everywhere else — so the laboratory
+   * should be able to state a group of elements once and reuse it, rather than
+   * retyping it into every framework that needs it. The caller chooses what to
+   * take: whole groups (heading and all their elements), individual elements,
+   * or the source framework entire. A group is merged into a target group of
+   * the same title where one already exists, so importing twice does not leave
+   * two "General laboratory practice" headings side by side.
+   */
+  router.post('/competency-frameworks/:id/import-elements', requirePermission('personnel.training', 'create'), (req, res) => {
+    const db = getDb();
+    const target = db.prepare('SELECT * FROM competency_frameworks WHERE id = ?').get(req.params.id) as Row | undefined;
+    if (!target) return res.status(404).json({ error: 'Framework not found' });
+
+    const sourceId = parseIntNullable(req.body.sourceFrameworkId);
+    const source = sourceId ? loadFramework(db, sourceId) : null;
+    if (!source) return res.status(400).json({ error: 'Choose a framework to copy from.' });
+    if (String(source.id) === String(target.id)) return res.status(400).json({ error: 'A framework cannot import from itself.' });
+
+    const importAll = req.body.importAll === true;
+    const groupIds = new Set<number>((Array.isArray(req.body.groupIds) ? req.body.groupIds : []).map(Number).filter((n: number) => Number.isFinite(n)));
+    const elementIds = new Set<number>((Array.isArray(req.body.elementIds) ? req.body.elementIds : []).map(Number).filter((n: number) => Number.isFinite(n)));
+
+    const sourceGroups = (source.groups as Row[]);
+    const sourceElements = (source.elements as Row[]).filter(e => e.is_active);
+    const wantGroupIds = importAll ? new Set<number>(sourceGroups.filter(g => g.is_active).map(g => g.id)) : groupIds;
+    const elementsToCopy = sourceElements.filter(e =>
+      importAll || (e.group_id && wantGroupIds.has(e.group_id)) || elementIds.has(e.id));
+
+    if (elementsToCopy.length === 0 && wantGroupIds.size === 0) {
+      return res.status(400).json({ error: 'Select at least one group or element to copy.' });
+    }
+
+    const sourceGroupById = new Map<number, Row>(sourceGroups.map(g => [g.id, g]));
+
+    const copied = db.transaction(() => {
+      const existing = db.prepare('SELECT * FROM competency_framework_groups WHERE framework_id = ? AND is_active = 1').all(target.id) as Row[];
+      const byTitle = new Map<string, number>(existing.map(g => [String(g.group_title).trim().toLowerCase(), g.id]));
+      const groupMap = new Map<number, number>();
+      let groupOrder = Number((db.prepare('SELECT COALESCE(MAX(display_order), 0) AS o FROM competency_framework_groups WHERE framework_id = ?').get(target.id) as Row).o);
+      let elementOrder = Number((db.prepare('SELECT COALESCE(MAX(display_order), 0) AS o FROM competency_framework_elements WHERE framework_id = ?').get(target.id) as Row).o);
+
+      const ensureGroup = (sourceGroupId?: number | null): number | null => {
+        if (!sourceGroupId) return null;
+        if (groupMap.has(sourceGroupId)) return groupMap.get(sourceGroupId)!;
+        const group = sourceGroupById.get(sourceGroupId);
+        if (!group) return null;
+        const key = String(group.group_title).trim().toLowerCase();
+        if (byTitle.has(key)) { groupMap.set(sourceGroupId, byTitle.get(key)!); return byTitle.get(key)!; }
+        groupOrder += 10;
+        const inserted = db.prepare('INSERT INTO competency_framework_groups (framework_id, group_title, group_description, weight, display_order) VALUES (?, ?, ?, ?, ?)')
+          .run(target.id, group.group_title, group.group_description, group.weight, groupOrder);
+        const newId = Number(inserted.lastInsertRowid);
+        groupMap.set(sourceGroupId, newId); byTitle.set(key, newId);
+        return newId;
+      };
+
+      // Selected groups create their heading even before their elements land,
+      // so an intentionally empty group still comes across.
+      for (const gid of wantGroupIds) ensureGroup(gid);
+
+      const insert = db.prepare(`INSERT INTO competency_framework_elements
+        (framework_id, group_id, element_code, element_text, performance_criteria, expected_evidence, default_method, weight, is_critical, display_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      let count = 0;
+      for (const element of elementsToCopy) {
+        elementOrder += 10;
+        insert.run(target.id, ensureGroup(element.group_id), element.element_code, element.element_text,
+          element.performance_criteria, element.expected_evidence, element.default_method, element.weight,
+          element.is_critical, elementOrder);
+        count++;
+      }
+      return count;
+    })();
+
+    audit(req, { action: 'edit', entity: 'competency_frameworks', entityId: target.id, newValue: { importedFrom: source.id, importedElements: copied } });
+    res.status(201).json({ ok: true, copied });
+  });
+
   /* ══ Assessments ═════════════════════════════════════════════════════ */
 
   router.get('/competency', requirePermission('personnel.training', 'view'), (req, res) => {
@@ -536,7 +636,8 @@ export function competencyRoutes() {
     const db = getDb();
     const old = db.prepare('SELECT * FROM competency_assessments WHERE id = ?').get(req.params.id) as Row | undefined;
     if (!old) return res.status(404).json({ error: 'Competency assessment not found' });
-    if (['completed', 'acknowledged'].includes(old.status)) {
+    const override = adminOverride(req);
+    if (['completed', 'acknowledged'].includes(old.status) && !override) {
       return res.status(400).json({ error: 'A completed assessment cannot be edited. Raise a new assessment instead.' });
     }
     db.prepare(`UPDATE competency_assessments SET activity = ?, section_id = ?, department_id = ?, position_id = ?,
@@ -552,7 +653,7 @@ export function competencyRoutes() {
         oneOf(COMPETENCY_METHODS, req.body.assessmentMethod, old.assessment_method),
         nullableText(req.body.findings), nullableText(req.body.assessorComments), nullableText(req.body.developmentPlan),
         nullableText(req.body.nextAssessmentDue), nullableText(req.body.authorizationRecommendation), req.params.id);
-    audit(req, { action: 'edit', entity: 'competency_assessments', entityId: req.params.id, oldValue: old, newValue: req.body });
+    audit(req, { action: override ? 'override_edit' : 'edit', entity: 'competency_assessments', entityId: req.params.id, oldValue: old, newValue: { ...req.body, adminOverride: override } });
     res.json({ ok: true });
   });
 
@@ -560,24 +661,34 @@ export function competencyRoutes() {
     const db = getDb();
     const record = db.prepare('SELECT * FROM competency_assessments WHERE id = ?').get(req.params.id) as Row | undefined;
     if (!record) return res.status(404).json({ error: 'Competency assessment not found' });
-    if (!OPEN_STATUSES.includes(record.status)) {
+    // A closed assessment can only be deleted under an explicit administrative
+    // override; ordinarily just an open one can be removed and the rest cancelled.
+    const override = adminOverride(req);
+    if (!OPEN_STATUSES.includes(record.status) && !override) {
       return res.status(400).json({ error: 'Only a planned or in-progress assessment can be removed. Cancel this one instead.' });
     }
     db.transaction(() => {
       db.prepare('DELETE FROM competency_assessment_items WHERE assessment_id = ?').run(req.params.id);
       db.prepare('DELETE FROM competency_sample_checks WHERE assessment_id = ?').run(req.params.id);
       db.prepare('DELETE FROM competency_assessment_attachments WHERE assessment_id = ?').run(req.params.id);
+      // A closed assessment may have left evidence in the cross-module register,
+      // an authorisation granted from it, and links to and from other records.
+      // Clear those too, or deleting the record leaves them pointing at nothing.
+      db.prepare('DELETE FROM evidence_files WHERE record_type = ? AND record_id = ?').run('competency_assessments', String(req.params.id));
+      db.prepare('DELETE FROM technical_authorizations WHERE competency_assessment_id = ?').run(req.params.id);
+      db.prepare('DELETE FROM record_links WHERE (source_record_type = ? AND source_record_id = ?) OR (target_record_type = ? AND target_record_id = ?)')
+        .run('competency_assessments', String(req.params.id), 'competency_assessments', String(req.params.id));
       db.prepare('DELETE FROM competency_assessments WHERE id = ?').run(req.params.id);
     })();
-    audit(req, { action: 'delete', entity: 'competency_assessments', entityId: req.params.id, oldValue: record });
+    audit(req, { action: override ? 'override_delete' : 'delete', entity: 'competency_assessments', entityId: req.params.id, oldValue: { ...record, adminOverride: override } });
     res.json({ ok: true });
   });
 
   /* ── Scoring the elements ── */
 
-  function assertScorable(record: Row | undefined) {
+  function assertScorable(record: Row | undefined, allowClosed = false) {
     if (!record) return 'Competency assessment not found';
-    if (['completed', 'acknowledged', 'cancelled'].includes(record.status)) return 'This assessment is closed and can no longer be scored.';
+    if (!allowClosed && ['completed', 'acknowledged', 'cancelled'].includes(record.status)) return 'This assessment is closed and can no longer be scored.';
     return null;
   }
 
@@ -585,7 +696,7 @@ export function competencyRoutes() {
   router.put('/competency/:id/items', requirePermission('personnel.training', 'edit'), (req, res) => {
     const db = getDb();
     const record = db.prepare('SELECT * FROM competency_assessments WHERE id = ?').get(req.params.id) as Row | undefined;
-    const problem = assertScorable(record);
+    const problem = assertScorable(record, adminOverride(req));
     if (problem) return res.status(record ? 400 : 404).json({ error: problem });
     const items = Array.isArray(req.body.items) ? req.body.items : [];
     if (!items.length) return res.status(400).json({ error: 'No element scores were supplied.' });
@@ -625,7 +736,7 @@ export function competencyRoutes() {
   router.post('/competency/:id/items', requirePermission('personnel.training', 'edit'), (req, res) => {
     const db = getDb();
     const record = db.prepare('SELECT * FROM competency_assessments WHERE id = ?').get(req.params.id) as Row | undefined;
-    const problem = assertScorable(record);
+    const problem = assertScorable(record, adminOverride(req));
     if (problem) return res.status(record ? 400 : 404).json({ error: problem });
     const text = nullableText(req.body.elementText);
     if (!text) return res.status(400).json({ error: 'An element description is required.' });
@@ -646,7 +757,7 @@ export function competencyRoutes() {
   router.delete('/competency/:id/items/:itemId', requirePermission('personnel.training', 'edit'), (req, res) => {
     const db = getDb();
     const record = db.prepare('SELECT * FROM competency_assessments WHERE id = ?').get(req.params.id) as Row | undefined;
-    const problem = assertScorable(record);
+    const problem = assertScorable(record, adminOverride(req));
     if (problem) return res.status(record ? 400 : 404).json({ error: problem });
     const item = db.prepare('SELECT * FROM competency_assessment_items WHERE id = ? AND assessment_id = ?').get(req.params.itemId, req.params.id) as Row | undefined;
     if (!item) return res.status(404).json({ error: 'Element not found on this assessment' });
@@ -661,7 +772,7 @@ export function competencyRoutes() {
   router.post('/competency/:id/sample-checks', requirePermission('personnel.training', 'edit'), (req, res) => {
     const db = getDb();
     const record = db.prepare('SELECT * FROM competency_assessments WHERE id = ?').get(req.params.id) as Row | undefined;
-    const problem = assertScorable(record);
+    const problem = assertScorable(record, adminOverride(req));
     if (problem) return res.status(record ? 400 : 404).json({ error: problem });
     const result = db.prepare(`INSERT INTO competency_sample_checks
       (assessment_id, check_type, sample_id, date_tested, test_performed, staff_result, reference_result, agreement, remarks, created_by)
