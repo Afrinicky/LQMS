@@ -266,6 +266,8 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
   const [signatures, setSignatures] = useState<EthicalDeclarationSignature[]>([]);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [signForm, setSignForm] = useState({ conflictDeclared: false, conflictDetails: '', affirmationText: '', notes: '' });
+  const [signedFile, setSignedFile] = useState<File | null>(null);
+  const [signing, setSigning] = useState(false);
   const [setupForm, setSetupForm] = useState(emptyDeclarationSetup);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [showSetup, setShowSetup] = useState(false);
@@ -331,14 +333,28 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
   async function signSelected(e: FormEvent) {
     e.preventDefault();
     if (!selected) return;
+    const fileBased = !selected.body_content && !!selected.file_id;
+    if (fileBased && !signedFile) { onError('Download the form, sign it, then attach the signed copy before submitting.'); return; }
+    onError('');
+    setSigning(true);
     try {
-      await api(`/organisation/ethical-forms/${selected.id}/sign`, { method: 'POST', body: JSON.stringify(signForm) });
+      const signedFileId = signedFile ? await uploadFileToServer(signedFile) : undefined;
+      await api(`/organisation/ethical-forms/${selected.id}/sign`, { method: 'POST', body: JSON.stringify({ ...signForm, signedFileId }) });
       setSignForm({ conflictDeclared: false, conflictDetails: '', affirmationText: '', notes: '' });
+      setSignedFile(null);
       await load();
       const fresh = await api<EthicalDeclarationForm & { signatures: EthicalDeclarationSignature[] }>(`/organisation/ethical-forms/${selected.id}`);
       setSelected(fresh); setSignatures(fresh.signatures || []);
       onNotice('Your acknowledgement has been signed and recorded. Thank you.');
     } catch (e) { onError((e as Error).message); }
+    finally { setSigning(false); }
+  }
+
+  // Fetch a file with the auth header and hand it to the browser to save.
+  async function downloadFileById(fileId: number, name: string) {
+    const url = await fetchBlobUrl(`/files/${fileId}/download`);
+    const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
   }
 
   // Print the declaration together with every appended signature, so the signed
@@ -466,11 +482,7 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
                 <p className="muted" style={{ margin: 0, fontSize: 12 }}>v{selected.version || '—'} · effective {selected.effective_date || '—'} · issued by {selected.uploaded_by_name || '—'} on {String(selected.uploaded_at).slice(0, 10)}</p>
               </div>
               <button type="button" className="badge" onClick={printDeclaration} style={{ cursor: 'pointer' }}>🖨 Print</button>
-              {selected.file_id && <a className="badge" onClick={async () => {
-                const url = await fetchBlobUrl(`/files/${selected.file_id}/download`);
-                const a = document.createElement('a'); a.href = url; a.download = selected.file_name || 'declaration'; a.click();
-                setTimeout(() => URL.revokeObjectURL(url), 4000);
-              }} style={{ cursor: 'pointer' }}>⬇ Download</a>}
+              {selected.file_id && <a className="badge" onClick={() => void downloadFileById(selected.file_id!, selected.file_name || 'declaration')} style={{ cursor: 'pointer' }}>⬇ Download form</a>}
             </div>
             {selected.description && <p style={{ marginTop: 8 }}>{selected.description}</p>}
             {selected.body_content && <div style={{ whiteSpace: 'pre-wrap', marginTop: 10, lineHeight: 1.55, borderTop: '1px solid #e2e8f0', paddingTop: 10 }}>{selected.body_content}</div>}
@@ -484,15 +496,25 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
             <h4 style={{ marginTop: 0 }}>Your acknowledgement</h4>
             <p>Signed on {String(selected.my_signature.signed_at).slice(0, 19).replace('T', ' ')}. {selected.my_signature.conflict_declared ? <strong style={{ color: '#dc2626' }}>Conflict declared.</strong> : 'No conflict declared.'}</p>
             {selected.my_signature.conflict_details && <p className="muted">Conflict details: {selected.my_signature.conflict_details}</p>}
+            {selected.my_signature.signed_file_id && <p style={{ marginTop: 6 }}>Signed copy: <a onClick={() => void downloadFileById(selected.my_signature!.signed_file_id!, `signed-${selected.form_number || selected.id}`)} style={{ cursor: 'pointer', color: 'var(--accent, #2563eb)' }}>⬇ download your signed document</a></p>}
           </div> : <div className="card" style={{ marginTop: 12 }}>
             <h4 style={{ marginTop: 0 }}>Read &amp; sign your acknowledgement</h4>
             <p className="muted" style={{ marginTop: 0 }}>{selected.acknowledgement_statement || 'By signing you confirm you have read and understood this declaration and agree to be bound by it.'} Your signature is personal and cannot be delegated.</p>
+            {isFileOnly && <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '10px 12px', margin: '8px 0', fontSize: 13 }}>
+              <strong>This declaration is a form document.</strong> To sign it:
+              <ol style={{ margin: '6px 0 0', paddingLeft: 20 }}>
+                <li><a onClick={() => selected.file_id && void downloadFileById(selected.file_id, selected.file_name || 'declaration')} style={{ cursor: 'pointer', color: 'var(--accent, #2563eb)' }}>Download the form</a></li>
+                <li>Print and sign it (or sign it electronically).</li>
+                <li>Attach the signed copy below, then submit.</li>
+              </ol>
+            </div>}
             <form onSubmit={signSelected}>
+              {isFileOnly && <label style={{ display: 'block', margin: '6px 0' }}>Signed document (required)<input type="file" accept=".pdf,.doc,.docx,.rtf,.odt,.txt,.jpg,.jpeg,.png" onChange={e => setSignedFile(e.target.files?.[0] ?? null)} required /></label>}
               <label style={{ display: 'block', margin: '6px 0' }}>Affirmation (optional)<textarea value={signForm.affirmationText} onChange={e => setSignForm({ ...signForm, affirmationText: e.target.value })} placeholder="I have read, understood and agree to be bound by the terms of this declaration…" style={{ width: '100%' }} /></label>
               <label><input type="checkbox" checked={signForm.conflictDeclared} onChange={e => setSignForm({ ...signForm, conflictDeclared: e.target.checked })} /> I have a conflict of interest to declare</label>
               {signForm.conflictDeclared && <label style={{ display: 'block', margin: '6px 0' }}>Conflict details<textarea value={signForm.conflictDetails} onChange={e => setSignForm({ ...signForm, conflictDetails: e.target.value })} required style={{ width: '100%' }} /></label>}
               <label style={{ display: 'block', margin: '6px 0' }}>Notes (optional)<input value={signForm.notes} onChange={e => setSignForm({ ...signForm, notes: e.target.value })} /></label>
-              <button type="submit">✔ I have read &amp; understood — Sign</button>
+              <button type="submit" disabled={signing || (isFileOnly && !signedFile)}>{signing ? 'Submitting…' : isFileOnly ? '✔ Attach signed copy & record acknowledgement' : '✔ I have read & understood — Sign'}</button>
             </form>
           </div>}
 
@@ -502,8 +524,8 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
               {signatures.length > 0 && <button type="button" className="badge" onClick={printDeclaration} style={{ cursor: 'pointer' }}>🖨 Print signed declaration</button>}
             </div>
             {signatures.length === 0 ? <p className="muted">No signatures yet.</p> :
-              <table className="data-table" style={{ marginTop: 8 }}><thead><tr><th>#</th><th>Staff</th><th>Staff ID</th><th>Section</th><th>Signed on</th><th>Conflict</th></tr></thead><tbody>
-                {signatures.map((s, i) => <tr key={s.id}><td>{i + 1}</td><td>{s.staff_name || staffName(s.staff_id)}</td><td>{s.employee_no || '—'}</td><td>{s.section_name || '—'}</td><td>{String(s.signed_at).slice(0, 19).replace('T', ' ')}</td><td>{s.conflict_declared ? <span style={{ color: '#dc2626' }}>Declared</span> : '—'}</td></tr>)}
+              <table className="data-table" style={{ marginTop: 8 }}><thead><tr><th>#</th><th>Staff</th><th>Staff ID</th><th>Section</th><th>Signed on</th><th>Conflict</th>{isFileOnly && <th>Signed copy</th>}</tr></thead><tbody>
+                {signatures.map((s, i) => <tr key={s.id}><td>{i + 1}</td><td>{s.staff_name || staffName(s.staff_id)}</td><td>{s.employee_no || '—'}</td><td>{s.section_name || '—'}</td><td>{String(s.signed_at).slice(0, 19).replace('T', ' ')}</td><td>{s.conflict_declared ? <span style={{ color: '#dc2626' }}>Declared</span> : '—'}</td>{isFileOnly && <td>{s.signed_file_id ? <a onClick={() => void downloadFileById(s.signed_file_id!, s.signed_file_name || `signed-${i + 1}`)} style={{ cursor: 'pointer', color: 'var(--accent, #2563eb)' }}>⬇ {s.signed_file_name || 'download'}</a> : '—'}</td>}</tr>)}
               </tbody></table>}
           </div>
         </>}
