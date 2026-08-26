@@ -3495,8 +3495,13 @@ tr.row-retired { opacity: .62; }
 .re-rowform .rf-full { width: 100%; }
 .rf-cap { font-size: 11px; color: var(--faint); }
 .rf-locked { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); background: rgba(255,255,255,.03); font-size: 13px; color: var(--text); min-height: 36px; }
-.rf-actions { display: flex; justify-content: flex-end; }
+.rf-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .rf-actions button { padding: 8px 22px; }
+.re-rowform.editing { border-color: var(--accent-bright, #5a82ff); box-shadow: 0 0 0 1px var(--accent-bright, #5a82ff) inset; }
+.rf-editing-tag { font-size: 12px; color: var(--faint); }
+.rf-change { align-self: flex-start; font-size: 11px; padding: 0; margin-top: 2px; }
+.re-row-actions { display: flex; gap: 6px; white-space: nowrap; }
+.re-table tr.row-editing td { background: rgba(90,130,255,.08); }
 
 .member-picker { display: flex; flex-direction: column; gap: 8px; }
 .mp-chips { display: flex; flex-wrap: wrap; gap: 6px; }
