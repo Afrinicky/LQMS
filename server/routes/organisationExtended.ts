@@ -46,7 +46,7 @@ export function organisationExtendedRoutes() {
     const staffId = getCurrentStaffId(req);
     const withMy = forms.map(f => ({
       ...f,
-      my_signature: staffId ? db.prepare('SELECT id, signed_at, conflict_declared, conflict_details FROM ethical_declaration_signatures WHERE form_id = ? AND staff_id = ?').get(f.id, staffId) : null,
+      my_signature: staffId ? db.prepare('SELECT id, signed_at, conflict_declared, conflict_details, signed_file_id FROM ethical_declaration_signatures WHERE form_id = ? AND staff_id = ?').get(f.id, staffId) : null,
     }));
     res.json(withMy);
   });
@@ -57,9 +57,11 @@ export function organisationExtendedRoutes() {
       FROM ethical_declaration_forms f LEFT JOIN staff s ON s.id = f.uploaded_by_staff_id
       LEFT JOIN files fl ON fl.id = f.file_id WHERE f.id = ?`).get(req.params.id) as any;
     if (!f) return res.status(404).json({ error: 'Form not found' });
-    const signatures = db.prepare(`SELECT sig.*, st.full_name AS staff_name, st.employee_no, sec.name AS section_name
+    const signatures = db.prepare(`SELECT sig.*, st.full_name AS staff_name, st.employee_no, sec.name AS section_name, fl.original_name AS signed_file_name
       FROM ethical_declaration_signatures sig LEFT JOIN staff st ON st.id = sig.staff_id
-      LEFT JOIN sections sec ON sec.id = st.section_id WHERE sig.form_id = ? ORDER BY sig.signed_at DESC`).all(req.params.id);
+      LEFT JOIN sections sec ON sec.id = st.section_id
+      LEFT JOIN files fl ON fl.id = sig.signed_file_id
+      WHERE sig.form_id = ? ORDER BY sig.signed_at DESC`).all(req.params.id);
     res.json({ ...f, signatures });
   });
 
@@ -123,10 +125,18 @@ export function organisationExtendedRoutes() {
     if (!form) return res.status(404).json({ error: 'Form not found or no longer active.' });
     const existing = db.prepare('SELECT id FROM ethical_declaration_signatures WHERE form_id = ? AND staff_id = ?').get(req.params.id, staffId);
     if (existing) return res.status(400).json({ error: 'You have already signed this declaration.' });
-    const r = db.prepare(`INSERT INTO ethical_declaration_signatures (form_id, staff_id, signed_by_user_id, conflict_declared, conflict_details, affirmation_text, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
+    // A file-based declaration (a form file, no in-app text) is signed on the
+    // document itself: the signatory must download it, sign it and attach the
+    // signed copy. A text declaration is acknowledged in the app, no upload.
+    const signedFileId = parseIntNullable(req.body.signedFileId);
+    const isFileBased = !!form.file_id && !form.body_content;
+    if (isFileBased && !signedFileId) {
+      return res.status(400).json({ error: 'Download the form, sign it, and attach the signed copy before submitting your acknowledgement.' });
+    }
+    const r = db.prepare(`INSERT INTO ethical_declaration_signatures (form_id, staff_id, signed_by_user_id, conflict_declared, conflict_details, affirmation_text, notes, signed_file_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
       req.params.id, staffId, req.user!.id, req.body.conflictDeclared ? 1 : 0,
-      req.body.conflictDetails ?? null, req.body.affirmationText ?? null, req.body.notes ?? null);
+      req.body.conflictDetails ?? null, req.body.affirmationText ?? null, req.body.notes ?? null, signedFileId);
     // Auto-resolve the "sign this declaration" notifications for this user.
     db.prepare("UPDATE notifications SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP, resolved_by_staff_id = ? WHERE assigned_to_staff_id = ? AND module_key = 'organisation' AND (action_url LIKE ? OR (record_type = 'ethical_declaration_forms' AND record_id = ?)) AND status NOT IN ('resolved','dismissed')")
       .run(staffId, staffId, `%form=${req.params.id}%`, String(req.params.id));

@@ -6213,6 +6213,10 @@ CREATE INDEX IF NOT EXISTS idx_appraisal_attachments ON appraisal_attachments(ap
     ] as const) {
       if (!cols.has(col)) database.exec(`ALTER TABLE ethical_declaration_forms ADD COLUMN ${type}`);
     }
+    // For a file-based declaration, each signatory downloads the form, signs it
+    // and attaches the signed copy — that upload hangs off their signature.
+    const sigCols = new Set((database.prepare('PRAGMA table_info(ethical_declaration_signatures)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!sigCols.has('signed_file_id')) database.exec('ALTER TABLE ethical_declaration_signatures ADD COLUMN signed_file_id INTEGER REFERENCES files(id)');
   }
 
   seedNotificationSounds(database);
