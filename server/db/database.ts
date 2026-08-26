@@ -6,6 +6,7 @@ import { SYNCABLE_TABLES } from './syncableTables.js';
 import { CONFIG_LISTS } from '../../shared/constants/configLists.js';
 import { BUILTIN_SOUNDS, DEFAULT_SOUND_FOR_EVENT } from '../../shared/constants/activities.js';
 import { seedCompetencyFrameworks } from './seedCompetency.js';
+import { seedOrientationFrameworks } from './seedOrientation.js';
 import { seedSupplierEvaluationFrameworks } from './seedSupplierEvaluation.js';
 
 // Filesystem layout is sourced from the centralized config module so every path
@@ -3036,6 +3037,70 @@ CREATE TABLE IF NOT EXISTS staff_orientations (
   updated_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_staff_orientations_staff ON staff_orientations(staff_id);
+
+-- ---------------------------------------------------------------------------
+-- Orientation & induction frameworks. The laboratory's own induction
+-- checklists, built and used exactly like competency frameworks: a framework
+-- carries grouped checklist items, records copy those items so revising a
+-- framework never rewrites a record already in progress, and nothing is in
+-- force until somebody with the authority activates it.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS orientation_frameworks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  framework_code TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  applies_to TEXT NOT NULL DEFAULT 'new_hire',   -- new_hire|existing_staff|intern_attachee|locum|student|all_staff
+  department_id INTEGER REFERENCES departments(id),
+  section_id INTEGER REFERENCES sections(id),
+  cadre TEXT,
+  version_label TEXT NOT NULL DEFAULT '1.0',
+  purpose TEXT,
+  scope TEXT,
+  validity_months INTEGER NOT NULL DEFAULT 0,      -- 0 = no periodic re-induction
+  requires_facilitator_sign_off INTEGER NOT NULL DEFAULT 1,
+  requires_staff_sign_off INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'draft',            -- draft|active|archived
+  is_default INTEGER NOT NULL DEFAULT 0,
+  effective_date TEXT,
+  next_review_date TEXT,
+  approved_by_staff_id INTEGER REFERENCES staff(id),
+  approved_at TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_orientation_frameworks_status ON orientation_frameworks(status, applies_to);
+
+CREATE TABLE IF NOT EXISTS orientation_framework_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  framework_id INTEGER NOT NULL REFERENCES orientation_frameworks(id) ON DELETE CASCADE,
+  group_title TEXT NOT NULL DEFAULT 'General',
+  item_text TEXT NOT NULL,
+  item_description TEXT,
+  responsible_role TEXT,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_orientation_items_framework ON orientation_framework_items(framework_id, display_order);
+
+-- One checklist line on a staff orientation record. Text is copied from the
+-- framework item so the record stays readable after the framework is revised.
+CREATE TABLE IF NOT EXISTS staff_orientation_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  orientation_id INTEGER NOT NULL REFERENCES staff_orientations(id) ON DELETE CASCADE,
+  framework_item_id INTEGER REFERENCES orientation_framework_items(id),
+  group_title TEXT,
+  item_text TEXT NOT NULL,
+  item_description TEXT,
+  responsible_role TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',           -- pending|completed|not_applicable
+  completed_at TEXT,
+  completed_by_staff_id INTEGER REFERENCES staff(id),
+  remarks TEXT,
+  display_order INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_staff_orientation_items_record ON staff_orientation_items(orientation_id, display_order);
 `);
 
   // My Laboratory: extend the single-row laboratory_profile with identity and
@@ -6122,9 +6187,38 @@ CREATE INDEX IF NOT EXISTS idx_appraisal_attachments ON appraisal_attachments(ap
     add('completed_at', 'completed_at TEXT');
   }
 
+  // Framework-based orientation: link a record to the framework it was raised
+  // against. Legacy records keep their fixed step columns and simply carry a
+  // null framework_id.
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(staff_orientations)').all() as Array<{ name: string }>).map(c => c.name));
+    for (const [col, type] of [
+      ['framework_id', 'framework_id INTEGER REFERENCES orientation_frameworks(id)'],
+      ['framework_code', 'framework_code TEXT'],
+      ['framework_title', 'framework_title TEXT'],
+    ] as const) {
+      if (!cols.has(col)) database.exec(`ALTER TABLE staff_orientations ADD COLUMN ${type}`);
+    }
+  }
+
+  // Code of Conduct declarations can now be set up from pre-populated text
+  // instead of an uploaded file. The body content and the acknowledgement line
+  // become part of the signed, printable record.
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(ethical_declaration_forms)').all() as Array<{ name: string }>).map(c => c.name));
+    for (const [col, type] of [
+      ['body_content', 'body_content TEXT'],
+      ['acknowledgement_statement', 'acknowledgement_statement TEXT'],
+      ['template_key', 'template_key TEXT'],
+    ] as const) {
+      if (!cols.has(col)) database.exec(`ALTER TABLE ethical_declaration_forms ADD COLUMN ${type}`);
+    }
+  }
+
   seedNotificationSounds(database);
   seedFormTemplates(database);
   seedCompetencyFrameworks(database);
+  seedOrientationFrameworks(database);
   seedSupplierEvaluationFrameworks(database);
 }
 

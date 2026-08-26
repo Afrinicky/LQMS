@@ -88,11 +88,38 @@ export type OrgTreeNode = {
 };
 export type OrgTree = { roots: OrgTreeNode[] };
 export type StaffOrientation = {
-  id: number; staff_id: number; staff_name?: string; hire_date?: string; orientation_start?: string;
+  id: number; staff_id: number; staff_name?: string; employee_no?: string | null; section_name?: string | null;
+  hire_date?: string; orientation_start?: string;
   orientation_complete: number; welcome_orientation: string; safety_training: string; ethics_training: string;
   lis_training: string; equipment_training: string; sop_review: string; competency_baseline: string;
   department_induction: string; form_completed_date?: string; facilitator_staff_id?: number; facilitator_name?: string;
   staff_sign_off?: string; facilitator_sign_off?: string; status: string; notes?: string; created_at: string; updated_at?: string;
+  // Framework-based records carry the framework they were raised against and a
+  // snapshotted checklist; legacy records leave these null/absent.
+  framework_id?: number | null; framework_code?: string | null; framework_title?: string | null;
+  item_count?: number; item_done?: number; item_na?: number;
+  items?: StaffOrientationItem[];
+};
+export type StaffOrientationItem = {
+  id: number; orientation_id: number; framework_item_id?: number | null; group_title?: string | null;
+  item_text: string; item_description?: string | null; responsible_role?: string | null;
+  status: string; completed_at?: string | null; completed_by_staff_id?: number | null; completed_by_name?: string | null;
+  remarks?: string | null; display_order: number;
+};
+export type OrientationFrameworkItem = {
+  id: number; framework_id: number; group_title: string; item_text: string; item_description?: string | null;
+  responsible_role?: string | null; display_order: number; is_active: number;
+};
+export type OrientationFramework = {
+  id: number; framework_code: string; title: string; applies_to: string;
+  department_id?: number | null; section_id?: number | null; department_name?: string | null; section_name?: string | null;
+  cadre?: string | null; version_label: string; purpose?: string | null; scope?: string | null;
+  validity_months: number; requires_facilitator_sign_off: number; requires_staff_sign_off: number;
+  status: string; is_default: number; effective_date?: string | null; next_review_date?: string | null;
+  approved_by_staff_id?: number | null; approved_by_name?: string | null; approved_at?: string | null;
+  created_at: string; updated_at?: string | null;
+  item_count?: number; group_count?: number; record_count?: number; records_raised?: number;
+  items?: OrientationFrameworkItem[];
 };
 export type RegisterImportResult = { ok: boolean; created: number; updated: number; totalRows: number; errors: string[] };
 export type TechnicalAuthorizationRow = { id: number; staff_id?: number | null; position_id?: number | null; module_key: string; section_id?: number | null; level: string; is_active: number; granted_at?: string; expires_at?: string | null; competency_assessment_id?: number | null; staff_name?: string | null; position_title?: string | null; section_name?: string | null };
@@ -334,7 +361,8 @@ export type OrganisationSummary = { codeOfConductRecords:number; codeOfConductDu
 export type CentralArchive = { id:number; archive_number:string; title:string; description?:string|null; archive_type:string; source_module?:string|null; source_record_type?:string|null; source_record_id?:string|null; period_start?:string|null; period_end?:string|null; retention_period_months?:number|null; retention_until?:string|null; file_id?:number|null; file_name?:string|null; file_mime?:string|null; file_size?:number|null; cloud_url?:string|null; cloud_provider?:string|null; storage_location?:string|null; format?:string|null; size_bytes?:number|null; archived_by_staff_id?:number|null; archived_by_name?:string|null; archived_at:string; status:string; is_automatic:number; linked_record_id?:number|null; notes?:string|null; created_at:string; updated_at?:string|null };
 export type CentralArchiveSummary = { totalArchives:number; archivedThisMonth:number; withCloudCopy:number; dueForDestruction:number; byType:Array<{ archive_type:string; c:number }>; byModule:Array<{ source_module:string|null; c:number }> };
 export type CentralArchiveSchedule = { id:number; schedule_key:string; title:string; archive_type:string; frequency:string; retention_period_months?:number|null; format?:string|null; responsible_staff_id?:number|null; responsible_name?:string|null; cloud_url_template?:string|null; last_run_at?:string|null; next_run_at?:string|null; is_active:number; notes?:string|null };
-export type EthicalDeclarationForm = { id:number; form_number:string; title:string; form_type:string; description?:string|null; version?:string|null; effective_date?:string|null; review_frequency_months?:number|null; next_review_date?:string|null; file_id?:number|null; file_name?:string|null; file_mime?:string|null; linked_document_id?:number|null; requires_annual_reaffirmation:number; status:string; uploaded_by_staff_id?:number|null; uploaded_by_name?:string|null; uploaded_at:string; signature_count:number; total_staff:number; my_signature?:{ id:number; signed_at:string; conflict_declared:number; conflict_details?:string|null }|null };
+export type EthicalDeclarationForm = { id:number; form_number:string; title:string; form_type:string; description?:string|null; version?:string|null; effective_date?:string|null; review_frequency_months?:number|null; next_review_date?:string|null; file_id?:number|null; file_name?:string|null; file_mime?:string|null; linked_document_id?:number|null; requires_annual_reaffirmation:number; status:string; body_content?:string|null; acknowledgement_statement?:string|null; template_key?:string|null; uploaded_by_staff_id?:number|null; uploaded_by_name?:string|null; uploaded_at:string; signature_count:number; total_staff:number; my_signature?:{ id:number; signed_at:string; conflict_declared:number; conflict_details?:string|null }|null };
+export type DeclarationTemplate = { key:string; formType:string; title:string; purpose:string; reviewFrequencyMonths:number; requiresAnnualReaffirmation:boolean; bodyContent:string; acknowledgementStatement:string };
 export type EthicalDeclarationSignature = { id:number; form_id:number; staff_id:number; staff_name?:string|null; employee_no?:string|null; section_name?:string|null; signed_at:string; conflict_declared:number; conflict_details?:string|null; affirmation_text?:string|null; notes?:string|null };
 export type ContinuityPlan = { id:number; plan_number:string; position_id?:number|null; position_title?:string|null; key_role:string; deputy_position_id?:number|null; deputy_position_title?:string|null; deputy_staff_id?:number|null; deputy_name?:string|null; acting_arrangement?:string|null; authority_scope?:string|null; handover_procedure?:string|null; activation_trigger?:string|null; training_status?:string|null; last_tested_date?:string|null; next_review_date?:string|null; status:string; notes?:string|null; created_at:string; updated_at?:string|null };
 export type QtReviewConfig = { id:number; area_key:string; area_label:string; frequency:string; responsible_staff_id?:number|null; responsible_name?:string|null; next_review_date?:string|null; last_review_date?:string|null; is_active:number; notes?:string|null };

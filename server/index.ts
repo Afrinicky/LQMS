@@ -35,6 +35,7 @@ import { centralArchivesRoutes } from './routes/archives.js';
 import { organisationExtendedRoutes } from './routes/organisationExtended.js';
 import { personnelRoutes } from './routes/personnel.js';
 import { competencyRoutes } from './routes/competency.js';
+import { orientationFrameworkRoutes } from './routes/orientationFrameworks.js';
 import { appraisalRoutes } from './routes/appraisals.js';
 import { schedulingRoutes } from './routes/scheduling.js';
 import { dutyActivityRoutes } from './routes/dutyActivities.js';
@@ -145,6 +146,7 @@ export function createApiServer() {
   // specific paths win over the register's generic ones.
   app.use('/api/personnel', competencyRoutes());
   app.use('/api/personnel', appraisalRoutes());
+  app.use('/api/personnel', orientationFrameworkRoutes());
   app.use('/api/personnel', personnelRoutes());
   app.use('/api/scheduling', schedulingRoutes());
   // Duty-driven unit activities, the reminders they raise and the sound catalogue.

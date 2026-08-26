@@ -4,6 +4,7 @@ import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getCurrentStaffId } from './routeHelpers.js';
+import { DECLARATION_TEMPLATES, DECLARATION_FORM_TYPES } from '../../shared/constants/declarations.js';
 
 // Notify all active staff via the notifications table (rich, actionable form).
 function notifyAllStaff(db: any, moduleKey: string, title: string, message: string, actionUrl: string, actionLabel: string, notificationType: string, severity: string) {
@@ -25,7 +26,14 @@ export function organisationExtendedRoutes() {
   // ==================================================================
   // ETHICAL DECLARATION FORMS — Code of Conduct upload + sign flow
   // ==================================================================
-  const FORM_TYPES = ['code_of_conduct', 'impartiality', 'confidentiality', 'conflict_of_interest', 'adherence', 'other'];
+  const FORM_TYPES = [...DECLARATION_FORM_TYPES];
+
+  // The pre-populated declaration library. Setting up a declaration copies one
+  // of these onto a real, editable form, so a laboratory can stand up its Code
+  // of Conduct and ethical declarations without drafting them from scratch.
+  router.get('/declaration-templates', requirePermission('organisation.structure', 'view'), (_req, res) => {
+    res.json(DECLARATION_TEMPLATES);
+  });
 
   router.get('/ethical-forms', requirePermission('organisation.structure', 'view'), (req, res) => {
     const db = getDb();
@@ -58,15 +66,22 @@ export function organisationExtendedRoutes() {
   router.post('/ethical-forms', requirePermission('organisation.structure', 'create'), (req, res) => {
     if (!req.body.title) return res.status(400).json({ error: 'title is required' });
     if (!req.body.formType || !FORM_TYPES.includes(req.body.formType)) return res.status(400).json({ error: `formType must be one of: ${FORM_TYPES.join(', ')}` });
+    // A declaration must give staff something to read: either the declaration
+    // text set up in the product, or an uploaded form file.
+    const bodyContent = typeof req.body.bodyContent === 'string' && req.body.bodyContent.trim() ? req.body.bodyContent.trim() : null;
+    if (!bodyContent && !parseIntNullable(req.body.fileId)) {
+      return res.status(400).json({ error: 'Provide the declaration text or attach a form file.' });
+    }
     const db = getDb();
     const staffId = getCurrentStaffId(req);
     const formNumber = generateRecordNumber(db, 'ethical_declaration_forms', 'ECOC', new Date().toISOString());
-    const r = db.prepare(`INSERT INTO ethical_declaration_forms (form_number, title, form_type, description, version, effective_date, review_frequency_months, next_review_date, file_id, linked_document_id, requires_annual_reaffirmation, status, uploaded_by_staff_id, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    const r = db.prepare(`INSERT INTO ethical_declaration_forms (form_number, title, form_type, description, version, effective_date, review_frequency_months, next_review_date, file_id, linked_document_id, requires_annual_reaffirmation, status, body_content, acknowledgement_statement, template_key, uploaded_by_staff_id, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       formNumber, req.body.title, req.body.formType, req.body.description ?? null, req.body.version ?? null,
       req.body.effectiveDate ?? null, parseIntNullable(req.body.reviewFrequencyMonths), req.body.nextReviewDate ?? null,
       parseIntNullable(req.body.fileId), parseIntNullable(req.body.linkedDocumentId),
-      req.body.requiresAnnualReaffirmation === false ? 0 : 1, req.body.status ?? 'active', staffId, req.user!.id);
+      req.body.requiresAnnualReaffirmation === false ? 0 : 1, req.body.status ?? 'active',
+      bodyContent, req.body.acknowledgementStatement ?? null, req.body.templateKey ?? null, staffId, req.user!.id);
     const id = Number(r.lastInsertRowid);
     // Notify every active staff to read and sign the newly uploaded form.
     if ((req.body.status ?? 'active') === 'active') {
@@ -83,14 +98,17 @@ export function organisationExtendedRoutes() {
     const db = getDb();
     const old = db.prepare('SELECT * FROM ethical_declaration_forms WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Form not found' });
-    db.prepare(`UPDATE ethical_declaration_forms SET title = ?, form_type = ?, description = ?, version = ?, effective_date = ?, review_frequency_months = ?, next_review_date = ?, file_id = ?, linked_document_id = ?, requires_annual_reaffirmation = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(
+    db.prepare(`UPDATE ethical_declaration_forms SET title = ?, form_type = ?, description = ?, version = ?, effective_date = ?, review_frequency_months = ?, next_review_date = ?, file_id = ?, linked_document_id = ?, requires_annual_reaffirmation = ?, status = ?, body_content = ?, acknowledgement_statement = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(
       req.body.title ?? old.title, req.body.formType ?? old.form_type, req.body.description ?? old.description,
       req.body.version ?? old.version, req.body.effectiveDate ?? old.effective_date,
       parseIntNullable(req.body.reviewFrequencyMonths) ?? old.review_frequency_months,
       req.body.nextReviewDate ?? old.next_review_date,
       parseIntNullable(req.body.fileId) ?? old.file_id, parseIntNullable(req.body.linkedDocumentId) ?? old.linked_document_id,
       req.body.requiresAnnualReaffirmation === undefined ? old.requires_annual_reaffirmation : (req.body.requiresAnnualReaffirmation ? 1 : 0),
-      req.body.status ?? old.status, req.params.id);
+      req.body.status ?? old.status,
+      req.body.bodyContent === undefined ? old.body_content : (typeof req.body.bodyContent === 'string' && req.body.bodyContent.trim() ? req.body.bodyContent.trim() : null),
+      req.body.acknowledgementStatement === undefined ? old.acknowledgement_statement : (req.body.acknowledgementStatement ?? null),
+      req.params.id);
     audit(req, { action: 'edit', entity: 'ethical_declaration_forms', entityId: req.params.id, oldValue: old, newValue: req.body });
     res.json({ ok: true });
   });
