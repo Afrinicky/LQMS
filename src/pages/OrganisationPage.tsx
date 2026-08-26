@@ -10,6 +10,7 @@ import PermissionTabs from '../components/PermissionTabs';
 import type {
   Staff, CodeOfConductRecord, BudgetProjection, OrganisationSummary, RegulatoryRegistration, LaboratoryConfig,
   EthicalDeclarationForm, EthicalDeclarationSignature, ContinuityPlan, QtReviewConfig, QtReview, Position, OrgTree,
+  DeclarationTemplate,
 } from '../../shared/types/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
@@ -243,22 +244,32 @@ export function OrganisationPage() {
 }
 
 // ============================================================================
-// Code of Conduct — upload ethical declaration forms then let each staff read
-// and sign them. Signing is strictly personal (server binds to the caller's
-// user id) and can never be done on someone else's behalf.
+// Code of Conduct — set up ethical declarations from pre-populated templates
+// (or an uploaded form), then let each member of staff read and sign them.
+// Signing is strictly personal (the server binds it to the caller's user id)
+// and can never be done on someone else's behalf. Once signed, every signature
+// is appended to the declaration and the whole record can be printed.
 // ============================================================================
+const emptyDeclarationSetup = {
+  title: '', formType: 'code_of_conduct', description: '', version: '1.0', effectiveDate: '',
+  reviewFrequencyMonths: '12', nextReviewDate: '', requiresAnnualReaffirmation: true, status: 'active',
+  bodyContent: '', acknowledgementStatement: '', templateKey: '',
+};
+
 function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onError: (m: string) => void; onNotice: (m: string) => void }) {
   const staffName = (id?: number | null) => staff.find(s => s.id === id)?.fullName || '—';
   const [searchParams] = useSearchParams();
   const focusForm = searchParams.get('form');
   const [forms, setForms] = useState<EthicalDeclarationForm[]>([]);
+  const [templates, setTemplates] = useState<DeclarationTemplate[]>([]);
   const [selected, setSelected] = useState<EthicalDeclarationForm | null>(null);
   const [signatures, setSignatures] = useState<EthicalDeclarationSignature[]>([]);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [signForm, setSignForm] = useState({ conflictDeclared: false, conflictDetails: '', affirmationText: '', notes: '' });
-  const [uploadForm, setUploadForm] = useState({ title: '', formType: 'code_of_conduct', description: '', version: '1.0', effectiveDate: '', reviewFrequencyMonths: '12', nextReviewDate: '', requiresAnnualReaffirmation: true, status: 'active' });
+  const [setupForm, setSetupForm] = useState(emptyDeclarationSetup);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [showUpload, setShowUpload] = useState(false);
+  const [showSetup, setShowSetup] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   async function load() {
     try {
@@ -271,6 +282,7 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
     } catch (e) { onError((e as Error).message); }
   }
   useEffect(() => { void load(); }, []);
+  useEffect(() => { api<DeclarationTemplate[]>('/organisation/declaration-templates').then(setTemplates).catch(() => setTemplates([])); }, []);
 
   async function openForm(f: EthicalDeclarationForm) {
     setSelected(f);
@@ -278,23 +290,42 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
     setPreviewUrl(null);
     try {
       const detail = await api<EthicalDeclarationForm & { signatures: EthicalDeclarationSignature[] }>(`/organisation/ethical-forms/${f.id}`);
+      setSelected(detail);
       setSignatures(detail.signatures || []);
-      if (f.file_id) fetchBlobUrl(`/files/${f.file_id}/raw`).then(setPreviewUrl).catch(() => setPreviewUrl(null));
+      if (detail.file_id) fetchBlobUrl(`/files/${detail.file_id}/raw`).then(setPreviewUrl).catch(() => setPreviewUrl(null));
     } catch (e) { onError((e as Error).message); }
   }
 
-  async function submitUpload(e: FormEvent) {
+  // Choosing a template copies its wording onto the editable setup form. The
+  // laboratory can then amend anything before it is published.
+  function applyTemplate(key: string) {
+    if (!key) { setSetupForm({ ...emptyDeclarationSetup }); return; }
+    const t = templates.find(x => x.key === key);
+    if (!t) { setSetupForm({ ...emptyDeclarationSetup, templateKey: '' }); return; }
+    setSetupForm({
+      ...emptyDeclarationSetup,
+      templateKey: t.key, title: t.title, formType: t.formType, description: t.purpose,
+      bodyContent: t.bodyContent, acknowledgementStatement: t.acknowledgementStatement,
+      reviewFrequencyMonths: String(t.reviewFrequencyMonths ?? 12),
+      requiresAnnualReaffirmation: t.requiresAnnualReaffirmation !== false,
+    });
+  }
+
+  function resetSetup() { setSetupForm({ ...emptyDeclarationSetup }); setUploadFile(null); }
+
+  async function submitSetup(e: FormEvent) {
     e.preventDefault(); onError('');
-    if (!uploadFile) { onError('Choose the ethical declaration form file to upload.'); return; }
+    if (!setupForm.bodyContent.trim() && !uploadFile) { onError('Add the declaration text, or attach a form file.'); return; }
+    setSaving(true);
     try {
-      const fileId = await uploadFileToServer(uploadFile);
-      await api('/organisation/ethical-forms', { method: 'POST', body: JSON.stringify({ ...uploadForm, fileId }) });
-      setUploadForm({ title: '', formType: 'code_of_conduct', description: '', version: '1.0', effectiveDate: '', reviewFrequencyMonths: '12', nextReviewDate: '', requiresAnnualReaffirmation: true, status: 'active' });
-      setUploadFile(null);
-      setShowUpload(false);
+      const fileId = uploadFile ? await uploadFileToServer(uploadFile) : undefined;
+      await api('/organisation/ethical-forms', { method: 'POST', body: JSON.stringify({ ...setupForm, fileId }) });
+      resetSetup();
+      setShowSetup(false);
       await load();
-      onNotice('Form uploaded. Every active staff has been notified in their inbox to open, read and sign it.');
+      onNotice('Declaration published. Every active staff has been notified in their inbox to open, read and sign it.');
     } catch (e) { onError((e as Error).message); }
+    finally { setSaving(false); }
   }
 
   async function signSelected(e: FormEvent) {
@@ -310,31 +341,88 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
     } catch (e) { onError((e as Error).message); }
   }
 
-  const canUpload = true; // Server enforces permissions
+  // Print the declaration together with every appended signature, so the signed
+  // record can be filed or held on paper.
+  function printDeclaration() {
+    if (!selected) return;
+    const typeLabel = FORM_TYPES.find(t => t.key === selected.form_type)?.label || selected.form_type;
+    const esc = (s?: string | null) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const rows = signatures.map((s, i) => `<tr>
+      <td>${i + 1}</td>
+      <td>${esc(s.staff_name || staffName(s.staff_id))}</td>
+      <td>${esc(s.employee_no || '—')}</td>
+      <td>${esc(s.section_name || '—')}</td>
+      <td>${esc(String(s.signed_at).slice(0, 19).replace('T', ' '))}</td>
+      <td>${s.conflict_declared ? 'Declared' : '—'}</td>
+      <td class="sig">${esc(s.staff_name || staffName(s.staff_id))}</td>
+    </tr>`).join('');
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(selected.title)}</title>
+      <style>
+        body { font-family: Georgia, 'Times New Roman', serif; color: #111; margin: 32px; line-height: 1.5; }
+        h1 { font-size: 20px; margin: 0 0 2px; }
+        .meta { color: #555; font-size: 12px; margin-bottom: 18px; }
+        .body { white-space: pre-wrap; font-size: 13.5px; margin: 16px 0 22px; }
+        .ack { border-left: 3px solid #333; padding: 6px 12px; font-style: italic; margin: 18px 0; }
+        h2 { font-size: 14px; border-bottom: 1px solid #999; padding-bottom: 4px; margin-top: 26px; }
+        table { width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 11.5px; }
+        th, td { border: 1px solid #999; padding: 5px 7px; text-align: left; vertical-align: top; }
+        th { background: #f0f0f0; }
+        td.sig { font-family: 'Segoe Script', 'Brush Script MT', cursive; font-size: 14px; }
+        .empty { color: #666; font-style: italic; }
+        @media print { body { margin: 12mm; } }
+      </style></head><body>
+      <div class="meta">${esc(typeLabel)}${selected.form_number ? ` · ${esc(selected.form_number)}` : ''}</div>
+      <h1>${esc(selected.title)}</h1>
+      <div class="meta">Version ${esc(selected.version || '—')} · effective ${esc(selected.effective_date || '—')}${selected.uploaded_by_name ? ` · issued by ${esc(selected.uploaded_by_name)}` : ''}</div>
+      ${selected.description ? `<p>${esc(selected.description)}</p>` : ''}
+      ${selected.body_content ? `<div class="body">${esc(selected.body_content)}</div>` : '<p class="empty">The declaration text was supplied as an attached file.</p>'}
+      ${selected.acknowledgement_statement ? `<div class="ack">${esc(selected.acknowledgement_statement)}</div>` : ''}
+      <h2>Acknowledgement of signatories (${signatures.length})</h2>
+      ${signatures.length ? `<table><thead><tr><th>#</th><th>Name</th><th>Staff ID</th><th>Section</th><th>Signed on</th><th>Conflict</th><th>Signature</th></tr></thead><tbody>${rows}</tbody></table>`
+        : '<p class="empty">No signatures recorded yet.</p>'}
+      <script>window.onload = function(){ window.print(); }</script>
+      </body></html>`;
+    const w = window.open('', '_blank', 'width=900,height=700');
+    if (!w) { onError('Allow pop-ups to print the declaration.'); return; }
+    w.document.write(html); w.document.close();
+  }
+
+  const canManage = true; // Server enforces permissions
+  const isFileOnly = selected && !selected.body_content && !!selected.file_id;
 
   return <div>
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
       <div>
         <h3 style={{ margin: 0 }}>Code of Conduct &amp; Ethical Declarations</h3>
-        <p className="muted" style={{ margin: 0, fontSize: 12 }}>Upload each declaration once; every staff opens it, reads it, and signs their own acknowledgement. Signatures are personal and non-transferable.</p>
+        <p className="muted" style={{ margin: 0, fontSize: 12 }}>Set up each declaration once from a pre-populated template; every member of staff opens it, reads it, and signs their own acknowledgement. Signatures are personal, appended to the form, and can be printed.</p>
       </div>
-      {canUpload && <button onClick={() => setShowUpload(v => !v)}>{showUpload ? 'Cancel' : '＋ Upload declaration form'}</button>}
+      {canManage && <button onClick={() => setShowSetup(v => !v)}>{showSetup ? 'Cancel' : '＋ Set up declaration'}</button>}
     </div>
 
-    {showUpload && <div className="card" style={{ marginTop: 10 }}>
-      <h4 style={{ marginTop: 0 }}>Upload declaration form</h4>
-      <p className="muted" style={{ marginTop: 0 }}>Add the master declaration form (PDF/Word). All active staff will be notified in their inbox to open, read, and sign this form.</p>
-      <form className="form-grid" onSubmit={submitUpload}>
-        <label>Title<input value={uploadForm.title} onChange={e => setUploadForm({ ...uploadForm, title: e.target.value })} required placeholder="e.g. Declaration of Impartiality (2026)" /></label>
-        <label>Type<select value={uploadForm.formType} onChange={e => setUploadForm({ ...uploadForm, formType: e.target.value })}>{FORM_TYPES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}</select></label>
-        <label>Version<input value={uploadForm.version} onChange={e => setUploadForm({ ...uploadForm, version: e.target.value })} /></label>
-        <label>Effective date<input type="date" value={uploadForm.effectiveDate} onChange={e => setUploadForm({ ...uploadForm, effectiveDate: e.target.value })} /></label>
-        <label>Review frequency (months)<input type="number" min={0} value={uploadForm.reviewFrequencyMonths} onChange={e => setUploadForm({ ...uploadForm, reviewFrequencyMonths: e.target.value })} /></label>
-        <label>Next review date<input type="date" value={uploadForm.nextReviewDate} onChange={e => setUploadForm({ ...uploadForm, nextReviewDate: e.target.value })} /></label>
-        <label>Description<textarea value={uploadForm.description} onChange={e => setUploadForm({ ...uploadForm, description: e.target.value })} placeholder="What this form covers…" /></label>
-        <label><input type="checkbox" checked={uploadForm.requiresAnnualReaffirmation} onChange={e => setUploadForm({ ...uploadForm, requiresAnnualReaffirmation: e.target.checked })} /> Requires annual re-affirmation</label>
-        <label>File (PDF, Word)<input type="file" accept=".pdf,.doc,.docx,.rtf,.odt,.txt" onChange={e => setUploadFile(e.target.files?.[0] ?? null)} required /></label>
-        <button type="submit">Upload &amp; notify all staff</button>
+    {showSetup && <div className="card" style={{ marginTop: 10 }}>
+      <h4 style={{ marginTop: 0 }}>Set up declaration</h4>
+      <p className="muted" style={{ marginTop: 0 }}>Start from a pre-populated declaration and edit it to suit the laboratory, or write your own. All active staff will be notified in their inbox to open, read, and sign it.</p>
+      <label style={{ display: 'block', marginBottom: 10 }}>Start from a template
+        <select value={setupForm.templateKey} onChange={e => applyTemplate(e.target.value)} style={{ display: 'block', marginTop: 4 }}>
+          <option value="">Blank / custom declaration</option>
+          {templates.map(t => <option key={t.key} value={t.key}>{t.title}</option>)}
+        </select>
+      </label>
+      <form className="form-grid" onSubmit={submitSetup}>
+        <label>Title<input value={setupForm.title} onChange={e => setSetupForm({ ...setupForm, title: e.target.value })} required placeholder="e.g. Declaration of Impartiality (2026)" /></label>
+        <label>Type<select value={setupForm.formType} onChange={e => setSetupForm({ ...setupForm, formType: e.target.value })}>{FORM_TYPES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}</select></label>
+        <label>Version<input value={setupForm.version} onChange={e => setSetupForm({ ...setupForm, version: e.target.value })} /></label>
+        <label>Effective date<input type="date" value={setupForm.effectiveDate} onChange={e => setSetupForm({ ...setupForm, effectiveDate: e.target.value })} /></label>
+        <label>Review frequency (months)<input type="number" min={0} value={setupForm.reviewFrequencyMonths} onChange={e => setSetupForm({ ...setupForm, reviewFrequencyMonths: e.target.value })} /></label>
+        <label>Next review date<input type="date" value={setupForm.nextReviewDate} onChange={e => setSetupForm({ ...setupForm, nextReviewDate: e.target.value })} /></label>
+        <label style={{ gridColumn: '1 / -1' }}>Purpose / description<textarea value={setupForm.description} onChange={e => setSetupForm({ ...setupForm, description: e.target.value })} placeholder="What this declaration covers…" /></label>
+        <label style={{ gridColumn: '1 / -1' }}>Declaration text
+          <textarea value={setupForm.bodyContent} onChange={e => setSetupForm({ ...setupForm, bodyContent: e.target.value })} rows={14} style={{ width: '100%', fontFamily: 'inherit' }} placeholder="The declaration every member of staff will read and agree to…" />
+        </label>
+        <label style={{ gridColumn: '1 / -1' }}>Acknowledgement statement (shown when signing)<input value={setupForm.acknowledgementStatement} onChange={e => setSetupForm({ ...setupForm, acknowledgementStatement: e.target.value })} placeholder="I have read and understood this declaration and agree to be bound by it." /></label>
+        <label><input type="checkbox" checked={setupForm.requiresAnnualReaffirmation} onChange={e => setSetupForm({ ...setupForm, requiresAnnualReaffirmation: e.target.checked })} /> Requires annual re-affirmation</label>
+        <label>Attach a form file (optional)<input type="file" accept=".pdf,.doc,.docx,.rtf,.odt,.txt" onChange={e => setUploadFile(e.target.files?.[0] ?? null)} /></label>
+        <button type="submit" disabled={saving} style={{ gridColumn: '1 / -1' }}>{saving ? 'Publishing…' : 'Publish & notify all staff'}</button>
       </form>
     </div>}
 
@@ -342,7 +430,7 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
       <div>
         <div className="card" style={{ padding: 12 }}>
           <h4 style={{ marginTop: 0 }}>Declaration forms</h4>
-          {forms.length === 0 ? <p className="muted">No declaration forms uploaded yet.</p> :
+          {forms.length === 0 ? <p className="muted">No declarations set up yet.</p> :
             <div style={{ maxHeight: '58vh', overflowY: 'auto', borderTop: '1px solid #e2e8f0' }}>
               {forms.map(f => {
                 const isSelected = selected?.id === f.id;
@@ -375,8 +463,9 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
               <div style={{ flex: 1, minWidth: 220 }}>
                 <span className="hint">{FORM_TYPES.find(t => t.key === selected.form_type)?.label || selected.form_type}</span>
                 <h3 style={{ margin: '2px 0 0' }}>{selected.title}</h3>
-                <p className="muted" style={{ margin: 0, fontSize: 12 }}>v{selected.version || '—'} · effective {selected.effective_date || '—'} · uploaded by {selected.uploaded_by_name || '—'} on {String(selected.uploaded_at).slice(0, 10)}</p>
+                <p className="muted" style={{ margin: 0, fontSize: 12 }}>v{selected.version || '—'} · effective {selected.effective_date || '—'} · issued by {selected.uploaded_by_name || '—'} on {String(selected.uploaded_at).slice(0, 10)}</p>
               </div>
+              <button type="button" className="badge" onClick={printDeclaration} style={{ cursor: 'pointer' }}>🖨 Print</button>
               {selected.file_id && <a className="badge" onClick={async () => {
                 const url = await fetchBlobUrl(`/files/${selected.file_id}/download`);
                 const a = document.createElement('a'); a.href = url; a.download = selected.file_name || 'declaration'; a.click();
@@ -384,9 +473,11 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
               }} style={{ cursor: 'pointer' }}>⬇ Download</a>}
             </div>
             {selected.description && <p style={{ marginTop: 8 }}>{selected.description}</p>}
-            {previewUrl && (selected.file_mime === 'application/pdf' || /\.pdf$/i.test(selected.file_name || '')
+            {selected.body_content && <div style={{ whiteSpace: 'pre-wrap', marginTop: 10, lineHeight: 1.55, borderTop: '1px solid #e2e8f0', paddingTop: 10 }}>{selected.body_content}</div>}
+            {selected.acknowledgement_statement && <p style={{ marginTop: 10, fontStyle: 'italic', borderLeft: '3px solid #94a3b8', paddingLeft: 10, color: '#475569' }}>{selected.acknowledgement_statement}</p>}
+            {isFileOnly && (previewUrl && (selected.file_mime === 'application/pdf' || /\.pdf$/i.test(selected.file_name || ''))
               ? <iframe title="declaration" src={previewUrl} style={{ width: '100%', height: '60vh', border: '1px solid #cbd5e0', borderRadius: 6, marginTop: 10 }} />
-              : <p className="muted" style={{ marginTop: 10 }}>Preview not available — download the form to read it.</p>)}
+              : isFileOnly && <p className="muted" style={{ marginTop: 10 }}>Preview not available — download the form to read it.</p>)}
           </div>
 
           {selected.my_signature ? <div className="card" style={{ marginTop: 12 }}>
@@ -395,7 +486,7 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
             {selected.my_signature.conflict_details && <p className="muted">Conflict details: {selected.my_signature.conflict_details}</p>}
           </div> : <div className="card" style={{ marginTop: 12 }}>
             <h4 style={{ marginTop: 0 }}>Read &amp; sign your acknowledgement</h4>
-            <p className="muted" style={{ marginTop: 0 }}>By signing you confirm you have read and understood this declaration and agree to be bound by it. Your signature is personal and cannot be delegated.</p>
+            <p className="muted" style={{ marginTop: 0 }}>{selected.acknowledgement_statement || 'By signing you confirm you have read and understood this declaration and agree to be bound by it.'} Your signature is personal and cannot be delegated.</p>
             <form onSubmit={signSelected}>
               <label style={{ display: 'block', margin: '6px 0' }}>Affirmation (optional)<textarea value={signForm.affirmationText} onChange={e => setSignForm({ ...signForm, affirmationText: e.target.value })} placeholder="I have read, understood and agree to be bound by the terms of this declaration…" style={{ width: '100%' }} /></label>
               <label><input type="checkbox" checked={signForm.conflictDeclared} onChange={e => setSignForm({ ...signForm, conflictDeclared: e.target.checked })} /> I have a conflict of interest to declare</label>
@@ -406,9 +497,12 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
           </div>}
 
           <div className="card" style={{ marginTop: 12 }}>
-            <h4 style={{ marginTop: 0 }}>Signatures ({signatures.length})</h4>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h4 style={{ marginTop: 0, marginBottom: 0 }}>Signatures ({signatures.length})</h4>
+              {signatures.length > 0 && <button type="button" className="badge" onClick={printDeclaration} style={{ cursor: 'pointer' }}>🖨 Print signed declaration</button>}
+            </div>
             {signatures.length === 0 ? <p className="muted">No signatures yet.</p> :
-              <table className="data-table"><thead><tr><th>#</th><th>Staff</th><th>Staff ID</th><th>Section</th><th>Signed on</th><th>Conflict</th></tr></thead><tbody>
+              <table className="data-table" style={{ marginTop: 8 }}><thead><tr><th>#</th><th>Staff</th><th>Staff ID</th><th>Section</th><th>Signed on</th><th>Conflict</th></tr></thead><tbody>
                 {signatures.map((s, i) => <tr key={s.id}><td>{i + 1}</td><td>{s.staff_name || staffName(s.staff_id)}</td><td>{s.employee_no || '—'}</td><td>{s.section_name || '—'}</td><td>{String(s.signed_at).slice(0, 19).replace('T', ' ')}</td><td>{s.conflict_declared ? <span style={{ color: '#dc2626' }}>Declared</span> : '—'}</td></tr>)}
               </tbody></table>}
           </div>

@@ -12,10 +12,11 @@ import PermissionTabs from '../components/PermissionTabs';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import CompetencyWorkspace from './personnel/CompetencyWorkspace';
 import AppraisalWorkspace from './personnel/AppraisalWorkspace';
+import OrientationInduction from './personnel/OrientationInduction';
 import type {
   Section, Department, Staff, Position,
   StaffDocument, StaffDeclaration, TrainingEvent, DutyRoster,
-  PersonnelSummary, MyTasks, MyProfile, RosterCoverage, StaffSuggestionsResponse, StaffOrientation, ProfessionalRank
+  PersonnelSummary, MyTasks, MyProfile, RosterCoverage, StaffSuggestionsResponse, ProfessionalRank
 } from '../../shared/types/api';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
@@ -35,16 +36,6 @@ const APPOINTMENT_TYPES = ['FULL TIME', 'PART TIME', 'CONTRACT', 'INTERN', 'NSS'
 const NATIONAL_ID_TYPES = ['GHANA CARD', 'PASSPORT', 'VOTER ID', 'DRIVERS LICENCE', 'OTHER'];
 const CADRES = ['Scientist', 'Technician', 'Assistant', 'Other'];
 const AVAILABILITY_STATUSES = ['available', 'on_leave', 'transferred', 'inactive', 'unavailable'];
-const ORIENTATION_STEPS: { key: string; label: string }[] = [
-  { key: 'welcome_orientation', label: 'Welcome orientation' },
-  { key: 'safety_training', label: 'Safety training' },
-  { key: 'ethics_training', label: 'Ethics & confidentiality' },
-  { key: 'lis_training', label: 'LIS training' },
-  { key: 'equipment_training', label: 'Equipment training' },
-  { key: 'sop_review', label: 'SOP review' },
-  { key: 'competency_baseline', label: 'Competency baseline' },
-  { key: 'department_induction', label: 'Department induction' },
-];
 const emptyStaffForm = {
   employeeNo: '', surname: '', middleName: '', firstName: '', initials: '', dateOfBirth: '', gender: '',
   designation: '', jobTitle: '', professionalRegulator: '', professionalLicence: '', licenceExpiryDate: '',
@@ -115,8 +106,6 @@ export function PersonnelManagementPage() {
   const [staffForm, setStaffForm] = useState(emptyStaffForm);
   const [editingStaffId, setEditingStaffId] = useState<number | null>(null);
   const [staffSearch, setStaffSearch] = useState('');
-  const [orientations, setOrientations] = useState<StaffOrientation[]>([]);
-  const [orientForm, setOrientForm] = useState({ staffId: '', hireDate: '', orientationStart: '', facilitatorStaffId: '', notes: '' });
   const [regBusy, setRegBusy] = useState('');
   const [regResult, setRegResult] = useState<{ created: number; updated: number; skipped?: number; errors: string[] } | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -147,7 +136,6 @@ export function PersonnelManagementPage() {
       api<MyTasks>('/personnel/my-tasks').then(setMyTasks).catch(() => undefined);
       api<StaffSuggestionsResponse>('/personnel/staff-suggestions').then(setStaffSuggestions).catch(() => undefined);
     }
-    if (tab === 'Orientation & Induction' && isEnabled('personnel')) void loadOrientations();
   }, [tab, isEnabled]);
   if (!isEnabled('personnel')) return <DisabledModule />;
 
@@ -214,11 +202,6 @@ export function PersonnelManagementPage() {
     } catch (e) { setError((e as Error).message); }
   }
 
-  async function loadOrientations() {
-    try { setOrientations(await api<StaffOrientation[]>('/personnel/orientations')); }
-    catch (e) { setError((e as Error).message); }
-  }
-
   async function downloadRegister(path: string, fallback: string) {
     setError(null); setRegBusy(path);
     try {
@@ -248,24 +231,6 @@ export function PersonnelManagementPage() {
       await reloadStaff();
     } catch (e) { setError((e as Error).message); }
     finally { setRegBusy(''); if (importInputRef.current) importInputRef.current.value = ''; }
-  }
-
-  async function submitOrientation(e: FormEvent) {
-    e.preventDefault(); setError(null);
-    if (!orientForm.staffId) { setError('Select a staff member.'); return; }
-    try {
-      await api('/personnel/orientations', { method: 'POST', body: JSON.stringify(orientForm) });
-      setOrientForm({ staffId: '', hireDate: '', orientationStart: '', facilitatorStaffId: '', notes: '' });
-      await loadOrientations();
-    } catch (e) { setError((e as Error).message); }
-  }
-
-  async function toggleOrientationStep(o: StaffOrientation, key: string) {
-    const current = (o as unknown as Record<string, string>)[key];
-    try {
-      await api(`/personnel/orientations/${o.id}`, { method: 'PUT', body: JSON.stringify({ [key]: current === 'completed' ? 'pending' : 'completed' }) });
-      await loadOrientations();
-    } catch (e) { setError((e as Error).message); }
   }
 
   async function signDeclaration(id: number) {
@@ -507,27 +472,7 @@ export function PersonnelManagementPage() {
       </tbody></table>
     </>}
 
-    {tab === 'Orientation & Induction' && <>
-      <div className="card"><p className="muted" style={{ marginTop: 0 }}>Tracks the structured induction of new staff: welcome, safety, ethics, LIS, equipment, SOPs, baseline competency and department induction. Tick each element as it is completed; the record closes automatically when all are done.</p>
-      <form className="form-grid" onSubmit={submitOrientation}>
-        <label>Staff<select value={orientForm.staffId} onChange={e => setOrientForm({ ...orientForm, staffId: e.target.value })} required><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-        <label>Hire date<input type="date" value={orientForm.hireDate} onChange={e => setOrientForm({ ...orientForm, hireDate: e.target.value })} /></label>
-        <label>Orientation start<input type="date" value={orientForm.orientationStart} onChange={e => setOrientForm({ ...orientForm, orientationStart: e.target.value })} /></label>
-        <label>Facilitator<select value={orientForm.facilitatorStaffId} onChange={e => setOrientForm({ ...orientForm, facilitatorStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-        <label>Notes<input value={orientForm.notes} onChange={e => setOrientForm({ ...orientForm, notes: e.target.value })} /></label>
-        <button type="submit">Start orientation record</button>
-      </form></div>
-      <table className="data-table" style={{ marginTop: 16 }}><thead><tr><th>Staff</th><th>Hire date</th>{ORIENTATION_STEPS.map(s => <th key={s.key} title={s.label} style={{ writingMode: 'vertical-rl', whiteSpace: 'nowrap' }}>{s.label}</th>)}<th>Status</th></tr></thead><tbody>
-        {orientations.map(o => <tr key={o.id}>
-          <td>{o.staff_name}</td><td>{o.hire_date || '—'}</td>
-          {ORIENTATION_STEPS.map(s => { const v = (o as unknown as Record<string, string>)[s.key]; return <td key={s.key} style={{ textAlign: 'center' }}>
-            <button type="button" className="step-toggle" title={`Toggle ${s.label}`} onClick={() => toggleOrientationStep(o, s.key)}>{v === 'completed' ? '✅' : '⬜'}</button>
-          </td>; })}
-          <td>{o.orientation_complete ? <span className="badge approved">complete</span> : formatBadge(o.status)}</td>
-        </tr>)}
-        {orientations.length === 0 && <tr><td colSpan={ORIENTATION_STEPS.length + 3} className="muted">No orientation records yet.</td></tr>}
-      </tbody></table>
-    </>}
+    {tab === 'Orientation & Induction' && <OrientationInduction staff={staff} sections={sections} departments={departments} />}
 
     {tab === 'Training Events' && <>
       <form className="form-grid" onSubmit={submitTraining}>

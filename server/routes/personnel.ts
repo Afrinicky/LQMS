@@ -515,7 +515,10 @@ export function personnelRoutes() {
    * Orientation / Induction tracking.
    * ──────────────────────────────────────────────────────────────────────── */
   router.get('/orientations', requirePermission('personnel.orientation', 'view'), (_req, res) => {
-    res.json(getDb().prepare(`SELECT o.*, s.full_name AS staff_name, f.full_name AS facilitator_name
+    res.json(getDb().prepare(`SELECT o.*, s.full_name AS staff_name, f.full_name AS facilitator_name,
+      (SELECT COUNT(*) FROM staff_orientation_items i WHERE i.orientation_id = o.id) AS item_count,
+      (SELECT COUNT(*) FROM staff_orientation_items i WHERE i.orientation_id = o.id AND i.status = 'completed') AS item_done,
+      (SELECT COUNT(*) FROM staff_orientation_items i WHERE i.orientation_id = o.id AND i.status = 'not_applicable') AS item_na
       FROM staff_orientations o JOIN staff s ON s.id = o.staff_id
       LEFT JOIN staff f ON f.id = o.facilitator_staff_id ORDER BY o.created_at DESC, o.id DESC`).all());
   });
@@ -545,12 +548,16 @@ export function personnelRoutes() {
       if (api in req.body) { sets.push(`${col} = ?`); vals.push(req.body[api] ?? null); }
     }
     if ('facilitatorStaffId' in req.body) { sets.push('facilitator_staff_id = ?'); vals.push(parseIntNullable(req.body.facilitatorStaffId)); }
-    // Mark complete when every step is done.
-    const merged = { ...(existing as any) };
-    for (const step of ORIENTATION_STEPS) if (step in req.body) merged[step] = req.body[step] === 'completed' || req.body[step] === true ? 'completed' : 'pending';
-    const allDone = ORIENTATION_STEPS.every(s => merged[s] === 'completed');
-    sets.push('orientation_complete = ?'); vals.push(allDone ? 1 : 0);
-    if (allDone && (existing as any).status !== 'completed' && !('status' in req.body)) { sets.push('status = ?'); vals.push('completed'); }
+    // Completion for a framework-based record is driven by its checklist items
+    // (recomputed as items are ticked), so leave it alone here. For a legacy
+    // record it is derived from the fixed steps.
+    if (!(existing as any).framework_id) {
+      const merged = { ...(existing as any) };
+      for (const step of ORIENTATION_STEPS) if (step in req.body) merged[step] = req.body[step] === 'completed' || req.body[step] === true ? 'completed' : 'pending';
+      const allDone = ORIENTATION_STEPS.every(s => merged[s] === 'completed');
+      sets.push('orientation_complete = ?'); vals.push(allDone ? 1 : 0);
+      if (allDone && (existing as any).status !== 'completed' && !('status' in req.body)) { sets.push('status = ?'); vals.push('completed'); }
+    }
     sets.push('updated_at = CURRENT_TIMESTAMP');
     db.prepare(`UPDATE staff_orientations SET ${sets.join(', ')} WHERE id = ?`).run(...vals, req.params.id);
     audit(req, { action: 'edit', entity: 'staff_orientations', entityId: Number(req.params.id), oldValue: existing, newValue: req.body });
