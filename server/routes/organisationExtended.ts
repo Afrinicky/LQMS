@@ -57,7 +57,7 @@ export function organisationExtendedRoutes() {
       FROM ethical_declaration_forms f LEFT JOIN staff s ON s.id = f.uploaded_by_staff_id
       LEFT JOIN files fl ON fl.id = f.file_id WHERE f.id = ?`).get(req.params.id) as any;
     if (!f) return res.status(404).json({ error: 'Form not found' });
-    const signatures = db.prepare(`SELECT sig.*, st.full_name AS staff_name, st.employee_no, sec.name AS section_name, fl.original_name AS signed_file_name
+    const signatures = db.prepare(`SELECT sig.*, st.full_name AS staff_name, st.employee_no, sec.name AS section_name, st.signature_file_id, fl.original_name AS signed_file_name
       FROM ethical_declaration_signatures sig LEFT JOIN staff st ON st.id = sig.staff_id
       LEFT JOIN sections sec ON sec.id = st.section_id
       LEFT JOIN files fl ON fl.id = sig.signed_file_id
@@ -142,6 +142,22 @@ export function organisationExtendedRoutes() {
       .run(staffId, staffId, `%form=${req.params.id}%`, String(req.params.id));
     audit(req, { action: 'sign', entity: 'ethical_declaration_signatures', entityId: r.lastInsertRowid, newValue: { formId: req.params.id, staffId } });
     res.status(201).json({ id: r.lastInsertRowid });
+  });
+
+  // Delete a declaration form and everything hanging off it — its signatures
+  // and the "sign this" notifications it raised. Kept behind the edit/delete
+  // controls that are tucked away in the UI, and gated on the archive right.
+  router.delete('/ethical-forms/:id', requirePermission('organisation.structure', 'void_archive'), (req, res) => {
+    const db = getDb();
+    const form = db.prepare('SELECT * FROM ethical_declaration_forms WHERE id = ?').get(req.params.id) as any;
+    if (!form) return res.status(404).json({ error: 'Form not found' });
+    db.transaction(() => {
+      db.prepare('DELETE FROM ethical_declaration_signatures WHERE form_id = ?').run(req.params.id);
+      db.prepare("DELETE FROM notifications WHERE module_key = 'organisation' AND ((record_type = 'ethical_declaration_forms' AND record_id = ?) OR action_url LIKE ?)").run(String(req.params.id), `%form=${req.params.id}%`);
+      db.prepare('DELETE FROM ethical_declaration_forms WHERE id = ?').run(req.params.id);
+    })();
+    audit(req, { action: 'delete', entity: 'ethical_declaration_forms', entityId: Number(req.params.id), oldValue: form });
+    res.json({ ok: true });
   });
 
   // ==================================================================

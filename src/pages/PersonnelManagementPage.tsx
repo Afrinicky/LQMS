@@ -13,6 +13,7 @@ import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import CompetencyWorkspace from './personnel/CompetencyWorkspace';
 import AppraisalWorkspace from './personnel/AppraisalWorkspace';
 import OrientationInduction from './personnel/OrientationInduction';
+import UserPortal from './personnel/UserPortal';
 import type {
   Section, Department, Staff, Position,
   StaffDocument, StaffDeclaration, TrainingEvent, DutyRoster,
@@ -130,13 +131,8 @@ export function PersonnelManagementPage() {
     } catch (e) { setError((e as Error).message); }
   }
   useEffect(() => { if (isEnabled('personnel')) void load(); }, [isEnabled]);
-  useEffect(() => {
-    if (tab === 'My Profile' && isEnabled('personnel')) {
-      api<MyProfile>('/personnel/my-profile').then(setMyProfile).catch((e) => setError((e as Error).message));
-      api<MyTasks>('/personnel/my-tasks').then(setMyTasks).catch(() => undefined);
-      api<StaffSuggestionsResponse>('/personnel/staff-suggestions').then(setStaffSuggestions).catch(() => undefined);
-    }
-  }, [tab, isEnabled]);
+  // The My Profile tab is a self-contained portal (UserPortal) that fetches its
+  // own self-scoped data.
   if (!isEnabled('personnel')) return <DisabledModule />;
 
   async function uploadFile(file: File | null): Promise<string | null> {
@@ -521,50 +517,7 @@ export function PersonnelManagementPage() {
     {tab === 'Unit Supervisors' && <ActingSupervisorsBoard staff={staff} sections={sections} canEdit={canEditRosters} />}
     {tab === 'Bench Schedules' && <BenchScheduleBoard sections={sections} canEdit={canEditRosters} />}
 
-    {tab === 'My Profile' && <>
-      {myProfile && <div className="card">
-        <h3>{myProfile.staff?.fullName || myProfile.user.fullName}</h3>
-        {!myProfile.staff && <>
-          <p className="error">Your user account is not linked to a staff record. You need a link before signing attestations or declarations.</p>
-          {staffSuggestions && staffSuggestions.suggestions.length > 0 && <>
-            <h4>Candidate staff records</h4>
-            <table className="data-table"><thead><tr><th>Staff</th><th>Email</th><th>Section</th><th></th></tr></thead><tbody>
-              {staffSuggestions.suggestions.map(s => <tr key={s.id}>
-                <td>{s.full_name}{s.employee_no ? ` (${s.employee_no})` : ''}</td>
-                <td>{s.email || '—'}</td><td>{s.section_name || '—'}</td>
-                <td>{s.already_taken ? <em>linked to another user</em> : <button onClick={() => linkMyStaff(s.id)}>Link to me</button>}</td>
-              </tr>)}
-            </tbody></table>
-            <small>Self-link only succeeds when your account's full name or username/email exactly matches the candidate. Otherwise an administrator must link you.</small>
-          </>}
-          {staffSuggestions && staffSuggestions.suggestions.length === 0 && <p>No matching staff records found. Ask an administrator to create your staff record and link your account.</p>}
-        </>}
-        {myProfile.staff && <p>Employee #: {myProfile.staff.employeeNo || '—'} | Section: {myProfile.staff.section_name || '—'}</p>}
-        {myProfile.positions.length > 0 && <p>Positions: {myProfile.positions.map(p => `${p.title}${p.is_active ? '' : ' (inactive)'}`).join(', ')}</p>}
-        {myProfile.authorizations.length > 0 && <>
-          <h4>Active technical authorisations</h4>
-          <table className="data-table"><thead><tr><th>Module</th><th>Level</th><th>Expires</th><th>Notes</th></tr></thead><tbody>
-            {myProfile.authorizations.map(a => <tr key={a.id}><td>{a.module_key}</td><td>{a.level}</td><td>{a.expires_at || '—'}</td><td>{a.notes || '—'}</td></tr>)}
-          </tbody></table>
-        </>}
-      </div>}
-      {myTasks && <>
-        <div className="cards">
-          <div className="card"><h4>Pending attestations</h4><p className="metric">{myTasks.pendingAttestations.length}</p></div>
-          <div className="card"><h4>Pending declarations</h4><p className="metric">{myTasks.pendingDeclarations.length}</p></div>
-          <div className="card"><h4>Upcoming training</h4><p className="metric">{myTasks.upcomingTraining.length}</p></div>
-          <div className="card"><h4>Upcoming competency</h4><p className="metric">{myTasks.upcomingCompetency.length}</p></div>
-          <div className="card"><h4>Assigned actions</h4><p className="metric">{myTasks.assignedActions.length}</p></div>
-          <div className="card"><h4>Upcoming duties</h4><p className="metric">{myTasks.upcomingDuties.length}</p></div>
-        </div>
-        {myTasks.upcomingDuties.length > 0 && <>
-          <h4>Upcoming duties</h4>
-          <table className="data-table"><thead><tr><th>Roster</th><th>Date</th><th>Shift</th><th>Hours</th><th>Role</th></tr></thead><tbody>
-            {myTasks.upcomingDuties.map(a => <tr key={a.id}><td>{a.roster_number || '—'}</td><td>{a.duty_date}</td><td>{a.shift_name || '—'}</td><td>{a.start_time || '—'} – {a.end_time || '—'}</td><td>{a.duty_role || '—'}</td></tr>)}
-          </tbody></table>
-        </>}
-      </>}
-    </>}
+    {tab === 'My Profile' && <UserPortal />}
 
     {tab === 'Reports' && <div className="card">
       <h3>Personnel reports</h3>
