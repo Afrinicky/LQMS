@@ -351,6 +351,46 @@ export function personnelRoutes() {
     });
   });
 
+  // My declarations — the Code of Conduct / ethical declarations that concern
+  // the logged-in member of staff: the ones they have signed (so they can
+  // reopen and print them from their own profile) and the ones still awaiting
+  // their signature. Personal data, so gated only on being signed in.
+  router.get('/my-declarations', (req, res) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    const db = getDb();
+    const staffId = req.user.staffId;
+    if (!staffId) return res.json({ signed: [], pending: [] });
+    if (!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='ethical_declaration_forms'").get()) {
+      return res.json({ signed: [], pending: [] });
+    }
+    const signed = db.prepare(`SELECT f.id, f.form_number, f.title, f.form_type, f.version, f.effective_date, f.body_content,
+        f.acknowledgement_statement, f.file_id, fl.original_name AS file_name, iss.full_name AS issued_by,
+        sig.id AS signature_id, sig.signed_at, sig.conflict_declared, sig.conflict_details, sig.affirmation_text, sig.signed_file_id
+      FROM ethical_declaration_signatures sig
+      JOIN ethical_declaration_forms f ON f.id = sig.form_id
+      LEFT JOIN files fl ON fl.id = f.file_id
+      LEFT JOIN staff iss ON iss.id = f.uploaded_by_staff_id
+      WHERE sig.staff_id = ? ORDER BY sig.signed_at DESC`).all(staffId);
+    const pending = db.prepare(`SELECT f.id, f.form_number, f.title, f.form_type, f.version, f.effective_date, f.body_content,
+        f.acknowledgement_statement, f.file_id
+      FROM ethical_declaration_forms f
+      WHERE f.status = 'active' AND NOT EXISTS (SELECT 1 FROM ethical_declaration_signatures s WHERE s.form_id = f.id AND s.staff_id = ?)
+      ORDER BY f.uploaded_at DESC`).all(staffId);
+    res.json({ signed, pending });
+  });
+
+  // My documents — the staff documents on the logged-in member of staff's own
+  // file. Self-scoped so a member of staff can see their own without holding
+  // the register view permission.
+  router.get('/my-documents', (req, res) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    const db = getDb();
+    const staffId = req.user.staffId;
+    if (!staffId) return res.json([]);
+    res.json(db.prepare(`SELECT sd.*, f.original_name AS file_name FROM staff_documents sd
+      LEFT JOIN files f ON f.id = sd.file_id WHERE sd.staff_id = ? ORDER BY sd.created_at DESC`).all(staffId));
+  });
+
   router.get('/staff-suggestions', (req, res) => {
     if (!req.user) return res.status(401).json({ error: 'Authentication required' });
     const db = getDb();

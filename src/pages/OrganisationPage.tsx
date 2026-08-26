@@ -38,6 +38,38 @@ async function fetchBlobUrl(path: string): Promise<string> {
   return URL.createObjectURL(await r.blob());
 }
 
+// Fetch a protected image with the auth header and return it as a data: URL —
+// used to embed signature images inside a print window that carries no session.
+async function blobAsDataUrl(path: string): Promise<string> {
+  const token = getToken();
+  const r = await fetch(`${API_BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+  if (!r.ok) throw new Error('Could not load the image.');
+  const blob = await r.blob();
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result));
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+// A staff member's signature image shown inline, fetched with the auth header.
+// Falls back to their name in a script face when no signature is on file (or
+// the fetch is not permitted).
+function SignatureImage({ staffId, hasSignature, name }: { staffId: number; hasSignature: boolean; name: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let revoke: string | null = null;
+    if (hasSignature) {
+      fetchBlobUrl(`/signatures/staff/${staffId}/image`).then(u => { revoke = u; setUrl(u); }).catch(() => setFailed(true));
+    }
+    return () => { if (revoke) URL.revokeObjectURL(revoke); };
+  }, [staffId, hasSignature]);
+  if (hasSignature && url && !failed) return <img src={url} alt={`${name} signature`} style={{ maxHeight: 34, maxWidth: 150 }} />;
+  return <span style={{ fontFamily: "'Segoe Script', 'Brush Script MT', cursive", fontSize: 15 }}>{name}</span>;
+}
+
 // Read-only display of the laboratory configuration owned by Settings → My
 // Laboratory. Shown here so the whole team can see the legal identity, quality
 // manual, quality policy and objectives; it can only be changed in Settings.
@@ -271,6 +303,8 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
   const [setupForm, setSetupForm] = useState(emptyDeclarationSetup);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [showSetup, setShowSetup] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [showManage, setShowManage] = useState(false);
   const [saving, setSaving] = useState(false);
 
   async function load() {
@@ -313,19 +347,52 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
     });
   }
 
-  function resetSetup() { setSetupForm({ ...emptyDeclarationSetup }); setUploadFile(null); }
+  function resetSetup() { setSetupForm({ ...emptyDeclarationSetup }); setUploadFile(null); setEditingId(null); }
+
+  // Edit an existing declaration — populate the setup form with its current
+  // values so it can be amended in place. Reached from the tucked-away Manage
+  // control on the selected declaration.
+  function startEdit(f: EthicalDeclarationForm) {
+    setEditingId(f.id);
+    setSetupForm({
+      title: f.title || '', formType: f.form_type || 'code_of_conduct', description: f.description || '',
+      version: f.version || '1.0', effectiveDate: f.effective_date || '',
+      reviewFrequencyMonths: f.review_frequency_months != null ? String(f.review_frequency_months) : '12',
+      nextReviewDate: f.next_review_date || '', requiresAnnualReaffirmation: f.requires_annual_reaffirmation !== 0,
+      status: f.status || 'active', bodyContent: f.body_content || '', acknowledgementStatement: f.acknowledgement_statement || '',
+      templateKey: f.template_key || '',
+    });
+    setUploadFile(null); setShowManage(false); setShowSetup(true);
+  }
+
+  async function deleteDeclaration(f: EthicalDeclarationForm) {
+    if (!confirm(`Delete "${f.title}" and all of its signatures? This cannot be undone.`)) return;
+    onError('');
+    try {
+      await api(`/organisation/ethical-forms/${f.id}`, { method: 'DELETE' });
+      setSelected(null); setShowManage(false);
+      await load();
+      onNotice('Declaration deleted.');
+    } catch (e) { onError((e as Error).message); }
+  }
 
   async function submitSetup(e: FormEvent) {
     e.preventDefault(); onError('');
-    if (!setupForm.bodyContent.trim() && !uploadFile) { onError('Add the declaration text, or attach a form file.'); return; }
+    if (!setupForm.bodyContent.trim() && !uploadFile && !(editingId && selected?.file_id)) { onError('Add the declaration text, or attach a form file.'); return; }
     setSaving(true);
     try {
       const fileId = uploadFile ? await uploadFileToServer(uploadFile) : undefined;
-      await api('/organisation/ethical-forms', { method: 'POST', body: JSON.stringify({ ...setupForm, fileId }) });
-      resetSetup();
-      setShowSetup(false);
-      await load();
-      onNotice('Declaration published. Every active staff has been notified in their inbox to open, read and sign it.');
+      if (editingId) {
+        await api(`/organisation/ethical-forms/${editingId}`, { method: 'PUT', body: JSON.stringify({ ...setupForm, ...(fileId ? { fileId } : {}) }) });
+        resetSetup(); setShowSetup(false);
+        await load(); await openForm({ id: editingId } as EthicalDeclarationForm);
+        onNotice('Declaration updated.');
+      } else {
+        await api('/organisation/ethical-forms', { method: 'POST', body: JSON.stringify({ ...setupForm, fileId }) });
+        resetSetup(); setShowSetup(false);
+        await load();
+        onNotice('Declaration published. Every active staff has been notified in their inbox to open, read and sign it.');
+      }
     } catch (e) { onError((e as Error).message); }
     finally { setSaving(false); }
   }
@@ -358,20 +425,28 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
   }
 
   // Print the declaration together with every appended signature, so the signed
-  // record can be filed or held on paper.
-  function printDeclaration() {
+  // record can be filed or held on paper. Each signatory's actual signature
+  // image (uploaded once under their profile) is embedded where they have one.
+  async function printDeclaration() {
     if (!selected) return;
     const typeLabel = FORM_TYPES.find(t => t.key === selected.form_type)?.label || selected.form_type;
     const esc = (s?: string | null) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const rows = signatures.map((s, i) => `<tr>
+    const sigImgs = await Promise.all(signatures.map(s => s.signature_file_id ? blobAsDataUrl(`/signatures/staff/${s.staff_id}/image`).catch(() => null) : Promise.resolve(null)));
+    const rows = signatures.map((s, i) => {
+      const img = sigImgs[i];
+      const sigCell = img ? `<img class="sigimg" src="${img}" alt="signature" />`
+        : s.signed_file_id ? '<span class="muted">signed copy on file</span>'
+        : `<span class="signame">${esc(s.staff_name || staffName(s.staff_id))}</span>`;
+      return `<tr>
       <td>${i + 1}</td>
       <td>${esc(s.staff_name || staffName(s.staff_id))}</td>
       <td>${esc(s.employee_no || '—')}</td>
       <td>${esc(s.section_name || '—')}</td>
       <td>${esc(String(s.signed_at).slice(0, 19).replace('T', ' '))}</td>
       <td>${s.conflict_declared ? 'Declared' : '—'}</td>
-      <td class="sig">${esc(s.staff_name || staffName(s.staff_id))}</td>
-    </tr>`).join('');
+      <td class="sig">${sigCell}</td>
+    </tr>`;
+    }).join('');
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(selected.title)}</title>
       <style>
         body { font-family: Georgia, 'Times New Roman', serif; color: #111; margin: 32px; line-height: 1.5; }
@@ -383,7 +458,10 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
         table { width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 11.5px; }
         th, td { border: 1px solid #999; padding: 5px 7px; text-align: left; vertical-align: top; }
         th { background: #f0f0f0; }
-        td.sig { font-family: 'Segoe Script', 'Brush Script MT', cursive; font-size: 14px; }
+        td.sig { min-width: 120px; }
+        .sigimg { max-height: 40px; max-width: 160px; }
+        .signame { font-family: 'Segoe Script', 'Brush Script MT', cursive; font-size: 15px; }
+        .muted { color: #666; font-style: italic; }
         .empty { color: #666; font-style: italic; }
         @media print { body { margin: 12mm; } }
       </style></head><body>
@@ -412,18 +490,18 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
         <h3 style={{ margin: 0 }}>Code of Conduct &amp; Ethical Declarations</h3>
         <p className="muted" style={{ margin: 0, fontSize: 12 }}>Set up each declaration once from a pre-populated template; every member of staff opens it, reads it, and signs their own acknowledgement. Signatures are personal, appended to the form, and can be printed.</p>
       </div>
-      {canManage && <button onClick={() => setShowSetup(v => !v)}>{showSetup ? 'Cancel' : '＋ Set up declaration'}</button>}
+      {canManage && <button onClick={() => { if (showSetup) { resetSetup(); setShowSetup(false); } else { resetSetup(); setShowSetup(true); } }}>{showSetup ? 'Cancel' : '＋ Set up declaration'}</button>}
     </div>
 
     {showSetup && <div className="card" style={{ marginTop: 10 }}>
-      <h4 style={{ marginTop: 0 }}>Set up declaration</h4>
-      <p className="muted" style={{ marginTop: 0 }}>Start from a pre-populated declaration and edit it to suit the laboratory, or write your own. All active staff will be notified in their inbox to open, read, and sign it.</p>
-      <label style={{ display: 'block', marginBottom: 10 }}>Start from a template
+      <h4 style={{ marginTop: 0 }}>{editingId ? 'Edit declaration' : 'Set up declaration'}</h4>
+      <p className="muted" style={{ marginTop: 0 }}>{editingId ? 'Amend this declaration. Changes apply to the form staff open and sign; existing signatures are kept.' : 'Start from a pre-populated declaration and edit it to suit the laboratory, or write your own. All active staff will be notified in their inbox to open, read, and sign it.'}</p>
+      {!editingId && <label style={{ display: 'block', marginBottom: 10 }}>Start from a template
         <select value={setupForm.templateKey} onChange={e => applyTemplate(e.target.value)} style={{ display: 'block', marginTop: 4 }}>
           <option value="">Blank / custom declaration</option>
           {templates.map(t => <option key={t.key} value={t.key}>{t.title}</option>)}
         </select>
-      </label>
+      </label>}
       <form className="form-grid" onSubmit={submitSetup}>
         <label>Title<input value={setupForm.title} onChange={e => setSetupForm({ ...setupForm, title: e.target.value })} required placeholder="e.g. Declaration of Impartiality (2026)" /></label>
         <label>Type<select value={setupForm.formType} onChange={e => setSetupForm({ ...setupForm, formType: e.target.value })}>{FORM_TYPES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}</select></label>
@@ -437,8 +515,8 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
         </label>
         <label style={{ gridColumn: '1 / -1' }}>Acknowledgement statement (shown when signing)<input value={setupForm.acknowledgementStatement} onChange={e => setSetupForm({ ...setupForm, acknowledgementStatement: e.target.value })} placeholder="I have read and understood this declaration and agree to be bound by it." /></label>
         <label><input type="checkbox" checked={setupForm.requiresAnnualReaffirmation} onChange={e => setSetupForm({ ...setupForm, requiresAnnualReaffirmation: e.target.checked })} /> Requires annual re-affirmation</label>
-        <label>Attach a form file (optional)<input type="file" accept=".pdf,.doc,.docx,.rtf,.odt,.txt" onChange={e => setUploadFile(e.target.files?.[0] ?? null)} /></label>
-        <button type="submit" disabled={saving} style={{ gridColumn: '1 / -1' }}>{saving ? 'Publishing…' : 'Publish & notify all staff'}</button>
+        <label>{editingId && selected?.file_id ? 'Replace form file (optional)' : 'Attach a form file (optional)'}<input type="file" accept=".pdf,.doc,.docx,.rtf,.odt,.txt" onChange={e => setUploadFile(e.target.files?.[0] ?? null)} /></label>
+        <button type="submit" disabled={saving} style={{ gridColumn: '1 / -1' }}>{saving ? 'Saving…' : editingId ? 'Save changes' : 'Publish & notify all staff'}</button>
       </form>
     </div>}
 
@@ -481,9 +559,16 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
                 <h3 style={{ margin: '2px 0 0' }}>{selected.title}</h3>
                 <p className="muted" style={{ margin: 0, fontSize: 12 }}>v{selected.version || '—'} · effective {selected.effective_date || '—'} · issued by {selected.uploaded_by_name || '—'} on {String(selected.uploaded_at).slice(0, 10)}</p>
               </div>
-              <button type="button" className="badge" onClick={printDeclaration} style={{ cursor: 'pointer' }}>🖨 Print</button>
+              <button type="button" className="badge" onClick={() => void printDeclaration()} style={{ cursor: 'pointer' }}>🖨 Print</button>
               {selected.file_id && <a className="badge" onClick={() => void downloadFileById(selected.file_id!, selected.file_name || 'declaration')} style={{ cursor: 'pointer' }}>⬇ Download form</a>}
+              {/* Manage is deliberately understated — a small ⋯ that reveals edit/delete. */}
+              <button type="button" title="Manage this declaration" aria-label="Manage this declaration" onClick={() => setShowManage(v => !v)}
+                style={{ cursor: 'pointer', border: 'none', background: 'transparent', color: '#94a3b8', fontSize: 18, lineHeight: 1, padding: '0 6px' }}>⋯</button>
             </div>
+            {showManage && <div style={{ marginTop: 8, display: 'flex', gap: 8, justifyContent: 'flex-end', borderTop: '1px dashed #e2e8f0', paddingTop: 8 }}>
+              <button type="button" className="secondary" onClick={() => startEdit(selected)}>✎ Edit declaration</button>
+              <button type="button" className="secondary" style={{ color: '#dc2626' }} onClick={() => void deleteDeclaration(selected)}>🗑 Delete declaration</button>
+            </div>}
             {selected.description && <p style={{ marginTop: 8 }}>{selected.description}</p>}
             {selected.body_content && <div style={{ whiteSpace: 'pre-wrap', marginTop: 10, lineHeight: 1.55, borderTop: '1px solid #e2e8f0', paddingTop: 10 }}>{selected.body_content}</div>}
             {selected.acknowledgement_statement && <p style={{ marginTop: 10, fontStyle: 'italic', borderLeft: '3px solid #94a3b8', paddingLeft: 10, color: '#475569' }}>{selected.acknowledgement_statement}</p>}
@@ -521,11 +606,11 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
           <div className="card" style={{ marginTop: 12 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h4 style={{ marginTop: 0, marginBottom: 0 }}>Signatures ({signatures.length})</h4>
-              {signatures.length > 0 && <button type="button" className="badge" onClick={printDeclaration} style={{ cursor: 'pointer' }}>🖨 Print signed declaration</button>}
+              {signatures.length > 0 && <button type="button" className="badge" onClick={() => void printDeclaration()} style={{ cursor: 'pointer' }}>🖨 Print signed declaration</button>}
             </div>
             {signatures.length === 0 ? <p className="muted">No signatures yet.</p> :
-              <table className="data-table" style={{ marginTop: 8 }}><thead><tr><th>#</th><th>Staff</th><th>Staff ID</th><th>Section</th><th>Signed on</th><th>Conflict</th>{isFileOnly && <th>Signed copy</th>}</tr></thead><tbody>
-                {signatures.map((s, i) => <tr key={s.id}><td>{i + 1}</td><td>{s.staff_name || staffName(s.staff_id)}</td><td>{s.employee_no || '—'}</td><td>{s.section_name || '—'}</td><td>{String(s.signed_at).slice(0, 19).replace('T', ' ')}</td><td>{s.conflict_declared ? <span style={{ color: '#dc2626' }}>Declared</span> : '—'}</td>{isFileOnly && <td>{s.signed_file_id ? <a onClick={() => void downloadFileById(s.signed_file_id!, s.signed_file_name || `signed-${i + 1}`)} style={{ cursor: 'pointer', color: 'var(--accent, #2563eb)' }}>⬇ {s.signed_file_name || 'download'}</a> : '—'}</td>}</tr>)}
+              <table className="data-table" style={{ marginTop: 8 }}><thead><tr><th>#</th><th>Staff</th><th>Staff ID</th><th>Section</th><th>Signed on</th><th>Signature</th><th>Conflict</th>{isFileOnly && <th>Signed copy</th>}</tr></thead><tbody>
+                {signatures.map((s, i) => <tr key={s.id}><td>{i + 1}</td><td>{s.staff_name || staffName(s.staff_id)}</td><td>{s.employee_no || '—'}</td><td>{s.section_name || '—'}</td><td>{String(s.signed_at).slice(0, 19).replace('T', ' ')}</td><td><SignatureImage staffId={s.staff_id} hasSignature={!!s.signature_file_id} name={s.staff_name || staffName(s.staff_id)} /></td><td>{s.conflict_declared ? <span style={{ color: '#dc2626' }}>Declared</span> : '—'}</td>{isFileOnly && <td>{s.signed_file_id ? <a onClick={() => void downloadFileById(s.signed_file_id!, s.signed_file_name || `signed-${i + 1}`)} style={{ cursor: 'pointer', color: 'var(--accent, #2563eb)' }}>⬇ {s.signed_file_name || 'download'}</a> : '—'}</td>}</tr>)}
               </tbody></table>}
           </div>
         </>}
