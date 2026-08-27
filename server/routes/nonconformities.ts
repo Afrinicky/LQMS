@@ -98,8 +98,8 @@ export function nonconformityRoutes() {
     }
     return buildWorkbook(NC_HEADERS, rows, 'NONCONFORMITIES');
   }
-  router.get('/register/template', requirePermission('nc_capa', 'view'), (_req, res) => sendWorkbook(res, ncWorkbook(false), 'Nonconformities_Template.xlsx'));
-  router.get('/register/export', requirePermission('nc_capa', 'view'), (_req, res) => sendWorkbook(res, ncWorkbook(true), 'Nonconformities.xlsx'));
+  router.get('/register/template', requirePermission('nc_capa', 'export'), (_req, res) => sendWorkbook(res, ncWorkbook(false), 'Nonconformities_Template.xlsx'));
+  router.get('/register/export', requirePermission('nc_capa', 'export'), (_req, res) => sendWorkbook(res, ncWorkbook(true), 'Nonconformities.xlsx'));
   router.post('/register/import', requirePermission('nc_capa', 'create'), ncXlsxUpload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the Nonconformities .xlsx file.' });
     try {
@@ -363,7 +363,7 @@ export function nonconformityRoutes() {
   // Printable nonconformity & corrective-action report. The layout is a neutral,
   // ISO-aligned record — it carries the laboratory's own masthead and record
   // number, not any single facility's form number.
-  router.get('/:id/print', requirePermission('nc_capa', 'view'), (req, res) => {
+  router.get('/:id/print', requirePermission('nc_capa', 'print'), (req, res) => {
     const db = getDb();
     const n = db.prepare(`SELECT nc.*, s.name AS section_name,
         det.full_name AS detected_by_full, inv.full_name AS capa_resp_full, eff.full_name AS eff_by_full, rev.full_name AS reviewer_full, appr.full_name AS approved_full

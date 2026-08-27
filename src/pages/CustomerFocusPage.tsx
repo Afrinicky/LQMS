@@ -525,17 +525,19 @@ export function CustomerFocusPage() {
 
     {tab === 'Imports' && <>
       <p><small>Supported import types: feedback, survey_responses, stakeholders, other. CSV / XLSX. Stakeholder import expects columns like stakeholderName, stakeholderType, organisation, email. Feedback import expects feedbackDate, feedbackType, title, description.</small></p>
-      <form className="form-grid" onSubmit={submitImport}>
+      {/* Reading the batch register is one right; putting a file into it is
+          another. A "View" user sees the history and not the upload form. */}
+      {can('customer_focus.imports', 'create') && <form className="form-grid" onSubmit={submitImport}>
         <label>Import type<select value={importForm.importType} onChange={e => setImportForm({ ...importForm, importType: e.target.value })}>{IMPORT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
         <label>File<input type="file" accept=".csv,.xlsx,.xls" onChange={e => setImportForm({ ...importForm, file: e.target.files?.[0] ?? null })} required /></label>
         <label>Notes<textarea value={importForm.notes} onChange={e => setImportForm({ ...importForm, notes: e.target.value })} /></label>
         <button type="submit">Upload batch</button>
-      </form>
+      </form>}
       <table className="data-table"><thead><tr><th>Batch</th><th>Type</th><th>Status</th><th>Rows</th><th>Processed</th><th>Exceptions</th><th></th></tr></thead><tbody>
         {imports.map(b => <tr key={b.id}>
           <td>{b.batch_number}</td><td>{b.import_type}</td><td>{formatBadge(b.status)}</td>
           <td>{b.total_rows}</td><td>{b.processed_rows}</td><td>{b.exception_count}</td>
-          <td>{b.status !== 'processed' && <button onClick={() => processImport(b.id)}>Process</button>}</td>
+          <td>{can('customer_focus.imports', 'edit') && b.status !== 'processed' && <button onClick={() => processImport(b.id)}>Process</button>}</td>
         </tr>)}
       </tbody></table>
     </>}

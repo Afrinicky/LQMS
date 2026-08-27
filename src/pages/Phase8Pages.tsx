@@ -384,12 +384,14 @@ export function AssessmentsPage() {
           <td>
             <button onClick={() => openChecklist(c.id)}>Open</button>
             {can('assessments', 'print') && <button onClick={() => openPrintPage(`/assessments/checklists/${c.id}/print`)}>Print</button>}
-            <button onClick={() => toggleChecklist(c.id)}>{c.status === 'active' ? 'Deactivate' : 'Activate'}</button>
-            {c.status !== 'archived' && <button onClick={() => archiveChecklist(c.id)}>Archive</button>}
-            <button onClick={() => deleteChecklist(c.id)} className="secondary">Delete</button>
+            {can('assessments', 'edit') && <button onClick={() => toggleChecklist(c.id)}>{c.status === 'active' ? 'Deactivate' : 'Activate'}</button>}
+            {can('assessments', 'void_archive') && c.status !== 'archived' && <button onClick={() => archiveChecklist(c.id)}>Archive</button>}
+            {can('assessments', 'void_archive') && <button onClick={() => deleteChecklist(c.id)} className="secondary">Delete</button>}
           </td>
         </tr>)}
       </tbody></table>
+      {/* Bringing a checklist in creates records; reading the register does not. */}
+      {can('assessments', 'create') && <>
       <h3>Import checklist from CSV / XLSX</h3>
       <p><small>Expected columns: SectionTitle, QuestionText (required), and optionally SectionCode, SectionPossibleMarks, SectionWeight, QuestionCode, ResponseType, MaxMarks, Weight, Guidance, ExpectedEvidence, ScoringGuidance, IsRequired. Rows are grouped into sections by SectionTitle.</small></p>
       <form className="form-grid" onSubmit={submitFileImport}>
@@ -415,6 +417,7 @@ export function AssessmentsPage() {
         <label>Internal pass mark<input type="number" step="any" value={chForm.internalPassMark} onChange={e => setChForm({ ...chForm, internalPassMark: e.target.value })} /></label>
         <button type="submit">Create checklist</button>
       </form>
+      </>}
 
       {selectedChecklist && <DetailModal open onClose={() => setSelectedChecklist(null)} title={<>{selectedChecklist.checklist_code ? selectedChecklist.checklist_code + ' — ' : ''}{selectedChecklist.checklist_name}</>}>
         <p>Status: {formatBadge(selectedChecklist.status)} | Type: {selectedChecklist.checklist_type.replace(/_/g, ' ')} | Marking: {selectedChecklist.marking_enabled ? 'enabled' : 'disabled'}</p>

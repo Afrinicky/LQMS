@@ -1,23 +1,56 @@
 /**
- * Central RBAC decision point.
+ * Central RBAC decision point — one model, two layers.
  *
  * Every permission question in SECH_LIMS — API middleware, the effective
  * permission map the client uses to hide features, and the module filters on
  * dashboards and alert feeds — is answered here, so the server and the UI can
  * never disagree about what a user may do.
  *
- * Three rules make the model safe:
+ * ── Why this was rewritten ────────────────────────────────────────────────
+ * Access used to be assembled from four independent sources that could all
+ * disagree with one another: a role default, a position grant, a technical
+ * authorization level, and a personal override. Because the first three could
+ * only ever ADD, a role set to "no access" was silently re-opened by a
+ * position or an authorization, and nobody looking at any single screen could
+ * say what a person could actually do. That is how staff ended up seeing
+ * workspaces nobody meant to give them.
  *
- *  1. `view` is the floor. No action on a module is possible without the right
- *     to view that module. A user who cannot open a record cannot print it,
- *     export it, edit it or approve it either.
- *  2. A technical authorization grants only the actions its level actually
- *     implies. "View only" no longer confers approval rights.
- *  3. An expired or inactive authorization grants nothing.
+ * There are now exactly two layers, and they are ordered:
+ *
+ *   1. ACCESS PROFILE — the single cohort decision. Every user resolves to
+ *      exactly one profile, so two cohorts can never contradict each other.
+ *      A profile is a row in `roles`; an organogram position may be mapped to
+ *      a profile (`positions.access_profile_role_id`), and when the person's
+ *      active primary position carries such a mapping it is the profile that
+ *      applies. Otherwise the profile on their user account applies. One
+ *      decision, always.
+ *
+ *   2. INDIVIDUAL — a person-specific override that SUPERSEDES the profile,
+ *      to allow or to deny. This is the only thing that can overrule layer 1,
+ *      and it always wins.
+ *
+ * Technical authorizations no longer grant permissions. They remain the
+ * competency record ISO 15189 asks for — who is authorised to perform, review,
+ * verify or approve technical work — but a competency record silently widening
+ * somebody's software rights was one of the contradictions this model removes.
+ * If a person needs the rights, they are granted on their profile or as an
+ * individual override, where they can be seen.
+ *
+ * Four invariants hold on top of the layers:
+ *
+ *  a. `view` is the floor. No action on an area is possible without the right
+ *     to view it. A user who cannot open a record cannot print it, export it,
+ *     edit it or approve it either.
+ *  b. A decision recorded against a MODULE cascades to every feature inside
+ *     it, allow or deny. "No access to Documents" means no access to any part
+ *     of Documents.
+ *  c. A module's access is the union of its features, so a module-level route
+ *     guard keeps working once the module has been split up.
+ *  d. A disabled module, or an inactive user, grants nothing at all.
  */
 import { getDb } from '../db/database.js';
 import { MODULES, PERMISSION_ACTIONS } from '../../shared/constants/modules.js';
-import { FEATURES, featuresOfModule, isFeatureKey, getFeature } from '../../shared/constants/features.js';
+import { FEATURES, featuresOfModule, isFeatureKey, getFeature, LEVEL_ACTIONS, levelForActions, type AccessLevel } from '../../shared/constants/features.js';
 
 export type PermissionDecision = { allowed: boolean; source: string; reason: string };
 
@@ -30,36 +63,62 @@ export type PermissionMap = Record<string, string[]>;
  */
 export const BASE_ACTION = 'view';
 
-/**
- * What each technical-authorization level is actually authorised to do.
- * Levels are competency statements, so they widen gradually and only the
- * supervisory levels carry approval or archiving rights.
- */
-const TECHNICAL_LEVEL_ACTIONS: Record<string, string[]> = {
-  'View only': ['view'],
-  'Perform': ['view', 'create', 'print'],
-  'Review': ['view', 'create', 'edit', 'print'],
-  'Verify': ['view', 'create', 'edit', 'print', 'export'],
-  'Approve': ['view', 'create', 'edit', 'print', 'export', 'approve'],
-  'Supervise': ['view', 'create', 'edit', 'void_archive', 'print', 'export', 'approve'],
-  'Train others': ['view', 'print'],
-};
+/** Where a decision came from, in the words the screens use. */
+export const SOURCE_PROFILE = 'Access profile';
+export const SOURCE_INDIVIDUAL = 'Individual override';
+export const SOURCE_DERIVED = 'Derived';
+export const SOURCE_NONE = 'Not granted';
 
 type Grant = { allowed: boolean; source: string; reason: string };
 
+/** Every key a permission may be granted on: modules and features alike. */
+const ALL_PERM_KEYS: string[] = [...MODULES.map(m => m.key), ...FEATURES.map(f => f.key)];
+
 /**
- * Resolve every (module, action) pair for a user in a handful of queries.
+ * The one access profile that applies to a user.
+ *
+ * An organogram position may carry a profile mapping. When the person holds
+ * such a position, that mapping is their profile — the organogram is the more
+ * specific statement of what the job is. Otherwise their account's own profile
+ * applies. Exactly one is returned, which is what makes contradiction
+ * impossible.
+ */
+export function profileIdForUser(userId: number): { profileId: number | null; via: 'position' | 'account' | null; positionTitle?: string } {
+  const db = getDb();
+  const user = db.prepare('SELECT id, role_id, staff_id, is_active FROM users WHERE id = ?').get(userId) as
+    { id: number; role_id: number; staff_id: number | null; is_active: number } | undefined;
+  if (!user || user.is_active !== 1) return { profileId: null, via: null };
+
+  if (user.staff_id) {
+    const mapped = db.prepare(`
+      SELECT p.access_profile_role_id AS profileId, p.title AS title
+      FROM staff_position_assignments spa
+      JOIN positions p ON p.id = spa.position_id
+      WHERE spa.staff_id = ? AND spa.is_active = 1 AND p.is_active = 1
+        AND p.access_profile_role_id IS NOT NULL
+      ORDER BY CASE spa.assignment_type WHEN 'primary' THEN 0 ELSE 1 END, spa.id
+      LIMIT 1
+    `).get(user.staff_id) as { profileId: number; title: string } | undefined;
+    if (mapped?.profileId) return { profileId: mapped.profileId, via: 'position', positionTitle: mapped.title };
+  }
+  return { profileId: user.role_id, via: 'account' };
+}
+
+/**
+ * Resolve every (key, action) pair for a user in a handful of queries.
  * Used directly for the client permission map, and by `resolvePermission` so
  * a single implementation decides both.
  */
 function computeGrants(userId: number): Map<string, Grant> {
   const db = getDb();
   const grants = new Map<string, Grant>();
-  const key = (moduleKey: string, action: string) => `${moduleKey}:${action}`;
+  const key = (permKey: string, action: string) => `${permKey}:${action}`;
+  const set = (permKey: string, action: string, allowed: boolean, source: string, reason: string) => {
+    grants.set(key(permKey, action), { allowed, source, reason });
+  };
 
-  const user = db.prepare('SELECT id, role_id, staff_id, is_active FROM users WHERE id = ?').get(userId) as
-    { id: number; role_id: number; staff_id: number | null; is_active: number } | undefined;
-  if (!user || user.is_active !== 1) return grants;
+  const { profileId, via, positionTitle } = profileIdForUser(userId);
+  if (profileId === null) return grants;
 
   const enabledModules = new Set(
     (db.prepare('SELECT key FROM system_modules WHERE enabled = 1').all() as { key: string }[]).map(m => m.key)
@@ -69,121 +128,83 @@ function computeGrants(userId: number): Map<string, Grant> {
     { id: number; module_key: string; action: string }[];
   const permById = new Map(permissions.map(p => [p.id, p]));
 
-  const set = (moduleKey: string, action: string, allowed: boolean, source: string, reason: string) => {
-    grants.set(key(moduleKey, action), { allowed, source, reason });
-  };
-
-  // ── Layer 1: role defaults ────────────────────────────────────────────────
-  const rolePerms = db.prepare('SELECT permission_id, allowed, source FROM role_permissions WHERE role_id = ?')
-    .all(user.role_id) as { permission_id: number; allowed: number; source: string }[];
-  for (const rp of rolePerms) {
-    const p = permById.get(rp.permission_id);
-    if (!p || rp.allowed !== 1) continue;
-    set(p.module_key, p.action, true, rp.source || 'Role default', 'Allowed by role default.');
-  }
-
-  if (user.staff_id) {
-    // ── Layer 2: permissions attached to an active position assignment ──────
-    const positionPerms = db.prepare(`
-      SELECT pp.permission_id, pp.allowed, pp.source
-      FROM staff_position_assignments spa
-      JOIN position_permissions pp ON pp.position_id = spa.position_id
-      WHERE spa.staff_id = ? AND spa.is_active = 1
-    `).all(user.staff_id) as { permission_id: number; allowed: number; source: string }[];
-    for (const pp of positionPerms) {
-      const p = permById.get(pp.permission_id);
-      if (!p || pp.allowed !== 1) continue;
-      set(p.module_key, p.action, true, pp.source || 'Position default', 'Allowed by active position assignment.');
-    }
-
-    // ── Layer 3: technical authorizations, limited to the level's actions ────
-    // Inactive and expired authorizations are ignored entirely.
-    const techAuths = db.prepare(`
-      SELECT ta.module_key, ta.level
-      FROM technical_authorizations ta
-      WHERE ta.is_active = 1
-        AND (ta.expires_at IS NULL OR ta.expires_at = '' OR date(ta.expires_at) >= date('now'))
-        AND (
-          ta.staff_id = ?
-          OR ta.position_id IN (SELECT position_id FROM staff_position_assignments WHERE staff_id = ? AND is_active = 1)
-        )
-    `).all(user.staff_id, user.staff_id) as { module_key: string; level: string }[];
-    for (const ta of techAuths) {
-      for (const action of TECHNICAL_LEVEL_ACTIONS[ta.level] ?? []) {
-        set(ta.module_key, action, true, 'Technical authorization', `Allowed by technical authorization level ${ta.level}.`);
-      }
-    }
-  }
-
-  // ── Layer 4: user-specific overrides win over everything above ────────────
-  const overrides = db.prepare('SELECT permission_id, allowed, source FROM user_permission_overrides WHERE user_id = ?')
-    .all(userId) as { permission_id: number; allowed: number; source: string }[];
-  for (const o of overrides) {
-    const p = permById.get(o.permission_id);
-    if (!p) continue;
-    set(p.module_key, p.action, o.allowed === 1, o.source || 'Manual override', 'User-specific permission override.');
-  }
-
-  // ── Denying a whole module cascades to everything inside it ───────────────
-  // Module access is derived from features (see below), so without this an
-  // administrator revoking "Documents" from someone would change nothing at
-  // all: the union of their still-granted document features would hand it
-  // straight back. A denial written against a module is the plainest way to
-  // say "not this person, not anywhere in here", and it has to hold.
-  const explicitDenials = new Set<string>();
-  const collectDenials = (rows: { permission_id: number; allowed: number }[]) => {
-    for (const r of rows) {
-      if (r.allowed !== 0) continue;
-      const p = permById.get(r.permission_id);
-      if (p && featuresOfModule(p.module_key).length > 0) explicitDenials.add(`${p.module_key}:${p.action}`);
+  // A decision written against a module applies to every feature inside it.
+  // Applied for both layers so "no access to Personnel" is not undone by a
+  // feature grant left behind from an earlier configuration.
+  const applyRow = (permKey: string, action: string, allowed: boolean, source: string, reason: string) => {
+    set(permKey, action, allowed, source, reason);
+    for (const feature of featuresOfModule(permKey)) {
+      set(feature.key, action, allowed, source, reason);
     }
   };
-  collectDenials(overrides);
-  collectDenials(rolePerms);
-  for (const denied of explicitDenials) {
-    const [moduleKey, action] = denied.split(':');
-    for (const feature of featuresOfModule(moduleKey)) {
-      set(feature.key, action, false, 'Denied override', `Denied for the whole ${moduleKey} module.`);
-    }
+
+  // ── Layer 1: the access profile ───────────────────────────────────────────
+  const profileVia = via === 'position'
+    ? `${SOURCE_PROFILE} (via the ${positionTitle} position)`
+    : SOURCE_PROFILE;
+  const profileRows = db.prepare('SELECT permission_id, allowed FROM role_permissions WHERE role_id = ?')
+    .all(profileId) as { permission_id: number; allowed: number }[];
+  // Modules first, features second, so a specific feature decision refines the
+  // module-wide one rather than being overwritten by it.
+  const ordered = profileRows
+    .map(r => ({ ...r, perm: permById.get(r.permission_id) }))
+    .filter((r): r is typeof r & { perm: { id: number; module_key: string; action: string } } => !!r.perm)
+    .sort((a, b) => Number(isFeatureKey(a.perm.module_key)) - Number(isFeatureKey(b.perm.module_key)));
+  for (const row of ordered) {
+    applyRow(row.perm.module_key, row.perm.action, row.allowed === 1, profileVia,
+      row.allowed === 1 ? 'Allowed by the access profile.' : 'Not allowed by the access profile.');
   }
 
-  // ── Rule 1: `view` is the floor for every other action ────────────────────
-  // Applied last so it also overrides grants made by any layer above.
-  const keysSeen = new Set(permissions.map(p => p.module_key));
-  for (const permKey of keysSeen) {
+  // ── Layer 2: the individual, superseding everything above ─────────────────
+  const overrides = db.prepare('SELECT permission_id, allowed, reason FROM user_permission_overrides WHERE user_id = ?')
+    .all(userId) as { permission_id: number; allowed: number; reason: string | null }[];
+  const orderedOverrides = overrides
+    .map(r => ({ ...r, perm: permById.get(r.permission_id) }))
+    .filter((r): r is typeof r & { perm: { id: number; module_key: string; action: string } } => !!r.perm)
+    .sort((a, b) => Number(isFeatureKey(a.perm.module_key)) - Number(isFeatureKey(b.perm.module_key)));
+  for (const row of orderedOverrides) {
+    applyRow(row.perm.module_key, row.perm.action, row.allowed === 1, SOURCE_INDIVIDUAL,
+      row.allowed === 1
+        ? `Granted to this person individually${row.reason ? ` — ${row.reason}` : ''}.`
+        : `Withdrawn from this person individually${row.reason ? ` — ${row.reason}` : ''}.`);
+  }
+
+  // ── Invariant (a): `view` is the floor for every other action ─────────────
+  // Applied before the module union so a module cannot inherit, say, `export`
+  // from a feature the user may not even open.
+  for (const permKey of ALL_PERM_KEYS) {
     const canView = grants.get(key(permKey, BASE_ACTION))?.allowed === true;
+    if (canView) continue;
     for (const action of PERMISSION_ACTIONS) {
       if (action === BASE_ACTION) continue;
-      const g = grants.get(key(permKey, action));
-      if (g?.allowed && !canView) {
-        set(permKey, action, false, 'Denied override',
+      if (grants.get(key(permKey, action))?.allowed) {
+        set(permKey, action, false, SOURCE_DERIVED,
           `The ${action} right needs the right to view this area. Grant "view" first.`);
       }
     }
   }
 
-  // ── Rule 2: a module's access is the union of its features ───────────────
+  // ── Invariant (c): a module's access is the union of its features ─────────
   // Permissions are granted on features, but 1,000+ existing route guards name
   // modules. Deriving the module from its features keeps every one of them
   // working: `personnel:view` now means "can view at least one part of
-  // Personnel", which is exactly the question the module gate is asking — is
-  // this workspace worth showing at all. The finer question is asked with a
-  // feature key.
+  // Personnel", which is exactly the question the module gate is asking. The
+  // finer question is asked with a feature key.
   for (const moduleKey of new Set(FEATURES.map(f => f.module))) {
     const features = featuresOfModule(moduleKey);
     for (const action of PERMISSION_ACTIONS) {
       const allowedBy = features.find(f => grants.get(key(f.key, action))?.allowed === true);
       if (allowedBy) {
-        set(moduleKey, action, true, 'Feature grant', `Allowed by the "${allowedBy.label}" feature.`);
+        set(moduleKey, action, true, SOURCE_DERIVED, `Allowed by the "${allowedBy.label}" area.`);
       } else {
-        set(moduleKey, action, false, 'Denied override', 'No feature inside this module allows this action.');
+        set(moduleKey, action, false, SOURCE_DERIVED, 'No area inside this module allows this action.');
       }
     }
   }
 
-  // ── Disabled modules grant nothing, whatever the layers above said ────────
+  // ── Invariant (d): disabled modules grant nothing ─────────────────────────
   const moduleOf = (permKey: string) => getFeature(permKey)?.module ?? permKey;
-  for (const permKey of new Set([...keysSeen, ...FEATURES.map(f => f.key)])) {
+  for (const permKey of ALL_PERM_KEYS) {
     if (enabledModules.has(moduleOf(permKey))) continue;
     for (const action of PERMISSION_ACTIONS) {
       set(permKey, action, false, 'Module disabled', 'The module is disabled or unavailable.');
@@ -204,19 +225,19 @@ export function resolvePermission(userId: number, permKey: string, action: strin
   if (!module || module.enabled !== 1) return { allowed: false, source: 'Module disabled', reason: 'The module is disabled or unavailable.' };
 
   const user = db.prepare('SELECT is_active FROM users WHERE id = ?').get(userId) as { is_active: number } | undefined;
-  if (!user || user.is_active !== 1) return { allowed: false, source: 'Denied override', reason: 'Inactive or unknown user.' };
+  if (!user || user.is_active !== 1) return { allowed: false, source: SOURCE_NONE, reason: 'Inactive or unknown user.' };
 
   if (!isFeatureKey(permKey)) {
     const permission = db.prepare('SELECT id FROM permissions WHERE module_key = ? AND action = ?').get(permKey, action) as { id: number } | undefined;
     if (!permission && featuresOfModule(permKey).length === 0) {
-      return { allowed: false, source: 'Denied override', reason: 'Permission is not defined.' };
+      return { allowed: false, source: SOURCE_NONE, reason: 'Permission is not defined.' };
     }
   }
 
   const grant = computeGrants(userId).get(`${permKey}:${action}`);
   if (grant?.allowed) return { allowed: true, source: grant.source, reason: grant.reason };
   if (grant) return { allowed: false, source: grant.source, reason: grant.reason };
-  return { allowed: false, source: 'Denied override', reason: 'No permission source allows this action.' };
+  return { allowed: false, source: SOURCE_NONE, reason: 'No permission source allows this action.' };
 }
 
 /**
@@ -249,21 +270,17 @@ export function canReachPersonalRecord(
 
 /**
  * The full effective permission map for a user, in the shape the client needs
- * to decide what to render: `{ documents: ['view','print'], … }`. Modules the
+ * to decide what to render: `{ documents: ['view','print'], … }`. Areas the
  * user cannot view are omitted entirely, so "not in the map" means "must not
  * see it" on both sides of the wire.
  */
 export function getEffectivePermissions(userId: number): PermissionMap {
   const grants = computeGrants(userId);
   const map: PermissionMap = {};
-  const add = (permKey: string) => {
+  for (const permKey of ALL_PERM_KEYS) {
     const actions = PERMISSION_ACTIONS.filter(a => grants.get(`${permKey}:${a}`)?.allowed === true);
     if (actions.includes(BASE_ACTION)) map[permKey] = [...actions];
-  };
-  for (const module of MODULES) add(module.key);
-  // Features travel in the same map, keyed `module.feature`, so the client
-  // hides a tab with the same call it uses to hide a module.
-  for (const feature of FEATURES) add(feature.key);
+  }
   return map;
 }
 
@@ -275,4 +292,77 @@ export function getViewableModules(userId: number): Set<string> {
 /** Convenience predicate used by route handlers that filter mixed-module data. */
 export function canViewModule(userId: number, moduleKey: string): boolean {
   return resolvePermission(userId, moduleKey, BASE_ACTION).allowed;
+}
+
+/* ==========================================================================
+   Explaining a decision
+   --------------------------------------------------------------------------
+   The Individuals screen has to answer "why can this person do that?" in
+   words an administrator can act on. Nothing else may compute access, so the
+   explanation is derived from the same grant map the guards use.
+   ========================================================================= */
+
+export type AreaExplanation = {
+  permKey: string;
+  /** What the profile alone would give. */
+  profileLevel: AccessLevel;
+  /** What the individual override gives, when there is one. */
+  overrideLevel: AccessLevel | null;
+  /** What actually applies. */
+  effectiveLevel: AccessLevel;
+  actions: string[];
+  source: string;
+};
+
+/** The level a set of stored rows amounts to for one area. */
+function levelFromRows(rows: Map<string, boolean>, permKey: string): AccessLevel {
+  const actions = PERMISSION_ACTIONS.filter(a => rows.get(`${permKey}:${a}`) === true);
+  return levelForActions(actions);
+}
+
+/**
+ * Per-area explanation of one user's access: profile level, personal override
+ * level (or none), and the effective outcome.
+ */
+export function explainUserAccess(userId: number): { profileId: number | null; via: 'position' | 'account' | null; positionTitle?: string; areas: AreaExplanation[] } {
+  const db = getDb();
+  const { profileId, via, positionTitle } = profileIdForUser(userId);
+  const permissions = db.prepare('SELECT id, module_key, action FROM permissions').all() as
+    { id: number; module_key: string; action: string }[];
+  const permById = new Map(permissions.map(p => [p.id, p]));
+
+  const profileRows = new Map<string, boolean>();
+  if (profileId !== null) {
+    for (const r of db.prepare('SELECT permission_id, allowed FROM role_permissions WHERE role_id = ?').all(profileId) as { permission_id: number; allowed: number }[]) {
+      const p = permById.get(r.permission_id);
+      if (p) profileRows.set(`${p.module_key}:${p.action}`, r.allowed === 1);
+    }
+  }
+  const overrideRows = new Map<string, boolean>();
+  const overriddenKeys = new Set<string>();
+  for (const r of db.prepare('SELECT permission_id, allowed FROM user_permission_overrides WHERE user_id = ?').all(userId) as { permission_id: number; allowed: number }[]) {
+    const p = permById.get(r.permission_id);
+    if (!p) continue;
+    overrideRows.set(`${p.module_key}:${p.action}`, r.allowed === 1);
+    overriddenKeys.add(p.module_key);
+  }
+
+  const effective = getEffectivePermissions(userId);
+  const areas: AreaExplanation[] = ALL_PERM_KEYS.map(permKey => {
+    const actions = effective[permKey] ?? [];
+    return {
+      permKey,
+      profileLevel: levelFromRows(profileRows, permKey),
+      overrideLevel: overriddenKeys.has(permKey) ? levelFromRows(overrideRows, permKey) : null,
+      effectiveLevel: levelForActions(actions),
+      actions,
+      source: overriddenKeys.has(permKey) ? SOURCE_INDIVIDUAL : SOURCE_PROFILE,
+    };
+  });
+  return { profileId, via, positionTitle, areas };
+}
+
+/** The action set a level implies — exported so writers and readers agree. */
+export function actionsForLevel(level: AccessLevel): string[] {
+  return LEVEL_ACTIONS[level] ?? [];
 }

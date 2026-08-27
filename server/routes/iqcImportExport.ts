@@ -88,7 +88,7 @@ export function iqcImportExportRoutes() {
 
   /* ================================================================ controls */
 
-  router.get('/controls/template', requirePermission('iqc', 'view'), (_req, res) => {
+  router.get('/controls/template', requirePermission('iqc', 'export'), (_req, res) => {
     sendWorkbook(res, buildWorkbook(CONTROL_HEADERS, CONTROL_GUIDE, 'IQC CONTROLS'), 'IQC_Controls_Template.xlsx');
   });
 
@@ -291,7 +291,7 @@ export function iqcImportExportRoutes() {
    * A blank run sheet. Given a control, it pre-fills one row per analyte with
    * the lot number already in place — the bench then only types results.
    */
-  router.get('/runs/template', requirePermission('iqc', 'view'), (req, res) => {
+  router.get('/runs/template', requirePermission('iqc', 'export'), (req, res) => {
     const guide: unknown[][] = [];
     const materialId = parseIntNullable(req.query.materialId);
     if (materialId) {

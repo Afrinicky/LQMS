@@ -59,7 +59,46 @@ export type ApiUser = { id: number; username: string; fullName: string; roleId: 
  */
 export type PermissionMap = Record<string, string[]>;
 export type SystemModule = { id: number; key: string; label: string; path: string; enabled: boolean; alertsPaused: boolean };
-export type Position = { id: number; title: string; description?: string; reportsToPositionId?: number | null; isActive: boolean; archivedAt?: string | null };
+export type Position = { id: number; title: string; description?: string; reportsToPositionId?: number | null; isActive: boolean; archivedAt?: string | null; accessProfileId?: number | null; accessProfileName?: string | null };
+
+/**
+ * ACCESS CONTROL — one model, two layers.
+ *
+ * An access profile is the single cohort decision: every user resolves to
+ * exactly one, so two cohorts can never contradict each other. An organogram
+ * position may be mapped to a profile, and when it is, that mapping is what
+ * applies to the people holding the position.
+ */
+export type AccessProfile = { id: number; name: string; description?: string | null; isAdministrator?: number; accountCount: number };
+
+export type AccessProfilePosition = { id: number; title: string; isActive: number; accessProfileId: number | null; accessProfileName: string | null; holderCount: number };
+
+export type AccessCatalogue = {
+  profiles: AccessProfile[];
+  positions: AccessProfilePosition[];
+  /** profileId → area key → the actions that profile allows. */
+  roles: Record<string, Record<string, string[]>>;
+  /** userId → area key → the actions the individual override allows. */
+  users: Record<string, Record<string, string[]>>;
+  userOverrideKeys: { userId: number; permKey: string }[];
+};
+
+export type AreaExplanation = {
+  permKey: string;
+  profileLevel: string;
+  overrideLevel: string | null;
+  effectiveLevel: string;
+  actions: string[];
+  source: string;
+};
+
+export type EffectiveAccess = {
+  user: { id: number; username: string; fullName: string; roleId: number; isActive: number };
+  profile: { id: number; name: string } | null;
+  via: 'position' | 'account' | null;
+  positionTitle: string | null;
+  areas: AreaExplanation[];
+};
 /**
  * A member of laboratory personnel.
  *

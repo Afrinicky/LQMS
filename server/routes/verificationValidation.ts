@@ -191,7 +191,13 @@ export function verificationValidationRoutes() {
     res.status(201).json({ id: verId, verificationNumber });
   });
 
-  router.get('/:id', requirePermission('verification_validation', 'view'), (req, res) => {
+  // Numeric-guarded so `/export` further down is not swallowed as a study id.
+  // It was: the export route's own `export` guard was never reached, and the
+  // request fell through to this one — which asks only for `view` and then
+  // answers 404. The register could not be exported by anybody, and the guard
+  // that was supposed to protect it was dead code.
+  const numericOnly = (req: any, _res: any, next: any) => (/^\d+$/.test(req.params.id) ? next() : next('route'));
+  router.get('/:id', numericOnly, requirePermission('verification_validation', 'view'), (req, res) => {
     const study = loadStudy(getDb(), req.params.id);
     if (!study) return res.status(404).json({ error: 'Study not found' });
     res.json(study);
@@ -383,7 +389,7 @@ export function verificationValidationRoutes() {
 
   // ---- Excel export of the studies register ----
   const REGISTER_HEADERS = ['Number', 'Study type', 'Test', 'Method', 'Analyte', 'Matrix', 'Units', 'Measurand', 'Equipment', 'Guideline', 'Scope', 'Start', 'Completed', 'Verdict', 'Authorised', 'Status'];
-  router.get('/export', requirePermission('verification_validation', 'view'), (_req, res) => {
+  router.get('/export', requirePermission('verification_validation', 'export'), (_req, res) => {
     const db = getDb();
     const rows = db.prepare(`SELECT mv.*, e.name AS equipment_name FROM method_verifications mv LEFT JOIN equipment_items e ON e.id = mv.equipment_id ORDER BY mv.created_at DESC`).all() as any[];
     const aoa: any[][] = [REGISTER_HEADERS as unknown as string[]];
@@ -399,7 +405,7 @@ export function verificationValidationRoutes() {
   });
 
   // ---- Printable formal verification/validation report ----
-  router.get('/:id/print', requirePermission('verification_validation', 'view'), (req, res) => {
+  router.get('/:id/print', requirePermission('verification_validation', 'print'), (req, res) => {
     const db = getDb();
     const s = loadStudy(db, req.params.id) as any;
     if (!s) return res.status(404).send('Study not found');

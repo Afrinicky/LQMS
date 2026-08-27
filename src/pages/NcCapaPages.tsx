@@ -9,7 +9,7 @@ import DisabledModule from '../components/DisabledModule';
 import RiskMatrix, { riskLevelBadge, bandFor } from '../components/RiskMatrix';
 import XlsxToolbar from '../components/XlsxToolbar';
 import WorkflowStepper from '../components/WorkflowStepper';
-import { useTabParam } from '../hooks/useTabParam';
+import { usePermittedTabs } from '../components/PermissionTabs';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import {
   NC_TYPE_OPTIONS, RCA_METHOD_OPTIONS, capaSourceLabel, formatBadge, fmtDate, EmptyRow,
@@ -63,8 +63,12 @@ function Banner({ kind, children }: { kind: 'error' | 'ok' | 'info'; children: R
 /** Tab bar shared by the three submodules. Honours ?tab= so a dashboard alert
  *  opens the register the record is on, not the submodule's first tab. */
 function Tabs({ tabs, tab, setTab, counts }: { tabs: string[]; tab: string; setTab: (t: string) => void; counts?: Record<string, number> }) {
-  useTabParam(tabs, setTab);
-  return <div className="tabs">{tabs.map(name => {
+  // "Log Event" and "Report Incident" are blank forms: showing them to someone
+  // who may read the register but not add to it was the exact complaint — they
+  // fill the form in and the save is refused. The bar asks the same question
+  // the API will ask, and drops the tab when the answer is no.
+  const permitted = usePermittedTabs('nc_capa', tabs, tab, setTab);
+  return <div className="tabs">{permitted.map(name => {
     const n = counts?.[name];
     return <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>
       {name}{n ? <span className="badge badge--warning" style={{ marginLeft: 6 }}>{n}</span> : null}

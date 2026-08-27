@@ -201,8 +201,8 @@ export function iqcRoutes() {
     }
     return buildWorkbook(IQC_MATERIAL_HEADERS, rows, 'IQC MATERIALS');
   }
-  router.get('/materials/template', requirePermission('iqc', 'view'), (_req, res) => sendWorkbook(res, iqcMaterialsWorkbook(false), 'IQC_Materials_Template.xlsx'));
-  router.get('/materials/export', requirePermission('iqc', 'view'), (_req, res) => sendWorkbook(res, iqcMaterialsWorkbook(true), 'IQC_Materials.xlsx'));
+  router.get('/materials/template', requirePermission('iqc', 'export'), (_req, res) => sendWorkbook(res, iqcMaterialsWorkbook(false), 'IQC_Materials_Template.xlsx'));
+  router.get('/materials/export', requirePermission('iqc', 'export'), (_req, res) => sendWorkbook(res, iqcMaterialsWorkbook(true), 'IQC_Materials.xlsx'));
   router.post('/materials/import', requirePermission('iqc', 'create'), xlsxUpload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the IQC Materials .xlsx file.' });
     try {

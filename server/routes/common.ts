@@ -10,8 +10,8 @@ import { config, isLanExposed, type AppMode } from '../config/index.js';
 import { seedDefaults } from '../db/seed.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requirePermission, viewableModulesOf } from '../middleware/permissions.js';
-import { resolvePermission } from '../services/permissionResolver.js';
-import { ACCESS_LEVELS, LEVEL_ACTIONS, type AccessLevel } from '../../shared/constants/features.js';
+import { resolvePermission, explainUserAccess } from '../services/permissionResolver.js';
+import { ACCESS_LEVELS, LEVEL_ACTIONS, featuresOfModule, type AccessLevel } from '../../shared/constants/features.js';
 import { pendingRequests, recentRequests, decideRequest } from '../services/passwordResetService.js';
 import { historicReferences, purgeDisposableRows, purgeUserEverywhere } from '../services/userReferences.js';
 import { historicStaffReferences, purgeDisposableStaffRows, describeStaffReference, purgeStaffEverywhere } from '../services/staffReferences.js';
@@ -200,7 +200,7 @@ export function commonRoutes() {
   const router = Router();
   router.use(requireAuth);
 
-  router.get('/dashboard', (req, res) => {
+  router.get('/dashboard', requireAuth, (req, res) => {
     const db = getDb();
     const seen = viewableModulesOf(req);
     const only = (moduleKey: string, fields: () => Record<string, unknown>) => (seen.has(moduleKey) ? fields() : {});
@@ -218,7 +218,7 @@ export function commonRoutes() {
       })),
     });
   });
-  router.get('/dashboard/operations-summary', (req, res) => {
+  router.get('/dashboard/operations-summary', requireAuth, (req, res) => {
     const db = getDb();
     const seen = viewableModulesOf(req);
     const now = new Date().toISOString();
@@ -252,7 +252,7 @@ export function commonRoutes() {
 
   // Deprecated: kept for backward compatibility. New code should use the per-module
   // summary endpoints below (/dashboard/iqc-summary etc).
-  router.get('/dashboard/technical-quality-summary', (req, res) => {
+  router.get('/dashboard/technical-quality-summary', requireAuth, (req, res) => {
     const db = getDb();
     const seen = viewableModulesOf(req);
     const now = new Date().toISOString();
@@ -545,7 +545,7 @@ export function commonRoutes() {
   // each field is emitted only when the caller may view the module it counts.
   // A field the caller may not see is absent rather than zero — the client
   // then leaves it out of the dashboard instead of showing a misleading 0.
-  router.get('/dashboard/governance-summary', (req, res) => {
+  router.get('/dashboard/governance-summary', requireAuth, (req, res) => {
     const db = getDb();
     const seen = viewableModulesOf(req);
     const todayIso = new Date().toISOString().slice(0, 10);
@@ -573,7 +573,7 @@ export function commonRoutes() {
     });
   });
 
-  router.get('/dashboard/qms-summary', (req, res) => {
+  router.get('/dashboard/qms-summary', requireAuth, (req, res) => {
     const db = getDb();
     const seen = viewableModulesOf(req);
     const staffId = req.user?.staffId ?? null;
@@ -598,7 +598,65 @@ export function commonRoutes() {
     });
   });
 
-  router.get('/roles', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT id, name, description, is_system isSystem FROM roles ORDER BY name').all()));
+  router.get('/roles', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT id, name, description, is_system isSystem, is_administrator isAdministrator FROM roles ORDER BY name').all()));
+
+  // ── Access profiles ──────────────────────────────────────────────────────
+  // A profile IS a role: one row, one cohort, the single thing that decides
+  // what a person may do before their own individual decisions are applied.
+  // A laboratory has to be able to add one — "Night shift", "Locum" — without
+  // reaching into the database, so the merged Access Control screen creates,
+  // renames and retires them here.
+  router.post('/roles', requirePermission('settings', 'create'), (req, res) => {
+    const name = String(req.body?.name ?? '').trim();
+    if (!name) return res.status(400).json({ error: 'A name is required for the access profile.' });
+    const db = getDb();
+    if (db.prepare('SELECT id FROM roles WHERE LOWER(name) = LOWER(?)').get(name)) {
+      return res.status(400).json({ error: 'An access profile with that name already exists.' });
+    }
+    const r = db.prepare('INSERT INTO roles (name, description, is_system) VALUES (?, ?, 0)')
+      .run(name, String(req.body?.description ?? '').trim() || null);
+    // A new profile starts with nothing granted, stated explicitly rather than
+    // left blank, so it reads as "no access" everywhere until somebody decides
+    // otherwise. Least privilege is the default, not an omission.
+    const id = Number(r.lastInsertRowid);
+    for (const p of db.prepare('SELECT id FROM permissions').all() as { id: number }[]) {
+      db.prepare('INSERT OR IGNORE INTO role_permissions (role_id, permission_id, allowed, source) VALUES (?, ?, 0, ?)').run(id, p.id, 'Access profile');
+    }
+    audit(req, { action: 'create', entity: 'roles', entityId: id, newValue: { name } });
+    res.status(201).json({ id, name });
+  });
+
+  router.put('/roles/:id', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const existing = db.prepare('SELECT * FROM roles WHERE id = ?').get(req.params.id) as { id: number; name: string } | undefined;
+    if (!existing) return res.status(404).json({ error: 'Access profile not found' });
+    const name = String(req.body?.name ?? existing.name).trim();
+    if (!name) return res.status(400).json({ error: 'A name is required.' });
+    const clash = db.prepare('SELECT id FROM roles WHERE LOWER(name) = LOWER(?) AND id != ?').get(name, existing.id);
+    if (clash) return res.status(400).json({ error: 'Another access profile already has that name.' });
+    db.prepare('UPDATE roles SET name = ?, description = ? WHERE id = ?')
+      .run(name, req.body?.description ?? null, existing.id);
+    audit(req, { action: 'edit', entity: 'roles', entityId: existing.id, oldValue: existing, newValue: { name, description: req.body?.description ?? null } });
+    res.json({ ok: true });
+  });
+
+  router.delete('/roles/:id', requirePermission('settings', 'void_archive'), (req, res) => {
+    const db = getDb();
+    const existing = db.prepare('SELECT * FROM roles WHERE id = ?').get(req.params.id) as
+      { id: number; name: string; is_system: number; is_administrator: number } | undefined;
+    if (!existing) return res.status(404).json({ error: 'Access profile not found' });
+    if (existing.is_administrator === 1) return res.status(400).json({ error: 'The administrator profile cannot be removed.' });
+    if (existing.is_system === 1) return res.status(400).json({ error: 'This is a built-in profile and cannot be removed.' });
+    const accounts = db.prepare('SELECT COUNT(*) AS n FROM users WHERE role_id = ?').get(existing.id) as { n: number };
+    if (accounts.n > 0) return res.status(400).json({ error: `${accounts.n} account(s) still work under this profile. Move them to another one first.` });
+    const positions = db.prepare('SELECT COUNT(*) AS n FROM positions WHERE access_profile_role_id = ?').get(existing.id) as { n: number };
+    if (positions.n > 0) return res.status(400).json({ error: `${positions.n} organogram position(s) are mapped to this profile. Unmap them first.` });
+    db.prepare('DELETE FROM role_permissions WHERE role_id = ?').run(existing.id);
+    db.prepare('DELETE FROM roles WHERE id = ?').run(existing.id);
+    audit(req, { action: 'delete', entity: 'roles', entityId: existing.id, oldValue: existing });
+    res.json({ ok: true });
+  });
+
   router.get('/users', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT u.id, u.username, u.full_name fullName, u.role_id roleId, u.staff_id staffId, s.full_name staffName, r.name roleName, u.is_active isActive, u.must_change_password mustChangePassword FROM users u JOIN roles r ON r.id = u.role_id LEFT JOIN staff s ON s.id = u.staff_id ORDER BY u.full_name').all()));
   router.post('/users', requirePermission('settings', 'create'), (req, res) => {
     const { username, password, fullName, roleId } = req.body;
@@ -1512,13 +1570,12 @@ export function commonRoutes() {
   // Access, Positions & Organogram, the Permission Matrix and Personnel Management.
   router.post('/staff/register', requirePermission('personnel.register', 'create'), (req, res) => {
     const db = getDb();
-    const { firstName, surname, otherNames, employeeNo, fullName, email, phone, sectionId, positionIds, primaryPositionId, createUser, username, password, roleId, authorizations, permissions } = req.body as {
+    const { firstName, surname, otherNames, employeeNo, fullName, email, phone, sectionId, positionIds, primaryPositionId, createUser, username, password, roleId, authorizations } = req.body as {
       firstName?: string; surname?: string; otherNames?: string;
       employeeNo?: string; fullName?: string; email?: string; phone?: string; sectionId?: number | string | null;
       positionIds?: Array<number | string>; primaryPositionId?: number | string | null;
       createUser?: boolean; username?: string; password?: string; roleId?: number | string;
       authorizations?: Array<{ moduleKey: string; sectionId?: number | string | null; level: string }>;
-      permissions?: Array<{ permissionId: number | string; allowed: boolean }>;
     };
     const composedName = composeFullName(firstName, surname, otherNames, fullName);
     if (!composedName) return res.status(400).json({ error: 'A staff name is required (first name and surname, or full name).' });
@@ -1552,14 +1609,12 @@ export function commonRoutes() {
             .run('settings', 'users', String(userId), 'personnel', 'staff', String(staffId), 'Login account linked to staff record at registration');
           audit(req, { action: 'create', entity: 'users', entityId: userId, newValue: { username, fullName, roleId, staffId } });
 
-          // Persist authorization-grid edits as per-user permission overrides. These
-          // are the explicit grant/deny deltas on top of the role + position defaults.
-          for (const p of permissions ?? []) {
-            const permId = idOrNull(p?.permissionId);
-            if (!permId) continue;
-            db.prepare('INSERT OR REPLACE INTO user_permission_overrides (user_id, permission_id, allowed, source, reason) VALUES (?, ?, ?, ?, ?)')
-              .run(userId, permId, p.allowed ? 1 : 0, 'Manual override', 'Set during staff registration');
-          }
+          // Registration no longer sets raw permission flags. It used to carry
+          // its own action grid, which was a third place access could be
+          // decided and therefore a third place it could contradict the
+          // others. The new account starts on the access profile chosen above;
+          // anything personal is set afterwards under Access Control →
+          // Individuals, where it is visible and reversible.
         }
 
         for (const a of authorizations ?? []) {
@@ -1617,7 +1672,7 @@ export function commonRoutes() {
   }
 
   // Registered before '/staff/:id' so the ":id" param route does not capture these.
-  router.get('/staff/template', requirePermission('personnel', 'view'), (_req, res) => {
+  router.get('/staff/template', requirePermission('personnel.register', 'export'), (_req, res) => {
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="Staff_Register_Template.xlsx"');
     res.send(buildRegisterWorkbook(false));
@@ -1860,18 +1915,22 @@ export function commonRoutes() {
     res.json({ ok: true });
   });
 
+  // The reference data the merged Access Control screen shows alongside the
+  // levels: what a permission key means, and the trail of who changed access.
+  // Position permissions are gone — positions are mapped to an access profile
+  // instead — so nothing here can contradict the profile any more.
   router.get('/permissions/matrix', requirePermission('settings', 'view'), (_req, res) => {
     const db = getDb();
     res.json({
       permissions: db.prepare('SELECT * FROM permissions ORDER BY module_key, action').all(),
       rolePermissions: db.prepare('SELECT * FROM role_permissions').all(),
-      positionPermissions: db.prepare('SELECT * FROM position_permissions').all(),
+      positionPermissions: [],
       userOverrides: db.prepare('SELECT * FROM user_permission_overrides').all(),
       technicalAuthorizations: db.prepare(`SELECT ta.*, s.full_name AS staff_name, p.title AS position_title, sec.name AS section_name
         FROM technical_authorizations ta LEFT JOIN staff s ON s.id = ta.staff_id LEFT JOIN positions p ON p.id = ta.position_id LEFT JOIN sections sec ON sec.id = ta.section_id`).all(),
       auditHistory: db.prepare(`SELECT a.id, a.action, a.entity, a.entity_id, a.old_value, a.new_value, a.created_at, u.username AS actor_username, u.full_name AS actor_name
         FROM audit_logs a LEFT JOIN users u ON u.id = a.actor_user_id
-        WHERE a.entity IN ('permissions','role_permissions','position_permissions','user_permission_overrides','technical_authorizations','staff','users')
+        WHERE a.entity IN ('permissions','role_permissions','position_permissions','user_permission_overrides','technical_authorizations','positions','staff','users')
         ORDER BY a.id DESC LIMIT 100`).all()
     });
   });
@@ -2123,80 +2182,185 @@ export function commonRoutes() {
   });
 
   router.get('/permissions', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT * FROM permissions ORDER BY module_key, action').all()));
-  router.post('/permissions/role', requirePermission('settings', 'edit'), (req, res) => {
-    const { roleId, permissionId, allowed } = req.body;
-    const result = getDb().prepare('INSERT OR REPLACE INTO role_permissions (role_id, permission_id, allowed, source) VALUES (?, ?, ?, ?)').run(roleId, permissionId, allowed ? 1 : 0, 'Manual assignment');
-    audit(req, { action: 'create', entity: 'role_permissions', entityId: result.lastInsertRowid, newValue: { roleId, permissionId, allowed } });
-    res.status(201).json({ ok: true });
-  });
-  router.post('/permissions/position', requirePermission('settings', 'edit'), (req, res) => {
-    const { positionId, permissionId, allowed } = req.body;
-    const result = getDb().prepare('INSERT OR REPLACE INTO position_permissions (position_id, permission_id, allowed, source) VALUES (?, ?, ?, ?)').run(positionId, permissionId, allowed ? 1 : 0, 'Manual assignment');
-    audit(req, { action: 'create', entity: 'position_permissions', entityId: result.lastInsertRowid, newValue: { positionId, permissionId, allowed } });
-    res.status(201).json({ ok: true });
-  });
-  router.post('/permissions/user-override', requirePermission('settings', 'edit'), (req, res) => {
-    const { userId, permissionId, allowed, reason } = req.body;
-    const result = getDb().prepare('INSERT OR REPLACE INTO user_permission_overrides (user_id, permission_id, allowed, source, reason) VALUES (?, ?, ?, ?, ?)').run(userId, permissionId, allowed ? 1 : 0, 'Manual override', reason ?? null);
-    audit(req, { action: 'create', entity: 'user_permission_overrides', entityId: result.lastInsertRowid, newValue: { userId, permissionId, allowed, reason } });
-    res.status(201).json({ ok: true });
-  });
-  // Set a whole ACCESS LEVEL in one call.
+
+  // ======================================================================
+  // ACCESS CONTROL — one model, two layers
+  // ----------------------------------------------------------------------
+  // Layer 1, the ACCESS PROFILE, is the single cohort decision: every user
+  // resolves to exactly one, so two cohorts can never contradict. Layer 2,
+  // the INDIVIDUAL override, supersedes it for one person.
   //
-  // The matrix used to ask an administrator for seven yes/no answers per area
-  // per role — hundreds of clicks, each independently wrong-clickable, with no
-  // way to see what a role could actually do. A level is one decision that
-  // writes the actions it implies and explicitly denies the rest, so the stored
-  // grants always spell out a coherent, reviewable position.
-  router.post('/permissions/level', requirePermission('settings', 'edit'), (req, res) => {
-    const { scope, subjectId, permKey, level, reason } = req.body ?? {};
-    if (!['role', 'position', 'user'].includes(scope)) return res.status(400).json({ error: "scope must be 'role', 'position' or 'user'" });
-    if (!subjectId) return res.status(400).json({ error: 'subjectId is required' });
-    if (!permKey) return res.status(400).json({ error: 'permKey is required' });
-    if (!ACCESS_LEVELS.includes(level)) return res.status(400).json({ error: `level must be one of: ${ACCESS_LEVELS.join(', ')}` });
+  // Everything an administrator sets goes through `/permissions/level`, which
+  // writes a whole coherent position — the actions the level allows, and an
+  // explicit denial of the ones it does not — rather than leaving a scatter
+  // of half-set flags nobody can review.
+  // ======================================================================
 
+  /** Every permission key a level may be written against, module or feature. */
+  const areaKeysFor = (permKey: string): string[] => {
+    const features = featuresOfModule(permKey);
+    // A module that has been split into features carries no grants of its own:
+    // writing the level onto its features is what actually decides access, and
+    // is what makes "no access to Personnel" hold across every tab inside it.
+    return features.length ? [permKey, ...features.map(f => f.key)] : [permKey];
+  };
+
+  function writeLevel(
+    scope: 'profile' | 'user',
+    subjectId: number,
+    permKey: string,
+    level: AccessLevel,
+    reason: string | null,
+  ): { keys: string[]; actions: string[] } {
     const db = getDb();
-    const perms = db.prepare('SELECT id, action FROM permissions WHERE module_key = ?').all(permKey) as { id: number; action: string }[];
-    if (perms.length === 0) return res.status(404).json({ error: `No permissions are defined for "${permKey}".` });
-
-    const granted = new Set(LEVEL_ACTIONS[level as AccessLevel]);
-    const table = scope === 'role' ? 'role_permissions' : scope === 'position' ? 'position_permissions' : 'user_permission_overrides';
-    const column = scope === 'role' ? 'role_id' : scope === 'position' ? 'position_id' : 'user_id';
-    const source = scope === 'user' ? 'Manual override' : 'Manual assignment';
-
+    const keys = areaKeysFor(permKey);
+    const granted = new Set(LEVEL_ACTIONS[level]);
+    const perms = db.prepare(
+      `SELECT id, module_key, action FROM permissions WHERE module_key IN (${keys.map(() => '?').join(',')})`,
+    ).all(...keys) as { id: number; module_key: string; action: string }[];
     const tx = db.transaction(() => {
       for (const p of perms) {
         const allowed = granted.has(p.action) ? 1 : 0;
         if (scope === 'user') {
-          db.prepare(`INSERT OR REPLACE INTO user_permission_overrides (user_id, permission_id, allowed, source, reason) VALUES (?, ?, ?, ?, ?)`)
-            .run(subjectId, p.id, allowed, source, reason ?? null);
+          db.prepare('INSERT OR REPLACE INTO user_permission_overrides (user_id, permission_id, allowed, source, reason) VALUES (?, ?, ?, ?, ?)')
+            .run(subjectId, p.id, allowed, 'Individual override', reason);
         } else {
-          db.prepare(`INSERT OR REPLACE INTO ${table} (${column}, permission_id, allowed, source) VALUES (?, ?, ?, ?)`)
-            .run(subjectId, p.id, allowed, source);
+          db.prepare('INSERT OR REPLACE INTO role_permissions (role_id, permission_id, allowed, source) VALUES (?, ?, ?, ?)')
+            .run(subjectId, p.id, allowed, 'Access profile');
         }
       }
     });
     tx();
-    audit(req, { action: 'set_level', entity: table, entityId: subjectId, newValue: { permKey, level, scope } });
-    res.json({ ok: true, permKey, level, actionsGranted: [...granted] });
-  });
+    return { keys, actions: [...granted] };
+  }
 
-  // Clear a user's personal overrides for one area so they fall back to their
-  // role. Without this an override could only ever be replaced, never removed.
-  router.delete('/permissions/user-override/:userId/:permKey', requirePermission('settings', 'edit'), (req, res) => {
+  function clearIndividual(userId: number, permKey: string): void {
     const db = getDb();
-    const perms = db.prepare('SELECT id FROM permissions WHERE module_key = ?').all(req.params.permKey) as { id: number }[];
+    const keys = areaKeysFor(permKey);
+    const perms = db.prepare(
+      `SELECT id FROM permissions WHERE module_key IN (${keys.map(() => '?').join(',')})`,
+    ).all(...keys) as { id: number }[];
     const tx = db.transaction(() => {
-      for (const p of perms) db.prepare('DELETE FROM user_permission_overrides WHERE user_id = ? AND permission_id = ?').run(req.params.userId, p.id);
+      for (const p of perms) db.prepare('DELETE FROM user_permission_overrides WHERE user_id = ? AND permission_id = ?').run(userId, p.id);
     });
     tx();
+  }
+
+  // Set an access LEVEL for one area.
+  //
+  // `scope` is 'profile' (the merged cohort — roles and the positions mapped
+  // onto them) or 'user' (the individual, which supersedes). 'role' is
+  // accepted as a synonym for 'profile' so older clients keep working;
+  // 'position' is refused, because positions no longer carry grants of their
+  // own — they are mapped to a profile instead.
+  router.post('/permissions/level', requirePermission('settings', 'edit'), (req, res) => {
+    const { scope: rawScope, subjectId, permKey, level, reason } = req.body ?? {};
+    const scope = rawScope === 'role' ? 'profile' : rawScope;
+    if (scope === 'position') {
+      return res.status(400).json({
+        error: 'Positions no longer hold permissions of their own. Map the position to an access profile instead (PUT /positions/:id/access-profile).',
+      });
+    }
+    if (!['profile', 'user'].includes(scope)) return res.status(400).json({ error: "scope must be 'profile' or 'user'" });
+    if (!subjectId) return res.status(400).json({ error: 'subjectId is required' });
+    if (!permKey) return res.status(400).json({ error: 'permKey is required' });
+
+    // "inherit" is only meaningful for a person: it removes their personal
+    // decision so they follow their access profile again.
+    if (level === 'inherit') {
+      if (scope !== 'user') return res.status(400).json({ error: 'Only an individual can inherit; a profile must state a level.' });
+      clearIndividual(Number(subjectId), String(permKey));
+      audit(req, { action: 'clear_override', entity: 'user_permission_overrides', entityId: subjectId, newValue: { permKey } });
+      return res.json({ ok: true, permKey, level: 'inherit' });
+    }
+
+    if (!ACCESS_LEVELS.includes(level)) return res.status(400).json({ error: `level must be one of: ${ACCESS_LEVELS.join(', ')}, inherit` });
+    const known = getDb().prepare('SELECT 1 FROM permissions WHERE module_key = ? LIMIT 1').get(permKey);
+    if (!known) return res.status(404).json({ error: `No permissions are defined for "${permKey}".` });
+
+    const written = writeLevel(scope, Number(subjectId), String(permKey), level as AccessLevel, reason ?? null);
+    audit(req, {
+      action: 'set_level',
+      entity: scope === 'user' ? 'user_permission_overrides' : 'role_permissions',
+      entityId: subjectId,
+      newValue: { permKey, level, scope, areas: written.keys },
+    });
+    res.json({ ok: true, permKey, level, actionsGranted: written.actions, areas: written.keys });
+  });
+
+  // One action, one area — the low-level write.
+  //
+  // The screens never use this: an administrator picks a LEVEL, which writes a
+  // whole coherent position, because that is the thing a person can review.
+  // This exists for scripted corrections and for the checks that prove the
+  // engine's own invariants still hold (that `print` without `view` is
+  // refused, for one). It writes to the same two tables as everything else, so
+  // it cannot become a third source of truth.
+  router.post('/permissions/action', requirePermission('settings', 'edit'), (req, res) => {
+    const { scope: rawScope, subjectId, permKey, action, allowed, reason } = req.body ?? {};
+    const scope = rawScope === 'role' ? 'profile' : rawScope;
+    if (!['profile', 'user'].includes(scope)) return res.status(400).json({ error: "scope must be 'profile' or 'user'" });
+    if (!subjectId || !permKey || !action) return res.status(400).json({ error: 'subjectId, permKey and action are required' });
+    const db = getDb();
+    const perm = db.prepare('SELECT id FROM permissions WHERE module_key = ? AND action = ?').get(permKey, action) as { id: number } | undefined;
+    if (!perm) return res.status(404).json({ error: `No "${action}" permission is defined for "${permKey}".` });
+    if (scope === 'user') {
+      db.prepare('INSERT OR REPLACE INTO user_permission_overrides (user_id, permission_id, allowed, source, reason) VALUES (?, ?, ?, ?, ?)')
+        .run(Number(subjectId), perm.id, allowed ? 1 : 0, 'Individual override', reason ?? null);
+    } else {
+      db.prepare('INSERT OR REPLACE INTO role_permissions (role_id, permission_id, allowed, source) VALUES (?, ?, ?, ?)')
+        .run(Number(subjectId), perm.id, allowed ? 1 : 0, 'Access profile');
+    }
+    audit(req, {
+      action: 'set_action',
+      entity: scope === 'user' ? 'user_permission_overrides' : 'role_permissions',
+      entityId: subjectId, newValue: { permKey, action, allowed: !!allowed, scope },
+    });
+    res.json({ ok: true });
+  });
+
+  // Clear a person's individual decision for one area so they follow their
+  // access profile again. Without this an override could only be replaced.
+  router.delete('/permissions/user-override/:userId/:permKey', requirePermission('settings', 'edit'), (req, res) => {
+    clearIndividual(Number(req.params.userId), req.params.permKey);
     audit(req, { action: 'clear_override', entity: 'user_permission_overrides', entityId: req.params.userId, newValue: { permKey: req.params.permKey } });
     res.json({ ok: true });
   });
 
-  // The catalogue the access-control screen renders: every grantable area, the
-  // level each role/position/user currently holds, and what each level means.
-  router.get('/permissions/catalogue', requirePermission('settings', 'view'), (req, res) => {
+  // Clear every individual decision for one person.
+  router.delete('/permissions/user-override/:userId', requirePermission('settings', 'edit'), (req, res) => {
+    getDb().prepare('DELETE FROM user_permission_overrides WHERE user_id = ?').run(req.params.userId);
+    audit(req, { action: 'clear_override', entity: 'user_permission_overrides', entityId: req.params.userId, newValue: { all: true } });
+    res.json({ ok: true });
+  });
+
+  // Map an organogram position to an access profile — or unmap it. This is
+  // what replaces per-position permissions: the position says which profile
+  // its holders work under, and the profile says what that means.
+  router.put('/positions/:id/access-profile', requirePermission('settings', 'edit'), (req, res) => {
+    const db = getDb();
+    const position = db.prepare('SELECT id, title, access_profile_role_id FROM positions WHERE id = ?').get(req.params.id) as
+      { id: number; title: string; access_profile_role_id: number | null } | undefined;
+    if (!position) return res.status(404).json({ error: 'Position not found' });
+    const raw = req.body?.accessProfileId;
+    const profileId = raw === null || raw === undefined || raw === '' ? null : Number(raw);
+    if (profileId !== null) {
+      const profile = db.prepare('SELECT id FROM roles WHERE id = ?').get(profileId);
+      if (!profile) return res.status(404).json({ error: 'Access profile not found' });
+    }
+    db.prepare('UPDATE positions SET access_profile_role_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(profileId, position.id);
+    audit(req, {
+      action: 'edit', entity: 'positions', entityId: position.id,
+      oldValue: { accessProfileId: position.access_profile_role_id }, newValue: { accessProfileId: profileId },
+    });
+    res.json({ ok: true });
+  });
+
+  // The catalogue the merged Access Control screen renders: every access
+  // profile and the level it holds in each area, every position and the
+  // profile it is mapped to, and every person's individual decisions
+  // alongside the profile they would otherwise follow.
+  router.get('/permissions/catalogue', requirePermission('settings', 'view'), (_req, res) => {
     const db = getDb();
     const perms = db.prepare('SELECT id, module_key, action FROM permissions').all() as { id: number; module_key: string; action: string }[];
     const byId = new Map(perms.map(p => [p.id, p]));
@@ -2210,14 +2374,44 @@ export function commonRoutes() {
       }
       return map;
     };
+
+    const profiles = db.prepare(`
+      SELECT r.id, r.name, r.description, r.is_administrator AS isAdministrator,
+        (SELECT COUNT(*) FROM users u WHERE u.role_id = r.id AND u.is_active = 1) AS accountCount
+      FROM roles r ORDER BY r.name
+    `).all() as Array<{ id: number; name: string; description: string | null; isAdministrator: number; accountCount: number }>;
+
+    const positions = db.prepare(`
+      SELECT p.id, p.title, p.is_active AS isActive, p.access_profile_role_id AS accessProfileId,
+        r.name AS accessProfileName,
+        (SELECT COUNT(*) FROM staff_position_assignments spa WHERE spa.position_id = p.id AND spa.is_active = 1) AS holderCount
+      FROM positions p LEFT JOIN roles r ON r.id = p.access_profile_role_id
+      ORDER BY p.title
+    `).all();
+
     res.json({
-      roles: collect((db.prepare('SELECT role_id AS subject, permission_id, allowed FROM role_permissions').all() as never)),
-      positions: collect((db.prepare('SELECT position_id AS subject, permission_id, allowed FROM position_permissions').all() as never)),
-      users: collect((db.prepare('SELECT user_id AS subject, permission_id, allowed FROM user_permission_overrides').all() as never)),
+      profiles,
+      positions,
+      // `roles` is kept as an alias so an older client still renders.
+      roles: collect(db.prepare('SELECT role_id AS subject, permission_id, allowed FROM role_permissions').all() as never),
+      users: collect(db.prepare('SELECT user_id AS subject, permission_id, allowed FROM user_permission_overrides').all() as never),
       userOverrideKeys: (db.prepare('SELECT DISTINCT user_id, permission_id FROM user_permission_overrides').all() as { user_id: number; permission_id: number }[])
         .map(r => ({ userId: r.user_id, permKey: byId.get(r.permission_id)?.module_key }))
         .filter(r => r.permKey),
     });
+  });
+
+  // What one person can actually do, and why — profile level, individual
+  // decision, and the effective outcome, area by area. This is what makes the
+  // Individuals screen answer "why can they see that?" without guesswork.
+  router.get('/permissions/effective/:userId', requirePermission('settings', 'view'), (req, res) => {
+    const db = getDb();
+    const user = db.prepare('SELECT id, username, full_name AS fullName, role_id AS roleId, is_active AS isActive FROM users WHERE id = ?').get(req.params.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const explained = explainUserAccess(Number(req.params.userId));
+    const profile = explained.profileId === null ? null
+      : db.prepare('SELECT id, name FROM roles WHERE id = ?').get(explained.profileId);
+    res.json({ user, profile, via: explained.via, positionTitle: explained.positionTitle ?? null, areas: explained.areas });
   });
 
   router.get('/authorizations/technical', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare(`
@@ -2519,7 +2713,7 @@ export function commonRoutes() {
     }
     return buildWorkbook(TEST_MENU_HEADERS, rows, 'TEST MENU');
   }
-  router.get('/section-config/sections/:id/tests/template', requirePermission('settings', 'view'), (req, res) => sendWorkbook(res, testMenuWorkbook(Number(req.params.id), false), 'Test_Menu_Template.xlsx'));
+  router.get('/section-config/sections/:id/tests/template', requirePermission('settings', 'export'), (req, res) => sendWorkbook(res, testMenuWorkbook(Number(req.params.id), false), 'Test_Menu_Template.xlsx'));
   router.get('/section-config/sections/:id/tests/export', requirePermission('settings', 'export'), (req, res) => sendWorkbook(res, testMenuWorkbook(Number(req.params.id), true), 'Test_Menu.xlsx'));
   router.post('/section-config/sections/:id/tests/import', requirePermission('settings', 'create'), testMenuUpload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the Test Menu .xlsx file.' });
@@ -2948,7 +3142,7 @@ export function commonRoutes() {
     try { return (db.prepare(sql).get(...params) as { count: number }).count; } catch { return 0; }
   }
 
-  router.get('/system/about', (_req, res) => {
+  router.get('/system/about', requireAuth, (_req, res) => {
     const db = getDb();
     let dbOk = true;
     try { db.prepare('SELECT 1').get(); } catch { dbOk = false; }
@@ -2992,7 +3186,7 @@ export function commonRoutes() {
     return urls;
   }
 
-  router.get('/system/connectivity', async (_req, res) => {
+  router.get('/system/connectivity', requireAuth, async (_req, res) => {
     const { mode, source } = resolveMode();
     // Whether anybody else can actually open this laboratory. Binding to
     // loopback is the default and is invisible from the outside — a browser on
@@ -3048,7 +3242,7 @@ export function commonRoutes() {
     });
   });
 
-  router.get('/dashboard/my-work-summary', (req, res) => {
+  router.get('/dashboard/my-work-summary', requireAuth, (req, res) => {
     const db = getDb();
     const userId = req.user?.id ?? null;
     const staffId = req.user?.staffId ?? null;
@@ -3098,7 +3292,7 @@ export function commonRoutes() {
     res.json({ ok: false, message: 'Demo data seeding is disabled in this foundation build.' });
   });
 
-  router.get('/common/linked-records', (req, res) => {
+  router.get('/common/linked-records', requireAuth, (req, res) => {
     const moduleKey = String(req.query.module_key ?? '').trim();
     const recordType = String(req.query.record_type ?? '').trim();
     const recordId = String(req.query.record_id ?? '').trim();

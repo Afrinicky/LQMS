@@ -69,7 +69,6 @@ export function RegisterStaff() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
-  const [matrix, setMatrix] = useState<PermissionMatrixData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [profile, setProfile] = useState<StaffProfile | null>(null);
@@ -79,56 +78,14 @@ export function RegisterStaff() {
   const [positionIds, setPositionIds] = useState<number[]>([]);
   const [createUser, setCreateUser] = useState(false);
   const [account, setAccount] = useState({ username: '', password: '', roleId: '' });
-  // Authorization grid: explicit allow/deny per permission for this staff member.
-  // Seeded from the selected positions, then freely editable (add / remove).
-  const [perm, setPerm] = useState<Record<number, boolean>>({});
 
   function loadLookups() {
     api<{ id: number; name: string }[]>('/roles').then(setRoles).catch(() => setRoles([]));
     api<Position[]>('/positions').then(setPositions).catch(() => setPositions([]));
     api<Section[]>('/sections').then(setSections).catch(() => setSections([]));
     api<Staff[]>('/staff').then(setStaff).catch(() => setStaff([]));
-    api<PermissionMatrixData>('/permissions/matrix').then(setMatrix).catch(() => setMatrix(null));
   }
   useEffect(() => { loadLookups(); }, []);
-
-  // Baseline = permissions inherited from the selected organogram positions. Positions
-  // map to role defaults by matching title↔role-name (the lab's standard roles), and we
-  // also include any explicit position-permission grants an admin has configured.
-  const baseline = useMemo(() => {
-    const set = new Set<number>();
-    if (!matrix) return set;
-    for (const pp of matrix.positionPermissions) {
-      if (pp.allowed === 1 && positionIds.includes(pp.position_id)) set.add(pp.permission_id);
-    }
-    const wantedRoleNames = new Set<string>();
-    for (const p of positions.filter(p => positionIds.includes(p.id))) {
-      for (const rn of effectiveRoleNames(p.title)) wantedRoleNames.add(rn);
-    }
-    const roleIds = new Set(roles.filter(r => wantedRoleNames.has(r.name.toLowerCase())).map(r => r.id));
-    for (const rp of matrix.rolePermissions) {
-      if (rp.allowed === 1 && roleIds.has(rp.role_id)) set.add(rp.permission_id);
-    }
-    return set;
-  }, [matrix, positionIds, positions, roles]);
-
-  // Whenever the selected positions change, reset the grid to the inherited baseline.
-  useEffect(() => {
-    const next: Record<number, boolean> = {};
-    baseline.forEach(id => { next[id] = true; });
-    setPerm(next);
-  }, [baseline]);
-
-  const permById = useMemo(() => {
-    const m = new Map<string, Permission>();
-    matrix?.permissions.forEach(p => m.set(`${p.module_key}:${p.action}`, p));
-    return m;
-  }, [matrix]);
-  const matrixModules = useMemo(() => {
-    if (!matrix) return [] as { key: string; label: string }[];
-    const present = new Set(matrix.permissions.map(p => p.module_key));
-    return MODULES.filter(m => present.has(m.key)).map(m => ({ key: m.key, label: m.label }));
-  }, [matrix]);
 
   function togglePosition(id: number) {
     setPositionIds(prev => {
@@ -137,16 +94,11 @@ export function RegisterStaff() {
       return next;
     });
   }
-  function togglePerm(permId: number) { setPerm(prev => ({ ...prev, [permId]: !prev[permId] })); }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null); setSuccess(null);
     try {
-      // Send only the deltas vs. the position baseline as explicit overrides.
-      const permissions: { permissionId: number; allowed: boolean }[] = [];
-      const ids = new Set<number>([...baseline, ...Object.keys(perm).map(Number)]);
-      ids.forEach(id => { const on = !!perm[id]; if (on !== baseline.has(id)) permissions.push({ permissionId: id, allowed: on }); });
       const payload = {
         firstName: form.firstName,
         surname: form.surname,
@@ -161,11 +113,10 @@ export function RegisterStaff() {
         username: createUser ? account.username : undefined,
         password: createUser ? account.password : undefined,
         roleId: createUser ? account.roleId : undefined,
-        permissions: createUser ? permissions : [],
       };
       const res = await api<{ staffId: number; userId: number | null }>('/staff/register', { method: 'POST', body: JSON.stringify(payload) });
       setSuccess(`Staff record created (#${res.staffId})${res.userId ? ` with linked login account (user #${res.userId})` : ''}. Positions, permissions and personnel records are now linked.`);
-      setForm(blank); setPositionIds([]); setCreateUser(false); setAccount({ username: '', password: '', roleId: '' }); setPerm({});
+      setForm(blank); setPositionIds([]); setCreateUser(false); setAccount({ username: '', password: '', roleId: '' });
       loadLookups();
     } catch (err) { setError((err as Error).message); }
   }
@@ -181,7 +132,7 @@ export function RegisterStaff() {
   return <div className="reg-staff">
     <div className="card">
       <h3>Register New Staff</h3>
-      <p>Onboard a staff member in one step. This record feeds <strong>Personnel Management</strong>, and the choices below link the person to <strong>Positions &amp; Organogram</strong>, <strong>Users &amp; Access</strong> (optional login), and the <strong>Permission Matrix</strong> (technical authorizations &amp; section scope).</p>
+      <p>Onboard a staff member in one step. This record feeds <strong>Personnel Management</strong>, and the choices below link the person to <strong>Positions &amp; Organogram</strong>, <strong>Users &amp; Access</strong> (optional login), and <strong>Access Control</strong> (the access profile they work under).</p>
       {error && <div className="error">{error}</div>}
       {success && <div className="notice-ok">{success}</div>}
 
@@ -224,35 +175,21 @@ export function RegisterStaff() {
         </fieldset>
 
         <fieldset className="reg-section">
-          <legend>Permissions &amp; authorizations</legend>
+          <legend>Access</legend>
           <p className="hint">
-            The grid below is pre-set from the organogram position(s) selected above — change the positions and it updates automatically.
-            Click any action chip to grant or revoke it for this staff member. These apply to the login account
-            {createUser ? '' : ' (enable “Create a system login account” above to save them)'}. Role defaults still apply on top of these.
+            The access profile chosen above is what this person will be able to do. Registration used to
+            carry its own grid of raw permission flags, which meant access could be decided in three places
+            that disagreed with each other. It is decided in one place now:
+            <strong> People &amp; Access → Access Control</strong>. Set the profile there, and anything this
+            person needs personally under its <strong>Individuals</strong> tab, where it overrides the
+            profile and can be seen and undone.
           </p>
-          <div className="matrix-legend">
-            {PERMISSION_ACTIONS.map(a => <span key={a} className="leg"><span className="auth-chip on">{ACTION_META[a]?.short ?? a[0].toUpperCase()}</span>{ACTION_META[a]?.title ?? a}</span>)}
-          </div>
-          <div className="auth-matrix-wrap">
-            <table className="auth-matrix">
-              <thead><tr><th className="corner">Module</th>{PERMISSION_ACTIONS.map(a => <th key={a} className="act-col">{ACTION_META[a]?.short ?? a[0].toUpperCase()}</th>)}</tr></thead>
-              <tbody>
-                {matrixModules.map(m => <tr key={m.key}>
-                  <th className="row-head">{m.label}</th>
-                  {PERMISSION_ACTIONS.map(action => {
-                    const p = permById.get(`${m.key}:${action}`);
-                    if (!p) return <td key={action} className="auth-cell" />;
-                    const on = !!perm[p.id];
-                    const inherited = baseline.has(p.id);
-                    return <td key={action} className="auth-cell">
-                      <button type="button" title={`${ACTION_META[action]?.title ?? action}${inherited ? ' — from position' : ''} — click to ${on ? 'revoke' : 'grant'}`} className={`auth-chip ${on ? 'on' : 'off'} ${inherited ? 'inherited' : ''}`} onClick={() => togglePerm(p.id)}>{ACTION_META[action]?.short ?? action[0].toUpperCase()}</button>
-                    </td>;
-                  })}
-                </tr>)}
-                {matrixModules.length === 0 && <tr><td className="hint" colSpan={PERMISSION_ACTIONS.length + 1}>Loading permissions…</td></tr>}
-              </tbody>
-            </table>
-          </div>
+          {createUser && account.roleId && (
+            <p className="hint">
+              This account will work under the <strong>{roles.find(r => r.id === Number(account.roleId))?.name ?? 'selected'}</strong> access profile.
+              If one of the positions selected above is mapped to a profile of its own, that mapping applies instead.
+            </p>
+          )}
         </fieldset>
 
         <button type="submit">Register staff member</button>
@@ -1379,268 +1316,15 @@ function SectionBenches({ sectionId }: { sectionId: number }) {
 }
 
 // ---------------------------------------------------------------------------
-// Permission Matrix
+// The Permission Matrix used to live here: a grid of every module against every
+// action, for roles and for positions, editable one checkbox at a time. It was
+// a second place to decide access that could disagree with the first, and
+// nobody could review 224 checkboxes a cohort. Access Control now owns the
+// decision; each area there expands to show the exact actions its level
+// allows, and the technical authorizations and change history this screen
+// carried are panels on that same page.
 // ---------------------------------------------------------------------------
-const ACTION_META: Record<string, { short: string; title: string }> = {
-  view: { short: 'V', title: 'View' },
-  create: { short: 'C', title: 'Create' },
-  edit: { short: 'E', title: 'Edit' },
-  void_archive: { short: 'Z', title: 'Void / Archive' },
-  export: { short: 'X', title: 'Export' },
-  print: { short: 'P', title: 'Print' },
-  approve: { short: 'A', title: 'Approve' },
-};
 
-export function PermissionMatrix(){
-  const [data,setData]=useState<PermissionMatrixData | null>(null);
-  const [roles,setRoles]=useState<{id:number;name:string}[]>([]);
-  const [positions,setPositions]=useState<Position[]>([]);
-  const [users,setUsers]=useState<ApiUser[]>([]);
-  const [staff,setStaff]=useState<Staff[]>([]);
-  const [sections,setSections]=useState<Section[]>([]);
-  const [techAuths,setTechAuths]=useState<TechnicalAuthorizationRow[]>([]);
-  const [error,setError]=useState<string|null>(null);
-  const tabs=['Authorization Matrix','Role Permissions','Position Permissions','User Overrides','Technical Authorizations','Section Scope','Audit History'];
-  const [tab,setTab]=useState(tabs[0]);
-  const [matrixScope,setMatrixScope]=useState<'role'|'position'>('role');
-  const [moduleFilter,setModuleFilter]=useState<string>('all');
-  const [auditFilter,setAuditFilter]=useState<string>('all');
-
-  function loadMatrix(){ api<PermissionMatrixData>('/permissions/matrix').then(setData).catch(e=>setError((e as Error).message)); }
-  function loadTechAuths(){ api<TechnicalAuthorizationRow[]>('/authorizations/technical').then(setTechAuths).catch(()=>setTechAuths([])); }
-  useEffect(()=>{
-    loadMatrix();
-    loadTechAuths();
-    api<{id:number;name:string}[]>('/roles').then(setRoles);
-    api<Position[]>('/positions').then(setPositions);
-    api<ApiUser[]>('/users').then(setUsers);
-    api<Staff[]>('/staff').then(setStaff);
-    api<Section[]>('/sections').then(setSections);
-  },[]);
-
-  // module list present in the permission set, in canonical MODULES order
-  const matrixModules = useMemo(()=>{
-    if(!data) return [] as { key:string; label:string }[];
-    const present = new Set(data.permissions.map(p=>p.module_key));
-    return MODULES.filter(m=>present.has(m.key)).map(m=>({key:m.key,label:m.label}));
-  },[data]);
-
-  // permission id lookup by module+action
-  const permIndex = useMemo(()=>{
-    const map = new Map<string, Permission>();
-    data?.permissions.forEach(p=>map.set(`${p.module_key}:${p.action}`, p));
-    return map;
-  },[data]);
-
-  // allowed set for current scope: `${subjectId}:${permissionId}`
-  const allowedSet = useMemo(()=>{
-    const set = new Set<string>();
-    if(!data) return set;
-    const rows = matrixScope==='role' ? data.rolePermissions : data.positionPermissions;
-    rows.forEach(r=>{ if(r.allowed===1){ const id = matrixScope==='role'?(r as any).role_id:(r as any).position_id; set.add(`${id}:${r.permission_id}`);} });
-    return set;
-  },[data,matrixScope]);
-
-  const subjects = matrixScope==='role' ? roles.map(r=>({id:r.id,name:r.name})) : positions.filter(p=>p.isActive!==false).map(p=>({id:p.id,name:p.title}));
-  const visibleModules = moduleFilter==='all' ? matrixModules : matrixModules.filter(m=>m.key===moduleFilter);
-
-  async function toggleCell(subjectId:number, perm:Permission, currentlyAllowed:boolean){
-    setError(null);
-    try {
-      const endpoint = matrixScope==='role' ? '/permissions/role' : '/permissions/position';
-      const body = matrixScope==='role'
-        ? { roleId: subjectId, permissionId: perm.id, allowed: !currentlyAllowed }
-        : { positionId: subjectId, permissionId: perm.id, allowed: !currentlyAllowed };
-      await api(endpoint,{method:'POST',body:JSON.stringify(body)});
-      loadMatrix();
-    } catch (e) { setError((e as Error).message); }
-  }
-
-  async function addRolePermission(e:FormEvent<HTMLFormElement>){
-    e.preventDefault();
-    const fd=new FormData(e.currentTarget);
-    await api('/permissions/role',{method:'POST',body:JSON.stringify({roleId:Number(fd.get('roleId')),permissionId:Number(fd.get('permissionId')),allowed:fd.get('allowed')==='allow'})});
-    e.currentTarget.reset(); loadMatrix();
-  }
-  async function addPositionPermission(e:FormEvent<HTMLFormElement>){
-    e.preventDefault();
-    const fd=new FormData(e.currentTarget);
-    await api('/permissions/position',{method:'POST',body:JSON.stringify({positionId:Number(fd.get('positionId')),permissionId:Number(fd.get('permissionId')),allowed:fd.get('allowed')==='allow'})});
-    e.currentTarget.reset(); loadMatrix();
-  }
-  async function addUserOverride(e:FormEvent<HTMLFormElement>){
-    e.preventDefault();
-    const fd=new FormData(e.currentTarget);
-    await api('/permissions/user-override',{method:'POST',body:JSON.stringify({userId:Number(fd.get('userId')),permissionId:Number(fd.get('permissionId')),allowed:fd.get('effect')==='allow',reason:fd.get('reason')})});
-    e.currentTarget.reset(); loadMatrix();
-  }
-  async function addTechnicalAuth(e:FormEvent<HTMLFormElement>){
-    e.preventDefault(); setError(null);
-    const fd=new FormData(e.currentTarget);
-    try {
-      await api('/authorizations/technical',{method:'POST',body:JSON.stringify({staffId:fd.get('staffId')?Number(fd.get('staffId')):null,positionId:fd.get('positionId')?Number(fd.get('positionId')):null,moduleKey:fd.get('moduleKey'),sectionId:fd.get('sectionId')?Number(fd.get('sectionId')):null,level:fd.get('level'),expiresAt:fd.get('expiresAt')||null})});
-      e.currentTarget.reset(); loadMatrix(); loadTechAuths();
-    } catch (err) { setError((err as Error).message); }
-  }
-  async function deactivateAuth(id:number){
-    setError(null);
-    try { await api(`/authorizations/technical/${id}/deactivate`,{method:'POST'}); loadMatrix(); loadTechAuths(); }
-    catch (err) { setError((err as Error).message); }
-  }
-
-  const moduleLabel = (key:string)=>MODULES.find(m=>m.key===key)?.label ?? key;
-
-  function summariseAudit(entry: PermissionMatrixData['auditHistory'][number]): string {
-    const parse = (v?: string|null) => { if(!v) return null; try { return JSON.parse(v); } catch { return v; } };
-    const nv:any = parse(entry.new_value);
-    if(nv && typeof nv==='object'){
-      const bits:string[]=[];
-      if(nv.username) bits.push(`user ${nv.username}`);
-      if(nv.fullName) bits.push(nv.fullName);
-      if(nv.moduleKey) bits.push(`module ${nv.moduleKey}`);
-      if(nv.level) bits.push(`level ${nv.level}`);
-      if('allowed' in nv) bits.push(nv.allowed?'allow':'deny');
-      if(nv.reason) bits.push(`(${nv.reason})`);
-      if(bits.length) return bits.join(' · ');
-    }
-    return entry.entity_id ? `#${entry.entity_id}` : '';
-  }
-
-  const auditEntities = useMemo(()=>{
-    const s = new Set<string>(); data?.auditHistory.forEach(a=>s.add(a.entity)); return Array.from(s);
-  },[data]);
-  const filteredAudit = (data?.auditHistory ?? []).filter(a=>auditFilter==='all'||a.entity===auditFilter);
-
-  return <div className="card"><h3>Permission Matrix</h3><p>Role-based access control with module permissions, record actions, approvals, technical authorizations, section scope, overrides, and a full audit trail.</p>
-    <div className="tabs">{tabs.map(t=><button key={t} onClick={()=>setTab(t)} className={tab===t?'active':''}>{t}</button>)}</div>
-    {error && <div className="error">{error}</div>}
-
-    {tab==='Authorization Matrix' && <div>
-      <div className="matrix-toolbar">
-        <div className="seg">
-          <button className={matrixScope==='role'?'active':''} onClick={()=>setMatrixScope('role')}>Roles</button>
-          <button className={matrixScope==='position'?'active':''} onClick={()=>setMatrixScope('position')}>Positions</button>
-        </div>
-        <label className="inline">Module
-          <select value={moduleFilter} onChange={e=>setModuleFilter(e.target.value)}>
-            <option value="all">All modules</option>
-            {matrixModules.map(m=><option key={m.key} value={m.key}>{m.label}</option>)}
-          </select>
-        </label>
-      </div>
-      <p className="hint">Each cell shows the actions a {matrixScope} is authorized for. Click an action chip to grant or revoke it.</p>
-      <div className="matrix-legend">
-        {PERMISSION_ACTIONS.map(a=><span key={a} className="leg"><span className="auth-chip on">{ACTION_META[a]?.short ?? a[0].toUpperCase()}</span>{ACTION_META[a]?.title ?? a}</span>)}
-      </div>
-      <div className="auth-matrix-wrap">
-        <table className="auth-matrix">
-          <thead><tr><th className="corner">{matrixScope==='role'?'Role':'Position'}</th>{visibleModules.map(m=><th key={m.key}>{m.label}</th>)}</tr></thead>
-          <tbody>
-            {subjects.map(sub=><tr key={sub.id}>
-              <th className="row-head">{sub.name}</th>
-              {visibleModules.map(m=><td key={m.key} className="auth-cell">
-                {PERMISSION_ACTIONS.map(action=>{
-                  const perm = permIndex.get(`${m.key}:${action}`);
-                  if(!perm) return null;
-                  const on = allowedSet.has(`${sub.id}:${perm.id}`);
-                  return <button key={action} type="button" title={`${ACTION_META[action]?.title ?? action} — click to ${on?'revoke':'grant'}`} className={`auth-chip ${on?'on':'off'}`} onClick={()=>toggleCell(sub.id, perm, on)}>{ACTION_META[action]?.short ?? action[0].toUpperCase()}</button>;
-                })}
-              </td>)}
-            </tr>)}
-            {subjects.length===0 && <tr><td className="hint" colSpan={visibleModules.length+1}>No {matrixScope}s defined.</td></tr>}
-          </tbody>
-        </table>
-      </div>
-    </div>}
-
-    {tab==='Role Permissions' && <div>
-      <form className="form" onSubmit={addRolePermission}>
-        <label>Role<select name="roleId" required>{roles.map(r=><option value={r.id} key={r.id}>{r.name}</option>)}</select></label>
-        <label>Permission<select name="permissionId" required>{(data?.permissions??[]).map(p=><option value={p.id} key={p.id}>{p.label}</option>)}</select></label>
-        <label>Effect<select name="allowed" required><option value="allow">Allow</option><option value="deny">Deny</option></select></label>
-        <button>Assign permission</button>
-      </form>
-    </div>}
-
-    {tab==='Position Permissions' && <div>
-      <form className="form" onSubmit={addPositionPermission}>
-        <label>Position<select name="positionId" required>{positions.map(p=><option value={p.id} key={p.id}>{p.title}</option>)}</select></label>
-        <label>Permission<select name="permissionId" required>{(data?.permissions??[]).map(p=><option value={p.id} key={p.id}>{p.label}</option>)}</select></label>
-        <label>Effect<select name="allowed" required><option value="allow">Allow</option><option value="deny">Deny</option></select></label>
-        <button>Assign permission</button>
-      </form>
-    </div>}
-
-    {tab==='User Overrides' && <div>
-      <form className="form" onSubmit={addUserOverride}>
-        <label>User<select name="userId" required>{users.map(u=><option value={u.id} key={u.id}>{u.fullName}</option>)}</select></label>
-        <label>Permission<select name="permissionId" required>{(data?.permissions??[]).map(p=><option value={p.id} key={p.id}>{p.label}</option>)}</select></label>
-        <label>Effect<select name="effect" required><option value="allow">Allow</option><option value="deny">Deny</option></select></label>
-        <label>Reason<textarea name="reason"/></label>
-        <button>Add override</button>
-      </form>
-      {data && data.userOverrides.length>0 && <table className="data-table"><thead><tr><th>User</th><th>Permission</th><th>Effect</th><th>Reason</th></tr></thead><tbody>
-        {data.userOverrides.map(o=>{ const u=users.find(x=>x.id===o.user_id); const p=data.permissions.find(x=>x.id===o.permission_id); return <tr key={o.id}><td>{u?.fullName||`User #${o.user_id}`}</td><td>{p?.label||`#${o.permission_id}`}</td><td>{o.allowed?<span className="badge active">allow</span>:<span className="badge inactive">deny</span>}</td><td>{o.reason||'—'}</td></tr>; })}
-      </tbody></table>}
-    </div>}
-
-    {tab==='Technical Authorizations' && <div>
-      <form className="form" onSubmit={addTechnicalAuth}>
-        <label>Staff<select name="staffId"><option value="">—</option>{staff.map(s=><option value={s.id} key={s.id}>{s.fullName}</option>)}</select></label>
-        <label>Position (Optional)<select name="positionId"><option value="">None</option>{positions.map(p=><option value={p.id} key={p.id}>{p.title}</option>)}</select></label>
-        <label>Module<select name="moduleKey" required>{MODULES.map(m=><option value={m.key} key={m.key}>{m.label}</option>)}</select></label>
-        <label>Section<select name="sectionId"><option value="">All sections</option>{sections.map(s=><option value={s.id} key={s.id}>{s.name}</option>)}</select></label>
-        <label>Authorization Level<select name="level" required>{TECHNICAL_AUTHORIZATION_LEVELS.map(l=><option value={l} key={l}>{l}</option>)}</select></label>
-        <label>Expires<input type="date" name="expiresAt"/></label>
-        <button>Add authorization</button>
-      </form>
-    </div>}
-
-    {tab==='Section Scope' && <div>
-      <p>Section-scoped technical authorizations control what each staff member or position can do within a specific laboratory section.</p>
-      <form className="form" onSubmit={addTechnicalAuth}>
-        <label>Staff<select name="staffId"><option value="">—</option>{staff.map(s=><option value={s.id} key={s.id}>{s.fullName}</option>)}</select></label>
-        <label>or Position<select name="positionId"><option value="">None</option>{positions.map(p=><option value={p.id} key={p.id}>{p.title}</option>)}</select></label>
-        <label>Module<select name="moduleKey" required>{MODULES.map(m=><option value={m.key} key={m.key}>{m.label}</option>)}</select></label>
-        <label>Section scope<select name="sectionId"><option value="">All sections</option>{sections.map(s=><option value={s.id} key={s.id}>{s.name}</option>)}</select></label>
-        <label>Level<select name="level" required>{TECHNICAL_AUTHORIZATION_LEVELS.map(l=><option value={l} key={l}>{l}</option>)}</select></label>
-        <label>Expires<input type="date" name="expiresAt"/></label>
-        <button>Grant section authorization</button>
-      </form>
-      <table className="data-table"><thead><tr><th>Subject</th><th>Module</th><th>Section</th><th>Level</th><th>Status</th><th>Expires</th><th></th></tr></thead><tbody>
-        {techAuths.map(a=><tr key={a.id}>
-          <td>{a.staff_name || a.position_title || '—'}{a.position_title && a.staff_name ? '' : a.position_title ? ' (position)' : ''}</td>
-          <td>{moduleLabel(a.module_key)}</td>
-          <td>{a.section_name || 'All sections'}</td>
-          <td><span className="badge">{a.level}</span></td>
-          <td>{a.is_active ? <span className="badge active">active</span> : <span className="badge inactive">inactive</span>}</td>
-          <td>{a.expires_at || '—'}</td>
-          <td>{a.is_active ? <button onClick={()=>deactivateAuth(a.id)}>Deactivate</button> : null}</td>
-        </tr>)}
-        {techAuths.length===0 && <tr><td colSpan={7} className="hint">No technical authorizations yet.</td></tr>}
-      </tbody></table>
-    </div>}
-
-    {tab==='Audit History' && <div>
-      <label className="inline">Filter by entity
-        <select value={auditFilter} onChange={e=>setAuditFilter(e.target.value)}>
-          <option value="all">All</option>
-          {auditEntities.map(en=><option key={en} value={en}>{en}</option>)}
-        </select>
-      </label>
-      <table className="data-table"><thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Entity</th><th>Details</th></tr></thead><tbody>
-        {filteredAudit.map(a=><tr key={a.id}>
-          <td>{a.created_at}</td>
-          <td>{a.actor_name || a.actor_username || 'System'}</td>
-          <td><span className="badge">{a.action}</span></td>
-          <td>{a.entity}</td>
-          <td>{summariseAudit(a)}</td>
-        </tr>)}
-        {filteredAudit.length===0 && <tr><td colSpan={5} className="hint">No audit history yet.</td></tr>}
-      </tbody></table>
-    </div>}
-  </div>;
-}
 
 // ---------------------------------------------------------------------------
 // Other settings panels (unchanged behaviour)
@@ -2579,9 +2263,14 @@ export function Devices(){
 
 // ---------------------------------------------------------------------------
 // People & Access  (merged module: everything about staff, users, positions,
-// the organogram, the permission matrix, and staff Excel import/export)
+// the organogram, access control, and staff Excel import/export)
 // ---------------------------------------------------------------------------
-const PEOPLE_TABS = ['Register New Staff', 'Personnel Register', 'Users & Access', 'Positions & Organogram', 'Access Control', 'Advanced Matrix'] as const;
+// The Advanced Matrix used to sit beside Access Control as a second, rawer
+// place to decide the same thing — and the two could disagree. It is folded
+// into Access Control now: every area row there expands to the exact actions
+// its level allows, and the technical-authorization register and change
+// history it carried are panels on the same screen.
+const PEOPLE_TABS = ['Register New Staff', 'Personnel Register', 'Users & Access', 'Positions & Organogram', 'Access Control'] as const;
 type PeopleTab = typeof PEOPLE_TABS[number];
 
 export function PeopleAccess() {
@@ -2598,7 +2287,6 @@ export function PeopleAccess() {
       {tab === 'Users & Access' && <UsersAccess />}
       {tab === 'Positions & Organogram' && <Positions />}
       {tab === 'Access Control' && <AccessControl />}
-      {tab === 'Advanced Matrix' && <PermissionMatrix />}
     </div>
   </div>;
 }

@@ -8,6 +8,7 @@ import { STOCK_STATUS_LABELS, NEEDS_ACTION, type StockStatus } from '../../../sh
 import { MOVEMENT_LABELS } from '../../../shared/constants/inventory';
 import type { ConfigOption } from '../../../shared/constants/configLists';
 import { useCappedRows } from '../../hooks/useCappedRows';
+import { usePermissions } from '../../hooks/usePermissions';
 import { encodeDestination, decodeDestination } from '../../../shared/constants/inventory';
 
 /**
@@ -79,6 +80,7 @@ async function download(path: string, fallback: string) {
  * another.
  */
 export function StockLedger({ onOpenItem, refreshKey }: { onOpenItem: (id: number) => void; refreshKey: number }) {
+  const { can } = usePermissions();
   const [rows, setRows] = useState<LedgerRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -137,7 +139,7 @@ export function StockLedger({ onOpenItem, refreshKey }: { onOpenItem: (id: numbe
         </div>
         <div className="reg-head-actions" style={{ marginLeft: 'auto' }}>
           <RegisterSearch onQuery={setDeferred} placeholder="Search item, code, category, shelf…" />
-          <button type="button" className="secondary" onClick={() => void download('/supplier-inventory/ledger/export', 'Stock_Control_Ledger.xlsx').catch(e => setError((e as Error).message))}>Export</button>
+          {can('supplier_inventory.stock', 'export') && <button type="button" className="secondary" onClick={() => void download('/supplier-inventory/ledger/export', 'Stock_Control_Ledger.xlsx').catch(e => setError((e as Error).message))}>Export</button>}
         </div>
       </div>
 
@@ -699,6 +701,7 @@ export function StockTake({ places, staff, items, categories, canVoid, onPosted 
   canVoid?: boolean;
   onPosted: () => void;
 }) {
+  const { can } = usePermissions();
   const [counts, setCounts] = useState<any[]>([]);
   const [open, setOpen] = useState<number | null>(null);
   const [cancelling, setCancelling] = useState<any>(null);
@@ -879,9 +882,9 @@ export function StockTake({ places, staff, items, categories, canVoid, onPosted 
             <td className="reg-actions-col" onClick={e => e.stopPropagation()}>
               <RowMenu label={`Manage ${c.count_number}`}>{close => <>
                 <button type="button" role="menuitem" onClick={() => { close(); setOpen(c.id); }}><FileText size={14} /> Open the sheet</button>
-                <button type="button" role="menuitem" onClick={() => { close(); void download(`/supplier-inventory/counts/${c.id}/export`, `${c.count_number}.xlsx`).catch(e => setError((e as Error).message)); }}>
+                {can('supplier_inventory.stock', 'export') && <button type="button" role="menuitem" onClick={() => { close(); void download(`/supplier-inventory/counts/${c.id}/export`, `${c.count_number}.xlsx`).catch(e => setError((e as Error).message)); }}>
                   <Printer size={14} /> Export the variance sheet
-                </button>
+                </button>}
                 {canVoid && c.status === 'open' && <button type="button" role="menuitem" className="danger" onClick={() => { close(); setCancelling(c); }}>
                   <X size={14} /> Abandon this count…
                 </button>}
@@ -940,6 +943,7 @@ function CountSheet({ id, items, canVoid, onClose, onPosted }: {
   id: number; items: LedgerRow[]; canVoid?: boolean; onClose: () => void; onPosted: () => void;
 }) {
   const [data, setData] = useState<any>(null);
+  const { can } = usePermissions();
   const [edits, setEdits] = useState<Record<number, { counted: string; reason: string; note: string }>>({});
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -1071,9 +1075,9 @@ function CountSheet({ id, items, canVoid, onClose, onPosted }: {
         : abandoned ? <span className="badge" style={{ background: '#fde2e2', color: '#b42318' }}>abandoned</span>
         : <span className="badge warn">open</span>}
       {Boolean(data.blind) && <span className="badge">blind count</span>}
-      <button type="button" className="secondary" onClick={() => void download(`/supplier-inventory/counts/${id}/export`, `${data.count_number}.xlsx`).catch(e => setError((e as Error).message))}>
+      {can('supplier_inventory.stock', 'export') && <button type="button" className="secondary" onClick={() => void download(`/supplier-inventory/counts/${id}/export`, `${data.count_number}.xlsx`).catch(e => setError((e as Error).message))}>
         <Printer size={14} /> Export
-      </button>
+      </button>}
     </>}
     footer={data && !locked && <>
       <button type="button" className="secondary" disabled={!!busy} onClick={() => setAdding(true)}>

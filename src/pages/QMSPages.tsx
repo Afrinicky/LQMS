@@ -5,6 +5,7 @@ import { api } from '../services/api';
 import { useModules } from '../hooks/useModules';
 import DisabledModule from '../components/DisabledModule';
 import { useTabParam } from '../hooks/useTabParam';
+import PermissionTabs from '../components/PermissionTabs';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import { formatBadge, toDisplay, useLookupData, type LoadState, type RiskDetail } from './qmsShared';
 import type { ActionRecord, RiskRecord } from '../../shared/types/api';
@@ -21,7 +22,6 @@ export function RisksPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { isEnabled } = useModules();
   const { staff, sections } = useLookupData();
   const [tab, setTab] = useState(embedded ? 'Risk Register' : 'Dashboard');
-  useTabParam(RISK_TABS, setTab);
   const [risks, setRisks] = useState<RiskRecord[]>([]);
   useFocusTarget(risks);
   const [selected, setSelected] = useState<RiskDetail | null>(null);
@@ -146,7 +146,7 @@ export function RisksPage({ embedded = false }: { embedded?: boolean } = {}) {
 
   return <div>
     {!embedded && <PageHeader eyebrow="Continual Improvement" title="Risk Register" subtitle="Risk identification, mitigation, and periodic review." />}
-    <div className="tabs">{RISK_TABS.filter(name => !embedded || name !== 'Dashboard').map(name => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
+    <PermissionTabs moduleKey="risks" tabs={RISK_TABS.filter(name => !embedded || name !== 'Dashboard')} active={tab} onChange={setTab} />
     {loadState.error && <div className="card"><strong>Error:</strong> {loadState.error}</div>}
     {loadState.loading && <div className="card"><em>Loading risk register…</em></div>}
     {tab === 'Dashboard' && <><ModuleAlerts moduleKey="risks" /><KpiStrip items={[

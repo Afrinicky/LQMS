@@ -91,10 +91,10 @@ export function equipmentRoutes() {
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
   }
 
-  router.get('/register/template', requirePermission('equipment.register', 'view'), (_req, res) => {
+  router.get('/register/template', requirePermission('equipment.register', 'export'), (_req, res) => {
     sendWorkbook(res, buildEquipmentWorkbook(false), 'Equipment_Register_Template.xlsx');
   });
-  router.get('/register/export', requirePermission('equipment.register', 'view'), (_req, res) => {
+  router.get('/register/export', requirePermission('equipment.register', 'export'), (_req, res) => {
     sendWorkbook(res, buildEquipmentWorkbook(true), 'Equipment_Register.xlsx');
   });
 
@@ -190,8 +190,8 @@ export function equipmentRoutes() {
     XLSX.utils.book_append_sheet(wb, ws, 'MAINTENANCE RECORDS');
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
   }
-  router.get('/maintenance/template', requirePermission('equipment.maintenance', 'view'), (_req, res) => sendWorkbook(res, buildMaintenanceWorkbook(false), 'Equipment_Maintenance_Template.xlsx'));
-  router.get('/maintenance/export', requirePermission('equipment.maintenance', 'view'), (_req, res) => sendWorkbook(res, buildMaintenanceWorkbook(true), 'Equipment_Maintenance_Records.xlsx'));
+  router.get('/maintenance/template', requirePermission('equipment.maintenance', 'export'), (_req, res) => sendWorkbook(res, buildMaintenanceWorkbook(false), 'Equipment_Maintenance_Template.xlsx'));
+  router.get('/maintenance/export', requirePermission('equipment.maintenance', 'export'), (_req, res) => sendWorkbook(res, buildMaintenanceWorkbook(true), 'Equipment_Maintenance_Records.xlsx'));
   router.post('/maintenance/import', requirePermission('equipment.maintenance', 'create'), upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the Equipment Maintenance .xlsx file.' });
     try {

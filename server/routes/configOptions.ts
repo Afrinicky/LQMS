@@ -14,6 +14,7 @@
 import { Router } from 'express';
 import { getDb } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
+import { requireAuth } from '../middleware/auth.js';
 import { audit } from '../services/auditService.js';
 import { CONFIG_LISTS, configListDef } from '../../shared/constants/configLists.js';
 import { isArchetype } from '../../shared/constants/equipment.js';
@@ -49,7 +50,10 @@ export function configOptionsRoutes() {
 
   // Any authenticated user may read a list — the equipment form needs it — so
   // this is gated only by being logged in, not by the settings permission.
-  router.get('/config/option-lists/:key', (req, res) => {
+  // These lists are the laboratory's own configured vocabulary — unit names,
+  // categories, suppliers' terms. Readable by anybody signed in, because every
+  // form needs them, but not by an unauthenticated caller on the LAN.
+  router.get('/config/option-lists/:key', requireAuth, (req, res) => {
     if (!configListDef(req.params.key)) return res.status(404).json({ error: 'Unknown list.' });
     res.json(readOptions(getDb(), req.params.key));
   });

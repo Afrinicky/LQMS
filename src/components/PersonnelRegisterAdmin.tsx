@@ -240,7 +240,7 @@ export default function PersonnelRegisterAdmin() {
             <Search size={15} />
             <input placeholder="Search name, Staff ID, position, unit…" value={query} onChange={e => setQuery(e.target.value)} />
           </label>
-          {view === 'active' && <button type="button" className="secondary" disabled={busy === '/staff/template'} onClick={() => download('/staff/template', 'Staff_Register_Template.xlsx')}>
+          {mayExport && view === 'active' && <button type="button" className="secondary" disabled={busy === '/staff/template'} onClick={() => download('/staff/template', 'Staff_Register_Template.xlsx')}>
             <FileSpreadsheet size={15} /> {busy === '/staff/template' ? 'Preparing…' : 'Blank template'}
           </button>}
           {mayExport && <button type="button" className="secondary" disabled={!!busy?.startsWith('/staff/export')}

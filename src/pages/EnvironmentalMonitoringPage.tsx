@@ -21,7 +21,30 @@ const TAB_MODULE = 'monitoring';
 // This workspace is nested inside the Facilities & Safety "Environmental
 // Monitoring" tab, so an alert aims at it with ?subtab= while ?tab= selects the
 // outer tab.
+/**
+ * Environmental Monitoring is a FEATURE of Facilities & Safety, not a module
+ * of its own. It used to gate its buttons on `monitoring` while the API
+ * guarded the whole `facilities_safety` module — so a control could appear for
+ * someone the server would refuse, and disappear for someone it would allow.
+ * Both sides name this one key now.
+ */
+const ENV = 'facilities_safety.environment';
+
 const TABS = ['Live Dashboard', 'Assets', 'Devices', 'Manual Entry', 'Alerts', 'Excursions', 'Insights', 'Notifications', 'Charts', 'Scanned Charts', 'Reports', 'Settings'];
+
+/**
+ * What a tab actually asks of the person opening it. A tab that is nothing but
+ * a configuration form is not something a "View" user should be offered and
+ * then refused — it is not shown at all.
+ */
+const TAB_ACTION: Record<string, 'view' | 'create' | 'edit'> = {
+  'Assets': 'edit',
+  'Devices': 'edit',
+  'Settings': 'edit',
+  'Notifications': 'edit',
+  'Manual Entry': 'create',
+  'Scanned Charts': 'create',
+};
 
 const tabBar = (active: string, tabs: string[], onChange: (name: string) => void) =>
   <PermissionTabs moduleKey={TAB_MODULE} tabs={tabs} active={active} onChange={onChange} />;
@@ -99,6 +122,14 @@ export function EnvironmentalMonitoringPage({ embedded = false }: { embedded?: b
   const [chartData, setChartData] = useState<EnvReading[]>([]);
 
   const enabled = embedded || isEnabled('facilities_safety');
+  // Tabs the person may actually work in. A tab filtered away must not stay
+  // selected — a bookmark or a rights change mid-session lands the user on the
+  // first tab they can open rather than on a blank panel.
+  const permittedTabs = TABS.filter(t => can(ENV, TAB_ACTION[t] ?? 'view'));
+  useEffect(() => {
+    if (permittedTabs.length && !permittedTabs.includes(tab)) setTab(permittedTabs[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [permittedTabs.join('|'), tab]);
   function flash(m: string) { setNotice(m); setTimeout(() => setNotice(null), 4000); }
 
   function loadDashboard() { api<EnvDashboard>('/environmental/dashboard').then(setDashboard).catch(() => {}); }
@@ -131,7 +162,7 @@ export function EnvironmentalMonitoringPage({ embedded = false }: { embedded?: b
 
   return <div className="module-page env-mon">
     {!embedded && <PageHeader eyebrow="Facilities and Safety" title="Environmental Monitoring" subtitle="Manual and automated temperature/humidity monitoring, alarms and excursions." />}
-    {tabBar(tab, TABS, setTab)}
+    {tabBar(tab, permittedTabs, setTab)}
     {error && <div className="error">{error}</div>}
     {notice && <div className="notice-ok">{notice}</div>}
 
@@ -169,7 +200,7 @@ export function EnvironmentalMonitoringPage({ embedded = false }: { embedded?: b
         <label>Asset<select value={chartAsset} onChange={e => setChartAsset(e.target.value)}><option value="">— select —</option>{assets.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
         <label>Range<select value={chartRange} onChange={e => setChartRange(e.target.value)}>{['24h', '7d', '30d', '90d'].map(r => <option key={r} value={r}>{r === '24h' ? '24 hours' : r === '7d' ? '7 days' : r === '30d' ? '30 days' : '90 days'}</option>)}</select></label>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
-          {can('monitoring', 'export') && <button type="button" className="secondary" disabled={!chartData.length} onClick={() => exportCsv(chartData, assets.find(a => String(a.id) === chartAsset)?.name || 'asset')}>Export CSV</button>}
+          {can(ENV, 'export') && <button type="button" className="secondary" disabled={!chartData.length} onClick={() => exportCsv(chartData, assets.find(a => String(a.id) === chartAsset)?.name || 'asset')}>Export CSV</button>}
         </div>
       </div>
       {chartAsset
@@ -312,6 +343,7 @@ function AssetsTab({ assets, devices, lookups, onChanged, onError, onFlash }: an
 }
 
 function DevicesTab({ devices, assets, locations, drivers, commMethods, onChanged, onError, onFlash }: any) {
+  const { can } = usePermissions();
   const blank = { name: '', manufacturer: '', model: '', serialNumber: '', deviceType: '', communicationMethod: 'manual', driverKey: 'manual', firmwareVersion: '', calibrationStatus: '', calibrationDueDate: '', assetId: '', locationId: '', pollIntervalSeconds: '', configJson: '', notes: '' };
   const [form, setForm] = useState(blank);
   const [csv, setCsv] = useState<Record<number, string>>({});
@@ -354,7 +386,7 @@ function DevicesTab({ devices, assets, locations, drivers, commMethods, onChange
             {d.asset_id && <button className="secondary" onClick={() => pollNow(d.id)}>Poll now</button>}{' '}
             {d.communication_method === 'csv_import' && d.asset_id && <>
               <input type="file" accept=".csv,text/csv" onChange={e => onFile(d.id, e.target.files?.[0])} style={{ maxWidth: 150 }} />
-              <button className="secondary" disabled={!csv[d.id]} onClick={() => importCsv(d.id)}>Import</button>{' '}
+              {can(ENV, 'create') && <button className="secondary" disabled={!csv[d.id]} onClick={() => importCsv(d.id)}>Import</button>}{' '}
             </>}
             <button className="secondary" onClick={() => remove(d.id)}>Delete</button>
           </td>
@@ -379,7 +411,7 @@ function ManualEntryTab({ assets, staff, onSaved, onError, onFlash }: any) {
   return <div className="card">
     <h3>Manual reading</h3>
     <p className="muted" style={{ marginTop: 0 }}>Manual entries are tagged as <em>manual</em> and evaluated by the same alarm/excursion engine as automated readings.</p>
-    <XlsxToolbar module="monitoring" exportPath="/environmental/readings/export" templatePath="/environmental/readings/template" importPath="/environmental/readings/import" exportName="Environmental_Readings.xlsx" onImported={onSaved} />
+    <XlsxToolbar module={ENV} exportPath="/environmental/readings/export" templatePath="/environmental/readings/template" importPath="/environmental/readings/import" exportName="Environmental_Readings.xlsx" onImported={onSaved} />
     <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>Export/import temperature &amp; humidity readings in Excel. Imported rows are matched to assets by their <strong>Asset code</strong> and pass through the same excursion engine, so out-of-range values raise alerts automatically.</p>
     <form className="form-grid" onSubmit={submit}>
       <label>Asset<select value={form.assetId} onChange={e => setForm({ ...form, assetId: e.target.value })} required><option value="">—</option>{assets.map((a: EnvAsset) => <option key={a.id} value={a.id}>{a.name} ({a.temp_min ?? '−'}–{a.temp_max ?? '−'}°C)</option>)}</select></label>
@@ -564,8 +596,8 @@ function ReportsTab({ onError }: any) {
       <label>From<input type="date" value={from} onChange={e => setFrom(e.target.value)} /></label>
       <label>To<input type="date" value={to} onChange={e => setTo(e.target.value)} /></label>
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
-        {can('monitoring', 'export') && <button type="button" onClick={exportExcel}>Export Excel</button>}
-        {can('monitoring', 'print') && <button type="button" className="secondary" onClick={printPdf}>Print / PDF</button>}
+        {can(ENV, 'export') && <button type="button" onClick={exportExcel}>Export Excel</button>}
+        {can(ENV, 'print') && <button type="button" className="secondary" onClick={printPdf}>Print / PDF</button>}
       </div>
     </div>
   </div>;

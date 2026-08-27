@@ -794,8 +794,8 @@ export function processManagementRoutes() {
     }
     return buildWorkbook(RI_HEADERS, rows, 'REFERENCE INTERVALS');
   }
-  router.get('/reference-intervals/template', requirePermission('process_management.intervals', 'view'), (_req, res) => sendWorkbook(res, riWorkbook(false), 'Reference_Intervals_Template.xlsx'));
-  router.get('/reference-intervals/export', requirePermission('process_management.intervals', 'view'), (_req, res) => sendWorkbook(res, riWorkbook(true), 'Reference_Intervals.xlsx'));
+  router.get('/reference-intervals/template', requirePermission('process_management.intervals', 'export'), (_req, res) => sendWorkbook(res, riWorkbook(false), 'Reference_Intervals_Template.xlsx'));
+  router.get('/reference-intervals/export', requirePermission('process_management.intervals', 'export'), (_req, res) => sendWorkbook(res, riWorkbook(true), 'Reference_Intervals.xlsx'));
   router.post('/reference-intervals/import', requirePermission('process_management.intervals', 'create'), riXlsxUpload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the Reference Intervals .xlsx file.' });
     try {

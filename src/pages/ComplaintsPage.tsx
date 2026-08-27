@@ -8,6 +8,7 @@ import { useModules } from '../hooks/useModules';
 import { usePermissions } from '../hooks/usePermissions';
 import DisabledModule from '../components/DisabledModule';
 import { useTabParam } from '../hooks/useTabParam';
+import PermissionTabs from '../components/PermissionTabs';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import { formatBadge, useLookupData, type ComplaintDetail, type LoadState } from './qmsShared';
 import {
@@ -56,7 +57,6 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
   const { can } = usePermissions();
   const { staff, sections } = useLookupData();
   const [tab, setTab] = useState(embedded ? 'Complaints Register' : 'Dashboard');
-  useTabParam(COMPLAINT_TABS, setTab);
   const [complaints, setComplaints] = useState<ComplaintRecord[]>([]);
   useFocusTarget(complaints);
   const [selected, setSelected] = useState<ComplaintDetail | null>(null);
@@ -168,8 +168,7 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
   return <div>
     {!embedded && <PageHeader eyebrow="Customer Focus" title="Complaints"
       subtitle="Receive, acknowledge, investigate, review and answer — ISO 15189 §7.4." />}
-    <div className="tabs">{COMPLAINT_TABS.filter(n => !embedded || n !== 'Dashboard').map(name =>
-      <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}</div>
+    <PermissionTabs moduleKey="complaints" tabs={COMPLAINT_TABS.filter(n => !embedded || n !== 'Dashboard')} active={tab} onChange={setTab} />
     {loadState.error && <div className="error">{loadState.error}</div>}
     {notice && <div className="notice-ok">{notice}</div>}
 

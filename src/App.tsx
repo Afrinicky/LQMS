@@ -225,7 +225,10 @@ function AppRoutes() {
       <Route path="/system-audit" element={<RequirePermission module="system_audit"><Suspense fallback={<ModuleFallback/>}><SystemAuditPage/></Suspense></RequirePermission>}/>
       <Route path="/process-management" element={<RequirePermission module="process_management"><Suspense fallback={<ModuleFallback/>}><ProcessManagementPage/></Suspense></RequirePermission>}/>
       <Route path="/information-management" element={<RequirePermission module="information_management"><Suspense fallback={<ModuleFallback/>}><InformationManagementPage/></Suspense></RequirePermission>}/>
-      {placeholders.map(m => <Route key={m.key} path={m.path.slice(1)} element={<ModulePage moduleKey={m.key} title={m.label} placeholder/>}/>)}
+      {/* A placeholder module is still a module: it is gated like every other
+          one, so a workspace nobody has been given does not open just because
+          it has no content yet. */}
+      {placeholders.map(m => <Route key={m.key} path={m.path.slice(1)} element={<RequirePermission module={m.key}><ModulePage moduleKey={m.key} title={m.label} placeholder/></RequirePermission>}/>)}
       {/* Settings holds pages with different requirements: the shell opens for
           anyone who can reach at least one of them, and each page is gated on
           the exact right it needs. */}

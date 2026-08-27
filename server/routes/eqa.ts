@@ -23,8 +23,8 @@ export function eqaRoutes() {
     }
     return buildWorkbook(EQA_PROGRAM_HEADERS, rows, 'EQA PROGRAMMES');
   }
-  router.get('/programs/template', requirePermission('eqa', 'view'), (_req, res) => sendWorkbook(res, eqaProgramsWorkbook(false), 'EQA_Programmes_Template.xlsx'));
-  router.get('/programs/export', requirePermission('eqa', 'view'), (_req, res) => sendWorkbook(res, eqaProgramsWorkbook(true), 'EQA_Programmes.xlsx'));
+  router.get('/programs/template', requirePermission('eqa', 'export'), (_req, res) => sendWorkbook(res, eqaProgramsWorkbook(false), 'EQA_Programmes_Template.xlsx'));
+  router.get('/programs/export', requirePermission('eqa', 'export'), (_req, res) => sendWorkbook(res, eqaProgramsWorkbook(true), 'EQA_Programmes.xlsx'));
   router.post('/programs/import', requirePermission('eqa', 'create'), xlsxUpload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the EQA Programmes .xlsx file.' });
     try {

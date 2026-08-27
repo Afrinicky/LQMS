@@ -29,8 +29,13 @@ export function usePermittedTabs(moduleKey: string, tabs: string[], active: stri
 
   const permitted = useMemo(
     () => tabs.filter(tab => {
-      const permKey = permKeyForTab(moduleKey, tab);
-      return permKey === null || can(permKey, actionForTab(tab));
+      // A tab with no feature of its own is governed by its module. It used to
+      // be shown unconditionally, which is how a "New …" form appeared to
+      // someone who may read a register but not add to it — they filled it in
+      // and the save was refused. Falling back to the module key means the
+      // tab's own action decides it either way.
+      const permKey = permKeyForTab(moduleKey, tab) ?? moduleKey;
+      return can(permKey, actionForTab(tab));
     }),
     [moduleKey, tabs, can],
   );
