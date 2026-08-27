@@ -405,6 +405,9 @@ const CREATE_TAB_NAMES = new Set([
   'Add Staff', 'Log Event', 'Report Incident', 'Manual Entry', 'Enter Reading',
   'Result Entry', 'Results Entry', 'Generate Report', 'Generate Alerts',
   'Feedback Intake', 'Sample Receipt',
+  // Registers whose "add" tab is phrased as a verb rather than "New …".
+  'Log a complaint', 'Log Complaint', 'Raise a risk', 'Log a nonconformity',
+  'Register Equipment', 'Add Item', 'Add Element', 'Upload', 'New Import',
 ]);
 
 /** The action a tab requires: `create` for the "new record" tabs, else `view`. */

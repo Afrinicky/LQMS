@@ -17,6 +17,8 @@
     "smoke": "node scripts/smoke-check.mjs",
     "rbac:check": "node scripts/rbac-check.mjs",
     "rbac:levels": "node scripts/rbac-levels.mjs",
+    "audit:access": "node scripts/access-audit.mjs",
+    "audit:access:live": "node scripts/access-audit-live.mjs",
     "check:accounts": "node scripts/account-check.mjs",
     "check:iqc": "node scripts/iqc-check.mjs",
     "rebuild:native": "electron-builder install-app-deps",

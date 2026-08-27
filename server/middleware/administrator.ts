@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { getDb } from '../db/database.js';
+import { profileIdForUser } from '../services/permissionResolver.js';
 
 /**
  * The administrator gate.
@@ -20,9 +21,14 @@ import { getDb } from '../db/database.js';
  */
 export function isAdministrator(userId: number | undefined): boolean {
   if (!userId) return false;
-  const row = getDb().prepare(
-    'SELECT r.is_administrator AS a FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?',
-  ).get(userId) as { a: number } | undefined;
+  // Read the flag off the ACCESS PROFILE the user actually resolves to — the
+  // same one every other permission question uses. Reading it straight off
+  // `users.role_id` would disagree with the rest of the model the moment a
+  // position mapping applied, which is exactly the kind of second opinion this
+  // work set out to remove.
+  const { profileId } = profileIdForUser(userId);
+  if (profileId === null) return false;
+  const row = getDb().prepare('SELECT is_administrator AS a FROM roles WHERE id = ?').get(profileId) as { a: number } | undefined;
   return Number(row?.a) === 1;
 }
 

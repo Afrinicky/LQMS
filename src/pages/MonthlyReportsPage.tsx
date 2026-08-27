@@ -244,8 +244,8 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
         <td>{formatBadge(b.status)}</td><td>{b.total_rows}</td><td>{b.exception_count}</td>
         <td>
           <button onClick={() => openImport(b.id)}>Open</button>
-          {b.status !== 'processed' && <button onClick={() => processImport(b.id)}>Process</button>}
-          {b.status === 'processed' && <button onClick={() => processImport(b.id)}>Reprocess</button>}
+          {can('monthly_reports', 'edit') && b.status !== 'processed' && <button onClick={() => processImport(b.id)}>Process</button>}
+          {can('monthly_reports', 'edit') && b.status === 'processed' && <button onClick={() => processImport(b.id)}>Reprocess</button>}
         </td>
       </tr>)}
     </tbody></table>}
@@ -268,8 +268,8 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
           <td>{b.total_rows}</td><td>{b.processed_rows}</td><td>{b.exception_count}</td>
           <td>
             <button onClick={() => openImport(b.id)}>Open</button>
-            {b.status !== 'processed' && <button onClick={() => processImport(b.id)}>Process</button>}
-            {b.status === 'processed' && <button onClick={() => processImport(b.id)}>Reprocess</button>}
+            {can('monthly_reports', 'edit') && b.status !== 'processed' && <button onClick={() => processImport(b.id)}>Process</button>}
+            {can('monthly_reports', 'edit') && b.status === 'processed' && <button onClick={() => processImport(b.id)}>Reprocess</button>}
           </td>
         </tr>)}
       </tbody></table>
@@ -349,9 +349,9 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
           <td>{r.approved_by_staff_id ? (staff.find(s => s.id === r.approved_by_staff_id)?.fullName || `Staff #${r.approved_by_staff_id}`) : '—'}</td>
           <td>
             <button onClick={() => openReport(r.id)}>Open</button>
-            {r.status === 'draft' && <button onClick={() => reviewReport(r.id)}>Mark reviewed</button>}
-            {(r.status === 'reviewed' || r.status === 'draft') && <button onClick={() => approveReport(r.id, false)}>Approve</button>}
-            {(r.status === 'reviewed' || r.status === 'draft') && r.exception_count > 0 && <button onClick={() => approveReport(r.id, true)}>Approve (override)</button>}
+            {can('monthly_reports', 'approve') && r.status === 'draft' && <button onClick={() => reviewReport(r.id)}>Mark reviewed</button>}
+            {can('monthly_reports', 'approve') && (r.status === 'reviewed' || r.status === 'draft') && <button onClick={() => approveReport(r.id, false)}>Approve</button>}
+            {can('monthly_reports', 'approve') && (r.status === 'reviewed' || r.status === 'draft') && r.exception_count > 0 && <button onClick={() => approveReport(r.id, true)}>Approve (override)</button>}
             {(r.status === 'approved' || r.status === 'exported') && <>
               {can('monthly_reports', 'export') && <>
                 <button onClick={() => exportReport(r.id, 'csv')}>Export CSV</button>
@@ -414,7 +414,7 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
           <td>{(a.size_bytes / 1024).toFixed(1)} KB</td>
           <td>{a.file_created_at}</td>
           <td>{a.link_notes || '—'}</td>
-          <td><button onClick={() => downloadArchiveFile(a.report_id, a.file_id, a.original_name)}>Download</button></td>
+          <td>{can('monthly_reports', 'export') ? <button onClick={() => downloadArchiveFile(a.report_id, a.file_id, a.original_name)}>Download</button> : <span className="muted">—</span>}</td>
         </tr>)}
       </tbody></table>
       {archive.length === 0 && <p>No exported reports yet. Export an approved report to populate the archive.</p>}

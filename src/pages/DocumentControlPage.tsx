@@ -1737,7 +1737,7 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
               {isPdfFile && canAuthor && <button onClick={() => external.uploadInput.current?.click()} disabled={external.uploading}>{external.uploading ? 'Uploading…' : '⬆ Upload an edited copy'}</button>}
               {content?.file_id && !isOfficeFile && <button onClick={reExtract} disabled={busy}>{busy ? 'Reading…' : '⟳ Re-read content from file'}</button>}
               {!isOfficeFile && !!content?.content_html && isWordSource && <div className="dv-menu-sep" />}
-              {!isOfficeFile && !!content?.content_html && isWordSource && <button onClick={downloadAsWord} disabled={!!exportBusy}>{exportBusy === 'download' ? 'Building…' : '⬇ Download as Word (.docx)'}</button>}
+              {!isOfficeFile && !!content?.content_html && isWordSource && can('documents.library', 'export') && <button onClick={downloadAsWord} disabled={!!exportBusy}>{exportBusy === 'download' ? 'Building…' : '⬇ Download as Word (.docx)'}</button>}
               {!isOfficeFile && !!content?.content_html && isWordSource && <button onClick={saveAsWordVersion} disabled={!!exportBusy}>{exportBusy === 'save' ? 'Saving…' : '＋ Save as new Word version'}</button>}
               <div className="dv-menu-sep" />
               <button onClick={() => window.dispatchEvent(new CustomEvent('dennis:ask', { detail: { question: `Summarise and explain this document: ${content?.file_name || content?.version_label || 'the open document'}` } }))}>🤖 Ask Dennis about this document</button>
@@ -2146,7 +2146,7 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
           <td>{r.section_name || 'General / QMS-wide'}</td><td>{r.storage_location || '—'}</td>
           <td>{formatBadge(r.confidentiality)}</td><td>{r.retention_period || '—'}</td>
           <td>{r.disposal_method || '—'}</td><td>{formatBadge(r.status)}</td>
-          <td>{r.file_id ? <button className="secondary" onClick={() => downloadRecordFile(r)} title={r.file_name}>Download</button> : '—'}</td>
+          <td>{r.file_id && can('documents.records', 'export') ? <button className="secondary" onClick={() => downloadRecordFile(r)} title={r.file_name}>Download</button> : '—'}</td>
         </tr>)}{filteredRegister.length === 0 && <tr><td colSpan={13} className="muted">No records registered yet.</td></tr>}
       </tbody></table>
       </div>
@@ -2450,6 +2450,7 @@ const ARCHIVE_TYPES_UI = [
 const ARCHIVE_FREQUENCIES = ['weekly', 'monthly', 'quarterly', 'biannual', 'annual'];
 
 function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onError: (m: string) => void; onNotice: (m: string) => void }) {
+  const { can } = usePermissions();
   const [sub, setSub] = useState('Register');
   const [rows, setRows] = useState<CentralArchiveRow[]>([]);
   const [summary, setSummary] = useState<CentralArchiveSummaryLocal | null>(null);
@@ -2574,7 +2575,7 @@ function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onEr
               <td>{String(r.archived_at).slice(0, 10)}</td>
               <td>{r.archived_by_name || staffName(staff, r.archived_by_staff_id)}</td>
               <td style={{ fontSize: 11 }}>{r.retention_until || (r.retention_period_months ? `${r.retention_period_months} mo` : '—')}</td>
-              <td>{r.file_id ? <button className="link-btn" onClick={e => { e.stopPropagation(); void downloadArchive(r); }}>Download</button> : '—'}</td>
+              <td>{r.file_id && can('documents.archive', 'export') ? <button className="link-btn" onClick={e => { e.stopPropagation(); void downloadArchive(r); }}>Download</button> : '—'}</td>
               <td>{r.cloud_url ? <a href={r.cloud_url} onClick={e => e.stopPropagation()} target="_blank" rel="noopener noreferrer">Open</a> : '—'}</td>
               <td onClick={e => e.stopPropagation()}><button className="secondary" onClick={() => setSelected(r)}>Details</button></td>
             </tr>)}
@@ -2605,7 +2606,7 @@ function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onEr
               {selected.notes && <p className="muted" style={{ margin: '4px 0' }}>{selected.notes}</p>}
               <hr />
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {selected.file_id && <button onClick={() => downloadArchive(selected)}>⬇ Download local copy</button>}
+                {selected.file_id && can('documents.archive', 'export') && <button onClick={() => downloadArchive(selected)}>⬇ Download local copy</button>}
                 {selected.cloud_url && <a className="badge" href={selected.cloud_url} target="_blank" rel="noopener noreferrer">☁ Open cloud copy</a>}
               </div>
             </div>

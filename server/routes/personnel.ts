@@ -465,11 +465,11 @@ export function personnelRoutes() {
     res.send(buf);
   }
 
-  router.get('/register/template', requirePermission('personnel.register', 'view'), (_req, res) => {
+  router.get('/register/template', requirePermission('personnel.register', 'export'), (_req, res) => {
     sendWorkbook(res, registerWorkbook(false), 'Master_Personnel_Register_Template.xlsx');
   });
 
-  router.get('/register/export', requirePermission('personnel.register', 'view'), (_req, res) => {
+  router.get('/register/export', requirePermission('personnel.register', 'export'), (_req, res) => {
     sendWorkbook(res, registerWorkbook(true), 'Master_Personnel_Register.xlsx');
   });
 

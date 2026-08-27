@@ -78,8 +78,8 @@ async function main() {
   const docView = perms.find(p => p.module_key === 'documents' && p.action === 'view');
   const docPrint = perms.find(p => p.module_key === 'documents' && p.action === 'print');
   // Grant print, deny view, for this one user.
-  await call('/permissions/user-override', { token: A, method: 'POST', body: { userId: tech.user.id, permissionId: docPrint.id, allowed: true, reason: 'test' } });
-  await call('/permissions/user-override', { token: A, method: 'POST', body: { userId: tech.user.id, permissionId: docView.id, allowed: false, reason: 'test' } });
+  await call('/permissions/action', { token: A, method: 'POST', body: { scope: 'user', subjectId: tech.user.id, permKey: 'documents.library', action: 'print', allowed: true, reason: 'test' } });
+  await call('/permissions/action', { token: A, method: 'POST', body: { scope: 'user', subjectId: tech.user.id, permKey: 'documents.library', action: 'view', allowed: false, reason: 'test' } });
   const after = (await call('/auth/permissions', { token: T })).json.permissions;
   check('documents disappears from the map when view is denied', !after.documents, JSON.stringify(after.documents));
   const printRes = await call('/documents/1/print-render', { token: T });
@@ -108,7 +108,7 @@ async function main() {
 
   console.log('\n[5] A revoked role permission is not restored by re-seeding');
   const eqaPrint = perms.find(p => p.module_key === 'eqa' && p.action === 'print');
-  await call('/permissions/role', { token: A, method: 'POST', body: { roleId: techRole.id, permissionId: eqaPrint.id, allowed: false } });
+  await call('/permissions/action', { token: A, method: 'POST', body: { scope: 'profile', subjectId: techRole.id, permKey: 'eqa', action: 'print', allowed: false } });
   const matrix = (await call('/permissions/matrix', { token: A })).json;
   const row = matrix.rolePermissions.find(r => r.role_id === techRole.id && r.permission_id === eqaPrint.id);
   check('revocation is stored as allowed=0', row && row.allowed === 0, JSON.stringify(row));
@@ -122,7 +122,7 @@ async function main() {
   check('QR lookup succeeds when the user may print that module', okLookup.status === 200, `got ${okLookup.status}`);
   const token = okLookup.json?.token;
   const equipView = perms.find(p => p.module_key === 'equipment' && p.action === 'view');
-  await call('/permissions/user-override', { token: A, method: 'POST', body: { userId: tech.user.id, permissionId: equipView.id, allowed: false, reason: 'test' } });
+  await call('/permissions/action', { token: A, method: 'POST', body: { scope: 'user', subjectId: tech.user.id, permKey: 'equipment', action: 'view', allowed: false, reason: 'test' } });
   const deniedLookup = await call('/qr/lookup/equipment/1', { token: T });
   check('QR lookup is refused once equipment view is revoked', deniedLookup.status === 403, `got ${deniedLookup.status}`);
   if (token) {

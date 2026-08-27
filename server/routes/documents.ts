@@ -995,7 +995,7 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   //   - export-docx/save-as-version: the export becomes the document's newest
   //     version (so edits made in-app round-trip into the official record as a
   //     real Word file, not just trapped HTML).
-  router.post('/:id/versions/:versionId/export-docx', requirePermission('documents.library', 'view'), async (req, res) => {
+  router.post('/:id/versions/:versionId/export-docx', requirePermission('documents.library', 'export'), async (req, res) => {
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
     if (!doc) return res.status(404).json({ error: 'Document not found' });

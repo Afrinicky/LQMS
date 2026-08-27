@@ -261,10 +261,10 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
         <td>{r.date_from || '—'} → {r.date_to || '—'}</td><td>{formatBadge(r.status)}</td>
         <td><small>{r.summary || '—'}</small></td>
         <td>
-          {r.status === 'draft' && <button onClick={() => generateReport(r.id)}>Generate</button>}
-          {r.status === 'generated' && <button onClick={() => reviewReport(r.id)}>Review</button>}
-          {r.status === 'reviewed' && <button onClick={() => approveReport(r.id)}>Approve</button>}
-          {(r.status === 'generated' || r.status === 'reviewed' || r.status === 'approved') && <>
+          {can('records_reports.generate', 'edit') && r.status === 'draft' && <button onClick={() => generateReport(r.id)}>Generate</button>}
+          {can('records_reports.generate', 'edit') && r.status === 'generated' && <button onClick={() => reviewReport(r.id)}>Review</button>}
+          {can('records_reports.generate', 'approve') && r.status === 'reviewed' && <button onClick={() => approveReport(r.id)}>Approve</button>}
+          {can('records_reports.generate', 'export') && (r.status === 'generated' || r.status === 'reviewed' || r.status === 'approved') && <>
             <button onClick={() => exportReport(r.id, 'csv')}>CSV</button>
             <button onClick={() => exportReport(r.id, 'json')}>JSON</button>
             <button onClick={() => exportReport(r.id, 'html')}>HTML</button>
@@ -274,7 +274,7 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
     </tbody></table>}
 
     {tab === 'Print Jobs' && <>
-      <form className="form-grid" onSubmit={submitPrint}>
+      {can('records_reports.print', 'print') && <form className="form-grid" onSubmit={submitPrint}>
         <label>Title<input value={printForm.printTitle} onChange={e => setPrintForm({ ...printForm, printTitle: e.target.value })} required /></label>
         <label>Purpose<input value={printForm.printPurpose} onChange={e => setPrintForm({ ...printForm, printPurpose: e.target.value })} required placeholder="reference / training / controlled distribution" /></label>
         <label>Module<input value={printForm.moduleKey} onChange={e => setPrintForm({ ...printForm, moduleKey: e.target.value })} /></label>
@@ -284,7 +284,7 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
         <label>Copy number<input value={printForm.copyNumber} onChange={e => setPrintForm({ ...printForm, copyNumber: e.target.value })} /></label>
         <label>Watermark<input value={printForm.watermark} onChange={e => setPrintForm({ ...printForm, watermark: e.target.value })} /></label>
         <button type="submit">Log print job</button>
-      </form>
+      </form>}
       <table className="data-table"><thead><tr><th>Number</th><th>Title</th><th>Module / record</th><th>Purpose</th><th>Controlled</th><th>Copy</th><th>Watermark</th></tr></thead><tbody>
         {printJobs.map(p => <tr key={p.id}><td>{p.print_number}</td><td>{p.print_title}</td><td>{p.module_key || '—'}{p.record_type ? ` / ${p.record_type} #${p.record_id}` : ''}</td><td>{p.print_purpose}</td><td>{p.controlled_copy ? 'Yes' : 'No'}</td><td>{p.copy_number || '—'}</td><td>{p.watermark || '—'}</td></tr>)}
       </tbody></table>

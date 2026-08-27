@@ -394,11 +394,13 @@ export function EquipmentPage() {
         <h3 style={{ margin: 0 }}>Equipment register</h3>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span className="muted" style={{ fontSize: 13 }}>Click a row to open its profile.</span>
-          {can('equipment', 'export') && <button type="button" className="secondary" disabled={!!regBusy} title="Download the equipment register as an Excel workbook" onClick={() => downloadEquipmentRegister('/equipment/register/export', 'Equipment_Register.xlsx')}>{regBusy === '/equipment/register/export' ? 'Exporting…' : 'Export'}</button>}
-          <button type="button" className="secondary" disabled={!!regBusy} title="Upload a completed equipment register workbook" onClick={() => equipImportRef.current?.click()}>{regBusy === 'import' ? 'Importing…' : 'Import'}</button>
-          <input ref={equipImportRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) void importEquipmentRegister(f); }} />
+          {can('equipment.register', 'export') && <button type="button" className="secondary" disabled={!!regBusy} title="Download the equipment register as an Excel workbook" onClick={() => downloadEquipmentRegister('/equipment/register/export', 'Equipment_Register.xlsx')}>{regBusy === '/equipment/register/export' ? 'Exporting…' : 'Export'}</button>}
+          {can('equipment.register', 'create') && <>
+            <button type="button" className="secondary" disabled={!!regBusy} title="Upload a completed equipment register workbook" onClick={() => equipImportRef.current?.click()}>{regBusy === 'import' ? 'Importing…' : 'Import'}</button>
+            <input ref={equipImportRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) void importEquipmentRegister(f); }} />
+          </>}
           <select value={bcSize} onChange={e => setBcSize(e.target.value)} title="Barcode label size">{LABEL_PRESETS.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}</select>
-          {can('equipment', 'print') && <button type="button" className="secondary" title="Print Code 128 barcode asset tags for all equipment" onClick={() => { const p = LABEL_PRESETS.find(x => x.key === bcSize) || LABEL_PRESETS[1]; printLabelSheet(equipment.map(it => ({ barcodeValue: it.equipment_number, title: it.name, lines: [it.equipment_number, it.serial_number ? `S/N ${it.serial_number}` : ''].filter(Boolean) })), { widthMm: p.widthMm, heightMm: p.heightMm, title: 'Equipment barcode labels' }); }}>🏷️ Print barcode labels</button>}
+          {can('equipment.register', 'print') && <button type="button" className="secondary" title="Print Code 128 barcode asset tags for all equipment" onClick={() => { const p = LABEL_PRESETS.find(x => x.key === bcSize) || LABEL_PRESETS[1]; printLabelSheet(equipment.map(it => ({ barcodeValue: it.equipment_number, title: it.name, lines: [it.equipment_number, it.serial_number ? `S/N ${it.serial_number}` : ''].filter(Boolean) })), { widthMm: p.widthMm, heightMm: p.heightMm, title: 'Equipment barcode labels' }); }}>🏷️ Print barcode labels</button>}
         </div>
       </div>
       <div style={{ margin: '4px 0 10px' }}>
@@ -1694,10 +1696,10 @@ export function InventoryPage() {
       <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <h3 style={{ margin: 0 }}>Stock item register</h3>
         <div className="reg-head-actions" style={{ marginLeft: 'auto' }}>
-          {can('supplier_inventory', 'export') && <button type="button" className="secondary" disabled={regBusy === 'export'}
+          {can('supplier_inventory.stock', 'export') && <button type="button" className="secondary" disabled={regBusy === 'export'}
             title="Download the register the laboratory actually holds — the same file the import accepts"
             onClick={downloadRegister}>{regBusy === 'export' ? 'Exporting…' : 'Export register'}</button>}
-          {can('supplier_inventory', 'create') && <>
+          {can('supplier_inventory.stock', 'create') && <>
             <button type="button" disabled={regBusy === 'import'} onClick={() => importRef.current?.click()}>
               {regBusy === 'import' ? 'Importing…' : 'Import'}
             </button>
@@ -2015,7 +2017,7 @@ export function InventoryPage() {
         <h3 style={{ margin: 0 }}>Stock movement register</h3>
         <div className="reg-head-actions" style={{ marginLeft: 'auto' }}>
           <RegisterSearch onQuery={setMoveQuery} placeholder="Search item, batch, unit, reason…" />
-          {can('supplier_inventory', 'export') && <button type="button" className="secondary" disabled={regBusy === 'movements'}
+          {can('supplier_inventory.stock', 'export') && <button type="button" className="secondary" disabled={regBusy === 'movements'}
             onClick={() => void downloadFile('/supplier-inventory/movements/export', 'Stock_Movements.xlsx', 'movements')}>
             {regBusy === 'movements' ? 'Exporting…' : 'Export'}</button>}
         </div>
@@ -2085,10 +2087,10 @@ export function InventoryPage() {
           <h3 style={{ margin: 0 }}>Approved suppliers</h3>
           <div className="reg-head-actions" style={{ marginLeft: 'auto' }}>
             <RegisterSearch onQuery={setSupplierQuery} placeholder="Search name, code, contact…" />
-            {can('supplier_inventory', 'export') && <button type="button" className="secondary" disabled={regBusy === 'suppliers'}
+            {can('supplier_inventory.suppliers', 'export') && <button type="button" className="secondary" disabled={regBusy === 'suppliers'}
               onClick={() => void downloadFile('/supplier-inventory/suppliers/export', 'Supplier_Register.xlsx', 'suppliers')}>
               {regBusy === 'suppliers' ? 'Exporting…' : 'Export'}</button>}
-            {can('supplier_inventory', 'create') && <>
+            {can('supplier_inventory.suppliers', 'create') && <>
               <button type="button" disabled={regBusy === 'import'} onClick={() => supplierImportRef.current?.click()}>
                 {regBusy === 'import' ? 'Importing…' : 'Import'}</button>
               <input ref={supplierImportRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }}

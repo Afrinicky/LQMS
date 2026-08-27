@@ -29,8 +29,8 @@ export function measurementUncertaintyRoutes() {
     }
     return buildWorkbook(MU_HEADERS, rows, 'MEASUREMENT UNCERTAINTY');
   }
-  router.get('/template', requirePermission('measurement_uncertainty', 'view'), (_req, res) => sendWorkbook(res, muWorkbook(false), 'Measurement_Uncertainty_Template.xlsx'));
-  router.get('/export', requirePermission('measurement_uncertainty', 'view'), (_req, res) => sendWorkbook(res, muWorkbook(true), 'Measurement_Uncertainty.xlsx'));
+  router.get('/template', requirePermission('measurement_uncertainty', 'export'), (_req, res) => sendWorkbook(res, muWorkbook(false), 'Measurement_Uncertainty_Template.xlsx'));
+  router.get('/export', requirePermission('measurement_uncertainty', 'export'), (_req, res) => sendWorkbook(res, muWorkbook(true), 'Measurement_Uncertainty.xlsx'));
   router.post('/import', requirePermission('measurement_uncertainty', 'create'), xlsxUpload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the Measurement Uncertainty .xlsx file.' });
     try {

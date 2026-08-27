@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { api, API_BASE, getToken } from '../services/api';
 import DocumentScanner from './DocumentScanner';
+import { usePermissions } from '../hooks/usePermissions';
 
 // Reusable uploader for scanned paper records / evidence charts. Used by
 // Environmental Monitoring, Equipment and other modules so historical records
@@ -48,6 +49,9 @@ export default function ScannedRecordUpload({
   heading?: string;
   blurb?: string;
 }) {
+  // The scans belong to the module they document, so the rights that decide
+  // what may be done with them are that module's — not the document library's.
+  const { can } = usePermissions();
   const [rows, setRows] = useState<ScannedRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -111,7 +115,9 @@ export default function ScannedRecordUpload({
     <p className="muted" style={{ marginTop: 0 }}>{blurb || 'Upload scanned copies of paper records so they are preserved, and attach charts/logs as evidence that the activity was performed. State the period the scan covers, and flag any out-of-range reading — the system will raise a nonconformity so the corrective-action steps follow.'}</p>
     {error && <div className="error">{error}</div>}
     {msg && <div className="notice-ok">{msg}</div>}
-    <form className="form-grid" onSubmit={submit}>
+    {/* Uploading a scan creates a record. Somebody who may only read the
+        register sees the register, not the form. */}
+    {can(moduleKey, 'create') && <form className="form-grid" onSubmit={submit}>
       <label>Title / description<input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="e.g. Fridge 1 temperature chart — Aug 2026" required /></label>
       <label>Type of record<select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>{categories.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></label>
       <label>Coverage<select value={form.coverage} onChange={e => setForm({ ...form, coverage: e.target.value })}>{COVERAGES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></label>
@@ -133,7 +139,7 @@ export default function ScannedRecordUpload({
       {form.hasOutOfRange && <label style={{ gridColumn: '1 / -1' }}>Out-of-range details (what/when)<input value={form.outOfRangeNotes} onChange={e => setForm({ ...form, outOfRangeNotes: e.target.value })} placeholder="e.g. 08 Aug reading 9.2°C exceeded 2–8°C limit" /></label>}
       <label style={{ gridColumn: '1 / -1' }}>Notes<input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
       <button type="submit" disabled={busy}>{busy ? 'Uploading…' : 'Upload scanned record'}</button>
-    </form>
+    </form>}
 
     <table className="data-table" style={{ marginTop: 14 }}><thead><tr><th>Number</th><th>Title</th><th>Type</th><th>Coverage</th><th>Period</th><th>Out-of-range</th><th>File</th><th></th></tr></thead><tbody>
       {rows.map(r => <tr key={r.id}>
@@ -143,8 +149,8 @@ export default function ScannedRecordUpload({
         <td>{r.coverage.replace(/_/g, ' ')}</td>
         <td>{r.month || [r.period_start, r.period_end].filter(Boolean).join(' → ') || '—'}</td>
         <td>{r.has_out_of_range ? <span className="badge danger">yes{r.nc_number ? ` · ${r.nc_number}` : ''}</span> : 'no'}</td>
-        <td>{r.file_id ? <button type="button" className="secondary" onClick={() => downloadFile(r.file_id!, r.file_name || r.record_number, setError)}>Download</button> : '—'}</td>
-        <td><button type="button" className="secondary" onClick={() => remove(r.id)}>Delete</button></td>
+        <td>{r.file_id && can(moduleKey, 'export') ? <button type="button" className="secondary" onClick={() => downloadFile(r.file_id!, r.file_name || r.record_number, setError)}>Download</button> : '—'}</td>
+        <td>{can(moduleKey, 'void_archive') && <button type="button" className="secondary" onClick={() => remove(r.id)}>Delete</button>}</td>
       </tr>)}
       {rows.length === 0 && <tr><td colSpan={8} className="muted">No scanned records uploaded yet.</td></tr>}
     </tbody></table>

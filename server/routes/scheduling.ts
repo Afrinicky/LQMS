@@ -367,7 +367,7 @@ export function schedulingRoutes() {
     res.json({ ok: true });
   });
 
-  router.get('/duty-rosters/:id/print', requirePermission('personnel.rosters', 'view'), (req, res) => {
+  router.get('/duty-rosters/:id/print', requirePermission('personnel.rosters', 'print'), (req, res) => {
     const db = getDb();
     const roster = loadRoster(db, req.params.id) as any;
     if (!roster) return res.status(404).send('Roster not found');
@@ -602,7 +602,7 @@ export function schedulingRoutes() {
     res.json({ ok: true });
   });
 
-  router.get('/reassignments/:id/print', requirePermission('personnel.rosters', 'view'), (req, res) => {
+  router.get('/reassignments/:id/print', requirePermission('personnel.rosters', 'print'), (req, res) => {
     const db = getDb();
     const s = loadReassignment(db, req.params.id) as any;
     if (!s) return res.status(404).send('Schedule not found');
@@ -754,7 +754,7 @@ export function schedulingRoutes() {
     res.json({ ok: true });
   });
 
-  router.get('/bench-schedules/:id/print', requirePermission('personnel.rosters', 'view'), (req, res) => {
+  router.get('/bench-schedules/:id/print', requirePermission('personnel.rosters', 'print'), (req, res) => {
     const db = getDb();
     const bs = loadBench(db, req.params.id) as any;
     if (!bs) return res.status(404).send('Schedule not found');
@@ -906,7 +906,7 @@ export function schedulingRoutes() {
     res.json({ ok: true });
   });
 
-  router.get('/unit-supervisors/print', requirePermission('personnel.rosters', 'view'), (req, res) => {
+  router.get('/unit-supervisors/print', requirePermission('personnel.rosters', 'print'), (req, res) => {
     const db = getDb();
     sweepActingHeads(db);
     const onDate = isoDate(req.query.onDate) ?? todayIso();

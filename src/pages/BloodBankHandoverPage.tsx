@@ -12,6 +12,7 @@ import type {
 } from '../../shared/types/api';
 import { API_BASE, getToken } from '../services/api';
 import PermissionTabs from '../components/PermissionTabs';
+import { usePermissions } from '../hooks/usePermissions';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
@@ -54,6 +55,7 @@ const emptyCampaignForm = { campaignDate: '', location: '', organizer: '', total
 const emptyAdverseForm = { eventDate: '', eventType: 'donor_reaction', relatedUnitId: '', bloodGroup: '', donorType: '', sectionId: '', locationId: '', title: '', description: '', immediateAction: '', severity: 'medium', outcome: '' };
 
 export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean } = {}) {
+  const { can } = usePermissions();
   const { isEnabled } = useModules();
   const { staff, sections, locations, monitoringItems } = useLookups();
   const [tab, setTab] = useState(embedded ? 'Blood Units' : 'Dashboard');
@@ -491,7 +493,7 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
         <button type="button" onClick={loadMonthlySummary}>Load summary</button>
       </div>
       {monthlySummary && <>
-        <div style={{ margin: '8px 0' }}><button type="button" onClick={downloadMonthlySummaryCsv}>Download CSV</button></div>
+        {can('blood_bank_handover', 'export') && <div style={{ margin: '8px 0' }}><button type="button" onClick={downloadMonthlySummaryCsv}>Download CSV</button></div>}
         <div className="cards">
           <div className="card"><h4>Units at month end</h4><p className="metric">{monthlySummary.unitsAvailableAtMonthEnd}</p></div>
           <div className="card"><h4>Expiring soon</h4><p className="metric">{monthlySummary.unitsExpiringSoon}</p></div>

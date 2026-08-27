@@ -2,7 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { getDb, uploadRoot } from '../db/database.js';
 import { requireAuth } from '../middleware/auth.js';
-import { requirePermission } from '../middleware/permissions.js';
+import { requirePermission, requireResolvedPermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
@@ -34,7 +34,12 @@ export function scannedRecordsRoutes() {
   const router = Router();
   router.use(requireAuth);
 
-  router.get('/', requirePermission('documents', 'view'), (req, res) => {
+  // A scanned record belongs to the module it documents — a temperature chart
+  // to Environmental Monitoring, a service sheet to Equipment. Guarding these
+  // on `documents` meant anybody who could open the document library could
+  // read, upload and delete every other module's scans. The module named on
+  // the request decides it, and the caller is checked against that module.
+  router.get('/', requireResolvedPermission(req => String(req.query.moduleKey ?? '').trim() || null, 'view'), (req, res) => {
     const db = getDb();
     let q = `SELECT sr.*, f.original_name AS file_name, f.mime_type AS file_mime, s.name AS section_name,
         e.name AS equipment_name, e.equipment_number, st.full_name AS uploaded_by_name, nc.nc_number
@@ -55,7 +60,7 @@ export function scannedRecordsRoutes() {
     res.json(db.prepare(q).all(...params));
   });
 
-  router.post('/', requirePermission('documents', 'create'), upload.single('file'), (req, res) => {
+  router.post('/', upload.single('file'), requireResolvedPermission(req => String(req.body?.moduleKey ?? '').trim() || null, 'create'), (req, res) => {
     const db = getDb();
     const b = req.body ?? {};
     const moduleKey = String(b.moduleKey || 'other').trim();
@@ -110,7 +115,10 @@ export function scannedRecordsRoutes() {
     res.status(201).json({ id, recordNumber, ncId, ncNumber });
   });
 
-  router.delete('/:id', requirePermission('documents', 'void_archive'), (req, res) => {
+  router.delete('/:id', requireResolvedPermission(req => {
+    const row = getDb().prepare('SELECT module_key FROM scanned_records WHERE id = ?').get(req.params.id) as { module_key: string } | undefined;
+    return row?.module_key ?? null;
+  }, 'void_archive'), (req, res) => {
     const db = getDb();
     const ex = db.prepare('SELECT * FROM scanned_records WHERE id = ?').get(req.params.id);
     if (!ex) return res.status(404).json({ error: 'Record not found' });

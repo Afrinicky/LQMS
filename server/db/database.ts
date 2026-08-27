@@ -186,6 +186,60 @@ CREATE TABLE IF NOT EXISTS dennis_settings (id INTEGER PRIMARY KEY AUTOINCREMENT
   }
 
   // ---------------------------------------------------------------------
+  // One access model: profiles, and positions mapped onto them
+  // ---------------------------------------------------------------------
+  // Access used to come from a role AND a position AND a technical
+  // authorization, each able only to ADD, so a role set to "no access" was
+  // silently re-opened by either of the others and no screen could say what a
+  // person could really do.
+  //
+  // There is now one cohort: the ACCESS PROFILE (a row in `roles`). An
+  // organogram position may be mapped to a profile; when it is, that mapping
+  // is what applies to the people holding the position. Nothing is combined,
+  // so nothing can contradict.
+  {
+    const positionColumns = database.prepare("PRAGMA table_info(positions)").all() as Array<{ name: string }>;
+    if (positionColumns.length > 0 && !positionColumns.some(c => c.name === 'access_profile_role_id')) {
+      database.exec('ALTER TABLE positions ADD COLUMN access_profile_role_id INTEGER REFERENCES roles(id)');
+    }
+
+    // Fold whatever a laboratory had configured under the old "Position" tab
+    // into a profile of its own, so the configuration is not lost — but leave
+    // the position UNMAPPED. Mapping it would change, silently, which profile
+    // its holders resolve to. The merged Access Control screen lists every
+    // unmapped position so an administrator decides explicitly.
+    const hasPositionGrants = database.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'position_permissions'",
+    ).get() as { name: string } | undefined;
+    const alreadyFolded = (database.prepare("SELECT value FROM settings WHERE key = 'accessProfilesMigrated'").get() as { value: string } | undefined)?.value;
+    if (hasPositionGrants && alreadyFolded !== '1') {
+      const granted = database.prepare(`
+        SELECT DISTINCT pp.position_id AS positionId, p.title AS title
+        FROM position_permissions pp JOIN positions p ON p.id = pp.position_id
+        WHERE pp.allowed = 1
+      `).all() as Array<{ positionId: number; title: string }>;
+      for (const pos of granted) {
+        const name = `${pos.title} (from position)`;
+        database.prepare("INSERT OR IGNORE INTO roles (name, description, is_system) VALUES (?, ?, 0)")
+          .run(name, `Access profile carried over from the ${pos.title} position when access control was unified.`);
+        const profile = database.prepare('SELECT id FROM roles WHERE name = ?').get(name) as { id: number } | undefined;
+        if (!profile) continue;
+        const rows = database.prepare('SELECT permission_id, allowed FROM position_permissions WHERE position_id = ?')
+          .all(pos.positionId) as Array<{ permission_id: number; allowed: number }>;
+        for (const r of rows) {
+          database.prepare('INSERT OR IGNORE INTO role_permissions (role_id, permission_id, allowed, source) VALUES (?, ?, ?, ?)')
+            .run(profile.id, r.permission_id, r.allowed, 'Carried over from position');
+        }
+      }
+      database.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('accessProfilesMigrated', '1', CURRENT_TIMESTAMP)").run();
+      if (granted.length) {
+        database.prepare('INSERT INTO audit_logs (actor_user_id, action, entity, new_value) VALUES (NULL, ?, ?, ?)')
+          .run('access_profiles_migrated', 'role_permissions', JSON.stringify({ positionsFolded: granted.map(g => g.title) }));
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------
   // Password reset requests.
   //
   // There is no email on a LAN Host, so a forgotten password is recovered by

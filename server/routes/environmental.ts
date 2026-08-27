@@ -13,7 +13,11 @@ import { computeInsights } from '../services/environmental/insights.js';
 import { buildReport, reportToWorkbook, reportToHtml, REPORT_TYPES } from '../services/environmental/reports.js';
 
 const numericOnly = (req: any, _res: any, next: any) => (/^\d+$/.test(req.params.id) ? next() : next('route'));
-const MODULE = 'facilities_safety'; // Environmental Monitoring lives under Facilities & Safety RBAC.
+// Environmental Monitoring is a feature of Facilities & Safety, not the whole
+// module. Guarding it on `facilities_safety` meant anyone with any safety
+// right — a person who may only report an incident — could read, export and
+// import the monitoring record. The client gates on this same key.
+const MODULE = 'facilities_safety.environment';
 const xlsxUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 const READING_HEADERS = ['Asset code', 'Asset name', 'Recorded at', 'Temperature', 'Humidity', 'Recorded by (employee no.)', 'Observation', 'Corrective action'] as const;
 
@@ -102,7 +106,7 @@ export function environmentalRoutes() {
 
   // ---- Reports (Excel + printable/PDF) ----
   router.get('/reports', requirePermission(MODULE, 'view'), (_req, res) => res.json(REPORT_TYPES));
-  router.get('/reports/:type/export', requirePermission(MODULE, 'view'), (req, res) => {
+  router.get('/reports/:type/export', requirePermission(MODULE, 'export'), (req, res) => {
     const report = buildReport(getDb(), req.params.type, req.query.from as string, req.query.to as string);
     const buf = reportToWorkbook(report);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -110,7 +114,7 @@ export function environmentalRoutes() {
     res.send(buf);
     audit(req, { action: 'export', entity: 'environmental_report', entityId: req.params.type });
   });
-  router.get('/reports/:type/print', requirePermission(MODULE, 'view'), (req, res) => {
+  router.get('/reports/:type/print', requirePermission(MODULE, 'print'), (req, res) => {
     const report = buildReport(getDb(), req.params.type, req.query.from as string, req.query.to as string);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(reportToHtml(report, req.query.autoprint !== '0'));
@@ -144,8 +148,8 @@ export function environmentalRoutes() {
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.end(buf);
   }
-  router.get('/readings/template', requirePermission(MODULE, 'view'), (_req, res) => sendXlsx(res, buildReadingsWorkbook(false), 'Environmental_Readings_Template.xlsx'));
-  router.get('/readings/export', requirePermission(MODULE, 'view'), (req, res) => {
+  router.get('/readings/template', requirePermission(MODULE, 'export'), (_req, res) => sendXlsx(res, buildReadingsWorkbook(false), 'Environmental_Readings_Template.xlsx'));
+  router.get('/readings/export', requirePermission(MODULE, 'export'), (req, res) => {
     sendXlsx(res, buildReadingsWorkbook(true, req.query.from as string, req.query.to as string), 'Environmental_Readings.xlsx');
     audit(req, { action: 'export', entity: 'environmental_readings', entityId: null });
   });
