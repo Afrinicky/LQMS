@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
+import { usePermissions } from '../hooks/usePermissions';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Bot, Maximize2, MessageCircle, Send, X } from 'lucide-react';
 import { MODULES } from '../../shared/constants/modules';
@@ -74,6 +75,7 @@ function defaultPosition(width: number, height: number): WidgetPosition {
 function inferRecordId(pathname: string) { return pathname.match(/\/(\d+)(?:$|\/)/)?.[1] ?? null; }
 
 export function DennisFloatingWidget({ user, dennisEnabled }: { user: ApiUser | null; dennisEnabled: boolean }) {
+  const { can } = usePermissions();
   const location = useLocation();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -158,7 +160,7 @@ export function DennisFloatingWidget({ user, dennisEnabled }: { user: ApiUser | 
         <button type="button" className="ic" title="Open full workspace" onClick={() => { setOpen(false); navigate('/dennis'); }}><Maximize2 size={16} /></button>
         <button type="button" className="ic" title="Minimize" onClick={() => setOpen(false)}><X size={18} /></button>
       </div>
-      <div className="qa">{quickActions.map(a => <button type="button" key={a} disabled={busy} onClick={() => send(a)}>{a}</button>)}</div>
+      <div className="qa">{quickActions.map(a => can('dennis', 'view') && <button type="button" key={a} disabled={busy} onClick={() => send(a)}>{a}</button>)}</div>
       <div className="ms">
         {messages.map((m, i) => <div key={i} className={`b ${m.role}`}>
           {m.pending ? <span className="typing"><span /><span /><span /></span> : m.content}
@@ -167,10 +169,10 @@ export function DennisFloatingWidget({ user, dennisEnabled }: { user: ApiUser | 
         </div>)}
         <div ref={msgEndRef} />
       </div>
-      <form className="cp" onSubmit={e => { e.preventDefault(); send(); }}>
+      {can('dennis', 'view') && <form className="cp" onSubmit={e => { e.preventDefault(); send(); }}>
         <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder="Ask Dennis…" />
         <button type="submit" disabled={busy} aria-label="Send"><Send size={16} /></button>
-      </form>
+      </form>}
     </section>
   </>;
 }

@@ -289,6 +289,7 @@ function AssessmentEditor({ assessmentId, staff, sections, positions, mayEdit, m
   onClose: () => void;
   onChanged: () => Promise<void>;
 }) {
+  const { can } = usePermissions();
   const { user } = useAuth();
   const [record, setRecord] = useState<CompetencyAssessment | null>(null);
   const [tab, setTab] = useState<EditorTab>('Scoring');
@@ -376,7 +377,7 @@ function AssessmentEditor({ assessmentId, staff, sections, positions, mayEdit, m
     {confirmDelete && <div className="notice-warn confirm-bar">
       <span><ShieldAlert size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />Delete {record.competency_number} for good? This removes the record, its scores, sample checks, evidence and any authorisation granted from it. It cannot be undone.</span>
       <span className="element-add-actions">
-        <button type="button" className="secondary danger-text" onClick={() => void removeRecord()}>Delete permanently</button>
+        {can('personnel.training', 'void_archive') && <button type="button" className="secondary danger-text" onClick={() => void removeRecord()}>Delete permanently</button>}
         <button type="button" className="secondary" onClick={() => setConfirmDelete(false)}>Keep it</button>
       </span>
     </div>}
@@ -450,6 +451,7 @@ function ScoringGrid({ record, maxScore, scorable, override, onError, onChanged 
   onError: (message: string | null) => void;
   onChanged: () => Promise<void>;
 }) {
+  const { can } = usePermissions();
   const items = useMemo(() => record.items ?? [], [record.items]);
   const [draft, setDraft] = useState<Draft>({});
   const [saving, setSaving] = useState(false);
@@ -559,7 +561,7 @@ function ScoringGrid({ record, maxScore, scorable, override, onError, onChanged 
             </label>
             <button type="button" className="secondary" onClick={() => markRemaining(fillScore)} title={`Give every element still unscored a rating of ${fillScore}`}>Apply to remaining</button>
           </span>
-          <button type="button" disabled={!dirty || saving} onClick={() => void save()}>{saving ? 'Saving…' : dirty ? `Save ${Object.keys(draft).length} change(s)` : 'Save changes'}</button>
+          {can('personnel.training', 'edit') && <button type="button" disabled={!dirty || saving} onClick={() => void save()}>{saving ? 'Saving…' : dirty ? `Save ${Object.keys(draft).length} change(s)` : 'Save changes'}</button>}
         </>}
         {savedAt && !dirty && <span className="saved-flag">Saved at {savedAt}</span>}
       </div>
@@ -582,6 +584,7 @@ function ScoringGrid({ record, maxScore, scorable, override, onError, onChanged 
         </tr></thead>
         <tbody>
           {rows.map((item, index) => {
+  const { can } = usePermissions();
             const current = value(item);
             return <tr key={item.id} className={current.notApplicable ? 'row-na' : ''}>
               <td>{index + 1}</td>
@@ -616,7 +619,7 @@ function ScoringGrid({ record, maxScore, scorable, override, onError, onChanged 
                 />
               </td>}
               {removable && <td>
-                {!item.framework_element_id && <button type="button" className="link-button danger" onClick={() => void removeElement(item.id)} aria-label="Remove element"><Trash2 size={14} /></button>}
+                {!item.framework_element_id && can('personnel.training', 'edit') && <button type="button" className="link-button danger" onClick={() => void removeElement(item.id)} aria-label="Remove element"><Trash2 size={14} /></button>}
               </td>}
             </tr>;
           })}
@@ -631,7 +634,7 @@ function ScoringGrid({ record, maxScore, scorable, override, onError, onChanged 
         : <button type="button" className="secondary" onClick={() => setAdding(true)}>
           <Plus size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Add an element to this assessment only
         </button>}
-      <button type="button" disabled={!dirty || saving} onClick={() => void save()}>{saving ? 'Saving…' : dirty ? `Save ${Object.keys(draft).length} change(s)` : 'Save changes'}</button>
+      {can('personnel.training', 'edit') && <button type="button" disabled={!dirty || saving} onClick={() => void save()}>{saving ? 'Saving…' : dirty ? `Save ${Object.keys(draft).length} change(s)` : 'Save changes'}</button>}
     </div>}
   </div>;
 }
@@ -669,6 +672,7 @@ function SampleChecks({ record, scorable, override, onError, onChanged }: {
   onError: (message: string | null) => void;
   onChanged: () => Promise<void>;
 }) {
+  const { can } = usePermissions();
   const [form, setForm] = useState({ checkType: 'proficiency_testing', sampleId: '', dateTested: '', testPerformed: '', staffResult: '', referenceResult: '', agreement: 'acceptable', remarks: '' });
   const checks = record.sample_checks ?? [];
 
@@ -707,12 +711,12 @@ function SampleChecks({ record, scorable, override, onError, onChanged }: {
             <td>{c.reference_result || '—'}</td>
             <td>{badgeFor(c.agreement)}</td>
             <td>{c.remarks || '—'}</td>
-            {scorable && <td><button type="button" className="link-button danger" onClick={() => void remove(c.id)} aria-label="Remove"><Trash2 size={14} /></button></td>}
+            {scorable && <td>{can('personnel.training', 'edit') && <button type="button" className="link-button danger" onClick={() => void remove(c.id)} aria-label="Remove"><Trash2 size={14} /></button>}</td>}
           </tr>)}
         </tbody>
       </table>}
 
-    {scorable && <form className="form-grid" onSubmit={add}>
+    {scorable && can('personnel.training', 'edit') && <form className="form-grid" onSubmit={add}>
       <label>Check type
         <select value={form.checkType} onChange={e => setForm({ ...form, checkType: e.target.value })}>
           {SAMPLE_CHECK_TYPES.map(t => <option key={t} value={t}>{SAMPLE_CHECK_TYPE_LABELS[t]}</option>)}
@@ -746,6 +750,7 @@ function AssessmentDetails({ record, staff, sections, positions, editable, overr
   onError: (message: string | null) => void;
   onChanged: () => Promise<void>;
 }) {
+  const { can } = usePermissions();
   const [form, setForm] = useState({
     activity: record.activity,
     assessmentDate: record.assessment_date,
@@ -795,7 +800,7 @@ function AssessmentDetails({ record, staff, sections, positions, editable, overr
     </dl>;
   }
 
-  return <form className="form-grid" onSubmit={save}>
+  return can('personnel.training', 'edit') && <form className="form-grid" onSubmit={save}>
     <label>Activity / title<input value={form.activity} onChange={e => setForm({ ...form, activity: e.target.value })} required /></label>
     <label>Assessment date<input type="date" value={form.assessmentDate} onChange={e => setForm({ ...form, assessmentDate: e.target.value })} required /></label>
     <label>Reason

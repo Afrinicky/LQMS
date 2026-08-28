@@ -377,7 +377,7 @@ export default function PersonnelRegisterAdmin() {
       </>}
     >
       {error && <div className="error">{error}</div>}
-      <form id="reg-edit-form" className="form-grid" onSubmit={saveEdit}>
+      {can('personnel.self', 'view') && <form id="reg-edit-form" className="form-grid" onSubmit={saveEdit}>
         <label>Staff ID<input value={form.employeeNo} onChange={set('employeeNo')} placeholder="e.g. SNO-001" /></label>
         <label>Surname<input value={form.surname} onChange={set('surname')} /></label>
         <label>Middle name(s)<input value={form.middleName} onChange={set('middleName')} /></label>
@@ -405,7 +405,7 @@ export default function PersonnelRegisterAdmin() {
         <label>Availability<select value={form.availabilityStatus} onChange={set('availabilityStatus')}>{AVAILABILITY_STATUSES.map(a => <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Assign position<select value={form.positionId} onChange={set('positionId')}><option value="">— keep current —</option>{positions.filter(p => !!p.isActive).map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>
         <label>Staff file location<input value={form.staffFileLocation} onChange={set('staffFileLocation')} placeholder="e.g. /SECH-LAB-PERSONNEL-FILES/SNO-001/" /></label>
-      </form>
+      </form>}
     </DetailModal>
 
     {/* --- Record a departure ----------------------------------------------- */}
@@ -417,9 +417,9 @@ export default function PersonnelRegisterAdmin() {
       subtitle={departing?.employeeNo ? `Staff ID ${departing.employeeNo}` : undefined}
       footer={<>
         <button type="button" className="secondary" onClick={() => setDeparting(null)}>Cancel</button>
-        <button type="button" disabled={busy === 'depart' || !exitForm.exitReason} onClick={doDeparture}>
+        {can('personnel.register', 'void_archive') && <button type="button" disabled={busy === 'depart' || !exitForm.exitReason} onClick={doDeparture}>
           {busy === 'depart' ? 'Recording…' : 'Record departure'}
-        </button>
+        </button>}
       </>}
     >
       {error && <div className="error">{error}</div>}
@@ -471,10 +471,10 @@ export default function PersonnelRegisterAdmin() {
             <span>Type <strong>{deleting.staff.fullName}</strong> to confirm</span>
             <input value={confirmName} onChange={e => setConfirmName(e.target.value)} placeholder={deleting.staff.fullName} />
           </label>
-          <button type="button" className="danger" disabled={busy === 'delete' || confirmName.trim().toLowerCase() !== deleting.staff.fullName.trim().toLowerCase()}
+          {can('personnel.register', 'void_archive') && <button type="button" className="danger" disabled={busy === 'delete' || confirmName.trim().toLowerCase() !== deleting.staff.fullName.trim().toLowerCase()}
             onClick={() => doDelete('delete')}>
             {busy === 'delete' ? 'Erasing…' : 'Erase permanently'}
-          </button>
+          </button>}
         </>}
 
         {/* Named in the record: a departure is the answer, unless this is one of the
@@ -516,11 +516,11 @@ export default function PersonnelRegisterAdmin() {
                 </label>
                 <div className="remove-acts">
                   <button type="button" className="secondary" onClick={() => { setForcing(false); setForceReason(''); setConfirmName(''); }}>Cancel</button>
-                  <button type="button" className="danger"
+                  {can('personnel.register', 'void_archive') && <button type="button" className="danger"
                     disabled={busy === 'purge' || forceReason.trim().length < 10 || confirmName.trim().toLowerCase() !== deleting.staff.fullName.trim().toLowerCase()}
                     onClick={() => doDelete('purge')}>
                     {busy === 'purge' ? 'Erasing…' : 'Erase and remove the name'}
-                  </button>
+                  </button>}
                 </div>
               </div>)}
         </>}

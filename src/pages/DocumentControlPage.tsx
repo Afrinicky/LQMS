@@ -7,7 +7,7 @@ import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts, 
 import { useCappedRows } from '../hooks/useCappedRows';
 import { useAuth } from '../hooks/useAuth';
 import { useModules } from '../hooks/useModules';
-import { usePermissions } from '../hooks/usePermissions';
+import { usePermissions, type PermissionAction } from '../hooks/usePermissions';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -122,9 +122,34 @@ const emptyAttestForm = { targetType: 'staff', staffIds: [] as number[], positio
 const emptyPrintForm = { printPurpose: '', controlledCopy: false, copyNumber: '', watermark: '' };
 
 const SECTIONS = ['Dashboard', 'Documents', 'Records', 'Central Archive', 'Master List', 'Laboratory Profile'] as const;
-// Tabs inside the Documents section. Named at module scope so the ?subtab=
-// deep link can resolve against the same list the bar renders.
+/**
+ * The document-control tabs, and the right each one actually needs.
+ *
+ * This bar was a plain array rendered to everybody who could open the module,
+ * so a Biomedical Scientist — whose profile says No access to Authoring and
+ * to Review & approval — was offered New Document, Bulk Import, the Review
+ * and Approval queues, Reviews Due and the whole laboratory's Attestations
+ * register. What they need is the register they read from, the documents in
+ * their own inbox, and the attestation they owe. Nothing else.
+ *
+ * Both live at module scope so the bar and the ?subtab= deep link answer the
+ * same question: a tab a person may not see cannot be opened by putting its
+ * name in a URL either.
+ */
 const DOC_TABS = ['Document Register', 'New Document', 'Bulk Import', 'Review Queue', 'Approval Queue', 'Reviews Due', 'Attestations', 'My Inbox', 'Obsolete Register'];
+const DOC_TAB_RIGHTS: Record<string, { key: string; action: PermissionAction }> = {
+  'Document Register': { key: 'documents.library', action: 'view' },
+  'My Inbox': { key: 'documents.library', action: 'view' },
+  'New Document': { key: 'documents.authoring', action: 'create' },
+  'Bulk Import': { key: 'documents.authoring', action: 'create' },
+  // The queues, the review calendar and the laboratory-wide attestation
+  // register are document control's own work, not a reader's.
+  'Review Queue': { key: 'documents.workflow', action: 'view' },
+  'Approval Queue': { key: 'documents.workflow', action: 'view' },
+  'Reviews Due': { key: 'documents.workflow', action: 'view' },
+  'Attestations': { key: 'documents.workflow', action: 'view' },
+  'Obsolete Register': { key: 'documents.workflow', action: 'view' },
+};
 
 // Roles with governance authority over the register (change ownership, bulk
 // actions). The server independently enforces the documents "approve"
@@ -150,7 +175,10 @@ export function DocumentControlPage() {
   const canGovern = can('documents.workflow', 'edit');
   // Permanent deletion is administrator-only and deliberately kept out of plain
   // sight — the server independently enforces the same restriction.
-  const isAdmin = !!user && (user.roleName || '').trim().toLowerCase() === 'system administrator';
+  // The administrator FLAG, never the role's name. A laboratory that renames
+  // its administrator role would otherwise silently lose — or keep — a
+  // capability the server decides from `roles.is_administrator`.
+  const isAdmin = user?.isAdministrator === true;
   const { staff, sections, departments, positions } = useLookups();
   const [searchParams, setSearchParams] = useSearchParams();
   const [section, setSection] = useState<(typeof SECTIONS)[number]>('Dashboard');
@@ -220,7 +248,7 @@ export function DocumentControlPage() {
   // controlled-document workflow (owner, section, review schedule, versions).
   useEffect(() => {
     const nt = searchParams.get('new');
-    if (nt) { setSection('Documents'); setTab('New Document'); setDocForm(f => ({ ...f, documentType: nt })); setSearchParams({}, { replace: true }); }
+    if (nt && can('documents.authoring', 'create')) { setSection('Documents'); setTab('New Document'); setDocForm(f => ({ ...f, documentType: nt })); setSearchParams({}, { replace: true }); }
   }, [searchParams]);
   // Deep link from a dashboard alert: ?focus=documents:<id> opens the register
   // on the right tab; useFocusTarget then scrolls to and flashes the row.
@@ -237,8 +265,11 @@ export function DocumentControlPage() {
     if (!wanted) return;
     const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, '');
     const match = DOC_TABS.find(t => norm(t) === norm(wanted));
-    if (match) { setSection('Documents'); setTab(match); }
-  }, [searchParams]);
+    if (!match) return;
+    const need = DOC_TAB_RIGHTS[match];
+    if (need && !can(need.key, need.action)) return;
+    setSection('Documents'); setTab(match);
+  }, [searchParams, can]);
   // Deep link from Settings → Core Documents: ?open=<id> opens the document
   // itself, because clicking the laboratory's Quality Manual should show the
   // Quality Manual, not a register row that happens to mention it.
@@ -584,7 +615,10 @@ export function DocumentControlPage() {
     }
   }
 
-  const docTabs = DOC_TABS;
+  const docTabs = DOC_TABS.filter(name => {
+    const need = DOC_TAB_RIGHTS[name];
+    return !need || can(need.key, need.action);
+  });
   const obsoleteDocs = documents.filter(d => d.status === 'obsolete');
   const reviewQueue = documents.filter(d => d.status === 'under_review');
   const approvalQueue = documents.filter(d => d.status === 'reviewed');
@@ -610,6 +644,14 @@ export function DocumentControlPage() {
     if (vb == null) return -1;
     return (typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb), undefined, { numeric: true })) * sortBy.dir;
   });
+  // A tab filtered away must not stay selected — a deep link, a bookmark, or a
+  // right withdrawn mid-session lands the reader on the register rather than on
+  // a form they may not use.
+  useEffect(() => {
+    if (docTabs.length && !docTabs.includes(tab)) setTab(docTabs[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docTabs.join('|'), tab]);
+
   const previewVersionId = (d: DocumentRecord) => d.resolved_version_id ?? d.current_version_id ?? 0;
   const hasVersion = (d: DocumentRecord) => Boolean(d.resolved_version_id || d.current_version_id);
   const allVisibleSelected = filteredRegister.length > 0 && filteredRegister.every(d => selectedIds.has(d.id));
@@ -633,7 +675,7 @@ export function DocumentControlPage() {
   return <div className="module-page">
     <PageHeader eyebrow="Documents and Records" title="Documents &amp; Records" subtitle="Controlled documents and controlled records — creation, review, approval, distribution, attestation, retention and disposal." />
     {tabBar(section, SECTIONS as unknown as string[], s => setSection(s as (typeof SECTIONS)[number]))}
-    {section === 'Documents' && <div className="tabs dm-doc-tabs">
+    {section === 'Documents' && docTabs.length > 0 && <div className="tabs dm-doc-tabs">
       {docTabs.map(name => {
         const count = name === 'Review Queue' ? reviewQueue.length : name === 'Approval Queue' ? approvalQueue.length
           : name === 'Reviews Due' ? reviewsDue.length : name === 'Attestations' ? pendingAttestations.length
@@ -743,8 +785,8 @@ export function DocumentControlPage() {
         <strong>{selectedIds.size} selected</strong>
         <button className="secondary" disabled={!!bulkBusyAction} onClick={() => setTransferModal({ docIds: Array.from(selectedIds), ownerStaffId: '', note: '', busy: false })}>Change owner…</button>
         <button className="secondary" disabled={!!bulkBusyAction} onClick={() => bulkAction('distribute')}>{bulkBusyAction === 'distribute' ? 'Distributing…' : 'Distribute for attestation'}</button>
-        <button className="secondary" disabled={!!bulkBusyAction} onClick={() => bulkAction('submit-review')}>{bulkBusyAction === 'submit-review' ? 'Submitting…' : 'Submit for review'}</button>
-        <button className="danger" disabled={!!bulkBusyAction} onClick={() => bulkAction('obsolete')}>{bulkBusyAction === 'obsolete' ? 'Working…' : 'Mark obsolete…'}</button>
+        {can('documents.workflow', 'edit') && can('documents.workflow', 'approve') && <button className="secondary" disabled={!!bulkBusyAction} onClick={() => bulkAction('submit-review')}>{bulkBusyAction === 'submit-review' ? 'Submitting…' : 'Submit for review'}</button>}
+        {can('documents.workflow', 'edit') && can('documents.workflow', 'approve') && <button className="danger" disabled={!!bulkBusyAction} onClick={() => bulkAction('obsolete')}>{bulkBusyAction === 'obsolete' ? 'Working…' : 'Mark obsolete…'}</button>}
         <span style={{ flex: 1 }} />
         {/* Permanent deletion lives here, out of plain sight behind an admin-only
             menu, so it can never be hit by accident by ordinary quality staff. */}
@@ -837,7 +879,7 @@ export function DocumentControlPage() {
           </label>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
             <button className="secondary" disabled={transferModal.busy} onClick={() => setTransferModal(null)}>Cancel</button>
-            <button disabled={transferModal.busy || !transferModal.ownerStaffId} onClick={transferOwnership}>{transferModal.busy ? 'Transferring…' : 'Transfer ownership'}</button>
+            {can('documents.workflow', 'approve') && <button disabled={transferModal.busy || !transferModal.ownerStaffId} onClick={transferOwnership}>{transferModal.busy ? 'Transferring…' : 'Transfer ownership'}</button>}
           </div>
         </div>
       </div>}
@@ -860,9 +902,9 @@ export function DocumentControlPage() {
           </label>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
             <button className="secondary" disabled={deleteModal.busy} onClick={() => setDeleteModal(null)}>Cancel</button>
-            <button className="danger" disabled={deleteModal.busy || deleteModal.confirmText.trim().toUpperCase() !== 'DELETE'} onClick={confirmDelete}>
+            {can('documents.workflow', 'approve') && <button className="danger" disabled={deleteModal.busy || deleteModal.confirmText.trim().toUpperCase() !== 'DELETE'} onClick={confirmDelete}>
               {deleteModal.busy ? 'Deleting…' : `Delete ${deleteModal.docs.length === 1 ? 'document' : deleteModal.docs.length + ' documents'} permanently`}
-            </button>
+            </button>}
           </div>
         </div>
       </div>}
@@ -886,7 +928,7 @@ export function DocumentControlPage() {
       </div></div>}
     </>}
 
-    {section === 'Documents' && tab === 'New Document' && <form className="form-grid" onSubmit={submitDoc}>
+    {section === 'Documents' && tab === 'New Document' && can('documents.authoring', 'create') && <form className="form-grid" onSubmit={submitDoc}>
       <label>Document code (leave blank to auto-generate)
         <span style={{ display: 'flex', gap: 6 }}>
           <input value={docForm.documentCode} onChange={e => setDocForm({ ...docForm, documentCode: e.target.value })} placeholder="e.g. SECHPO026 — or Auto-generate" />
@@ -922,7 +964,7 @@ export function DocumentControlPage() {
     {section === 'Documents' && tab === 'Bulk Import' && <div className="card">
       <h3 style={{ marginTop: 0 }}>Bulk import documents</h3>
       <p className="muted" style={{ marginTop: 0 }}>Import many SOPs, policies, forms or registers at once. Each file becomes a controlled document (Draft) and its full content is read for in-app viewing. Document numbers are taken from the file name when present (e.g. <em>“SECHPO026 Document Control Procedure”</em> → <strong>SECHPO026</strong>), otherwise auto-numbered from the prefix.</p>
-      <form className="form-grid" onSubmit={submitBulk}>
+      {can('documents.authoring', 'create') && <form className="form-grid" onSubmit={submitBulk}>
         <label>Document type<select value={bulkForm.documentType} onChange={e => setBulkForm({ ...bulkForm, documentType: e.target.value })}>{DOCUMENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
         <label>Numbering<select value={bulkForm.codeMode} onChange={e => setBulkForm({ ...bulkForm, codeMode: e.target.value })}>
           <option value="filename">From file name (fallback to prefix)</option>
@@ -937,7 +979,7 @@ export function DocumentControlPage() {
         <label><input type="checkbox" checked={bulkForm.isControlled} onChange={e => setBulkForm({ ...bulkForm, isControlled: e.target.checked })} /> Controlled documents</label>
         <label>Files<input type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.odt,.ods,.rtf,.md" onChange={e => setBulkFiles(Array.from(e.target.files ?? []))} /></label>
         <button type="submit" disabled={bulkBusy}>{bulkBusy ? `Importing… (${bulkResults.filter(r => r.ok).length}/${bulkFiles.length || bulkResults.length})` : `Import ${bulkFiles.length || ''} document${bulkFiles.length === 1 ? '' : 's'}`}</button>
-      </form>
+      </form>}
       {bulkResults.length > 0 && <table className="data-table" style={{ marginTop: 16 }}><thead><tr><th>File</th><th>Result</th></tr></thead><tbody>
         {bulkResults.map((r, i) => <tr key={i}><td>{r.name}</td><td>{r.ok ? <span className="badge approved">{r.message}</span> : <span className="badge error">{r.message}</span>}</td></tr>)}
       </tbody></table>}
@@ -983,7 +1025,7 @@ export function DocumentControlPage() {
           <td>{e.attested_at || '—'}</td>
           <td style={{ whiteSpace: 'nowrap' }}>
             <button onClick={() => setViewer({ docId: e.document_id, versionId: e.document_version_id || 0, attestationId: e.attestation_id })}>Read &amp; attest</button>
-            {e.attestation_id && e.attestation_status !== 'signed' && <button className="secondary" onClick={() => signAttestation(e.attestation_id!, e.document_id)}>Quick sign</button>}
+            {e.attestation_id && e.attestation_status !== 'signed' && can('documents.library', 'view') && <button className="secondary" onClick={() => signAttestation(e.attestation_id!, e.document_id)}>Quick sign</button>}
           </td>
         </tr>)}
       </tbody></table>
@@ -1238,6 +1280,7 @@ const SOP_ACTIONS: Array<{ task: string; label: string }> = [
   { task: 'compare', label: 'Compare SOPs' },
 ];
 function SopTools({ docId, versionId, documents, startOpen }: { docId: number; versionId: number; documents?: DocumentRecord[]; startOpen?: boolean }) {
+  const { can } = usePermissions();
   const [open, setOpen] = useState(!!startOpen);
   const [busy, setBusy] = useState<string | null>(null);
   const [result, setResult] = useState<SopResult | null>(null);
@@ -1266,14 +1309,14 @@ function SopTools({ docId, versionId, documents, startOpen }: { docId: number; v
     {open && <>
       <p style={{ fontSize: 11.5, color: '#8fa3c8', margin: '6px 0 8px' }}>Offline Ollama runs these by default. If you enable Hybrid mode with an online provider, Dennis may use it for stronger SOP understanding — only after redaction, and never when patient/operational data is detected.</p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-        {SOP_ACTIONS.map(a => <button key={a.task} className="secondary" disabled={!!busy} onClick={() => run(a.task)}>{busy === a.task ? 'Working…' : a.label}</button>)}
+        {SOP_ACTIONS.map(a => can('dennis', 'view') && <button key={a.task} className="secondary" disabled={!!busy} onClick={() => run(a.task)}>{busy === a.task ? 'Working…' : a.label}</button>)}
       </div>
       {others.length > 0 && <label style={{ fontSize: 12, color: '#9fb2d6' }}>Compare with:&nbsp;
         <select value={compareId} onChange={e => setCompareId(e.target.value)}><option value="">— choose document —</option>{others.map(d => <option key={d.id} value={d.id}>{d.document_code ? `${d.document_code} — ` : ''}{d.title}</option>)}</select>
       </label>}
       {confirm && <div style={{ marginTop: 8, padding: 10, background: '#3a2a12', border: '1px solid #6b4e1f', borderRadius: 6, color: '#f3d9a6', fontSize: 12.5 }}>
         Online AI may send this document's text outside the hospital network. Use only for SOPs and non-patient documents. Continue?
-        <div style={{ marginTop: 6, display: 'flex', gap: 8 }}><button onClick={() => run(confirm.task, true)}>Yes, use online AI</button><button className="secondary" onClick={() => setConfirm(null)}>Cancel</button></div>
+        <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>{can('dennis', 'view') && <button onClick={() => run(confirm.task, true)}>Yes, use online AI</button>}<button className="secondary" onClick={() => setConfirm(null)}>Cancel</button></div>
       </div>}
       {result && <div style={{ marginTop: 8 }}>
         {result.error ? <div className="error">{result.error}</div> : <>
@@ -1454,6 +1497,7 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
     fileId: content?.file_id ?? 0,
     fileName: content?.file_name || 'document',
     fileMime: content?.file_mime,
+    canSaveBack: canAuthor,
     onSavedVersion: id => { setActiveVersionId(id); onSaved(); },
     onError,
   });
@@ -1730,7 +1774,7 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
         </div>}
         {isOfficeFile && <span className="dv-owner">Opens in {appName}</span>}
         {!isOfficeFile && !readsInPlace && mode === 'content' && content && !editing && <button className="dv-ghost" onClick={() => setEditing(true)}>✎ Edit</button>}
-        {!isOfficeFile && !readsInPlace && mode === 'content' && editing && <button className="dv-btn" onClick={saveContent} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>}
+        {!isOfficeFile && !readsInPlace && mode === 'content' && editing && can('documents.authoring', 'edit') && <button className="dv-btn" onClick={saveContent} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>}
         {!isOfficeFile && !readsInPlace && mode === 'content' && editing && <button className="dv-ghost" onClick={() => setEditing(false)}>Cancel</button>}
         <span style={{ flex: 1 }} />
         {showZoom && <span className="dv-zoom">
@@ -1833,7 +1877,7 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
         </div>}
         <div style={{ display: 'flex', gap: 8 }}>
           <input value={newComment} onChange={e => setNewComment(e.target.value)} placeholder="Add a comment for the drafter / reviewer / approver…" style={{ flex: 1 }} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addComment(); } }} />
-          <button className="secondary" onClick={addComment} disabled={busy || !newComment.trim()}>Comment</button>
+          {can('documents.library', 'view') && <button className="secondary" onClick={addComment} disabled={busy || !newComment.trim()}>Comment</button>}
         </div>
         {comments.length > 0 && <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0 0' }}>
           {comments.map(c => <li key={c.id} style={{ fontSize: 12, color: '#c2cde3', padding: '4px 0', borderBottom: '1px solid #1c2a4a' }}>
@@ -1885,6 +1929,7 @@ function WorkflowStepper({ status }: { status: string }) {
 // Master-list fields kept on the document itself so the on-screen registers
 // and Excel exports carry the full master-list columns.
 function MasterListDetailsForm({ doc, onSaved, onError }: { doc: any; onSaved: () => void; onError: (m: string) => void }) {
+  const { can } = usePermissions();
   const fromDoc = () => ({ formatMedium: doc.format_medium || '', controlledLocations: doc.controlled_locations || '', retentionPeriod: doc.retention_period || '', remarks: doc.remarks || '', archiveLocation: doc.archive_location || '', destroyDueDate: doc.destroy_due_date || '' });
   const [f, setF] = useState(fromDoc);
   useEffect(() => { setF(fromDoc()); }, [doc.id]);
@@ -1896,7 +1941,7 @@ function MasterListDetailsForm({ doc, onSaved, onError }: { doc: any; onSaved: (
   }
   return <details style={{ margin: '8px 0' }}>
     <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Master-list details — format, distribution, retention, remarks</summary>
-    <form className="form-grid" onSubmit={save} style={{ marginTop: 8 }}>
+    {can('documents.authoring', 'edit') && <form className="form-grid" onSubmit={save} style={{ marginTop: 8 }}>
       <label>Format / medium<input value={f.formatMedium} onChange={e => setF({ ...f, formatMedium: e.target.value })} placeholder="e.g. Electronic (Word) + Printed Master Copy" /></label>
       <label>Controlled locations / distribution<input value={f.controlledLocations} onChange={e => setF({ ...f, controlledLocations: e.target.value })} placeholder="e.g. All laboratory computers; QM Master File" /></label>
       <label>Retention period<input value={f.retentionPeriod} onChange={e => setF({ ...f, retentionPeriod: e.target.value })} placeholder="e.g. 5 years after obsolescence" /></label>
@@ -1906,7 +1951,7 @@ function MasterListDetailsForm({ doc, onSaved, onError }: { doc: any; onSaved: (
         <label>Retention / destroy date<input type="date" value={f.destroyDueDate} onChange={e => setF({ ...f, destroyDueDate: e.target.value })} /></label>
       </>}
       <button type="submit">Save master-list details</button>
-    </form>
+    </form>}
   </details>;
 }
 
@@ -1969,7 +2014,7 @@ function DocumentDetailPanel(props: any) {
     <div style={{ display: 'flex', gap: 6, alignItems: 'center', margin: '8px 0' }}>
       <label style={{ margin: 0 }}>Document number</label>
       <input value={codeEdit} onChange={e => setCodeEdit(e.target.value)} style={{ maxWidth: 220 }} />
-      <button className="secondary" onClick={saveCode} disabled={codeEdit === (doc.document_code || '')}>Update number</button>
+      {can('documents.authoring', 'edit') && <button className="secondary" onClick={saveCode} disabled={codeEdit === (doc.document_code || '')}>Update number</button>}
     </div>
 
     <MasterListDetailsForm doc={doc} onSaved={onCodeSaved} onError={onError} />
@@ -1999,20 +2044,20 @@ function DocumentDetailPanel(props: any) {
         </td>
       </tr>)}
     </tbody></table>
-    <form className="form-grid" onSubmit={submitVersion}>
+    {can('documents.authoring', 'create') && <form className="form-grid" onSubmit={submitVersion}>
       <label>New version number<input value={versionForm.versionNumber} onChange={(e: any) => setVersionForm({ ...versionForm, versionNumber: e.target.value })} required /></label>
       <label>Revision summary<input value={versionForm.revisionSummary} onChange={(e: any) => setVersionForm({ ...versionForm, revisionSummary: e.target.value })} /></label>
       <label>Effective date<input type="date" value={versionForm.effectiveDate} onChange={(e: any) => setVersionForm({ ...versionForm, effectiveDate: e.target.value })} /></label>
       <label>File<input type="file" accept=".pdf,.doc,.docx,.txt,.md,.rtf,.odt" onChange={(e: any) => setVersionFile(e.target.files?.[0] ?? null)} /></label>
       <button type="submit">Add version</button>
-    </form>
+    </form>}
 
     <h4>Reviews</h4>
     <table className="data-table"><thead><tr><th>Date</th><th>Outcome</th><th>Notes</th><th>Next review</th><th>Reviewer</th></tr></thead><tbody>
       {(doc.reviews || []).map((r: any) => <tr key={r.id}><td>{r.review_date}</td><td>{formatBadge(r.review_outcome)}</td><td>{r.review_notes || '—'}</td><td>{r.next_review_date || '—'}</td><td>{staffName(staff, r.reviewed_by_staff_id)}</td></tr>)}
       {(doc.reviews || []).length === 0 && <tr><td colSpan={5} className="muted">No reviews recorded.</td></tr>}
     </tbody></table>
-    {(doc.status === 'under_review' || doc.status === 'draft' || doc.status === 'reviewed') && <form className="form-grid" onSubmit={submitReview}>
+    {(doc.status === 'under_review' || doc.status === 'draft' || doc.status === 'reviewed') && can('documents.workflow', 'edit') && <form className="form-grid" onSubmit={submitReview}>
       <label>Review date<input type="date" value={reviewForm.reviewDate} onChange={(e: any) => setReviewForm({ ...reviewForm, reviewDate: e.target.value })} required /></label>
       <label>Outcome<select value={reviewForm.reviewOutcome} onChange={(e: any) => setReviewForm({ ...reviewForm, reviewOutcome: e.target.value })}>{REVIEW_OUTCOMES.map(o => <option key={o} value={o}>{o.replace(/_/g, ' ')}</option>)}</select></label>
       <label>Notes<textarea value={reviewForm.reviewNotes} onChange={(e: any) => setReviewForm({ ...reviewForm, reviewNotes: e.target.value })} /></label>
@@ -2026,7 +2071,7 @@ function DocumentDetailPanel(props: any) {
       {(doc.attestations || []).map((a: any) => <tr key={a.id}><td>{a.staff_name || staffName(staff, a.staff_id)}</td><td>{a.version_number || '—'}</td><td>{formatBadge(a.status)}</td><td>{a.due_date || '—'}</td><td>{a.attested_at ? String(a.attested_at).slice(0, 10) : '—'}</td><td>{a.status === 'signed' ? <SignatureThumb staffId={a.staff_id} /> : '—'}</td><td>{a.status !== 'signed' && <button onClick={() => onSignAttestation(a.id, doc.id)}>Sign</button>}</td></tr>)}
       {(doc.attestations || []).length === 0 && <tr><td colSpan={7} className="muted">No attestations assigned yet. Approve the document or use “Distribute to all staff”.</td></tr>}
     </tbody></table>
-    <form className="form-grid" onSubmit={submitAttest}>
+    {can('documents.workflow', 'edit') && <form className="form-grid" onSubmit={submitAttest}>
       <label>Target<select value={attestForm.targetType} onChange={(e: any) => setAttestForm({ ...attestForm, targetType: e.target.value })}>{TARGET_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
       {attestForm.targetType === 'staff' && <label>Staff (Ctrl-click for multi)<select multiple size={Math.min(8, Math.max(3, staff.length))} value={attestForm.staffIds.map(String)} onChange={(e: any) => setAttestForm({ ...attestForm, staffIds: Array.from(e.target.selectedOptions).map((o: any) => Number(o.value)) })}>{staff.map((s: any) => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>}
       {attestForm.targetType === 'position' && <label>Position<select value={attestForm.positionId} onChange={(e: any) => setAttestForm({ ...attestForm, positionId: e.target.value })}><option value="">—</option>{positions.map((p: any) => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>}
@@ -2035,20 +2080,20 @@ function DocumentDetailPanel(props: any) {
       <label>Due date<input type="date" value={attestForm.dueDate} onChange={(e: any) => setAttestForm({ ...attestForm, dueDate: e.target.value })} /></label>
       <label>Notes<input value={attestForm.notes} onChange={(e: any) => setAttestForm({ ...attestForm, notes: e.target.value })} /></label>
       <button type="submit">Assign attestations</button>
-    </form>
+    </form>}
 
     <h4>Print logs</h4>
     <table className="data-table"><thead><tr><th>Date</th><th>By</th><th>Purpose</th><th>Controlled</th><th>Copy #</th><th>Watermark</th></tr></thead><tbody>
       {(doc.printLogs || []).map((p: any) => <tr key={p.id}><td>{p.print_date}</td><td>{p.printed_by_name || staffName(staff, p.printed_by_staff_id)}</td><td>{p.print_purpose || '—'}</td><td>{p.controlled_copy ? 'Yes' : 'No'}</td><td>{p.copy_number || '—'}</td><td>{p.watermark || '—'}</td></tr>)}
       {(doc.printLogs || []).length === 0 && <tr><td colSpan={6} className="muted">No prints logged.</td></tr>}
     </tbody></table>
-    <form className="form-grid" onSubmit={submitPrint}>
+    {can('documents.library', 'print') && <form className="form-grid" onSubmit={submitPrint}>
       <label>Purpose<input value={printForm.printPurpose} onChange={(e: any) => setPrintForm({ ...printForm, printPurpose: e.target.value })} /></label>
       <label><input type="checkbox" checked={printForm.controlledCopy} onChange={(e: any) => setPrintForm({ ...printForm, controlledCopy: e.target.checked })} /> Controlled copy</label>
       <label>Copy #<input value={printForm.copyNumber} onChange={(e: any) => setPrintForm({ ...printForm, copyNumber: e.target.value })} /></label>
       <label>Watermark<input value={printForm.watermark} onChange={(e: any) => setPrintForm({ ...printForm, watermark: e.target.value })} /></label>
       <button type="submit">Log print</button>
-    </form>
+    </form>}
 
     {doc.status !== 'obsolete' && <div style={{ marginTop: 16 }}>
       <h4>Mark obsolete</h4>
@@ -2170,7 +2215,7 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
       </p>}
       <h4>Register a controlled record</h4>
       <p className="muted" style={{ marginTop: 0 }}>Records completed on paper are indexed here; electronic records can be uploaded and stored in the register; records generated inside the system are linked to their source module.</p>
-      <form className="form-grid" onSubmit={submitRecord}>
+      {can('documents.records', 'create') && <form className="form-grid" onSubmit={submitRecord}>
         <label>Record type / title<input value={regForm.title} onChange={e => setRegForm({ ...regForm, title: e.target.value })} required /></label>
         <label>Category<select value={regForm.recordCategory} onChange={e => setRegForm({ ...regForm, recordCategory: e.target.value })}>{RECORD_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
         <label>Origin<select value={regForm.origin} onChange={e => setRegForm({ ...regForm, origin: e.target.value })}>{RECORD_ORIGINS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
@@ -2189,7 +2234,7 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
         <label>Disposal method<input value={regForm.disposalMethod} onChange={e => setRegForm({ ...regForm, disposalMethod: e.target.value })} placeholder="e.g. Secure disposal (shred / confidential waste / electronic deletion)" /></label>
         <label>Remarks<input value={regForm.notes} onChange={e => setRegForm({ ...regForm, notes: e.target.value })} /></label>
         <button type="submit" disabled={savingRecord}>{savingRecord ? 'Saving…' : 'Add record'}</button>
-      </form>
+      </form>}
     </>}
 
     {sub === 'Retention Schedule' && <>
@@ -2198,14 +2243,14 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
         {schedule.map(s => <tr key={s.id}><td>{s.sn ?? '—'}</td><td>{s.record_type}</td><td>{s.retention_period}</td><td>{s.storage_medium || '—'}</td><td>{s.responsible_role || '—'}</td><td>{s.extended_retention ? 'Yes' : '—'}</td></tr>)}
       </tbody></table>
       <h4>Add a retention rule</h4>
-      <form className="form-grid" onSubmit={e => { e.preventDefault(); const f = e.currentTarget as any; submit('retention-schedule', { recordType: f.recordType.value, retentionPeriod: f.retentionPeriod.value, storageMedium: f.storageMedium.value, responsibleRole: f.responsibleRole.value, extendedRetention: f.extendedRetention.checked }, () => f.reset()); }}>
+      {can('documents.records', 'create') && <form className="form-grid" onSubmit={e => { e.preventDefault(); const f = e.currentTarget as any; submit('retention-schedule', { recordType: f.recordType.value, retentionPeriod: f.retentionPeriod.value, storageMedium: f.storageMedium.value, responsibleRole: f.responsibleRole.value, extendedRetention: f.extendedRetention.checked }, () => f.reset()); }}>
         <label>Record type<input name="recordType" required /></label>
         <label>Retention period<input name="retentionPeriod" required placeholder="e.g. 5 years" /></label>
         <label>Storage medium<input name="storageMedium" placeholder="Paper / Electronic" /></label>
         <label>Responsible role<input name="responsibleRole" placeholder="e.g. Quality Manager" /></label>
         <label><input type="checkbox" name="extendedRetention" /> Extended retention (high-risk)</label>
         <button type="submit">Add rule</button>
-      </form>
+      </form>}
     </>}
 
     {sub === 'Review Log' && <>
@@ -2215,7 +2260,7 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
         {reviewLog.length === 0 && <tr><td colSpan={9} className="muted">No reviews logged.</td></tr>}
       </tbody></table>
       <h4>Record a review</h4>
-      <form className="form-grid" onSubmit={e => { e.preventDefault(); submit('review-log', revForm, () => setRevForm(emptyRev)); }}>
+      {can('documents.records', 'create') && <form className="form-grid" onSubmit={e => { e.preventDefault(); submit('review-log', revForm, () => setRevForm(emptyRev)); }}>
         <label>Review date<input type="date" value={revForm.reviewDate} onChange={e => setRevForm({ ...revForm, reviewDate: e.target.value })} required /></label>
         <label>Record category<input value={revForm.recordCategory} onChange={e => setRevForm({ ...revForm, recordCategory: e.target.value })} required placeholder="e.g. Quality control records" /></label>
         <label>Section<select value={revForm.sectionId} onChange={e => setRevForm({ ...revForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
@@ -2227,7 +2272,7 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
         <label>Target completion<input type="date" value={revForm.targetCompletionDate} onChange={e => setRevForm({ ...revForm, targetCompletionDate: e.target.value })} /></label>
         <label>Follow-up status<select value={revForm.followUpStatus} onChange={e => setRevForm({ ...revForm, followUpStatus: e.target.value })}>{FOLLOW_UP_STATUSES.map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select></label>
         <button type="submit">Log review</button>
-      </form>
+      </form>}
     </>}
 
     {sub === 'Destruction Log' && <>
@@ -2237,7 +2282,7 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
         {destruction.length === 0 && <tr><td colSpan={7} className="muted">No destructions recorded.</td></tr>}
       </tbody></table>
       <h4>Record a destruction</h4>
-      <form className="form-grid" onSubmit={e => { e.preventDefault(); submit('destruction-log', desForm, () => setDesForm(emptyDes)); }}>
+      {can('documents.records', 'create') && <form className="form-grid" onSubmit={e => { e.preventDefault(); submit('destruction-log', desForm, () => setDesForm(emptyDes)); }}>
         <label>Item type<select value={desForm.itemType} onChange={e => setDesForm({ ...desForm, itemType: e.target.value })}><option value="record">Record</option><option value="document">Document</option></select></label>
         <label>From register (optional)<select value={desForm.recordRegisterId} onChange={e => setDesForm({ ...desForm, recordRegisterId: e.target.value })}><option value="">—</option>{register.map(r => <option key={r.id} value={r.id}>{r.record_code} {r.title}</option>)}</select></label>
         <label>Description<input value={desForm.description} onChange={e => setDesForm({ ...desForm, description: e.target.value })} required /></label>
@@ -2249,7 +2294,7 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
         <label><input type="checkbox" checked={desForm.confidentialityEnsured} onChange={e => setDesForm({ ...desForm, confidentialityEnsured: e.target.checked })} /> Confidentiality ensured</label>
         <label>Notes<input value={desForm.notes} onChange={e => setDesForm({ ...desForm, notes: e.target.value })} /></label>
         <button type="submit">Record destruction</button>
-      </form>
+      </form>}
     </>}
 
     {sub === 'Backup & Archive' && <>
@@ -2259,7 +2304,7 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
         {backups.length === 0 && <tr><td colSpan={8} className="muted">No backups logged.</td></tr>}
       </tbody></table>
       <h4>Log a backup</h4>
-      <form className="form-grid" onSubmit={e => { e.preventDefault(); submit('backup-log', bkpForm, () => setBkpForm(emptyBkp)); }}>
+      {can('documents.records', 'create') && <form className="form-grid" onSubmit={e => { e.preventDefault(); submit('backup-log', bkpForm, () => setBkpForm(emptyBkp)); }}>
         <label>Backup date<input type="date" value={bkpForm.backupDate} onChange={e => setBkpForm({ ...bkpForm, backupDate: e.target.value })} required /></label>
         <label>Type<select value={bkpForm.backupType} onChange={e => setBkpForm({ ...bkpForm, backupType: e.target.value })}>{BACKUP_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
         <label>Scope<input value={bkpForm.scope} onChange={e => setBkpForm({ ...bkpForm, scope: e.target.value })} placeholder="e.g. LHIMS database" /></label>
@@ -2271,7 +2316,7 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
         <label><input type="checkbox" checked={bkpForm.integrityVerified} onChange={e => setBkpForm({ ...bkpForm, integrityVerified: e.target.checked })} /> Integrity verified</label>
         <label>Notes<input value={bkpForm.notes} onChange={e => setBkpForm({ ...bkpForm, notes: e.target.value })} /></label>
         <button type="submit">Log backup</button>
-      </form>
+      </form>}
     </>}
   </div>;
 }
@@ -2632,7 +2677,7 @@ function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onEr
     {sub === 'Upload / Add' && <div className="card">
       <h4 style={{ marginTop: 0 }}>Upload an archived document / record</h4>
       <p className="muted" style={{ marginTop: 0 }}>Register an archive here for records held physically or already prepared as a file. Every archive becomes searchable from this tab and is linked back to its source module.</p>
-      <form className="form-grid" onSubmit={submitUpload}>
+      {can('documents.archive', 'create') && <form className="form-grid" onSubmit={submitUpload}>
         <label>Title<input value={uploadForm.title} onChange={e => setUploadForm({ ...uploadForm, title: e.target.value })} required /></label>
         <label>Archive type<select value={uploadForm.archiveType} onChange={e => setUploadForm({ ...uploadForm, archiveType: e.target.value })}>{ARCHIVE_TYPES_UI.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}</select></label>
         <label>Source module<input value={uploadForm.sourceModule} onChange={e => setUploadForm({ ...uploadForm, sourceModule: e.target.value })} placeholder="documents | equipment | monthly_reports …" /></label>
@@ -2648,13 +2693,13 @@ function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onEr
         <label>Notes / remarks<input value={uploadForm.notes} onChange={e => setUploadForm({ ...uploadForm, notes: e.target.value })} /></label>
         <label>File to archive (local copy)<input type="file" onChange={e => setArchiveFile(e.target.files?.[0] ?? null)} /></label>
         <button type="submit" disabled={uploadBusy}>{uploadBusy ? 'Uploading…' : 'Register archive'}</button>
-      </form>
+      </form>}
     </div>}
 
     {sub === 'Periodic Patient Results' && <div className="card">
       <h4 style={{ marginTop: 0 }}>Archive patient results for a period (Excel / CSV)</h4>
       <p className="muted" style={{ marginTop: 0 }}>Generates an Excel or CSV file of every processed patient result within the chosen period and registers it as an archive. Requires LHIMS data for the period to be imported.</p>
-      <form className="form-grid" onSubmit={submitPatientArchive}>
+      {can('documents.archive', 'create') && <form className="form-grid" onSubmit={submitPatientArchive}>
         <label>Title (optional)<input value={patientForm.title} onChange={e => setPatientForm({ ...patientForm, title: e.target.value })} placeholder="e.g. Patient Results — Q3 2026" /></label>
         <label>Period start<input type="date" value={patientForm.periodStart} onChange={e => setPatientForm({ ...patientForm, periodStart: e.target.value })} required /></label>
         <label>Period end<input type="date" value={patientForm.periodEnd} onChange={e => setPatientForm({ ...patientForm, periodEnd: e.target.value })} required /></label>
@@ -2665,14 +2710,14 @@ function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onEr
         <label>Storage location<input value={patientForm.storageLocation} onChange={e => setPatientForm({ ...patientForm, storageLocation: e.target.value })} placeholder="e.g. patient archive drive" /></label>
         <label>Notes<input value={patientForm.notes} onChange={e => setPatientForm({ ...patientForm, notes: e.target.value })} /></label>
         <button type="submit" disabled={patientBusy}>{patientBusy ? 'Building archive…' : 'Create archive'}</button>
-      </form>
+      </form>}
     </div>}
 
     {sub === 'Automation Schedules' && <>
       <div className="card">
         <h4 style={{ marginTop: 0 }}>Configure a periodic archive schedule</h4>
         <p className="muted" style={{ marginTop: 0 }}>Define when an archive should be generated (e.g. weekly / monthly patient results). The schedule is stored and displayed on the dashboard; an operator triggers each archive from the &ldquo;Periodic Patient Results&rdquo; tab or an automated job.</p>
-        <form className="form-grid" onSubmit={submitSchedule}>
+        {can('documents.archive', 'edit') && <form className="form-grid" onSubmit={submitSchedule}>
           <label>Key<input value={scheduleForm.scheduleKey} onChange={e => setScheduleForm({ ...scheduleForm, scheduleKey: e.target.value })} placeholder="e.g. patient_results" required /></label>
           <label>Title<input value={scheduleForm.title} onChange={e => setScheduleForm({ ...scheduleForm, title: e.target.value })} required /></label>
           <label>Archive type<select value={scheduleForm.archiveType} onChange={e => setScheduleForm({ ...scheduleForm, archiveType: e.target.value })}>{ARCHIVE_TYPES_UI.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}</select></label>
@@ -2684,7 +2729,7 @@ function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onEr
           <label>Cloud URL template<input value={scheduleForm.cloudUrlTemplate} onChange={e => setScheduleForm({ ...scheduleForm, cloudUrlTemplate: e.target.value })} /></label>
           <label>Notes<input value={scheduleForm.notes} onChange={e => setScheduleForm({ ...scheduleForm, notes: e.target.value })} /></label>
           <button type="submit">Save schedule</button>
-        </form>
+        </form>}
       </div>
       <div className="card" style={{ marginTop: 12 }}>
         <h4 style={{ marginTop: 0 }}>Existing schedules</h4>

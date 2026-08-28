@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import * as XLSX from 'xlsx';
 import { getDb, uploadRoot, evidenceRoot } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
+import { resolvePermission } from '../services/permissionResolver.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent, getCurrentStaffId } from './routeHelpers.js';
@@ -242,7 +243,7 @@ export function documentControlRoutes() {
 
   // Every attestation ever assigned or signed — filterable by document code,
   // title, staff name, status. Powers the redesigned Attestation List tab.
-  router.get('/attestations/list', requirePermission('documents.library', 'view'), (req, res) => {
+  router.get('/attestations/list', requirePermission('documents.workflow', 'view'), (req, res) => {
     const db = getDb();
     flipOverdueAttestations(db);
     const filters: string[] = [];
@@ -271,7 +272,7 @@ export function documentControlRoutes() {
 
   // Documents that have at least one attestation (for the "pick a document"
   // search on the Attestation List tab).
-  router.get('/attestations/documents', requirePermission('documents.library', 'view'), (_req, res) => {
+  router.get('/attestations/documents', requirePermission('documents.workflow', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare(`
       SELECT d.id, d.document_code, d.title, d.document_type, d.status,
@@ -347,7 +348,13 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   router.get('/attestations/pending', requirePermission('documents.library', 'view'), (req, res) => {
     const db = getDb();
     flipOverdueAttestations(db);
-    const staffId = parseIntNullable(req.query.staffId);
+    // Whose pending attestations? Your own, unless you run document control.
+    // Without this, "read the library" listed every colleague's outstanding
+    // signatures — and let a reader ask for any named person's by id.
+    const asked = parseIntNullable(req.query.staffId);
+    const mayOversee = resolvePermission(req.user!.id, 'documents.workflow', 'view').allowed;
+    const staffId = mayOversee ? asked : (req.user?.staffId ?? -1);
+    if (!mayOversee && !req.user?.staffId) return res.json([]);
     const where = staffId ? 'WHERE a.staff_id = ? AND a.status IN (\'pending\',\'overdue\')' : 'WHERE a.status IN (\'pending\',\'overdue\')';
     const params: unknown[] = staffId ? [staffId] : [];
     res.json(db.prepare(`SELECT a.*, d.id AS doc_id, d.document_code, d.title, d.document_type, v.version_number FROM document_attestations a JOIN documents d ON d.id = COALESCE(a.document_id, (SELECT document_id FROM document_versions WHERE id = a.document_version_id)) LEFT JOIN document_versions v ON v.id = a.document_version_id ${where} ORDER BY a.due_date NULLS LAST, a.id DESC`).all(...params));
@@ -356,7 +363,12 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   router.get('/distribution/inbox', requirePermission('documents.library', 'view'), (req, res) => {
     const db = getDb();
     flipOverdueAttestations(db);
-    const staffId = parseIntNullable(req.query.staffId) ?? req.user?.staffId ?? null;
+    // Your own inbox. Reading somebody else's takes the workflow right, which
+    // is what document control holds; a reader is answered with their own
+    // whatever id they ask for.
+    const asked = parseIntNullable(req.query.staffId);
+    const mayOversee = resolvePermission(req.user!.id, 'documents.workflow', 'view').allowed;
+    const staffId = (mayOversee ? asked : null) ?? req.user?.staffId ?? null;
     if (!staffId) return res.json([]);
     res.json(db.prepare(`
       SELECT dd.*, d.document_code, d.title, d.document_type, v.version_number,
@@ -947,7 +959,15 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   // save that arrives through it becomes a new version of this document, so a
   // person editing over the LAN or the internet leaves exactly the record a
   // person editing at the host machine would.
-  router.post('/:id/versions/:versionId/office-session', requirePermission('documents.authoring', 'edit'), (req, res) => {
+  // Opening a controlled document in Word.
+  //
+  // Guarded on READING the library, not on authoring. A .docx has no in-app
+  // preview — Word is the only way to read one — so gating the handoff on
+  // `documents.authoring:edit` meant a Biomedical Scientist could not open the
+  // SOP they are required to read and attest to; they were offered a Download
+  // button and nothing else. Whether the handoff may write a version BACK is a
+  // separate question, answered below and enforced on the save.
+  router.post('/:id/versions/:versionId/office-session', requirePermission('documents.library', 'view'), (req, res) => {
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
     if (!doc) return res.status(404).json({ error: 'Document not found' });
@@ -960,19 +980,24 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     if (!file) return res.status(404).json({ error: 'The file for this version is missing from the store.' });
     const fileName = file.original_name || 'document.docx';
     if (!OFFICE_EDITABLE.test(fileName)) {
-      return res.status(400).json({ error: 'This file is not a Word, Excel or PowerPoint document, so it cannot be opened for editing in Office.' });
+      return res.status(400).json({ error: 'This file is not a Word, Excel or PowerPoint document, so it cannot be opened in Office.' });
     }
 
+    // An author's handoff opens for editing and saves back; a reader's opens
+    // for viewing and the save is refused at the door.
+    const mayAuthor = resolvePermission(req.user!.id, 'documents.authoring', 'edit').allowed;
     const session = createOfficeSession({
       documentId: Number(req.params.id), versionId: Number(v.id), fileId: Number(file.id), fileName, userId: req.user!.id,
+      readOnly: !mayAuthor,
     });
     const url = `${publicBaseUrl(req)}/office/edit/${session.token}/${encodeURIComponent(fileName)}`;
-    audit(req, { action: 'office_session', entity: 'document_versions', entityId: v.id, newValue: { documentId: req.params.id, fileName } });
+    audit(req, { action: 'office_session', entity: 'document_versions', entityId: v.id, newValue: { documentId: req.params.id, fileName, readOnly: !mayAuthor } });
     res.status(201).json({
       token: session.token,
       fileName,
       url,
-      officeUri: officeUriFor(fileName, url),
+      readOnly: !mayAuthor,
+      officeUri: officeUriFor(fileName, url, mayAuthor ? 'edit' : 'view'),
       appName: officeAppNameFor(fileName),
       expiresAt: session.expires_at,
       expiresInHours: OFFICE_SESSION_HOURS,

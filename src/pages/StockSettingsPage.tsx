@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { usePermissions } from '../hooks/usePermissions';
 import { Plus, Warehouse, Thermometer, Barcode, Trash2, Pencil, Truck } from 'lucide-react';
 import { api } from '../services/api';
 import { DetailModal, NumberField } from '../components/ui';
@@ -45,6 +46,7 @@ export type SupplySource = {
 };
 
 export default function StockSettingsPage() {
+  const { can } = usePermissions();
   const [places, setPlaces] = useState<StorageLocation[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
   const [policy, setPolicy] = useState<BarcodePolicy>({ defaultSource: 'system', allowPerItem: true });
@@ -301,7 +303,7 @@ export default function StockSettingsPage() {
         <button type="submit" form="add-place" disabled={!form.name.trim() || busy === 'add'}>{busy === 'add' ? 'Adding…' : 'Add'}</button>
       </>}>
       {error && <div className="error">{error}</div>}
-      <form id="add-place" className="form-grid" onSubmit={addPlace}>
+      {can('settings', 'edit') && <form id="add-place" className="form-grid" onSubmit={addPlace}>
         <label className="wide">Name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Shelf B3, Reagent fridge, Haematology cupboard" /></label>
         <label>Kind<select value={form.kind} onChange={e => setForm({ ...form, kind: e.target.value })}>
           {STORAGE_KINDS.map(k => <option key={k} value={k}>{STORAGE_KIND_LABELS[k]}</option>)}</select></label>
@@ -316,7 +318,7 @@ export default function StockSettingsPage() {
           <label>Coldest allowed °C<input type="number" step="any" value={form.tempMin} onChange={e => setForm({ ...form, tempMin: e.target.value })} placeholder="2" /></label>
           <label>Warmest allowed °C<input type="number" step="any" value={form.tempMax} onChange={e => setForm({ ...form, tempMax: e.target.value })} placeholder="8" /></label>
         </>}
-      </form>
+      </form>}
     </DetailModal>
 
     <DetailModal open={addingSource} onClose={() => setAddingSource(false)} width="narrow" title="Add a store"
@@ -325,7 +327,7 @@ export default function StockSettingsPage() {
         <button type="submit" form="add-source" disabled={!sourceForm.name.trim() || busy === 'add-source'}>{busy === 'add-source' ? 'Adding…' : 'Add'}</button>
       </>}>
       {error && <div className="error">{error}</div>}
-      <form id="add-source" className="form-grid" onSubmit={addSource}>
+      {can('settings', 'edit') && <form id="add-source" className="form-grid" onSubmit={addSource}>
         <label className="wide">Name<input value={sourceForm.name} onChange={e => setSourceForm({ ...sourceForm, name: e.target.value })} placeholder="e.g. Hospital Main Store, Regional Medical Store" /></label>
         <label>Kind<select value={sourceForm.kind} onChange={e => setSourceForm({ ...sourceForm, kind: e.target.value })}>
           {SUPPLY_SOURCE_KINDS.map(k => <option key={k} value={k}>{SUPPLY_SOURCE_KIND_LABELS[k]}</option>)}</select></label>
@@ -333,7 +335,7 @@ export default function StockSettingsPage() {
         <label>Contact person<input value={sourceForm.contactPerson} onChange={e => setSourceForm({ ...sourceForm, contactPerson: e.target.value })} /></label>
         <label>Phone<input value={sourceForm.phone} onChange={e => setSourceForm({ ...sourceForm, phone: e.target.value })} /></label>
         <label className="wide">Note<input value={sourceForm.note} onChange={e => setSourceForm({ ...sourceForm, note: e.target.value })} placeholder="Requisition day, who signs for it…" /></label>
-      </form>
+      </form>}
     </DetailModal>
 
     <DetailModal open={!!editingSource} onClose={() => setEditingSource(null)} width="narrow" title={editingSource ? `Edit ${editingSource.name}` : ''}
@@ -343,7 +345,7 @@ export default function StockSettingsPage() {
       </>}>
       {editingSource && <>
         {error && <div className="error">{error}</div>}
-        <form id="edit-source" className="form-grid" onSubmit={saveSource}>
+        {can('settings', 'edit') && <form id="edit-source" className="form-grid" onSubmit={saveSource}>
           <label className="wide">Name<input value={editingSource.name} onChange={e => setEditingSource({ ...editingSource, name: e.target.value })} /></label>
           <label>Kind<select value={editingSource.kind} onChange={e => setEditingSource({ ...editingSource, kind: e.target.value })}>
             {SUPPLY_SOURCE_KINDS.map(k => <option key={k} value={k}>{SUPPLY_SOURCE_KIND_LABELS[k]}</option>)}</select></label>
@@ -355,7 +357,7 @@ export default function StockSettingsPage() {
             <input type="checkbox" checked={editingSource.is_active === 1} onChange={e => setEditingSource({ ...editingSource, is_active: e.target.checked ? 1 : 0 })} />
             Still drawn from
           </label>
-        </form>
+        </form>}
       </>}
     </DetailModal>
 
@@ -366,7 +368,7 @@ export default function StockSettingsPage() {
       </>}>
       {editing && <>
         {error && <div className="error">{error}</div>}
-        <form id="edit-place" className="form-grid" onSubmit={saveEdit}>
+        {can('settings', 'edit') && <form id="edit-place" className="form-grid" onSubmit={saveEdit}>
           <label className="wide">Name<input value={editing.name} onChange={e => setEditing({ ...editing, name: e.target.value })} /></label>
           <label>Kind<select value={editing.kind} onChange={e => setEditing({ ...editing, kind: e.target.value })}>
             {STORAGE_KINDS.map(k => <option key={k} value={k}>{STORAGE_KIND_LABELS[k]}</option>)}</select></label>
@@ -385,7 +387,7 @@ export default function StockSettingsPage() {
             <input type="checkbox" checked={editing.is_active === 1} onChange={e => setEditing({ ...editing, is_active: e.target.checked ? 1 : 0 })} />
             Still in use
           </label>
-        </form>
+        </form>}
       </>}
     </DetailModal>
   </div>;

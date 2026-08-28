@@ -6279,6 +6279,16 @@ CREATE INDEX IF NOT EXISTS idx_appraisal_attachments ON appraisal_attachments(ap
   seedOrientationFrameworks(database);
   seedSupplierEvaluationFrameworks(database);
 
+  // A handoff to Microsoft Word can be read-only: opening a controlled SOP to
+  // read it is reading, and needs no authoring right. The flag says whether
+  // this particular handoff may write a new version back.
+  {
+    const officeCols = database.prepare("PRAGMA table_info(office_edit_sessions)").all() as Array<{ name: string }>;
+    if (officeCols.length > 0 && !officeCols.some(c => c.name === 'read_only')) {
+      database.exec('ALTER TABLE office_edit_sessions ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0');
+    }
+  }
+
   // ---------------------------------------------------------------------
   // Last: deliver the tasks that never reached anybody
   // ---------------------------------------------------------------------

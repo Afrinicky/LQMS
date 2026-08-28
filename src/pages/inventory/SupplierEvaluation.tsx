@@ -181,6 +181,7 @@ type Draft = Record<number, { score?: number | null; notApplicable?: boolean; re
 function ScoringGrid({ record, maxScore, scorable, onError, onChanged }: {
   record: SupplierEvalAssessment; maxScore: number; scorable: boolean; onError: (m: string | null) => void; onChanged: () => Promise<void>;
 }) {
+  const { can } = usePermissions();
   const items = useMemo(() => record.items ?? [], [record.items]);
   const [draft, setDraft] = useState<Draft>({});
   const [saving, setSaving] = useState(false);
@@ -243,7 +244,7 @@ function ScoringGrid({ record, maxScore, scorable, onError, onChanged }: {
             </label>
             <button type="button" className="secondary" onClick={() => markRemaining(fillScore)}>Apply to remaining</button>
           </span>
-          <button type="button" disabled={!dirty || saving} onClick={() => void save()}>{saving ? 'Saving…' : dirty ? `Save ${Object.keys(draft).length} change(s)` : 'Save changes'}</button>
+          {can('supplier_inventory.suppliers', 'approve') && <button type="button" disabled={!dirty || saving} onClick={() => void save()}>{saving ? 'Saving…' : dirty ? `Save ${Object.keys(draft).length} change(s)` : 'Save changes'}</button>}
         </>}
       </div>
     </div>

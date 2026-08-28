@@ -475,6 +475,7 @@ function ImportElements({ targetId, onError, onClose, onChanged }: {
   onClose: () => void;
   onChanged: () => Promise<void>;
 }) {
+  const { can } = usePermissions();
   const [options, setOptions] = useState<CompetencyFramework[]>([]);
   const [sourceId, setSourceId] = useState('');
   const [source, setSource] = useState<CompetencyFramework | null>(null);
@@ -585,9 +586,9 @@ function ImportElements({ targetId, onError, onClose, onChanged }: {
       </div>
 
       <div className="element-add-actions">
-        <button type="button" disabled={busy || nothingChosen} onClick={() => void runImport()}>
+        {can('personnel.training', 'create') && <button type="button" disabled={busy || nothingChosen} onClick={() => void runImport()}>
           {busy ? 'Copying…' : nothingChosen ? 'Select what to copy' : `Copy ${selectedCount} element(s)`}
-        </button>
+        </button>}
         <button type="button" className="secondary" onClick={onClose}>Cancel</button>
       </div>
     </>}
@@ -604,6 +605,7 @@ function FrameworkDetails({ framework, sections, departments, editable, onError,
   onError: (message: string | null) => void;
   onChanged: () => Promise<void>;
 }) {
+  const { can } = usePermissions();
   const [form, setForm] = useState({
     title: framework.title,
     appliesTo: framework.applies_to,
@@ -655,7 +657,7 @@ function FrameworkDetails({ framework, sections, departments, editable, onError,
     </dl>;
   }
 
-  return <form className="form-grid" onSubmit={save}>
+  return can('personnel.training', 'edit') && <form className="form-grid" onSubmit={save}>
     <label>Title<input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required /></label>
     <label>Applies to
       <select value={form.appliesTo} onChange={e => setForm({ ...form, appliesTo: e.target.value })}>

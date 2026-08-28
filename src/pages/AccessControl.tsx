@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePermissions } from '../hooks/usePermissions';
 import { Search, ShieldCheck, User, Users, Briefcase, RotateCcw, Info, History, BadgeCheck, ChevronDown, ChevronRight } from 'lucide-react';
 import { api } from '../services/api';
 import { MODULES, PERMISSION_ACTIONS } from '../../shared/constants/modules';
@@ -198,6 +199,7 @@ function AreaList({
    Tab 1 — Access profiles (roles, positions and the advanced matrix, merged)
    ========================================================================= */
 function ProfilesTab({ catalogue, reload }: { catalogue: AccessCatalogue | null; reload: () => Promise<void> }) {
+  const { can } = usePermissions();
   const [profileId, setProfileId] = useState<number | null>(null);
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -329,7 +331,7 @@ function ProfilesTab({ catalogue, reload }: { catalogue: AccessCatalogue | null;
             onChange={e => setNewProfile(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void createProfile(); } }}
           />
-          <button type="button" className="secondary" disabled={busy === 'new' || !newProfile.trim()} onClick={() => void createProfile()}>Add</button>
+          {can('settings', 'create') && <button type="button" className="secondary" disabled={busy === 'new' || !newProfile.trim()} onClick={() => void createProfile()}>Add</button>}
         </div>
 
         {/* Positions, merged in. They no longer hold permissions; they say
@@ -463,6 +465,7 @@ function ProfilesTab({ catalogue, reload }: { catalogue: AccessCatalogue | null;
    Tab 2 — Individuals (supersedes the profile, always)
    ========================================================================= */
 function IndividualsTab({ catalogue, reload }: { catalogue: AccessCatalogue | null; reload: () => Promise<void> }) {
+  const { can } = usePermissions();
   const [users, setUsers] = useState<ApiUser[]>([]);
   const [userId, setUserId] = useState<number | null>(null);
   const [effective, setEffective] = useState<EffectiveAccess | null>(null);
@@ -575,9 +578,9 @@ function IndividualsTab({ catalogue, reload }: { catalogue: AccessCatalogue | nu
         {notice && <div className="notice-ok">{notice}</div>}
         {overrideCount > 0 && (
           <p className="muted" style={{ padding: '0 4px' }}>
-            <button type="button" className="ac-reset" disabled={busy === 'all'} onClick={clearAll}>
+            {can('settings', 'edit') && <button type="button" className="ac-reset" disabled={busy === 'all'} onClick={clearAll}>
               <RotateCcw size={12} /> Remove all personal decisions
-            </button>
+            </button>}
           </p>
         )}
 

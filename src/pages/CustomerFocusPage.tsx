@@ -275,7 +275,7 @@ export function CustomerFocusPage() {
     {tab === 'Complaints' && <ComplaintsPage embedded />}
 
     {tab === 'Advisory Services' && <>
-      <form className="form-grid" onSubmit={submitAdvisory}>
+      {can('customer_focus.advisory', 'create') && <form className="form-grid" onSubmit={submitAdvisory}>
         <label>Date<input type="date" value={advForm.serviceDate} onChange={e => setAdvForm({ ...advForm, serviceDate: e.target.value })} required /></label>
         <label>Type<select value={advForm.serviceType} onChange={e => setAdvForm({ ...advForm, serviceType: e.target.value })}><option value="">—</option>{['test_choice', 'interpretation', 'sample_type', 'frequency', 'clinical_advice', 'utilization', 'other'].map(t => <option key={t} value={t}>{pretty(t)}</option>)}</select></label>
         <label>Requester<input value={advForm.requester} onChange={e => setAdvForm({ ...advForm, requester: e.target.value })} placeholder="clinician / ward / user" /></label>
@@ -287,7 +287,7 @@ export function CustomerFocusPage() {
         <label>Follow-up due<input type="date" value={advForm.followUpDueDate} onChange={e => setAdvForm({ ...advForm, followUpDueDate: e.target.value })} /></label>
         <label>Advice summary<textarea value={advForm.adviceSummary} onChange={e => setAdvForm({ ...advForm, adviceSummary: e.target.value })} /></label>
         <button type="submit">Log advisory</button>
-      </form>
+      </form>}
       <table className="data-table"><thead><tr><th>No.</th><th>Date</th><th>Type</th><th>Requester</th><th>Subject</th><th>By</th><th>Follow-up</th></tr></thead><tbody>
         {advisory.map(a => <tr key={a.id}><td>{a.record_number}</td><td>{a.service_date}</td><td>{pretty(a.service_type)}</td><td>{a.requester || '—'}</td><td>{a.subject || '—'}</td><td>{staffName(staff, a.provided_by_staff_id)}</td><td>{a.follow_up_required ? (a.follow_up_due_date || 'Yes') : '—'}</td></tr>)}
         {advisory.length === 0 && <tr><td colSpan={7}>No advisory services logged yet.</td></tr>}
@@ -295,7 +295,7 @@ export function CustomerFocusPage() {
     </>}
 
     {tab === 'Laboratory Handbook' && <>
-      <form className="form-grid" onSubmit={submitHandbook}>
+      {can('customer_focus.advisory', 'create') && <form className="form-grid" onSubmit={submitHandbook}>
         <label>Section<select value={hbForm.section} onChange={e => setHbForm({ ...hbForm, section: e.target.value })}><option value="">—</option>{['hours', 'test_menu', 'collection', 'transport', 'turnaround', 'contacts', 'policies', 'other'].map(s => <option key={s} value={s}>{pretty(s)}</option>)}</select></label>
         <label>Title<input value={hbForm.title} onChange={e => setHbForm({ ...hbForm, title: e.target.value })} required /></label>
         <label>Version<input value={hbForm.version} onChange={e => setHbForm({ ...hbForm, version: e.target.value })} /></label>
@@ -305,7 +305,7 @@ export function CustomerFocusPage() {
         <label>Status<select value={hbForm.status} onChange={e => setHbForm({ ...hbForm, status: e.target.value })}>{['draft', 'active', 'under_review', 'archived'].map(s => <option key={s} value={s}>{pretty(s)}</option>)}</select></label>
         <label>Content<textarea value={hbForm.content} onChange={e => setHbForm({ ...hbForm, content: e.target.value })} /></label>
         <button type="submit">Add entry</button>
-      </form>
+      </form>}
       <table className="data-table"><thead><tr><th>No.</th><th>Section</th><th>Title</th><th>Version</th><th>Effective</th><th>Review</th><th>Status</th></tr></thead><tbody>
         {handbook.map(h => <tr key={h.id}><td>{h.entry_number}</td><td>{pretty(h.section)}</td><td>{h.title}</td><td>{h.version || '—'}</td><td>{h.effective_date || '—'}</td><td>{h.review_date || '—'}</td><td>{formatBadge(h.status)}</td></tr>)}
         {handbook.length === 0 && <tr><td colSpan={7}>No handbook entries yet.</td></tr>}
@@ -317,11 +317,11 @@ export function CustomerFocusPage() {
         <td>{s.stakeholder_number}</td><td>{s.stakeholder_name}</td><td>{s.stakeholder_type.replace(/_/g, ' ')}</td>
         <td>{s.organisation || '—'}</td><td>{s.contact_person || s.email || s.phone || '—'}</td>
         <td>{s.is_active ? 'Yes' : 'No'}</td>
-        <td><button onClick={() => toggleStakeholder(s.id)}>{s.is_active ? 'Deactivate' : 'Activate'}</button></td>
+        <td>{can('customer_focus.stakeholders', 'edit') && <button onClick={() => toggleStakeholder(s.id)}>{s.is_active ? 'Deactivate' : 'Activate'}</button>}</td>
       </tr>)}
     </tbody></table>}
 
-    {tab === 'New Stakeholder' && <form className="form-grid" onSubmit={submitStakeholder}>
+    {tab === 'New Stakeholder' && can('customer_focus.stakeholders', 'create') && <form className="form-grid" onSubmit={submitStakeholder}>
       <label>Name<input value={stakeForm.stakeholderName} onChange={e => setStakeForm({ ...stakeForm, stakeholderName: e.target.value })} required /></label>
       <label>Type<select value={stakeForm.stakeholderType} onChange={e => setStakeForm({ ...stakeForm, stakeholderType: e.target.value })} required>{STAKEHOLDER_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
       <label>Organisation<input value={stakeForm.organisation} onChange={e => setStakeForm({ ...stakeForm, organisation: e.target.value })} /></label>
@@ -336,7 +336,7 @@ export function CustomerFocusPage() {
     </form>}
 
     {tab === 'Service Agreements' && <>
-      <form className="form-grid" onSubmit={submitAgreement}>
+      {can('customer_focus.stakeholders', 'create') && <form className="form-grid" onSubmit={submitAgreement}>
         <label>Stakeholder<select value={agreeForm.stakeholderId} onChange={e => setAgreeForm({ ...agreeForm, stakeholderId: e.target.value })} required><option value="">—</option>{stakeholders.filter(s => s.is_active).map(s => <option key={s.id} value={s.id}>{s.stakeholder_name}</option>)}</select></label>
         <label>Title<input value={agreeForm.agreementTitle} onChange={e => setAgreeForm({ ...agreeForm, agreementTitle: e.target.value })} required /></label>
         <label>Start date<input type="date" value={agreeForm.startDate} onChange={e => setAgreeForm({ ...agreeForm, startDate: e.target.value })} /></label>
@@ -348,15 +348,15 @@ export function CustomerFocusPage() {
         <label>Service scope<textarea value={agreeForm.serviceScope} onChange={e => setAgreeForm({ ...agreeForm, serviceScope: e.target.value })} required /></label>
         <label>Notes<textarea value={agreeForm.notes} onChange={e => setAgreeForm({ ...agreeForm, notes: e.target.value })} /></label>
         <button type="submit">Create agreement</button>
-      </form>
+      </form>}
       <table className="data-table"><thead><tr><th>Number</th><th>Stakeholder</th><th>Title</th><th>Period</th><th>Status</th><th></th></tr></thead><tbody>
         {agreements.map(a => <tr key={a.id}>
           <td>{a.agreement_number}</td><td>{a.stakeholder_name || '—'}</td><td>{a.agreement_title}</td>
           <td>{a.start_date || '—'} → {a.end_date || '—'}</td><td>{formatBadge(a.status)}</td>
           <td>
             <button onClick={() => loadAgreementPerformance(a.id)}>Performance</button>
-            {a.status !== 'active' && <button onClick={() => approveAgreement(a.id)}>Approve</button>}
-            {a.status !== 'archived' && <button onClick={() => archiveAgreement(a.id)}>Archive</button>}
+            {a.status !== 'active' && can('customer_focus.stakeholders', 'approve') && <button onClick={() => approveAgreement(a.id)}>Approve</button>}
+            {a.status !== 'archived' && can('customer_focus.stakeholders', 'approve') && <button onClick={() => archiveAgreement(a.id)}>Archive</button>}
           </td>
         </tr>)}
       </tbody></table>
@@ -377,7 +377,7 @@ export function CustomerFocusPage() {
     </>}
 
     {tab === 'Feedback Intake' && <>
-      <form className="form-grid" onSubmit={submitFeedback}>
+      {can('customer_focus.feedback', 'create') && <form className="form-grid" onSubmit={submitFeedback}>
         <label>Date<input type="date" value={feedbackForm.feedbackDate} onChange={e => setFeedbackForm({ ...feedbackForm, feedbackDate: e.target.value })} required /></label>
         <label>Type<select value={feedbackForm.feedbackType} onChange={e => setFeedbackForm({ ...feedbackForm, feedbackType: e.target.value })} required>{FEEDBACK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
         <label>Source channel<input value={feedbackForm.sourceChannel} onChange={e => setFeedbackForm({ ...feedbackForm, sourceChannel: e.target.value })} placeholder="e.g. phone, email, in-person" /></label>
@@ -391,7 +391,7 @@ export function CustomerFocusPage() {
         <label>Title<input value={feedbackForm.title} onChange={e => setFeedbackForm({ ...feedbackForm, title: e.target.value })} required /></label>
         <label>Description<textarea value={feedbackForm.description} onChange={e => setFeedbackForm({ ...feedbackForm, description: e.target.value })} required /></label>
         <button type="submit">Record feedback</button>
-      </form>
+      </form>}
       <table className="data-table"><thead><tr><th>Number</th><th>Date</th><th>Type</th><th>Title</th><th>Urgency</th><th>Status</th><th>Stakeholder</th><th>Actions</th></tr></thead><tbody>
         {feedback.map(f => <tr key={f.id}>
           <td>{f.feedback_number}</td><td>{f.feedback_date}</td><td>{f.feedback_type}</td>
@@ -402,15 +402,15 @@ export function CustomerFocusPage() {
             {!f.complaint_id && <button onClick={() => escalateToComplaint(f.id)}>Escalate to complaint</button>}
             <button onClick={() => feedbackCreateAction(f.id)}>Action</button>
             {!f.nc_id && <button onClick={() => feedbackCreateNc(f.id)}>NC</button>}
-            {!f.capa_id && <button onClick={() => feedbackCreateCapa(f.id)}>CAPA</button>}
-            {f.status !== 'closed' && <button onClick={() => closeFeedback(f.id)}>Close</button>}
+            {!f.capa_id && can('nc_capa', 'create') && <button onClick={() => feedbackCreateCapa(f.id)}>CAPA</button>}
+            {f.status !== 'closed' && can('customer_focus.feedback', 'approve') && <button onClick={() => closeFeedback(f.id)}>Close</button>}
           </td>
         </tr>)}
       </tbody></table>
     </>}
 
     {tab === 'Satisfaction Surveys' && <>
-      <form className="form-grid" onSubmit={submitSurvey}>
+      {can('customer_focus.surveys', 'create') && <form className="form-grid" onSubmit={submitSurvey}>
         <label>Title<input value={surveyForm.surveyTitle} onChange={e => setSurveyForm({ ...surveyForm, surveyTitle: e.target.value })} required /></label>
         <label>Type<select value={surveyForm.surveyType} onChange={e => setSurveyForm({ ...surveyForm, surveyType: e.target.value })} required>{SURVEY_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Audience<input value={surveyForm.audience} onChange={e => setSurveyForm({ ...surveyForm, audience: e.target.value })} /></label>
@@ -418,15 +418,15 @@ export function CustomerFocusPage() {
         <label>Period end<input type="date" value={surveyForm.periodEnd} onChange={e => setSurveyForm({ ...surveyForm, periodEnd: e.target.value })} /></label>
         <label>Description<textarea value={surveyForm.description} onChange={e => setSurveyForm({ ...surveyForm, description: e.target.value })} /></label>
         <button type="submit">Create survey</button>
-      </form>
+      </form>}
       <table className="data-table"><thead><tr><th>Number</th><th>Title</th><th>Type</th><th>Status</th><th>Period</th><th></th></tr></thead><tbody>
         {surveys.map(s => <tr key={s.id}>
           <td>{s.survey_number}</td><td>{s.survey_title}</td><td>{s.survey_type.replace(/_/g, ' ')}</td>
           <td>{formatBadge(s.status)}</td><td>{s.period_start || '—'} → {s.period_end || '—'}</td>
           <td>
             <button onClick={() => openSurvey(s.id)}>Open</button>
-            {s.status === 'draft' && <button onClick={() => approveSurvey(s.id)}>Approve / activate</button>}
-            {s.status === 'active' && <button onClick={() => closeSurvey(s.id)}>Close</button>}
+            {s.status === 'draft' && can('customer_focus.surveys', 'approve') && <button onClick={() => approveSurvey(s.id)}>Approve / activate</button>}
+            {s.status === 'active' && can('customer_focus.surveys', 'approve') && <button onClick={() => closeSurvey(s.id)}>Close</button>}
           </td>
         </tr>)}
       </tbody></table>
@@ -449,7 +449,7 @@ export function CustomerFocusPage() {
         <table className="data-table"><thead><tr><th>Order</th><th>Text</th><th>Type</th><th>Scale</th><th>Required</th></tr></thead><tbody>
           {(selectedSurvey.questions || []).map(q => <tr key={q.id}><td>{q.display_order}</td><td>{q.question_text}</td><td>{q.question_type}</td><td>{q.scale_min !== null && q.scale_max !== null ? `${q.scale_min}–${q.scale_max}` : '—'}</td><td>{q.is_required ? 'Yes' : 'No'}</td></tr>)}
         </tbody></table>
-        {selectedSurvey.status === 'draft' && <form className="form-grid" onSubmit={addQuestion}>
+        {selectedSurvey.status === 'draft' && can('customer_focus.surveys', 'create') && <form className="form-grid" onSubmit={addQuestion}>
           <label>Code<input value={questionForm.questionCode} onChange={e => setQuestionForm({ ...questionForm, questionCode: e.target.value })} /></label>
           <label>Type<select value={questionForm.questionType} onChange={e => setQuestionForm({ ...questionForm, questionType: e.target.value })}>{QUESTION_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
           <label>Scale min<input type="number" value={questionForm.scaleMin} onChange={e => setQuestionForm({ ...questionForm, scaleMin: e.target.value })} /></label>
@@ -475,7 +475,7 @@ export function CustomerFocusPage() {
         <table className="data-table"><thead><tr><th>Date</th><th>Respondent</th><th>Role</th><th>Source</th><th>Overall comment</th></tr></thead><tbody>
           {surveyResponses.map(r => <tr key={r.id}><td>{r.response_date}</td><td>{r.respondent_name || r.stakeholder_name || '—'}</td><td>{r.respondent_role || '—'}</td><td>{r.source_channel || '—'}</td><td>{r.overall_comment || '—'}</td></tr>)}
         </tbody></table>
-        {selectedSurvey.status === 'active' && <form className="form-grid" onSubmit={submitResponse}>
+        {selectedSurvey.status === 'active' && can('customer_focus.surveys', 'create') && <form className="form-grid" onSubmit={submitResponse}>
           <h4>Record new response</h4>
           <label>Response date<input type="date" value={respForm.responseDate} onChange={e => setRespForm({ ...respForm, responseDate: e.target.value })} required /></label>
           <label>Respondent name<input value={respForm.respondentName} onChange={e => setRespForm({ ...respForm, respondentName: e.target.value })} /></label>
@@ -496,7 +496,7 @@ export function CustomerFocusPage() {
     </>}
 
     {tab === 'Communication Log' && <>
-      <form className="form-grid" onSubmit={submitCommunication}>
+      {can('customer_focus.communication', 'create') && <form className="form-grid" onSubmit={submitCommunication}>
         <label>Date<input type="date" value={commForm.communicationDate} onChange={e => setCommForm({ ...commForm, communicationDate: e.target.value })} required /></label>
         <label>Type<select value={commForm.communicationType} onChange={e => setCommForm({ ...commForm, communicationType: e.target.value })}>{COMMUNICATION_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Direction<select value={commForm.direction} onChange={e => setCommForm({ ...commForm, direction: e.target.value })}>{COMMUNICATION_DIRECTIONS.map(d => <option key={d} value={d}>{d}</option>)}</select></label>
@@ -509,15 +509,15 @@ export function CustomerFocusPage() {
         <label>Subject<input value={commForm.subject} onChange={e => setCommForm({ ...commForm, subject: e.target.value })} required /></label>
         <label>Message summary<textarea value={commForm.messageSummary} onChange={e => setCommForm({ ...commForm, messageSummary: e.target.value })} required /></label>
         <button type="submit">Log communication</button>
-      </form>
+      </form>}
       <table className="data-table"><thead><tr><th>Number</th><th>Date</th><th>Type</th><th>Dir.</th><th>Subject</th><th>Stakeholder</th><th>Status</th><th></th></tr></thead><tbody>
         {communications.map(c => <tr key={c.id}>
           <td>{c.communication_number}</td><td>{c.communication_date}</td><td>{c.communication_type.replace(/_/g, ' ')}</td>
           <td>{c.direction}</td><td>{c.subject}</td><td>{c.stakeholder_name || '—'}</td><td>{formatBadge(c.status)}</td>
           <td>
             {c.direction === 'outbound' && (c.channel || '').toLowerCase().includes('email') && c.contact_detail && c.contact_detail.includes('@') && <a href={`mailto:${encodeURIComponent(c.contact_detail)}?subject=${encodeURIComponent(c.subject)}&body=${encodeURIComponent(c.message_summary)}`} target="_blank" rel="noreferrer"><button type="button">Open in mail</button></a>}
-            <button onClick={() => commCreateAction(c.id)}>Action</button>
-            {c.status !== 'closed' && <button onClick={() => closeComm(c.id)}>Close</button>}
+            {can('actions', 'create') && <button onClick={() => commCreateAction(c.id)}>Action</button>}
+            {c.status !== 'closed' && can('customer_focus.communication', 'edit') && <button onClick={() => closeComm(c.id)}>Close</button>}
           </td>
         </tr>)}
       </tbody></table>

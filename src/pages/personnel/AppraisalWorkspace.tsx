@@ -412,6 +412,7 @@ function RatingsGrid({ record, maxScore, isSubject, mayEdit, onError, onChanged 
   onError: (message: string | null) => void;
   onChanged: () => Promise<void>;
 }) {
+  const { can } = usePermissions();
   const items = useMemo(() => record.items ?? [], [record.items]);
   const editableStage = !['completed', 'acknowledged', 'cancelled'].includes(record.status);
   // Whose column you are filling in. The member of staff fills their own; the
@@ -571,7 +572,7 @@ function RatingsGrid({ record, maxScore, isSubject, mayEdit, onError, onChanged 
         <label className="wide">How success is measured<input value={extra.successMeasure} onChange={e => setExtra({ ...extra, successMeasure: e.target.value })} /></label>
         <label>Weight<input type="number" min={0.5} step="0.5" value={extra.weight} onChange={e => setExtra({ ...extra, weight: e.target.value })} /></label>
         <div className="element-add-actions">
-          <button type="button" onClick={() => void addItem()}>Add item</button>
+          {can('personnel.appraisals', 'edit') && <button type="button" onClick={() => void addItem()}>Add item</button>}
           <button type="button" className="secondary" onClick={() => setAdding(false)}>Cancel</button>
         </div>
       </div> : <button type="button" className="secondary" onClick={() => setAdding(true)}>
@@ -590,6 +591,7 @@ function Objectives({ record, mayEdit, onError, onChanged }: {
   onError: (message: string | null) => void;
   onChanged: () => Promise<void>;
 }) {
+  const { can } = usePermissions();
   const objectives = record.objectives ?? [];
   const [form, setForm] = useState({ objective: '', successMeasure: '', targetDate: '', weight: '1' });
   const [editing, setEditing] = useState<number | null>(null);
@@ -657,7 +659,7 @@ function Objectives({ record, mayEdit, onError, onChanged }: {
       <label>Achieved (%)<input type="number" min={0} max={100} value={patch.achievementPercent} onChange={e => setPatch({ ...patch, achievementPercent: e.target.value })} /></label>
       <label className="wide">Comments<textarea rows={2} value={patch.comments} onChange={e => setPatch({ ...patch, comments: e.target.value })} /></label>
       <div className="element-add-actions">
-        <button type="button" onClick={() => void update(editing)}>Save progress</button>
+        {can('personnel.appraisals', 'edit') && <button type="button" onClick={() => void update(editing)}>Save progress</button>}
         <button type="button" className="secondary" onClick={() => setEditing(null)}>Cancel</button>
       </div>
     </div>}
@@ -764,6 +766,7 @@ function AppraisalDetails({ record, staff, sections, positions, editable, onErro
   onError: (message: string | null) => void;
   onChanged: () => Promise<void>;
 }) {
+  const { can } = usePermissions();
   const [form, setForm] = useState({
     appraisalDate: record.appraisal_date,
     appraisalType: record.appraisal_type,
@@ -810,7 +813,7 @@ function AppraisalDetails({ record, staff, sections, positions, editable, onErro
     </dl>;
   }
 
-  return <form className="form-grid" onSubmit={save}>
+  return can('personnel.appraisals', 'edit') && <form className="form-grid" onSubmit={save}>
     <label>Appraisal date<input type="date" value={form.appraisalDate} onChange={e => setForm({ ...form, appraisalDate: e.target.value })} required /></label>
     <label>Type
       <select value={form.appraisalType} onChange={e => setForm({ ...form, appraisalType: e.target.value })}>

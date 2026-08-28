@@ -288,21 +288,138 @@ console.log('\n[4c] Tasks are addressed to the staff record, and the inbox is pe
 }
 
 /* ==========================================================================
+   4d — Reading a document is reading, not authoring
+   --------------------------------------------------------------------------
+   A .docx has no in-app preview: opening it in Word IS reading it. Gating the
+   Office handoff on `documents.authoring:edit` meant a Biomedical Scientist
+   could not open the SOP they are required to read and attest to — the viewer
+   offered them a lone Download button. Opening is governed by the right to
+   read the library; whether the handoff may save a version back is a separate
+   answer, carried on the session and enforced on the PUT.
+   ========================================================================= */
+console.log('\n[4d] Opening a controlled document needs only the right to read it');
+{
+  const docs = read('server/routes/documents.ts');
+  check('the Office handoff is minted on documents.library:view',
+    /'\/:id\/versions\/:versionId\/office-session', requirePermission\('documents\.library', 'view'\)/.test(docs));
+  check('the handoff records whether it may write back',
+    /readOnly: !mayAuthor/.test(docs) && /officeUriFor\(fileName, url, mayAuthor \? 'edit' : 'view'\)/.test(docs));
+
+  const office = read('server/routes/officeEdit.ts');
+  check('a read-only handoff opens for viewing, not editing',
+    /mode === 'view' \? 'ofv' : 'ofe'/.test(office));
+  check('and its save is refused at the door',
+    /if \(session\.read_only\) \{ davHeaders\(res\); res\.status\(403\)/.test(office));
+
+  const panel = read('src/components/OfficeHandoff.tsx');
+  check('the viewer offers "Open in …" to a reader',
+    /<button type="button" className="oh-primary" onClick=\{open\}/.test(panel)
+    && !/\{canEdit && <button type="button" className="oh-primary"/.test(panel));
+  check('but wires no save-back path for one', /if \(!canSaveBack\) return;/.test(panel));
+}
+
+/* ==========================================================================
    5 — Module pages filter their tab bars
    ========================================================================= */
 console.log('\n[5] Module pages filter their tab bars by permission');
 {
+  // Checking that a file merely MENTIONS PermissionTabs is not enough: Documents
+  // & Records imported it for its Dashboard/Documents/Records rail while a
+  // second bar right underneath mapped a raw `docTabs` array — which is how a
+  // Biomedical Scientist came to be offered New Document, Bulk Import and both
+  // approval queues. Every `className="tabs"` block is inspected on its own.
   const offenders = [];
-  for (const p of CLIENT_FILES.filter(f => f.startsWith(`src${path.sep}pages`))) {
-    const s = read(p);
-    if (!/className="tabs"/.test(s)) continue;
-    if (/PermissionTabs|usePermittedTabs|permittedTabs/.test(s)) continue;
-    // Settings has its own gate per page (see src/constants/settingsAccess.ts),
-    // and the NC/CAPA top bar is three routes, each gated on the same module.
-    if (/SettingsPages|ActivitySettingsPage/.test(p)) continue;
-    offenders.push(path.basename(p));
+  for (const p of CLIENT_FILES.filter(f => f.startsWith(`src${path.sep}pages`) || f.startsWith(`src${path.sep}components`))) {
+    const src = read(p);
+    // Settings has its own gate per page (src/constants/settingsAccess.ts).
+    if (/SettingsPages|ActivitySettingsPage|PermissionTabs\.tsx$/.test(p)) continue;
+    const lines = src.split('\n');
+    lines.forEach((line, i) => {
+      // Only the bars that choose a WORKSPACE. `tabs sub` / `view-switch` are
+      // inner switchers between views of one area the person already holds —
+      // gating them would be asking the same question twice.
+      if (!/className="tabs\b/.test(line)) return;
+      if (/className="tabs (sub|.*view-switch)/.test(line)) return;
+      // The bar and what it maps over, within the next few lines.
+      const block = lines.slice(i, i + 4).join(' ');
+      const mapped = block.match(/\{\s*([A-Za-z_$][\w$]*)\s*(?:\.filter\([^)]*\))?\.map\(/);
+      if (!mapped) return;                       // not a mapped bar
+      const ident = mapped[1];
+      // Filtered in place, right here in the bar.
+      if (/\.filter\([^)]*\bcan(View)?\(/.test(block)) return;
+      // Or the array itself is built from a permission filter, or is the
+      // output of usePermittedTabs.
+      // A fixed window after the declaration, not "up to the first semicolon":
+      // a filter body has semicolons of its own.
+      const at = src.search(new RegExp(`\\b(const|let)\\s+${ident}\\b`));
+      const body = at === -1 ? '' : src.slice(at, at + 900);
+      if (/usePermittedTabs|\bcan(View)?\(/.test(body)) return;
+      offenders.push(`${path.basename(p)}:${i + 1} maps ${ident} unfiltered`);
+    });
   }
-  check('every module page filters its tabs', offenders.length === 0, offenders.join(', '));
+  check('every tab bar filters what it draws', offenders.length === 0, offenders.slice(0, 8).join(' | '));
+}
+
+/* ==========================================================================
+   5b — Reading a document is not authoring it, and signing is not raising
+   --------------------------------------------------------------------------
+   A Biomedical Scientist reads the SOPs they must follow and signs what is put
+   in front of them. Offering them New Document, Bulk Import, the review and
+   approval queues, the laboratory-wide attestation register, or a "Set up
+   declaration" button is offering work the API refuses — and what you cannot
+   do you should not see.
+   ========================================================================= */
+console.log('\n[5b] A reader is offered reading, not document control');
+{
+  const docs = read('src/pages/DocumentControlPage.tsx');
+  check('the document tabs each name the right they need', /DOC_TAB_RIGHTS/.test(docs));
+  for (const [tab, key, action] of [
+    ['New Document', 'documents.authoring', 'create'],
+    ['Bulk Import', 'documents.authoring', 'create'],
+    ['Review Queue', 'documents.workflow', 'view'],
+    ['Approval Queue', 'documents.workflow', 'view'],
+    ['Attestations', 'documents.workflow', 'view'],
+  ]) {
+    const re = new RegExp(`'${tab}': \\{ key: '${key}', action: '${action}' \\}`);
+    check(`  ${tab} needs ${key}:${action}`, re.test(docs));
+  }
+  const server = read('server/routes/documents.ts');
+  check('the laboratory-wide attestation register is document control\'s',
+    /'\/attestations\/list', requirePermission\('documents\.workflow', 'view'\)/.test(server));
+  check('and a reader\'s pending list is their own',
+    /const mayOversee = resolvePermission\(req\.user!\.id, 'documents\.workflow', 'view'\)\.allowed/.test(server));
+
+  const org = read('src/pages/OrganisationPage.tsx');
+  check('setting up a declaration needs the right to create one',
+    /const canManage = can\('organisation\.structure', 'create'\)/.test(org)
+    && !/const canManage = true/.test(org));
+  check('and editing or deleting one is gated separately',
+    /const canEditForm = can\('organisation\.structure', 'edit'\)/.test(org)
+    && /const canDeleteForm = can\('organisation\.structure', 'void_archive'\)/.test(org));
+}
+
+/* ==========================================================================
+   5c — "Administrator" is a flag, never a role's name
+   --------------------------------------------------------------------------
+   The server decides it from `roles.is_administrator`, so a laboratory may
+   rename or move the role. A client comparing `roleName === 'system
+   administrator'` disagrees with the server the moment they do — and the
+   comparison silently keeps, or loses, a reserved capability.
+   ========================================================================= */
+console.log('\n[5c] Administrator status is read from the flag, not a name');
+{
+  const offenders = [];
+  for (const p of CLIENT_FILES) {
+    read(p).split('\n').forEach((l, i) => {
+      if (/roleName[^\n]*===[^\n]*administrator/i.test(l) || /=== 'system administrator'/i.test(l)) {
+        offenders.push(`${path.basename(p)}:${i + 1}`);
+      }
+    });
+  }
+  check('no client compares a role name to decide administrator', offenders.length === 0, offenders.join(', '));
+  const auth = read('server/routes/auth.ts');
+  check('the auth payload reports the flag off the resolved access profile',
+    /isAdministrator: isAdministrator\(user\.id\)/.test(auth) && /isAdministrator\(Number\(user\.id\)\)/.test(auth));
 }
 
 /* ==========================================================================

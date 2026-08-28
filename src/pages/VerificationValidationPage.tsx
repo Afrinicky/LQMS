@@ -222,7 +222,7 @@ export function VerificationValidationPage({ embedded = false }: { embedded?: bo
     {tab === 'New study' && <div className="card">
       <h3>New verification / validation study</h3>
       <p className="muted" style={{ marginTop: 0 }}>Choose the study type and whether the measurand is quantitative or qualitative — the standard ISO/CLSI performance characteristics are added automatically, ready for you to enter results. <strong>Verification</strong> confirms a validated (e.g. manufacturer's) method performs as claimed here; <strong>validation</strong> fully characterises a lab-developed or modified method.</p>
-      <form className="form-grid" onSubmit={createStudy}>
+      {can('verification_validation', 'create') && <form className="form-grid" onSubmit={createStudy}>
         <label>Study type<select value={nf.studyType} onChange={e => setNf({ ...nf, studyType: e.target.value })}>{STUDY_TYPES.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}</select></label>
         <label>Measurand<select value={nf.measurandType} onChange={e => setNf({ ...nf, measurandType: e.target.value })}>{MEASURANDS.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}</select></label>
         <label>Test<input value={nf.testName} onChange={e => setNf({ ...nf, testName: e.target.value })} required placeholder="e.g. Serum creatinine" /></label>
@@ -240,14 +240,14 @@ export function VerificationValidationPage({ embedded = false }: { embedded?: bo
         <label>Start date<input type="date" value={nf.startDate} onChange={e => setNf({ ...nf, startDate: e.target.value })} /></label>
         <label className="check-inline"><input type="checkbox" checked={nf.seedParameters} onChange={e => setNf({ ...nf, seedParameters: e.target.checked })} /> Add the standard performance characteristics automatically</label>
         <button type="submit">Create study</button>
-      </form>
+      </form>}
     </div>}
 
     {tab === 'Equipment verification' && <>
       <div className="card">
         <h3>Equipment verification (instrument performance)</h3>
         <p className="muted" style={{ marginTop: 0 }}>Verify an instrument performs to specification (calibration verification, performance checks). Method/assay studies are on the <em>Register</em>.</p>
-        <form className="form-grid" onSubmit={submitEquip}>
+        {can('verification_validation', 'create') && <form className="form-grid" onSubmit={submitEquip}>
           <label>Equipment<select value={equipForm.equipmentId} onChange={e => setEquipForm({ ...equipForm, equipmentId: e.target.value })} required><option value="">—</option>{equipment.map(eq => <option key={eq.id} value={eq.id}>{eq.name}</option>)}</select></label>
           <label>Verification type<input value={equipForm.verificationType} onChange={e => setEquipForm({ ...equipForm, verificationType: e.target.value })} required placeholder="e.g. calibration verification" /></label>
           <label>Date<input type="date" value={equipForm.verificationDate} onChange={e => setEquipForm({ ...equipForm, verificationDate: e.target.value })} required /></label>
@@ -256,11 +256,11 @@ export function VerificationValidationPage({ embedded = false }: { embedded?: bo
           <label>Results summary<textarea value={equipForm.resultsSummary} onChange={e => setEquipForm({ ...equipForm, resultsSummary: e.target.value })} /></label>
           <label>Conclusion<textarea value={equipForm.conclusion} onChange={e => setEquipForm({ ...equipForm, conclusion: e.target.value })} /></label>
           <button type="submit">Record equipment verification</button>
-        </form>
+        </form>}
       </div>
       <table className="data-table" style={{ marginTop: 16 }}><thead><tr><th>Number</th><th>Equipment</th><th>Type</th><th>Date</th><th>Status</th><th></th></tr></thead><tbody>
         {equipVerifs.map(ev => <tr key={ev.id}><td>{ev.verification_number}</td><td>{ev.equipment_name}</td><td>{(ev.verification_type || '').replace(/_/g, ' ')}</td><td>{ev.verification_date}</td><td>{badge(ev.status)}</td>
-          <td>{ev.status !== 'approved' && <button onClick={() => approveEquip(ev.id)}>Approve</button>}</td></tr>)}
+          <td>{ev.status !== 'approved' && can('verification_validation', 'approve') && <button onClick={() => approveEquip(ev.id)}>Approve</button>}</td></tr>)}
         {equipVerifs.length === 0 && <tr><td colSpan={6} className="muted">No equipment verifications yet.</td></tr>}
       </tbody></table>
     </>}
@@ -398,6 +398,7 @@ function StudyWorkspace({ study, staff, sections, equipment, catalogue, canManag
 // ---- Raw-data workbench for a single performance characteristic ----
 type DP = { sampleLabel: string; valueA: string; valueB: string };
 function ParamDataEditor({ param, onClose, onComputed, setError }: { param: VParam; onClose: () => void; onComputed: () => void; setError: (m: string | null) => void }) {
+  const { can } = usePermissions();
   const paired = param.parameter === 'method_comparison' || param.parameter === 'linearity';
   const bLabel = param.parameter === 'method_comparison' ? 'Comparator (B)' : param.parameter === 'linearity' ? 'Assigned (B)' : 'Value B';
   const aLabel = param.parameter === 'method_comparison' ? 'Test method (A)' : param.parameter === 'linearity' ? 'Measured (A)' : 'Value';
@@ -435,7 +436,7 @@ function ParamDataEditor({ param, onClose, onComputed, setError }: { param: VPar
     </tbody></table>
     <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
       <button type="button" className="secondary" onClick={() => setRows(r => [...r, { sampleLabel: '', valueA: '', valueB: '' }])}>+ Add row</button>
-      <button type="button" onClick={saveCompute}>Save &amp; compute</button>
+      {can('verification_validation', 'edit') && <button type="button" onClick={saveCompute}>Save &amp; compute</button>}
     </div>
     {computed && <div className="notice-ok" style={{ marginTop: 8 }}>Computed: <strong>{computed}</strong> — written to the characteristic's observed value.</div>}
   </div>;

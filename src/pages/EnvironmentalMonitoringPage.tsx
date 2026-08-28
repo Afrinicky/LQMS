@@ -298,6 +298,7 @@ function LiveDashboard({ dashboard, onOpenChart, onRefresh }: { dashboard: EnvDa
 }
 
 function AssetsTab({ assets, devices, lookups, onChanged, onError, onFlash }: any) {
+  const { can } = usePermissions();
   const blank = { name: '', assetType: 'refrigerator', departmentId: '', sectionId: '', locationId: '', responsibleStaffId: '', equipmentId: '', tempMin: '', tempMax: '', humidityMin: '', humidityMax: '', monitoringFrequency: 'continuous', installationDate: '', calibrationDueDate: '', deviceId: '', notes: '' };
   const [form, setForm] = useState(blank);
   async function submit(e: FormEvent) {
@@ -313,7 +314,7 @@ function AssetsTab({ assets, devices, lookups, onChanged, onError, onFlash }: an
   return <>
     <div className="card">
       <h3>Register monitored asset</h3>
-      <form className="form-grid" onSubmit={submit}>
+      {can('facilities_safety.environment', 'create') && <form className="form-grid" onSubmit={submit}>
         <label>Name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required placeholder="e.g. Reagent fridge 1" /></label>
         <label>Asset type<select value={form.assetType} onChange={e => setForm({ ...form, assetType: e.target.value })}>{['refrigerator', 'freezer', 'ultra_low_freezer', 'incubator', 'cold_room', 'room', 'water_bath', 'blood_bank_fridge', 'other'].map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Department<select value={form.departmentId} onChange={e => setForm({ ...form, departmentId: e.target.value })}><option value="">—</option>{lookups.departments.map((d: Department) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
@@ -330,12 +331,12 @@ function AssetsTab({ assets, devices, lookups, onChanged, onError, onFlash }: an
         <label>Installation date<input type="date" value={form.installationDate} onChange={e => setForm({ ...form, installationDate: e.target.value })} /></label>
         <label>Calibration due<input type="date" value={form.calibrationDueDate} onChange={e => setForm({ ...form, calibrationDueDate: e.target.value })} /></label>
         <button type="submit">Add asset</button>
-      </form>
+      </form>}
     </div>
     <div className="card" style={{ marginTop: 16 }}>
       <h3>Assets</h3>
       <table className="data-table"><thead><tr><th>Code</th><th>Name</th><th>Type</th><th>Location</th><th>Range °C</th><th>Device</th><th>Status</th><th></th></tr></thead><tbody>
-        {assets.map((a: EnvAsset) => <tr key={a.id}><td>{a.asset_code}</td><td>{a.name}</td><td>{(a.asset_type || '—').replace(/_/g, ' ')}</td><td>{a.location_name || '—'}</td><td>{a.temp_min ?? '−'}–{a.temp_max ?? '−'}</td><td>{a.device_name || <span className="muted">manual</span>}</td><td>{badge(a.status)}</td><td><button className="secondary" onClick={() => remove(a.id)}>Delete</button></td></tr>)}
+        {assets.map((a: EnvAsset) => <tr key={a.id}><td>{a.asset_code}</td><td>{a.name}</td><td>{(a.asset_type || '—').replace(/_/g, ' ')}</td><td>{a.location_name || '—'}</td><td>{a.temp_min ?? '−'}–{a.temp_max ?? '−'}</td><td>{a.device_name || <span className="muted">manual</span>}</td><td>{badge(a.status)}</td><td>{can('facilities_safety.environment', 'edit') && <button className="secondary" onClick={() => remove(a.id)}>Delete</button>}</td></tr>)}
         {assets.length === 0 && <tr><td colSpan={8} className="muted">No assets yet.</td></tr>}
       </tbody></table>
     </div>
@@ -360,7 +361,7 @@ function DevicesTab({ devices, assets, locations, drivers, commMethods, onChange
     <div className="card">
       <h3>Register device / data logger</h3>
       <p className="muted" style={{ marginTop: 0 }}>Pick a communication method. The <strong>Simulator</strong> driver generates live readings so you can trial the dashboard, alarms and excursions before hardware arrives. REST API and CSV import are ready; other protocols are listed and store configuration for when their adapter is installed.</p>
-      <form className="form-grid" onSubmit={submit}>
+      {can('facilities_safety.environment', 'create') && <form className="form-grid" onSubmit={submit}>
         <label>Name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></label>
         <label>Communication<select value={form.communicationMethod} onChange={e => setForm({ ...form, communicationMethod: e.target.value, driverKey: e.target.value })}>{(commMethods.length ? commMethods : ['manual']).map((m: string) => <option key={m} value={m}>{m.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Driver<select value={form.driverKey} onChange={e => setForm({ ...form, driverKey: e.target.value })}>{drivers.map((d: any) => <option key={d.key} value={d.key}>{d.label}{d.automated ? ' (auto)' : ''}</option>)}</select></label>
@@ -374,7 +375,7 @@ function DevicesTab({ devices, assets, locations, drivers, commMethods, onChange
         <label>Calibration due<input type="date" value={form.calibrationDueDate} onChange={e => setForm({ ...form, calibrationDueDate: e.target.value })} /></label>
         <label>Driver config (JSON)<textarea value={form.configJson} onChange={e => setForm({ ...form, configJson: e.target.value })} placeholder='REST e.g. {"url":"http://sensor/api","tempPath":"data.temp"}' /></label>
         <button type="submit">Add device</button>
-      </form>
+      </form>}
     </div>
     <div className="card" style={{ marginTop: 16 }}>
       <h3>Devices</h3>
@@ -383,7 +384,7 @@ function DevicesTab({ devices, assets, locations, drivers, commMethods, onChange
           <td>{d.device_code}</td><td>{d.name}</td><td>{d.communication_method.replace(/_/g, ' ')}</td><td>{d.asset_name || '—'}</td>
           <td>{d.battery_level != null ? `${Math.round(d.battery_level)}%` : '—'}</td><td>{ago(d.last_communication_at)}</td>
           <td style={{ whiteSpace: 'nowrap' }}>
-            {d.asset_id && <button className="secondary" onClick={() => pollNow(d.id)}>Poll now</button>}{' '}
+            {d.asset_id && can('facilities_safety.environment', 'edit') && <button className="secondary" onClick={() => pollNow(d.id)}>Poll now</button>}{' '}
             {d.communication_method === 'csv_import' && d.asset_id && <>
               <input type="file" accept=".csv,text/csv" onChange={e => onFile(d.id, e.target.files?.[0])} style={{ maxWidth: 150 }} />
               {can(ENV, 'create') && <button className="secondary" disabled={!csv[d.id]} onClick={() => importCsv(d.id)}>Import</button>}{' '}
@@ -398,6 +399,7 @@ function DevicesTab({ devices, assets, locations, drivers, commMethods, onChange
 }
 
 function ManualEntryTab({ assets, staff, onSaved, onError, onFlash }: any) {
+  const { can } = usePermissions();
   const blank = { assetId: '', temperature: '', humidity: '', recordedByStaffId: '', observation: '', correctiveAction: '', manualReason: '', signature: '' };
   const [form, setForm] = useState(blank);
   async function submit(e: FormEvent) {
@@ -413,7 +415,7 @@ function ManualEntryTab({ assets, staff, onSaved, onError, onFlash }: any) {
     <p className="muted" style={{ marginTop: 0 }}>Manual entries are tagged as <em>manual</em> and evaluated by the same alarm/excursion engine as automated readings.</p>
     <XlsxToolbar module={ENV} exportPath="/environmental/readings/export" templatePath="/environmental/readings/template" importPath="/environmental/readings/import" exportName="Environmental_Readings.xlsx" onImported={onSaved} />
     <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>Export/import temperature &amp; humidity readings in Excel. Imported rows are matched to assets by their <strong>Asset code</strong> and pass through the same excursion engine, so out-of-range values raise alerts automatically.</p>
-    <form className="form-grid" onSubmit={submit}>
+    {can('facilities_safety.environment', 'create') && <form className="form-grid" onSubmit={submit}>
       <label>Asset<select value={form.assetId} onChange={e => setForm({ ...form, assetId: e.target.value })} required><option value="">—</option>{assets.map((a: EnvAsset) => <option key={a.id} value={a.id}>{a.name} ({a.temp_min ?? '−'}–{a.temp_max ?? '−'}°C)</option>)}</select></label>
       <label>Temperature (°C)<input type="number" step="any" value={form.temperature} onChange={e => setForm({ ...form, temperature: e.target.value })} required /></label>
       <label>Humidity (%)<input type="number" step="any" value={form.humidity} onChange={e => setForm({ ...form, humidity: e.target.value })} /></label>
@@ -423,11 +425,12 @@ function ManualEntryTab({ assets, staff, onSaved, onError, onFlash }: any) {
       <label>Observation<textarea value={form.observation} onChange={e => setForm({ ...form, observation: e.target.value })} /></label>
       <label>Corrective action<textarea value={form.correctiveAction} onChange={e => setForm({ ...form, correctiveAction: e.target.value })} /></label>
       <button type="submit">Record reading</button>
-    </form>
+    </form>}
   </div>;
 }
 
 function AlertsTab({ alerts, onChanged, onError }: any) {
+  const { can } = usePermissions();
   const [filter, setFilter] = useState('active');
   const shown = alerts.filter((a: EnvAlert) => filter === 'all' || a.status === filter);
   async function ack(id: number) { try { await api(`/environmental/alerts/${id}/acknowledge`, { method: 'POST', body: JSON.stringify({}) }); onChanged(); } catch (e) { onError((e as Error).message); } }
@@ -439,13 +442,14 @@ function AlertsTab({ alerts, onChanged, onError }: any) {
     </div>
     <table className="data-table" style={{ marginTop: 10 }}><thead><tr><th>Severity</th><th>Type</th><th>Asset</th><th>Message</th><th>Triggered</th><th>Status</th><th></th></tr></thead><tbody>
       {shown.map((a: EnvAlert) => <tr key={a.id}><td>{badge(a.severity)}</td><td>{a.alert_type.replace(/_/g, ' ')}</td><td>{a.asset_name || '—'}</td><td>{a.message || '—'}</td><td>{fmtTime(a.triggered_at)}</td><td>{badge(a.status)}</td>
-        <td style={{ whiteSpace: 'nowrap' }}>{a.status === 'active' && <button className="secondary" onClick={() => ack(a.id)}>Acknowledge</button>}{' '}{a.status !== 'resolved' && <button className="secondary" onClick={() => resolve(a.id)}>Resolve</button>}</td></tr>)}
+        <td style={{ whiteSpace: 'nowrap' }}>{a.status === 'active' && can('facilities_safety.environment', 'edit') && <button className="secondary" onClick={() => ack(a.id)}>Acknowledge</button>}{' '}{a.status !== 'resolved' && <button className="secondary" onClick={() => resolve(a.id)}>Resolve</button>}</td></tr>)}
       {shown.length === 0 && <tr><td colSpan={7} className="muted">No {filter} alerts.</td></tr>}
     </tbody></table>
   </div>;
 }
 
 function ExcursionsTab({ excursions, onChanged, onError, onFlash }: any) {
+  const { can } = usePermissions();
   async function ack(id: number) { try { await api(`/environmental/excursions/${id}/acknowledge`, { method: 'POST', body: JSON.stringify({ investigationStatus: 'investigating' }) }); onChanged(); } catch (e) { onError((e as Error).message); } }
   async function createNc(id: number) { try { const r = await api<{ ncNumber: string }>(`/environmental/excursions/${id}/create-nc`, { method: 'POST', body: JSON.stringify({}) }); onChanged(); onFlash(`Created ${r.ncNumber}.`); } catch (e) { onError((e as Error).message); } }
   return <div className="card">
@@ -453,20 +457,21 @@ function ExcursionsTab({ excursions, onChanged, onError, onFlash }: any) {
     <p className="muted" style={{ marginTop: 0 }}>An excursion opens when temperature leaves the acceptable band and closes when it returns. Sustained excursions auto-create a Nonconformity (and linked CAPA).</p>
     <table className="data-table"><thead><tr><th>Asset</th><th>Band °C</th><th>Started</th><th>Ended</th><th>Min/Max</th><th>Duration</th><th>Status</th><th>NC / CAPA</th><th></th></tr></thead><tbody>
       {excursions.map((e: EnvExcursion) => <tr key={e.id}><td>{e.asset_name || '—'}</td><td>{e.acceptable_min ?? '−'}–{e.acceptable_max ?? '−'}</td><td>{fmtTime(e.started_at)}</td><td>{e.ended_at ? fmtTime(e.ended_at) : <span className="badge critical">ongoing</span>}</td><td>{e.min_value ?? '−'} / {e.max_value ?? '−'}</td><td>{e.duration_minutes != null ? `${e.duration_minutes}m` : '—'}</td><td>{badge(e.status)}</td><td>{e.nc_number || '—'}{e.capa_number ? ` / ${e.capa_number}` : ''}</td>
-        <td style={{ whiteSpace: 'nowrap' }}><button className="secondary" onClick={() => ack(e.id)}>Acknowledge</button>{' '}{!e.nc_id && <button className="secondary" onClick={() => createNc(e.id)}>Create NC</button>}</td></tr>)}
+        <td style={{ whiteSpace: 'nowrap' }}>{can('facilities_safety.environment', 'edit') && <button className="secondary" onClick={() => ack(e.id)}>Acknowledge</button>}{' '}{!e.nc_id && <button className="secondary" onClick={() => createNc(e.id)}>Create NC</button>}</td></tr>)}
       {excursions.length === 0 && <tr><td colSpan={9} className="muted">No excursions recorded.</td></tr>}
     </tbody></table>
   </div>;
 }
 
 function SettingsTab({ settings, onSaved, onError, onFlash }: any) {
+  const { can } = usePermissions();
   const [f, setF] = useState<any>(null);
   useEffect(() => { if (settings) setF({ pollingEnabled: !!settings.polling_enabled, defaultPollIntervalSeconds: settings.default_poll_interval_seconds, excursionNcMinutes: settings.excursion_nc_minutes, batteryLowThreshold: settings.battery_low_threshold, noCommMinutes: settings.no_comm_minutes, preventExpiredDevices: !!settings.prevent_expired_devices, webhookUrl: (settings as any).webhook_url ?? '' }); }, [settings]);
   if (!f) return <p>Loading settings…</p>;
   async function save(e: FormEvent) { e.preventDefault(); onError(null); try { await api('/environmental/settings', { method: 'PUT', body: JSON.stringify(f) }); onFlash('Settings saved.'); onSaved(); } catch (err) { onError((err as Error).message); } }
   return <div className="card">
     <h3>Monitoring settings</h3>
-    <form className="form-grid" onSubmit={save}>
+    {can('facilities_safety.environment', 'edit') && <form className="form-grid" onSubmit={save}>
       <label><input type="checkbox" checked={f.pollingEnabled} onChange={e => setF({ ...f, pollingEnabled: e.target.checked })} /> Enable automated polling</label>
       <label>Default poll interval<select value={f.defaultPollIntervalSeconds} onChange={e => setF({ ...f, defaultPollIntervalSeconds: Number(e.target.value) })}>{[[30, '30 seconds'], [60, '1 minute'], [300, '5 minutes'], [600, '10 minutes'], [1800, '30 minutes'], [3600, 'Hourly']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
       <label>Excursion → NC after (minutes)<NumberField min={0} value={f.excursionNcMinutes} onValue={n => setF({ ...f, excursionNcMinutes: n ?? 0 })} /></label>
@@ -475,12 +480,13 @@ function SettingsTab({ settings, onSaved, onError, onFlash }: any) {
       <label><input type="checkbox" checked={f.preventExpiredDevices} onChange={e => setF({ ...f, preventExpiredDevices: e.target.checked })} /> Prevent use of calibration-expired devices</label>
       <label>Webhook URL (Teams/Slack incoming webhook)<input value={f.webhookUrl} onChange={e => setF({ ...f, webhookUrl: e.target.value })} placeholder="https://…" /></label>
       <button type="submit">Save settings</button>
-    </form>
+    </form>}
     <p className="muted" style={{ marginTop: 12 }}>Configure who gets notified under the <strong>Notifications</strong> tab. The interactive floor plan, predictive maintenance and Dennis analysis build on this data in later phases.</p>
   </div>;
 }
 
 function NotificationsTab({ onError, onFlash }: any) {
+  const { can } = usePermissions();
   const [channels, setChannels] = useState<EnvChannel[]>([]);
   const [rules, setRules] = useState<EnvEscalationRule[]>([]);
   const [queue, setQueue] = useState<EnvNotificationQueueItem[]>([]);
@@ -501,23 +507,23 @@ function NotificationsTab({ onError, onFlash }: any) {
       <h3>Notification channels</h3>
       <p className="muted" style={{ marginTop: 0 }}>In-app is always on. The Webhook channel posts to a Teams/Slack incoming webhook (set the URL under Settings). Email/SMS/WhatsApp are ready to plug in once a relay is configured on the host.</p>
       <table className="data-table"><thead><tr><th>Channel</th><th>Status</th><th></th></tr></thead><tbody>
-        {channels.map(c => <tr key={c.key}><td>{c.label}</td><td>{c.ready ? <span className="badge active">ready</span> : <span className="badge">not configured</span>}</td><td><button className="secondary" onClick={() => test(c.key)}>Send test</button></td></tr>)}
+        {channels.map(c => <tr key={c.key}><td>{c.label}</td><td>{c.ready ? <span className="badge active">ready</span> : <span className="badge">not configured</span>}</td><td>{can('facilities_safety.environment', 'edit') && <button className="secondary" onClick={() => test(c.key)}>Send test</button>}</td></tr>)}
       </tbody></table>
     </div>
     <div className="card" style={{ marginTop: 16 }}>
       <h3>Escalation rules</h3>
       <p className="muted" style={{ marginTop: 0 }}>Each rule notifies a channel when a matching alert has gone unacknowledged for the delay. Delay 0 = notify immediately; larger delays form the escalation ladder.</p>
-      <form className="form-grid" onSubmit={addRule}>
+      {can('facilities_safety.environment', 'edit') && <form className="form-grid" onSubmit={addRule}>
         <label>Name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></label>
         <label>Severity<select value={form.severity} onChange={e => setForm({ ...form, severity: e.target.value })}>{['any', 'information', 'warning', 'critical'].map(s => <option key={s} value={s}>{s}</option>)}</select></label>
         <label>Delay (minutes)<input type="number" min={0} value={form.delayMinutes} onChange={e => setForm({ ...form, delayMinutes: e.target.value })} /></label>
         <label>Channel<select value={form.channel} onChange={e => setForm({ ...form, channel: e.target.value })}>{channels.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}</select></label>
         <label>Recipients<input value={form.recipients} onChange={e => setForm({ ...form, recipients: e.target.value })} placeholder="emails / phones / role (optional)" /></label>
         <button type="submit">Add rule</button>
-      </form>
+      </form>}
       <table className="data-table" style={{ marginTop: 10 }}><thead><tr><th>Name</th><th>Severity</th><th>Delay</th><th>Channel</th><th>Recipients</th><th>Active</th><th></th></tr></thead><tbody>
         {rules.map(r => <tr key={r.id}><td>{r.name}</td><td>{badge(r.severity)}</td><td>{r.delay_minutes}m</td><td>{r.channel}</td><td>{r.recipients || '—'}</td><td>{r.is_active ? 'Yes' : 'No'}</td>
-          <td style={{ whiteSpace: 'nowrap' }}><button className="secondary" onClick={() => toggleRule(r)}>{r.is_active ? 'Disable' : 'Enable'}</button>{' '}<button className="secondary" onClick={() => removeRule(r.id)}>Delete</button></td></tr>)}
+          <td style={{ whiteSpace: 'nowrap' }}><button className="secondary" onClick={() => toggleRule(r)}>{r.is_active ? 'Disable' : 'Enable'}</button>{' '}{can('facilities_safety.environment', 'edit') && <button className="secondary" onClick={() => removeRule(r.id)}>Delete</button>}</td></tr>)}
         {rules.length === 0 && <tr><td colSpan={7} className="muted">No rules yet.</td></tr>}
       </tbody></table>
     </div>
@@ -532,6 +538,7 @@ function NotificationsTab({ onError, onFlash }: any) {
 }
 
 function InsightsTab({ onError, onFlash }: any) {
+  const { can } = usePermissions();
   const [insights, setInsights] = useState<EnvInsight[]>([]);
   const [loading, setLoading] = useState(true);
   function load() { setLoading(true); api<EnvInsight[]>('/environmental/insights').then(setInsights).catch(() => setInsights([])).finally(() => setLoading(false)); }
@@ -545,7 +552,7 @@ function InsightsTab({ onError, onFlash }: any) {
   const observations = insights.filter(i => !i.maintenance);
   const row = (i: EnvInsight, k: number) => <div key={k} className={`insight-row sev-${i.severity}`}>
     <div className="insight-main"><strong>{i.asset_name}</strong> <span className="badge">{i.category}</span> {badge(i.severity)}<div>{i.message}</div>{i.recommendation && <div className="muted" style={{ marginTop: 2 }}>→ {i.recommendation}</div>}</div>
-    <button type="button" className="secondary" onClick={() => createAction(i)}>Create action</button>
+    {can('facilities_safety.environment', 'create') && <button type="button" className="secondary" onClick={() => createAction(i)}>Create action</button>}
   </div>;
   return <>
     <div className="card">

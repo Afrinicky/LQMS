@@ -90,6 +90,7 @@ const ASSESSMENT_TABS = ['Dashboard', 'Assessment Programmes', 'New Assessment',
   'Plan Assessment', 'Assessment Questions', 'Internal Audit Marks', 'Findings', 'Reports'];
 
 export function AssessmentsPage() {
+  const { canView } = usePermissions();
   const { can } = usePermissions();
   const { isEnabled } = useModules();
   const { staff, sections, departments } = useLookups();
@@ -318,8 +319,10 @@ export function AssessmentsPage() {
   const topTabs: { key: string; active: boolean; go: () => void }[] = [
     { key: 'Dashboard', active: tab === 'Dashboard', go: () => setTab('Dashboard') },
     { key: 'Internal Audit', active: inInternalAudit, go: () => setTab('Assessment Programmes') },
-    ...(isEnabled('risks') ? [{ key: 'Risk Management', active: tab === 'Risk Management', go: () => setTab('Risk Management') }] : []),
-    ...(isEnabled('quality_indicators') ? [{ key: 'Quality Indicator Monitoring', active: tab === 'Quality Indicator Monitoring', go: () => setTab('Quality Indicator Monitoring') }] : []),
+    // These two switch into other modules. Enabled says the laboratory runs
+    // them; canView says this person may open them.
+    ...(isEnabled('risks') && canView('risks') ? [{ key: 'Risk Management', active: tab === 'Risk Management', go: () => setTab('Risk Management') }] : []),
+    ...(isEnabled('quality_indicators') && canView('quality_indicators') ? [{ key: 'Quality Indicator Monitoring', active: tab === 'Quality Indicator Monitoring', go: () => setTab('Quality Indicator Monitoring') }] : []),
   ];
   return <div className="module-page">
     <PageHeader eyebrow="Assessments" title="Assessments" subtitle="Internal audits, risk management, and quality indicator monitoring." />
@@ -346,9 +349,9 @@ export function AssessmentsPage() {
         {selected.objectives && <p><strong>Objectives:</strong> {selected.objectives}</p>}
         <h4>Findings</h4>
         <table className="data-table"><thead><tr><th>Number</th><th>Date</th><th>Type</th><th>Title</th><th>Severity</th><th>Status</th><th></th></tr></thead><tbody>
-          {(selected.findings || []).map(f => <tr key={f.id}><td>{f.finding_number}</td><td>{f.finding_date}</td><td>{f.finding_type.replace(/_/g, ' ')}</td><td>{f.title}</td><td>{formatBadge(f.severity)}</td><td>{formatBadge(f.status)}</td><td>{!f.nc_id && <button onClick={() => createNc(f.id)}>NC</button>}{!f.capa_id && <button onClick={() => createCapa(f.id)}>CAPA</button>}{f.status !== 'closed' && <button onClick={() => closeFinding(f.id)}>Close</button>}</td></tr>)}
+          {(selected.findings || []).map(f => <tr key={f.id}><td>{f.finding_number}</td><td>{f.finding_date}</td><td>{f.finding_type.replace(/_/g, ' ')}</td><td>{f.title}</td><td>{formatBadge(f.severity)}</td><td>{formatBadge(f.status)}</td><td>{!f.nc_id && can('nc_capa', 'create') && <button onClick={() => createNc(f.id)}>NC</button>}{!f.capa_id && <button onClick={() => createCapa(f.id)}>CAPA</button>}{f.status !== 'closed' && <button onClick={() => closeFinding(f.id)}>Close</button>}</td></tr>)}
         </tbody></table>
-        <form className="form-grid" onSubmit={submitFinding}>
+        {can('assessments', 'create') && <form className="form-grid" onSubmit={submitFinding}>
           <label>Type<select value={findForm.findingType} onChange={e => setFindForm({ ...findForm, findingType: e.target.value })}>{FINDING_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
           <label>Date<input type="date" value={findForm.findingDate} onChange={e => setFindForm({ ...findForm, findingDate: e.target.value })} /></label>
           <label>Title<input value={findForm.title} onChange={e => setFindForm({ ...findForm, title: e.target.value })} required /></label>
@@ -357,11 +360,11 @@ export function AssessmentsPage() {
           <label>Evidence summary<textarea value={findForm.evidenceSummary} onChange={e => setFindForm({ ...findForm, evidenceSummary: e.target.value })} /></label>
           <label>Responsible<select value={findForm.responsibleStaffId} onChange={e => setFindForm({ ...findForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           <button type="submit">Add finding</button>
-        </form>
+        </form>}
       </DetailModal>}
     </>}
 
-    {tab === 'New Assessment' && <form className="form-grid" onSubmit={submitProgram}>
+    {tab === 'New Assessment' && can('assessments', 'create') && <form className="form-grid" onSubmit={submitProgram}>
       <label>Title<input value={progForm.title} onChange={e => setProgForm({ ...progForm, title: e.target.value })} required /></label>
       <label>Type<select value={progForm.assessmentType} onChange={e => setProgForm({ ...progForm, assessmentType: e.target.value })}>{ASSESSMENT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
       <label>Department<select value={progForm.departmentId} onChange={e => setProgForm({ ...progForm, departmentId: e.target.value })}><option value="">—</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
@@ -404,7 +407,7 @@ export function AssessmentsPage() {
       </form>
 
       <h3>Create new checklist</h3>
-      <form className="form-grid" onSubmit={submitChecklist}>
+      {can('assessments', 'create') && <form className="form-grid" onSubmit={submitChecklist}>
         <label>Code<input value={chForm.checklistCode} onChange={e => setChForm({ ...chForm, checklistCode: e.target.value })} /></label>
         <label>Name<input value={chForm.checklistName} onChange={e => setChForm({ ...chForm, checklistName: e.target.value })} required /></label>
         <label>Type<select value={chForm.checklistType} onChange={e => setChForm({ ...chForm, checklistType: e.target.value })}>{CHECKLIST_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
@@ -416,16 +419,16 @@ export function AssessmentsPage() {
         <label>Threshold label<input value={chForm.internalThresholdLabel} onChange={e => setChForm({ ...chForm, internalThresholdLabel: e.target.value })} placeholder="optional, e.g. Internal pass threshold" /></label>
         <label>Internal pass mark<input type="number" step="any" value={chForm.internalPassMark} onChange={e => setChForm({ ...chForm, internalPassMark: e.target.value })} /></label>
         <button type="submit">Create checklist</button>
-      </form>
+      </form>}
       </>}
 
       {selectedChecklist && <DetailModal open onClose={() => setSelectedChecklist(null)} title={<>{selectedChecklist.checklist_code ? selectedChecklist.checklist_code + ' — ' : ''}{selectedChecklist.checklist_name}</>}>
         <p>Status: {formatBadge(selectedChecklist.status)} | Type: {selectedChecklist.checklist_type.replace(/_/g, ' ')} | Marking: {selectedChecklist.marking_enabled ? 'enabled' : 'disabled'}</p>
         <h4>Sections</h4>
         <table className="data-table"><thead><tr><th>Order</th><th>Title</th><th>Possible marks</th><th>Weight</th><th></th></tr></thead><tbody>
-          {(selectedChecklist.sections || []).map(s => <tr key={s.id}><td>{s.display_order}</td><td>{s.section_title}</td><td>{s.section_possible_marks ?? '—'}</td><td>{s.section_weight ?? '—'}</td><td><button onClick={() => deleteSection(selectedChecklist.id, s.id)} className="secondary">Delete</button></td></tr>)}
+          {(selectedChecklist.sections || []).map(s => <tr key={s.id}><td>{s.display_order}</td><td>{s.section_title}</td><td>{s.section_possible_marks ?? '—'}</td><td>{s.section_weight ?? '—'}</td><td>{can('assessments', 'void_archive') && <button onClick={() => deleteSection(selectedChecklist.id, s.id)} className="secondary">Delete</button>}</td></tr>)}
         </tbody></table>
-        <form className="form-grid" onSubmit={addSection}>
+        {can('assessments', 'create') && <form className="form-grid" onSubmit={addSection}>
           <label>Section title<input value={secForm.sectionTitle} onChange={e => setSecForm({ ...secForm, sectionTitle: e.target.value })} required /></label>
           <label>Code<input value={secForm.sectionCode} onChange={e => setSecForm({ ...secForm, sectionCode: e.target.value })} /></label>
           <label>Order<input type="number" value={secForm.displayOrder} onChange={e => setSecForm({ ...secForm, displayOrder: e.target.value })} /></label>
@@ -433,17 +436,17 @@ export function AssessmentsPage() {
           <label>Weight<input type="number" step="any" value={secForm.sectionWeight} onChange={e => setSecForm({ ...secForm, sectionWeight: e.target.value })} /></label>
           <label>Description<textarea value={secForm.sectionDescription} onChange={e => setSecForm({ ...secForm, sectionDescription: e.target.value })} /></label>
           <button type="submit">Add section</button>
-        </form>
+        </form>}
         <h4>Questions</h4>
         <table className="data-table"><thead><tr><th>Section</th><th>Code</th><th>Text</th><th>Response type</th><th>Max marks</th><th>Active</th><th></th></tr></thead><tbody>
           {(selectedChecklist.questions || []).map(q => <tr key={q.id}>
             <td>{(selectedChecklist.sections || []).find(s => s.id === q.section_id)?.section_title || '—'}</td>
             <td>{q.question_code || '—'}</td><td>{q.question_text}</td>
             <td>{q.response_type}</td><td>{q.max_marks ?? '—'}</td><td>{q.is_active ? 'Yes' : 'No'}</td>
-            <td><button onClick={() => deleteQuestion(selectedChecklist.id, q.id)} className="secondary">Delete</button></td>
+            <td>{can('assessments', 'void_archive') && <button onClick={() => deleteQuestion(selectedChecklist.id, q.id)} className="secondary">Delete</button>}</td>
           </tr>)}
         </tbody></table>
-        <form className="form-grid" onSubmit={addQuestion}>
+        {can('assessments', 'create') && <form className="form-grid" onSubmit={addQuestion}>
           <label>Section<select value={qForm.sectionId} onChange={e => setQForm({ ...qForm, sectionId: e.target.value })}><option value="">(no section)</option>{(selectedChecklist.sections || []).map(s => <option key={s.id} value={s.id}>{s.section_title}</option>)}</select></label>
           <label>Code<input value={qForm.questionCode} onChange={e => setQForm({ ...qForm, questionCode: e.target.value })} /></label>
           <label>Response type<select value={qForm.responseType} onChange={e => setQForm({ ...qForm, responseType: e.target.value })}>{RESPONSE_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
@@ -455,7 +458,7 @@ export function AssessmentsPage() {
           <label>Expected evidence<textarea value={qForm.expectedEvidence} onChange={e => setQForm({ ...qForm, expectedEvidence: e.target.value })} /></label>
           <label>Scoring guidance<textarea value={qForm.scoringGuidance} onChange={e => setQForm({ ...qForm, scoringGuidance: e.target.value })} /></label>
           <button type="submit">Add question</button>
-        </form>
+        </form>}
       </DetailModal>}
     </>}
 
@@ -483,7 +486,7 @@ export function AssessmentsPage() {
             <td>{q.question_text}</td><td>{q.max_marks ?? '—'}</td>
           </tr>)}
         </tbody></table>
-        <button type="button" onClick={savePlan}>Save selection for this assessment</button>
+        {can('assessments', 'edit') && <button type="button" onClick={savePlan}>Save selection for this assessment</button>}
       </>}
     </>}
 
@@ -494,6 +497,7 @@ export function AssessmentsPage() {
       {respQuestions.length === 0 && respAssessmentId && <p>No questions selected for this assessment yet. Use the Plan Assessment tab first.</p>}
       {respQuestions.length > 0 && <table className="data-table"><thead><tr><th>Checklist</th><th>Section</th><th>Question</th><th>Response</th><th>Evidence summary</th><th>Marks awarded / max</th><th>Finding?</th><th>Save / history</th></tr></thead><tbody>
         {respQuestions.map(q => {
+  const { can } = usePermissions();
           const v = respValues[q.question_id] || { response: 'not_assessed', evidenceSummary: '', marksAwarded: '', scoreComment: '', findingRequired: false };
           const max = q.max_marks_at_selection;
           return <tr key={q.question_id}>
@@ -505,7 +509,7 @@ export function AssessmentsPage() {
             <td>{q.marking_enabled ? <input type="number" step="any" value={v.marksAwarded} onChange={e => setRespValues({ ...respValues, [q.question_id]: { ...v, marksAwarded: e.target.value } })} style={{ width: 80 }} placeholder={max !== null && max !== undefined ? `/ ${max}` : ''} /> : <em>n/a</em>}{q.marking_enabled && max !== null && max !== undefined ? ` / ${max}` : ''}</td>
             <td><label><input type="checkbox" checked={v.findingRequired} onChange={e => setRespValues({ ...respValues, [q.question_id]: { ...v, findingRequired: e.target.checked } })} /> required</label></td>
             <td>
-              <button type="button" onClick={() => saveResponse(q.question_id)}>Save</button>
+              {can('assessments', 'edit') && <button type="button" onClick={() => saveResponse(q.question_id)}>Save</button>}
               {v.existingResponseId && <button type="button" className="secondary" onClick={() => loadHistory(v.existingResponseId!)}>History</button>}
             </td>
           </tr>;
@@ -562,7 +566,7 @@ export function AssessmentsPage() {
     </>}
 
     {tab === 'Findings' && <table className="data-table"><thead><tr><th>Number</th><th>Programme</th><th>Date</th><th>Type</th><th>Title</th><th>Status</th><th></th></tr></thead><tbody>
-      {findings.map(f => <tr key={f.id}><td>{f.finding_number}</td><td>{f.program_number || f.assessment_program_id}</td><td>{f.finding_date}</td><td>{f.finding_type.replace(/_/g, ' ')}</td><td>{f.title}</td><td>{formatBadge(f.status)}</td><td>{!f.nc_id && <button onClick={() => createNc(f.id)}>NC</button>}{!f.capa_id && <button onClick={() => createCapa(f.id)}>CAPA</button>}</td></tr>)}
+      {findings.map(f => <tr key={f.id}><td>{f.finding_number}</td><td>{f.program_number || f.assessment_program_id}</td><td>{f.finding_date}</td><td>{f.finding_type.replace(/_/g, ' ')}</td><td>{f.title}</td><td>{formatBadge(f.status)}</td><td>{!f.nc_id && can('nc_capa', 'create') && <button onClick={() => createNc(f.id)}>NC</button>}{!f.capa_id && <button onClick={() => createCapa(f.id)}>CAPA</button>}</td></tr>)}
     </tbody></table>}
 
     {tab === 'Reports' && <p>Assessment outcome reports and trend dashboards will be added in a later phase.</p>}
@@ -571,6 +575,7 @@ export function AssessmentsPage() {
 
 // ============= Meetings =============
 export function MeetingsPage({ embedded = false }: { embedded?: boolean } = {}) {
+  const { can } = usePermissions();
   const { isEnabled } = useModules();
   const { staff } = useLookups();
   const summary = useGovernanceSummary();
@@ -607,7 +612,7 @@ export function MeetingsPage({ embedded = false }: { embedded?: boolean } = {}) 
 
     {tab === 'Meetings' && <>
       <table className="data-table"><thead><tr><th>Number</th><th>Type</th><th>Title</th><th>Date</th><th>Status</th><th></th></tr></thead><tbody>
-        {meetings.map(m => <tr key={m.id}><td>{m.meeting_number}</td><td>{m.meeting_type.replace(/_/g, ' ')}</td><td>{m.title}</td><td>{m.meeting_date}</td><td>{formatBadge(m.status)}</td><td><button onClick={() => open(m.id)}>Open</button>{m.status !== 'closed' && <button onClick={() => closeMtg(m.id)}>Close</button>}</td></tr>)}
+        {meetings.map(m => <tr key={m.id}><td>{m.meeting_number}</td><td>{m.meeting_type.replace(/_/g, ' ')}</td><td>{m.title}</td><td>{m.meeting_date}</td><td>{formatBadge(m.status)}</td><td><button onClick={() => open(m.id)}>Open</button>{m.status !== 'closed' && can('meetings', 'approve') && <button onClick={() => closeMtg(m.id)}>Close</button>}</td></tr>)}
       </tbody></table>
       {selected && <DetailModal open onClose={() => setSelected(null)} title={<>{selected.meeting_number} — {selected.title}</>}>
         <p>Date: {selected.meeting_date} | Chair: {staffName(staff, selected.chair_staff_id)} | Secretary: {staffName(staff, selected.secretary_staff_id)}</p>
@@ -617,27 +622,27 @@ export function MeetingsPage({ embedded = false }: { embedded?: boolean } = {}) 
         <table className="data-table"><thead><tr><th>Staff</th><th>Status</th><th>Signed</th><th>Remarks</th></tr></thead><tbody>
           {(selected.attendance || []).map((a: MeetingAttendance) => <tr key={a.id}><td>{a.staff_name || staffName(staff, a.staff_id)}</td><td>{formatBadge(a.attendance_status)}</td><td>{a.signed_at || '—'}</td><td>{a.remarks || '—'}</td></tr>)}
         </tbody></table>
-        <form className="form-grid" onSubmit={submitAtt}>
+        {can('meetings', 'edit') && <form className="form-grid" onSubmit={submitAtt}>
           <label>Staff<select value={attForm.staffId} onChange={e => setAttForm({ ...attForm, staffId: e.target.value })} required><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           <label>Status<select value={attForm.attendanceStatus} onChange={e => setAttForm({ ...attForm, attendanceStatus: e.target.value })}>{ATTENDANCE_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}</select></label>
           <label>Remarks<input value={attForm.remarks} onChange={e => setAttForm({ ...attForm, remarks: e.target.value })} /></label>
           <button type="submit">Record attendance</button>
-        </form>
+        </form>}
         <h4>Action items</h4>
         <table className="data-table"><thead><tr><th>Title</th><th>Status</th><th>Assigned</th><th>Due</th></tr></thead><tbody>
           {(selected.actions || []).map(a => <tr key={a.id}><td>{a.title}</td><td>{formatBadge(a.status)}</td><td>{staffName(staff, a.assigned_to_staff_id)}</td><td>{a.due_date || '—'}</td></tr>)}
         </tbody></table>
-        <form className="form-grid" onSubmit={submitAct}>
+        {can('actions', 'create') && <form className="form-grid" onSubmit={submitAct}>
           <label>Action title<input value={actForm.title} onChange={e => setActForm({ ...actForm, title: e.target.value })} required /></label>
           <label>Description<textarea value={actForm.description} onChange={e => setActForm({ ...actForm, description: e.target.value })} /></label>
           <label>Assigned to<select value={actForm.assignedToStaffId} onChange={e => setActForm({ ...actForm, assignedToStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           <label>Due date<input type="date" value={actForm.dueDate} onChange={e => setActForm({ ...actForm, dueDate: e.target.value })} /></label>
           <button type="submit">Create action</button>
-        </form>
+        </form>}
       </DetailModal>}
     </>}
 
-    {tab === 'New Meeting' && <form className="form-grid" onSubmit={submit}>
+    {tab === 'New Meeting' && can('continual_improvement.projects', 'create') && <form className="form-grid" onSubmit={submit}>
       <label>Type<select value={form.meetingType} onChange={e => setForm({ ...form, meetingType: e.target.value })}>{MEETING_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
       <label>Title<input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required /></label>
       <label>Date<input type="date" value={form.meetingDate} onChange={e => setForm({ ...form, meetingDate: e.target.value })} required /></label>
@@ -659,6 +664,7 @@ export function MeetingsPage({ embedded = false }: { embedded?: boolean } = {}) 
 
 // ============= Management Review =============
 export function ManagementReviewPage({ embedded = false }: { embedded?: boolean } = {}) {
+  const { can } = usePermissions();
   const { isEnabled } = useModules();
   const { staff } = useLookups();
   const summary = useGovernanceSummary();
@@ -693,37 +699,37 @@ export function ManagementReviewPage({ embedded = false }: { embedded?: boolean 
 
     {tab === 'Review Register' && <>
       <table className="data-table"><thead><tr><th>Number</th><th>Period</th><th>Date</th><th>Chair</th><th>Status</th><th></th></tr></thead><tbody>
-        {reviews.map(r => <tr key={r.id}><td>{r.review_number}</td><td>{r.review_period_start} → {r.review_period_end}</td><td>{r.review_date}</td><td>{staffName(staff, r.chair_staff_id)}</td><td>{formatBadge(r.status)}</td><td><button onClick={() => open(r.id)}>Open</button>{r.status !== 'approved' && r.status !== 'closed' && <button onClick={() => approve(r.id)}>Approve</button>}{r.status !== 'closed' && <button onClick={() => closeReview(r.id)}>Close</button>}</td></tr>)}
+        {reviews.map(r => <tr key={r.id}><td>{r.review_number}</td><td>{r.review_period_start} → {r.review_period_end}</td><td>{r.review_date}</td><td>{staffName(staff, r.chair_staff_id)}</td><td>{formatBadge(r.status)}</td><td><button onClick={() => open(r.id)}>Open</button>{r.status !== 'approved' && r.status !== 'closed' && can('management_review', 'approve') && <button onClick={() => approve(r.id)}>Approve</button>}{r.status !== 'closed' && <button onClick={() => closeReview(r.id)}>Close</button>}</td></tr>)}
       </tbody></table>
       {selected && <DetailModal open onClose={() => setSelected(null)} title={<>{selected.review_number}</>}>
         <p>Period: {selected.review_period_start} → {selected.review_period_end} | Date: {selected.review_date} | Status: {formatBadge(selected.status)}</p>
         {selected.summary && <p><strong>Summary:</strong> {selected.summary}</p>}
         {selected.conclusions && <p><strong>Conclusions:</strong> {selected.conclusions}</p>}
         {selected.decisions && <p><strong>Decisions:</strong> {selected.decisions}</p>}
-        <button onClick={() => generate(selected.id)}>Generate inputs from modules</button>
+        {can('management_review', 'create') && <button onClick={() => generate(selected.id)}>Generate inputs from modules</button>}
         <h4>Inputs</h4>
         <table className="data-table"><thead><tr><th>Area</th><th>Source</th><th>Summary</th><th>Issues</th><th>Actions required</th></tr></thead><tbody>
           {(selected.inputs || []).map((i: ManagementReviewInput) => <tr key={i.id}><td>{i.input_area}</td><td>{i.source_module || '—'}</td><td>{i.summary || '—'}</td><td>{i.issues || '—'}</td><td>{i.actions_required || '—'}</td></tr>)}
         </tbody></table>
-        <form className="form-grid" onSubmit={addInput}>
+        {can('management_review', 'create') && <form className="form-grid" onSubmit={addInput}>
           <label>Area<input value={inputForm.inputArea} onChange={e => setInputForm({ ...inputForm, inputArea: e.target.value })} required /></label>
           <label>Summary<textarea value={inputForm.summary} onChange={e => setInputForm({ ...inputForm, summary: e.target.value })} /></label>
           <label>Issues<textarea value={inputForm.issues} onChange={e => setInputForm({ ...inputForm, issues: e.target.value })} /></label>
           <label>Actions required<textarea value={inputForm.actionsRequired} onChange={e => setInputForm({ ...inputForm, actionsRequired: e.target.value })} /></label>
           <button type="submit">Add input</button>
-        </form>
+        </form>}
         <h4>Add action</h4>
-        <form className="form-grid" onSubmit={addAction}>
+        {can('actions', 'create') && <form className="form-grid" onSubmit={addAction}>
           <label>Title<input value={actForm.title} onChange={e => setActForm({ ...actForm, title: e.target.value })} required /></label>
           <label>Description<textarea value={actForm.description} onChange={e => setActForm({ ...actForm, description: e.target.value })} /></label>
           <label>Assigned to<select value={actForm.assignedToStaffId} onChange={e => setActForm({ ...actForm, assignedToStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           <label>Due<input type="date" value={actForm.dueDate} onChange={e => setActForm({ ...actForm, dueDate: e.target.value })} /></label>
           <button type="submit">Create action</button>
-        </form>
+        </form>}
       </DetailModal>}
     </>}
 
-    {tab === 'New Review' && <form className="form-grid" onSubmit={submit}>
+    {tab === 'New Review' && can('continual_improvement.projects', 'create') && <form className="form-grid" onSubmit={submit}>
       <label>Period start<input type="date" value={form.reviewPeriodStart} onChange={e => setForm({ ...form, reviewPeriodStart: e.target.value })} required /></label>
       <label>Period end<input type="date" value={form.reviewPeriodEnd} onChange={e => setForm({ ...form, reviewPeriodEnd: e.target.value })} required /></label>
       <label>Review date<input type="date" value={form.reviewDate} onChange={e => setForm({ ...form, reviewDate: e.target.value })} required /></label>
@@ -743,6 +749,7 @@ export function ManagementReviewPage({ embedded = false }: { embedded?: boolean 
 
 // ============= Quality Indicators =============
 export function QualityIndicatorsPage({ embedded = false }: { embedded?: boolean } = {}) {
+  const { can } = usePermissions();
   const { isEnabled } = useModules();
   const { staff, sections } = useLookups();
   const summary = useGovernanceSummary();
@@ -781,7 +788,7 @@ export function QualityIndicatorsPage({ embedded = false }: { embedded?: boolean
       {indicators.map(i => <tr key={i.id}><td>{i.indicator_code}</td><td>{i.indicator_name}</td><td>{i.frequency}</td><td>{i.target_value ?? '—'}</td><td>{i.warning_threshold ?? '—'}</td><td>{i.critical_threshold ?? '—'}</td><td>{i.is_active ? 'Yes' : 'No'}</td></tr>)}
     </tbody></table>}
 
-    {tab === 'New Indicator' && <form className="form-grid" onSubmit={submit}>
+    {tab === 'New Indicator' && can('continual_improvement.projects', 'create') && <form className="form-grid" onSubmit={submit}>
       <label>Code (auto if blank)<input value={form.indicatorCode} onChange={e => setForm({ ...form, indicatorCode: e.target.value })} /></label>
       <label>Name<input value={form.indicatorName} onChange={e => setForm({ ...form, indicatorName: e.target.value })} required /></label>
       <label>Section<select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
@@ -799,7 +806,7 @@ export function QualityIndicatorsPage({ embedded = false }: { embedded?: boolean
 
     {tab === 'Results Entry' && <>
       <label>Indicator<select value={selectedId} onChange={e => { setSelectedId(e.target.value); void loadResults(e.target.value); }}><option value="">—</option>{indicators.filter(i => i.is_active).map(i => <option key={i.id} value={i.id}>{i.indicator_code} — {i.indicator_name}</option>)}</select></label>
-      {selectedId && <form className="form-grid" onSubmit={submitResult}>
+      {selectedId && can('quality_indicators', 'create') && <form className="form-grid" onSubmit={submitResult}>
         <label>Period start<input type="date" value={resForm.periodStart} onChange={e => setResForm({ ...resForm, periodStart: e.target.value })} required /></label>
         <label>Period end<input type="date" value={resForm.periodEnd} onChange={e => setResForm({ ...resForm, periodEnd: e.target.value })} required /></label>
         <label>Numerator<input type="number" step="any" value={resForm.numeratorValue} onChange={e => setResForm({ ...resForm, numeratorValue: e.target.value })} required /></label>
@@ -808,7 +815,7 @@ export function QualityIndicatorsPage({ embedded = false }: { embedded?: boolean
         <button type="submit">Record result</button>
       </form>}
       {selectedId && <table className="data-table"><thead><tr><th>Period</th><th>Numerator</th><th>Denominator</th><th>Value %</th><th>Status</th><th>Reviewed</th><th></th></tr></thead><tbody>
-        {results.map(r => <tr key={r.id}><td>{r.period_start} → {r.period_end}</td><td>{r.numerator_value}</td><td>{r.denominator_value}</td><td>{r.calculated_value !== null && r.calculated_value !== undefined ? r.calculated_value.toFixed(2) : '—'}</td><td>{formatBadge(r.status)}</td><td>{r.reviewed_at || 'Pending'}</td><td>{!r.reviewed_at && <button onClick={() => review(r.id)}>Review</button>}{r.status === 'critical' && !r.nc_id && <button onClick={() => createNc(r.id)}>NC</button>}{r.status === 'critical' && !r.capa_id && <button onClick={() => createCapa(r.id)}>CAPA</button>}</td></tr>)}
+        {results.map(r => <tr key={r.id}><td>{r.period_start} → {r.period_end}</td><td>{r.numerator_value}</td><td>{r.denominator_value}</td><td>{r.calculated_value !== null && r.calculated_value !== undefined ? r.calculated_value.toFixed(2) : '—'}</td><td>{formatBadge(r.status)}</td><td>{r.reviewed_at || 'Pending'}</td><td>{!r.reviewed_at && <button onClick={() => review(r.id)}>Review</button>}{r.status === 'critical' && !r.nc_id && can('nc_capa', 'create') && <button onClick={() => createNc(r.id)}>NC</button>}{r.status === 'critical' && !r.capa_id && <button onClick={() => createCapa(r.id)}>CAPA</button>}</td></tr>)}
       </tbody></table>}
     </>}
 
@@ -866,6 +873,7 @@ export function QualityIndicatorsPage({ embedded = false }: { embedded?: boolean
 
 // ============= Continual Improvement =============
 export function ContinualImprovementPage() {
+  const { can } = usePermissions();
   const { isEnabled } = useModules();
   const { staff } = useLookups();
   const summary = useGovernanceSummary();
@@ -901,7 +909,7 @@ export function ContinualImprovementPage() {
 
     {tab === 'Improvement Projects' && <>
       <table className="data-table"><thead><tr><th>Number</th><th>Title</th><th>Area</th><th>Status</th><th>Responsible</th><th></th></tr></thead><tbody>
-        {projects.map(p => <tr key={p.id}><td>{p.project_number}</td><td>{p.title}</td><td>{p.improvement_area.replace(/_/g, ' ')}</td><td>{formatBadge(p.status)}</td><td>{staffName(staff, p.responsible_staff_id)}</td><td><button onClick={() => open(p.id)}>Open</button>{p.status !== 'closed' && <button onClick={() => closeProject(p.id)}>Close</button>}</td></tr>)}
+        {projects.map(p => <tr key={p.id}><td>{p.project_number}</td><td>{p.title}</td><td>{p.improvement_area.replace(/_/g, ' ')}</td><td>{formatBadge(p.status)}</td><td>{staffName(staff, p.responsible_staff_id)}</td><td><button onClick={() => open(p.id)}>Open</button>{p.status !== 'closed' && can('continual_improvement.projects', 'approve') && <button onClick={() => closeProject(p.id)}>Close</button>}</td></tr>)}
       </tbody></table>
       {selected && <DetailModal open onClose={() => setSelected(null)} title={<>{selected.project_number} — {selected.title}</>}>
         <p>Area: {selected.improvement_area.replace(/_/g, ' ')} | Status: {formatBadge(selected.status)} | Responsible: {staffName(staff, selected.responsible_staff_id)}</p>
@@ -913,24 +921,24 @@ export function ContinualImprovementPage() {
         <table className="data-table"><thead><tr><th>Date</th><th>Progress</th><th>Notes</th></tr></thead><tbody>
           {(selected.updates || []).map((u: ImprovementUpdate) => <tr key={u.id}><td>{u.update_date}</td><td>{u.progress_status || '—'}</td><td>{u.update_text || '—'}</td></tr>)}
         </tbody></table>
-        <form className="form-grid" onSubmit={addUpdate}>
+        {can('continual_improvement.projects', 'edit') && <form className="form-grid" onSubmit={addUpdate}>
           <label>Date<input type="date" value={updForm.updateDate} onChange={e => setUpdForm({ ...updForm, updateDate: e.target.value })} required /></label>
           <label>Progress status<input value={updForm.progressStatus} onChange={e => setUpdForm({ ...updForm, progressStatus: e.target.value })} /></label>
           <label>Update<textarea value={updForm.updateText} onChange={e => setUpdForm({ ...updForm, updateText: e.target.value })} /></label>
           <button type="submit">Add update</button>
-        </form>
+        </form>}
         <h4>Add action</h4>
-        <form className="form-grid" onSubmit={addAction}>
+        {can('actions', 'create') && <form className="form-grid" onSubmit={addAction}>
           <label>Title<input value={actForm.title} onChange={e => setActForm({ ...actForm, title: e.target.value })} required /></label>
           <label>Description<textarea value={actForm.description} onChange={e => setActForm({ ...actForm, description: e.target.value })} /></label>
           <label>Assigned<select value={actForm.assignedToStaffId} onChange={e => setActForm({ ...actForm, assignedToStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           <label>Due<input type="date" value={actForm.dueDate} onChange={e => setActForm({ ...actForm, dueDate: e.target.value })} /></label>
           <button type="submit">Create action</button>
-        </form>
+        </form>}
       </DetailModal>}
     </>}
 
-    {tab === 'New Project' && <form className="form-grid" onSubmit={submit}>
+    {tab === 'New Project' && can('continual_improvement.projects', 'create') && <form className="form-grid" onSubmit={submit}>
       <label>Title<input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required /></label>
       <label>Area<select value={form.improvementArea} onChange={e => setForm({ ...form, improvementArea: e.target.value })}>{IMPROVEMENT_AREAS.map(a => <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>)}</select></label>
       <label>Aim statement<textarea value={form.aimStatement} onChange={e => setForm({ ...form, aimStatement: e.target.value })} required /></label>

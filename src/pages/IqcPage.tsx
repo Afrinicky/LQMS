@@ -437,6 +437,7 @@ function ControlActions({ material, isAdmin, onEdit, onChanged, onError, onNotic
   material: Material; isAdmin: boolean; onEdit: () => void;
   onChanged: () => void; onError: (m: string) => void; onNotice: (m: string) => void;
 }) {
+  const { can } = usePermissions();
   const [impact, setImpact] = useState<Record<string, any> | null>(null);
   const [confirming, setConfirming] = useState<'retire' | 'delete' | null>(null);
   const [reason, setReason] = useState('');
@@ -517,7 +518,7 @@ function ControlActions({ material, isAdmin, onEdit, onChanged, onError, onNotic
           </button>
         : <>
             <span className="chip warn">Retired</span>
-            <button type="button" className="secondary" disabled={busy} onClick={reactivate}>Put back in use</button>
+            {can('iqc', 'edit') && <button type="button" className="secondary" disabled={busy} onClick={reactivate}>Put back in use</button>}
           </>}
     </div>
   );
@@ -538,6 +539,7 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
   sections: Section[]; staff: Staff[]; equipment: EquipmentItem[];
   onSaved: (message: string) => void | Promise<void>; onCancel: () => void; onError: (m: string) => void;
 }) {
+  const { can } = usePermissions();
   const qualitative = material.control_type === 'qualitative';
   const isCs = material.control_type === 'culture_sensitivity';
   const [csScope, setCsScope] = useState(material.cs_scope ?? 'both');
@@ -610,7 +612,7 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
   }
 
   return (
-    <form className="iqc-detail iqc-edit" onSubmit={submit}>
+    can('iqc', 'create') && <form className="iqc-detail iqc-edit" onSubmit={submit}>
       <div className="section-head">
         <h4><Pencil size={14} /> Edit {material.material_name} · lot {material.lot_number}</h4>
         <span className="chip">{IQC_CONTROL_TYPE_LABELS[material.control_type]}</span>
@@ -773,6 +775,7 @@ function DefineControl({ sections, staff, equipment, onSaved, onError }: {
   sections: Section[]; staff: Staff[]; equipment: EquipmentItem[];
   onSaved: () => void | Promise<void>; onError: (m: string) => void;
 }) {
+  const { can } = usePermissions();
   const [source, setSource] = useState<IqcSource>('commercial');
   const [controlType, setControlType] = useState<IqcControlType>('quantitative');
   const [form, setForm] = useState({
@@ -837,7 +840,7 @@ function DefineControl({ sections, staff, equipment, onSaved, onError }: {
   const outcomes = QUALITATIVE_SCALES.find(s => s.key === scale)?.outcomes ?? [];
 
   return (
-    <form className="card iqc-define" onSubmit={submit}>
+    can('iqc', 'create') && <form className="card iqc-define" onSubmit={submit}>
       <div className="section-head"><h3>Define a control</h3></div>
 
       {/* 1 — where it came from */}
@@ -1039,6 +1042,7 @@ function RunControl({ materials, equipment, staff, onRecorded, onError }: {
   materials: Material[]; equipment: EquipmentItem[]; staff: Staff[];
   onRecorded: (msg: string) => void | Promise<void>; onError: (m: string) => void;
 }) {
+  const { can } = usePermissions();
   const [materialId, setMaterialId] = useState('');
   const [analytes, setAnalytes] = useState<Analyte[]>([]);
   const [values, setValues] = useState<Record<number, string>>({});
@@ -1121,7 +1125,7 @@ function RunControl({ materials, equipment, staff, onRecorded, onError }: {
       />
     </div>
 
-    <form className="card iqc-run" onSubmit={submit}>
+    {can('iqc', 'create') && <form className="card iqc-run" onSubmit={submit}>
       <div className="section-head"><h3><ClipboardCheck size={16} /> Record a control run</h3></div>
 
       <div className="form-grid">
@@ -1241,7 +1245,7 @@ function RunControl({ materials, equipment, staff, onRecorded, onError }: {
           </ul>
         </div>
       )}
-    </form>
+    </form>}
     </>
   );
 }
@@ -1253,6 +1257,7 @@ function RunReview({ runs, onChanged, canApprove, isAdmin, equipment, staff, onE
   equipment: EquipmentItem[]; staff: Staff[];
   onError: (m: string) => void; onNotice: (m: string) => void;
 }) {
+  const { can } = usePermissions();
   // Correcting or removing a run is an administrator override, so the controls
   // for it are not drawn for anyone else — see server/middleware/administrator.
   const [correcting, setCorrecting] = useState<number | null>(null);
@@ -1322,14 +1327,14 @@ function RunReview({ runs, onChanged, canApprove, isAdmin, equipment, staff, onE
                   <div className="iqc-run-act">
                     <input placeholder={r.status === 'out_of_control' ? 'What was done about this? (required)' : 'Note (optional)'}
                       value={action[r.id] ?? ''} onChange={e => setAction(a => ({ ...a, [r.id]: e.target.value }))} />
-                    <button type="button" disabled={busy === r.id} onClick={() => review(r)}>Sign off</button>
+                    {can('iqc', 'approve') && <button type="button" disabled={busy === r.id} onClick={() => review(r)}>Sign off</button>}
                     {r.patient_results_released === 0 && (
-                      <button type="button" className="secondary" disabled={busy === r.id} onClick={() => release(r, true)}>
+                      can('iqc', 'approve') && <button type="button" className="secondary" disabled={busy === r.id} onClick={() => release(r, true)}>
                         Release patient results
                       </button>
                     )}
                     {r.patient_results_released === 1 && r.status === 'out_of_control' && (
-                      <button type="button" className="danger" disabled={busy === r.id} onClick={() => release(r, false)}>
+                      can('iqc', 'approve') && <button type="button" className="danger" disabled={busy === r.id} onClick={() => release(r, false)}>
                         Withhold results
                       </button>
                     )}

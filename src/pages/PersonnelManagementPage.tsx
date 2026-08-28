@@ -375,7 +375,7 @@ export function PersonnelManagementPage() {
         <div className="section-head"><h3 style={{ margin: 0 }}>{editingStaffId ? 'Edit staff record' : 'Add staff'}</h3>
           {editingStaffId && <button type="button" className="secondary" onClick={() => { setEditingStaffId(null); setStaffForm(emptyStaffForm); }}>Cancel edit</button>}</div>
         <p className="muted" style={{ marginTop: 0 }}>Adds a member of staff to the Master Personnel Register: identity, professional registration, qualifications, appointment and emergency contact.</p>
-        <form className="form-grid" onSubmit={submitStaff}>
+        {can('personnel.self', 'view') && can('personnel.register', 'create') && <form className="form-grid" onSubmit={submitStaff}>
           <label>Staff ID<input value={staffForm.employeeNo} onChange={e => setStaffForm({ ...staffForm, employeeNo: e.target.value })} placeholder="e.g. SNO-001" /></label>
           <label>Surname<input value={staffForm.surname} onChange={e => setStaffForm({ ...staffForm, surname: e.target.value })} /></label>
           <label>Middle name(s)<input value={staffForm.middleName} onChange={e => setStaffForm({ ...staffForm, middleName: e.target.value })} /></label>
@@ -404,12 +404,12 @@ export function PersonnelManagementPage() {
           <label>Assign position<select value={staffForm.positionId} onChange={e => setStaffForm({ ...staffForm, positionId: e.target.value })}><option value="">— keep current —</option>{positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>
           <label>Staff file location<input value={staffForm.staffFileLocation} onChange={e => setStaffForm({ ...staffForm, staffFileLocation: e.target.value })} placeholder="e.g. /SECH-LAB-PERSONNEL-FILES/SNO-001/" /></label>
           <button type="submit">{editingStaffId ? 'Save changes' : 'Create staff record'}</button>
-        </form>
+        </form>}
       </div>
     </>}
 
     {tab === 'Staff Documents' && <>
-      <form className="form-grid" onSubmit={submitStaffDoc}>
+      {can('personnel.register', 'create') && <form className="form-grid" onSubmit={submitStaffDoc}>
         <label>Staff<select value={docForm.staffId} onChange={e => setDocForm({ ...docForm, staffId: e.target.value })} required><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Type<select value={docForm.documentType} onChange={e => setDocForm({ ...docForm, documentType: e.target.value })} required>{STAFF_DOC_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
         <label>Title<input value={docForm.title} onChange={e => setDocForm({ ...docForm, title: e.target.value })} required /></label>
@@ -418,7 +418,7 @@ export function PersonnelManagementPage() {
         <label>File<input type="file" onChange={e => setDocFile(e.target.files?.[0] ?? null)} /></label>
         <label>Remarks<input value={docForm.remarks} onChange={e => setDocForm({ ...docForm, remarks: e.target.value })} /></label>
         <button type="submit">Upload staff document</button>
-      </form>
+      </form>}
       <table className="data-table"><thead><tr><th>Staff</th><th>Type</th><th>Title</th><th>Issue</th><th>Expiry</th><th>Verification</th><th>File</th><th></th></tr></thead><tbody>
         {staffDocs.map(d => {
           const today = new Date().toISOString().slice(0, 10);
@@ -429,7 +429,7 @@ export function PersonnelManagementPage() {
             <td>{d.issue_date || '—'}</td>
             <td>{d.expiry_date || '—'} {expired && <span className="badge danger">expired</span>}{expiringSoon && <span className="badge warning">expiring</span>}</td>
             <td>{formatBadge(d.verification_status)}</td><td>{d.file_name || '—'}</td>
-            <td>{d.verification_status === 'pending' && <button onClick={() => verifyStaffDoc(d.id)}>Verify</button>}</td>
+            <td>{d.verification_status === 'pending' && can('personnel.register', 'approve') && <button onClick={() => verifyStaffDoc(d.id)}>Verify</button>}</td>
           </tr>;
         })}
       </tbody></table>
@@ -437,7 +437,7 @@ export function PersonnelManagementPage() {
 
     {tab === 'Declarations' && <>
       <div className="card"><p className="muted" style={{ marginTop: 0 }}>Ethical declarations record each member of staff's commitment to impartiality, confidentiality, disclosure of conflicts of interest, and the code of conduct.</p>
-      <form className="form-grid" onSubmit={submitDeclaration}>
+      {can('personnel.declarations', 'create') && <form className="form-grid" onSubmit={submitDeclaration}>
         <label>Type<select value={declForm.declarationType} onChange={e => setDeclForm({ ...declForm, declarationType: e.target.value })} required>{DECLARATION_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Title<input value={declForm.title} onChange={e => setDeclForm({ ...declForm, title: e.target.value })} required placeholder="e.g. Annual ethics & confidentiality declaration" /></label>
         <label>Assign to staff<select value={declForm.staffId} onChange={e => setDeclForm({ ...declForm, staffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
@@ -450,7 +450,7 @@ export function PersonnelManagementPage() {
         <label className="check-inline"><input type="checkbox" checked={declForm.confidentialityConfirmed} onChange={e => setDeclForm({ ...declForm, confidentialityConfirmed: e.target.checked })} /> Confidentiality confirmed</label>
         <label className="check-inline"><input type="checkbox" checked={declForm.codeOfConductAck} onChange={e => setDeclForm({ ...declForm, codeOfConductAck: e.target.checked })} /> Code of conduct acknowledged</label>
         <button type="submit">Create declaration</button>
-      </form></div>
+      </form>}</div>
       <table className="data-table" style={{ marginTop: 16 }}><thead><tr><th>Number</th><th>Type</th><th>Title</th><th>Staff</th><th>Impartiality</th><th>Confidentiality</th><th>COI</th><th>Next review</th><th>Status</th><th></th></tr></thead><tbody>
         {declarations.map(d => <tr key={d.id}>
           <td>{d.declaration_number}</td><td>{d.declaration_type.replace(/_/g, ' ')}</td><td>{d.title}</td>
@@ -460,7 +460,7 @@ export function PersonnelManagementPage() {
           <td>{d.conflict_of_interest || '—'}</td>
           <td>{d.next_review_date || '—'}</td>
           <td>{formatBadge(d.status)}</td>
-          <td>{d.status === 'pending' && <button onClick={() => signDeclaration(d.id)}>Sign</button>}</td>
+          <td>{d.status === 'pending' && can('personnel.declarations', 'edit') && <button onClick={() => signDeclaration(d.id)}>Sign</button>}</td>
         </tr>)}
       </tbody></table>
     </>}
@@ -468,7 +468,7 @@ export function PersonnelManagementPage() {
     {tab === 'Orientation & Induction' && <OrientationInduction staff={staff} sections={sections} departments={departments} />}
 
     {tab === 'Training Events' && <>
-      <form className="form-grid" onSubmit={submitTraining}>
+      {can('personnel.training', 'create') && <form className="form-grid" onSubmit={submitTraining}>
         <label>Title<input value={trainingForm.title} onChange={e => setTrainingForm({ ...trainingForm, title: e.target.value })} required /></label>
         <label>Description<textarea value={trainingForm.description} onChange={e => setTrainingForm({ ...trainingForm, description: e.target.value })} /></label>
         <label>Type<input value={trainingForm.trainingType} onChange={e => setTrainingForm({ ...trainingForm, trainingType: e.target.value })} placeholder="e.g. internal, external, refresher" /></label>
@@ -479,7 +479,7 @@ export function PersonnelManagementPage() {
         <label>End time<input type="time" value={trainingForm.endTime} onChange={e => setTrainingForm({ ...trainingForm, endTime: e.target.value })} /></label>
         <label>Location<input value={trainingForm.location} onChange={e => setTrainingForm({ ...trainingForm, location: e.target.value })} /></label>
         <button type="submit">Create training event</button>
-      </form>
+      </form>}
       <table className="data-table"><thead><tr><th>Number</th><th>Title</th><th>Type</th><th>Date</th><th>Status</th><th></th></tr></thead><tbody>
         {trainings.map(t => <tr key={t.id}>
           <td>{t.training_number}</td><td>{t.title}</td><td>{t.training_type || '—'}</td>
@@ -492,12 +492,12 @@ export function PersonnelManagementPage() {
         <table className="data-table"><thead><tr><th>Staff</th><th>Status</th><th>Signed</th><th>Remarks</th></tr></thead><tbody>
           {(selectedTraining.attendance || []).map(a => <tr key={a.id}><td>{a.staff_name || staffName(staff, a.staff_id)}</td><td>{formatBadge(a.attendance_status)}</td><td>{a.signed_at || '—'}</td><td>{a.remarks || '—'}</td></tr>)}
         </tbody></table>
-        <form className="form-grid" onSubmit={submitAttendance}>
+        {can('personnel.training', 'create') && <form className="form-grid" onSubmit={submitAttendance}>
           <label>Staff<select value={attendanceForm.staffId} onChange={e => setAttendanceForm({ ...attendanceForm, staffId: e.target.value })} required><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           <label>Status<select value={attendanceForm.attendanceStatus} onChange={e => setAttendanceForm({ ...attendanceForm, attendanceStatus: e.target.value })}>{ATTENDANCE_STATUSES.map(a => <option key={a} value={a}>{a}</option>)}</select></label>
           <label>Remarks<input value={attendanceForm.remarks} onChange={e => setAttendanceForm({ ...attendanceForm, remarks: e.target.value })} /></label>
           <button type="submit">Record attendance</button>
-        </form>
+        </form>}
       </DetailModal>}
     </>}
 
