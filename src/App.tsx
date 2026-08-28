@@ -47,6 +47,7 @@ const MeasurementUncertaintyPage = lazy(() => import('./pages/Phase4Pages').then
 const BloodBankHandoverPage = lazy(() => import('./pages/BloodBankHandoverPage').then(m => ({ default: m.BloodBankHandoverPage })));
 const MonthlyReportsPage = lazy(() => import('./pages/MonthlyReportsPage').then(m => ({ default: m.MonthlyReportsPage })));
 const SystemAuditPage = lazy(() => import('./pages/SystemAuditPage').then(m => ({ default: m.SystemAuditPage })));
+const StaffPortalPage = lazy(() => import('./pages/StaffPortalPage').then(m => ({ default: m.StaffPortalPage })));
 
 const ModuleFallback = () => <div className="card">Loading module…</div>;
 
@@ -187,7 +188,18 @@ function AppRoutes() {
     <Route element={<ModuleProvider><PermissionProvider><DutyReminderProvider><AppLayout/></DutyReminderProvider></PermissionProvider></ModuleProvider>}>
       <Route index element={<Navigate to="/home"/>}/>
       <Route path="/home" element={<Home/>}/>
-      <Route path="/dashboard" element={<RequirePermission module="dashboard" redirect="/home"><Dashboard/></RequirePermission>}/>
+      {/* The Main Dashboard is the laboratory's management view and is granted
+          to the roles accountable for it. Anyone else who lands on the URL is
+          sent to their own portal rather than shown a refusal — their version
+          of "my dashboard" exists, it is just a different page. */}
+      <Route path="/dashboard" element={<RequirePermission module="dashboard" redirect="/my-portal"><Dashboard/></RequirePermission>}/>
+      {/* My Portal — one person's workspace. Gated like every other module so a
+          laboratory that switches it off switches it off, but granted to the
+          whole laboratory by default: everything inside is self-scoped. */}
+      <Route path="/my-portal" element={<RequirePermission module="staff_portal" redirect="/home"><Suspense fallback={<ModuleFallback/>}><StaffPortalPage/></Suspense></RequirePermission>}/>
+      {/* Where the portal used to live, and the names people will guess. */}
+      <Route path="/my-profile" element={<Navigate to="/my-portal" replace/>}/>
+      <Route path="/portal" element={<Navigate to="/my-portal" replace/>}/>
       <Route path="/documents" element={<RequirePermission module="documents"><Suspense fallback={<ModuleFallback/>}><DocumentControlPage/></Suspense></RequirePermission>}/>
       <Route path="/dennis" element={<RequirePermission module="dennis"><Suspense fallback={<ModuleFallback/>}><DennisPage/></Suspense></RequirePermission>}/>
       <Route path="/organisation" element={<RequirePermission module="organisation"><Suspense fallback={<ModuleFallback/>}><OrganisationPage/></Suspense></RequirePermission>}/>

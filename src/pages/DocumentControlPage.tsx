@@ -122,6 +122,9 @@ const emptyAttestForm = { targetType: 'staff', staffIds: [] as number[], positio
 const emptyPrintForm = { printPurpose: '', controlledCopy: false, copyNumber: '', watermark: '' };
 
 const SECTIONS = ['Dashboard', 'Documents', 'Records', 'Central Archive', 'Master List', 'Laboratory Profile'] as const;
+// Tabs inside the Documents section. Named at module scope so the ?subtab=
+// deep link can resolve against the same list the bar renders.
+const DOC_TABS = ['Document Register', 'New Document', 'Bulk Import', 'Review Queue', 'Approval Queue', 'Reviews Due', 'Attestations', 'My Inbox', 'Obsolete Register'];
 
 // Roles with governance authority over the register (change ownership, bulk
 // actions). The server independently enforces the documents "approve"
@@ -224,6 +227,17 @@ export function DocumentControlPage() {
   useEffect(() => {
     const focus = searchParams.get('focus');
     if (focus && focus.startsWith('documents:')) { setSection('Documents'); setTab('Document Register'); }
+  }, [searchParams]);
+  // Deep link from My Portal: ?subtab=My Inbox lands a member of staff on the
+  // documents awaiting their attestation. Without this the link opened the
+  // register and left them to find the tab, which is the gap the portal exists
+  // to close. Matching ignores case and punctuation so a renamed tab survives.
+  useEffect(() => {
+    const wanted = searchParams.get('subtab');
+    if (!wanted) return;
+    const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const match = DOC_TABS.find(t => norm(t) === norm(wanted));
+    if (match) { setSection('Documents'); setTab(match); }
   }, [searchParams]);
   // Deep link from Settings → Core Documents: ?open=<id> opens the document
   // itself, because clicking the laboratory's Quality Manual should show the
@@ -570,7 +584,7 @@ export function DocumentControlPage() {
     }
   }
 
-  const docTabs = ['Document Register', 'New Document', 'Bulk Import', 'Review Queue', 'Approval Queue', 'Reviews Due', 'Attestations', 'My Inbox', 'Obsolete Register'];
+  const docTabs = DOC_TABS;
   const obsoleteDocs = documents.filter(d => d.status === 'obsolete');
   const reviewQueue = documents.filter(d => d.status === 'under_review');
   const approvalQueue = documents.filter(d => d.status === 'reviewed');

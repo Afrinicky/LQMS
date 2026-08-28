@@ -29,6 +29,16 @@ export const NAV_SECTIONS: NavSection[] = [
     group: 'overview',
     modules: ['dashboard'],
   },
+  // Directly below the Main Dashboard, and above everything else, because it
+  // is where most of the laboratory spends its day. The Main Dashboard answers
+  // "how is the laboratory doing?"; My Portal answers "what do I have to do?".
+  {
+    key: 'staff_portal',
+    title: 'My Portal',
+    desc: 'Your profile, tasks, inbox, schedule and records — everything that is yours',
+    group: 'overview',
+    modules: ['staff_portal'],
+  },
 
   /* ---- The twelve quality essentials ---- */
   {
