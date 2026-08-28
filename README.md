@@ -602,6 +602,21 @@ rather than to the sentence. The legacy class names (`.error`, `.notice-ok`,
 `.notice-warn`, `.success-msg`) carry the same colours for markup that has not
 been migrated.
 
+One thing about that is worth knowing before changing it. A page reports an
+outcome by putting a sentence in its own state, and most handlers are written
+`catch (e) { setError(errorText(e)) }` without clearing it first. Do the same
+thing twice and it fails the same way twice, so that state is set to a string it
+already holds; React compares the two, finds them equal, and does nothing —
+no re-render, no effect, no message. Trying to sign someone else's attestation
+was answered the first time and met with silence every time after.
+
+Nothing inside React can tell those two cases apart, because as far as React is
+concerned nothing happened. The request layer can, so `api()` counts writes that
+come back and whether they came back a refusal (`onWriteOutcome` in
+`services/api.ts`), and `Notice` watches that count. Reads are deliberately not
+counted: a register reloading in the background must never re-raise a sentence
+that is already on screen.
+
 **Text boxes hold their own text.** Every register here is one enormous page
 component holding a dozen tabs, a form and a table. Bound the obvious way —
 `value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}`

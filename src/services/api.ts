@@ -122,16 +122,61 @@ export async function apiRead<T>(path: string, fallback: T): Promise<T> {
   try { return await api<T>(path); } catch (e) { if (isPermissionDenied(e)) return fallback; throw e; }
 }
 
+/**
+ * How many writes have failed, and how many have succeeded, this session.
+ *
+ * A page reports an outcome by putting a sentence in its own state —
+ * `catch (e) { setError(errorText(e)) }`. Do the same thing twice and it fails
+ * the same way twice, so that state is set to a string it already holds, React
+ * compares the two, finds them equal, and does nothing at all: no re-render, no
+ * effect, no message. The person sees an answer the first time they are told
+ * off and silence every time after, which reads as the application ignoring
+ * them.
+ *
+ * Nothing inside React can tell those two cases apart, because to React nothing
+ * happened. The request layer can: it knows a write just came back, and whether
+ * it came back a refusal. These counters are what the message component watches
+ * so that the second identical refusal is still an event.
+ *
+ * Reads are deliberately not counted. A register reloading in the background,
+ * or a poll, must never re-raise a sentence that is already on screen.
+ */
+let writeFailures = 0;
+let writeSuccesses = 0;
+const outcomeWatchers = new Set<() => void>();
+
+export function writeOutcomeCounts() { return { failures: writeFailures, successes: writeSuccesses }; }
+
+export function onWriteOutcome(fn: () => void): () => void {
+  outcomeWatchers.add(fn);
+  return () => { outcomeWatchers.delete(fn); };
+}
+
+function recordOutcome(method: string, ok: boolean) {
+  if (method === 'GET' || method === 'HEAD') return;
+  if (ok) writeSuccesses++; else writeFailures++;
+  for (const fn of outcomeWatchers) fn();
+}
+
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
   if (!(options.body instanceof FormData)) headers.set('Content-Type', 'application/json');
   const token = getToken();
   if (token) headers.set('Authorization', `Bearer ${token}`);
-  const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  const method = String(options.method ?? 'GET').toUpperCase();
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  } catch (e) {
+    recordOutcome(method, false);
+    throw e;
+  }
   if (!response.ok) {
     const body = await response.json().catch(() => ({ error: response.statusText })) as Record<string, unknown>;
-    throw new ApiError(String(body.error ?? response.statusText), response.status, body, String(options.method ?? 'GET').toUpperCase());
+    recordOutcome(method, false);
+    throw new ApiError(String(body.error ?? response.statusText), response.status, body, method);
   }
+  recordOutcome(method, true);
   return response.json() as Promise<T>;
 }
 
