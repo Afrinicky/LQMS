@@ -1440,6 +1440,7 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
     fileId: content?.file_id ?? 0,
     fileName: content?.file_name || 'document',
     fileMime: content?.file_mime,
+    canSaveBack: canAuthor,
     onSavedVersion: id => { setActiveVersionId(id); onSaved(); },
     onError,
   });

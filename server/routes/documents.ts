@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import * as XLSX from 'xlsx';
 import { getDb, uploadRoot, evidenceRoot } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
+import { resolvePermission } from '../services/permissionResolver.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent, getCurrentStaffId } from './routeHelpers.js';
@@ -947,7 +948,15 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   // save that arrives through it becomes a new version of this document, so a
   // person editing over the LAN or the internet leaves exactly the record a
   // person editing at the host machine would.
-  router.post('/:id/versions/:versionId/office-session', requirePermission('documents.authoring', 'edit'), (req, res) => {
+  // Opening a controlled document in Word.
+  //
+  // Guarded on READING the library, not on authoring. A .docx has no in-app
+  // preview — Word is the only way to read one — so gating the handoff on
+  // `documents.authoring:edit` meant a Biomedical Scientist could not open the
+  // SOP they are required to read and attest to; they were offered a Download
+  // button and nothing else. Whether the handoff may write a version BACK is a
+  // separate question, answered below and enforced on the save.
+  router.post('/:id/versions/:versionId/office-session', requirePermission('documents.library', 'view'), (req, res) => {
     const db = getDb();
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id) as any;
     if (!doc) return res.status(404).json({ error: 'Document not found' });
@@ -960,19 +969,24 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     if (!file) return res.status(404).json({ error: 'The file for this version is missing from the store.' });
     const fileName = file.original_name || 'document.docx';
     if (!OFFICE_EDITABLE.test(fileName)) {
-      return res.status(400).json({ error: 'This file is not a Word, Excel or PowerPoint document, so it cannot be opened for editing in Office.' });
+      return res.status(400).json({ error: 'This file is not a Word, Excel or PowerPoint document, so it cannot be opened in Office.' });
     }
 
+    // An author's handoff opens for editing and saves back; a reader's opens
+    // for viewing and the save is refused at the door.
+    const mayAuthor = resolvePermission(req.user!.id, 'documents.authoring', 'edit').allowed;
     const session = createOfficeSession({
       documentId: Number(req.params.id), versionId: Number(v.id), fileId: Number(file.id), fileName, userId: req.user!.id,
+      readOnly: !mayAuthor,
     });
     const url = `${publicBaseUrl(req)}/office/edit/${session.token}/${encodeURIComponent(fileName)}`;
-    audit(req, { action: 'office_session', entity: 'document_versions', entityId: v.id, newValue: { documentId: req.params.id, fileName } });
+    audit(req, { action: 'office_session', entity: 'document_versions', entityId: v.id, newValue: { documentId: req.params.id, fileName, readOnly: !mayAuthor } });
     res.status(201).json({
       token: session.token,
       fileName,
       url,
-      officeUri: officeUriFor(fileName, url),
+      readOnly: !mayAuthor,
+      officeUri: officeUriFor(fileName, url, mayAuthor ? 'edit' : 'view'),
       appName: officeAppNameFor(fileName),
       expiresAt: session.expires_at,
       expiresInHours: OFFICE_SESSION_HOURS,

@@ -288,6 +288,37 @@ console.log('\n[4c] Tasks are addressed to the staff record, and the inbox is pe
 }
 
 /* ==========================================================================
+   4d — Reading a document is reading, not authoring
+   --------------------------------------------------------------------------
+   A .docx has no in-app preview: opening it in Word IS reading it. Gating the
+   Office handoff on `documents.authoring:edit` meant a Biomedical Scientist
+   could not open the SOP they are required to read and attest to — the viewer
+   offered them a lone Download button. Opening is governed by the right to
+   read the library; whether the handoff may save a version back is a separate
+   answer, carried on the session and enforced on the PUT.
+   ========================================================================= */
+console.log('\n[4d] Opening a controlled document needs only the right to read it');
+{
+  const docs = read('server/routes/documents.ts');
+  check('the Office handoff is minted on documents.library:view',
+    /'\/:id\/versions\/:versionId\/office-session', requirePermission\('documents\.library', 'view'\)/.test(docs));
+  check('the handoff records whether it may write back',
+    /readOnly: !mayAuthor/.test(docs) && /officeUriFor\(fileName, url, mayAuthor \? 'edit' : 'view'\)/.test(docs));
+
+  const office = read('server/routes/officeEdit.ts');
+  check('a read-only handoff opens for viewing, not editing',
+    /mode === 'view' \? 'ofv' : 'ofe'/.test(office));
+  check('and its save is refused at the door',
+    /if \(session\.read_only\) \{ davHeaders\(res\); res\.status\(403\)/.test(office));
+
+  const panel = read('src/components/OfficeHandoff.tsx');
+  check('the viewer offers "Open in …" to a reader',
+    /<button type="button" className="oh-primary" onClick=\{open\}/.test(panel)
+    && !/\{canEdit && <button type="button" className="oh-primary"/.test(panel));
+  check('but wires no save-back path for one', /if \(!canSaveBack\) return;/.test(panel));
+}
+
+/* ==========================================================================
    5 — Module pages filter their tab bars
    ========================================================================= */
 console.log('\n[5] Module pages filter their tab bars by permission');

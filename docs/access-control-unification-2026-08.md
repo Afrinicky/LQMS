@@ -524,3 +524,54 @@ Alongside: `rbac:check` 19/19, `rbac:matrix` 14/14, `rbac:selfservice` 22/22
 `account-check` 37/37, `complaints-check` 38/38, `core-documents-check` 20/20,
 `inventory-check` 43/43, `inventory-records-check` 56/56, `iqc-check` 38/38,
 `iqc-io-check` 80/80, `iqc-admin-check` 73/73, `office-edit-check` 74/74.
+
+
+---
+
+## 11. Opening a Word document was gated on authoring
+
+A controlled `.docx` has **no in-app preview** — the viewer deliberately stopped
+rendering an approximation of Word, because the record and what people read
+could drift. Word is therefore the *only* way to read one.
+
+The handoff that opens it was gated on `documents.authoring:edit`, on both
+sides:
+
+```ts
+// server/routes/documents.ts
+router.post('/:id/versions/:versionId/office-session',
+  requirePermission('documents.authoring', 'edit'), …)
+
+// src/components/OfficeHandoff.tsx
+{canEdit && <button className="oh-primary" onClick={open}>Open in Word</button>}
+const rt = useOfficeRoundTrip({ ...props, autoOpen: canEdit });
+```
+
+So anybody who could read the document library but not author it — which,
+after §9, is every member of bench staff — got no auto-open, no **Open in
+Microsoft Word** button, and a card with a lone **Download**. They could not
+read the SOP they are required to read and attest to.
+
+**Reading is reading.** Opening is now governed by `documents.library:view`;
+whether the handoff may write a version *back* is a separate answer:
+
+- The session records `read_only` (new column on `office_edit_sessions`).
+- `officeUriFor` takes a mode: an author is handed `ms-word:ofe|u|…` (open for
+  edit), a reader `ms-word:ofv|u|…` (open for view), so Word behaves correctly
+  at the desk.
+- The WebDAV `PUT` refuses a read-only session with 403 — the URI is a request,
+  this is the answer.
+- On the desktop route the file-change watcher is not wired up at all for a
+  reader, so no save is pushed at an API that would refuse it and no false
+  "your reading failed" error is shown.
+- **Upload edit** stays behind `documents.authoring:edit`; **Open** and
+  **Download** do not. The status line says `Opened in Word · read-only`.
+
+Verified live: a Biomedical Scientist mints a session (201), gets
+`readOnly: true` and `ms-word:ofv`, **GET 200** (Word reads it) and **PUT 403**
+(Word cannot save back). An administrator gets `readOnly: false`, `ms-word:ofe`
+and GET 200.
+
+`audit:access` check **[4d]** pins all six halves of this — 29 static checks in
+total now — so a future change cannot quietly make reading an SOP require the
+right to rewrite it.
