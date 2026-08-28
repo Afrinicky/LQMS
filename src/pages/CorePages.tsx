@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Bell, Search, FlaskConical, ArrowRight, PackageSearch } from 'lucide-react';
+import { Bell, Search, FlaskConical, ArrowRight, IdCard, PackageSearch } from 'lucide-react';
 import { api } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import DisabledModule from '../components/DisabledModule';
@@ -11,9 +11,6 @@ import { MODULES } from '../../shared/constants/modules';
 import { NAV_SECTIONS } from '../../shared/constants/navigation';
 import { sectionIcon } from '../components/ui/moduleIcons';
 import { WaveBackground, MedicalLabBackgroundMarks, PageHeader, KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, AttentionCenter, AlertsByModule } from '../components/ui';
-import DashboardProfileCard from '../components/DashboardProfileCard';
-import DashboardInbox from '../components/DashboardInbox';
-import DutyTodoCard from '../components/DutyTodoCard';
 
 type CountRow = { count: number };
 type AnyRec = Record<string, any>;
@@ -43,9 +40,10 @@ export function Home() {
   const [needsRegistration, setNeedsRegistration] = useState(false);
 
   useEffect(() => {
-    if (canView('notifications')) {
-      safeGet<{ unreadNotifications: number }>('/dashboard/notifications-summary').then(d => setUnread(d?.unreadNotifications ?? null));
-    }
+    // The badge counts what is waiting on THIS person — the same number the
+    // portal shows — rather than the laboratory's unread total, which is not
+    // theirs to clear and made the badge meaningless.
+    safeGet<{ myUnreadNotifications: number }>('/dashboard/my-work-summary').then(d => setUnread(d?.myUnreadNotifications ?? null));
     // First-run: prompt the user to register the laboratory until the profile is
     // marked complete under Settings → My Laboratory. Only someone who can
     // actually complete the registration is asked to.
@@ -101,14 +99,16 @@ export function Home() {
         </div>
         <div className="topbar-actions">
           <span className="health-pill"><span className="dot" /><span>System Healthy</span></span>
+          {/* The bell is personal, so it opens the personal inbox — which is in
+              My Portal now, not the Notifications workspace. */}
           {canView('notifications') && (
-            <button className="icon-btn" type="button" aria-label="Notifications" onClick={() => navigate('/notifications')}>
+            <button className="icon-btn" type="button" aria-label="My inbox" onClick={() => navigate('/my-portal?tab=My%20Inbox')}>
               <Bell size={18} />
               {unread !== null && unread > 0 && <span className="icon-badge">{unread > 99 ? '99+' : unread}</span>}
             </button>
           )}
-          <button className="user-chip" type="button" title="My profile"
-            onClick={() => navigate(canView('dashboard') ? '/dashboard' : '/home')}>
+          <button className="user-chip" type="button" title="My Portal"
+            onClick={() => navigate('/my-portal')}>
             <span className="user-avatar">{initials(user?.fullName)}</span>
             <span className="user-meta">
               <strong>{user?.fullName ?? 'User'}</strong>
@@ -162,18 +162,27 @@ export function Home() {
 }
 
 /* ============================================================================
-   MAIN DASHBOARD — the staff member's home base.
+   MAIN DASHBOARD — the laboratory's management view.
 
-   Three things, in the order they matter to the person looking at it:
-     1. Who they are and what is waiting on them  — profile + inbox, side by side
-     2. What needs attention across the laboratory — severity ring + priorities
-     3. The numbers behind it                      — key figures, then a compact
+   This page used to try to be two things at once: a management overview AND
+   the individual's own home base, with their profile card, their inbox and
+   their duty list stacked on top of the laboratory's figures. Those three
+   belonged to one person, not to the laboratory, and they now live in My
+   Portal, where the rest of that person's file is.
+
+   What is left is what the page was always for, and only that:
+     1. What needs attention across the laboratory — severity ring + priorities
+     2. The numbers behind it                      — key figures, then a compact
                                                      chart per management area
 
    Every tile, row and bar opens the exact record or register it summarises, so
    the dashboard is a way into the work rather than a report about it. Nothing
    is shown for a module the reader may not open: the metric is dropped, not
    greyed out, so the page shrinks to fit the role instead of teasing it.
+
+   Access follows the same logic: the dashboard is granted to the roles
+   accountable for the laboratory as a whole — administrator, laboratory
+   manager, quality manager and unit heads. Everyone else lands on My Portal.
    ========================================================================= */
 
 export function Dashboard() {
@@ -274,31 +283,18 @@ export function Dashboard() {
   return (
     <div className="module-page dash">
       <PageHeader
-        eyebrow="My dashboard"
+        eyebrow="Laboratory overview"
         title={firstName ? `Good day, ${firstName}` : 'Main Dashboard'}
-        subtitle="Your profile, your inbox and the laboratory's quality picture — every figure opens the record behind it."
-        actions={canView('notifications')
-          ? <button className="secondary" type="button" onClick={() => navigate('/notifications')}><Bell size={16} /> Open inbox</button>
-          : undefined}
+        subtitle="The laboratory's quality picture — every figure opens the record behind it. Your own tasks, inbox and record are in My Portal."
+        actions={<button className="secondary" type="button" onClick={() => navigate('/my-portal')}><IdCard size={16} /> My Portal</button>}
       />
 
-      {/* 1 — the person, and what is waiting on them */}
-      <div className="dash-me">
-        <DashboardProfileCard />
-        {canView('notifications') && <DashboardInbox />}
-      </div>
-
-      {/* 1b — what they are on duty to do. Deliberately above the laboratory's
-          numbers: the bench's own day comes before management's overview, and
-          it needs no permission because it is the person's own work. */}
-      <DutyTodoCard />
-
-      {/* 2 — what needs attention across the laboratory. Both views read the
+      {/* 1 — what needs attention across the laboratory. Both views read the
           live-alert feed, which is itself trimmed to the modules this reader
           may view, so they are shown only to someone who has that feed. */}
       {canView('notifications') && <AttentionCenter />}
 
-      {/* 3 — the numbers behind it */}
+      {/* 2 — the numbers behind it */}
       {kpis.length > 0 && <>
         <div className="section-title"><h3>Key numbers</h3></div>
         <KpiStrip items={kpis} />

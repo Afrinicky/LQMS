@@ -122,6 +122,34 @@ const emptyAttestForm = { targetType: 'staff', staffIds: [] as number[], positio
 const emptyPrintForm = { printPurpose: '', controlledCopy: false, copyNumber: '', watermark: '' };
 
 const SECTIONS = ['Dashboard', 'Documents', 'Records', 'Central Archive', 'Master List', 'Laboratory Profile'] as const;
+/**
+ * The document-control tabs, and the right each one actually needs.
+ *
+ * This bar was a plain array rendered to everybody who could open the module,
+ * so a Biomedical Scientist — whose profile says No access to Authoring and
+ * to Review & approval — was offered New Document, Bulk Import, the Review
+ * and Approval queues, Reviews Due and the whole laboratory's Attestations
+ * register. What they need is the register they read from, the documents in
+ * their own inbox, and the attestation they owe. Nothing else.
+ *
+ * Both live at module scope so the bar and the ?subtab= deep link answer the
+ * same question: a tab a person may not see cannot be opened by putting its
+ * name in a URL either.
+ */
+const DOC_TABS = ['Document Register', 'New Document', 'Bulk Import', 'Review Queue', 'Approval Queue', 'Reviews Due', 'Attestations', 'My Inbox', 'Obsolete Register'];
+const DOC_TAB_RIGHTS: Record<string, { key: string; action: PermissionAction }> = {
+  'Document Register': { key: 'documents.library', action: 'view' },
+  'My Inbox': { key: 'documents.library', action: 'view' },
+  'New Document': { key: 'documents.authoring', action: 'create' },
+  'Bulk Import': { key: 'documents.authoring', action: 'create' },
+  // The queues, the review calendar and the laboratory-wide attestation
+  // register are document control's own work, not a reader's.
+  'Review Queue': { key: 'documents.workflow', action: 'view' },
+  'Approval Queue': { key: 'documents.workflow', action: 'view' },
+  'Reviews Due': { key: 'documents.workflow', action: 'view' },
+  'Attestations': { key: 'documents.workflow', action: 'view' },
+  'Obsolete Register': { key: 'documents.workflow', action: 'view' },
+};
 
 // Roles with governance authority over the register (change ownership, bulk
 // actions). The server independently enforces the documents "approve"
@@ -228,6 +256,20 @@ export function DocumentControlPage() {
     const focus = searchParams.get('focus');
     if (focus && focus.startsWith('documents:')) { setSection('Documents'); setTab('Document Register'); }
   }, [searchParams]);
+  // Deep link from My Portal: ?subtab=My Inbox lands a member of staff on the
+  // documents awaiting their attestation. Without this the link opened the
+  // register and left them to find the tab, which is the gap the portal exists
+  // to close. Matching ignores case and punctuation so a renamed tab survives.
+  useEffect(() => {
+    const wanted = searchParams.get('subtab');
+    if (!wanted) return;
+    const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const match = DOC_TABS.find(t => norm(t) === norm(wanted));
+    if (!match) return;
+    const need = DOC_TAB_RIGHTS[match];
+    if (need && !can(need.key, need.action)) return;
+    setSection('Documents'); setTab(match);
+  }, [searchParams, can]);
   // Deep link from Settings → Core Documents: ?open=<id> opens the document
   // itself, because clicking the laboratory's Quality Manual should show the
   // Quality Manual, not a register row that happens to mention it.
@@ -573,34 +615,10 @@ export function DocumentControlPage() {
     }
   }
 
-  /**
-   * The document-control tabs, and the right each one actually needs.
-   *
-   * This bar was a plain array rendered to everybody who could open the module,
-   * so a Biomedical Scientist — whose profile says No access to Authoring and
-   * to Review & approval — was offered New Document, Bulk Import, the Review
-   * and Approval queues, Reviews Due and the whole laboratory's Attestations
-   * register. What they need is the register they read from, the documents in
-   * their own inbox, and the attestation they owe. Nothing else.
-   */
-  const DOC_TAB_RIGHTS: Record<string, { key: string; action: PermissionAction }> = {
-    'Document Register': { key: 'documents.library', action: 'view' },
-    'My Inbox': { key: 'documents.library', action: 'view' },
-    'New Document': { key: 'documents.authoring', action: 'create' },
-    'Bulk Import': { key: 'documents.authoring', action: 'create' },
-    // The queues, the review calendar and the laboratory-wide attestation
-    // register are document control's own work, not a reader's.
-    'Review Queue': { key: 'documents.workflow', action: 'view' },
-    'Approval Queue': { key: 'documents.workflow', action: 'view' },
-    'Reviews Due': { key: 'documents.workflow', action: 'view' },
-    'Attestations': { key: 'documents.workflow', action: 'view' },
-    'Obsolete Register': { key: 'documents.workflow', action: 'view' },
-  };
-  const docTabs = ['Document Register', 'New Document', 'Bulk Import', 'Review Queue', 'Approval Queue', 'Reviews Due', 'Attestations', 'My Inbox', 'Obsolete Register']
-    .filter(name => {
-      const need = DOC_TAB_RIGHTS[name];
-      return !need || can(need.key, need.action);
-    });
+  const docTabs = DOC_TABS.filter(name => {
+    const need = DOC_TAB_RIGHTS[name];
+    return !need || can(need.key, need.action);
+  });
   const obsoleteDocs = documents.filter(d => d.status === 'obsolete');
   const reviewQueue = documents.filter(d => d.status === 'under_review');
   const approvalQueue = documents.filter(d => d.status === 'reviewed');

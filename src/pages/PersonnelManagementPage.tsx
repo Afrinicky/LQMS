@@ -13,7 +13,6 @@ import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import CompetencyWorkspace from './personnel/CompetencyWorkspace';
 import AppraisalWorkspace from './personnel/AppraisalWorkspace';
 import OrientationInduction from './personnel/OrientationInduction';
-import UserPortal from './personnel/UserPortal';
 import type {
   Section, Department, Staff, Position,
   StaffDocument, StaffDeclaration, TrainingEvent, DutyRoster,
@@ -131,8 +130,6 @@ export function PersonnelManagementPage() {
     } catch (e) { setError((e as Error).message); }
   }
   useEffect(() => { if (isEnabled('personnel')) void load(); }, [isEnabled]);
-  // The My Profile tab is a self-contained portal (UserPortal) that fetches its
-  // own self-scoped data.
   if (!isEnabled('personnel')) return <DisabledModule />;
 
   async function uploadFile(file: File | null): Promise<string | null> {
@@ -300,7 +297,7 @@ export function PersonnelManagementPage() {
     catch (e) { setError((e as Error).message); }
   }
 
-  const tabs = ['Dashboard', 'Master Personnel Register', 'Add Staff', 'Staff Documents', 'Orientation & Induction', 'Declarations', 'Training Events', 'Competency Assessments', 'Performance Appraisals', 'Technical Authorizations', 'Duty Roster', 'Unit Reassignments', 'Unit Supervisors', 'Bench Schedules', 'My Profile', 'Reports'];
+  const tabs = ['Dashboard', 'Master Personnel Register', 'Add Staff', 'Staff Documents', 'Orientation & Induction', 'Declarations', 'Training Events', 'Competency Assessments', 'Performance Appraisals', 'Technical Authorizations', 'Duty Roster', 'Unit Reassignments', 'Unit Supervisors', 'Bench Schedules', 'Reports'];
 
   return <div className="module-page">
     <PageHeader eyebrow="Personnel Management" title="Personnel Management" subtitle="Personnel records — competence, authorisation, training, induction, and ethics." />
@@ -424,7 +421,6 @@ export function PersonnelManagementPage() {
       </form>}
       <table className="data-table"><thead><tr><th>Staff</th><th>Type</th><th>Title</th><th>Issue</th><th>Expiry</th><th>Verification</th><th>File</th><th></th></tr></thead><tbody>
         {staffDocs.map(d => {
-  const { can } = usePermissions();
           const today = new Date().toISOString().slice(0, 10);
           const expiringSoon = d.expiry_date && d.expiry_date <= new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10) && d.expiry_date >= today;
           const expired = d.expiry_date && d.expiry_date < today;
@@ -511,14 +507,13 @@ export function PersonnelManagementPage() {
     {tab === 'Performance Appraisals' &&
       <AppraisalWorkspace staff={staff} sections={sections} departments={departments} positions={positions} />}
 
-    {tab === 'Technical Authorizations' && <p>Technical authorisations are created from completed competency assessments via the Competency Assessments tab. They appear on each staff member's profile under <em>My Profile</em>.</p>}
+    {tab === 'Technical Authorizations' && <p>Technical authorisations are created from completed competency assessments via the Competency Assessments tab. They appear on each staff member's own record in <em>My Portal</em>.</p>}
 
     {tab === 'Duty Roster' && <DutyRosterBoard staff={staff} canEdit={canEditRosters} />}
     {tab === 'Unit Reassignments' && <ReassignmentBoard staff={staff} sections={sections} canEdit={canEditRosters} onNavigate={setTab} />}
     {tab === 'Unit Supervisors' && <ActingSupervisorsBoard staff={staff} sections={sections} canEdit={canEditRosters} />}
     {tab === 'Bench Schedules' && <BenchScheduleBoard sections={sections} canEdit={canEditRosters} />}
 
-    {tab === 'My Profile' && <UserPortal />}
 
     {tab === 'Reports' && <div className="card">
       <h3>Personnel reports</h3>

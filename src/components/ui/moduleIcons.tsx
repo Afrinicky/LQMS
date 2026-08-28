@@ -3,7 +3,7 @@ import {
   MessageSquareWarning, ShieldAlert, HeartHandshake, Wrench, ClipboardCheck, Boxes,
   Workflow, Database, TrendingUp, CalendarClock, FileSignature, Gauge, ShieldCheck,
   Thermometer, FlaskConical, Microscope, BadgeCheck, Ruler, Droplets,
-  CalendarRange, FolderArchive, Bell, Settings, Home, Activity, Bot, ScanSearch, type LucideIcon,
+  CalendarRange, FolderArchive, Bell, Settings, Home, Activity, Bot, ScanSearch, IdCard, type LucideIcon,
 } from 'lucide-react';
 
 /**
@@ -13,6 +13,7 @@ import {
 export const MODULE_ICONS: Record<string, LucideIcon> = {
   home: Home,
   dashboard: LayoutDashboard,
+  staff_portal: IdCard,
   documents: FileText,
   dennis: Bot,
   organisation: Building2,
@@ -60,6 +61,7 @@ export function moduleIcon(key: string): LucideIcon {
  */
 export const SECTION_ICONS: Record<string, LucideIcon> = {
   dashboard: LayoutDashboard,
+  staff_portal: IdCard,
   documents_records: FileText,
   organisation: Building2,
   personnel: Users,

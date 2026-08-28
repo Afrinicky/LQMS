@@ -114,8 +114,8 @@ export default function DailyBriefing() {
 
         <footer className="briefing-foot">
           <button type="button" onClick={dismissBriefing}>Start my day</button>
-          <button type="button" className="secondary" onClick={() => { dismissBriefing(); navigate('/dashboard'); }}>
-            Open my dashboard
+          <button type="button" className="secondary" onClick={() => { dismissBriefing(); navigate('/my-portal'); }}>
+            Open my portal
           </button>
         </footer>
       </div>

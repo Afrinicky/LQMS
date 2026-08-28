@@ -92,9 +92,11 @@ export type FeatureDef = {
 
 export const FEATURES: FeatureDef[] = [
   // ── Personnel Management ────────────────────────────────────────────────
+  // Governs no tab in the Personnel workspace any more: a person's own record
+  // is My Portal, which is a module in its own right. The key remains because
+  // the self-service endpoints behind the portal are gated on it.
   { key: 'personnel.self', module: 'personnel', label: 'My own record', personal: true,
-    desc: 'A member of staff maintaining their own profile, documents and training history.',
-    tabs: ['My Profile'] },
+    desc: 'A member of staff maintaining their own profile, documents and training history in My Portal.' },
   { key: 'personnel.register', module: 'personnel', label: 'Personnel register', sensitive: true,
     desc: 'The master register of all staff — opening, adding and editing other people\'s records.',
     tabs: ['Master Personnel Register', 'Add Staff', 'Staff Documents'] },
@@ -291,17 +293,20 @@ export const FEATURES: FeatureDef[] = [
     desc: 'Improvement registers and summaries.', tabs: ['Reports'] },
 
   // ── Notifications & Reports ─────────────────────────────────────────────
+  // The inbox itself now lives in My Portal — a person's alerts belong beside
+  // the work they are about, not in a workspace of their own. This key still
+  // governs every inbox and task endpoint the portal calls, so it stays, and
+  // the whole laboratory holds it.
   { key: 'notifications.inbox', module: 'notifications', label: 'My inbox & tasks', personal: true,
-    desc: 'A member of staff\'s own alerts and assigned tasks. Everyone needs this.',
-    tabs: ['Dashboard', 'Full Inbox', 'My Tasks', 'Preferences'] },
+    desc: 'A member of staff\'s own alerts and assigned tasks, read and worked in My Portal. Everyone needs this.' },
   { key: 'notifications.calendar', module: 'notifications', label: 'Review calendar',
-    desc: 'The scheduled review and due-date calendar.', tabs: ['Review Calendar'] },
+    desc: 'The laboratory-wide alert picture and the scheduled review and due-date calendar.',
+    tabs: ['Alert Overview', 'Review Calendar'] },
   { key: 'notifications.rules', module: 'notifications', label: 'Alert rules', sensitive: true,
     desc: 'Configuring which alerts are raised, to whom, and running a scan.',
     tabs: ['Notification Rules', 'Generate Alerts'] },
   { key: 'notifications.sounds', module: 'notifications', label: 'Reminder sounds', personal: true,
-    desc: 'The chimes played on the desktop and mobile apps, and each person\'s own choice of them.',
-    tabs: ['Reminder Sounds'] },
+    desc: 'The chimes played on the desktop and mobile apps, and each person\'s own choice of them, set in My Portal.' },
 
   // ── System Audit ────────────────────────────────────────────────────────
   // Split three ways because they are three different jobs: reading the trail,

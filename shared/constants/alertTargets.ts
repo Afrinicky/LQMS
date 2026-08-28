@@ -43,10 +43,10 @@ export const ALERT_TARGETS: Record<string, AlertTarget> = {
   schedule_carried_forward: { tab: 'Duty Roster' },
 
   /* Unit activities — the recurring work the duty roster puts in front of
-     whoever is on the bench. The to-do itself lives on the dashboard, so the
-     alert lands on the register that lists every occurrence. */
-  activity_due: { route: '/dashboard' },
-  activity_overdue: { route: '/dashboard' },
+     whoever is on the bench. The to-do list belongs to one person, so it lives
+     in their portal, and the alert lands on it there. */
+  activity_due: { route: '/my-portal', tab: 'My Tasks' },
+  activity_overdue: { route: '/my-portal', tab: 'My Tasks' },
   activity_missed: { route: '/system-audit', tab: 'Not Done' },
   activity_redesign: { route: '/settings/activities' },
 
