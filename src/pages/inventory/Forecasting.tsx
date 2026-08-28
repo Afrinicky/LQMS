@@ -5,6 +5,7 @@ import { DetailModal, KpiStrip, ChartCard, Sparkline, BarChart, RegisterSearch, 
 import { useCappedRows } from '../../hooks/useCappedRows';
 import { STOCK_STATUS_LABELS, VEN_CLASSES, VEN_LABELS, SERVICE_LEVEL_Z, type StockStatus } from '../../../shared/constants/stockControl';
 import { StatusBadge, qty } from './StockControl';
+import { Notice } from '../../components/ui/Feedback';
 
 /**
  * What to order, and what the levels should be.
@@ -129,8 +130,8 @@ export function ForecastingPanel({ canEdit, refreshKey, onApplied }: { canEdit: 
           <button key={k} type="button" role="tab" aria-selected={only === k} className={only === k ? 'on' : ''} onClick={() => setOnly(k)}>{l}</button>)}
       </div>
 
-      {error && <div className="error">{error}</div>}
-      {notice && <div className="notice-ok">{notice}</div>}
+      {error && <Notice kind="error">{error}</Notice>}
+      {notice && <Notice kind="success">{notice}</Notice>}
 
       {canEdit && shown.length > 0 && <div className="reg-head-actions" style={{ marginBottom: 10 }}>
         <button type="button" className="secondary" onClick={() => setPicked(new Set(shown.filter(r => !r.item.planningLocked).map(r => r.item.id)))}>Select all shown</button>
@@ -237,7 +238,7 @@ function PlanningPanel({ advice, canEdit, onClose, onSaved }: {
       <StatusBadge status={it.status} />
       {it.planningLocked ? <span className="badge"><Lock size={11} /> levels locked</span> : null}
     </>}>
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     <div className="stock-figures">
       <div><span className="fig">{qty(it.onHand)} <small>{it.unit || ''}</small></span><span className="fig-label">on hand</span></div>

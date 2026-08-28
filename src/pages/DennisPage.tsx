@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, Bell, Bot, FileSearch, RefreshCw, Send, ShieldCheck, Sparkles } from 'lucide-react';
 import { api, errorText } from '../services/api';
 import { DENNIS_NOTICE, dennisSafetyRules } from '../services/dennisService';
+import TextField from '../components/ui/TextField';
 
 const tabs = ['Ask Dennis','Document Search','CAPA Helper','Audit Helper','Report Writer','Quality Indicator Analyst','Training Helper','Blood Bank Quality Assistant','Risk Assistant','Equipment Assistant','Inventory and Supplier Assistant','Dennis Alerts','Dennis Activity Log','Dennis Settings'] as const;
 type Tab = typeof tabs[number];
@@ -39,8 +40,11 @@ function AskDennis() {
   const [allowOnline, setAllowOnline] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([{ role: 'dennis', content: 'Hello, I am Dennis. Ask me a quality question and I will search the laboratory’s approved documents and answer with sources.' }]);
 
-  async function send() {
-    const q = input.trim(); if (!q || busy) return;
+  // Takes the text it is given. Enter-to-send fires from the box's own key
+  // handler, in the same event that hands the text up, so the state behind
+  // `input` is still the previous keystroke's at that moment.
+  async function send(typed = input) {
+    const q = typed.trim(); if (!q || busy) return;
     setMessages(m => [...m, { role: 'user', content: q }]); setInput(''); setBusy(true);
     try {
       let res = await api<{ answer: string; sources: AskSource[]; mode: string }>('/dennis/ask', { method: 'POST', body: JSON.stringify({ question: q, allowOnline }) });
@@ -58,8 +62,8 @@ function AskDennis() {
     <div className="chat-stream">{messages.map((m,i)=><div key={i} className={`chat-bubble ${m.role}`}><strong>{m.role==='dennis'?'Dennis':'You'}</strong><p style={{ whiteSpace: 'pre-wrap' }}>{m.content}</p>{m.role==='dennis' && m.content!=='' && <><SourceList sources={m.sources ?? []}/><Notice/></>}</div>)}
       {busy && <div className="chat-bubble dennis"><strong>Dennis</strong><p>Searching approved documents…</p></div>}</div>
     <div className="dennis-input">
-      <textarea value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); send(); } }} placeholder="Ask Dennis a quality management question…"/>
-      {can('dennis', 'view') && <button onClick={send} disabled={busy}><Send size={16}/> Send</button>}
+      <TextField as="textarea" value={input} onValue={nextValue => setInput(nextValue)} onKeyDown={e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); void send(e.currentTarget.value); } }} placeholder="Ask Dennis a quality management question…"/>
+      {can('dennis', 'view') && <button onClick={() => void send()} disabled={busy}><Send size={16}/> Send</button>}
       <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={allowOnline} onChange={e=>setAllowOnline(e.target.checked)}/> Allow online AI (if enabled)</label>
       <button className="secondary" onClick={()=>setMessages([])}>Clear</button>
     </div></div><SafetyPanel/></div>;
@@ -79,10 +83,10 @@ function DocumentSearch() {
   const loadStats = () => api('/dennis/index-stats').then(setStats).catch(()=>{});
   useEffect(() => { void loadStats(); }, []);
 
-  async function search() {
+  async function search(typed = q) {
     setBusy(true); setMsg(null);
     try {
-      const params = new URLSearchParams({ q });
+      const params = new URLSearchParams({ q: typed });
       if (type) params.set('documentType', type);
       if (currentOnly) params.set('currentOnly', 'true');
       const r = await api<{ results: any[] }>(`/dennis/search?${params.toString()}`);
@@ -103,10 +107,10 @@ function DocumentSearch() {
     <h3><FileSearch size={18}/> Document Search</h3>
     {stats && <p className="muted" style={{ fontSize: 12 }}>Indexed: {stats.totalIndexed} · Chunks: {stats.chunks} · Skipped: {stats.skipped} · Failed: {stats.failed} · Not indexed: {stats.notIndexed}</p>}
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-      <input style={{ flex: 1, minWidth: 220 }} value={q} onChange={e=>setQ(e.target.value)} onKeyDown={e=>{ if(e.key==='Enter') search(); }} placeholder="Search approved/current documents (keywords)…"/>
+      <TextField style={{ flex: 1, minWidth: 220 }} value={q} onValue={nextValue => setQ(nextValue)} onKeyDown={e=>{ if(e.key==='Enter') void search(e.currentTarget.value); }} placeholder="Search approved/current documents (keywords)…"/>
       <select value={type} onChange={e=>setType(e.target.value)}><option value="">All types</option>{['SOP','Policy','Manual','Form','Register','Log'].map(t=><option key={t} value={t}>{t}</option>)}</select>
       <label style={{ fontSize: 12 }}><input type="checkbox" checked={currentOnly} onChange={e=>setCurrentOnly(e.target.checked)}/> Current only</label>
-      <button onClick={search} disabled={busy}>Search</button>
+      <button onClick={() => void search()} disabled={busy}>Search</button>
       {can('dennis', 'edit') && <button className="secondary" onClick={indexAll} disabled={busy} title="Index all approved/current documents"><RefreshCw size={14}/> Reindex all approved</button>}
     </div>
     {msg && <p className="muted" style={{ marginTop: 8 }}>{msg}</p>}
@@ -157,10 +161,10 @@ function Helper({ tab }: { tab: Tab }) {
   return <div className="dennis-grid two"><div className="card">
     <h3><Sparkles size={18}/> {tab}</h3>
     <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-      <input style={{ width: 160 }} value={recordId} onChange={e=>setRecordId(e.target.value)} placeholder="Record # (optional)"/>
+      <TextField style={{ width: 160 }} value={recordId} onValue={nextValue => setRecordId(nextValue)} placeholder="Record # (optional)"/>
       <span className="muted" style={{ fontSize: 12, alignSelf: 'center' }}>Link a record to ground the draft.</span>
     </div>
-    <textarea value={input} onChange={e=>setInput(e.target.value)} placeholder={`Paste ${tab} notes here. Do not include patient or donor identifiers.`}/>
+    <TextField as="textarea" value={input} onValue={nextValue => setInput(nextValue)} placeholder={`Paste ${tab} notes here. Do not include patient or donor identifiers.`}/>
     <div className="button-grid">{cfg.buttons.map(([label, task])=>can('dennis', 'view') && <button key={label} disabled={busy} onClick={()=>run(task)}>{label}</button>)}</div>
     <div className="dennis-output">
       <strong>Dennis draft output {out?.mode ? `(${out.mode})` : ''}</strong>
@@ -264,17 +268,17 @@ function Settings() {
     <h4 style={{ marginBottom: 4 }}>Local / offline AI (Phase DENNIS-4)</h4>
     <label><input type="checkbox" checked={bool('dennis.local.enabled')} onChange={e=>set('dennis.local.enabled', String(e.target.checked))}/> Local AI enabled</label>
     <label>Provider<select value={s['dennis.local.provider']||'ollama'} onChange={e=>set('dennis.local.provider', e.target.value)}><option value="ollama">Ollama</option><option value="custom">Custom local endpoint</option><option value="none">None</option></select></label>
-    <label>Local endpoint URL<input value={s['dennis.local.endpoint']||''} onChange={e=>set('dennis.local.endpoint', e.target.value)} placeholder="http://localhost:11434"/></label>
-    <label>Local chat model<input value={s['dennis.local.chatModel']||''} onChange={e=>set('dennis.local.chatModel', e.target.value)} placeholder="llama3.1"/></label>
-    <label>Local embedding model<input value={s['dennis.local.embedModel']||''} onChange={e=>set('dennis.local.embedModel', e.target.value)} placeholder="nomic-embed-text"/></label>
+    <label>Local endpoint URL<TextField value={s['dennis.local.endpoint']||''} onValue={nextValue => set('dennis.local.endpoint', nextValue)} placeholder="http://localhost:11434"/></label>
+    <label>Local chat model<TextField value={s['dennis.local.chatModel']||''} onValue={nextValue => set('dennis.local.chatModel', nextValue)} placeholder="llama3.1"/></label>
+    <label>Local embedding model<TextField value={s['dennis.local.embedModel']||''} onValue={nextValue => set('dennis.local.embedModel', nextValue)} placeholder="nomic-embed-text"/></label>
     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>{can('dennis', 'edit') && <button className="secondary" type="button" onClick={()=>testConn('local')}>Test local connection</button>}<span className="badge">{test.local || 'not tested'}</span></div>
 
     <h4 style={{ margin: '12px 0 4px' }}>Online AI (Phase DENNIS-6 — disabled by default)</h4>
     <label><input type="checkbox" checked={bool('dennis.online.enabled')} onChange={e=>set('dennis.online.enabled', String(e.target.checked))}/> Online Dennis enabled</label>
     <label>Provider<select value={s['dennis.online.provider']||'anthropic'} onChange={e=>set('dennis.online.provider', e.target.value)}><option value="anthropic">Anthropic (Claude)</option><option value="openai">OpenAI</option><option value="custom">Custom (OpenAI-compatible)</option></select></label>
-    <label>Endpoint (optional)<input value={s['dennis.online.endpoint']||''} onChange={e=>set('dennis.online.endpoint', e.target.value)} placeholder="default per provider"/></label>
-    <label>Model<input value={s['dennis.online.model']||''} onChange={e=>set('dennis.online.model', e.target.value)} placeholder="claude-sonnet-4-6"/></label>
-    <label>API key<input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)} placeholder={s['dennis.online.apiKey'] ? `Saved (${s['dennis.online.apiKey']}) — type to replace` : 'Enter API key'}/></label>
+    <label>Endpoint (optional)<TextField value={s['dennis.online.endpoint']||''} onValue={nextValue => set('dennis.online.endpoint', nextValue)} placeholder="default per provider"/></label>
+    <label>Model<TextField value={s['dennis.online.model']||''} onValue={nextValue => set('dennis.online.model', nextValue)} placeholder="claude-sonnet-4-6"/></label>
+    <label>API key<TextField type="password" value={apiKey} onValue={nextValue => setApiKey(nextValue)} placeholder={s['dennis.online.apiKey'] ? `Saved (${s['dennis.online.apiKey']}) — type to replace` : 'Enter API key'}/></label>
     <label><input type="checkbox" checked={s['dennis.online.confirmRequired']!=='false'} onChange={e=>set('dennis.online.confirmRequired', String(e.target.checked))}/> Require confirmation before each online AI use</label>
     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>{can('dennis', 'edit') && <button className="secondary" type="button" onClick={()=>testConn('online')}>Test online connection</button>}<span className="badge">{test.online || 'not tested'}</span></div>
 

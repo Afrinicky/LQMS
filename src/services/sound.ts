@@ -69,10 +69,19 @@ function getContext(): AudioContext | null {
  * the first interaction of the session, resumes the context, and then removes
  * itself — after which reminders are audible for the rest of the session.
  */
+let waitingForUnlock = false;
+
 export function primeAudio(): void {
-  if (unlocked) return;
+  if (unlocked || waitingForUnlock) return;
+  // The shell calls this again whenever the duty poll is set up, which is
+  // every time the signed-in user or the loader changes. Registering a fresh
+  // listener each time left the earlier ones on the window for good — only the
+  // closure that actually fired could take itself off — so every keystroke in
+  // the application ran a growing pile of dead handlers.
+  waitingForUnlock = true;
   const unlock = () => {
     unlocked = true;
+    waitingForUnlock = false;
     const ctx = getContext();
     if (ctx && ctx.state === 'suspended') void ctx.resume();
     for (const event of ['pointerdown', 'keydown', 'touchstart']) {

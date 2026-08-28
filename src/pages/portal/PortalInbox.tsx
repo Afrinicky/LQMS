@@ -6,6 +6,7 @@ import { dueTone, isOpenAlert, usePortal, type PortalFace } from './portalData';
 import { resolveNotificationTarget } from './notificationTarget';
 import PortalTaskDrawer, { type PortalTaskTarget } from './PortalTaskDrawer';
 import type { NotificationRecord } from '../../../shared/types/api';
+import TextField from '../../components/ui/TextField';
 
 /**
  * My inbox — every alert the system routed to this person, and nothing else.
@@ -157,7 +158,7 @@ export default function PortalInbox({ onOpenFace }: { onOpenFace?: (face: Portal
           <h3><Inbox size={16} /> My inbox</h3>
           <p>Every alert routed to you. Opening one marks it read and opens the work itself, right here.</p>
         </div>
-        <input className="pp-search" value={search} onChange={e => setSearch(e.target.value)}
+        <TextField className="pp-search" value={search} onValue={nextValue => setSearch(nextValue)}
           placeholder="Search your alerts…" aria-label="Search your alerts" />
       </div>
 

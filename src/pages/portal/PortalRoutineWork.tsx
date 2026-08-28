@@ -12,6 +12,7 @@ import {
 } from '../../../shared/constants/activities';
 import { usePortal } from './portalData';
 import type { RoutineWorkResponse, RoutineActivity, ActivityOccurrence } from '../../../shared/types/api';
+import TextField from '../../components/ui/TextField';
 
 /**
  * Routine Work — the recurring work of the bench, done from the portal.
@@ -120,7 +121,7 @@ function OccurrenceRow({ occurrence, mayPerform, onWorked }: {
           <div className="rw-expand">
             <label>
               <span>Note (optional)</span>
-              <input value={note} onChange={e => setNote(e.target.value)} placeholder="Anything worth recording" />
+              <TextField value={note} onValue={nextValue => setNote(nextValue)} placeholder="Anything worth recording" />
             </label>
             <div className="duty-ease">
               <span>How easy was it?</span>
@@ -138,7 +139,7 @@ function OccurrenceRow({ occurrence, mayPerform, onWorked }: {
           <div className="rw-expand">
             <label>
               <span>Why does this not apply today?</span>
-              <input value={naReason} onChange={e => setNaReason(e.target.value)} autoFocus
+              <TextField value={naReason} onValue={nextValue => setNaReason(nextValue)} autoFocus
                 placeholder="Instrument out of service, unit closed…" />
             </label>
             <div className="pr-btns">

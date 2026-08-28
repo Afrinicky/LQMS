@@ -13,6 +13,8 @@ import type {
   BackupRestoreCheck, DataIntegrityCheck, AuditLogRow, AuditTrailSummary,
   RecordsReportsSummary
 } from '../../shared/types/api';
+import TextField from '../components/ui/TextField';
+import { Notice } from '../components/ui/Feedback';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
@@ -202,7 +204,7 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
   return <div className={embedded ? '' : 'module-page'}>
     {!embedded && <PageHeader eyebrow="Notifications &amp; Reports" title="Records, Reports &amp; Evidence" subtitle="Report templates, generated reports, and evidence packs." />}
     {tabBar(tab, embedded ? tabs.filter(t => t !== 'Dashboard') : tabs, setTab)}
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {tab === 'Dashboard' && (summary ? <KpiStrip items={[
       { label: 'Report templates', value: summary.activeReportTemplates, onClick: () => setTab('Report Templates') },
@@ -234,11 +236,11 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
 
     {tab === 'Report Templates' && <>
       {can('records_reports.generate', 'create') && <form className="form-grid" onSubmit={submitTemplate}>
-        <label>Name<input value={templateForm.templateName} onChange={e => setTemplateForm({ ...templateForm, templateName: e.target.value })} required /></label>
-        <label>Type<input value={templateForm.templateType} onChange={e => setTemplateForm({ ...templateForm, templateType: e.target.value })} placeholder="list / summary / register" /></label>
+        <label>Name<TextField value={templateForm.templateName} onValue={nextValue => setTemplateForm({ ...templateForm, templateName: nextValue })} required /></label>
+        <label>Type<TextField value={templateForm.templateType} onValue={nextValue => setTemplateForm({ ...templateForm, templateType: nextValue })} placeholder="list / summary / register" /></label>
         <label>Module<select value={templateForm.moduleKey} onChange={e => setTemplateForm({ ...templateForm, moduleKey: e.target.value })}><option value="">—</option>{REPORT_MODULES.map(m => <option key={m} value={m}>{m}</option>)}</select></label>
         <label>Output format<select value={templateForm.outputFormat} onChange={e => setTemplateForm({ ...templateForm, outputFormat: e.target.value })}>{OUTPUT_FORMATS.map(f => <option key={f} value={f}>{f}</option>)}</select></label>
-        <label>Description<textarea value={templateForm.description} onChange={e => setTemplateForm({ ...templateForm, description: e.target.value })} /></label>
+        <label>Description<TextField as="textarea" value={templateForm.description} onValue={nextValue => setTemplateForm({ ...templateForm, description: nextValue })} /></label>
         <button type="submit">Create template</button>
       </form>}
       <table className="data-table"><thead><tr><th>Code</th><th>Name</th><th>Type</th><th>Module</th><th>Format</th><th>Active</th><th></th></tr></thead><tbody>
@@ -247,11 +249,11 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
     </>}
 
     {tab === 'Generate Report' && can('records_reports.generate', 'create') && <form className="form-grid" onSubmit={submitReport}>
-      <label>Title<input value={reportForm.reportTitle} onChange={e => setReportForm({ ...reportForm, reportTitle: e.target.value })} required /></label>
+      <label>Title<TextField value={reportForm.reportTitle} onValue={nextValue => setReportForm({ ...reportForm, reportTitle: nextValue })} required /></label>
       <label>Module<select value={reportForm.moduleKey} onChange={e => setReportForm({ ...reportForm, moduleKey: e.target.value })}>{REPORT_MODULES.map(m => <option key={m} value={m}>{m}</option>)}</select></label>
       <label>Date from<input type="date" value={reportForm.dateFrom} onChange={e => setReportForm({ ...reportForm, dateFrom: e.target.value })} /></label>
       <label>Date to<input type="date" value={reportForm.dateTo} onChange={e => setReportForm({ ...reportForm, dateTo: e.target.value })} /></label>
-      <label>Filters JSON<textarea value={reportForm.filterJson} onChange={e => setReportForm({ ...reportForm, filterJson: e.target.value })} placeholder='{ "status": "open" }' /></label>
+      <label>Filters JSON<TextField as="textarea" value={reportForm.filterJson} onValue={nextValue => setReportForm({ ...reportForm, filterJson: nextValue })} placeholder='{ "status": "open" }' /></label>
       <button type="submit">Create report request</button>
     </form>}
 
@@ -275,14 +277,14 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
 
     {tab === 'Print Jobs' && <>
       {can('records_reports.print', 'print') && <form className="form-grid" onSubmit={submitPrint}>
-        <label>Title<input value={printForm.printTitle} onChange={e => setPrintForm({ ...printForm, printTitle: e.target.value })} required /></label>
-        <label>Purpose<input value={printForm.printPurpose} onChange={e => setPrintForm({ ...printForm, printPurpose: e.target.value })} required placeholder="reference / training / controlled distribution" /></label>
-        <label>Module<input value={printForm.moduleKey} onChange={e => setPrintForm({ ...printForm, moduleKey: e.target.value })} /></label>
-        <label>Record type<input value={printForm.recordType} onChange={e => setPrintForm({ ...printForm, recordType: e.target.value })} /></label>
-        <label>Record id<input value={printForm.recordId} onChange={e => setPrintForm({ ...printForm, recordId: e.target.value })} /></label>
+        <label>Title<TextField value={printForm.printTitle} onValue={nextValue => setPrintForm({ ...printForm, printTitle: nextValue })} required /></label>
+        <label>Purpose<TextField value={printForm.printPurpose} onValue={nextValue => setPrintForm({ ...printForm, printPurpose: nextValue })} required placeholder="reference / training / controlled distribution" /></label>
+        <label>Module<TextField value={printForm.moduleKey} onValue={nextValue => setPrintForm({ ...printForm, moduleKey: nextValue })} /></label>
+        <label>Record type<TextField value={printForm.recordType} onValue={nextValue => setPrintForm({ ...printForm, recordType: nextValue })} /></label>
+        <label>Record id<TextField value={printForm.recordId} onValue={nextValue => setPrintForm({ ...printForm, recordId: nextValue })} /></label>
         <label><input type="checkbox" checked={printForm.controlledCopy} onChange={e => setPrintForm({ ...printForm, controlledCopy: e.target.checked })} /> Controlled copy</label>
-        <label>Copy number<input value={printForm.copyNumber} onChange={e => setPrintForm({ ...printForm, copyNumber: e.target.value })} /></label>
-        <label>Watermark<input value={printForm.watermark} onChange={e => setPrintForm({ ...printForm, watermark: e.target.value })} /></label>
+        <label>Copy number<TextField value={printForm.copyNumber} onValue={nextValue => setPrintForm({ ...printForm, copyNumber: nextValue })} /></label>
+        <label>Watermark<TextField value={printForm.watermark} onValue={nextValue => setPrintForm({ ...printForm, watermark: nextValue })} /></label>
         <button type="submit">Log print job</button>
       </form>}
       <table className="data-table"><thead><tr><th>Number</th><th>Title</th><th>Module / record</th><th>Purpose</th><th>Controlled</th><th>Copy</th><th>Watermark</th></tr></thead><tbody>
@@ -292,11 +294,11 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
 
     {tab === 'Evidence Packs' && <>
       {can('records_reports.evidence', 'create') && <form className="form-grid" onSubmit={submitPack}>
-        <label>Title<input value={packForm.packTitle} onChange={e => setPackForm({ ...packForm, packTitle: e.target.value })} required /></label>
-        <label>Purpose<input value={packForm.packPurpose} onChange={e => setPackForm({ ...packForm, packPurpose: e.target.value })} required placeholder="audit / management review / inspection" /></label>
+        <label>Title<TextField value={packForm.packTitle} onValue={nextValue => setPackForm({ ...packForm, packTitle: nextValue })} required /></label>
+        <label>Purpose<TextField value={packForm.packPurpose} onValue={nextValue => setPackForm({ ...packForm, packPurpose: nextValue })} required placeholder="audit / management review / inspection" /></label>
         <label>Date from<input type="date" value={packForm.dateFrom} onChange={e => setPackForm({ ...packForm, dateFrom: e.target.value })} /></label>
         <label>Date to<input type="date" value={packForm.dateTo} onChange={e => setPackForm({ ...packForm, dateTo: e.target.value })} /></label>
-        <label>Notes<textarea value={packForm.notes} onChange={e => setPackForm({ ...packForm, notes: e.target.value })} /></label>
+        <label>Notes<TextField as="textarea" value={packForm.notes} onValue={nextValue => setPackForm({ ...packForm, notes: nextValue })} /></label>
         <button type="submit">Create pack</button>
       </form>}
       <table className="data-table"><thead><tr><th>Number</th><th>Title</th><th>Purpose</th><th>Period</th><th>Status</th><th></th></tr></thead><tbody>
@@ -318,11 +320,11 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
           {(selectedPack.items || []).map(i => <tr key={i.id}><td>{i.display_order}</td><td>{i.module_key}/{i.record_type}#{i.record_id}</td><td>{i.item_title}</td><td>{i.item_summary || '—'}</td><td>{can('records_reports.evidence', 'edit') && <button onClick={() => removePackItem(i.id)}>Remove</button>}</td></tr>)}
         </tbody></table>
         {can('records_reports.evidence', 'create') && <form className="form-grid" onSubmit={addPackItem}>
-          <label>Module<input value={packItemForm.moduleKey} onChange={e => setPackItemForm({ ...packItemForm, moduleKey: e.target.value })} required /></label>
-          <label>Record type<input value={packItemForm.recordType} onChange={e => setPackItemForm({ ...packItemForm, recordType: e.target.value })} required /></label>
-          <label>Record id<input value={packItemForm.recordId} onChange={e => setPackItemForm({ ...packItemForm, recordId: e.target.value })} required /></label>
-          <label>Title<input value={packItemForm.itemTitle} onChange={e => setPackItemForm({ ...packItemForm, itemTitle: e.target.value })} required /></label>
-          <label>Summary<textarea value={packItemForm.itemSummary} onChange={e => setPackItemForm({ ...packItemForm, itemSummary: e.target.value })} /></label>
+          <label>Module<TextField value={packItemForm.moduleKey} onValue={nextValue => setPackItemForm({ ...packItemForm, moduleKey: nextValue })} required /></label>
+          <label>Record type<TextField value={packItemForm.recordType} onValue={nextValue => setPackItemForm({ ...packItemForm, recordType: nextValue })} required /></label>
+          <label>Record id<TextField value={packItemForm.recordId} onValue={nextValue => setPackItemForm({ ...packItemForm, recordId: nextValue })} required /></label>
+          <label>Title<TextField value={packItemForm.itemTitle} onValue={nextValue => setPackItemForm({ ...packItemForm, itemTitle: nextValue })} required /></label>
+          <label>Summary<TextField as="textarea" value={packItemForm.itemSummary} onValue={nextValue => setPackItemForm({ ...packItemForm, itemSummary: nextValue })} /></label>
           <button type="submit">Add item</button>
         </form>}
       </DetailModal>}
@@ -332,8 +334,8 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
       <div className="form-grid">
         <label>From<input type="date" value={auditFilter.from} onChange={e => setAuditFilter({ ...auditFilter, from: e.target.value })} /></label>
         <label>To<input type="date" value={auditFilter.to} onChange={e => setAuditFilter({ ...auditFilter, to: e.target.value })} /></label>
-        <label>Entity<input value={auditFilter.entity} onChange={e => setAuditFilter({ ...auditFilter, entity: e.target.value })} placeholder="e.g. actions, documents" /></label>
-        <label>Action<input value={auditFilter.action} onChange={e => setAuditFilter({ ...auditFilter, action: e.target.value })} placeholder="e.g. create, approve" /></label>
+        <label>Entity<TextField value={auditFilter.entity} onValue={nextValue => setAuditFilter({ ...auditFilter, entity: nextValue })} placeholder="e.g. actions, documents" /></label>
+        <label>Action<TextField value={auditFilter.action} onValue={nextValue => setAuditFilter({ ...auditFilter, action: nextValue })} placeholder="e.g. create, approve" /></label>
         <button type="button" onClick={loadAudit}>Load audit trail</button>
       </div>
       {auditSummary && <div className="cards"><div className="card"><h4>Total events</h4><p className="metric">{auditSummary.total}</p></div></div>}
@@ -347,9 +349,9 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
         <label>Review date<input type="date" value={auditReviewForm.reviewDate} onChange={e => setAuditReviewForm({ ...auditReviewForm, reviewDate: e.target.value })} required /></label>
         <label>From<input type="date" value={auditReviewForm.dateFrom} onChange={e => setAuditReviewForm({ ...auditReviewForm, dateFrom: e.target.value })} required /></label>
         <label>To<input type="date" value={auditReviewForm.dateTo} onChange={e => setAuditReviewForm({ ...auditReviewForm, dateTo: e.target.value })} required /></label>
-        <label>Module<input value={auditReviewForm.moduleKey} onChange={e => setAuditReviewForm({ ...auditReviewForm, moduleKey: e.target.value })} /></label>
+        <label>Module<TextField value={auditReviewForm.moduleKey} onValue={nextValue => setAuditReviewForm({ ...auditReviewForm, moduleKey: nextValue })} /></label>
         <label><input type="checkbox" checked={auditReviewForm.unusualActivityNoted} onChange={e => setAuditReviewForm({ ...auditReviewForm, unusualActivityNoted: e.target.checked })} /> Unusual activity noted</label>
-        <label>Findings summary<textarea value={auditReviewForm.findingsSummary} onChange={e => setAuditReviewForm({ ...auditReviewForm, findingsSummary: e.target.value })} /></label>
+        <label>Findings summary<TextField as="textarea" value={auditReviewForm.findingsSummary} onValue={nextValue => setAuditReviewForm({ ...auditReviewForm, findingsSummary: nextValue })} /></label>
         <button type="submit">Create audit review</button>
       </form>}
       <table className="data-table"><thead><tr><th>Number</th><th>Date</th><th>Period</th><th>Module</th><th>Unusual</th><th>Findings</th><th>Linked action</th><th>Status</th><th></th></tr></thead><tbody>
@@ -362,12 +364,12 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
 
     {tab === 'Retention Rules' && <>
       {can('records_reports.retention', 'create') && <form className="form-grid" onSubmit={submitRule}>
-        <label>Rule name<input value={ruleForm.ruleName} onChange={e => setRuleForm({ ...ruleForm, ruleName: e.target.value })} required /></label>
-        <label>Module<input value={ruleForm.moduleKey} onChange={e => setRuleForm({ ...ruleForm, moduleKey: e.target.value })} required /></label>
-        <label>Record type<input value={ruleForm.recordType} onChange={e => setRuleForm({ ...ruleForm, recordType: e.target.value })} required /></label>
+        <label>Rule name<TextField value={ruleForm.ruleName} onValue={nextValue => setRuleForm({ ...ruleForm, ruleName: nextValue })} required /></label>
+        <label>Module<TextField value={ruleForm.moduleKey} onValue={nextValue => setRuleForm({ ...ruleForm, moduleKey: nextValue })} required /></label>
+        <label>Record type<TextField value={ruleForm.recordType} onValue={nextValue => setRuleForm({ ...ruleForm, recordType: nextValue })} required /></label>
         <label>Retention months<input type="number" value={ruleForm.retentionPeriodMonths} onChange={e => setRuleForm({ ...ruleForm, retentionPeriodMonths: e.target.value })} required /></label>
         <label>Archive action<select value={ruleForm.archiveAction} onChange={e => setRuleForm({ ...ruleForm, archiveAction: e.target.value })}>{ARCHIVE_ACTIONS.map(a => <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>)}</select></label>
-        <label>Notes<textarea value={ruleForm.notes} onChange={e => setRuleForm({ ...ruleForm, notes: e.target.value })} /></label>
+        <label>Notes<TextField as="textarea" value={ruleForm.notes} onValue={nextValue => setRuleForm({ ...ruleForm, notes: nextValue })} /></label>
         <button type="submit">Create rule</button>
       </form>}
       <table className="data-table"><thead><tr><th>Rule</th><th>Module</th><th>Record type</th><th>Months</th><th>Archive action</th><th>Active</th><th></th></tr></thead><tbody>
@@ -382,12 +384,12 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
     {tab === 'Backup/Restore Checks' && <>
       {can('records_reports.retention', 'create') && <form className="form-grid" onSubmit={submitBackup}>
         <label>Check date<input type="date" value={backupForm.checkDate} onChange={e => setBackupForm({ ...backupForm, checkDate: e.target.value })} required /></label>
-        <label>Check type<input value={backupForm.checkType} onChange={e => setBackupForm({ ...backupForm, checkType: e.target.value })} required placeholder="scheduled / ad-hoc / restore_test" /></label>
-        <label>Backup location<input value={backupForm.backupLocation} onChange={e => setBackupForm({ ...backupForm, backupLocation: e.target.value })} /></label>
-        <label>Backup file<input value={backupForm.backupFileName} onChange={e => setBackupForm({ ...backupForm, backupFileName: e.target.value })} /></label>
+        <label>Check type<TextField value={backupForm.checkType} onValue={nextValue => setBackupForm({ ...backupForm, checkType: nextValue })} required placeholder="scheduled / ad-hoc / restore_test" /></label>
+        <label>Backup location<TextField value={backupForm.backupLocation} onValue={nextValue => setBackupForm({ ...backupForm, backupLocation: nextValue })} /></label>
+        <label>Backup file<TextField value={backupForm.backupFileName} onValue={nextValue => setBackupForm({ ...backupForm, backupFileName: nextValue })} /></label>
         <label>Backup status<select value={backupForm.backupStatus} onChange={e => setBackupForm({ ...backupForm, backupStatus: e.target.value })}><option value="passed">passed</option><option value="failed">failed</option><option value="partial">partial</option></select></label>
         <label>Restore test status<select value={backupForm.restoreTestStatus} onChange={e => setBackupForm({ ...backupForm, restoreTestStatus: e.target.value })}><option value="">—</option><option value="passed">passed</option><option value="failed">failed</option><option value="not_performed">not performed</option></select></label>
-        <label>Findings<textarea value={backupForm.findings} onChange={e => setBackupForm({ ...backupForm, findings: e.target.value })} /></label>
+        <label>Findings<TextField as="textarea" value={backupForm.findings} onValue={nextValue => setBackupForm({ ...backupForm, findings: nextValue })} /></label>
         <button type="submit">Log backup check</button>
       </form>}
       <table className="data-table"><thead><tr><th>Number</th><th>Date</th><th>Type</th><th>Backup</th><th>Restore test</th><th>Status</th><th>Findings</th><th></th></tr></thead><tbody>
@@ -400,11 +402,11 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
       {can('records_reports.retention', 'create') && <button type="button" onClick={runBasicScan}>Run basic scan</button>}
       {can('records_reports.retention', 'create') && <form className="form-grid" onSubmit={submitIntegrity} style={{ marginTop: 12 }}>
         <label>Check date<input type="date" value={integrityForm.checkDate} onChange={e => setIntegrityForm({ ...integrityForm, checkDate: e.target.value })} required /></label>
-        <label>Check type<input value={integrityForm.checkType} onChange={e => setIntegrityForm({ ...integrityForm, checkType: e.target.value })} required /></label>
-        <label>Module<input value={integrityForm.moduleKey} onChange={e => setIntegrityForm({ ...integrityForm, moduleKey: e.target.value })} /></label>
+        <label>Check type<TextField value={integrityForm.checkType} onValue={nextValue => setIntegrityForm({ ...integrityForm, checkType: nextValue })} required /></label>
+        <label>Module<TextField value={integrityForm.moduleKey} onValue={nextValue => setIntegrityForm({ ...integrityForm, moduleKey: nextValue })} /></label>
         <label>Records checked<input type="number" value={integrityForm.recordsChecked} onChange={e => setIntegrityForm({ ...integrityForm, recordsChecked: e.target.value })} /></label>
         <label>Issues found<input type="number" value={integrityForm.issuesFound} onChange={e => setIntegrityForm({ ...integrityForm, issuesFound: e.target.value })} /></label>
-        <label>Findings summary<textarea value={integrityForm.findingsSummary} onChange={e => setIntegrityForm({ ...integrityForm, findingsSummary: e.target.value })} /></label>
+        <label>Findings summary<TextField as="textarea" value={integrityForm.findingsSummary} onValue={nextValue => setIntegrityForm({ ...integrityForm, findingsSummary: nextValue })} /></label>
         <button type="submit">Log manual check</button>
       </form>}
       <table className="data-table"><thead><tr><th>Number</th><th>Date</th><th>Type</th><th>Module</th><th>Records</th><th>Issues</th><th>Status</th><th>Findings</th><th></th></tr></thead><tbody>

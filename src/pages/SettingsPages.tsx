@@ -35,6 +35,8 @@ import type {
   EquipmentPattern, EquipmentSegment,
   SystemConnectivity, AppMode, SyncStatus, SyncResult, RemoteCloudUser,
 } from '../../shared/types/api';
+import TextField from '../components/ui/TextField';
+import { Notice } from '../components/ui/Feedback';
 
 // Maps an organogram position title to the lab role(s) whose default permissions
 // it should inherit, so that selecting a position pre-fills the authorization grid
@@ -134,19 +136,19 @@ export function RegisterStaff() {
     <div className="card">
       <h3>Register New Staff</h3>
       <p>Onboard a staff member in one step. This record feeds <strong>Personnel Management</strong>, and the choices below link the person to <strong>Positions &amp; Organogram</strong>, <strong>Users &amp; Access</strong> (optional login), and <strong>Access Control</strong> (the access profile they work under).</p>
-      {error && <div className="error">{error}</div>}
-      {success && <div className="notice-ok">{success}</div>}
+      {error && <Notice kind="error">{error}</Notice>}
+      {success && <Notice kind="success">{success}</Notice>}
 
       {can('settings', 'create') && <form className="form" onSubmit={submit}>
         <fieldset className="reg-section">
           <legend>Personal &amp; role details</legend>
           <div className="form-grid">
-            <label>First name<input value={form.firstName} onChange={e => setForm({ ...form, firstName: e.target.value })} required /></label>
-            <label>Surname<input value={form.surname} onChange={e => setForm({ ...form, surname: e.target.value })} required /></label>
-            <label>Other names<input value={form.otherNames} onChange={e => setForm({ ...form, otherNames: e.target.value })} placeholder="Optional" /></label>
-            <label>Employee no<input value={form.employeeNo} onChange={e => setForm({ ...form, employeeNo: e.target.value })} placeholder="Optional" /></label>
-            <label>Email<input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="Used for self-link to login" /></label>
-            <label>Phone<input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></label>
+            <label>First name<TextField value={form.firstName} onValue={nextValue => setForm({ ...form, firstName: nextValue })} required /></label>
+            <label>Surname<TextField value={form.surname} onValue={nextValue => setForm({ ...form, surname: nextValue })} required /></label>
+            <label>Other names<TextField value={form.otherNames} onValue={nextValue => setForm({ ...form, otherNames: nextValue })} placeholder="Optional" /></label>
+            <label>Employee no<TextField value={form.employeeNo} onValue={nextValue => setForm({ ...form, employeeNo: nextValue })} placeholder="Optional" /></label>
+            <label>Email<TextField type="email" value={form.email} onValue={nextValue => setForm({ ...form, email: nextValue })} placeholder="Used for self-link to login" /></label>
+            <label>Phone<TextField value={form.phone} onValue={nextValue => setForm({ ...form, phone: nextValue })} /></label>
             <label>Section / Unit<select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })}><option value="">Unassigned</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
           </div>
         </fieldset>
@@ -169,8 +171,8 @@ export function RegisterStaff() {
           <legend>Login account (Users &amp; Access)</legend>
           <label className="toggle"><input type="checkbox" checked={createUser} onChange={e => setCreateUser(e.target.checked)} /> Create a system login account linked to this staff member</label>
           {createUser && <div className="form-grid">
-            <label>Username<input value={account.username} onChange={e => setAccount({ ...account, username: e.target.value })} required={createUser} /></label>
-            <label>Password<input type="password" minLength={8} value={account.password} onChange={e => setAccount({ ...account, password: e.target.value })} required={createUser} placeholder="Min 8 characters" /></label>
+            <label>Username<TextField value={account.username} onValue={nextValue => setAccount({ ...account, username: nextValue })} required={createUser} /></label>
+            <label>Password<TextField type="password" minLength={8} value={account.password} onValue={nextValue => setAccount({ ...account, password: nextValue })} required={createUser} placeholder="Min 8 characters" /></label>
             <label>Role<select value={account.roleId} onChange={e => setAccount({ ...account, roleId: e.target.value })} required={createUser}><option value="">Select role…</option>{roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select></label>
           </div>}
         </fieldset>
@@ -290,8 +292,8 @@ export function UsersAccess(){
   return <><PasswordResetApprovals />
   <div className="card"><h3>Users &amp; Access</h3>
     <p>Create login accounts, link them to staff records, and change what role somebody holds. To onboard a whole new person (staff + account + positions) use the <strong>Register New Staff</strong> tab. Click a row to link its staff record, or <strong>Manage account</strong> to change the role, hand over a password, or deactivate it.</p>
-    {error && <div className="error">{error}</div>}
-    {success && <div className="notice-ok">{success}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
+    {success && <Notice kind="success">{success}</Notice>}
     {can('settings', 'create') && <form className="form" onSubmit={submit}>
       <label>Full name<input name="fullName" required/></label>
       <label>Username<input name="username" required/></label>
@@ -398,7 +400,7 @@ export function Positions(){
 
   return <div>
     <div className="tabs"><button className={view==='list'?'active':''} onClick={()=>setView('list')}>Positions list</button><button className={view==='organogram'?'active':''} onClick={()=>setView('organogram')}>Organogram</button></div>
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {view==='list' && <div className="grid cols-2">
       <div className="card"><h3>Positions &amp; Organogram</h3><p>Create positions and assign reporting lines. Not every laboratory has every position — deactivate the ones you don't use. Staff are mapped here and during <Link to="/settings/people">Register New Staff</Link>.</p>
@@ -412,7 +414,7 @@ export function Positions(){
           {positions.map(p => editing?.id===p.id
             ? <tr key={p.id}><td colSpan={4}>
                 {can('settings', 'edit') && <form className="form inline-edit" onSubmit={saveEdit}>
-                  <label>Title<input value={editForm.title} onChange={e=>setEditForm({...editForm,title:e.target.value})} required/></label>
+                  <label>Title<TextField value={editForm.title} onValue={nextValue => setEditForm({...editForm,title:nextValue})} required/></label>
                   <label>Reports to<select value={editForm.reportsToPositionId} onChange={e=>setEditForm({...editForm,reportsToPositionId:e.target.value})}><option value="">None</option>{positions.filter(x=>x.id!==p.id).map(x=><option value={x.id} key={x.id}>{x.title}</option>)}</select></label>
                   <label className="toggle"><input type="checkbox" checked={editForm.isActive} onChange={e=>setEditForm({...editForm,isActive:e.target.checked})}/> Active</label>
                   <button type="submit">Save</button>
@@ -487,7 +489,7 @@ function RankConfig() {
   return <div className="card" style={{ marginTop: 16 }}>
     <h3>Professional rank order</h3>
     <p className="hint">The automatic hierarchy under each Unit Head orders staff of the same cadre by these ranks (top = highest). Staff with no explicit rank are matched against their designation.</p>
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
     <table className="data-table" style={{ maxWidth: 520 }}><thead><tr><th>#</th><th>Rank</th><th>Active</th><th></th></tr></thead><tbody>
       {[...ranks].sort((a, b) => a.sortOrder - b.sortOrder).map((r, i, arr) => <tr key={r.id} style={{ opacity: r.isActive ? 1 : 0.5 }}>
         <td>{i + 1}</td><td>{r.name}</td>
@@ -501,7 +503,7 @@ function RankConfig() {
       {ranks.length === 0 && <tr><td colSpan={4} className="hint">No ranks configured.</td></tr>}
     </tbody></table>
     {can('settings', 'edit') && <form className="org-add-root" style={{ marginTop: 10 }} onSubmit={add}>
-      <input placeholder="Add a rank (e.g. Senior Medical Laboratory Scientist)…" value={name} onChange={e => setName(e.target.value)} />
+      <TextField placeholder="Add a rank (e.g. Senior Medical Laboratory Scientist)…" value={name} onValue={nextValue => setName(nextValue)} />
       <button type="submit">Add rank</button>
     </form>}
   </div>;
@@ -574,11 +576,11 @@ function Organogram({ staff, onChanged }: { staff: Staff[]; onChanged: () => voi
       <span className="leg"><span className="org-swatch org-staff-swatch" />Auto staff (by cadre &amp; rank)</span>
     </div>
     <form className="org-add-root no-print" onSubmit={addRoot}>
-      <input placeholder="Add a top-level role (e.g. Laboratory Manager)…" value={newRoot} onChange={e=>setNewRoot(e.target.value)} />
+      <TextField placeholder="Add a top-level role (e.g. Laboratory Manager)…" value={newRoot} onValue={nextValue => setNewRoot(nextValue)} />
       <button type="submit">Add top role</button>
     </form>
-    {error && <div className="error no-print">{error}</div>}
-    {success && <div className="notice-ok no-print">{success}</div>}
+    {error && <Notice kind="error" className="no-print">{error}</Notice>}
+    {success && <Notice kind="success" className="no-print">{success}</Notice>}
 
     <div className="org-viewport" ref={viewportRef}>
       <div className="org-print-area" ref={chartRef} style={{ zoom } as unknown as React.CSSProperties}>
@@ -638,7 +640,9 @@ function OrgNodeEditor({ node, ctx }: { node: OrgNodeData; ctx: OrgCtx }) {
   const rt = roleType(node.title);
   const reportOptions = ctx.nodes.filter(n => n.id !== node.id && !ctx.descendants(node.id).has(n.id));
 
-  function saveTitle(){ const t=title.trim(); if(t && t!==node.title) ctx.call(`/positions/${node.id}`,{method:'PUT',body:JSON.stringify({title:t})},'Title updated.'); }
+  // Takes the text it is given: the box hands over what was typed as it
+  // loses focus, and React has not re-rendered this closure by then.
+  function saveTitle(typed = title){ const t=typed.trim(); if(t && t!==node.title) ctx.call(`/positions/${node.id}`,{method:'PUT',body:JSON.stringify({title:t})},'Title updated.'); }
   function assign(staffId:string, assignmentType:'primary'|'deputy'|'secondary'){ if(staffId) ctx.call(`/positions/${node.id}/occupant`,{method:'POST',body:JSON.stringify({staffId:Number(staffId),assignmentType})}, assignmentType==='deputy'?'Deputy assigned.':'Occupant assigned.'); }
   function removeOcc(staffId:number){ ctx.call(`/positions/${node.id}/occupant/${staffId}`,{method:'DELETE'},'Removed.'); }
   function addChildRole(e:FormEvent){ e.preventDefault(); const t=child.trim(); if(!t) return; ctx.call('/positions',{method:'POST',body:JSON.stringify({title:t, reportsToPositionId:node.id})},'Subordinate role added.').then(ok=>{ if(ok) setChild(''); }); }
@@ -646,7 +650,7 @@ function OrgNodeEditor({ node, ctx }: { node: OrgNodeData; ctx: OrgCtx }) {
   const freeStaff = ctx.staff.filter(s => !!s.isActive);
 
   return <div className={`org-node org-node-edit rt-${rt}`}>
-    <input className="org-title-input" value={title} onChange={e=>setTitle(e.target.value)} onBlur={saveTitle} onKeyDown={e=>{ if(e.key==='Enter'){ e.preventDefault(); (e.target as HTMLInputElement).blur(); } }} aria-label="Role title" />
+    <TextField className="org-title-input" value={title} onValue={nextValue => setTitle(nextValue)} onBlur={e => saveTitle((e.target as HTMLInputElement).value)} onKeyDown={e=>{ if(e.key==='Enter'){ e.preventDefault(); (e.target as HTMLInputElement).blur(); } }} aria-label="Role title" />
 
     <div className="org-edit-row">
       <span className="lab">Holder</span>
@@ -684,7 +688,7 @@ function OrgNodeEditor({ node, ctx }: { node: OrgNodeData; ctx: OrgCtx }) {
     <label className="org-edit-row toggle"><input type="checkbox" checked={node.isActive===1} onChange={e=>ctx.call(`/positions/${node.id}`,{method:'PUT',body:JSON.stringify({isActive:e.target.checked})})} /> Active</label>
 
     <form className="org-edit-row" onSubmit={addChildRole}>
-      <input placeholder="Add subordinate role…" value={child} onChange={e=>setChild(e.target.value)} />
+      <TextField placeholder="Add subordinate role…" value={child} onValue={nextValue => setChild(nextValue)} />
       <button type="submit" className="tiny">Add</button>
     </form>
 
@@ -757,8 +761,8 @@ export function ConfigListsPage() {
     <div className="card">
       <div className="panel-head"><h3>Dropdown Lists</h3></div>
       <p>The words the laboratory chooses from in its forms. Rename or retire the ones you don't use, and add your own — these feed Equipment and the rest of the system straight away.</p>
-      {error && <div className="error">{error}</div>}
-      {success && <div className="notice-ok">{success}</div>}
+      {error && <Notice kind="error">{error}</Notice>}
+      {success && <Notice kind="success">{success}</Notice>}
 
       <div className="tabs" style={{ marginTop: 8 }}>
         {lists.map(l => <button key={l.key} className={activeKey === l.key ? 'active' : ''} onClick={() => { setActiveKey(l.key); setEditing(null); }}>{l.label}</button>)}
@@ -769,7 +773,7 @@ export function ConfigListsPage() {
 
         <form className="form" onSubmit={addOption} style={{ marginTop: 10 }}>
           <div className="form-grid">
-            <label>New option<input value={draft.label} onChange={e => setDraft({ ...draft, label: e.target.value })} required placeholder="e.g. Molecular analyser" /></label>
+            <label>New option<TextField value={draft.label} onValue={nextValue => setDraft({ ...draft, label: nextValue })} required placeholder="e.g. Molecular analyser" /></label>
             {list.archetypeOf && <label>Behaves as<select value={draft.archetype} onChange={e => setDraft({ ...draft, archetype: e.target.value })} required>
               <option value="">— choose behaviour —</option>
               {list.archetypeOf.map(a => <option key={a} value={a}>{archetypeLabel(a)}</option>)}
@@ -784,7 +788,7 @@ export function ConfigListsPage() {
           <tbody>
             {list.options.map(o => editing === o.id ? (
               <tr key={o.id} className="editing-row">
-                <td><input value={editDraft.label} onChange={e => setEditDraft({ ...editDraft, label: e.target.value })} /></td>
+                <td><TextField value={editDraft.label} onValue={nextValue => setEditDraft({ ...editDraft, label: nextValue })} /></td>
                 {list.archetypeOf && <td><select value={editDraft.archetype} onChange={e => setEditDraft({ ...editDraft, archetype: e.target.value })}>{list.archetypeOf.map(a => <option key={a} value={a}>{archetypeLabel(a)}</option>)}</select></td>}
                 <td colSpan={2}>{can('settings', 'edit') && <button onClick={() => saveEdit(o.id)}>Save</button>} <button className="secondary" onClick={() => setEditing(null)}>Cancel</button></td>
               </tr>
@@ -865,19 +869,19 @@ export function SectionConfig() {
         <button onClick={() => setShowNew(v => !v)}>{showNew ? 'Cancel' : '+ New unit'}</button>
       </div>
       <p>Configure every laboratory unit in one place. Not all laboratories run every unit — create only the units you operate, define what each one does (and does not) do, and set up its test menu, equipment and stock. These feed Process Management, Equipment, Supplier &amp; Inventory and Personnel automatically.</p>
-      {error && <div className="error">{error}</div>}
-      {success && <div className="notice-ok">{success}</div>}
+      {error && <Notice kind="error">{error}</Notice>}
+      {success && <Notice kind="success">{success}</Notice>}
 
       {showNew && <form className="form" onSubmit={createSection}>
         <div className="form-grid">
-          <label>Unit / section name<input value={newForm.name} onChange={e => setNewForm({ ...newForm, name: e.target.value })} required placeholder="e.g. Molecular Biology" /></label>
+          <label>Unit / section name<TextField value={newForm.name} onValue={nextValue => setNewForm({ ...newForm, name: nextValue })} required placeholder="e.g. Molecular Biology" /></label>
           <label>Department<select value={newForm.departmentId} onChange={e => setNewForm({ ...newForm, departmentId: e.target.value })}><option value="">Default</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
-          <label>Unit code<input value={newForm.code} onChange={e => setNewForm({ ...newForm, code: e.target.value })} placeholder="e.g. MOL" /></label>
-          <label>Operating hours<input value={newForm.operatingHours} onChange={e => setNewForm({ ...newForm, operatingHours: e.target.value })} placeholder="e.g. 24/7 or Mon–Fri 08:00–17:00" /></label>
+          <label>Unit code<TextField value={newForm.code} onValue={nextValue => setNewForm({ ...newForm, code: nextValue })} placeholder="e.g. MOL" /></label>
+          <label>Operating hours<TextField value={newForm.operatingHours} onValue={nextValue => setNewForm({ ...newForm, operatingHours: nextValue })} placeholder="e.g. 24/7 or Mon–Fri 08:00–17:00" /></label>
           <label>Unit head<select value={newForm.headStaffId} onChange={e => setNewForm({ ...newForm, headStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         </div>
-        <label>Service summary<input value={newForm.serviceSummary} onChange={e => setNewForm({ ...newForm, serviceSummary: e.target.value })} placeholder="Short description of what this unit provides" /></label>
-        <label>Description / scope<textarea value={newForm.description} onChange={e => setNewForm({ ...newForm, description: e.target.value })} /></label>
+        <label>Service summary<TextField value={newForm.serviceSummary} onValue={nextValue => setNewForm({ ...newForm, serviceSummary: nextValue })} placeholder="Short description of what this unit provides" /></label>
+        <label>Description / scope<TextField as="textarea" value={newForm.description} onValue={nextValue => setNewForm({ ...newForm, description: nextValue })} /></label>
         <button type="submit">Create unit</button>
       </form>}
 
@@ -943,14 +947,14 @@ function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onCl
 
     {subtab === 'Profile' && <form className="form" onSubmit={e => { e.preventDefault(); call(`/section-config/sections/${sectionId}`, { method: 'PUT', body: JSON.stringify(profile) }, 'Unit profile updated.'); }}>
       <div className="form-grid">
-        <label>Unit name<input value={profile.name} onChange={e => setProfile({ ...profile, name: e.target.value })} required /></label>
-        <label>Unit code<input value={profile.code} onChange={e => setProfile({ ...profile, code: e.target.value })} /></label>
+        <label>Unit name<TextField value={profile.name} onValue={nextValue => setProfile({ ...profile, name: nextValue })} required /></label>
+        <label>Unit code<TextField value={profile.code} onValue={nextValue => setProfile({ ...profile, code: nextValue })} /></label>
         <label>Department<select value={profile.departmentId} onChange={e => setProfile({ ...profile, departmentId: e.target.value })}><option value="">Default</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
         <label>Unit head<select value={profile.headStaffId} onChange={e => setProfile({ ...profile, headStaffId: e.target.value })}><option value="">—</option>{staff.map(st => <option key={st.id} value={st.id}>{st.fullName}</option>)}</select></label>
-        <label>Operating hours<input value={profile.operatingHours} onChange={e => setProfile({ ...profile, operatingHours: e.target.value })} /></label>
+        <label>Operating hours<TextField value={profile.operatingHours} onValue={nextValue => setProfile({ ...profile, operatingHours: nextValue })} /></label>
       </div>
-      <label>Service summary<input value={profile.serviceSummary} onChange={e => setProfile({ ...profile, serviceSummary: e.target.value })} /></label>
-      <label>Description / scope<textarea value={profile.description} onChange={e => setProfile({ ...profile, description: e.target.value })} /></label>
+      <label>Service summary<TextField value={profile.serviceSummary} onValue={nextValue => setProfile({ ...profile, serviceSummary: nextValue })} /></label>
+      <label>Description / scope<TextField as="textarea" value={profile.description} onValue={nextValue => setProfile({ ...profile, description: nextValue })} /></label>
       <button type="submit">Save profile</button>
     </form>}
 
@@ -958,10 +962,10 @@ function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onCl
       <p className="hint">Define what this unit does and explicitly does not do. This makes the lab's true scope clear and drives section-specific configuration.</p>
       <form className="form" onSubmit={e => { e.preventDefault(); call(`/section-config/sections/${sectionId}/services`, { method: 'POST', body: JSON.stringify({ ...svc, isOffered: svc.isOffered === 'yes' }) }, 'Service saved.').then(ok => { if (ok) setSvc({ name: '', category: '', isOffered: 'yes', notes: '' }); }); }}>
         <div className="form-grid">
-          <label>Service / activity<input value={svc.name} onChange={e => setSvc({ ...svc, name: e.target.value })} required placeholder="e.g. Full Blood Count, Blood Culture" /></label>
-          <label>Category<input value={svc.category} onChange={e => setSvc({ ...svc, category: e.target.value })} placeholder="e.g. Routine, Referral" /></label>
+          <label>Service / activity<TextField value={svc.name} onValue={nextValue => setSvc({ ...svc, name: nextValue })} required placeholder="e.g. Full Blood Count, Blood Culture" /></label>
+          <label>Category<TextField value={svc.category} onValue={nextValue => setSvc({ ...svc, category: nextValue })} placeholder="e.g. Routine, Referral" /></label>
           <label>Offered here?<select value={svc.isOffered} onChange={e => setSvc({ ...svc, isOffered: e.target.value })}><option value="yes">Yes — done in this unit</option><option value="no">No — not offered / referred out</option></select></label>
-          <label>Notes<input value={svc.notes} onChange={e => setSvc({ ...svc, notes: e.target.value })} /></label>
+          <label>Notes<TextField value={svc.notes} onValue={nextValue => setSvc({ ...svc, notes: nextValue })} /></label>
         </div>
         <button type="submit">Add service</button>
       </form>
@@ -985,11 +989,11 @@ function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onCl
       <p className="hint">Equipment registered here is scoped to this unit and appears in the <Link to="/equipment">Equipment Management</Link> module for scheduling and maintenance.</p>
       <form className="form" onSubmit={e => { e.preventDefault(); call(`/section-config/sections/${sectionId}/equipment`, { method: 'POST', body: JSON.stringify(equip) }, 'Equipment registered.').then(ok => { if (ok) setEquip({ name: '', category: '', manufacturer: '', model: '', serialNumber: '' }); }); }}>
         <div className="form-grid">
-          <label>Equipment name<input value={equip.name} onChange={e => setEquip({ ...equip, name: e.target.value })} required /></label>
-          <label>Category<input value={equip.category} onChange={e => setEquip({ ...equip, category: e.target.value })} placeholder="e.g. Analyser, Centrifuge" /></label>
-          <label>Manufacturer<input value={equip.manufacturer} onChange={e => setEquip({ ...equip, manufacturer: e.target.value })} /></label>
-          <label>Model<input value={equip.model} onChange={e => setEquip({ ...equip, model: e.target.value })} /></label>
-          <label>Serial number<input value={equip.serialNumber} onChange={e => setEquip({ ...equip, serialNumber: e.target.value })} /></label>
+          <label>Equipment name<TextField value={equip.name} onValue={nextValue => setEquip({ ...equip, name: nextValue })} required /></label>
+          <label>Category<TextField value={equip.category} onValue={nextValue => setEquip({ ...equip, category: nextValue })} placeholder="e.g. Analyser, Centrifuge" /></label>
+          <label>Manufacturer<TextField value={equip.manufacturer} onValue={nextValue => setEquip({ ...equip, manufacturer: nextValue })} /></label>
+          <label>Model<TextField value={equip.model} onValue={nextValue => setEquip({ ...equip, model: nextValue })} /></label>
+          <label>Serial number<TextField value={equip.serialNumber} onValue={nextValue => setEquip({ ...equip, serialNumber: nextValue })} /></label>
         </div>
         <button type="submit">Register equipment</button>
       </form>
@@ -1007,10 +1011,10 @@ function SectionDetailPanel({ detail, departments, staff, subtab, onSubtab, onCl
       <p className="hint">Stock and reagents set here are scoped to this unit and managed in the <Link to="/supplier-inventory">Supplier &amp; Inventory</Link> module.</p>
       <form className="form" onSubmit={e => { e.preventDefault(); call(`/section-config/sections/${sectionId}/inventory`, { method: 'POST', body: JSON.stringify(item) }, 'Stock item added.').then(ok => { if (ok) setItem({ name: '', category: '', quantity: '', unit: '', reorderLevel: '', expiryDate: '' }); }); }}>
         <div className="form-grid">
-          <label>Item name<input value={item.name} onChange={e => setItem({ ...item, name: e.target.value })} required /></label>
-          <label>Category<input value={item.category} onChange={e => setItem({ ...item, category: e.target.value })} placeholder="e.g. Reagent, Consumable" /></label>
+          <label>Item name<TextField value={item.name} onValue={nextValue => setItem({ ...item, name: nextValue })} required /></label>
+          <label>Category<TextField value={item.category} onValue={nextValue => setItem({ ...item, category: nextValue })} placeholder="e.g. Reagent, Consumable" /></label>
           <label>Quantity<input type="number" value={item.quantity} onChange={e => setItem({ ...item, quantity: e.target.value })} /></label>
-          <label>Unit<input value={item.unit} onChange={e => setItem({ ...item, unit: e.target.value })} placeholder="e.g. boxes, vials" /></label>
+          <label>Unit<TextField value={item.unit} onValue={nextValue => setItem({ ...item, unit: nextValue })} placeholder="e.g. boxes, vials" /></label>
           <label>Reorder level<input type="number" value={item.reorderLevel} onChange={e => setItem({ ...item, reorderLevel: e.target.value })} /></label>
           <label>Expiry date<input type="date" value={item.expiryDate} onChange={e => setItem({ ...item, expiryDate: e.target.value })} /></label>
         </div>
@@ -1156,9 +1160,9 @@ function SectionTestMenu({ detail, sectionId, call }: {
   const { can } = usePermissions();
     if (editing === t.id) return (
       <tr key={t.id} className="editing-row">
-        <td style={isComponent ? { paddingLeft: 22 } : undefined}><input value={editForm.testName} onChange={e => setEditForm({ ...editForm, testName: e.target.value })} /></td>
-        <td><input value={editForm.sampleType} onChange={e => setEditForm({ ...editForm, sampleType: e.target.value })} style={{ width: 120 }} /></td>
-        <td><input value={editForm.methodName} onChange={e => setEditForm({ ...editForm, methodName: e.target.value })} style={{ width: 120 }} /></td>
+        <td style={isComponent ? { paddingLeft: 22 } : undefined}><TextField value={editForm.testName} onValue={nextValue => setEditForm({ ...editForm, testName: nextValue })} /></td>
+        <td><TextField value={editForm.sampleType} onValue={nextValue => setEditForm({ ...editForm, sampleType: nextValue })} style={{ width: 120 }} /></td>
+        <td><TextField value={editForm.methodName} onValue={nextValue => setEditForm({ ...editForm, methodName: nextValue })} style={{ width: 120 }} /></td>
         <td>{autoSelect(editForm.automation, v => setEditForm({ ...editForm, automation: v, equipmentId: automationUsesEquipment(v) ? editForm.equipmentId : '' }))}</td>
         <td>{analyserSelect(editForm.automation, editForm.equipmentId, v => setEditForm({ ...editForm, equipmentId: v }))}</td>
         <td><input type="number" value={editForm.tatTargetMinutes} onChange={e => setEditForm({ ...editForm, tatTargetMinutes: e.target.value })} style={{ width: 60 }} /></td>
@@ -1202,8 +1206,8 @@ function SectionTestMenu({ detail, sectionId, call }: {
 
     {kind === 'single' && <form className="form" onSubmit={submitSingle}>
       <div className="form-grid">
-        <label>Test name<input value={single.testName} onChange={e => setSingle({ ...single, testName: e.target.value })} required placeholder="e.g. Sodium" /></label>
-        <label>Specimen<input value={single.sampleType} onChange={e => setSingle({ ...single, sampleType: e.target.value })} placeholder="e.g. Serum, EDTA blood" /></label>
+        <label>Test name<TextField value={single.testName} onValue={nextValue => setSingle({ ...single, testName: nextValue })} required placeholder="e.g. Sodium" /></label>
+        <label>Specimen<TextField value={single.sampleType} onValue={nextValue => setSingle({ ...single, sampleType: nextValue })} placeholder="e.g. Serum, EDTA blood" /></label>
         <label>How performed<select value={single.automation} onChange={e => setSingle({ ...single, automation: e.target.value, equipmentId: automationUsesEquipment(e.target.value) ? single.equipmentId : '' })}>
           <option value="">— select —</option>
           {AUTOMATION_LEVELS.map(a => <option key={a} value={a}>{AUTOMATION_LABELS[a]}</option>)}
@@ -1212,7 +1216,7 @@ function SectionTestMenu({ detail, sectionId, call }: {
           <option value="">{analysers.length ? '— select analyser —' : 'No diagnostic equipment in this unit'}</option>
           {analysers.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select></label>}
-        <label>Method<input value={single.methodName} onChange={e => setSingle({ ...single, methodName: e.target.value })} placeholder="optional" /></label>
+        <label>Method<TextField value={single.methodName} onValue={nextValue => setSingle({ ...single, methodName: nextValue })} placeholder="optional" /></label>
         <label>TAT target (min)<input type="number" value={single.tatTargetMinutes} onChange={e => setSingle({ ...single, tatTargetMinutes: e.target.value })} /></label>
       </div>
       {single.automation && <p className="hint">{AUTOMATION_HINTS[single.automation as never]}</p>}
@@ -1221,17 +1225,17 @@ function SectionTestMenu({ detail, sectionId, call }: {
 
     {kind === 'panel' && <form className="form" onSubmit={submitPanel}>
       <div className="form-grid">
-        <label>Panel / profile name<input value={panel.testName} onChange={e => setPanel({ testName: e.target.value })} required placeholder="e.g. Renal Function Test" /></label>
+        <label>Panel / profile name<TextField value={panel.testName} onValue={nextValue => setPanel({ testName: nextValue })} required placeholder="e.g. Renal Function Test" /></label>
       </div>
 
       <p className="hint" style={{ margin: '2px 0 6px' }}>List the component tests. Each keeps its own specimen, method and analyser — tick the ones a shared value should apply to, set it below, and press <em>Apply to ticked</em>.</p>
 
       <div className="apply-bar" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', background: 'var(--surface-2, rgba(127,127,127,.08))', padding: '8px 10px', borderRadius: 8, marginBottom: 8 }}>
         <span style={{ fontSize: 13, fontWeight: 600 }}>Apply to ticked:</span>
-        <input placeholder="Specimen" value={apply.sampleType} onChange={e => setApply({ ...apply, sampleType: e.target.value })} style={{ width: 120 }} />
+        <TextField placeholder="Specimen" value={apply.sampleType} onValue={nextValue => setApply({ ...apply, sampleType: nextValue })} style={{ width: 120 }} />
         {autoSelect(apply.automation, v => setApply({ ...apply, automation: v, equipmentId: automationUsesEquipment(v) ? apply.equipmentId : '' }))}
         {automationUsesEquipment(apply.automation) && analyserSelect(apply.automation, apply.equipmentId, v => setApply({ ...apply, equipmentId: v }))}
-        <input placeholder="Method" value={apply.methodName} onChange={e => setApply({ ...apply, methodName: e.target.value })} style={{ width: 120 }} />
+        <TextField placeholder="Method" value={apply.methodName} onValue={nextValue => setApply({ ...apply, methodName: nextValue })} style={{ width: 120 }} />
         <button type="button" onClick={applyToSelected} disabled={applyDisabled}>Apply to ticked ({compSel.size})</button>
       </div>
 
@@ -1241,11 +1245,11 @@ function SectionTestMenu({ detail, sectionId, call }: {
       </tr></thead><tbody>
         {comps.map(c => <tr key={c.key}>
           <td><input type="checkbox" checked={compSel.has(c.key)} onChange={() => setCompSel(s => toggleSet(s, c.key))} /></td>
-          <td><input value={c.testName} onChange={e => setComp(c.key, { testName: e.target.value })} placeholder="e.g. Urea" /></td>
-          <td><input value={c.sampleType} onChange={e => setComp(c.key, { sampleType: e.target.value })} style={{ width: 110 }} /></td>
+          <td><TextField value={c.testName} onValue={nextValue => setComp(c.key, { testName: nextValue })} placeholder="e.g. Urea" /></td>
+          <td><TextField value={c.sampleType} onValue={nextValue => setComp(c.key, { sampleType: nextValue })} style={{ width: 110 }} /></td>
           <td>{autoSelect(c.automation, v => setComp(c.key, { automation: v, equipmentId: automationUsesEquipment(v) ? c.equipmentId : '' }))}</td>
           <td>{analyserSelect(c.automation, c.equipmentId, v => setComp(c.key, { equipmentId: v }))}</td>
-          <td><input value={c.methodName} onChange={e => setComp(c.key, { methodName: e.target.value })} style={{ width: 110 }} /></td>
+          <td><TextField value={c.methodName} onValue={nextValue => setComp(c.key, { methodName: nextValue })} style={{ width: 110 }} /></td>
           <td><input type="number" value={c.tatTargetMinutes} onChange={e => setComp(c.key, { tatTargetMinutes: e.target.value })} style={{ width: 56 }} /></td>
           <td>{comps.length > 1 && <button type="button" className="danger" title="Remove component" onClick={() => removeComp(c.key)}>✕</button>}</td>
         </tr>)}
@@ -1302,7 +1306,7 @@ function SectionBenches({ sectionId }: { sectionId: number }) {
   async function add(e: FormEvent) { e.preventDefault(); if (!form.name.trim()) return; const ok = await call(`/scheduling/sections/${sectionId}/benches`, { method: 'POST', body: JSON.stringify(form) }); if (ok) setForm({ name: '', code: '', description: '' }); }
   return <>
     <p className="hint">Benches / workspaces in this unit. Staff on the unit's monthly <Link to="/personnel">Bench Schedule</Link> are assigned to these each day. The short code is what appears in the schedule grid cells.</p>
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
     <table className="data-table"><thead><tr><th>Order</th><th>Name</th><th>Code</th><th>Description</th><th>Active</th><th></th></tr></thead><tbody>
       {rows.map(b => <tr key={b.id}>
         <td style={{ width: 66 }}><input type="number" defaultValue={b.display_order} style={{ width: 52 }} onBlur={e => call(`/scheduling/benches/${b.id}`, { method: 'PUT', body: JSON.stringify({ displayOrder: Number(e.target.value) }) })} /></td>
@@ -1315,9 +1319,9 @@ function SectionBenches({ sectionId }: { sectionId: number }) {
       {rows.length === 0 && <tr><td colSpan={6} className="hint">No benches yet. Add the unit's workspaces below.</td></tr>}
     </tbody></table>
     {can('settings', 'edit') && <form className="form-grid" onSubmit={add} style={{ marginTop: 12 }}>
-      <label>Bench / workspace name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Culture & Sensitivity" required /></label>
-      <label>Short code<input value={form.code} onChange={e => setForm({ ...form, code: e.target.value })} placeholder="e.g. C&S" /></label>
-      <label>Description<input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></label>
+      <label>Bench / workspace name<TextField value={form.name} onValue={nextValue => setForm({ ...form, name: nextValue })} placeholder="e.g. Culture & Sensitivity" required /></label>
+      <label>Short code<TextField value={form.code} onValue={nextValue => setForm({ ...form, code: nextValue })} placeholder="e.g. C&S" /></label>
+      <label>Description<TextField value={form.description} onValue={nextValue => setForm({ ...form, description: nextValue })} /></label>
       <button type="submit">Add bench</button>
     </form>}
   </>;
@@ -1555,8 +1559,8 @@ export function BackupRestore(){
       lead="A backup is the whole laboratory in one file — the database, uploads, evidence and configuration. Take one on a schedule, keep a sensible number, and put a copy somewhere the building is not."
     />
 
-    {error && <div className="error" role="alert">{error}</div>}
-    {message && <div className="notice-ok" role="status">{message}</div>}
+    {error && <Notice kind="error" role="alert">{error}</Notice>}
+    {message && <Notice kind="success" role="status">{message}</Notice>}
 
     <ProtectionCard
       status={status}
@@ -1620,7 +1624,7 @@ export function BackupRestore(){
               to first-time setup. A full backup is taken first and existing backups are kept, so this can be undone.
             </p>
             <div className="bk-restore-row">
-              <input type="text" value={resetConfirm} onChange={e => setResetConfirm(e.target.value)} placeholder="Type RESET to confirm" style={{ maxWidth: 220 }} />
+              <TextField type="text" value={resetConfirm} onValue={nextValue => setResetConfirm(nextValue)} placeholder="Type RESET to confirm" style={{ maxWidth: 220 }} />
               {can('settings', 'approve') && <button className="danger" onClick={factoryReset} disabled={!!busy || resetConfirm !== 'RESET'}>
                 {busy === 'reset' ? 'Resetting…' : 'Erase everything'}
               </button>}
@@ -2090,15 +2094,15 @@ function DestinationForm({ def, existing, onCancel, onSaved, onError }: {
       )}
 
       <label className="stack">Name it
-        <input value={name} onChange={e => setName(e.target.value)} placeholder={def.label} />
+        <TextField value={name} onValue={nextValue => setName(nextValue)} placeholder={def.label} />
       </label>
 
       {def.fields.map(f => (
         <label className="stack" key={f.key}>
           {f.label}{f.required ? '' : <span className="muted"> (optional)</span>}
           {f.type === 'textarea'
-            ? <textarea rows={5} spellCheck={false} value={config[f.key] ?? ''} placeholder={f.placeholder}
-                onChange={e => set(f.key, e.target.value)} />
+            ? <TextField as="textarea" rows={5} spellCheck={false} value={config[f.key] ?? ''} placeholder={f.placeholder}
+                onValue={nextValue => set(f.key, nextValue)} />
             : f.type === 'checkbox'
               ? <span className="bk-check"><input type="checkbox" checked={config[f.key] === 'true'}
                   onChange={e => set(f.key, e.target.checked ? 'true' : '')} /> <span>{f.help}</span></span>
@@ -2163,7 +2167,7 @@ function FolderCard({ status, readOnly, onChanged, onError }: {
       ) : (
         <>
           <label className="stack">Folder path
-            <input value={value} onChange={e => setValue(e.target.value)}
+            <TextField value={value} onValue={nextValue => setValue(nextValue)}
               placeholder="D:\LIMS-Backups   or   /var/backups/lims   (blank for the default)" />
             <span className="hint">
               A folder on this computer or a drive attached to it. To copy backups onto the hospital server, leave this
@@ -2378,11 +2382,11 @@ function EquipmentNumbering() {
   return <div className="card">
     <h3>Equipment identifier</h3>
     <p>Define how each equipment's unique identifier is built. Add segments in order, choose a separator, and place the year wherever you like. The <strong>Sequence</strong> counter restarts at 1 each calendar year. Every new equipment gets the next identifier automatically; it can still be overridden on an individual equipment profile.</p>
-    {error && <div className="error">{error}</div>}
-    {success && <div className="notice-ok">{success}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
+    {success && <Notice kind="success">{success}</Notice>}
 
     <div className="form-grid" style={{ maxWidth: 320 }}>
-      <label>Separator<input value={pattern.separator} maxLength={3} onChange={e => update({ ...pattern, separator: e.target.value })} placeholder="/" /></label>
+      <label>Separator<TextField value={pattern.separator} maxLength={3} onValue={nextValue => update({ ...pattern, separator: nextValue })} placeholder="/" /></label>
     </div>
 
     <table className="data-table" style={{ marginTop: 12 }}>
@@ -2399,7 +2403,7 @@ function EquipmentNumbering() {
             </select>
           </td>
           <td>
-            {seg.type === 'text' && <input value={seg.value} onChange={e => setSeg(i, { type: 'text', value: e.target.value })} placeholder="e.g. SECH" style={{ maxWidth: 160 }} />}
+            {seg.type === 'text' && <TextField value={seg.value} onValue={nextValue => setSeg(i, { type: 'text', value: nextValue })} placeholder="e.g. SECH" style={{ maxWidth: 160 }} />}
             {seg.type === 'year' && <select value={seg.digits} onChange={e => setSeg(i, { type: 'year', digits: Number(e.target.value) === 2 ? 2 : 4 })}><option value={4}>4-digit (2026)</option><option value={2}>2-digit (26)</option></select>}
             {seg.type === 'sequence' && <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>Padding <NumberField min={1} max={8} value={seg.padding} onValue={n => setSeg(i, { type: 'sequence', padding: Math.min(8, Math.max(1, n ?? 1)) })} style={{ width: 64 }} /></label>}
           </td>
@@ -2458,21 +2462,21 @@ function LabDocuments({ category, docTypes, onChanged }: { category: string; doc
   }
 
   return <>
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
     {can('settings', 'edit') && <form className="form" onSubmit={add}>
       <div className="form-grid">
         <label>Document type<select value={form.docType} onChange={e => setForm({ ...form, docType: e.target.value })}>{docTypes.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
-        <label>Title<input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required placeholder={isManual ? 'e.g. Laboratory Quality Manual' : 'e.g. Operating licence 2026'} /></label>
-        <label>Reference no<input value={form.referenceNumber} onChange={e => setForm({ ...form, referenceNumber: e.target.value })} /></label>
-        {!isManual && <label>Issuing authority<input value={form.issuingAuthority} onChange={e => setForm({ ...form, issuingAuthority: e.target.value })} /></label>}
-        {isManual && <label>Version<input value={form.version} onChange={e => setForm({ ...form, version: e.target.value })} placeholder="e.g. v3.0" /></label>}
+        <label>Title<TextField value={form.title} onValue={nextValue => setForm({ ...form, title: nextValue })} required placeholder={isManual ? 'e.g. Laboratory Quality Manual' : 'e.g. Operating licence 2026'} /></label>
+        <label>Reference no<TextField value={form.referenceNumber} onValue={nextValue => setForm({ ...form, referenceNumber: nextValue })} /></label>
+        {!isManual && <label>Issuing authority<TextField value={form.issuingAuthority} onValue={nextValue => setForm({ ...form, issuingAuthority: nextValue })} /></label>}
+        {isManual && <label>Version<TextField value={form.version} onValue={nextValue => setForm({ ...form, version: nextValue })} placeholder="e.g. v3.0" /></label>}
         {isManual
           ? <label>Effective date<input type="date" value={form.effectiveDate} onChange={e => setForm({ ...form, effectiveDate: e.target.value })} /></label>
           : <label>Issue date<input type="date" value={form.issueDate} onChange={e => setForm({ ...form, issueDate: e.target.value })} /></label>}
         {!isManual && <label>Expiry date<input type="date" value={form.expiryDate} onChange={e => setForm({ ...form, expiryDate: e.target.value })} /></label>}
         <label>Attachment<input ref={fileRef} type="file" onChange={e => setFile(e.target.files?.[0] ?? null)} /></label>
       </div>
-      <label>Notes<textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
+      <label>Notes<TextField as="textarea" value={form.notes} onValue={nextValue => setForm({ ...form, notes: nextValue })} /></label>
       <button disabled={busy}>{busy ? 'Uploading…' : 'Add document'}</button>
     </form>}
     <table className="data-table"><thead><tr><th>Type</th><th>Title</th><th>Ref</th><th>{isManual ? 'Version' : 'Issuer'}</th><th>{isManual ? 'Effective' : 'Issued'}</th><th>{isManual ? '' : 'Expiry'}</th><th>File</th><th></th></tr></thead><tbody>
@@ -2561,8 +2565,8 @@ function CoreDocumentsTab({ qualityManualSummary, onSummaryChange, onSaveSummary
   }, [docs, pickQuery, picking]);
 
   return <div>
-    {error && <div className="error">{error}</div>}
-    {notice && <div className="notice-ok">{notice}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
+    {notice && <Notice kind="success">{notice}</Notice>}
 
     <div className="card">
       <div className="reg-head">
@@ -2627,7 +2631,7 @@ function CoreDocumentsTab({ qualityManualSummary, onSummaryChange, onSaveSummary
     <div className="card" style={{ marginTop: 16 }}>
       <h3>Quality manual summary</h3>
       <p className="muted" style={{ marginTop: 0 }}>Scope, structure and references of the quality manual — shown on the laboratory profile.</p>
-      <label className="form"><textarea value={qualityManualSummary} onChange={e => onSummaryChange(e.target.value)} rows={3} /></label>
+      <label className="form"><TextField as="textarea" value={qualityManualSummary} onValue={nextValue => onSummaryChange(nextValue)} rows={3} /></label>
       <div style={{ marginTop: 8 }}><button type="button" onClick={onSaveSummary}>Save summary</button></div>
     </div>
 
@@ -2640,10 +2644,10 @@ function CoreDocumentsTab({ qualityManualSummary, onSummaryChange, onSaveSummary
       subtitle="From the controlled documents already in Documents & Records"
     >
       {picking && <>
-        {error && <div className="error">{error}</div>}
+        {error && <Notice kind="error">{error}</Notice>}
         <label className="reg-search" style={{ width: '100%', marginBottom: 12 }}>
           <Search size={15} />
-          <input value={pickQuery} onChange={e => setPickQuery(e.target.value)} placeholder="Search title, code or type…" autoFocus />
+          <TextField value={pickQuery} onValue={nextValue => setPickQuery(nextValue)} placeholder="Search title, code or type…" autoFocus />
         </label>
         <ul className="core-pick">
           {candidates.map(d => <li key={d.id}>
@@ -2683,8 +2687,8 @@ function CoreDocumentsTab({ qualityManualSummary, onSummaryChange, onSaveSummary
         a service-level agreement. You then point it at a document in the register.
       </p>
       <div className="form-grid">
-        <label className="wide">Name<input value={newSlot.label} onChange={e => setNewSlot({ ...newSlot, label: e.target.value })} placeholder="e.g. Ethics Policy" /></label>
-        <label className="wide">What it is <span className="muted">(optional)</span><input value={newSlot.description} onChange={e => setNewSlot({ ...newSlot, description: e.target.value })} /></label>
+        <label className="wide">Name<TextField value={newSlot.label} onValue={nextValue => setNewSlot({ ...newSlot, label: nextValue })} placeholder="e.g. Ethics Policy" /></label>
+        <label className="wide">What it is <span className="muted">(optional)</span><TextField value={newSlot.description} onValue={nextValue => setNewSlot({ ...newSlot, description: nextValue })} /></label>
       </div>
     </DetailModal>
 
@@ -2702,7 +2706,7 @@ function CoreDocumentsTab({ qualityManualSummary, onSummaryChange, onSaveSummary
         </button>}
       </>}
     >
-      <div className="form-grid"><label className="wide">Name<input value={renameTo} onChange={e => setRenameTo(e.target.value)} /></label></div>
+      <div className="form-grid"><label className="wide">Name<TextField value={renameTo} onValue={nextValue => setRenameTo(nextValue)} /></label></div>
     </DetailModal>
   </div>;
 }
@@ -2797,7 +2801,7 @@ function LabLogo() {
   return <div className="card">
     <h3>Laboratory logo</h3>
     <p>Upload your laboratory / hospital logo. It appears on the masthead of printed <strong>duty rosters</strong>, <strong>bench schedules</strong> and other documents so they match your official forms. Use a square or landscape PNG/JPG with a transparent or white background.</p>
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
     <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
       <div style={{ width: 120, height: 120, border: '1px dashed #bbb', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fafafa', overflow: 'hidden' }}>
         {url ? <img src={url} alt="Laboratory logo" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} /> : <span className="muted" style={{ fontSize: 12 }}>No logo</span>}
@@ -2898,8 +2902,8 @@ export function MyLaboratory() {
       <h3>My Laboratory</h3>
       <p>Register and configure your laboratory here. Everything on this page is the single source of truth for the laboratory's legal identity, quality manual, quality policy and objectives — these are shown read-only elsewhere in the system and can only be changed here.</p>
       <div className="tabs">{LAB_TABS.map(t => <button key={t} type="button" className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>)}</div>
-      {error && <div className="error">{error}</div>}
-      {success && <div className="notice-ok">{success}</div>}
+      {error && <Notice kind="error">{error}</Notice>}
+      {success && <Notice kind="success">{success}</Notice>}
       {!registrationComplete && <div className="notice" style={{ marginTop: 10 }}>Laboratory registration is not yet marked complete. Fill in the identity, quality manual, and quality policy &amp; objectives, then use <strong>Mark registration complete</strong> below.</div>}
     </div>
 
@@ -2910,31 +2914,31 @@ export function MyLaboratory() {
         {can('settings', 'edit') && <form className="form" onSubmit={e => { e.preventDefault(); saveProfile(); }}>
           <fieldset className="reg-section"><legend>Identity</legend>
             <div className="form-grid">
-              <label>Facility name<input value={form.facilityName} onChange={e => setForm({ ...form, facilityName: e.target.value })} required /></label>
-              <label>Short name<input value={form.shortName} onChange={e => setForm({ ...form, shortName: e.target.value })} /></label>
-              <label>Motto / tagline<input value={form.motto} onChange={e => setForm({ ...form, motto: e.target.value })} /></label>
-              <label>Registration no<input value={form.registrationNumber} onChange={e => setForm({ ...form, registrationNumber: e.target.value })} /></label>
-              <label>Legal status / entity type<input value={form.legalStatus} onChange={e => setForm({ ...form, legalStatus: e.target.value })} placeholder="e.g. faith-based hospital laboratory, private company" /></label>
+              <label>Facility name<TextField value={form.facilityName} onValue={nextValue => setForm({ ...form, facilityName: nextValue })} required /></label>
+              <label>Short name<TextField value={form.shortName} onValue={nextValue => setForm({ ...form, shortName: nextValue })} /></label>
+              <label>Motto / tagline<TextField value={form.motto} onValue={nextValue => setForm({ ...form, motto: nextValue })} /></label>
+              <label>Registration no<TextField value={form.registrationNumber} onValue={nextValue => setForm({ ...form, registrationNumber: nextValue })} /></label>
+              <label>Legal status / entity type<TextField value={form.legalStatus} onValue={nextValue => setForm({ ...form, legalStatus: nextValue })} placeholder="e.g. faith-based hospital laboratory, private company" /></label>
             </div>
           </fieldset>
           <fieldset className="reg-section"><legend>Contact</legend>
             <div className="form-grid">
-              <label>Address<input value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} /></label>
-              <label>City / town<input value={form.city} onChange={e => setForm({ ...form, city: e.target.value })} /></label>
-              <label>Country<input value={form.country} onChange={e => setForm({ ...form, country: e.target.value })} /></label>
-              <label>Phone<input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></label>
-              <label>Email<input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></label>
-              <label>Website<input value={form.website} onChange={e => setForm({ ...form, website: e.target.value })} /></label>
+              <label>Address<TextField value={form.address} onValue={nextValue => setForm({ ...form, address: nextValue })} /></label>
+              <label>City / town<TextField value={form.city} onValue={nextValue => setForm({ ...form, city: nextValue })} /></label>
+              <label>Country<TextField value={form.country} onValue={nextValue => setForm({ ...form, country: nextValue })} /></label>
+              <label>Phone<TextField value={form.phone} onValue={nextValue => setForm({ ...form, phone: nextValue })} /></label>
+              <label>Email<TextField type="email" value={form.email} onValue={nextValue => setForm({ ...form, email: nextValue })} /></label>
+              <label>Website<TextField value={form.website} onValue={nextValue => setForm({ ...form, website: nextValue })} /></label>
             </div>
           </fieldset>
           <fieldset className="reg-section"><legend>Accreditation</legend>
             <div className="form-grid">
-              <label>Accreditation body<input value={form.accreditationBody} onChange={e => setForm({ ...form, accreditationBody: e.target.value })} placeholder="e.g. your national accreditation body" /></label>
-              <label>Accreditation no<input value={form.accreditationNumber} onChange={e => setForm({ ...form, accreditationNumber: e.target.value })} /></label>
+              <label>Accreditation body<TextField value={form.accreditationBody} onValue={nextValue => setForm({ ...form, accreditationBody: nextValue })} placeholder="e.g. your national accreditation body" /></label>
+              <label>Accreditation no<TextField value={form.accreditationNumber} onValue={nextValue => setForm({ ...form, accreditationNumber: nextValue })} /></label>
               <label>Status<select value={form.accreditationStatus} onChange={e => setForm({ ...form, accreditationStatus: e.target.value })}><option value="">—</option><option>Accredited</option><option>In progress</option><option>Not accredited</option><option>Suspended</option></select></label>
             </div>
           </fieldset>
-          <label>Legal identity notes<textarea value={form.legalIdentityNotes} onChange={e => setForm({ ...form, legalIdentityNotes: e.target.value })} placeholder="Ownership, governing body, licences held, etc." /></label>
+          <label>Legal identity notes<TextField as="textarea" value={form.legalIdentityNotes} onValue={nextValue => setForm({ ...form, legalIdentityNotes: nextValue })} placeholder="Ownership, governing body, licences held, etc." /></label>
           <button type="submit">Save identity</button>
         </form>}
       </div>
@@ -2952,9 +2956,9 @@ export function MyLaboratory() {
       <h3>Mission &amp; vision</h3>
       <p>The laboratory's mission and vision statements. These appear on the Laboratory Profile in Documents &amp; Records.</p>
       {can('settings', 'edit') && <form className="form" onSubmit={e => { e.preventDefault(); saveProfile(); }}>
-        <label>Mission<textarea rows={3} value={form.mission} onChange={e => setForm({ ...form, mission: e.target.value })} placeholder="Why the laboratory exists and who it serves." /></label>
-        <label>Vision<textarea rows={3} value={form.vision} onChange={e => setForm({ ...form, vision: e.target.value })} placeholder="What the laboratory aspires to become." /></label>
-        <label>Motto / tagline<input value={form.motto} onChange={e => setForm({ ...form, motto: e.target.value })} /></label>
+        <label>Mission<TextField as="textarea" rows={3} value={form.mission} onValue={nextValue => setForm({ ...form, mission: nextValue })} placeholder="Why the laboratory exists and who it serves." /></label>
+        <label>Vision<TextField as="textarea" rows={3} value={form.vision} onValue={nextValue => setForm({ ...form, vision: nextValue })} placeholder="What the laboratory aspires to become." /></label>
+        <label>Motto / tagline<TextField value={form.motto} onValue={nextValue => setForm({ ...form, motto: nextValue })} /></label>
         <button type="submit">Save mission &amp; vision</button>
       </form>}
     </div>}
@@ -2966,15 +2970,15 @@ export function MyLaboratory() {
         <h3>Quality policy</h3>
         <p>The laboratory's overarching quality policy statement, established to fulfil the requirements of ISO 15189:2022.</p>
         {can('settings', 'edit') && <form className="form" onSubmit={e => { e.preventDefault(); saveProfile(); }}>
-          <label>Quality policy statement<textarea rows={6} value={form.qualityPolicy} onChange={e => setForm({ ...form, qualityPolicy: e.target.value })} placeholder="Management's commitment to quality, good professional practice, and continual improvement…" /></label>
+          <label>Quality policy statement<TextField as="textarea" rows={6} value={form.qualityPolicy} onValue={nextValue => setForm({ ...form, qualityPolicy: nextValue })} placeholder="Management's commitment to quality, good professional practice, and continual improvement…" /></label>
           <button type="submit">Save quality policy</button>
         </form>}
         <h4 style={{ marginTop: 18 }}>Supporting policies</h4>
         <p className="hint">Add specific policies that support the quality policy.</p>
         {can('settings', 'edit') && <form className="form" onSubmit={addPolicy}>
-          <label>Title<input value={policyForm.title} onChange={e => setPolicyForm({ ...policyForm, title: e.target.value })} required /></label>
-          <label>Policy statement<textarea value={policyForm.policyStatement} onChange={e => setPolicyForm({ ...policyForm, policyStatement: e.target.value })} required /></label>
-          <label>ISO 15189:2022 relationship (optional)<input value={policyForm.referenceNote} onChange={e => setPolicyForm({ ...policyForm, referenceNote: e.target.value })} placeholder="How this policy relates to the standard" /></label>
+          <label>Title<TextField value={policyForm.title} onValue={nextValue => setPolicyForm({ ...policyForm, title: nextValue })} required /></label>
+          <label>Policy statement<TextField as="textarea" value={policyForm.policyStatement} onValue={nextValue => setPolicyForm({ ...policyForm, policyStatement: nextValue })} required /></label>
+          <label>ISO 15189:2022 relationship (optional)<TextField value={policyForm.referenceNote} onValue={nextValue => setPolicyForm({ ...policyForm, referenceNote: nextValue })} placeholder="How this policy relates to the standard" /></label>
           <button>Add policy</button>
         </form>}
         <table className="data-table"><thead><tr><th>Title</th><th>Statement</th><th></th></tr></thead><tbody>
@@ -2986,13 +2990,13 @@ export function MyLaboratory() {
         <h3>Standing quality objectives</h3>
         <p>Continuous quality objectives, in relation to ISO 15189:2022. Year-specific targets are set under <strong>Annual Objectives</strong>.</p>
         {can('settings', 'edit') && <form className="form" onSubmit={addObjective}>
-          <label>Objective<textarea value={objForm.objective} onChange={e => setObjForm({ ...objForm, objective: e.target.value })} required /></label>
+          <label>Objective<TextField as="textarea" value={objForm.objective} onValue={nextValue => setObjForm({ ...objForm, objective: nextValue })} required /></label>
           <div className="form-grid">
-            <label>Target<input value={objForm.target} onChange={e => setObjForm({ ...objForm, target: e.target.value })} placeholder="e.g. ≥ 95%" /></label>
-            <label>Measure / indicator<input value={objForm.measure} onChange={e => setObjForm({ ...objForm, measure: e.target.value })} /></label>
+            <label>Target<TextField value={objForm.target} onValue={nextValue => setObjForm({ ...objForm, target: nextValue })} placeholder="e.g. ≥ 95%" /></label>
+            <label>Measure / indicator<TextField value={objForm.measure} onValue={nextValue => setObjForm({ ...objForm, measure: nextValue })} /></label>
             <label>Responsible<select value={objForm.responsibleStaffId} onChange={e => setObjForm({ ...objForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           </div>
-          <label>ISO 15189:2022 relationship (optional)<input value={objForm.referenceNote} onChange={e => setObjForm({ ...objForm, referenceNote: e.target.value })} /></label>
+          <label>ISO 15189:2022 relationship (optional)<TextField value={objForm.referenceNote} onValue={nextValue => setObjForm({ ...objForm, referenceNote: nextValue })} /></label>
           <button>Add objective</button>
         </form>}
         <table className="data-table"><thead><tr><th>Objective</th><th>Target</th><th>Measure</th><th>Owner</th><th></th></tr></thead><tbody>
@@ -3008,12 +3012,12 @@ export function MyLaboratory() {
       {can('settings', 'edit') && <form className="form" onSubmit={addAnnual}>
         <div className="form-grid">
           <label>Year<input type="number" min={2000} max={2100} value={annualForm.year} onChange={e => setAnnualForm({ ...annualForm, year: e.target.value })} required /></label>
-          <label>Target<input value={annualForm.target} onChange={e => setAnnualForm({ ...annualForm, target: e.target.value })} placeholder="e.g. ≥ 98%" /></label>
-          <label>Measure / indicator<input value={annualForm.measure} onChange={e => setAnnualForm({ ...annualForm, measure: e.target.value })} /></label>
+          <label>Target<TextField value={annualForm.target} onValue={nextValue => setAnnualForm({ ...annualForm, target: nextValue })} placeholder="e.g. ≥ 98%" /></label>
+          <label>Measure / indicator<TextField value={annualForm.measure} onValue={nextValue => setAnnualForm({ ...annualForm, measure: nextValue })} /></label>
           <label>Responsible<select value={annualForm.responsibleStaffId} onChange={e => setAnnualForm({ ...annualForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           <label>Status<select value={annualForm.status} onChange={e => setAnnualForm({ ...annualForm, status: e.target.value })}>{['active', 'on_track', 'at_risk', 'achieved', 'not_achieved', 'carried_over'].map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select></label>
         </div>
-        <label>Objective<textarea value={annualForm.objective} onChange={e => setAnnualForm({ ...annualForm, objective: e.target.value })} required /></label>
+        <label>Objective<TextField as="textarea" value={annualForm.objective} onValue={nextValue => setAnnualForm({ ...annualForm, objective: nextValue })} required /></label>
         <button>Add annual objective</button>
       </form>}
       {years.length === 0 && <p className="hint">No annual objectives yet.</p>}
@@ -3042,7 +3046,7 @@ export function MyLaboratory() {
 
     <div className="card" style={{ marginTop: 16 }}>
       {registrationComplete
-        ? <p className="notice-ok">Laboratory registration is complete. You can keep updating any section above at any time.</p>
+        ? <Notice kind="success">Laboratory registration is complete. You can keep updating any section above at any time.</Notice>
         : can('settings', 'edit') && <button onClick={completeRegistration}>Mark registration complete</button>}
     </div>
   </div>;
@@ -3124,18 +3128,18 @@ export function RemoteStaffAccess() {
           </select>
         </label>
         {selectedStaff && !selectedStaff.username && <p className="hint">This staff member has no Host login, so they can sign in but will have no module permissions until a login/role is assigned.</p>}
-        <label>Portal email<input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} required /></label>
-        <label>Role label (optional)<input value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))} /></label>
+        <label>Portal email<TextField type="email" value={form.email} onValue={nextValue => setForm(f => ({ ...f, email: nextValue }))} required /></label>
+        <label>Role label (optional)<TextField value={form.role} onValue={nextValue => setForm(f => ({ ...f, role: nextValue }))} /></label>
         <label>Temporary password
           <span style={{ display: 'flex', gap: 8 }}>
-            <input value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} required />
+            <TextField value={form.password} onValue={nextValue => setForm(f => ({ ...f, password: nextValue }))} required />
             <button type="button" onClick={genPassword}>Generate</button>
           </span>
         </label>
         <button disabled={busy}>Create remote access</button>
       </form>}
-      {message && <p className="notice-ok">{message}</p>}
-      {error && <p className="error">{error}</p>}
+      {message && <Notice kind="success">{message}</Notice>}
+      {error && <Notice kind="error">{error}</Notice>}
     </div>
 
     <div className="card">
@@ -3234,8 +3238,8 @@ function QualityWorkflowSettings() {
     <div className="card">
       <h3 style={{ marginTop: 0 }}>Nonconformity &amp; incident workflow</h3>
       <p className="muted" style={{ marginTop: 0 }}>Nonconformities and incidents follow the same staged lifecycle: <strong>Log → Risk assessment → (root cause, where the risk warrants it) → CAPA → Closure</strong>. Everyone can log an event; risk assessment and follow-up are done by staff with reviewer permissions.</p>
-      {error && <div className="error">{error}</div>}
-      {msg && <div className="notice-ok">{msg}</div>}
+      {error && <Notice kind="error">{error}</Notice>}
+      {msg && <Notice kind="success">{msg}</Notice>}
       {!cfg ? <p className="muted">Loading…</p> : <>
         <label className="check-inline" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <input type="checkbox" checked={cfg.remedialActionEnabled} disabled={busy} onChange={e => save({ remedialActionEnabled: e.target.checked })} />
@@ -3318,11 +3322,11 @@ function RemoteAccessCard({ info }: { info: SystemConnectivity }) {
         <p className="muted">This host has not reported its reachability.</p>
       ) : reach.reachable ? (
         <>
-          <p className="notice-ok">
+          <Notice kind="success" silent>
             {reach.route === 'tailscale'
               ? 'The laboratory is published over Tailscale. Any device signed in to the same tailnet can open it — nothing is exposed to the wider network.'
               : 'The laboratory is open to every device on this network.'}
-          </p>
+          </Notice>
           {reach.url && (
             <p className="bk-folder-path">
               <code><PathText value={reach.url} /></code>
@@ -3333,7 +3337,7 @@ function RemoteAccessCard({ info }: { info: SystemConnectivity }) {
         </>
       ) : (
         <>
-          <p className="notice-warn">Only this computer can open the laboratory.</p>
+          <Notice kind="warn" silent>Only this computer can open the laboratory.</Notice>
           <p className="hint">{reach.advice}</p>
           {ts?.installed && ts.running && (
             <div className="bk-folder-path">
@@ -3415,7 +3419,7 @@ export function ConnectivityMode() {
     }
   }
 
-  if (!info) return <div className="card"><h3>Connectivity &amp; Mode</h3>{error ? <p className="error">{error}</p> : <p className="muted">Loading…</p>}</div>;
+  if (!info) return <div className="card"><h3>Connectivity &amp; Mode</h3>{error ? <Notice kind="error">{error}</Notice> : <p className="muted">Loading…</p>}</div>;
 
   return <div>
     <div className="card">
@@ -3431,8 +3435,8 @@ export function ConnectivityMode() {
         {' '}<em>Local</em> = single-PC offline. <em>Hybrid</em> = LAN clients now, secure remote access later.
       </p>
       {!canEdit && <p className="muted">Only a System Administrator or Laboratory Manager can change the mode.</p>}
-      {message && <p className="notice-ok">{message}</p>}
-      {error && <p className="error">{error}</p>}
+      {message && <Notice kind="success">{message}</Notice>}
+      {error && <Notice kind="error">{error}</Notice>}
     </div>
 
     <RemoteAccessCard info={info} />
@@ -3498,8 +3502,8 @@ export function RosterSettings() {
     <div className="card">
       <h3>Roster &amp; Scheduling — Shift Types</h3>
       <p>These shift codes drive the department <strong>Duty Roster</strong> grid and its legend. Not every laboratory practises every shift — deactivate the ones you do not use, and add your own. Colours are used to fill the roster cells and print exactly as shown here. (Leave types such as Annual/Part/Study Leave and Leave Without Pay merge into a labelled bar on the printed roster.)</p>
-      {error && <div className="error">{error}</div>}
-      {success && <div className="notice-ok">{success}</div>}
+      {error && <Notice kind="error">{error}</Notice>}
+      {success && <Notice kind="success">{success}</Notice>}
       <table className="data-table"><thead><tr><th>Order</th><th>Code</th><th>Label</th><th>Category</th><th>Preview</th><th>Colours</th><th>Active</th><th></th></tr></thead><tbody>
         {rows.map(r => <tr key={r.id}>
           <td style={{ width: 70 }}><input type="number" defaultValue={r.display_order} style={{ width: 56 }} onBlur={e => call(`/scheduling/shift-types/${r.id}`, { method: 'PUT', body: JSON.stringify({ displayOrder: Number(e.target.value) }) })} /></td>
@@ -3519,8 +3523,8 @@ export function RosterSettings() {
     <div className="card" style={{ marginTop: 16 }}>
       <h3>Add a shift type</h3>
       {can('settings', 'edit') && <form className="form-grid" onSubmit={add}>
-        <label>Code<input value={form.code} onChange={e => setForm({ ...form, code: e.target.value.toUpperCase() })} placeholder="e.g. E (Evening)" required maxLength={4} /></label>
-        <label>Label<input value={form.label} onChange={e => setForm({ ...form, label: e.target.value })} placeholder="e.g. Evening Duty" required /></label>
+        <label>Code<TextField value={form.code} onValue={nextValue => setForm({ ...form, code: nextValue.toUpperCase() })} placeholder="e.g. E (Evening)" required maxLength={4} /></label>
+        <label>Label<TextField value={form.label} onValue={nextValue => setForm({ ...form, label: nextValue })} placeholder="e.g. Evening Duty" required /></label>
         <label>Category<select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>{SHIFT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
         <label>Cell background<input type="color" value={form.bgColor} onChange={e => setForm({ ...form, bgColor: e.target.value })} /></label>
         <label>Cell text colour<input type="color" value={form.textColor} onChange={e => setForm({ ...form, textColor: e.target.value })} /></label>

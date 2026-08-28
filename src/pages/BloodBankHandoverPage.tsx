@@ -13,6 +13,8 @@ import type {
 import { API_BASE, getToken } from '../services/api';
 import PermissionTabs from '../components/PermissionTabs';
 import { usePermissions } from '../hooks/usePermissions';
+import TextField from '../components/ui/TextField';
+import { Notice } from '../components/ui/Feedback';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
@@ -248,7 +250,7 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
   return <div className="module-page">
     {!embedded && <PageHeader eyebrow="Process Management" title="Blood Bank Quality &amp; Inventory Handover" subtitle="Blood unit inventory, handovers, and adverse events." />}
     {tabBar(tab, tabs, setTab)}
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {tab === 'Dashboard' && <>
       <ModuleAlerts moduleKey="blood_bank_handover" />
@@ -295,8 +297,8 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
     </tbody></table>}
 
     {tab === 'New Blood Unit' && can('blood_bank_handover', 'create') && <form className="form-grid" onSubmit={submitUnit}>
-      <label>Unit number<input value={unitForm.unitNumber} onChange={e => setUnitForm({ ...unitForm, unitNumber: e.target.value })} required /></label>
-      <label>Batch number<input value={unitForm.batchNumber} onChange={e => setUnitForm({ ...unitForm, batchNumber: e.target.value })} /></label>
+      <label>Unit number<TextField value={unitForm.unitNumber} onValue={nextValue => setUnitForm({ ...unitForm, unitNumber: nextValue })} required /></label>
+      <label>Batch number<TextField value={unitForm.batchNumber} onValue={nextValue => setUnitForm({ ...unitForm, batchNumber: nextValue })} /></label>
       <label>Blood group<select value={unitForm.bloodGroup} onChange={e => setUnitForm({ ...unitForm, bloodGroup: e.target.value })} required>{BLOOD_GROUPS.map(g => <option key={g} value={g}>{g}</option>)}</select></label>
       <label>Component type<select value={unitForm.componentType} onChange={e => setUnitForm({ ...unitForm, componentType: e.target.value })} required>{COMPONENT_TYPES.map(c => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}</select></label>
       <label>Donor type<select value={unitForm.donorType} onChange={e => setUnitForm({ ...unitForm, donorType: e.target.value })} required>{DONOR_TYPES.map(d => <option key={d} value={d}>{d.replace(/_/g, ' ')}</option>)}</select></label>
@@ -308,7 +310,7 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
       <label>HIV<select value={unitForm.screeningHiv} onChange={e => setUnitForm({ ...unitForm, screeningHiv: e.target.value })}>{SCREENING_RESULTS.map(s => <option key={s} value={s}>{s || '—'}</option>)}</select></label>
       <label>Location<select value={unitForm.locationId} onChange={e => setUnitForm({ ...unitForm, locationId: e.target.value })}><option value="">—</option>{locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
       <label>Refrigerator monitoring item<select value={unitForm.refrigeratorMonitoringItemId} onChange={e => setUnitForm({ ...unitForm, refrigeratorMonitoringItemId: e.target.value })}><option value="">—</option>{monitoringItems.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
-      <label>Notes<textarea value={unitForm.notes} onChange={e => setUnitForm({ ...unitForm, notes: e.target.value })} /></label>
+      <label>Notes<TextField as="textarea" value={unitForm.notes} onValue={nextValue => setUnitForm({ ...unitForm, notes: nextValue })} /></label>
       <button type="submit">Register blood unit</button>
     </form>}
 
@@ -331,7 +333,7 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
       <label>Total discards<input type="number" value={handoverForm.totalDiscards} onChange={e => setHandoverForm({ ...handoverForm, totalDiscards: e.target.value })} /></label>
       <label>Donor reactions<input type="number" value={handoverForm.donorReactionsCount} onChange={e => setHandoverForm({ ...handoverForm, donorReactionsCount: e.target.value })} /></label>
       <label>Transfusion reactions<input type="number" value={handoverForm.transfusionReactionsCount} onChange={e => setHandoverForm({ ...handoverForm, transfusionReactionsCount: e.target.value })} /></label>
-      <label>Issues noted<textarea value={handoverForm.issuesNoted} onChange={e => setHandoverForm({ ...handoverForm, issuesNoted: e.target.value })} /></label>
+      <label>Issues noted<TextField as="textarea" value={handoverForm.issuesNoted} onValue={nextValue => setHandoverForm({ ...handoverForm, issuesNoted: nextValue })} /></label>
       <button type="submit">Create handover</button>
     </form>}
 
@@ -369,7 +371,7 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
         </tbody></table>
         {can('blood_bank_handover', 'edit') && <form className="form-grid" onSubmit={addUnitToHandover}>
           <label>Add unit<select value={addUnitForm.bloodUnitId} onChange={e => setAddUnitForm({ ...addUnitForm, bloodUnitId: e.target.value })} required><option value="">—</option>{units.map(u => <option key={u.id} value={u.id}>{u.unit_number} ({u.blood_group})</option>)}</select></label>
-          <label>Notes<input value={addUnitForm.notes} onChange={e => setAddUnitForm({ ...addUnitForm, notes: e.target.value })} /></label>
+          <label>Notes<TextField value={addUnitForm.notes} onValue={nextValue => setAddUnitForm({ ...addUnitForm, notes: nextValue })} /></label>
           <button type="submit">Add to handover</button>
         </form>}
 
@@ -414,8 +416,8 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
     {tab === 'Donation Campaigns' && <>
       {can('blood_bank_handover', 'create') && <form className="form-grid" onSubmit={submitCampaign}>
         <label>Campaign date<input type="date" value={campaignForm.campaignDate} onChange={e => setCampaignForm({ ...campaignForm, campaignDate: e.target.value })} required /></label>
-        <label>Location<input value={campaignForm.location} onChange={e => setCampaignForm({ ...campaignForm, location: e.target.value })} required /></label>
-        <label>Organizer<input value={campaignForm.organizer} onChange={e => setCampaignForm({ ...campaignForm, organizer: e.target.value })} /></label>
+        <label>Location<TextField value={campaignForm.location} onValue={nextValue => setCampaignForm({ ...campaignForm, location: nextValue })} required /></label>
+        <label>Organizer<TextField value={campaignForm.organizer} onValue={nextValue => setCampaignForm({ ...campaignForm, organizer: nextValue })} /></label>
         <label>Total screened<input type="number" value={campaignForm.totalScreened} onChange={e => setCampaignForm({ ...campaignForm, totalScreened: e.target.value })} required /></label>
         <label>Total collected<input type="number" value={campaignForm.totalCollected} onChange={e => setCampaignForm({ ...campaignForm, totalCollected: e.target.value })} required /></label>
         <label>Family donors<input type="number" value={campaignForm.familyDonorCount} onChange={e => setCampaignForm({ ...campaignForm, familyDonorCount: e.target.value })} /></label>
@@ -423,7 +425,7 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
         <label>Commercial/paid donors<input type="number" value={campaignForm.commercialPaidDonorCount} onChange={e => setCampaignForm({ ...campaignForm, commercialPaidDonorCount: e.target.value })} /></label>
         <label>Rejected/deferred<input type="number" value={campaignForm.rejectedOrDeferredCount} onChange={e => setCampaignForm({ ...campaignForm, rejectedOrDeferredCount: e.target.value })} /></label>
         <label>Responsible staff<select value={campaignForm.responsibleStaffId} onChange={e => setCampaignForm({ ...campaignForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-        <label>Remarks<textarea value={campaignForm.remarks} onChange={e => setCampaignForm({ ...campaignForm, remarks: e.target.value })} /></label>
+        <label>Remarks<TextField as="textarea" value={campaignForm.remarks} onValue={nextValue => setCampaignForm({ ...campaignForm, remarks: nextValue })} /></label>
         <button type="submit">Record campaign</button>
       </form>}
       <table className="data-table"><thead><tr><th>Date</th><th>Location</th><th>Organizer</th><th>Screened</th><th>Collected</th><th>Family</th><th>Voluntary</th><th>Paid</th><th>Rejected</th><th>Responsible</th></tr></thead><tbody>
@@ -446,11 +448,11 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
         <label>Donor type<select value={adverseForm.donorType} onChange={e => setAdverseForm({ ...adverseForm, donorType: e.target.value })}><option value="">—</option>{DONOR_TYPES.map(d => <option key={d} value={d}>{d.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Section<select value={adverseForm.sectionId} onChange={e => setAdverseForm({ ...adverseForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Location<select value={adverseForm.locationId} onChange={e => setAdverseForm({ ...adverseForm, locationId: e.target.value })}><option value="">—</option>{locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
-        <label>Title<input value={adverseForm.title} onChange={e => setAdverseForm({ ...adverseForm, title: e.target.value })} required /></label>
+        <label>Title<TextField value={adverseForm.title} onValue={nextValue => setAdverseForm({ ...adverseForm, title: nextValue })} required /></label>
         <label>Severity<select value={adverseForm.severity} onChange={e => setAdverseForm({ ...adverseForm, severity: e.target.value })} required>{SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}</select></label>
-        <label>Outcome<input value={adverseForm.outcome} onChange={e => setAdverseForm({ ...adverseForm, outcome: e.target.value })} /></label>
-        <label>Description<textarea value={adverseForm.description} onChange={e => setAdverseForm({ ...adverseForm, description: e.target.value })} required /></label>
-        <label>Immediate action<textarea value={adverseForm.immediateAction} onChange={e => setAdverseForm({ ...adverseForm, immediateAction: e.target.value })} /></label>
+        <label>Outcome<TextField value={adverseForm.outcome} onValue={nextValue => setAdverseForm({ ...adverseForm, outcome: nextValue })} /></label>
+        <label>Description<TextField as="textarea" value={adverseForm.description} onValue={nextValue => setAdverseForm({ ...adverseForm, description: nextValue })} required /></label>
+        <label>Immediate action<TextField as="textarea" value={adverseForm.immediateAction} onValue={nextValue => setAdverseForm({ ...adverseForm, immediateAction: nextValue })} /></label>
         <button type="submit">Log adverse event</button>
       </form>}
       <table className="data-table"><thead><tr><th>Number</th><th>Date</th><th>Type</th><th>Unit</th><th>Title</th><th>Severity</th><th>Outcome</th><th>Status</th><th>Actions</th></tr></thead><tbody>
@@ -471,8 +473,8 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
     {tab === 'Discards' && <>
       {can('blood_bank_handover', 'edit') && <form className="form-grid" onSubmit={submitDiscard}>
         <label>Blood unit<select value={discardForm.unitId} onChange={e => setDiscardForm({ ...discardForm, unitId: e.target.value })} required><option value="">—</option>{units.filter(u => u.current_status !== 'discarded').map(u => <option key={u.id} value={u.id}>{u.unit_number} ({u.blood_group})</option>)}</select></label>
-        <label>Reason<input value={discardForm.reason} onChange={e => setDiscardForm({ ...discardForm, reason: e.target.value })} required /></label>
-        <label>Remarks<textarea value={discardForm.remarks} onChange={e => setDiscardForm({ ...discardForm, remarks: e.target.value })} /></label>
+        <label>Reason<TextField value={discardForm.reason} onValue={nextValue => setDiscardForm({ ...discardForm, reason: nextValue })} required /></label>
+        <label>Remarks<TextField as="textarea" value={discardForm.remarks} onValue={nextValue => setDiscardForm({ ...discardForm, remarks: nextValue })} /></label>
         <button type="submit">Mark as discard</button>
       </form>}
       <table className="data-table"><thead><tr><th>Date</th><th>Unit #</th><th>Group</th><th>Component</th><th>Reason</th><th>Authorised by</th><th>Discarded by</th><th>NC/CAPA</th></tr></thead><tbody>

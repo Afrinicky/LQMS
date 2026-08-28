@@ -564,6 +564,56 @@ new capability is off by default, so an existing single-PC install is unchanged.
   environment variables; see [`.env.example`](.env.example). Full plan in
   [`docs/HYBRID_ARCHITECTURE_PLAN.md`](docs/HYBRID_ARCHITECTURE_PLAN.md).
 
+## How the application answers an action, and why the boxes stay typeable
+
+Two rules apply to every screen. Both are enforced by shared components rather
+than by convention, so a new page gets them for free.
+
+**A message goes to the action, not to the top of the page.** `Notice`
+(`src/components/ui/Feedback.tsx`) draws the banner where it is placed — an
+error about a form belongs beside that form and has to stay readable while it
+is corrected. If the banner appears somewhere the reader cannot see, which is
+the normal case for a page-level `error`/`notice` line above a form three
+screens long, the same message is also shown as a toast pinned to the control
+that was just used. The control is tracked from a capture-phase listener on the
+document, so no call site passes an anchor. A banner that is page furniture
+rather than an answer — a standing rule, a hint — is marked `silent` and never
+raises one.
+
+    {error  && <Notice kind="error">{error}</Notice>}
+    {notice && <Notice kind="success">{notice}</Notice>}
+    <Notice kind="warn" silent>Escalation applies to this event.</Notice>
+
+The four kinds are `error`, `success`, `warn` and `info`. They share one shape:
+a tinted ground, a semantic rail down the left edge, an icon, and body text set
+for reading rather than for alarm. The legacy class names (`.error`,
+`.notice-ok`, `.notice-warn`, `.success-msg`) are styled to match, so a banner
+that has not been migrated still looks like the rest of the product.
+
+**Text boxes hold their own text.** Every register here is one enormous page
+component holding a dozen tabs, a form and a table. Bound the obvious way —
+`value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}`
+— each character sets state on that page component, so React re-runs the whole
+thing before the letter can be painted. On a real register that is hundreds of
+milliseconds per keystroke, and the box does not look slow, it looks broken.
+
+`TextField` (`src/components/ui/TextField.tsx`) keeps what is typed in a
+component of its own and tells the page once typing pauses, and at once on
+blur, Enter and Escape. Use it for every text box and textarea:
+
+    <TextField value={form.title} onValue={v => setForm({ ...form, title: v })} />
+    <TextField as="textarea" value={form.notes} onValue={v => setForm({ ...form, notes: v })} />
+
+`NumberField` does the same for numbers and `RegisterSearch` for search boxes.
+Discrete pickers — dates, checkboxes, selects, files — are one interaction
+rather than a stream of them, and stay bound directly.
+
+One thing to watch: a handler that fires from the box's own `onKeyDown` or
+`onBlur` runs in the same event that hands the text up, so the state behind it
+is still the previous keystroke's. Such a handler must take the text as an
+argument — `onKeyDown={e => send(e.currentTarget.value)}` — rather than read it
+from state.
+
 ## Known limitations
 
 - All modules are foundation-level and require real-world testing before production use.

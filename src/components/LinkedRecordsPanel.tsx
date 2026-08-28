@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, errorText } from '../services/api';
+import { Notice } from './ui/Feedback';
 
 type LinkRow = {
   id: number;
@@ -22,7 +23,7 @@ export function LinkedRecordsPanel({ moduleKey, recordType, recordId, title }: {
     const params = new URLSearchParams({ module_key: moduleKey, record_type: recordType, record_id: String(recordId) });
     api<LinkedView>(`/common/linked-records?${params.toString()}`).then(setData).catch(e => setError(errorText(e)));
   }, [moduleKey, recordType, recordId]);
-  if (error) return <div className="card"><h4>{title ?? 'Linked records'}</h4><p className="error">{error}</p></div>;
+  if (error) return <div className="card"><h4>{title ?? 'Linked records'}</h4><Notice kind="error" silent>{error}</Notice></div>;
   if (!data) return <div className="card"><h4>{title ?? 'Linked records'}</h4><p>Loading…</p></div>;
   const renderRow = (l: LinkRow, direction: 'outgoing' | 'incoming') => {
     const target = direction === 'outgoing' ? { module: l.target_module_key, type: l.target_record_type, id: l.target_record_id } : { module: l.source_module_key, type: l.source_record_type, id: l.source_record_id };

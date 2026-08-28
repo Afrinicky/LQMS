@@ -12,6 +12,8 @@ import type {
   MonthlyReportException, TatRecord, MonthlyReportsSummary, TatSummary,
   MonthlyReportArchiveEntry
 } from '../../shared/types/api';
+import TextField from '../components/ui/TextField';
+import { Notice } from '../components/ui/Feedback';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
@@ -205,7 +207,7 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
   return <div className={embedded ? '' : 'module-page'}>
     {!embedded && <PageHeader eyebrow="Notifications &amp; Reports" title="Monthly Reports &amp; Archives" subtitle="Monthly report imports, archives, and exception handling." />}
     {tabBar(tab, tabs, setTab)}
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {tab === 'Dashboard' && <>
       <ModuleAlerts moduleKey="monthly_reports" />
@@ -255,7 +257,7 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
       <label>Report year<NumberField min={2000} max={2100} value={importForm.reportYear} onValue={n => setImportForm({ ...importForm, reportYear: n ?? 0 })} required /></label>
       <label>Import type<select value={importForm.importType} onChange={e => setImportForm({ ...importForm, importType: e.target.value })} required>{IMPORT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
       <label>Source file<input type="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={e => setImportForm({ ...importForm, file: e.target.files?.[0] ?? null })} required /></label>
-      <label>Notes<textarea value={importForm.notes} onChange={e => setImportForm({ ...importForm, notes: e.target.value })} /></label>
+      <label>Notes<TextField as="textarea" value={importForm.notes} onValue={nextValue => setImportForm({ ...importForm, notes: nextValue })} /></label>
       <button type="submit">Upload import batch</button>
       <p><em>CSV (.csv) and Excel (.xlsx, .xls) imports are parsed. The uploaded file is retained as raw archive evidence and included in backups.</em></p>
     </form>}
@@ -287,12 +289,12 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
 
     {tab === 'Mapping Rules' && <>
       {can('monthly_reports', 'create') && <form className="form-grid" onSubmit={submitRule}>
-        <label>Mapping name<input value={ruleForm.mappingName} onChange={e => setRuleForm({ ...ruleForm, mappingName: e.target.value })} required /></label>
-        <label>Source pattern<input value={ruleForm.sourcePattern} onChange={e => setRuleForm({ ...ruleForm, sourcePattern: e.target.value })} required placeholder="e.g. FBC, regex:^Malaria|MP, Hb*" /></label>
+        <label>Mapping name<TextField value={ruleForm.mappingName} onValue={nextValue => setRuleForm({ ...ruleForm, mappingName: nextValue })} required /></label>
+        <label>Source pattern<TextField value={ruleForm.sourcePattern} onValue={nextValue => setRuleForm({ ...ruleForm, sourcePattern: nextValue })} required placeholder="e.g. FBC, regex:^Malaria|MP, Hb*" /></label>
         <label>Source field<select value={ruleForm.sourceField} onChange={e => setRuleForm({ ...ruleForm, sourceField: e.target.value })}>{MAPPING_SOURCE_FIELDS.map(f => <option key={f} value={f}>{f.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Report type<select value={ruleForm.reportType} onChange={e => setRuleForm({ ...ruleForm, reportType: e.target.value })}>{REPORT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
-        <label>Report section<input value={ruleForm.reportSection} onChange={e => setRuleForm({ ...ruleForm, reportSection: e.target.value })} required placeholder="e.g. Haematology" /></label>
-        <label>Report row<input value={ruleForm.reportRow} onChange={e => setRuleForm({ ...ruleForm, reportRow: e.target.value })} required placeholder="e.g. FBC requests" /></label>
+        <label>Report section<TextField value={ruleForm.reportSection} onValue={nextValue => setRuleForm({ ...ruleForm, reportSection: nextValue })} required placeholder="e.g. Haematology" /></label>
+        <label>Report row<TextField value={ruleForm.reportRow} onValue={nextValue => setRuleForm({ ...ruleForm, reportRow: nextValue })} required placeholder="e.g. FBC requests" /></label>
         <label>Counting rule<select value={ruleForm.countingRule} onChange={e => setRuleForm({ ...ruleForm, countingRule: e.target.value })}>{COUNTING_RULES.map(c => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Department<select value={ruleForm.departmentId} onChange={e => setRuleForm({ ...ruleForm, departmentId: e.target.value })}><option value="">—</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
         <label>Section<select value={ruleForm.sectionId} onChange={e => setRuleForm({ ...ruleForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
@@ -322,7 +324,7 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
       </tbody></table>
       {resolveForm.exceptionId > 0 && can('monthly_reports', 'edit') && <form className="form-grid" onSubmit={submitResolve} style={{ marginTop: 12 }}>
         <h4>Resolve exception #{resolveForm.exceptionId}</h4>
-        <label>Resolution notes<textarea value={resolveForm.resolutionNotes} onChange={e => setResolveForm({ ...resolveForm, resolutionNotes: e.target.value })} required /></label>
+        <label>Resolution notes<TextField as="textarea" value={resolveForm.resolutionNotes} onValue={nextValue => setResolveForm({ ...resolveForm, resolutionNotes: nextValue })} required /></label>
         <button type="submit">Mark resolved</button>{' '}
         <button type="button" className="secondary" onClick={() => setResolveForm({ exceptionId: 0, resolutionNotes: '' })}>Cancel</button>
       </form>}
@@ -335,7 +337,7 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
       <label>Import batches (processed only)<select multiple size={Math.min(8, Math.max(3, imports.length))} value={generateForm.importBatchIds.map(String)} onChange={e => setGenerateForm({ ...generateForm, importBatchIds: Array.from(e.target.selectedOptions).map(o => Number(o.value)) })} required>
         {imports.filter(b => b.status === 'processed').map(b => <option key={b.id} value={b.id}>{b.batch_number} — {b.report_year}-{String(b.report_month).padStart(2, '0')} ({b.import_type})</option>)}
       </select></label>
-      <label>Notes<textarea value={generateForm.notes} onChange={e => setGenerateForm({ ...generateForm, notes: e.target.value })} /></label>
+      <label>Notes<TextField as="textarea" value={generateForm.notes} onValue={nextValue => setGenerateForm({ ...generateForm, notes: nextValue })} /></label>
       <button type="submit">Generate draft report</button>
     </form>}
 

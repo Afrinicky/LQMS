@@ -2,6 +2,8 @@ import { FormEvent, useEffect, useRef, useState } from 'react';
 import { api, API_BASE, getToken, errorText } from '../services/api';
 import DocumentScanner from './DocumentScanner';
 import { usePermissions } from '../hooks/usePermissions';
+import TextField from './ui/TextField';
+import { Notice } from './ui/Feedback';
 
 // Reusable uploader for scanned paper records / evidence charts. Used by
 // Environmental Monitoring, Equipment and other modules so historical records
@@ -113,12 +115,12 @@ export default function ScannedRecordUpload({
   return <div className="card" style={{ marginTop: 16 }}>
     <h3>{heading || 'Scanned records & evidence'}</h3>
     <p className="muted" style={{ marginTop: 0 }}>{blurb || 'Upload scanned copies of paper records so they are preserved, and attach charts/logs as evidence that the activity was performed. State the period the scan covers, and flag any out-of-range reading — the system will raise a nonconformity so the corrective-action steps follow.'}</p>
-    {error && <div className="error">{error}</div>}
-    {msg && <div className="notice-ok">{msg}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
+    {msg && <Notice kind="success">{msg}</Notice>}
     {/* Uploading a scan creates a record. Somebody who may only read the
         register sees the register, not the form. */}
     {can(moduleKey, 'create') && <form className="form-grid" onSubmit={submit}>
-      <label>Title / description<input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="e.g. Fridge 1 temperature chart — Aug 2026" required /></label>
+      <label>Title / description<TextField value={form.title} onValue={nextValue => setForm({ ...form, title: nextValue })} placeholder="e.g. Fridge 1 temperature chart — Aug 2026" required /></label>
       <label>Type of record<select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>{categories.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></label>
       <label>Coverage<select value={form.coverage} onChange={e => setForm({ ...form, coverage: e.target.value })}>{COVERAGES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></label>
       {form.coverage === 'monthly' ? <label>Month<input type="month" value={form.month} onChange={e => setForm({ ...form, month: e.target.value })} /></label> : <>
@@ -136,8 +138,8 @@ export default function ScannedRecordUpload({
       </label>
       <label className="check-inline"><input type="checkbox" checked={form.isLegacy} onChange={e => setForm({ ...form, isLegacy: e.target.checked })} /> Historical (legacy) record being preserved</label>
       <label className="check-inline"><input type="checkbox" checked={form.hasOutOfRange} onChange={e => setForm({ ...form, hasOutOfRange: e.target.checked })} /> This copy contains an out-of-range reading</label>
-      {form.hasOutOfRange && <label style={{ gridColumn: '1 / -1' }}>Out-of-range details (what/when)<input value={form.outOfRangeNotes} onChange={e => setForm({ ...form, outOfRangeNotes: e.target.value })} placeholder="e.g. 08 Aug reading 9.2°C exceeded 2–8°C limit" /></label>}
-      <label style={{ gridColumn: '1 / -1' }}>Notes<input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
+      {form.hasOutOfRange && <label style={{ gridColumn: '1 / -1' }}>Out-of-range details (what/when)<TextField value={form.outOfRangeNotes} onValue={nextValue => setForm({ ...form, outOfRangeNotes: nextValue })} placeholder="e.g. 08 Aug reading 9.2°C exceeded 2–8°C limit" /></label>}
+      <label style={{ gridColumn: '1 / -1' }}>Notes<TextField value={form.notes} onValue={nextValue => setForm({ ...form, notes: nextValue })} /></label>
       <button type="submit" disabled={busy}>{busy ? 'Uploading…' : 'Upload scanned record'}</button>
     </form>}
 

@@ -3,6 +3,8 @@ import { Paperclip, Printer, Trash2, Upload } from 'lucide-react';
 import { api, API_BASE, getToken, errorText } from '../../services/api';
 import { openPrintable } from '../../services/xlsx';
 import type { RecordAttachment } from '../../../shared/types/api';
+import TextField from '../../components/ui/TextField';
+import { Notice } from '../../components/ui/Feedback';
 
 /**
  * The pieces the competence and appraisal workspaces both need: the score
@@ -225,8 +227,8 @@ export function EvidencePanel({ basePath, attachments, canEdit, onChanged, itemC
 
     {canEdit && <div className="evidence-add">
       <label>File<input ref={inputRef} type="file" onChange={e => setFile(e.target.files?.[0] ?? null)} /></label>
-      <label>Title<input value={title} onChange={e => setTitle(e.target.value)} placeholder="Defaults to the file name" /></label>
-      <label>Description<input value={description} onChange={e => setDescription(e.target.value)} placeholder="What this evidences" /></label>
+      <label>Title<TextField value={title} onValue={nextValue => setTitle(nextValue)} placeholder="Defaults to the file name" /></label>
+      <label>Description<TextField value={description} onValue={nextValue => setDescription(nextValue)} placeholder="What this evidences" /></label>
       {itemChoices && itemChoices.length > 0 && <label>Evidence for
         <select value={itemId} onChange={e => setItemId(e.target.value)}>
           <option value="">The record as a whole</option>
@@ -237,7 +239,7 @@ export function EvidencePanel({ basePath, attachments, canEdit, onChanged, itemC
         <Upload size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />{busy ? 'Attaching…' : 'Attach evidence'}
       </button>
     </div>}
-    {error && <div className="error" style={{ marginTop: 8 }}>{error}</div>}
+    {error && <Notice kind="error" style={{ marginTop: 8 }}>{error}</Notice>}
   </div>;
 }
 

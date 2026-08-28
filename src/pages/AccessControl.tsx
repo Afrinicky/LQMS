@@ -11,6 +11,8 @@ import type {
   ApiUser, AccessCatalogue, AccessProfilePosition, EffectiveAccess,
   PermissionMatrixData, TechnicalAuthorizationRow,
 } from '../../shared/types/api';
+import TextField from '../components/ui/TextField';
+import { Notice } from '../components/ui/Feedback';
 
 /* ============================================================================
    ACCESS CONTROL — one model, two layers
@@ -325,10 +327,10 @@ function ProfilesTab({ catalogue, reload }: { catalogue: AccessCatalogue | null;
           {profiles.length === 0 && <p className="muted" style={{ padding: 12 }}>No access profiles yet.</p>}
         </div>
         <div className="ac-add-profile">
-          <input
+          <TextField
             value={newProfile}
             placeholder="Add a profile — Night shift, Locum…"
-            onChange={e => setNewProfile(e.target.value)}
+            onValue={nextValue => setNewProfile(nextValue)}
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void createProfile(); } }}
           />
           {can('settings', 'create') && <button type="button" className="secondary" disabled={busy === 'new' || !newProfile.trim()} onClick={() => void createProfile()}>Add</button>}
@@ -360,8 +362,8 @@ function ProfilesTab({ catalogue, reload }: { catalogue: AccessCatalogue | null;
         <div className="ac-areas-head">
           <div>
             {renaming !== null
-              ? <input className="ac-rename" autoFocus value={renaming}
-                  onChange={e => setRenaming(e.target.value)}
+              ? <TextField className="ac-rename" autoFocus value={renaming}
+                  onValue={nextValue => setRenaming(nextValue)}
                   onKeyDown={e => { if (e.key === 'Enter') void renameProfile(renaming); if (e.key === 'Escape') setRenaming(null); }}
                   onBlur={() => void renameProfile(renaming)} />
               : <h3>
@@ -378,24 +380,24 @@ function ProfilesTab({ catalogue, reload }: { catalogue: AccessCatalogue | null;
           </div>
           <div className="ac-search">
             <Search size={15} />
-            <input placeholder="Find an area — appraisals, suppliers, approvals…" value={query} onChange={e => setQuery(e.target.value)} />
+            <TextField placeholder="Find an area — appraisals, suppliers, approvals…" value={query} onValue={nextValue => setQuery(nextValue)} />
           </div>
         </div>
 
-        {error && <div className="error">{error}</div>}
-        {notice && <div className="notice-ok">{notice}</div>}
+        {error && <Notice kind="error">{error}</Notice>}
+        {notice && <Notice kind="success">{notice}</Notice>}
         {isAdminProfile && (
-          <div className="notice-warn">
+          <Notice kind="warn">
             This is the administrator profile. Narrowing it can lock the laboratory out of its own
             configuration — change it only when another administrator account exists.
-          </div>
+          </Notice>
         )}
         {unmapped.length > 0 && (
-          <div className="notice-warn">
+          <Notice kind="warn">
             {unmapped.length} {unmapped.length === 1 ? 'position holds staff but is' : 'positions hold staff but are'} not mapped
             to an access profile: {unmapped.slice(0, 6).map(p => p.title).join(', ')}{unmapped.length > 6 ? '…' : ''}.
             Those people follow the profile on their own account. Map them on the left to decide it here instead.
-          </div>
+          </Notice>
         )}
 
         {profileId !== null && (
@@ -559,7 +561,7 @@ function IndividualsTab({ catalogue, reload }: { catalogue: AccessCatalogue | nu
           </div>
           <div className="ac-search">
             <Search size={15} />
-            <input placeholder="Find an area…" value={query} onChange={e => setQuery(e.target.value)} />
+            <TextField placeholder="Find an area…" value={query} onValue={nextValue => setQuery(nextValue)} />
           </div>
         </div>
 
@@ -574,8 +576,8 @@ function IndividualsTab({ catalogue, reload }: { catalogue: AccessCatalogue | nu
           </div>
         </div>
 
-        {error && <div className="error">{error}</div>}
-        {notice && <div className="notice-ok">{notice}</div>}
+        {error && <Notice kind="error">{error}</Notice>}
+        {notice && <Notice kind="success">{notice}</Notice>}
         {overrideCount > 0 && (
           <p className="muted" style={{ padding: '0 4px' }}>
             {can('settings', 'edit') && <button type="button" className="ac-reset" disabled={busy === 'all'} onClick={clearAll}>
@@ -647,7 +649,7 @@ export function AccessControl() {
         </div>
       </div>
 
-      {error && <div className="error">{error}</div>}
+      {error && <Notice kind="error">{error}</Notice>}
 
       <div className="ac-scope">
         <button type="button" className={tab === 'profiles' ? 'active' : ''} onClick={() => setTab('profiles')}

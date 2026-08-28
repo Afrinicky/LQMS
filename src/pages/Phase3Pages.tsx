@@ -8,6 +8,8 @@ import { ForecastingPanel } from './inventory/Forecasting';
 import { InventoryReports } from './inventory/Reports';
 import SupplierEvaluationWorkspace from './inventory/SupplierEvaluation';
 import { STOCK_STATUS_LABELS, NEEDS_ACTION } from '../../shared/constants/stockControl';
+import TextField from '../components/ui/TextField';
+import { Notice } from '../components/ui/Feedback';
 
 // Receiving is one job done in two places: the delivery is booked in, and the
 // lots it created are then inspected, accepted and watched for expiry.
@@ -406,7 +408,7 @@ export function EquipmentPage() {
       <div style={{ margin: '4px 0 10px' }}>
         <BarcodeScanner placeholder="Scan an equipment barcode to open it…" autoFocus={false} onScan={code => { const m = equipment.find(e => e.equipment_number?.toLowerCase() === code.trim().toLowerCase()); if (m) openDetail(m.id); else setError(`No equipment found for barcode "${code}".`); }} />
       </div>
-      {regResult && <div className="success-msg" style={{ marginTop: 8 }}><strong>{regResult.created}</strong> created, <strong>{regResult.updated}</strong> updated ({regResult.totalRows} rows).{regResult.errors.length > 0 && <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>{regResult.errors.slice(0, 8).map((er, i) => <li key={i} style={{ fontSize: 12 }}>{er}</li>)}</ul>}</div>}
+      {regResult && <Notice kind="success" style={{ marginTop: 8 }}><strong>{regResult.created}</strong> created, <strong>{regResult.updated}</strong> updated ({regResult.totalRows} rows).{regResult.errors.length > 0 && <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>{regResult.errors.slice(0, 8).map((er, i) => <li key={i} style={{ fontSize: 12 }}>{er}</li>)}</ul>}</Notice>}
       {loading ? <p>Loading…</p> : equipment.length === 0 ? <p>No equipment items have been recorded yet.</p> :
         <div style={{ overflowX: 'auto' }}>
         <table className="table"><thead><tr><th>Identifier</th><th>Name</th><th>Serial no.</th><th>Model</th><th>Manufacturer</th><th>Supplier</th><th>Country</th><th>Condition</th><th>Received</th><th>In service</th><th>Location</th><th>Out of service</th><th>Status</th></tr></thead><tbody>
@@ -430,20 +432,20 @@ export function EquipmentPage() {
     {tab === 'New Equipment' && <div className="card">
       <h3>New equipment</h3>
       {can('equipment.register', 'create') && <form className="form" onSubmit={submitEquipment}>
-        <label>Unique identifier<input value={equipForm.equipmentNumber} onChange={e => setEquipForm({ ...equipForm, equipmentNumber: e.target.value })} placeholder={nextNumber || 'auto'} /><small className="muted">Follows the configured pattern; edit only for items with their own identifier.</small></label>
-        <label>Name<input value={equipForm.name} onChange={e => setEquipForm({ ...equipForm, name: e.target.value })} required /></label>
+        <label>Unique identifier<TextField value={equipForm.equipmentNumber} onValue={nextValue => setEquipForm({ ...equipForm, equipmentNumber: nextValue })} placeholder={nextNumber || 'auto'} /><small className="muted">Follows the configured pattern; edit only for items with their own identifier.</small></label>
+        <label>Name<TextField value={equipForm.name} onValue={nextValue => setEquipForm({ ...equipForm, name: nextValue })} required /></label>
         <label>Equipment category<select value={equipForm.equipmentCategory} onChange={e => setEquipForm({ ...equipForm, equipmentCategory: e.target.value })}>
           {opt('equipment_category').map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
         </select><small className="muted">{EQUIPMENT_CATEGORY_HINTS[(archetypeOfOption(opt('equipment_category'), equipForm.equipmentCategory)) as never] ?? ''} <Link to="/settings/config-lists">Manage categories</Link></small></label>
-        <label>Manufacturer<input value={equipForm.manufacturer} onChange={e => setEquipForm({ ...equipForm, manufacturer: e.target.value })} /></label>
-        <label>Model<input value={equipForm.model} onChange={e => setEquipForm({ ...equipForm, model: e.target.value })} /></label>
-        <label>Serial number<input value={equipForm.serialNumber} onChange={e => setEquipForm({ ...equipForm, serialNumber: e.target.value })} /></label>
-        <label>Country of origin<input value={equipForm.countryOfOrigin} onChange={e => setEquipForm({ ...equipForm, countryOfOrigin: e.target.value })} /></label>
+        <label>Manufacturer<TextField value={equipForm.manufacturer} onValue={nextValue => setEquipForm({ ...equipForm, manufacturer: nextValue })} /></label>
+        <label>Model<TextField value={equipForm.model} onValue={nextValue => setEquipForm({ ...equipForm, model: nextValue })} /></label>
+        <label>Serial number<TextField value={equipForm.serialNumber} onValue={nextValue => setEquipForm({ ...equipForm, serialNumber: nextValue })} /></label>
+        <label>Country of origin<TextField value={equipForm.countryOfOrigin} onValue={nextValue => setEquipForm({ ...equipForm, countryOfOrigin: nextValue })} /></label>
         <label>Condition received<select value={equipForm.conditionReceived} onChange={e => setEquipForm({ ...equipForm, conditionReceived: e.target.value })}><option value="">—</option>{opt('equipment_condition').map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></label>
         <label>Criticality<select value={equipForm.criticality} onChange={e => setEquipForm({ ...equipForm, criticality: e.target.value })}><option value="">—</option>{opt('equipment_criticality').map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></label>
-        <label>Supplier name<input value={equipForm.supplierName} onChange={e => setEquipForm({ ...equipForm, supplierName: e.target.value })} /></label>
-        <label>Supplier location<input value={equipForm.supplierLocation} onChange={e => setEquipForm({ ...equipForm, supplierLocation: e.target.value })} /></label>
-        <label>Supplier contact<input value={equipForm.supplierContact} onChange={e => setEquipForm({ ...equipForm, supplierContact: e.target.value })} placeholder="phone / email" /></label>
+        <label>Supplier name<TextField value={equipForm.supplierName} onValue={nextValue => setEquipForm({ ...equipForm, supplierName: nextValue })} /></label>
+        <label>Supplier location<TextField value={equipForm.supplierLocation} onValue={nextValue => setEquipForm({ ...equipForm, supplierLocation: nextValue })} /></label>
+        <label>Supplier contact<TextField value={equipForm.supplierContact} onValue={nextValue => setEquipForm({ ...equipForm, supplierContact: nextValue })} placeholder="phone / email" /></label>
         <label>Department<select value={equipForm.departmentId} onChange={e => setEquipForm({ ...equipForm, departmentId: e.target.value })}><option value="">Select department</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
         <label>Section (location)<select value={equipForm.sectionId} onChange={e => setEquipForm({ ...equipForm, sectionId: e.target.value })}><option value="">Select section</option>{sections.filter(s => !equipForm.departmentId || String(s.department_id) === equipForm.departmentId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select><small className="muted">The equipment's location is the section it belongs to.</small></label>
         <label>Custodian (responsible staff)<select value={equipForm.responsibleStaffId} onChange={e => setEquipForm({ ...equipForm, responsibleStaffId: e.target.value })}><option value="">Select staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
@@ -451,13 +453,13 @@ export function EquipmentPage() {
         <label>Date received<input type="date" value={equipForm.dateReceived} onChange={e => setEquipForm({ ...equipForm, dateReceived: e.target.value })} /></label>
         <label>Date of entry into service<input type="date" value={equipForm.dateInService} onChange={e => setEquipForm({ ...equipForm, dateInService: e.target.value })} /></label>
         <label>Date out of service<input type="date" value={equipForm.dateOutOfService} onChange={e => setEquipForm({ ...equipForm, dateOutOfService: e.target.value })} /></label>
-        <label>Maintenance frequency<input value={equipForm.maintenanceFrequency} onChange={e => setEquipForm({ ...equipForm, maintenanceFrequency: e.target.value })} placeholder="e.g. monthly" /></label>
+        <label>Maintenance frequency<TextField value={equipForm.maintenanceFrequency} onValue={nextValue => setEquipForm({ ...equipForm, maintenanceFrequency: nextValue })} placeholder="e.g. monthly" /></label>
         <label>Next maintenance due<input type="date" value={equipForm.nextMaintenanceDue} onChange={e => setEquipForm({ ...equipForm, nextMaintenanceDue: e.target.value })} /></label>
-        <label>Calibration frequency<input value={equipForm.calibrationFrequency} onChange={e => setEquipForm({ ...equipForm, calibrationFrequency: e.target.value })} /></label>
+        <label>Calibration frequency<TextField value={equipForm.calibrationFrequency} onValue={nextValue => setEquipForm({ ...equipForm, calibrationFrequency: nextValue })} /></label>
         <label>Next calibration due<input type="date" value={equipForm.nextCalibrationDue} onChange={e => setEquipForm({ ...equipForm, nextCalibrationDue: e.target.value })} /></label>
         <label><input type="checkbox" checked={equipForm.calibrationRequired} onChange={e => setEquipForm({ ...equipForm, calibrationRequired: e.target.checked })} /> Calibration required</label>
         <label>Manufacturer's instructions / IFU<input type="file" onChange={e => setNewIfuFile(e.target.files?.[0] ?? null)} /><small className="muted">Attached to the profile as the manufacturer's manual.</small></label>
-        <label>Notes<textarea value={equipForm.notes} onChange={e => setEquipForm({ ...equipForm, notes: e.target.value })} /></label>
+        <label>Notes<TextField as="textarea" value={equipForm.notes} onValue={nextValue => setEquipForm({ ...equipForm, notes: nextValue })} /></label>
         <button type="submit">Save equipment</button>
       </form>}
     </div>}
@@ -486,12 +488,12 @@ export function EquipmentPage() {
         <label>Equipment<select value={breakdownForm.equipmentId} onChange={e => setBreakdownForm({ ...breakdownForm, equipmentId: e.target.value })} required><option value="">Select equipment</option>{equipment.map(e2 => <option key={e2.id} value={e2.id}>{e2.equipment_number} — {e2.name}</option>)}</select></label>
         <label>Breakdown date<input type="date" value={breakdownForm.breakdownDate} onChange={e => setBreakdownForm({ ...breakdownForm, breakdownDate: e.target.value })} required /></label>
         <label>Reported by<select value={breakdownForm.reportedByStaffId} onChange={e => setBreakdownForm({ ...breakdownForm, reportedByStaffId: e.target.value })}><option value="">Select staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-        <label>Description<textarea value={breakdownForm.description} onChange={e => setBreakdownForm({ ...breakdownForm, description: e.target.value })} required /></label>
-        <label>Service impact<input value={breakdownForm.serviceImpact} onChange={e => setBreakdownForm({ ...breakdownForm, serviceImpact: e.target.value })} /></label>
-        <label>Immediate action<textarea value={breakdownForm.immediateAction} onChange={e => setBreakdownForm({ ...breakdownForm, immediateAction: e.target.value })} /></label>
+        <label>Description<TextField as="textarea" value={breakdownForm.description} onValue={nextValue => setBreakdownForm({ ...breakdownForm, description: nextValue })} required /></label>
+        <label>Service impact<TextField value={breakdownForm.serviceImpact} onValue={nextValue => setBreakdownForm({ ...breakdownForm, serviceImpact: nextValue })} /></label>
+        <label>Immediate action<TextField as="textarea" value={breakdownForm.immediateAction} onValue={nextValue => setBreakdownForm({ ...breakdownForm, immediateAction: nextValue })} /></label>
         <label>Equipment status<select value={breakdownForm.equipmentStatus} onChange={e => setBreakdownForm({ ...breakdownForm, equipmentStatus: e.target.value })}>{['out_of_service', 'under_repair', 'restricted_use'].map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select></label>
-        <label>Repair action<textarea value={breakdownForm.repairAction} onChange={e => setBreakdownForm({ ...breakdownForm, repairAction: e.target.value })} /></label>
-        <label>Service provider<input value={breakdownForm.serviceProvider} onChange={e => setBreakdownForm({ ...breakdownForm, serviceProvider: e.target.value })} /></label>
+        <label>Repair action<TextField as="textarea" value={breakdownForm.repairAction} onValue={nextValue => setBreakdownForm({ ...breakdownForm, repairAction: nextValue })} /></label>
+        <label>Service provider<TextField value={breakdownForm.serviceProvider} onValue={nextValue => setBreakdownForm({ ...breakdownForm, serviceProvider: nextValue })} /></label>
         <button type="submit">Report breakdown</button>
       </form>}
     </div>}
@@ -647,13 +649,13 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
       <div className="form-grid">
         <label>Date decommissioned<input type="date" value={decomForm.decommissionedAt} onChange={e => setDecomForm({ ...decomForm, decommissionedAt: e.target.value })} required /></label>
         <label>Decommissioned by<select value={decomForm.decommissionedByStaffId} onChange={e => setDecomForm({ ...decomForm, decommissionedByStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-        <label style={{ gridColumn: '1 / -1' }}>Reason<textarea value={decomForm.decommissionReason} onChange={e => setDecomForm({ ...decomForm, decommissionReason: e.target.value })} /></label>
+        <label style={{ gridColumn: '1 / -1' }}>Reason<TextField as="textarea" value={decomForm.decommissionReason} onValue={nextValue => setDecomForm({ ...decomForm, decommissionReason: nextValue })} /></label>
         <label className="check-inline" style={{ gridColumn: '1 / -1' }}><input type="checkbox" checked={decomForm.decontaminationConfirmed} onChange={e => setDecomForm({ ...decomForm, decontaminationConfirmed: e.target.checked })} /> Decontamination confirmed</label>
-        <label>Decontamination method<input value={decomForm.decontaminationMethod} onChange={e => setDecomForm({ ...decomForm, decontaminationMethod: e.target.value })} placeholder="e.g. 1% NaOCl, autoclave, wipe-down" /></label>
+        <label>Decontamination method<TextField value={decomForm.decontaminationMethod} onValue={nextValue => setDecomForm({ ...decomForm, decontaminationMethod: nextValue })} placeholder="e.g. 1% NaOCl, autoclave, wipe-down" /></label>
         <label>Confirmed by<select value={decomForm.decontaminationConfirmedByStaffId} onChange={e => setDecomForm({ ...decomForm, decontaminationConfirmedByStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-        <label>Disposal method<input value={decomForm.disposalMethod} onChange={e => setDecomForm({ ...decomForm, disposalMethod: e.target.value })} placeholder="e.g. e-waste vendor, returned to supplier" /></label>
+        <label>Disposal method<TextField value={decomForm.disposalMethod} onValue={nextValue => setDecomForm({ ...decomForm, disposalMethod: nextValue })} placeholder="e.g. e-waste vendor, returned to supplier" /></label>
         <label>Disposal date<input type="date" value={decomForm.disposalDate} onChange={e => setDecomForm({ ...decomForm, disposalDate: e.target.value })} /></label>
-        <label>Disposal reference<input value={decomForm.disposalReference} onChange={e => setDecomForm({ ...decomForm, disposalReference: e.target.value })} placeholder="Certificate / waybill no." /></label>
+        <label>Disposal reference<TextField value={decomForm.disposalReference} onValue={nextValue => setDecomForm({ ...decomForm, disposalReference: nextValue })} placeholder="Certificate / waybill no." /></label>
         <label>Evidence<input type="file" onChange={e => setDecomFile(e.target.files?.[0] ?? null)} /></label>
       </div>
       <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
@@ -673,19 +675,19 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
 
     {editing
       ? can('supplier_inventory.suppliers', 'edit') && <form className="form" style={{ marginTop: 14 }} onSubmit={e => { e.preventDefault(); void save(); }}>
-          <label>Unique identifier<input value={form.equipmentNumber} onChange={e => setForm({ ...form, equipmentNumber: e.target.value })} /></label>
-          <label>Name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></label>
-          <label>Category<input value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} /></label>
-          <label>Equipment type<input value={form.equipmentType} onChange={e => setForm({ ...form, equipmentType: e.target.value })} /></label>
-          <label>Manufacturer<input value={form.manufacturer} onChange={e => setForm({ ...form, manufacturer: e.target.value })} /></label>
-          <label>Model<input value={form.model} onChange={e => setForm({ ...form, model: e.target.value })} /></label>
-          <label>Serial number<input value={form.serialNumber} onChange={e => setForm({ ...form, serialNumber: e.target.value })} /></label>
-          <label>Country of origin<input value={form.countryOfOrigin} onChange={e => setForm({ ...form, countryOfOrigin: e.target.value })} /></label>
+          <label>Unique identifier<TextField value={form.equipmentNumber} onValue={nextValue => setForm({ ...form, equipmentNumber: nextValue })} /></label>
+          <label>Name<TextField value={form.name} onValue={nextValue => setForm({ ...form, name: nextValue })} required /></label>
+          <label>Category<TextField value={form.category} onValue={nextValue => setForm({ ...form, category: nextValue })} /></label>
+          <label>Equipment type<TextField value={form.equipmentType} onValue={nextValue => setForm({ ...form, equipmentType: nextValue })} /></label>
+          <label>Manufacturer<TextField value={form.manufacturer} onValue={nextValue => setForm({ ...form, manufacturer: nextValue })} /></label>
+          <label>Model<TextField value={form.model} onValue={nextValue => setForm({ ...form, model: nextValue })} /></label>
+          <label>Serial number<TextField value={form.serialNumber} onValue={nextValue => setForm({ ...form, serialNumber: nextValue })} /></label>
+          <label>Country of origin<TextField value={form.countryOfOrigin} onValue={nextValue => setForm({ ...form, countryOfOrigin: nextValue })} /></label>
           <label>Condition received<select value={form.conditionReceived} onChange={e => setForm({ ...form, conditionReceived: e.target.value })}><option value="">—</option>{CONDITION_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
           <label>Criticality<select value={form.criticality} onChange={e => setForm({ ...form, criticality: e.target.value })}><option value="">—</option>{CRITICALITY_OPTIONS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></label>
-          <label>Supplier name<input value={form.supplierName} onChange={e => setForm({ ...form, supplierName: e.target.value })} /></label>
-          <label>Supplier location<input value={form.supplierLocation} onChange={e => setForm({ ...form, supplierLocation: e.target.value })} /></label>
-          <label>Supplier contact<input value={form.supplierContact} onChange={e => setForm({ ...form, supplierContact: e.target.value })} /></label>
+          <label>Supplier name<TextField value={form.supplierName} onValue={nextValue => setForm({ ...form, supplierName: nextValue })} /></label>
+          <label>Supplier location<TextField value={form.supplierLocation} onValue={nextValue => setForm({ ...form, supplierLocation: nextValue })} /></label>
+          <label>Supplier contact<TextField value={form.supplierContact} onValue={nextValue => setForm({ ...form, supplierContact: nextValue })} /></label>
           <label>Department<select value={form.departmentId} onChange={e => setForm({ ...form, departmentId: e.target.value })}><option value="">—</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
           <label>Section (location)<select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })}><option value="">—</option>{sections.filter(s => !form.departmentId || String(s.department_id) === form.departmentId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
           <label>Custodian<select value={form.responsibleStaffId} onChange={e => setForm({ ...form, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
@@ -693,12 +695,12 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
           <label>Date received<input type="date" value={form.dateReceived} onChange={e => setForm({ ...form, dateReceived: e.target.value })} /></label>
           <label>Date into service<input type="date" value={form.dateInService} onChange={e => setForm({ ...form, dateInService: e.target.value })} /></label>
           <label>Date out of service<input type="date" value={form.dateOutOfService} onChange={e => setForm({ ...form, dateOutOfService: e.target.value })} /></label>
-          <label>Maintenance frequency<input value={form.maintenanceFrequency} onChange={e => setForm({ ...form, maintenanceFrequency: e.target.value })} /></label>
+          <label>Maintenance frequency<TextField value={form.maintenanceFrequency} onValue={nextValue => setForm({ ...form, maintenanceFrequency: nextValue })} /></label>
           <label>Next maintenance due<input type="date" value={form.nextMaintenanceDue} onChange={e => setForm({ ...form, nextMaintenanceDue: e.target.value })} /></label>
-          <label>Calibration frequency<input value={form.calibrationFrequency} onChange={e => setForm({ ...form, calibrationFrequency: e.target.value })} /></label>
+          <label>Calibration frequency<TextField value={form.calibrationFrequency} onValue={nextValue => setForm({ ...form, calibrationFrequency: nextValue })} /></label>
           <label>Next calibration due<input type="date" value={form.nextCalibrationDue} onChange={e => setForm({ ...form, nextCalibrationDue: e.target.value })} /></label>
           <label className="check-inline"><input type="checkbox" checked={form.calibrationRequired} onChange={e => setForm({ ...form, calibrationRequired: e.target.checked })} /> Calibration required</label>
-          <label>Notes<textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
+          <label>Notes<TextField as="textarea" value={form.notes} onValue={nextValue => setForm({ ...form, notes: nextValue })} /></label>
           <label>Manufacturer's IFU {item.ifu_file_id ? <>· <a href={`${API_BASE}/files/${item.ifu_file_id}/raw`} target="_blank" rel="noreferrer">current</a></> : null}<input type="file" onChange={e => setIfuFile(e.target.files?.[0] ?? null)} /><small className="muted">Upload to replace the current IFU.</small></label>
           <div style={{ display: 'flex', gap: 8 }}><button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button><button type="button" className="secondary" onClick={() => { setForm(toForm(item)); setEditing(false); }}>Cancel</button></div>
         </form>
@@ -854,7 +856,7 @@ function EquipmentLifecycleTab({ kind, equipment, staff, setError, onChanged }: 
         {items.length === 0 && <tr><td colSpan={3} className="muted">No active questions.</td></tr>}
       </tbody></table>
       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-        <input placeholder="Add a question…" value={newPrompt} onChange={e => setNewPrompt(e.target.value)} style={{ flex: 1 }} />
+        <TextField placeholder="Add a question…" value={newPrompt} onValue={nextValue => setNewPrompt(nextValue)} style={{ flex: 1 }} />
         {can('equipment.maintenance', 'edit') && <button type="button" onClick={addItem}>Add</button>}
       </div>
     </div>}
@@ -866,13 +868,13 @@ function EquipmentLifecycleTab({ kind, equipment, staff, setError, onChanged }: 
         <label>Date performed<input type="date" value={form.performedDate} onChange={e => setForm({ ...form, performedDate: e.target.value })} required /></label>
         <label>Performed by<select value={form.performedByStaffId} onChange={e => setForm({ ...form, performedByStaffId: e.target.value })}><option value="">Select staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Outcome<select value={form.outcome} onChange={e => setForm({ ...form, outcome: e.target.value })}><option value="">—</option><option value="pass">Pass</option><option value="conditional">Conditional</option><option value="fail">Fail</option></select></label>
-        <label>Conclusion<textarea value={form.conclusion} onChange={e => setForm({ ...form, conclusion: e.target.value })} /></label>
+        <label>Conclusion<TextField as="textarea" value={form.conclusion} onValue={nextValue => setForm({ ...form, conclusion: nextValue })} /></label>
       </> : <>
         <label>Calibration date<input type="date" value={form.calibrationDate} onChange={e => setForm({ ...form, calibrationDate: e.target.value })} required /></label>
         <label>Mode<select value={form.calibrationMode} onChange={e => setForm({ ...form, calibrationMode: e.target.value })}><option value="internal">Internal (in-house)</option><option value="external">External (offsite)</option></select></label>
-        <label>Provider<input value={form.provider} onChange={e => setForm({ ...form, provider: e.target.value })} placeholder="Calibration provider" /></label>
-        <label>Certificate number<input value={form.certificateNumber} onChange={e => setForm({ ...form, certificateNumber: e.target.value })} /></label>
-        <label>Traceability reference<input value={form.traceabilityReference} onChange={e => setForm({ ...form, traceabilityReference: e.target.value })} placeholder="e.g. national standard / CRM" /></label>
+        <label>Provider<TextField value={form.provider} onValue={nextValue => setForm({ ...form, provider: nextValue })} placeholder="Calibration provider" /></label>
+        <label>Certificate number<TextField value={form.certificateNumber} onValue={nextValue => setForm({ ...form, certificateNumber: nextValue })} /></label>
+        <label>Traceability reference<TextField value={form.traceabilityReference} onValue={nextValue => setForm({ ...form, traceabilityReference: nextValue })} placeholder="e.g. national standard / CRM" /></label>
         <label>Reference standard used<select value={form.referenceStandardId} onChange={e => setForm({ ...form, referenceStandardId: e.target.value })}><option value="">—</option>{refStandards.map(r => <option key={r.id} value={r.id}>{r.reference_number} — {r.name}</option>)}</select></label>
         <label>Result<select value={form.result} onChange={e => setForm({ ...form, result: e.target.value })}><option value="">—</option><option value="pass">Pass</option><option value="fail">Fail</option><option value="adjusted">Adjusted</option></select></label>
         <label>Next calibration due<input type="date" value={form.nextDueDate} onChange={e => setForm({ ...form, nextDueDate: e.target.value })} /></label>
@@ -886,14 +888,14 @@ function EquipmentLifecycleTab({ kind, equipment, staff, setError, onChanged }: 
           <div style={{ fontSize: 14, marginBottom: 6 }}>{it.prompt}</div>
           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>
             <div style={{ display: 'flex', gap: 10 }}>{RESPONSE_OPTIONS.map(o => <label key={o.v} className="check-inline" style={{ fontSize: 13 }}><input type="radio" name={`resp-${kind}-${it.id}`} checked={responses[it.id]?.response === o.v} onChange={() => setResp(it.id, { response: o.v })} /> {o.l}</label>)}</div>
-            <input placeholder="Notes" value={responses[it.id]?.notes ?? ''} onChange={e => setResp(it.id, { notes: e.target.value })} style={{ flex: 1, minWidth: 160 }} />
+            <TextField placeholder="Notes" value={responses[it.id]?.notes ?? ''} onValue={nextValue => setResp(it.id, { notes: nextValue })} style={{ flex: 1, minWidth: 160 }} />
             <label style={{ fontSize: 12 }} className="muted">Evidence <input type="file" onChange={e => setResp(it.id, { file: e.target.files?.[0] ?? null })} /></label>
           </div>
         </div>)}
       </div>}
 
       <label>Overall evidence / report<input type="file" onChange={e => setRecordFile(e.target.files?.[0] ?? null)} /></label>
-      <label>Notes<textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
+      <label>Notes<TextField as="textarea" value={form.notes} onValue={nextValue => setForm({ ...form, notes: nextValue })} /></label>
       <button type="submit" disabled={busy}>{busy ? 'Saving…' : `Record ${isVer ? 'verification' : 'calibration'}`}</button>
     </form>}
 
@@ -942,11 +944,11 @@ function ReferenceStandardsPanel({ staff, setError }: { staff: Staff[]; setError
     <h3>Reference standards &amp; certified reference materials</h3>
     <p className="muted" style={{ marginTop: 0 }}>The reference materials and instruments (certified thermometer, tachometer, CRMs) that underpin in-house calibration and metrological traceability.</p>
     {can('facilities_safety.incidents', 'create') && <form className="form" onSubmit={submit}>
-      <label>Name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></label>
+      <label>Name<TextField value={form.name} onValue={nextValue => setForm({ ...form, name: nextValue })} required /></label>
       <label>Type<select value={form.standardType} onChange={e => setForm({ ...form, standardType: e.target.value })}><option value="certified_reference_material">Certified reference material</option><option value="reference_instrument">Reference instrument</option><option value="other">Other</option></select></label>
-      <label>Identifier / serial<input value={form.identifier} onChange={e => setForm({ ...form, identifier: e.target.value })} /></label>
-      <label>Certificate number<input value={form.certificateNumber} onChange={e => setForm({ ...form, certificateNumber: e.target.value })} /></label>
-      <label>Traceable to<input value={form.traceableTo} onChange={e => setForm({ ...form, traceableTo: e.target.value })} placeholder="e.g. national metrology institute" /></label>
+      <label>Identifier / serial<TextField value={form.identifier} onValue={nextValue => setForm({ ...form, identifier: nextValue })} /></label>
+      <label>Certificate number<TextField value={form.certificateNumber} onValue={nextValue => setForm({ ...form, certificateNumber: nextValue })} /></label>
+      <label>Traceable to<TextField value={form.traceableTo} onValue={nextValue => setForm({ ...form, traceableTo: nextValue })} placeholder="e.g. national metrology institute" /></label>
       <label>Valid from<input type="date" value={form.validFrom} onChange={e => setForm({ ...form, validFrom: e.target.value })} /></label>
       <label>Valid until<input type="date" value={form.validUntil} onChange={e => setForm({ ...form, validUntil: e.target.value })} /></label>
       <label>Custodian<select value={form.custodianStaffId} onChange={e => setForm({ ...form, custodianStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
@@ -1065,10 +1067,10 @@ function EquipmentMaintenanceTab({ equipment, staff, sections, setError, onChang
           <label>Frequency<select value={schedForm.frequency} onChange={e => setSchedForm({ ...schedForm, frequency: e.target.value })}>{SCHEDULE_FREQUENCIES.map(f => <option key={f} value={f}>{f}</option>)}</select></label>
           {schedForm.frequency === 'custom' && <label>Interval (days)<input type="number" min={1} value={schedForm.intervalDays} onChange={e => setSchedForm({ ...schedForm, intervalDays: e.target.value })} /></label>}
           <label>Provider type<select value={schedForm.providerType} onChange={e => setSchedForm({ ...schedForm, providerType: e.target.value })}><option value="internal">Internal</option><option value="external">External</option></select></label>
-          <label>Provider name<input value={schedForm.providerName} onChange={e => setSchedForm({ ...schedForm, providerName: e.target.value })} placeholder="Service engineer / unit" /></label>
+          <label>Provider name<TextField value={schedForm.providerName} onValue={nextValue => setSchedForm({ ...schedForm, providerName: nextValue })} placeholder="Service engineer / unit" /></label>
           <label>Responsible staff<select value={schedForm.responsibleStaffId} onChange={e => setSchedForm({ ...schedForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           <label>Responsible unit<select value={schedForm.sectionId} onChange={e => setSchedForm({ ...schedForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-          <label>Task description<input value={schedForm.taskDescription} onChange={e => setSchedForm({ ...schedForm, taskDescription: e.target.value })} placeholder="e.g. clean rotor, check seals" /></label>
+          <label>Task description<TextField value={schedForm.taskDescription} onValue={nextValue => setSchedForm({ ...schedForm, taskDescription: nextValue })} placeholder="e.g. clean rotor, check seals" /></label>
           <label>First due date<input type="date" value={schedForm.nextDueDate} onChange={e => setSchedForm({ ...schedForm, nextDueDate: e.target.value })} /></label>
           <button type="submit">Add schedule</button>
         </form>}
@@ -1080,9 +1082,9 @@ function EquipmentMaintenanceTab({ equipment, staff, sections, setError, onChang
           <label>Against schedule<select value={maintForm.scheduleId} onChange={e => setMaintForm({ ...maintForm, scheduleId: e.target.value })}><option value="">— none —</option>{schedules.filter(s => s.is_active).map(s => <option key={s.id} value={s.id}>{(s.schedule_type || '').replace(/_/g, ' ')} · {s.frequency}</option>)}</select></label>
           <label>Performed by<select value={maintForm.performedByStaffId} onChange={e => setMaintForm({ ...maintForm, performedByStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           <label>Provider type<select value={maintForm.providerType} onChange={e => setMaintForm({ ...maintForm, providerType: e.target.value })}><option value="">—</option><option value="internal">Internal</option><option value="external">External</option></select></label>
-          <label>Service provider<input value={maintForm.serviceProvider} onChange={e => setMaintForm({ ...maintForm, serviceProvider: e.target.value })} placeholder="Engineer / company" /></label>
-          <label>Findings<textarea value={maintForm.findings} onChange={e => setMaintForm({ ...maintForm, findings: e.target.value })} /></label>
-          <label>Action taken<textarea value={maintForm.actionTaken} onChange={e => setMaintForm({ ...maintForm, actionTaken: e.target.value })} /></label>
+          <label>Service provider<TextField value={maintForm.serviceProvider} onValue={nextValue => setMaintForm({ ...maintForm, serviceProvider: nextValue })} placeholder="Engineer / company" /></label>
+          <label>Findings<TextField as="textarea" value={maintForm.findings} onValue={nextValue => setMaintForm({ ...maintForm, findings: nextValue })} /></label>
+          <label>Action taken<TextField as="textarea" value={maintForm.actionTaken} onValue={nextValue => setMaintForm({ ...maintForm, actionTaken: nextValue })} /></label>
           <label>Next due (override)<input type="date" value={maintForm.nextDueDate} onChange={e => setMaintForm({ ...maintForm, nextDueDate: e.target.value })} /></label>
           <label>Evidence<input type="file" onChange={e => setMaintFile(e.target.files?.[0] ?? null)} /></label>
           <button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Log maintenance'}</button>
@@ -1158,18 +1160,18 @@ function EquipmentAdverseEventsTab({ equipment, staff, setError, onChanged }: { 
         <label>Event type<select value={form.eventType} onChange={e => setForm({ ...form, eventType: e.target.value })}>{ADVERSE_EVENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}</select></label>
         <label>Severity<select value={form.severity} onChange={e => setForm({ ...form, severity: e.target.value })}>{['low', 'medium', 'high', 'critical'].map(s => <option key={s} value={s}>{s}</option>)}</select></label>
         <label>Patient harm<select value={form.patientHarm} onChange={e => setForm({ ...form, patientHarm: e.target.value })}>{['none', 'potential', 'actual'].map(s => <option key={s} value={s}>{s}</option>)}</select></label>
-        <label style={{ gridColumn: '1 / -1' }}>Description<textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} required /></label>
-        <label style={{ gridColumn: '1 / -1' }}>Immediate action<textarea value={form.immediateAction} onChange={e => setForm({ ...form, immediateAction: e.target.value })} /></label>
+        <label style={{ gridColumn: '1 / -1' }}>Description<TextField as="textarea" value={form.description} onValue={nextValue => setForm({ ...form, description: nextValue })} required /></label>
+        <label style={{ gridColumn: '1 / -1' }}>Immediate action<TextField as="textarea" value={form.immediateAction} onValue={nextValue => setForm({ ...form, immediateAction: nextValue })} /></label>
         <label className="check-inline"><input type="checkbox" checked={form.retrospectiveImpactRequired} onChange={e => setForm({ ...form, retrospectiveImpactRequired: e.target.checked })} /> Retrospective impact review needed</label>
         <label className="check-inline"><input type="checkbox" checked={form.resultsAffected} onChange={e => setForm({ ...form, resultsAffected: e.target.checked })} /> Previously reported results affected</label>
         {form.resultsAffected && <>
           <label>Affected from<input type="date" value={form.affectedPeriodFrom} onChange={e => setForm({ ...form, affectedPeriodFrom: e.target.value })} /></label>
           <label>Affected to<input type="date" value={form.affectedPeriodTo} onChange={e => setForm({ ...form, affectedPeriodTo: e.target.value })} /></label>
-          <label style={{ gridColumn: '1 / -1' }}>Impact summary<textarea value={form.retrospectiveImpactSummary} onChange={e => setForm({ ...form, retrospectiveImpactSummary: e.target.value })} /></label>
+          <label style={{ gridColumn: '1 / -1' }}>Impact summary<TextField as="textarea" value={form.retrospectiveImpactSummary} onValue={nextValue => setForm({ ...form, retrospectiveImpactSummary: nextValue })} /></label>
         </>}
         <label className="check-inline"><input type="checkbox" checked={form.reportedToManufacturer} onChange={e => setForm({ ...form, reportedToManufacturer: e.target.checked })} /> Reported to manufacturer/supplier</label>
         <label className="check-inline"><input type="checkbox" checked={form.reportedToAuthority} onChange={e => setForm({ ...form, reportedToAuthority: e.target.checked })} /> Reported to authority</label>
-        <label>Report reference<input value={form.reportReference} onChange={e => setForm({ ...form, reportReference: e.target.value })} /></label>
+        <label>Report reference<TextField value={form.reportReference} onValue={nextValue => setForm({ ...form, reportReference: nextValue })} /></label>
         <label>Report date<input type="date" value={form.reportDate} onChange={e => setForm({ ...form, reportDate: e.target.value })} /></label>
         <label className="check-inline"><input type="checkbox" checked={form.raiseNc} onChange={e => setForm({ ...form, raiseNc: e.target.checked })} /> Automatically raise a nonconformity</label>
         <button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Report adverse event'}</button>
@@ -1189,22 +1191,22 @@ function EquipmentAdverseEventsTab({ equipment, staff, setError, onChanged }: { 
         {open.nc_id ? <> · linked NC #{open.nc_id}</> : null}{open.capa_id ? <> · linked CAPA #{open.capa_id}</> : null}</p>
       <div className="form">
         <h4>Investigation</h4>
-        <label>Investigation<textarea value={edit.investigation} onChange={e => setEdit({ ...edit, investigation: e.target.value })} /></label>
+        <label>Investigation<TextField as="textarea" value={edit.investigation} onValue={nextValue => setEdit({ ...edit, investigation: nextValue })} /></label>
         <label>Investigated by<select value={edit.investigatedByStaffId} onChange={e => setEdit({ ...edit, investigatedByStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Investigation date<input type="date" value={edit.investigationDate} onChange={e => setEdit({ ...edit, investigationDate: e.target.value })} /></label>
         <h4>Corrective action &amp; follow-up</h4>
-        <label>Corrective action<textarea value={edit.correctiveAction} onChange={e => setEdit({ ...edit, correctiveAction: e.target.value })} /></label>
-        <label>Follow-up<textarea value={edit.followUp} onChange={e => setEdit({ ...edit, followUp: e.target.value })} /></label>
+        <label>Corrective action<TextField as="textarea" value={edit.correctiveAction} onValue={nextValue => setEdit({ ...edit, correctiveAction: nextValue })} /></label>
+        <label>Follow-up<TextField as="textarea" value={edit.followUp} onValue={nextValue => setEdit({ ...edit, followUp: nextValue })} /></label>
         <label>Follow-up date<input type="date" value={edit.followUpDate} onChange={e => setEdit({ ...edit, followUpDate: e.target.value })} /></label>
         <h4>Retrospective impact on results</h4>
         <label className="check-inline"><input type="checkbox" checked={edit.resultsAffected} onChange={e => setEdit({ ...edit, resultsAffected: e.target.checked })} /> Previously reported results affected</label>
         <label>Affected from<input type="date" value={edit.affectedPeriodFrom} onChange={e => setEdit({ ...edit, affectedPeriodFrom: e.target.value })} /></label>
         <label>Affected to<input type="date" value={edit.affectedPeriodTo} onChange={e => setEdit({ ...edit, affectedPeriodTo: e.target.value })} /></label>
-        <label>Impact summary<textarea value={edit.retrospectiveImpactSummary} onChange={e => setEdit({ ...edit, retrospectiveImpactSummary: e.target.value })} /></label>
+        <label>Impact summary<TextField as="textarea" value={edit.retrospectiveImpactSummary} onValue={nextValue => setEdit({ ...edit, retrospectiveImpactSummary: nextValue })} /></label>
         <h4>External reporting</h4>
         <label className="check-inline"><input type="checkbox" checked={edit.reportedToManufacturer} onChange={e => setEdit({ ...edit, reportedToManufacturer: e.target.checked })} /> Reported to manufacturer/supplier</label>
         <label className="check-inline"><input type="checkbox" checked={edit.reportedToAuthority} onChange={e => setEdit({ ...edit, reportedToAuthority: e.target.checked })} /> Reported to authority</label>
-        <label>Report reference<input value={edit.reportReference} onChange={e => setEdit({ ...edit, reportReference: e.target.value })} /></label>
+        <label>Report reference<TextField value={edit.reportReference} onValue={nextValue => setEdit({ ...edit, reportReference: nextValue })} /></label>
         <label>Report date<input type="date" value={edit.reportDate} onChange={e => setEdit({ ...edit, reportDate: e.target.value })} /></label>
         <label>Status<select value={edit.status} onChange={e => setEdit({ ...edit, status: e.target.value })}>{['open', 'under_investigation', 'action_required', 'closed'].map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select></label>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -1254,7 +1256,7 @@ function EquipmentCompetencyTab({ equipment, staff, setError, onChanged }: { equ
         <label>Outcome<select value={form.outcome} onChange={e => setForm({ ...form, outcome: e.target.value })}>{COMPETENCY_OUTCOMES.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}</select></label>
         <label className="check-inline"><input type="checkbox" checked={form.authorized} onChange={e => setForm({ ...form, authorized: e.target.checked })} /> Authorise to operate</label>
         {form.authorized && <label>Authorisation level<select value={form.authorizationLevel} onChange={e => setForm({ ...form, authorizationLevel: e.target.value })}>{['View only', 'Perform', 'Review', 'Verify', 'Approve', 'Supervise', 'Train others'].map(l => <option key={l} value={l}>{l}</option>)}</select></label>}
-        <label style={{ gridColumn: '1 / -1' }}>Notes<textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
+        <label style={{ gridColumn: '1 / -1' }}>Notes<TextField as="textarea" value={form.notes} onValue={nextValue => setForm({ ...form, notes: nextValue })} /></label>
         <button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Record competence'}</button>
       </form>}
     </div>
@@ -1307,7 +1309,7 @@ function EquipmentFilesTab({ equipment, sections, departments, setError, onChang
     <p className="muted" style={{ marginTop: 0 }}>Documents added here are created as controlled documents in <strong>Documents &amp; Records</strong> and linked to the equipment, so an update in either module is reflected in both.</p>
     {!equipId ? <p className="muted">Select an equipment item to view and add its files.</p> : <>
       {can('facilities_safety.incidents', 'create') && <form className="form" onSubmit={submit}>
-        <label>Title<input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required /></label>
+        <label>Title<TextField value={form.title} onValue={nextValue => setForm({ ...form, title: nextValue })} required /></label>
         <label>Document type<select value={form.documentType} onChange={e => setForm({ ...form, documentType: e.target.value })}>{EQUIP_DOC_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
         <label>Department<select value={form.departmentId} onChange={e => setForm({ ...form, departmentId: e.target.value })}><option value="">—</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
         <label>Section<select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
@@ -1667,10 +1669,10 @@ export function InventoryPage() {
   return <div>
     <PageHeader eyebrow="Supplier &amp; Inventory Management" title="Supplier &amp; Inventory Management" subtitle="Suppliers, stock items, receiving, issuing, stock counts and expiry control." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
-    {notice && <div className="card notice-ok" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+    {notice && <Notice kind="success" className="card" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
       <span style={{ flex: 1 }}>{notice}</span>
       <button type="button" className="secondary tiny" onClick={() => setNotice(null)}>Dismiss</button>
-    </div>}
+    </Notice>}
     {/* The store's day, in the order it runs: what is held, what came in, what
         is going out, what the count found, and the trail of all of it. */}
     {tabBarFor('supplier_inventory')(tab, ['Dashboard', 'Stock Ledger', 'Issuing', 'Receiving', 'Item Register', 'New Item', 'Stock Management', 'Suppliers', 'Storage Inspections', 'Barcode Labels', 'Forecasting'], setTab)}
@@ -1718,10 +1720,10 @@ export function InventoryPage() {
         </div>
       </div>
       <p className="muted" style={{ marginTop: 0 }}>Rows are matched on item code — a code the register already holds is updated, a blank one is created. Export first, edit that file, import it back.</p>
-      {regResult && <div className="notice-ok">
+      {regResult && <Notice kind="success">
         Import complete — <strong>{regResult.created}</strong> created, <strong>{regResult.updated}</strong> updated, <strong>{regResult.skipped}</strong> skipped
         {regResult.errors.length > 0 && <ul className="link-list">{regResult.errors.slice(0, 8).map((er, i) => <li key={i}>{er}</li>)}</ul>}
-      </div>}
+      </Notice>}
       <div className="reg-head-actions" style={{ margin: '4px 0 10px', gap: 10 }}>
         <RegisterSearch style={{ flex: '1 1 240px' }} onQuery={setItemQuery}
           placeholder="Search name, code, category, storage place…" />
@@ -1771,7 +1773,7 @@ export function InventoryPage() {
     {tab === 'New Item' && <div className="card">
       <h3>Register a stock item</h3>
       {can('monitoring.assets', 'create') && <form className="form" onSubmit={submitItem}>
-        <label>Name<input value={itemForm.name} onChange={e => setItemForm({ ...itemForm, name: e.target.value })} required /></label>
+        <label>Name<TextField value={itemForm.name} onValue={nextValue => setItemForm({ ...itemForm, name: nextValue })} required /></label>
         <label>Category<select value={itemForm.category} onChange={e => setItemForm({ ...itemForm, category: e.target.value })} required>
           <option value="">Select the category</option>
           {categories.map(c => <option key={c.id} value={c.value}>{c.label}</option>)}
@@ -1780,8 +1782,8 @@ export function InventoryPage() {
           <option value="">Select the unit of measure</option>
           {units.map(u => <option key={u.id} value={u.value}>{u.label}</option>)}
         </select></label>
-        <label>Manufacturer<input value={itemForm.manufacturer} onChange={e => setItemForm({ ...itemForm, manufacturer: e.target.value })} /></label>
-        <label>Catalogue number<input value={itemForm.catalogueNumber} onChange={e => setItemForm({ ...itemForm, catalogueNumber: e.target.value })} placeholder="Manufacturer's reference" /></label>
+        <label>Manufacturer<TextField value={itemForm.manufacturer} onValue={nextValue => setItemForm({ ...itemForm, manufacturer: nextValue })} /></label>
+        <label>Catalogue number<TextField value={itemForm.catalogueNumber} onValue={nextValue => setItemForm({ ...itemForm, catalogueNumber: nextValue })} placeholder="Manufacturer's reference" /></label>
         <label>Supplier<select value={itemForm.supplierId} onChange={e => setItemForm({ ...itemForm, supplierId: e.target.value })}><option value="">Select the supplier</option>{suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Storage location<select value={itemForm.storageLocationId} onChange={e => setItemForm({ ...itemForm, storageLocationId: e.target.value })}>
           <option value="">Select a store, shelf or fridge</option>
@@ -1790,7 +1792,7 @@ export function InventoryPage() {
         <label>Unit<select value={itemForm.sectionId} onChange={e => setItemForm({ ...itemForm, sectionId: e.target.value })}><option value="">Select the unit</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Minimum stock<NumberField value={itemForm.minimumStock} onValue={n => setItemForm({ ...itemForm, minimumStock: n ?? 0 })} min={0} /></label>
         <label>Reorder level<NumberField value={itemForm.reorderLevel} onValue={n => setItemForm({ ...itemForm, reorderLevel: n ?? 0 })} min={0} /></label>
-        <label>Storage requirement<input value={itemForm.storageRequirement} onChange={e => setItemForm({ ...itemForm, storageRequirement: e.target.value })} placeholder="e.g. 2-8°C" /></label>
+        <label>Storage requirement<TextField value={itemForm.storageRequirement} onValue={nextValue => setItemForm({ ...itemForm, storageRequirement: nextValue })} placeholder="e.g. 2-8°C" /></label>
         <label>Status<select value={itemForm.status} onChange={e => setItemForm({ ...itemForm, status: e.target.value })}><option value="available">Available</option><option value="reserved">Reserved</option><option value="unavailable">Unavailable</option></select></label>
 
         {/* Some boxes arrive with a barcode already on them and some do not.
@@ -1808,12 +1810,12 @@ export function InventoryPage() {
             : <p className="muted">This laboratory uses <strong>{BARCODE_SOURCE_LABELS[barcodePolicy.defaultSource]}</strong> for every item. Change that in Settings → Stock &amp; Storage.</p>}
           {itemForm.barcodeSource === 'product'
             ? <>
-                <label>Product barcode<input value={itemForm.productBarcode} onChange={e => setItemForm({ ...itemForm, productBarcode: e.target.value })} required placeholder="Scan or type the barcode on the box"
+                <label>Product barcode<TextField value={itemForm.productBarcode} onValue={nextValue => setItemForm({ ...itemForm, productBarcode: nextValue })} required placeholder="Scan or type the barcode on the box"
                   onKeyDown={e => { if (e.key === 'Enter') e.preventDefault(); }} /></label>
                 <BarcodeScanner placeholder="…or scan it here" autoFocus={false} onScan={code => setItemForm(f => ({ ...f, productBarcode: code.trim() }))} />
               </>
             : <label>Product barcode <span className="muted">(optional — recorded so a scan of the box still finds the item)</span>
-                <input value={itemForm.productBarcode} onChange={e => setItemForm({ ...itemForm, productBarcode: e.target.value })} />
+                <TextField value={itemForm.productBarcode} onValue={nextValue => setItemForm({ ...itemForm, productBarcode: nextValue })} />
               </label>}
         </fieldset>
         <button type="submit">Register the item</button>
@@ -1862,12 +1864,12 @@ export function InventoryPage() {
         </p>
         <div style={{ margin: '0 0 12px' }}>
           <BarcodeScanner placeholder="Scan the box to fill this form…" autoFocus={false} onScan={scanForReceipt} />
-          {receiptNote && <p className="notice-ok" style={{ marginTop: 8 }}>{receiptNote}</p>}
+          {receiptNote && <Notice kind="success" style={{ marginTop: 8 }}>{receiptNote}</Notice>}
         </div>
         {can('supplier_inventory.stock', 'create') && <form className="form" onSubmit={submitBatch}>
           <label>Item<select value={batchForm.itemId} onChange={e => setBatchForm({ ...batchForm, itemId: e.target.value })} required><option value="">Select the item</option>{items.map(i => <option key={i.id} value={i.id}>{i.item_code} — {i.name}</option>)}</select></label>
-          <label>Batch number<input value={batchForm.batchNumber} onChange={e => setBatchForm({ ...batchForm, batchNumber: e.target.value })} /></label>
-          <label>Lot number<input value={batchForm.lotNumber} onChange={e => setBatchForm({ ...batchForm, lotNumber: e.target.value })} /></label>
+          <label>Batch number<TextField value={batchForm.batchNumber} onValue={nextValue => setBatchForm({ ...batchForm, batchNumber: nextValue })} /></label>
+          <label>Lot number<TextField value={batchForm.lotNumber} onValue={nextValue => setBatchForm({ ...batchForm, lotNumber: nextValue })} /></label>
 
           {/* Who supplied the goods and who the laboratory received them FROM
               are two different facts. A hospital laboratory draws most of its
@@ -1892,7 +1894,7 @@ export function InventoryPage() {
                 <option value="">Not recorded</option>{suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select></label>}
           <label>Waybill / invoice reference <span className="muted">(optional)</span>
-            <input value={batchForm.reference} onChange={e => setBatchForm({ ...batchForm, reference: e.target.value })} placeholder="What this delivery is traced by" /></label>
+            <TextField value={batchForm.reference} onValue={nextValue => setBatchForm({ ...batchForm, reference: nextValue })} placeholder="What this delivery is traced by" /></label>
           <label>Quantity received<NumberField value={batchForm.quantityReceived} required min={0} step="any"
             onValue={n => setBatchForm({ ...batchForm, quantityReceived: n ?? 0, quantityAvailable: n ?? 0 })} /></label>
           <label>Quantity available<NumberField value={batchForm.quantityAvailable} required min={0} step="any"
@@ -1903,7 +1905,7 @@ export function InventoryPage() {
             <input type="number" step="any" min={0} value={batchForm.unitCost} onChange={e => setBatchForm({ ...batchForm, unitCost: e.target.value })} /></label>
           <label>Storage location<select value={batchForm.storageLocationId} onChange={e => setBatchForm({ ...batchForm, storageLocationId: e.target.value })}><option value="">Select a store, shelf or fridge</option>{storagePlaces.map(pl => <option key={pl.id} value={pl.id}>{pl.path}{pl.kind && pl.kind !== 'shelf' ? ` (${STORAGE_KIND_LABELS[pl.kind] ?? pl.kind})` : ''}</option>)}</select></label>
           <label>Barcode on this box <span className="muted">(optional — scanning it later finds this exact delivery)</span>
-            <input value={batchForm.productBarcode} onChange={e => setBatchForm({ ...batchForm, productBarcode: e.target.value })}
+            <TextField value={batchForm.productBarcode} onValue={nextValue => setBatchForm({ ...batchForm, productBarcode: nextValue })}
               onKeyDown={e => { if (e.key === 'Enter') e.preventDefault(); }} />
           </label>
           <button type="submit">Book in the delivery</button>
@@ -2008,12 +2010,12 @@ export function InventoryPage() {
           <option value="">Select a reason</option>
           {movementReasons.map(r => <option key={r.id} value={r.value}>{r.label}</option>)}
         </select>{movementReasons.length === 0 && <span className="muted">No reasons configured — add them in Settings → Dropdown Lists.</span>}</label>
-        <label>Detail <span className="muted">(optional)</span><input value={movementForm.reasonNote} onChange={e => setMovementForm({ ...movementForm, reasonNote: e.target.value })} placeholder="Anything the movement record should carry" /></label>
-        {fefoWarning && <div className="notice-warn">
+        <label>Detail <span className="muted">(optional)</span><TextField value={movementForm.reasonNote} onValue={nextValue => setMovementForm({ ...movementForm, reasonNote: nextValue })} placeholder="Anything the movement record should carry" /></label>
+        {fefoWarning && <Notice kind="warn">
           <p style={{ margin: '0 0 8px' }}>{fefoWarning.message}</p>
           <button type="button" className="secondary" onClick={() => { setMovementForm({ ...movementForm, batchId: String(fefoWarning.batchId) }); setFefoWarning(null); }}>Issue the older batch instead</button>{' '}
           {can('supplier_inventory.stock', 'create') && <button type="button" className="secondary" onClick={e => void submitMovement(e as unknown as FormEvent, true)}>Skip it anyway — record the reason</button>}
-        </div>}
+        </Notice>}
         <button type="submit">Record movement</button>
       </form>}
     </div>
@@ -2135,12 +2137,12 @@ export function InventoryPage() {
         <h3>Register a supplier</h3>
         <p className="muted" style={{ marginTop: 0 }}>Whoever supplies reagents, consumables or a service that affects a result belongs on this register, with the evaluation the laboratory's procedure requires.</p>
         {can('supplier_inventory.suppliers', 'create') && <form className="form" onSubmit={submitSupplier}>
-          <label>Name<input value={supplierForm.name} onChange={e => setSupplierForm({ ...supplierForm, name: e.target.value })} required /></label>
-          <label>Contact person<input value={supplierForm.contactPerson} onChange={e => setSupplierForm({ ...supplierForm, contactPerson: e.target.value })} /></label>
-          <label>Phone<input value={supplierForm.phone} onChange={e => setSupplierForm({ ...supplierForm, phone: e.target.value })} /></label>
-          <label>Email<input type="email" value={supplierForm.email} onChange={e => setSupplierForm({ ...supplierForm, email: e.target.value })} /></label>
-          <label>Address<input value={supplierForm.address} onChange={e => setSupplierForm({ ...supplierForm, address: e.target.value })} /></label>
-          <label>What they supply<input value={supplierForm.itemCategory} onChange={e => setSupplierForm({ ...supplierForm, itemCategory: e.target.value })} placeholder="Reagents, consumables, calibration services…" /></label>
+          <label>Name<TextField value={supplierForm.name} onValue={nextValue => setSupplierForm({ ...supplierForm, name: nextValue })} required /></label>
+          <label>Contact person<TextField value={supplierForm.contactPerson} onValue={nextValue => setSupplierForm({ ...supplierForm, contactPerson: nextValue })} /></label>
+          <label>Phone<TextField value={supplierForm.phone} onValue={nextValue => setSupplierForm({ ...supplierForm, phone: nextValue })} /></label>
+          <label>Email<TextField type="email" value={supplierForm.email} onValue={nextValue => setSupplierForm({ ...supplierForm, email: nextValue })} /></label>
+          <label>Address<TextField value={supplierForm.address} onValue={nextValue => setSupplierForm({ ...supplierForm, address: nextValue })} /></label>
+          <label>What they supply<TextField value={supplierForm.itemCategory} onValue={nextValue => setSupplierForm({ ...supplierForm, itemCategory: nextValue })} placeholder="Reagents, consumables, calibration services…" /></label>
           <label className="toggle"><input type="checkbox" checked={supplierForm.evaluationRequired} onChange={e => setSupplierForm({ ...supplierForm, evaluationRequired: e.target.checked })} /> They must be evaluated periodically</label>
           <button type="submit">Register supplier</button>
         </form>}
@@ -2156,8 +2158,8 @@ export function InventoryPage() {
               <option value="">Select a rating</option>
               {['satisfactory', 'acceptable', 'conditional', 'unsatisfactory'].map(r => <option key={r} value={r}>{r[0].toUpperCase() + r.slice(1)}</option>)}
             </select></label>
-            <label>Findings<textarea value={evalForm.findings} onChange={e => setEvalForm({ ...evalForm, findings: e.target.value })} placeholder="Delivery times, condition on arrival, documentation, complaints raised…" /></label>
-            <label>Action required<textarea value={evalForm.actionRequired} onChange={e => setEvalForm({ ...evalForm, actionRequired: e.target.value })} /></label>
+            <label>Findings<TextField as="textarea" value={evalForm.findings} onValue={nextValue => setEvalForm({ ...evalForm, findings: nextValue })} placeholder="Delivery times, condition on arrival, documentation, complaints raised…" /></label>
+            <label>Action required<TextField as="textarea" value={evalForm.actionRequired} onValue={nextValue => setEvalForm({ ...evalForm, actionRequired: nextValue })} /></label>
             <label>Next evaluation due<input type="date" value={evalForm.nextEvaluationDate} onChange={e => setEvalForm({ ...evalForm, nextEvaluationDate: e.target.value })} /></label>
             <button type="submit">Record evaluation</button>
           </form>}
@@ -2230,7 +2232,7 @@ export function InventoryPage() {
         {can('supplier_inventory.storage', 'create') && <form className="form" onSubmit={submitStorageInspection}>
           <label>Inspection date<input type="date" value={stiForm.inspectionDate} onChange={e => setStiForm({ ...stiForm, inspectionDate: e.target.value })} required /></label>
           <label>Location<select value={stiForm.locationId} onChange={e => setStiForm({ ...stiForm, locationId: e.target.value })}><option value="">Select location</option>{locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
-          <label>Storage area<input value={stiForm.storageArea} onChange={e => setStiForm({ ...stiForm, storageArea: e.target.value })} placeholder="e.g. reagent store, cold room" /></label>
+          <label>Storage area<TextField value={stiForm.storageArea} onValue={nextValue => setStiForm({ ...stiForm, storageArea: nextValue })} placeholder="e.g. reagent store, cold room" /></label>
           <label><input type="checkbox" checked={stiForm.coldStorageAdequate} onChange={e => setStiForm({ ...stiForm, coldStorageAdequate: e.target.checked })} /> Cold storage adequate</label>
           <label><input type="checkbox" checked={stiForm.temperatureMonitored} onChange={e => setStiForm({ ...stiForm, temperatureMonitored: e.target.checked })} /> Temperature monitored</label>
           <label><input type="checkbox" checked={stiForm.humidityMonitored} onChange={e => setStiForm({ ...stiForm, humidityMonitored: e.target.checked })} /> Humidity monitored</label>
@@ -2239,8 +2241,8 @@ export function InventoryPage() {
           <label><input type="checkbox" checked={stiForm.organisedFefo} onChange={e => setStiForm({ ...stiForm, organisedFefo: e.target.checked })} /> Organised / FEFO practised</label>
           <label>Outcome<select value={stiForm.outcome} onChange={e => setStiForm({ ...stiForm, outcome: e.target.value })}><option value="">Select outcome</option><option value="pass">Pass</option><option value="action_required">Action required</option><option value="fail">Fail</option></select></label>
           <label>Next due date<input type="date" value={stiForm.nextDueDate} onChange={e => setStiForm({ ...stiForm, nextDueDate: e.target.value })} /></label>
-          <label>Findings<textarea value={stiForm.findings} onChange={e => setStiForm({ ...stiForm, findings: e.target.value })} /></label>
-          <label>Corrective action<textarea value={stiForm.correctiveAction} onChange={e => setStiForm({ ...stiForm, correctiveAction: e.target.value })} /></label>
+          <label>Findings<TextField as="textarea" value={stiForm.findings} onValue={nextValue => setStiForm({ ...stiForm, findings: nextValue })} /></label>
+          <label>Corrective action<TextField as="textarea" value={stiForm.correctiveAction} onValue={nextValue => setStiForm({ ...stiForm, correctiveAction: nextValue })} /></label>
           <button type="submit">Record inspection</button>
         </form>}
       </div>
@@ -2320,9 +2322,9 @@ function ReasonPrompt({ title, intro, confirmLabel, danger, placeholder, onClose
         {busy ? 'Working…' : confirmLabel}
       </button>}
     </>}>
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
     <p className="muted" style={{ marginTop: 0 }}>{intro}</p>
-    <label>Reason<textarea value={reason} onChange={e => setReason(e.target.value)} rows={3}
+    <label>Reason<TextField as="textarea" value={reason} onValue={nextValue => setReason(nextValue)} rows={3}
       placeholder={placeholder ?? 'What went wrong, and how it was noticed'} autoFocus /></label>
   </DetailModal>;
 }
@@ -2374,14 +2376,14 @@ function BatchEditModal({ batch, suppliers, storagePlaces, supplySources, procur
       <button type="button" className="secondary" onClick={onClose}>Cancel</button>
       <button type="submit" form="edit-batch" disabled={busy}>{busy ? 'Saving…' : 'Save the correction'}</button>
     </>}>
-    {error && <div className="error">{error}</div>}
-    {issued > 0 && <div className="notice-warn" style={{ marginTop: 0 }}>
+    {error && <Notice kind="error">{error}</Notice>}
+    {issued > 0 && <Notice kind="warn" style={{ marginTop: 0 }}>
       {issued} {batch.unit_of_measure || ''} has already gone out of this delivery, so the quantity received cannot be
       corrected below that. If the whole receipt was wrong, reverse it instead.
-    </div>}
+    </Notice>}
     {can('supplier_inventory.suppliers', 'edit') && <form id="edit-batch" className="form" onSubmit={save}>
-      <label>Batch number<input value={form.batchNumber} onChange={e => setForm({ ...form, batchNumber: e.target.value })} /></label>
-      <label>Lot number<input value={form.lotNumber} onChange={e => setForm({ ...form, lotNumber: e.target.value })} /></label>
+      <label>Batch number<TextField value={form.batchNumber} onValue={nextValue => setForm({ ...form, batchNumber: nextValue })} /></label>
+      <label>Lot number<TextField value={form.lotNumber} onValue={nextValue => setForm({ ...form, lotNumber: nextValue })} /></label>
       {procurement.mode === 'both' && <label>How it was obtained
         <select value={form.sourceType} onChange={e => setForm({ ...form, sourceType: e.target.value as 'supplier' | 'store', sourceId: '' })}>
           <option value="supplier">Bought direct from a supplier</option>
@@ -2395,7 +2397,7 @@ function BatchEditModal({ batch, suppliers, storagePlaces, supplySources, procur
       <label>Supplier<select value={form.supplierId} onChange={e => setForm({ ...form, supplierId: e.target.value })}>
         <option value="">Not recorded</option>{suppliers.map(sp => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
       </select></label>
-      <label>Waybill / invoice reference<input value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })} /></label>
+      <label>Waybill / invoice reference<TextField value={form.reference} onValue={nextValue => setForm({ ...form, reference: nextValue })} /></label>
       <label>Quantity received<input type="number" step="any" min={issued} value={form.quantityReceived}
         onChange={e => setForm({ ...form, quantityReceived: e.target.value })} />
         <span className="muted">{issued > 0 ? `At least ${issued} — that much has already been issued.` : 'What is on the shelf moves with this correction.'}</span></label>
@@ -2406,7 +2408,7 @@ function BatchEditModal({ batch, suppliers, storagePlaces, supplySources, procur
         <option value="">Not recorded</option>
         {storagePlaces.map(pl => <option key={pl.id} value={pl.id}>{pl.path}</option>)}
       </select></label>
-      <label>Barcode on this box<input value={form.productBarcode} onChange={e => setForm({ ...form, productBarcode: e.target.value })}
+      <label>Barcode on this box<TextField value={form.productBarcode} onValue={nextValue => setForm({ ...form, productBarcode: nextValue })}
         onKeyDown={e => { if (e.key === 'Enter') e.preventDefault(); }} /></label>
     </form>}
   </DetailModal>;
@@ -2458,7 +2460,7 @@ function StockAdjustModal({ item, reasons, onClose, onDone }: {
         {busy ? 'Posting…' : direction === 'debit' ? 'Debit the stock' : 'Credit the stock'}
       </button>
     </>}>
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
     {can('supplier_inventory.stock', 'edit') && <form id="adjust-stock" className="form" onSubmit={go}>
       <div className="bc-choice">
         <button type="button" className={direction === 'debit' ? 'active' : ''} onClick={() => setDirection('debit')}>
@@ -2477,7 +2479,7 @@ function StockAdjustModal({ item, reasons, onClose, onDone }: {
         {reasons.map(r => <option key={r.id} value={r.value}>{r.label}</option>)}
       </select>{reasons.length === 0 && <span className="muted">No reasons configured — add them in Settings → Dropdown Lists.</span>}</label>
       <label>Detail <span className="muted">(optional)</span>
-        <input value={note} onChange={e => setNote(e.target.value)} placeholder="Anything the bin card should carry" /></label>
+        <TextField value={note} onValue={nextValue => setNote(nextValue)} placeholder="Anything the bin card should carry" /></label>
       <label>Which lot <span className="muted">(optional)</span>
         <select value={batchId} onChange={e => setBatchId(e.target.value)}>
           <option value="">{direction === 'debit' ? 'Take it off earliest-expiry-first' : 'Put it on the lot that expires first'}</option>
@@ -2575,7 +2577,7 @@ function InventoryDetailPanel({
       </>}</RowMenu>
     </>}>
 
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {/* What is on the shelf, first — it is the question being asked. */}
     <div className="stock-figures">
@@ -2585,20 +2587,20 @@ function InventoryDetailPanel({
       <div><span className="fig">{item.batch_count ?? 0}</span><span className="fig-label">batches in stock</span></div>
       <div><span className="fig">{item.effective_expiry ? String(item.effective_expiry).slice(0, 10) : '—'}</span><span className="fig-label">expires first</span></div>
     </div>
-    {item.low_stock && <div className="notice-warn" style={{ marginTop: 10 }}>
+    {item.low_stock && <Notice kind="warn" style={{ marginTop: 10 }}>
       Stock is at or below the minimum. {item.supplier_name ? `Reorder from ${item.supplier_name}.` : 'No supplier is recorded against this item.'}
-    </div>}
+    </Notice>}
 
     {mode === 'edit' ? can('supplier_inventory.suppliers', 'edit') && <form className="form" onSubmit={save} style={{ marginTop: 14 }}>
-      <label>Name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></label>
+      <label>Name<TextField value={form.name} onValue={nextValue => setForm({ ...form, name: nextValue })} required /></label>
       <label>Category<select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} required>
         {categories.map(c => <option key={c.id} value={c.value}>{c.label}</option>)}
       </select></label>
       <label>Unit of measure<select value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })} required>
         {units.map(u => <option key={u.id} value={u.value}>{u.label}</option>)}
       </select></label>
-      <label>Manufacturer<input value={form.manufacturer} onChange={e => setForm({ ...form, manufacturer: e.target.value })} /></label>
-      <label>Catalogue number<input value={form.catalogueNumber} onChange={e => setForm({ ...form, catalogueNumber: e.target.value })} /></label>
+      <label>Manufacturer<TextField value={form.manufacturer} onValue={nextValue => setForm({ ...form, manufacturer: nextValue })} /></label>
+      <label>Catalogue number<TextField value={form.catalogueNumber} onValue={nextValue => setForm({ ...form, catalogueNumber: nextValue })} /></label>
       <label>Supplier<select value={form.supplierId} onChange={e => setForm({ ...form, supplierId: e.target.value })}>
         <option value="">No supplier recorded</option>{suppliers.map(sp => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
       </select></label>
@@ -2610,7 +2612,7 @@ function InventoryDetailPanel({
       </select></label>
       <label>Minimum stock<NumberField value={form.minimumStock} onValue={n => setForm({ ...form, minimumStock: n ?? 0 })} min={0} /></label>
       <label>Reorder level<NumberField value={form.reorderLevel} onValue={n => setForm({ ...form, reorderLevel: n ?? 0 })} min={0} /></label>
-      <label>Storage requirement<input value={form.storageRequirement} onChange={e => setForm({ ...form, storageRequirement: e.target.value })} placeholder="e.g. 2-8°C" /></label>
+      <label>Storage requirement<TextField value={form.storageRequirement} onValue={nextValue => setForm({ ...form, storageRequirement: nextValue })} placeholder="e.g. 2-8°C" /></label>
       <label>Status<select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
         <option value="available">Available</option><option value="reserved">Reserved</option><option value="unavailable">Unavailable</option>
       </select></label>
@@ -2622,7 +2624,7 @@ function InventoryDetailPanel({
             <span>{BARCODE_SOURCE_LABELS[src]}</span>
           </label>)}
         </div>}
-        <label>Product barcode<input value={form.productBarcode} onChange={e => setForm({ ...form, productBarcode: e.target.value })}
+        <label>Product barcode<TextField value={form.productBarcode} onValue={nextValue => setForm({ ...form, productBarcode: nextValue })}
           required={form.barcodeSource === 'product'} onKeyDown={e => { if (e.key === 'Enter') e.preventDefault(); }} /></label>
       </fieldset>
       <div className="reg-head-actions">
@@ -2760,7 +2762,7 @@ function ItemRemovalModal({ impact, busy, onClose, onDone, setError }: {
           {impact.quantityOnHand > 0 ? <>, with <strong>{impact.quantityOnHand}</strong> still on the shelf</> : null}. That history is what a recall would be traced through.</>}
     </p>
     <label>Reason <span className="muted">(kept in the audit trail)</span>
-      <input value={reason} onChange={e => setReason(e.target.value)} placeholder="Discontinued, replaced by…, entered in error" />
+      <TextField value={reason} onValue={nextValue => setReason(nextValue)} placeholder="Discontinued, replaced by…, entered in error" />
     </label>
     <div className="danger-actions">
       {can('supplier_inventory.suppliers', 'void_archive') && <button type="button" disabled={!!working} onClick={() => void run('withdraw')}>
@@ -2823,12 +2825,12 @@ function SupplierDetailPanel({ supplier, evaluations, can, onClose, onSaved, onR
     </div>
 
     {can('supplier_inventory.suppliers', 'edit') && <form className="form" onSubmit={save} style={{ marginTop: 14 }}>
-      <label>Name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></label>
-      <label>Contact person<input value={form.contactPerson} onChange={e => setForm({ ...form, contactPerson: e.target.value })} /></label>
-      <label>Phone<input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></label>
-      <label>Email<input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></label>
-      <label>Address<input value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} /></label>
-      <label>What they supply<input value={form.itemCategory} onChange={e => setForm({ ...form, itemCategory: e.target.value })} /></label>
+      <label>Name<TextField value={form.name} onValue={nextValue => setForm({ ...form, name: nextValue })} required /></label>
+      <label>Contact person<TextField value={form.contactPerson} onValue={nextValue => setForm({ ...form, contactPerson: nextValue })} /></label>
+      <label>Phone<TextField value={form.phone} onValue={nextValue => setForm({ ...form, phone: nextValue })} /></label>
+      <label>Email<TextField type="email" value={form.email} onValue={nextValue => setForm({ ...form, email: nextValue })} /></label>
+      <label>Address<TextField value={form.address} onValue={nextValue => setForm({ ...form, address: nextValue })} /></label>
+      <label>What they supply<TextField value={form.itemCategory} onValue={nextValue => setForm({ ...form, itemCategory: nextValue })} /></label>
       <label>Status<select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
         {['active', 'suspended', 'inactive'].map(st => <option key={st} value={st}>{st[0].toUpperCase() + st.slice(1)}</option>)}
       </select></label>
@@ -2892,7 +2894,7 @@ function SupplierRemovalModal({ impact, onClose, onDone, setError }: {
         : <>They supply <strong>{impact.items}</strong> item{impact.items === 1 ? '' : 's'}, have delivered <strong>{impact.batches}</strong> batch{impact.batches === 1 ? '' : 'es'} and carry <strong>{impact.evaluations}</strong> evaluation{impact.evaluations === 1 ? '' : 's'}.</>}
     </p>
     <label>Reason <span className="muted">(kept in the audit trail)</span>
-      <input value={reason} onChange={e => setReason(e.target.value)} placeholder="Contract ended, duplicate record, entered in error" />
+      <TextField value={reason} onValue={nextValue => setReason(nextValue)} placeholder="Contract ended, duplicate record, entered in error" />
     </label>
     <div className="danger-actions">
       {can('supplier_inventory.suppliers', 'void_archive') && <button type="button" disabled={!!working} onClick={() => void run('suspend')}>
@@ -3019,10 +3021,10 @@ export function MonitoringPage({ embedded = false }: { embedded?: boolean } = {}
     {tab === 'New Monitoring Item' && <div className="card">
       <h3>New monitoring item</h3>
       {can('monitoring.assets', 'create') && <form className="form" onSubmit={submitItem}>
-        <label>Name<input value={itemForm.name} onChange={e => setItemForm({ ...itemForm, name: e.target.value })} required /></label>
-        <label>Monitoring type<input value={itemForm.monitoringType} onChange={e => setItemForm({ ...itemForm, monitoringType: e.target.value })} placeholder="e.g. fridge, freezer, room temp" /></label>
-        <label>Parameter<input value={itemForm.parameter} onChange={e => setItemForm({ ...itemForm, parameter: e.target.value })} required placeholder="e.g. temperature" /></label>
-        <label>Unit<input value={itemForm.unit} onChange={e => setItemForm({ ...itemForm, unit: e.target.value })} required placeholder="°C" /></label>
+        <label>Name<TextField value={itemForm.name} onValue={nextValue => setItemForm({ ...itemForm, name: nextValue })} required /></label>
+        <label>Monitoring type<TextField value={itemForm.monitoringType} onValue={nextValue => setItemForm({ ...itemForm, monitoringType: nextValue })} placeholder="e.g. fridge, freezer, room temp" /></label>
+        <label>Parameter<TextField value={itemForm.parameter} onValue={nextValue => setItemForm({ ...itemForm, parameter: nextValue })} required placeholder="e.g. temperature" /></label>
+        <label>Unit<TextField value={itemForm.unit} onValue={nextValue => setItemForm({ ...itemForm, unit: nextValue })} required placeholder="°C" /></label>
         <label>Section<select value={itemForm.sectionId} onChange={e => setItemForm({ ...itemForm, sectionId: e.target.value })}><option value="">Select section</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Location<select value={itemForm.locationId} onChange={e => setItemForm({ ...itemForm, locationId: e.target.value })}><option value="">Select location</option>{locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
         <label>Lower limit<input type="number" step="any" value={itemForm.lowerLimit} onChange={e => setItemForm({ ...itemForm, lowerLimit: e.target.value })} required /></label>
@@ -3031,7 +3033,7 @@ export function MonitoringPage({ embedded = false }: { embedded?: boolean } = {}
         <label>Warning upper<input type="number" step="any" value={itemForm.warningUpperLimit} onChange={e => setItemForm({ ...itemForm, warningUpperLimit: e.target.value })} /></label>
         <label>Critical lower<input type="number" step="any" value={itemForm.criticalLowerLimit} onChange={e => setItemForm({ ...itemForm, criticalLowerLimit: e.target.value })} /></label>
         <label>Critical upper<input type="number" step="any" value={itemForm.criticalUpperLimit} onChange={e => setItemForm({ ...itemForm, criticalUpperLimit: e.target.value })} /></label>
-        <label>Frequency<input value={itemForm.frequency} onChange={e => setItemForm({ ...itemForm, frequency: e.target.value })} placeholder="e.g. daily" /></label>
+        <label>Frequency<TextField value={itemForm.frequency} onValue={nextValue => setItemForm({ ...itemForm, frequency: nextValue })} placeholder="e.g. daily" /></label>
         <label>Responsible staff<select value={itemForm.responsibleStaffId} onChange={e => setItemForm({ ...itemForm, responsibleStaffId: e.target.value })}><option value="">Select staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label><input type="checkbox" checked={itemForm.ncTriggerEnabled} onChange={e => setItemForm({ ...itemForm, ncTriggerEnabled: e.target.checked })} /> Enable NC trigger button on critical/out-of-range</label>
         <button type="submit">Save monitoring item</button>
@@ -3045,8 +3047,8 @@ export function MonitoringPage({ embedded = false }: { embedded?: boolean } = {}
         <label>Reading date<input type="date" value={readingForm.readingDate} onChange={e => setReadingForm({ ...readingForm, readingDate: e.target.value })} required /></label>
         <label>Reading time<input type="time" value={readingForm.readingTime} onChange={e => setReadingForm({ ...readingForm, readingTime: e.target.value })} /></label>
         <label>Value<input type="number" step="any" value={readingForm.value} onChange={e => setReadingForm({ ...readingForm, value: e.target.value })} required /></label>
-        <label>Comment<textarea value={readingForm.comment} onChange={e => setReadingForm({ ...readingForm, comment: e.target.value })} placeholder="Required for abnormal readings" /></label>
-        <label>Immediate action<textarea value={readingForm.immediateAction} onChange={e => setReadingForm({ ...readingForm, immediateAction: e.target.value })} placeholder="Required for abnormal readings" /></label>
+        <label>Comment<TextField as="textarea" value={readingForm.comment} onValue={nextValue => setReadingForm({ ...readingForm, comment: nextValue })} placeholder="Required for abnormal readings" /></label>
+        <label>Immediate action<TextField as="textarea" value={readingForm.immediateAction} onValue={nextValue => setReadingForm({ ...readingForm, immediateAction: nextValue })} placeholder="Required for abnormal readings" /></label>
         <button type="submit">Save reading</button>
       </form>}
     </div>}
@@ -3245,17 +3247,17 @@ export function SafetyPage() {
       <h3>Report safety incident</h3>
       {can('facilities_safety.incidents', 'create') && <form className="form" onSubmit={submit}>
         <label>Incident date<input type="date" value={form.incidentDate} onChange={e => setForm({ ...form, incidentDate: e.target.value })} required /></label>
-        <label>Incident type<input value={form.incidentType} onChange={e => setForm({ ...form, incidentType: e.target.value })} placeholder="e.g. spill, exposure, injury" /></label>
-        <label>Title<input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required /></label>
-        <label>Description<textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} required /></label>
+        <label>Incident type<TextField value={form.incidentType} onValue={nextValue => setForm({ ...form, incidentType: nextValue })} placeholder="e.g. spill, exposure, injury" /></label>
+        <label>Title<TextField value={form.title} onValue={nextValue => setForm({ ...form, title: nextValue })} required /></label>
+        <label>Description<TextField as="textarea" value={form.description} onValue={nextValue => setForm({ ...form, description: nextValue })} required /></label>
         <label>Severity<select value={form.severity} onChange={e => setForm({ ...form, severity: e.target.value })} required><option value="">Select severity</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
-        <label>Category<input value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} /></label>
+        <label>Category<TextField value={form.category} onValue={nextValue => setForm({ ...form, category: nextValue })} /></label>
         <label>Location<select value={form.locationId} onChange={e => setForm({ ...form, locationId: e.target.value })}><option value="">Select location</option>{locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
         <label>Section<select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })}><option value="">Select section</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Reported by<select value={form.reportedByStaffId} onChange={e => setForm({ ...form, reportedByStaffId: e.target.value })}><option value="">Select staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-        <label>Immediate action<textarea value={form.immediateAction} onChange={e => setForm({ ...form, immediateAction: e.target.value })} /></label>
-        <label>Persons involved<input value={form.personsInvolved} onChange={e => setForm({ ...form, personsInvolved: e.target.value })} /></label>
-        <label>Reported to<input value={form.reportedTo} onChange={e => setForm({ ...form, reportedTo: e.target.value })} /></label>
+        <label>Immediate action<TextField as="textarea" value={form.immediateAction} onValue={nextValue => setForm({ ...form, immediateAction: nextValue })} /></label>
+        <label>Persons involved<TextField value={form.personsInvolved} onValue={nextValue => setForm({ ...form, personsInvolved: nextValue })} /></label>
+        <label>Reported to<TextField value={form.reportedTo} onValue={nextValue => setForm({ ...form, reportedTo: nextValue })} /></label>
         <button type="submit">Report incident</button>
       </form>}
     </div>}
@@ -3264,18 +3266,18 @@ export function SafetyPage() {
       <div className="card">
         <h3>Add safety equipment</h3>
         {can('facilities_safety.equipment', 'create') && <form className="form" onSubmit={submitEquip}>
-          <label>Name<input value={equipForm.name} onChange={e => setEquipForm({ ...equipForm, name: e.target.value })} required /></label>
+          <label>Name<TextField value={equipForm.name} onValue={nextValue => setEquipForm({ ...equipForm, name: nextValue })} required /></label>
           <label>Type<select value={equipForm.equipmentType} onChange={e => setEquipForm({ ...equipForm, equipmentType: e.target.value })}><option value="">Select type</option>{SAFETY_EQUIPMENT_TYPES.map(t => <option key={t} value={t}>{prettify(t)}</option>)}</select></label>
-          <label>Serial number<input value={equipForm.serialNumber} onChange={e => setEquipForm({ ...equipForm, serialNumber: e.target.value })} /></label>
+          <label>Serial number<TextField value={equipForm.serialNumber} onValue={nextValue => setEquipForm({ ...equipForm, serialNumber: nextValue })} /></label>
           <label>Location<select value={equipForm.locationId} onChange={e => setEquipForm({ ...equipForm, locationId: e.target.value })}><option value="">Select location</option>{locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
           <label>Section<select value={equipForm.sectionId} onChange={e => setEquipForm({ ...equipForm, sectionId: e.target.value })}><option value="">Select section</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
           <label>Responsible staff<select value={equipForm.responsibleStaffId} onChange={e => setEquipForm({ ...equipForm, responsibleStaffId: e.target.value })}><option value="">Select staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           <label>Status<select value={equipForm.status} onChange={e => setEquipForm({ ...equipForm, status: e.target.value })}>{['operational', 'out_of_service', 'expired', 'removed'].map(s => <option key={s} value={s}>{prettify(s)}</option>)}</select></label>
-          <label>Inspection frequency<input value={equipForm.inspectionFrequency} onChange={e => setEquipForm({ ...equipForm, inspectionFrequency: e.target.value })} placeholder="e.g. monthly" /></label>
+          <label>Inspection frequency<TextField value={equipForm.inspectionFrequency} onValue={nextValue => setEquipForm({ ...equipForm, inspectionFrequency: nextValue })} placeholder="e.g. monthly" /></label>
           <label>Next inspection due<input type="date" value={equipForm.nextInspectionDue} onChange={e => setEquipForm({ ...equipForm, nextInspectionDue: e.target.value })} /></label>
-          <label>Certification frequency<input value={equipForm.certificationFrequency} onChange={e => setEquipForm({ ...equipForm, certificationFrequency: e.target.value })} placeholder="e.g. annual" /></label>
+          <label>Certification frequency<TextField value={equipForm.certificationFrequency} onValue={nextValue => setEquipForm({ ...equipForm, certificationFrequency: nextValue })} placeholder="e.g. annual" /></label>
           <label>Next certification due<input type="date" value={equipForm.nextCertificationDue} onChange={e => setEquipForm({ ...equipForm, nextCertificationDue: e.target.value })} /></label>
-          <label>Notes<input value={equipForm.notes} onChange={e => setEquipForm({ ...equipForm, notes: e.target.value })} /></label>
+          <label>Notes<TextField value={equipForm.notes} onValue={nextValue => setEquipForm({ ...equipForm, notes: nextValue })} /></label>
           <button type="submit">Add equipment</button>
         </form>}
       </div>
@@ -3299,9 +3301,9 @@ export function SafetyPage() {
           <label>Conducted by<select value={inspForm.conductedByStaffId} onChange={e => setInspForm({ ...inspForm, conductedByStaffId: e.target.value })}><option value="">Select staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           <label>Outcome<select value={inspForm.outcome} onChange={e => setInspForm({ ...inspForm, outcome: e.target.value })}><option value="">Select outcome</option><option value="pass">Pass</option><option value="action_required">Action required</option><option value="fail">Fail</option></select></label>
           <label>Next due date<input type="date" value={inspForm.nextDueDate} onChange={e => setInspForm({ ...inspForm, nextDueDate: e.target.value })} /></label>
-          <label>Scope<textarea value={inspForm.scope} onChange={e => setInspForm({ ...inspForm, scope: e.target.value })} /></label>
-          <label>Findings summary<textarea value={inspForm.findingsSummary} onChange={e => setInspForm({ ...inspForm, findingsSummary: e.target.value })} /></label>
-          <label>Corrective action<textarea value={inspForm.correctiveAction} onChange={e => setInspForm({ ...inspForm, correctiveAction: e.target.value })} /></label>
+          <label>Scope<TextField as="textarea" value={inspForm.scope} onValue={nextValue => setInspForm({ ...inspForm, scope: nextValue })} /></label>
+          <label>Findings summary<TextField as="textarea" value={inspForm.findingsSummary} onValue={nextValue => setInspForm({ ...inspForm, findingsSummary: nextValue })} /></label>
+          <label>Corrective action<TextField as="textarea" value={inspForm.correctiveAction} onValue={nextValue => setInspForm({ ...inspForm, correctiveAction: nextValue })} /></label>
           <button type="submit">Record inspection</button>
         </form>}
       </div>
@@ -3321,13 +3323,13 @@ export function SafetyPage() {
         {can('facilities_safety.waste', 'create') && <form className="form" onSubmit={submitWaste}>
           <label>Disposal date<input type="date" value={wasteForm.disposalDate} onChange={e => setWasteForm({ ...wasteForm, disposalDate: e.target.value })} required /></label>
           <label>Waste type<select value={wasteForm.wasteType} onChange={e => setWasteForm({ ...wasteForm, wasteType: e.target.value })}><option value="">Select type</option>{WASTE_TYPES.map(t => <option key={t} value={t}>{prettify(t)}</option>)}</select></label>
-          <label>Quantity<input value={wasteForm.quantity} onChange={e => setWasteForm({ ...wasteForm, quantity: e.target.value })} /></label>
-          <label>Unit<input value={wasteForm.unit} onChange={e => setWasteForm({ ...wasteForm, unit: e.target.value })} placeholder="e.g. kg, L, containers" /></label>
+          <label>Quantity<TextField value={wasteForm.quantity} onValue={nextValue => setWasteForm({ ...wasteForm, quantity: nextValue })} /></label>
+          <label>Unit<TextField value={wasteForm.unit} onValue={nextValue => setWasteForm({ ...wasteForm, unit: nextValue })} placeholder="e.g. kg, L, containers" /></label>
           <label>Disposal method<select value={wasteForm.disposalMethod} onChange={e => setWasteForm({ ...wasteForm, disposalMethod: e.target.value })}><option value="">Select method</option>{DISPOSAL_METHODS.map(m => <option key={m} value={m}>{prettify(m)}</option>)}</select></label>
           <label>Handled by<select value={wasteForm.handledByStaffId} onChange={e => setWasteForm({ ...wasteForm, handledByStaffId: e.target.value })}><option value="">Select staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-          <label>Carrier / destination<input value={wasteForm.carrierOrDestination} onChange={e => setWasteForm({ ...wasteForm, carrierOrDestination: e.target.value })} /></label>
-          <label>Manifest reference<input value={wasteForm.manifestReference} onChange={e => setWasteForm({ ...wasteForm, manifestReference: e.target.value })} /></label>
-          <label>Notes<textarea value={wasteForm.notes} onChange={e => setWasteForm({ ...wasteForm, notes: e.target.value })} /></label>
+          <label>Carrier / destination<TextField value={wasteForm.carrierOrDestination} onValue={nextValue => setWasteForm({ ...wasteForm, carrierOrDestination: nextValue })} /></label>
+          <label>Manifest reference<TextField value={wasteForm.manifestReference} onValue={nextValue => setWasteForm({ ...wasteForm, manifestReference: nextValue })} /></label>
+          <label>Notes<TextField as="textarea" value={wasteForm.notes} onValue={nextValue => setWasteForm({ ...wasteForm, notes: nextValue })} /></label>
           <button type="submit">Record disposal</button>
         </form>}
       </div>
@@ -3344,18 +3346,18 @@ export function SafetyPage() {
       <div className="card">
         <h3>Add hazardous chemical</h3>
         {can('facilities_safety.waste', 'create') && <form className="form" onSubmit={submitChem}>
-          <label>Name<input value={chemForm.name} onChange={e => setChemForm({ ...chemForm, name: e.target.value })} required /></label>
+          <label>Name<TextField value={chemForm.name} onValue={nextValue => setChemForm({ ...chemForm, name: nextValue })} required /></label>
           <label>Hazard class<select value={chemForm.hazardClass} onChange={e => setChemForm({ ...chemForm, hazardClass: e.target.value })}><option value="">Select class</option>{HAZARD_CLASSES.map(h => <option key={h} value={h}>{prettify(h)}</option>)}</select></label>
-          <label>CAS number<input value={chemForm.casNumber} onChange={e => setChemForm({ ...chemForm, casNumber: e.target.value })} /></label>
-          <label>SDS reference<input value={chemForm.sdsReference} onChange={e => setChemForm({ ...chemForm, sdsReference: e.target.value })} /></label>
+          <label>CAS number<TextField value={chemForm.casNumber} onValue={nextValue => setChemForm({ ...chemForm, casNumber: nextValue })} /></label>
+          <label>SDS reference<TextField value={chemForm.sdsReference} onValue={nextValue => setChemForm({ ...chemForm, sdsReference: nextValue })} /></label>
           <label><input type="checkbox" checked={chemForm.sdsOnFile} onChange={e => setChemForm({ ...chemForm, sdsOnFile: e.target.checked })} /> SDS on file</label>
           <label>Storage location<select value={chemForm.storageLocationId} onChange={e => setChemForm({ ...chemForm, storageLocationId: e.target.value })}><option value="">Select location</option>{locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
-          <label>Segregation group<input value={chemForm.segregationGroup} onChange={e => setChemForm({ ...chemForm, segregationGroup: e.target.value })} placeholder="e.g. acids, bases, flammables" /></label>
-          <label>Quantity<input value={chemForm.quantity} onChange={e => setChemForm({ ...chemForm, quantity: e.target.value })} /></label>
-          <label>Unit<input value={chemForm.unit} onChange={e => setChemForm({ ...chemForm, unit: e.target.value })} /></label>
+          <label>Segregation group<TextField value={chemForm.segregationGroup} onValue={nextValue => setChemForm({ ...chemForm, segregationGroup: nextValue })} placeholder="e.g. acids, bases, flammables" /></label>
+          <label>Quantity<TextField value={chemForm.quantity} onValue={nextValue => setChemForm({ ...chemForm, quantity: nextValue })} /></label>
+          <label>Unit<TextField value={chemForm.unit} onValue={nextValue => setChemForm({ ...chemForm, unit: nextValue })} /></label>
           <label>Expiry date<input type="date" value={chemForm.expiryDate} onChange={e => setChemForm({ ...chemForm, expiryDate: e.target.value })} /></label>
           <label>Status<select value={chemForm.status} onChange={e => setChemForm({ ...chemForm, status: e.target.value })}>{['in_use', 'in_store', 'disposed'].map(s => <option key={s} value={s}>{prettify(s)}</option>)}</select></label>
-          <label>Spill measures<textarea value={chemForm.spillMeasures} onChange={e => setChemForm({ ...chemForm, spillMeasures: e.target.value })} /></label>
+          <label>Spill measures<TextField as="textarea" value={chemForm.spillMeasures} onValue={nextValue => setChemForm({ ...chemForm, spillMeasures: nextValue })} /></label>
           <button type="submit">Add chemical</button>
         </form>}
       </div>
@@ -3374,16 +3376,16 @@ export function SafetyPage() {
         {can('facilities_safety.health', 'create') && <form className="form" onSubmit={submitImm}>
           <label>Record type<select value={immForm.recordType} onChange={e => setImmForm({ ...immForm, recordType: e.target.value })}>{IMMUNIZATION_TYPES.map(t => <option key={t} value={t}>{prettify(t)}</option>)}</select></label>
           <label>Staff<select value={immForm.staffId} onChange={e => setImmForm({ ...immForm, staffId: e.target.value })}><option value="">Select staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-          <label>Vaccine / agent<input value={immForm.vaccineOrAgent} onChange={e => setImmForm({ ...immForm, vaccineOrAgent: e.target.value })} placeholder="e.g. Hepatitis B" /></label>
-          <label>Dose / stage<input value={immForm.doseOrStage} onChange={e => setImmForm({ ...immForm, doseOrStage: e.target.value })} /></label>
+          <label>Vaccine / agent<TextField value={immForm.vaccineOrAgent} onValue={nextValue => setImmForm({ ...immForm, vaccineOrAgent: nextValue })} placeholder="e.g. Hepatitis B" /></label>
+          <label>Dose / stage<TextField value={immForm.doseOrStage} onValue={nextValue => setImmForm({ ...immForm, doseOrStage: nextValue })} /></label>
           <label>Date administered<input type="date" value={immForm.dateAdministered} onChange={e => setImmForm({ ...immForm, dateAdministered: e.target.value })} /></label>
           <label>Next dose due<input type="date" value={immForm.nextDueDate} onChange={e => setImmForm({ ...immForm, nextDueDate: e.target.value })} /></label>
-          <label>Provider<input value={immForm.provider} onChange={e => setImmForm({ ...immForm, provider: e.target.value })} /></label>
+          <label>Provider<TextField value={immForm.provider} onValue={nextValue => setImmForm({ ...immForm, provider: nextValue })} /></label>
           <label>Exposure date<input type="date" value={immForm.exposureDate} onChange={e => setImmForm({ ...immForm, exposureDate: e.target.value })} /></label>
-          <label>Exposure source<input value={immForm.exposureSource} onChange={e => setImmForm({ ...immForm, exposureSource: e.target.value })} /></label>
-          <label>Outcome<input value={immForm.outcome} onChange={e => setImmForm({ ...immForm, outcome: e.target.value })} /></label>
+          <label>Exposure source<TextField value={immForm.exposureSource} onValue={nextValue => setImmForm({ ...immForm, exposureSource: nextValue })} /></label>
+          <label>Outcome<TextField value={immForm.outcome} onValue={nextValue => setImmForm({ ...immForm, outcome: nextValue })} /></label>
           <label><input type="checkbox" checked={immForm.declinationSigned} onChange={e => setImmForm({ ...immForm, declinationSigned: e.target.checked })} /> Declination signed</label>
-          <label>Follow-up summary<textarea value={immForm.followUpSummary} onChange={e => setImmForm({ ...immForm, followUpSummary: e.target.value })} /></label>
+          <label>Follow-up summary<TextField as="textarea" value={immForm.followUpSummary} onValue={nextValue => setImmForm({ ...immForm, followUpSummary: nextValue })} /></label>
           <button type="submit">Record</button>
         </form>}
       </div>

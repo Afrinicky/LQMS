@@ -22,6 +22,8 @@ import type {
   ReportAmendmentLog, ProcessReviewRecord, ProcessManagementSummary,
   PreExaminationInstruction, SampleReceiptRecord, ReferenceIntervalRecord, ResultComparabilityStudy, ContingencyPlan
 } from '../../shared/types/api';
+import TextField from '../components/ui/TextField';
+import { Notice } from '../components/ui/Feedback';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
@@ -209,7 +211,7 @@ export function ProcessManagementPage() {
     {inPreExam && tabBar(tab, PRE_EXAM_TABS, setTab)}
     {inExam && tabBar(tab, EXAM_TABS, setTab)}
     {inPostExam && tabBar(tab, POST_EXAM_TABS, setTab)}
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {tab === 'IQC' && <IqcPage embedded />}
     {tab === 'EQA' && <EqaPage embedded />}
@@ -256,17 +258,17 @@ export function ProcessManagementPage() {
 
     {tab === 'Pre-Examination' && <>
       <form className="form-grid" onSubmit={submitPreExam}>
-        <label>Title<input value={preExamForm.title} onChange={e => setPreExamForm({ ...preExamForm, title: e.target.value })} required /></label>
+        <label>Title<TextField value={preExamForm.title} onValue={nextValue => setPreExamForm({ ...preExamForm, title: nextValue })} required /></label>
         <label>Test<select value={preExamForm.testCatalogId} onChange={e => setPreExamForm({ ...preExamForm, testCatalogId: e.target.value })}><option value="">—</option>{tests.map(t => <option key={t.id} value={t.id}>{t.test_name}</option>)}</select></label>
-        <label>Sample type<input value={preExamForm.sampleType} onChange={e => setPreExamForm({ ...preExamForm, sampleType: e.target.value })} /></label>
-        <label>Container / additive<input value={preExamForm.containerAdditive} onChange={e => setPreExamForm({ ...preExamForm, containerAdditive: e.target.value })} /></label>
-        <label>Transport condition<input value={preExamForm.transportCondition} onChange={e => setPreExamForm({ ...preExamForm, transportCondition: e.target.value })} /></label>
-        <label>Storage condition<input value={preExamForm.storageCondition} onChange={e => setPreExamForm({ ...preExamForm, storageCondition: e.target.value })} /></label>
+        <label>Sample type<TextField value={preExamForm.sampleType} onValue={nextValue => setPreExamForm({ ...preExamForm, sampleType: nextValue })} /></label>
+        <label>Container / additive<TextField value={preExamForm.containerAdditive} onValue={nextValue => setPreExamForm({ ...preExamForm, containerAdditive: nextValue })} /></label>
+        <label>Transport condition<TextField value={preExamForm.transportCondition} onValue={nextValue => setPreExamForm({ ...preExamForm, transportCondition: nextValue })} /></label>
+        <label>Storage condition<TextField value={preExamForm.storageCondition} onValue={nextValue => setPreExamForm({ ...preExamForm, storageCondition: nextValue })} /></label>
         <label>Section<select value={preExamForm.sectionId} onChange={e => setPreExamForm({ ...preExamForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Status<select value={preExamForm.status} onChange={e => setPreExamForm({ ...preExamForm, status: e.target.value })}>{['active', 'under_review', 'archived'].map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select></label>
-        <label>Patient preparation<textarea value={preExamForm.patientPreparation} onChange={e => setPreExamForm({ ...preExamForm, patientPreparation: e.target.value })} /></label>
-        <label>Collection instructions<textarea value={preExamForm.collectionInstructions} onChange={e => setPreExamForm({ ...preExamForm, collectionInstructions: e.target.value })} /></label>
-        <label>Stability summary<textarea value={preExamForm.stabilitySummary} onChange={e => setPreExamForm({ ...preExamForm, stabilitySummary: e.target.value })} /></label>
+        <label>Patient preparation<TextField as="textarea" value={preExamForm.patientPreparation} onValue={nextValue => setPreExamForm({ ...preExamForm, patientPreparation: nextValue })} /></label>
+        <label>Collection instructions<TextField as="textarea" value={preExamForm.collectionInstructions} onValue={nextValue => setPreExamForm({ ...preExamForm, collectionInstructions: nextValue })} /></label>
+        <label>Stability summary<TextField as="textarea" value={preExamForm.stabilitySummary} onValue={nextValue => setPreExamForm({ ...preExamForm, stabilitySummary: nextValue })} /></label>
         <button type="submit">Add instruction</button>
       </form>
       <table className="data-table"><thead><tr><th>No.</th><th>Title</th><th>Test</th><th>Sample</th><th>Container</th><th>Transport</th><th>Status</th></tr></thead><tbody>
@@ -279,16 +281,16 @@ export function ProcessManagementPage() {
       <form className="form-grid" onSubmit={submitReceipt}>
         <label>Receipt date<input type="date" value={receiptForm.receiptDate} onChange={e => setReceiptForm({ ...receiptForm, receiptDate: e.target.value })} required /></label>
         <label>Time<input type="time" value={receiptForm.receiptTime} onChange={e => setReceiptForm({ ...receiptForm, receiptTime: e.target.value })} /></label>
-        <label>Request reference<input value={receiptForm.requestReference} onChange={e => setReceiptForm({ ...receiptForm, requestReference: e.target.value })} /></label>
-        <label>Patient reference<input value={receiptForm.patientReference} onChange={e => setReceiptForm({ ...receiptForm, patientReference: e.target.value })} /></label>
-        <label>Sample type<input value={receiptForm.sampleType} onChange={e => setReceiptForm({ ...receiptForm, sampleType: e.target.value })} /></label>
+        <label>Request reference<TextField value={receiptForm.requestReference} onValue={nextValue => setReceiptForm({ ...receiptForm, requestReference: nextValue })} /></label>
+        <label>Patient reference<TextField value={receiptForm.patientReference} onValue={nextValue => setReceiptForm({ ...receiptForm, patientReference: nextValue })} /></label>
+        <label>Sample type<TextField value={receiptForm.sampleType} onValue={nextValue => setReceiptForm({ ...receiptForm, sampleType: nextValue })} /></label>
         <label>Section<select value={receiptForm.sectionId} onChange={e => setReceiptForm({ ...receiptForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Received by<select value={receiptForm.receivedByStaffId} onChange={e => setReceiptForm({ ...receiptForm, receivedByStaffId: e.target.value })}><option value="">Me</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Condition<select value={receiptForm.condition} onChange={e => setReceiptForm({ ...receiptForm, condition: e.target.value })}>{['acceptable', 'suboptimal', 'rejected'].map(c => <option key={c} value={c}>{c}</option>)}</select></label>
-        <label>Temperature<input value={receiptForm.temperature} onChange={e => setReceiptForm({ ...receiptForm, temperature: e.target.value })} /></label>
+        <label>Temperature<TextField value={receiptForm.temperature} onValue={nextValue => setReceiptForm({ ...receiptForm, temperature: nextValue })} /></label>
         <label><input type="checkbox" checked={receiptForm.requestComplete} onChange={e => setReceiptForm({ ...receiptForm, requestComplete: e.target.checked })} /> Request form complete</label>
         <label><input type="checkbox" checked={receiptForm.urgent} onChange={e => setReceiptForm({ ...receiptForm, urgent: e.target.checked })} /> Urgent</label>
-        <label>Condition notes<textarea value={receiptForm.conditionNotes} onChange={e => setReceiptForm({ ...receiptForm, conditionNotes: e.target.value })} /></label>
+        <label>Condition notes<TextField as="textarea" value={receiptForm.conditionNotes} onValue={nextValue => setReceiptForm({ ...receiptForm, conditionNotes: nextValue })} /></label>
         <button type="submit">Log receipt</button>
       </form>
       <div style={{ margin: '4px 0 10px' }}><BarcodeScanner placeholder="Scan a specimen barcode (request ref / receipt no.)…" autoFocus={false} onScan={code => { const c = code.trim().toLowerCase(); const m = receipts.find(x => (x.request_reference || '').toLowerCase() === c || x.receipt_number.toLowerCase() === c); setError(m ? `Specimen ${m.receipt_number} — ${m.sample_type || ''} (${m.condition})` : `No specimen found for "${code}".`); }} /></div>
@@ -302,14 +304,14 @@ export function ProcessManagementPage() {
       <XlsxToolbar module="process_management.intervals" exportPath="/process-management/reference-intervals/export" templatePath="/process-management/reference-intervals/template" importPath="/process-management/reference-intervals/import" exportName="Reference_Intervals.xlsx" onImported={load} />
       <form className="form-grid" onSubmit={submitRi}>
         <label>Test<select value={riForm.testCatalogId} onChange={e => setRiForm({ ...riForm, testCatalogId: e.target.value })}><option value="">—</option>{tests.map(t => <option key={t.id} value={t.id}>{t.test_name}</option>)}</select></label>
-        <label>Analyte<input value={riForm.analyte} onChange={e => setRiForm({ ...riForm, analyte: e.target.value })} required /></label>
-        <label>Sample type<input value={riForm.sampleType} onChange={e => setRiForm({ ...riForm, sampleType: e.target.value })} /></label>
-        <label>Population<input value={riForm.population} onChange={e => setRiForm({ ...riForm, population: e.target.value })} placeholder="e.g. adult male" /></label>
-        <label>Lower limit<input value={riForm.lowerLimit} onChange={e => setRiForm({ ...riForm, lowerLimit: e.target.value })} /></label>
-        <label>Upper limit<input value={riForm.upperLimit} onChange={e => setRiForm({ ...riForm, upperLimit: e.target.value })} /></label>
-        <label>Unit<input value={riForm.unit} onChange={e => setRiForm({ ...riForm, unit: e.target.value })} /></label>
-        <label>Clinical decision limit<input value={riForm.clinicalDecisionLimit} onChange={e => setRiForm({ ...riForm, clinicalDecisionLimit: e.target.value })} /></label>
-        <label>Source<input value={riForm.source} onChange={e => setRiForm({ ...riForm, source: e.target.value })} placeholder="manufacturer / literature / in-house" /></label>
+        <label>Analyte<TextField value={riForm.analyte} onValue={nextValue => setRiForm({ ...riForm, analyte: nextValue })} required /></label>
+        <label>Sample type<TextField value={riForm.sampleType} onValue={nextValue => setRiForm({ ...riForm, sampleType: nextValue })} /></label>
+        <label>Population<TextField value={riForm.population} onValue={nextValue => setRiForm({ ...riForm, population: nextValue })} placeholder="e.g. adult male" /></label>
+        <label>Lower limit<TextField value={riForm.lowerLimit} onValue={nextValue => setRiForm({ ...riForm, lowerLimit: nextValue })} /></label>
+        <label>Upper limit<TextField value={riForm.upperLimit} onValue={nextValue => setRiForm({ ...riForm, upperLimit: nextValue })} /></label>
+        <label>Unit<TextField value={riForm.unit} onValue={nextValue => setRiForm({ ...riForm, unit: nextValue })} /></label>
+        <label>Clinical decision limit<TextField value={riForm.clinicalDecisionLimit} onValue={nextValue => setRiForm({ ...riForm, clinicalDecisionLimit: nextValue })} /></label>
+        <label>Source<TextField value={riForm.source} onValue={nextValue => setRiForm({ ...riForm, source: nextValue })} placeholder="manufacturer / literature / in-house" /></label>
         <label>Effective date<input type="date" value={riForm.effectiveDate} onChange={e => setRiForm({ ...riForm, effectiveDate: e.target.value })} /></label>
         <label>Review date<input type="date" value={riForm.reviewDate} onChange={e => setRiForm({ ...riForm, reviewDate: e.target.value })} /></label>
         <label><input type="checkbox" checked={riForm.communicatedToUsers} onChange={e => setRiForm({ ...riForm, communicatedToUsers: e.target.checked })} /> Communicated to users</label>
@@ -324,16 +326,16 @@ export function ProcessManagementPage() {
     {tab === 'Comparability' && <>
       <form className="form-grid" onSubmit={submitCmp}>
         <label>Study date<input type="date" value={cmpForm.studyDate} onChange={e => setCmpForm({ ...cmpForm, studyDate: e.target.value })} required /></label>
-        <label>Test name<input value={cmpForm.testName} onChange={e => setCmpForm({ ...cmpForm, testName: e.target.value })} /></label>
-        <label>Analyte<input value={cmpForm.analyte} onChange={e => setCmpForm({ ...cmpForm, analyte: e.target.value })} /></label>
-        <label>Method / analyser A<input value={cmpForm.methodA} onChange={e => setCmpForm({ ...cmpForm, methodA: e.target.value })} /></label>
-        <label>Method / analyser B<input value={cmpForm.methodB} onChange={e => setCmpForm({ ...cmpForm, methodB: e.target.value })} /></label>
+        <label>Test name<TextField value={cmpForm.testName} onValue={nextValue => setCmpForm({ ...cmpForm, testName: nextValue })} /></label>
+        <label>Analyte<TextField value={cmpForm.analyte} onValue={nextValue => setCmpForm({ ...cmpForm, analyte: nextValue })} /></label>
+        <label>Method / analyser A<TextField value={cmpForm.methodA} onValue={nextValue => setCmpForm({ ...cmpForm, methodA: nextValue })} /></label>
+        <label>Method / analyser B<TextField value={cmpForm.methodB} onValue={nextValue => setCmpForm({ ...cmpForm, methodB: nextValue })} /></label>
         <label>Sample count<input type="number" value={cmpForm.sampleCount} onChange={e => setCmpForm({ ...cmpForm, sampleCount: e.target.value })} /></label>
         <label>Outcome<select value={cmpForm.outcome} onChange={e => setCmpForm({ ...cmpForm, outcome: e.target.value })}><option value="">—</option><option value="comparable">Comparable</option><option value="significant_difference">Significant difference</option><option value="inconclusive">Inconclusive</option></select></label>
         <label>Next due date<input type="date" value={cmpForm.nextDueDate} onChange={e => setCmpForm({ ...cmpForm, nextDueDate: e.target.value })} /></label>
-        <label>Acceptance criteria<textarea value={cmpForm.acceptanceCriteria} onChange={e => setCmpForm({ ...cmpForm, acceptanceCriteria: e.target.value })} /></label>
-        <label>Findings<textarea value={cmpForm.findings} onChange={e => setCmpForm({ ...cmpForm, findings: e.target.value })} /></label>
-        <label>Action taken<textarea value={cmpForm.actionTaken} onChange={e => setCmpForm({ ...cmpForm, actionTaken: e.target.value })} /></label>
+        <label>Acceptance criteria<TextField as="textarea" value={cmpForm.acceptanceCriteria} onValue={nextValue => setCmpForm({ ...cmpForm, acceptanceCriteria: nextValue })} /></label>
+        <label>Findings<TextField as="textarea" value={cmpForm.findings} onValue={nextValue => setCmpForm({ ...cmpForm, findings: nextValue })} /></label>
+        <label>Action taken<TextField as="textarea" value={cmpForm.actionTaken} onValue={nextValue => setCmpForm({ ...cmpForm, actionTaken: nextValue })} /></label>
         <button type="submit">Record study</button>
       </form>
       <table className="data-table"><thead><tr><th>No.</th><th>Date</th><th>Test</th><th>A vs B</th><th>Samples</th><th>Outcome</th><th>Next due</th><th>Status</th></tr></thead><tbody>
@@ -345,15 +347,15 @@ export function ProcessManagementPage() {
     {tab === 'Contingency Plan' && <>
       <form className="form-grid" onSubmit={submitCtp}>
         <label>Scenario<select value={ctpForm.scenarioType} onChange={e => setCtpForm({ ...ctpForm, scenarioType: e.target.value })}><option value="">—</option>{['personnel', 'equipment', 'power', 'reagent_stockout', 'fire_disaster', 'lis_downtime', 'other'].map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select></label>
-        <label>Title<input value={ctpForm.title} onChange={e => setCtpForm({ ...ctpForm, title: e.target.value })} required /></label>
+        <label>Title<TextField value={ctpForm.title} onValue={nextValue => setCtpForm({ ...ctpForm, title: nextValue })} required /></label>
         <label>Responsible staff<select value={ctpForm.responsibleStaffId} onChange={e => setCtpForm({ ...ctpForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Status<select value={ctpForm.status} onChange={e => setCtpForm({ ...ctpForm, status: e.target.value })}>{['draft', 'active', 'under_review', 'retired'].map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Last tested<input type="date" value={ctpForm.lastTestedDate} onChange={e => setCtpForm({ ...ctpForm, lastTestedDate: e.target.value })} /></label>
         <label>Next test due<input type="date" value={ctpForm.nextTestDue} onChange={e => setCtpForm({ ...ctpForm, nextTestDue: e.target.value })} /></label>
-        <label>Trigger description<textarea value={ctpForm.triggerDescription} onChange={e => setCtpForm({ ...ctpForm, triggerDescription: e.target.value })} /></label>
-        <label>Response actions<textarea value={ctpForm.responseActions} onChange={e => setCtpForm({ ...ctpForm, responseActions: e.target.value })} /></label>
-        <label>Backup arrangement<textarea value={ctpForm.backupArrangement} onChange={e => setCtpForm({ ...ctpForm, backupArrangement: e.target.value })} /></label>
-        <label>Test outcome<textarea value={ctpForm.testOutcome} onChange={e => setCtpForm({ ...ctpForm, testOutcome: e.target.value })} /></label>
+        <label>Trigger description<TextField as="textarea" value={ctpForm.triggerDescription} onValue={nextValue => setCtpForm({ ...ctpForm, triggerDescription: nextValue })} /></label>
+        <label>Response actions<TextField as="textarea" value={ctpForm.responseActions} onValue={nextValue => setCtpForm({ ...ctpForm, responseActions: nextValue })} /></label>
+        <label>Backup arrangement<TextField as="textarea" value={ctpForm.backupArrangement} onValue={nextValue => setCtpForm({ ...ctpForm, backupArrangement: nextValue })} /></label>
+        <label>Test outcome<TextField as="textarea" value={ctpForm.testOutcome} onValue={nextValue => setCtpForm({ ...ctpForm, testOutcome: nextValue })} /></label>
         <button type="submit">Add plan</button>
       </form>
       <table className="data-table"><thead><tr><th>No.</th><th>Scenario</th><th>Title</th><th>Responsible</th><th>Last tested</th><th>Next test</th><th>Status</th></tr></thead><tbody>
@@ -364,18 +366,18 @@ export function ProcessManagementPage() {
 
     {tab === 'Test Directory' && <>
       <form className="form-grid" onSubmit={submitTest}>
-        <label>Code<input value={testForm.testCode} onChange={e => setTestForm({ ...testForm, testCode: e.target.value })} /></label>
-        <label>Test name<input value={testForm.testName} onChange={e => setTestForm({ ...testForm, testName: e.target.value })} required /></label>
+        <label>Code<TextField value={testForm.testCode} onValue={nextValue => setTestForm({ ...testForm, testCode: nextValue })} /></label>
+        <label>Test name<TextField value={testForm.testName} onValue={nextValue => setTestForm({ ...testForm, testName: nextValue })} required /></label>
         <label>Department<select value={testForm.departmentId} onChange={e => setTestForm({ ...testForm, departmentId: e.target.value })}><option value="">—</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
         <label>Section<select value={testForm.sectionId} onChange={e => setTestForm({ ...testForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-        <label>Sample type<input value={testForm.sampleType} onChange={e => setTestForm({ ...testForm, sampleType: e.target.value })} required /></label>
-        <label>Container<input value={testForm.containerType} onChange={e => setTestForm({ ...testForm, containerType: e.target.value })} /></label>
-        <label>Min volume<input value={testForm.minimumVolume} onChange={e => setTestForm({ ...testForm, minimumVolume: e.target.value })} /></label>
-        <label>Method name<input value={testForm.methodName} onChange={e => setTestForm({ ...testForm, methodName: e.target.value })} /></label>
+        <label>Sample type<TextField value={testForm.sampleType} onValue={nextValue => setTestForm({ ...testForm, sampleType: nextValue })} required /></label>
+        <label>Container<TextField value={testForm.containerType} onValue={nextValue => setTestForm({ ...testForm, containerType: nextValue })} /></label>
+        <label>Min volume<TextField value={testForm.minimumVolume} onValue={nextValue => setTestForm({ ...testForm, minimumVolume: nextValue })} /></label>
+        <label>Method name<TextField value={testForm.methodName} onValue={nextValue => setTestForm({ ...testForm, methodName: nextValue })} /></label>
         <label>TAT target (minutes)<input type="number" value={testForm.tatTargetMinutes} onChange={e => setTestForm({ ...testForm, tatTargetMinutes: e.target.value })} /></label>
-        <label>Reportable range<input value={testForm.reportableRange} onChange={e => setTestForm({ ...testForm, reportableRange: e.target.value })} /></label>
-        <label>Reference interval<input value={testForm.referenceIntervalSummary} onChange={e => setTestForm({ ...testForm, referenceIntervalSummary: e.target.value })} /></label>
-        <label>Method summary<textarea value={testForm.methodSummary} onChange={e => setTestForm({ ...testForm, methodSummary: e.target.value })} /></label>
+        <label>Reportable range<TextField value={testForm.reportableRange} onValue={nextValue => setTestForm({ ...testForm, reportableRange: nextValue })} /></label>
+        <label>Reference interval<TextField value={testForm.referenceIntervalSummary} onValue={nextValue => setTestForm({ ...testForm, referenceIntervalSummary: nextValue })} /></label>
+        <label>Method summary<TextField as="textarea" value={testForm.methodSummary} onValue={nextValue => setTestForm({ ...testForm, methodSummary: nextValue })} /></label>
         <label><input type="checkbox" checked={testForm.criticalResultApplicable} onChange={e => setTestForm({ ...testForm, criticalResultApplicable: e.target.checked })} /> Critical result applicable</label>
         <label>Status<select value={testForm.status} onChange={e => setTestForm({ ...testForm, status: e.target.value })}>{TEST_STATUSES.map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select></label>
         <button type="submit">Add test</button>
@@ -387,14 +389,14 @@ export function ProcessManagementPage() {
 
     {tab === 'Acceptance Criteria' && <>
       <form className="form-grid" onSubmit={submitCriteria}>
-        <label>Code<input value={criteriaForm.criteriaCode} onChange={e => setCriteriaForm({ ...criteriaForm, criteriaCode: e.target.value })} /></label>
+        <label>Code<TextField value={criteriaForm.criteriaCode} onValue={nextValue => setCriteriaForm({ ...criteriaForm, criteriaCode: nextValue })} /></label>
         <label>Test<select value={criteriaForm.testCatalogId} onChange={e => setCriteriaForm({ ...criteriaForm, testCatalogId: e.target.value })}><option value="">—</option>{tests.map(t => <option key={t.id} value={t.id}>{t.test_name}</option>)}</select></label>
-        <label>Sample type<input value={criteriaForm.sampleType} onChange={e => setCriteriaForm({ ...criteriaForm, sampleType: e.target.value })} required /></label>
-        <label>Container<input value={criteriaForm.containerType} onChange={e => setCriteriaForm({ ...criteriaForm, containerType: e.target.value })} /></label>
-        <label>Acceptance criteria<textarea value={criteriaForm.acceptanceCriteria} onChange={e => setCriteriaForm({ ...criteriaForm, acceptanceCriteria: e.target.value })} required /></label>
-        <label>Rejection criteria<textarea value={criteriaForm.rejectionCriteria} onChange={e => setCriteriaForm({ ...criteriaForm, rejectionCriteria: e.target.value })} /></label>
-        <label>Transport condition<input value={criteriaForm.transportCondition} onChange={e => setCriteriaForm({ ...criteriaForm, transportCondition: e.target.value })} /></label>
-        <label>Stability summary<input value={criteriaForm.stabilitySummary} onChange={e => setCriteriaForm({ ...criteriaForm, stabilitySummary: e.target.value })} /></label>
+        <label>Sample type<TextField value={criteriaForm.sampleType} onValue={nextValue => setCriteriaForm({ ...criteriaForm, sampleType: nextValue })} required /></label>
+        <label>Container<TextField value={criteriaForm.containerType} onValue={nextValue => setCriteriaForm({ ...criteriaForm, containerType: nextValue })} /></label>
+        <label>Acceptance criteria<TextField as="textarea" value={criteriaForm.acceptanceCriteria} onValue={nextValue => setCriteriaForm({ ...criteriaForm, acceptanceCriteria: nextValue })} required /></label>
+        <label>Rejection criteria<TextField as="textarea" value={criteriaForm.rejectionCriteria} onValue={nextValue => setCriteriaForm({ ...criteriaForm, rejectionCriteria: nextValue })} /></label>
+        <label>Transport condition<TextField value={criteriaForm.transportCondition} onValue={nextValue => setCriteriaForm({ ...criteriaForm, transportCondition: nextValue })} /></label>
+        <label>Stability summary<TextField value={criteriaForm.stabilitySummary} onValue={nextValue => setCriteriaForm({ ...criteriaForm, stabilitySummary: nextValue })} /></label>
         <button type="submit">Add criteria</button>
       </form>
       <table className="data-table"><thead><tr><th>Code</th><th>Sample</th><th>Container</th><th>Acceptance</th><th>Active</th><th></th></tr></thead><tbody>
@@ -405,17 +407,17 @@ export function ProcessManagementPage() {
     {tab === 'Specimen Rejections' && <>
       <form className="form-grid" onSubmit={submitRejection}>
         <label>Rejection date<input type="date" value={rejectionForm.rejectionDate} onChange={e => setRejectionForm({ ...rejectionForm, rejectionDate: e.target.value })} required /></label>
-        <label>Request reference<input value={rejectionForm.requestReference} onChange={e => setRejectionForm({ ...rejectionForm, requestReference: e.target.value })} /></label>
-        <label>Patient reference<input value={rejectionForm.patientReference} onChange={e => setRejectionForm({ ...rejectionForm, patientReference: e.target.value })} /></label>
-        <label>Patient type<input value={rejectionForm.patientType} onChange={e => setRejectionForm({ ...rejectionForm, patientType: e.target.value })} placeholder="e.g. OPD, IPD" /></label>
+        <label>Request reference<TextField value={rejectionForm.requestReference} onValue={nextValue => setRejectionForm({ ...rejectionForm, requestReference: nextValue })} /></label>
+        <label>Patient reference<TextField value={rejectionForm.patientReference} onValue={nextValue => setRejectionForm({ ...rejectionForm, patientReference: nextValue })} /></label>
+        <label>Patient type<TextField value={rejectionForm.patientType} onValue={nextValue => setRejectionForm({ ...rejectionForm, patientType: nextValue })} placeholder="e.g. OPD, IPD" /></label>
         <label>Section<select value={rejectionForm.sectionId} onChange={e => setRejectionForm({ ...rejectionForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Test<select value={rejectionForm.testCatalogId} onChange={e => setRejectionForm({ ...rejectionForm, testCatalogId: e.target.value })}><option value="">—</option>{tests.map(t => <option key={t.id} value={t.id}>{t.test_name}</option>)}</select></label>
-        <label>Test name (free text)<input value={rejectionForm.testName} onChange={e => setRejectionForm({ ...rejectionForm, testName: e.target.value })} /></label>
-        <label>Sample type<input value={rejectionForm.sampleType} onChange={e => setRejectionForm({ ...rejectionForm, sampleType: e.target.value })} /></label>
-        <label>Rejection reason<textarea value={rejectionForm.rejectionReason} onChange={e => setRejectionForm({ ...rejectionForm, rejectionReason: e.target.value })} required /></label>
-        <label>Communicated to<input value={rejectionForm.communicatedTo} onChange={e => setRejectionForm({ ...rejectionForm, communicatedTo: e.target.value })} /></label>
+        <label>Test name (free text)<TextField value={rejectionForm.testName} onValue={nextValue => setRejectionForm({ ...rejectionForm, testName: nextValue })} /></label>
+        <label>Sample type<TextField value={rejectionForm.sampleType} onValue={nextValue => setRejectionForm({ ...rejectionForm, sampleType: nextValue })} /></label>
+        <label>Rejection reason<TextField as="textarea" value={rejectionForm.rejectionReason} onValue={nextValue => setRejectionForm({ ...rejectionForm, rejectionReason: nextValue })} required /></label>
+        <label>Communicated to<TextField value={rejectionForm.communicatedTo} onValue={nextValue => setRejectionForm({ ...rejectionForm, communicatedTo: nextValue })} /></label>
         <label>Communication date<input type="date" value={rejectionForm.communicationDate} onChange={e => setRejectionForm({ ...rejectionForm, communicationDate: e.target.value })} /></label>
-        <label>Immediate action<input value={rejectionForm.immediateAction} onChange={e => setRejectionForm({ ...rejectionForm, immediateAction: e.target.value })} /></label>
+        <label>Immediate action<TextField value={rejectionForm.immediateAction} onValue={nextValue => setRejectionForm({ ...rejectionForm, immediateAction: nextValue })} /></label>
         <label><input type="checkbox" checked={rejectionForm.repeatSampleRequested} onChange={e => setRejectionForm({ ...rejectionForm, repeatSampleRequested: e.target.checked })} /> Repeat sample requested</label>
         <button type="submit">Log rejection</button>
       </form>
@@ -428,14 +430,14 @@ export function ProcessManagementPage() {
 
     {tab === 'Critical Result Rules' && <>
       <form className="form-grid" onSubmit={submitRule}>
-        <label>Code<input value={ruleForm.ruleCode} onChange={e => setRuleForm({ ...ruleForm, ruleCode: e.target.value })} /></label>
+        <label>Code<TextField value={ruleForm.ruleCode} onValue={nextValue => setRuleForm({ ...ruleForm, ruleCode: nextValue })} /></label>
         <label>Test<select value={ruleForm.testCatalogId} onChange={e => setRuleForm({ ...ruleForm, testCatalogId: e.target.value })} required><option value="">—</option>{tests.map(t => <option key={t.id} value={t.id}>{t.test_name}</option>)}</select></label>
-        <label>Analyte<input value={ruleForm.analyteName} onChange={e => setRuleForm({ ...ruleForm, analyteName: e.target.value })} required /></label>
-        <label>Unit<input value={ruleForm.unit} onChange={e => setRuleForm({ ...ruleForm, unit: e.target.value })} /></label>
+        <label>Analyte<TextField value={ruleForm.analyteName} onValue={nextValue => setRuleForm({ ...ruleForm, analyteName: nextValue })} required /></label>
+        <label>Unit<TextField value={ruleForm.unit} onValue={nextValue => setRuleForm({ ...ruleForm, unit: nextValue })} /></label>
         <label>Low critical<input type="number" step="any" value={ruleForm.lowCriticalValue} onChange={e => setRuleForm({ ...ruleForm, lowCriticalValue: e.target.value })} /></label>
         <label>High critical<input type="number" step="any" value={ruleForm.highCriticalValue} onChange={e => setRuleForm({ ...ruleForm, highCriticalValue: e.target.value })} /></label>
         <label>Notification timeframe (min)<input type="number" value={ruleForm.notificationTimeframeMinutes} onChange={e => setRuleForm({ ...ruleForm, notificationTimeframeMinutes: e.target.value })} /></label>
-        <label>Escalation instruction<textarea value={ruleForm.escalationInstruction} onChange={e => setRuleForm({ ...ruleForm, escalationInstruction: e.target.value })} /></label>
+        <label>Escalation instruction<TextField as="textarea" value={ruleForm.escalationInstruction} onValue={nextValue => setRuleForm({ ...ruleForm, escalationInstruction: nextValue })} /></label>
         <button type="submit">Add rule</button>
       </form>
       <table className="data-table"><thead><tr><th>Code</th><th>Test</th><th>Analyte</th><th>Range</th><th>Timeframe (min)</th><th>Active</th><th></th></tr></thead><tbody>
@@ -447,19 +449,19 @@ export function ProcessManagementPage() {
       <form className="form-grid" onSubmit={submitCritical}>
         <label>Event date<input type="date" value={criticalForm.eventDate} onChange={e => setCriticalForm({ ...criticalForm, eventDate: e.target.value })} required /></label>
         <label>Event time<input type="time" value={criticalForm.eventTime} onChange={e => setCriticalForm({ ...criticalForm, eventTime: e.target.value })} required /></label>
-        <label>Request reference<input value={criticalForm.requestReference} onChange={e => setCriticalForm({ ...criticalForm, requestReference: e.target.value })} /></label>
-        <label>Patient reference<input value={criticalForm.patientReference} onChange={e => setCriticalForm({ ...criticalForm, patientReference: e.target.value })} /></label>
-        <label>Patient type<input value={criticalForm.patientType} onChange={e => setCriticalForm({ ...criticalForm, patientType: e.target.value })} placeholder="e.g. OPD, IPD" /></label>
+        <label>Request reference<TextField value={criticalForm.requestReference} onValue={nextValue => setCriticalForm({ ...criticalForm, requestReference: nextValue })} /></label>
+        <label>Patient reference<TextField value={criticalForm.patientReference} onValue={nextValue => setCriticalForm({ ...criticalForm, patientReference: nextValue })} /></label>
+        <label>Patient type<TextField value={criticalForm.patientType} onValue={nextValue => setCriticalForm({ ...criticalForm, patientType: nextValue })} placeholder="e.g. OPD, IPD" /></label>
         <label>Test<select value={criticalForm.testCatalogId} onChange={e => setCriticalForm({ ...criticalForm, testCatalogId: e.target.value })}><option value="">—</option>{tests.map(t => <option key={t.id} value={t.id}>{t.test_name}</option>)}</select></label>
-        <label>Analyte<input value={criticalForm.analyteName} onChange={e => setCriticalForm({ ...criticalForm, analyteName: e.target.value })} required /></label>
-        <label>Result value<input value={criticalForm.resultValue} onChange={e => setCriticalForm({ ...criticalForm, resultValue: e.target.value })} required /></label>
-        <label>Unit<input value={criticalForm.unit} onChange={e => setCriticalForm({ ...criticalForm, unit: e.target.value })} /></label>
+        <label>Analyte<TextField value={criticalForm.analyteName} onValue={nextValue => setCriticalForm({ ...criticalForm, analyteName: nextValue })} required /></label>
+        <label>Result value<TextField value={criticalForm.resultValue} onValue={nextValue => setCriticalForm({ ...criticalForm, resultValue: nextValue })} required /></label>
+        <label>Unit<TextField value={criticalForm.unit} onValue={nextValue => setCriticalForm({ ...criticalForm, unit: nextValue })} /></label>
         <label>Critical rule<select value={criticalForm.criticalRuleId} onChange={e => setCriticalForm({ ...criticalForm, criticalRuleId: e.target.value })}><option value="">—</option>{rules.map(r => <option key={r.id} value={r.id}>{r.analyte_name} ({r.rule_code || `#${r.id}`})</option>)}</select></label>
-        <label>Notified to<input value={criticalForm.notifiedTo} onChange={e => setCriticalForm({ ...criticalForm, notifiedTo: e.target.value })} /></label>
-        <label>Notification method<input value={criticalForm.notificationMethod} onChange={e => setCriticalForm({ ...criticalForm, notificationMethod: e.target.value })} placeholder="e.g. phone, in person" /></label>
+        <label>Notified to<TextField value={criticalForm.notifiedTo} onValue={nextValue => setCriticalForm({ ...criticalForm, notifiedTo: nextValue })} /></label>
+        <label>Notification method<TextField value={criticalForm.notificationMethod} onValue={nextValue => setCriticalForm({ ...criticalForm, notificationMethod: nextValue })} placeholder="e.g. phone, in person" /></label>
         <label>Notification time<input type="time" value={criticalForm.notificationTime} onChange={e => setCriticalForm({ ...criticalForm, notificationTime: e.target.value })} /></label>
         <label><input type="checkbox" checked={criticalForm.readBackConfirmed} onChange={e => setCriticalForm({ ...criticalForm, readBackConfirmed: e.target.checked })} /> Read-back confirmed</label>
-        <label>Escalation notes<textarea value={criticalForm.escalationNotes} onChange={e => setCriticalForm({ ...criticalForm, escalationNotes: e.target.value })} /></label>
+        <label>Escalation notes<TextField as="textarea" value={criticalForm.escalationNotes} onValue={nextValue => setCriticalForm({ ...criticalForm, escalationNotes: nextValue })} /></label>
         <button type="submit">Log notification</button>
       </form>
       <table className="data-table"><thead><tr><th>Number</th><th>Date/time</th><th>Request ref</th><th>Analyte</th><th>Value</th><th>Notified</th><th>Escalation?</th><th>Status</th><th></th></tr></thead><tbody>
@@ -471,14 +473,14 @@ export function ProcessManagementPage() {
 
     {tab === 'Referral Labs' && <>
       <form className="form-grid" onSubmit={submitLab}>
-        <label>Code<input value={labForm.referralLabCode} onChange={e => setLabForm({ ...labForm, referralLabCode: e.target.value })} /></label>
-        <label>Lab name<input value={labForm.referralLabName} onChange={e => setLabForm({ ...labForm, referralLabName: e.target.value })} required /></label>
-        <label>Contact person<input value={labForm.contactPerson} onChange={e => setLabForm({ ...labForm, contactPerson: e.target.value })} /></label>
-        <label>Phone<input value={labForm.phone} onChange={e => setLabForm({ ...labForm, phone: e.target.value })} /></label>
-        <label>Email<input value={labForm.email} onChange={e => setLabForm({ ...labForm, email: e.target.value })} /></label>
-        <label>Address<input value={labForm.address} onChange={e => setLabForm({ ...labForm, address: e.target.value })} /></label>
-        <label>Service scope<input value={labForm.serviceScope} onChange={e => setLabForm({ ...labForm, serviceScope: e.target.value })} /></label>
-        <label>Accreditation/approval<input value={labForm.accreditationOrApprovalNote} onChange={e => setLabForm({ ...labForm, accreditationOrApprovalNote: e.target.value })} placeholder="Lab-recorded note only; not an official scoring claim" /></label>
+        <label>Code<TextField value={labForm.referralLabCode} onValue={nextValue => setLabForm({ ...labForm, referralLabCode: nextValue })} /></label>
+        <label>Lab name<TextField value={labForm.referralLabName} onValue={nextValue => setLabForm({ ...labForm, referralLabName: nextValue })} required /></label>
+        <label>Contact person<TextField value={labForm.contactPerson} onValue={nextValue => setLabForm({ ...labForm, contactPerson: nextValue })} /></label>
+        <label>Phone<TextField value={labForm.phone} onValue={nextValue => setLabForm({ ...labForm, phone: nextValue })} /></label>
+        <label>Email<TextField value={labForm.email} onValue={nextValue => setLabForm({ ...labForm, email: nextValue })} /></label>
+        <label>Address<TextField value={labForm.address} onValue={nextValue => setLabForm({ ...labForm, address: nextValue })} /></label>
+        <label>Service scope<TextField value={labForm.serviceScope} onValue={nextValue => setLabForm({ ...labForm, serviceScope: nextValue })} /></label>
+        <label>Accreditation/approval<TextField value={labForm.accreditationOrApprovalNote} onValue={nextValue => setLabForm({ ...labForm, accreditationOrApprovalNote: nextValue })} placeholder="Lab-recorded note only; not an official scoring claim" /></label>
         <label>Status<select value={labForm.status} onChange={e => setLabForm({ ...labForm, status: e.target.value })}>{LAB_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}</select></label>
         <button type="submit">Register referral lab</button>
       </form>
@@ -493,11 +495,11 @@ export function ProcessManagementPage() {
       <form className="form-grid" onSubmit={submitRefTest}>
         <label>Referral lab<select value={refTestForm.referralLabId} onChange={e => setRefTestForm({ ...refTestForm, referralLabId: e.target.value })} required><option value="">—</option>{labs.map(l => <option key={l.id} value={l.id}>{l.referral_lab_name}</option>)}</select></label>
         <label>Local test<select value={refTestForm.testCatalogId} onChange={e => setRefTestForm({ ...refTestForm, testCatalogId: e.target.value })}><option value="">—</option>{tests.map(t => <option key={t.id} value={t.id}>{t.test_name}</option>)}</select></label>
-        <label>Referral test name<input value={refTestForm.referralTestName} onChange={e => setRefTestForm({ ...refTestForm, referralTestName: e.target.value })} required /></label>
-        <label>Sample requirement<input value={refTestForm.sampleRequirement} onChange={e => setRefTestForm({ ...refTestForm, sampleRequirement: e.target.value })} /></label>
+        <label>Referral test name<TextField value={refTestForm.referralTestName} onValue={nextValue => setRefTestForm({ ...refTestForm, referralTestName: nextValue })} required /></label>
+        <label>Sample requirement<TextField value={refTestForm.sampleRequirement} onValue={nextValue => setRefTestForm({ ...refTestForm, sampleRequirement: nextValue })} /></label>
         <label>Expected TAT (days)<input type="number" value={refTestForm.expectedTatDays} onChange={e => setRefTestForm({ ...refTestForm, expectedTatDays: e.target.value })} /></label>
-        <label>Transport condition<input value={refTestForm.transportCondition} onChange={e => setRefTestForm({ ...refTestForm, transportCondition: e.target.value })} /></label>
-        <label>Cost note<input value={refTestForm.costNote} onChange={e => setRefTestForm({ ...refTestForm, costNote: e.target.value })} /></label>
+        <label>Transport condition<TextField value={refTestForm.transportCondition} onValue={nextValue => setRefTestForm({ ...refTestForm, transportCondition: nextValue })} /></label>
+        <label>Cost note<TextField value={refTestForm.costNote} onValue={nextValue => setRefTestForm({ ...refTestForm, costNote: nextValue })} /></label>
         <button type="submit">Add referral test</button>
       </form>
       <table className="data-table"><thead><tr><th>Lab</th><th>Test name</th><th>Sample</th><th>TAT (days)</th><th>Active</th><th></th></tr></thead><tbody>
@@ -510,11 +512,11 @@ export function ProcessManagementPage() {
         <label>Sendout date<input type="date" value={sendoutForm.sendoutDate} onChange={e => setSendoutForm({ ...sendoutForm, sendoutDate: e.target.value })} required /></label>
         <label>Referral lab<select value={sendoutForm.referralLabId} onChange={e => setSendoutForm({ ...sendoutForm, referralLabId: e.target.value })} required><option value="">—</option>{labs.map(l => <option key={l.id} value={l.id}>{l.referral_lab_name}</option>)}</select></label>
         <label>Referral test<select value={sendoutForm.referralTestId} onChange={e => setSendoutForm({ ...sendoutForm, referralTestId: e.target.value })}><option value="">—</option>{refTests.filter(rt => !sendoutForm.referralLabId || String(rt.referral_lab_id) === sendoutForm.referralLabId).map(rt => <option key={rt.id} value={rt.id}>{rt.referral_test_name}</option>)}</select></label>
-        <label>Request reference<input value={sendoutForm.requestReference} onChange={e => setSendoutForm({ ...sendoutForm, requestReference: e.target.value })} /></label>
-        <label>Patient reference<input value={sendoutForm.patientReference} onChange={e => setSendoutForm({ ...sendoutForm, patientReference: e.target.value })} /></label>
-        <label>Patient type<input value={sendoutForm.patientType} onChange={e => setSendoutForm({ ...sendoutForm, patientType: e.target.value })} placeholder="e.g. OPD, IPD" /></label>
-        <label>Sample type<input value={sendoutForm.sampleType} onChange={e => setSendoutForm({ ...sendoutForm, sampleType: e.target.value })} /></label>
-        <label>Courier/transport<input value={sendoutForm.courierOrTransport} onChange={e => setSendoutForm({ ...sendoutForm, courierOrTransport: e.target.value })} /></label>
+        <label>Request reference<TextField value={sendoutForm.requestReference} onValue={nextValue => setSendoutForm({ ...sendoutForm, requestReference: nextValue })} /></label>
+        <label>Patient reference<TextField value={sendoutForm.patientReference} onValue={nextValue => setSendoutForm({ ...sendoutForm, patientReference: nextValue })} /></label>
+        <label>Patient type<TextField value={sendoutForm.patientType} onValue={nextValue => setSendoutForm({ ...sendoutForm, patientType: nextValue })} placeholder="e.g. OPD, IPD" /></label>
+        <label>Sample type<TextField value={sendoutForm.sampleType} onValue={nextValue => setSendoutForm({ ...sendoutForm, sampleType: nextValue })} /></label>
+        <label>Courier/transport<TextField value={sendoutForm.courierOrTransport} onValue={nextValue => setSendoutForm({ ...sendoutForm, courierOrTransport: nextValue })} /></label>
         <label>Expected return date<input type="date" value={sendoutForm.expectedReturnDate} onChange={e => setSendoutForm({ ...sendoutForm, expectedReturnDate: e.target.value })} /></label>
         <button type="submit">Log sendout</button>
       </form>
@@ -528,14 +530,14 @@ export function ProcessManagementPage() {
     {tab === 'Report Amendments' && <>
       <form className="form-grid" onSubmit={submitAmendment}>
         <label>Amendment date<input type="date" value={amendmentForm.amendmentDate} onChange={e => setAmendmentForm({ ...amendmentForm, amendmentDate: e.target.value })} required /></label>
-        <label>Request reference<input value={amendmentForm.requestReference} onChange={e => setAmendmentForm({ ...amendmentForm, requestReference: e.target.value })} /></label>
-        <label>Patient reference<input value={amendmentForm.patientReference} onChange={e => setAmendmentForm({ ...amendmentForm, patientReference: e.target.value })} /></label>
-        <label>Patient type<input value={amendmentForm.patientType} onChange={e => setAmendmentForm({ ...amendmentForm, patientType: e.target.value })} /></label>
+        <label>Request reference<TextField value={amendmentForm.requestReference} onValue={nextValue => setAmendmentForm({ ...amendmentForm, requestReference: nextValue })} /></label>
+        <label>Patient reference<TextField value={amendmentForm.patientReference} onValue={nextValue => setAmendmentForm({ ...amendmentForm, patientReference: nextValue })} /></label>
+        <label>Patient type<TextField value={amendmentForm.patientType} onValue={nextValue => setAmendmentForm({ ...amendmentForm, patientType: nextValue })} /></label>
         <label>Section<select value={amendmentForm.sectionId} onChange={e => setAmendmentForm({ ...amendmentForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Test<select value={amendmentForm.testCatalogId} onChange={e => setAmendmentForm({ ...amendmentForm, testCatalogId: e.target.value })}><option value="">—</option>{tests.map(t => <option key={t.id} value={t.id}>{t.test_name}</option>)}</select></label>
-        <label>Reason for amendment<textarea value={amendmentForm.reasonForAmendment} onChange={e => setAmendmentForm({ ...amendmentForm, reasonForAmendment: e.target.value })} required /></label>
-        <label>Original report summary<textarea value={amendmentForm.originalReportSummary} onChange={e => setAmendmentForm({ ...amendmentForm, originalReportSummary: e.target.value })} /></label>
-        <label>Amended report summary<textarea value={amendmentForm.amendedReportSummary} onChange={e => setAmendmentForm({ ...amendmentForm, amendedReportSummary: e.target.value })} /></label>
+        <label>Reason for amendment<TextField as="textarea" value={amendmentForm.reasonForAmendment} onValue={nextValue => setAmendmentForm({ ...amendmentForm, reasonForAmendment: nextValue })} required /></label>
+        <label>Original report summary<TextField as="textarea" value={amendmentForm.originalReportSummary} onValue={nextValue => setAmendmentForm({ ...amendmentForm, originalReportSummary: nextValue })} /></label>
+        <label>Amended report summary<TextField as="textarea" value={amendmentForm.amendedReportSummary} onValue={nextValue => setAmendmentForm({ ...amendmentForm, amendedReportSummary: nextValue })} /></label>
         <button type="submit">Log amendment</button>
       </form>
       <table className="data-table"><thead><tr><th>Number</th><th>Date</th><th>Request ref</th><th>Reason</th><th>Status</th><th></th></tr></thead><tbody>

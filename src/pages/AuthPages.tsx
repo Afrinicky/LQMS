@@ -5,6 +5,7 @@ import { api } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import { WaveBackground, MedicalLabBackgroundMarks } from '../components/ui';
 import PasswordResetDialog from '../components/PasswordResetDialog';
+import { Notice } from '../components/ui/Feedback';
 
 function AuthBrand({ tagline }: { tagline: string }) {
   return (
@@ -102,7 +103,7 @@ export function LoginPage() {
         <Field icon={<User size={16} />} label="Username" name="username" required autoFocus autoComplete="username" placeholder="Enter your username"
           onChange={e => setLastUsername(e.currentTarget.value)} />
         <PasswordField icon={<Lock size={16} />} label="Password" name="password" required autoComplete="current-password" placeholder="Enter your password" />
-        {error && <div className="error">{error}</div>}
+        {error && <Notice kind="error">{error}</Notice>}
         <button className="auth-submit" disabled={busy}>
           {busy ? <><span className="spinner sm" /> Signing in…</> : <>Sign in <ArrowRight size={16} /></>}
         </button>
@@ -153,7 +154,7 @@ export function SetupPage() {
         <Field icon={<IdCard size={16} />} label="Administrator full name" name="fullName" required />
         <Field icon={<User size={16} />} label="Admin username" name="username" required autoComplete="username" />
         <PasswordField icon={<Lock size={16} />} label="Admin password" name="password" minLength={8} required autoComplete="new-password" />
-        {error && <div className="error">{error}</div>}
+        {error && <Notice kind="error">{error}</Notice>}
         <button className="auth-submit" disabled={busy}>
           {busy ? <><span className="spinner sm" /> Initializing…</> : <>Initialize workspace <ArrowRight size={16} /></>}
         </button>

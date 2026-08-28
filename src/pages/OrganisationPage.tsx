@@ -13,6 +13,8 @@ import type {
   EthicalDeclarationForm, EthicalDeclarationSignature, ContinuityPlan, QtReviewConfig, QtReview, Position, OrgTree,
   DeclarationTemplate,
 } from '../../shared/types/api';
+import TextField from '../components/ui/TextField';
+import { Notice } from '../components/ui/Feedback';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
@@ -214,8 +216,8 @@ export function OrganisationPage() {
   return <div className="module-page">
     <PageHeader eyebrow="Organisation and Leadership" title="Organisation &amp; Leadership" subtitle="Leadership commitments, ethical declarations, organogram, budgetary projections and routine record reviews." />
     {tabBar(tab, enabledTabs, t => { setTab(t); setSearchParams(prev => { prev.set('tab', t); return prev; }); })}
-    {error && <div className="error">{error}</div>}
-    {notice && <div className="banner-success" style={{ background: '#e8f6ee', border: '1px solid #58b27a', color: '#1c6b3e', padding: '8px 12px', borderRadius: 6, margin: '8px 0' }}>{notice}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
+    {notice && <Notice kind="success" style={{ background: '#e8f6ee', border: '1px solid #58b27a', color: '#1c6b3e', padding: '8px 12px', borderRadius: 6, margin: '8px 0' }}>{notice}</Notice>}
 
     {tab === 'Quality Configuration' && <QualityConfigurationView config={config} />}
 
@@ -253,9 +255,9 @@ export function OrganisationPage() {
         <p className="muted" style={{ marginTop: 0 }}>Facility licences, accreditation, practice registrations and permits. Enter the issuing body for your jurisdiction.</p>
         {can('organisation.licences', 'create') && <form className="form-grid" onSubmit={submitReg}>
           <label>Type<select value={regForm.credentialType} onChange={e => setRegForm({ ...regForm, credentialType: e.target.value })}><option value="">—</option>{['facility_licence', 'accreditation', 'practice_registration', 'permit', 'certification', 'other'].map(c => <option key={c} value={c}>{pretty(c)}</option>)}</select></label>
-          <label>Title<input value={regForm.title} onChange={e => setRegForm({ ...regForm, title: e.target.value })} required /></label>
-          <label>Issuing body<input value={regForm.issuingBody} onChange={e => setRegForm({ ...regForm, issuingBody: e.target.value })} placeholder="regulator / authority name" /></label>
-          <label>Reference<input value={regForm.reference} onChange={e => setRegForm({ ...regForm, reference: e.target.value })} /></label>
+          <label>Title<TextField value={regForm.title} onValue={nextValue => setRegForm({ ...regForm, title: nextValue })} required /></label>
+          <label>Issuing body<TextField value={regForm.issuingBody} onValue={nextValue => setRegForm({ ...regForm, issuingBody: nextValue })} placeholder="regulator / authority name" /></label>
+          <label>Reference<TextField value={regForm.reference} onValue={nextValue => setRegForm({ ...regForm, reference: nextValue })} /></label>
           <label>Issue date<input type="date" value={regForm.issueDate} onChange={e => setRegForm({ ...regForm, issueDate: e.target.value })} /></label>
           <label>Expiry date<input type="date" value={regForm.expiryDate} onChange={e => setRegForm({ ...regForm, expiryDate: e.target.value })} /></label>
           <label>Responsible<select value={regForm.responsibleStaffId} onChange={e => setRegForm({ ...regForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
@@ -515,17 +517,17 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
         </select>
       </label>}
       {can('organisation.structure', 'edit') && can('organisation.structure', 'create') && <form className="form-grid" onSubmit={submitSetup}>
-        <label>Title<input value={setupForm.title} onChange={e => setSetupForm({ ...setupForm, title: e.target.value })} required placeholder="e.g. Declaration of Impartiality (2026)" /></label>
+        <label>Title<TextField value={setupForm.title} onValue={nextValue => setSetupForm({ ...setupForm, title: nextValue })} required placeholder="e.g. Declaration of Impartiality (2026)" /></label>
         <label>Type<select value={setupForm.formType} onChange={e => setSetupForm({ ...setupForm, formType: e.target.value })}>{FORM_TYPES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}</select></label>
-        <label>Version<input value={setupForm.version} onChange={e => setSetupForm({ ...setupForm, version: e.target.value })} /></label>
+        <label>Version<TextField value={setupForm.version} onValue={nextValue => setSetupForm({ ...setupForm, version: nextValue })} /></label>
         <label>Effective date<input type="date" value={setupForm.effectiveDate} onChange={e => setSetupForm({ ...setupForm, effectiveDate: e.target.value })} /></label>
         <label>Review frequency (months)<input type="number" min={0} value={setupForm.reviewFrequencyMonths} onChange={e => setSetupForm({ ...setupForm, reviewFrequencyMonths: e.target.value })} /></label>
         <label>Next review date<input type="date" value={setupForm.nextReviewDate} onChange={e => setSetupForm({ ...setupForm, nextReviewDate: e.target.value })} /></label>
-        <label style={{ gridColumn: '1 / -1' }}>Purpose / description<textarea value={setupForm.description} onChange={e => setSetupForm({ ...setupForm, description: e.target.value })} placeholder="What this declaration covers…" /></label>
+        <label style={{ gridColumn: '1 / -1' }}>Purpose / description<TextField as="textarea" value={setupForm.description} onValue={nextValue => setSetupForm({ ...setupForm, description: nextValue })} placeholder="What this declaration covers…" /></label>
         <label style={{ gridColumn: '1 / -1' }}>Declaration text
-          <textarea value={setupForm.bodyContent} onChange={e => setSetupForm({ ...setupForm, bodyContent: e.target.value })} rows={14} style={{ width: '100%', fontFamily: 'inherit' }} placeholder="The declaration every member of staff will read and agree to…" />
+          <TextField as="textarea" value={setupForm.bodyContent} onValue={nextValue => setSetupForm({ ...setupForm, bodyContent: nextValue })} rows={14} style={{ width: '100%', fontFamily: 'inherit' }} placeholder="The declaration every member of staff will read and agree to…" />
         </label>
-        <label style={{ gridColumn: '1 / -1' }}>Acknowledgement statement (shown when signing)<input value={setupForm.acknowledgementStatement} onChange={e => setSetupForm({ ...setupForm, acknowledgementStatement: e.target.value })} placeholder="I have read and understood this declaration and agree to be bound by it." /></label>
+        <label style={{ gridColumn: '1 / -1' }}>Acknowledgement statement (shown when signing)<TextField value={setupForm.acknowledgementStatement} onValue={nextValue => setSetupForm({ ...setupForm, acknowledgementStatement: nextValue })} placeholder="I have read and understood this declaration and agree to be bound by it." /></label>
         <label><input type="checkbox" checked={setupForm.requiresAnnualReaffirmation} onChange={e => setSetupForm({ ...setupForm, requiresAnnualReaffirmation: e.target.checked })} /> Requires annual re-affirmation</label>
         <label>{editingId && selected?.file_id ? 'Replace form file (optional)' : 'Attach a form file (optional)'}<input type="file" accept=".pdf,.doc,.docx,.rtf,.odt,.txt" onChange={e => setUploadFile(e.target.files?.[0] ?? null)} /></label>
         <button type="submit" disabled={saving} style={{ gridColumn: '1 / -1' }}>{saving ? 'Saving…' : editingId ? 'Save changes' : 'Publish & notify all staff'}</button>
@@ -608,10 +610,10 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
             </div>}
             {can('organisation.structure', 'view') && <form onSubmit={signSelected}>
               {isFileOnly && <label style={{ display: 'block', margin: '6px 0' }}>Signed document (required)<input type="file" accept=".pdf,.doc,.docx,.rtf,.odt,.txt,.jpg,.jpeg,.png" onChange={e => setSignedFile(e.target.files?.[0] ?? null)} required /></label>}
-              <label style={{ display: 'block', margin: '6px 0' }}>Affirmation (optional)<textarea value={signForm.affirmationText} onChange={e => setSignForm({ ...signForm, affirmationText: e.target.value })} placeholder="I have read, understood and agree to be bound by the terms of this declaration…" style={{ width: '100%' }} /></label>
+              <label style={{ display: 'block', margin: '6px 0' }}>Affirmation (optional)<TextField as="textarea" value={signForm.affirmationText} onValue={nextValue => setSignForm({ ...signForm, affirmationText: nextValue })} placeholder="I have read, understood and agree to be bound by the terms of this declaration…" style={{ width: '100%' }} /></label>
               <label><input type="checkbox" checked={signForm.conflictDeclared} onChange={e => setSignForm({ ...signForm, conflictDeclared: e.target.checked })} /> I have a conflict of interest to declare</label>
-              {signForm.conflictDeclared && <label style={{ display: 'block', margin: '6px 0' }}>Conflict details<textarea value={signForm.conflictDetails} onChange={e => setSignForm({ ...signForm, conflictDetails: e.target.value })} required style={{ width: '100%' }} /></label>}
-              <label style={{ display: 'block', margin: '6px 0' }}>Notes (optional)<input value={signForm.notes} onChange={e => setSignForm({ ...signForm, notes: e.target.value })} /></label>
+              {signForm.conflictDeclared && <label style={{ display: 'block', margin: '6px 0' }}>Conflict details<TextField as="textarea" value={signForm.conflictDetails} onValue={nextValue => setSignForm({ ...signForm, conflictDetails: nextValue })} required style={{ width: '100%' }} /></label>}
+              <label style={{ display: 'block', margin: '6px 0' }}>Notes (optional)<TextField value={signForm.notes} onValue={nextValue => setSignForm({ ...signForm, notes: nextValue })} /></label>
               <button type="submit" disabled={signing || (isFileOnly && !signedFile)}>{signing ? 'Submitting…' : isFileOnly ? '✔ Attach signed copy & record acknowledgement' : '✔ I have read & understood — Sign'}</button>
             </form>}
           </div>}
@@ -766,19 +768,19 @@ function OrganogramContinuityView({ staff, onError, onNotice }: { staff: Staff[]
           </div>
           <div className="doc-drawer-body">
             {can('organisation.budget', 'edit') && can('organisation.budget', 'create') && <form className="form-grid" onSubmit={submit}>
-              <label>Key role<input value={form.keyRole} onChange={e => setForm({ ...form, keyRole: e.target.value })} required placeholder="e.g. Laboratory Manager" /></label>
+              <label>Key role<TextField value={form.keyRole} onValue={nextValue => setForm({ ...form, keyRole: nextValue })} required placeholder="e.g. Laboratory Manager" /></label>
               <label>Position<select value={form.positionId} onChange={e => setForm({ ...form, positionId: e.target.value })}><option value="">—</option>{positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>
               <label>Deputy position<select value={form.deputyPositionId} onChange={e => setForm({ ...form, deputyPositionId: e.target.value })}><option value="">—</option>{positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>
               <label>Deputy staff (specific person)<select value={form.deputyStaffId} onChange={e => setForm({ ...form, deputyStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-              <label>Activation trigger<textarea value={form.activationTrigger} onChange={e => setForm({ ...form, activationTrigger: e.target.value })} placeholder="Circumstances that trigger the plan (planned leave, illness, emergency)" /></label>
-              <label>Acting arrangement<textarea value={form.actingArrangement} onChange={e => setForm({ ...form, actingArrangement: e.target.value })} placeholder="Who acts, how they are informed, expected duration…" /></label>
-              <label>Authority scope<textarea value={form.authorityScope} onChange={e => setForm({ ...form, authorityScope: e.target.value })} placeholder="Which decisions the acting person may make, and which must escalate" /></label>
-              <label>Handover procedure<textarea value={form.handoverProcedure} onChange={e => setForm({ ...form, handoverProcedure: e.target.value })} placeholder="Briefing steps, key documents, ongoing NCs / risks, active reviews" /></label>
+              <label>Activation trigger<TextField as="textarea" value={form.activationTrigger} onValue={nextValue => setForm({ ...form, activationTrigger: nextValue })} placeholder="Circumstances that trigger the plan (planned leave, illness, emergency)" /></label>
+              <label>Acting arrangement<TextField as="textarea" value={form.actingArrangement} onValue={nextValue => setForm({ ...form, actingArrangement: nextValue })} placeholder="Who acts, how they are informed, expected duration…" /></label>
+              <label>Authority scope<TextField as="textarea" value={form.authorityScope} onValue={nextValue => setForm({ ...form, authorityScope: nextValue })} placeholder="Which decisions the acting person may make, and which must escalate" /></label>
+              <label>Handover procedure<TextField as="textarea" value={form.handoverProcedure} onValue={nextValue => setForm({ ...form, handoverProcedure: nextValue })} placeholder="Briefing steps, key documents, ongoing NCs / risks, active reviews" /></label>
               <label>Training status<select value={form.trainingStatus} onChange={e => setForm({ ...form, trainingStatus: e.target.value })}><option value="ready">Ready</option><option value="in_progress">In progress</option><option value="not_ready">Not ready</option></select></label>
               <label>Last tested date<input type="date" value={form.lastTestedDate} onChange={e => setForm({ ...form, lastTestedDate: e.target.value })} /></label>
               <label>Next review date<input type="date" value={form.nextReviewDate} onChange={e => setForm({ ...form, nextReviewDate: e.target.value })} /></label>
               <label>Status<select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}><option value="active">Active</option><option value="retired">Retired</option></select></label>
-              <label>Notes<textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
+              <label>Notes<TextField as="textarea" value={form.notes} onValue={nextValue => setForm({ ...form, notes: nextValue })} /></label>
               <button type="submit">Save plan</button>
             </form>}
           </div>
@@ -872,17 +874,17 @@ function BudgetProjectionView({ staff, onError, onNotice }: { staff: Staff[]; on
     <div className="card" style={{ marginTop: 12 }}>
       <h4 style={{ marginTop: 0 }}>{editingId ? 'Edit budget line' : 'Add budget line'}</h4>
       {can('organisation.budget', 'edit') && can('organisation.budget', 'create') && <form className="form-grid" onSubmit={submit}>
-        <label>Fiscal year<input value={form.fiscalYear} onChange={e => setForm({ ...form, fiscalYear: e.target.value })} required /></label>
+        <label>Fiscal year<TextField value={form.fiscalYear} onValue={nextValue => setForm({ ...form, fiscalYear: nextValue })} required /></label>
         <label>Scope<select value={form.scope} onChange={e => setForm({ ...form, scope: e.target.value })}>{BUDGET_SCOPES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}</select></label>
-        <label>Category / line item<input value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} placeholder="e.g. Full-Time Scientist, Analyzer maintenance" /></label>
+        <label>Category / line item<TextField value={form.category} onValue={nextValue => setForm({ ...form, category: nextValue })} placeholder="e.g. Full-Time Scientist, Analyzer maintenance" /></label>
         <label>Quantity<input type="number" step="0.01" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} /></label>
         <label>Unit cost<input type="number" step="0.01" value={form.unitCost} onChange={e => setForm({ ...form, unitCost: e.target.value })} /></label>
         <label>Projected total<input type="number" step="0.01" value={form.projectedAmount} onChange={e => setForm({ ...form, projectedAmount: e.target.value })} /></label>
-        <label>Currency<input value={form.currency} onChange={e => setForm({ ...form, currency: e.target.value })} /></label>
+        <label>Currency<TextField value={form.currency} onValue={nextValue => setForm({ ...form, currency: nextValue })} /></label>
         <label>Responsible<select value={form.responsibleStaffId} onChange={e => setForm({ ...form, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Status<select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>{['draft', 'submitted', 'approved', 'closed', 'rejected'].map(s => <option key={s} value={s}>{pretty(s)}</option>)}</select></label>
-        <label>Description<textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></label>
-        <label>Justification<textarea value={form.justification} onChange={e => setForm({ ...form, justification: e.target.value })} placeholder="ISO-aligned justification — why the item is needed" /></label>
+        <label>Description<TextField as="textarea" value={form.description} onValue={nextValue => setForm({ ...form, description: nextValue })} /></label>
+        <label>Justification<TextField as="textarea" value={form.justification} onValue={nextValue => setForm({ ...form, justification: nextValue })} placeholder="ISO-aligned justification — why the item is needed" /></label>
         <button type="submit">{editingId ? 'Save changes' : 'Add line'}</button>
         {editingId && <button type="button" className="secondary" onClick={() => { setEditingId(null); setForm({ ...emptyForm, fiscalYear: year }); }}>Cancel</button>}
       </form>}
@@ -1060,9 +1062,9 @@ function QtRecordsReviewView({ staff, onError, onNotice }: { staff: Staff[]; onE
         <h4 style={{ marginTop: 0 }}>Document the review</h4>
         {can('organisation.records_review', 'create') && <form onSubmit={submitReview}>
           <div className="form-grid">
-            <label>Findings<textarea value={reviewForm.findings} onChange={e => setReviewForm({ ...reviewForm, findings: e.target.value })} placeholder="What did the review find?" required /></label>
-            <label>Recurrent problems<textarea value={reviewForm.recurrentProblems} onChange={e => setReviewForm({ ...reviewForm, recurrentProblems: e.target.value })} placeholder="Any recurring issues?" /></label>
-            <label>Actions planned<textarea value={reviewForm.actionsPlanned} onChange={e => setReviewForm({ ...reviewForm, actionsPlanned: e.target.value })} placeholder="What will you do about it?" /></label>
+            <label>Findings<TextField as="textarea" value={reviewForm.findings} onValue={nextValue => setReviewForm({ ...reviewForm, findings: nextValue })} placeholder="What did the review find?" required /></label>
+            <label>Recurrent problems<TextField as="textarea" value={reviewForm.recurrentProblems} onValue={nextValue => setReviewForm({ ...reviewForm, recurrentProblems: nextValue })} placeholder="Any recurring issues?" /></label>
+            <label>Actions planned<TextField as="textarea" value={reviewForm.actionsPlanned} onValue={nextValue => setReviewForm({ ...reviewForm, actionsPlanned: nextValue })} placeholder="What will you do about it?" /></label>
             <label>Follow-up due<input type="date" value={reviewForm.followUpDueDate} onChange={e => setReviewForm({ ...reviewForm, followUpDueDate: e.target.value })} /></label>
             <label>Follow-up status<select value={reviewForm.followUpStatus} onChange={e => setReviewForm({ ...reviewForm, followUpStatus: e.target.value })}><option value="not_required">Not required</option><option value="pending">Pending</option><option value="in_progress">In progress</option><option value="completed">Completed</option></select></label>
             <label>Next review due<input type="date" value={reviewForm.nextReviewDue} onChange={e => setReviewForm({ ...reviewForm, nextReviewDue: e.target.value })} /></label>

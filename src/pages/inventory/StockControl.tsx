@@ -10,6 +10,8 @@ import type { ConfigOption } from '../../../shared/constants/configLists';
 import { useCappedRows } from '../../hooks/useCappedRows';
 import { usePermissions } from '../../hooks/usePermissions';
 import { encodeDestination, decodeDestination } from '../../../shared/constants/inventory';
+import TextField from '../../components/ui/TextField';
+import { Notice } from '../../components/ui/Feedback';
 
 /**
  * Running the store.
@@ -148,7 +150,7 @@ export function StockLedger({ onOpenItem, refreshKey }: { onOpenItem: (id: numbe
           <button key={k} type="button" role="tab" aria-selected={filter === k} className={filter === k ? 'on' : ''} onClick={() => setFilter(k)}>{label}</button>)}
       </div>
 
-      {error && <div className="error">{error}</div>}
+      {error && <Notice kind="error">{error}</Notice>}
       {loading ? <p>Loading…</p> : shown.length === 0 ? <p className="muted">Nothing here.</p> :
         <div>
         <div className="table-scroll"><table className="data-table reg-table ledger-table"><thead><tr>
@@ -214,7 +216,7 @@ export function BinCard({ itemId, onClose, onOpenItem }: { itemId: number; onClo
       {p && <StatusBadge status={p.status} />}
       <button type="button" className="secondary" onClick={() => { onClose(); onOpenItem(itemId); }}>Open the item</button>
     </>}>
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
     {!data ? <p>Loading…</p> : <>
       <div className="stock-figures">
         <div><span className="fig">{qty(data.onHand)} <small>{data.item.unit || ''}</small></span><span className="fig-label">on the shelf</span></div>
@@ -224,9 +226,9 @@ export function BinCard({ itemId, onClose, onOpenItem }: { itemId: number; onClo
         <div><span className="fig">{dateOnly(p?.earliest_expiry)}</span><span className="fig-label">expires first</span></div>
       </div>
 
-      {!data.reconciles && <div className="notice-warn" style={{ marginTop: 10 }}>
+      {!data.reconciles && <Notice kind="warn" style={{ marginTop: 10 }}>
         The card's running balance and the shelf do not agree. Something was posted out of order or backdated — a stock count will settle it.
-      </div>}
+      </Notice>}
 
       {p && p.consumption.some((n: number) => n > 0) && <div style={{ marginTop: 16 }}>
         <p className="muted" style={{ margin: '0 0 4px' }}>Issued per completed month over the last year</p>
@@ -381,7 +383,7 @@ export function IssueDesk({ items, sections, staff, departments, reasons, destin
         a hospital department, another facility or anything else can be named. The store allocates the lots —
         earliest expiry first — and writes a numbered issue voucher.
       </p>
-      {error && <div className="error">{error}</div>}
+      {error && <Notice kind="error">{error}</Notice>}
 
       <form onSubmit={submit}>
         <div className="issue-head">
@@ -404,12 +406,12 @@ export function IssueDesk({ items, sections, staff, departments, reasons, destin
             </optgroup>
           </select></label>
           {needsDestinationName && <label>Who or where <span className="muted">(required)</span>
-            <input value={destinationName} onChange={e => setDestinationName(e.target.value)}
+            <TextField value={destinationName} onValue={nextValue => setDestinationName(nextValue)}
               placeholder="Name the unit, facility or programme" autoFocus /></label>}
 
           <label>Collected by
             {collectorOther
-              ? <input value={collectedByName} onChange={e => setCollectedByName(e.target.value)}
+              ? <TextField value={collectedByName} onValue={nextValue => setCollectedByName(nextValue)}
                   placeholder="Name the person collecting" autoFocus />
               : <select value={receivedByStaffId} onChange={e => {
                   if (e.target.value === '__other') { setCollectorOther(true); setReceivedByStaffId(''); setCollectedByName(''); return; }
@@ -428,7 +430,7 @@ export function IssueDesk({ items, sections, staff, departments, reasons, destin
             {reasons.map(r => <option key={r.id} value={r.value}>{r.label}</option>)}
           </select>
           {reasons.length === 0 && <span className="muted">No reasons configured — add them in Settings → Dropdown Lists.</span>}</label>
-          <label>Remarks<input value={note} onChange={e => setNote(e.target.value)} placeholder="Optional — anything the voucher should carry" /></label>
+          <label>Remarks<TextField value={note} onValue={nextValue => setNote(nextValue)} placeholder="Optional — anything the voucher should carry" /></label>
         </div>
 
         <div style={{ margin: '12px 0' }}>
@@ -486,7 +488,7 @@ function IssueVoucher({ voucher, onClose }: { voucher: any; onClose: () => void 
   return <DetailModal open onClose={onClose} width="narrow" title={`Issued — ${voucher.issueNumber}`}
     header={<button type="button" className="secondary" onClick={() => window.print()}><Printer size={14} /> Print</button>}
     footer={<button type="button" onClick={onClose}>Done</button>}>
-    <p className="notice-ok">Stock has left the store and the balances are updated.</p>
+    <Notice kind="success" silent>Stock has left the store and the balances are updated.</Notice>
     <table className="data-table"><thead><tr><th>Item</th><th>Quantity</th><th>Lots issued from</th></tr></thead><tbody>
       {voucher.lines.map((l: any) => <tr key={l.itemId}>
         <td><span className="reg-primary">{l.name}</span></td>
@@ -589,13 +591,13 @@ function CancelVoucherPrompt({ voucher, onClose, onDone }: { voucher: any; onClo
       <button type="button" className="secondary" onClick={onClose}>Keep the voucher</button>
       <button type="button" className="danger" disabled={busy} onClick={() => void go()}>{busy ? 'Cancelling…' : 'Cancel the voucher'}</button>
     </>}>
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
     <p className="muted" style={{ marginTop: 0 }}>
       All {voucher.total_quantity} on this voucher goes back to the lots it came out of, and the voucher stays on
       the register marked cancelled. Use this for a voucher issued in error — if the stock was taken and some of
       it came back, record a return on the voucher instead.
     </p>
-    <label>Reason<textarea value={reason} onChange={e => setReason(e.target.value)} rows={3}
+    <label>Reason<TextField as="textarea" value={reason} onValue={nextValue => setReason(nextValue)} rows={3}
       placeholder="Issued to the wrong unit, duplicate of ISS-…, wrong item picked" autoFocus /></label>
   </DetailModal>;
 }
@@ -635,12 +637,12 @@ function IssueDetail({ id, onClose, onChanged, canVoid }: {
         </button>
       </>}</RowMenu>}
     </>}>
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
     {!data ? <p>Loading…</p> : <>
-      {data.status === 'cancelled' && <div className="notice-warn" style={{ marginTop: 0 }}>
+      {data.status === 'cancelled' && <Notice kind="warn" style={{ marginTop: 0 }}>
         This voucher was cancelled{data.cancelled_by_name ? ` by ${data.cancelled_by_name}` : ''} — every line went back
         to the lot it came from.{data.cancellation_reason ? ` Reason: ${data.cancellation_reason}` : ''}
-      </div>}
+      </Notice>}
       <dl className="fact-grid">
         <div><dt>Issued to</dt><dd>{data.destination_label || data.section_name || '—'}</dd></div>
         <div><dt>Collected by</dt><dd>{data.received_by_name || data.issued_to_name || '—'}</dd></div>
@@ -786,8 +788,8 @@ export function StockTake({ places, staff, items, categories, canVoid, onPosted 
         A sheet is drawn up per lot on the shelf. Count it, enter what you found, and post it — every difference
         becomes an adjustment with your reason on it, and lands on the item's bin card.
       </p>
-      {error && <div className="error">{error}</div>}
-      {notice && <div className="notice-warn">{notice}</div>}
+      {error && <Notice kind="error">{error}</Notice>}
+      {notice && <Notice kind="warn">{notice}</Notice>}
       <form className="form" onSubmit={start}>
         <label>What to count<select value={form.scope} onChange={e => setForm({ ...form, scope: e.target.value })}>
           <option value="full">Everything in the store</option>
@@ -828,7 +830,7 @@ export function StockTake({ places, staff, items, categories, canVoid, onPosted 
           <option value="">Me</option>
           {staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
         </select></label>
-        <label>Note<input value={form.note} onChange={e => setForm({ ...form, note: e.target.value })} placeholder="Month-end count, handover…" /></label>
+        <label>Note<TextField value={form.note} onValue={nextValue => setForm({ ...form, note: nextValue })} placeholder="Month-end count, handover…" /></label>
 
         <label className="toggle">
           <input type="checkbox" checked={form.includeEmpty} onChange={e => setForm({ ...form, includeEmpty: e.target.checked })} />
@@ -921,12 +923,12 @@ function AbandonCountPrompt({ count, onClose, onDone }: { count: any; onClose: (
       <button type="button" className="secondary" onClick={onClose}>Keep the count</button>
       <button type="button" className="danger" disabled={busy} onClick={() => void go()}>{busy ? 'Abandoning…' : 'Abandon the count'}</button>
     </>}>
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
     <p className="muted" style={{ marginTop: 0 }}>
       Nothing is posted and no balance moves. The sheet stays on the register marked abandoned, with what had been
       counted still on it.
     </p>
-    <label>Reason<textarea value={reason} onChange={e => setReason(e.target.value)} rows={3}
+    <label>Reason<TextField as="textarea" value={reason} onValue={nextValue => setReason(nextValue)} rows={3}
       placeholder="Started in the wrong place, superseded by CNT-…, interrupted" autoFocus /></label>
   </DetailModal>;
 }
@@ -1090,12 +1092,12 @@ function CountSheet({ id, items, canVoid, onClose, onPosted }: {
         <PackageCheck size={15} /> Post the count
       </button>
     </>}>
-    {error && <div className="error">{error}</div>}
-    {notice && <div className="notice-ok">{notice}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
+    {notice && <Notice kind="success">{notice}</Notice>}
     {!data ? <p>Loading…</p> : <>
-      {abandoned && <div className="notice-warn" style={{ marginTop: 0 }}>
+      {abandoned && <Notice kind="warn" style={{ marginTop: 0 }}>
         This count was abandoned and nothing was posted.{data.cancellation_reason ? ` Reason: ${data.cancellation_reason}` : ''}
-      </div>}
+      </Notice>}
 
       {/* What the count has found so far, in the four figures a manager asks
           for: how far through it is, how many lines disagree, which way, and
@@ -1132,10 +1134,10 @@ function CountSheet({ id, items, canVoid, onClose, onPosted }: {
       {hideBook && <p className="hint" style={{ marginTop: 0 }}>
         This is a blind count — what the register believes is hidden until the sheet is posted.
       </p>}
-      {Boolean(data.blind) && revealed && !posted && <div className="notice-warn">
+      {Boolean(data.blind) && revealed && !posted && <Notice kind="warn">
         The book balance has been revealed on a blind count. That is recorded against nothing — but the point of
         counting blind is lost for any line counted from here on.
-      </div>}
+      </Notice>}
 
       <div className="table-scroll"><table className="data-table count-sheet"><thead><tr>
         <th>Item</th><th>Batch / lot</th><th>Expires</th><th>Where</th>
@@ -1160,9 +1162,9 @@ function CountSheet({ id, items, canVoid, onClose, onPosted }: {
               : hideBook ? <span className="muted">on posting</span>
               : v === 0 ? <span className="badge" style={{ background: '#e4f7ec', color: '#155c34' }}>agrees</span>
               : <span className="badge" style={{ background: '#fde2e2', color: '#b42318' }}>{v > 0 ? '+' : ''}{Math.round(v * 100) / 100}</span>}</td>
-            <td><input disabled={locked} placeholder={v ? 'Why?' : ''} style={{ minWidth: 160 }}
+            <td><TextField disabled={locked} placeholder={v ? 'Why?' : ''} style={{ minWidth: 160 }}
               value={edits[l.id]?.reason ?? l.reason ?? ''}
-              onChange={e => patch(l, { reason: e.target.value })} /></td>
+              onValue={nextValue => patch(l, { reason: nextValue })} /></td>
             <td className="reg-actions-col">
               {!locked && <div className="reg-row-actions">
                 {!hideBook && <button type="button" className="tiny" title="Record it as agreeing with the register"
@@ -1193,7 +1195,7 @@ function CountSheet({ id, items, canVoid, onClose, onPosted }: {
           <button type="button" className="secondary" onClick={() => setAdding(false)}>Cancel</button>
           <button type="submit" form="add-count-line" disabled={busy === 'add' || !addForm.itemId}>{busy === 'add' ? 'Adding…' : 'Add it to the sheet'}</button>
         </>}>
-        {error && <div className="error">{error}</div>}
+        {error && <Notice kind="error">{error}</Notice>}
         <p className="muted" style={{ marginTop: 0 }}>
           For stock the sheet did not list — a box behind another box, a lot nobody booked in, something moved
           from a unit's own cupboard. It posts as a variance like any other line.
@@ -1205,9 +1207,9 @@ function CountSheet({ id, items, canVoid, onClose, onPosted }: {
           </select></label>
           <label>Quantity found<input type="number" step="any" min={0} value={addForm.countedQuantity}
             onChange={e => setAddForm({ ...addForm, countedQuantity: e.target.value })} /></label>
-          <label>Reason<input value={addForm.reason} onChange={e => setAddForm({ ...addForm, reason: e.target.value })}
+          <label>Reason<TextField value={addForm.reason} onValue={nextValue => setAddForm({ ...addForm, reason: nextValue })}
             placeholder="Found behind the fridge, never booked in…" /></label>
-          <label>Note<input value={addForm.note} onChange={e => setAddForm({ ...addForm, note: e.target.value })} /></label>
+          <label>Note<TextField value={addForm.note} onValue={nextValue => setAddForm({ ...addForm, note: nextValue })} /></label>
           {chosenItem && <p className="hint">
             The register holds {qty(chosenItem.on_hand)} {chosenItem.unit || ''} of this across {chosenItem.batch_count} lot
             {chosenItem.batch_count === 1 ? '' : 's'}. What is entered here is counted against nothing, so the whole

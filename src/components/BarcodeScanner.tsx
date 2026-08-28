@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Notice } from './ui/Feedback';
 
 // Barcode input that works with the two common lab setups:
 //   1. USB "keyboard-wedge" scanners — they type the code into the focused
@@ -72,7 +73,7 @@ export default function BarcodeScanner({ onScan, placeholder = 'Scan or type a b
       <button type="button" className="secondary" onClick={() => (camOn ? stopCam() : startCam())}>{camOn ? 'Stop camera' : '📷 Scan with camera'}</button>
       <span className="muted" style={{ fontSize: 12 }}>USB scanners type into the box automatically.</span>
     </div>
-    {camError && <div className="error" style={{ marginTop: 6 }}>{camError}</div>}
+    {camError && <Notice kind="error" style={{ marginTop: 6 }}>{camError}</Notice>}
     {camOn && <div style={{ marginTop: 8 }}><video ref={videoRef} style={{ width: '100%', maxWidth: 360, borderRadius: 8, border: '1px solid #ccc' }} muted playsInline /></div>}
   </div>;
 }

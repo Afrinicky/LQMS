@@ -2,6 +2,8 @@ import { FormEvent, useEffect, useMemo, useRef, useState, type CSSProperties } f
 import { api, API_BASE, getToken, errorText } from '../services/api';
 import type { Staff, Section, ActingUnitHead, UnitSupervisor, UnitSupervisors } from '../../shared/types/api';
 import { usePermissions } from '../hooks/usePermissions';
+import TextField from '../components/ui/TextField';
+import { Notice } from '../components/ui/Feedback';
 
 // ==========================================================================
 // Scheduling boards — the department duty roster (Excel-like editable grid),
@@ -143,8 +145,8 @@ export function DutyRosterBoard({ staff, canEdit }: { staff: Staff[]; canEdit: b
   }
 
   return <div>
-    {error && <div className="error">{error}</div>}
-    {msg && <div className="notice-ok">{msg}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
+    {msg && <Notice kind="success">{msg}</Notice>}
     <div className="card">
       <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
         <h3 style={{ margin: 0 }}>Department Duty Roster</h3>
@@ -224,7 +226,7 @@ export function DutyRosterBoard({ staff, canEdit }: { staff: Staff[]; canEdit: b
       {canEdit && <form onSubmit={addRow} style={{ marginTop: 14, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <label style={{ margin: 0 }}>Add staff row <select value={addStaffId} onChange={e => setAddStaffId(e.target.value)}><option value="">— pick staff —</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <span className="muted">or</span>
-        <label style={{ margin: 0 }}>label/spacer row <input value={addLabel} onChange={e => setAddLabel(e.target.value)} placeholder="e.g. MORNING SHIFT" /></label>
+        <label style={{ margin: 0 }}>label/spacer row <TextField value={addLabel} onValue={nextValue => setAddLabel(nextValue)} placeholder="e.g. MORNING SHIFT" /></label>
         <button type="submit">+ Add row</button>
       </form>}
       {!canEdit && <p className="muted" style={{ marginTop: 12 }}>This roster is read-only for your account. It is prepared by the laboratory manager and posted in the laboratory.</p>}
@@ -250,7 +252,7 @@ function MemberPicker({ staff, selected, exclude = [], onChange }: { staff: Staf
   return <div className="member-picker">
     <span className="rf-cap">Members{selected.length ? ` · ${selected.length}` : ''}</span>
     {selected.length > 0 && <div className="mp-chips">{selected.map(id => <span key={id} className="mp-chip">{nameOf(id)}<button type="button" onClick={() => toggle(id)} aria-label="Remove">×</button></span>)}</div>}
-    <input className="mp-search" value={q} onChange={e => setQ(e.target.value)} placeholder="Search staff…" />
+    <TextField className="mp-search" value={q} onValue={nextValue => setQ(nextValue)} placeholder="Search staff…" />
     <div className="mp-list">
       {list.map(s => { const id = String(s.id); const on = selected.includes(id); return <label key={id} className={`mp-item${on ? ' on' : ''}`}><input type="checkbox" checked={on} onChange={() => toggle(id)} /><span>{s.fullName}</span></label>; })}
       {list.length === 0 && <div className="muted mp-empty">No match.</div>}
@@ -297,8 +299,8 @@ export function ReassignmentBoard({ staff, sections, canEdit, onNavigate }: { st
   async function remove(id: number) { if (!confirm('Delete this schedule?')) return; try { await api(`/scheduling/reassignments/${id}`, { method: 'DELETE' }); if (sched?.id === id) setSched(null); loadList(); } catch (e) { setError(errorText(e)); } }
 
   return <div>
-    {error && <div className="error">{error}</div>}
-    {msg && <div className="notice-ok">{msg}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
+    {msg && <Notice kind="success">{msg}</Notice>}
     <div className="card">
       <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
         <h3 style={{ margin: 0 }}>Unit / Staff Reassignment Schedule</h3>
@@ -410,12 +412,12 @@ function ReRowForm({ staff, sections, heads, editing, onSubmit, onCancel, onNavi
         </select>
       </label>
       <label className="rf-label">Label as printed
-        <input value={form.unitLabel} onChange={e => setForm({ ...form, unitLabel: e.target.value })} placeholder="e.g. Microbiology & GeneXpert" required />
+        <TextField value={form.unitLabel} onValue={nextValue => setForm({ ...form, unitLabel: nextValue })} placeholder="e.g. Microbiology & GeneXpert" required />
       </label>
       <label className="rf-span check-inline"><input type="checkbox" checked={form.isSpan} onChange={e => setForm({ ...form, isSpan: e.target.checked })} /> Wide cell</label>
     </div>
 
-    {form.isSpan ? <label className="rf-full">People<input value={form.spanText} onChange={e => setForm({ ...form, spanText: e.target.value })} placeholder="e.g. Evans Owusu, Nicholas Afriyie" /></label> : <>
+    {form.isSpan ? <label className="rf-full">People<TextField value={form.spanText} onValue={nextValue => setForm({ ...form, spanText: nextValue })} placeholder="e.g. Evans Owusu, Nicholas Afriyie" /></label> : <>
       <div className="rf-line">
         <div className="rf-sup">
           <span className="rf-cap">{linkedHead?.acting ? 'Acting Unit Supervisor' : 'Supervisor'}</span>
@@ -486,8 +488,8 @@ export function BenchScheduleBoard({ sections, canEdit }: { sections: Section[];
   async function remove(id: number) { if (!confirm('Delete this bench schedule?')) return; try { await api(`/scheduling/bench-schedules/${id}`, { method: 'DELETE' }); if (bs?.id === id) setBs(null); loadList(); } catch (e) { setError(errorText(e)); } }
 
   return <div>
-    {error && <div className="error">{error}</div>}
-    {msg && <div className="notice-ok">{msg}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
+    {msg && <Notice kind="success">{msg}</Notice>}
     <div className="card">
       <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
         <h3 style={{ margin: 0 }}>Unit Bench Schedules</h3>
@@ -592,8 +594,8 @@ export function ActingSupervisorsBoard({ staff, sections, canEdit }: { staff: St
   };
 
   return <div>
-    {error && <div className="error">{error}</div>}
-    {msg && <div className="notice-ok">{msg}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
+    {msg && <Notice kind="success">{msg}</Notice>}
 
     <div className="card">
       <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
@@ -639,7 +641,7 @@ export function ActingSupervisorsBoard({ staff, sections, canEdit }: { staff: St
         </label>
         <label>From<input type="date" value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })} required /></label>
         <label>Until<input type="date" value={form.endDate} onChange={e => setForm({ ...form, endDate: e.target.value })} required /></label>
-        <label style={{ gridColumn: '1 / -1' }}>Reason (optional)<input value={form.reason} onChange={e => setForm({ ...form, reason: e.target.value })} placeholder="e.g. Substantive head on annual leave" /></label>
+        <label style={{ gridColumn: '1 / -1' }}>Reason (optional)<TextField value={form.reason} onValue={nextValue => setForm({ ...form, reason: nextValue })} placeholder="e.g. Substantive head on annual leave" /></label>
         <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8 }}>
           <button type="submit">Appoint</button>
           <button type="button" className="secondary" onClick={() => setShowForm(false)}>Cancel</button>

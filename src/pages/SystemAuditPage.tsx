@@ -19,6 +19,7 @@ import {
 import type {
   SystemAuditFlag, SystemAuditSummary, SystemAuditTrailResponse, SystemAuditScan, ScheduleObligation,
 } from '../../shared/types/api';
+import TextField from '../components/ui/TextField';
 
 /**
  * System Audit — the laboratory's watchtower over its own software.
@@ -215,7 +216,7 @@ function Flags({ onChanged }: { onChanged: () => void }) {
           </select>
         </label>
         <label><span>Search</span>
-          <input value={filter.search} onChange={e => setFilter({ ...filter, search: e.target.value })} placeholder="Title or detail" />
+          <TextField value={filter.search} onValue={nextValue => setFilter({ ...filter, search: nextValue })} placeholder="Title or detail" />
         </label>
       </div>
 
@@ -250,8 +251,8 @@ function Flags({ onChanged }: { onChanged: () => void }) {
 
               {dismissing?.id === flag.id && (
                 <div className="flag-dismiss">
-                  <input value={dismissing.note} autoFocus placeholder="Why does this not apply here?"
-                    onChange={e => setDismissing({ id: flag.id, note: e.target.value })} />
+                  <TextField value={dismissing.note} autoFocus placeholder="Why does this not apply here?"
+                    onValue={nextValue => setDismissing({ id: flag.id, note: nextValue })} />
                   {can('system_audit.flags', 'edit') && <button type="button" disabled={!dismissing.note.trim() || busyId === flag.id}
                     onClick={() => void act(flag.id, 'dismiss', { note: dismissing.note.trim() }).then(() => setDismissing(null))}>
                     Dismiss it
@@ -514,7 +515,7 @@ function LiveTrail() {
         </label>
         <label><span>From</span><input type="date" value={filter.from} onChange={e => setFilter({ ...filter, from: e.target.value })} /></label>
         <label><span>To</span><input type="date" value={filter.to} onChange={e => setFilter({ ...filter, to: e.target.value })} /></label>
-        <label><span>Search</span><input value={filter.search} onChange={e => setFilter({ ...filter, search: e.target.value })} placeholder="Record, person, action" /></label>
+        <label><span>Search</span><TextField value={filter.search} onValue={nextValue => setFilter({ ...filter, search: nextValue })} placeholder="Record, person, action" /></label>
         <label className="inline">
           <input type="checkbox" checked={live} onChange={e => setLive(e.target.checked)} />
           <span><Radio size={12} /> Live</span>

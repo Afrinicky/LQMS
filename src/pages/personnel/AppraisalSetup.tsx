@@ -9,6 +9,8 @@ import {
   APPRAISAL_CYCLE_STATUSES, APPRAISAL_CYCLE_TYPES,
 } from '../../../shared/constants/competency';
 import type { AppraisalCycle, AppraisalTemplate, Department, Section, Staff } from '../../../shared/types/api';
+import TextField from '../../components/ui/TextField';
+import { Notice } from '../../components/ui/Feedback';
 
 /**
  * Appraisal setup — the template and the cycle.
@@ -110,7 +112,7 @@ export default function AppraisalSetup({ staff, sections, departments, onChanged
   const activeTemplates = templates.filter(t => t.status === 'active');
 
   return <div className="appraisal-setup">
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {/* ── Cycles ── */}
     <div className="workspace-head">
@@ -126,7 +128,7 @@ export default function AppraisalSetup({ staff, sections, departments, onChanged
     </div>
 
     {creatingCycle && mayCreate && <form className="form-grid" onSubmit={submitCycle}>
-      <label>Cycle name<input value={cycleForm.cycleName} onChange={e => setCycleForm({ ...cycleForm, cycleName: e.target.value })} required placeholder="e.g. 2026 annual review" /></label>
+      <label>Cycle name<TextField value={cycleForm.cycleName} onValue={nextValue => setCycleForm({ ...cycleForm, cycleName: nextValue })} required placeholder="e.g. 2026 annual review" /></label>
       <label>Type
         <select value={cycleForm.cycleType} onChange={e => setCycleForm({ ...cycleForm, cycleType: e.target.value })}>
           {APPRAISAL_CYCLE_TYPES.map(t => <option key={t} value={t}>{labelise(t)}</option>)}
@@ -154,7 +156,7 @@ export default function AppraisalSetup({ staff, sections, departments, onChanged
           <option value="">—</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
         </select>
       </label>
-      <label className="wide">Notes<textarea rows={2} value={cycleForm.notes} onChange={e => setCycleForm({ ...cycleForm, notes: e.target.value })} /></label>
+      <label className="wide">Notes<TextField as="textarea" rows={2} value={cycleForm.notes} onValue={nextValue => setCycleForm({ ...cycleForm, notes: nextValue })} /></label>
       <button type="submit">Create cycle</button>
     </form>}
 
@@ -190,10 +192,10 @@ export default function AppraisalSetup({ staff, sections, departments, onChanged
     </div>
 
     {creatingTemplate && mayCreate && <form className="form-grid" onSubmit={submitTemplate}>
-      <label>Title<input value={templateForm.title} onChange={e => setTemplateForm({ ...templateForm, title: e.target.value })} required placeholder="e.g. Annual appraisal — laboratory scientists" /></label>
-      <label>Applies to<input value={templateForm.appliesTo} onChange={e => setTemplateForm({ ...templateForm, appliesTo: e.target.value })} placeholder="all_staff" /></label>
-      <label>Cadre<input value={templateForm.cadre} onChange={e => setTemplateForm({ ...templateForm, cadre: e.target.value })} placeholder="e.g. Scientist" /></label>
-      <label>Version<input value={templateForm.versionLabel} onChange={e => setTemplateForm({ ...templateForm, versionLabel: e.target.value })} /></label>
+      <label>Title<TextField value={templateForm.title} onValue={nextValue => setTemplateForm({ ...templateForm, title: nextValue })} required placeholder="e.g. Annual appraisal — laboratory scientists" /></label>
+      <label>Applies to<TextField value={templateForm.appliesTo} onValue={nextValue => setTemplateForm({ ...templateForm, appliesTo: nextValue })} placeholder="all_staff" /></label>
+      <label>Cadre<TextField value={templateForm.cadre} onValue={nextValue => setTemplateForm({ ...templateForm, cadre: nextValue })} placeholder="e.g. Scientist" /></label>
+      <label>Version<TextField value={templateForm.versionLabel} onValue={nextValue => setTemplateForm({ ...templateForm, versionLabel: nextValue })} /></label>
       <label>Top of rating scale
         <select value={templateForm.maxScore} onChange={e => setTemplateForm({ ...templateForm, maxScore: e.target.value })}>
           <option value="5">5-point</option><option value="4">4-point</option><option value="3">3-point</option>
@@ -203,7 +205,7 @@ export default function AppraisalSetup({ staff, sections, departments, onChanged
       <label className="check-inline"><input type="checkbox" checked={templateForm.selfAssessmentRequired} onChange={e => setTemplateForm({ ...templateForm, selfAssessmentRequired: e.target.checked })} /> The member of staff rates themselves first</label>
       <label className="check-inline"><input type="checkbox" checked={templateForm.secondLevelReviewRequired} onChange={e => setTemplateForm({ ...templateForm, secondLevelReviewRequired: e.target.checked })} /> A second-level reviewer moderates before the record closes</label>
       <label className="check-inline"><input type="checkbox" checked={templateForm.objectivesRequired} onChange={e => setTemplateForm({ ...templateForm, objectivesRequired: e.target.checked })} /> Objectives are agreed for the period ahead</label>
-      <label className="wide">Description<textarea rows={2} value={templateForm.description} onChange={e => setTemplateForm({ ...templateForm, description: e.target.value })} /></label>
+      <label className="wide">Description<TextField as="textarea" rows={2} value={templateForm.description} onValue={nextValue => setTemplateForm({ ...templateForm, description: nextValue })} /></label>
       <button type="submit">Create template</button>
     </form>}
 
@@ -324,10 +326,10 @@ function TemplateEditor({ template, mayEdit, mayCreate, mayApprove, mayArchive, 
       {mayArchive && !(template.appraisals_raised ?? 0) && <button type="button" className="secondary danger-text" onClick={() => void remove()}>Delete</button>}
     </div>}
   >
-    {error && <div className="error">{error}</div>}
-    {template.status === 'active' && <p className="notice-ok">
+    {error && <Notice kind="error">{error}</Notice>}
+    {template.status === 'active' && <Notice kind="success">
       This template is in force. To change what it asks, take a new version — the appraisals already raised from this one keep the questions they were answered against.
-    </p>}
+    </Notice>}
     {template.description && <p className="muted">{template.description}</p>}
     <ScaleLegend scale={APPRAISAL_SCALE_5} max={template.max_score} />
 
@@ -359,9 +361,9 @@ function TemplateEditor({ template, mayEdit, mayCreate, mayApprove, mayArchive, 
           </tbody>
         </table>}
         {addingTo === section && <div className="element-add">
-          <label className="wide">Item<input autoFocus value={item.itemTitle} onChange={e => setItem({ ...item, itemTitle: e.target.value })} placeholder="What is being assessed" /></label>
-          <label className="wide">Description<textarea rows={2} value={item.itemDescription} onChange={e => setItem({ ...item, itemDescription: e.target.value })} /></label>
-          <label className="wide">How success is measured<input value={item.successMeasure} onChange={e => setItem({ ...item, successMeasure: e.target.value })} placeholder="The evidence an appraiser looks for" /></label>
+          <label className="wide">Item<TextField autoFocus value={item.itemTitle} onValue={nextValue => setItem({ ...item, itemTitle: nextValue })} placeholder="What is being assessed" /></label>
+          <label className="wide">Description<TextField as="textarea" rows={2} value={item.itemDescription} onValue={nextValue => setItem({ ...item, itemDescription: nextValue })} /></label>
+          <label className="wide">How success is measured<TextField value={item.successMeasure} onValue={nextValue => setItem({ ...item, successMeasure: nextValue })} placeholder="The evidence an appraiser looks for" /></label>
           <label>Weight<input type="number" min={0.5} step="0.5" value={item.weight} onChange={e => setItem({ ...item, weight: e.target.value })} /></label>
           <div className="element-add-actions">
             {can('supplier_inventory.stock', 'create') && <button type="button" onClick={() => void addItem(section)}>Add item</button>}
@@ -424,8 +426,8 @@ function CycleDetail({ cycle, staff, templates, mayCreate, mayApprove, onClose, 
       </div>
     </div> : undefined}
   >
-    {error && <div className="error">{error}</div>}
-    {notice && <div className="notice-ok">{notice}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
+    {notice && <Notice kind="success">{notice}</Notice>}
 
     <dl className="record-facts">
       <div><dt>Template</dt><dd>{cycle.template_title || 'Not set'}</dd></div>
@@ -477,7 +479,7 @@ function CycleDetail({ cycle, staff, templates, mayCreate, mayApprove, onClose, 
       </button>}
     </section>}
 
-    {cycle.status === 'closed' && <p className="notice-warn">This cycle is closed. Reopen it to raise or change appraisals within it.</p>}
+    {cycle.status === 'closed' && <Notice kind="warn">This cycle is closed. Reopen it to raise or change appraisals within it.</Notice>}
 
     <p className="muted">Cycle status: {APPRAISAL_CYCLE_STATUSES.map(s => labelise(s)).join(' → ')}.</p>
   </DetailModal>;

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { usePermissions } from '../hooks/usePermissions';
 import { ShieldQuestion, Check, X, Clock, Loader2 } from 'lucide-react';
 import { api, errorText } from '../services/api';
+import { Notice } from './ui/Feedback';
 
 /**
  * Password reset requests waiting on an administrator.
@@ -76,8 +77,8 @@ export default function PasswordResetApprovals({ compact = false }: { compact?: 
         {pending.length > 0 && <span className="pwra-count">{pending.length} waiting</span>}
       </div>
 
-      {error && <div className="error">{error}</div>}
-      {notice && <div className="notice-ok">{notice}</div>}
+      {error && <Notice kind="error">{error}</Notice>}
+      {notice && <Notice kind="success">{notice}</Notice>}
 
       {pending.length === 0 ? (
         <p className="muted" style={{ margin: 0 }}>Nothing waiting. Requests raised from the sign-in screen appear here.</p>

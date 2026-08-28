@@ -20,6 +20,8 @@ import type {
   AppraisalCycle, AppraisalItem, AppraisalOverview, AppraisalTemplate, Department,
   PerformanceAppraisal, Position, Section, Staff,
 } from '../../../shared/types/api';
+import TextField from '../../components/ui/TextField';
+import { Notice } from '../../components/ui/Feedback';
 
 /**
  * Performance appraisal.
@@ -266,7 +268,7 @@ export default function AppraisalWorkspace({ staff, sections, departments, posit
       </button>)}
     </div>
 
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {(view === 'Register' || view === 'My appraisals') && register}
     {view === 'Setup' && <AppraisalSetup staff={staff} sections={sections} departments={departments} onChanged={() => { void loadSetup(); void load(); }} />}
@@ -318,7 +320,7 @@ function AppraisalEditor({ appraisalId, staff, sections, positions, mayEdit, may
 
   if (!record) {
     return <DetailModal open onClose={onClose} title="Performance appraisal">
-      {error ? <div className="error">{error}</div> : <p className="muted">Loading…</p>}
+      {error ? <Notice kind="error">{error}</Notice> : <p className="muted">Loading…</p>}
     </DetailModal>;
   }
 
@@ -350,11 +352,11 @@ function AppraisalEditor({ appraisalId, staff, sections, positions, mayEdit, may
       {mayPrint && <PrintButton path={`/personnel/appraisals/${appraisalId}/print`} label="Print record" />}
     </>}
   >
-    {error && <div className="error">{error}</div>}
-    {notice && <div className="notice-ok">{notice}</div>}
-    {isSubject && record.status === 'self_assessment' && <p className="notice-warn">
+    {error && <Notice kind="error">{error}</Notice>}
+    {notice && <Notice kind="success">{notice}</Notice>}
+    {isSubject && record.status === 'self_assessment' && <Notice kind="warn">
       This appraisal is waiting on you. Rate yourself against each item under <strong>Ratings</strong>, then submit it to your appraiser from <strong>Sign-off</strong>.
-    </p>}
+    </Notice>}
 
     <div className="record-summary">
       <ScoreDial percent={summary?.overallPercent ?? null} threshold={null} label="Overall" sublabel={summary?.band ?? 'Not yet rated'} />
@@ -549,7 +551,7 @@ function RatingsGrid({ record, maxScore, isSubject, mayEdit, onError, onChanged 
                   />
                 </td>
                 <td>
-                  <input value={current.comment} disabled={!canWrite} placeholder="Evidence for this rating" onChange={e => set(item.id, { comment: e.target.value })} />
+                  <TextField value={current.comment} disabled={!canWrite} placeholder="Evidence for this rating" onValue={nextValue => set(item.id, { comment: nextValue })} />
                 </td>
                 {mayEdit && editableStage && <td>
                   {!item.template_item_id && <button type="button" className="link-button danger" onClick={() => void removeItem(item.id)} aria-label="Remove item"><Trash2 size={14} /></button>}
@@ -568,8 +570,8 @@ function RatingsGrid({ record, maxScore, isSubject, mayEdit, onError, onChanged 
             {APPRAISAL_SECTIONS.map(s => <option key={s} value={s}>{APPRAISAL_SECTION_LABELS[s]}</option>)}
           </select>
         </label>
-        <label className="wide">Item<input value={extra.itemTitle} onChange={e => setExtra({ ...extra, itemTitle: e.target.value })} placeholder="What is being rated" /></label>
-        <label className="wide">How success is measured<input value={extra.successMeasure} onChange={e => setExtra({ ...extra, successMeasure: e.target.value })} /></label>
+        <label className="wide">Item<TextField value={extra.itemTitle} onValue={nextValue => setExtra({ ...extra, itemTitle: nextValue })} placeholder="What is being rated" /></label>
+        <label className="wide">How success is measured<TextField value={extra.successMeasure} onValue={nextValue => setExtra({ ...extra, successMeasure: nextValue })} /></label>
         <label>Weight<input type="number" min={0.5} step="0.5" value={extra.weight} onChange={e => setExtra({ ...extra, weight: e.target.value })} /></label>
         <div className="element-add-actions">
           {can('personnel.appraisals', 'edit') && <button type="button" onClick={() => void addItem()}>Add item</button>}
@@ -657,7 +659,7 @@ function Objectives({ record, mayEdit, onError, onChanged }: {
         </select>
       </label>
       <label>Achieved (%)<input type="number" min={0} max={100} value={patch.achievementPercent} onChange={e => setPatch({ ...patch, achievementPercent: e.target.value })} /></label>
-      <label className="wide">Comments<textarea rows={2} value={patch.comments} onChange={e => setPatch({ ...patch, comments: e.target.value })} /></label>
+      <label className="wide">Comments<TextField as="textarea" rows={2} value={patch.comments} onValue={nextValue => setPatch({ ...patch, comments: nextValue })} /></label>
       <div className="element-add-actions">
         {can('personnel.appraisals', 'edit') && <button type="button" onClick={() => void update(editing)}>Save progress</button>}
         <button type="button" className="secondary" onClick={() => setEditing(null)}>Cancel</button>
@@ -665,8 +667,8 @@ function Objectives({ record, mayEdit, onError, onChanged }: {
     </div>}
 
     {mayEdit && <form className="form-grid" onSubmit={add}>
-      <label className="wide">Objective<input value={form.objective} onChange={e => setForm({ ...form, objective: e.target.value })} required placeholder="e.g. Complete blood bank competency reverification" /></label>
-      <label className="wide">How success is measured<input value={form.successMeasure} onChange={e => setForm({ ...form, successMeasure: e.target.value })} placeholder="What will show it was achieved" /></label>
+      <label className="wide">Objective<TextField value={form.objective} onValue={nextValue => setForm({ ...form, objective: nextValue })} required placeholder="e.g. Complete blood bank competency reverification" /></label>
+      <label className="wide">How success is measured<TextField value={form.successMeasure} onValue={nextValue => setForm({ ...form, successMeasure: nextValue })} placeholder="What will show it was achieved" /></label>
       <label>Target date<input type="date" value={form.targetDate} onChange={e => setForm({ ...form, targetDate: e.target.value })} /></label>
       <label>Weight<input type="number" min={0.5} step="0.5" value={form.weight} onChange={e => setForm({ ...form, weight: e.target.value })} /></label>
       <button type="submit">Add objective</button>
@@ -736,13 +738,13 @@ function DevelopmentPlan({ record, staff, mayEdit, onError, onChanged, onAct }: 
     </div>}
 
     {mayEdit && <form className="form-grid" onSubmit={add}>
-      <label className="wide">Action<input value={form.action} onChange={e => setForm({ ...form, action: e.target.value })} required placeholder="e.g. Attend transfusion science refresher" /></label>
+      <label className="wide">Action<TextField value={form.action} onValue={nextValue => setForm({ ...form, action: nextValue })} required placeholder="e.g. Attend transfusion science refresher" /></label>
       <label>Type
         <select value={form.actionType} onChange={e => setForm({ ...form, actionType: e.target.value })}>
           {DEVELOPMENT_ACTION_TYPES.map(t => <option key={t} value={t}>{DEVELOPMENT_ACTION_TYPE_LABELS[t]}</option>)}
         </select>
       </label>
-      <label>Development need<input value={form.developmentNeed} onChange={e => setForm({ ...form, developmentNeed: e.target.value })} placeholder="What gap this closes" /></label>
+      <label>Development need<TextField value={form.developmentNeed} onValue={nextValue => setForm({ ...form, developmentNeed: nextValue })} placeholder="What gap this closes" /></label>
       <label>Target date<input type="date" value={form.targetDate} onChange={e => setForm({ ...form, targetDate: e.target.value })} /></label>
       <label>Responsible
         <select value={form.responsibleStaffId} onChange={e => setForm({ ...form, responsibleStaffId: e.target.value })}>
@@ -843,10 +845,10 @@ function AppraisalDetails({ record, staff, sections, positions, editable, onErro
       </select>
     </label>
     <label>Next appraisal due<input type="date" value={form.nextAppraisalDue} onChange={e => setForm({ ...form, nextAppraisalDue: e.target.value })} /></label>
-    <label className="wide">Strengths<textarea rows={3} value={form.strengths} onChange={e => setForm({ ...form, strengths: e.target.value })} /></label>
-    <label className="wide">Areas for development<textarea rows={3} value={form.developmentAreas} onChange={e => setForm({ ...form, developmentAreas: e.target.value })} /></label>
-    <label className="wide">Training needs identified<textarea rows={2} value={form.trainingNeeds} onChange={e => setForm({ ...form, trainingNeeds: e.target.value })} /></label>
-    <label className="wide">Appraiser's comments<textarea rows={3} value={form.appraiserComments} onChange={e => setForm({ ...form, appraiserComments: e.target.value })} /></label>
+    <label className="wide">Strengths<TextField as="textarea" rows={3} value={form.strengths} onValue={nextValue => setForm({ ...form, strengths: nextValue })} /></label>
+    <label className="wide">Areas for development<TextField as="textarea" rows={3} value={form.developmentAreas} onValue={nextValue => setForm({ ...form, developmentAreas: nextValue })} /></label>
+    <label className="wide">Training needs identified<TextField as="textarea" rows={2} value={form.trainingNeeds} onValue={nextValue => setForm({ ...form, trainingNeeds: nextValue })} /></label>
+    <label className="wide">Appraiser's comments<TextField as="textarea" rows={3} value={form.appraiserComments} onValue={nextValue => setForm({ ...form, appraiserComments: nextValue })} /></label>
     <div className="element-add-actions">
       <button type="submit">Save</button>
       {saved && <span className="saved-flag">Saved</span>}
@@ -901,14 +903,14 @@ function AppraisalSignOff({ record, staff, summary, mayEdit, mayApprove, mayArch
       <h4>Submit your self-assessment</h4>
       <p className="muted">Rate yourself against each item under <strong>Ratings</strong> first. Your ratings stay on the record beside your appraiser's, so the discussion starts from both views.</p>
       <div className="form-grid">
-        <label className="wide">Anything you want to say about the period<textarea rows={3} value={self.selfOverallComments} onChange={e => setSelf({ selfOverallComments: e.target.value })} /></label>
+        <label className="wide">Anything you want to say about the period<TextField as="textarea" rows={3} value={self.selfOverallComments} onValue={nextValue => setSelf({ selfOverallComments: nextValue })} /></label>
         <button type="button" onClick={() => void onAct('/submit-self-assessment', self, 'Self-assessment sent to your appraiser.')}>Submit to my appraiser</button>
       </div>
     </section>}
 
-    {record.status === 'self_assessment' && !isSubject && <p className="notice-warn">
+    {record.status === 'self_assessment' && !isSubject && <Notice kind="warn">
       Waiting for {record.staff_name} to complete their self-assessment. You can still record your own ratings in the meantime.
-    </p>}
+    </Notice>}
 
     {!closed && mayEdit && !isSubject && <section className="signoff-card">
       <h4>Complete the appraisal</h4>
@@ -931,10 +933,10 @@ function AppraisalSignOff({ record, staff, summary, mayEdit, mayApprove, mayArch
           </select>
         </label>
         <label>Next appraisal due<input type="date" value={submit.nextAppraisalDue} onChange={e => setSubmit({ ...submit, nextAppraisalDue: e.target.value })} /></label>
-        <label className="wide">Strengths<textarea rows={2} value={submit.strengths} onChange={e => setSubmit({ ...submit, strengths: e.target.value })} /></label>
-        <label className="wide">Areas for development<textarea rows={2} value={submit.developmentAreas} onChange={e => setSubmit({ ...submit, developmentAreas: e.target.value })} /></label>
-        <label className="wide">Training needs<textarea rows={2} value={submit.trainingNeeds} onChange={e => setSubmit({ ...submit, trainingNeeds: e.target.value })} /></label>
-        <label className="wide">Appraiser's comments<textarea rows={3} value={submit.appraiserComments} onChange={e => setSubmit({ ...submit, appraiserComments: e.target.value })} /></label>
+        <label className="wide">Strengths<TextField as="textarea" rows={2} value={submit.strengths} onValue={nextValue => setSubmit({ ...submit, strengths: nextValue })} /></label>
+        <label className="wide">Areas for development<TextField as="textarea" rows={2} value={submit.developmentAreas} onValue={nextValue => setSubmit({ ...submit, developmentAreas: nextValue })} /></label>
+        <label className="wide">Training needs<TextField as="textarea" rows={2} value={submit.trainingNeeds} onValue={nextValue => setSubmit({ ...submit, trainingNeeds: nextValue })} /></label>
+        <label className="wide">Appraiser's comments<TextField as="textarea" rows={3} value={submit.appraiserComments} onValue={nextValue => setSubmit({ ...submit, appraiserComments: nextValue })} /></label>
         <button type="button" disabled={!submit.recommendation || unrated > 0}
           onClick={() => void onAct('/submit-appraisal', submit, 'Appraisal completed.')}>Complete the appraisal</button>
       </div>
@@ -950,7 +952,7 @@ function AppraisalSignOff({ record, staff, summary, mayEdit, mayApprove, mayArch
             {staff.filter(s => s.id !== record.staff_id && s.id !== record.appraiser_staff_id).map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
           </select>
         </label>
-        <label className="wide">Reviewer's comments<textarea rows={3} value={moderate.reviewerComments} onChange={e => setModerate({ ...moderate, reviewerComments: e.target.value })} /></label>
+        <label className="wide">Reviewer's comments<TextField as="textarea" rows={3} value={moderate.reviewerComments} onValue={nextValue => setModerate({ ...moderate, reviewerComments: nextValue })} /></label>
         <button type="button" onClick={() => void onAct('/moderate', moderate, 'Second-level review recorded.')}>Record the review</button>
       </div>
     </section>}
@@ -965,7 +967,7 @@ function AppraisalSignOff({ record, staff, summary, mayEdit, mayApprove, mayArch
       <h4>Your signature</h4>
       <p className="muted">Signing records that the appraisal was discussed with you. It does not signify agreement — anything you disagree with belongs in the box, and it stays on the record.</p>
       <div className="form-grid">
-        <label className="wide">Your comments<textarea rows={3} value={ack.employeeComments} onChange={e => setAck({ employeeComments: e.target.value })} /></label>
+        <label className="wide">Your comments<TextField as="textarea" rows={3} value={ack.employeeComments} onValue={nextValue => setAck({ employeeComments: nextValue })} /></label>
         <button type="button" onClick={() => void onAct('/acknowledge', ack, 'Appraisal acknowledged.')}>Sign this appraisal</button>
       </div>
     </section>}
@@ -976,13 +978,13 @@ function AppraisalSignOff({ record, staff, summary, mayEdit, mayApprove, mayArch
       {record.employee_comments && <p className="prewrap">{record.employee_comments}</p>}
     </section>}
 
-    {record.status === 'completed' && !isSubject && !record.employee_acknowledged_at && <p className="notice-warn">
+    {record.status === 'completed' && !isSubject && !record.employee_acknowledged_at && <Notice kind="warn">
       Waiting for {record.staff_name} to sign this appraisal from their own profile.
-    </p>}
+    </Notice>}
 
     {!closed && mayArchive && <section className="signoff-card">
       {showCancel ? <div className="form-grid">
-        <label className="wide">Reason for cancelling<textarea rows={2} value={cancelReason} onChange={e => setCancelReason(e.target.value)} /></label>
+        <label className="wide">Reason for cancelling<TextField as="textarea" rows={2} value={cancelReason} onValue={nextValue => setCancelReason(nextValue)} /></label>
         <div className="element-add-actions">
           <button type="button" className="secondary danger-text" disabled={!cancelReason.trim()}
             onClick={() => void onAct('/cancel', { reason: cancelReason }, 'Appraisal cancelled.')}>Confirm cancellation</button>

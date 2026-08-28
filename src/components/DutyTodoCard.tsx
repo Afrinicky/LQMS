@@ -8,6 +8,7 @@ import { useDutyReminders } from '../hooks/useDutyReminders';
 import { CATEGORY_LABELS, frequencyPhrase, type ActivityCategory } from '../../shared/constants/activities';
 import type { ActivityOccurrence } from '../../shared/types/api';
 import { errorText } from '../services/api';
+import TextField from './ui/TextField';
 
 /**
  * "What am I on duty to do today?" — the panel the whole feature exists for.
@@ -123,7 +124,7 @@ function OccurrenceRow({ occurrence, watching = false }: { occurrence: ActivityO
           <div className="duty-expand">
             <label>
               <span>Note (optional)</span>
-              <input value={note} onChange={e => setNote(e.target.value)} placeholder="Anything worth recording" />
+              <TextField value={note} onValue={nextValue => setNote(nextValue)} placeholder="Anything worth recording" />
             </label>
             <div className="duty-ease">
               <span>How easy was it?</span>
@@ -141,7 +142,7 @@ function OccurrenceRow({ occurrence, watching = false }: { occurrence: ActivityO
           <div className="duty-expand">
             <label>
               <span>Why is this not applicable today?</span>
-              <input value={naReason} onChange={e => setNaReason(e.target.value)} placeholder="Instrument out of service, unit closed…" autoFocus />
+              <TextField value={naReason} onValue={nextValue => setNaReason(nextValue)} placeholder="Instrument out of service, unit closed…" autoFocus />
             </label>
             <div className="duty-actions">
               <button type="button" disabled={busy || !naReason.trim()}

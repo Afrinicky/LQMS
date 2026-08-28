@@ -10,6 +10,8 @@ import {
   PROCUREMENT_MODE_HINTS, normaliseProcurementPolicy, allowsStore, type ProcurementPolicy,
 } from '../../shared/constants/inventory';
 import type { Section } from '../../shared/types/api';
+import TextField from '../components/ui/TextField';
+import { Notice } from '../components/ui/Feedback';
 
 /* ============================================================================
    STOCK & STORAGE SETTINGS
@@ -129,8 +131,8 @@ export default function StockSettingsPage() {
       <p>Where the laboratory keeps its reagents and consumables, where deliveries come from, and how its stock is barcoded. Stock item categories, units of measure, issue reasons, movement reasons and outside issue destinations live in <strong>Dropdown Lists</strong>.</p>
     </div>
 
-    {error && <div className="error">{error}</div>}
-    {notice && <div className="notice-ok">{notice}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
+    {notice && <Notice kind="success">{notice}</Notice>}
 
     {/* ---- Storage places ------------------------------------------------ */}
     <div className="card">
@@ -302,9 +304,9 @@ export default function StockSettingsPage() {
         <button type="button" className="secondary" onClick={() => setAdding(false)}>Cancel</button>
         <button type="submit" form="add-place" disabled={!form.name.trim() || busy === 'add'}>{busy === 'add' ? 'Adding…' : 'Add'}</button>
       </>}>
-      {error && <div className="error">{error}</div>}
+      {error && <Notice kind="error">{error}</Notice>}
       {can('settings', 'edit') && <form id="add-place" className="form-grid" onSubmit={addPlace}>
-        <label className="wide">Name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Shelf B3, Reagent fridge, Haematology cupboard" /></label>
+        <label className="wide">Name<TextField value={form.name} onValue={nextValue => setForm({ ...form, name: nextValue })} placeholder="e.g. Shelf B3, Reagent fridge, Haematology cupboard" /></label>
         <label>Kind<select value={form.kind} onChange={e => setForm({ ...form, kind: e.target.value })}>
           {STORAGE_KINDS.map(k => <option key={k} value={k}>{STORAGE_KIND_LABELS[k]}</option>)}</select></label>
         <label>Inside<select value={form.parentId} onChange={e => setForm({ ...form, parentId: e.target.value })}>
@@ -313,7 +315,7 @@ export default function StockSettingsPage() {
         <label>Unit <span className="muted">(optional)</span><select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })}>
           <option value="">Not tied to a unit</option>
           {sections.map(sec => <option key={sec.id} value={sec.id}>{sec.name}</option>)}</select></label>
-        <label>Label / code <span className="muted">(optional)</span><input value={form.code} onChange={e => setForm({ ...form, code: e.target.value })} placeholder="e.g. B3" /></label>
+        <label>Label / code <span className="muted">(optional)</span><TextField value={form.code} onValue={nextValue => setForm({ ...form, code: nextValue })} placeholder="e.g. B3" /></label>
         {isColdStorage(form.kind) && <>
           <label>Coldest allowed °C<input type="number" step="any" value={form.tempMin} onChange={e => setForm({ ...form, tempMin: e.target.value })} placeholder="2" /></label>
           <label>Warmest allowed °C<input type="number" step="any" value={form.tempMax} onChange={e => setForm({ ...form, tempMax: e.target.value })} placeholder="8" /></label>
@@ -326,15 +328,15 @@ export default function StockSettingsPage() {
         <button type="button" className="secondary" onClick={() => setAddingSource(false)}>Cancel</button>
         <button type="submit" form="add-source" disabled={!sourceForm.name.trim() || busy === 'add-source'}>{busy === 'add-source' ? 'Adding…' : 'Add'}</button>
       </>}>
-      {error && <div className="error">{error}</div>}
+      {error && <Notice kind="error">{error}</Notice>}
       {can('settings', 'edit') && <form id="add-source" className="form-grid" onSubmit={addSource}>
-        <label className="wide">Name<input value={sourceForm.name} onChange={e => setSourceForm({ ...sourceForm, name: e.target.value })} placeholder="e.g. Hospital Main Store, Regional Medical Store" /></label>
+        <label className="wide">Name<TextField value={sourceForm.name} onValue={nextValue => setSourceForm({ ...sourceForm, name: nextValue })} placeholder="e.g. Hospital Main Store, Regional Medical Store" /></label>
         <label>Kind<select value={sourceForm.kind} onChange={e => setSourceForm({ ...sourceForm, kind: e.target.value })}>
           {SUPPLY_SOURCE_KINDS.map(k => <option key={k} value={k}>{SUPPLY_SOURCE_KIND_LABELS[k]}</option>)}</select></label>
-        <label>Code <span className="muted">(optional)</span><input value={sourceForm.code} onChange={e => setSourceForm({ ...sourceForm, code: e.target.value })} /></label>
-        <label>Contact person<input value={sourceForm.contactPerson} onChange={e => setSourceForm({ ...sourceForm, contactPerson: e.target.value })} /></label>
-        <label>Phone<input value={sourceForm.phone} onChange={e => setSourceForm({ ...sourceForm, phone: e.target.value })} /></label>
-        <label className="wide">Note<input value={sourceForm.note} onChange={e => setSourceForm({ ...sourceForm, note: e.target.value })} placeholder="Requisition day, who signs for it…" /></label>
+        <label>Code <span className="muted">(optional)</span><TextField value={sourceForm.code} onValue={nextValue => setSourceForm({ ...sourceForm, code: nextValue })} /></label>
+        <label>Contact person<TextField value={sourceForm.contactPerson} onValue={nextValue => setSourceForm({ ...sourceForm, contactPerson: nextValue })} /></label>
+        <label>Phone<TextField value={sourceForm.phone} onValue={nextValue => setSourceForm({ ...sourceForm, phone: nextValue })} /></label>
+        <label className="wide">Note<TextField value={sourceForm.note} onValue={nextValue => setSourceForm({ ...sourceForm, note: nextValue })} placeholder="Requisition day, who signs for it…" /></label>
       </form>}
     </DetailModal>
 
@@ -344,15 +346,15 @@ export default function StockSettingsPage() {
         <button type="submit" form="edit-source" disabled={busy === 'edit-source'}>{busy === 'edit-source' ? 'Saving…' : 'Save'}</button>
       </>}>
       {editingSource && <>
-        {error && <div className="error">{error}</div>}
+        {error && <Notice kind="error">{error}</Notice>}
         {can('settings', 'edit') && <form id="edit-source" className="form-grid" onSubmit={saveSource}>
-          <label className="wide">Name<input value={editingSource.name} onChange={e => setEditingSource({ ...editingSource, name: e.target.value })} /></label>
+          <label className="wide">Name<TextField value={editingSource.name} onValue={nextValue => setEditingSource({ ...editingSource, name: nextValue })} /></label>
           <label>Kind<select value={editingSource.kind} onChange={e => setEditingSource({ ...editingSource, kind: e.target.value })}>
             {SUPPLY_SOURCE_KINDS.map(k => <option key={k} value={k}>{SUPPLY_SOURCE_KIND_LABELS[k]}</option>)}</select></label>
-          <label>Code<input value={editingSource.code ?? ''} onChange={e => setEditingSource({ ...editingSource, code: e.target.value })} /></label>
-          <label>Contact person<input value={editingSource.contact_person ?? ''} onChange={e => setEditingSource({ ...editingSource, contact_person: e.target.value })} /></label>
-          <label>Phone<input value={editingSource.phone ?? ''} onChange={e => setEditingSource({ ...editingSource, phone: e.target.value })} /></label>
-          <label className="wide">Note<input value={editingSource.note ?? ''} onChange={e => setEditingSource({ ...editingSource, note: e.target.value })} /></label>
+          <label>Code<TextField value={editingSource.code ?? ''} onValue={nextValue => setEditingSource({ ...editingSource, code: nextValue })} /></label>
+          <label>Contact person<TextField value={editingSource.contact_person ?? ''} onValue={nextValue => setEditingSource({ ...editingSource, contact_person: nextValue })} /></label>
+          <label>Phone<TextField value={editingSource.phone ?? ''} onValue={nextValue => setEditingSource({ ...editingSource, phone: nextValue })} /></label>
+          <label className="wide">Note<TextField value={editingSource.note ?? ''} onValue={nextValue => setEditingSource({ ...editingSource, note: nextValue })} /></label>
           <label className="toggle wide">
             <input type="checkbox" checked={editingSource.is_active === 1} onChange={e => setEditingSource({ ...editingSource, is_active: e.target.checked ? 1 : 0 })} />
             Still drawn from
@@ -367,9 +369,9 @@ export default function StockSettingsPage() {
         <button type="submit" form="edit-place" disabled={busy === 'edit'}>{busy === 'edit' ? 'Saving…' : 'Save'}</button>
       </>}>
       {editing && <>
-        {error && <div className="error">{error}</div>}
+        {error && <Notice kind="error">{error}</Notice>}
         {can('settings', 'edit') && <form id="edit-place" className="form-grid" onSubmit={saveEdit}>
-          <label className="wide">Name<input value={editing.name} onChange={e => setEditing({ ...editing, name: e.target.value })} /></label>
+          <label className="wide">Name<TextField value={editing.name} onValue={nextValue => setEditing({ ...editing, name: nextValue })} /></label>
           <label>Kind<select value={editing.kind} onChange={e => setEditing({ ...editing, kind: e.target.value })}>
             {STORAGE_KINDS.map(k => <option key={k} value={k}>{STORAGE_KIND_LABELS[k]}</option>)}</select></label>
           <label>Inside<select value={String(editing.parent_id ?? '')} onChange={e => setEditing({ ...editing, parent_id: e.target.value ? Number(e.target.value) : null })}>
@@ -378,7 +380,7 @@ export default function StockSettingsPage() {
           <label>Unit<select value={String(editing.section_id ?? '')} onChange={e => setEditing({ ...editing, section_id: e.target.value ? Number(e.target.value) : null })}>
             <option value="">Not tied to a unit</option>
             {sections.map(sec => <option key={sec.id} value={sec.id}>{sec.name}</option>)}</select></label>
-          <label>Label / code<input value={editing.code ?? ''} onChange={e => setEditing({ ...editing, code: e.target.value })} /></label>
+          <label>Label / code<TextField value={editing.code ?? ''} onValue={nextValue => setEditing({ ...editing, code: nextValue })} /></label>
           {isColdStorage(editing.kind) && <>
             <label>Coldest allowed °C<NumberField step="any" value={editing.temp_min ?? null} onValue={n => setEditing({ ...editing, temp_min: n })} /></label>
             <label>Warmest allowed °C<NumberField step="any" value={editing.temp_max ?? null} onValue={n => setEditing({ ...editing, temp_max: n })} /></label>

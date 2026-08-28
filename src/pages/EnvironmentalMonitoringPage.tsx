@@ -14,6 +14,8 @@ import type {
   EnvAsset, EnvDevice, EnvReading, EnvAlert, EnvExcursion, EnvDashboard, EnvSettings,
   EnvEscalationRule, EnvNotificationQueueItem, EnvChannel, EnvInsight, EnvReportType,
 } from '../../shared/types/api';
+import TextField from '../components/ui/TextField';
+import { Notice } from '../components/ui/Feedback';
 
 // Tabs are filtered by permission — a tab whose feature this user cannot
 // view is not drawn. See src/components/PermissionTabs.tsx.
@@ -163,8 +165,8 @@ export function EnvironmentalMonitoringPage({ embedded = false }: { embedded?: b
   return <div className="module-page env-mon">
     {!embedded && <PageHeader eyebrow="Facilities and Safety" title="Environmental Monitoring" subtitle="Manual and automated temperature/humidity monitoring, alarms and excursions." />}
     {tabBar(tab, permittedTabs, setTab)}
-    {error && <div className="error">{error}</div>}
-    {notice && <div className="notice-ok">{notice}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
+    {notice && <Notice kind="success">{notice}</Notice>}
 
     {tab === 'Live Dashboard' && <LiveDashboard dashboard={dashboard} onOpenChart={id => { setChartAsset(String(id)); setChartRange('24h'); setTab('Charts'); }} onRefresh={loadDashboard} />}
 
@@ -315,7 +317,7 @@ function AssetsTab({ assets, devices, lookups, onChanged, onError, onFlash }: an
     <div className="card">
       <h3>Register monitored asset</h3>
       {can('facilities_safety.environment', 'create') && <form className="form-grid" onSubmit={submit}>
-        <label>Name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required placeholder="e.g. Reagent fridge 1" /></label>
+        <label>Name<TextField value={form.name} onValue={nextValue => setForm({ ...form, name: nextValue })} required placeholder="e.g. Reagent fridge 1" /></label>
         <label>Asset type<select value={form.assetType} onChange={e => setForm({ ...form, assetType: e.target.value })}>{['refrigerator', 'freezer', 'ultra_low_freezer', 'incubator', 'cold_room', 'room', 'water_bath', 'blood_bank_fridge', 'other'].map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Department<select value={form.departmentId} onChange={e => setForm({ ...form, departmentId: e.target.value })}><option value="">—</option>{lookups.departments.map((d: Department) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
         <label>Section<select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })}><option value="">—</option>{lookups.sections.map((s: Section) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
@@ -362,18 +364,18 @@ function DevicesTab({ devices, assets, locations, drivers, commMethods, onChange
       <h3>Register device / data logger</h3>
       <p className="muted" style={{ marginTop: 0 }}>Pick a communication method. The <strong>Simulator</strong> driver generates live readings so you can trial the dashboard, alarms and excursions before hardware arrives. REST API and CSV import are ready; other protocols are listed and store configuration for when their adapter is installed.</p>
       {can('facilities_safety.environment', 'create') && <form className="form-grid" onSubmit={submit}>
-        <label>Name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></label>
+        <label>Name<TextField value={form.name} onValue={nextValue => setForm({ ...form, name: nextValue })} required /></label>
         <label>Communication<select value={form.communicationMethod} onChange={e => setForm({ ...form, communicationMethod: e.target.value, driverKey: e.target.value })}>{(commMethods.length ? commMethods : ['manual']).map((m: string) => <option key={m} value={m}>{m.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Driver<select value={form.driverKey} onChange={e => setForm({ ...form, driverKey: e.target.value })}>{drivers.map((d: any) => <option key={d.key} value={d.key}>{d.label}{d.automated ? ' (auto)' : ''}</option>)}</select></label>
-        <label>Manufacturer<input value={form.manufacturer} onChange={e => setForm({ ...form, manufacturer: e.target.value })} placeholder="e.g. Testo, LogTag, Vaisala" /></label>
-        <label>Model<input value={form.model} onChange={e => setForm({ ...form, model: e.target.value })} /></label>
-        <label>Serial number<input value={form.serialNumber} onChange={e => setForm({ ...form, serialNumber: e.target.value })} /></label>
+        <label>Manufacturer<TextField value={form.manufacturer} onValue={nextValue => setForm({ ...form, manufacturer: nextValue })} placeholder="e.g. Testo, LogTag, Vaisala" /></label>
+        <label>Model<TextField value={form.model} onValue={nextValue => setForm({ ...form, model: nextValue })} /></label>
+        <label>Serial number<TextField value={form.serialNumber} onValue={nextValue => setForm({ ...form, serialNumber: nextValue })} /></label>
         <label>Assigned asset<select value={form.assetId} onChange={e => setForm({ ...form, assetId: e.target.value })}><option value="">—</option>{assets.map((a: EnvAsset) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
         <label>Location<select value={form.locationId} onChange={e => setForm({ ...form, locationId: e.target.value })}><option value="">—</option>{locations.map((l: Location) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
         <label>Poll interval (s)<input type="number" value={form.pollIntervalSeconds} onChange={e => setForm({ ...form, pollIntervalSeconds: e.target.value })} placeholder="default from settings" /></label>
-        <label>Firmware<input value={form.firmwareVersion} onChange={e => setForm({ ...form, firmwareVersion: e.target.value })} /></label>
+        <label>Firmware<TextField value={form.firmwareVersion} onValue={nextValue => setForm({ ...form, firmwareVersion: nextValue })} /></label>
         <label>Calibration due<input type="date" value={form.calibrationDueDate} onChange={e => setForm({ ...form, calibrationDueDate: e.target.value })} /></label>
-        <label>Driver config (JSON)<textarea value={form.configJson} onChange={e => setForm({ ...form, configJson: e.target.value })} placeholder='REST e.g. {"url":"http://sensor/api","tempPath":"data.temp"}' /></label>
+        <label>Driver config (JSON)<TextField as="textarea" value={form.configJson} onValue={nextValue => setForm({ ...form, configJson: nextValue })} placeholder='REST e.g. {"url":"http://sensor/api","tempPath":"data.temp"}' /></label>
         <button type="submit">Add device</button>
       </form>}
     </div>
@@ -420,10 +422,10 @@ function ManualEntryTab({ assets, staff, onSaved, onError, onFlash }: any) {
       <label>Temperature (°C)<input type="number" step="any" value={form.temperature} onChange={e => setForm({ ...form, temperature: e.target.value })} required /></label>
       <label>Humidity (%)<input type="number" step="any" value={form.humidity} onChange={e => setForm({ ...form, humidity: e.target.value })} /></label>
       <label>Recorded by<select value={form.recordedByStaffId} onChange={e => setForm({ ...form, recordedByStaffId: e.target.value })}><option value="">Me</option>{staff.map((s: Staff) => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-      <label>Reason for manual entry<input value={form.manualReason} onChange={e => setForm({ ...form, manualReason: e.target.value })} placeholder="e.g. routine round, device offline" /></label>
-      <label>Signature<input value={form.signature} onChange={e => setForm({ ...form, signature: e.target.value })} placeholder="initials" /></label>
-      <label>Observation<textarea value={form.observation} onChange={e => setForm({ ...form, observation: e.target.value })} /></label>
-      <label>Corrective action<textarea value={form.correctiveAction} onChange={e => setForm({ ...form, correctiveAction: e.target.value })} /></label>
+      <label>Reason for manual entry<TextField value={form.manualReason} onValue={nextValue => setForm({ ...form, manualReason: nextValue })} placeholder="e.g. routine round, device offline" /></label>
+      <label>Signature<TextField value={form.signature} onValue={nextValue => setForm({ ...form, signature: nextValue })} placeholder="initials" /></label>
+      <label>Observation<TextField as="textarea" value={form.observation} onValue={nextValue => setForm({ ...form, observation: nextValue })} /></label>
+      <label>Corrective action<TextField as="textarea" value={form.correctiveAction} onValue={nextValue => setForm({ ...form, correctiveAction: nextValue })} /></label>
       <button type="submit">Record reading</button>
     </form>}
   </div>;
@@ -478,7 +480,7 @@ function SettingsTab({ settings, onSaved, onError, onFlash }: any) {
       <label>Battery low threshold (%)<NumberField min={0} max={100} value={f.batteryLowThreshold} onValue={n => setF({ ...f, batteryLowThreshold: n ?? 0 })} /></label>
       <label>No-communication alert after (minutes)<NumberField min={0} value={f.noCommMinutes} onValue={n => setF({ ...f, noCommMinutes: n ?? 0 })} /></label>
       <label><input type="checkbox" checked={f.preventExpiredDevices} onChange={e => setF({ ...f, preventExpiredDevices: e.target.checked })} /> Prevent use of calibration-expired devices</label>
-      <label>Webhook URL (Teams/Slack incoming webhook)<input value={f.webhookUrl} onChange={e => setF({ ...f, webhookUrl: e.target.value })} placeholder="https://…" /></label>
+      <label>Webhook URL (Teams/Slack incoming webhook)<TextField value={f.webhookUrl} onValue={nextValue => setF({ ...f, webhookUrl: nextValue })} placeholder="https://…" /></label>
       <button type="submit">Save settings</button>
     </form>}
     <p className="muted" style={{ marginTop: 12 }}>Configure who gets notified under the <strong>Notifications</strong> tab. The interactive floor plan, predictive maintenance and Dennis analysis build on this data in later phases.</p>
@@ -514,11 +516,11 @@ function NotificationsTab({ onError, onFlash }: any) {
       <h3>Escalation rules</h3>
       <p className="muted" style={{ marginTop: 0 }}>Each rule notifies a channel when a matching alert has gone unacknowledged for the delay. Delay 0 = notify immediately; larger delays form the escalation ladder.</p>
       {can('facilities_safety.environment', 'edit') && <form className="form-grid" onSubmit={addRule}>
-        <label>Name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></label>
+        <label>Name<TextField value={form.name} onValue={nextValue => setForm({ ...form, name: nextValue })} required /></label>
         <label>Severity<select value={form.severity} onChange={e => setForm({ ...form, severity: e.target.value })}>{['any', 'information', 'warning', 'critical'].map(s => <option key={s} value={s}>{s}</option>)}</select></label>
         <label>Delay (minutes)<input type="number" min={0} value={form.delayMinutes} onChange={e => setForm({ ...form, delayMinutes: e.target.value })} /></label>
         <label>Channel<select value={form.channel} onChange={e => setForm({ ...form, channel: e.target.value })}>{channels.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}</select></label>
-        <label>Recipients<input value={form.recipients} onChange={e => setForm({ ...form, recipients: e.target.value })} placeholder="emails / phones / role (optional)" /></label>
+        <label>Recipients<TextField value={form.recipients} onValue={nextValue => setForm({ ...form, recipients: nextValue })} placeholder="emails / phones / role (optional)" /></label>
         <button type="submit">Add rule</button>
       </form>}
       <table className="data-table" style={{ marginTop: 10 }}><thead><tr><th>Name</th><th>Severity</th><th>Delay</th><th>Channel</th><th>Recipients</th><th>Active</th><th></th></tr></thead><tbody>
