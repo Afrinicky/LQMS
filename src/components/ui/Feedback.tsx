@@ -3,44 +3,66 @@ import { createPortal } from 'react-dom';
 import { AlertTriangle, CheckCircle2, Info, X, XCircle } from 'lucide-react';
 
 /**
- * Where an answer appears.
+ * Where an answer appears, and what it looks like.
  *
- * Every register in SECH_LIMS keeps its "saved" and its "could not save" in one
- * place: a line at the very top of the page. That is where the state lives, so
- * that is where it was drawn. But the save button is rarely at the top — it is
- * at the bottom of a form, three screens down — so a person pressed Save, the
- * page answered off-screen, and as far as they could tell nothing happened.
- * They pressed it again.
+ * Every register in SECH_LIMS used to keep its "saved" and its "could not
+ * save" in one place: a line at the very top of the page. That is where the
+ * state lives, so that is where it was drawn. But the button that caused it is
+ * rarely at the top — it is at the bottom of a form, or in a row halfway down a
+ * table — so a person pressed the button, the page answered off-screen, and as
+ * far as they could tell nothing happened. They pressed it again.
  *
- * The answer now goes to the action. A <Notice> still draws in place, because
- * an error about a form belongs beside that form and has to stay readable
- * while it is corrected. But when it appears somewhere the reader cannot see,
- * the same message is also shown as a toast pinned to the control they just
- * used — the button, the row menu item, the field they pressed Enter in. No
- * duplication: the toast only exists for the case where the banner is out of
- * sight.
+ * So the answer goes to the action, and it goes there ONLY. When the control
+ * that was used is known, the message is drawn beside that control and the
+ * banner in the page is not drawn at all — one message, in one place, where the
+ * person is already looking. The banner in the page is the fallback for the
+ * cases where there is no control to point at: a page that failed while it was
+ * loading, a background refresh, a message whose content is too rich to repeat
+ * (a list, a link) and therefore belongs in the layout.
  *
- * The "control they just used" is tracked here, from a capture-phase listener
- * on the document, so no call site has to pass an anchor.
+ * The control is tracked here, from a capture-phase listener on the document,
+ * so no call site has to pass an anchor. Its position is remembered as well as
+ * its node: a row that reloads after saving replaces the button that was
+ * pressed, and the message should still appear where that button was rather
+ * than jumping to a corner of the screen.
+ *
+ * Nothing here animates. A message that slides, fades or counts itself down
+ * draws the eye to the movement rather than to the sentence.
  */
 
 export type NoticeKind = 'error' | 'success' | 'warn' | 'info';
 
-type Toast = {
-  id: number;
-  kind: NoticeKind;
-  message: ReactNode;
-  /** The control the person used, so the toast can be drawn beside it. */
-  anchor: HTMLElement | null;
-  /** How long it stays. Errors linger; confirmations do not need to. */
-  ms: number;
+/** The heading each kind carries, the way a notification is normally labelled. */
+const TITLES: Record<NoticeKind, string> = {
+  error: 'Error', success: 'Success', warn: 'Warning', info: 'Info',
 };
+
+const ICONS: Record<NoticeKind, typeof Info> = {
+  error: XCircle, success: CheckCircle2, warn: AlertTriangle, info: Info,
+};
+
+/**
+ * How long each kind stays.
+ *
+ * An error is not a status update — it is something to read, act on, and often
+ * to retype a field because of, so it waits to be dismissed. A confirmation has
+ * done its job the moment it is seen.
+ */
+const HOLD_MS: Record<NoticeKind, number> = {
+  error: 0, // stays until dismissed or replaced
+  warn: 0,
+  success: 5000,
+  info: 5000,
+};
+
+type Point = { el: HTMLElement | null; rect: DOMRect | null };
+
+type Toast = { id: number; kind: NoticeKind; message: string; point: Point };
 
 // ---------------------------------------------------------------------------
 // The action point
 // ---------------------------------------------------------------------------
 
-/** Things that count as "the place the action was performed". */
 const ACTION_SELECTOR = [
   'button',
   '[role="button"]',
@@ -51,14 +73,25 @@ const ACTION_SELECTOR = [
   '[data-action-anchor]',
 ].join(',');
 
-let lastAction: HTMLElement | null = null;
+let lastEl: HTMLElement | null = null;
+let lastRect: DOMRect | null = null;
+let lastAt = 0;
 let listening = false;
+
+/**
+ * How long after a click a message still counts as that click's answer.
+ * Generous, because a save on a slow host is still the answer to the save.
+ */
+const ANSWER_WINDOW_MS = 30000;
 
 function remember(target: EventTarget | null) {
   if (!(target instanceof Element)) return;
-  const el = target.closest<HTMLElement>(ACTION_SELECTOR);
-  // Typing Enter in a field is an action too; the field itself is the anchor.
-  lastAction = el ?? (target instanceof HTMLElement && target.matches('input, textarea, select') ? target : lastAction);
+  const el = target.closest<HTMLElement>(ACTION_SELECTOR)
+    ?? (target instanceof HTMLElement && target.matches('input, textarea, select') ? target : null);
+  if (!el) return;
+  lastEl = el;
+  lastRect = el.getBoundingClientRect();
+  lastAt = Date.now();
 }
 
 function startListening() {
@@ -66,89 +99,98 @@ function startListening() {
   listening = true;
   document.addEventListener('pointerdown', e => remember(e.target), true);
   document.addEventListener('keydown', e => {
-    if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') remember(e.target);
+    const k = (e as KeyboardEvent).key;
+    if (k === 'Enter' || k === ' ') remember(e.target);
   }, true);
   document.addEventListener('submit', e => remember(e.target), true);
 }
 
-/** The control the person last used, if it is still on the page. */
-export function actionAnchor(): HTMLElement | null {
-  if (!lastAction) return null;
-  if (!document.contains(lastAction)) { lastAction = null; return null; }
-  return lastAction;
+/** The control the message is an answer to, or null when there is not one. */
+export function actionPoint(): Point | null {
+  startListening();
+  if (!lastEl || Date.now() - lastAt > ANSWER_WINDOW_MS) return null;
+  // The node itself if it survived, otherwise where it was when it was used —
+  // a table row that reloads after saving replaces the button that was pressed.
+  if (document.contains(lastEl)) {
+    const rect = lastEl.getBoundingClientRect();
+    if (rect.width || rect.height) return { el: lastEl, rect };
+  }
+  return lastRect ? { el: null, rect: lastRect } : null;
 }
 
 // ---------------------------------------------------------------------------
-// The toast store — a plain subscription, so raising one costs no re-render
-// anywhere except the host that draws them.
+// The message on screen — one at a time, because one thing happened
 // ---------------------------------------------------------------------------
 
-let toasts: Toast[] = [];
+let current: Toast | null = null;
 let nextId = 1;
 const subscribers = new Set<() => void>();
-
 function publish() { for (const fn of subscribers) fn(); }
 
-const DEFAULT_MS: Record<NoticeKind, number> = {
-  error: 9000, warn: 8000, success: 4500, info: 5000,
-};
-
-/** The last few messages shown, so a re-render does not show one twice. */
-const recent = new Map<string, number>();
+/** The last message shown, so a page re-drawing does not repeat it. */
+let lastSignature = '';
+let lastSignatureAt = 0;
 const REPEAT_MS = 3000;
 
-/** Shows a message at the control the person just used. */
-export function notifyAtAction(kind: NoticeKind, message: ReactNode, ms?: number): number {
-  startListening();
-  // The same page can draw the same banner again — switching tab, a list
-  // reloading underneath it — and that is not a second thing happening.
-  const signature = `${kind}:${typeof message === 'string' ? message : ''}`;
+/** Shows a message beside the control the person just used. */
+export function notifyAtAction(kind: NoticeKind, message: string, point?: Point | null): number {
+  const where = point ?? actionPoint();
+  if (!where) return 0;
+
+  const signature = `${kind}:${message}`;
   const now = Date.now();
-  for (const [k, at] of recent) if (now - at > REPEAT_MS) recent.delete(k);
-  if (signature.length > kind.length + 1 && recent.has(signature)) return 0;
-  recent.set(signature, now);
+  if (signature === lastSignature && now - lastSignatureAt < REPEAT_MS) return 0;
+  lastSignature = signature;
+  lastSignatureAt = now;
 
   const id = nextId++;
-  toasts = [...toasts.filter(t => t.kind !== kind || t.message !== message), {
-    id, kind, message, anchor: actionAnchor(), ms: ms ?? DEFAULT_MS[kind],
-  }].slice(-3); // three at once is already more than anyone reads
+  current = { id, kind, message, point: where };
   publish();
   return id;
 }
 
 export function dismissToast(id: number) {
-  toasts = toasts.filter(t => t.id !== id);
-  publish();
+  if (current && current.id === id) { current = null; publish(); }
 }
 
-function useToasts() {
+function useCurrent() {
   const [, force] = useState(0);
   useEffect(() => {
     const fn = () => force(n => n + 1);
     subscribers.add(fn);
     return () => { subscribers.delete(fn); };
   }, []);
-  return toasts;
+  return current;
 }
 
 // ---------------------------------------------------------------------------
 // Drawing
 // ---------------------------------------------------------------------------
 
-const ICONS: Record<NoticeKind, typeof Info> = {
-  error: XCircle, success: CheckCircle2, warn: AlertTriangle, info: Info,
-};
-
-/** Class the existing stylesheet already carries, so old markup keeps working. */
-const KIND_CLASS: Record<NoticeKind, string> = {
-  error: 'error', success: 'notice-ok', warn: 'notice-warn', info: 'notice-info',
-};
+/** The message itself: a colour block, a heading, the sentence, a way out. */
+function Body({ kind, message, onClose }: { kind: NoticeKind; message: ReactNode; onClose?: () => void }) {
+  const Icon = ICONS[kind];
+  return <>
+    <span className="fb-ico"><Icon size={20} strokeWidth={2.2} aria-hidden /></span>
+    <div className="fb-main">
+      <strong className="fb-title">{TITLES[kind]}</strong>
+      <div className="fb-text">{message}</div>
+    </div>
+    {onClose && (
+      <button type="button" className="fb-x" onClick={onClose} aria-label="Dismiss">
+        <X size={16} />
+      </button>
+    )}
+  </>;
+}
 
 /**
- * A message about something that just happened, drawn where it is placed.
+ * A message about something that just happened.
  *
- * `kind` picks the colour and the icon. Anything else — style, extra classes —
- * is passed straight through, so it drops into the markup it replaces.
+ * When the control that caused it is known, this draws nothing and the message
+ * appears beside that control instead. `silent` marks a banner that is page
+ * furniture rather than an answer — a standing rule, a hint — which always
+ * draws in place and never goes to a control.
  */
 export function Notice({
   kind = 'info', children, className, style, silent = false, role,
@@ -157,85 +199,63 @@ export function Notice({
   children: ReactNode;
   className?: string;
   style?: React.CSSProperties;
-  /** Set on a banner that is part of the page furniture rather than an answer
-   *  to an action — a standing rule, a hint — so it never raises a toast. */
   silent?: boolean;
   role?: string;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const Icon = ICONS[kind];
-  // Re-checked whenever the wording changes: the same box saying something new
-  // is a new answer, and it has to reach the reader wherever they are looking.
-  const key = typeof children === 'string' || typeof children === 'number' ? String(children) : '';
+  // Only a plain sentence can be repeated beside a button. A message built out
+  // of a list, a link or a table is part of the layout and stays in it.
+  const text = typeof children === 'string' || typeof children === 'number' ? String(children) : '';
+  const sendable = !silent && text.trim() !== '';
+  const [sent, setSent] = useState(false);
 
   useLayoutEffect(() => {
-    if (silent) return;
-    const el = ref.current;
-    if (!el) return;
-    // One frame's grace: a banner drawn as the page re-lays-out reports a
-    // position it is about to leave.
-    const raf = requestAnimationFrame(() => {
-      if (!ref.current || !document.contains(ref.current)) return;
-      if (isOnScreen(ref.current)) return;
-      notifyAtAction(kind, textOf(ref.current));
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [key, kind, silent]);
+    if (!sendable) { setSent(false); return; }
+    setSent(notifyAtAction(kind, text) !== 0 || wasJustShown(kind, text));
+  }, [text, kind, sendable]);
+
+  if (sent) return null;
 
   return (
     <div
-      ref={ref}
-      className={`fb-notice fb-${kind} ${KIND_CLASS[kind]} ${className ?? ''}`.trim()}
+      className={`fb-notice fb-${kind} ${className ?? ''}`.trim()}
       style={style}
       role={role ?? (kind === 'error' ? 'alert' : 'status')}
     >
-      <Icon size={16} className="fb-notice-ico" aria-hidden />
-      <div className="fb-notice-body">{children}</div>
+      <Body kind={kind} message={children} />
     </div>
   );
 }
 
-/** What the banner actually says, for repeating in the toast. */
-function textOf(el: HTMLElement): string {
-  const body = el.querySelector<HTMLElement>('.fb-notice-body') ?? el;
-  return (body.innerText || body.textContent || '').trim();
+/**
+ * True when this exact message is the one already on screen. A page that
+ * re-renders must not fall back to drawing the banner as well, or the reader
+ * gets the same sentence twice — once at the control and once at the top.
+ */
+function wasJustShown(kind: NoticeKind, text: string) {
+  return lastSignature === `${kind}:${text}` && Date.now() - lastSignatureAt < REPEAT_MS;
 }
 
-/** Whether the reader can see it without scrolling. */
-function isOnScreen(el: HTMLElement): boolean {
-  const r = el.getBoundingClientRect();
-  if (r.width === 0 && r.height === 0) return false;
-  // The top bar sits over the page, so a banner under it is not readable.
-  const top = 72;
-  return r.bottom > top + 8 && r.top < window.innerHeight - 8;
-}
+const GAP = 8;
+const WIDTH = 380;
 
-const GAP = 10;
-const TOAST_W = 340;
-
-/** Keeps one toast beside its control as the page moves under it. */
-function AnchoredToast({ toast }: { toast: Toast }) {
+/** Keeps the message beside its control as the page moves under it. */
+function ActionMessage({ toast }: { toast: Toast }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-  const Icon = ICONS[toast.kind];
 
   useLayoutEffect(() => {
     const place = () => {
-      const anchor = toast.anchor;
       const box = ref.current;
       if (!box) return;
-      const h = box.offsetHeight || 64;
-      if (!anchor || !document.contains(anchor)) { setPos(null); return; }
-      const r = anchor.getBoundingClientRect();
-      if (r.width === 0 && r.height === 0) { setPos(null); return; }
-      // Below the control by preference, above it when there is no room.
+      const h = box.offsetHeight || 68;
+      const el = toast.point.el;
+      const r = el && document.contains(el) ? el.getBoundingClientRect() : toast.point.rect;
+      if (!r) { setPos(null); return; }
+      // Under the control by preference, over it when there is no room.
       let top = r.bottom + GAP;
       if (top + h > window.innerHeight - 12) top = Math.max(12, r.top - GAP - h);
-      // Left-aligned to the control, pulled back inside the window.
-      let left = r.left;
-      left = Math.min(left, window.innerWidth - TOAST_W - 16);
-      left = Math.max(16, left);
-      setPos({ top, left });
+      let left = Math.min(r.left, window.innerWidth - WIDTH - 16);
+      setPos({ top, left: Math.max(16, left) });
     };
     place();
     window.addEventListener('resize', place);
@@ -244,44 +264,35 @@ function AnchoredToast({ toast }: { toast: Toast }) {
       window.removeEventListener('resize', place);
       window.removeEventListener('scroll', place, true);
     };
-  }, [toast.anchor, toast.id]);
+  }, [toast.id, toast.point]);
 
   useEffect(() => {
-    const t = window.setTimeout(() => dismissToast(toast.id), toast.ms);
+    const hold = HOLD_MS[toast.kind];
+    if (!hold) return;
+    const t = window.setTimeout(() => dismissToast(toast.id), hold);
     return () => window.clearTimeout(t);
-  }, [toast.id, toast.ms]);
-
-  // With no live control to point at, it falls to the corner rather than
-  // disappearing — an answer nobody sees is the bug this exists to fix.
-  const style: React.CSSProperties = pos
-    ? { top: pos.top, left: pos.left }
-    : { bottom: 24, right: 24 };
+  }, [toast.id, toast.kind]);
 
   return (
     <div
       ref={ref}
-      className={`fb-toast fb-${toast.kind} ${pos ? 'fb-toast-anchored' : 'fb-toast-corner'}`}
-      style={style}
+      className={`fb-notice fb-at-action fb-${toast.kind}`}
+      style={pos ? { top: pos.top, left: pos.left } : { visibility: 'hidden' }}
       role={toast.kind === 'error' ? 'alert' : 'status'}
     >
-      <span className="fb-toast-ico"><Icon size={16} aria-hidden /></span>
-      <div className="fb-toast-body">{toast.message}</div>
-      <button type="button" className="fb-toast-x" onClick={() => dismissToast(toast.id)} aria-label="Dismiss">
-        <X size={14} />
-      </button>
-      <span className="fb-toast-rail" style={{ animationDuration: `${toast.ms}ms` }} />
+      <Body kind={toast.kind} message={toast.message} onClose={() => dismissToast(toast.id)} />
     </div>
   );
 }
 
-/** Mounted once by the shell. Draws whatever toasts are up. */
+/** Mounted once by the shell. Draws the message that is up, if there is one. */
 export function FeedbackHost() {
-  const list = useToasts();
+  const toast = useCurrent();
   useEffect(startListening, []);
   if (typeof document === 'undefined') return null;
   return createPortal(
     <div className="fb-layer" aria-live="polite">
-      {list.map(t => <AnchoredToast key={t.id} toast={t} />)}
+      {toast && <ActionMessage key={toast.id} toast={toast} />}
     </div>,
     document.body,
   );

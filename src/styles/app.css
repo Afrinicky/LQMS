@@ -4449,169 +4449,130 @@ button.cell-mark:disabled { cursor: default; }
 /* ============================================================================
    MESSAGES — the way SECH_LIMS answers an action
    ----------------------------------------------------------------------------
-   One shape for every "saved", "could not save", "check this first". A tinted
-   ground, a semantic rail down the left edge, an icon, and body text that is
-   readable rather than coloured — the pattern every professional application
-   settles on, because a sentence set in alarm-red is harder to read at the
-   moment it matters most.
+   One shape for every "saved", "could not save", "check this first": a solid
+   colour block carrying the icon, a heading, the sentence, and a way out. It
+   is the shape a notification has in most professional software, and it reads
+   the same whether it is drawn in the page or beside the button that caused it.
 
-   The legacy class names are restyled rather than replaced, so a banner that
-   has not been migrated to <Notice> still looks like the rest of the product.
+   Nothing here moves. A message that slides in or counts itself down draws the
+   eye to the movement rather than to the sentence.
    ========================================================================= */
 
-.fb-notice,
+.fb-notice {
+  display: flex;
+  align-items: stretch;
+  margin: 12px 0;
+  border-radius: 6px;
+  background: #FFFFFF;
+  color: #1F2933;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(8, 13, 26, 0.30), 0 6px 18px rgba(8, 13, 26, 0.22);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* The colour block. Full height, one flat colour, a white glyph. */
+.fb-notice .fb-ico {
+  flex: 0 0 52px;
+  display: grid;
+  place-items: center;
+  color: #FFFFFF;
+  align-self: stretch;
+}
+
+.fb-notice .fb-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 11px 14px 12px;
+}
+.fb-notice .fb-title {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+  color: #14202E;
+  margin-bottom: 1px;
+}
+.fb-notice .fb-text {
+  color: #4A5666;
+  overflow-wrap: anywhere;
+}
+.fb-notice .fb-text > :first-child { margin-top: 0; }
+.fb-notice .fb-text > :last-child { margin-bottom: 0; }
+.fb-notice .fb-text ul { margin: 6px 0 0; padding-left: 18px; }
+.fb-notice .fb-text a { color: #1D5FD0; }
+
+.fb-notice .fb-x,
+.fb-notice .fb-x:hover,
+.fb-notice .fb-x:active {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 30px; height: 30px; min-width: 0; margin: 0 8px 0 4px; padding: 0;
+  display: grid; place-items: center;
+  border: 0; border-radius: 4px; background: none;
+  color: #98A2B0; cursor: pointer;
+  box-shadow: none; transform: none; font: inherit;
+}
+.fb-notice .fb-x:hover { color: #14202E; background: rgba(20, 32, 46, 0.07); }
+
+.fb-error   .fb-ico { background: #D0342C; }
+.fb-success .fb-ico { background: #12855B; }
+.fb-warn    .fb-ico { background: #E08A0B; }
+.fb-info    .fb-ico { background: #1D6FD8; }
+
+/* Beside the control that caused it. Positioned from Feedback.tsx. */
+.fb-layer { position: fixed; inset: 0; z-index: 2000; pointer-events: none; }
+.fb-at-action {
+  position: fixed;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  margin: 0;
+  pointer-events: auto;
+  box-shadow: 0 2px 6px rgba(8, 13, 26, 0.34), 0 16px 40px rgba(8, 13, 26, 0.40);
+}
+@media (max-width: 560px) {
+  .fb-at-action { left: 16px !important; right: 16px; width: auto; }
+}
+
+/* ----------------------------------------------------------------------------
+   The legacy banner classes, for the markup that has not been migrated to
+   <Notice>. Same colours, same weight, without the icon block.
+   ------------------------------------------------------------------------- */
+
 .error,
 .success-msg,
 .notice-ok,
 .notice-warn,
-.notice-info {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin: 10px 0;
+.notice-info,
+.banner-success {
+  margin: 12px 0;
   padding: 11px 14px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--panel);
-  color: var(--text);
+  border-radius: 6px;
+  border: 0;
+  background: #FFFFFF;
+  color: #4A5666;
   font-size: 13px;
-  line-height: 1.55;
+  line-height: 1.5;
+  box-shadow: 0 1px 3px rgba(8, 13, 26, 0.30), 0 6px 18px rgba(8, 13, 26, 0.22);
+  border-left: 6px solid var(--border);
 }
+.error ul, .notice-ok ul, .notice-warn ul, .notice-info ul { margin: 6px 0 0; padding-left: 18px; }
+.error a, .notice-ok a, .notice-warn a, .notice-info a { color: #1D5FD0; }
 
-.fb-notice-ico { flex: 0 0 auto; margin-top: 1px; }
-.fb-notice-body { min-width: 0; flex: 1 1 auto; }
-.fb-notice-body > :first-child { margin-top: 0; }
-.fb-notice-body > :last-child { margin-bottom: 0; }
-.fb-notice ul, .notice-ok ul, .notice-warn ul, .error ul { margin: 6px 0 0; padding-left: 18px; line-height: 1.6; }
+.error                            { border-left-color: #D0342C; }
+.notice-ok, .success-msg, .banner-success { border-left-color: #12855B; }
+.notice-warn                      { border-left-color: #E08A0B; }
+.notice-info, .notice             { border-left-color: #1D6FD8; }
 
-/* --- error / danger --- */
-.fb-error, .error, .badge.error {
-  background: linear-gradient(0deg, rgba(255, 107, 125, 0.07), rgba(255, 107, 125, 0.07)), var(--card);
-  border-color: rgba(255, 107, 125, 0.22);
-  box-shadow: inset 3px 0 0 var(--danger);
-  color: #F6E6E9;
-}
-.fb-error .fb-notice-ico { color: var(--danger); }
-
-/* --- success --- */
-.fb-success, .notice-ok, .success-msg, .banner-success {
-  background: linear-gradient(0deg, rgba(52, 211, 153, 0.07), rgba(52, 211, 153, 0.07)), var(--card);
-  border-color: rgba(52, 211, 153, 0.22);
-  box-shadow: inset 3px 0 0 var(--success);
-  color: #E2F6EE;
-}
-.fb-success .fb-notice-ico { color: var(--success); }
-
-/* --- warning --- */
-.fb-warn, .notice-warn {
-  background: linear-gradient(0deg, rgba(245, 181, 68, 0.07), rgba(245, 181, 68, 0.07)), var(--card);
-  border-color: rgba(245, 181, 68, 0.22);
-  box-shadow: inset 3px 0 0 var(--warning);
-  color: #F7EEDD;
-}
-.fb-warn .fb-notice-ico { color: var(--warning); }
-
-/* --- information --- */
-.fb-info, .notice-info, .notice {
-  background: linear-gradient(0deg, rgba(78, 141, 255, 0.07), rgba(78, 141, 255, 0.07)), var(--card);
-  border-color: rgba(78, 141, 255, 0.22);
-  box-shadow: inset 3px 0 0 var(--info);
-  color: #E3EAF7;
-}
-.fb-info .fb-notice-ico { color: var(--info); }
-
-/* A badge is a chip, not a banner — keep it small even though it shares the
-   .error name with the banner above. */
+/* A badge is a chip, not a banner, even though it shares the .error name. */
 .badge.error {
   display: inline-flex; padding: 2px 9px; margin: 0; gap: 5px;
   font-size: 11.5px; border-radius: var(--radius-pill); box-shadow: none;
+  border: 1px solid rgba(255, 107, 125, 0.3); border-left-width: 1px;
+  background: var(--danger-bg); color: var(--danger);
 }
 /* Field-level errors stay a line of text under the field. */
 .form-error, .pd-error, .pw-error {
   display: block; background: none; border: 0; box-shadow: none;
   padding: 0; margin: 4px 0 0; color: var(--danger); font-size: 12px;
-}
-
-/* ----------------------------------------------------------------------------
-   The same message, taken to the control that caused it.
-   Only raised when the banner above is off-screen (see Feedback.tsx).
-   ------------------------------------------------------------------------- */
-
-.fb-layer {
-  position: fixed; inset: 0; z-index: 2000;
-  pointer-events: none;
-}
-
-.fb-toast {
-  position: fixed;
-  width: 340px; max-width: calc(100vw - 32px);
-  display: flex; align-items: flex-start; gap: 10px;
-  padding: 12px 34px 13px 12px;
-  border-radius: 12px;
-  border: 1px solid var(--border-strong);
-  background: var(--panel-2);
-  color: var(--text);
-  font-size: 13px; line-height: 1.5;
-  box-shadow: 0 16px 44px rgba(2, 8, 23, 0.62), 0 2px 8px rgba(2, 8, 23, 0.4);
-  overflow: hidden;
-  pointer-events: auto;
-  animation: fb-toast-in 160ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-.fb-toast-corner { animation: fb-toast-in-corner 180ms cubic-bezier(0.16, 1, 0.3, 1); }
-
-@keyframes fb-toast-in {
-  from { opacity: 0; transform: translateY(-6px) scale(0.985); }
-  to   { opacity: 1; transform: none; }
-}
-@keyframes fb-toast-in-corner {
-  from { opacity: 0; transform: translateY(10px) scale(0.985); }
-  to   { opacity: 1; transform: none; }
-}
-
-.fb-toast-ico {
-  flex: 0 0 auto; width: 26px; height: 26px; border-radius: 8px;
-  display: grid; place-items: center;
-}
-.fb-toast-body { flex: 1 1 auto; min-width: 0; padding-top: 4px; word-break: break-word; }
-
-.fb-toast-x {
-  position: absolute; top: 8px; right: 8px;
-  width: 22px; height: 22px; padding: 0;
-  display: grid; place-items: center;
-  border: 0; border-radius: 6px; background: none;
-  color: var(--faint); cursor: pointer;
-}
-.fb-toast-x:hover { background: rgba(255, 255, 255, 0.08); color: var(--text); }
-
-.fb-toast-rail {
-  position: absolute; left: 0; bottom: 0; height: 2px; width: 100%;
-  transform-origin: left center;
-  animation: fb-rail linear forwards;
-}
-@keyframes fb-rail { from { transform: scaleX(1); } to { transform: scaleX(0); } }
-
-.fb-toast.fb-error   { border-color: rgba(255, 107, 125, 0.34); }
-.fb-toast.fb-error   .fb-toast-ico { background: var(--danger-bg); color: var(--danger); }
-.fb-toast.fb-error   .fb-toast-rail { background: var(--danger); }
-.fb-toast.fb-success { border-color: rgba(52, 211, 153, 0.34); }
-.fb-toast.fb-success .fb-toast-ico { background: var(--success-bg); color: var(--success); }
-.fb-toast.fb-success .fb-toast-rail { background: var(--success); }
-.fb-toast.fb-warn    { border-color: rgba(245, 181, 68, 0.34); }
-.fb-toast.fb-warn    .fb-toast-ico { background: var(--warning-bg); color: var(--warning); }
-.fb-toast.fb-warn    .fb-toast-rail { background: var(--warning); }
-.fb-toast.fb-info    { border-color: rgba(78, 141, 255, 0.34); }
-.fb-toast.fb-info    .fb-toast-ico { background: var(--info-bg); color: var(--info); }
-.fb-toast.fb-info    .fb-toast-rail { background: var(--info); }
-
-/* Toasts stack from the corner when the control that raised them has gone. */
-.fb-toast-corner ~ .fb-toast-corner { bottom: 104px; }
-.fb-toast-corner ~ .fb-toast-corner ~ .fb-toast-corner { bottom: 184px; }
-
-@media (max-width: 560px) {
-  .fb-toast { left: 16px !important; right: 16px; width: auto; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .fb-toast { animation: none; }
-  .fb-toast-rail { animation: none; opacity: 0.5; }
 }
