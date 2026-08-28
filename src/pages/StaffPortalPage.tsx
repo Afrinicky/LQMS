@@ -216,7 +216,7 @@ function PortalHero({ onOpen }: { onOpen: (tab: PortalTab) => void }) {
    ------------------------------------------------------------------------- */
 function PortalHome({ onOpen }: { onOpen: (tab: PortalTab) => void }) {
   const navigate = useNavigate();
-  const { inbox, declarations, documents, tasks, queue, profile, reloadInbox } = usePortal();
+  const { inbox, declarations, documents, tasks, queue, profile, reload, setNotice, reloadInbox } = usePortal();
   const { data } = useDutyReminders();
   const { assigned, coming } = useOwedWork();
   // The landing shows the first few rows of the same list the My Tasks face
@@ -360,7 +360,10 @@ function PortalHome({ onOpen }: { onOpen: (tab: PortalTab) => void }) {
               <div className="pp-clear"><Sparkles size={18} /><span>Nothing is assigned to you right now.</span></div>
             ) : (
               <ul className="pt-list">
-                {assigned.slice(0, 5).map(r => <OwedRow key={r.key} row={r} onOpen={setOpenTask} />)}
+                {assigned.slice(0, 5).map(r => (
+                  <OwedRow key={r.key} row={r} onOpen={setOpenTask}
+                    onSigned={() => { setNotice('Signed. It is recorded against the document.'); void reload(); }} />
+                ))}
               </ul>
             )}
             {assigned.length > 5 && (

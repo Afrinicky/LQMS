@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, Suspense, lazy, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, BarMeter, BarChart, CHART_COLORS, ModuleAlerts, DetailModal, RegisterSearch } from '../components/ui';
 import { useModules } from '../hooks/useModules';
@@ -16,8 +17,14 @@ import OrientationInduction from './personnel/OrientationInduction';
 import type {
   Section, Department, Staff, Position,
   StaffDocument, StaffDeclaration, TrainingEvent, DutyRoster,
-  PersonnelSummary, MyTasks, MyProfile, RosterCoverage, StaffSuggestionsResponse, ProfessionalRank
+  PersonnelSummary, MyTasks, MyProfile, RosterCoverage, StaffSuggestionsResponse, ProfessionalRank,
+  JobDescriptionDoc, JobDescriptionRegister,
 } from '../../shared/types/api';
+
+// Document control's own viewer, so a job description previewed from a
+// personnel screen is the same document, at the same version, as the one read
+// in Documents & Records. Lazy — Personnel Management should not carry it.
+const DocumentViewer = lazy(() => import('./DocumentControlPage').then(m => ({ default: m.DocumentViewer })));
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
@@ -297,7 +304,7 @@ export function PersonnelManagementPage() {
     catch (e) { setError((e as Error).message); }
   }
 
-  const tabs = ['Dashboard', 'Master Personnel Register', 'Add Staff', 'Staff Documents', 'Orientation & Induction', 'Declarations', 'Training Events', 'Competency Assessments', 'Performance Appraisals', 'Technical Authorizations', 'Duty Roster', 'Unit Reassignments', 'Unit Supervisors', 'Bench Schedules', 'Reports'];
+  const tabs = ['Dashboard', 'Master Personnel Register', 'Add Staff', 'Staff Documents', 'Job Descriptions', 'Orientation & Induction', 'Declarations', 'Training Events', 'Competency Assessments', 'Performance Appraisals', 'Technical Authorizations', 'Duty Roster', 'Unit Reassignments', 'Unit Supervisors', 'Bench Schedules', 'Reports'];
 
   return <div className="module-page">
     <PageHeader eyebrow="Personnel Management" title="Personnel Management" subtitle="Personnel records — competence, authorisation, training, induction, and ethics." />
@@ -407,6 +414,8 @@ export function PersonnelManagementPage() {
         </form>}
       </div>
     </>}
+
+    {tab === 'Job Descriptions' && <JobDescriptionsTab onError={setError} />}
 
     {tab === 'Staff Documents' && <>
       {can('personnel.register', 'create') && <form className="form-grid" onSubmit={submitStaffDoc}>
@@ -529,4 +538,115 @@ export function PersonnelManagementPage() {
       <p className="muted">Training-hours-per-member-of-staff and authorisation expiry trend reports follow in a later phase.</p>
     </div>}
   </div>;
+}
+
+
+/* ============================================================================
+   Job Descriptions
+   ----------------------------------------------------------------------------
+   Personnel Management's view of documents that live in Document Control. It
+   deliberately holds no copies: it reads the register and lists what is issued,
+   for which post, and — the part an assessor actually asks about — which active
+   posts have no description at all.
+
+   Uploading one is document control's job and stays there, so this view links
+   across rather than growing a second upload form. Two ways to create the same
+   controlled document is two ways for it to be created wrongly.
+   ========================================================================= */
+function JobDescriptionsTab({ onError }: { onError: (m: string | null) => void }) {
+  const navigate = useNavigate();
+  const { can } = usePermissions();
+  const [data, setData] = useState<JobDescriptionRegister | null>(null);
+  const [reading, setReading] = useState<JobDescriptionDoc | null>(null);
+
+  useEffect(() => {
+    api<JobDescriptionRegister>('/personnel/job-descriptions')
+      .then(setData)
+      .catch(e => { onError((e as Error).message); setData({ documents: [], gaps: [] }); });
+  }, [onError]);
+
+  if (!data) return <p className="muted">Loading the job description register…</p>;
+
+  const mayAuthor = can('documents.authoring', 'create');
+
+  return <>
+    <div className="section-head">
+      <div>
+        <h3 style={{ margin: 0 }}>Job descriptions</h3>
+        <p className="muted" style={{ marginTop: 4, maxWidth: '72ch' }}>
+          Job descriptions are controlled documents: written, reviewed, approved and versioned in
+          Documents &amp; Records like any other. Naming the post one describes is what puts it here,
+          and on the portal of every member of staff holding that post — from one upload, with no
+          second copy to drift out of step.
+        </p>
+      </div>
+      {mayAuthor && (
+        <button type="button" className="secondary"
+          onClick={() => navigate('/documents?new=Job%20Description')}>
+          Upload a job description
+        </button>
+      )}
+    </div>
+
+    <table className="data-table">
+      <thead><tr><th>Post / person</th><th>Document</th><th>Version</th><th>Status</th><th>Next review</th><th /></tr></thead>
+      <tbody>
+        {data.documents.map(d => (
+          <tr key={d.id}>
+            <td>
+              <strong>{d.position_title ?? d.staff_name ?? '—'}</strong>
+              {d.staff_name && d.applies_to_staff_id ? <div className="muted">issued to this person by name</div> : null}
+              {!d.position_title && !d.staff_name ? <div className="muted">not linked to a post yet — it will not reach anybody&rsquo;s portal</div> : null}
+            </td>
+            <td>{d.title}<div className="muted">{d.document_code ?? '—'}</div></td>
+            <td>{d.version_number ?? '—'}</td>
+            <td>{formatBadge(d.status)}</td>
+            <td>{d.next_review_date ?? '—'}</td>
+            <td style={{ whiteSpace: 'nowrap' }}>
+              {d.current_version_id
+                ? <button type="button" className="pq-link" onClick={() => setReading(d)}>Preview</button>
+                : <span className="muted">no file yet</span>}
+              <button type="button" className="pq-link" onClick={() => navigate(`/documents?open=${d.id}`)}>Open in Documents</button>
+            </td>
+          </tr>
+        ))}
+        {data.documents.length === 0 && (
+          <tr><td colSpan={6} className="muted">No job description has been registered yet.</td></tr>
+        )}
+      </tbody>
+    </table>
+
+    {data.gaps.length > 0 && <>
+      <div className="section-head" style={{ marginTop: 22 }}>
+        <h3 style={{ margin: 0 }}>Posts with no issued description</h3>
+      </div>
+      <p className="muted" style={{ marginTop: 0 }}>
+        ISO 15189 expects every post to have a documented description of its responsibilities and
+        authority. These are the ones that do not, with the number of people currently holding each.
+      </p>
+      <ul className="jd-gaps">
+        {data.gaps.map(g => (
+          <li key={g.id}>
+            <span>{g.title}</span>
+            <span className={`badge ${g.staff_count > 0 ? 'warning' : ''}`}>
+              {g.staff_count === 0 ? 'nobody in post' : g.staff_count === 1 ? '1 member of staff' : `${g.staff_count} members of staff`}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </>}
+
+    {reading && (
+      <Suspense fallback={<div className="card">Opening the document…</div>}>
+        <DocumentViewer
+          docId={reading.id}
+          versionId={Number(reading.current_version_id ?? 0)}
+          onClose={() => setReading(null)}
+          onAttest={() => setReading(null)}
+          onSaved={() => undefined}
+          onError={onError}
+        />
+      </Suspense>
+    )}
+  </>;
 }

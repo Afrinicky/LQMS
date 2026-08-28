@@ -30,7 +30,15 @@ const TAB_MODULE = 'documents';
 const tabBar = (active: string, tabs: string[], onChange: (name: string) => void) =>
   <PermissionTabs moduleKey={TAB_MODULE} tabs={tabs} active={active} onChange={onChange} />;
 
-const DOCUMENT_TYPES = ['SOP', 'Policy', 'Manual', 'Form', 'Register', 'Log', 'Tracker', 'Job Aid', 'Quality Manual', 'Handbook', 'Safety Manual', 'Master List', 'External Document', 'Reference Document', 'Other'];
+const DOCUMENT_TYPES = ['SOP', 'Policy', 'Manual', 'Form', 'Register', 'Log', 'Tracker', 'Job Aid', 'Job Description', 'Quality Manual', 'Handbook', 'Safety Manual', 'Master List', 'External Document', 'Reference Document', 'Other'];
+/**
+ * A job description is a controlled document like any other, with one addition:
+ * it is the only kind whose purpose is to describe a particular job, so it can
+ * say which. Naming the position puts it in front of everybody who holds that
+ * post — in Personnel Management and in each of their portals — from this one
+ * upload, with no second copy to drift out of step.
+ */
+const JOB_DESCRIPTION_TYPE = 'Job Description';
 const ACCESS_LEVELS = ['public', 'internal', 'restricted', 'confidential'];
 const REVIEW_OUTCOMES = ['no_change', 'minor_revision', 'major_revision', 'obsolete'];
 const TARGET_TYPES = ['staff', 'position', 'section', 'department'];
@@ -115,7 +123,7 @@ async function fetchBlobUrl(path: string): Promise<string> {
   return URL.createObjectURL(await r.blob());
 }
 
-const emptyDocForm = { documentCode: '', title: '', documentType: 'SOP', sectionCategory: '', departmentId: '', sectionId: '', ownerStaffId: '', reviewFrequencyMonths: '12', nextReviewDate: '', accessLevel: 'internal', isControlled: true, fileId: '', versionNumber: '1.0', revisionSummary: '', effectiveDate: '', formatMedium: '', controlledLocations: '', retentionPeriod: '', remarks: '' };
+const emptyDocForm = { documentCode: '', title: '', documentType: 'SOP', sectionCategory: '', departmentId: '', sectionId: '', ownerStaffId: '', appliesToPositionId: '', appliesToStaffId: '', reviewFrequencyMonths: '12', nextReviewDate: '', accessLevel: 'internal', isControlled: true, fileId: '', versionNumber: '1.0', revisionSummary: '', effectiveDate: '', formatMedium: '', controlledLocations: '', retentionPeriod: '', remarks: '' };
 const emptyVersionForm = { versionNumber: '', revisionSummary: '', fileId: '', effectiveDate: '' };
 const emptyReviewForm = { reviewDate: '', reviewOutcome: 'no_change', reviewNotes: '', nextReviewDate: '', actionRequired: false };
 const emptyAttestForm = { targetType: 'staff', staffIds: [] as number[], positionId: '', sectionId: '', departmentId: '', dueDate: '', notes: '' };
@@ -941,6 +949,25 @@ export function DocumentControlPage() {
       <label>Department<select value={docForm.departmentId} onChange={e => setDocForm({ ...docForm, departmentId: e.target.value })}><option value="">—</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
       <label>Section<select value={docForm.sectionId} onChange={e => setDocForm({ ...docForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
       <label>Owner / author<select value={docForm.ownerStaffId} onChange={e => setDocForm({ ...docForm, ownerStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+      {/* Only a job description asks who it is about. Every other document type
+          is about a process, and offering these fields for an SOP would invite
+          somebody to fill them in and wonder why nothing happened. */}
+      {docForm.documentType === JOB_DESCRIPTION_TYPE && <>
+        <label>Describes which post
+          <select value={docForm.appliesToPositionId} onChange={e => setDocForm({ ...docForm, appliesToPositionId: e.target.value, appliesToStaffId: e.target.value ? '' : docForm.appliesToStaffId })}>
+            <option value="">— choose the position —</option>
+            {positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+          </select>
+          <span className="hint">Once issued, everybody holding this post sees it on their own portal and on their personnel record.</span>
+        </label>
+        <label>…or one named member of staff
+          <select value={docForm.appliesToStaffId} onChange={e => setDocForm({ ...docForm, appliesToStaffId: e.target.value, appliesToPositionId: e.target.value ? '' : docForm.appliesToPositionId })}>
+            <option value="">— none —</option>
+            {staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
+          </select>
+          <span className="hint">For a personalised description. A description issued to one person overrides the one for their post.</span>
+        </label>
+      </>}
       <label>Review frequency (months)<input type="number" min={1} value={docForm.reviewFrequencyMonths} onChange={e => setDocForm({ ...docForm, reviewFrequencyMonths: e.target.value })} /></label>
       <label>Next review date<input type="date" value={docForm.nextReviewDate} onChange={e => setDocForm({ ...docForm, nextReviewDate: e.target.value })} /></label>
       <label>Access level<select value={docForm.accessLevel} onChange={e => setDocForm({ ...docForm, accessLevel: e.target.value })}>{ACCESS_LEVELS.map(a => <option key={a} value={a}>{a}</option>)}</select></label>

@@ -3,6 +3,7 @@ import { api, API_BASE, getToken } from '../../services/api';
 import type {
   MyProfile, MyTasks, MyDeclarations, StaffDocument, NotificationRecord,
   StaffSuggestionsResponse, UserTaskQueueItem, ReviewCalendarItem, StaffCpdRecord,
+  JobDescriptionDoc,
 } from '../../../shared/types/api';
 
 /**
@@ -62,6 +63,7 @@ export type PortalData = {
   calendar: ReviewCalendarItem[];
   suggestions: StaffSuggestionsResponse | null;
   cpd: StaffCpdRecord[];
+  jobDescriptions: JobDescriptionDoc[];
   hasSignature: boolean;
   signatureUrl: string | null;
   photoUrl: string | null;
@@ -102,6 +104,7 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
   const [calendar, setCalendar] = useState<ReviewCalendarItem[]>([]);
   const [suggestions, setSuggestions] = useState<StaffSuggestionsResponse | null>(null);
   const [cpd, setCpd] = useState<StaffCpdRecord[]>([]);
+  const [jobDescriptions, setJobDescriptions] = useState<JobDescriptionDoc[]>([]);
   const [hasSignature, setHasSignature] = useState(false);
   const [signatureUrl, setSignatureUrl] = useState<string | null>(null);
   const [photoStamp, setPhotoStamp] = useState(0);
@@ -127,6 +130,9 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
       api<MyDeclarations>('/personnel/my-declarations').then(setDeclarations).catch(() => undefined),
       api<StaffDocument[]>('/personnel/my-documents').then(setDocuments).catch(() => undefined),
       api<StaffCpdRecord[]>('/personnel/my-training').then(setCpd).catch(() => setCpd([])),
+      // The job description for the post they hold, read straight from the
+      // document register — not a copy of it.
+      api<JobDescriptionDoc[]>('/personnel/my-job-descriptions').then(setJobDescriptions).catch(() => setJobDescriptions([])),
       api<UserTaskQueueItem[]>('/notifications/tasks?mine=true').then(setQueue).catch(() => setQueue([])),
       // The review calendar is laboratory-wide and gated on its own feature;
       // the portal keeps only the rows naming this person, and simply shows
@@ -232,11 +238,11 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
   const staff = (profile?.staff as unknown as PortalStaff | null) ?? null;
 
   const value = useMemo<PortalData>(() => ({
-    profile, staff, tasks, declarations, documents, inbox, queue, calendar, suggestions, cpd,
+    profile, staff, tasks, declarations, documents, inbox, queue, calendar, suggestions, cpd, jobDescriptions,
     hasSignature, signatureUrl, photoUrl, loading, error, notice,
     setNotice, setError, reload, reloadInbox,
     uploadSignature, uploadPhoto, removePhoto, saveProfile, linkStaff,
-  }), [profile, staff, tasks, declarations, documents, inbox, queue, calendar, suggestions, cpd,
+  }), [profile, staff, tasks, declarations, documents, inbox, queue, calendar, suggestions, cpd, jobDescriptions,
     hasSignature, signatureUrl, photoUrl, loading, error, notice, reload, reloadInbox,
     uploadSignature, uploadPhoto, removePhoto, saveProfile, linkStaff]);
 

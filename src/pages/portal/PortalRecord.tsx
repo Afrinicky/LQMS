@@ -1,10 +1,16 @@
-import { useRef, useState } from 'react';
+import { Suspense, lazy, useRef, useState } from 'react';
 import {
-  AlertTriangle, BadgeCheck, IdCard, KeyRound, Link2, Loader2, Lock,
+  AlertTriangle, BadgeCheck, BriefcaseBusiness, IdCard, KeyRound, Link2, Loader2, Lock,
   Pencil, PenLine, ShieldCheck, Trash2, UserRound, X,
 } from 'lucide-react';
 import { ChangePasswordModal } from '../../components/ChangePasswordModal';
 import { titleCase, usePortal, type SelfEditableProfile } from './portalData';
+import type { JobDescriptionDoc } from '../../../shared/types/api';
+
+// The controlled-document window, borrowed so a job description is read here
+// exactly as it is read in Document Control — same version, same watermark,
+// same record. Lazy, so My Record does not carry it for everyone.
+const DocumentViewer = lazy(() => import('../DocumentControlPage').then(m => ({ default: m.DocumentViewer })));
 
 /**
  * My record — the working file the laboratory holds on this person.
@@ -123,6 +129,86 @@ function PhotoPanel() {
         {problem && <p className="pd-error"><AlertTriangle size={13} /> {problem}</p>}
       </div>
     </div>
+  );
+}
+
+/* ----------------------------------------------------------------------------
+   My job description
+   ------------------------------------------------------------------------- */
+
+/**
+ * The description of the job this person actually holds.
+ *
+ * It is not a copy kept on the staff file — it is the controlled document
+ * itself, read from the register, opened in document control's own viewer.
+ * That matters more than it sounds: a job description that exists twice is a
+ * job description that will eventually say two different things, and the one
+ * the member of staff reads will be the stale one.
+ *
+ * So this panel holds no content of its own. It says which document applies,
+ * which version is in force, and opens it. When a new version is issued, what
+ * is read here changes with it, because it is the same document.
+ */
+function JobDescriptionPanel() {
+  const { jobDescriptions, setError } = usePortal();
+  const [reading, setReading] = useState<JobDescriptionDoc | null>(null);
+
+  return (
+    <section className="portal-panel">
+      <div className="pp-head">
+        <div>
+          <h3><BriefcaseBusiness size={16} /> My job description</h3>
+          <p>
+            What your post is responsible for, as the laboratory has approved it. This is the
+            controlled document itself — when a new version is issued, this is the new version.
+          </p>
+        </div>
+        {jobDescriptions.length > 0 && <span className="pp-count">{jobDescriptions.length}</span>}
+      </div>
+
+      {jobDescriptions.length === 0 ? (
+        <p className="muted">
+          No job description has been issued for your post yet. They are uploaded as controlled
+          documents under Documents &amp; Records and appear here as soon as they are approved.
+        </p>
+      ) : (
+        <ul className="pjd-list">
+          {jobDescriptions.map(d => (
+            <li key={d.id}>
+              <div className="pjd-main">
+                <span className="pjd-title">{d.title}</span>
+                <span className="pjd-meta">
+                  {d.document_code && <span className="badge">{d.document_code}</span>}
+                  <span>{d.applies_to_staff_id ? 'Issued to you by name' : `For the post of ${d.position_title ?? '—'}`}</span>
+                  {d.version_number && <span>v{d.version_number}</span>}
+                  {d.effective_date && <span>effective {d.effective_date}</span>}
+                  <span className={`badge ${d.status}`}>{String(d.status).replace(/_/g, ' ')}</span>
+                </span>
+              </div>
+              {/* A description registered but not yet given a file has nothing
+                  to open. Offering "Read it" and then showing an empty window
+                  is worse than saying so on the row. */}
+              {d.current_version_id
+                ? <button type="button" className="pt-open" onClick={() => setReading(d)}>Read it</button>
+                : <span className="muted pjd-nofile">No file attached yet</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {reading && (
+        <Suspense fallback={<div className="portal-drawer-wrap"><div className="portal-drawer"><p className="muted">Opening the document…</p></div></div>}>
+          <DocumentViewer
+            docId={reading.id}
+            versionId={Number(reading.current_version_id ?? 0)}
+            onClose={() => setReading(null)}
+            onAttest={() => setReading(null)}
+            onSaved={() => undefined}
+            onError={setError}
+          />
+        </Suspense>
+      )}
+    </section>
   );
 }
 
@@ -355,6 +441,8 @@ export default function PortalRecord() {
           )}
         </section>
       </div>
+
+      <JobDescriptionPanel />
 
       <section className="portal-panel">
         <div className="pp-head">

@@ -5530,6 +5530,26 @@ CREATE INDEX IF NOT EXISTS idx_supply_sources_active ON supply_sources(is_active
   // the register can mark it and the viewer can be reached from either side.
   const docCoreCols = new Set((database.prepare('PRAGMA table_info(documents)').all() as Array<{ name: string }>).map(c => c.name));
   if (!docCoreCols.has('core_slot_key')) database.exec('ALTER TABLE documents ADD COLUMN core_slot_key TEXT');
+
+  // Who a document is ABOUT, as opposed to who owns it.
+  //
+  // A job description is a controlled document like any other — it is written,
+  // reviewed, approved, versioned and issued through document control — but it
+  // is also the one kind of document whose whole purpose is to describe a
+  // particular job. Until now there was nowhere to say which job, so a
+  // laboratory could register "Job Description — Biomedical Scientist" and the
+  // Biomedical Scientists still had no way to find it.
+  //
+  // `owner_position_id` already exists and means something different: the post
+  // RESPONSIBLE for keeping the document current. These two say who it APPLIES
+  // to. A job description normally names a position, and everybody holding that
+  // position sees it; a laboratory that issues a personalised description names
+  // the staff member instead. Both are optional and both are ignored for every
+  // other document type.
+  if (!docCoreCols.has('applies_to_position_id')) database.exec('ALTER TABLE documents ADD COLUMN applies_to_position_id INTEGER REFERENCES positions(id)');
+  if (!docCoreCols.has('applies_to_staff_id')) database.exec('ALTER TABLE documents ADD COLUMN applies_to_staff_id INTEGER REFERENCES staff(id)');
+  database.exec('CREATE INDEX IF NOT EXISTS idx_documents_applies_position ON documents(applies_to_position_id)');
+  database.exec('CREATE INDEX IF NOT EXISTS idx_documents_applies_staff ON documents(applies_to_staff_id)');
   // Adopt whatever already matches a slot's document type, so a laboratory that
   // registered its manuals before this existed finds them already in place.
   database.exec(`UPDATE core_document_slots SET document_id = (
