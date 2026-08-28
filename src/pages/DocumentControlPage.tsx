@@ -1394,7 +1394,14 @@ function WordToolbar({ editorRef }: { editorRef: { current: HTMLDivElement | nul
   </div>;
 }
 
-function DocumentViewer(props: { docId: number; versionId: number; attestationId?: number; workflowStatus?: string; documents?: DocumentRecord[]; onWorkflowAction?: (action: string) => Promise<void>; onClose: () => void; onAttest: (attId: number, docId: number) => void; onSaved: () => void; onError: (m: string) => void }) {
+/**
+ * The controlled-document window. Exported because My Portal opens it too: a
+ * member of staff who owes an attestation should read and sign the document
+ * where they were told about it, rather than being sent to a workspace to
+ * find it. It is lazy-imported there so the portal does not carry document
+ * control's weight for everyone who never opens a document.
+ */
+export function DocumentViewer(props: { docId: number; versionId: number; attestationId?: number; workflowStatus?: string; documents?: DocumentRecord[]; onWorkflowAction?: (action: string) => Promise<void>; onClose: () => void; onAttest: (attId: number, docId: number) => void; onSaved: () => void; onError: (m: string) => void }) {
   const { docId, versionId, attestationId, workflowStatus, documents, onWorkflowAction, onClose, onAttest, onSaved, onError } = props;
   const { can } = usePermissions();
   // Writing a new version of a controlled document — including one that arrives

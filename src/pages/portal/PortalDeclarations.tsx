@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { ArrowRight, FileSignature, Printer } from 'lucide-react';
 import { API_BASE, getToken } from '../../services/api';
 import { downloadFileById, titleCase, usePortal } from './portalData';
+import PortalTaskDrawer, { type PortalTaskTarget } from './PortalTaskDrawer';
 import type { MyDeclaration } from '../../../shared/types/api';
 
 /**
@@ -30,9 +30,11 @@ async function signatureDataUrl(): Promise<string | null> {
 }
 
 export default function PortalDeclarations() {
-  const navigate = useNavigate();
   const { declarations, profile, staff, hasSignature, setError } = usePortal();
   const [reading, setReading] = useState<MyDeclaration | null>(null);
+  // Signing happens here, over the portal — the same drawer My Tasks opens, so
+  // there is one way to sign a declaration however you reached it.
+  const [signing, setSigning] = useState<PortalTaskTarget | null>(null);
 
   const name = staff?.full_name || profile?.user.fullName || '';
 
@@ -80,7 +82,7 @@ export default function PortalDeclarations() {
         <div className="pp-head">
           <div>
             <h3><FileSignature size={16} /> Awaiting your signature</h3>
-            <p>A declaration is not in force until you have read and signed it. Each one opens where you sign it.</p>
+            <p>A declaration is not in force until you have read and signed it. Open one and sign it here.</p>
           </div>
           {declarations.pending.length > 0 && <span className="pp-count crit">{declarations.pending.length}</span>}
         </div>
@@ -92,7 +94,7 @@ export default function PortalDeclarations() {
               <li key={`p-${d.id}`} className="pt-row sev-warn">
                 <span className="pt-rail warn" />
                 <button type="button" className="pt-row-main"
-                  onClick={() => navigate(`/organisation?tab=Code%20of%20Conduct&form=${d.id}`)}>
+                  onClick={() => setSigning({ kind: 'declaration', declaration: d })}>
                   <span className="pt-row-title">{d.title}</span>
                   <span className="pt-row-meta">
                     <span className="badge">{titleCase(d.form_type)}</span>
@@ -102,7 +104,7 @@ export default function PortalDeclarations() {
                 </button>
                 <div className="pt-row-side">
                   <button type="button" className="pt-open"
-                    onClick={() => navigate(`/organisation?tab=Code%20of%20Conduct&form=${d.id}`)}>
+                    onClick={() => setSigning({ kind: 'declaration', declaration: d })}>
                     Read &amp; sign <ArrowRight size={13} />
                   </button>
                 </div>
@@ -179,6 +181,8 @@ export default function PortalDeclarations() {
           </div>
         </div>
       )}
+
+      {signing && <PortalTaskDrawer target={signing} onClose={() => setSigning(null)} />}
     </div>
   );
 }

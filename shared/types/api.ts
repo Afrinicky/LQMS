@@ -405,6 +405,20 @@ export type DeclarationTemplate = { key:string; formType:string; title:string; p
 export type EthicalDeclarationSignature = { id:number; form_id:number; staff_id:number; staff_name?:string|null; employee_no?:string|null; section_name?:string|null; signed_at:string; conflict_declared:number; conflict_details?:string|null; affirmation_text?:string|null; notes?:string|null; signed_file_id?:number|null; signed_file_name?:string|null; signature_file_id?:number|null };
 export type MyDeclaration = { id:number; form_number?:string|null; title:string; form_type:string; version?:string|null; effective_date?:string|null; body_content?:string|null; acknowledgement_statement?:string|null; file_id?:number|null; file_name?:string|null; issued_by?:string|null; signature_id?:number; signed_at?:string; conflict_declared?:number; conflict_details?:string|null; affirmation_text?:string|null; signed_file_id?:number|null };
 export type MyDeclarations = { signed: MyDeclaration[]; pending: MyDeclaration[] };
+/**
+ * Training a member of staff recorded about themselves — the weekend course,
+ * the webinar, the qualification taken in their own time. Separate from the
+ * laboratory's training register on purpose: a record its subject entered is a
+ * declaration until Personnel Management verifies it against the certificate.
+ */
+export type StaffCpdRecord = {
+  id:number; staff_id:number; title:string; provider?:string|null; training_type:string;
+  start_date?:string|null; end_date?:string|null; hours?:number|null; location?:string|null;
+  description?:string|null; file_id?:number|null; file_name?:string|null;
+  verification_status:'declared'|'verified'|'rejected'|string;
+  verified_by_staff_id?:number|null; verified_by_name?:string|null; verified_at?:string|null;
+  verifier_remarks?:string|null; created_at:string; updated_at?:string|null;
+};
 export type ContinuityPlan = { id:number; plan_number:string; position_id?:number|null; position_title?:string|null; key_role:string; deputy_position_id?:number|null; deputy_position_title?:string|null; deputy_staff_id?:number|null; deputy_name?:string|null; acting_arrangement?:string|null; authority_scope?:string|null; handover_procedure?:string|null; activation_trigger?:string|null; training_status?:string|null; last_tested_date?:string|null; next_review_date?:string|null; status:string; notes?:string|null; created_at:string; updated_at?:string|null };
 export type QtReviewConfig = { id:number; area_key:string; area_label:string; frequency:string; responsible_staff_id?:number|null; responsible_name?:string|null; next_review_date?:string|null; last_review_date?:string|null; is_active:number; notes?:string|null };
 export type QtReview = { id:number; review_number:string; area_key:string; period_start:string; period_end:string; reviewed_by_staff_id?:number|null; reviewer_name?:string|null; reviewed_at?:string|null; data_snapshot?:string|null; findings?:string|null; recurrent_problems?:string|null; actions_planned?:string|null; status:string; linked_nc_id?:number|null; linked_capa_id?:number|null; follow_up_due_date?:string|null; follow_up_status:string; next_review_due?:string|null; created_at:string; updated_at?:string|null };

@@ -1,33 +1,39 @@
-import { useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ArrowRight, CheckCircle2, ClipboardList, GraduationCap, ListChecks, Sparkles } from 'lucide-react';
-import { api } from '../../services/api';
+import { useMemo, useState } from 'react';
+import { ArrowRight, ClipboardList, GraduationCap, Sparkles } from 'lucide-react';
 import DutyTodoCard from '../../components/DutyTodoCard';
-import { MODULES } from '../../../shared/constants/modules';
 import { dueTone, titleCase, usePortal } from './portalData';
+import PortalTaskDrawer, { type PortalTaskTarget } from './PortalTaskDrawer';
 
 /**
- * My tasks — one list of everything this person owes, whatever raised it.
+ * My tasks — one list of everything this person owes, and the place they do it.
  *
  * A member of staff does not think in modules. They think "what do I have to
  * do?", and the answer used to be spread over six workspaces: an action here,
- * a document to attest there, a declaration to sign in a third. Everything
- * routed to one person is gathered here, each row opening the exact screen
- * where the work is done — not the module's front page.
+ * a document to attest there, a declaration to sign in a third.
+ *
+ * Gathering them into one list was half the job. The other half is that the
+ * list is where the work happens: clicking a row opens the thing itself, over
+ * the portal, and closes back onto the list with the row gone. Nothing here
+ * navigates anywhere. Being told what you owe and then being sent somewhere
+ * else to do it is how a to-do list becomes something people stop opening.
  *
  * Today's recurring unit work keeps its own panel above, because it is the one
- * kind of task that is finished with a single tap rather than a visit.
+ * kind of task that is finished with a single tap and needs no panel at all.
  */
-const MODULE_PATHS = new Map(MODULES.map(m => [m.key, m.path]));
-
-type Owed = {
+export type Owed = {
   key: string;
   title: string;
   detail?: string;
   badge: string;
   due?: string | null;
-  to: string;
   cta: string;
+  /**
+   * What opens when the row is clicked, in place, over the portal. Absent on a
+   * row there is nothing to do about — a training date somebody booked for you
+   * is news, not a task, and an "Open" button that did nothing would be worse
+   * than none.
+   */
+  open?: PortalTaskTarget;
 };
 
 export function useOwedWork(): { assigned: Owed[]; coming: Owed[] } {
@@ -43,8 +49,8 @@ export function useOwedWork(): { assigned: Owed[]; coming: Owed[] } {
         title: d.title,
         detail: `${titleCase(d.form_type)} · awaiting your signature`,
         badge: 'Declaration',
-        to: `/organisation?tab=Code%20of%20Conduct&form=${d.id}`,
         cta: 'Read & sign',
+        open: { kind: 'declaration', declaration: d },
       });
     }
 
@@ -55,8 +61,14 @@ export function useOwedWork(): { assigned: Owed[]; coming: Owed[] } {
         detail: `${a.document_code ? `${a.document_code} · ` : ''}read and attest to the issued version`,
         badge: 'Attestation',
         due: a.due_date,
-        to: '/documents?subtab=My%20Inbox',
         cta: 'Read & attest',
+        open: {
+          kind: 'attestation',
+          attestationId: a.id,
+          documentId: Number(a.document_id ?? 0),
+          versionId: Number(a.document_version_id ?? 0),
+          title: a.title || a.document_code || 'Controlled document',
+        },
       });
     }
 
@@ -67,25 +79,28 @@ export function useOwedWork(): { assigned: Owed[]; coming: Owed[] } {
         detail: [titleCase(a.module_key), a.priority ? `${titleCase(a.priority)} priority` : null, a.status].filter(Boolean).join(' · '),
         badge: 'Action',
         due: a.due_date,
-        to: '/actions',
-        cta: 'Open action',
+        cta: 'Update progress',
+        open: { kind: 'action', id: a.id, title: a.title, description: a.description, status: a.status, dueDate: a.due_date },
       });
     }
 
     for (const t of queue) {
       if (t.status === 'completed' || t.status === 'cancelled') continue;
-      const route = t.module_key ? MODULE_PATHS.get(t.module_key) : undefined;
       assigned.push({
         key: `task-${t.id}`,
         title: t.title,
         detail: [t.task_number, titleCase(t.module_key), titleCase(t.priority)].filter(Boolean).join(' · '),
         badge: 'Task',
         due: t.due_date,
-        to: route ?? '/my-portal?tab=My%20Tasks',
-        cta: route ? 'Open workspace' : 'Open',
+        cta: 'Open task',
+        open: { kind: 'queueTask', id: t.id, title: t.title, description: t.description, status: t.status },
       });
     }
 
+    // Training and competency are booked FOR this person by somebody else.
+    // There is nothing for them to complete here, so these rows carry no
+    // action — showing an "Open" button that does nothing would be worse than
+    // showing none.
     for (const c of tasks?.upcomingCompetency ?? []) {
       coming.push({
         key: `comp-${c.id}`,
@@ -93,8 +108,7 @@ export function useOwedWork(): { assigned: Owed[]; coming: Owed[] } {
         detail: [c.competency_number, c.assessor_name ? `assessor ${c.assessor_name}` : null, titleCase(c.status)].filter(Boolean).join(' · '),
         badge: 'Competency',
         due: c.assessment_date,
-        to: '/my-portal?tab=My%20Training',
-        cta: 'View',
+        cta: '',
       });
     }
 
@@ -105,8 +119,7 @@ export function useOwedWork(): { assigned: Owed[]; coming: Owed[] } {
         detail: [t.training_number, t.location, t.attendance_status ? titleCase(t.attendance_status) : null].filter(Boolean).join(' · '),
         badge: 'Training',
         due: t.training_date,
-        to: '/my-portal?tab=My%20Training',
-        cta: 'View',
+        cta: '',
       });
     }
 
@@ -115,10 +128,47 @@ export function useOwedWork(): { assigned: Owed[]; coming: Owed[] } {
   }, [tasks, declarations, queue]);
 }
 
-function OwedList({ rows, icon, title, blurb, empty }: {
+/**
+ * One row of owed work. Clicking anywhere on it opens the thing itself.
+ *
+ * Shared with the portal landing, which shows the first few of the same rows —
+ * two renderings of "what you owe" would eventually disagree about what a row
+ * looks like or what clicking it does.
+ */
+export function OwedRow({ row, onOpen }: { row: Owed; onOpen: (target: PortalTaskTarget) => void }) {
+  const due = dueTone(row.due);
+  const tone = due?.tone === 'crit' ? 'crit' : due?.tone === 'warn' ? 'warn' : 'info';
+  const body = (
+    <>
+      <span className="pt-row-title">{row.title}</span>
+      {row.detail && <span className="pt-row-msg">{row.detail}</span>}
+      <span className="pt-row-meta">
+        <span className="badge">{row.badge}</span>
+        {due && <span className={`pt-due ${due.tone}`}>{due.text}</span>}
+      </span>
+    </>
+  );
+  return (
+    <li className={`pt-row${tone === 'crit' ? ' sev-crit' : ''}`}>
+      <span className={`pt-rail ${tone}`} />
+      {row.open
+        ? <button type="button" className="pt-row-main" onClick={() => onOpen(row.open!)} title={row.cta}>{body}</button>
+        : <div className="pt-row-main static">{body}</div>}
+      {row.open && (
+        <div className="pt-row-side">
+          <button type="button" className="pt-open" onClick={() => onOpen(row.open!)}>
+            {row.cta} <ArrowRight size={13} />
+          </button>
+        </div>
+      )}
+    </li>
+  );
+}
+
+function OwedList({ rows, icon, title, blurb, empty, onOpen }: {
   rows: Owed[]; icon: React.ReactNode; title: string; blurb: string; empty: string;
+  onOpen: (target: PortalTaskTarget) => void;
 }) {
-  const navigate = useNavigate();
   return (
     <section className="portal-panel">
       <div className="pp-head">
@@ -132,102 +182,37 @@ function OwedList({ rows, icon, title, blurb, empty }: {
         <div className="pp-clear"><Sparkles size={18} /><span>{empty}</span></div>
       ) : (
         <ul className="pt-list">
-          {rows.map(r => {
-            const due = dueTone(r.due);
-            return (
-              <li key={r.key} className={`pt-row${due?.tone === 'crit' ? ' sev-crit' : ''}`}>
-                <span className={`pt-rail ${due?.tone === 'crit' ? 'crit' : due?.tone === 'warn' ? 'warn' : 'info'}`} />
-                <button type="button" className="pt-row-main" onClick={() => navigate(r.to)} title={r.cta}>
-                  <span className="pt-row-title">{r.title}</span>
-                  {r.detail && <span className="pt-row-msg">{r.detail}</span>}
-                  <span className="pt-row-meta">
-                    <span className="badge">{r.badge}</span>
-                    {due && <span className={`pt-due ${due.tone}`}>{due.text}</span>}
-                  </span>
-                </button>
-                <div className="pt-row-side">
-                  <button type="button" className="pt-open" onClick={() => navigate(r.to)}>
-                    {r.cta} <ArrowRight size={13} />
-                  </button>
-                </div>
-              </li>
-            );
-          })}
+          {rows.map(r => <OwedRow key={r.key} row={r} onOpen={onOpen} />)}
         </ul>
       )}
     </section>
   );
 }
 
-/** The queue tasks a person can advance without leaving the portal. */
-function QuickQueue() {
-  const { queue, reload, setError } = usePortal();
-  const live = queue.filter(t => t.status !== 'completed' && t.status !== 'cancelled');
-  if (live.length === 0) return null;
-
-  async function act(id: number, action: 'start' | 'complete') {
-    try { await api(`/notifications/tasks/${id}/${action}`, { method: 'POST', body: JSON.stringify({}) }); await reload(); }
-    catch (e) { setError((e as Error).message); }
-  }
-
-  return (
-    <section className="portal-panel">
-      <div className="pp-head">
-        <div>
-          <h3><ListChecks size={16} /> Task queue</h3>
-          <p>Tasks assigned to you by name. Start one to show your colleagues it is in hand; complete it when it is done.</p>
-        </div>
-        <span className="pp-count">{live.length}</span>
-      </div>
-      <ul className="pt-list">
-        {live.map(t => {
-          const due = dueTone(t.due_date);
-          return (
-            <li key={t.id} className="pt-row">
-              <span className={`pt-rail ${due?.tone === 'crit' ? 'crit' : 'info'}`} />
-              <div className="pt-row-main static">
-                <span className="pt-row-title">{t.title}</span>
-                {t.description && <span className="pt-row-msg">{t.description}</span>}
-                <span className="pt-row-meta">
-                  <span className="badge">{titleCase(t.status)}</span>
-                  {t.module_key && <span>{titleCase(t.module_key)}</span>}
-                  {due && <span className={`pt-due ${due.tone}`}>{due.text}</span>}
-                </span>
-              </div>
-              <div className="pt-row-side">
-                {t.status === 'open' && <button type="button" className="pt-mini" onClick={() => void act(t.id, 'start')}>Start</button>}
-                <button type="button" className="pt-mini ok" title="Mark complete" onClick={() => void act(t.id, 'complete')}>
-                  <CheckCircle2 size={13} />
-                </button>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-    </section>
-  );
-}
-
 export default function PortalTasks() {
   const { assigned, coming } = useOwedWork();
+  const [open, setOpen] = useState<PortalTaskTarget | null>(null);
+
   return (
     <div className="portal-stack">
       <DutyTodoCard limit={20} />
       <OwedList
         rows={assigned}
         icon={<ClipboardList size={16} />}
-        title="Assigned to me"
-        blurb="Declarations, attestations, actions and tasks with your name on them. Each row opens the screen where you do it."
+        title="Waiting on me"
+        blurb="Declarations, attestations, actions and tasks with your name on them. Click one and you do it here — nothing sends you elsewhere."
         empty="Nothing is assigned to you right now."
+        onOpen={setOpen}
       />
-      <QuickQueue />
       <OwedList
         rows={coming}
         icon={<GraduationCap size={16} />}
         title="Coming up"
-        blurb="Training and competency assessments already scheduled for you."
+        blurb="Training and competency assessments already booked for you by your unit."
         empty="Nothing scheduled for you yet."
+        onOpen={setOpen}
       />
+      {open && <PortalTaskDrawer target={open} onClose={() => setOpen(null)} />}
     </div>
   );
 }

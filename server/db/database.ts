@@ -5056,6 +5056,12 @@ CREATE INDEX IF NOT EXISTS idx_form_sub_template ON form_submissions(template_ke
   // Signature on file: each staff member uploads their signature once; it is
   // then reused for every electronic signing in place of drawing one each time.
   if (!staffSelfCols.has('signature_file_id')) database.exec('ALTER TABLE staff ADD COLUMN signature_file_id INTEGER REFERENCES files(id)');
+  // Passport photograph. A personnel file has carried one on paper for as long
+  // as personnel files have existed — it is how a laboratory confirms the
+  // person at the bench is the person on the record, and what an ID badge and
+  // a printed register are made from. Stored like the signature: one file id
+  // on the staff row, uploaded by its subject, replaced rather than versioned.
+  if (!staffSelfCols.has('photo_file_id')) database.exec('ALTER TABLE staff ADD COLUMN photo_file_id INTEGER REFERENCES files(id)');
 
   // Why somebody left, and when.
   //
@@ -5071,6 +5077,50 @@ CREATE INDEX IF NOT EXISTS idx_form_sub_template ON form_submissions(template_ke
   if (!staffSelfCols.has('exit_notes')) database.exec('ALTER TABLE staff ADD COLUMN exit_notes TEXT');
   if (!staffSelfCols.has('exit_recorded_at')) database.exec('ALTER TABLE staff ADD COLUMN exit_recorded_at TEXT');
   if (!staffSelfCols.has('exit_recorded_by')) database.exec('ALTER TABLE staff ADD COLUMN exit_recorded_by INTEGER REFERENCES users(id)');
+
+  // Staff-declared training and CPD.
+  //
+  // The training register belongs to the laboratory: management schedules an
+  // event, records who attended, keeps the evidence. But a great deal of a
+  // scientist's continuing professional development happens outside that
+  // register — a weekend course, a webinar, a conference, a qualification
+  // taken in their own time — and until now there was nowhere for it to go.
+  // The person it belongs to could not put it on their own file, so at
+  // appraisal it did not exist.
+  //
+  // This is that place, and it is deliberately separate from `training_events`
+  // rather than mixed into it: a record somebody entered about themselves is
+  // not the same evidence as one the laboratory ran and witnessed. It carries
+  // its own verification state so Personnel Management can confirm it against
+  // the certificate, and until they do it reads as declared, not proven.
+  database.exec(`CREATE TABLE IF NOT EXISTS staff_cpd_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id INTEGER NOT NULL REFERENCES staff(id),
+    title TEXT NOT NULL,
+    provider TEXT,
+    training_type TEXT NOT NULL DEFAULT 'external_course',
+    start_date TEXT,
+    end_date TEXT,
+    hours REAL,
+    location TEXT,
+    description TEXT,
+    file_id INTEGER REFERENCES files(id),
+    verification_status TEXT NOT NULL DEFAULT 'declared',
+    verified_by_staff_id INTEGER REFERENCES staff(id),
+    verified_at TEXT,
+    verifier_remarks TEXT,
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT
+  );`);
+  database.exec('CREATE INDEX IF NOT EXISTS idx_staff_cpd_staff ON staff_cpd_records(staff_id)');
+
+  // Who added a staff document, and whether the person it is about added it
+  // themselves. Personnel Management verifies either way, but a file the
+  // subject uploaded is a claim awaiting confirmation rather than a record the
+  // laboratory placed there, and the register should be able to say which.
+  const staffDocCols = new Set((database.prepare('PRAGMA table_info(staff_documents)').all() as Array<{ name: string }>).map(c => c.name));
+  if (!staffDocCols.has('source')) database.exec("ALTER TABLE staff_documents ADD COLUMN source TEXT NOT NULL DEFAULT 'register'");
 
   // ===================================================================
   // Complaints — ISO 15189:2022 §7.4
