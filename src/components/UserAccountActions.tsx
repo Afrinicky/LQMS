@@ -3,6 +3,8 @@ import { usePermissions } from '../hooks/usePermissions';
 import { UserX, UserCheck, KeyRound, Trash2, ShieldAlert, Loader2, ShieldCheck } from 'lucide-react';
 import { api, errorText } from '../services/api';
 import type { ApiUser } from '../../shared/types/api';
+import TextField from './ui/TextField';
+import { Notice } from './ui/Feedback';
 
 /**
  * What an administrator can do to somebody's account.
@@ -77,8 +79,8 @@ export default function UserAccountActions({ user, onChanged }: {
 
   return (
     <div className="uaa">
-      {error && <div className="error">{error}</div>}
-      {notice && <div className="notice-ok">{notice}</div>}
+      {error && <Notice kind="error">{error}</Notice>}
+      {notice && <Notice kind="success">{notice}</Notice>}
 
       {/* The role is what actually moves somebody between cohorts — a quality
           manager becoming a System Administrator, an officer standing down to
@@ -118,7 +120,7 @@ export default function UserAccountActions({ user, onChanged }: {
           </p>
         </div>
         <div className="uaa-do">
-          <input type="text" value={tempPassword} onChange={e => setTempPassword(e.target.value)}
+          <TextField type="text" value={tempPassword} onValue={nextValue => setTempPassword(nextValue)}
             placeholder="Temporary password" minLength={8} autoComplete="off" />
           {can('settings', 'edit') && <button type="button" disabled={busy !== '' || tempPassword.length < 8}
             onClick={() => run('temp', () => api(`/users/${user.id}/reset-password`, { method: 'POST', body: JSON.stringify({ newPassword: tempPassword }) }), 'Temporary password set. They must change it on first use.').then(() => setTempPassword(''))}>
@@ -203,7 +205,7 @@ export default function UserAccountActions({ user, onChanged }: {
                 intact — its entries stay exactly as they are, and this erasure records whose account they
                 belonged to. This cannot be undone.
               </p>
-              <input value={forceReason} onChange={e => setForceReason(e.target.value)}
+              <TextField value={forceReason} onValue={nextValue => setForceReason(nextValue)}
                 placeholder="Why is this account being erased?" />
               <div className="uaa-force-acts">
                 <button type="button" className="secondary" onClick={() => { setForcing(false); setForceReason(''); }}>Cancel</button>

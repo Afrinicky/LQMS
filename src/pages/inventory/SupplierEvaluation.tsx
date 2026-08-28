@@ -7,6 +7,8 @@ import {
   PrintButton, RatingPicker, ScaleLegend, ScoreDial, StatCell, badgeFor, labelise,
 } from '../personnel/competencyShared';
 import type { Supplier, SupplierEvalFramework, SupplierEvalAssessment, SupplierEvalItem } from '../../../shared/types/api';
+import TextField from '../../components/ui/TextField';
+import { Notice } from '../../components/ui/Feedback';
 
 /**
  * Supplier evaluation, framework-based — the same idea as competency
@@ -83,7 +85,7 @@ function EvaluationList({ suppliers }: { suppliers: Supplier[] }) {
         <button type="button" onClick={() => setCreating(v => !v)}><Plus size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />New evaluation</button>
       </div>}
     </div>
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {creating && mayEvaluate && <form className="form-grid" onSubmit={submitNew}>
       <label>Supplier
@@ -100,8 +102,8 @@ function EvaluationList({ suppliers }: { suppliers: Supplier[] }) {
         {frameworks.length === 0 && <small className="field-hint">No active frameworks yet — build one under Frameworks and activate it.</small>}
       </label>
       <label>Evaluation date<input type="date" value={form.evaluationDate} onChange={e => setForm({ ...form, evaluationDate: e.target.value })} required /></label>
-      <label>Period label<input value={form.periodLabel} onChange={e => setForm({ ...form, periodLabel: e.target.value })} placeholder="e.g. 2026 annual review" /></label>
-      <label className="wide">Purpose<textarea rows={2} value={form.purpose} onChange={e => setForm({ ...form, purpose: e.target.value })} /></label>
+      <label>Period label<TextField value={form.periodLabel} onValue={nextValue => setForm({ ...form, periodLabel: nextValue })} placeholder="e.g. 2026 annual review" /></label>
+      <label className="wide">Purpose<TextField as="textarea" rows={2} value={form.purpose} onValue={nextValue => setForm({ ...form, purpose: nextValue })} /></label>
       <button type="submit" disabled={!form.frameworkId}>Raise evaluation</button>
     </form>}
 
@@ -143,7 +145,7 @@ function EvaluationEditor({ id, mayEvaluate, onClose, onChanged }: { id: number;
   useEffect(() => { void load(); }, [load]);
   const refresh = useCallback(async () => { await load(); await onChanged(); }, [load, onChanged]);
 
-  if (!record) return <DetailModal open onClose={onClose} title="Supplier evaluation">{error ? <div className="error">{error}</div> : <p className="muted">Loading…</p>}</DetailModal>;
+  if (!record) return <DetailModal open onClose={onClose} title="Supplier evaluation">{error ? <Notice kind="error">{error}</Notice> : <p className="muted">Loading…</p>}</DetailModal>;
 
   const summary = record.score_summary;
   const closed = record.status === 'completed';
@@ -155,8 +157,8 @@ function EvaluationEditor({ id, mayEvaluate, onClose, onChanged }: { id: number;
     subtitle={<>{record.framework_title}{record.framework_version ? ` v${record.framework_version}` : ''} · {record.evaluation_date}</>}
     header={<>{badgeFor(record.status)}{record.rating && badgeFor(record.rating, RATING_LABELS[record.rating])}{mayPrint && <PrintButton path={`${BASE}/eval-assessments/${id}/print`} label="Print record" />}</>}
   >
-    {error && <div className="error">{error}</div>}
-    {notice && <div className="notice-ok">{notice}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
+    {notice && <Notice kind="success">{notice}</Notice>}
     <div className="record-summary">
       <ScoreDial percent={summary?.percent ?? null} threshold={summary?.passThreshold ?? record.pass_threshold_percent ?? null} />
       <div className="summary-stats">
@@ -258,7 +260,7 @@ function ScoringGrid({ record, maxScore, scorable, onError, onChanged }: {
             <td><strong>{item.element_text}</strong>{item.is_critical ? <span className="badge critical inline-badge">Critical</span> : null}{item.performance_criteria && <><br /><small className="muted">{item.performance_criteria}</small></>}</td>
             <td><RatingPicker value={c.score ?? null} max={maxScore} labels={SCALE_LABELS} disabled={!scorable} allowNotApplicable notApplicable={c.notApplicable}
               onChange={score => set(item.id, { score })} onNotApplicable={na => set(item.id, { notApplicable: na, score: na ? null : c.score })} /></td>
-            {showRemarks && <td><input value={c.remarks} disabled={!scorable} placeholder="Evidence / note" onChange={e => set(item.id, { remarks: e.target.value })} /></td>}
+            {showRemarks && <td><TextField value={c.remarks} disabled={!scorable} placeholder="Evidence / note" onValue={nextValue => set(item.id, { remarks: nextValue })} /></td>}
           </tr>; })}
         </tbody>
       </table>
@@ -307,8 +309,8 @@ function Conclusion({ record, summary, mayEvaluate, onError, onNotice, onChanged
           </select>
         </label>
         <label>Next evaluation due<input type="date" value={form.nextEvaluationDue} onChange={e => setForm({ ...form, nextEvaluationDue: e.target.value })} /></label>
-        <label className="wide">Findings<textarea rows={2} value={form.findings} onChange={e => setForm({ ...form, findings: e.target.value })} /></label>
-        <label className="wide">Action required<textarea rows={2} value={form.actionRequired} onChange={e => setForm({ ...form, actionRequired: e.target.value })} /></label>
+        <label className="wide">Findings<TextField as="textarea" rows={2} value={form.findings} onValue={nextValue => setForm({ ...form, findings: nextValue })} /></label>
+        <label className="wide">Action required<TextField as="textarea" rows={2} value={form.actionRequired} onValue={nextValue => setForm({ ...form, actionRequired: nextValue })} /></label>
         <button type="button" disabled={!form.rating} onClick={() => void act('/complete', form, 'Evaluation concluded and fed to the supplier register.')}>Complete evaluation</button>
       </div>
     </section>}
@@ -317,7 +319,7 @@ function Conclusion({ record, summary, mayEvaluate, onError, onNotice, onChanged
       <h4>Review</h4>
       <p className="muted">A second pair of eyes, recorded as you. The reviewer cannot be the evaluator.</p>
       <div className="form-grid">
-        <label className="wide">Reviewer's comments<textarea rows={2} value={review.reviewerComments} onChange={e => setReview({ reviewerComments: e.target.value })} /></label>
+        <label className="wide">Reviewer's comments<TextField as="textarea" rows={2} value={review.reviewerComments} onValue={nextValue => setReview({ reviewerComments: nextValue })} /></label>
         <button type="button" onClick={() => void act('/review', review, 'Review recorded.')}>Countersign as reviewer</button>
       </div>
     </section>}
@@ -358,16 +360,16 @@ function FrameworkList() {
       <div><h3>Evaluation frameworks</h3><p className="muted">What a supplier is judged against — a set of questions grouped by theme, each with the standard for an acceptable answer.</p></div>
       {mayCreate && <div className="workspace-actions"><button type="button" onClick={() => setCreating(v => !v)}><Plus size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />New framework</button></div>}
     </div>
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {creating && mayCreate && <form className="form-grid" onSubmit={submitNew}>
-      <label>Title<input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required placeholder="e.g. Reagent supplier evaluation" /></label>
-      <label>Applies to (category)<input value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} placeholder="Reagents, services…" /></label>
-      <label>Version<input value={form.versionLabel} onChange={e => setForm({ ...form, versionLabel: e.target.value })} /></label>
+      <label>Title<TextField value={form.title} onValue={nextValue => setForm({ ...form, title: nextValue })} required placeholder="e.g. Reagent supplier evaluation" /></label>
+      <label>Applies to (category)<TextField value={form.category} onValue={nextValue => setForm({ ...form, category: nextValue })} placeholder="Reagents, services…" /></label>
+      <label>Version<TextField value={form.versionLabel} onValue={nextValue => setForm({ ...form, versionLabel: nextValue })} /></label>
       <label>Top of rating scale<select value={form.maxScore} onChange={e => setForm({ ...form, maxScore: e.target.value })}><option value="4">4-point</option><option value="5">5-point</option><option value="3">3-point</option></select></label>
       <label>Pass mark (%)<input type="number" min={0} max={100} value={form.passThresholdPercent} onChange={e => setForm({ ...form, passThresholdPercent: e.target.value })} /></label>
       <label>Re-evaluate every (months)<input type="number" min={1} value={form.validityMonths} onChange={e => setForm({ ...form, validityMonths: e.target.value })} /></label>
-      <label className="wide">Purpose<textarea rows={2} value={form.purpose} onChange={e => setForm({ ...form, purpose: e.target.value })} /></label>
+      <label className="wide">Purpose<TextField as="textarea" rows={2} value={form.purpose} onValue={nextValue => setForm({ ...form, purpose: nextValue })} /></label>
       <button type="submit">Create framework</button>
     </form>}
 
@@ -409,7 +411,7 @@ function FrameworkEditor({ id, onClose, onListChanged }: { id: number; onClose: 
   useEffect(() => { void load(); }, [load]);
   const refresh = useCallback(async () => { await load(); await onListChanged(); }, [load, onListChanged]);
 
-  if (!framework) return <DetailModal open onClose={onClose} title="Framework">{error ? <div className="error">{error}</div> : <p className="muted">Loading…</p>}</DetailModal>;
+  if (!framework) return <DetailModal open onClose={onClose} title="Framework">{error ? <Notice kind="error">{error}</Notice> : <p className="muted">Loading…</p>}</DetailModal>;
   const editable = mayEdit && framework.status === 'draft';
   const inUse = (framework.evaluations_raised ?? 0) > 0;
 
@@ -443,8 +445,8 @@ function FrameworkEditor({ id, onClose, onListChanged }: { id: number; onClose: 
       {mayArchive && !inUse && <button type="button" className="secondary danger-text" onClick={() => void remove()}>Delete</button>}
     </div>}
   >
-    {error && <div className="error">{error}</div>}
-    {framework.status === 'active' && <p className="notice-ok">This framework is in force. To change what it asks, take a new version.</p>}
+    {error && <Notice kind="error">{error}</Notice>}
+    {framework.status === 'active' && <Notice kind="success">This framework is in force. To change what it asks, take a new version.</Notice>}
     <QuestionBuilder framework={framework} editable={editable} onError={setError} onChanged={refresh} />
   </DetailModal>;
 }
@@ -461,10 +463,10 @@ function QuestionBuilder({ framework, editable, onError, onChanged }: {
   const [addingTo, setAddingTo] = useState<number | 'none' | null>(null);
   const [q, setQ] = useState({ elementText: '', performanceCriteria: '', weight: '1', isCritical: false });
 
-  async function addGroup() {
-    if (!newGroup.trim()) return;
+  async function addGroup(typed = newGroup) {
+    if (!typed.trim()) return;
     onError(null);
-    try { await api(`${base}/groups`, { method: 'POST', body: JSON.stringify({ groupTitle: newGroup.trim() }) }); setNewGroup(''); await onChanged(); }
+    try { await api(`${base}/groups`, { method: 'POST', body: JSON.stringify({ groupTitle: typed.trim() }) }); setNewGroup(''); await onChanged(); }
     catch (e) { onError(errorText(e)); }
   }
   async function removeGroup(gid: number) { onError(null); try { await api(`${base}/groups/${gid}`, { method: 'DELETE' }); await onChanged(); } catch (e) { onError(errorText(e)); } }
@@ -477,8 +479,8 @@ function QuestionBuilder({ framework, editable, onError, onChanged }: {
   async function removeElement(eid: number) { onError(null); try { await api(`${base}/elements/${eid}`, { method: 'DELETE' }); await onChanged(); } catch (e) { onError(errorText(e)); } }
 
   const addForm = (groupId: number | 'none') => <div className="element-add">
-    <label className="wide">Question<input autoFocus value={q.elementText} onChange={e => setQ({ ...q, elementText: e.target.value })} placeholder="e.g. Delivers within the agreed lead time" /></label>
-    <label className="wide">Standard for an acceptable answer<textarea rows={2} value={q.performanceCriteria} onChange={e => setQ({ ...q, performanceCriteria: e.target.value })} /></label>
+    <label className="wide">Question<TextField autoFocus value={q.elementText} onValue={nextValue => setQ({ ...q, elementText: nextValue })} placeholder="e.g. Delivers within the agreed lead time" /></label>
+    <label className="wide">Standard for an acceptable answer<TextField as="textarea" rows={2} value={q.performanceCriteria} onValue={nextValue => setQ({ ...q, performanceCriteria: nextValue })} /></label>
     <label>Weight<input type="number" min={0.5} step="0.5" value={q.weight} onChange={e => setQ({ ...q, weight: e.target.value })} /></label>
     <label className="check-inline"><input type="checkbox" checked={q.isCritical} onChange={e => setQ({ ...q, isCritical: e.target.checked })} /> Critical — a shortfall blocks approval</label>
     <div className="element-add-actions"><button type="button" onClick={() => void addElement(groupId)}>Add question</button><button type="button" className="secondary" onClick={() => setAddingTo(null)}>Cancel</button></div>
@@ -522,7 +524,7 @@ function QuestionBuilder({ framework, editable, onError, onChanged }: {
     {ungrouped.length > 0 && <section className="element-group"><header><span className="eg-title">Other questions</span></header>{rows(ungrouped)}</section>}
 
     {editable && <div className="group-add">
-      <label>New group<input value={newGroup} onChange={e => setNewGroup(e.target.value)} placeholder="e.g. Delivery and logistics" onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void addGroup(); } }} /></label>
+      <label>New group<TextField value={newGroup} onValue={nextValue => setNewGroup(nextValue)} placeholder="e.g. Delivery and logistics" onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void addGroup(e.currentTarget.value); } }} /></label>
       <button type="button" className="secondary" onClick={() => void addGroup()}>Add group</button>
       <button type="button" className="secondary" onClick={() => setAddingTo('none')}>Add ungrouped question</button>
     </div>}

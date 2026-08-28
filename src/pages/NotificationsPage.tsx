@@ -11,6 +11,8 @@ import { RecordsReportsPage } from './RecordsReportsPage';
 import { MonthlyReportsPage } from './MonthlyReportsPage';
 import PermissionTabs from '../components/PermissionTabs';
 import type { NotificationRule, ReviewCalendarItem, NotificationsSummary } from '../../shared/types/api';
+import TextField from '../components/ui/TextField';
+import { Notice } from '../components/ui/Feedback';
 
 /**
  * Notifications & Reports — the laboratory's alerting machinery.
@@ -123,7 +125,7 @@ export function NotificationsPage() {
     />
     <div className="tabs">{topTabs.map(t => <button key={t.key} type="button" className={t.active ? 'active' : ''} onClick={t.go}>{t.key}</button>)}</div>
     {inNotifications && tabBar(tab, NOTIF_TABS, setTab)}
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {tab === 'Records, Reports & Evidence' && <RecordsReportsPage embedded />}
     {tab === 'Monthly Reports & Archives' && <MonthlyReportsPage embedded />}
@@ -153,8 +155,8 @@ export function NotificationsPage() {
 
     {tab === 'Review Calendar' && <>
       <div className="form-grid">
-        <label>Module<input value={calFilter.moduleKey} onChange={e => setCalFilter({ ...calFilter, moduleKey: e.target.value })} placeholder="any" /></label>
-        <label>Item type<input value={calFilter.itemType} onChange={e => setCalFilter({ ...calFilter, itemType: e.target.value })} placeholder="any" /></label>
+        <label>Module<TextField value={calFilter.moduleKey} onValue={nextValue => setCalFilter({ ...calFilter, moduleKey: nextValue })} placeholder="any" /></label>
+        <label>Item type<TextField value={calFilter.itemType} onValue={nextValue => setCalFilter({ ...calFilter, itemType: nextValue })} placeholder="any" /></label>
         <label>Status<select value={calFilter.status} onChange={e => setCalFilter({ ...calFilter, status: e.target.value })}><option value="">any</option>{CALENDAR_STATUSES.map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select></label>
         <label>From<input type="date" value={calFilter.from} onChange={e => setCalFilter({ ...calFilter, from: e.target.value })} /></label>
         <label>To<input type="date" value={calFilter.to} onChange={e => setCalFilter({ ...calFilter, to: e.target.value })} /></label>
@@ -175,10 +177,10 @@ export function NotificationsPage() {
 
     {tab === 'Notification Rules' && <>
       <form className="form-grid" onSubmit={submitRule}>
-        <label>Name<input value={ruleForm.ruleName} onChange={e => setRuleForm({ ...ruleForm, ruleName: e.target.value })} required /></label>
-        <label>Module<input value={ruleForm.moduleKey} onChange={e => setRuleForm({ ...ruleForm, moduleKey: e.target.value })} required /></label>
+        <label>Name<TextField value={ruleForm.ruleName} onValue={nextValue => setRuleForm({ ...ruleForm, ruleName: nextValue })} required /></label>
+        <label>Module<TextField value={ruleForm.moduleKey} onValue={nextValue => setRuleForm({ ...ruleForm, moduleKey: nextValue })} required /></label>
         <label>Trigger<select value={ruleForm.triggerType} onChange={e => setRuleForm({ ...ruleForm, triggerType: e.target.value })}>{RULE_TRIGGERS.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
-        <label>Due field<input value={ruleForm.dueField} onChange={e => setRuleForm({ ...ruleForm, dueField: e.target.value })} placeholder="e.g. due_date" /></label>
+        <label>Due field<TextField value={ruleForm.dueField} onValue={nextValue => setRuleForm({ ...ruleForm, dueField: nextValue })} placeholder="e.g. due_date" /></label>
         <label>Reminder days before<input type="number" value={ruleForm.reminderDaysBefore} onChange={e => setRuleForm({ ...ruleForm, reminderDaysBefore: e.target.value })} /></label>
         <label>Escalation days after<input type="number" value={ruleForm.escalationDaysAfter} onChange={e => setRuleForm({ ...ruleForm, escalationDaysAfter: e.target.value })} /></label>
         <button type="submit">Create rule</button>

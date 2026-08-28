@@ -6,6 +6,7 @@ import { MODULES } from '../../shared/constants/modules';
 import type { ApiUser } from '../../shared/types/api';
 import { DENNIS_NOTICE, createFloatingDennisResponse } from '../services/dennisService';
 import { api } from '../services/api';
+import TextField from './ui/TextField';
 
 type WidgetPosition = { x: number; y: number };
 type Source = { title: string; documentCode?: string | null; version?: string | null; section?: string | null };
@@ -170,7 +171,7 @@ export function DennisFloatingWidget({ user, dennisEnabled }: { user: ApiUser | 
         <div ref={msgEndRef} />
       </div>
       {can('dennis', 'view') && <form className="cp" onSubmit={e => { e.preventDefault(); send(); }}>
-        <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder="Ask Dennis…" />
+        <TextField as="textarea" value={input} onValue={nextValue => setInput(nextValue)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(e.currentTarget.value.trim()); } }} placeholder="Ask Dennis…" />
         <button type="submit" disabled={busy} aria-label="Send"><Send size={16} /></button>
       </form>}
     </section>

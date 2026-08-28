@@ -11,6 +11,8 @@ import type {
   OrientationFramework, OrientationFrameworkItem, StaffOrientation, StaffOrientationItem,
   Staff, Section, Department,
 } from '../../../shared/types/api';
+import TextField from '../../components/ui/TextField';
+import { Notice } from '../../components/ui/Feedback';
 
 /**
  * Orientation & induction — built and used exactly like competency assessment.
@@ -64,7 +66,7 @@ export default function OrientationInduction({ staff, sections, departments }: {
       </div>
     </div>
 
-    {error && <div className="error" style={{ marginTop: 10 }}>{error}</div>}
+    {error && <Notice kind="error" style={{ marginTop: 10 }}>{error}</Notice>}
     {notice && <div className="notice" style={{ marginTop: 10, background: '#ecfdf5', color: '#065f46', padding: '8px 12px', borderRadius: 6 }}>{notice}</div>}
 
     {view === 'records'
@@ -206,7 +208,7 @@ function RecordsView({ staff, staffName, mayCreate, mayEdit, onError, onNotice }
             <label>Hire date<input type="date" value={form.hireDate} onChange={e => setForm({ ...form, hireDate: e.target.value })} /></label>
             <label>Orientation start<input type="date" value={form.orientationStart} onChange={e => setForm({ ...form, orientationStart: e.target.value })} /></label>
             <label>Facilitator<select value={form.facilitatorStaffId} onChange={e => setForm({ ...form, facilitatorStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-            <label style={{ gridColumn: '1 / -1' }}>Notes<input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
+            <label style={{ gridColumn: '1 / -1' }}>Notes<TextField value={form.notes} onValue={nextValue => setForm({ ...form, notes: nextValue })} /></label>
             <button type="submit" style={{ gridColumn: '1 / -1' }}>Raise record from framework</button>
           </form>}
       </div>}
@@ -441,15 +443,15 @@ function FrameworksView({ sections, departments, mayCreate, mayEdit, mayApprove,
       {creating ? <div className="card">
         <h4 style={{ marginTop: 0 }}>New orientation framework</h4>
         {can('personnel.orientation', 'create') && <form className="form-grid" onSubmit={submitNew}>
-          <label style={{ gridColumn: '1 / -1' }}>Title<input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required placeholder="e.g. Staff orientation & induction" /></label>
+          <label style={{ gridColumn: '1 / -1' }}>Title<TextField value={form.title} onValue={nextValue => setForm({ ...form, title: nextValue })} required placeholder="e.g. Staff orientation & induction" /></label>
           <label>Applies to<select value={form.appliesTo} onChange={e => setForm({ ...form, appliesTo: e.target.value })}>{ORIENTATION_AUDIENCES.map(a => <option key={a} value={a}>{ORIENTATION_AUDIENCE_LABELS[a]}</option>)}</select></label>
-          <label>Version<input value={form.versionLabel} onChange={e => setForm({ ...form, versionLabel: e.target.value })} /></label>
+          <label>Version<TextField value={form.versionLabel} onValue={nextValue => setForm({ ...form, versionLabel: nextValue })} /></label>
           <label>Department<select value={form.departmentId} onChange={e => setForm({ ...form, departmentId: e.target.value })}><option value="">All</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
           <label>Section<select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })}><option value="">All</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
           <label>Re-induction every (months, 0 = none)<input type="number" min={0} value={form.validityMonths} onChange={e => setForm({ ...form, validityMonths: e.target.value })} /></label>
           <label>Effective date<input type="date" value={form.effectiveDate} onChange={e => setForm({ ...form, effectiveDate: e.target.value })} /></label>
-          <label style={{ gridColumn: '1 / -1' }}>Purpose<textarea value={form.purpose} onChange={e => setForm({ ...form, purpose: e.target.value })} /></label>
-          <label style={{ gridColumn: '1 / -1' }}>Scope<textarea value={form.scope} onChange={e => setForm({ ...form, scope: e.target.value })} /></label>
+          <label style={{ gridColumn: '1 / -1' }}>Purpose<TextField as="textarea" value={form.purpose} onValue={nextValue => setForm({ ...form, purpose: nextValue })} /></label>
+          <label style={{ gridColumn: '1 / -1' }}>Scope<TextField as="textarea" value={form.scope} onValue={nextValue => setForm({ ...form, scope: nextValue })} /></label>
           <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8 }}>
             <button type="submit">Create draft</button>
             <button type="button" className="secondary" onClick={() => setCreating(false)}>Cancel</button>
@@ -496,10 +498,10 @@ function FrameworksView({ sections, departments, mayCreate, mayEdit, mayApprove,
             {g.items.map(it => <tr key={it.id}>
               {editingItem?.id === it.id ? <td colSpan={2}>
                 {can('personnel.orientation', 'edit') && <form onSubmit={saveItem} className="form-grid">
-                  <label>Group<input value={editingItem.group_title} onChange={e => setEditingItem({ ...editingItem, group_title: e.target.value })} /></label>
+                  <label>Group<TextField value={editingItem.group_title} onValue={nextValue => setEditingItem({ ...editingItem, group_title: nextValue })} /></label>
                   <label>Responsible<select value={editingItem.responsible_role || ''} onChange={e => setEditingItem({ ...editingItem, responsible_role: e.target.value })}><option value="">—</option>{ORIENTATION_RESPONSIBLE_ROLES.map(r => <option key={r} value={r}>{ORIENTATION_RESPONSIBLE_ROLE_LABELS[r]}</option>)}</select></label>
-                  <label style={{ gridColumn: '1 / -1' }}>Item<input value={editingItem.item_text} onChange={e => setEditingItem({ ...editingItem, item_text: e.target.value })} required /></label>
-                  <label style={{ gridColumn: '1 / -1' }}>Description<input value={editingItem.item_description || ''} onChange={e => setEditingItem({ ...editingItem, item_description: e.target.value })} /></label>
+                  <label style={{ gridColumn: '1 / -1' }}>Item<TextField value={editingItem.item_text} onValue={nextValue => setEditingItem({ ...editingItem, item_text: nextValue })} required /></label>
+                  <label style={{ gridColumn: '1 / -1' }}>Description<TextField value={editingItem.item_description || ''} onValue={nextValue => setEditingItem({ ...editingItem, item_description: nextValue })} /></label>
                   <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8 }}><button type="submit">Save</button><button type="button" className="secondary" onClick={() => setEditingItem(null)}>Cancel</button></div>
                 </form>}
               </td> : <>
@@ -522,12 +524,12 @@ function FrameworksView({ sections, departments, mayCreate, mayEdit, mayApprove,
         {mayEdit && <div className="card" style={{ marginTop: 12 }}>
           <h4 style={{ marginTop: 0 }}>Add checklist item</h4>
           <form className="form-grid" onSubmit={addItem}>
-            <label>Group<input list="orient-groups" value={itemForm.groupTitle} onChange={e => setItemForm({ ...itemForm, groupTitle: e.target.value })} placeholder="e.g. Health, safety & biosafety" />
+            <label>Group<TextField list="orient-groups" value={itemForm.groupTitle} onValue={nextValue => setItemForm({ ...itemForm, groupTitle: nextValue })} placeholder="e.g. Health, safety & biosafety" />
               <datalist id="orient-groups">{knownGroups.map(g => <option key={g} value={g} />)}</datalist>
             </label>
             <label>Responsible<select value={itemForm.responsibleRole} onChange={e => setItemForm({ ...itemForm, responsibleRole: e.target.value })}><option value="">—</option>{ORIENTATION_RESPONSIBLE_ROLES.map(r => <option key={r} value={r}>{ORIENTATION_RESPONSIBLE_ROLE_LABELS[r]}</option>)}</select></label>
-            <label style={{ gridColumn: '1 / -1' }}>Item<input value={itemForm.itemText} onChange={e => setItemForm({ ...itemForm, itemText: e.target.value })} required placeholder="What the new starter must be shown, given or told" /></label>
-            <label style={{ gridColumn: '1 / -1' }}>Description (optional)<input value={itemForm.itemDescription} onChange={e => setItemForm({ ...itemForm, itemDescription: e.target.value })} /></label>
+            <label style={{ gridColumn: '1 / -1' }}>Item<TextField value={itemForm.itemText} onValue={nextValue => setItemForm({ ...itemForm, itemText: nextValue })} required placeholder="What the new starter must be shown, given or told" /></label>
+            <label style={{ gridColumn: '1 / -1' }}>Description (optional)<TextField value={itemForm.itemDescription} onValue={nextValue => setItemForm({ ...itemForm, itemDescription: nextValue })} /></label>
             <button type="submit" style={{ gridColumn: '1 / -1' }}>Add item</button>
           </form>
         </div>}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Notice } from './ui/Feedback';
 
 // Document scanner: capture a page straight from a camera (webcam / phone) into
 // the system, or select a file produced by a flatbed/desktop scanner. The
@@ -43,7 +44,7 @@ export default function DocumentScanner({ onCapture, buttonLabel = '📷 Scan do
   return <span style={{ display: 'inline-block' }}>
     <button type="button" className="secondary" onClick={() => (open ? stop() : start())}>{open ? 'Close scanner' : buttonLabel}</button>
     {open && <div style={{ marginTop: 8, padding: 10, border: '1px solid #ccc', borderRadius: 8, maxWidth: 420 }}>
-      {error && <div className="error" style={{ marginBottom: 6 }}>{error}</div>}
+      {error && <Notice kind="error" style={{ marginBottom: 6 }}>{error}</Notice>}
       {!error && <video ref={videoRef} style={{ width: '100%', borderRadius: 6, background: '#000' }} muted playsInline />}
       <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
         {!error && <button type="button" onClick={capture} disabled={!ready}>Capture page</button>}

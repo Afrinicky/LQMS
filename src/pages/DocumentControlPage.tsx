@@ -21,6 +21,8 @@ import type {
   RecordRegisterEntry, RetentionScheduleRule, RecordReviewLogEntry, RecordDestructionEntry, RecordBackupEntry, RecordControlSummary, DocumentComment,
   MasterListResponse
 } from '../../shared/types/api';
+import TextField from '../components/ui/TextField';
+import { Notice } from '../components/ui/Feedback';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
@@ -693,8 +695,8 @@ export function DocumentControlPage() {
         </button>;
       })}
     </div>}
-    {error && <div className="error">{error}</div>}
-    {notice && <div className="banner-success" style={{ background: '#e8f6ee', border: '1px solid #58b27a', color: '#1c6b3e', padding: '8px 12px', borderRadius: 6, margin: '8px 0' }}>{notice}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
+    {notice && <Notice kind="success" style={{ background: '#e8f6ee', border: '1px solid #58b27a', color: '#1c6b3e', padding: '8px 12px', borderRadius: 6, margin: '8px 0' }}>{notice}</Notice>}
 
     {viewer && <DocumentViewer key={`${viewer.docId}-${viewer.versionId}`} docId={viewer.docId} versionId={viewer.versionId} attestationId={viewer.attestationId}
       workflowStatus={viewer.workflowStatus} onWorkflowAction={(action: string) => workflowAction(viewer.docId, action)}
@@ -764,7 +766,7 @@ export function DocumentControlPage() {
 
     {section === 'Documents' && tab === 'Document Register' && <>
       <div className="dm-toolbar">
-        <input className="dm-search" placeholder="Search code, title, unit, owner…" value={registerFilter} onChange={e => setRegisterFilter(e.target.value)} />
+        <TextField className="dm-search" placeholder="Search code, title, unit, owner…" value={registerFilter} onValue={nextValue => setRegisterFilter(nextValue)} />
         <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} title="Status">
           <option value="">All statuses</option>
           {['draft', 'under_review', 'reviewed', 'approved', 'current', 'due_review'].map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
@@ -883,7 +885,7 @@ export function DocumentControlPage() {
             </select>
           </label>
           <label>Note (optional, included in the notification)
-            <input value={transferModal.note} onChange={e => setTransferModal({ ...transferModal, note: e.target.value })} placeholder="e.g. Handover — previous owner has left the section" />
+            <TextField value={transferModal.note} onValue={nextValue => setTransferModal({ ...transferModal, note: nextValue })} placeholder="e.g. Handover — previous owner has left the section" />
           </label>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
             <button className="secondary" disabled={transferModal.busy} onClick={() => setTransferModal(null)}>Cancel</button>
@@ -905,7 +907,7 @@ export function DocumentControlPage() {
             {deleteModal.docs.length > 8 && <div className="muted">…and {deleteModal.docs.length - 8} more</div>}
           </div>
           <label>Type <strong>DELETE</strong> to confirm
-            <input autoFocus value={deleteModal.confirmText} onChange={e => setDeleteModal({ ...deleteModal, confirmText: e.target.value })}
+            <TextField autoFocus value={deleteModal.confirmText} onValue={nextValue => setDeleteModal({ ...deleteModal, confirmText: nextValue })}
               placeholder="DELETE" onKeyDown={e => { if (e.key === 'Enter') confirmDelete(); }} />
           </label>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
@@ -939,13 +941,13 @@ export function DocumentControlPage() {
     {section === 'Documents' && tab === 'New Document' && can('documents.authoring', 'create') && <form className="form-grid" onSubmit={submitDoc}>
       <label>Document code (leave blank to auto-generate)
         <span style={{ display: 'flex', gap: 6 }}>
-          <input value={docForm.documentCode} onChange={e => setDocForm({ ...docForm, documentCode: e.target.value })} placeholder="e.g. SECHPO026 — or Auto-generate" />
+          <TextField value={docForm.documentCode} onValue={nextValue => setDocForm({ ...docForm, documentCode: nextValue })} placeholder="e.g. SECHPO026 — or Auto-generate" />
           <button type="button" className="secondary" onClick={autoGenerateCode}>Auto</button>
         </span>
       </label>
-      <label>Title<input value={docForm.title} onChange={e => setDocForm({ ...docForm, title: e.target.value })} required /></label>
+      <label>Title<TextField value={docForm.title} onValue={nextValue => setDocForm({ ...docForm, title: nextValue })} required /></label>
       <label>Document type<select value={docForm.documentType} onChange={e => setDocForm({ ...docForm, documentType: e.target.value })} required>{DOCUMENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
-      <label>Section code (for SOP numbering, e.g. HA, MB)<input value={docForm.sectionCategory} onChange={e => setDocForm({ ...docForm, sectionCategory: e.target.value })} placeholder="e.g. HA for Haematology" /></label>
+      <label>Section code (for SOP numbering, e.g. HA, MB)<TextField value={docForm.sectionCategory} onValue={nextValue => setDocForm({ ...docForm, sectionCategory: nextValue })} placeholder="e.g. HA for Haematology" /></label>
       <label>Department<select value={docForm.departmentId} onChange={e => setDocForm({ ...docForm, departmentId: e.target.value })}><option value="">—</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
       <label>Section<select value={docForm.sectionId} onChange={e => setDocForm({ ...docForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
       <label>Owner / author<select value={docForm.ownerStaffId} onChange={e => setDocForm({ ...docForm, ownerStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
@@ -972,13 +974,13 @@ export function DocumentControlPage() {
       <label>Next review date<input type="date" value={docForm.nextReviewDate} onChange={e => setDocForm({ ...docForm, nextReviewDate: e.target.value })} /></label>
       <label>Access level<select value={docForm.accessLevel} onChange={e => setDocForm({ ...docForm, accessLevel: e.target.value })}>{ACCESS_LEVELS.map(a => <option key={a} value={a}>{a}</option>)}</select></label>
       <label><input type="checkbox" checked={docForm.isControlled} onChange={e => setDocForm({ ...docForm, isControlled: e.target.checked })} /> Controlled document</label>
-      <label>Initial version number<input value={docForm.versionNumber} onChange={e => setDocForm({ ...docForm, versionNumber: e.target.value })} /></label>
-      <label>Revision summary<input value={docForm.revisionSummary} onChange={e => setDocForm({ ...docForm, revisionSummary: e.target.value })} /></label>
+      <label>Initial version number<TextField value={docForm.versionNumber} onValue={nextValue => setDocForm({ ...docForm, versionNumber: nextValue })} /></label>
+      <label>Revision summary<TextField value={docForm.revisionSummary} onValue={nextValue => setDocForm({ ...docForm, revisionSummary: nextValue })} /></label>
       <label>Effective date<input type="date" value={docForm.effectiveDate} onChange={e => setDocForm({ ...docForm, effectiveDate: e.target.value })} /></label>
-      <label>Format / medium<input value={docForm.formatMedium} onChange={e => setDocForm({ ...docForm, formatMedium: e.target.value })} placeholder="e.g. Electronic (Word) + Printed Master Copy" /></label>
-      <label>Controlled locations / distribution<input value={docForm.controlledLocations} onChange={e => setDocForm({ ...docForm, controlledLocations: e.target.value })} placeholder="e.g. All laboratory computers; QM Master File" /></label>
-      <label>Retention period<input value={docForm.retentionPeriod} onChange={e => setDocForm({ ...docForm, retentionPeriod: e.target.value })} placeholder="e.g. 5 years after obsolescence" /></label>
-      <label>Remarks<input value={docForm.remarks} onChange={e => setDocForm({ ...docForm, remarks: e.target.value })} /></label>
+      <label>Format / medium<TextField value={docForm.formatMedium} onValue={nextValue => setDocForm({ ...docForm, formatMedium: nextValue })} placeholder="e.g. Electronic (Word) + Printed Master Copy" /></label>
+      <label>Controlled locations / distribution<TextField value={docForm.controlledLocations} onValue={nextValue => setDocForm({ ...docForm, controlledLocations: nextValue })} placeholder="e.g. All laboratory computers; QM Master File" /></label>
+      <label>Retention period<TextField value={docForm.retentionPeriod} onValue={nextValue => setDocForm({ ...docForm, retentionPeriod: nextValue })} placeholder="e.g. 5 years after obsolescence" /></label>
+      <label>Remarks<TextField value={docForm.remarks} onValue={nextValue => setDocForm({ ...docForm, remarks: nextValue })} /></label>
       <label>File upload (PDF/Word — title, number &amp; content are read automatically)
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <input type="file" accept=".pdf,.doc,.docx,.txt,.md,.rtf,.odt" onChange={e => onPickNewDocFile(e.target.files?.[0] ?? null)} />
@@ -997,8 +999,8 @@ export function DocumentControlPage() {
           <option value="filename">From file name (fallback to prefix)</option>
           <option value="prefix">Always auto-number from prefix</option>
         </select></label>
-        <label>Code prefix (fallback)<input value={bulkForm.codePrefix} onChange={e => setBulkForm({ ...bulkForm, codePrefix: e.target.value })} placeholder="e.g. SECHPO" /></label>
-        <label>Section code (SOP numbering)<input value={bulkForm.sectionCategory} onChange={e => setBulkForm({ ...bulkForm, sectionCategory: e.target.value })} placeholder="e.g. HA" /></label>
+        <label>Code prefix (fallback)<TextField value={bulkForm.codePrefix} onValue={nextValue => setBulkForm({ ...bulkForm, codePrefix: nextValue })} placeholder="e.g. SECHPO" /></label>
+        <label>Section code (SOP numbering)<TextField value={bulkForm.sectionCategory} onValue={nextValue => setBulkForm({ ...bulkForm, sectionCategory: nextValue })} placeholder="e.g. HA" /></label>
         <label>Section (applied to all)<select value={bulkForm.sectionId} onChange={e => setBulkForm({ ...bulkForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Owner staff (applied to all)<select value={bulkForm.ownerStaffId} onChange={e => setBulkForm({ ...bulkForm, ownerStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Review frequency (months)<input type="number" min={1} value={bulkForm.reviewFrequencyMonths} onChange={e => setBulkForm({ ...bulkForm, reviewFrequencyMonths: e.target.value })} /></label>
@@ -1346,7 +1348,7 @@ function SopTools({ docId, versionId, documents, startOpen }: { docId: number; v
         <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>{can('dennis', 'view') && <button onClick={() => run(confirm.task, true)}>Yes, use online AI</button>}<button className="secondary" onClick={() => setConfirm(null)}>Cancel</button></div>
       </div>}
       {result && <div style={{ marginTop: 8 }}>
-        {result.error ? <div className="error">{result.error}</div> : <>
+        {result.error ? <Notice kind="error">{result.error}</Notice> : <>
           <div style={{ fontSize: 11.5, color: '#9fb2d6', marginBottom: 4, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <span className="badge">{result.mode}{result.provider && result.provider !== 'none' ? ` · ${result.provider}` : ''}</span>
             {result.onlineUsed ? <span className="badge warning">online · redacted</span> : <span className="badge">offline · on-premises</span>}
@@ -1539,10 +1541,10 @@ export function DocumentViewer(props: { docId: number; versionId: number; attest
   const loadComments = () => api<DocumentComment[]>(`/documents/${docId}/comments`).then(setComments).catch(() => {});
   useEffect(() => { void loadComments(); }, [docId]);
 
-  async function addComment() {
-    if (!newComment.trim()) return;
+  async function addComment(typed = newComment) {
+    if (!typed.trim()) return;
     setBusy(true);
-    try { await api(`/documents/${docId}/comments`, { method: 'POST', body: JSON.stringify({ comment: newComment, stage: workflowStatus, documentVersionId: activeVersionId }) }); setNewComment(''); await loadComments(); }
+    try { await api(`/documents/${docId}/comments`, { method: 'POST', body: JSON.stringify({ comment: typed, stage: workflowStatus, documentVersionId: activeVersionId }) }); setNewComment(''); await loadComments(); }
     catch (e) { onError(errorText(e)); } finally { setBusy(false); }
   }
   async function doWorkflow(action: string) {
@@ -1910,8 +1912,8 @@ export function DocumentViewer(props: { docId: number; versionId: number; attest
           Stage: {formatBadge(workflowStatus)} · {workflowStatus === 'draft' ? 'Preview, edit if needed, then accept to send for review.' : workflowStatus === 'under_review' ? 'Reviewer: preview, edit/comment, then accept to send for approval.' : workflowStatus === 'reviewed' ? 'Approver: preview, edit/comment, then approve to publish to all staff.' : workflowStatus === 'current' ? 'Published — visible to all staff for attestation.' : 'Obsolete.'}
         </div>}
         <div style={{ display: 'flex', gap: 8 }}>
-          <input value={newComment} onChange={e => setNewComment(e.target.value)} placeholder="Add a comment for the drafter / reviewer / approver…" style={{ flex: 1 }} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addComment(); } }} />
-          {can('documents.library', 'view') && <button className="secondary" onClick={addComment} disabled={busy || !newComment.trim()}>Comment</button>}
+          <TextField value={newComment} onValue={nextValue => setNewComment(nextValue)} placeholder="Add a comment for the drafter / reviewer / approver…" style={{ flex: 1 }} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void addComment(e.currentTarget.value); } }} />
+          {can('documents.library', 'view') && <button className="secondary" onClick={() => void addComment()} disabled={busy || !newComment.trim()}>Comment</button>}
         </div>
         {comments.length > 0 && <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0 0' }}>
           {comments.map(c => <li key={c.id} style={{ fontSize: 12, color: '#c2cde3', padding: '4px 0', borderBottom: '1px solid #1c2a4a' }}>
@@ -1976,12 +1978,12 @@ function MasterListDetailsForm({ doc, onSaved, onError }: { doc: any; onSaved: (
   return <details style={{ margin: '8px 0' }}>
     <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Master-list details — format, distribution, retention, remarks</summary>
     {can('documents.authoring', 'edit') && <form className="form-grid" onSubmit={save} style={{ marginTop: 8 }}>
-      <label>Format / medium<input value={f.formatMedium} onChange={e => setF({ ...f, formatMedium: e.target.value })} placeholder="e.g. Electronic (Word) + Printed Master Copy" /></label>
-      <label>Controlled locations / distribution<input value={f.controlledLocations} onChange={e => setF({ ...f, controlledLocations: e.target.value })} placeholder="e.g. All laboratory computers; QM Master File" /></label>
-      <label>Retention period<input value={f.retentionPeriod} onChange={e => setF({ ...f, retentionPeriod: e.target.value })} placeholder="e.g. 5 years after obsolescence" /></label>
-      <label>Remarks<input value={f.remarks} onChange={e => setF({ ...f, remarks: e.target.value })} /></label>
+      <label>Format / medium<TextField value={f.formatMedium} onValue={nextValue => setF({ ...f, formatMedium: nextValue })} placeholder="e.g. Electronic (Word) + Printed Master Copy" /></label>
+      <label>Controlled locations / distribution<TextField value={f.controlledLocations} onValue={nextValue => setF({ ...f, controlledLocations: nextValue })} placeholder="e.g. All laboratory computers; QM Master File" /></label>
+      <label>Retention period<TextField value={f.retentionPeriod} onValue={nextValue => setF({ ...f, retentionPeriod: nextValue })} placeholder="e.g. 5 years after obsolescence" /></label>
+      <label>Remarks<TextField value={f.remarks} onValue={nextValue => setF({ ...f, remarks: nextValue })} /></label>
       {doc.status === 'obsolete' && <>
-        <label>Archive location<input value={f.archiveLocation} onChange={e => setF({ ...f, archiveLocation: e.target.value })} placeholder="e.g. QM archive cabinet / archive server" /></label>
+        <label>Archive location<TextField value={f.archiveLocation} onValue={nextValue => setF({ ...f, archiveLocation: nextValue })} placeholder="e.g. QM archive cabinet / archive server" /></label>
         <label>Retention / destroy date<input type="date" value={f.destroyDueDate} onChange={e => setF({ ...f, destroyDueDate: e.target.value })} /></label>
       </>}
       <button type="submit">Save master-list details</button>
@@ -2047,7 +2049,7 @@ function DocumentDetailPanel(props: any) {
     {/* Unique document identification: the number can be corrected here. */}
     <div style={{ display: 'flex', gap: 6, alignItems: 'center', margin: '8px 0' }}>
       <label style={{ margin: 0 }}>Document number</label>
-      <input value={codeEdit} onChange={e => setCodeEdit(e.target.value)} style={{ maxWidth: 220 }} />
+      <TextField value={codeEdit} onValue={nextValue => setCodeEdit(nextValue)} style={{ maxWidth: 220 }} />
       {can('documents.authoring', 'edit') && <button className="secondary" onClick={saveCode} disabled={codeEdit === (doc.document_code || '')}>Update number</button>}
     </div>
 
@@ -2250,23 +2252,23 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
       <h4>Register a controlled record</h4>
       <p className="muted" style={{ marginTop: 0 }}>Records completed on paper are indexed here; electronic records can be uploaded and stored in the register; records generated inside the system are linked to their source module.</p>
       {can('documents.records', 'create') && <form className="form-grid" onSubmit={submitRecord}>
-        <label>Record type / title<input value={regForm.title} onChange={e => setRegForm({ ...regForm, title: e.target.value })} required /></label>
+        <label>Record type / title<TextField value={regForm.title} onValue={nextValue => setRegForm({ ...regForm, title: nextValue })} required /></label>
         <label>Category<select value={regForm.recordCategory} onChange={e => setRegForm({ ...regForm, recordCategory: e.target.value })}>{RECORD_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
         <label>Origin<select value={regForm.origin} onChange={e => setRegForm({ ...regForm, origin: e.target.value })}>{RECORD_ORIGINS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
-        {regForm.origin === 'system' && <label>Source module / system<input value={regForm.sourceModule} onChange={e => setRegForm({ ...regForm, sourceModule: e.target.value })} placeholder="e.g. IQC Management, Equipment Management" /></label>}
+        {regForm.origin === 'system' && <label>Source module / system<TextField value={regForm.sourceModule} onValue={nextValue => setRegForm({ ...regForm, sourceModule: nextValue })} placeholder="e.g. IQC Management, Equipment Management" /></label>}
         <label>Upload record file (stores the record here)<input type="file" onChange={e => setRecordFile(e.target.files?.[0] ?? null)} /></label>
         <label>Format<select value={regForm.recordFormat} onChange={e => setRegForm({ ...regForm, recordFormat: e.target.value })}>{RECORD_FORMATS.map(f => <option key={f} value={f}>{f}</option>)}</select></label>
         <label>Section<select value={regForm.sectionId} onChange={e => setRegForm({ ...regForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Responsible person<select value={regForm.responsibleStaffId} onChange={e => setRegForm({ ...regForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Retention rule<select value={regForm.retentionScheduleId} onChange={e => { const r = schedule.find(x => String(x.id) === e.target.value); setRegForm({ ...regForm, retentionScheduleId: e.target.value, retentionPeriod: r?.retention_period || regForm.retentionPeriod }); }}><option value="">—</option>{schedule.map(s => <option key={s.id} value={s.id}>{s.record_type} ({s.retention_period})</option>)}</select></label>
-        <label>Retention period<input value={regForm.retentionPeriod} onChange={e => setRegForm({ ...regForm, retentionPeriod: e.target.value })} placeholder="e.g. 5 years" /></label>
-        <label>Storage location<input value={regForm.storageLocation} onChange={e => setRegForm({ ...regForm, storageLocation: e.target.value })} placeholder="e.g. Quality Manager Office — Master File" /></label>
+        <label>Retention period<TextField value={regForm.retentionPeriod} onValue={nextValue => setRegForm({ ...regForm, retentionPeriod: nextValue })} placeholder="e.g. 5 years" /></label>
+        <label>Storage location<TextField value={regForm.storageLocation} onValue={nextValue => setRegForm({ ...regForm, storageLocation: nextValue })} placeholder="e.g. Quality Manager Office — Master File" /></label>
         <label>Confidentiality / access<select value={regForm.confidentiality} onChange={e => setRegForm({ ...regForm, confidentiality: e.target.value })}>{CONFIDENTIALITY.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
         <label>Source / generating document<select value={regForm.linkedDocumentId} onChange={e => setRegForm({ ...regForm, linkedDocumentId: e.target.value })}><option value="">—</option>{documents.map(d => <option key={d.id} value={d.id}>{d.document_code || ''} {d.title}</option>)}</select></label>
         <label>Date created<input type="date" value={regForm.dateCreated} onChange={e => setRegForm({ ...regForm, dateCreated: e.target.value })} /></label>
         <label>Disposal due date<input type="date" value={regForm.disposalDueDate} onChange={e => setRegForm({ ...regForm, disposalDueDate: e.target.value })} /></label>
-        <label>Disposal method<input value={regForm.disposalMethod} onChange={e => setRegForm({ ...regForm, disposalMethod: e.target.value })} placeholder="e.g. Secure disposal (shred / confidential waste / electronic deletion)" /></label>
-        <label>Remarks<input value={regForm.notes} onChange={e => setRegForm({ ...regForm, notes: e.target.value })} /></label>
+        <label>Disposal method<TextField value={regForm.disposalMethod} onValue={nextValue => setRegForm({ ...regForm, disposalMethod: nextValue })} placeholder="e.g. Secure disposal (shred / confidential waste / electronic deletion)" /></label>
+        <label>Remarks<TextField value={regForm.notes} onValue={nextValue => setRegForm({ ...regForm, notes: nextValue })} /></label>
         <button type="submit" disabled={savingRecord}>{savingRecord ? 'Saving…' : 'Add record'}</button>
       </form>}
     </>}
@@ -2296,11 +2298,11 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
       <h4>Record a review</h4>
       {can('documents.records', 'create') && <form className="form-grid" onSubmit={e => { e.preventDefault(); submit('review-log', revForm, () => setRevForm(emptyRev)); }}>
         <label>Review date<input type="date" value={revForm.reviewDate} onChange={e => setRevForm({ ...revForm, reviewDate: e.target.value })} required /></label>
-        <label>Record category<input value={revForm.recordCategory} onChange={e => setRevForm({ ...revForm, recordCategory: e.target.value })} required placeholder="e.g. Quality control records" /></label>
+        <label>Record category<TextField value={revForm.recordCategory} onValue={nextValue => setRevForm({ ...revForm, recordCategory: nextValue })} required placeholder="e.g. Quality control records" /></label>
         <label>Section<select value={revForm.sectionId} onChange={e => setRevForm({ ...revForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-        <label>Records reviewed<input value={revForm.recordsReviewed} onChange={e => setRevForm({ ...revForm, recordsReviewed: e.target.value })} /></label>
-        <label>Findings<textarea value={revForm.findings} onChange={e => setRevForm({ ...revForm, findings: e.target.value })} /></label>
-        <label>Nonconformities identified<textarea value={revForm.nonconformitiesIdentified} onChange={e => setRevForm({ ...revForm, nonconformitiesIdentified: e.target.value })} /></label>
+        <label>Records reviewed<TextField value={revForm.recordsReviewed} onValue={nextValue => setRevForm({ ...revForm, recordsReviewed: nextValue })} /></label>
+        <label>Findings<TextField as="textarea" value={revForm.findings} onValue={nextValue => setRevForm({ ...revForm, findings: nextValue })} /></label>
+        <label>Nonconformities identified<TextField as="textarea" value={revForm.nonconformitiesIdentified} onValue={nextValue => setRevForm({ ...revForm, nonconformitiesIdentified: nextValue })} /></label>
         <label><input type="checkbox" checked={revForm.actionRequired} onChange={e => setRevForm({ ...revForm, actionRequired: e.target.checked })} /> Action required</label>
         <label>Responsible person<select value={revForm.responsibleStaffId} onChange={e => setRevForm({ ...revForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Target completion<input type="date" value={revForm.targetCompletionDate} onChange={e => setRevForm({ ...revForm, targetCompletionDate: e.target.value })} /></label>
@@ -2319,14 +2321,14 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
       {can('documents.records', 'create') && <form className="form-grid" onSubmit={e => { e.preventDefault(); submit('destruction-log', desForm, () => setDesForm(emptyDes)); }}>
         <label>Item type<select value={desForm.itemType} onChange={e => setDesForm({ ...desForm, itemType: e.target.value })}><option value="record">Record</option><option value="document">Document</option></select></label>
         <label>From register (optional)<select value={desForm.recordRegisterId} onChange={e => setDesForm({ ...desForm, recordRegisterId: e.target.value })}><option value="">—</option>{register.map(r => <option key={r.id} value={r.id}>{r.record_code} {r.title}</option>)}</select></label>
-        <label>Description<input value={desForm.description} onChange={e => setDesForm({ ...desForm, description: e.target.value })} required /></label>
+        <label>Description<TextField value={desForm.description} onValue={nextValue => setDesForm({ ...desForm, description: nextValue })} required /></label>
         <label>Date destroyed<input type="date" value={desForm.dateDestroyed} onChange={e => setDesForm({ ...desForm, dateDestroyed: e.target.value })} required /></label>
         <label>Method<select value={desForm.method} onChange={e => setDesForm({ ...desForm, method: e.target.value })}>{DESTRUCTION_METHODS.map(m => <option key={m} value={m}>{m.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Authorised by<select value={desForm.authorizedByStaffId} onChange={e => setDesForm({ ...desForm, authorizedByStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Witness<select value={desForm.witnessStaffId} onChange={e => setDesForm({ ...desForm, witnessStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label><input type="checkbox" checked={desForm.retentionVerified} onChange={e => setDesForm({ ...desForm, retentionVerified: e.target.checked })} /> Retention period verified expired</label>
         <label><input type="checkbox" checked={desForm.confidentialityEnsured} onChange={e => setDesForm({ ...desForm, confidentialityEnsured: e.target.checked })} /> Confidentiality ensured</label>
-        <label>Notes<input value={desForm.notes} onChange={e => setDesForm({ ...desForm, notes: e.target.value })} /></label>
+        <label>Notes<TextField value={desForm.notes} onValue={nextValue => setDesForm({ ...desForm, notes: nextValue })} /></label>
         <button type="submit">Record destruction</button>
       </form>}
     </>}
@@ -2341,14 +2343,14 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
       {can('documents.records', 'create') && <form className="form-grid" onSubmit={e => { e.preventDefault(); submit('backup-log', bkpForm, () => setBkpForm(emptyBkp)); }}>
         <label>Backup date<input type="date" value={bkpForm.backupDate} onChange={e => setBkpForm({ ...bkpForm, backupDate: e.target.value })} required /></label>
         <label>Type<select value={bkpForm.backupType} onChange={e => setBkpForm({ ...bkpForm, backupType: e.target.value })}>{BACKUP_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
-        <label>Scope<input value={bkpForm.scope} onChange={e => setBkpForm({ ...bkpForm, scope: e.target.value })} placeholder="e.g. LHIMS database" /></label>
-        <label>Storage location<input value={bkpForm.storageLocation} onChange={e => setBkpForm({ ...bkpForm, storageLocation: e.target.value })} /></label>
+        <label>Scope<TextField value={bkpForm.scope} onValue={nextValue => setBkpForm({ ...bkpForm, scope: nextValue })} placeholder="e.g. LHIMS database" /></label>
+        <label>Storage location<TextField value={bkpForm.storageLocation} onValue={nextValue => setBkpForm({ ...bkpForm, storageLocation: nextValue })} /></label>
         <label>Performed by<select value={bkpForm.performedByStaffId} onChange={e => setBkpForm({ ...bkpForm, performedByStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Restore test status<select value={bkpForm.restoreTestStatus} onChange={e => setBkpForm({ ...bkpForm, restoreTestStatus: e.target.value })}>{RESTORE_STATUSES.map(s => <option key={s} value={s}>{s ? s.replace(/_/g, ' ') : '—'}</option>)}</select></label>
         <label>Restore test date<input type="date" value={bkpForm.restoreTestDate} onChange={e => setBkpForm({ ...bkpForm, restoreTestDate: e.target.value })} /></label>
         <label><input type="checkbox" checked={bkpForm.offsite} onChange={e => setBkpForm({ ...bkpForm, offsite: e.target.checked })} /> Off-site copy</label>
         <label><input type="checkbox" checked={bkpForm.integrityVerified} onChange={e => setBkpForm({ ...bkpForm, integrityVerified: e.target.checked })} /> Integrity verified</label>
-        <label>Notes<input value={bkpForm.notes} onChange={e => setBkpForm({ ...bkpForm, notes: e.target.value })} /></label>
+        <label>Notes<TextField value={bkpForm.notes} onValue={nextValue => setBkpForm({ ...bkpForm, notes: nextValue })} /></label>
         <button type="submit">Log backup</button>
       </form>}
     </>}
@@ -2425,7 +2427,7 @@ function AttestationsTabView({ pending, staff, documents, onSignAttestation, onO
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 360px) 1fr', gap: 16, alignItems: 'start' }}>
       <div className="card" style={{ padding: 12 }}>
         <h4 style={{ margin: '0 0 8px' }}>1 · Choose a document</h4>
-        <input placeholder="Search document code, title or type…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={{ width: '100%', marginBottom: 8 }} />
+        <TextField placeholder="Search document code, title or type…" value={searchTerm} onValue={nextValue => setSearchTerm(nextValue)} style={{ width: '100%', marginBottom: 8 }} />
         <div style={{ maxHeight: '52vh', overflowY: 'auto', border: '1px solid var(--border, #e2e8f0)', borderRadius: 6 }}>
           {filteredDocs.length === 0 && <p className="muted" style={{ padding: 12 }}>No documents with attestations found.</p>}
           {filteredDocs.map(d => {
@@ -2645,9 +2647,9 @@ function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onEr
 
     {sub === 'Register' && <>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '10px 0' }}>
-        <input placeholder="Search title / description / archive number…" value={search.q} onChange={e => setSearch({ ...search, q: e.target.value })} style={{ minWidth: 260 }} />
+        <TextField placeholder="Search title / description / archive number…" value={search.q} onValue={nextValue => setSearch({ ...search, q: nextValue })} style={{ minWidth: 260 }} />
         <select value={search.type} onChange={e => setSearch({ ...search, type: e.target.value })}><option value="">All types</option>{ARCHIVE_TYPES_UI.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}</select>
-        <input placeholder="Source module" value={search.module} onChange={e => setSearch({ ...search, module: e.target.value })} style={{ width: 140 }} />
+        <TextField placeholder="Source module" value={search.module} onValue={nextValue => setSearch({ ...search, module: nextValue })} style={{ width: 140 }} />
         <input type="date" value={search.from} onChange={e => setSearch({ ...search, from: e.target.value })} />
         <input type="date" value={search.to} onChange={e => setSearch({ ...search, to: e.target.value })} />
         <button type="button" onClick={applyFilters}>Apply</button>
@@ -2712,19 +2714,19 @@ function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onEr
       <h4 style={{ marginTop: 0 }}>Upload an archived document / record</h4>
       <p className="muted" style={{ marginTop: 0 }}>Register an archive here for records held physically or already prepared as a file. Every archive becomes searchable from this tab and is linked back to its source module.</p>
       {can('documents.archive', 'create') && <form className="form-grid" onSubmit={submitUpload}>
-        <label>Title<input value={uploadForm.title} onChange={e => setUploadForm({ ...uploadForm, title: e.target.value })} required /></label>
+        <label>Title<TextField value={uploadForm.title} onValue={nextValue => setUploadForm({ ...uploadForm, title: nextValue })} required /></label>
         <label>Archive type<select value={uploadForm.archiveType} onChange={e => setUploadForm({ ...uploadForm, archiveType: e.target.value })}>{ARCHIVE_TYPES_UI.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}</select></label>
-        <label>Source module<input value={uploadForm.sourceModule} onChange={e => setUploadForm({ ...uploadForm, sourceModule: e.target.value })} placeholder="documents | equipment | monthly_reports …" /></label>
-        <label>Source record type<input value={uploadForm.sourceRecordType} onChange={e => setUploadForm({ ...uploadForm, sourceRecordType: e.target.value })} placeholder="optional" /></label>
-        <label>Source record id<input value={uploadForm.sourceRecordId} onChange={e => setUploadForm({ ...uploadForm, sourceRecordId: e.target.value })} placeholder="optional" /></label>
+        <label>Source module<TextField value={uploadForm.sourceModule} onValue={nextValue => setUploadForm({ ...uploadForm, sourceModule: nextValue })} placeholder="documents | equipment | monthly_reports …" /></label>
+        <label>Source record type<TextField value={uploadForm.sourceRecordType} onValue={nextValue => setUploadForm({ ...uploadForm, sourceRecordType: nextValue })} placeholder="optional" /></label>
+        <label>Source record id<TextField value={uploadForm.sourceRecordId} onValue={nextValue => setUploadForm({ ...uploadForm, sourceRecordId: nextValue })} placeholder="optional" /></label>
         <label>Period start<input type="date" value={uploadForm.periodStart} onChange={e => setUploadForm({ ...uploadForm, periodStart: e.target.value })} /></label>
         <label>Period end<input type="date" value={uploadForm.periodEnd} onChange={e => setUploadForm({ ...uploadForm, periodEnd: e.target.value })} /></label>
         <label>Retention (months)<input type="number" min={0} value={uploadForm.retentionPeriodMonths} onChange={e => setUploadForm({ ...uploadForm, retentionPeriodMonths: e.target.value })} /></label>
-        <label>Storage location<input value={uploadForm.storageLocation} onChange={e => setUploadForm({ ...uploadForm, storageLocation: e.target.value })} placeholder="e.g. archive cabinet / server folder" /></label>
-        <label>Cloud provider<input value={uploadForm.cloudProvider} onChange={e => setUploadForm({ ...uploadForm, cloudProvider: e.target.value })} placeholder="Google Drive / OneDrive / …" /></label>
-        <label>Cloud link<input value={uploadForm.cloudUrl} onChange={e => setUploadForm({ ...uploadForm, cloudUrl: e.target.value })} placeholder="https://…" /></label>
-        <label>Description<textarea value={uploadForm.description} onChange={e => setUploadForm({ ...uploadForm, description: e.target.value })} /></label>
-        <label>Notes / remarks<input value={uploadForm.notes} onChange={e => setUploadForm({ ...uploadForm, notes: e.target.value })} /></label>
+        <label>Storage location<TextField value={uploadForm.storageLocation} onValue={nextValue => setUploadForm({ ...uploadForm, storageLocation: nextValue })} placeholder="e.g. archive cabinet / server folder" /></label>
+        <label>Cloud provider<TextField value={uploadForm.cloudProvider} onValue={nextValue => setUploadForm({ ...uploadForm, cloudProvider: nextValue })} placeholder="Google Drive / OneDrive / …" /></label>
+        <label>Cloud link<TextField value={uploadForm.cloudUrl} onValue={nextValue => setUploadForm({ ...uploadForm, cloudUrl: nextValue })} placeholder="https://…" /></label>
+        <label>Description<TextField as="textarea" value={uploadForm.description} onValue={nextValue => setUploadForm({ ...uploadForm, description: nextValue })} /></label>
+        <label>Notes / remarks<TextField value={uploadForm.notes} onValue={nextValue => setUploadForm({ ...uploadForm, notes: nextValue })} /></label>
         <label>File to archive (local copy)<input type="file" onChange={e => setArchiveFile(e.target.files?.[0] ?? null)} /></label>
         <button type="submit" disabled={uploadBusy}>{uploadBusy ? 'Uploading…' : 'Register archive'}</button>
       </form>}
@@ -2734,15 +2736,15 @@ function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onEr
       <h4 style={{ marginTop: 0 }}>Archive patient results for a period (Excel / CSV)</h4>
       <p className="muted" style={{ marginTop: 0 }}>Generates an Excel or CSV file of every processed patient result within the chosen period and registers it as an archive. Requires LHIMS data for the period to be imported.</p>
       {can('documents.archive', 'create') && <form className="form-grid" onSubmit={submitPatientArchive}>
-        <label>Title (optional)<input value={patientForm.title} onChange={e => setPatientForm({ ...patientForm, title: e.target.value })} placeholder="e.g. Patient Results — Q3 2026" /></label>
+        <label>Title (optional)<TextField value={patientForm.title} onValue={nextValue => setPatientForm({ ...patientForm, title: nextValue })} placeholder="e.g. Patient Results — Q3 2026" /></label>
         <label>Period start<input type="date" value={patientForm.periodStart} onChange={e => setPatientForm({ ...patientForm, periodStart: e.target.value })} required /></label>
         <label>Period end<input type="date" value={patientForm.periodEnd} onChange={e => setPatientForm({ ...patientForm, periodEnd: e.target.value })} required /></label>
         <label>Format<select value={patientForm.format} onChange={e => setPatientForm({ ...patientForm, format: e.target.value })}><option value="excel">Excel (.xlsx)</option><option value="csv">CSV (.csv)</option></select></label>
         <label>Retention (months)<input type="number" min={0} value={patientForm.retentionPeriodMonths} onChange={e => setPatientForm({ ...patientForm, retentionPeriodMonths: e.target.value })} /></label>
-        <label>Cloud provider<input value={patientForm.cloudProvider} onChange={e => setPatientForm({ ...patientForm, cloudProvider: e.target.value })} placeholder="optional" /></label>
-        <label>Cloud link<input value={patientForm.cloudUrl} onChange={e => setPatientForm({ ...patientForm, cloudUrl: e.target.value })} placeholder="optional" /></label>
-        <label>Storage location<input value={patientForm.storageLocation} onChange={e => setPatientForm({ ...patientForm, storageLocation: e.target.value })} placeholder="e.g. patient archive drive" /></label>
-        <label>Notes<input value={patientForm.notes} onChange={e => setPatientForm({ ...patientForm, notes: e.target.value })} /></label>
+        <label>Cloud provider<TextField value={patientForm.cloudProvider} onValue={nextValue => setPatientForm({ ...patientForm, cloudProvider: nextValue })} placeholder="optional" /></label>
+        <label>Cloud link<TextField value={patientForm.cloudUrl} onValue={nextValue => setPatientForm({ ...patientForm, cloudUrl: nextValue })} placeholder="optional" /></label>
+        <label>Storage location<TextField value={patientForm.storageLocation} onValue={nextValue => setPatientForm({ ...patientForm, storageLocation: nextValue })} placeholder="e.g. patient archive drive" /></label>
+        <label>Notes<TextField value={patientForm.notes} onValue={nextValue => setPatientForm({ ...patientForm, notes: nextValue })} /></label>
         <button type="submit" disabled={patientBusy}>{patientBusy ? 'Building archive…' : 'Create archive'}</button>
       </form>}
     </div>}
@@ -2752,16 +2754,16 @@ function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onEr
         <h4 style={{ marginTop: 0 }}>Configure a periodic archive schedule</h4>
         <p className="muted" style={{ marginTop: 0 }}>Define when an archive should be generated (e.g. weekly / monthly patient results). The schedule is stored and displayed on the dashboard; an operator triggers each archive from the &ldquo;Periodic Patient Results&rdquo; tab or an automated job.</p>
         {can('documents.archive', 'edit') && <form className="form-grid" onSubmit={submitSchedule}>
-          <label>Key<input value={scheduleForm.scheduleKey} onChange={e => setScheduleForm({ ...scheduleForm, scheduleKey: e.target.value })} placeholder="e.g. patient_results" required /></label>
-          <label>Title<input value={scheduleForm.title} onChange={e => setScheduleForm({ ...scheduleForm, title: e.target.value })} required /></label>
+          <label>Key<TextField value={scheduleForm.scheduleKey} onValue={nextValue => setScheduleForm({ ...scheduleForm, scheduleKey: nextValue })} placeholder="e.g. patient_results" required /></label>
+          <label>Title<TextField value={scheduleForm.title} onValue={nextValue => setScheduleForm({ ...scheduleForm, title: nextValue })} required /></label>
           <label>Archive type<select value={scheduleForm.archiveType} onChange={e => setScheduleForm({ ...scheduleForm, archiveType: e.target.value })}>{ARCHIVE_TYPES_UI.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}</select></label>
           <label>Frequency<select value={scheduleForm.frequency} onChange={e => setScheduleForm({ ...scheduleForm, frequency: e.target.value })}>{ARCHIVE_FREQUENCIES.map(f => <option key={f} value={f}>{f}</option>)}</select></label>
           <label>Format<select value={scheduleForm.format} onChange={e => setScheduleForm({ ...scheduleForm, format: e.target.value })}><option value="excel">Excel</option><option value="csv">CSV</option><option value="zip">ZIP</option></select></label>
           <label>Retention (months)<input type="number" value={scheduleForm.retentionPeriodMonths} onChange={e => setScheduleForm({ ...scheduleForm, retentionPeriodMonths: e.target.value })} /></label>
           <label>Responsible<select value={scheduleForm.responsibleStaffId} onChange={e => setScheduleForm({ ...scheduleForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           <label>Next run at<input type="date" value={scheduleForm.nextRunAt} onChange={e => setScheduleForm({ ...scheduleForm, nextRunAt: e.target.value })} /></label>
-          <label>Cloud URL template<input value={scheduleForm.cloudUrlTemplate} onChange={e => setScheduleForm({ ...scheduleForm, cloudUrlTemplate: e.target.value })} /></label>
-          <label>Notes<input value={scheduleForm.notes} onChange={e => setScheduleForm({ ...scheduleForm, notes: e.target.value })} /></label>
+          <label>Cloud URL template<TextField value={scheduleForm.cloudUrlTemplate} onValue={nextValue => setScheduleForm({ ...scheduleForm, cloudUrlTemplate: nextValue })} /></label>
+          <label>Notes<TextField value={scheduleForm.notes} onValue={nextValue => setScheduleForm({ ...scheduleForm, notes: nextValue })} /></label>
           <button type="submit">Save schedule</button>
         </form>}
       </div>

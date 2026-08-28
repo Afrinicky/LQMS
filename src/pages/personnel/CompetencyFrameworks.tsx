@@ -9,6 +9,8 @@ import {
   COMPETENCY_METHOD_LABELS, COMPETENCY_METHOD_HINTS, COMPETENCY_SCALE_4,
 } from '../../../shared/constants/competency';
 import type { CompetencyFramework, Section, Department } from '../../../shared/types/api';
+import TextField from '../../components/ui/TextField';
+import { Notice } from '../../components/ui/Feedback';
 
 /**
  * The framework builder — what a job is assessed against.
@@ -117,10 +119,10 @@ export default function CompetencyFrameworks({ sections, departments, onChanged 
       </div>
     </div>
 
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {creating && mayCreate && <form className="form-grid" onSubmit={submitNew}>
-      <label>Title<input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required placeholder="e.g. Bench competency — haematology" /></label>
+      <label>Title<TextField value={form.title} onValue={nextValue => setForm({ ...form, title: nextValue })} required placeholder="e.g. Bench competency — haematology" /></label>
       <label>Applies to
         <select value={form.appliesTo} onChange={e => setForm({ ...form, appliesTo: e.target.value })}>
           {COMPETENCY_AUDIENCES.map(a => <option key={a} value={a}>{COMPETENCY_AUDIENCE_LABELS[a]}</option>)}
@@ -138,7 +140,7 @@ export default function CompetencyFrameworks({ sections, departments, onChanged 
           {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
         </select>
       </label>
-      <label>Version<input value={form.versionLabel} onChange={e => setForm({ ...form, versionLabel: e.target.value })} /></label>
+      <label>Version<TextField value={form.versionLabel} onValue={nextValue => setForm({ ...form, versionLabel: nextValue })} /></label>
       <label>Top of rating scale
         <select value={form.maxScore} onChange={e => setForm({ ...form, maxScore: e.target.value })}>
           <option value="4">4-point</option>
@@ -154,8 +156,8 @@ export default function CompetencyFrameworks({ sections, departments, onChanged 
       <label className="check-inline"><input type="checkbox" checked={form.criticalElementsMustPass} onChange={e => setForm({ ...form, criticalElementsMustPass: e.target.checked })} /> A shortfall on a critical element blocks a competent outcome</label>
       <label className="check-inline"><input type="checkbox" checked={form.requiresTechnicalReview} onChange={e => setForm({ ...form, requiresTechnicalReview: e.target.checked })} /> Requires a technical countersignature</label>
       <label className="check-inline"><input type="checkbox" checked={form.requiresStaffAcknowledgement} onChange={e => setForm({ ...form, requiresStaffAcknowledgement: e.target.checked })} /> Requires the member of staff to acknowledge</label>
-      <label className="wide">Purpose<textarea rows={2} value={form.purpose} onChange={e => setForm({ ...form, purpose: e.target.value })} placeholder="What this framework is for." /></label>
-      <label className="wide">Scope<textarea rows={2} value={form.scope} onChange={e => setForm({ ...form, scope: e.target.value })} placeholder="Who it applies to, and what it covers." /></label>
+      <label className="wide">Purpose<TextField as="textarea" rows={2} value={form.purpose} onValue={nextValue => setForm({ ...form, purpose: nextValue })} placeholder="What this framework is for." /></label>
+      <label className="wide">Scope<TextField as="textarea" rows={2} value={form.scope} onValue={nextValue => setForm({ ...form, scope: nextValue })} placeholder="Who it applies to, and what it covers." /></label>
       <button type="submit">Create framework</button>
     </form>}
 
@@ -268,17 +270,17 @@ function FrameworkEditor({ framework, sections, departments, mayEdit, mayCreate,
       </>}</RowMenu>}
     </div>}
   >
-    {error && <div className="error">{error}</div>}
-    {!isDraft && adminEdit && editable && <p className="notice-warn">
+    {error && <Notice kind="error">{error}</Notice>}
+    {!isDraft && adminEdit && editable && <Notice kind="warn">
       <ShieldAlert size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />
       You are editing a framework that is already in force. Changes here do not rewrite the {framework.assessments_raised ?? 0} assessment(s) already raised against it — those keep the wording they were judged by — but they do change the standard from now on. Use this only to correct a mistake or clear demonstration data.
-    </p>}
-    {framework.status === 'active' && !adminEdit && <p className="notice-ok">
+    </Notice>}
+    {framework.status === 'active' && !adminEdit && <Notice kind="success">
       This framework is in force. To change what it asks for, take a new version — the assessments already raised against this one keep the wording they were judged by.
-    </p>}
-    {framework.status === 'draft' && elements.length === 0 && <p className="notice-warn">
+    </Notice>}
+    {framework.status === 'draft' && elements.length === 0 && <Notice kind="warn">
       Add the elements of the job below, then activate the framework to start raising assessments against it.
-    </p>}
+    </Notice>}
 
     <div className="tabs sub">
       {(['Elements', 'Details'] as const).map(t =>
@@ -361,10 +363,10 @@ function ElementBuilder({ framework, groups, elements, editable, onError, onChan
 
   const addForm = (groupId: number | 'none') => <div className="element-add">
     <label className="wide">Element — what the person has to be able to do
-      <input autoFocus value={element.elementText} onChange={e => setElement({ ...element, elementText: e.target.value })} placeholder="e.g. Performs ABO and Rh D grouping and resolves discrepancies" />
+      <TextField autoFocus value={element.elementText} onValue={nextValue => setElement({ ...element, elementText: nextValue })} placeholder="e.g. Performs ABO and Rh D grouping and resolves discrepancies" />
     </label>
     <label className="wide">Performance criteria — what acceptable work looks like
-      <textarea rows={2} value={element.performanceCriteria} onChange={e => setElement({ ...element, performanceCriteria: e.target.value })} placeholder="The standard the assessor judges against." />
+      <TextField as="textarea" rows={2} value={element.performanceCriteria} onValue={nextValue => setElement({ ...element, performanceCriteria: nextValue })} placeholder="The standard the assessor judges against." />
     </label>
     <label>Method of assessment
       <select value={element.defaultMethod} onChange={e => setElement({ ...element, defaultMethod: e.target.value })}>
@@ -372,7 +374,7 @@ function ElementBuilder({ framework, groups, elements, editable, onError, onChan
       </select>
       <small className="field-hint">{COMPETENCY_METHOD_HINTS[element.defaultMethod]}</small>
     </label>
-    <label>Expected evidence<input value={element.expectedEvidence} onChange={e => setElement({ ...element, expectedEvidence: e.target.value })} placeholder="e.g. Signed worksheet" /></label>
+    <label>Expected evidence<TextField value={element.expectedEvidence} onValue={nextValue => setElement({ ...element, expectedEvidence: nextValue })} placeholder="e.g. Signed worksheet" /></label>
     <label>Weight<input type="number" min={0.5} step="0.5" value={element.weight} onChange={e => setElement({ ...element, weight: e.target.value })} /></label>
     <label className="check-inline"><input type="checkbox" checked={element.isCritical} onChange={e => setElement({ ...element, isCritical: e.target.checked })} /> Critical — a shortfall here blocks a competent outcome</label>
     <div className="element-add-actions">
@@ -443,7 +445,7 @@ function ElementBuilder({ framework, groups, elements, editable, onError, onChan
 
     {editable && <div className="group-add">
       <label>New group
-        <input value={newGroup} onChange={e => setNewGroup(e.target.value)} placeholder="e.g. Haematology and blood transfusion"
+        <TextField value={newGroup} onValue={nextValue => setNewGroup(nextValue)} placeholder="e.g. Haematology and blood transfusion"
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void addGroup(); } }} />
       </label>
       <button type="button" className="secondary" onClick={() => void addGroup()}>Add group</button>
@@ -658,7 +660,7 @@ function FrameworkDetails({ framework, sections, departments, editable, onError,
   }
 
   return can('personnel.training', 'edit') && <form className="form-grid" onSubmit={save}>
-    <label>Title<input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required /></label>
+    <label>Title<TextField value={form.title} onValue={nextValue => setForm({ ...form, title: nextValue })} required /></label>
     <label>Applies to
       <select value={form.appliesTo} onChange={e => setForm({ ...form, appliesTo: e.target.value })}>
         {COMPETENCY_AUDIENCES.map(a => <option key={a} value={a}>{COMPETENCY_AUDIENCE_LABELS[a]}</option>)}
@@ -676,8 +678,8 @@ function FrameworkDetails({ framework, sections, departments, editable, onError,
         {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
       </select>
     </label>
-    <label>Cadre<input value={form.cadre} onChange={e => setForm({ ...form, cadre: e.target.value })} placeholder="e.g. Scientist" /></label>
-    <label>Version<input value={form.versionLabel} onChange={e => setForm({ ...form, versionLabel: e.target.value })} /></label>
+    <label>Cadre<TextField value={form.cadre} onValue={nextValue => setForm({ ...form, cadre: nextValue })} placeholder="e.g. Scientist" /></label>
+    <label>Version<TextField value={form.versionLabel} onValue={nextValue => setForm({ ...form, versionLabel: nextValue })} /></label>
     <label>Top of rating scale
       <select value={form.maxScore} onChange={e => setForm({ ...form, maxScore: e.target.value })}>
         <option value="4">4-point</option><option value="5">5-point</option><option value="3">3-point</option>
@@ -691,8 +693,8 @@ function FrameworkDetails({ framework, sections, departments, editable, onError,
     <label className="check-inline"><input type="checkbox" checked={form.criticalElementsMustPass} onChange={e => setForm({ ...form, criticalElementsMustPass: e.target.checked })} /> A shortfall on a critical element blocks a competent outcome</label>
     <label className="check-inline"><input type="checkbox" checked={form.requiresTechnicalReview} onChange={e => setForm({ ...form, requiresTechnicalReview: e.target.checked })} /> Requires a technical countersignature</label>
     <label className="check-inline"><input type="checkbox" checked={form.requiresStaffAcknowledgement} onChange={e => setForm({ ...form, requiresStaffAcknowledgement: e.target.checked })} /> Requires the member of staff to acknowledge</label>
-    <label className="wide">Purpose<textarea rows={2} value={form.purpose} onChange={e => setForm({ ...form, purpose: e.target.value })} /></label>
-    <label className="wide">Scope<textarea rows={2} value={form.scope} onChange={e => setForm({ ...form, scope: e.target.value })} /></label>
+    <label className="wide">Purpose<TextField as="textarea" rows={2} value={form.purpose} onValue={nextValue => setForm({ ...form, purpose: nextValue })} /></label>
+    <label className="wide">Scope<TextField as="textarea" rows={2} value={form.scope} onValue={nextValue => setForm({ ...form, scope: nextValue })} /></label>
     <div className="element-add-actions">
       <button type="submit">Save details</button>
       {saved && <span className="saved-flag">Saved</span>}

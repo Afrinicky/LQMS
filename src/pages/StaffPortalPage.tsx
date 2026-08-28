@@ -26,6 +26,7 @@ import PortalTraining from './portal/PortalTraining';
 import PortalPreferences from './portal/PortalPreferences';
 import PortalRoutineWork from './portal/PortalRoutineWork';
 import { errorText } from '../services/api';
+import { Notice } from '../components/ui/Feedback';
 
 /* ============================================================================
    MY PORTAL — the member of staff's own workspace.
@@ -89,7 +90,7 @@ function PortalShell() {
         ))}
       </nav>
 
-      {error && <div className="error" role="alert">{error}<button type="button" className="link-button" onClick={() => setError(null)}>Dismiss</button></div>}
+      {error && <Notice kind="error" role="alert">{error}<button type="button" className="link-button" onClick={() => setError(null)}>Dismiss</button></Notice>}
       {notice && <div className="portal-notice" role="status">{notice}<button type="button" className="link-button" onClick={() => setNotice(null)}>Dismiss</button></div>}
       {loading && <div className="portal-loading">Gathering your file…</div>}
       {!loading && !staff && tab !== 'My Record' && <LinkStaffPrompt />}

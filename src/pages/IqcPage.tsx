@@ -26,6 +26,8 @@ import {
 } from '../../shared/constants/iqc';
 import type { Section, Staff, EquipmentItem } from '../../shared/types/api';
 import { equipmentIsDiagnostic } from '../../shared/constants/equipment';
+import TextField from '../components/ui/TextField';
+import { Notice } from '../components/ui/Feedback';
 
 /* ============================================================================
    IQC — internal quality control.
@@ -150,8 +152,8 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
         />
       )}
       <PermissionTabs moduleKey="iqc" tabs={tabs} active={tab} onChange={setTab} />
-      {error && <div className="error">{error}</div>}
-      {notice && <div className="notice-ok">{notice}</div>}
+      {error && <Notice kind="error">{error}</Notice>}
+      {notice && <Notice kind="success">{notice}</Notice>}
 
       {tab === 'Dashboard' && (
         <>
@@ -482,7 +484,7 @@ function ControlActions({ material, isAdmin, onEdit, onChanged, onError, onNotic
           </p>
         )}
         <label className="stack">Reason
-          <textarea rows={2} value={reason} onChange={e => setReason(e.target.value)}
+          <TextField as="textarea" rows={2} value={reason} onValue={nextValue => setReason(nextValue)}
             placeholder="e.g. Lot registered twice in error — this duplicate was never run." />
         </label>
         <div className="iqc-danger-acts">
@@ -626,14 +628,14 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
       )}
 
       <div className="form-grid">
-        <label>Control name<input value={form.materialName} onChange={e => set('materialName', e.target.value)} required /></label>
-        <label>Test<input value={form.testName} onChange={e => set('testName', e.target.value)} required /></label>
-        <label>Lot / batch number<input value={form.lotNumber} onChange={e => set('lotNumber', e.target.value)} required /></label>
-        <label>Level or designation<input value={form.levelLabel} onChange={e => set('levelLabel', e.target.value)} /></label>
-        {material.source === 'commercial' && <label>Manufacturer<input value={form.manufacturer} onChange={e => set('manufacturer', e.target.value)} /></label>}
+        <label>Control name<TextField value={form.materialName} onValue={nextValue => set('materialName', nextValue)} required /></label>
+        <label>Test<TextField value={form.testName} onValue={nextValue => set('testName', nextValue)} required /></label>
+        <label>Lot / batch number<TextField value={form.lotNumber} onValue={nextValue => set('lotNumber', nextValue)} required /></label>
+        <label>Level or designation<TextField value={form.levelLabel} onValue={nextValue => set('levelLabel', nextValue)} /></label>
+        {material.source === 'commercial' && <label>Manufacturer<TextField value={form.manufacturer} onValue={nextValue => set('manufacturer', nextValue)} /></label>}
         <label>Expiry date<input type="date" value={form.expiryDate} onChange={e => set('expiryDate', e.target.value)} /></label>
         <label>Open-vial expiry<input type="date" value={form.openVialExpiry} onChange={e => set('openVialExpiry', e.target.value)} /></label>
-        <label>Storage condition<input value={form.storageCondition} onChange={e => set('storageCondition', e.target.value)} placeholder="e.g. 2–8 °C" /></label>
+        <label>Storage condition<TextField value={form.storageCondition} onValue={nextValue => set('storageCondition', nextValue)} placeholder="e.g. 2–8 °C" /></label>
         <label>Section<select value={form.sectionId} onChange={e => set('sectionId', e.target.value)}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Instrument<select value={form.equipmentId} onChange={e => set('equipmentId', e.target.value)}><option value="">—</option>{equipment.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
         <label>Run frequency<select value={form.qcFrequency} onChange={e => set('qcFrequency', e.target.value)}>{IQC_FREQUENCIES.map(f => <option key={f} value={f}>{IQC_FREQUENCY_LABELS[f]}</option>)}</select></label>
@@ -643,7 +645,7 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
         {isCs && <label>This control confirms<select value={csScope} onChange={e => setCsScope(e.target.value)}>
           {CS_SCOPES.map(s => <option key={s} value={s}>{CS_SCOPE_LABELS[s]}</option>)}
         </select></label>}
-        {wantsOrganism && <label>Expected organism (reference strain)<input value={form.expectedOrganism} onChange={e => set('expectedOrganism', e.target.value)} placeholder="e.g. E. coli ATCC 25922" required /></label>}
+        {wantsOrganism && <label>Expected organism (reference strain)<TextField value={form.expectedOrganism} onValue={nextValue => set('expectedOrganism', nextValue)} placeholder="e.g. E. coli ATCC 25922" required /></label>}
       </div>
 
       {material.source === 'in_house' && (
@@ -655,10 +657,10 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
               {staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
             </select></label>
             <label>Preparation date<input type="date" value={form.preparationDate} onChange={e => set('preparationDate', e.target.value)} /></label>
-            <label>Base material<input value={form.baseMaterial} onChange={e => set('baseMaterial', e.target.value)} /></label>
+            <label>Base material<TextField value={form.baseMaterial} onValue={nextValue => set('baseMaterial', nextValue)} /></label>
           </div>
-          <label className="stack">How it was prepared<textarea rows={2} value={form.preparationMethod} onChange={e => set('preparationMethod', e.target.value)} required /></label>
-          <label className="stack">How its target was assigned<textarea rows={2} value={form.validationSummary} onChange={e => set('validationSummary', e.target.value)} /></label>
+          <label className="stack">How it was prepared<TextField as="textarea" rows={2} value={form.preparationMethod} onValue={nextValue => set('preparationMethod', nextValue)} required /></label>
+          <label className="stack">How its target was assigned<TextField as="textarea" rows={2} value={form.validationSummary} onValue={nextValue => set('validationSummary', nextValue)} /></label>
         </fieldset>
       )}
 
@@ -674,7 +676,7 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
         <tbody>
           {rows.map((r, i) => (
             <tr key={i}>
-              <td><input value={r.analyte} onChange={e => setRow(i, 'analyte', e.target.value)} required /></td>
+              <td><TextField value={r.analyte} onValue={nextValue => setRow(i, 'analyte', nextValue)} required /></td>
               {isCs ? (
                 <>
                   <td><select value={r.astMethod} onChange={e => setRow(i, 'astMethod', e.target.value)}>
@@ -688,7 +690,7 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
                 </>
               ) : (
                 <>
-                  <td><input value={r.unit} onChange={e => setRow(i, 'unit', e.target.value)} style={{ width: 80 }} /></td>
+                  <td><TextField value={r.unit} onValue={nextValue => setRow(i, 'unit', nextValue)} style={{ width: 80 }} /></td>
                   {qualitative ? (
                     <td><select value={r.expectedResult} onChange={e => setRow(i, 'expectedResult', e.target.value)} required>
                       <option value="">—</option>
@@ -729,7 +731,7 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
           <strong>{movedTargets.join(', ')}</strong>: you are moving the target on a lot with {material.run_count} recorded
           run(s). Every z-score already on file was measured against the old target, so say why.
           <label className="stack" style={{ marginTop: 8 }}>Reason
-            <textarea rows={2} value={reason} onChange={e => setReason(e.target.value)}
+            <TextField as="textarea" rows={2} value={reason} onValue={nextValue => setReason(nextValue)}
               placeholder="e.g. Manufacturer reissued the value sheet for this lot on 2026-07-30." />
           </label>
         </div>
@@ -873,14 +875,14 @@ function DefineControl({ sections, staff, equipment, onSaved, onError }: {
       <fieldset className="iqc-step">
         <legend><span className="step-n">3</span> Identify the material</legend>
         <div className="form-grid">
-          <label>Control name<input value={form.materialName} onChange={e => set('materialName', e.target.value)} required placeholder="e.g. Haematology Control Normal" /></label>
-          <label>Test<input value={form.testName} onChange={e => set('testName', e.target.value)} required placeholder="e.g. Full blood count" /></label>
-          <label>Lot / batch number<input value={form.lotNumber} onChange={e => set('lotNumber', e.target.value)} required /></label>
-          <label>Level or designation<input value={form.levelLabel} onChange={e => set('levelLabel', e.target.value)} placeholder="e.g. Level 1 (Normal), Positive control" /></label>
-          {source === 'commercial' && <label>Manufacturer<input value={form.manufacturer} onChange={e => set('manufacturer', e.target.value)} /></label>}
+          <label>Control name<TextField value={form.materialName} onValue={nextValue => set('materialName', nextValue)} required placeholder="e.g. Haematology Control Normal" /></label>
+          <label>Test<TextField value={form.testName} onValue={nextValue => set('testName', nextValue)} required placeholder="e.g. Full blood count" /></label>
+          <label>Lot / batch number<TextField value={form.lotNumber} onValue={nextValue => set('lotNumber', nextValue)} required /></label>
+          <label>Level or designation<TextField value={form.levelLabel} onValue={nextValue => set('levelLabel', nextValue)} placeholder="e.g. Level 1 (Normal), Positive control" /></label>
+          {source === 'commercial' && <label>Manufacturer<TextField value={form.manufacturer} onValue={nextValue => set('manufacturer', nextValue)} /></label>}
           <label>Expiry date<input type="date" value={form.expiryDate} onChange={e => set('expiryDate', e.target.value)} /></label>
           <label>Open-vial expiry<input type="date" value={form.openVialExpiry} onChange={e => set('openVialExpiry', e.target.value)} /></label>
-          <label>Storage condition<input value={form.storageCondition} onChange={e => set('storageCondition', e.target.value)} placeholder="e.g. 2–8 °C" /></label>
+          <label>Storage condition<TextField value={form.storageCondition} onValue={nextValue => set('storageCondition', nextValue)} placeholder="e.g. 2–8 °C" /></label>
           <label>Section<select value={form.sectionId} onChange={e => set('sectionId', e.target.value)}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
           <label>Instrument<select value={form.equipmentId} onChange={e => set('equipmentId', e.target.value)}><option value="">—</option>{equipment.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
         </div>
@@ -897,15 +899,15 @@ function DefineControl({ sections, staff, equipment, onSaved, onError }: {
           <div className="form-grid">
             <label>Prepared by<select value={form.preparedByStaffId} onChange={e => set('preparedByStaffId', e.target.value)}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
             <label>Preparation date<input type="date" value={form.preparationDate} onChange={e => set('preparationDate', e.target.value)} /></label>
-            <label>Base material<input value={form.baseMaterial} onChange={e => set('baseMaterial', e.target.value)} placeholder="e.g. Pooled patient serum" /></label>
-            <label>Stability period<input value={form.stabilityPeriod} onChange={e => set('stabilityPeriod', e.target.value)} placeholder="e.g. 30 days at −20 °C" /></label>
+            <label>Base material<TextField value={form.baseMaterial} onValue={nextValue => set('baseMaterial', nextValue)} placeholder="e.g. Pooled patient serum" /></label>
+            <label>Stability period<TextField value={form.stabilityPeriod} onValue={nextValue => set('stabilityPeriod', nextValue)} placeholder="e.g. 30 days at −20 °C" /></label>
           </div>
           <label className="stack">Preparation method <em>(required)</em>
-            <textarea value={form.preparationMethod} onChange={e => set('preparationMethod', e.target.value)} rows={3}
+            <TextField as="textarea" value={form.preparationMethod} onValue={nextValue => set('preparationMethod', nextValue)} rows={3}
               placeholder="How the material was pooled, aliquoted and stored." required />
           </label>
           <label className="stack">Validation summary
-            <textarea value={form.validationSummary} onChange={e => set('validationSummary', e.target.value)} rows={2}
+            <TextField as="textarea" value={form.validationSummary} onValue={nextValue => set('validationSummary', nextValue)} rows={2}
               placeholder="How the target values were established, and against what." />
           </label>
         </fieldset>
@@ -931,7 +933,7 @@ function DefineControl({ sections, staff, equipment, onSaved, onError }: {
                   {CS_SCOPES.map(s => <option key={s} value={s}>{CS_SCOPE_LABELS[s]}</option>)}
                 </select>
               </label>
-              {wantsOrganism && <label>Expected organism (reference strain)<input value={form.expectedOrganism} onChange={e => set('expectedOrganism', e.target.value)} placeholder="e.g. Escherichia coli ATCC 25922" required /></label>}
+              {wantsOrganism && <label>Expected organism (reference strain)<TextField value={form.expectedOrganism} onValue={nextValue => set('expectedOrganism', nextValue)} placeholder="e.g. Escherichia coli ATCC 25922" required /></label>}
             </div>
             <p className="iqc-note">
               {CS_SCOPE_HINTS[form.csScope as never]} Report categories only — S, SDD, I, R or NS (CLSI M100) —
@@ -962,7 +964,7 @@ function DefineControl({ sections, staff, equipment, onSaved, onError }: {
           <tbody>
             {rows.map((r, i) => (
               <tr key={i}>
-                <td><input value={r.analyte} onChange={e => setRow(i, 'analyte', e.target.value)} placeholder={isCs ? 'e.g. Ciprofloxacin' : 'e.g. Haemoglobin'} /></td>
+                <td><TextField value={r.analyte} onValue={nextValue => setRow(i, 'analyte', nextValue)} placeholder={isCs ? 'e.g. Ciprofloxacin' : 'e.g. Haemoglobin'} /></td>
                 {isCs ? (
                   <>
                     <td>
@@ -987,7 +989,7 @@ function DefineControl({ sections, staff, equipment, onSaved, onError }: {
                   </td>
                 ) : (
                   <>
-                    <td><input value={r.unit} onChange={e => setRow(i, 'unit', e.target.value)} style={{ width: 74 }} /></td>
+                    <td><TextField value={r.unit} onValue={nextValue => setRow(i, 'unit', nextValue)} style={{ width: 74 }} /></td>
                     <td><input value={r.targetMean} onChange={e => setRow(i, 'targetMean', e.target.value)} type="number" step="any" style={{ width: 92 }} /></td>
                     <td><input value={r.targetSd} onChange={e => setRow(i, 'targetSd', e.target.value)} type="number" step="any" style={{ width: 84 }} /></td>
                     <td><input value={r.acceptableLow} onChange={e => setRow(i, 'acceptableLow', e.target.value)} type="number" step="any" style={{ width: 80 }} /></td>
@@ -1143,7 +1145,7 @@ function RunControl({ materials, equipment, staff, onRecorded, onError }: {
         <label>Time<input type="time" value={meta.runTime} onChange={e => setMeta(m => ({ ...m, runTime: e.target.value }))} /></label>
         <label>Shift<select value={meta.shift} onChange={e => setMeta(m => ({ ...m, shift: e.target.value }))}><option value="">—</option><option>Morning</option><option>Afternoon</option><option>Night</option></select></label>
         <label>Instrument<select value={meta.equipmentId} onChange={e => setMeta(m => ({ ...m, equipmentId: e.target.value }))}><option value="">— None (manual method) —</option>{equipment.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
-        <label>Reagent lot<input value={meta.reagentLot} onChange={e => setMeta(m => ({ ...m, reagentLot: e.target.value }))} /></label>
+        <label>Reagent lot<TextField value={meta.reagentLot} onValue={nextValue => setMeta(m => ({ ...m, reagentLot: nextValue }))} /></label>
         <label>Operator<select value={meta.operatorStaffId} onChange={e => setMeta(m => ({ ...m, operatorStaffId: e.target.value }))}><option value="">Me</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
       </div>
 
@@ -1159,7 +1161,7 @@ function RunControl({ materials, equipment, staff, onRecorded, onError }: {
       {material && material.control_type === 'culture_sensitivity' && csNeedsOrganism(material.cs_scope) && (
         <div className="form-grid" style={{ marginTop: 8 }}>
           <label>Organism identified
-            <input value={meta.observedOrganism} onChange={e => setMeta(m => ({ ...m, observedOrganism: e.target.value }))}
+            <TextField value={meta.observedOrganism} onValue={nextValue => setMeta(m => ({ ...m, observedOrganism: nextValue }))}
               placeholder={material.expected_organism ? `Expected: ${material.expected_organism}` : 'Organism the strain identified as'} />
           </label>
         </div>
@@ -1218,7 +1220,7 @@ function RunControl({ materials, equipment, staff, onRecorded, onError }: {
         <p className="iqc-note bad">This control has no analytes defined, so it cannot be run. Edit its definition first.</p>
       )}
 
-      <label className="stack">Comment<textarea value={meta.comment} onChange={e => setMeta(m => ({ ...m, comment: e.target.value }))} rows={2} /></label>
+      <label className="stack">Comment<TextField as="textarea" value={meta.comment} onValue={nextValue => setMeta(m => ({ ...m, comment: nextValue }))} rows={2} /></label>
 
       <div className="form-actions">
         <button type="submit" disabled={busy || !material || (analytes.length === 0 && material?.control_type !== 'culture_sensitivity')}>{busy ? 'Evaluating…' : 'Record run'}</button>
@@ -1325,8 +1327,8 @@ function RunReview({ runs, onChanged, canApprove, isAdmin, equipment, staff, onE
 
                 {canApprove && !r.reviewed_at && (
                   <div className="iqc-run-act">
-                    <input placeholder={r.status === 'out_of_control' ? 'What was done about this? (required)' : 'Note (optional)'}
-                      value={action[r.id] ?? ''} onChange={e => setAction(a => ({ ...a, [r.id]: e.target.value }))} />
+                    <TextField placeholder={r.status === 'out_of_control' ? 'What was done about this? (required)' : 'Note (optional)'}
+                      value={action[r.id] ?? ''} onValue={nextValue => setAction(a => ({ ...a, [r.id]: nextValue }))} />
                     {can('iqc', 'approve') && <button type="button" disabled={busy === r.id} onClick={() => review(r)}>Sign off</button>}
                     {r.patient_results_released === 0 && (
                       can('iqc', 'approve') && <button type="button" className="secondary" disabled={busy === r.id} onClick={() => release(r, true)}>
@@ -1454,7 +1456,7 @@ function RunCorrection({ run, mode, equipment, staff, onClose, onDone, onError }
           wrong control. A failure is not removed; it is investigated and signed off.
         </p>
         <label className="stack">Reason
-          <textarea rows={2} value={reason} onChange={e => setReason(e.target.value)}
+          <TextField as="textarea" rows={2} value={reason} onValue={nextValue => setReason(nextValue)}
             placeholder="e.g. Duplicate entry — the same run was recorded twice on 2026-07-14." />
         </label>
         <div className="iqc-danger-acts">
@@ -1481,7 +1483,7 @@ function RunCorrection({ run, mode, equipment, staff, onClose, onDone, onError }
         <label>Time<input type="time" value={meta.runTime} onChange={e => setMeta(m => ({ ...m, runTime: e.target.value }))} /></label>
         <label>Instrument<select value={meta.equipmentId} onChange={e => setMeta(m => ({ ...m, equipmentId: e.target.value }))}><option value="">—</option>{equipment.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
         <label>Operator<select value={meta.operatorStaffId} onChange={e => setMeta(m => ({ ...m, operatorStaffId: e.target.value }))}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-        <label>Reagent lot<input value={meta.reagentLot} onChange={e => setMeta(m => ({ ...m, reagentLot: e.target.value }))} /></label>
+        <label>Reagent lot<TextField value={meta.reagentLot} onValue={nextValue => setMeta(m => ({ ...m, reagentLot: nextValue }))} /></label>
       </div>
 
       {detail === null ? <p className="muted">Loading the readings…</p> : (
@@ -1510,7 +1512,7 @@ function RunCorrection({ run, mode, equipment, staff, onClose, onDone, onError }
       )}
 
       <label className="stack">Reason
-        <textarea rows={2} value={reason} onChange={e => setReason(e.target.value)}
+        <TextField as="textarea" rows={2} value={reason} onValue={nextValue => setReason(nextValue)}
           placeholder="e.g. Haemoglobin transcribed as 1.35 instead of 13.5 — corrected against the analyser printout." />
       </label>
       <div className="iqc-danger-acts">
@@ -1621,8 +1623,8 @@ function LotChanges({ materials, onError, canCreate }: { materials: Material[]; 
           <label>Old lot<select value={form.oldIqcMaterialId} onChange={e => setForm(f => ({ ...f, oldIqcMaterialId: e.target.value }))} required><option value="">—</option>{materials.map(m => <option key={m.id} value={m.id}>{m.material_name} · {m.lot_number}</option>)}</select></label>
           <label>New lot<select value={form.newIqcMaterialId} onChange={e => setForm(f => ({ ...f, newIqcMaterialId: e.target.value }))} required><option value="">—</option>{materials.map(m => <option key={m.id} value={m.id}>{m.material_name} · {m.lot_number}</option>)}</select></label>
           <label>Change date<input type="date" value={form.changeDate} onChange={e => setForm(f => ({ ...f, changeDate: e.target.value }))} required /></label>
-          <label>Reason<input value={form.reason} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))} placeholder="e.g. Previous lot exhausted" /></label>
-          <label className="stack">Parallel-run verification<textarea value={form.verificationSummary} onChange={e => setForm(f => ({ ...f, verificationSummary: e.target.value }))} rows={2} placeholder="How the new lot's targets were established against the old." /></label>
+          <label>Reason<TextField value={form.reason} onValue={nextValue => setForm(f => ({ ...f, reason: nextValue }))} placeholder="e.g. Previous lot exhausted" /></label>
+          <label className="stack">Parallel-run verification<TextField as="textarea" value={form.verificationSummary} onValue={nextValue => setForm(f => ({ ...f, verificationSummary: nextValue }))} rows={2} placeholder="How the new lot's targets were established against the old." /></label>
           <div className="form-actions"><button type="submit">Record lot change</button></div>
         </form>
       )}

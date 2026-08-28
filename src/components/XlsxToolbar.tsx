@@ -3,6 +3,7 @@ import { Download, Upload, FileSpreadsheet, Printer } from 'lucide-react';
 import { downloadXlsx, uploadXlsx, openPrintable, type ImportResult } from '../services/xlsx';
 import { usePermissions } from '../hooks/usePermissions';
 import { errorText } from '../services/api';
+import { Notice } from './ui/Feedback';
 
 // Reusable Export / Import (Excel) toolbar. Give it the export, template and
 // import endpoints; it handles the download, the file picker and shows the
@@ -103,7 +104,7 @@ export default function XlsxToolbar({
         <input ref={inputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) void doImport(f); }} />
       </>}
     </div>
-    {error && <div className="error" style={{ marginTop: 6 }}>{error}</div>}
+    {error && <Notice kind="error" style={{ marginTop: 6 }}>{error}</Notice>}
     {result && <div className={result.errors && result.errors.length > 0 ? 'notice-warn' : 'notice-ok'} style={{ marginTop: 6 }}>
       <strong>{result.created ?? 0}</strong> created{typeof result.updated === 'number' ? <>, <strong>{result.updated}</strong> updated</> : null}
       {typeof result.analytes === 'number' ? <>, <strong>{result.analytes}</strong> analyte(s)</> : null}

@@ -3,6 +3,7 @@ import { api, errorText } from '../../services/api';
 import { KpiStrip, ChartCard, DonutChart, BarChart, BarMeter, Sparkline, CHART_COLORS } from '../../components/ui';
 import type { StockStatus } from '../../../shared/constants/stockControl';
 import { StatusBadge, qty } from './StockControl';
+import { Notice } from '../../components/ui/Feedback';
 
 /**
  * The state of the store, in the figures a manager is asked for.
@@ -46,7 +47,7 @@ export function InventoryReports({ refreshKey }: { refreshKey: number }) {
     api<Reports>(`/supplier-inventory/reports?months=${months}`).then(setData).catch(e => setError(errorText(e)));
   }, [refreshKey, months]);
 
-  if (error) return <div className="card"><div className="error">{error}</div></div>;
+  if (error) return <div className="card"><Notice kind="error" silent>{error}</Notice></div>;
   if (!data) return <div className="card"><p>Loading…</p></div>;
   const t = data.totals;
 

@@ -4,6 +4,7 @@ import { api, errorText } from '../../services/api';
 import { downloadFileById, isOverdue, titleCase, usePortal } from './portalData';
 import { uploadPersonalFile } from './PortalTaskDrawer';
 import type { StaffDocument } from '../../../shared/types/api';
+import TextField from '../../components/ui/TextField';
 
 /**
  * My documents — the certificates, licences and records on this person's file,
@@ -131,12 +132,12 @@ export default function PortalDocuments() {
               </label>
               <label className="pf-wide">
                 <span>Title</span>
-                <input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
+                <TextField value={form.title} onValue={nextValue => setForm({ ...form, title: nextValue })}
                   placeholder="e.g. BSc Medical Laboratory Science — University of Ghana" />
               </label>
               <label><span>Issued</span><input type="date" value={form.issueDate} onChange={e => setForm({ ...form, issueDate: e.target.value })} /></label>
               <label><span>Expires</span><input type="date" value={form.expiryDate} onChange={e => setForm({ ...form, expiryDate: e.target.value })} /></label>
-              <label className="pf-wide"><span>Remarks</span><input value={form.remarks} onChange={e => setForm({ ...form, remarks: e.target.value })} placeholder="Optional" /></label>
+              <label className="pf-wide"><span>Remarks</span><TextField value={form.remarks} onValue={nextValue => setForm({ ...form, remarks: nextValue })} placeholder="Optional" /></label>
               <label className="pf-wide">
                 <span>{form.id ? 'Replace the file (optional)' : 'The file'}</span>
                 <input ref={fileInput} type="file" accept=".pdf,image/*,.doc,.docx"

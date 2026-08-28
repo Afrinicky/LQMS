@@ -13,3 +13,6 @@ export { MODULE_ICONS, moduleIcon, SECTION_ICONS, sectionIcon } from './moduleIc
 export { DonutChart, BarChart, BarMeter, RadialGauge, Sparkline, ChartCard, CHART_COLORS } from './Charts';
 export { AlertCard, AlertGrid, ModuleAlerts, AlertSummary } from './AlertCard';
 export { AttentionCenter, AlertsByModule } from './AttentionCenter';
+export { Notice, FeedbackHost, notifyAtAction } from './Feedback';
+export type { NoticeKind } from './Feedback';
+export { default as TextField, default as TextBox } from './TextField';

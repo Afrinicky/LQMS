@@ -19,6 +19,8 @@ import type {
   IqcSummary, EqaSummary, VerificationSummary, MeasurementUncertaintySummary,
   LeveyJenningsData, EquipmentVerificationDetail
 } from '../../shared/types/api';
+import TextField from '../components/ui/TextField';
+import { Notice } from '../components/ui/Feedback';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
@@ -181,7 +183,7 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
   return <div className="module-page">
     {!embedded && <PageHeader eyebrow="Process Management" title="IQC Management" subtitle="Internal quality control materials, results, and review." />}
     {tabBarFor('iqc')(tab, tabs, setTab)}
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {tab === 'Dashboard' && <ModuleAlerts moduleKey="iqc" />}
     {tab === 'Dashboard' && summary && <KpiStrip items={[
@@ -213,13 +215,13 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
     </tbody></table>}
 
     {tab === 'New Material' && can('iqc', 'create') && <form className="form-grid" onSubmit={submitMaterial}>
-      <label>Material name<input value={materialForm.materialName} onChange={e => setMaterialForm({ ...materialForm, materialName: e.target.value })} required /></label>
-      <label>Test name<input value={materialForm.testName} onChange={e => setMaterialForm({ ...materialForm, testName: e.target.value })} required /></label>
-      <label>Analyte<input value={materialForm.analyte} onChange={e => setMaterialForm({ ...materialForm, analyte: e.target.value })} required /></label>
-      <label>Lot number<input value={materialForm.lotNumber} onChange={e => setMaterialForm({ ...materialForm, lotNumber: e.target.value })} required /></label>
-      <label>Manufacturer<input value={materialForm.manufacturer} onChange={e => setMaterialForm({ ...materialForm, manufacturer: e.target.value })} /></label>
+      <label>Material name<TextField value={materialForm.materialName} onValue={nextValue => setMaterialForm({ ...materialForm, materialName: nextValue })} required /></label>
+      <label>Test name<TextField value={materialForm.testName} onValue={nextValue => setMaterialForm({ ...materialForm, testName: nextValue })} required /></label>
+      <label>Analyte<TextField value={materialForm.analyte} onValue={nextValue => setMaterialForm({ ...materialForm, analyte: nextValue })} required /></label>
+      <label>Lot number<TextField value={materialForm.lotNumber} onValue={nextValue => setMaterialForm({ ...materialForm, lotNumber: nextValue })} required /></label>
+      <label>Manufacturer<TextField value={materialForm.manufacturer} onValue={nextValue => setMaterialForm({ ...materialForm, manufacturer: nextValue })} /></label>
       <label>Expiry date<input type="date" value={materialForm.expiryDate} onChange={e => setMaterialForm({ ...materialForm, expiryDate: e.target.value })} /></label>
-      <label>Storage condition<input value={materialForm.storageCondition} onChange={e => setMaterialForm({ ...materialForm, storageCondition: e.target.value })} /></label>
+      <label>Storage condition<TextField value={materialForm.storageCondition} onValue={nextValue => setMaterialForm({ ...materialForm, storageCondition: nextValue })} /></label>
       <label>Section<select value={materialForm.sectionId} onChange={e => setMaterialForm({ ...materialForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
       <label>Equipment<select value={materialForm.equipmentId} onChange={e => setMaterialForm({ ...materialForm, equipmentId: e.target.value })}><option value="">—</option>{equipment.map(eq => <option key={eq.id} value={eq.id}>{eq.name}</option>)}</select></label>
       <label>Target mean<input type="number" step="any" value={materialForm.targetMean} onChange={e => setMaterialForm({ ...materialForm, targetMean: e.target.value })} /></label>
@@ -235,8 +237,8 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
       <label>Run time<input type="time" value={resultForm.runTime} onChange={e => setResultForm({ ...resultForm, runTime: e.target.value })} /></label>
       <label>Result value<input type="number" step="any" value={resultForm.resultValue} onChange={e => setResultForm({ ...resultForm, resultValue: e.target.value })} required /></label>
       <label>Equipment<select value={resultForm.equipmentId} onChange={e => setResultForm({ ...resultForm, equipmentId: e.target.value })}><option value="">—</option>{equipment.map(eq => <option key={eq.id} value={eq.id}>{eq.name}</option>)}</select></label>
-      <label>Comment<textarea value={resultForm.comment} onChange={e => setResultForm({ ...resultForm, comment: e.target.value })} /></label>
-      <label>Immediate action<textarea value={resultForm.immediateAction} onChange={e => setResultForm({ ...resultForm, immediateAction: e.target.value })} /></label>
+      <label>Comment<TextField as="textarea" value={resultForm.comment} onValue={nextValue => setResultForm({ ...resultForm, comment: nextValue })} /></label>
+      <label>Immediate action<TextField as="textarea" value={resultForm.immediateAction} onValue={nextValue => setResultForm({ ...resultForm, immediateAction: nextValue })} /></label>
       <button type="submit">Submit result</button>
     </form>}
 
@@ -271,8 +273,8 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
         <label>Old material<select value={lotForm.oldIqcMaterialId} onChange={e => setLotForm({ ...lotForm, oldIqcMaterialId: e.target.value })}><option value="">—</option>{materials.map(m => <option key={m.id} value={m.id}>{m.material_name} / {m.lot_number}</option>)}</select></label>
         <label>New material<select value={lotForm.newIqcMaterialId} onChange={e => setLotForm({ ...lotForm, newIqcMaterialId: e.target.value })}><option value="">—</option>{materials.map(m => <option key={m.id} value={m.id}>{m.material_name} / {m.lot_number}</option>)}</select></label>
         <label>Change date<input type="date" value={lotForm.changeDate} onChange={e => setLotForm({ ...lotForm, changeDate: e.target.value })} required /></label>
-        <label>Reason<input value={lotForm.reason} onChange={e => setLotForm({ ...lotForm, reason: e.target.value })} /></label>
-        <label>Verification summary<textarea value={lotForm.verificationSummary} onChange={e => setLotForm({ ...lotForm, verificationSummary: e.target.value })} /></label>
+        <label>Reason<TextField value={lotForm.reason} onValue={nextValue => setLotForm({ ...lotForm, reason: nextValue })} /></label>
+        <label>Verification summary<TextField as="textarea" value={lotForm.verificationSummary} onValue={nextValue => setLotForm({ ...lotForm, verificationSummary: nextValue })} /></label>
         <button type="submit">Record lot change</button>
       </form>}
       <table className="data-table"><thead><tr><th>Date</th><th>Old lot</th><th>New lot</th><th>Reason</th></tr></thead><tbody>
@@ -415,7 +417,7 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
   return <div className="module-page">
     {!embedded && <PageHeader eyebrow="Process Management" title="EQA Management" subtitle="External quality assessment events, results, and follow-up." />}
     {tabBarFor('eqa')(tab, tabs, setTab)}
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {tab === 'Dashboard' && <ModuleAlerts moduleKey="eqa" />}
     {tab === 'Dashboard' && summary && <KpiStrip items={[
@@ -447,26 +449,26 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
     </tbody></table>}
 
     {tab === 'New Program' && can('eqa', 'create') && <form className="form-grid" onSubmit={submitProgram}>
-      <label>Program name<input value={programForm.programName} onChange={e => setProgramForm({ ...programForm, programName: e.target.value })} required /></label>
-      <label>Provider<input value={programForm.provider} onChange={e => setProgramForm({ ...programForm, provider: e.target.value })} required /></label>
-      <label>Test area<input value={programForm.testArea} onChange={e => setProgramForm({ ...programForm, testArea: e.target.value })} required /></label>
+      <label>Program name<TextField value={programForm.programName} onValue={nextValue => setProgramForm({ ...programForm, programName: nextValue })} required /></label>
+      <label>Provider<TextField value={programForm.provider} onValue={nextValue => setProgramForm({ ...programForm, provider: nextValue })} required /></label>
+      <label>Test area<TextField value={programForm.testArea} onValue={nextValue => setProgramForm({ ...programForm, testArea: nextValue })} required /></label>
       <label>Section<select value={programForm.sectionId} onChange={e => setProgramForm({ ...programForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-      <label>Frequency<input value={programForm.frequency} onChange={e => setProgramForm({ ...programForm, frequency: e.target.value })} /></label>
-      <label>Contact<input value={programForm.contact} onChange={e => setProgramForm({ ...programForm, contact: e.target.value })} /></label>
+      <label>Frequency<TextField value={programForm.frequency} onValue={nextValue => setProgramForm({ ...programForm, frequency: nextValue })} /></label>
+      <label>Contact<TextField value={programForm.contact} onValue={nextValue => setProgramForm({ ...programForm, contact: nextValue })} /></label>
       <button type="submit">Create program</button>
     </form>}
 
     {tab === 'EQA Events' && <>
       {can('eqa', 'create') && <form className="form-grid" onSubmit={submitEvent}>
         <label>Program<select value={eventForm.eqaProgramId} onChange={e => setEventForm({ ...eventForm, eqaProgramId: e.target.value })} required><option value="">—</option>{programs.map(p => <option key={p.id} value={p.id}>{p.program_name}</option>)}</select></label>
-        <label>Cycle name<input value={eventForm.cycleName} onChange={e => setEventForm({ ...eventForm, cycleName: e.target.value })} required /></label>
+        <label>Cycle name<TextField value={eventForm.cycleName} onValue={nextValue => setEventForm({ ...eventForm, cycleName: nextValue })} required /></label>
         <label>Received date<input type="date" value={eventForm.receivedDate} onChange={e => setEventForm({ ...eventForm, receivedDate: e.target.value })} /></label>
         <label>Submission due<input type="date" value={eventForm.submissionDueDate} onChange={e => setEventForm({ ...eventForm, submissionDueDate: e.target.value })} /></label>
         <label>Submitted date<input type="date" value={eventForm.submittedDate} onChange={e => setEventForm({ ...eventForm, submittedDate: e.target.value })} /></label>
         <label>Result received<input type="date" value={eventForm.resultReceivedDate} onChange={e => setEventForm({ ...eventForm, resultReceivedDate: e.target.value })} /></label>
         <label>Performance status<select value={eventForm.performanceStatus} onChange={e => setEventForm({ ...eventForm, performanceStatus: e.target.value })}><option value="">— not yet assessed —</option><option value="satisfactory">Satisfactory</option><option value="unsatisfactory">Unsatisfactory</option><option value="not assessed">Not assessed</option></select></label>
-        <label>Score<input value={eventForm.score} onChange={e => setEventForm({ ...eventForm, score: e.target.value })} /></label>
-        <label>Findings<textarea value={eventForm.findings} onChange={e => setEventForm({ ...eventForm, findings: e.target.value })} /></label>
+        <label>Score<TextField value={eventForm.score} onValue={nextValue => setEventForm({ ...eventForm, score: nextValue })} /></label>
+        <label>Findings<TextField as="textarea" value={eventForm.findings} onValue={nextValue => setEventForm({ ...eventForm, findings: nextValue })} /></label>
         <label>Responsible<select value={eventForm.responsibleStaffId} onChange={e => setEventForm({ ...eventForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <button type="submit">Create event</button>
       </form>}
@@ -498,16 +500,16 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
               <option value="organism_id">Organism identification</option>
               <option value="susceptibility">Susceptibility (antimicrobial)</option>
             </select></label>
-            <label>{isSus ? 'Organism' : isOrg ? 'Specimen / sample' : 'Analyte or test'}<input value={resultForm.analyteOrTest} onChange={e => setResultForm({ ...resultForm, analyteOrTest: e.target.value })} required placeholder={isSus ? 'e.g. Escherichia coli' : isOrg ? 'e.g. Sample M-3' : 'e.g. Glucose'} /></label>
-            {isSus && <label>Antimicrobial<input value={resultForm.antimicrobial} onChange={e => setResultForm({ ...resultForm, antimicrobial: e.target.value })} required placeholder="e.g. Ciprofloxacin" /></label>}
+            <label>{isSus ? 'Organism' : isOrg ? 'Specimen / sample' : 'Analyte or test'}<TextField value={resultForm.analyteOrTest} onValue={nextValue => setResultForm({ ...resultForm, analyteOrTest: nextValue })} required placeholder={isSus ? 'e.g. Escherichia coli' : isOrg ? 'e.g. Sample M-3' : 'e.g. Glucose'} /></label>
+            {isSus && <label>Antimicrobial<TextField value={resultForm.antimicrobial} onValue={nextValue => setResultForm({ ...resultForm, antimicrobial: nextValue })} required placeholder="e.g. Ciprofloxacin" /></label>}
             <label>{isOrg ? 'Reported organism' : 'Reported result'}{isSus
               ? catSelect(resultForm.reportedResult, v => setResultForm({ ...resultForm, reportedResult: v }))
-              : <input value={resultForm.reportedResult} onChange={e => setResultForm({ ...resultForm, reportedResult: e.target.value })} placeholder={isOrg ? 'organism your lab reported' : ''} />}</label>
+              : <TextField value={resultForm.reportedResult} onValue={nextValue => setResultForm({ ...resultForm, reportedResult: nextValue })} placeholder={isOrg ? 'organism your lab reported' : ''} />}</label>
             <label>{isOrg ? 'Expected organism' : 'Expected result'}{isSus
               ? catSelect(resultForm.expectedResult, v => setResultForm({ ...resultForm, expectedResult: v }))
-              : <input value={resultForm.expectedResult} onChange={e => setResultForm({ ...resultForm, expectedResult: e.target.value })} placeholder={isOrg ? "provider's expected organism" : ''} />}</label>
-            <label>Performance<input value={resultForm.performance} onChange={e => setResultForm({ ...resultForm, performance: e.target.value })} placeholder="e.g. satisfactory / concordant" /></label>
-            <label>Comment<textarea value={resultForm.comment} onChange={e => setResultForm({ ...resultForm, comment: e.target.value })} /></label>
+              : <TextField value={resultForm.expectedResult} onValue={nextValue => setResultForm({ ...resultForm, expectedResult: nextValue })} placeholder={isOrg ? "provider's expected organism" : ''} />}</label>
+            <label>Performance<TextField value={resultForm.performance} onValue={nextValue => setResultForm({ ...resultForm, performance: nextValue })} placeholder="e.g. satisfactory / concordant" /></label>
+            <label>Comment<TextField as="textarea" value={resultForm.comment} onValue={nextValue => setResultForm({ ...resultForm, comment: nextValue })} /></label>
             <button type="submit">Add result row</button>
           </form>
         );
@@ -627,7 +629,7 @@ export function MeasurementUncertaintyPage({ embedded = false }: { embedded?: bo
   return <div className="module-page">
     {!embedded && <PageHeader eyebrow="Process Management" title="Measurement Uncertainty" subtitle="Measurement uncertainty budgets and periodic review." />}
     {tabBarFor('measurement_uncertainty')(tab, tabs, setTab)}
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {tab === 'Dashboard' && <ModuleAlerts moduleKey="measurement_uncertainty" />}
     {tab === 'Dashboard' && summary && <KpiStrip items={[
@@ -661,21 +663,21 @@ export function MeasurementUncertaintyPage({ embedded = false }: { embedded?: bo
     </tbody></table>}
 
     {tab === 'New MU Record' && can('measurement_uncertainty', 'create') && <form className="form-grid" onSubmit={submit}>
-      <label>Test name<input value={form.testName} onChange={e => setForm({ ...form, testName: e.target.value })} required /></label>
-      <label>Analyte<input value={form.analyte} onChange={e => setForm({ ...form, analyte: e.target.value })} required /></label>
-      <label>Method name<input value={form.methodName} onChange={e => setForm({ ...form, methodName: e.target.value })} /></label>
+      <label>Test name<TextField value={form.testName} onValue={nextValue => setForm({ ...form, testName: nextValue })} required /></label>
+      <label>Analyte<TextField value={form.analyte} onValue={nextValue => setForm({ ...form, analyte: nextValue })} required /></label>
+      <label>Method name<TextField value={form.methodName} onValue={nextValue => setForm({ ...form, methodName: nextValue })} /></label>
       <label>Equipment<select value={form.equipmentId} onChange={e => setForm({ ...form, equipmentId: e.target.value })}><option value="">—</option>{equipment.map(eq => <option key={eq.id} value={eq.id}>{eq.name}</option>)}</select></label>
       <label>Calculation date<input type="date" value={form.calculationDate} onChange={e => setForm({ ...form, calculationDate: e.target.value })} required /></label>
       <label>Data period start<input type="date" value={form.dataPeriodStart} onChange={e => setForm({ ...form, dataPeriodStart: e.target.value })} /></label>
       <label>Data period end<input type="date" value={form.dataPeriodEnd} onChange={e => setForm({ ...form, dataPeriodEnd: e.target.value })} /></label>
-      <label>Source data<textarea value={form.sourceData} onChange={e => setForm({ ...form, sourceData: e.target.value })} placeholder="e.g. IQC L1 (n=120)" /></label>
+      <label>Source data<TextField as="textarea" value={form.sourceData} onValue={nextValue => setForm({ ...form, sourceData: nextValue })} placeholder="e.g. IQC L1 (n=120)" /></label>
       <label>Mean<input type="number" step="any" value={form.meanValue} onChange={e => setForm({ ...form, meanValue: e.target.value })} /></label>
       <label>SD<input type="number" step="any" value={form.sdValue} onChange={e => setForm({ ...form, sdValue: e.target.value })} /></label>
       <label>CV %<input type="number" step="any" value={form.cvPercent} onChange={e => setForm({ ...form, cvPercent: e.target.value })} /></label>
       <label>Uncertainty u<input type="number" step="any" value={form.uncertaintyValue} onChange={e => setForm({ ...form, uncertaintyValue: e.target.value })} /></label>
       <label>Expanded uncertainty U<input type="number" step="any" value={form.expandedUncertainty} onChange={e => setForm({ ...form, expandedUncertainty: e.target.value })} /></label>
       <label>Coverage factor k<input type="number" step="any" value={form.coverageFactor} onChange={e => setForm({ ...form, coverageFactor: e.target.value })} /></label>
-      <label>Interpretation<textarea value={form.interpretation} onChange={e => setForm({ ...form, interpretation: e.target.value })} /></label>
+      <label>Interpretation<TextField as="textarea" value={form.interpretation} onValue={nextValue => setForm({ ...form, interpretation: nextValue })} /></label>
       <button type="submit">Create MU record</button>
     </form>}
 

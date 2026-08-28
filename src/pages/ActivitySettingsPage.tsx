@@ -19,6 +19,8 @@ import {
 import type {
   NotificationSound, Section, SchedulingPolicy, SoundSettingsResponse, Staff, UnitActivity,
 } from '../../shared/types/api';
+import TextField from '../components/ui/TextField';
+import { Notice } from '../components/ui/Feedback';
 
 /**
  * Unit Activities & Reminders — where the daily work of a unit is defined, and
@@ -195,8 +197,8 @@ function ActivityCatalogue({ sections, staff, onChanged }: { sections: Section[]
           </div>
         </div>
 
-        {error && <div className="error">{error}</div>}
-        {notice && <div className="notice-ok">{notice}</div>}
+        {error && <Notice kind="error">{error}</Notice>}
+        {notice && <Notice kind="success">{notice}</Notice>}
 
         {proposals && (
           <div className="proposal-box">
@@ -225,8 +227,8 @@ function ActivityCatalogue({ sections, staff, onChanged }: { sections: Section[]
 
         {showForm && (
           can('personnel.activities', 'edit') && can('personnel.activities', 'create') && <form className="form-grid activity-form" onSubmit={submit}>
-            <label>Name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required placeholder="Morning fridge temperature chart" /></label>
-            <label>Code<input value={form.activityCode} onChange={e => setForm({ ...form, activityCode: e.target.value })} placeholder="auto" disabled={Boolean(editing)} /></label>
+            <label>Name<TextField value={form.name} onValue={nextValue => setForm({ ...form, name: nextValue })} required placeholder="Morning fridge temperature chart" /></label>
+            <label>Code<TextField value={form.activityCode} onValue={nextValue => setForm({ ...form, activityCode: nextValue })} placeholder="auto" disabled={Boolean(editing)} /></label>
             <label>Kind of work
               {/* Choosing the category suggests the tier that kind of work
                   usually sits at, so an analyser service does not quietly
@@ -314,11 +316,11 @@ function ActivityCatalogue({ sections, staff, onChanged }: { sections: Section[]
               </select>
             </label>
             <label className="wide">How to do it (shown on the to-do)
-              <input value={form.instructions} onChange={e => setForm({ ...form, instructions: e.target.value })}
+              <TextField value={form.instructions} onValue={nextValue => setForm({ ...form, instructions: nextValue })}
                 placeholder="Read and chart the temperature; record any corrective action." />
             </label>
             <label className="wide">Where it is recorded (link)
-              <input value={form.targetRoute} onChange={e => setForm({ ...form, targetRoute: e.target.value })}
+              <TextField value={form.targetRoute} onValue={nextValue => setForm({ ...form, targetRoute: nextValue })}
                 placeholder="/monitoring?tab=Enter%20Reading" />
             </label>
             <label className="inline"><input type="checkbox" checked={form.notifyLeadership} onChange={e => setForm({ ...form, notifyLeadership: e.target.checked })} />
@@ -438,8 +440,8 @@ function Simplification({ onChanged }: { onChanged: () => void }) {
           so it is treated here as a design problem to fix rather than a discipline problem to chase. Flag anything that needs
           redesigning; the flag travels with the activity so everybody working on it can see it is being simplified.
         </p>
-        {error && <div className="error">{error}</div>}
-        {notice && <div className="notice-ok">{notice}</div>}
+        {error && <Notice kind="error">{error}</Notice>}
+        {notice && <Notice kind="success">{notice}</Notice>}
       </div>
 
       <div className="card">
@@ -506,7 +508,7 @@ function Simplification({ onChanged }: { onChanged: () => void }) {
                 </select>
               </label>
               <label className="wide">What needs to change?
-                <input value={editing.note} onChange={e => setEditing({ ...editing, note: e.target.value })}
+                <TextField value={editing.note} onValue={nextValue => setEditing({ ...editing, note: nextValue })}
                   placeholder="Too many fields; combine the chart and the corrective action into one screen" />
               </label>
             </div>
@@ -591,8 +593,8 @@ function SchedulingPolicyTab() {
         laboratory manager and quality manager; the bench schedules belong to the unit heads and are due later, because they follow
         the unit assignments rather than preceding them.
       </p>
-      {error && <div className="error">{error}</div>}
-      {notice && <div className="notice-ok">{notice}</div>}
+      {error && <Notice kind="error">{error}</Notice>}
+      {notice && <Notice kind="success">{notice}</Notice>}
 
       <form className="form-grid" onSubmit={save}>
         <label>Duty roster due (days before the month starts)
@@ -638,7 +640,7 @@ function SchedulingPolicyTab() {
             </label>}
           </>}
           <label className="wide">Notes on the rotation arrangement (optional)
-            <textarea rows={2} value={policy.rotation_notes ?? ''} onChange={e => setPolicy({ ...policy, rotation_notes: e.target.value })} disabled={!mayEdit}
+            <TextField as="textarea" rows={2} value={policy.rotation_notes ?? ''} onValue={nextValue => setPolicy({ ...policy, rotation_notes: nextValue })} disabled={!mayEdit}
               placeholder="e.g. Heads fixed; scientists rotate monthly; interns rotate every posting." /></label>
         </fieldset>
 
@@ -736,8 +738,8 @@ function ReminderSounds() {
         )}
       </div>
 
-      {error && <div className="error">{error}</div>}
-      {notice && <div className="notice-ok">{notice}</div>}
+      {error && <Notice kind="error">{error}</Notice>}
+      {notice && <Notice kind="success">{notice}</Notice>}
       {scope === 'user' && !data.user && <p className="muted">You are currently following the laboratory default. Changing anything here creates your own settings.</p>}
 
       <div className="form-grid">

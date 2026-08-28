@@ -12,6 +12,8 @@ import type {
   PoctReagentLot, PoctQcMaterial, PoctQcResult, PoctEqaEvent,
   PoctMaintenanceLog, PoctIncident, PoctMonthlyReview, PoctSummary
 } from '../../shared/types/api';
+import TextField from '../components/ui/TextField';
+import { Notice } from '../components/ui/Feedback';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
@@ -169,7 +171,7 @@ export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
   return <div className="module-page">
     {!embedded && <PageHeader eyebrow="Process Management" title="POCT Oversight" subtitle="Point-of-care testing sites, QC, and incident oversight." />}
     {tabBar(tab, tabs, setTab)}
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {tab === 'Dashboard' && <ModuleAlerts moduleKey="poct" />}
     {tab === 'Dashboard' && (summary ? <KpiStrip items={[
@@ -203,15 +205,15 @@ export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
 
     {tab === 'Sites' && <>
       <form className="form-grid" onSubmit={submitSite}>
-        <label>Site code<input value={siteForm.siteCode} onChange={e => setSiteForm({ ...siteForm, siteCode: e.target.value })} /></label>
-        <label>Site name<input value={siteForm.siteName} onChange={e => setSiteForm({ ...siteForm, siteName: e.target.value })} required /></label>
+        <label>Site code<TextField value={siteForm.siteCode} onValue={nextValue => setSiteForm({ ...siteForm, siteCode: nextValue })} /></label>
+        <label>Site name<TextField value={siteForm.siteName} onValue={nextValue => setSiteForm({ ...siteForm, siteName: nextValue })} required /></label>
         <label>Department<select value={siteForm.departmentId} onChange={e => setSiteForm({ ...siteForm, departmentId: e.target.value })}><option value="">—</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
         <label>Section<select value={siteForm.sectionId} onChange={e => setSiteForm({ ...siteForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Location<select value={siteForm.locationId} onChange={e => setSiteForm({ ...siteForm, locationId: e.target.value })}><option value="">—</option>{locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
-        <label>Service area<input value={siteForm.serviceArea} onChange={e => setSiteForm({ ...siteForm, serviceArea: e.target.value })} /></label>
+        <label>Service area<TextField value={siteForm.serviceArea} onValue={nextValue => setSiteForm({ ...siteForm, serviceArea: nextValue })} /></label>
         <label>Responsible staff<select value={siteForm.responsibleStaffId} onChange={e => setSiteForm({ ...siteForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-        <label>Contact person<input value={siteForm.contactPerson} onChange={e => setSiteForm({ ...siteForm, contactPerson: e.target.value })} /></label>
-        <label>Notes<textarea value={siteForm.notes} onChange={e => setSiteForm({ ...siteForm, notes: e.target.value })} /></label>
+        <label>Contact person<TextField value={siteForm.contactPerson} onValue={nextValue => setSiteForm({ ...siteForm, contactPerson: nextValue })} /></label>
+        <label>Notes<TextField as="textarea" value={siteForm.notes} onValue={nextValue => setSiteForm({ ...siteForm, notes: nextValue })} /></label>
         <button type="submit">Create site</button>
       </form>
       <table className="data-table"><thead><tr><th>Code</th><th>Name</th><th>Section</th><th>Responsible</th><th>Status</th><th></th></tr></thead><tbody>
@@ -222,16 +224,16 @@ export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
     {tab === 'Devices' && <>
       <form className="form-grid" onSubmit={submitDevice}>
         <label>Site<select value={deviceForm.siteId} onChange={e => setDeviceForm({ ...deviceForm, siteId: e.target.value })} required><option value="">—</option>{sites.map(s => <option key={s.id} value={s.id}>{s.site_name}</option>)}</select></label>
-        <label>Code<input value={deviceForm.deviceCode} onChange={e => setDeviceForm({ ...deviceForm, deviceCode: e.target.value })} /></label>
-        <label>Name<input value={deviceForm.deviceName} onChange={e => setDeviceForm({ ...deviceForm, deviceName: e.target.value })} required /></label>
-        <label>Type<input value={deviceForm.deviceType} onChange={e => setDeviceForm({ ...deviceForm, deviceType: e.target.value })} required placeholder="e.g. glucose meter" /></label>
-        <label>Manufacturer<input value={deviceForm.manufacturer} onChange={e => setDeviceForm({ ...deviceForm, manufacturer: e.target.value })} /></label>
-        <label>Model<input value={deviceForm.model} onChange={e => setDeviceForm({ ...deviceForm, model: e.target.value })} /></label>
-        <label>Serial<input value={deviceForm.serialNumber} onChange={e => setDeviceForm({ ...deviceForm, serialNumber: e.target.value })} /></label>
-        <label>Test menu summary<input value={deviceForm.testMenuSummary} onChange={e => setDeviceForm({ ...deviceForm, testMenuSummary: e.target.value })} /></label>
+        <label>Code<TextField value={deviceForm.deviceCode} onValue={nextValue => setDeviceForm({ ...deviceForm, deviceCode: nextValue })} /></label>
+        <label>Name<TextField value={deviceForm.deviceName} onValue={nextValue => setDeviceForm({ ...deviceForm, deviceName: nextValue })} required /></label>
+        <label>Type<TextField value={deviceForm.deviceType} onValue={nextValue => setDeviceForm({ ...deviceForm, deviceType: nextValue })} required placeholder="e.g. glucose meter" /></label>
+        <label>Manufacturer<TextField value={deviceForm.manufacturer} onValue={nextValue => setDeviceForm({ ...deviceForm, manufacturer: nextValue })} /></label>
+        <label>Model<TextField value={deviceForm.model} onValue={nextValue => setDeviceForm({ ...deviceForm, model: nextValue })} /></label>
+        <label>Serial<TextField value={deviceForm.serialNumber} onValue={nextValue => setDeviceForm({ ...deviceForm, serialNumber: nextValue })} /></label>
+        <label>Test menu summary<TextField value={deviceForm.testMenuSummary} onValue={nextValue => setDeviceForm({ ...deviceForm, testMenuSummary: nextValue })} /></label>
         <label>Installation date<input type="date" value={deviceForm.installationDate} onChange={e => setDeviceForm({ ...deviceForm, installationDate: e.target.value })} /></label>
         <label>Next service due<input type="date" value={deviceForm.nextServiceDue} onChange={e => setDeviceForm({ ...deviceForm, nextServiceDue: e.target.value })} /></label>
-        <label>Notes<textarea value={deviceForm.notes} onChange={e => setDeviceForm({ ...deviceForm, notes: e.target.value })} /></label>
+        <label>Notes<TextField as="textarea" value={deviceForm.notes} onValue={nextValue => setDeviceForm({ ...deviceForm, notes: nextValue })} /></label>
         <button type="submit">Register device</button>
       </form>
       <table className="data-table"><thead><tr><th>Code</th><th>Site</th><th>Name</th><th>Type</th><th>Model</th><th>Serial</th><th>Status</th><th>Next service</th><th></th></tr></thead><tbody>
@@ -243,13 +245,13 @@ export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
 
     {tab === 'Test Menu' && <>
       <form className="form-grid" onSubmit={submitTest}>
-        <label>Code<input value={testForm.testCode} onChange={e => setTestForm({ ...testForm, testCode: e.target.value })} /></label>
-        <label>Name<input value={testForm.testName} onChange={e => setTestForm({ ...testForm, testName: e.target.value })} required /></label>
-        <label>Sample type<input value={testForm.sampleType} onChange={e => setTestForm({ ...testForm, sampleType: e.target.value })} /></label>
-        <label>Result unit<input value={testForm.resultUnit} onChange={e => setTestForm({ ...testForm, resultUnit: e.target.value })} /></label>
-        <label>Method<input value={testForm.methodSummary} onChange={e => setTestForm({ ...testForm, methodSummary: e.target.value })} /></label>
-        <label>Device type<input value={testForm.deviceType} onChange={e => setTestForm({ ...testForm, deviceType: e.target.value })} /></label>
-        <label>Clinical area<input value={testForm.clinicalArea} onChange={e => setTestForm({ ...testForm, clinicalArea: e.target.value })} /></label>
+        <label>Code<TextField value={testForm.testCode} onValue={nextValue => setTestForm({ ...testForm, testCode: nextValue })} /></label>
+        <label>Name<TextField value={testForm.testName} onValue={nextValue => setTestForm({ ...testForm, testName: nextValue })} required /></label>
+        <label>Sample type<TextField value={testForm.sampleType} onValue={nextValue => setTestForm({ ...testForm, sampleType: nextValue })} /></label>
+        <label>Result unit<TextField value={testForm.resultUnit} onValue={nextValue => setTestForm({ ...testForm, resultUnit: nextValue })} /></label>
+        <label>Method<TextField value={testForm.methodSummary} onValue={nextValue => setTestForm({ ...testForm, methodSummary: nextValue })} /></label>
+        <label>Device type<TextField value={testForm.deviceType} onValue={nextValue => setTestForm({ ...testForm, deviceType: nextValue })} /></label>
+        <label>Clinical area<TextField value={testForm.clinicalArea} onValue={nextValue => setTestForm({ ...testForm, clinicalArea: nextValue })} /></label>
         <button type="submit">Add test</button>
       </form>
       <table className="data-table"><thead><tr><th>Code</th><th>Name</th><th>Sample</th><th>Unit</th><th>Method</th><th>Active</th><th></th></tr></thead><tbody>
@@ -267,7 +269,7 @@ export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
         <label>Authorised date<input type="date" value={authForm.authorizedDate} onChange={e => setAuthForm({ ...authForm, authorizedDate: e.target.value })} /></label>
         <label>Expiry date<input type="date" value={authForm.expiryDate} onChange={e => setAuthForm({ ...authForm, expiryDate: e.target.value })} /></label>
         <label>Competency assessment id<input type="number" value={authForm.competencyAssessmentId} onChange={e => setAuthForm({ ...authForm, competencyAssessmentId: e.target.value })} /></label>
-        <label>Restrictions<input value={authForm.restrictions} onChange={e => setAuthForm({ ...authForm, restrictions: e.target.value })} /></label>
+        <label>Restrictions<TextField value={authForm.restrictions} onValue={nextValue => setAuthForm({ ...authForm, restrictions: nextValue })} /></label>
         <button type="submit">Create authorisation</button>
       </form>
       <table className="data-table"><thead><tr><th>Number</th><th>Staff</th><th>Site</th><th>Device</th><th>Test</th><th>Level</th><th>Expiry</th><th>Status</th><th></th></tr></thead><tbody>
@@ -279,15 +281,15 @@ export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
 
     {tab === 'Reagent Lots' && <>
       <form className="form-grid" onSubmit={submitReagent}>
-        <label>Lot number<input value={reagentForm.lotNumber} onChange={e => setReagentForm({ ...reagentForm, lotNumber: e.target.value })} required /></label>
-        <label>Reagent name<input value={reagentForm.reagentName} onChange={e => setReagentForm({ ...reagentForm, reagentName: e.target.value })} required /></label>
+        <label>Lot number<TextField value={reagentForm.lotNumber} onValue={nextValue => setReagentForm({ ...reagentForm, lotNumber: nextValue })} required /></label>
+        <label>Reagent name<TextField value={reagentForm.reagentName} onValue={nextValue => setReagentForm({ ...reagentForm, reagentName: nextValue })} required /></label>
         <label>Device<select value={reagentForm.deviceId} onChange={e => setReagentForm({ ...reagentForm, deviceId: e.target.value })}><option value="">—</option>{devices.map(d => <option key={d.id} value={d.id}>{d.device_name}</option>)}</select></label>
         <label>Test<select value={reagentForm.testId} onChange={e => setReagentForm({ ...reagentForm, testId: e.target.value })}><option value="">—</option>{tests.map(t => <option key={t.id} value={t.id}>{t.test_name}</option>)}</select></label>
-        <label>Manufacturer<input value={reagentForm.manufacturer} onChange={e => setReagentForm({ ...reagentForm, manufacturer: e.target.value })} /></label>
+        <label>Manufacturer<TextField value={reagentForm.manufacturer} onValue={nextValue => setReagentForm({ ...reagentForm, manufacturer: nextValue })} /></label>
         <label>Received date<input type="date" value={reagentForm.receivedDate} onChange={e => setReagentForm({ ...reagentForm, receivedDate: e.target.value })} /></label>
         <label>Opened date<input type="date" value={reagentForm.openedDate} onChange={e => setReagentForm({ ...reagentForm, openedDate: e.target.value })} /></label>
         <label>Expiry<input type="date" value={reagentForm.expiryDate} onChange={e => setReagentForm({ ...reagentForm, expiryDate: e.target.value })} required /></label>
-        <label>Storage condition<input value={reagentForm.storageCondition} onChange={e => setReagentForm({ ...reagentForm, storageCondition: e.target.value })} /></label>
+        <label>Storage condition<TextField value={reagentForm.storageCondition} onValue={nextValue => setReagentForm({ ...reagentForm, storageCondition: nextValue })} /></label>
         <label>Status<select value={reagentForm.status} onChange={e => setReagentForm({ ...reagentForm, status: e.target.value })}>{REAGENT_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}</select></label>
         <button type="submit">Register lot</button>
       </form>
@@ -299,12 +301,12 @@ export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
     {tab === 'QC Monitoring' && <>
       <h3>QC materials</h3>
       <form className="form-grid" onSubmit={submitQcMaterial}>
-        <label>Material name<input value={qcMaterialForm.materialName} onChange={e => setQcMaterialForm({ ...qcMaterialForm, materialName: e.target.value })} required /></label>
-        <label>Code<input value={qcMaterialForm.materialCode} onChange={e => setQcMaterialForm({ ...qcMaterialForm, materialCode: e.target.value })} /></label>
+        <label>Material name<TextField value={qcMaterialForm.materialName} onValue={nextValue => setQcMaterialForm({ ...qcMaterialForm, materialName: nextValue })} required /></label>
+        <label>Code<TextField value={qcMaterialForm.materialCode} onValue={nextValue => setQcMaterialForm({ ...qcMaterialForm, materialCode: nextValue })} /></label>
         <label>Device<select value={qcMaterialForm.deviceId} onChange={e => setQcMaterialForm({ ...qcMaterialForm, deviceId: e.target.value })}><option value="">—</option>{devices.map(d => <option key={d.id} value={d.id}>{d.device_name}</option>)}</select></label>
         <label>Test<select value={qcMaterialForm.testId} onChange={e => setQcMaterialForm({ ...qcMaterialForm, testId: e.target.value })}><option value="">—</option>{tests.map(t => <option key={t.id} value={t.id}>{t.test_name}</option>)}</select></label>
-        <label>Lot number<input value={qcMaterialForm.lotNumber} onChange={e => setQcMaterialForm({ ...qcMaterialForm, lotNumber: e.target.value })} /></label>
-        <label>Manufacturer<input value={qcMaterialForm.manufacturer} onChange={e => setQcMaterialForm({ ...qcMaterialForm, manufacturer: e.target.value })} /></label>
+        <label>Lot number<TextField value={qcMaterialForm.lotNumber} onValue={nextValue => setQcMaterialForm({ ...qcMaterialForm, lotNumber: nextValue })} /></label>
+        <label>Manufacturer<TextField value={qcMaterialForm.manufacturer} onValue={nextValue => setQcMaterialForm({ ...qcMaterialForm, manufacturer: nextValue })} /></label>
         <label>Expiry<input type="date" value={qcMaterialForm.expiryDate} onChange={e => setQcMaterialForm({ ...qcMaterialForm, expiryDate: e.target.value })} /></label>
         <label>Target<input type="number" step="any" value={qcMaterialForm.targetValue} onChange={e => setQcMaterialForm({ ...qcMaterialForm, targetValue: e.target.value })} /></label>
         <label>Acceptable low<input type="number" step="any" value={qcMaterialForm.acceptableLow} onChange={e => setQcMaterialForm({ ...qcMaterialForm, acceptableLow: e.target.value })} /></label>
@@ -325,8 +327,8 @@ export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
         <label>QC material<select value={qcResultForm.qcMaterialId} onChange={e => setQcResultForm({ ...qcResultForm, qcMaterialId: e.target.value })}><option value="">—</option>{qcMaterials.map(m => <option key={m.id} value={m.id}>{m.material_name}</option>)}</select></label>
         <label>Reagent lot<select value={qcResultForm.reagentLotId} onChange={e => setQcResultForm({ ...qcResultForm, reagentLotId: e.target.value })}><option value="">—</option>{reagentLots.map(r => <option key={r.id} value={r.id}>{r.lot_number}</option>)}</select></label>
         <label>Result value<input type="number" step="any" value={qcResultForm.resultValue} onChange={e => setQcResultForm({ ...qcResultForm, resultValue: e.target.value })} required /></label>
-        <label>Expected<input value={qcResultForm.expectedResult} onChange={e => setQcResultForm({ ...qcResultForm, expectedResult: e.target.value })} /></label>
-        <label>Immediate action (required if failed)<textarea value={qcResultForm.immediateAction} onChange={e => setQcResultForm({ ...qcResultForm, immediateAction: e.target.value })} /></label>
+        <label>Expected<TextField value={qcResultForm.expectedResult} onValue={nextValue => setQcResultForm({ ...qcResultForm, expectedResult: nextValue })} /></label>
+        <label>Immediate action (required if failed)<TextField as="textarea" value={qcResultForm.immediateAction} onValue={nextValue => setQcResultForm({ ...qcResultForm, immediateAction: nextValue })} /></label>
         <button type="submit">Record QC result</button>
       </form>
       <table className="data-table"><thead><tr><th>Number</th><th>Date</th><th>Device</th><th>Test</th><th>Material</th><th>Value</th><th>Interp.</th><th>Status</th><th></th></tr></thead><tbody>
@@ -377,13 +379,13 @@ export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
         <label>Site<select value={eqaForm.siteId} onChange={e => setEqaForm({ ...eqaForm, siteId: e.target.value })}><option value="">—</option>{sites.map(s => <option key={s.id} value={s.id}>{s.site_name}</option>)}</select></label>
         <label>Device<select value={eqaForm.deviceId} onChange={e => setEqaForm({ ...eqaForm, deviceId: e.target.value })}><option value="">—</option>{devices.map(d => <option key={d.id} value={d.id}>{d.device_name}</option>)}</select></label>
         <label>Test<select value={eqaForm.testId} onChange={e => setEqaForm({ ...eqaForm, testId: e.target.value })} required><option value="">—</option>{tests.map(t => <option key={t.id} value={t.id}>{t.test_name}</option>)}</select></label>
-        <label>Cycle name<input value={eqaForm.cycleName} onChange={e => setEqaForm({ ...eqaForm, cycleName: e.target.value })} required /></label>
+        <label>Cycle name<TextField value={eqaForm.cycleName} onValue={nextValue => setEqaForm({ ...eqaForm, cycleName: nextValue })} required /></label>
         <label>Received date<input type="date" value={eqaForm.receivedDate} onChange={e => setEqaForm({ ...eqaForm, receivedDate: e.target.value })} /></label>
         <label>Due date<input type="date" value={eqaForm.dueDate} onChange={e => setEqaForm({ ...eqaForm, dueDate: e.target.value })} /></label>
         <label>Submitted date<input type="date" value={eqaForm.submittedDate} onChange={e => setEqaForm({ ...eqaForm, submittedDate: e.target.value })} /></label>
         <label>Result received date<input type="date" value={eqaForm.resultReceivedDate} onChange={e => setEqaForm({ ...eqaForm, resultReceivedDate: e.target.value })} /></label>
         <label>Performance<select value={eqaForm.performanceStatus} onChange={e => setEqaForm({ ...eqaForm, performanceStatus: e.target.value })}>{EQA_PERFORMANCE_STATUSES.map(p => <option key={p} value={p}>{p}</option>)}</select></label>
-        <label>Findings<textarea value={eqaForm.findings} onChange={e => setEqaForm({ ...eqaForm, findings: e.target.value })} /></label>
+        <label>Findings<TextField as="textarea" value={eqaForm.findings} onValue={nextValue => setEqaForm({ ...eqaForm, findings: nextValue })} /></label>
         <button type="submit">Record EQA event</button>
       </form>
       <table className="data-table"><thead><tr><th>Number</th><th>Cycle</th><th>Test</th><th>Due</th><th>Submitted</th><th>Performance</th><th>Status</th><th></th></tr></thead><tbody>
@@ -398,8 +400,8 @@ export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
         <label>Device<select value={maintForm.deviceId} onChange={e => setMaintForm({ ...maintForm, deviceId: e.target.value })} required><option value="">—</option>{devices.map(d => <option key={d.id} value={d.id}>{d.device_name}</option>)}</select></label>
         <label>Date<input type="date" value={maintForm.maintenanceDate} onChange={e => setMaintForm({ ...maintForm, maintenanceDate: e.target.value })} required /></label>
         <label>Type<select value={maintForm.maintenanceType} onChange={e => setMaintForm({ ...maintForm, maintenanceType: e.target.value })}>{MAINTENANCE_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
-        <label>Description<textarea value={maintForm.description} onChange={e => setMaintForm({ ...maintForm, description: e.target.value })} required /></label>
-        <label>Outcome<input value={maintForm.outcome} onChange={e => setMaintForm({ ...maintForm, outcome: e.target.value })} /></label>
+        <label>Description<TextField as="textarea" value={maintForm.description} onValue={nextValue => setMaintForm({ ...maintForm, description: nextValue })} required /></label>
+        <label>Outcome<TextField value={maintForm.outcome} onValue={nextValue => setMaintForm({ ...maintForm, outcome: nextValue })} /></label>
         <label>Next due<input type="date" value={maintForm.nextDueDate} onChange={e => setMaintForm({ ...maintForm, nextDueDate: e.target.value })} /></label>
         <label>Performed by<select value={maintForm.performedByStaffId} onChange={e => setMaintForm({ ...maintForm, performedByStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <button type="submit">Log maintenance</button>
@@ -416,10 +418,10 @@ export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
         <label>Device<select value={incidentForm.deviceId} onChange={e => setIncidentForm({ ...incidentForm, deviceId: e.target.value })}><option value="">—</option>{devices.map(d => <option key={d.id} value={d.id}>{d.device_name}</option>)}</select></label>
         <label>Test<select value={incidentForm.testId} onChange={e => setIncidentForm({ ...incidentForm, testId: e.target.value })}><option value="">—</option>{tests.map(t => <option key={t.id} value={t.id}>{t.test_name}</option>)}</select></label>
         <label>Severity<select value={incidentForm.severity} onChange={e => setIncidentForm({ ...incidentForm, severity: e.target.value })}>{SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}</select></label>
-        <label>Title<input value={incidentForm.title} onChange={e => setIncidentForm({ ...incidentForm, title: e.target.value })} required /></label>
-        <label>Description<textarea value={incidentForm.description} onChange={e => setIncidentForm({ ...incidentForm, description: e.target.value })} required /></label>
-        <label>Immediate action<textarea value={incidentForm.immediateAction} onChange={e => setIncidentForm({ ...incidentForm, immediateAction: e.target.value })} /></label>
-        <label>Outcome<input value={incidentForm.outcome} onChange={e => setIncidentForm({ ...incidentForm, outcome: e.target.value })} /></label>
+        <label>Title<TextField value={incidentForm.title} onValue={nextValue => setIncidentForm({ ...incidentForm, title: nextValue })} required /></label>
+        <label>Description<TextField as="textarea" value={incidentForm.description} onValue={nextValue => setIncidentForm({ ...incidentForm, description: nextValue })} required /></label>
+        <label>Immediate action<TextField as="textarea" value={incidentForm.immediateAction} onValue={nextValue => setIncidentForm({ ...incidentForm, immediateAction: nextValue })} /></label>
+        <label>Outcome<TextField value={incidentForm.outcome} onValue={nextValue => setIncidentForm({ ...incidentForm, outcome: nextValue })} /></label>
         <button type="submit">Log incident</button>
       </form>
       <table className="data-table"><thead><tr><th>Number</th><th>Date</th><th>Site</th><th>Device</th><th>Title</th><th>Severity</th><th>Status</th><th></th></tr></thead><tbody>
@@ -434,7 +436,7 @@ export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
         <label>Month<NumberField min={1} max={12} value={reviewForm.reviewMonth} onValue={n => setReviewForm({ ...reviewForm, reviewMonth: n ?? 0 })} required /></label>
         <label>Year<NumberField min={2000} value={reviewForm.reviewYear} onValue={n => setReviewForm({ ...reviewForm, reviewYear: n ?? 0 })} required /></label>
         <label>Site<select value={reviewForm.siteId} onChange={e => setReviewForm({ ...reviewForm, siteId: e.target.value })}><option value="">All sites</option>{sites.map(s => <option key={s.id} value={s.id}>{s.site_name}</option>)}</select></label>
-        <label>Summary<textarea value={reviewForm.summary} onChange={e => setReviewForm({ ...reviewForm, summary: e.target.value })} /></label>
+        <label>Summary<TextField as="textarea" value={reviewForm.summary} onValue={nextValue => setReviewForm({ ...reviewForm, summary: nextValue })} /></label>
         <button type="submit">Create review</button>
       </form>
       <table className="data-table"><thead><tr><th>Number</th><th>Period</th><th>Site</th><th>Status</th><th>Summaries</th><th></th></tr></thead><tbody>

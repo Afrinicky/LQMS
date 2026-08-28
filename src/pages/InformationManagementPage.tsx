@@ -12,6 +12,8 @@ import type {
   SoftwareReleaseRecord, SystemValidationRecord, SystemDowntimeRecord,
   InformationManagementReview, InformationManagementSummary
 } from '../../shared/types/api';
+import TextField from '../components/ui/TextField';
+import { Notice } from '../components/ui/Feedback';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
@@ -153,7 +155,7 @@ export function InformationManagementPage() {
     <PageHeader eyebrow="Information Management" title="Information Management" subtitle="Information assets, systems, access reviews, and changes." />
     <p className="muted">QMS oversight of laboratory information assets and systems. SECH_LIMS does not replace LHIMS/Lightwave for patient registration, test requests, result entry, verification, dispatch, or reporting.</p>
     {tabBar(tab, tabs, setTab)}
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {tab === 'Dashboard' && <ModuleAlerts moduleKey="information_management" />}
     {tab === 'Dashboard' && (summary ? <KpiStrip items={[
@@ -186,18 +188,18 @@ export function InformationManagementPage() {
 
     {tab === 'Information Assets' && <>
       <form className="form-grid" onSubmit={submitAsset}>
-        <label>Code<input value={assetForm.assetCode} onChange={e => setAssetForm({ ...assetForm, assetCode: e.target.value })} /></label>
-        <label>Name<input value={assetForm.assetName} onChange={e => setAssetForm({ ...assetForm, assetName: e.target.value })} required /></label>
+        <label>Code<TextField value={assetForm.assetCode} onValue={nextValue => setAssetForm({ ...assetForm, assetCode: nextValue })} /></label>
+        <label>Name<TextField value={assetForm.assetName} onValue={nextValue => setAssetForm({ ...assetForm, assetName: nextValue })} required /></label>
         <label>Type<select value={assetForm.assetType} onChange={e => setAssetForm({ ...assetForm, assetType: e.target.value })}>{ASSET_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Owner<select value={assetForm.ownerStaffId} onChange={e => setAssetForm({ ...assetForm, ownerStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Department<select value={assetForm.departmentId} onChange={e => setAssetForm({ ...assetForm, departmentId: e.target.value })}><option value="">—</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
         <label>Section<select value={assetForm.sectionId} onChange={e => setAssetForm({ ...assetForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-        <label>Data category<input value={assetForm.dataCategory} onChange={e => setAssetForm({ ...assetForm, dataCategory: e.target.value })} placeholder="e.g. QMS, results, samples" /></label>
+        <label>Data category<TextField value={assetForm.dataCategory} onValue={nextValue => setAssetForm({ ...assetForm, dataCategory: nextValue })} placeholder="e.g. QMS, results, samples" /></label>
         <label>Confidentiality<select value={assetForm.confidentialityLevel} onChange={e => setAssetForm({ ...assetForm, confidentialityLevel: e.target.value })}>{CONFIDENTIALITY_LEVELS.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
-        <label>Storage location<input value={assetForm.storageLocation} onChange={e => setAssetForm({ ...assetForm, storageLocation: e.target.value })} /></label>
-        <label>Backup method<input value={assetForm.backupMethod} onChange={e => setAssetForm({ ...assetForm, backupMethod: e.target.value })} /></label>
+        <label>Storage location<TextField value={assetForm.storageLocation} onValue={nextValue => setAssetForm({ ...assetForm, storageLocation: nextValue })} /></label>
+        <label>Backup method<TextField value={assetForm.backupMethod} onValue={nextValue => setAssetForm({ ...assetForm, backupMethod: nextValue })} /></label>
         <label>Retention rule id<input type="number" value={assetForm.retentionRuleId} onChange={e => setAssetForm({ ...assetForm, retentionRuleId: e.target.value })} /></label>
-        <label>Description<textarea value={assetForm.description} onChange={e => setAssetForm({ ...assetForm, description: e.target.value })} /></label>
+        <label>Description<TextField as="textarea" value={assetForm.description} onValue={nextValue => setAssetForm({ ...assetForm, description: nextValue })} /></label>
         <button type="submit">Register asset</button>
       </form>
       <table className="data-table"><thead><tr><th>Code</th><th>Name</th><th>Type</th><th>Owner</th><th>Confidentiality</th><th>Storage</th><th>Backup</th><th>Status</th><th></th></tr></thead><tbody>
@@ -209,16 +211,16 @@ export function InformationManagementPage() {
 
     {tab === 'Information Systems' && <>
       <form className="form-grid" onSubmit={submitSystem}>
-        <label>Code<input value={systemForm.systemCode} onChange={e => setSystemForm({ ...systemForm, systemCode: e.target.value })} /></label>
-        <label>Name<input value={systemForm.systemName} onChange={e => setSystemForm({ ...systemForm, systemName: e.target.value })} required /></label>
+        <label>Code<TextField value={systemForm.systemCode} onValue={nextValue => setSystemForm({ ...systemForm, systemCode: nextValue })} /></label>
+        <label>Name<TextField value={systemForm.systemName} onValue={nextValue => setSystemForm({ ...systemForm, systemName: nextValue })} required /></label>
         <label>Type<select value={systemForm.systemType} onChange={e => setSystemForm({ ...systemForm, systemType: e.target.value })}>{SYSTEM_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
-        <label>Vendor/owner<input value={systemForm.vendorOrOwner} onChange={e => setSystemForm({ ...systemForm, vendorOrOwner: e.target.value })} /></label>
-        <label>Purpose<input value={systemForm.purpose} onChange={e => setSystemForm({ ...systemForm, purpose: e.target.value })} /></label>
-        <label>Data handled<input value={systemForm.dataHandled} onChange={e => setSystemForm({ ...systemForm, dataHandled: e.target.value })} /></label>
-        <label>Hosting location<input value={systemForm.hostingLocation} onChange={e => setSystemForm({ ...systemForm, hostingLocation: e.target.value })} /></label>
-        <label>Access method<input value={systemForm.accessMethod} onChange={e => setSystemForm({ ...systemForm, accessMethod: e.target.value })} placeholder="e.g. LAN desktop, browser" /></label>
-        <label>Backup responsibility<input value={systemForm.backupResponsibility} onChange={e => setSystemForm({ ...systemForm, backupResponsibility: e.target.value })} /></label>
-        <label>Support contact<input value={systemForm.supportContact} onChange={e => setSystemForm({ ...systemForm, supportContact: e.target.value })} /></label>
+        <label>Vendor/owner<TextField value={systemForm.vendorOrOwner} onValue={nextValue => setSystemForm({ ...systemForm, vendorOrOwner: nextValue })} /></label>
+        <label>Purpose<TextField value={systemForm.purpose} onValue={nextValue => setSystemForm({ ...systemForm, purpose: nextValue })} /></label>
+        <label>Data handled<TextField value={systemForm.dataHandled} onValue={nextValue => setSystemForm({ ...systemForm, dataHandled: nextValue })} /></label>
+        <label>Hosting location<TextField value={systemForm.hostingLocation} onValue={nextValue => setSystemForm({ ...systemForm, hostingLocation: nextValue })} /></label>
+        <label>Access method<TextField value={systemForm.accessMethod} onValue={nextValue => setSystemForm({ ...systemForm, accessMethod: nextValue })} placeholder="e.g. LAN desktop, browser" /></label>
+        <label>Backup responsibility<TextField value={systemForm.backupResponsibility} onValue={nextValue => setSystemForm({ ...systemForm, backupResponsibility: nextValue })} /></label>
+        <label>Support contact<TextField value={systemForm.supportContact} onValue={nextValue => setSystemForm({ ...systemForm, supportContact: nextValue })} /></label>
         <label>Criticality<select value={systemForm.criticality} onChange={e => setSystemForm({ ...systemForm, criticality: e.target.value })}>{CRITICALITY_LEVELS.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
         <button type="submit">Register system</button>
       </form>
@@ -239,7 +241,7 @@ export function InformationManagementPage() {
         <label>Access issues<input type="number" value={accessForm.accessIssuesFound} onChange={e => setAccessForm({ ...accessForm, accessIssuesFound: e.target.value })} /></label>
         <label>Inactive accounts<input type="number" value={accessForm.inactiveAccountsFound} onChange={e => setAccessForm({ ...accessForm, inactiveAccountsFound: e.target.value })} /></label>
         <label>Excessive access<input type="number" value={accessForm.excessiveAccessFound} onChange={e => setAccessForm({ ...accessForm, excessiveAccessFound: e.target.value })} /></label>
-        <label>Actions required<textarea value={accessForm.actionsRequired} onChange={e => setAccessForm({ ...accessForm, actionsRequired: e.target.value })} /></label>
+        <label>Actions required<TextField as="textarea" value={accessForm.actionsRequired} onValue={nextValue => setAccessForm({ ...accessForm, actionsRequired: nextValue })} /></label>
         <button type="submit">Open access review</button>
       </form>
       <table className="data-table"><thead><tr><th>Number</th><th>System</th><th>Review date</th><th>Users</th><th>Issues</th><th>Status</th><th></th></tr></thead><tbody>
@@ -256,11 +258,11 @@ export function InformationManagementPage() {
         <label>System<select value={incidentForm.systemId} onChange={e => setIncidentForm({ ...incidentForm, systemId: e.target.value })}><option value="">—</option>{systems.map(s => <option key={s.id} value={s.id}>{s.system_name}</option>)}</select></label>
         <label>Asset<select value={incidentForm.assetId} onChange={e => setIncidentForm({ ...incidentForm, assetId: e.target.value })}><option value="">—</option>{assets.map(a => <option key={a.id} value={a.id}>{a.asset_name}</option>)}</select></label>
         <label>Severity<select value={incidentForm.severity} onChange={e => setIncidentForm({ ...incidentForm, severity: e.target.value })}>{SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}</select></label>
-        <label>Confidentiality impact<input value={incidentForm.confidentialityImpact} onChange={e => setIncidentForm({ ...incidentForm, confidentialityImpact: e.target.value })} /></label>
-        <label>Title<input value={incidentForm.title} onChange={e => setIncidentForm({ ...incidentForm, title: e.target.value })} required /></label>
-        <label>Description<textarea value={incidentForm.description} onChange={e => setIncidentForm({ ...incidentForm, description: e.target.value })} required /></label>
-        <label>Immediate action<textarea value={incidentForm.immediateAction} onChange={e => setIncidentForm({ ...incidentForm, immediateAction: e.target.value })} /></label>
-        <label>Investigation summary<textarea value={incidentForm.investigationSummary} onChange={e => setIncidentForm({ ...incidentForm, investigationSummary: e.target.value })} /></label>
+        <label>Confidentiality impact<TextField value={incidentForm.confidentialityImpact} onValue={nextValue => setIncidentForm({ ...incidentForm, confidentialityImpact: nextValue })} /></label>
+        <label>Title<TextField value={incidentForm.title} onValue={nextValue => setIncidentForm({ ...incidentForm, title: nextValue })} required /></label>
+        <label>Description<TextField as="textarea" value={incidentForm.description} onValue={nextValue => setIncidentForm({ ...incidentForm, description: nextValue })} required /></label>
+        <label>Immediate action<TextField as="textarea" value={incidentForm.immediateAction} onValue={nextValue => setIncidentForm({ ...incidentForm, immediateAction: nextValue })} /></label>
+        <label>Investigation summary<TextField as="textarea" value={incidentForm.investigationSummary} onValue={nextValue => setIncidentForm({ ...incidentForm, investigationSummary: nextValue })} /></label>
         <label><input type="checkbox" checked={incidentForm.dataLossSuspected} onChange={e => setIncidentForm({ ...incidentForm, dataLossSuspected: e.target.checked })} /> Data loss suspected</label>
         <button type="submit">Log incident</button>
       </form>
@@ -276,12 +278,12 @@ export function InformationManagementPage() {
       <form className="form-grid" onSubmit={submitCorrection}>
         <label>Request date<input type="date" value={correctionForm.requestDate} onChange={e => setCorrectionForm({ ...correctionForm, requestDate: e.target.value })} required /></label>
         <label>System<select value={correctionForm.systemId} onChange={e => setCorrectionForm({ ...correctionForm, systemId: e.target.value })}><option value="">—</option>{systems.map(s => <option key={s.id} value={s.id}>{s.system_name}</option>)}</select></label>
-        <label>Module key<input value={correctionForm.moduleKey} onChange={e => setCorrectionForm({ ...correctionForm, moduleKey: e.target.value })} placeholder="e.g. nc_capa, blood_bank_handover" /></label>
-        <label>Record type<input value={correctionForm.recordType} onChange={e => setCorrectionForm({ ...correctionForm, recordType: e.target.value })} /></label>
-        <label>Record reference<input value={correctionForm.recordReference} onChange={e => setCorrectionForm({ ...correctionForm, recordReference: e.target.value })} placeholder="Record number / reference only" /></label>
-        <label>Correction reason<textarea value={correctionForm.correctionReason} onChange={e => setCorrectionForm({ ...correctionForm, correctionReason: e.target.value })} required /></label>
-        <label>Original value summary<textarea value={correctionForm.originalValueSummary} onChange={e => setCorrectionForm({ ...correctionForm, originalValueSummary: e.target.value })} /></label>
-        <label>Requested correction summary<textarea value={correctionForm.requestedCorrectionSummary} onChange={e => setCorrectionForm({ ...correctionForm, requestedCorrectionSummary: e.target.value })} required /></label>
+        <label>Module key<TextField value={correctionForm.moduleKey} onValue={nextValue => setCorrectionForm({ ...correctionForm, moduleKey: nextValue })} placeholder="e.g. nc_capa, blood_bank_handover" /></label>
+        <label>Record type<TextField value={correctionForm.recordType} onValue={nextValue => setCorrectionForm({ ...correctionForm, recordType: nextValue })} /></label>
+        <label>Record reference<TextField value={correctionForm.recordReference} onValue={nextValue => setCorrectionForm({ ...correctionForm, recordReference: nextValue })} placeholder="Record number / reference only" /></label>
+        <label>Correction reason<TextField as="textarea" value={correctionForm.correctionReason} onValue={nextValue => setCorrectionForm({ ...correctionForm, correctionReason: nextValue })} required /></label>
+        <label>Original value summary<TextField as="textarea" value={correctionForm.originalValueSummary} onValue={nextValue => setCorrectionForm({ ...correctionForm, originalValueSummary: nextValue })} /></label>
+        <label>Requested correction summary<TextField as="textarea" value={correctionForm.requestedCorrectionSummary} onValue={nextValue => setCorrectionForm({ ...correctionForm, requestedCorrectionSummary: nextValue })} required /></label>
         <button type="submit">Submit request</button>
       </form>
       <table className="data-table"><thead><tr><th>Number</th><th>Date</th><th>System</th><th>Record ref</th><th>Reason</th><th>Status</th><th></th></tr></thead><tbody>
@@ -298,11 +300,11 @@ export function InformationManagementPage() {
         <label>Change type<select value={changeForm.changeType} onChange={e => setChangeForm({ ...changeForm, changeType: e.target.value })}>{CHANGE_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Risk level<select value={changeForm.riskLevel} onChange={e => setChangeForm({ ...changeForm, riskLevel: e.target.value })}>{CRITICALITY_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}</select></label>
         <label>Implementation date<input type="date" value={changeForm.implementationDate} onChange={e => setChangeForm({ ...changeForm, implementationDate: e.target.value })} /></label>
-        <label>Title<input value={changeForm.title} onChange={e => setChangeForm({ ...changeForm, title: e.target.value })} required /></label>
-        <label>Description<textarea value={changeForm.description} onChange={e => setChangeForm({ ...changeForm, description: e.target.value })} required /></label>
-        <label>Reason<textarea value={changeForm.reason} onChange={e => setChangeForm({ ...changeForm, reason: e.target.value })} required /></label>
-        <label>Rollback plan<textarea value={changeForm.rollbackPlan} onChange={e => setChangeForm({ ...changeForm, rollbackPlan: e.target.value })} /></label>
-        <label>Validation summary<textarea value={changeForm.validationSummary} onChange={e => setChangeForm({ ...changeForm, validationSummary: e.target.value })} /></label>
+        <label>Title<TextField value={changeForm.title} onValue={nextValue => setChangeForm({ ...changeForm, title: nextValue })} required /></label>
+        <label>Description<TextField as="textarea" value={changeForm.description} onValue={nextValue => setChangeForm({ ...changeForm, description: nextValue })} required /></label>
+        <label>Reason<TextField as="textarea" value={changeForm.reason} onValue={nextValue => setChangeForm({ ...changeForm, reason: nextValue })} required /></label>
+        <label>Rollback plan<TextField as="textarea" value={changeForm.rollbackPlan} onValue={nextValue => setChangeForm({ ...changeForm, rollbackPlan: nextValue })} /></label>
+        <label>Validation summary<TextField as="textarea" value={changeForm.validationSummary} onValue={nextValue => setChangeForm({ ...changeForm, validationSummary: nextValue })} /></label>
         <label><input type="checkbox" checked={changeForm.validationRequired} onChange={e => setChangeForm({ ...changeForm, validationRequired: e.target.checked })} /> Validation required</label>
         <button type="submit">Log change request</button>
       </form>
@@ -316,13 +318,13 @@ export function InformationManagementPage() {
     {tab === 'Software Releases' && <>
       <form className="form-grid" onSubmit={submitRelease}>
         <label>System<select value={releaseForm.systemId} onChange={e => setReleaseForm({ ...releaseForm, systemId: e.target.value })} required><option value="">—</option>{systems.map(s => <option key={s.id} value={s.id}>{s.system_name}</option>)}</select></label>
-        <label>Version label<input value={releaseForm.versionLabel} onChange={e => setReleaseForm({ ...releaseForm, versionLabel: e.target.value })} required /></label>
+        <label>Version label<TextField value={releaseForm.versionLabel} onValue={nextValue => setReleaseForm({ ...releaseForm, versionLabel: nextValue })} required /></label>
         <label>Release date<input type="date" value={releaseForm.releaseDate} onChange={e => setReleaseForm({ ...releaseForm, releaseDate: e.target.value })} required /></label>
         <label>Change request id<input type="number" value={releaseForm.changeRequestId} onChange={e => setReleaseForm({ ...releaseForm, changeRequestId: e.target.value })} /></label>
-        <label>Release summary<textarea value={releaseForm.releaseSummary} onChange={e => setReleaseForm({ ...releaseForm, releaseSummary: e.target.value })} /></label>
-        <label>Changes included<textarea value={releaseForm.changesIncluded} onChange={e => setReleaseForm({ ...releaseForm, changesIncluded: e.target.value })} /></label>
-        <label>Testing summary<textarea value={releaseForm.testingSummary} onChange={e => setReleaseForm({ ...releaseForm, testingSummary: e.target.value })} /></label>
-        <label>Deployment notes<textarea value={releaseForm.deploymentNotes} onChange={e => setReleaseForm({ ...releaseForm, deploymentNotes: e.target.value })} /></label>
+        <label>Release summary<TextField as="textarea" value={releaseForm.releaseSummary} onValue={nextValue => setReleaseForm({ ...releaseForm, releaseSummary: nextValue })} /></label>
+        <label>Changes included<TextField as="textarea" value={releaseForm.changesIncluded} onValue={nextValue => setReleaseForm({ ...releaseForm, changesIncluded: nextValue })} /></label>
+        <label>Testing summary<TextField as="textarea" value={releaseForm.testingSummary} onValue={nextValue => setReleaseForm({ ...releaseForm, testingSummary: nextValue })} /></label>
+        <label>Deployment notes<TextField as="textarea" value={releaseForm.deploymentNotes} onValue={nextValue => setReleaseForm({ ...releaseForm, deploymentNotes: nextValue })} /></label>
         <button type="submit">Record release</button>
       </form>
       <table className="data-table"><thead><tr><th>Number</th><th>System</th><th>Version</th><th>Date</th><th>Status</th><th></th></tr></thead><tbody>
@@ -339,10 +341,10 @@ export function InformationManagementPage() {
         <label>Type<select value={validationForm.validationType} onChange={e => setValidationForm({ ...validationForm, validationType: e.target.value })}>{VALIDATION_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Release id<input type="number" value={validationForm.releaseId} onChange={e => setValidationForm({ ...validationForm, releaseId: e.target.value })} /></label>
         <label>Change request id<input type="number" value={validationForm.changeRequestId} onChange={e => setValidationForm({ ...validationForm, changeRequestId: e.target.value })} /></label>
-        <label>Scope<input value={validationForm.scope} onChange={e => setValidationForm({ ...validationForm, scope: e.target.value })} /></label>
-        <label>Test summary<textarea value={validationForm.testSummary} onChange={e => setValidationForm({ ...validationForm, testSummary: e.target.value })} /></label>
-        <label>Deviations found<textarea value={validationForm.deviationsFound} onChange={e => setValidationForm({ ...validationForm, deviationsFound: e.target.value })} /></label>
-        <label>Outcome<input value={validationForm.outcome} onChange={e => setValidationForm({ ...validationForm, outcome: e.target.value })} /></label>
+        <label>Scope<TextField value={validationForm.scope} onValue={nextValue => setValidationForm({ ...validationForm, scope: nextValue })} /></label>
+        <label>Test summary<TextField as="textarea" value={validationForm.testSummary} onValue={nextValue => setValidationForm({ ...validationForm, testSummary: nextValue })} /></label>
+        <label>Deviations found<TextField as="textarea" value={validationForm.deviationsFound} onValue={nextValue => setValidationForm({ ...validationForm, deviationsFound: nextValue })} /></label>
+        <label>Outcome<TextField value={validationForm.outcome} onValue={nextValue => setValidationForm({ ...validationForm, outcome: nextValue })} /></label>
         <button type="submit">Record validation</button>
       </form>
       <table className="data-table"><thead><tr><th>Number</th><th>System</th><th>Date</th><th>Type</th><th>Outcome</th><th>Status</th><th></th></tr></thead><tbody>
@@ -358,9 +360,9 @@ export function InformationManagementPage() {
         <label>Downtime start<input type="datetime-local" value={downtimeForm.downtimeStart} onChange={e => setDowntimeForm({ ...downtimeForm, downtimeStart: e.target.value })} required /></label>
         <label>Downtime end<input type="datetime-local" value={downtimeForm.downtimeEnd} onChange={e => setDowntimeForm({ ...downtimeForm, downtimeEnd: e.target.value })} /></label>
         <label>Type<select value={downtimeForm.downtimeType} onChange={e => setDowntimeForm({ ...downtimeForm, downtimeType: e.target.value })}>{DOWNTIME_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
-        <label>Affected services<textarea value={downtimeForm.affectedServices} onChange={e => setDowntimeForm({ ...downtimeForm, affectedServices: e.target.value })} required /></label>
-        <label>Impact summary<textarea value={downtimeForm.impactSummary} onChange={e => setDowntimeForm({ ...downtimeForm, impactSummary: e.target.value })} /></label>
-        <label>Workaround used<textarea value={downtimeForm.workaroundUsed} onChange={e => setDowntimeForm({ ...downtimeForm, workaroundUsed: e.target.value })} /></label>
+        <label>Affected services<TextField as="textarea" value={downtimeForm.affectedServices} onValue={nextValue => setDowntimeForm({ ...downtimeForm, affectedServices: nextValue })} required /></label>
+        <label>Impact summary<TextField as="textarea" value={downtimeForm.impactSummary} onValue={nextValue => setDowntimeForm({ ...downtimeForm, impactSummary: nextValue })} /></label>
+        <label>Workaround used<TextField as="textarea" value={downtimeForm.workaroundUsed} onValue={nextValue => setDowntimeForm({ ...downtimeForm, workaroundUsed: nextValue })} /></label>
         <button type="submit">Log downtime</button>
       </form>
       <table className="data-table"><thead><tr><th>Number</th><th>System</th><th>Start</th><th>End</th><th>Duration (min)</th><th>Affected</th><th>Status</th><th></th></tr></thead><tbody>

@@ -17,6 +17,8 @@ import {
   isOverdue, type ComplaintTargets,
 } from '../../shared/constants/complaints';
 import type { ComplaintRecord } from '../../shared/types/api';
+import TextField from '../components/ui/TextField';
+import { Notice } from '../components/ui/Feedback';
 
 /* ============================================================================
    COMPLAINTS — ISO 15189:2022 §7.4
@@ -169,8 +171,8 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
     {!embedded && <PageHeader eyebrow="Customer Focus" title="Complaints"
       subtitle="Receive, acknowledge, investigate, review and answer — ISO 15189 §7.4." />}
     <PermissionTabs moduleKey="complaints" tabs={COMPLAINT_TABS.filter(n => !embedded || n !== 'Dashboard')} active={tab} onChange={setTab} />
-    {loadState.error && <div className="error">{loadState.error}</div>}
-    {notice && <div className="notice-ok">{notice}</div>}
+    {loadState.error && <Notice kind="error">{loadState.error}</Notice>}
+    {notice && <Notice kind="success">{notice}</Notice>}
 
     {tab === 'Dashboard' && <><ModuleAlerts moduleKey="complaints" /><KpiStrip items={[
       { label: 'Open', value: openOnes.length, onClick: () => { setStageFilter(''); setTab('Complaints Register'); } },
@@ -260,9 +262,9 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
             <option value="">Select…</option>{COMPLAINANT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
         </label>
-        <label><span>Complainant name <span className="muted">(optional)</span></span><input value={form.complainantName} onChange={e => setForm({ ...form, complainantName: e.target.value })} placeholder="May be left anonymous" /></label>
-        <label><span>Contact <span className="muted">(optional)</span></span><input value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} placeholder="Phone or email — needed to answer them" /></label>
-        <label>How it reached us<input value={form.source} onChange={e => setForm({ ...form, source: e.target.value })} placeholder="e.g. OPD, ward round, suggestion box" /></label>
+        <label><span>Complainant name <span className="muted">(optional)</span></span><TextField value={form.complainantName} onValue={nextValue => setForm({ ...form, complainantName: nextValue })} placeholder="May be left anonymous" /></label>
+        <label><span>Contact <span className="muted">(optional)</span></span><TextField value={form.contact} onValue={nextValue => setForm({ ...form, contact: nextValue })} placeholder="Phone or email — needed to answer them" /></label>
+        <label>How it reached us<TextField value={form.source} onValue={nextValue => setForm({ ...form, source: nextValue })} placeholder="e.g. OPD, ward round, suggestion box" /></label>
         <label>Category
           <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} required>
             <option value="">Select…</option>{COMPLAINT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
@@ -278,8 +280,8 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
             {COMPLAINT_SEVERITIES.map(s => <option key={s} value={s}>{SEVERITY_LABELS[s]}</option>)}
           </select>
         </label>
-        <label className="wide">Summary<input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="One line — what they are complaining about" required /></label>
-        <label className="wide">What they said<textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} rows={4} placeholder="In their words as far as possible" required /></label>
+        <label className="wide">Summary<TextField value={form.title} onValue={nextValue => setForm({ ...form, title: nextValue })} placeholder="One line — what they are complaining about" required /></label>
+        <label className="wide">What they said<TextField as="textarea" value={form.description} onValue={nextValue => setForm({ ...form, description: nextValue })} rows={4} placeholder="In their words as far as possible" required /></label>
         <label className="toggle wide">
           <input type="checkbox" checked={form.patientAffected} onChange={e => setForm({ ...form, patientAffected: e.target.checked })} />
           A patient or a reported result was affected
@@ -319,7 +321,7 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
       header={selected ? formatBadge(STAGE_LABELS[stage] ?? stage) : undefined}
     >
       {selected && <div className="cx">
-        {loadState.error && <div className="error">{loadState.error}</div>}
+        {loadState.error && <Notice kind="error">{loadState.error}</Notice>}
         <StageTrail stage={stage} />
         <p className="cx-next"><AlertTriangle size={14} /> {STAGE_NEXT_ACTION[stage] ?? ''}</p>
 
@@ -340,7 +342,7 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
           <div className="form-grid">
             <label>How<select value={ack.method} onChange={e => setAck({ ...ack, method: e.target.value })}>
               <option value="">Select…</option>{CONTACT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}</select></label>
-            <label className="wide"><span>Note <span className="muted">(optional)</span></span><input value={ack.note} onChange={e => setAck({ ...ack, note: e.target.value })} placeholder="e.g. Spoke to Dr Mensah, explained the next steps" /></label>
+            <label className="wide"><span>Note <span className="muted">(optional)</span></span><TextField value={ack.note} onValue={nextValue => setAck({ ...ack, note: nextValue })} placeholder="e.g. Spoke to Dr Mensah, explained the next steps" /></label>
           </div>
           <button type="button" disabled={!ack.method || busy === 'ack'} onClick={() => step('ack', '/acknowledge', ack, 'Receipt acknowledged.')}>
             {busy === 'ack' ? 'Recording…' : 'Record acknowledgement'}
@@ -358,9 +360,9 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
                 <option value="">Choose…</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
               </select>
             </label>
-            <label className="wide">What the investigation found<textarea rows={3} value={inv.investigationSummary} onChange={e => setInv({ ...inv, investigationSummary: e.target.value })} /></label>
-            <label className="wide">Cause<textarea rows={2} value={inv.rootCause} onChange={e => setInv({ ...inv, rootCause: e.target.value })} placeholder="Why it happened" /></label>
-            <label className="wide">Correction<textarea rows={2} value={inv.correction} onChange={e => setInv({ ...inv, correction: e.target.value })} placeholder="What was put right" /></label>
+            <label className="wide">What the investigation found<TextField as="textarea" rows={3} value={inv.investigationSummary} onValue={nextValue => setInv({ ...inv, investigationSummary: nextValue })} /></label>
+            <label className="wide">Cause<TextField as="textarea" rows={2} value={inv.rootCause} onValue={nextValue => setInv({ ...inv, rootCause: nextValue })} placeholder="Why it happened" /></label>
+            <label className="wide">Correction<TextField as="textarea" rows={2} value={inv.correction} onValue={nextValue => setInv({ ...inv, correction: nextValue })} placeholder="What was put right" /></label>
           </div>
           <div className="cx-acts">
             <button type="button" className="secondary" disabled={!inv.investigationSummary.trim() || busy === 'inv'}
@@ -395,7 +397,7 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
                 <option value="">Select…</option>{COMPLAINT_OUTCOMES.map(o => <option key={o} value={o}>{OUTCOME_LABELS[o]}</option>)}
               </select>
             </label>
-            <label className="wide">Review notes<textarea rows={2} value={rev.notes} onChange={e => setRev({ ...rev, notes: e.target.value })} /></label>
+            <label className="wide">Review notes<TextField as="textarea" rows={2} value={rev.notes} onValue={nextValue => setRev({ ...rev, notes: nextValue })} /></label>
           </div>
           <button type="button" disabled={!rev.outcome || !rev.reviewedByStaffId || busy === 'rev'}
             onClick={() => step('rev', '/review', rev, 'Reviewed.')}>
@@ -411,7 +413,7 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
           <div className="form-grid">
             <label>How<select value={out.method} onChange={e => setOut({ ...out, method: e.target.value })}>
               <option value="">Select…</option>{CONTACT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}</select></label>
-            <label className="wide">What they were told<textarea rows={3} value={out.summary} onChange={e => setOut({ ...out, summary: e.target.value })} /></label>
+            <label className="wide">What they were told<TextField as="textarea" rows={3} value={out.summary} onValue={nextValue => setOut({ ...out, summary: nextValue })} /></label>
           </div>
           <button type="button" disabled={!out.method || !out.summary.trim() || busy === 'out'}
             onClick={() => step('out', '/communicate-outcome', out, 'Outcome communicated.')}>
@@ -431,7 +433,7 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
           </div>
           {mayClose && <>
             <label className="cx-field">Closure summary
-              <textarea rows={2} value={closure} onChange={e => setClosure(e.target.value)} placeholder="What the laboratory did, and what remains being tracked elsewhere" />
+              <TextField as="textarea" rows={2} value={closure} onValue={nextValue => setClosure(nextValue)} placeholder="What the laboratory did, and what remains being tracked elsewhere" />
             </label>
             <div className="cx-acts">
               <button type="button" disabled={!closure.trim() || busy === 'close'}
@@ -440,7 +442,7 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
               </button>
             </div>
             <label className="cx-field">Or, if the complainant withdrew it
-              <input value={withdrawal} onChange={e => setWithdrawal(e.target.value)} placeholder="Why it was withdrawn" />
+              <TextField value={withdrawal} onValue={nextValue => setWithdrawal(nextValue)} placeholder="Why it was withdrawn" />
             </label>
             <button type="button" className="secondary" disabled={!withdrawal.trim() || busy === 'wd'}
               onClick={() => step('wd', '/withdraw', { reason: withdrawal }, 'Recorded as withdrawn.')}>Record as withdrawn</button>

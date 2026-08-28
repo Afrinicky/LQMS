@@ -19,6 +19,7 @@ import { NcCapaPage } from './pages/NcCapaPages';
 import { MODULES } from '../shared/constants/modules';
 import { FlaskConical, TriangleAlert } from 'lucide-react';
 import { WaveBackground } from './components/ui';
+import { FeedbackHost } from './components/ui/Feedback';
 import './styles/app.css';
 
 const DocumentControlPage = lazy(() => import('./pages/DocumentControlPage').then(m => ({ default: m.DocumentControlPage })));
@@ -272,4 +273,11 @@ function AppRoutes() {
     <Route path="*" element={<Navigate to="/home"/>}/>
   </Routes>;
 }
-export default function App() { return <AuthProvider><Gate><AppRoutes/></Gate></AuthProvider>; }
+export default function App() {
+  return <AuthProvider>
+    <Gate><AppRoutes/></Gate>
+    {/* Answers follow the action: a message whose banner is off-screen is
+        repeated beside the control that caused it. See ui/Feedback.tsx. */}
+    <FeedbackHost/>
+  </AuthProvider>;
+}

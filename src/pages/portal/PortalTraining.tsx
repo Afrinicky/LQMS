@@ -4,6 +4,7 @@ import { api, errorText } from '../../services/api';
 import { downloadFileById, dueTone, titleCase, usePortal } from './portalData';
 import { uploadPersonalFile } from './PortalTaskDrawer';
 import type { StaffCpdRecord } from '../../../shared/types/api';
+import TextField from '../../components/ui/TextField';
 
 /**
  * My training and competency — the evidence that this person is competent to
@@ -137,7 +138,7 @@ export default function PortalTraining() {
             <div className="pf-grid">
               <label className="pf-wide">
                 <span>What was it called?</span>
-                <input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
+                <TextField value={form.title} onValue={nextValue => setForm({ ...form, title: nextValue })}
                   placeholder="e.g. ISO 15189:2022 internal auditor course" />
               </label>
               <label>
@@ -146,14 +147,14 @@ export default function PortalTraining() {
                   {CPD_TYPES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
                 </select>
               </label>
-              <label><span>Who ran it?</span><input value={form.provider} onChange={e => setForm({ ...form, provider: e.target.value })} placeholder="Provider or institution" /></label>
+              <label><span>Who ran it?</span><TextField value={form.provider} onValue={nextValue => setForm({ ...form, provider: nextValue })} placeholder="Provider or institution" /></label>
               <label><span>Started</span><input type="date" value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })} /></label>
               <label><span>Finished</span><input type="date" value={form.endDate} onChange={e => setForm({ ...form, endDate: e.target.value })} /></label>
               <label><span>Hours</span><input type="number" min={0} step="0.5" value={form.hours} onChange={e => setForm({ ...form, hours: e.target.value })} placeholder="e.g. 8" /></label>
-              <label><span>Where</span><input value={form.location} onChange={e => setForm({ ...form, location: e.target.value })} placeholder="Online, Accra, …" /></label>
+              <label><span>Where</span><TextField value={form.location} onValue={nextValue => setForm({ ...form, location: nextValue })} placeholder="Online, Accra, …" /></label>
               <label className="pf-wide">
                 <span>What did it cover?</span>
-                <textarea rows={3} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
+                <TextField as="textarea" rows={3} value={form.description} onValue={nextValue => setForm({ ...form, description: nextValue })}
                   placeholder="A line or two — this is what your appraiser reads." />
               </label>
               <label className="pf-wide">

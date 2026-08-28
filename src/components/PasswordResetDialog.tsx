@@ -1,6 +1,8 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { KeyRound, ShieldQuestion, Clock, CheckCircle2, XCircle, Lock, ArrowRight, X } from 'lucide-react';
 import { api } from '../services/api';
+import TextField from './ui/TextField';
+import { Notice } from './ui/Feedback';
 
 /**
  * Forgotten password, from the sign-in screen.
@@ -106,16 +108,16 @@ export default function PasswordResetDialog({ onClose, initialUsername = '' }: {
               <span>Your username</span>
               <span className="auth-input">
                 <span className="ai-ico"><ShieldQuestion size={16} /></span>
-                <input value={username} onChange={e => setUsername(e.target.value)} required autoFocus placeholder="The username you sign in with" />
+                <TextField value={username} onValue={nextValue => setUsername(nextValue)} required autoFocus placeholder="The username you sign in with" />
               </span>
             </label>
             <label className="auth-field">
               <span>Anything the administrator should know <em>(optional)</em></span>
               <span className="auth-input">
-                <input value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. I am at the Haematology bench" />
+                <TextField value={reason} onValue={nextValue => setReason(nextValue)} placeholder="e.g. I am at the Haematology bench" />
               </span>
             </label>
-            {error && <div className="error">{error}</div>}
+            {error && <Notice kind="error">{error}</Notice>}
             <button className="auth-submit" disabled={busy || !username.trim()}>
               {busy ? <><span className="spinner sm" /> Sending…</> : <>Ask for a reset <ArrowRight size={16} /></>}
             </button>
@@ -157,7 +159,7 @@ export default function PasswordResetDialog({ onClose, initialUsername = '' }: {
                 <input name="confirm" type="password" required minLength={8} autoComplete="new-password" placeholder="Type it again" />
               </span>
             </label>
-            {error && <div className="error">{error}</div>}
+            {error && <Notice kind="error">{error}</Notice>}
             <button className="auth-submit" disabled={busy}>
               {busy ? <><span className="spinner sm" /> Saving…</> : <>Set new password <ArrowRight size={16} /></>}
             </button>

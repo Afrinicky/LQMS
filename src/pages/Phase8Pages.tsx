@@ -19,6 +19,8 @@ import type {
   AssessmentChecklist, AssessmentChecklistSection, AssessmentChecklistQuestion,
   AssessmentSelectedQuestion, AssessmentInternalScoreSummary
 } from '../../shared/types/api';
+import TextField from '../components/ui/TextField';
+import { Notice } from '../components/ui/Feedback';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
@@ -328,7 +330,7 @@ export function AssessmentsPage() {
     <PageHeader eyebrow="Assessments" title="Assessments" subtitle="Internal audits, risk management, and quality indicator monitoring." />
     <div className="tabs">{topTabs.map(t => <button key={t.key} type="button" className={t.active ? 'active' : ''} onClick={t.go}>{t.key}</button>)}</div>
     {inInternalAudit && tabBarFor('assessments')(tab, INTERNAL_AUDIT_TABS, setTab)}
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {tab === 'Risk Management' && <RisksPage embedded />}
     {tab === 'Quality Indicator Monitoring' && <QualityIndicatorsPage embedded />}
@@ -354,10 +356,10 @@ export function AssessmentsPage() {
         {can('assessments', 'create') && <form className="form-grid" onSubmit={submitFinding}>
           <label>Type<select value={findForm.findingType} onChange={e => setFindForm({ ...findForm, findingType: e.target.value })}>{FINDING_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
           <label>Date<input type="date" value={findForm.findingDate} onChange={e => setFindForm({ ...findForm, findingDate: e.target.value })} /></label>
-          <label>Title<input value={findForm.title} onChange={e => setFindForm({ ...findForm, title: e.target.value })} required /></label>
-          <label>Severity<input value={findForm.severity} onChange={e => setFindForm({ ...findForm, severity: e.target.value })} /></label>
-          <label>Description<textarea value={findForm.description} onChange={e => setFindForm({ ...findForm, description: e.target.value })} required /></label>
-          <label>Evidence summary<textarea value={findForm.evidenceSummary} onChange={e => setFindForm({ ...findForm, evidenceSummary: e.target.value })} /></label>
+          <label>Title<TextField value={findForm.title} onValue={nextValue => setFindForm({ ...findForm, title: nextValue })} required /></label>
+          <label>Severity<TextField value={findForm.severity} onValue={nextValue => setFindForm({ ...findForm, severity: nextValue })} /></label>
+          <label>Description<TextField as="textarea" value={findForm.description} onValue={nextValue => setFindForm({ ...findForm, description: nextValue })} required /></label>
+          <label>Evidence summary<TextField as="textarea" value={findForm.evidenceSummary} onValue={nextValue => setFindForm({ ...findForm, evidenceSummary: nextValue })} /></label>
           <label>Responsible<select value={findForm.responsibleStaffId} onChange={e => setFindForm({ ...findForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           <button type="submit">Add finding</button>
         </form>}
@@ -365,15 +367,15 @@ export function AssessmentsPage() {
     </>}
 
     {tab === 'New Assessment' && can('assessments', 'create') && <form className="form-grid" onSubmit={submitProgram}>
-      <label>Title<input value={progForm.title} onChange={e => setProgForm({ ...progForm, title: e.target.value })} required /></label>
+      <label>Title<TextField value={progForm.title} onValue={nextValue => setProgForm({ ...progForm, title: nextValue })} required /></label>
       <label>Type<select value={progForm.assessmentType} onChange={e => setProgForm({ ...progForm, assessmentType: e.target.value })}>{ASSESSMENT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
       <label>Department<select value={progForm.departmentId} onChange={e => setProgForm({ ...progForm, departmentId: e.target.value })}><option value="">—</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
       <label>Section<select value={progForm.sectionId} onChange={e => setProgForm({ ...progForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
       <label>Planned start<input type="date" value={progForm.plannedStartDate} onChange={e => setProgForm({ ...progForm, plannedStartDate: e.target.value })} required /></label>
       <label>Planned end<input type="date" value={progForm.plannedEndDate} onChange={e => setProgForm({ ...progForm, plannedEndDate: e.target.value })} /></label>
       <label>Lead assessor<select value={progForm.leadAssessorStaffId} onChange={e => setProgForm({ ...progForm, leadAssessorStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-      <label>Scope<textarea value={progForm.scope} onChange={e => setProgForm({ ...progForm, scope: e.target.value })} /></label>
-      <label>Objectives<textarea value={progForm.objectives} onChange={e => setProgForm({ ...progForm, objectives: e.target.value })} /></label>
+      <label>Scope<TextField as="textarea" value={progForm.scope} onValue={nextValue => setProgForm({ ...progForm, scope: nextValue })} /></label>
+      <label>Objectives<TextField as="textarea" value={progForm.objectives} onValue={nextValue => setProgForm({ ...progForm, objectives: nextValue })} /></label>
       <button type="submit">Create assessment</button>
     </form>}
 
@@ -399,7 +401,7 @@ export function AssessmentsPage() {
       <h3>Import checklist from CSV / XLSX</h3>
       <p><small>Expected columns: SectionTitle, QuestionText (required), and optionally SectionCode, SectionPossibleMarks, SectionWeight, QuestionCode, ResponseType, MaxMarks, Weight, Guidance, ExpectedEvidence, ScoringGuidance, IsRequired. Rows are grouped into sections by SectionTitle.</small></p>
       <form className="form-grid" onSubmit={submitFileImport}>
-        <label>Checklist name<input value={importMeta.checklistName} onChange={e => setImportMeta({ ...importMeta, checklistName: e.target.value })} required /></label>
+        <label>Checklist name<TextField value={importMeta.checklistName} onValue={nextValue => setImportMeta({ ...importMeta, checklistName: nextValue })} required /></label>
         <label>Checklist type<select value={importMeta.checklistType} onChange={e => setImportMeta({ ...importMeta, checklistType: e.target.value })}>{CHECKLIST_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
         <label><input type="checkbox" checked={importMeta.markingEnabled} onChange={e => setImportMeta({ ...importMeta, markingEnabled: e.target.checked })} /> Enable internal marking</label>
         <label>Internal pass mark<input type="number" step="any" value={importMeta.internalPassMark} onChange={e => setImportMeta({ ...importMeta, internalPassMark: e.target.value })} /></label>
@@ -409,15 +411,15 @@ export function AssessmentsPage() {
 
       <h3>Create new checklist</h3>
       {can('assessments', 'create') && <form className="form-grid" onSubmit={submitChecklist}>
-        <label>Code<input value={chForm.checklistCode} onChange={e => setChForm({ ...chForm, checklistCode: e.target.value })} /></label>
-        <label>Name<input value={chForm.checklistName} onChange={e => setChForm({ ...chForm, checklistName: e.target.value })} required /></label>
+        <label>Code<TextField value={chForm.checklistCode} onValue={nextValue => setChForm({ ...chForm, checklistCode: nextValue })} /></label>
+        <label>Name<TextField value={chForm.checklistName} onValue={nextValue => setChForm({ ...chForm, checklistName: nextValue })} required /></label>
         <label>Type<select value={chForm.checklistType} onChange={e => setChForm({ ...chForm, checklistType: e.target.value })}>{CHECKLIST_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
-        <label>Source<input value={chForm.sourceName} onChange={e => setChForm({ ...chForm, sourceName: e.target.value })} placeholder="e.g. internal QMS, framework name" /></label>
-        <label>Version<input value={chForm.versionLabel} onChange={e => setChForm({ ...chForm, versionLabel: e.target.value })} /></label>
+        <label>Source<TextField value={chForm.sourceName} onValue={nextValue => setChForm({ ...chForm, sourceName: nextValue })} placeholder="e.g. internal QMS, framework name" /></label>
+        <label>Version<TextField value={chForm.versionLabel} onValue={nextValue => setChForm({ ...chForm, versionLabel: nextValue })} /></label>
         <label>Effective date<input type="date" value={chForm.effectiveDate} onChange={e => setChForm({ ...chForm, effectiveDate: e.target.value })} /></label>
-        <label>Description<textarea value={chForm.description} onChange={e => setChForm({ ...chForm, description: e.target.value })} /></label>
+        <label>Description<TextField as="textarea" value={chForm.description} onValue={nextValue => setChForm({ ...chForm, description: nextValue })} /></label>
         <label><input type="checkbox" checked={chForm.markingEnabled} onChange={e => setChForm({ ...chForm, markingEnabled: e.target.checked })} /> Enable internal marking</label>
-        <label>Threshold label<input value={chForm.internalThresholdLabel} onChange={e => setChForm({ ...chForm, internalThresholdLabel: e.target.value })} placeholder="optional, e.g. Internal pass threshold" /></label>
+        <label>Threshold label<TextField value={chForm.internalThresholdLabel} onValue={nextValue => setChForm({ ...chForm, internalThresholdLabel: nextValue })} placeholder="optional, e.g. Internal pass threshold" /></label>
         <label>Internal pass mark<input type="number" step="any" value={chForm.internalPassMark} onChange={e => setChForm({ ...chForm, internalPassMark: e.target.value })} /></label>
         <button type="submit">Create checklist</button>
       </form>}
@@ -430,12 +432,12 @@ export function AssessmentsPage() {
           {(selectedChecklist.sections || []).map(s => <tr key={s.id}><td>{s.display_order}</td><td>{s.section_title}</td><td>{s.section_possible_marks ?? '—'}</td><td>{s.section_weight ?? '—'}</td><td>{can('assessments', 'void_archive') && <button onClick={() => deleteSection(selectedChecklist.id, s.id)} className="secondary">Delete</button>}</td></tr>)}
         </tbody></table>
         {can('assessments', 'create') && <form className="form-grid" onSubmit={addSection}>
-          <label>Section title<input value={secForm.sectionTitle} onChange={e => setSecForm({ ...secForm, sectionTitle: e.target.value })} required /></label>
-          <label>Code<input value={secForm.sectionCode} onChange={e => setSecForm({ ...secForm, sectionCode: e.target.value })} /></label>
+          <label>Section title<TextField value={secForm.sectionTitle} onValue={nextValue => setSecForm({ ...secForm, sectionTitle: nextValue })} required /></label>
+          <label>Code<TextField value={secForm.sectionCode} onValue={nextValue => setSecForm({ ...secForm, sectionCode: nextValue })} /></label>
           <label>Order<input type="number" value={secForm.displayOrder} onChange={e => setSecForm({ ...secForm, displayOrder: e.target.value })} /></label>
           <label>Possible marks<input type="number" step="any" value={secForm.sectionPossibleMarks} onChange={e => setSecForm({ ...secForm, sectionPossibleMarks: e.target.value })} /></label>
           <label>Weight<input type="number" step="any" value={secForm.sectionWeight} onChange={e => setSecForm({ ...secForm, sectionWeight: e.target.value })} /></label>
-          <label>Description<textarea value={secForm.sectionDescription} onChange={e => setSecForm({ ...secForm, sectionDescription: e.target.value })} /></label>
+          <label>Description<TextField as="textarea" value={secForm.sectionDescription} onValue={nextValue => setSecForm({ ...secForm, sectionDescription: nextValue })} /></label>
           <button type="submit">Add section</button>
         </form>}
         <h4>Questions</h4>
@@ -449,15 +451,15 @@ export function AssessmentsPage() {
         </tbody></table>
         {can('assessments', 'create') && <form className="form-grid" onSubmit={addQuestion}>
           <label>Section<select value={qForm.sectionId} onChange={e => setQForm({ ...qForm, sectionId: e.target.value })}><option value="">(no section)</option>{(selectedChecklist.sections || []).map(s => <option key={s.id} value={s.id}>{s.section_title}</option>)}</select></label>
-          <label>Code<input value={qForm.questionCode} onChange={e => setQForm({ ...qForm, questionCode: e.target.value })} /></label>
+          <label>Code<TextField value={qForm.questionCode} onValue={nextValue => setQForm({ ...qForm, questionCode: nextValue })} /></label>
           <label>Response type<select value={qForm.responseType} onChange={e => setQForm({ ...qForm, responseType: e.target.value })}>{RESPONSE_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
           <label>Max marks<input type="number" step="any" value={qForm.maxMarks} onChange={e => setQForm({ ...qForm, maxMarks: e.target.value })} /></label>
           <label>Weight<input type="number" step="any" value={qForm.weight} onChange={e => setQForm({ ...qForm, weight: e.target.value })} /></label>
           <label><input type="checkbox" checked={qForm.isRequired} onChange={e => setQForm({ ...qForm, isRequired: e.target.checked })} /> Required</label>
-          <label>Question text<textarea value={qForm.questionText} onChange={e => setQForm({ ...qForm, questionText: e.target.value })} required /></label>
-          <label>Guidance<textarea value={qForm.guidance} onChange={e => setQForm({ ...qForm, guidance: e.target.value })} /></label>
-          <label>Expected evidence<textarea value={qForm.expectedEvidence} onChange={e => setQForm({ ...qForm, expectedEvidence: e.target.value })} /></label>
-          <label>Scoring guidance<textarea value={qForm.scoringGuidance} onChange={e => setQForm({ ...qForm, scoringGuidance: e.target.value })} /></label>
+          <label>Question text<TextField as="textarea" value={qForm.questionText} onValue={nextValue => setQForm({ ...qForm, questionText: nextValue })} required /></label>
+          <label>Guidance<TextField as="textarea" value={qForm.guidance} onValue={nextValue => setQForm({ ...qForm, guidance: nextValue })} /></label>
+          <label>Expected evidence<TextField as="textarea" value={qForm.expectedEvidence} onValue={nextValue => setQForm({ ...qForm, expectedEvidence: nextValue })} /></label>
+          <label>Scoring guidance<TextField as="textarea" value={qForm.scoringGuidance} onValue={nextValue => setQForm({ ...qForm, scoringGuidance: nextValue })} /></label>
           <button type="submit">Add question</button>
         </form>}
       </DetailModal>}
@@ -469,7 +471,7 @@ export function AssessmentsPage() {
         <label>Assessment<select value={planAssessmentId} onChange={e => setPlanAssessmentId(e.target.value)}><option value="">—</option>{programs.map(p => <option key={p.id} value={p.id}>{p.program_number} — {p.title}</option>)}</select></label>
         <label>Checklist<select value={planChecklistId} onChange={e => { setPlanChecklistId(e.target.value); void loadPlanChecklist(e.target.value); setPlanSelectedSections([]); setPlanSelectedQuestions([]); }}><option value="">—</option>{checklists.filter(c => c.status !== 'archived').map(c => <option key={c.id} value={c.id}>{c.checklist_name} ({c.status})</option>)}</select></label>
         <label>Selection mode<select value={planMode} onChange={e => setPlanMode(e.target.value)}>{SELECTION_MODES.map(m => <option key={m} value={m}>{m.replace(/_/g, ' ')}</option>)}</select></label>
-        <label>Notes<input value={planNotes} onChange={e => setPlanNotes(e.target.value)} /></label>
+        <label>Notes<TextField value={planNotes} onValue={nextValue => setPlanNotes(nextValue)} /></label>
       </div>
       {planChecklistDetail && <>
         <h4>Sections{planMode === 'selected_sections' || planMode === 'mixed' ? ' (tick to include)' : ''}</h4>
@@ -506,7 +508,7 @@ export function AssessmentsPage() {
             <td>{q.section_title_at_selection || '—'}</td>
             <td>{q.question_text_at_selection || `Question #${q.question_id}`}</td>
             <td><select value={v.response} onChange={e => setRespValues({ ...respValues, [q.question_id]: { ...v, response: e.target.value } })}>{RESPONSE_OPTIONS.map(r => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}</select></td>
-            <td><input value={v.evidenceSummary} onChange={e => setRespValues({ ...respValues, [q.question_id]: { ...v, evidenceSummary: e.target.value } })} /></td>
+            <td><TextField value={v.evidenceSummary} onValue={nextValue => setRespValues({ ...respValues, [q.question_id]: { ...v, evidenceSummary: nextValue } })} /></td>
             <td>{q.marking_enabled ? <input type="number" step="any" value={v.marksAwarded} onChange={e => setRespValues({ ...respValues, [q.question_id]: { ...v, marksAwarded: e.target.value } })} style={{ width: 80 }} placeholder={max !== null && max !== undefined ? `/ ${max}` : ''} /> : <em>n/a</em>}{q.marking_enabled && max !== null && max !== undefined ? ` / ${max}` : ''}</td>
             <td><label><input type="checkbox" checked={v.findingRequired} onChange={e => setRespValues({ ...respValues, [q.question_id]: { ...v, findingRequired: e.target.checked } })} /> required</label></td>
             <td>
@@ -606,7 +608,7 @@ export function MeetingsPage({ embedded = false }: { embedded?: boolean } = {}) 
   return <div className={embedded ? '' : 'module-page'}>
     {!embedded && <PageHeader eyebrow="Organisation and Leadership" title="Meetings &amp; Minutes" subtitle="Meeting scheduling, agendas, minutes, and action items." />}
     {tabBarFor('meetings')(tab, embedded ? tabs.filter(t => t !== 'Dashboard') : tabs, setTab)}
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {tab === 'Dashboard' && <ModuleAlerts moduleKey="meetings" />}
     {tab === 'Dashboard' && dashboardCards(summary, [{ label: 'Open meetings', value: 'openMeetings', onClick: () => setTab('Meetings') }])}
@@ -626,7 +628,7 @@ export function MeetingsPage({ embedded = false }: { embedded?: boolean } = {}) 
         {can('meetings', 'edit') && <form className="form-grid" onSubmit={submitAtt}>
           <label>Staff<select value={attForm.staffId} onChange={e => setAttForm({ ...attForm, staffId: e.target.value })} required><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           <label>Status<select value={attForm.attendanceStatus} onChange={e => setAttForm({ ...attForm, attendanceStatus: e.target.value })}>{ATTENDANCE_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}</select></label>
-          <label>Remarks<input value={attForm.remarks} onChange={e => setAttForm({ ...attForm, remarks: e.target.value })} /></label>
+          <label>Remarks<TextField value={attForm.remarks} onValue={nextValue => setAttForm({ ...attForm, remarks: nextValue })} /></label>
           <button type="submit">Record attendance</button>
         </form>}
         <h4>Action items</h4>
@@ -634,8 +636,8 @@ export function MeetingsPage({ embedded = false }: { embedded?: boolean } = {}) 
           {(selected.actions || []).map(a => <tr key={a.id}><td>{a.title}</td><td>{formatBadge(a.status)}</td><td>{staffName(staff, a.assigned_to_staff_id)}</td><td>{a.due_date || '—'}</td></tr>)}
         </tbody></table>
         {can('actions', 'create') && <form className="form-grid" onSubmit={submitAct}>
-          <label>Action title<input value={actForm.title} onChange={e => setActForm({ ...actForm, title: e.target.value })} required /></label>
-          <label>Description<textarea value={actForm.description} onChange={e => setActForm({ ...actForm, description: e.target.value })} /></label>
+          <label>Action title<TextField value={actForm.title} onValue={nextValue => setActForm({ ...actForm, title: nextValue })} required /></label>
+          <label>Description<TextField as="textarea" value={actForm.description} onValue={nextValue => setActForm({ ...actForm, description: nextValue })} /></label>
           <label>Assigned to<select value={actForm.assignedToStaffId} onChange={e => setActForm({ ...actForm, assignedToStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           <label>Due date<input type="date" value={actForm.dueDate} onChange={e => setActForm({ ...actForm, dueDate: e.target.value })} /></label>
           <button type="submit">Create action</button>
@@ -645,15 +647,15 @@ export function MeetingsPage({ embedded = false }: { embedded?: boolean } = {}) 
 
     {tab === 'New Meeting' && can('continual_improvement.projects', 'create') && <form className="form-grid" onSubmit={submit}>
       <label>Type<select value={form.meetingType} onChange={e => setForm({ ...form, meetingType: e.target.value })}>{MEETING_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
-      <label>Title<input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required /></label>
+      <label>Title<TextField value={form.title} onValue={nextValue => setForm({ ...form, title: nextValue })} required /></label>
       <label>Date<input type="date" value={form.meetingDate} onChange={e => setForm({ ...form, meetingDate: e.target.value })} required /></label>
       <label>Start<input type="time" value={form.startTime} onChange={e => setForm({ ...form, startTime: e.target.value })} /></label>
       <label>End<input type="time" value={form.endTime} onChange={e => setForm({ ...form, endTime: e.target.value })} /></label>
-      <label>Location<input value={form.location} onChange={e => setForm({ ...form, location: e.target.value })} /></label>
+      <label>Location<TextField value={form.location} onValue={nextValue => setForm({ ...form, location: nextValue })} /></label>
       <label>Chair<select value={form.chairStaffId} onChange={e => setForm({ ...form, chairStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
       <label>Secretary<select value={form.secretaryStaffId} onChange={e => setForm({ ...form, secretaryStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-      <label>Agenda<textarea value={form.agenda} onChange={e => setForm({ ...form, agenda: e.target.value })} /></label>
-      <label>Minutes<textarea value={form.minutes} onChange={e => setForm({ ...form, minutes: e.target.value })} /></label>
+      <label>Agenda<TextField as="textarea" value={form.agenda} onValue={nextValue => setForm({ ...form, agenda: nextValue })} /></label>
+      <label>Minutes<TextField as="textarea" value={form.minutes} onValue={nextValue => setForm({ ...form, minutes: nextValue })} /></label>
       <button type="submit">Create meeting</button>
     </form>}
 
@@ -693,7 +695,7 @@ export function ManagementReviewPage({ embedded = false }: { embedded?: boolean 
   return <div className={embedded ? '' : 'module-page'}>
     {!embedded && <PageHeader eyebrow="Organisation and Leadership" title="Management Review" subtitle="Management review inputs, outputs, and resulting actions." />}
     {tabBarFor('management_review')(tab, embedded ? tabs.filter(t => t !== 'Dashboard') : tabs, setTab)}
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {tab === 'Dashboard' && <ModuleAlerts moduleKey="management_review" />}
     {tab === 'Dashboard' && dashboardCards(summary, [{ label: 'Pending management reviews', value: 'pendingManagementReviews', onClick: () => setTab('Review Register') }])}
@@ -713,16 +715,16 @@ export function ManagementReviewPage({ embedded = false }: { embedded?: boolean 
           {(selected.inputs || []).map((i: ManagementReviewInput) => <tr key={i.id}><td>{i.input_area}</td><td>{i.source_module || '—'}</td><td>{i.summary || '—'}</td><td>{i.issues || '—'}</td><td>{i.actions_required || '—'}</td></tr>)}
         </tbody></table>
         {can('management_review', 'create') && <form className="form-grid" onSubmit={addInput}>
-          <label>Area<input value={inputForm.inputArea} onChange={e => setInputForm({ ...inputForm, inputArea: e.target.value })} required /></label>
-          <label>Summary<textarea value={inputForm.summary} onChange={e => setInputForm({ ...inputForm, summary: e.target.value })} /></label>
-          <label>Issues<textarea value={inputForm.issues} onChange={e => setInputForm({ ...inputForm, issues: e.target.value })} /></label>
-          <label>Actions required<textarea value={inputForm.actionsRequired} onChange={e => setInputForm({ ...inputForm, actionsRequired: e.target.value })} /></label>
+          <label>Area<TextField value={inputForm.inputArea} onValue={nextValue => setInputForm({ ...inputForm, inputArea: nextValue })} required /></label>
+          <label>Summary<TextField as="textarea" value={inputForm.summary} onValue={nextValue => setInputForm({ ...inputForm, summary: nextValue })} /></label>
+          <label>Issues<TextField as="textarea" value={inputForm.issues} onValue={nextValue => setInputForm({ ...inputForm, issues: nextValue })} /></label>
+          <label>Actions required<TextField as="textarea" value={inputForm.actionsRequired} onValue={nextValue => setInputForm({ ...inputForm, actionsRequired: nextValue })} /></label>
           <button type="submit">Add input</button>
         </form>}
         <h4>Add action</h4>
         {can('actions', 'create') && <form className="form-grid" onSubmit={addAction}>
-          <label>Title<input value={actForm.title} onChange={e => setActForm({ ...actForm, title: e.target.value })} required /></label>
-          <label>Description<textarea value={actForm.description} onChange={e => setActForm({ ...actForm, description: e.target.value })} /></label>
+          <label>Title<TextField value={actForm.title} onValue={nextValue => setActForm({ ...actForm, title: nextValue })} required /></label>
+          <label>Description<TextField as="textarea" value={actForm.description} onValue={nextValue => setActForm({ ...actForm, description: nextValue })} /></label>
           <label>Assigned to<select value={actForm.assignedToStaffId} onChange={e => setActForm({ ...actForm, assignedToStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           <label>Due<input type="date" value={actForm.dueDate} onChange={e => setActForm({ ...actForm, dueDate: e.target.value })} /></label>
           <button type="submit">Create action</button>
@@ -736,9 +738,9 @@ export function ManagementReviewPage({ embedded = false }: { embedded?: boolean 
       <label>Review date<input type="date" value={form.reviewDate} onChange={e => setForm({ ...form, reviewDate: e.target.value })} required /></label>
       <label>Chair<select value={form.chairStaffId} onChange={e => setForm({ ...form, chairStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
       <label>Secretary<select value={form.secretaryStaffId} onChange={e => setForm({ ...form, secretaryStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-      <label>Summary<textarea value={form.summary} onChange={e => setForm({ ...form, summary: e.target.value })} /></label>
-      <label>Conclusions<textarea value={form.conclusions} onChange={e => setForm({ ...form, conclusions: e.target.value })} /></label>
-      <label>Decisions<textarea value={form.decisions} onChange={e => setForm({ ...form, decisions: e.target.value })} /></label>
+      <label>Summary<TextField as="textarea" value={form.summary} onValue={nextValue => setForm({ ...form, summary: nextValue })} /></label>
+      <label>Conclusions<TextField as="textarea" value={form.conclusions} onValue={nextValue => setForm({ ...form, conclusions: nextValue })} /></label>
+      <label>Decisions<TextField as="textarea" value={form.decisions} onValue={nextValue => setForm({ ...form, decisions: nextValue })} /></label>
       <button type="submit">Create review</button>
     </form>}
 
@@ -777,7 +779,7 @@ export function QualityIndicatorsPage({ embedded = false }: { embedded?: boolean
   return <div className={embedded ? '' : 'module-page'}>
     {!embedded && <PageHeader eyebrow="Continual Improvement" title="Quality Indicators" subtitle="Quality indicators, targets, and result monitoring." />}
     {tabBarFor('quality_indicators')(tab, embedded ? tabs.filter(t => t !== 'Dashboard') : tabs, setTab)}
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {tab === 'Dashboard' && <ModuleAlerts moduleKey="quality_indicators" />}
     {tab === 'Dashboard' && dashboardCards(summary, [
@@ -790,12 +792,12 @@ export function QualityIndicatorsPage({ embedded = false }: { embedded?: boolean
     </tbody></table>}
 
     {tab === 'New Indicator' && can('continual_improvement.projects', 'create') && <form className="form-grid" onSubmit={submit}>
-      <label>Code (auto if blank)<input value={form.indicatorCode} onChange={e => setForm({ ...form, indicatorCode: e.target.value })} /></label>
-      <label>Name<input value={form.indicatorName} onChange={e => setForm({ ...form, indicatorName: e.target.value })} required /></label>
+      <label>Code (auto if blank)<TextField value={form.indicatorCode} onValue={nextValue => setForm({ ...form, indicatorCode: nextValue })} /></label>
+      <label>Name<TextField value={form.indicatorName} onValue={nextValue => setForm({ ...form, indicatorName: nextValue })} required /></label>
       <label>Section<select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-      <label>Description<textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></label>
-      <label>Numerator definition<input value={form.numeratorDefinition} onChange={e => setForm({ ...form, numeratorDefinition: e.target.value })} /></label>
-      <label>Denominator definition<input value={form.denominatorDefinition} onChange={e => setForm({ ...form, denominatorDefinition: e.target.value })} /></label>
+      <label>Description<TextField as="textarea" value={form.description} onValue={nextValue => setForm({ ...form, description: nextValue })} /></label>
+      <label>Numerator definition<TextField value={form.numeratorDefinition} onValue={nextValue => setForm({ ...form, numeratorDefinition: nextValue })} /></label>
+      <label>Denominator definition<TextField value={form.denominatorDefinition} onValue={nextValue => setForm({ ...form, denominatorDefinition: nextValue })} /></label>
       <label>Target (%)<input type="number" step="any" value={form.targetValue} onChange={e => setForm({ ...form, targetValue: e.target.value })} required /></label>
       <label>Warning threshold<input type="number" step="any" value={form.warningThreshold} onChange={e => setForm({ ...form, warningThreshold: e.target.value })} /></label>
       <label>Critical threshold<input type="number" step="any" value={form.criticalThreshold} onChange={e => setForm({ ...form, criticalThreshold: e.target.value })} /></label>
@@ -812,7 +814,7 @@ export function QualityIndicatorsPage({ embedded = false }: { embedded?: boolean
         <label>Period end<input type="date" value={resForm.periodEnd} onChange={e => setResForm({ ...resForm, periodEnd: e.target.value })} required /></label>
         <label>Numerator<input type="number" step="any" value={resForm.numeratorValue} onChange={e => setResForm({ ...resForm, numeratorValue: e.target.value })} required /></label>
         <label>Denominator<input type="number" step="any" value={resForm.denominatorValue} onChange={e => setResForm({ ...resForm, denominatorValue: e.target.value })} required /></label>
-        <label>Interpretation<textarea value={resForm.interpretation} onChange={e => setResForm({ ...resForm, interpretation: e.target.value })} /></label>
+        <label>Interpretation<TextField as="textarea" value={resForm.interpretation} onValue={nextValue => setResForm({ ...resForm, interpretation: nextValue })} /></label>
         <button type="submit">Record result</button>
       </form>}
       {selectedId && <table className="data-table"><thead><tr><th>Period</th><th>Numerator</th><th>Denominator</th><th>Value %</th><th>Status</th><th>Reviewed</th><th></th></tr></thead><tbody>
@@ -900,7 +902,7 @@ export function ContinualImprovementPage() {
   return <div className="module-page">
     <PageHeader eyebrow="Continual Improvement" title="Continual Improvement" subtitle="Improvement projects, indicators, and action tracking." />
     {tabBarFor('continual_improvement')(tab, tabs, setTab)}
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {tab === 'Dashboard' && <ModuleAlerts moduleKey="continual_improvement" />}
     {tab === 'Dashboard' && dashboardCards(summary, [
@@ -924,14 +926,14 @@ export function ContinualImprovementPage() {
         </tbody></table>
         {can('continual_improvement.projects', 'edit') && <form className="form-grid" onSubmit={addUpdate}>
           <label>Date<input type="date" value={updForm.updateDate} onChange={e => setUpdForm({ ...updForm, updateDate: e.target.value })} required /></label>
-          <label>Progress status<input value={updForm.progressStatus} onChange={e => setUpdForm({ ...updForm, progressStatus: e.target.value })} /></label>
-          <label>Update<textarea value={updForm.updateText} onChange={e => setUpdForm({ ...updForm, updateText: e.target.value })} /></label>
+          <label>Progress status<TextField value={updForm.progressStatus} onValue={nextValue => setUpdForm({ ...updForm, progressStatus: nextValue })} /></label>
+          <label>Update<TextField as="textarea" value={updForm.updateText} onValue={nextValue => setUpdForm({ ...updForm, updateText: nextValue })} /></label>
           <button type="submit">Add update</button>
         </form>}
         <h4>Add action</h4>
         {can('actions', 'create') && <form className="form-grid" onSubmit={addAction}>
-          <label>Title<input value={actForm.title} onChange={e => setActForm({ ...actForm, title: e.target.value })} required /></label>
-          <label>Description<textarea value={actForm.description} onChange={e => setActForm({ ...actForm, description: e.target.value })} /></label>
+          <label>Title<TextField value={actForm.title} onValue={nextValue => setActForm({ ...actForm, title: nextValue })} required /></label>
+          <label>Description<TextField as="textarea" value={actForm.description} onValue={nextValue => setActForm({ ...actForm, description: nextValue })} /></label>
           <label>Assigned<select value={actForm.assignedToStaffId} onChange={e => setActForm({ ...actForm, assignedToStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           <label>Due<input type="date" value={actForm.dueDate} onChange={e => setActForm({ ...actForm, dueDate: e.target.value })} /></label>
           <button type="submit">Create action</button>
@@ -940,16 +942,16 @@ export function ContinualImprovementPage() {
     </>}
 
     {tab === 'New Project' && can('continual_improvement.projects', 'create') && <form className="form-grid" onSubmit={submit}>
-      <label>Title<input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required /></label>
+      <label>Title<TextField value={form.title} onValue={nextValue => setForm({ ...form, title: nextValue })} required /></label>
       <label>Area<select value={form.improvementArea} onChange={e => setForm({ ...form, improvementArea: e.target.value })}>{IMPROVEMENT_AREAS.map(a => <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>)}</select></label>
-      <label>Aim statement<textarea value={form.aimStatement} onChange={e => setForm({ ...form, aimStatement: e.target.value })} required /></label>
-      <label>Baseline measure<input value={form.baselineMeasure} onChange={e => setForm({ ...form, baselineMeasure: e.target.value })} /></label>
-      <label>Target measure<input value={form.targetMeasure} onChange={e => setForm({ ...form, targetMeasure: e.target.value })} /></label>
+      <label>Aim statement<TextField as="textarea" value={form.aimStatement} onValue={nextValue => setForm({ ...form, aimStatement: nextValue })} required /></label>
+      <label>Baseline measure<TextField value={form.baselineMeasure} onValue={nextValue => setForm({ ...form, baselineMeasure: nextValue })} /></label>
+      <label>Target measure<TextField value={form.targetMeasure} onValue={nextValue => setForm({ ...form, targetMeasure: nextValue })} /></label>
       <label>Start date<input type="date" value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })} /></label>
       <label>Expected completion<input type="date" value={form.expectedCompletionDate} onChange={e => setForm({ ...form, expectedCompletionDate: e.target.value })} /></label>
       <label>Responsible<select value={form.responsibleStaffId} onChange={e => setForm({ ...form, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-      <label>Source module (optional)<input value={form.sourceModule} onChange={e => setForm({ ...form, sourceModule: e.target.value })} placeholder="e.g. nc_capa, quality_indicators" /></label>
-      <label>Source record id<input value={form.sourceRecordId} onChange={e => setForm({ ...form, sourceRecordId: e.target.value })} /></label>
+      <label>Source module (optional)<TextField value={form.sourceModule} onValue={nextValue => setForm({ ...form, sourceModule: nextValue })} placeholder="e.g. nc_capa, quality_indicators" /></label>
+      <label>Source record id<TextField value={form.sourceRecordId} onValue={nextValue => setForm({ ...form, sourceRecordId: nextValue })} /></label>
       <button type="submit">Create improvement project</button>
     </form>}
 

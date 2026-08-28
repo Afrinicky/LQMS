@@ -20,6 +20,8 @@ import type {
   CompetencyAssessment, CompetencyAssessmentItem, CompetencyMatrix, CompetencyOverview,
   Department, Position, Section, Staff,
 } from '../../../shared/types/api';
+import TextField from '../../components/ui/TextField';
+import { Notice } from '../../components/ui/Feedback';
 
 /**
  * Competency assessment.
@@ -124,7 +126,7 @@ export default function CompetencyWorkspace({ staff, sections, departments, posi
       </button>)}
     </div>
 
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {view === 'Register' && <>
       {overview && <KpiStrip items={kpis} />}
@@ -159,7 +161,7 @@ export default function CompetencyWorkspace({ staff, sections, departments, posi
           </small>
         </label>
         {!form.frameworkId && <label>Activity assessed
-          <input value={form.activity} onChange={e => setForm({ ...form, activity: e.target.value })} required={!form.frameworkId} placeholder="e.g. Gram staining" />
+          <TextField value={form.activity} onValue={nextValue => setForm({ ...form, activity: nextValue })} required={!form.frameworkId} placeholder="e.g. Gram staining" />
         </label>}
         <label>Reason for assessment
           <select value={form.assessmentType} onChange={e => setForm({ ...form, assessmentType: e.target.value })}>
@@ -185,9 +187,9 @@ export default function CompetencyWorkspace({ staff, sections, departments, posi
             {positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
           </select>
         </label>
-        <label>Period label<input value={form.periodLabel} onChange={e => setForm({ ...form, periodLabel: e.target.value })} placeholder="e.g. 2026 induction" /></label>
+        <label>Period label<TextField value={form.periodLabel} onValue={nextValue => setForm({ ...form, periodLabel: nextValue })} placeholder="e.g. 2026 induction" /></label>
         <label className="wide">Why this assessment is being carried out
-          <textarea rows={2} value={form.assessmentReason} onChange={e => setForm({ ...form, assessmentReason: e.target.value })} placeholder="e.g. Newly appointed; to be assessed before working unsupervised." />
+          <TextField as="textarea" rows={2} value={form.assessmentReason} onValue={nextValue => setForm({ ...form, assessmentReason: nextValue })} placeholder="e.g. Newly appointed; to be assessed before working unsupervised." />
         </label>
         <button type="submit">Raise assessment</button>
       </form>}
@@ -313,7 +315,7 @@ function AssessmentEditor({ assessmentId, staff, sections, positions, mayEdit, m
 
   if (!record) {
     return <DetailModal open onClose={onClose} title="Competency assessment">
-      {error ? <div className="error">{error}</div> : <p className="muted">Loading…</p>}
+      {error ? <Notice kind="error">{error}</Notice> : <p className="muted">Loading…</p>}
     </DetailModal>;
   }
 
@@ -368,19 +370,19 @@ function AssessmentEditor({ assessmentId, staff, sections, positions, mayEdit, m
       </>}</RowMenu>}
     </>}
   >
-    {error && <div className="error">{error}</div>}
-    {notice && <div className="notice-ok">{notice}</div>}
-    {override && <p className="notice-warn">
+    {error && <Notice kind="error">{error}</Notice>}
+    {notice && <Notice kind="success">{notice}</Notice>}
+    {override && <Notice kind="warn">
       <ShieldAlert size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />
       This is a completed record, unlocked for editing. A competency record is normally left as it was signed — change it only to correct a mistake or clear demonstration data. Every change is audited as an override.
-    </p>}
-    {confirmDelete && <div className="notice-warn confirm-bar">
+    </Notice>}
+    {confirmDelete && <Notice kind="warn" className="confirm-bar">
       <span><ShieldAlert size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />Delete {record.competency_number} for good? This removes the record, its scores, sample checks, evidence and any authorisation granted from it. It cannot be undone.</span>
       <span className="element-add-actions">
         {can('personnel.training', 'void_archive') && <button type="button" className="secondary danger-text" onClick={() => void removeRecord()}>Delete permanently</button>}
         <button type="button" className="secondary" onClick={() => setConfirmDelete(false)}>Keep it</button>
       </span>
-    </div>}
+    </Notice>}
 
     <div className="record-summary">
       <ScoreDial percent={summary?.percent ?? null} threshold={summary?.passThreshold ?? record.pass_threshold_percent ?? null} />
@@ -610,11 +612,11 @@ function ScoringGrid({ record, maxScore, scorable, override, onError, onChanged 
                 <select value={current.method} disabled={!scorable} onChange={e => set(item.id, { method: e.target.value })}>
                   {COMPETENCY_METHODS.map(m => <option key={m} value={m}>{COMPETENCY_METHOD_LABELS[m]}</option>)}
                 </select>
-                <input
+                <TextField
                   value={current.remarks}
                   disabled={!scorable}
                   placeholder="What was observed"
-                  onChange={e => set(item.id, { remarks: e.target.value })}
+                  onValue={nextValue => set(item.id, { remarks: nextValue })}
                   style={{ marginTop: 6 }}
                 />
               </td>}
@@ -647,14 +649,14 @@ function ExtraElementForm({ extra, setExtra, onAdd, onCancel, alwaysOpen }: {
   alwaysOpen?: boolean;
 }) {
   return <div className="element-add">
-    <label className="wide">Element<input value={extra.elementText} onChange={e => setExtra({ ...extra, elementText: e.target.value })} placeholder="What the person has to be able to do" /></label>
-    <label>Group<input value={extra.groupTitle} onChange={e => setExtra({ ...extra, groupTitle: e.target.value })} placeholder="Additional elements" /></label>
+    <label className="wide">Element<TextField value={extra.elementText} onValue={nextValue => setExtra({ ...extra, elementText: nextValue })} placeholder="What the person has to be able to do" /></label>
+    <label>Group<TextField value={extra.groupTitle} onValue={nextValue => setExtra({ ...extra, groupTitle: nextValue })} placeholder="Additional elements" /></label>
     <label>Method
       <select value={extra.method} onChange={e => setExtra({ ...extra, method: e.target.value })}>
         {COMPETENCY_METHODS.map(m => <option key={m} value={m}>{COMPETENCY_METHOD_LABELS[m]}</option>)}
       </select>
     </label>
-    <label className="wide">Performance criteria<textarea rows={2} value={extra.performanceCriteria} onChange={e => setExtra({ ...extra, performanceCriteria: e.target.value })} /></label>
+    <label className="wide">Performance criteria<TextField as="textarea" rows={2} value={extra.performanceCriteria} onValue={nextValue => setExtra({ ...extra, performanceCriteria: nextValue })} /></label>
     <label className="check-inline"><input type="checkbox" checked={extra.isCritical} onChange={e => setExtra({ ...extra, isCritical: e.target.checked })} /> Critical element</label>
     <div className="element-add-actions">
       <button type="button" onClick={() => void onAdd()}>Add element</button>
@@ -722,17 +724,17 @@ function SampleChecks({ record, scorable, override, onError, onChanged }: {
           {SAMPLE_CHECK_TYPES.map(t => <option key={t} value={t}>{SAMPLE_CHECK_TYPE_LABELS[t]}</option>)}
         </select>
       </label>
-      <label>Sample ID<input value={form.sampleId} onChange={e => setForm({ ...form, sampleId: e.target.value })} /></label>
+      <label>Sample ID<TextField value={form.sampleId} onValue={nextValue => setForm({ ...form, sampleId: nextValue })} /></label>
       <label>Date tested<input type="date" value={form.dateTested} onChange={e => setForm({ ...form, dateTested: e.target.value })} /></label>
-      <label>Examination performed<input value={form.testPerformed} onChange={e => setForm({ ...form, testPerformed: e.target.value })} placeholder="e.g. Malaria microscopy" /></label>
-      <label>Result obtained<input value={form.staffResult} onChange={e => setForm({ ...form, staffResult: e.target.value })} /></label>
-      <label>Reference result<input value={form.referenceResult} onChange={e => setForm({ ...form, referenceResult: e.target.value })} /></label>
+      <label>Examination performed<TextField value={form.testPerformed} onValue={nextValue => setForm({ ...form, testPerformed: nextValue })} placeholder="e.g. Malaria microscopy" /></label>
+      <label>Result obtained<TextField value={form.staffResult} onValue={nextValue => setForm({ ...form, staffResult: nextValue })} /></label>
+      <label>Reference result<TextField value={form.referenceResult} onValue={nextValue => setForm({ ...form, referenceResult: nextValue })} /></label>
       <label>Agreement
         <select value={form.agreement} onChange={e => setForm({ ...form, agreement: e.target.value })}>
           {SAMPLE_AGREEMENTS.map(a => <option key={a} value={a}>{SAMPLE_AGREEMENT_LABELS[a]}</option>)}
         </select>
       </label>
-      <label className="wide">Remarks<input value={form.remarks} onChange={e => setForm({ ...form, remarks: e.target.value })} /></label>
+      <label className="wide">Remarks<TextField value={form.remarks} onValue={nextValue => setForm({ ...form, remarks: nextValue })} /></label>
       <button type="submit">Add sample check</button>
     </form>}
   </div>;
@@ -801,7 +803,7 @@ function AssessmentDetails({ record, staff, sections, positions, editable, overr
   }
 
   return can('personnel.training', 'edit') && <form className="form-grid" onSubmit={save}>
-    <label>Activity / title<input value={form.activity} onChange={e => setForm({ ...form, activity: e.target.value })} required /></label>
+    <label>Activity / title<TextField value={form.activity} onValue={nextValue => setForm({ ...form, activity: nextValue })} required /></label>
     <label>Assessment date<input type="date" value={form.assessmentDate} onChange={e => setForm({ ...form, assessmentDate: e.target.value })} required /></label>
     <label>Reason
       <select value={form.assessmentType} onChange={e => setForm({ ...form, assessmentType: e.target.value })}>
@@ -829,13 +831,13 @@ function AssessmentDetails({ record, staff, sections, positions, editable, overr
       </select>
       <small className="field-hint">Somebody other than the assessor countersigns the record.</small>
     </label>
-    <label>Period label<input value={form.periodLabel} onChange={e => setForm({ ...form, periodLabel: e.target.value })} /></label>
+    <label>Period label<TextField value={form.periodLabel} onValue={nextValue => setForm({ ...form, periodLabel: nextValue })} /></label>
     <label>Re-assessment due<input type="date" value={form.nextAssessmentDue} onChange={e => setForm({ ...form, nextAssessmentDue: e.target.value })} /></label>
-    <label>Authorisation recommended<input value={form.authorizationRecommendation} onChange={e => setForm({ ...form, authorizationRecommendation: e.target.value })} placeholder="e.g. Perform and report routine haematology" /></label>
-    <label className="wide">Why this assessment is being carried out<textarea rows={2} value={form.assessmentReason} onChange={e => setForm({ ...form, assessmentReason: e.target.value })} /></label>
-    <label className="wide">Findings and observations<textarea rows={3} value={form.findings} onChange={e => setForm({ ...form, findings: e.target.value })} /></label>
-    <label className="wide">Assessor's comments<textarea rows={3} value={form.assessorComments} onChange={e => setForm({ ...form, assessorComments: e.target.value })} /></label>
-    <label className="wide">Training and development plan<textarea rows={3} value={form.developmentPlan} onChange={e => setForm({ ...form, developmentPlan: e.target.value })} placeholder="What will be done about any shortfall, by when, and who will do it." /></label>
+    <label>Authorisation recommended<TextField value={form.authorizationRecommendation} onValue={nextValue => setForm({ ...form, authorizationRecommendation: nextValue })} placeholder="e.g. Perform and report routine haematology" /></label>
+    <label className="wide">Why this assessment is being carried out<TextField as="textarea" rows={2} value={form.assessmentReason} onValue={nextValue => setForm({ ...form, assessmentReason: nextValue })} /></label>
+    <label className="wide">Findings and observations<TextField as="textarea" rows={3} value={form.findings} onValue={nextValue => setForm({ ...form, findings: nextValue })} /></label>
+    <label className="wide">Assessor's comments<TextField as="textarea" rows={3} value={form.assessorComments} onValue={nextValue => setForm({ ...form, assessorComments: nextValue })} /></label>
+    <label className="wide">Training and development plan<TextField as="textarea" rows={3} value={form.developmentPlan} onValue={nextValue => setForm({ ...form, developmentPlan: nextValue })} placeholder="What will be done about any shortfall, by when, and who will do it." /></label>
     <div className="element-add-actions">
       <button type="submit">Save</button>
       {saved && <span className="saved-flag">Saved</span>}
@@ -924,10 +926,10 @@ function SignOff({ record, staff, summary, mayEdit, mayApprove, mayArchive, isSu
         </label>
         <label>Re-assessment due<input type="date" value={complete.nextAssessmentDue} onChange={e => setComplete({ ...complete, nextAssessmentDue: e.target.value })} /></label>
         {overriding && <label className="wide">Reason for departing from the scored outcome
-          <textarea rows={2} value={complete.overrideReason} onChange={e => setComplete({ ...complete, overrideReason: e.target.value })} required />
+          <TextField as="textarea" rows={2} value={complete.overrideReason} onValue={nextValue => setComplete({ ...complete, overrideReason: nextValue })} required />
         </label>}
-        <label className="wide">Assessor's comments<textarea rows={2} value={complete.assessorComments} onChange={e => setComplete({ ...complete, assessorComments: e.target.value })} /></label>
-        <label className="wide">Training and development plan<textarea rows={2} value={complete.developmentPlan} onChange={e => setComplete({ ...complete, developmentPlan: e.target.value })} /></label>
+        <label className="wide">Assessor's comments<TextField as="textarea" rows={2} value={complete.assessorComments} onValue={nextValue => setComplete({ ...complete, assessorComments: nextValue })} /></label>
+        <label className="wide">Training and development plan<TextField as="textarea" rows={2} value={complete.developmentPlan} onValue={nextValue => setComplete({ ...complete, developmentPlan: nextValue })} /></label>
         <label className="check-inline">
           <input type="checkbox" checked={complete.createRetrainingAction} onChange={e => setComplete({ ...complete, createRetrainingAction: e.target.checked })} />
           Raise a retraining action if the outcome is not yet competent
@@ -940,14 +942,14 @@ function SignOff({ record, staff, summary, mayEdit, mayApprove, mayArchive, isSu
     {(record.status === 'pending_review' || closed) && mayApprove && !record.reviewed_at && <section className="signoff-card">
       <h4>Technical review</h4>
       {isAssessor
-        ? <p className="notice-warn">
+        ? <Notice kind="warn">
             <ShieldAlert size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />
             You carried out this assessment, so you cannot also countersign it. The technical review has to be recorded by another approver, signed in as themselves.
-          </p>
+          </Notice>
         : <>
           <p className="muted">A second pair of eyes on the assessment and its evidence. It is recorded as you, the signed-in reviewer — it cannot be signed on someone else's behalf.</p>
           <div className="form-grid">
-            <label className="wide">Reviewer's comments<textarea rows={2} value={review.reviewerComments} onChange={e => setReview({ ...review, reviewerComments: e.target.value })} /></label>
+            <label className="wide">Reviewer's comments<TextField as="textarea" rows={2} value={review.reviewerComments} onValue={nextValue => setReview({ ...review, reviewerComments: nextValue })} /></label>
             <button type="button" onClick={() => void onAct('/review', { reviewerComments: review.reviewerComments }, 'Technical review recorded.')}>Countersign as technical reviewer</button>
           </div>
         </>}
@@ -963,7 +965,7 @@ function SignOff({ record, staff, summary, mayEdit, mayApprove, mayArchive, isSu
       <h4>Your acknowledgement</h4>
       <p className="muted">Signing records that the assessment was discussed with you. It does not signify agreement — put anything you disagree with in the box.</p>
       <div className="form-grid">
-        <label className="wide">Your comments<textarea rows={3} value={ack.staffComments} onChange={e => setAck({ staffComments: e.target.value })} /></label>
+        <label className="wide">Your comments<TextField as="textarea" rows={3} value={ack.staffComments} onValue={nextValue => setAck({ staffComments: nextValue })} /></label>
         <button type="button" onClick={() => void onAct('/acknowledge', ack, 'Acknowledgement recorded.')}>Acknowledge this assessment</button>
       </div>
     </section>}
@@ -974,22 +976,22 @@ function SignOff({ record, staff, summary, mayEdit, mayApprove, mayArchive, isSu
       {record.staff_comments && <p className="prewrap">{record.staff_comments}</p>}
     </section>}
 
-    {record.status === 'completed' && !isSubject && !record.staff_acknowledged_at && <p className="notice-warn">
+    {record.status === 'completed' && !isSubject && !record.staff_acknowledged_at && <Notice kind="warn">
       Waiting for {record.staff_name} to acknowledge this assessment from their own profile.
-    </p>}
+    </Notice>}
 
     {closed && record.outcome !== 'not_yet_competent' && mayApprove && <section className="signoff-card">
       <h4>Grant a technical authorisation</h4>
       <p className="muted">What this assessment entitles the person to do. The authorisation expires with the re-assessment date unless you set another.</p>
       <div className="form-grid">
-        <label>Area of work<input value={auth.moduleKey} onChange={e => setAuth({ ...auth, moduleKey: e.target.value })} placeholder="e.g. iqc, monitoring, poct" required /></label>
+        <label>Area of work<TextField value={auth.moduleKey} onValue={nextValue => setAuth({ ...auth, moduleKey: nextValue })} placeholder="e.g. iqc, monitoring, poct" required /></label>
         <label>Level
           <select value={auth.level} onChange={e => setAuth({ ...auth, level: e.target.value })}>
             {['View only', 'Perform', 'Review', 'Verify', 'Approve', 'Supervise', 'Train others'].map(l => <option key={l} value={l}>{l}</option>)}
           </select>
         </label>
         <label>Valid until<input type="date" value={auth.expiresAt} onChange={e => setAuth({ ...auth, expiresAt: e.target.value })} placeholder={record.next_assessment_due} /></label>
-        <label>Notes<input value={auth.notes} onChange={e => setAuth({ ...auth, notes: e.target.value })} /></label>
+        <label>Notes<TextField value={auth.notes} onValue={nextValue => setAuth({ ...auth, notes: nextValue })} /></label>
         <button type="button" disabled={!auth.moduleKey.trim()}
           onClick={() => void onAct('/create-authorization', auth, 'Authorisation granted.')}>Grant authorisation</button>
       </div>
@@ -1004,7 +1006,7 @@ function SignOff({ record, staff, summary, mayEdit, mayApprove, mayArchive, isSu
 
     {!closed && mayArchive && <section className="signoff-card">
       {showCancel ? <div className="form-grid">
-        <label className="wide">Reason for cancelling<textarea rows={2} value={cancelReason} onChange={e => setCancelReason(e.target.value)} /></label>
+        <label className="wide">Reason for cancelling<TextField as="textarea" rows={2} value={cancelReason} onValue={nextValue => setCancelReason(nextValue)} /></label>
         <div className="element-add-actions">
           <button type="button" className="secondary danger-text" disabled={!cancelReason.trim()}
             onClick={() => void onAct('/cancel', { reason: cancelReason }, 'Assessment cancelled.')}>Confirm cancellation</button>
@@ -1040,7 +1042,7 @@ function CoverageMatrix({ sections, mayPrint, onOpenAssessment }: {
       .then(setMatrix).catch(e => setError(errorText(e)));
   }, [sectionId]);
 
-  if (error) return <div className="error">{error}</div>;
+  if (error) return <Notice kind="error" silent>{error}</Notice>;
   if (!matrix) return <p className="muted">Loading…</p>;
 
   return <div className="coverage-matrix">

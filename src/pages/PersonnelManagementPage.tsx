@@ -20,6 +20,8 @@ import type {
   PersonnelSummary, MyTasks, MyProfile, RosterCoverage, StaffSuggestionsResponse, ProfessionalRank,
   JobDescriptionDoc, JobDescriptionRegister,
 } from '../../shared/types/api';
+import TextField from '../components/ui/TextField';
+import { Notice } from '../components/ui/Feedback';
 
 // Document control's own viewer, so a job description previewed from a
 // personnel screen is the same document, at the same version, as the one read
@@ -309,7 +311,7 @@ export function PersonnelManagementPage() {
   return <div className="module-page">
     <PageHeader eyebrow="Personnel Management" title="Personnel Management" subtitle="Personnel records — competence, authorisation, training, induction, and ethics." />
     {tabBar(tab, tabs, setTab)}
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {tab === 'Dashboard' && <ModuleAlerts moduleKey="personnel" />}
     {tab === 'Dashboard' && (summary ? <KpiStrip items={[
@@ -357,7 +359,7 @@ export function PersonnelManagementPage() {
           </div>
         </div>
         <p className="muted" style={{ marginTop: 0 }}>The complete register of laboratory personnel. Export or import uses the single approved workbook — rows are matched on Staff ID, so existing staff are updated and new ones created.</p>
-        {regResult && <div className="success-msg" style={{ marginTop: 4, marginBottom: 12 }}><strong>{regResult.created}</strong> created, <strong>{regResult.updated}</strong> updated{typeof regResult.skipped === 'number' ? <>, <strong>{regResult.skipped}</strong> skipped</> : null}.{regResult.errors.length > 0 && <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>{regResult.errors.map((er, i) => <li key={i} style={{ fontSize: 12 }}>{er}</li>)}</ul>}</div>}
+        {regResult && <Notice kind="success" style={{ marginTop: 4, marginBottom: 12 }}><strong>{regResult.created}</strong> created, <strong>{regResult.updated}</strong> updated{typeof regResult.skipped === 'number' ? <>, <strong>{regResult.skipped}</strong> skipped</> : null}.{regResult.errors.length > 0 && <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>{regResult.errors.map((er, i) => <li key={i} style={{ fontSize: 12 }}>{er}</li>)}</ul>}</Notice>}
         <table className="data-table"><thead><tr><th>Staff ID</th><th>Name</th><th>Designation</th><th>Position</th><th>Unit</th><th>Category</th><th>Licence</th><th>Experience</th><th></th></tr></thead><tbody>
           {staff.filter(s => { const q = staffSearch.trim().toLowerCase(); if (!q) return true; return [s.fullName, s.employeeNo, s.jobTitle, s.designation, s.unit].some(v => v?.toLowerCase().includes(q)); }).map(s => {
             const today = new Date().toISOString().slice(0, 10);
@@ -383,33 +385,33 @@ export function PersonnelManagementPage() {
           {editingStaffId && <button type="button" className="secondary" onClick={() => { setEditingStaffId(null); setStaffForm(emptyStaffForm); }}>Cancel edit</button>}</div>
         <p className="muted" style={{ marginTop: 0 }}>Adds a member of staff to the Master Personnel Register: identity, professional registration, qualifications, appointment and emergency contact.</p>
         {can('personnel.self', 'view') && can('personnel.register', 'create') && <form className="form-grid" onSubmit={submitStaff}>
-          <label>Staff ID<input value={staffForm.employeeNo} onChange={e => setStaffForm({ ...staffForm, employeeNo: e.target.value })} placeholder="e.g. SNO-001" /></label>
-          <label>Surname<input value={staffForm.surname} onChange={e => setStaffForm({ ...staffForm, surname: e.target.value })} /></label>
-          <label>Middle name(s)<input value={staffForm.middleName} onChange={e => setStaffForm({ ...staffForm, middleName: e.target.value })} /></label>
-          <label>First name(s)<input value={staffForm.firstName} onChange={e => setStaffForm({ ...staffForm, firstName: e.target.value })} /></label>
-          <label>Initials<input value={staffForm.initials} onChange={e => setStaffForm({ ...staffForm, initials: e.target.value })} placeholder="auto" /></label>
+          <label>Staff ID<TextField value={staffForm.employeeNo} onValue={nextValue => setStaffForm({ ...staffForm, employeeNo: nextValue })} placeholder="e.g. SNO-001" /></label>
+          <label>Surname<TextField value={staffForm.surname} onValue={nextValue => setStaffForm({ ...staffForm, surname: nextValue })} /></label>
+          <label>Middle name(s)<TextField value={staffForm.middleName} onValue={nextValue => setStaffForm({ ...staffForm, middleName: nextValue })} /></label>
+          <label>First name(s)<TextField value={staffForm.firstName} onValue={nextValue => setStaffForm({ ...staffForm, firstName: nextValue })} /></label>
+          <label>Initials<TextField value={staffForm.initials} onValue={nextValue => setStaffForm({ ...staffForm, initials: nextValue })} placeholder="auto" /></label>
           <label>Date of birth<input type="date" value={staffForm.dateOfBirth} onChange={e => setStaffForm({ ...staffForm, dateOfBirth: e.target.value })} /></label>
           <label>Gender<select value={staffForm.gender} onChange={e => setStaffForm({ ...staffForm, gender: e.target.value })}><option value="">—</option>{GENDERS.map(g => <option key={g} value={g}>{g}</option>)}</select></label>
-          <label>Designation (grade)<input value={staffForm.designation} onChange={e => setStaffForm({ ...staffForm, designation: e.target.value })} placeholder="e.g. Principal Medical Lab Scientist" /></label>
-          <label>Position / role<input value={staffForm.jobTitle} onChange={e => setStaffForm({ ...staffForm, jobTitle: e.target.value })} placeholder="e.g. Biochemistry Unit Head" /></label>
+          <label>Designation (grade)<TextField value={staffForm.designation} onValue={nextValue => setStaffForm({ ...staffForm, designation: nextValue })} placeholder="e.g. Principal Medical Lab Scientist" /></label>
+          <label>Position / role<TextField value={staffForm.jobTitle} onValue={nextValue => setStaffForm({ ...staffForm, jobTitle: nextValue })} placeholder="e.g. Biochemistry Unit Head" /></label>
           <label>Unit / Section<select value={staffForm.sectionId} onChange={e => setStaffForm({ ...staffForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-          <label>Professional regulator<input value={staffForm.professionalRegulator} onChange={e => setStaffForm({ ...staffForm, professionalRegulator: e.target.value })} placeholder="e.g. AHPC" /></label>
-          <label>Professional licence no.<input value={staffForm.professionalLicence} onChange={e => setStaffForm({ ...staffForm, professionalLicence: e.target.value })} /></label>
+          <label>Professional regulator<TextField value={staffForm.professionalRegulator} onValue={nextValue => setStaffForm({ ...staffForm, professionalRegulator: nextValue })} placeholder="e.g. AHPC" /></label>
+          <label>Professional licence no.<TextField value={staffForm.professionalLicence} onValue={nextValue => setStaffForm({ ...staffForm, professionalLicence: nextValue })} /></label>
           <label>Licence expiry<input type="date" value={staffForm.licenceExpiryDate} onChange={e => setStaffForm({ ...staffForm, licenceExpiryDate: e.target.value })} /></label>
-          <label>Qualifications<input value={staffForm.qualifications} onChange={e => setStaffForm({ ...staffForm, qualifications: e.target.value })} placeholder="Separate several with |" /></label>
+          <label>Qualifications<TextField value={staffForm.qualifications} onValue={nextValue => setStaffForm({ ...staffForm, qualifications: nextValue })} placeholder="Separate several with |" /></label>
           <label>Personnel category<select value={staffForm.personnelCategory} onChange={e => setStaffForm({ ...staffForm, personnelCategory: e.target.value })}>{PERSONNEL_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
           <label>Appointment type<select value={staffForm.appointmentType} onChange={e => setStaffForm({ ...staffForm, appointmentType: e.target.value })}>{APPOINTMENT_TYPES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
           <label>Date of appointment<input type="date" value={staffForm.appointmentDate} onChange={e => setStaffForm({ ...staffForm, appointmentDate: e.target.value })} /></label>
           <label>National ID type<select value={staffForm.nationalIdType} onChange={e => setStaffForm({ ...staffForm, nationalIdType: e.target.value })}>{NATIONAL_ID_TYPES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
-          <label>National ID number<input value={staffForm.nationalIdNumber} onChange={e => setStaffForm({ ...staffForm, nationalIdNumber: e.target.value })} /></label>
-          <label>Contact phone<input value={staffForm.phone} onChange={e => setStaffForm({ ...staffForm, phone: e.target.value })} /></label>
-          <label>Email<input type="email" value={staffForm.email} onChange={e => setStaffForm({ ...staffForm, email: e.target.value })} /></label>
-          <label>Emergency contact<input value={staffForm.emergencyContact} onChange={e => setStaffForm({ ...staffForm, emergencyContact: e.target.value })} placeholder="e.g. Spouse - 0200000000" /></label>
+          <label>National ID number<TextField value={staffForm.nationalIdNumber} onValue={nextValue => setStaffForm({ ...staffForm, nationalIdNumber: nextValue })} /></label>
+          <label>Contact phone<TextField value={staffForm.phone} onValue={nextValue => setStaffForm({ ...staffForm, phone: nextValue })} /></label>
+          <label>Email<TextField type="email" value={staffForm.email} onValue={nextValue => setStaffForm({ ...staffForm, email: nextValue })} /></label>
+          <label>Emergency contact<TextField value={staffForm.emergencyContact} onValue={nextValue => setStaffForm({ ...staffForm, emergencyContact: nextValue })} placeholder="e.g. Spouse - 0200000000" /></label>
           <label>Cadre<select value={staffForm.cadre} onChange={e => setStaffForm({ ...staffForm, cadre: e.target.value })}><option value="">Auto (from designation)</option>{CADRES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
           <label>Professional rank<select value={staffForm.professionalRank} onChange={e => setStaffForm({ ...staffForm, professionalRank: e.target.value })}><option value="">Auto (from designation)</option>{ranks.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}</select></label>
           <label>Availability<select value={staffForm.availabilityStatus} onChange={e => setStaffForm({ ...staffForm, availabilityStatus: e.target.value })}>{AVAILABILITY_STATUSES.map(a => <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>)}</select></label>
           <label>Assign position<select value={staffForm.positionId} onChange={e => setStaffForm({ ...staffForm, positionId: e.target.value })}><option value="">— keep current —</option>{positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>
-          <label>Staff file location<input value={staffForm.staffFileLocation} onChange={e => setStaffForm({ ...staffForm, staffFileLocation: e.target.value })} placeholder="e.g. /SECH-LAB-PERSONNEL-FILES/SNO-001/" /></label>
+          <label>Staff file location<TextField value={staffForm.staffFileLocation} onValue={nextValue => setStaffForm({ ...staffForm, staffFileLocation: nextValue })} placeholder="e.g. /SECH-LAB-PERSONNEL-FILES/SNO-001/" /></label>
           <button type="submit">{editingStaffId ? 'Save changes' : 'Create staff record'}</button>
         </form>}
       </div>
@@ -421,11 +423,11 @@ export function PersonnelManagementPage() {
       {can('personnel.register', 'create') && <form className="form-grid" onSubmit={submitStaffDoc}>
         <label>Staff<select value={docForm.staffId} onChange={e => setDocForm({ ...docForm, staffId: e.target.value })} required><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Type<select value={docForm.documentType} onChange={e => setDocForm({ ...docForm, documentType: e.target.value })} required>{STAFF_DOC_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
-        <label>Title<input value={docForm.title} onChange={e => setDocForm({ ...docForm, title: e.target.value })} required /></label>
+        <label>Title<TextField value={docForm.title} onValue={nextValue => setDocForm({ ...docForm, title: nextValue })} required /></label>
         <label>Issue date<input type="date" value={docForm.issueDate} onChange={e => setDocForm({ ...docForm, issueDate: e.target.value })} /></label>
         <label>Expiry date<input type="date" value={docForm.expiryDate} onChange={e => setDocForm({ ...docForm, expiryDate: e.target.value })} /></label>
         <label>File<input type="file" onChange={e => setDocFile(e.target.files?.[0] ?? null)} /></label>
-        <label>Remarks<input value={docForm.remarks} onChange={e => setDocForm({ ...docForm, remarks: e.target.value })} /></label>
+        <label>Remarks<TextField value={docForm.remarks} onValue={nextValue => setDocForm({ ...docForm, remarks: nextValue })} /></label>
         <button type="submit">Upload staff document</button>
       </form>}
       <table className="data-table"><thead><tr><th>Staff</th><th>Type</th><th>Title</th><th>Issue</th><th>Expiry</th><th>Verification</th><th>File</th><th></th></tr></thead><tbody>
@@ -448,13 +450,13 @@ export function PersonnelManagementPage() {
       <div className="card"><p className="muted" style={{ marginTop: 0 }}>Ethical declarations record each member of staff's commitment to impartiality, confidentiality, disclosure of conflicts of interest, and the code of conduct.</p>
       {can('personnel.declarations', 'create') && <form className="form-grid" onSubmit={submitDeclaration}>
         <label>Type<select value={declForm.declarationType} onChange={e => setDeclForm({ ...declForm, declarationType: e.target.value })} required>{DECLARATION_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
-        <label>Title<input value={declForm.title} onChange={e => setDeclForm({ ...declForm, title: e.target.value })} required placeholder="e.g. Annual ethics & confidentiality declaration" /></label>
+        <label>Title<TextField value={declForm.title} onValue={nextValue => setDeclForm({ ...declForm, title: nextValue })} required placeholder="e.g. Annual ethics & confidentiality declaration" /></label>
         <label>Assign to staff<select value={declForm.staffId} onChange={e => setDeclForm({ ...declForm, staffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-        <label>Conflict of interest<input value={declForm.conflictOfInterest} onChange={e => setDeclForm({ ...declForm, conflictOfInterest: e.target.value })} placeholder="None Declared / details" /></label>
+        <label>Conflict of interest<TextField value={declForm.conflictOfInterest} onValue={nextValue => setDeclForm({ ...declForm, conflictOfInterest: nextValue })} placeholder="None Declared / details" /></label>
         <label>Form completed date<input type="date" value={declForm.formCompletedDate} onChange={e => setDeclForm({ ...declForm, formCompletedDate: e.target.value })} /></label>
         <label>Reviewed by<select value={declForm.reviewedByStaffId} onChange={e => setDeclForm({ ...declForm, reviewedByStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Next review date<input type="date" value={declForm.nextReviewDate} onChange={e => setDeclForm({ ...declForm, nextReviewDate: e.target.value })} /></label>
-        <label>Description / notes<textarea value={declForm.description} onChange={e => setDeclForm({ ...declForm, description: e.target.value })} /></label>
+        <label>Description / notes<TextField as="textarea" value={declForm.description} onValue={nextValue => setDeclForm({ ...declForm, description: nextValue })} /></label>
         <label className="check-inline"><input type="checkbox" checked={declForm.impartialityConfirmed} onChange={e => setDeclForm({ ...declForm, impartialityConfirmed: e.target.checked })} /> Impartiality confirmed</label>
         <label className="check-inline"><input type="checkbox" checked={declForm.confidentialityConfirmed} onChange={e => setDeclForm({ ...declForm, confidentialityConfirmed: e.target.checked })} /> Confidentiality confirmed</label>
         <label className="check-inline"><input type="checkbox" checked={declForm.codeOfConductAck} onChange={e => setDeclForm({ ...declForm, codeOfConductAck: e.target.checked })} /> Code of conduct acknowledged</label>
@@ -478,15 +480,15 @@ export function PersonnelManagementPage() {
 
     {tab === 'Training Events' && <>
       {can('personnel.training', 'create') && <form className="form-grid" onSubmit={submitTraining}>
-        <label>Title<input value={trainingForm.title} onChange={e => setTrainingForm({ ...trainingForm, title: e.target.value })} required /></label>
-        <label>Description<textarea value={trainingForm.description} onChange={e => setTrainingForm({ ...trainingForm, description: e.target.value })} /></label>
-        <label>Type<input value={trainingForm.trainingType} onChange={e => setTrainingForm({ ...trainingForm, trainingType: e.target.value })} placeholder="e.g. internal, external, refresher" /></label>
+        <label>Title<TextField value={trainingForm.title} onValue={nextValue => setTrainingForm({ ...trainingForm, title: nextValue })} required /></label>
+        <label>Description<TextField as="textarea" value={trainingForm.description} onValue={nextValue => setTrainingForm({ ...trainingForm, description: nextValue })} /></label>
+        <label>Type<TextField value={trainingForm.trainingType} onValue={nextValue => setTrainingForm({ ...trainingForm, trainingType: nextValue })} placeholder="e.g. internal, external, refresher" /></label>
         <label>Section<select value={trainingForm.sectionId} onChange={e => setTrainingForm({ ...trainingForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Trainer<select value={trainingForm.trainerStaffId} onChange={e => setTrainingForm({ ...trainingForm, trainerStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Date<input type="date" value={trainingForm.trainingDate} onChange={e => setTrainingForm({ ...trainingForm, trainingDate: e.target.value })} required /></label>
         <label>Start time<input type="time" value={trainingForm.startTime} onChange={e => setTrainingForm({ ...trainingForm, startTime: e.target.value })} /></label>
         <label>End time<input type="time" value={trainingForm.endTime} onChange={e => setTrainingForm({ ...trainingForm, endTime: e.target.value })} /></label>
-        <label>Location<input value={trainingForm.location} onChange={e => setTrainingForm({ ...trainingForm, location: e.target.value })} /></label>
+        <label>Location<TextField value={trainingForm.location} onValue={nextValue => setTrainingForm({ ...trainingForm, location: nextValue })} /></label>
         <button type="submit">Create training event</button>
       </form>}
       <table className="data-table"><thead><tr><th>Number</th><th>Title</th><th>Type</th><th>Date</th><th>Status</th><th></th></tr></thead><tbody>
@@ -504,7 +506,7 @@ export function PersonnelManagementPage() {
         {can('personnel.training', 'create') && <form className="form-grid" onSubmit={submitAttendance}>
           <label>Staff<select value={attendanceForm.staffId} onChange={e => setAttendanceForm({ ...attendanceForm, staffId: e.target.value })} required><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           <label>Status<select value={attendanceForm.attendanceStatus} onChange={e => setAttendanceForm({ ...attendanceForm, attendanceStatus: e.target.value })}>{ATTENDANCE_STATUSES.map(a => <option key={a} value={a}>{a}</option>)}</select></label>
-          <label>Remarks<input value={attendanceForm.remarks} onChange={e => setAttendanceForm({ ...attendanceForm, remarks: e.target.value })} /></label>
+          <label>Remarks<TextField value={attendanceForm.remarks} onValue={nextValue => setAttendanceForm({ ...attendanceForm, remarks: nextValue })} /></label>
           <button type="submit">Record attendance</button>
         </form>}
       </DetailModal>}

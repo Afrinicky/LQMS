@@ -8,6 +8,8 @@ import {
   emptyStaffForm, staffFormFrom, yearsOfService, type StaffFormValues,
 } from '../../shared/constants/personnel';
 import type { Staff, Section, Position, ProfessionalRank } from '../../shared/types/api';
+import TextField from './ui/TextField';
+import { Notice } from './ui/Feedback';
 
 /* ============================================================================
    MASTER PERSONNEL REGISTER — administration
@@ -238,7 +240,7 @@ export default function PersonnelRegisterAdmin() {
         <div className="reg-head-actions">
           <label className="reg-search">
             <Search size={15} />
-            <input placeholder="Search name, Staff ID, position, unit…" value={query} onChange={e => setQuery(e.target.value)} />
+            <TextField placeholder="Search name, Staff ID, position, unit…" value={query} onValue={nextValue => setQuery(nextValue)} />
           </label>
           {mayExport && view === 'active' && <button type="button" className="secondary" disabled={busy === '/staff/template'} onClick={() => download('/staff/template', 'Staff_Register_Template.xlsx')}>
             <FileSpreadsheet size={15} /> {busy === '/staff/template' ? 'Preparing…' : 'Blank template'}
@@ -260,13 +262,13 @@ export default function PersonnelRegisterAdmin() {
         </div>
       </div>
 
-      {error && <div className="error">{error}</div>}
-      {notice && <div className="notice-ok">{notice}</div>}
-      {importResult && <div className="notice-ok">
+      {error && <Notice kind="error">{error}</Notice>}
+      {notice && <Notice kind="success">{notice}</Notice>}
+      {importResult && <Notice kind="success">
         Import complete — <strong>{importResult.created}</strong> created, <strong>{importResult.updated}</strong> updated
         {typeof importResult.skipped === 'number' ? <>, <strong>{importResult.skipped}</strong> skipped</> : null}
         {importResult.errors.length > 0 && <ul className="link-list">{importResult.errors.slice(0, 8).map((er, i) => <li key={i}>{er}</li>)}</ul>}
-      </div>}
+      </Notice>}
 
       <div className="reg-filters">
         <div className="reg-seg" role="tablist" aria-label="Register section">
@@ -376,7 +378,7 @@ export default function PersonnelRegisterAdmin() {
         <button type="submit" form="reg-edit-form" disabled={busy === 'save'}>{busy === 'save' ? 'Saving…' : 'Save changes'}</button>
       </>}
     >
-      {error && <div className="error">{error}</div>}
+      {error && <Notice kind="error">{error}</Notice>}
       {can('personnel.self', 'view') && <form id="reg-edit-form" className="form-grid" onSubmit={saveEdit}>
         <label>Staff ID<input value={form.employeeNo} onChange={set('employeeNo')} placeholder="e.g. SNO-001" /></label>
         <label>Surname<input value={form.surname} onChange={set('surname')} /></label>
@@ -422,7 +424,7 @@ export default function PersonnelRegisterAdmin() {
         </button>}
       </>}
     >
-      {error && <div className="error">{error}</div>}
+      {error && <Notice kind="error">{error}</Notice>}
       <p className="dialog-lead">
         They leave the register, the roster and the Excel export, their access ends and their technical
         authorizations are withdrawn. Everything they signed, reviewed or wrote keeps their name on it.
@@ -438,7 +440,7 @@ export default function PersonnelRegisterAdmin() {
           <input type="date" value={exitForm.exitDate} onChange={e => setExitForm(f => ({ ...f, exitDate: e.target.value }))} />
         </label>
         <label className="wide">Notes <span className="muted">(optional)</span>
-          <input value={exitForm.notes} onChange={e => setExitForm(f => ({ ...f, notes: e.target.value }))}
+          <TextField value={exitForm.notes} onValue={nextValue => setExitForm(f => ({ ...f, notes: nextValue }))}
             placeholder="e.g. Transferred to Regional Hospital laboratory" />
         </label>
       </div>
@@ -457,8 +459,8 @@ export default function PersonnelRegisterAdmin() {
       subtitle={deleting?.staff.employeeNo ? `Staff ID ${deleting.staff.employeeNo}` : undefined}
     >
       {deleting && <div className="remove-flow">
-        {error && <div className="error">{error}</div>}
-        {deleting.blockers.length > 0 && <div className="error"><ShieldAlert size={15} /> {deleting.blockers.join(' ')}</div>}
+        {error && <Notice kind="error">{error}</Notice>}
+        {deleting.blockers.length > 0 && <Notice kind="error"><ShieldAlert size={15} /> {deleting.blockers.join(' ')}</Notice>}
 
         {/* Nothing to lose: the ordinary erase. */}
         {deleting.canDelete && <>
@@ -469,7 +471,7 @@ export default function PersonnelRegisterAdmin() {
           </p>
           <label className="remove-confirm">
             <span>Type <strong>{deleting.staff.fullName}</strong> to confirm</span>
-            <input value={confirmName} onChange={e => setConfirmName(e.target.value)} placeholder={deleting.staff.fullName} />
+            <TextField value={confirmName} onValue={nextValue => setConfirmName(nextValue)} placeholder={deleting.staff.fullName} />
           </label>
           {can('personnel.register', 'void_archive') && <button type="button" className="danger" disabled={busy === 'delete' || confirmName.trim().toLowerCase() !== deleting.staff.fullName.trim().toLowerCase()}
             onClick={() => doDelete('delete')}>
@@ -507,12 +509,12 @@ export default function PersonnelRegisterAdmin() {
                 </p>
                 <label className="remove-confirm">
                   <span>Why is this record being erased?</span>
-                  <input value={forceReason} onChange={e => setForceReason(e.target.value)}
+                  <TextField value={forceReason} onValue={nextValue => setForceReason(nextValue)}
                     placeholder="e.g. Demonstration record created during setup, never a member of staff" />
                 </label>
                 <label className="remove-confirm">
                   <span>Type <strong>{deleting.staff.fullName}</strong> to confirm</span>
-                  <input value={confirmName} onChange={e => setConfirmName(e.target.value)} placeholder={deleting.staff.fullName} />
+                  <TextField value={confirmName} onValue={nextValue => setConfirmName(nextValue)} placeholder={deleting.staff.fullName} />
                 </label>
                 <div className="remove-acts">
                   <button type="button" className="secondary" onClick={() => { setForcing(false); setForceReason(''); setConfirmName(''); }}>Cancel</button>

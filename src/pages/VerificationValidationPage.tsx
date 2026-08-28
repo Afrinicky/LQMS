@@ -9,6 +9,8 @@ import type { Staff, Section, EquipmentItem } from '../../shared/types/api';
 import { usePermissions } from '../hooks/usePermissions';
 import PermissionTabs from '../components/PermissionTabs';
 import { equipmentIsDiagnostic } from '../../shared/constants/equipment';
+import TextField from '../components/ui/TextField';
+import { Notice } from '../components/ui/Feedback';
 
 // ==========================================================================
 // Method Verification & Validation — ISO 15189:2022 (§7.3.3) / CLSI EP series.
@@ -159,8 +161,8 @@ export function VerificationValidationPage({ embedded = false }: { embedded?: bo
   return <div className="module-page">
     {!embedded && <PageHeader eyebrow="Process Management" title="Method Verification &amp; Validation" subtitle="ISO 15189 verification and validation of examination methods, with structured performance characteristics and authorisation for use." />}
     {tabBar(tab, tabs, setTab)}
-    {error && <div className="error">{error}</div>}
-    {msg && <div className="notice-ok">{msg}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
+    {msg && <Notice kind="success">{msg}</Notice>}
 
     {tab === 'Dashboard' && <>
       <ModuleAlerts moduleKey="verification_validation" />
@@ -225,18 +227,18 @@ export function VerificationValidationPage({ embedded = false }: { embedded?: bo
       {can('verification_validation', 'create') && <form className="form-grid" onSubmit={createStudy}>
         <label>Study type<select value={nf.studyType} onChange={e => setNf({ ...nf, studyType: e.target.value })}>{STUDY_TYPES.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}</select></label>
         <label>Measurand<select value={nf.measurandType} onChange={e => setNf({ ...nf, measurandType: e.target.value })}>{MEASURANDS.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}</select></label>
-        <label>Test<input value={nf.testName} onChange={e => setNf({ ...nf, testName: e.target.value })} required placeholder="e.g. Serum creatinine" /></label>
-        <label>Method / assay<input value={nf.methodName} onChange={e => setNf({ ...nf, methodName: e.target.value })} required placeholder="e.g. Enzymatic, Cobas c311" /></label>
-        <label>Analyte<input value={nf.analyte} onChange={e => setNf({ ...nf, analyte: e.target.value })} placeholder="e.g. Creatinine" /></label>
+        <label>Test<TextField value={nf.testName} onValue={nextValue => setNf({ ...nf, testName: nextValue })} required placeholder="e.g. Serum creatinine" /></label>
+        <label>Method / assay<TextField value={nf.methodName} onValue={nextValue => setNf({ ...nf, methodName: nextValue })} required placeholder="e.g. Enzymatic, Cobas c311" /></label>
+        <label>Analyte<TextField value={nf.analyte} onValue={nextValue => setNf({ ...nf, analyte: nextValue })} placeholder="e.g. Creatinine" /></label>
         <label>Sample matrix<select value={nf.sampleMatrix} onChange={e => setNf({ ...nf, sampleMatrix: e.target.value })}>{MATRICES.map(m => <option key={m} value={m}>{m}</option>)}</select></label>
-        <label>Units<input value={nf.measurementUnits} onChange={e => setNf({ ...nf, measurementUnits: e.target.value })} placeholder="e.g. µmol/L" /></label>
+        <label>Units<TextField value={nf.measurementUnits} onValue={nextValue => setNf({ ...nf, measurementUnits: nextValue })} placeholder="e.g. µmol/L" /></label>
         <label>Equipment<select value={nf.equipmentId} onChange={e => setNf({ ...nf, equipmentId: e.target.value })}><option value="">—</option>{equipment.map(eq => <option key={eq.id} value={eq.id}>{eq.name}</option>)}</select></label>
         <label>Unit / section<select value={nf.sectionId} onChange={e => setNf({ ...nf, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-        <label>Manufacturer<input value={nf.manufacturer} onChange={e => setNf({ ...nf, manufacturer: e.target.value })} /></label>
-        <label>Reagent lot<input value={nf.reagentLot} onChange={e => setNf({ ...nf, reagentLot: e.target.value })} /></label>
+        <label>Manufacturer<TextField value={nf.manufacturer} onValue={nextValue => setNf({ ...nf, manufacturer: nextValue })} /></label>
+        <label>Reagent lot<TextField value={nf.reagentLot} onValue={nextValue => setNf({ ...nf, reagentLot: nextValue })} /></label>
         <label>Reason / scope<select value={nf.scopeReason} onChange={e => setNf({ ...nf, scopeReason: e.target.value })}>{SCOPE_REASONS.map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Guideline followed<select value={nf.guidelineRef} onChange={e => setNf({ ...nf, guidelineRef: e.target.value })}>{GUIDELINES.map(g => <option key={g} value={g}>{g}</option>)}</select></label>
-        <label>Manufacturer claims ref.<input value={nf.manufacturerClaimsRef} onChange={e => setNf({ ...nf, manufacturerClaimsRef: e.target.value })} placeholder="IFU / insert reference" /></label>
+        <label>Manufacturer claims ref.<TextField value={nf.manufacturerClaimsRef} onValue={nextValue => setNf({ ...nf, manufacturerClaimsRef: nextValue })} placeholder="IFU / insert reference" /></label>
         <label>Start date<input type="date" value={nf.startDate} onChange={e => setNf({ ...nf, startDate: e.target.value })} /></label>
         <label className="check-inline"><input type="checkbox" checked={nf.seedParameters} onChange={e => setNf({ ...nf, seedParameters: e.target.checked })} /> Add the standard performance characteristics automatically</label>
         <button type="submit">Create study</button>
@@ -249,12 +251,12 @@ export function VerificationValidationPage({ embedded = false }: { embedded?: bo
         <p className="muted" style={{ marginTop: 0 }}>Verify an instrument performs to specification (calibration verification, performance checks). Method/assay studies are on the <em>Register</em>.</p>
         {can('verification_validation', 'create') && <form className="form-grid" onSubmit={submitEquip}>
           <label>Equipment<select value={equipForm.equipmentId} onChange={e => setEquipForm({ ...equipForm, equipmentId: e.target.value })} required><option value="">—</option>{equipment.map(eq => <option key={eq.id} value={eq.id}>{eq.name}</option>)}</select></label>
-          <label>Verification type<input value={equipForm.verificationType} onChange={e => setEquipForm({ ...equipForm, verificationType: e.target.value })} required placeholder="e.g. calibration verification" /></label>
+          <label>Verification type<TextField value={equipForm.verificationType} onValue={nextValue => setEquipForm({ ...equipForm, verificationType: nextValue })} required placeholder="e.g. calibration verification" /></label>
           <label>Date<input type="date" value={equipForm.verificationDate} onChange={e => setEquipForm({ ...equipForm, verificationDate: e.target.value })} required /></label>
-          <label>Reason<input value={equipForm.reason} onChange={e => setEquipForm({ ...equipForm, reason: e.target.value })} /></label>
-          <label>Acceptance criteria<textarea value={equipForm.acceptanceCriteria} onChange={e => setEquipForm({ ...equipForm, acceptanceCriteria: e.target.value })} /></label>
-          <label>Results summary<textarea value={equipForm.resultsSummary} onChange={e => setEquipForm({ ...equipForm, resultsSummary: e.target.value })} /></label>
-          <label>Conclusion<textarea value={equipForm.conclusion} onChange={e => setEquipForm({ ...equipForm, conclusion: e.target.value })} /></label>
+          <label>Reason<TextField value={equipForm.reason} onValue={nextValue => setEquipForm({ ...equipForm, reason: nextValue })} /></label>
+          <label>Acceptance criteria<TextField as="textarea" value={equipForm.acceptanceCriteria} onValue={nextValue => setEquipForm({ ...equipForm, acceptanceCriteria: nextValue })} /></label>
+          <label>Results summary<TextField as="textarea" value={equipForm.resultsSummary} onValue={nextValue => setEquipForm({ ...equipForm, resultsSummary: nextValue })} /></label>
+          <label>Conclusion<TextField as="textarea" value={equipForm.conclusion} onValue={nextValue => setEquipForm({ ...equipForm, conclusion: nextValue })} /></label>
           <button type="submit">Record equipment verification</button>
         </form>}
       </div>
@@ -429,7 +431,7 @@ function ParamDataEditor({ param, onClose, onComputed, setError }: { param: VPar
     <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>{help}</p>
     <table className="data-table" style={{ maxWidth: 520 }}><thead><tr><th>Sample</th><th>{aLabel}</th>{paired && <th>{bLabel}</th>}</tr></thead><tbody>
       {rows.map((row, i) => <tr key={i}>
-        <td><input value={row.sampleLabel} onChange={e => setCell(i, 'sampleLabel', e.target.value)} style={{ width: 120 }} placeholder={`#${i + 1}`} /></td>
+        <td><TextField value={row.sampleLabel} onValue={nextValue => setCell(i, 'sampleLabel', nextValue)} style={{ width: 120 }} placeholder={`#${i + 1}`} /></td>
         <td><input type="number" step="any" value={row.valueA} onChange={e => setCell(i, 'valueA', e.target.value)} style={{ width: 110 }} /></td>
         {paired && <td><input type="number" step="any" value={row.valueB} onChange={e => setCell(i, 'valueB', e.target.value)} style={{ width: 110 }} /></td>}
       </tr>)}
@@ -438,6 +440,6 @@ function ParamDataEditor({ param, onClose, onComputed, setError }: { param: VPar
       <button type="button" className="secondary" onClick={() => setRows(r => [...r, { sampleLabel: '', valueA: '', valueB: '' }])}>+ Add row</button>
       {can('verification_validation', 'edit') && <button type="button" onClick={saveCompute}>Save &amp; compute</button>}
     </div>
-    {computed && <div className="notice-ok" style={{ marginTop: 8 }}>Computed: <strong>{computed}</strong> — written to the characteristic's observed value.</div>}
+    {computed && <Notice kind="success" style={{ marginTop: 8 }}>Computed: <strong>{computed}</strong> — written to the characteristic's observed value.</Notice>}
   </div>;
 }

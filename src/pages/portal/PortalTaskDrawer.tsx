@@ -6,6 +6,7 @@ import { api, API_BASE, getToken, errorText } from '../../services/api';
 import { useDutyReminders } from '../../hooks/useDutyReminders';
 import { downloadFileById, dueTone, titleCase, usePortal, type PortalFace } from './portalData';
 import type { ActivityOccurrence, MyDeclaration, NotificationRecord } from '../../../shared/types/api';
+import TextField from '../../components/ui/TextField';
 
 /**
  * Doing the work, without leaving the portal.
@@ -193,7 +194,7 @@ function DeclarationTask({ declaration, onClose }: { declaration: MyDeclaration;
           {conflict && (
             <label className="pd-field">
               <span>What is the conflict? <em>Required</em></span>
-              <textarea value={conflictDetails} onChange={e => setConflictDetails(e.target.value)} rows={3}
+              <TextField as="textarea" value={conflictDetails} onValue={nextValue => setConflictDetails(nextValue)} rows={3}
                 placeholder="Describe the interest, who it involves, and how it could affect your work." />
             </label>
           )}
@@ -209,7 +210,7 @@ function DeclarationTask({ declaration, onClose }: { declaration: MyDeclaration;
 
           <label className="pd-field">
             <span>Anything to note (optional)</span>
-            <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional" />
+            <TextField value={notes} onValue={nextValue => setNotes(nextValue)} placeholder="Optional" />
           </label>
         </div>
 
@@ -306,7 +307,7 @@ function ActionTask({ target, onClose }: {
           </div>
           <label className="pd-field">
             <span>What did you do? {status === 'Completed' && <em>Worth recording</em>}</span>
-            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={4}
+            <TextField as="textarea" value={notes} onValue={nextValue => setNotes(nextValue)} rows={4}
               placeholder="What you did, what you found, anything the person who raised it needs to know." />
           </label>
           <p className="pd-hint">
@@ -422,12 +423,12 @@ function OccurrenceTask({ occurrence, onClose }: { occurrence: ActivityOccurrenc
           <div className="pd-form">
             <label className="pd-field">
               <span>Note (optional)</span>
-              <input value={note} onChange={e => setNote(e.target.value)} placeholder="Anything worth recording — a reading, a fault, a substitution." />
+              <TextField value={note} onValue={nextValue => setNote(nextValue)} placeholder="Anything worth recording — a reading, a fault, a substitution." />
             </label>
             {showNa && (
               <label className="pd-field">
                 <span>Why does this not apply today? <em>Required</em></span>
-                <input value={reason} onChange={e => setReason(e.target.value)} placeholder="Bench closed, analyser down, no samples…" />
+                <TextField value={reason} onValue={nextValue => setReason(nextValue)} placeholder="Bench closed, analyser down, no samples…" />
               </label>
             )}
           </div>

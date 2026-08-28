@@ -14,6 +14,8 @@ import type {
   CustomerCommunicationLog, CustomerFocusImportBatch, CustomerFocusSummary,
   SurveyAnalytics, ServiceAgreementPerformance, AdvisoryService, LaboratoryHandbookEntry
 } from '../../shared/types/api';
+import TextField from '../components/ui/TextField';
+import { Notice } from '../components/ui/Feedback';
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
@@ -240,7 +242,7 @@ export function CustomerFocusPage() {
   return <div className="module-page">
     <PageHeader eyebrow="Customer Focus" title="Customer Focus" subtitle="Stakeholders, feedback, and satisfaction follow-up." />
     {tabBar(tab, tabs, setTab)}
-    {error && <div className="error">{error}</div>}
+    {error && <Notice kind="error">{error}</Notice>}
 
     {tab === 'Dashboard' && <ModuleAlerts moduleKey="customer_focus" />}
     {tab === 'Dashboard' && (summary ? <KpiStrip items={[
@@ -278,14 +280,14 @@ export function CustomerFocusPage() {
       {can('customer_focus.advisory', 'create') && <form className="form-grid" onSubmit={submitAdvisory}>
         <label>Date<input type="date" value={advForm.serviceDate} onChange={e => setAdvForm({ ...advForm, serviceDate: e.target.value })} required /></label>
         <label>Type<select value={advForm.serviceType} onChange={e => setAdvForm({ ...advForm, serviceType: e.target.value })}><option value="">—</option>{['test_choice', 'interpretation', 'sample_type', 'frequency', 'clinical_advice', 'utilization', 'other'].map(t => <option key={t} value={t}>{pretty(t)}</option>)}</select></label>
-        <label>Requester<input value={advForm.requester} onChange={e => setAdvForm({ ...advForm, requester: e.target.value })} placeholder="clinician / ward / user" /></label>
+        <label>Requester<TextField value={advForm.requester} onValue={nextValue => setAdvForm({ ...advForm, requester: nextValue })} placeholder="clinician / ward / user" /></label>
         <label>Stakeholder<select value={advForm.stakeholderId} onChange={e => setAdvForm({ ...advForm, stakeholderId: e.target.value })}><option value="">—</option>{stakeholders.map(s => <option key={s.id} value={s.id}>{s.stakeholder_name}</option>)}</select></label>
         <label>Provided by<select value={advForm.providedByStaffId} onChange={e => setAdvForm({ ...advForm, providedByStaffId: e.target.value })}><option value="">Me</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-        <label>Channel<input value={advForm.communicationChannel} onChange={e => setAdvForm({ ...advForm, communicationChannel: e.target.value })} placeholder="phone / email / ward round" /></label>
-        <label>Subject<input value={advForm.subject} onChange={e => setAdvForm({ ...advForm, subject: e.target.value })} /></label>
+        <label>Channel<TextField value={advForm.communicationChannel} onValue={nextValue => setAdvForm({ ...advForm, communicationChannel: nextValue })} placeholder="phone / email / ward round" /></label>
+        <label>Subject<TextField value={advForm.subject} onValue={nextValue => setAdvForm({ ...advForm, subject: nextValue })} /></label>
         <label><input type="checkbox" checked={advForm.followUpRequired} onChange={e => setAdvForm({ ...advForm, followUpRequired: e.target.checked })} /> Follow-up required</label>
         <label>Follow-up due<input type="date" value={advForm.followUpDueDate} onChange={e => setAdvForm({ ...advForm, followUpDueDate: e.target.value })} /></label>
-        <label>Advice summary<textarea value={advForm.adviceSummary} onChange={e => setAdvForm({ ...advForm, adviceSummary: e.target.value })} /></label>
+        <label>Advice summary<TextField as="textarea" value={advForm.adviceSummary} onValue={nextValue => setAdvForm({ ...advForm, adviceSummary: nextValue })} /></label>
         <button type="submit">Log advisory</button>
       </form>}
       <table className="data-table"><thead><tr><th>No.</th><th>Date</th><th>Type</th><th>Requester</th><th>Subject</th><th>By</th><th>Follow-up</th></tr></thead><tbody>
@@ -297,13 +299,13 @@ export function CustomerFocusPage() {
     {tab === 'Laboratory Handbook' && <>
       {can('customer_focus.advisory', 'create') && <form className="form-grid" onSubmit={submitHandbook}>
         <label>Section<select value={hbForm.section} onChange={e => setHbForm({ ...hbForm, section: e.target.value })}><option value="">—</option>{['hours', 'test_menu', 'collection', 'transport', 'turnaround', 'contacts', 'policies', 'other'].map(s => <option key={s} value={s}>{pretty(s)}</option>)}</select></label>
-        <label>Title<input value={hbForm.title} onChange={e => setHbForm({ ...hbForm, title: e.target.value })} required /></label>
-        <label>Version<input value={hbForm.version} onChange={e => setHbForm({ ...hbForm, version: e.target.value })} /></label>
+        <label>Title<TextField value={hbForm.title} onValue={nextValue => setHbForm({ ...hbForm, title: nextValue })} required /></label>
+        <label>Version<TextField value={hbForm.version} onValue={nextValue => setHbForm({ ...hbForm, version: nextValue })} /></label>
         <label>Display order<input type="number" value={hbForm.displayOrder} onChange={e => setHbForm({ ...hbForm, displayOrder: e.target.value })} /></label>
         <label>Effective date<input type="date" value={hbForm.effectiveDate} onChange={e => setHbForm({ ...hbForm, effectiveDate: e.target.value })} /></label>
         <label>Review date<input type="date" value={hbForm.reviewDate} onChange={e => setHbForm({ ...hbForm, reviewDate: e.target.value })} /></label>
         <label>Status<select value={hbForm.status} onChange={e => setHbForm({ ...hbForm, status: e.target.value })}>{['draft', 'active', 'under_review', 'archived'].map(s => <option key={s} value={s}>{pretty(s)}</option>)}</select></label>
-        <label>Content<textarea value={hbForm.content} onChange={e => setHbForm({ ...hbForm, content: e.target.value })} /></label>
+        <label>Content<TextField as="textarea" value={hbForm.content} onValue={nextValue => setHbForm({ ...hbForm, content: nextValue })} /></label>
         <button type="submit">Add entry</button>
       </form>}
       <table className="data-table"><thead><tr><th>No.</th><th>Section</th><th>Title</th><th>Version</th><th>Effective</th><th>Review</th><th>Status</th></tr></thead><tbody>
@@ -322,31 +324,31 @@ export function CustomerFocusPage() {
     </tbody></table>}
 
     {tab === 'New Stakeholder' && can('customer_focus.stakeholders', 'create') && <form className="form-grid" onSubmit={submitStakeholder}>
-      <label>Name<input value={stakeForm.stakeholderName} onChange={e => setStakeForm({ ...stakeForm, stakeholderName: e.target.value })} required /></label>
+      <label>Name<TextField value={stakeForm.stakeholderName} onValue={nextValue => setStakeForm({ ...stakeForm, stakeholderName: nextValue })} required /></label>
       <label>Type<select value={stakeForm.stakeholderType} onChange={e => setStakeForm({ ...stakeForm, stakeholderType: e.target.value })} required>{STAKEHOLDER_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
-      <label>Organisation<input value={stakeForm.organisation} onChange={e => setStakeForm({ ...stakeForm, organisation: e.target.value })} /></label>
-      <label>Contact person<input value={stakeForm.contactPerson} onChange={e => setStakeForm({ ...stakeForm, contactPerson: e.target.value })} /></label>
-      <label>Email<input value={stakeForm.email} onChange={e => setStakeForm({ ...stakeForm, email: e.target.value })} /></label>
-      <label>Phone<input value={stakeForm.phone} onChange={e => setStakeForm({ ...stakeForm, phone: e.target.value })} /></label>
-      <label>Address<input value={stakeForm.address} onChange={e => setStakeForm({ ...stakeForm, address: e.target.value })} /></label>
+      <label>Organisation<TextField value={stakeForm.organisation} onValue={nextValue => setStakeForm({ ...stakeForm, organisation: nextValue })} /></label>
+      <label>Contact person<TextField value={stakeForm.contactPerson} onValue={nextValue => setStakeForm({ ...stakeForm, contactPerson: nextValue })} /></label>
+      <label>Email<TextField value={stakeForm.email} onValue={nextValue => setStakeForm({ ...stakeForm, email: nextValue })} /></label>
+      <label>Phone<TextField value={stakeForm.phone} onValue={nextValue => setStakeForm({ ...stakeForm, phone: nextValue })} /></label>
+      <label>Address<TextField value={stakeForm.address} onValue={nextValue => setStakeForm({ ...stakeForm, address: nextValue })} /></label>
       <label>Department<select value={stakeForm.departmentId} onChange={e => setStakeForm({ ...stakeForm, departmentId: e.target.value })}><option value="">—</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
       <label>Section<select value={stakeForm.sectionId} onChange={e => setStakeForm({ ...stakeForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-      <label>Notes<textarea value={stakeForm.notes} onChange={e => setStakeForm({ ...stakeForm, notes: e.target.value })} /></label>
+      <label>Notes<TextField as="textarea" value={stakeForm.notes} onValue={nextValue => setStakeForm({ ...stakeForm, notes: nextValue })} /></label>
       <button type="submit">Create stakeholder</button>
     </form>}
 
     {tab === 'Service Agreements' && <>
       {can('customer_focus.stakeholders', 'create') && <form className="form-grid" onSubmit={submitAgreement}>
         <label>Stakeholder<select value={agreeForm.stakeholderId} onChange={e => setAgreeForm({ ...agreeForm, stakeholderId: e.target.value })} required><option value="">—</option>{stakeholders.filter(s => s.is_active).map(s => <option key={s.id} value={s.id}>{s.stakeholder_name}</option>)}</select></label>
-        <label>Title<input value={agreeForm.agreementTitle} onChange={e => setAgreeForm({ ...agreeForm, agreementTitle: e.target.value })} required /></label>
+        <label>Title<TextField value={agreeForm.agreementTitle} onValue={nextValue => setAgreeForm({ ...agreeForm, agreementTitle: nextValue })} required /></label>
         <label>Start date<input type="date" value={agreeForm.startDate} onChange={e => setAgreeForm({ ...agreeForm, startDate: e.target.value })} /></label>
         <label>End date<input type="date" value={agreeForm.endDate} onChange={e => setAgreeForm({ ...agreeForm, endDate: e.target.value })} /></label>
         <label>Review due<input type="date" value={agreeForm.reviewDueDate} onChange={e => setAgreeForm({ ...agreeForm, reviewDueDate: e.target.value })} /></label>
         <label>Responsible staff<select value={agreeForm.responsibleStaffId} onChange={e => setAgreeForm({ ...agreeForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-        <label>Agreed turnaround<input value={agreeForm.agreedTurnaround} onChange={e => setAgreeForm({ ...agreeForm, agreedTurnaround: e.target.value })} placeholder="e.g. 24 hours" /></label>
-        <label>Reporting format<input value={agreeForm.reportingFormat} onChange={e => setAgreeForm({ ...agreeForm, reportingFormat: e.target.value })} placeholder="e.g. monthly PDF" /></label>
-        <label>Service scope<textarea value={agreeForm.serviceScope} onChange={e => setAgreeForm({ ...agreeForm, serviceScope: e.target.value })} required /></label>
-        <label>Notes<textarea value={agreeForm.notes} onChange={e => setAgreeForm({ ...agreeForm, notes: e.target.value })} /></label>
+        <label>Agreed turnaround<TextField value={agreeForm.agreedTurnaround} onValue={nextValue => setAgreeForm({ ...agreeForm, agreedTurnaround: nextValue })} placeholder="e.g. 24 hours" /></label>
+        <label>Reporting format<TextField value={agreeForm.reportingFormat} onValue={nextValue => setAgreeForm({ ...agreeForm, reportingFormat: nextValue })} placeholder="e.g. monthly PDF" /></label>
+        <label>Service scope<TextField as="textarea" value={agreeForm.serviceScope} onValue={nextValue => setAgreeForm({ ...agreeForm, serviceScope: nextValue })} required /></label>
+        <label>Notes<TextField as="textarea" value={agreeForm.notes} onValue={nextValue => setAgreeForm({ ...agreeForm, notes: nextValue })} /></label>
         <button type="submit">Create agreement</button>
       </form>}
       <table className="data-table"><thead><tr><th>Number</th><th>Stakeholder</th><th>Title</th><th>Period</th><th>Status</th><th></th></tr></thead><tbody>
@@ -380,16 +382,16 @@ export function CustomerFocusPage() {
       {can('customer_focus.feedback', 'create') && <form className="form-grid" onSubmit={submitFeedback}>
         <label>Date<input type="date" value={feedbackForm.feedbackDate} onChange={e => setFeedbackForm({ ...feedbackForm, feedbackDate: e.target.value })} required /></label>
         <label>Type<select value={feedbackForm.feedbackType} onChange={e => setFeedbackForm({ ...feedbackForm, feedbackType: e.target.value })} required>{FEEDBACK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
-        <label>Source channel<input value={feedbackForm.sourceChannel} onChange={e => setFeedbackForm({ ...feedbackForm, sourceChannel: e.target.value })} placeholder="e.g. phone, email, in-person" /></label>
+        <label>Source channel<TextField value={feedbackForm.sourceChannel} onValue={nextValue => setFeedbackForm({ ...feedbackForm, sourceChannel: nextValue })} placeholder="e.g. phone, email, in-person" /></label>
         <label>Stakeholder<select value={feedbackForm.stakeholderId} onChange={e => setFeedbackForm({ ...feedbackForm, stakeholderId: e.target.value })}><option value="">—</option>{stakeholders.filter(s => s.is_active).map(s => <option key={s.id} value={s.id}>{s.stakeholder_name}</option>)}</select></label>
-        <label>Contact name<input value={feedbackForm.contactName} onChange={e => setFeedbackForm({ ...feedbackForm, contactName: e.target.value })} /></label>
-        <label>Contact detail<input value={feedbackForm.contactDetail} onChange={e => setFeedbackForm({ ...feedbackForm, contactDetail: e.target.value })} placeholder="phone / email" /></label>
+        <label>Contact name<TextField value={feedbackForm.contactName} onValue={nextValue => setFeedbackForm({ ...feedbackForm, contactName: nextValue })} /></label>
+        <label>Contact detail<TextField value={feedbackForm.contactDetail} onValue={nextValue => setFeedbackForm({ ...feedbackForm, contactDetail: nextValue })} placeholder="phone / email" /></label>
         <label>Urgency<select value={feedbackForm.urgency} onChange={e => setFeedbackForm({ ...feedbackForm, urgency: e.target.value })}>{URGENCIES.map(u => <option key={u} value={u}>{u}</option>)}</select></label>
-        <label>Sentiment<input value={feedbackForm.sentiment} onChange={e => setFeedbackForm({ ...feedbackForm, sentiment: e.target.value })} placeholder="positive / neutral / negative (optional)" /></label>
+        <label>Sentiment<TextField value={feedbackForm.sentiment} onValue={nextValue => setFeedbackForm({ ...feedbackForm, sentiment: nextValue })} placeholder="positive / neutral / negative (optional)" /></label>
         <label>Assigned to<select value={feedbackForm.assignedToStaffId} onChange={e => setFeedbackForm({ ...feedbackForm, assignedToStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Follow-up due<input type="date" value={feedbackForm.followUpDueDate} onChange={e => setFeedbackForm({ ...feedbackForm, followUpDueDate: e.target.value })} /></label>
-        <label>Title<input value={feedbackForm.title} onChange={e => setFeedbackForm({ ...feedbackForm, title: e.target.value })} required /></label>
-        <label>Description<textarea value={feedbackForm.description} onChange={e => setFeedbackForm({ ...feedbackForm, description: e.target.value })} required /></label>
+        <label>Title<TextField value={feedbackForm.title} onValue={nextValue => setFeedbackForm({ ...feedbackForm, title: nextValue })} required /></label>
+        <label>Description<TextField as="textarea" value={feedbackForm.description} onValue={nextValue => setFeedbackForm({ ...feedbackForm, description: nextValue })} required /></label>
         <button type="submit">Record feedback</button>
       </form>}
       <table className="data-table"><thead><tr><th>Number</th><th>Date</th><th>Type</th><th>Title</th><th>Urgency</th><th>Status</th><th>Stakeholder</th><th>Actions</th></tr></thead><tbody>
@@ -411,12 +413,12 @@ export function CustomerFocusPage() {
 
     {tab === 'Satisfaction Surveys' && <>
       {can('customer_focus.surveys', 'create') && <form className="form-grid" onSubmit={submitSurvey}>
-        <label>Title<input value={surveyForm.surveyTitle} onChange={e => setSurveyForm({ ...surveyForm, surveyTitle: e.target.value })} required /></label>
+        <label>Title<TextField value={surveyForm.surveyTitle} onValue={nextValue => setSurveyForm({ ...surveyForm, surveyTitle: nextValue })} required /></label>
         <label>Type<select value={surveyForm.surveyType} onChange={e => setSurveyForm({ ...surveyForm, surveyType: e.target.value })} required>{SURVEY_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
-        <label>Audience<input value={surveyForm.audience} onChange={e => setSurveyForm({ ...surveyForm, audience: e.target.value })} /></label>
+        <label>Audience<TextField value={surveyForm.audience} onValue={nextValue => setSurveyForm({ ...surveyForm, audience: nextValue })} /></label>
         <label>Period start<input type="date" value={surveyForm.periodStart} onChange={e => setSurveyForm({ ...surveyForm, periodStart: e.target.value })} /></label>
         <label>Period end<input type="date" value={surveyForm.periodEnd} onChange={e => setSurveyForm({ ...surveyForm, periodEnd: e.target.value })} /></label>
-        <label>Description<textarea value={surveyForm.description} onChange={e => setSurveyForm({ ...surveyForm, description: e.target.value })} /></label>
+        <label>Description<TextField as="textarea" value={surveyForm.description} onValue={nextValue => setSurveyForm({ ...surveyForm, description: nextValue })} /></label>
         <button type="submit">Create survey</button>
       </form>}
       <table className="data-table"><thead><tr><th>Number</th><th>Title</th><th>Type</th><th>Status</th><th>Period</th><th></th></tr></thead><tbody>
@@ -450,14 +452,14 @@ export function CustomerFocusPage() {
           {(selectedSurvey.questions || []).map(q => <tr key={q.id}><td>{q.display_order}</td><td>{q.question_text}</td><td>{q.question_type}</td><td>{q.scale_min !== null && q.scale_max !== null ? `${q.scale_min}–${q.scale_max}` : '—'}</td><td>{q.is_required ? 'Yes' : 'No'}</td></tr>)}
         </tbody></table>
         {selectedSurvey.status === 'draft' && can('customer_focus.surveys', 'create') && <form className="form-grid" onSubmit={addQuestion}>
-          <label>Code<input value={questionForm.questionCode} onChange={e => setQuestionForm({ ...questionForm, questionCode: e.target.value })} /></label>
+          <label>Code<TextField value={questionForm.questionCode} onValue={nextValue => setQuestionForm({ ...questionForm, questionCode: nextValue })} /></label>
           <label>Type<select value={questionForm.questionType} onChange={e => setQuestionForm({ ...questionForm, questionType: e.target.value })}>{QUESTION_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
           <label>Scale min<input type="number" value={questionForm.scaleMin} onChange={e => setQuestionForm({ ...questionForm, scaleMin: e.target.value })} /></label>
           <label>Scale max<input type="number" value={questionForm.scaleMax} onChange={e => setQuestionForm({ ...questionForm, scaleMax: e.target.value })} /></label>
-          <label>Options text<input value={questionForm.optionsText} onChange={e => setQuestionForm({ ...questionForm, optionsText: e.target.value })} placeholder="for multiple_choice, pipe-separated" /></label>
+          <label>Options text<TextField value={questionForm.optionsText} onValue={nextValue => setQuestionForm({ ...questionForm, optionsText: nextValue })} placeholder="for multiple_choice, pipe-separated" /></label>
           <label>Order<input type="number" value={questionForm.displayOrder} onChange={e => setQuestionForm({ ...questionForm, displayOrder: e.target.value })} /></label>
           <label><input type="checkbox" checked={questionForm.isRequired} onChange={e => setQuestionForm({ ...questionForm, isRequired: e.target.checked })} /> Required</label>
-          <label>Question text<textarea value={questionForm.questionText} onChange={e => setQuestionForm({ ...questionForm, questionText: e.target.value })} required /></label>
+          <label>Question text<TextField as="textarea" value={questionForm.questionText} onValue={nextValue => setQuestionForm({ ...questionForm, questionText: nextValue })} required /></label>
           <button type="submit">Add question</button>
         </form>}
       </DetailModal>}
@@ -478,17 +480,17 @@ export function CustomerFocusPage() {
         {selectedSurvey.status === 'active' && can('customer_focus.surveys', 'create') && <form className="form-grid" onSubmit={submitResponse}>
           <h4>Record new response</h4>
           <label>Response date<input type="date" value={respForm.responseDate} onChange={e => setRespForm({ ...respForm, responseDate: e.target.value })} required /></label>
-          <label>Respondent name<input value={respForm.respondentName} onChange={e => setRespForm({ ...respForm, respondentName: e.target.value })} /></label>
-          <label>Respondent role<input value={respForm.respondentRole} onChange={e => setRespForm({ ...respForm, respondentRole: e.target.value })} /></label>
-          <label>Source channel<input value={respForm.sourceChannel} onChange={e => setRespForm({ ...respForm, sourceChannel: e.target.value })} placeholder="e.g. paper, in-person, web" /></label>
+          <label>Respondent name<TextField value={respForm.respondentName} onValue={nextValue => setRespForm({ ...respForm, respondentName: nextValue })} /></label>
+          <label>Respondent role<TextField value={respForm.respondentRole} onValue={nextValue => setRespForm({ ...respForm, respondentRole: nextValue })} /></label>
+          <label>Source channel<TextField value={respForm.sourceChannel} onValue={nextValue => setRespForm({ ...respForm, sourceChannel: nextValue })} placeholder="e.g. paper, in-person, web" /></label>
           <label>Stakeholder (optional)<select value={respForm.stakeholderId} onChange={e => setRespForm({ ...respForm, stakeholderId: e.target.value })}><option value="">—</option>{stakeholders.filter(s => s.is_active).map(s => <option key={s.id} value={s.id}>{s.stakeholder_name}</option>)}</select></label>
-          <label>Overall comment<textarea value={respForm.overallComment} onChange={e => setRespForm({ ...respForm, overallComment: e.target.value })} /></label>
+          <label>Overall comment<TextField as="textarea" value={respForm.overallComment} onValue={nextValue => setRespForm({ ...respForm, overallComment: nextValue })} /></label>
           {(selectedSurvey.questions || []).map(q => <label key={q.id}>{q.question_text}{q.is_required ? ' *' : ''}
             {q.question_type === 'scale' ? <input type="number" min={q.scale_min ?? undefined} max={q.scale_max ?? undefined} value={respForm.answers[q.id]?.answerNumber ?? ''} onChange={e => setRespForm({ ...respForm, answers: { ...respForm.answers, [q.id]: { answerText: '', answerNumber: e.target.value } } })} />
               : q.question_type === 'yes_no' ? <select value={respForm.answers[q.id]?.answerText ?? ''} onChange={e => setRespForm({ ...respForm, answers: { ...respForm.answers, [q.id]: { answerText: e.target.value, answerNumber: '' } } })}><option value="">—</option><option value="yes">Yes</option><option value="no">No</option></select>
               : q.question_type === 'multiple_choice' ? <select value={respForm.answers[q.id]?.answerText ?? ''} onChange={e => setRespForm({ ...respForm, answers: { ...respForm.answers, [q.id]: { answerText: e.target.value, answerNumber: '' } } })}><option value="">—</option>{(q.options_text || '').split('|').filter(Boolean).map(o => <option key={o} value={o}>{o}</option>)}</select>
-              : q.question_type === 'long_text' ? <textarea value={respForm.answers[q.id]?.answerText ?? ''} onChange={e => setRespForm({ ...respForm, answers: { ...respForm.answers, [q.id]: { answerText: e.target.value, answerNumber: '' } } })} />
-              : <input value={respForm.answers[q.id]?.answerText ?? ''} onChange={e => setRespForm({ ...respForm, answers: { ...respForm.answers, [q.id]: { answerText: e.target.value, answerNumber: '' } } })} />}
+              : q.question_type === 'long_text' ? <TextField as="textarea" value={respForm.answers[q.id]?.answerText ?? ''} onValue={nextValue => setRespForm({ ...respForm, answers: { ...respForm.answers, [q.id]: { answerText: nextValue, answerNumber: '' } } })} />
+              : <TextField value={respForm.answers[q.id]?.answerText ?? ''} onValue={nextValue => setRespForm({ ...respForm, answers: { ...respForm.answers, [q.id]: { answerText: nextValue, answerNumber: '' } } })} />}
           </label>)}
           <button type="submit">Save response</button>
         </form>}
@@ -500,14 +502,14 @@ export function CustomerFocusPage() {
         <label>Date<input type="date" value={commForm.communicationDate} onChange={e => setCommForm({ ...commForm, communicationDate: e.target.value })} required /></label>
         <label>Type<select value={commForm.communicationType} onChange={e => setCommForm({ ...commForm, communicationType: e.target.value })}>{COMMUNICATION_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Direction<select value={commForm.direction} onChange={e => setCommForm({ ...commForm, direction: e.target.value })}>{COMMUNICATION_DIRECTIONS.map(d => <option key={d} value={d}>{d}</option>)}</select></label>
-        <label>Channel<input value={commForm.channel} onChange={e => setCommForm({ ...commForm, channel: e.target.value })} placeholder="email, phone, meeting…" /></label>
+        <label>Channel<TextField value={commForm.channel} onValue={nextValue => setCommForm({ ...commForm, channel: nextValue })} placeholder="email, phone, meeting…" /></label>
         <label>Stakeholder<select value={commForm.stakeholderId} onChange={e => setCommForm({ ...commForm, stakeholderId: e.target.value })}><option value="">—</option>{stakeholders.filter(s => s.is_active).map(s => <option key={s.id} value={s.id}>{s.stakeholder_name}</option>)}</select></label>
         <label>Linked feedback<select value={commForm.feedbackId} onChange={e => setCommForm({ ...commForm, feedbackId: e.target.value })}><option value="">—</option>{feedback.map(f => <option key={f.id} value={f.id}>{f.feedback_number} — {f.title}</option>)}</select></label>
-        <label>Contact name<input value={commForm.contactName} onChange={e => setCommForm({ ...commForm, contactName: e.target.value })} /></label>
-        <label>Contact detail<input value={commForm.contactDetail} onChange={e => setCommForm({ ...commForm, contactDetail: e.target.value })} /></label>
+        <label>Contact name<TextField value={commForm.contactName} onValue={nextValue => setCommForm({ ...commForm, contactName: nextValue })} /></label>
+        <label>Contact detail<TextField value={commForm.contactDetail} onValue={nextValue => setCommForm({ ...commForm, contactDetail: nextValue })} /></label>
         <label>Follow-up due<input type="date" value={commForm.followUpDueDate} onChange={e => setCommForm({ ...commForm, followUpDueDate: e.target.value })} /></label>
-        <label>Subject<input value={commForm.subject} onChange={e => setCommForm({ ...commForm, subject: e.target.value })} required /></label>
-        <label>Message summary<textarea value={commForm.messageSummary} onChange={e => setCommForm({ ...commForm, messageSummary: e.target.value })} required /></label>
+        <label>Subject<TextField value={commForm.subject} onValue={nextValue => setCommForm({ ...commForm, subject: nextValue })} required /></label>
+        <label>Message summary<TextField as="textarea" value={commForm.messageSummary} onValue={nextValue => setCommForm({ ...commForm, messageSummary: nextValue })} required /></label>
         <button type="submit">Log communication</button>
       </form>}
       <table className="data-table"><thead><tr><th>Number</th><th>Date</th><th>Type</th><th>Dir.</th><th>Subject</th><th>Stakeholder</th><th>Status</th><th></th></tr></thead><tbody>
@@ -530,7 +532,7 @@ export function CustomerFocusPage() {
       {can('customer_focus.imports', 'import') && <form className="form-grid" onSubmit={submitImport}>
         <label>Import type<select value={importForm.importType} onChange={e => setImportForm({ ...importForm, importType: e.target.value })}>{IMPORT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
         <label>File<input type="file" accept=".csv,.xlsx,.xls" onChange={e => setImportForm({ ...importForm, file: e.target.files?.[0] ?? null })} required /></label>
-        <label>Notes<textarea value={importForm.notes} onChange={e => setImportForm({ ...importForm, notes: e.target.value })} /></label>
+        <label>Notes<TextField as="textarea" value={importForm.notes} onValue={nextValue => setImportForm({ ...importForm, notes: nextValue })} /></label>
         <button type="submit">Upload batch</button>
       </form>}
       <table className="data-table"><thead><tr><th>Batch</th><th>Type</th><th>Status</th><th>Rows</th><th>Processed</th><th>Exceptions</th><th></th></tr></thead><tbody>

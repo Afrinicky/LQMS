@@ -18,6 +18,8 @@ import {
 } from './qmsShared';
 import type { CapaRecord, NonconformingEvent, Section, Staff } from '../../shared/types/api';
 import { usePermissions } from '../hooks/usePermissions';
+import TextField from '../components/ui/TextField';
+import { Notice } from '../components/ui/Feedback';
 
 // ==========================================================================
 // Nonconforming Event Management — three sibling submodules that share one
@@ -257,18 +259,18 @@ function StageBoard({ kind, stage, sections, cfg, onChanged }: {
           <input type="checkbox" checked={rcaReq || willEscalate} disabled={willEscalate} onChange={e => setRcaReq(e.target.checked)} /> {investigationLabel} required
         </label>
         {willEscalate
-          ? <p className="notice-warn" style={{ marginTop: 6 }}>This event meets the automatic escalation rules — {investigationLabel.toLowerCase()} and corrective action will be raised on save{cfg.autoCreateCapaOnEscalation ? ', including a CAPA record' : ''}.</p>
+          ? <Notice kind="warn" style={{ marginTop: 6 }}>This event meets the automatic escalation rules — {investigationLabel.toLowerCase()} and corrective action will be raised on save{cfg.autoCreateCapaOnEscalation ? ', including a CAPA record' : ''}.</Notice>
           : <p className="muted" style={{ fontSize: 12, marginTop: 2 }}>Tick this to investigate an event the rules would otherwise let through on a correction alone.</p>}
-        <label style={{ display: 'block', marginTop: 8 }}>Assessment notes (optional)<textarea value={notes} onChange={e => setNotes(e.target.value)} /></label>
+        <label style={{ display: 'block', marginTop: 8 }}>Assessment notes (optional)<TextField as="textarea" value={notes} onValue={nextValue => setNotes(nextValue)} /></label>
         <button style={{ marginTop: 10 }} disabled={busy || !cfg.canFollowUp} onClick={submitRisk}>{busy ? 'Saving…' : 'Complete risk assessment'}</button>
       </> : <>
         <p style={{ margin: '6px 0' }}>Assessed risk: {sel.risk_score != null ? <>{sel.risk_score} {riskLevelBadge(sel.risk_level)}</> : '—'}{sel.affects_patient_safety ? <span className="badge badge--danger" style={{ marginLeft: 8 }}>patient safety</span> : null}</p>
         <h4 style={{ marginBottom: 4 }}>{investigationLabel}</h4>
         <div className="form-grid">
-          <label>Investigation team / person<input value={team} onChange={e => setTeam(e.target.value)} /></label>
+          <label>Investigation team / person<TextField value={team} onValue={nextValue => setTeam(nextValue)} /></label>
           <label>Method<select value={method} onChange={e => setMethod(e.target.value)}>{RCA_METHOD_OPTIONS.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}</select></label>
-          <label style={{ gridColumn: '1 / -1' }}>Root cause(s) identified<textarea value={rootCause} onChange={e => setRootCause(e.target.value)} required /></label>
-          <label style={{ gridColumn: '1 / -1' }}>Contributing factors (optional)<textarea value={contributing} onChange={e => setContributing(e.target.value)} /></label>
+          <label style={{ gridColumn: '1 / -1' }}>Root cause(s) identified<TextField as="textarea" value={rootCause} onValue={nextValue => setRootCause(nextValue)} required /></label>
+          <label style={{ gridColumn: '1 / -1' }}>Contributing factors (optional)<TextField as="textarea" value={contributing} onValue={nextValue => setContributing(nextValue)} /></label>
           <label style={{ gridColumn: '1 / -1' }}>
             Analysis sheet (the completed {(RCA_METHOD_OPTIONS.find(m => m.v === method)?.l || 'RCA')} worksheet) — required
             <input type="file" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx" onChange={e => setEvidence(e.target.files?.[0] ?? null)} />
@@ -438,13 +440,13 @@ export function NonconformitiesPage({ embedded = false }: { embedded?: boolean }
           <label>Time of event<input type="time" value={form.timeOfEvent} onChange={e => setForm({ ...form, timeOfEvent: e.target.value })} /></label>
           <label>Unit / section<select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
           <label>Reported by (staff)<select value={form.detectedByStaffId} onChange={e => setForm({ ...form, detectedByStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-          <label>… or name / role<input value={form.detectedByName} onChange={e => setForm({ ...form, detectedByName: e.target.value })} placeholder="if not a staff record" /></label>
+          <label>… or name / role<TextField value={form.detectedByName} onValue={nextValue => setForm({ ...form, detectedByName: nextValue })} placeholder="if not a staff record" /></label>
           <label style={{ gridColumn: '1 / -1' }}>Category<select value={form.ncType} onChange={e => setForm({ ...form, ncType: e.target.value })}>{NC_TYPE_OPTIONS.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}</select></label>
-          {form.ncType === 'other' && <label style={{ gridColumn: '1 / -1' }}>Specify<input value={form.ncTypeOther} onChange={e => setForm({ ...form, ncTypeOther: e.target.value })} /></label>}
-          <label style={{ gridColumn: '1 / -1' }}>Title<input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required placeholder="Short descriptive title" /></label>
-          <label style={{ gridColumn: '1 / -1' }}>What happened? (facts only, no blame)<textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} required /></label>
-          <label style={{ gridColumn: '1 / -1' }}>Immediate action taken (urgent step to contain the problem)<textarea value={form.immediateCorrection} onChange={e => setForm({ ...form, immediateCorrection: e.target.value })} /></label>
-          {cfg.remedialActionEnabled && <label style={{ gridColumn: '1 / -1' }}>Remedial action taken (short-term correction)<textarea value={form.remedialAction} onChange={e => setForm({ ...form, remedialAction: e.target.value })} /></label>}
+          {form.ncType === 'other' && <label style={{ gridColumn: '1 / -1' }}>Specify<TextField value={form.ncTypeOther} onValue={nextValue => setForm({ ...form, ncTypeOther: nextValue })} /></label>}
+          <label style={{ gridColumn: '1 / -1' }}>Title<TextField value={form.title} onValue={nextValue => setForm({ ...form, title: nextValue })} required placeholder="Short descriptive title" /></label>
+          <label style={{ gridColumn: '1 / -1' }}>What happened? (facts only, no blame)<TextField as="textarea" value={form.description} onValue={nextValue => setForm({ ...form, description: nextValue })} required /></label>
+          <label style={{ gridColumn: '1 / -1' }}>Immediate action taken (urgent step to contain the problem)<TextField as="textarea" value={form.immediateCorrection} onValue={nextValue => setForm({ ...form, immediateCorrection: nextValue })} /></label>
+          {cfg.remedialActionEnabled && <label style={{ gridColumn: '1 / -1' }}>Remedial action taken (short-term correction)<TextField as="textarea" value={form.remedialAction} onValue={nextValue => setForm({ ...form, remedialAction: nextValue })} /></label>}
           <label className="check-inline" style={{ gridColumn: '1 / -1' }}>
             <input type="checkbox" checked={form.affectsPatientSafety} onChange={e => setForm({ ...form, affectsPatientSafety: e.target.checked })} /> This event affects patient safety
           </label>
@@ -495,10 +497,10 @@ function NcDetail({ nc, staff, sections, cfg, capa, onClose, onChanged, onError,
     {n.escalation_reason && <Banner kind="info"><strong>Auto-escalated:</strong> {n.escalation_reason}</Banner>}
 
     {amend ? <div className="form-grid">
-      <label style={{ gridColumn: '1 / -1' }}>Title<input value={edit.title} onChange={e => setEdit({ ...edit, title: e.target.value })} /></label>
-      <label style={{ gridColumn: '1 / -1' }}>Description<textarea value={edit.description} onChange={e => setEdit({ ...edit, description: e.target.value })} /></label>
-      <label style={{ gridColumn: '1 / -1' }}>Immediate action<textarea value={edit.immediateCorrection} onChange={e => setEdit({ ...edit, immediateCorrection: e.target.value })} /></label>
-      {cfg.remedialActionEnabled && <label style={{ gridColumn: '1 / -1' }}>Remedial action<textarea value={edit.remedialAction} onChange={e => setEdit({ ...edit, remedialAction: e.target.value })} /></label>}
+      <label style={{ gridColumn: '1 / -1' }}>Title<TextField value={edit.title} onValue={nextValue => setEdit({ ...edit, title: nextValue })} /></label>
+      <label style={{ gridColumn: '1 / -1' }}>Description<TextField as="textarea" value={edit.description} onValue={nextValue => setEdit({ ...edit, description: nextValue })} /></label>
+      <label style={{ gridColumn: '1 / -1' }}>Immediate action<TextField as="textarea" value={edit.immediateCorrection} onValue={nextValue => setEdit({ ...edit, immediateCorrection: nextValue })} /></label>
+      {cfg.remedialActionEnabled && <label style={{ gridColumn: '1 / -1' }}>Remedial action<TextField as="textarea" value={edit.remedialAction} onValue={nextValue => setEdit({ ...edit, remedialAction: nextValue })} /></label>}
       <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8 }}>
         {can('settings', 'edit') && <button onClick={saveAmendment}>Save amendment</button>}
         <button className="secondary" onClick={() => setAmend(false)}>Cancel</button>
@@ -642,14 +644,14 @@ export function IncidentsPage({ embedded = false }: { embedded?: boolean } = {})
       {can('nc_capa', 'create') && <form className="form-grid" onSubmit={create}>
         <label>Date &amp; time<input type="datetime-local" value={form.incidentDatetime} onChange={e => setForm({ ...form, incidentDatetime: e.target.value })} /></label>
         <label>Type<select value={form.incidentType} onChange={e => setForm({ ...form, incidentType: e.target.value })}>{INCIDENT_TYPES.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}</select></label>
-        {form.incidentType === 'other' && <label>Specify type<input value={form.incidentTypeOther} onChange={e => setForm({ ...form, incidentTypeOther: e.target.value })} /></label>}
+        {form.incidentType === 'other' && <label>Specify type<TextField value={form.incidentTypeOther} onValue={nextValue => setForm({ ...form, incidentTypeOther: nextValue })} /></label>}
         <label>Unit / section<select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-        <label>Location<input value={form.locationText} onChange={e => setForm({ ...form, locationText: e.target.value })} placeholder="e.g. Phlebotomy room" /></label>
-        <label>Persons involved<input value={form.personsInvolved} onChange={e => setForm({ ...form, personsInvolved: e.target.value })} placeholder="Names / roles (no blame)" /></label>
+        <label>Location<TextField value={form.locationText} onValue={nextValue => setForm({ ...form, locationText: nextValue })} placeholder="e.g. Phlebotomy room" /></label>
+        <label>Persons involved<TextField value={form.personsInvolved} onValue={nextValue => setForm({ ...form, personsInvolved: nextValue })} placeholder="Names / roles (no blame)" /></label>
         <label>Harm level<select value={form.harmLevel} onChange={e => setForm({ ...form, harmLevel: e.target.value })}>{HARM_LEVELS.map(h => <option key={h.v} value={h.v}>{h.l}</option>)}</select></label>
         <label>Reported by<select value={form.reportedByStaffId} onChange={e => setForm({ ...form, reportedByStaffId: e.target.value })}><option value="">Me</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-        <label style={{ gridColumn: '1 / -1' }}>What happened? (facts only)<textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} required /></label>
-        <label style={{ gridColumn: '1 / -1' }}>Immediate action taken<textarea value={form.immediateAction} onChange={e => setForm({ ...form, immediateAction: e.target.value })} /></label>
+        <label style={{ gridColumn: '1 / -1' }}>What happened? (facts only)<TextField as="textarea" value={form.description} onValue={nextValue => setForm({ ...form, description: nextValue })} required /></label>
+        <label style={{ gridColumn: '1 / -1' }}>Immediate action taken<TextField as="textarea" value={form.immediateAction} onValue={nextValue => setForm({ ...form, immediateAction: nextValue })} /></label>
         <label className="check-inline" style={{ gridColumn: '1 / -1' }}><input type="checkbox" checked={form.isNearMiss} onChange={e => setForm({ ...form, isNearMiss: e.target.checked })} /> Near miss (no harm occurred)</label>
         <label className="check-inline" style={{ gridColumn: '1 / -1' }}><input type="checkbox" checked={form.affectsPatientSafety} onChange={e => setForm({ ...form, affectsPatientSafety: e.target.checked })} /> This event affects patient safety</label>
         <div style={{ gridColumn: '1 / -1' }}><EscalationNote cfg={cfg} /></div>
@@ -716,9 +718,9 @@ function IncidentDetail({ incident: i, cfg, onClose, onChanged, onError, onMsg }
 
     <h4 style={{ marginBottom: 4, marginTop: 14 }}>Notification &amp; reporting</h4>
     <div className="form-grid">
-      <label>Notified to<input value={notifiedTo} onChange={e => setNotifiedTo(e.target.value)} onBlur={() => save({ notifiedTo })} placeholder="Manager, safety officer…" /></label>
+      <label>Notified to<TextField value={notifiedTo} onValue={nextValue => setNotifiedTo(nextValue)} onBlur={e => save({ notifiedTo: (e.target as HTMLInputElement).value })} placeholder="Manager, safety officer…" /></label>
       <label className="check-inline"><input type="checkbox" checked={external} onChange={e => { setExternal(e.target.checked); save({ reportableExternal: e.target.checked }); }} /> Reportable to an external authority</label>
-      {external && <label>External authority<input value={authority} onChange={e => setAuthority(e.target.value)} onBlur={() => save({ externalAuthority: authority })} /></label>}
+      {external && <label>External authority<TextField value={authority} onValue={nextValue => setAuthority(nextValue)} onBlur={e => save({ externalAuthority: (e.target as HTMLInputElement).value })} /></label>}
     </div>
 
     <h4 style={{ marginBottom: 4, marginTop: 14 }}>Corrective &amp; preventive action</h4>
@@ -933,9 +935,9 @@ function CapaDetailPanel({ capa, staff, cfg, onClose, onChanged, onError, onMsg 
     </p>
     <CapaStepper status={capa.status} effectiveness={c.effectiveness_status} />
 
-    <div className="notice-ok" style={{ background: 'var(--surface-2, #eef1f6)', color: 'inherit', marginBottom: 12 }}>
+    <Notice kind="success" style={{ background: 'var(--surface-2, #eef1f6)', color: 'inherit', marginBottom: 12 }} silent>
       <strong>Next step: {next.label}.</strong> <span className="muted">{next.hint}</span>
-    </div>
+    </Notice>
 
     <h4 style={{ marginBottom: 4 }}>Problem</h4>
     <p style={{ marginTop: 0 }}>{capa.title}{capa.problem_summary ? <><br /><span className="muted">{capa.problem_summary}</span></> : null}</p>
@@ -948,9 +950,9 @@ function CapaDetailPanel({ capa, staff, cfg, onClose, onChanged, onError, onMsg 
     {/* ---- stage-specific action panel ---- */}
     {(capa.status === 'open' || capa.status === 'reopened') && cfg.canFollowUp && <fieldset className="reg-section"><legend>Action plan</legend>
       <div className="form-grid">
-        <label style={{ gridColumn: '1 / -1' }}>Root cause<textarea value={plan.rootCause} onChange={e => setPlan({ ...plan, rootCause: e.target.value })} /></label>
-        <label style={{ gridColumn: '1 / -1' }}>Corrective action — what will be done to fix this<textarea value={plan.correctiveAction} onChange={e => setPlan({ ...plan, correctiveAction: e.target.value })} required /></label>
-        <label style={{ gridColumn: '1 / -1' }}>Preventive action — what will stop it recurring<textarea value={plan.preventiveAction} onChange={e => setPlan({ ...plan, preventiveAction: e.target.value })} /></label>
+        <label style={{ gridColumn: '1 / -1' }}>Root cause<TextField as="textarea" value={plan.rootCause} onValue={nextValue => setPlan({ ...plan, rootCause: nextValue })} /></label>
+        <label style={{ gridColumn: '1 / -1' }}>Corrective action — what will be done to fix this<TextField as="textarea" value={plan.correctiveAction} onValue={nextValue => setPlan({ ...plan, correctiveAction: nextValue })} required /></label>
+        <label style={{ gridColumn: '1 / -1' }}>Preventive action — what will stop it recurring<TextField as="textarea" value={plan.preventiveAction} onValue={nextValue => setPlan({ ...plan, preventiveAction: nextValue })} /></label>
         <label>Owner<select value={plan.responsibleStaffId} onChange={e => setPlan({ ...plan, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Target completion<input type="date" value={plan.dueDate} onChange={e => setPlan({ ...plan, dueDate: e.target.value })} required /></label>
         <label>Priority<select value={plan.priority} onChange={e => setPlan({ ...plan, priority: e.target.value })}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option></select></label>
@@ -961,20 +963,20 @@ function CapaDetailPanel({ capa, staff, cfg, onClose, onChanged, onError, onMsg 
 
     {capa.status === 'in_progress' && cfg.canFollowUp && <fieldset className="reg-section"><legend>Implementation</legend>
       <div className="form-grid">
-        <label style={{ gridColumn: '1 / -1' }}>Progress note<textarea value={progress} onChange={e => setProgress(e.target.value)} placeholder="What has been done since the last update?" /></label>
+        <label style={{ gridColumn: '1 / -1' }}>Progress note<TextField as="textarea" value={progress} onValue={nextValue => setProgress(nextValue)} placeholder="What has been done since the last update?" /></label>
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
         {can('nc_capa', 'edit') && <button className="secondary" disabled={busy || !progress.trim()} onClick={() => call('add-update', { updateText: progress, status: 'in_progress' }, 'Progress recorded.').then(() => setProgress(''))}>Add progress note</button>}
       </div>
       <div className="form-grid" style={{ marginTop: 12 }}>
-        <label style={{ gridColumn: '1 / -1' }}>Completion note (optional)<textarea value={completeNotes} onChange={e => setCompleteNotes(e.target.value)} /></label>
+        <label style={{ gridColumn: '1 / -1' }}>Completion note (optional)<TextField as="textarea" value={completeNotes} onValue={nextValue => setCompleteNotes(nextValue)} /></label>
       </div>
       {can('nc_capa', 'edit') && <button disabled={busy} onClick={() => call('complete', { notes: completeNotes }, 'Actions marked complete — awaiting verification.')}>Mark actions complete</button>}
     </fieldset>}
 
     {capa.status === 'completed' && cfg.canFollowUp && <fieldset className="reg-section"><legend>Verification</legend>
       <p className="muted" style={{ marginTop: 0 }}>Confirm the planned actions were actually carried out. This is a check of implementation, not yet of whether they worked.</p>
-      <label style={{ display: 'block' }}>Verification notes<textarea value={verifyNotes} onChange={e => setVerifyNotes(e.target.value)} /></label>
+      <label style={{ display: 'block' }}>Verification notes<TextField as="textarea" value={verifyNotes} onValue={nextValue => setVerifyNotes(nextValue)} /></label>
       <button style={{ marginTop: 10 }} disabled={busy || !verifyNotes.trim()} onClick={() => call('verify', { verificationNotes: verifyNotes }, 'Implementation verified.')}>Verify implementation</button>
     </fieldset>}
 
@@ -986,7 +988,7 @@ function CapaDetailPanel({ capa, staff, cfg, onClose, onChanged, onError, onMsg 
           <label>Verdict<select value={eff.verdict} onChange={e => setEff({ ...eff, verdict: e.target.value })}>
             <option value="">— choose —</option><option value="effective">Effective — the problem has not recurred</option><option value="not_effective">Not effective — rework required</option>
           </select></label>
-          <label style={{ gridColumn: '1 / -1' }}>Evidence &amp; conclusion<textarea value={eff.notes} onChange={e => setEff({ ...eff, notes: e.target.value })} required /></label>
+          <label style={{ gridColumn: '1 / -1' }}>Evidence &amp; conclusion<TextField as="textarea" value={eff.notes} onValue={nextValue => setEff({ ...eff, notes: nextValue })} required /></label>
         </div>
         {can('nc_capa', 'edit') && <button style={{ marginTop: 10 }} disabled={busy || !eff.verdict || !eff.notes.trim()}
           onClick={() => call('effectiveness-review', { verdict: eff.verdict, effectivenessReviewNotes: eff.notes, effectivenessReviewDate: eff.date },
@@ -997,7 +999,7 @@ function CapaDetailPanel({ capa, staff, cfg, onClose, onChanged, onError, onMsg 
 
     {capa.status === 'verified' && (!c.effectiveness_required || c.effectiveness_status === 'effective') && cfg.canFollowUp &&
       <fieldset className="reg-section"><legend>Closure</legend>
-        <label style={{ display: 'block' }}>Closure notes<textarea value={closureNotes} onChange={e => setClosureNotes(e.target.value)} /></label>
+        <label style={{ display: 'block' }}>Closure notes<TextField as="textarea" value={closureNotes} onValue={nextValue => setClosureNotes(nextValue)} /></label>
         <button style={{ marginTop: 10 }} disabled={busy} onClick={() => call('close', { closureNotes }, 'CAPA closed. The originating record was closed out too.')}>Close CAPA</button>
       </fieldset>}
 
