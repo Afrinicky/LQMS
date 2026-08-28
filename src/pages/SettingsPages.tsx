@@ -65,6 +65,7 @@ function effectiveRoleNames(title: string): string[] {
 // Matrix → Section Scope). Everything is created in one transaction server-side.
 
 export function RegisterStaff() {
+  const { can } = usePermissions();
   const [roles, setRoles] = useState<{ id: number; name: string }[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
@@ -136,7 +137,7 @@ export function RegisterStaff() {
       {error && <div className="error">{error}</div>}
       {success && <div className="notice-ok">{success}</div>}
 
-      <form className="form" onSubmit={submit}>
+      {can('settings', 'create') && <form className="form" onSubmit={submit}>
         <fieldset className="reg-section">
           <legend>Personal &amp; role details</legend>
           <div className="form-grid">
@@ -193,7 +194,7 @@ export function RegisterStaff() {
         </fieldset>
 
         <button type="submit">Register staff member</button>
-      </form>
+      </form>}
     </div>
 
     <div className="card">
@@ -254,6 +255,7 @@ export function RegisterStaff() {
 // Users & Access
 // ---------------------------------------------------------------------------
 export function UsersAccess(){
+  const { can } = usePermissions();
   const [users,setUsers]=useState<(ApiUser & {staffName?: string})[]>([]);
   const [roles,setRoles]=useState<{id:number;name:string}[]>([]);
   const [staff,setStaff]=useState<Staff[]>([]);
@@ -290,20 +292,21 @@ export function UsersAccess(){
     <p>Create login accounts, link them to staff records, and change what role somebody holds. To onboard a whole new person (staff + account + positions) use the <strong>Register New Staff</strong> tab. Click a row to link its staff record, or <strong>Manage account</strong> to change the role, hand over a password, or deactivate it.</p>
     {error && <div className="error">{error}</div>}
     {success && <div className="notice-ok">{success}</div>}
-    <form className="form" onSubmit={submit}>
+    {can('settings', 'create') && <form className="form" onSubmit={submit}>
       <label>Full name<input name="fullName" required/></label>
       <label>Username<input name="username" required/></label>
       <label>Password<input name="password" type="password" minLength={8} required/></label>
       <label>Role<select name="roleId" required><option value="">Select role…</option>{roles.map(r=><option value={r.id} key={r.id}>{r.name}</option>)}</select></label>
       <label>Link to Staff Record (Optional)<select name="staffId"><option value="">Not linked</option>{unlinkedStaff.map(s=><option value={s.id} key={s.id}>{s.fullName}{s.employeeNo?` (${s.employeeNo})`:''}</option>)}</select></label>
       <button>Create user</button>
-    </form>
+    </form>}
     {/* The account panel below opens inside a row, so the table is the widest
         thing on this screen. Scroll it in its own box rather than letting it
         push the whole page sideways. */}
     <div className="table-scroll">
     <table className="table users-table"><thead><tr><th>Username</th><th>Full Name</th><th>Role</th><th>Linked Staff</th><th>Active</th><th></th></tr></thead><tbody>
       {users.map(u=>{
+  const { can } = usePermissions();
         const linkable = staff.filter(s => !s.userId || s.userId === u.id);
         const open = openUser===u.id;
         const manage = manageUser===u.id;
@@ -324,8 +327,8 @@ export function UsersAccess(){
                 <option value="">— none —</option>
                 {linkable.map(s=><option key={s.id} value={s.id}>{s.fullName}{s.employeeNo?` (${s.employeeNo})`:''}</option>)}
               </select>
-              <button type="button" onClick={()=>linkStaff(u.id, linkSel?Number(linkSel):null)}>Save link</button>
-              {u.staffId && <button type="button" className="secondary" onClick={()=>linkStaff(u.id,null)}>Unlink</button>}
+              {can('settings', 'edit') && <button type="button" onClick={()=>linkStaff(u.id, linkSel?Number(linkSel):null)}>Save link</button>}
+              {u.staffId && can('settings', 'edit') && <button type="button" className="secondary" onClick={()=>linkStaff(u.id,null)}>Unlink</button>}
               {staff.length===0 && <span className="hint">No staff records yet — register staff first.</span>}
             </div>
           </td></tr>}
@@ -345,6 +348,7 @@ export function UsersAccess(){
 type OrgNodeData = { id: number; title: string; description?: string | null; reportsToPositionId: number | null; isActive: number; occupants: { staffId: number; staffName: string; assignmentType: string }[] };
 
 export function Positions(){
+  const { can } = usePermissions();
   const [view,setView]=useState<'list'|'organogram'>('list');
   const [positions,setPositions]=useState<Position[]>([]);
   const [staff,setStaff]=useState<Staff[]>([]);
@@ -398,30 +402,30 @@ export function Positions(){
 
     {view==='list' && <div className="grid cols-2">
       <div className="card"><h3>Positions &amp; Organogram</h3><p>Create positions and assign reporting lines. Not every laboratory has every position — deactivate the ones you don't use. Staff are mapped here and during <Link to="/settings/people">Register New Staff</Link>.</p>
-        <form className="form" onSubmit={addPosition}>
+        {can('settings', 'create') && <form className="form" onSubmit={addPosition}>
           <label>Position title<input name="title" required/></label>
           <label>Description<textarea name="description"/></label>
           <label>Reporting line<select name="reportsToPositionId"><option value="">None</option>{positions.map(p=><option value={p.id} key={p.id}>{p.title}</option>)}</select></label>
           <button>Create position</button>
-        </form>
+        </form>}
         <table className="data-table"><thead><tr><th>Title</th><th>Reports to</th><th>Status</th><th></th></tr></thead><tbody>
           {positions.map(p => editing?.id===p.id
             ? <tr key={p.id}><td colSpan={4}>
-                <form className="form inline-edit" onSubmit={saveEdit}>
+                {can('settings', 'edit') && <form className="form inline-edit" onSubmit={saveEdit}>
                   <label>Title<input value={editForm.title} onChange={e=>setEditForm({...editForm,title:e.target.value})} required/></label>
                   <label>Reports to<select value={editForm.reportsToPositionId} onChange={e=>setEditForm({...editForm,reportsToPositionId:e.target.value})}><option value="">None</option>{positions.filter(x=>x.id!==p.id).map(x=><option value={x.id} key={x.id}>{x.title}</option>)}</select></label>
                   <label className="toggle"><input type="checkbox" checked={editForm.isActive} onChange={e=>setEditForm({...editForm,isActive:e.target.checked})}/> Active</label>
                   <button type="submit">Save</button>
                   <button type="button" className="secondary" onClick={()=>setEditing(null)}>Cancel</button>
-                </form>
+                </form>}
               </td></tr>
             : <tr key={p.id}><td>{p.title}</td><td>{byId(p.reportsToPositionId) || '—'}</td><td>{p.isActive ? <span className="badge active">active</span> : <span className="badge inactive">inactive</span>}</td>
-                <td><button onClick={()=>startEdit(p)}>Edit</button> <button className="secondary" onClick={()=>toggleStatus(p)}>{p.isActive?'Deactivate':'Activate'}</button> <button className="secondary" onClick={()=>removePosition(p)}>Remove</button></td>
+                <td><button onClick={()=>startEdit(p)}>Edit</button> {can('settings', 'edit') && <button className="secondary" onClick={()=>toggleStatus(p)}>{p.isActive?'Deactivate':'Activate'}</button>} <button className="secondary" onClick={()=>removePosition(p)}>Remove</button></td>
               </tr>)}
         </tbody></table>
       </div>
       <div className="card"><h3>Quick staff assignment</h3>
-        <form className="form" onSubmit={addStaff}>
+        {can('personnel.register', 'create') && <form className="form" onSubmit={addStaff}>
           <label>Employee no<input name="employeeNo"/></label>
           <label>Staff full name<input name="fullName" required/></label>
           <label>Email<input name="email"/></label>
@@ -429,7 +433,7 @@ export function Positions(){
           <label>Section<select name="sectionId"><option value="">Unassigned</option>{sections.map(s=><option value={s.id} key={s.id}>{s.name}</option>)}</select></label>
           <label>Assign position<select name="positionId" required><option value="">Select…</option>{positions.filter(p=>p.isActive!==false).map(p=><option value={p.id} key={p.id}>{p.title}</option>)}</select></label>
           <button>Create staff</button>
-        </form>
+        </form>}
         <table className="data-table"><thead><tr><th>Name</th><th>Position</th><th>Section</th></tr></thead><tbody>
           {staff.map(s => <tr key={s.id}><td>{s.fullName}</td><td>{s.primaryPosition || '—'}</td><td>{s.sectionName || '—'}</td></tr>)}
         </tbody></table>
@@ -464,6 +468,7 @@ type OrgCtx = {
 // Configurable professional rank order — drives the automatic within-cadre
 // arrangement of technical staff on the organogram (lower number = higher rank).
 function RankConfig() {
+  const { can } = usePermissions();
   const [ranks, setRanks] = useState<ProfessionalRank[]>([]);
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -495,10 +500,10 @@ function RankConfig() {
       </tr>)}
       {ranks.length === 0 && <tr><td colSpan={4} className="hint">No ranks configured.</td></tr>}
     </tbody></table>
-    <form className="org-add-root" style={{ marginTop: 10 }} onSubmit={add}>
+    {can('settings', 'edit') && <form className="org-add-root" style={{ marginTop: 10 }} onSubmit={add}>
       <input placeholder="Add a rank (e.g. Senior Medical Laboratory Scientist)…" value={name} onChange={e => setName(e.target.value)} />
       <button type="submit">Add rank</button>
-    </form>
+    </form>}
   </div>;
 }
 
@@ -711,6 +716,7 @@ function OrgNodeEditor({ node, ctx }: { node: OrgNodeData; ctx: OrgCtx }) {
 type ConfigListView = { key: string; label: string; description: string; archetypeOf: string[] | null; options: ConfigOption[] };
 
 export function ConfigListsPage() {
+  const { can } = usePermissions();
   const [lists, setLists] = useState<ConfigListView[]>([]);
   const [activeKey, setActiveKey] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
@@ -780,7 +786,7 @@ export function ConfigListsPage() {
               <tr key={o.id} className="editing-row">
                 <td><input value={editDraft.label} onChange={e => setEditDraft({ ...editDraft, label: e.target.value })} /></td>
                 {list.archetypeOf && <td><select value={editDraft.archetype} onChange={e => setEditDraft({ ...editDraft, archetype: e.target.value })}>{list.archetypeOf.map(a => <option key={a} value={a}>{archetypeLabel(a)}</option>)}</select></td>}
-                <td colSpan={2}><button onClick={() => saveEdit(o.id)}>Save</button> <button className="secondary" onClick={() => setEditing(null)}>Cancel</button></td>
+                <td colSpan={2}>{can('settings', 'edit') && <button onClick={() => saveEdit(o.id)}>Save</button>} <button className="secondary" onClick={() => setEditing(null)}>Cancel</button></td>
               </tr>
             ) : (
               <tr key={o.id} className={o.is_active ? undefined : 'muted-row'}>
@@ -1147,6 +1153,7 @@ function SectionTestMenu({ detail, sectionId, call }: {
   // A single leaf test row (a panel's component or a standalone test), with
   // inline edit and its own remove / activate controls.
   const leafRow = (t: SectionTestRow, isComponent: boolean) => {
+  const { can } = usePermissions();
     if (editing === t.id) return (
       <tr key={t.id} className="editing-row">
         <td style={isComponent ? { paddingLeft: 22 } : undefined}><input value={editForm.testName} onChange={e => setEditForm({ ...editForm, testName: e.target.value })} /></td>
@@ -1155,7 +1162,7 @@ function SectionTestMenu({ detail, sectionId, call }: {
         <td>{autoSelect(editForm.automation, v => setEditForm({ ...editForm, automation: v, equipmentId: automationUsesEquipment(v) ? editForm.equipmentId : '' }))}</td>
         <td>{analyserSelect(editForm.automation, editForm.equipmentId, v => setEditForm({ ...editForm, equipmentId: v }))}</td>
         <td><input type="number" value={editForm.tatTargetMinutes} onChange={e => setEditForm({ ...editForm, tatTargetMinutes: e.target.value })} style={{ width: 60 }} /></td>
-        <td colSpan={2}><button onClick={() => saveEdit(t.id)}>Save</button> <button className="secondary" onClick={() => setEditing(null)}>Cancel</button></td>
+        <td colSpan={2}>{can('settings', 'edit') && <button onClick={() => saveEdit(t.id)}>Save</button>} <button className="secondary" onClick={() => setEditing(null)}>Cancel</button></td>
       </tr>
     );
     return (
@@ -1284,6 +1291,7 @@ function SectionTestMenu({ detail, sectionId, call }: {
 // (e.g. Culture & Sensitivity, Parasitology, GeneXpert, Microscopy). These feed
 // the Bench Schedule grid in Personnel Management.
 function SectionBenches({ sectionId }: { sectionId: number }) {
+  const { can } = usePermissions();
   type BenchRow = { id: number; name: string; code: string | null; description: string | null; display_order: number; is_active: number };
   const [rows, setRows] = useState<BenchRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -1306,12 +1314,12 @@ function SectionBenches({ sectionId }: { sectionId: number }) {
       </tr>)}
       {rows.length === 0 && <tr><td colSpan={6} className="hint">No benches yet. Add the unit's workspaces below.</td></tr>}
     </tbody></table>
-    <form className="form-grid" onSubmit={add} style={{ marginTop: 12 }}>
+    {can('settings', 'edit') && <form className="form-grid" onSubmit={add} style={{ marginTop: 12 }}>
       <label>Bench / workspace name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Culture & Sensitivity" required /></label>
       <label>Short code<input value={form.code} onChange={e => setForm({ ...form, code: e.target.value })} placeholder="e.g. C&S" /></label>
       <label>Description<input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></label>
       <button type="submit">Add bench</button>
-    </form>
+    </form>}
   </>;
 }
 
@@ -1330,6 +1338,7 @@ function SectionBenches({ sectionId }: { sectionId: number }) {
 // Other settings panels (unchanged behaviour)
 // ---------------------------------------------------------------------------
 export function ModuleToggles(){
+  const { can } = usePermissions();
   const [modules,setModules]=useState<SystemModule[]>([]);
   const load=()=>api<SystemModule[]>('/system-modules').then(setModules);
   useEffect(()=>{void load()},[]);
@@ -1338,7 +1347,7 @@ export function ModuleToggles(){
     load();
   }
   return <div className="card"><h3>System Modules Toggle</h3><p>Disabled modules are hidden from the main sidebar, alerts are paused, data is preserved, and direct routes show a disabled module page. Settings remains accessible.</p>
-    <table className="table"><tbody>{modules.map(m=><tr key={m.key}><td>{m.label}</td><td>{m.enabled?'Enabled':'Disabled'}</td><td><button disabled={m.key==='settings'} onClick={()=>toggle(m)}>{m.enabled?'Disable':'Enable'}</button></td></tr>)}</tbody></table>
+    <table className="table"><tbody>{modules.map(m=><tr key={m.key}><td>{m.label}</td><td>{m.enabled?'Enabled':'Disabled'}</td><td>{can('settings', 'edit') && <button disabled={m.key==='settings'} onClick={()=>toggle(m)}>{m.enabled?'Disable':'Enable'}</button>}</td></tr>)}</tbody></table>
   </div>;
 }
 
@@ -1351,6 +1360,7 @@ export function DocumentImport(){
 }
 
 export function EvidenceUpload(){
+  const { can } = usePermissions();
   async function submit(e:FormEvent<HTMLFormElement>){
     e.preventDefault();
     const fd=new FormData(e.currentTarget);
@@ -1358,18 +1368,19 @@ export function EvidenceUpload(){
     alert('Evidence uploaded and linked.');
   }
   return <div className="card"><h3>Evidence Upload</h3>
-    <form className="form" onSubmit={submit}>
+    {can('settings', 'create') && <form className="form" onSubmit={submit}>
       <label>File<input name="file" type="file" required/></label>
       <label>Module key<input name="moduleKey" defaultValue="documents" required/></label>
       <label>Record type<input name="recordType" defaultValue="foundation_record" required/></label>
       <label>Record ID<input name="recordId" defaultValue="MVP-1" required/></label>
       <label>Notes<textarea name="notes"/></label>
       <button>Upload evidence</button>
-    </form>
+    </form>}
   </div>;
 }
 
 export function ActionTracker(){
+  const { can } = usePermissions();
   async function submit(e:FormEvent<HTMLFormElement>){
     e.preventDefault();
     const fd=new FormData(e.currentTarget);
@@ -1377,13 +1388,13 @@ export function ActionTracker(){
     alert('Action created.');
   }
   return <div className="card"><h3>Action Tracker</h3>
-    <form className="form" onSubmit={submit}>
+    {can('settings', 'create') && <form className="form" onSubmit={submit}>
       <label>Title<input name="title" required/></label>
       <label>Module key<input name="moduleKey" defaultValue="nc_capa"/></label>
       <label>Priority<select name="priority"><option>normal</option><option>high</option><option>low</option></select></label>
       <label>Due date<input name="dueDate" type="date"/></label>
       <button>Create action</button>
-    </form>
+    </form>}
   </div>;
 }
 
@@ -1582,9 +1593,9 @@ export function BackupRestore(){
         </p>
         <div className="bk-restore-row">
           <input ref={fileRef} type="file" accept=".zip,application/zip" onChange={e => setRestoreFile(e.target.files?.[0] ?? null)} />
-          <button onClick={restoreFromUpload} disabled={!!busy || !restoreFile}>
+          {can('settings', 'approve') && <button onClick={restoreFromUpload} disabled={!!busy || !restoreFile}>
             {busy === 'restore' ? 'Restoring…' : 'Restore from this file'}
-          </button>
+          </button>}
         </div>
       </div>
     )}
@@ -1610,9 +1621,9 @@ export function BackupRestore(){
             </p>
             <div className="bk-restore-row">
               <input type="text" value={resetConfirm} onChange={e => setResetConfirm(e.target.value)} placeholder="Type RESET to confirm" style={{ maxWidth: 220 }} />
-              <button className="danger" onClick={factoryReset} disabled={!!busy || resetConfirm !== 'RESET'}>
+              {can('settings', 'approve') && <button className="danger" onClick={factoryReset} disabled={!!busy || resetConfirm !== 'RESET'}>
                 {busy === 'reset' ? 'Resetting…' : 'Erase everything'}
-              </button>
+              </button>}
             </div>
           </>
         )}
@@ -1757,6 +1768,7 @@ function ScheduleCard({ status, readOnly, onSaved, onError }: {
   status: ProtectionStatus | null; readOnly: boolean;
   onSaved: (message: string) => void | Promise<void>; onError: (m: string) => void;
 }) {
+  const { can } = usePermissions();
   const [schedule, setSchedule] = useState<BackupSchedule | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => { if (status) setSchedule(status.schedule); }, [status]);
@@ -1886,7 +1898,7 @@ function ScheduleCard({ status, readOnly, onSaved, onError }: {
 
       {!readOnly && (
         <div className="form-actions">
-          <button onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save schedule'}</button>
+          {can('settings', 'edit') && <button onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save schedule'}</button>}
         </div>
       )}
       {readOnly && <p className="hint">You can see the schedule but not change it.</p>}
@@ -2038,6 +2050,7 @@ function DestinationForm({ def, existing, onCancel, onSaved, onError }: {
   def: DestinationKindDef; existing: BackupDestination | null;
   onCancel: () => void; onSaved: (message: string) => void | Promise<void>; onError: (m: string) => void;
 }) {
+  const { can } = usePermissions();
   const [name, setName] = useState(existing?.name ?? def.label);
   const [config, setConfig] = useState<Record<string, string>>(() => {
     const seed: Record<string, string> = {};
@@ -2103,7 +2116,7 @@ function DestinationForm({ def, existing, onCancel, onSaved, onError }: {
       </p>
 
       <div className="form-actions">
-        <button onClick={save} disabled={busy}>{busy ? 'Checking…' : existing ? 'Save and verify' : 'Add and verify'}</button>
+        {can('settings', 'edit') && <button onClick={save} disabled={busy}>{busy ? 'Checking…' : existing ? 'Save and verify' : 'Add and verify'}</button>}
         <button type="button" className="secondary" onClick={onCancel}>Cancel</button>
       </div>
     </div>
@@ -2115,6 +2128,7 @@ function FolderCard({ status, readOnly, onChanged, onError }: {
   status: ProtectionStatus | null; readOnly: boolean;
   onChanged: (message: string) => void | Promise<void>; onError: (m: string) => void;
 }) {
+  const { can } = usePermissions();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState('');
@@ -2157,15 +2171,15 @@ function FolderCard({ status, readOnly, onChanged, onError }: {
             </span>
           </label>
           <div className="form-actions">
-            <button disabled={!!busy} onClick={() => run('save', async () => {
+            {can('settings', 'approve') && <button disabled={!!busy} onClick={() => run('save', async () => {
               const r = await api<{ message: string }>('/backup/folder', { method: 'PUT', body: JSON.stringify({ path: value.trim() || null }) });
               setEditing(false);
               return r;
-            })}>{busy === 'save' ? 'Checking…' : 'Use this folder'}</button>
-            <button type="button" className="secondary" disabled={!!busy || !value.trim()} onClick={() => run('test', () =>
+            })}>{busy === 'save' ? 'Checking…' : 'Use this folder'}</button>}
+            {can('settings', 'approve') && <button type="button" className="secondary" disabled={!!busy || !value.trim()} onClick={() => run('test', () =>
               api('/backup/folder/test', { method: 'POST', body: JSON.stringify({ path: value.trim() }) }))}>
               {busy === 'test' ? 'Checking…' : 'Test it'}
-            </button>
+            </button>}
             <button type="button" className="secondary" onClick={() => setEditing(false)}>Cancel</button>
           </div>
         </>
@@ -2234,6 +2248,7 @@ function BackupList({ backups, location, busy, driveConnected, canRestore, canPr
 
 
 export function Devices(){
+  const { can } = usePermissions();
   const [devices,setDevices]=useState<Device[]>([]);
   const load=()=>api<Device[]>('/devices').then(setDevices);
   useEffect(()=>{void load()},[]);
@@ -2252,12 +2267,12 @@ export function Devices(){
   }
 
   return <div className="card"><h3>Device Access / Pairing</h3><p>Foundation for future desktop LAN clients and mobile LAN clients. Only the host directly accesses SQLite.</p>
-    <form className="form" onSubmit={submit}>
+    {can('settings', 'create') && <form className="form" onSubmit={submit}>
       <label>Device name<input name="name" required/></label>
       <label>Type<select name="type"><option>desktop</option><option>mobile</option></select></label>
       <button>Request pairing code</button>
-    </form>
-    <table className="table"><thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Code</th><th>Actions</th></tr></thead><tbody>{devices.map(d=><tr key={d.id}><td>{d.name}</td><td>{d.type}</td><td>{d.status}</td><td>{d.device_code}</td><td><button onClick={()=>deviceAction(d.id,'approve')} disabled={d.status==='approved'}>Approve</button> <button onClick={()=>deviceAction(d.id,'revoke')} disabled={d.status==='revoked'}>Revoke</button> <button onClick={()=>deviceAction(d.id,'block')} disabled={d.status==='blocked'}>Block</button></td></tr>)}</tbody></table>
+    </form>}
+    <table className="table"><thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Code</th><th>Actions</th></tr></thead><tbody>{devices.map(d=><tr key={d.id}><td>{d.name}</td><td>{d.type}</td><td>{d.status}</td><td>{d.device_code}</td><td><button onClick={()=>deviceAction(d.id,'approve')} disabled={d.status==='approved'}>Approve</button> <button onClick={()=>deviceAction(d.id,'revoke')} disabled={d.status==='revoked'}>Revoke</button> {can('settings', 'edit') && <button onClick={()=>deviceAction(d.id,'block')} disabled={d.status==='blocked'}>Block</button>}</td></tr>)}</tbody></table>
   </div>;
 }
 
@@ -2320,6 +2335,7 @@ function renderPatternPreview(pattern: EquipmentPattern, year: number, seq: numb
 }
 
 function EquipmentNumbering() {
+  const { can } = usePermissions();
   const [pattern, setPattern] = useState<EquipmentPattern>({ separator: '/', segments: [{ type: 'text', value: 'EQP' }, { type: 'year', digits: 4 }, { type: 'sequence', padding: 4 }] });
   const [serverPreview, setServerPreview] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -2405,13 +2421,14 @@ function EquipmentNumbering() {
       Preview (first item this year): <strong style={{ fontFamily: 'ui-monospace, monospace' }}>{livePreview || '—'}</strong>
       {serverPreview && <> · next actual identifier: <strong style={{ fontFamily: 'ui-monospace, monospace' }}>{serverPreview}</strong></>}
     </div>
-    <div style={{ marginTop: 12 }}><button type="button" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save pattern'}</button></div>
+    <div style={{ marginTop: 12 }}>{can('settings', 'edit') && <button type="button" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save pattern'}</button>}</div>
   </div>;
 }
 
 // A small register that uploads and lists supporting documents for one category
 // (legal identity or the quality manual). Editing is confined to Settings.
 function LabDocuments({ category, docTypes, onChanged }: { category: string; docTypes: string[]; onChanged?: () => void }) {
+  const { can } = usePermissions();
   const blank = { docType: docTypes[0] ?? '', title: '', referenceNumber: '', issuingAuthority: '', issueDate: '', expiryDate: '', version: '', effectiveDate: '', notes: '' };
   const [rows, setRows] = useState<LaboratoryDocument[]>([]);
   const [form, setForm] = useState(blank);
@@ -2442,7 +2459,7 @@ function LabDocuments({ category, docTypes, onChanged }: { category: string; doc
 
   return <>
     {error && <div className="error">{error}</div>}
-    <form className="form" onSubmit={add}>
+    {can('settings', 'edit') && <form className="form" onSubmit={add}>
       <div className="form-grid">
         <label>Document type<select value={form.docType} onChange={e => setForm({ ...form, docType: e.target.value })}>{docTypes.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
         <label>Title<input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required placeholder={isManual ? 'e.g. Laboratory Quality Manual' : 'e.g. Operating licence 2026'} /></label>
@@ -2457,7 +2474,7 @@ function LabDocuments({ category, docTypes, onChanged }: { category: string; doc
       </div>
       <label>Notes<textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
       <button disabled={busy}>{busy ? 'Uploading…' : 'Add document'}</button>
-    </form>
+    </form>}
     <table className="data-table"><thead><tr><th>Type</th><th>Title</th><th>Ref</th><th>{isManual ? 'Version' : 'Issuer'}</th><th>{isManual ? 'Effective' : 'Issued'}</th><th>{isManual ? '' : 'Expiry'}</th><th>File</th><th></th></tr></thead><tbody>
       {rows.map(r => <tr key={r.id}>
         <td>{r.doc_type || '—'}</td><td>{r.title}</td><td>{r.reference_number || '—'}</td>
@@ -2465,7 +2482,7 @@ function LabDocuments({ category, docTypes, onChanged }: { category: string; doc
         <td>{(isManual ? r.effective_date : r.issue_date) || '—'}</td>
         <td>{isManual ? '' : (r.expiry_date || '—')}</td>
         <td>{r.file_id ? <button type="button" className="secondary" onClick={() => openStoredFile(r.file_id!, r.file_name, r.file_mime)}>Open {r.file_name ? `(${r.file_name})` : ''}</button> : '—'}</td>
-        <td><button type="button" className="secondary" onClick={() => remove(r.id)}>Remove</button></td>
+        <td>{can('settings', 'edit') && <button type="button" className="secondary" onClick={() => remove(r.id)}>Remove</button>}</td>
       </tr>)}
       {rows.length === 0 && <tr><td colSpan={8} className="hint">No documents uploaded yet.</td></tr>}
     </tbody></table>
@@ -2495,6 +2512,7 @@ type CoreSlot = {
 };
 
 function CoreDocumentsTab({ qualityManualSummary, onSummaryChange, onSaveSummary }: { qualityManualSummary: string; onSummaryChange: (v: string) => void; onSaveSummary: () => void }) {
+  const { can } = usePermissions();
   const nav = useNavigate();
   const [slots, setSlots] = useState<CoreSlot[]>([]);
   const [docs, setDocs] = useState<Array<{ id: number; document_code?: string; title: string; document_type?: string; status: string; core_slot_key?: string | null }>>([]);
@@ -2566,6 +2584,7 @@ function CoreDocumentsTab({ qualityManualSummary, onSummaryChange, onSaveSummary
 
     <div className="core-grid">
       {slots.map(slot => {
+  const { can } = usePermissions();
         const filled = !!slot.documentId;
         return <div className={`card core-card${filled ? '' : ' empty'}`} key={slot.id}>
           <div className="core-head">
@@ -2594,9 +2613,9 @@ function CoreDocumentsTab({ qualityManualSummary, onSummaryChange, onSaveSummary
             <RowMenuLite label={`More for ${slot.label}`}>
               {close => <>
                 <button type="button" role="menuitem" onClick={() => { close(); setRenaming(slot); setRenameTo(slot.label); }}>Rename…</button>
-                {filled && <button type="button" role="menuitem" disabled={busy === `assign-${slot.id}`}
+                {filled && can('settings', 'edit') && <button type="button" role="menuitem" disabled={busy === `assign-${slot.id}`}
                   onClick={() => { close(); void assign(slot, null); }}>Clear the assignment</button>}
-                {!slot.isSystem && <button type="button" role="menuitem" className="danger" disabled={busy === `del-${slot.id}`}
+                {!slot.isSystem && can('settings', 'edit') && <button type="button" role="menuitem" className="danger" disabled={busy === `del-${slot.id}`}
                   onClick={() => { close(); void run(`del-${slot.id}`, () => api(`/laboratory/core-documents/${slot.id}`, { method: 'DELETE' }), `${slot.label} removed.`); }}>Remove this core document</button>}
               </>}
             </RowMenuLite>
@@ -2628,10 +2647,10 @@ function CoreDocumentsTab({ qualityManualSummary, onSummaryChange, onSaveSummary
         </label>
         <ul className="core-pick">
           {candidates.map(d => <li key={d.id}>
-            <button type="button" disabled={busy === `assign-${picking.id}`} onClick={() => void assign(picking, d.id)}>
+            {can('settings', 'edit') && <button type="button" disabled={busy === `assign-${picking.id}`} onClick={() => void assign(picking, d.id)}>
               <span className="core-pick-title">{d.title}</span>
               <span className="core-pick-sub">{[d.document_code, d.document_type, d.status].filter(Boolean).join(' · ')}</span>
-            </button>
+            </button>}
           </li>)}
           {candidates.length === 0 && <li className="muted" style={{ padding: 12 }}>
             {docs.length === 0
@@ -2653,10 +2672,10 @@ function CoreDocumentsTab({ qualityManualSummary, onSummaryChange, onSaveSummary
       title="Add a core document"
       footer={<>
         <button type="button" className="secondary" onClick={() => setAdding(false)}>Cancel</button>
-        <button type="button" disabled={!newSlot.label.trim() || busy === 'add'}
+        {can('settings', 'edit') && <button type="button" disabled={!newSlot.label.trim() || busy === 'add'}
           onClick={() => void run('add', () => api('/laboratory/core-documents', { method: 'POST', body: JSON.stringify(newSlot) }), `${newSlot.label} added.`).then(() => setAdding(false))}>
           {busy === 'add' ? 'Adding…' : 'Add'}
-        </button>
+        </button>}
       </>}
     >
       <p className="dialog-lead muted">
@@ -2677,10 +2696,10 @@ function CoreDocumentsTab({ qualityManualSummary, onSummaryChange, onSaveSummary
       title={renaming ? `Rename ${renaming.label}` : ''}
       footer={<>
         <button type="button" className="secondary" onClick={() => setRenaming(null)}>Cancel</button>
-        <button type="button" disabled={!renameTo.trim() || busy === 'rename'}
+        {can('settings', 'edit') && <button type="button" disabled={!renameTo.trim() || busy === 'rename'}
           onClick={() => renaming && void run('rename', () => api(`/laboratory/core-documents/${renaming.id}`, { method: 'PUT', body: JSON.stringify({ label: renameTo }) }), 'Renamed.').then(() => setRenaming(null))}>
           Save
-        </button>
+        </button>}
       </>}
     >
       <div className="form-grid"><label className="wide">Name<input value={renameTo} onChange={e => setRenameTo(e.target.value)} /></label></div>
@@ -2731,6 +2750,7 @@ function RowMenuLite({ label, children }: { label: string; children: (close: () 
 // and other documents. The image is served behind auth, so it is fetched as a
 // blob with the bearer token and shown via an object URL.
 function LabLogo() {
+  const { can } = usePermissions();
   const [logoFileId, setLogoFileId] = useState<number | null>(null);
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -2785,13 +2805,14 @@ function LabLogo() {
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <input ref={inputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) void upload(f); }} />
         <button type="button" disabled={busy} onClick={() => inputRef.current?.click()}>{busy ? 'Uploading…' : (logoFileId ? 'Replace logo' : 'Upload logo')}</button>
-        {logoFileId && <button type="button" className="secondary" onClick={remove}>Remove</button>}
+        {logoFileId && can('settings', 'edit') && <button type="button" className="secondary" onClick={remove}>Remove</button>}
       </div>
     </div>
   </div>;
 }
 
 export function MyLaboratory() {
+  const { can } = usePermissions();
   const blank = { facilityName: '', shortName: '', motto: '', registrationNumber: '', address: '', city: '', country: '', phone: '', email: '', website: '', accreditationBody: '', accreditationNumber: '', accreditationStatus: '', legalStatus: '', legalIdentityNotes: '', qualityPolicy: '', qualityManualSummary: '', mission: '', vision: '' };
   const [tab, setTab] = useState<LabTab>('Identity & Legal');
   const [form, setForm] = useState(blank);
@@ -2886,7 +2907,7 @@ export function MyLaboratory() {
       <div className="card">
         <h3>Identity &amp; legal status</h3>
         <p>Your laboratory's legal identity and accreditation details, so the software can be used by any facility.</p>
-        <form className="form" onSubmit={e => { e.preventDefault(); saveProfile(); }}>
+        {can('settings', 'edit') && <form className="form" onSubmit={e => { e.preventDefault(); saveProfile(); }}>
           <fieldset className="reg-section"><legend>Identity</legend>
             <div className="form-grid">
               <label>Facility name<input value={form.facilityName} onChange={e => setForm({ ...form, facilityName: e.target.value })} required /></label>
@@ -2915,7 +2936,7 @@ export function MyLaboratory() {
           </fieldset>
           <label>Legal identity notes<textarea value={form.legalIdentityNotes} onChange={e => setForm({ ...form, legalIdentityNotes: e.target.value })} placeholder="Ownership, governing body, licences held, etc." /></label>
           <button type="submit">Save identity</button>
-        </form>
+        </form>}
       </div>
       <div style={{ display: 'grid', gap: 16 }}>
         <LabLogo />
@@ -2930,12 +2951,12 @@ export function MyLaboratory() {
     {tab === 'Mission & Vision' && <div className="card">
       <h3>Mission &amp; vision</h3>
       <p>The laboratory's mission and vision statements. These appear on the Laboratory Profile in Documents &amp; Records.</p>
-      <form className="form" onSubmit={e => { e.preventDefault(); saveProfile(); }}>
+      {can('settings', 'edit') && <form className="form" onSubmit={e => { e.preventDefault(); saveProfile(); }}>
         <label>Mission<textarea rows={3} value={form.mission} onChange={e => setForm({ ...form, mission: e.target.value })} placeholder="Why the laboratory exists and who it serves." /></label>
         <label>Vision<textarea rows={3} value={form.vision} onChange={e => setForm({ ...form, vision: e.target.value })} placeholder="What the laboratory aspires to become." /></label>
         <label>Motto / tagline<input value={form.motto} onChange={e => setForm({ ...form, motto: e.target.value })} /></label>
         <button type="submit">Save mission &amp; vision</button>
-      </form>
+      </form>}
     </div>}
 
     {tab === 'Core Documents' && <CoreDocumentsTab qualityManualSummary={form.qualityManualSummary} onSummaryChange={v => setForm({ ...form, qualityManualSummary: v })} onSaveSummary={() => saveProfile()} />}
@@ -2944,27 +2965,27 @@ export function MyLaboratory() {
       <div className="card">
         <h3>Quality policy</h3>
         <p>The laboratory's overarching quality policy statement, established to fulfil the requirements of ISO 15189:2022.</p>
-        <form className="form" onSubmit={e => { e.preventDefault(); saveProfile(); }}>
+        {can('settings', 'edit') && <form className="form" onSubmit={e => { e.preventDefault(); saveProfile(); }}>
           <label>Quality policy statement<textarea rows={6} value={form.qualityPolicy} onChange={e => setForm({ ...form, qualityPolicy: e.target.value })} placeholder="Management's commitment to quality, good professional practice, and continual improvement…" /></label>
           <button type="submit">Save quality policy</button>
-        </form>
+        </form>}
         <h4 style={{ marginTop: 18 }}>Supporting policies</h4>
         <p className="hint">Add specific policies that support the quality policy.</p>
-        <form className="form" onSubmit={addPolicy}>
+        {can('settings', 'edit') && <form className="form" onSubmit={addPolicy}>
           <label>Title<input value={policyForm.title} onChange={e => setPolicyForm({ ...policyForm, title: e.target.value })} required /></label>
           <label>Policy statement<textarea value={policyForm.policyStatement} onChange={e => setPolicyForm({ ...policyForm, policyStatement: e.target.value })} required /></label>
           <label>ISO 15189:2022 relationship (optional)<input value={policyForm.referenceNote} onChange={e => setPolicyForm({ ...policyForm, referenceNote: e.target.value })} placeholder="How this policy relates to the standard" /></label>
           <button>Add policy</button>
-        </form>
+        </form>}
         <table className="data-table"><thead><tr><th>Title</th><th>Statement</th><th></th></tr></thead><tbody>
-          {policies.map(p => <tr key={p.id}><td>{p.title}</td><td>{p.policy_statement}{p.reference_note ? <><br /><span className="hint">{p.reference_note}</span></> : ''}</td><td><button type="button" className="secondary" onClick={() => removePolicy(p.id)}>Remove</button></td></tr>)}
+          {policies.map(p => <tr key={p.id}><td>{p.title}</td><td>{p.policy_statement}{p.reference_note ? <><br /><span className="hint">{p.reference_note}</span></> : ''}</td><td>{can('settings', 'edit') && <button type="button" className="secondary" onClick={() => removePolicy(p.id)}>Remove</button>}</td></tr>)}
           {policies.length === 0 && <tr><td colSpan={3} className="hint">No supporting policies yet.</td></tr>}
         </tbody></table>
       </div>
       <div className="card">
         <h3>Standing quality objectives</h3>
         <p>Continuous quality objectives, in relation to ISO 15189:2022. Year-specific targets are set under <strong>Annual Objectives</strong>.</p>
-        <form className="form" onSubmit={addObjective}>
+        {can('settings', 'edit') && <form className="form" onSubmit={addObjective}>
           <label>Objective<textarea value={objForm.objective} onChange={e => setObjForm({ ...objForm, objective: e.target.value })} required /></label>
           <div className="form-grid">
             <label>Target<input value={objForm.target} onChange={e => setObjForm({ ...objForm, target: e.target.value })} placeholder="e.g. ≥ 95%" /></label>
@@ -2973,9 +2994,9 @@ export function MyLaboratory() {
           </div>
           <label>ISO 15189:2022 relationship (optional)<input value={objForm.referenceNote} onChange={e => setObjForm({ ...objForm, referenceNote: e.target.value })} /></label>
           <button>Add objective</button>
-        </form>
+        </form>}
         <table className="data-table"><thead><tr><th>Objective</th><th>Target</th><th>Measure</th><th>Owner</th><th></th></tr></thead><tbody>
-          {standingObjectives.map(o => <tr key={o.id}><td>{o.objective}{o.reference_note ? <><br /><span className="hint">{o.reference_note}</span></> : ''}</td><td>{o.target || '—'}</td><td>{o.measure || '—'}</td><td>{o.responsible_name || '—'}</td><td><button type="button" className="secondary" onClick={() => removeObjective(o.id)}>Remove</button></td></tr>)}
+          {standingObjectives.map(o => <tr key={o.id}><td>{o.objective}{o.reference_note ? <><br /><span className="hint">{o.reference_note}</span></> : ''}</td><td>{o.target || '—'}</td><td>{o.measure || '—'}</td><td>{o.responsible_name || '—'}</td><td>{can('settings', 'edit') && <button type="button" className="secondary" onClick={() => removeObjective(o.id)}>Remove</button>}</td></tr>)}
           {standingObjectives.length === 0 && <tr><td colSpan={5} className="hint">No standing objectives yet.</td></tr>}
         </tbody></table>
       </div>
@@ -2984,7 +3005,7 @@ export function MyLaboratory() {
     {tab === 'Annual Objectives' && <div className="card">
       <h3>Annual quality objectives</h3>
       <p>Set measurable objectives for each year. The laboratory is expected to establish objectives every year.</p>
-      <form className="form" onSubmit={addAnnual}>
+      {can('settings', 'edit') && <form className="form" onSubmit={addAnnual}>
         <div className="form-grid">
           <label>Year<input type="number" min={2000} max={2100} value={annualForm.year} onChange={e => setAnnualForm({ ...annualForm, year: e.target.value })} required /></label>
           <label>Target<input value={annualForm.target} onChange={e => setAnnualForm({ ...annualForm, target: e.target.value })} placeholder="e.g. ≥ 98%" /></label>
@@ -2994,12 +3015,12 @@ export function MyLaboratory() {
         </div>
         <label>Objective<textarea value={annualForm.objective} onChange={e => setAnnualForm({ ...annualForm, objective: e.target.value })} required /></label>
         <button>Add annual objective</button>
-      </form>
+      </form>}
       {years.length === 0 && <p className="hint">No annual objectives yet.</p>}
       {years.map(y => <div key={y} style={{ marginTop: 16 }}>
         <h4>{y}</h4>
         <table className="data-table"><thead><tr><th>Objective</th><th>Target</th><th>Measure</th><th>Owner</th><th>Status</th><th></th></tr></thead><tbody>
-          {annualObjectives.filter(o => o.year === y).map(o => <tr key={o.id}><td>{o.objective}</td><td>{o.target || '—'}</td><td>{o.measure || '—'}</td><td>{o.responsible_name || '—'}</td><td><span className="badge">{(o.status || '').replace(/_/g, ' ')}</span></td><td><button type="button" className="secondary" onClick={() => removeObjective(o.id)}>Remove</button></td></tr>)}
+          {annualObjectives.filter(o => o.year === y).map(o => <tr key={o.id}><td>{o.objective}</td><td>{o.target || '—'}</td><td>{o.measure || '—'}</td><td>{o.responsible_name || '—'}</td><td><span className="badge">{(o.status || '').replace(/_/g, ' ')}</span></td><td>{can('settings', 'edit') && <button type="button" className="secondary" onClick={() => removeObjective(o.id)}>Remove</button>}</td></tr>)}
         </tbody></table>
       </div>)}
     </div>}
@@ -3007,12 +3028,12 @@ export function MyLaboratory() {
     {tab === 'Departments' && <div className="card">
       <h3>Departments</h3>
       <p>Top-level departments. Sections/units (configured under Section/Unit Configuration) belong to a department.</p>
-      <form className="form" onSubmit={addDepartment}>
+      {can('settings', 'create') && <form className="form" onSubmit={addDepartment}>
         <label>New department<input name="name" required placeholder="e.g. Laboratory, Pathology" /></label>
         <button>Add department</button>
-      </form>
+      </form>}
       <table className="data-table"><thead><tr><th>Name</th><th>Status</th><th></th></tr></thead><tbody>
-        {departments.map(d => <tr key={d.id}><td>{d.name}</td><td>{d.is_active ? <span className="badge active">active</span> : <span className="badge inactive">inactive</span>}</td><td><button className="secondary" onClick={() => toggleDepartment(d)}>{d.is_active ? 'Deactivate' : 'Activate'}</button></td></tr>)}
+        {departments.map(d => <tr key={d.id}><td>{d.name}</td><td>{d.is_active ? <span className="badge active">active</span> : <span className="badge inactive">inactive</span>}</td><td>{can('settings', 'edit') && <button className="secondary" onClick={() => toggleDepartment(d)}>{d.is_active ? 'Deactivate' : 'Activate'}</button>}</td></tr>)}
         {departments.length === 0 && <tr><td colSpan={3} className="hint">No departments yet.</td></tr>}
       </tbody></table>
     </div>}
@@ -3022,7 +3043,7 @@ export function MyLaboratory() {
     <div className="card" style={{ marginTop: 16 }}>
       {registrationComplete
         ? <p className="notice-ok">Laboratory registration is complete. You can keep updating any section above at any time.</p>
-        : <button onClick={completeRegistration}>Mark registration complete</button>}
+        : can('settings', 'edit') && <button onClick={completeRegistration}>Mark registration complete</button>}
     </div>
   </div>;
 }
@@ -3034,6 +3055,7 @@ export function MyLaboratory() {
 // subset of the staff member's Host permissions.
 // ---------------------------------------------------------------------------
 export function RemoteStaffAccess() {
+  const { can } = usePermissions();
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [users, setUsers] = useState<RemoteCloudUser[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
@@ -3094,7 +3116,7 @@ export function RemoteStaffAccess() {
     <div className="card">
       <h3>Provision remote access</h3>
       <p className="muted" style={{ fontSize: 13 }}>Create a cloud portal account for a staff member. They sign in at the portal with this email and the temporary password, then set their own. Remote permissions are always a subset of their Host permissions.</p>
-      <form className="form" onSubmit={provision}>
+      {can('settings', 'edit') && <form className="form" onSubmit={provision}>
         <label>Staff member
           <select value={form.staffId} onChange={e => pickStaff(e.target.value)} required>
             <option value="">Select staff…</option>
@@ -3111,7 +3133,7 @@ export function RemoteStaffAccess() {
           </span>
         </label>
         <button disabled={busy}>Create remote access</button>
-      </form>
+      </form>}
       {message && <p className="notice-ok">{message}</p>}
       {error && <p className="error">{error}</p>}
     </div>
@@ -3120,7 +3142,8 @@ export function RemoteStaffAccess() {
       <h3>Remote staff accounts</h3>
       {users.length === 0 ? <p className="muted">No remote accounts yet.</p> :
         <table className="data-table"><thead><tr><th>Email</th><th>Staff</th><th>Role</th><th>Status</th><th>Last sign-in</th><th></th></tr></thead><tbody>
-          {users.map(u => { const s = staff.find(x => x.id === u.staff_id); return <tr key={u.id}>
+          {users.map(u => {
+  const { can } = usePermissions(); const s = staff.find(x => x.id === u.staff_id); return <tr key={u.id}>
             <td>{u.email}</td>
             <td>{u.full_name ?? s?.fullName ?? `#${u.staff_id}`}</td>
             <td>{u.role ?? ''}</td>
@@ -3128,9 +3151,9 @@ export function RemoteStaffAccess() {
             <td>{u.last_login_at ? new Date(u.last_login_at).toLocaleString() : '—'}</td>
             <td style={{ whiteSpace: 'nowrap' }}>
               {u.status === 'active'
-                ? <button onClick={() => changeStatus(u, 'disabled')}>Disable</button>
-                : <button onClick={() => changeStatus(u, 'active')}>Enable</button>}
-              {' '}<button onClick={() => refresh(u)}>Refresh access</button>
+                ? can('settings', 'edit') && <button onClick={() => changeStatus(u, 'disabled')}>Disable</button>
+                : can('settings', 'edit') && <button onClick={() => changeStatus(u, 'active')}>Enable</button>}
+              {' '}{can('settings', 'edit') && <button onClick={() => refresh(u)}>Refresh access</button>}
             </td>
           </tr>; })}
         </tbody></table>}
@@ -3451,6 +3474,7 @@ type ShiftTypeRow = { id: number; code: string; label: string; category: string;
 const SHIFT_CATEGORIES = ['shift', 'off', 'leave'];
 
 export function RosterSettings() {
+  const { can } = usePermissions();
   const [rows, setRows] = useState<ShiftTypeRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -3494,14 +3518,14 @@ export function RosterSettings() {
     </div>
     <div className="card" style={{ marginTop: 16 }}>
       <h3>Add a shift type</h3>
-      <form className="form-grid" onSubmit={add}>
+      {can('settings', 'edit') && <form className="form-grid" onSubmit={add}>
         <label>Code<input value={form.code} onChange={e => setForm({ ...form, code: e.target.value.toUpperCase() })} placeholder="e.g. E (Evening)" required maxLength={4} /></label>
         <label>Label<input value={form.label} onChange={e => setForm({ ...form, label: e.target.value })} placeholder="e.g. Evening Duty" required /></label>
         <label>Category<select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>{SHIFT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
         <label>Cell background<input type="color" value={form.bgColor} onChange={e => setForm({ ...form, bgColor: e.target.value })} /></label>
         <label>Cell text colour<input type="color" value={form.textColor} onChange={e => setForm({ ...form, textColor: e.target.value })} /></label>
         <button type="submit">Add shift type</button>
-      </form>
+      </form>}
     </div>
   </div>;
 }

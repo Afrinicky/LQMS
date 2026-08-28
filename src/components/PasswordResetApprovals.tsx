@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { usePermissions } from '../hooks/usePermissions';
 import { ShieldQuestion, Check, X, Clock, Loader2 } from 'lucide-react';
 import { api } from '../services/api';
 
@@ -34,6 +35,7 @@ const ago = (iso: string) => {
 };
 
 export default function PasswordResetApprovals({ compact = false }: { compact?: boolean }) {
+  const { can } = usePermissions();
   const [pending, setPending] = useState<ResetRequest[]>([]);
   const [recent, setRecent] = useState<ResetRequest[]>([]);
   const [busy, setBusy] = useState<number | null>(null);
@@ -99,12 +101,12 @@ export default function PasswordResetApprovals({ compact = false }: { compact?: 
                   </span>
                 </div>
                 <div className="pwra-act">
-                  <button type="button" disabled={busy === r.id} onClick={() => decide(r.id, 'approve')}>
+                  {can('settings', 'edit') && <button type="button" disabled={busy === r.id} onClick={() => decide(r.id, 'approve')}>
                     {busy === r.id ? <Loader2 size={13} className="spin" /> : <Check size={13} />} Approve
-                  </button>
-                  <button type="button" className="secondary" disabled={busy === r.id} onClick={() => decide(r.id, 'deny')}>
+                  </button>}
+                  {can('settings', 'edit') && <button type="button" className="secondary" disabled={busy === r.id} onClick={() => decide(r.id, 'deny')}>
                     <X size={13} /> Refuse
-                  </button>
+                  </button>}
                 </div>
               </li>
             ))}

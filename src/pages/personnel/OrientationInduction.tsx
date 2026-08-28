@@ -86,6 +86,7 @@ function RecordsView({ staff, staffName, mayCreate, mayEdit, onError, onNotice }
   staff: Staff[]; staffName: (id?: number | null) => string; mayCreate: boolean; mayEdit: boolean;
   onError: (m: string | null) => void; onNotice: (m: string | null) => void;
 }) {
+  const { can } = usePermissions();
   const [frameworks, setFrameworks] = useState<OrientationFramework[]>([]);
   const [records, setRecords] = useState<StaffOrientation[]>([]);
   const [selected, setSelected] = useState<StaffOrientation | null>(null);
@@ -199,7 +200,7 @@ function RecordsView({ staff, staffName, mayCreate, mayEdit, onError, onNotice }
         <h4 style={{ marginTop: 0 }}>Start orientation record</h4>
         {frameworks.length === 0
           ? <p className="muted">No active orientation framework yet. Create one under <strong>Frameworks</strong> and activate it first.</p>
-          : <form className="form-grid" onSubmit={submitNew}>
+          : can('personnel.orientation', 'create') && <form className="form-grid" onSubmit={submitNew}>
             <label>Staff<select value={form.staffId} onChange={e => setForm({ ...form, staffId: e.target.value })} required><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
             <label>Framework<select value={form.frameworkId} onChange={e => setForm({ ...form, frameworkId: e.target.value })} required><option value="">—</option>{frameworks.map(f => <option key={f.id} value={f.id}>{f.title} ({ORIENTATION_AUDIENCE_LABELS[f.applies_to] || f.applies_to})</option>)}</select></label>
             <label>Hire date<input type="date" value={form.hireDate} onChange={e => setForm({ ...form, hireDate: e.target.value })} /></label>
@@ -317,6 +318,7 @@ function FrameworksView({ sections, departments, mayCreate, mayEdit, mayApprove,
   mayCreate: boolean; mayEdit: boolean; mayApprove: boolean; mayArchive: boolean;
   onError: (m: string | null) => void; onNotice: (m: string | null) => void;
 }) {
+  const { can } = usePermissions();
   const [frameworks, setFrameworks] = useState<OrientationFramework[]>([]);
   const [statusFilter, setStatusFilter] = useState('');
   const [selected, setSelected] = useState<OrientationFramework | null>(null);
@@ -438,7 +440,7 @@ function FrameworksView({ sections, departments, mayCreate, mayEdit, mayApprove,
     <div>
       {creating ? <div className="card">
         <h4 style={{ marginTop: 0 }}>New orientation framework</h4>
-        <form className="form-grid" onSubmit={submitNew}>
+        {can('personnel.orientation', 'create') && <form className="form-grid" onSubmit={submitNew}>
           <label style={{ gridColumn: '1 / -1' }}>Title<input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required placeholder="e.g. Staff orientation & induction" /></label>
           <label>Applies to<select value={form.appliesTo} onChange={e => setForm({ ...form, appliesTo: e.target.value })}>{ORIENTATION_AUDIENCES.map(a => <option key={a} value={a}>{ORIENTATION_AUDIENCE_LABELS[a]}</option>)}</select></label>
           <label>Version<input value={form.versionLabel} onChange={e => setForm({ ...form, versionLabel: e.target.value })} /></label>
@@ -452,7 +454,7 @@ function FrameworksView({ sections, departments, mayCreate, mayEdit, mayApprove,
             <button type="submit">Create draft</button>
             <button type="button" className="secondary" onClick={() => setCreating(false)}>Cancel</button>
           </div>
-        </form>
+        </form>}
       </div>
       : !selected ? <div className="card" style={{ padding: 20 }}><p className="muted">Select a framework to view and edit it, or create a new one.</p></div>
       : <>
@@ -493,13 +495,13 @@ function FrameworksView({ sections, departments, mayCreate, mayEdit, mayApprove,
           <table className="data-table"><tbody>
             {g.items.map(it => <tr key={it.id}>
               {editingItem?.id === it.id ? <td colSpan={2}>
-                <form onSubmit={saveItem} className="form-grid">
+                {can('personnel.orientation', 'edit') && <form onSubmit={saveItem} className="form-grid">
                   <label>Group<input value={editingItem.group_title} onChange={e => setEditingItem({ ...editingItem, group_title: e.target.value })} /></label>
                   <label>Responsible<select value={editingItem.responsible_role || ''} onChange={e => setEditingItem({ ...editingItem, responsible_role: e.target.value })}><option value="">—</option>{ORIENTATION_RESPONSIBLE_ROLES.map(r => <option key={r} value={r}>{ORIENTATION_RESPONSIBLE_ROLE_LABELS[r]}</option>)}</select></label>
                   <label style={{ gridColumn: '1 / -1' }}>Item<input value={editingItem.item_text} onChange={e => setEditingItem({ ...editingItem, item_text: e.target.value })} required /></label>
                   <label style={{ gridColumn: '1 / -1' }}>Description<input value={editingItem.item_description || ''} onChange={e => setEditingItem({ ...editingItem, item_description: e.target.value })} /></label>
                   <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8 }}><button type="submit">Save</button><button type="button" className="secondary" onClick={() => setEditingItem(null)}>Cancel</button></div>
-                </form>
+                </form>}
               </td> : <>
                 <td>
                   <div style={{ fontWeight: 500 }}>{it.item_text}</div>

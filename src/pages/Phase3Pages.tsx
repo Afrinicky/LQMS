@@ -429,7 +429,7 @@ export function EquipmentPage() {
 
     {tab === 'New Equipment' && <div className="card">
       <h3>New equipment</h3>
-      <form className="form" onSubmit={submitEquipment}>
+      {can('equipment.register', 'create') && <form className="form" onSubmit={submitEquipment}>
         <label>Unique identifier<input value={equipForm.equipmentNumber} onChange={e => setEquipForm({ ...equipForm, equipmentNumber: e.target.value })} placeholder={nextNumber || 'auto'} /><small className="muted">Follows the configured pattern; edit only for items with their own identifier.</small></label>
         <label>Name<input value={equipForm.name} onChange={e => setEquipForm({ ...equipForm, name: e.target.value })} required /></label>
         <label>Equipment category<select value={equipForm.equipmentCategory} onChange={e => setEquipForm({ ...equipForm, equipmentCategory: e.target.value })}>
@@ -459,7 +459,7 @@ export function EquipmentPage() {
         <label>Manufacturer's instructions / IFU<input type="file" onChange={e => setNewIfuFile(e.target.files?.[0] ?? null)} /><small className="muted">Attached to the profile as the manufacturer's manual.</small></label>
         <label>Notes<textarea value={equipForm.notes} onChange={e => setEquipForm({ ...equipForm, notes: e.target.value })} /></label>
         <button type="submit">Save equipment</button>
-      </form>
+      </form>}
     </div>}
 
     {tab === 'Verification & Validation' && <EquipmentLifecycleTab kind="verification" equipment={equipment} staff={staff} setError={setError} onChanged={reloadSelected} />}
@@ -482,7 +482,7 @@ export function EquipmentPage() {
 
     {tab === 'Breakdowns' && <div className="card">
       <h3>Report breakdown</h3>
-      <form className="form" onSubmit={submitBreakdown}>
+      {can('equipment.maintenance', 'create') && <form className="form" onSubmit={submitBreakdown}>
         <label>Equipment<select value={breakdownForm.equipmentId} onChange={e => setBreakdownForm({ ...breakdownForm, equipmentId: e.target.value })} required><option value="">Select equipment</option>{equipment.map(e2 => <option key={e2.id} value={e2.id}>{e2.equipment_number} — {e2.name}</option>)}</select></label>
         <label>Breakdown date<input type="date" value={breakdownForm.breakdownDate} onChange={e => setBreakdownForm({ ...breakdownForm, breakdownDate: e.target.value })} required /></label>
         <label>Reported by<select value={breakdownForm.reportedByStaffId} onChange={e => setBreakdownForm({ ...breakdownForm, reportedByStaffId: e.target.value })}><option value="">Select staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
@@ -493,7 +493,7 @@ export function EquipmentPage() {
         <label>Repair action<textarea value={breakdownForm.repairAction} onChange={e => setBreakdownForm({ ...breakdownForm, repairAction: e.target.value })} /></label>
         <label>Service provider<input value={breakdownForm.serviceProvider} onChange={e => setBreakdownForm({ ...breakdownForm, serviceProvider: e.target.value })} /></label>
         <button type="submit">Report breakdown</button>
-      </form>
+      </form>}
     </div>}
 
     {tab === 'Adverse Events' && <EquipmentAdverseEventsTab equipment={equipment} staff={staff} setError={setError} onChanged={() => { void load(); void reloadSelected(); }} />}
@@ -657,7 +657,7 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
         <label>Evidence<input type="file" onChange={e => setDecomFile(e.target.files?.[0] ?? null)} /></label>
       </div>
       <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
-        <button type="button" onClick={submitDecommission} disabled={saving || !decomForm.decontaminationConfirmed}>{saving ? 'Saving…' : 'Decommission item'}</button>
+        {can('equipment.register', 'edit') && <button type="button" onClick={submitDecommission} disabled={saving || !decomForm.decontaminationConfirmed}>{saving ? 'Saving…' : 'Decommission item'}</button>}
         <button type="button" className="secondary" onClick={() => { setShowDecommission(false); setDecomForm(emptyDecom); setDecomFile(null); }}>Cancel</button>
       </div>
     </div>}
@@ -672,7 +672,7 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
     </div> : null}
 
     {editing
-      ? <form className="form" style={{ marginTop: 14 }} onSubmit={e => { e.preventDefault(); void save(); }}>
+      ? can('supplier_inventory.suppliers', 'edit') && <form className="form" style={{ marginTop: 14 }} onSubmit={e => { e.preventDefault(); void save(); }}>
           <label>Unique identifier<input value={form.equipmentNumber} onChange={e => setForm({ ...form, equipmentNumber: e.target.value })} /></label>
           <label>Name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></label>
           <label>Category<input value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} /></label>
@@ -726,9 +726,9 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
     {!item.breakdowns?.length ? <p className="muted">No breakdowns recorded.</p> : <table className="table"><thead><tr><th>Date</th><th>Description</th><th>Status</th><th>NC</th><th>CAPA</th><th>Actions</th></tr></thead><tbody>
       {item.breakdowns.map(b => <tr key={b.id}><td>{b.breakdown_date}</td><td>{b.description}</td><td>{formatBadge(b.status)}</td><td>{b.nc_id || '—'}</td><td>{b.capa_id || '—'}</td>
         <td>
-          {!b.nc_id && <button type="button" className="secondary" onClick={() => createBreakdownNc(b.id)}>Create NC</button>}{' '}
-          {!b.capa_id && <button type="button" className="secondary" onClick={() => createBreakdownCapa(b.id)}>Create CAPA</button>}{' '}
-          {b.status !== 'returned_to_service' && b.status !== 'closed' && <button type="button" className="secondary" onClick={() => returnToService(b.id)}>Return to service</button>}
+          {!b.nc_id && can('nc_capa', 'create') && <button type="button" className="secondary" onClick={() => createBreakdownNc(b.id)}>Create NC</button>}{' '}
+          {!b.capa_id && can('nc_capa', 'create') && <button type="button" className="secondary" onClick={() => createBreakdownCapa(b.id)}>Create CAPA</button>}{' '}
+          {b.status !== 'returned_to_service' && b.status !== 'closed' && can('equipment.maintenance', 'edit') && <button type="button" className="secondary" onClick={() => returnToService(b.id)}>Return to service</button>}
         </td></tr>)}
     </tbody></table>}
     <h4>Adverse events</h4>
@@ -759,6 +759,7 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
 // Verification/validation and calibration share one workflow: pick an item, run
 // an editable checklist with evidence, record structured detail, then review.
 function EquipmentLifecycleTab({ kind, equipment, staff, setError, onChanged }: { kind: 'verification' | 'calibration'; equipment: EquipmentItem[]; staff: Staff[]; setError: (m: string | null) => void; onChanged: () => void }) {
+  const { can } = usePermissions();
   const isVer = kind === 'verification';
   const checklistType = isVer ? 'verification_validation' : 'calibration';
   const recordsPath = isVer ? 'verifications' : 'calibrations';
@@ -848,17 +849,17 @@ function EquipmentLifecycleTab({ kind, equipment, staff, setError, onChanged }: 
         {items.map((it, i) => <tr key={it.id}>
           <td>{i + 1}</td>
           <td><input defaultValue={it.prompt} style={{ width: '100%' }} onBlur={e => { if (e.target.value.trim() && e.target.value !== it.prompt) saveItemPrompt(it, e.target.value.trim()); }} /></td>
-          <td><button type="button" className="secondary" onClick={() => retireItem(it)}>Retire</button></td>
+          <td>{can('equipment.maintenance', 'edit') && <button type="button" className="secondary" onClick={() => retireItem(it)}>Retire</button>}</td>
         </tr>)}
         {items.length === 0 && <tr><td colSpan={3} className="muted">No active questions.</td></tr>}
       </tbody></table>
       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
         <input placeholder="Add a question…" value={newPrompt} onChange={e => setNewPrompt(e.target.value)} style={{ flex: 1 }} />
-        <button type="button" onClick={addItem}>Add</button>
+        {can('equipment.maintenance', 'edit') && <button type="button" onClick={addItem}>Add</button>}
       </div>
     </div>}
 
-    <form className="form" onSubmit={submit} style={{ marginTop: 12 }}>
+    {can('facilities_safety.incidents', 'create') && <form className="form" onSubmit={submit} style={{ marginTop: 12 }}>
       <label>Equipment<select value={equipId} onChange={e => setEquipId(e.target.value)} required><option value="">Select equipment</option>{equipment.map(e2 => <option key={e2.id} value={e2.id}>{e2.equipment_number} — {e2.name}</option>)}</select></label>
       {isVer ? <>
         <label>Type<select value={form.verificationType} onChange={e => setForm({ ...form, verificationType: e.target.value })}><option value="verification">Verification</option><option value="validation">Validation</option></select></label>
@@ -894,7 +895,7 @@ function EquipmentLifecycleTab({ kind, equipment, staff, setError, onChanged }: 
       <label>Overall evidence / report<input type="file" onChange={e => setRecordFile(e.target.files?.[0] ?? null)} /></label>
       <label>Notes<textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
       <button type="submit" disabled={busy}>{busy ? 'Saving…' : `Record ${isVer ? 'verification' : 'calibration'}`}</button>
-    </form>
+    </form>}
 
     {equipId && <div style={{ marginTop: 16 }}>
       <h4>Records for this equipment</h4>
@@ -907,7 +908,7 @@ function EquipmentLifecycleTab({ kind, equipment, staff, setError, onChanged }: 
           <td>{formatBadge(r.status)}</td>
           <td>
             <button type="button" className="secondary" onClick={() => openDetail(r.id)}>Open</button>{' '}
-            {r.status !== 'reviewed' && <button type="button" className="secondary" onClick={() => review(r.id, isVer ? 'approved' : 'accepted')}>Review &amp; {isVer ? 'approve' : 'accept'}</button>}
+            {r.status !== 'reviewed' && can('equipment.verification', 'edit') && <button type="button" className="secondary" onClick={() => review(r.id, isVer ? 'approved' : 'accepted')}>Review &amp; {isVer ? 'approve' : 'accept'}</button>}
           </td>
         </tr>)}
       </tbody></table>}
@@ -924,6 +925,7 @@ function EquipmentLifecycleTab({ kind, equipment, staff, setError, onChanged }: 
 }
 
 function ReferenceStandardsPanel({ staff, setError }: { staff: Staff[]; setError: (m: string | null) => void }) {
+  const { can } = usePermissions();
   const [rows, setRows] = useState<ReferenceStandard[]>([]);
   const blank = { name: '', standardType: 'certified_reference_material', identifier: '', certificateNumber: '', traceableTo: '', validFrom: '', validUntil: '', custodianStaffId: '', notes: '' };
   const [form, setForm] = useState(blank);
@@ -939,7 +941,7 @@ function ReferenceStandardsPanel({ staff, setError }: { staff: Staff[]; setError
   return <div className="card" style={{ marginTop: 16 }}>
     <h3>Reference standards &amp; certified reference materials</h3>
     <p className="muted" style={{ marginTop: 0 }}>The reference materials and instruments (certified thermometer, tachometer, CRMs) that underpin in-house calibration and metrological traceability.</p>
-    <form className="form" onSubmit={submit}>
+    {can('facilities_safety.incidents', 'create') && <form className="form" onSubmit={submit}>
       <label>Name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></label>
       <label>Type<select value={form.standardType} onChange={e => setForm({ ...form, standardType: e.target.value })}><option value="certified_reference_material">Certified reference material</option><option value="reference_instrument">Reference instrument</option><option value="other">Other</option></select></label>
       <label>Identifier / serial<input value={form.identifier} onChange={e => setForm({ ...form, identifier: e.target.value })} /></label>
@@ -949,7 +951,7 @@ function ReferenceStandardsPanel({ staff, setError }: { staff: Staff[]; setError
       <label>Valid until<input type="date" value={form.validUntil} onChange={e => setForm({ ...form, validUntil: e.target.value })} /></label>
       <label>Custodian<select value={form.custodianStaffId} onChange={e => setForm({ ...form, custodianStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
       <button type="submit">Add reference standard</button>
-    </form>
+    </form>}
     <table className="table" style={{ marginTop: 12 }}><thead><tr><th>No.</th><th>Name</th><th>Type</th><th>Certificate</th><th>Traceable to</th><th>Valid until</th></tr></thead><tbody>
       {rows.map(r => { const expired = r.valid_until && r.valid_until < today; return <tr key={r.id}><td>{r.reference_number}</td><td>{r.name}</td><td>{(r.standard_type || '').replace(/_/g, ' ')}</td><td>{r.certificate_number || '—'}</td><td>{r.traceable_to || '—'}</td><td>{r.valid_until || '—'}{expired && <span className="badge danger">expired</span>}</td></tr>; })}
       {rows.length === 0 && <tr><td colSpan={6} className="muted">No reference standards recorded.</td></tr>}
@@ -960,6 +962,7 @@ function ReferenceStandardsPanel({ staff, setError }: { staff: Staff[]; setError
 // Maintenance as a programme: a due/overdue worklist, per-equipment schedules
 // (routine user PM and provider servicing), and the maintenance log.
 function EquipmentMaintenanceTab({ equipment, staff, sections, setError, onChanged }: { equipment: EquipmentItem[]; staff: Staff[]; sections: Section[]; setError: (m: string | null) => void; onChanged: () => void }) {
+  const { can } = usePermissions();
   const today = new Date().toISOString().slice(0, 10);
   const [due, setDue] = useState<EquipmentSchedule[]>([]);
   const [equipId, setEquipId] = useState('');
@@ -1027,12 +1030,13 @@ function EquipmentMaintenanceTab({ equipment, staff, sections, setError, onChang
       <h3>Due &amp; overdue</h3>
       <p className="muted" style={{ marginTop: 0 }}>Every routine maintenance and servicing schedule that is due within 30 days or overdue. Log it done in one click.</p>
       {due.length === 0 ? <p className="muted">Nothing due.</p> : <table className="table"><thead><tr><th>Equipment</th><th>Type</th><th>Frequency</th><th>Due</th><th></th></tr></thead><tbody>
-        {due.map(s => { const overdue = s.next_due_date && s.next_due_date < today; return <tr key={s.id}>
+        {due.map(s => {
+  const { can } = usePermissions(); const overdue = s.next_due_date && s.next_due_date < today; return <tr key={s.id}>
           <td>{s.equipment_number} — {s.equipment_name}</td>
           <td>{(s.schedule_type || '').replace(/_/g, ' ')}</td>
           <td>{s.frequency}</td>
           <td>{s.next_due_date || '—'} {overdue ? <span className="badge danger">overdue</span> : <span className="badge warning">due soon</span>}</td>
-          <td><button type="button" className="secondary" onClick={() => logDue(s)}>Log done today</button></td>
+          <td>{can('equipment.maintenance', 'create') && <button type="button" className="secondary" onClick={() => logDue(s)}>Log done today</button>}</td>
         </tr>; })}
       </tbody></table>}
     </div>
@@ -1044,7 +1048,8 @@ function EquipmentMaintenanceTab({ equipment, staff, sections, setError, onChang
       {!equipId ? <p className="muted">Select an equipment item to manage its schedules and log maintenance.</p> : <>
         <h4>Schedules</h4>
         {schedules.length === 0 ? <p className="muted">No schedules yet — every equipment should carry at least its routine maintenance schedule.</p> : <table className="table"><thead><tr><th>Type</th><th>Frequency</th><th>Provider</th><th>Responsible</th><th>Last done</th><th>Next due</th><th>Active</th><th></th></tr></thead><tbody>
-          {schedules.map(s => { const overdue = s.next_due_date && s.next_due_date < today; return <tr key={s.id} {...focusAttr('equipment_schedules', s.id)}>
+          {schedules.map(s => {
+  const { can } = usePermissions(); const overdue = s.next_due_date && s.next_due_date < today; return <tr key={s.id} {...focusAttr('equipment_schedules', s.id)}>
             <td>{(s.schedule_type || '').replace(/_/g, ' ')}</td>
             <td>{s.frequency}{s.frequency === 'custom' && s.interval_days ? ` (${s.interval_days}d)` : ''}</td>
             <td>{s.provider_name || (s.provider_type || '—')}</td>
@@ -1052,10 +1057,10 @@ function EquipmentMaintenanceTab({ equipment, staff, sections, setError, onChang
             <td>{s.last_done_date || '—'}</td>
             <td>{s.next_due_date || '—'}{overdue && s.is_active ? <span className="badge danger">overdue</span> : null}</td>
             <td>{s.is_active ? '✓' : '—'}</td>
-            <td><button type="button" className="secondary" onClick={() => toggleSchedule(s)}>{s.is_active ? 'Deactivate' : 'Activate'}</button></td>
+            <td>{can('equipment.maintenance', 'edit') && <button type="button" className="secondary" onClick={() => toggleSchedule(s)}>{s.is_active ? 'Deactivate' : 'Activate'}</button>}</td>
           </tr>; })}
         </tbody></table>}
-        <form className="form" onSubmit={addSchedule} style={{ marginTop: 10 }}>
+        {can('equipment.maintenance', 'create') && <form className="form" onSubmit={addSchedule} style={{ marginTop: 10 }}>
           <label>Schedule type<select value={schedForm.scheduleType} onChange={e => setSchedForm({ ...schedForm, scheduleType: e.target.value })}><option value="preventive_maintenance">Routine preventive maintenance</option><option value="servicing">Servicing (provider)</option></select></label>
           <label>Frequency<select value={schedForm.frequency} onChange={e => setSchedForm({ ...schedForm, frequency: e.target.value })}>{SCHEDULE_FREQUENCIES.map(f => <option key={f} value={f}>{f}</option>)}</select></label>
           {schedForm.frequency === 'custom' && <label>Interval (days)<input type="number" min={1} value={schedForm.intervalDays} onChange={e => setSchedForm({ ...schedForm, intervalDays: e.target.value })} /></label>}
@@ -1066,10 +1071,10 @@ function EquipmentMaintenanceTab({ equipment, staff, sections, setError, onChang
           <label>Task description<input value={schedForm.taskDescription} onChange={e => setSchedForm({ ...schedForm, taskDescription: e.target.value })} placeholder="e.g. clean rotor, check seals" /></label>
           <label>First due date<input type="date" value={schedForm.nextDueDate} onChange={e => setSchedForm({ ...schedForm, nextDueDate: e.target.value })} /></label>
           <button type="submit">Add schedule</button>
-        </form>
+        </form>}
 
         <h4 style={{ marginTop: 20 }}>Log maintenance</h4>
-        <form className="form" onSubmit={submitMaintenance}>
+        {can('equipment.maintenance', 'create') && <form className="form" onSubmit={submitMaintenance}>
           <label>Date<input type="date" value={maintForm.maintenanceDate} onChange={e => setMaintForm({ ...maintForm, maintenanceDate: e.target.value })} required /></label>
           <label>Type<select value={maintForm.maintenanceType} onChange={e => setMaintForm({ ...maintForm, maintenanceType: e.target.value })}>{MAINTENANCE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
           <label>Against schedule<select value={maintForm.scheduleId} onChange={e => setMaintForm({ ...maintForm, scheduleId: e.target.value })}><option value="">— none —</option>{schedules.filter(s => s.is_active).map(s => <option key={s.id} value={s.id}>{(s.schedule_type || '').replace(/_/g, ' ')} · {s.frequency}</option>)}</select></label>
@@ -1081,7 +1086,7 @@ function EquipmentMaintenanceTab({ equipment, staff, sections, setError, onChang
           <label>Next due (override)<input type="date" value={maintForm.nextDueDate} onChange={e => setMaintForm({ ...maintForm, nextDueDate: e.target.value })} /></label>
           <label>Evidence<input type="file" onChange={e => setMaintFile(e.target.files?.[0] ?? null)} /></label>
           <button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Log maintenance'}</button>
-        </form>
+        </form>}
 
         <h4 style={{ marginTop: 20 }}>Recent maintenance</h4>
         {records.length === 0 ? <p className="muted">No maintenance recorded.</p> : <table className="table"><thead><tr><th>Date</th><th>Type</th><th>Provider</th><th>Performed by</th><th>Findings</th><th>Next due</th></tr></thead><tbody>
@@ -1095,6 +1100,7 @@ function EquipmentMaintenanceTab({ equipment, staff, sections, setError, onChang
 // Equipment adverse events: report → auto-raised NC → investigate, correct,
 // follow up, assess retrospective impact and report externally.
 function EquipmentAdverseEventsTab({ equipment, staff, setError, onChanged }: { equipment: EquipmentItem[]; staff: Staff[]; setError: (m: string | null) => void; onChanged: () => void }) {
+  const { can } = usePermissions();
   const [list, setList] = useState<EquipmentAdverseEvent[]>([]);
   const [open, setOpen] = useState<EquipmentAdverseEvent | null>(null);
   const blank = { equipmentId: '', eventDate: '', reportedByStaffId: '', eventType: ADVERSE_EVENT_TYPES[0].value, severity: 'high', patientHarm: 'none', description: '', immediateAction: '', retrospectiveImpactRequired: false, resultsAffected: false, affectedPeriodFrom: '', affectedPeriodTo: '', retrospectiveImpactSummary: '', reportedToManufacturer: false, reportedToAuthority: false, reportReference: '', reportDate: '', raiseNc: true };
@@ -1145,7 +1151,7 @@ function EquipmentAdverseEventsTab({ equipment, staff, setError, onChanged }: { 
     <div className="card">
       <h3>Report an equipment adverse event</h3>
       <p className="muted" style={{ marginTop: 0 }}>Reportable incidents are nonconformities: a linked NC is raised automatically. Investigation, corrective action, follow-up, retrospective impact and external reporting are captured on the record.</p>
-      <form className="form" onSubmit={submit}>
+      {can('facilities_safety.incidents', 'create') && <form className="form" onSubmit={submit}>
         <label>Equipment<select value={form.equipmentId} onChange={e => setForm({ ...form, equipmentId: e.target.value })} required><option value="">Select equipment</option>{equipment.map(e2 => <option key={e2.id} value={e2.id}>{e2.equipment_number} — {e2.name}</option>)}</select></label>
         <label>Event date<input type="date" value={form.eventDate} onChange={e => setForm({ ...form, eventDate: e.target.value })} required /></label>
         <label>Reported by<select value={form.reportedByStaffId} onChange={e => setForm({ ...form, reportedByStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
@@ -1167,7 +1173,7 @@ function EquipmentAdverseEventsTab({ equipment, staff, setError, onChanged }: { 
         <label>Report date<input type="date" value={form.reportDate} onChange={e => setForm({ ...form, reportDate: e.target.value })} /></label>
         <label className="check-inline"><input type="checkbox" checked={form.raiseNc} onChange={e => setForm({ ...form, raiseNc: e.target.checked })} /> Automatically raise a nonconformity</label>
         <button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Report adverse event'}</button>
-      </form>
+      </form>}
     </div>
 
     <div className="card" style={{ marginTop: 16 }}>
@@ -1202,9 +1208,9 @@ function EquipmentAdverseEventsTab({ equipment, staff, setError, onChanged }: { 
         <label>Report date<input type="date" value={edit.reportDate} onChange={e => setEdit({ ...edit, reportDate: e.target.value })} /></label>
         <label>Status<select value={edit.status} onChange={e => setEdit({ ...edit, status: e.target.value })}>{['open', 'under_investigation', 'action_required', 'closed'].map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select></label>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button type="button" onClick={saveDetail} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
-          {!open.nc_id && <button type="button" className="secondary" onClick={createNc}>Raise NC</button>}
-          {!open.capa_id && <button type="button" className="secondary" onClick={createCapa}>Raise CAPA</button>}
+          {can('equipment.adverse', 'edit') && <button type="button" onClick={saveDetail} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>}
+          {!open.nc_id && can('nc_capa', 'create') && <button type="button" className="secondary" onClick={createNc}>Raise NC</button>}
+          {!open.capa_id && can('nc_capa', 'create') && <button type="button" className="secondary" onClick={createCapa}>Raise CAPA</button>}
         </div>
       </div>
     </div>}
@@ -1214,6 +1220,7 @@ function EquipmentAdverseEventsTab({ equipment, staff, setError, onChanged }: { 
 // Staff training & competence on a specific equipment. Competent + authorised
 // records flow into the personnel competency and technical-authorisation files.
 function EquipmentCompetencyTab({ equipment, staff, setError, onChanged }: { equipment: EquipmentItem[]; staff: Staff[]; setError: (m: string | null) => void; onChanged: () => void }) {
+  const { can } = usePermissions();
   const [list, setList] = useState<EquipmentCompetency[]>([]);
   const blank = { equipmentId: '', staffId: '', trainingDate: '', trainerStaffId: '', assessmentMethod: 'direct_observation', assessmentDate: '', assessorStaffId: '', outcome: 'competent', authorized: true, authorizationLevel: 'Perform', notes: '' };
   const [form, setForm] = useState(blank);
@@ -1236,7 +1243,7 @@ function EquipmentCompetencyTab({ equipment, staff, setError, onChanged }: { equ
     <div className="card">
       <h3>Record training &amp; competence on equipment</h3>
       <p className="muted" style={{ marginTop: 0 }}>When a staff member is competent and authorised, a competency assessment and technical authorisation are created automatically in Personnel Management, so the training file is populated in one place.</p>
-      <form className="form" onSubmit={submit}>
+      {can('facilities_safety.incidents', 'create') && <form className="form" onSubmit={submit}>
         <label>Equipment<select value={form.equipmentId} onChange={e => setForm({ ...form, equipmentId: e.target.value })} required><option value="">Select equipment</option>{equipment.map(e2 => <option key={e2.id} value={e2.id}>{e2.equipment_number} — {e2.name}</option>)}</select></label>
         <label>Staff<select value={form.staffId} onChange={e => setForm({ ...form, staffId: e.target.value })} required><option value="">Select staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Training date<input type="date" value={form.trainingDate} onChange={e => setForm({ ...form, trainingDate: e.target.value })} /></label>
@@ -1249,7 +1256,7 @@ function EquipmentCompetencyTab({ equipment, staff, setError, onChanged }: { equ
         {form.authorized && <label>Authorisation level<select value={form.authorizationLevel} onChange={e => setForm({ ...form, authorizationLevel: e.target.value })}>{['View only', 'Perform', 'Review', 'Verify', 'Approve', 'Supervise', 'Train others'].map(l => <option key={l} value={l}>{l}</option>)}</select></label>}
         <label style={{ gridColumn: '1 / -1' }}>Notes<textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
         <button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Record competence'}</button>
-      </form>
+      </form>}
     </div>
     <div className="card" style={{ marginTop: 16 }}>
       <h3>Equipment competence register</h3>
@@ -1263,6 +1270,7 @@ function EquipmentCompetencyTab({ equipment, staff, setError, onChanged }: { equ
 // Equipment files: uploads create a controlled document via the Documents module
 // and link it to the equipment, so it appears in both places.
 function EquipmentFilesTab({ equipment, sections, departments, setError, onChanged }: { equipment: EquipmentItem[]; sections: Section[]; departments: Department[]; setError: (m: string | null) => void; onChanged: () => void }) {
+  const { can } = usePermissions();
   const [equipId, setEquipId] = useState('');
   const [docs, setDocs] = useState<EquipmentDocumentLink[]>([]);
   const blank = { title: '', documentType: EQUIP_DOC_TYPES[0], sectionId: '', departmentId: '' };
@@ -1298,14 +1306,14 @@ function EquipmentFilesTab({ equipment, sections, departments, setError, onChang
     </div>
     <p className="muted" style={{ marginTop: 0 }}>Documents added here are created as controlled documents in <strong>Documents &amp; Records</strong> and linked to the equipment, so an update in either module is reflected in both.</p>
     {!equipId ? <p className="muted">Select an equipment item to view and add its files.</p> : <>
-      <form className="form" onSubmit={submit}>
+      {can('facilities_safety.incidents', 'create') && <form className="form" onSubmit={submit}>
         <label>Title<input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required /></label>
         <label>Document type<select value={form.documentType} onChange={e => setForm({ ...form, documentType: e.target.value })}>{EQUIP_DOC_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
         <label>Department<select value={form.departmentId} onChange={e => setForm({ ...form, departmentId: e.target.value })}><option value="">—</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
         <label>Section<select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>File<input ref={fileRef} type="file" onChange={e => setFile(e.target.files?.[0] ?? null)} /></label>
         <button type="submit" disabled={busy}>{busy ? 'Uploading…' : 'Add document'}</button>
-      </form>
+      </form>}
       <table className="table" style={{ marginTop: 12 }}><thead><tr><th>Code</th><th>Title</th><th>Type</th><th>Status</th><th>File</th></tr></thead><tbody>
         {docs.map(d => <tr key={d.id}><td>{d.document_code || '—'}</td><td>{d.title}</td><td>{d.document_type || '—'}</td><td>{formatBadge(d.status)}</td><td>{d.file_id ? <a href={`${API_BASE}/files/${d.file_id}/raw`} target="_blank" rel="noreferrer">open</a> : '—'}</td></tr>)}
         {docs.length === 0 && <tr><td colSpan={5} className="muted">No documents linked yet.</td></tr>}
@@ -1762,7 +1770,7 @@ export function InventoryPage() {
 
     {tab === 'New Item' && <div className="card">
       <h3>Register a stock item</h3>
-      <form className="form" onSubmit={submitItem}>
+      {can('monitoring.assets', 'create') && <form className="form" onSubmit={submitItem}>
         <label>Name<input value={itemForm.name} onChange={e => setItemForm({ ...itemForm, name: e.target.value })} required /></label>
         <label>Category<select value={itemForm.category} onChange={e => setItemForm({ ...itemForm, category: e.target.value })} required>
           <option value="">Select the category</option>
@@ -1809,7 +1817,7 @@ export function InventoryPage() {
               </label>}
         </fieldset>
         <button type="submit">Register the item</button>
-      </form>
+      </form>}
     </div>}
 
     {tab === 'Stock Ledger' &&
@@ -1856,7 +1864,7 @@ export function InventoryPage() {
           <BarcodeScanner placeholder="Scan the box to fill this form…" autoFocus={false} onScan={scanForReceipt} />
           {receiptNote && <p className="notice-ok" style={{ marginTop: 8 }}>{receiptNote}</p>}
         </div>
-        <form className="form" onSubmit={submitBatch}>
+        {can('supplier_inventory.stock', 'create') && <form className="form" onSubmit={submitBatch}>
           <label>Item<select value={batchForm.itemId} onChange={e => setBatchForm({ ...batchForm, itemId: e.target.value })} required><option value="">Select the item</option>{items.map(i => <option key={i.id} value={i.id}>{i.item_code} — {i.name}</option>)}</select></label>
           <label>Batch number<input value={batchForm.batchNumber} onChange={e => setBatchForm({ ...batchForm, batchNumber: e.target.value })} /></label>
           <label>Lot number<input value={batchForm.lotNumber} onChange={e => setBatchForm({ ...batchForm, lotNumber: e.target.value })} /></label>
@@ -1899,7 +1907,7 @@ export function InventoryPage() {
               onKeyDown={e => { if (e.key === 'Enter') e.preventDefault(); }} />
           </label>
           <button type="submit">Book in the delivery</button>
-        </form>
+        </form>}
       </div>
     </div>}
 
@@ -1976,7 +1984,7 @@ export function InventoryPage() {
         For anything that is not an ordinary issue — a disposal, a transfer, an adjustment. Issuing to a unit is
         quicker on the <button type="button" className="linklike" onClick={() => setTab('Issuing')}>Issuing</button> tab.
       </p>
-      <form className="form" onSubmit={submitMovement}>
+      {can('supplier_inventory.stock', 'create') && <form className="form" onSubmit={submitMovement}>
         {/* The state of a batch is on the option itself, so a storekeeper is
             not offered a quarantined or expired box and refused a click later. */}
         <label>Batch<select value={movementForm.batchId} onChange={e => { setMovementForm({ ...movementForm, batchId: e.target.value }); setFefoWarning(null); }} required>
@@ -2004,10 +2012,10 @@ export function InventoryPage() {
         {fefoWarning && <div className="notice-warn">
           <p style={{ margin: '0 0 8px' }}>{fefoWarning.message}</p>
           <button type="button" className="secondary" onClick={() => { setMovementForm({ ...movementForm, batchId: String(fefoWarning.batchId) }); setFefoWarning(null); }}>Issue the older batch instead</button>{' '}
-          <button type="button" className="secondary" onClick={e => void submitMovement(e as unknown as FormEvent, true)}>Skip it anyway — record the reason</button>
+          {can('supplier_inventory.stock', 'create') && <button type="button" className="secondary" onClick={e => void submitMovement(e as unknown as FormEvent, true)}>Skip it anyway — record the reason</button>}
         </div>}
         <button type="submit">Record movement</button>
-      </form>
+      </form>}
     </div>
 
     {/* Recording a movement and then having nowhere to see it is not a record.
@@ -2126,7 +2134,7 @@ export function InventoryPage() {
       {supplierTab === 'New registration' && <div className="card">
         <h3>Register a supplier</h3>
         <p className="muted" style={{ marginTop: 0 }}>Whoever supplies reagents, consumables or a service that affects a result belongs on this register, with the evaluation the laboratory's procedure requires.</p>
-        <form className="form" onSubmit={submitSupplier}>
+        {can('supplier_inventory.suppliers', 'create') && <form className="form" onSubmit={submitSupplier}>
           <label>Name<input value={supplierForm.name} onChange={e => setSupplierForm({ ...supplierForm, name: e.target.value })} required /></label>
           <label>Contact person<input value={supplierForm.contactPerson} onChange={e => setSupplierForm({ ...supplierForm, contactPerson: e.target.value })} /></label>
           <label>Phone<input value={supplierForm.phone} onChange={e => setSupplierForm({ ...supplierForm, phone: e.target.value })} /></label>
@@ -2135,13 +2143,13 @@ export function InventoryPage() {
           <label>What they supply<input value={supplierForm.itemCategory} onChange={e => setSupplierForm({ ...supplierForm, itemCategory: e.target.value })} placeholder="Reagents, consumables, calibration services…" /></label>
           <label className="toggle"><input type="checkbox" checked={supplierForm.evaluationRequired} onChange={e => setSupplierForm({ ...supplierForm, evaluationRequired: e.target.checked })} /> They must be evaluated periodically</label>
           <button type="submit">Register supplier</button>
-        </form>
+        </form>}
       </div>}
 
       {supplierTab === 'Evaluation' && <>
         <div className="card">
           <h3>Record an evaluation</h3>
-          <form className="form" onSubmit={submitEvaluation}>
+          {can('supplier_inventory.suppliers', 'create') && <form className="form" onSubmit={submitEvaluation}>
             <label>Supplier<select value={evalForm.supplierId} onChange={e => setEvalForm({ ...evalForm, supplierId: e.target.value })} required><option value="">Select supplier</option>{suppliers.map(sp => <option key={sp.id} value={sp.id}>{sp.name}</option>)}</select></label>
             <label>Evaluation date<input type="date" value={evalForm.evaluationDate} onChange={e => setEvalForm({ ...evalForm, evaluationDate: e.target.value })} required /></label>
             <label>Rating<select value={evalForm.rating} onChange={e => setEvalForm({ ...evalForm, rating: e.target.value })}>
@@ -2152,7 +2160,7 @@ export function InventoryPage() {
             <label>Action required<textarea value={evalForm.actionRequired} onChange={e => setEvalForm({ ...evalForm, actionRequired: e.target.value })} /></label>
             <label>Next evaluation due<input type="date" value={evalForm.nextEvaluationDate} onChange={e => setEvalForm({ ...evalForm, nextEvaluationDate: e.target.value })} /></label>
             <button type="submit">Record evaluation</button>
-          </form>
+          </form>}
         </div>
         <div className="card">
           <h3>Evaluation register</h3>
@@ -2219,7 +2227,7 @@ export function InventoryPage() {
     {tab === 'Storage Inspections' && <>
       <div className="card">
         <h3>Record storage-area inspection</h3>
-        <form className="form" onSubmit={submitStorageInspection}>
+        {can('supplier_inventory.storage', 'create') && <form className="form" onSubmit={submitStorageInspection}>
           <label>Inspection date<input type="date" value={stiForm.inspectionDate} onChange={e => setStiForm({ ...stiForm, inspectionDate: e.target.value })} required /></label>
           <label>Location<select value={stiForm.locationId} onChange={e => setStiForm({ ...stiForm, locationId: e.target.value })}><option value="">Select location</option>{locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
           <label>Storage area<input value={stiForm.storageArea} onChange={e => setStiForm({ ...stiForm, storageArea: e.target.value })} placeholder="e.g. reagent store, cold room" /></label>
@@ -2234,7 +2242,7 @@ export function InventoryPage() {
           <label>Findings<textarea value={stiForm.findings} onChange={e => setStiForm({ ...stiForm, findings: e.target.value })} /></label>
           <label>Corrective action<textarea value={stiForm.correctiveAction} onChange={e => setStiForm({ ...stiForm, correctiveAction: e.target.value })} /></label>
           <button type="submit">Record inspection</button>
-        </form>
+        </form>}
       </div>
       <div className="card" style={{ marginTop: 16 }}>
         <h3>Storage inspection log</h3>
@@ -2293,6 +2301,7 @@ function ReasonPrompt({ title, intro, confirmLabel, danger, placeholder, onClose
   title: string; intro: string; confirmLabel: string; danger?: boolean; placeholder?: string;
   onClose: () => void; onConfirm: (reason: string) => Promise<void>;
 }) {
+  const { can } = usePermissions();
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2307,9 +2316,9 @@ function ReasonPrompt({ title, intro, confirmLabel, danger, placeholder, onClose
   return <DetailModal open onClose={onClose} width="narrow" title={title}
     footer={<>
       <button type="button" className="secondary" onClick={onClose}>Cancel</button>
-      <button type="button" className={danger ? 'danger' : ''} disabled={busy} onClick={() => void go()}>
+      {can('supplier_inventory.stock', 'edit') && <button type="button" className={danger ? 'danger' : ''} disabled={busy} onClick={() => void go()}>
         {busy ? 'Working…' : confirmLabel}
-      </button>
+      </button>}
     </>}>
     {error && <div className="error">{error}</div>}
     <p className="muted" style={{ marginTop: 0 }}>{intro}</p>
@@ -2332,6 +2341,7 @@ function BatchEditModal({ batch, suppliers, storagePlaces, supplySources, procur
   supplySources: SupplySource[]; procurement: ProcurementPolicy;
   onClose: () => void; onSaved: (message: string) => void | Promise<void>;
 }) {
+  const { can } = usePermissions();
   const anyBatch = batch as any;
   const [form, setForm] = useState({
     batchNumber: batch.batch_number ?? '', lotNumber: batch.lot_number ?? '',
@@ -2369,7 +2379,7 @@ function BatchEditModal({ batch, suppliers, storagePlaces, supplySources, procur
       {issued} {batch.unit_of_measure || ''} has already gone out of this delivery, so the quantity received cannot be
       corrected below that. If the whole receipt was wrong, reverse it instead.
     </div>}
-    <form id="edit-batch" className="form" onSubmit={save}>
+    {can('supplier_inventory.suppliers', 'edit') && <form id="edit-batch" className="form" onSubmit={save}>
       <label>Batch number<input value={form.batchNumber} onChange={e => setForm({ ...form, batchNumber: e.target.value })} /></label>
       <label>Lot number<input value={form.lotNumber} onChange={e => setForm({ ...form, lotNumber: e.target.value })} /></label>
       {procurement.mode === 'both' && <label>How it was obtained
@@ -2398,7 +2408,7 @@ function BatchEditModal({ batch, suppliers, storagePlaces, supplySources, procur
       </select></label>
       <label>Barcode on this box<input value={form.productBarcode} onChange={e => setForm({ ...form, productBarcode: e.target.value })}
         onKeyDown={e => { if (e.key === 'Enter') e.preventDefault(); }} /></label>
-    </form>
+    </form>}
   </DetailModal>;
 }
 
@@ -2415,6 +2425,7 @@ function StockAdjustModal({ item, reasons, onClose, onDone }: {
   item: InventoryItemDetail; reasons: ConfigOption[];
   onClose: () => void; onDone: (message: string) => void | Promise<void>;
 }) {
+  const { can } = usePermissions();
   const [direction, setDirection] = useState<'debit' | 'credit'>('debit');
   const [quantity, setQuantity] = useState('');
   const [reason, setReason] = useState('');
@@ -2448,7 +2459,7 @@ function StockAdjustModal({ item, reasons, onClose, onDone }: {
       </button>
     </>}>
     {error && <div className="error">{error}</div>}
-    <form id="adjust-stock" className="form" onSubmit={go}>
+    {can('supplier_inventory.stock', 'edit') && <form id="adjust-stock" className="form" onSubmit={go}>
       <div className="bc-choice">
         <button type="button" className={direction === 'debit' ? 'active' : ''} onClick={() => setDirection('debit')}>
           <strong>Debit — take stock off</strong>
@@ -2474,7 +2485,7 @@ function StockAdjustModal({ item, reasons, onClose, onDone }: {
             {b.batch_number || `Lot #${b.id}`} — {b.quantity_available} available{b.expiry_date ? `, expires ${String(b.expiry_date).slice(0, 10)}` : ''}
           </option>)}
         </select></label>
-    </form>
+    </form>}
   </DetailModal>;
 }
 
@@ -2578,7 +2589,7 @@ function InventoryDetailPanel({
       Stock is at or below the minimum. {item.supplier_name ? `Reorder from ${item.supplier_name}.` : 'No supplier is recorded against this item.'}
     </div>}
 
-    {mode === 'edit' ? <form className="form" onSubmit={save} style={{ marginTop: 14 }}>
+    {mode === 'edit' ? can('supplier_inventory.suppliers', 'edit') && <form className="form" onSubmit={save} style={{ marginTop: 14 }}>
       <label>Name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></label>
       <label>Category<select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} required>
         {categories.map(c => <option key={c.id} value={c.value}>{c.label}</option>)}
@@ -2644,8 +2655,8 @@ function InventoryDetailPanel({
           <td className="reg-actions-col">
             <RowMenu label={`Manage batch ${b.batch_number || b.id}`}>{close => <>
               {(b.acceptance_status === 'pending' || b.acceptance_status === 'quarantined') && !b.reversed_at && <>
-                <button type="button" role="menuitem" onClick={() => { close(); acceptBatch(b.id, 'accepted'); }}>Accept on receipt</button>
-                <button type="button" role="menuitem" className="danger" onClick={() => { close(); acceptBatch(b.id, 'rejected'); }}>Reject on receipt</button>
+                {can('supplier_inventory.stock', 'edit') && <button type="button" role="menuitem" onClick={() => { close(); acceptBatch(b.id, 'accepted'); }}>Accept on receipt</button>}
+                {can('supplier_inventory.stock', 'edit') && <button type="button" role="menuitem" className="danger" onClick={() => { close(); acceptBatch(b.id, 'rejected'); }}>Reject on receipt</button>}
               </>}
               {mayCorrect && !b.reversed_at && <button type="button" role="menuitem" onClick={() => { close(); setEditingBatch({ ...b, item_id: item.id, item_name: item.name, unit_of_measure: item.unit ?? undefined } as InventoryBatch); }}><Pencil size={14} /> Correct this receipt…</button>}
               <button type="button" role="menuitem" onClick={() => { close(); createBatchNc(b.id); }}><ShieldAlert size={14} /> Raise a nonconformity</button>
@@ -2721,6 +2732,7 @@ function ItemRemovalModal({ impact, busy, onClose, onDone, setError }: {
   impact: ItemDeletionImpact; busy: string; onClose: () => void;
   onDone: (message: string) => void | Promise<void>; setError: (m: string | null) => void;
 }) {
+  const { can } = usePermissions();
   const [reason, setReason] = useState('');
   const [confirming, setConfirming] = useState(false);
   const [working, setWorking] = useState('');
@@ -2751,14 +2763,14 @@ function ItemRemovalModal({ impact, busy, onClose, onDone, setError }: {
       <input value={reason} onChange={e => setReason(e.target.value)} placeholder="Discontinued, replaced by…, entered in error" />
     </label>
     <div className="danger-actions">
-      <button type="button" disabled={!!working} onClick={() => void run('withdraw')}>
+      {can('supplier_inventory.suppliers', 'void_archive') && <button type="button" disabled={!!working} onClick={() => void run('withdraw')}>
         {working === 'withdraw' ? 'Withdrawing…' : 'Withdraw from the register'}
-      </button>
+      </button>}
       <p className="muted">It leaves the working register. Every batch and movement stays on the record.</p>
-      <button type="button" className="danger" disabled={!!working || reason.trim().length < 8}
+      {can('supplier_inventory.suppliers', 'void_archive') && <button type="button" className="danger" disabled={!!working || reason.trim().length < 8}
         onClick={() => void run('delete', confirming)}>
         {working === 'delete' ? 'Erasing…' : confirming ? `Yes — erase it and its ${history} record${history === 1 ? '' : 's'}` : 'Erase permanently'}
-      </button>
+      </button>}
       <p className="muted">
         {reason.trim().length < 8 ? 'Give a reason first — at least a few words.'
           : confirming ? 'This cannot be undone.'
@@ -2810,7 +2822,7 @@ function SupplierDetailPanel({ supplier, evaluations, can, onClose, onSaved, onR
       <div><span className="fig">{(supplier.last_evaluation_date ?? '').slice(0, 10) || '—'}</span><span className="fig-label">last evaluated</span></div>
     </div>
 
-    <form className="form" onSubmit={save} style={{ marginTop: 14 }}>
+    {can('supplier_inventory.suppliers', 'edit') && <form className="form" onSubmit={save} style={{ marginTop: 14 }}>
       <label>Name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></label>
       <label>Contact person<input value={form.contactPerson} onChange={e => setForm({ ...form, contactPerson: e.target.value })} /></label>
       <label>Phone<input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></label>
@@ -2823,7 +2835,7 @@ function SupplierDetailPanel({ supplier, evaluations, can, onClose, onSaved, onR
       <label>Next evaluation due<input type="date" value={form.nextEvaluationDue} onChange={e => setForm({ ...form, nextEvaluationDue: e.target.value })} /></label>
       <label className="toggle"><input type="checkbox" checked={form.evaluationRequired} onChange={e => setForm({ ...form, evaluationRequired: e.target.checked })} /> They must be evaluated periodically</label>
       <button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save changes'}</button>
-    </form>
+    </form>}
 
     <h4>Evaluations</h4>
     {evaluations.length === 0 ? <p className="muted">This supplier has never been evaluated.</p> :
@@ -2854,6 +2866,7 @@ function SupplierRemovalModal({ impact, onClose, onDone, setError }: {
   impact: SupplierDeletionImpact; onClose: () => void;
   onDone: (message: string) => void | Promise<void>; setError: (m: string | null) => void;
 }) {
+  const { can } = usePermissions();
   const [reason, setReason] = useState('');
   const [confirming, setConfirming] = useState(false);
   const [working, setWorking] = useState('');
@@ -2882,13 +2895,13 @@ function SupplierRemovalModal({ impact, onClose, onDone, setError }: {
       <input value={reason} onChange={e => setReason(e.target.value)} placeholder="Contract ended, duplicate record, entered in error" />
     </label>
     <div className="danger-actions">
-      <button type="button" disabled={!!working} onClick={() => void run('suspend')}>
+      {can('supplier_inventory.suppliers', 'void_archive') && <button type="button" disabled={!!working} onClick={() => void run('suspend')}>
         {working === 'suspend' ? 'Suspending…' : 'Suspend them'}
-      </button>
+      </button>}
       <p className="muted">They stop being offered for new orders. Everything they supplied keeps their name.</p>
-      <button type="button" className="danger" disabled={!!working || reason.trim().length < 8} onClick={() => void run('delete', confirming)}>
+      {can('supplier_inventory.suppliers', 'void_archive') && <button type="button" className="danger" disabled={!!working || reason.trim().length < 8} onClick={() => void run('delete', confirming)}>
         {working === 'delete' ? 'Erasing…' : confirming ? 'Yes — erase them' : 'Erase permanently'}
-      </button>
+      </button>}
       <p className="muted">
         {reason.trim().length < 8 ? 'Give a reason first — at least a few words.'
           : confirming ? `The ${impact.items} item(s) and ${impact.batches} batch(es) stay; only the supplier record goes.`
@@ -2900,6 +2913,7 @@ function SupplierRemovalModal({ impact, onClose, onDone, setError }: {
 
 // ============= MONITORING =============
 export function MonitoringPage({ embedded = false }: { embedded?: boolean } = {}) {
+  const { can } = usePermissions();
   const { isEnabled } = useModules();
   const { staff, sections, locations } = useLookups();
   const [tab, setTab] = useState(embedded ? 'Monitoring Items' : 'Dashboard');
@@ -3004,7 +3018,7 @@ export function MonitoringPage({ embedded = false }: { embedded?: boolean } = {}
 
     {tab === 'New Monitoring Item' && <div className="card">
       <h3>New monitoring item</h3>
-      <form className="form" onSubmit={submitItem}>
+      {can('monitoring.assets', 'create') && <form className="form" onSubmit={submitItem}>
         <label>Name<input value={itemForm.name} onChange={e => setItemForm({ ...itemForm, name: e.target.value })} required /></label>
         <label>Monitoring type<input value={itemForm.monitoringType} onChange={e => setItemForm({ ...itemForm, monitoringType: e.target.value })} placeholder="e.g. fridge, freezer, room temp" /></label>
         <label>Parameter<input value={itemForm.parameter} onChange={e => setItemForm({ ...itemForm, parameter: e.target.value })} required placeholder="e.g. temperature" /></label>
@@ -3021,12 +3035,12 @@ export function MonitoringPage({ embedded = false }: { embedded?: boolean } = {}
         <label>Responsible staff<select value={itemForm.responsibleStaffId} onChange={e => setItemForm({ ...itemForm, responsibleStaffId: e.target.value })}><option value="">Select staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label><input type="checkbox" checked={itemForm.ncTriggerEnabled} onChange={e => setItemForm({ ...itemForm, ncTriggerEnabled: e.target.checked })} /> Enable NC trigger button on critical/out-of-range</label>
         <button type="submit">Save monitoring item</button>
-      </form>
+      </form>}
     </div>}
 
     {tab === 'Enter Reading' && <div className="card">
       <h3>Enter reading</h3>
-      <form className="form" onSubmit={submitReading}>
+      {can('monitoring.assets', 'create') && <form className="form" onSubmit={submitReading}>
         <label>Monitoring item<select value={readingForm.itemId} onChange={e => setReadingForm({ ...readingForm, itemId: e.target.value })} required><option value="">Select item</option>{items.map(i => <option key={i.id} value={i.id}>{i.item_code} — {i.name} ({i.lower_limit}…{i.upper_limit} {i.unit})</option>)}</select></label>
         <label>Reading date<input type="date" value={readingForm.readingDate} onChange={e => setReadingForm({ ...readingForm, readingDate: e.target.value })} required /></label>
         <label>Reading time<input type="time" value={readingForm.readingTime} onChange={e => setReadingForm({ ...readingForm, readingTime: e.target.value })} /></label>
@@ -3034,7 +3048,7 @@ export function MonitoringPage({ embedded = false }: { embedded?: boolean } = {}
         <label>Comment<textarea value={readingForm.comment} onChange={e => setReadingForm({ ...readingForm, comment: e.target.value })} placeholder="Required for abnormal readings" /></label>
         <label>Immediate action<textarea value={readingForm.immediateAction} onChange={e => setReadingForm({ ...readingForm, immediateAction: e.target.value })} placeholder="Required for abnormal readings" /></label>
         <button type="submit">Save reading</button>
-      </form>
+      </form>}
     </div>}
 
     {tab === 'Excursions' && <div className="card">
@@ -3043,9 +3057,9 @@ export function MonitoringPage({ embedded = false }: { embedded?: boolean } = {}
         <table className="table"><thead><tr><th>Date</th><th>Item</th><th>Value</th><th>Status</th><th>Comment</th><th>Actions</th></tr></thead><tbody>
           {excursions.map(r => <tr key={r.id} {...focusAttr('monitoring_readings', r.id)}><td>{r.reading_date}</td><td>{r.item_name || items.find(i => i.id === r.monitoring_item_id)?.name}</td><td>{r.value} {r.item_unit}</td><td>{formatBadge(r.status)}</td><td>{r.comment || '—'}</td>
             <td>
-              {!r.reviewed_at && <button type="button" className="secondary" onClick={() => reviewReading(r.id)}>Review</button>}{' '}
-              {!r.nc_id && (r.status === 'critical' || r.status === 'out_of_range') && <button type="button" className="secondary" onClick={() => createNcForReading(r.id)}>Create NC</button>}{' '}
-              {!r.capa_id && <button type="button" className="secondary" onClick={() => createCapaForReading(r.id)}>Create CAPA</button>}
+              {!r.reviewed_at && can('monitoring.readings', 'approve') && <button type="button" className="secondary" onClick={() => reviewReading(r.id)}>Review</button>}{' '}
+              {!r.nc_id && (r.status === 'critical' || r.status === 'out_of_range') && can('nc_capa', 'create') && <button type="button" className="secondary" onClick={() => createNcForReading(r.id)}>Create NC</button>}{' '}
+              {!r.capa_id && can('nc_capa', 'create') && <button type="button" className="secondary" onClick={() => createCapaForReading(r.id)}>Create CAPA</button>}
             </td></tr>)}
         </tbody></table>}
     </div>}
@@ -3064,6 +3078,7 @@ const IMMUNIZATION_TYPES = ['vaccination', 'post_exposure', 'declination'];
 const prettify = (s?: string) => s ? s.replace(/_/g, ' ') : '—';
 
 export function SafetyPage() {
+  const { can } = usePermissions();
   const { isEnabled } = useModules();
   const { staff, sections, locations } = useLookups();
   const [tab, setTab] = useState('Dashboard');
@@ -3228,7 +3243,7 @@ export function SafetyPage() {
 
     {tab === 'New Incident' && <div className="card">
       <h3>Report safety incident</h3>
-      <form className="form" onSubmit={submit}>
+      {can('facilities_safety.incidents', 'create') && <form className="form" onSubmit={submit}>
         <label>Incident date<input type="date" value={form.incidentDate} onChange={e => setForm({ ...form, incidentDate: e.target.value })} required /></label>
         <label>Incident type<input value={form.incidentType} onChange={e => setForm({ ...form, incidentType: e.target.value })} placeholder="e.g. spill, exposure, injury" /></label>
         <label>Title<input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required /></label>
@@ -3242,13 +3257,13 @@ export function SafetyPage() {
         <label>Persons involved<input value={form.personsInvolved} onChange={e => setForm({ ...form, personsInvolved: e.target.value })} /></label>
         <label>Reported to<input value={form.reportedTo} onChange={e => setForm({ ...form, reportedTo: e.target.value })} /></label>
         <button type="submit">Report incident</button>
-      </form>
+      </form>}
     </div>}
 
     {tab === 'Safety Equipment' && <>
       <div className="card">
         <h3>Add safety equipment</h3>
-        <form className="form" onSubmit={submitEquip}>
+        {can('facilities_safety.equipment', 'create') && <form className="form" onSubmit={submitEquip}>
           <label>Name<input value={equipForm.name} onChange={e => setEquipForm({ ...equipForm, name: e.target.value })} required /></label>
           <label>Type<select value={equipForm.equipmentType} onChange={e => setEquipForm({ ...equipForm, equipmentType: e.target.value })}><option value="">Select type</option>{SAFETY_EQUIPMENT_TYPES.map(t => <option key={t} value={t}>{prettify(t)}</option>)}</select></label>
           <label>Serial number<input value={equipForm.serialNumber} onChange={e => setEquipForm({ ...equipForm, serialNumber: e.target.value })} /></label>
@@ -3262,7 +3277,7 @@ export function SafetyPage() {
           <label>Next certification due<input type="date" value={equipForm.nextCertificationDue} onChange={e => setEquipForm({ ...equipForm, nextCertificationDue: e.target.value })} /></label>
           <label>Notes<input value={equipForm.notes} onChange={e => setEquipForm({ ...equipForm, notes: e.target.value })} /></label>
           <button type="submit">Add equipment</button>
-        </form>
+        </form>}
       </div>
       <div className="card" style={{ marginTop: 16 }}>
         <h3>Safety equipment register</h3>
@@ -3276,7 +3291,7 @@ export function SafetyPage() {
     {tab === 'Inspections & Drills' && <>
       <div className="card">
         <h3>Record inspection / drill</h3>
-        <form className="form" onSubmit={submitInsp}>
+        {can('facilities_safety.inspections', 'create') && <form className="form" onSubmit={submitInsp}>
           <label>Type<select value={inspForm.inspectionType} onChange={e => setInspForm({ ...inspForm, inspectionType: e.target.value })}><option value="">Select type</option>{INSPECTION_TYPES.map(t => <option key={t} value={t}>{prettify(t)}</option>)}</select></label>
           <label>Date<input type="date" value={inspForm.inspectionDate} onChange={e => setInspForm({ ...inspForm, inspectionDate: e.target.value })} required /></label>
           <label>Section<select value={inspForm.sectionId} onChange={e => setInspForm({ ...inspForm, sectionId: e.target.value })}><option value="">Select section</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
@@ -3288,7 +3303,7 @@ export function SafetyPage() {
           <label>Findings summary<textarea value={inspForm.findingsSummary} onChange={e => setInspForm({ ...inspForm, findingsSummary: e.target.value })} /></label>
           <label>Corrective action<textarea value={inspForm.correctiveAction} onChange={e => setInspForm({ ...inspForm, correctiveAction: e.target.value })} /></label>
           <button type="submit">Record inspection</button>
-        </form>
+        </form>}
       </div>
       <div className="card" style={{ marginTop: 16 }}>
         <h3>Inspection & drill register</h3>
@@ -3303,7 +3318,7 @@ export function SafetyPage() {
     {tab === 'Waste Disposal' && <>
       <div className="card">
         <h3>Record waste disposal</h3>
-        <form className="form" onSubmit={submitWaste}>
+        {can('facilities_safety.waste', 'create') && <form className="form" onSubmit={submitWaste}>
           <label>Disposal date<input type="date" value={wasteForm.disposalDate} onChange={e => setWasteForm({ ...wasteForm, disposalDate: e.target.value })} required /></label>
           <label>Waste type<select value={wasteForm.wasteType} onChange={e => setWasteForm({ ...wasteForm, wasteType: e.target.value })}><option value="">Select type</option>{WASTE_TYPES.map(t => <option key={t} value={t}>{prettify(t)}</option>)}</select></label>
           <label>Quantity<input value={wasteForm.quantity} onChange={e => setWasteForm({ ...wasteForm, quantity: e.target.value })} /></label>
@@ -3314,7 +3329,7 @@ export function SafetyPage() {
           <label>Manifest reference<input value={wasteForm.manifestReference} onChange={e => setWasteForm({ ...wasteForm, manifestReference: e.target.value })} /></label>
           <label>Notes<textarea value={wasteForm.notes} onChange={e => setWasteForm({ ...wasteForm, notes: e.target.value })} /></label>
           <button type="submit">Record disposal</button>
-        </form>
+        </form>}
       </div>
       <div className="card" style={{ marginTop: 16 }}>
         <h3>Waste disposal log</h3>
@@ -3328,7 +3343,7 @@ export function SafetyPage() {
     {tab === 'Hazardous Chemicals' && <>
       <div className="card">
         <h3>Add hazardous chemical</h3>
-        <form className="form" onSubmit={submitChem}>
+        {can('facilities_safety.waste', 'create') && <form className="form" onSubmit={submitChem}>
           <label>Name<input value={chemForm.name} onChange={e => setChemForm({ ...chemForm, name: e.target.value })} required /></label>
           <label>Hazard class<select value={chemForm.hazardClass} onChange={e => setChemForm({ ...chemForm, hazardClass: e.target.value })}><option value="">Select class</option>{HAZARD_CLASSES.map(h => <option key={h} value={h}>{prettify(h)}</option>)}</select></label>
           <label>CAS number<input value={chemForm.casNumber} onChange={e => setChemForm({ ...chemForm, casNumber: e.target.value })} /></label>
@@ -3342,7 +3357,7 @@ export function SafetyPage() {
           <label>Status<select value={chemForm.status} onChange={e => setChemForm({ ...chemForm, status: e.target.value })}>{['in_use', 'in_store', 'disposed'].map(s => <option key={s} value={s}>{prettify(s)}</option>)}</select></label>
           <label>Spill measures<textarea value={chemForm.spillMeasures} onChange={e => setChemForm({ ...chemForm, spillMeasures: e.target.value })} /></label>
           <button type="submit">Add chemical</button>
-        </form>
+        </form>}
       </div>
       <div className="card" style={{ marginTop: 16 }}>
         <h3>Hazardous chemical inventory</h3>
@@ -3356,7 +3371,7 @@ export function SafetyPage() {
     {tab === 'Immunisation & Exposure' && <>
       <div className="card">
         <h3>Record immunisation / exposure</h3>
-        <form className="form" onSubmit={submitImm}>
+        {can('facilities_safety.health', 'create') && <form className="form" onSubmit={submitImm}>
           <label>Record type<select value={immForm.recordType} onChange={e => setImmForm({ ...immForm, recordType: e.target.value })}>{IMMUNIZATION_TYPES.map(t => <option key={t} value={t}>{prettify(t)}</option>)}</select></label>
           <label>Staff<select value={immForm.staffId} onChange={e => setImmForm({ ...immForm, staffId: e.target.value })}><option value="">Select staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           <label>Vaccine / agent<input value={immForm.vaccineOrAgent} onChange={e => setImmForm({ ...immForm, vaccineOrAgent: e.target.value })} placeholder="e.g. Hepatitis B" /></label>
@@ -3370,7 +3385,7 @@ export function SafetyPage() {
           <label><input type="checkbox" checked={immForm.declinationSigned} onChange={e => setImmForm({ ...immForm, declinationSigned: e.target.checked })} /> Declination signed</label>
           <label>Follow-up summary<textarea value={immForm.followUpSummary} onChange={e => setImmForm({ ...immForm, followUpSummary: e.target.value })} /></label>
           <button type="submit">Record</button>
-        </form>
+        </form>}
       </div>
       <div className="card" style={{ marginTop: 16 }}>
         <h3>Immunisation & exposure register</h3>
@@ -3386,14 +3401,15 @@ export function SafetyPage() {
 }
 
 function InspectionDetailPanel({ item, staff, onClose, createNc, createCapa, closeInspection }: { item: SafetyInspection & { links?: any[] }; staff: Staff[]; onClose: () => void; createNc: (id: number) => void; createCapa: (id: number) => void; closeInspection: (id: number) => void }) {
+  const { can } = usePermissions();
   return <DetailModal open onClose={onClose} title={<>{item.inspection_number} — {(item.inspection_type || 'inspection').replace(/_/g, ' ')}</>}>
     <p>Status: {formatBadge(item.status)} | Outcome: {item.outcome ? item.outcome.replace(/_/g, ' ') : '—'} | Conducted by: {staffName(staff, item.conducted_by_staff_id)} | Date: {item.inspection_date}</p>
     {item.scope && <p><strong>Scope:</strong> {item.scope}</p>}
     {item.findings_summary && <p><strong>Findings:</strong> {item.findings_summary}</p>}
     {item.corrective_action && <p><strong>Corrective action:</strong> {item.corrective_action}</p>}
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-      {!item.nc_id && <button type="button" className="secondary" onClick={() => createNc(item.id)}>Create NC</button>}
-      {!item.capa_id && <button type="button" className="secondary" onClick={() => createCapa(item.id)}>Create CAPA</button>}
+      {!item.nc_id && can('nc_capa', 'create') && <button type="button" className="secondary" onClick={() => createNc(item.id)}>Create NC</button>}
+      {!item.capa_id && can('nc_capa', 'create') && <button type="button" className="secondary" onClick={() => createCapa(item.id)}>Create CAPA</button>}
       {item.status !== 'closed' && <button type="button" className="secondary" onClick={() => closeInspection(item.id)}>Close inspection</button>}
     </div>
     <h4 style={{ marginTop: 16 }}>Linked records</h4>
@@ -3402,15 +3418,16 @@ function InspectionDetailPanel({ item, staff, onClose, createNc, createCapa, clo
 }
 
 function SafetyDetailPanel({ item, staff, onClose, createNc, createCapa, closeIncident }: { item: SafetyIncident & { links?: any[] }; staff: Staff[]; onClose: () => void; createNc: (id: number) => void; createCapa: (id: number) => void; closeIncident: (id: number) => void }) {
+  const { can } = usePermissions();
   return <DetailModal open onClose={onClose} title={<>{item.incident_number} — {item.title || (item.description || '').slice(0, 80)}</>}>
     <p>Status: {formatBadge(item.status)} | Severity: {item.severity || '—'} | Reported by: {staffName(staff, item.reported_by_staff_id)} | Date: {item.incident_date}</p>
     {item.description && <p><strong>Description:</strong> {item.description}</p>}
     {item.immediate_action && <p><strong>Immediate action:</strong> {item.immediate_action}</p>}
     {item.persons_involved && <p><strong>Persons involved:</strong> {item.persons_involved}</p>}
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-      {!item.nc_id && <button type="button" className="secondary" onClick={() => createNc(item.id)}>Create NC</button>}
-      {!item.capa_id && <button type="button" className="secondary" onClick={() => createCapa(item.id)}>Create CAPA</button>}
-      {item.status !== 'closed' && <button type="button" className="secondary" onClick={() => closeIncident(item.id)}>Close incident</button>}
+      {!item.nc_id && can('nc_capa', 'create') && <button type="button" className="secondary" onClick={() => createNc(item.id)}>Create NC</button>}
+      {!item.capa_id && can('nc_capa', 'create') && <button type="button" className="secondary" onClick={() => createCapa(item.id)}>Create CAPA</button>}
+      {item.status !== 'closed' && can('facilities_safety.incidents', 'void_archive') && <button type="button" className="secondary" onClick={() => closeIncident(item.id)}>Close incident</button>}
     </div>
     <h4 style={{ marginTop: 16 }}>Linked records</h4>
     {!item.links?.length ? <p>No linked records.</p> : <ul>{item.links.map((l: any) => <li key={l.id}>{l.source_module_key}/{l.source_record_type}#{l.source_record_id} → {l.target_module_key}/{l.target_record_type}#{l.target_record_id}{l.notes ? ` (${l.notes})` : ''}</li>)}</ul>}

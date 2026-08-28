@@ -36,7 +36,7 @@ const MAX_SAVE_BYTES = 80 * 1024 * 1024;
 
 export type OfficeSession = {
   id: number; token: string; document_id: number; version_id: number; file_id: number;
-  file_name: string; user_id: number; lock_token: string | null; saves: number;
+  file_name: string; user_id: number; read_only: number; lock_token: string | null; saves: number;
   last_saved_at: string | null; last_version_id: number | null;
   expires_at: string; closed_at: string | null; created_at: string;
 };
@@ -44,13 +44,21 @@ export type OfficeSession = {
 /** Word only opens what it recognises — anything else belongs in a download. */
 export const OFFICE_EDITABLE = /\.(docx?|dotx?|xlsx?|xlsm|xltx?|pptx?|potx?|rtf|odt|ods|odp)$/i;
 
-/** The Office URI scheme that hands a URL to the right application. */
-export function officeUriFor(fileName: string, url: string): string {
+/**
+ * The Office URI scheme that hands a URL to the right application.
+ *
+ * `ofe` opens the document for EDITING and saves back to the URL; `ofv` opens
+ * it for VIEWING and does not. Reading a Word SOP is reading — it is the only
+ * way to read one, because a .docx has no in-app preview — so somebody with
+ * the right to read the document library gets `ofv`, and only an author gets
+ * `ofe`. Word itself then enforces the difference at the desk.
+ */
+export function officeUriFor(fileName: string, url: string, mode: 'edit' | 'view' = 'edit'): string {
   const ext = (fileName.match(/\.([a-z0-9]+)$/i)?.[1] || '').toLowerCase();
   const app = /^(xls|xlsx|xlsm|xlt|xltx|ods|csv)$/.test(ext) ? 'ms-excel'
     : /^(ppt|pptx|pot|potx|odp)$/.test(ext) ? 'ms-powerpoint'
     : 'ms-word';
-  return `${app}:ofe|u|${url}`;
+  return `${app}:${mode === 'view' ? 'ofv' : 'ofe'}|u|${url}`;
 }
 
 /** The application a given file will land in, for the button's label. */
@@ -64,13 +72,15 @@ export function officeAppNameFor(fileName: string): string {
 /** Mint a handoff. Called by the documents routes, which do the permission work. */
 export function createOfficeSession(input: {
   documentId: number; versionId: number; fileId: number; fileName: string; userId: number;
+  /** True when the holder may read the document but not write a new version. */
+  readOnly?: boolean;
 }): OfficeSession {
   const db = getDb();
   const token = crypto.randomBytes(24).toString('base64url');
   const expiresAt = new Date(Date.now() + OFFICE_SESSION_HOURS * 3600_000).toISOString();
-  db.prepare(`INSERT INTO office_edit_sessions (token, document_id, version_id, file_id, file_name, user_id, expires_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`)
-    .run(token, input.documentId, input.versionId, input.fileId, input.fileName, input.userId, expiresAt);
+  db.prepare(`INSERT INTO office_edit_sessions (token, document_id, version_id, file_id, file_name, user_id, read_only, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(token, input.documentId, input.versionId, input.fileId, input.fileName, input.userId, input.readOnly ? 1 : 0, expiresAt);
   return db.prepare('SELECT * FROM office_edit_sessions WHERE token = ?').get(token) as OfficeSession;
 }
 
@@ -271,6 +281,10 @@ export function officeEditRoutes() {
   // controlled history reads the same as it would from a manual upload.
   router.put('/edit/:token/:name', (req, res) => {
     const session = load(req, res); if (!session) return;
+    // A reader's handoff carries no authority to write. Word is already told
+    // this by the `ofv` URI it was opened with, and it is enforced here too —
+    // the URI is a request, this is the answer.
+    if (session.read_only) { davHeaders(res); res.status(403).end(); return; }
     const bytes = (req as Request & { rawBody?: Buffer }).rawBody ?? Buffer.alloc(0);
     if (bytes.length === 0) { davHeaders(res); res.status(400).end(); return; }
     if (bytes.length > MAX_SAVE_BYTES) { davHeaders(res); res.status(413).end(); return; }

@@ -4,6 +4,7 @@ import { Bell, CheckCircle2, Clock, AlertTriangle, ArrowRight, Inbox } from 'luc
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, AlertsByModule } from '../components/ui';
 import { useModules } from '../hooks/useModules';
+import { usePermissions } from '../hooks/usePermissions';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import { RecordsReportsPage } from './RecordsReportsPage';
@@ -29,6 +30,7 @@ const MODULES_FOR_PREFS = ['actions', 'documents', 'personnel', 'equipment', 'su
 const SEV_TONE: Record<string, string> = { urgent: 'crit', high: 'crit', medium: 'warn', low: 'ok', info: 'info' };
 
 export function NotificationsPage() {
+  const { canView } = usePermissions();
   const { isEnabled } = useModules();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -172,8 +174,9 @@ export function NotificationsPage() {
   const inNotifications = NOTIF_TABS.includes(tab);
   const topTabs: { key: string; active: boolean; go: () => void }[] = [
     { key: 'Notifications & Alerts', active: inNotifications, go: () => setTab('Dashboard') },
-    ...(isEnabled('records_reports') ? [{ key: 'Records, Reports & Evidence', active: tab === 'Records, Reports & Evidence', go: () => setTab('Records, Reports & Evidence') }] : []),
-    ...(isEnabled('monthly_reports') ? [{ key: 'Monthly Reports & Archives', active: tab === 'Monthly Reports & Archives', go: () => setTab('Monthly Reports & Archives') }] : []),
+    // Both switch into other modules and take their own rights.
+    ...(isEnabled('records_reports') && canView('records_reports') ? [{ key: 'Records, Reports & Evidence', active: tab === 'Records, Reports & Evidence', go: () => setTab('Records, Reports & Evidence') }] : []),
+    ...(isEnabled('monthly_reports') && canView('monthly_reports') ? [{ key: 'Monthly Reports & Archives', active: tab === 'Monthly Reports & Archives', go: () => setTab('Monthly Reports & Archives') }] : []),
   ];
 
   return <div className="module-page">

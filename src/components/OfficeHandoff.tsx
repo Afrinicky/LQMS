@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { usePermissions } from '../hooks/usePermissions';
 import { FileText, ExternalLink, Download, Upload, CheckCircle2, Loader2, RefreshCw, X } from 'lucide-react';
 import { api, API_BASE, getToken, type OfficeFileChangedPayload } from '../services/api';
 
@@ -26,6 +27,8 @@ import { api, API_BASE, getToken, type OfficeFileChangedPayload } from '../servi
 export type OfficeSession = {
   token: string; fileName: string; url: string; officeUri: string; appName: string;
   expiresAt: string; expiresInHours: number;
+  /** True when the handoff opens the file for reading and cannot save back. */
+  readOnly?: boolean;
 };
 
 /** Is this a file Office should own, rather than something we preview? */
@@ -63,6 +66,13 @@ export type RoundTripOptions = {
   fileMime?: string | null;
   /** Auto-open on mount. The Office panel does; a PDF, which reads in place, does not. */
   autoOpen?: boolean;
+  /**
+   * May this person write a new version back? Reading a Word file always means
+   * opening it in Word — there is nowhere else to read it — so opening is
+   * governed by the right to read the document. Saving back is not, and when
+   * this is false the save paths are not wired up at all.
+   */
+  canSaveBack?: boolean;
   /** Called with the id of the version a save created, so the viewer follows it. */
   onSavedVersion: (versionId: number) => void;
   onError: (message: string) => void;
@@ -78,7 +88,7 @@ export type RoundTripOptions = {
  * the two screens differ only in what they draw.
  */
 export function useOfficeRoundTrip(opts: RoundTripOptions) {
-  const { docId, versionId, fileId, fileName, fileMime, autoOpen = false, onSavedVersion, onError } = opts;
+  const { docId, versionId, fileId, fileName, fileMime, autoOpen = false, canSaveBack = false, onSavedVersion, onError } = opts;
   const appName = officeAppName(fileName, fileMime);
   // The desktop application can hand the file to the OS directly; a browser has
   // to go through the URL handoff.
@@ -135,6 +145,10 @@ export function useOfficeRoundTrip(opts: RoundTripOptions) {
   // Each save from Office arrives here as bytes and goes straight back in as a
   // new version, through the same endpoints a manual upload uses.
   useEffect(() => {
+    // No watcher for a reader: every save it caught would be pushed at an API
+    // that would refuse it, and the person would be told their reading had
+    // failed. Word opened the file read-only; nothing is coming back.
+    if (!canSaveBack) return;
     if (!watchId || !window.sechLims?.onOfficeFileChanged) return;
     const unsubscribe = window.sechLims.onOfficeFileChanged(async (payload: OfficeFileChangedPayload) => {
       if (payload.watchId !== watchId) return;
@@ -158,7 +172,7 @@ export function useOfficeRoundTrip(opts: RoundTripOptions) {
       } catch (e) { setPhase('open'); onError((e as Error).message); }
     });
     return unsubscribe;
-  }, [watchId, docId, appName, onSavedVersion, onError]);
+  }, [watchId, canSaveBack, docId, appName, onSavedVersion, onError]);
 
   // ---- The browser route: hand Office a URL it can save back to -----------
   const openInBrowser = useCallback(async () => {
@@ -278,13 +292,23 @@ export default function OfficeHandoff(props: {
   fileMime?: string | null;
   versionLabel?: string | null;
   fileSize?: number | null;
-  /** May this person write a new version, or are they only allowed to read it? */
+  /**
+   * May this person write a new version back? Opening the file is not gated on
+   * this — a Word document has no in-app preview, so opening it in Word IS
+   * reading it, and anybody who may read the document may do that. This governs
+   * the save-back controls only.
+   */
   canEdit: boolean;
   onSavedVersion: (versionId: number) => void;
   onError: (message: string) => void;
 }) {
+  const { can } = usePermissions();
   const { fileName, versionLabel, fileSize, canEdit } = props;
-  const rt = useOfficeRoundTrip({ ...props, autoOpen: canEdit });
+  // Auto-open for everybody who reaches this panel: they reached it by opening
+  // a document, and the document is in Word. It used to auto-open only for an
+  // author, so a reader was shown a card with a lone Download button — which
+  // is not "the document opened".
+  const rt = useOfficeRoundTrip({ ...props, autoOpen: true, canSaveBack: canEdit });
   const {
     phase, message, saves, lastSavedAt, uploading, uploadInput,
     onDesktop, shortApp, live, open, finish, checkNow, downloadCopy, uploadEdited,
@@ -299,10 +323,10 @@ export default function OfficeHandoff(props: {
       {meta && <p className="oh-meta">{meta}</p>}
 
       <div className="oh-actions">
-        {canEdit && <button type="button" className="oh-primary" onClick={open} disabled={phase === 'opening'}>
+        <button type="button" className="oh-primary" onClick={open} disabled={phase === 'opening'}>
           {phase === 'opening' ? <><Loader2 size={16} className="spin" /> Opening…</> : <><ExternalLink size={16} /> Open in {shortApp}</>}
-        </button>}
-        <button type="button" className="secondary" onClick={downloadCopy}><Download size={15} /> Download</button>
+        </button>
+        {can('documents.authoring', 'create') && can('documents.library', 'view') && can('documents.library', 'create') && <button type="button" className="secondary" onClick={downloadCopy}><Download size={15} /> Download</button>}
         {canEdit && <>
           <button type="button" className="secondary" onClick={() => uploadInput.current?.click()} disabled={uploading}>
             <Upload size={15} /> {uploading ? 'Uploading…' : 'Upload edit'}
@@ -319,7 +343,7 @@ export default function OfficeHandoff(props: {
           ? <><Loader2 size={13} className="spin" /> Saving…</>
           : saves > 0
             ? <><CheckCircle2 size={13} /> Saved{lastSavedAt ? ` ${new Date(lastSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}{saves > 1 ? ` · ${saves} versions` : ''}</>
-            : <><span className="oh-dot" /> Opened in {shortApp}</>}
+            : <><span className="oh-dot" /> Opened in {shortApp}{canEdit ? '' : ' · read-only'}</>}
         <span style={{ flex: 1 }} />
         {onDesktop && <button type="button" className="oh-link" onClick={checkNow}><RefreshCw size={12} /> Check now</button>}
         <button type="button" className="oh-link" onClick={finish}>Done</button>

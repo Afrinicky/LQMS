@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
 import { useModules } from '../hooks/useModules';
+import { usePermissions } from '../hooks/usePermissions';
 import { api } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import { useTabParam } from '../hooks/useTabParam';
@@ -56,6 +57,7 @@ function useLookups() {
 }
 
 export function ProcessManagementPage() {
+  const { canView } = usePermissions();
   const { isEnabled } = useModules();
   const { sections, departments, staff } = useLookups();
   const [tab, setTab] = useState('Dashboard');
@@ -196,7 +198,8 @@ export function ProcessManagementPage() {
     { key: 'Pre-examination', active: inPreExam, go: () => setTab(PRE_EXAM_TABS[0]) },
     { key: 'Examination', active: inExam, go: () => setTab(EXAM_TABS[0]) },
     { key: 'Post-examination', active: inPostExam, go: () => setTab(POST_EXAM_TABS[0]) },
-    ...(isEnabled('blood_bank_handover') ? [{ key: 'Blood banking', active: tab === 'Blood banking', go: () => setTab('Blood banking') }] : []),
+    // Blood banking is its own module embedded here, so it takes its own right.
+    ...(isEnabled('blood_bank_handover') && canView('blood_bank_handover') ? [{ key: 'Blood banking', active: tab === 'Blood banking', go: () => setTab('Blood banking') }] : []),
   ];
 
   return <div className="module-page">

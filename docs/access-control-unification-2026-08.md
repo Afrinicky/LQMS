@@ -524,3 +524,260 @@ Alongside: `rbac:check` 19/19, `rbac:matrix` 14/14, `rbac:selfservice` 22/22
 `account-check` 37/37, `complaints-check` 38/38, `core-documents-check` 20/20,
 `inventory-check` 43/43, `inventory-records-check` 56/56, `iqc-check` 38/38,
 `iqc-io-check` 80/80, `iqc-admin-check` 73/73, `office-edit-check` 74/74.
+
+
+---
+
+## 11. Opening a Word document was gated on authoring
+
+A controlled `.docx` has **no in-app preview** — the viewer deliberately stopped
+rendering an approximation of Word, because the record and what people read
+could drift. Word is therefore the *only* way to read one.
+
+The handoff that opens it was gated on `documents.authoring:edit`, on both
+sides:
+
+```ts
+// server/routes/documents.ts
+router.post('/:id/versions/:versionId/office-session',
+  requirePermission('documents.authoring', 'edit'), …)
+
+// src/components/OfficeHandoff.tsx
+{canEdit && <button className="oh-primary" onClick={open}>Open in Word</button>}
+const rt = useOfficeRoundTrip({ ...props, autoOpen: canEdit });
+```
+
+So anybody who could read the document library but not author it — which,
+after §9, is every member of bench staff — got no auto-open, no **Open in
+Microsoft Word** button, and a card with a lone **Download**. They could not
+read the SOP they are required to read and attest to.
+
+**Reading is reading.** Opening is now governed by `documents.library:view`;
+whether the handoff may write a version *back* is a separate answer:
+
+- The session records `read_only` (new column on `office_edit_sessions`).
+- `officeUriFor` takes a mode: an author is handed `ms-word:ofe|u|…` (open for
+  edit), a reader `ms-word:ofv|u|…` (open for view), so Word behaves correctly
+  at the desk.
+- The WebDAV `PUT` refuses a read-only session with 403 — the URI is a request,
+  this is the answer.
+- On the desktop route the file-change watcher is not wired up at all for a
+  reader, so no save is pushed at an API that would refuse it and no false
+  "your reading failed" error is shown.
+- **Upload edit** stays behind `documents.authoring:edit`; **Open** and
+  **Download** do not. The status line says `Opened in Word · read-only`.
+
+Verified live: a Biomedical Scientist mints a session (201), gets
+`readOnly: true` and `ms-word:ofv`, **GET 200** (Word reads it) and **PUT 403**
+(Word cannot save back). An administrator gets `readOnly: false`, `ms-word:ofe`
+and GET 200.
+
+`audit:access` check **[4d]** pins all six halves of this — 29 static checks in
+total now — so a future change cannot quietly make reading an SOP require the
+right to rewrite it.
+
+
+---
+
+## 12. Document control and declarations were offered to readers
+
+Two more surfaces were drawn to everybody who could open the module.
+
+**Documents & Records.** The tab bar was a plain array — `docTabs` — rendered
+without a permission in sight, so a Biomedical Scientist whose profile reads
+*Authoring: No access* and *Review & approval: No access* was offered **New
+Document**, **Bulk Import**, the **Review** and **Approval** queues, **Reviews
+Due**, the **Obsolete Register**, and an **Attestations** register carrying 3,158
+rows of every colleague's signing status. Each tab now names the right it needs:
+
+| Tab | Right |
+|---|---|
+| Document Register, My Inbox | `documents.library:view` |
+| New Document, Bulk Import | `documents.authoring:create` |
+| Review Queue, Approval Queue, Reviews Due, Attestations, Obsolete Register | `documents.workflow:view` |
+
+A tab filtered away cannot stay selected, and the Settings deep link that jumps
+straight to *New Document* now checks the same right before it does.
+
+The server was loose in the same place: `GET /documents/attestations/list` and
+`/attestations/documents` were guarded on `documents.library:view`, so reading
+the library bought the whole laboratory's attestation register. Both now take
+`documents.workflow:view`. `/attestations/pending` and `/distribution/inbox`
+accepted any `staffId`, letting a reader open a named colleague's outstanding
+signatures; they answer with the **caller's own** unless the caller holds
+`documents.workflow:view`.
+
+**Organisation → Code of Conduct.** The *Set up declaration* button was
+literally hardcoded:
+
+```ts
+const canManage = true; // Server enforces permissions
+```
+
+The API had always refused a reader (`POST /organisation/ethical-forms` needs
+`organisation.structure:create`), so the button could only ever fail — and what
+you cannot do you should not see. It now asks `organisation.structure:create`,
+and the ⋯ menu behind it asks `:edit` and `:void_archive` for editing and
+deleting. **Signing is untouched**: `/ethical-forms/:id/sign` needs only
+`organisation.structure:view`, which every member of staff holds, so a
+declaration put to somebody is still theirs to read and sign — they simply
+cannot raise one.
+
+Verified as a Biomedical Scientist against a running host — the tab bar now
+draws **Document Register** and **My Inbox** and nothing else, while
+`POST /documents`, the attestation register, the picker and
+`POST /ethical-forms` all answer 403, and the document register, their own
+document inbox, the attestation they owe, the declarations put to them and
+their notifications inbox all answer 200.
+
+### The audit that should have caught it
+
+Check **[5]** passed this file because it looked for the string
+`PermissionTabs` *anywhere* in it — and Documents & Records imports it for its
+Dashboard/Documents/Records rail while a second bar right underneath mapped a
+raw array. It now inspects **each `className="tabs"` block on its own** and
+requires the array it maps to be filtered by `can` / `canView` or produced by
+`usePermittedTabs`. Inner switchers (`tabs sub`, `view-switch`) are exempt —
+they choose between views of one area the person already holds.
+
+That found four more rails that switch into **other modules** while checking
+only whether the module was switched on, never whether the person may open it:
+
+| Page | Rail entry | Was | Now |
+|---|---|---|---|
+| Assessments | Risk Management | `isEnabled('risks')` | `+ canView('risks')` |
+| Assessments | Quality Indicator Monitoring | `isEnabled(…)` | `+ canView('quality_indicators')` |
+| Process Management | Blood banking | `isEnabled(…)` | `+ canView('blood_bank_handover')` |
+| Notifications | Records, Reports & Evidence | `isEnabled(…)` | `+ canView('records_reports')` |
+| Notifications | Monthly Reports & Archives | `isEnabled(…)` | `+ canView('monthly_reports')` |
+
+New check **[5b]** pins the document tabs to their rights by name, the
+attestation register to `documents.workflow`, and the declaration button to
+`organisation.structure:create`. The live audit now also proves, for every bench
+profile, that the attestation register and raising a declaration are refused
+while the attestation they owe, their document inbox and the declarations put to
+them are reachable.
+
+**39 static checks, 21 live**, alongside `rbac:check` 19/19, `rbac:matrix`
+14/14, `rbac:selfservice` 22/22, `core-documents-check` 20/20,
+`office-edit-check` 74/74, `account-check` 37/37, `complaints-check` 38/38,
+`inventory-check` 43/43 and `iqc-io-check` 80/80.
+
+
+---
+
+## 13. Every role, every module — the sweep
+
+> *All these concerns I have raised are not only about biomedical scientists;
+> technicians and other roles are able to do the same.*
+
+Correct, and the four passes above were fixing what appeared in a screenshot.
+This one stopped doing that.
+
+### The inventory
+
+A scanner (`npm run audit:controls`, `scripts/access-scan-controls.mjs`) walks
+every `.tsx` file, finds each control that triggers a write — button, menu item,
+form — follows its handler to the API endpoint it calls, reads the guard the
+**server** puts on that endpoint, and reports the exact `can(key, action)` the
+control is missing.
+
+That derivation is the point. The gate is not a guess about what a control
+*ought* to need; it is **what the API will actually ask for**. A "Create NC"
+button on the blood-bank screen came out as `nc_capa:create`, not
+`blood_bank_handover:anything`, because that is the endpoint it calls.
+
+It found **388 ungated write controls across 42 files**, of which **339
+resolved to an exact gate**.
+
+### First, the reassurance
+
+The same pass read all **1,368 mounted routes**: **1,285 carry a
+`requirePermission` guard**, and the 24 unguarded writes are all self-service —
+your own appraisal acknowledgement, your own duty occurrence, your own mobile
+record, your own signature, your own push subscription — each checked inside the
+handler against the caller's own staff record. The one that looked like an
+exception, `POST /mobile/approvals/:type/:id/decision`, calls `canApprove`
+itself.
+
+**So this was never a hole in the data.** Every one of those 388 controls was
+already refused by the API. It was the other half of the rule — *what you cannot
+do you should not see* — that was broken, across every role, in 42 files.
+
+### The fix
+
+Hand-gating 339 controls invites a different mistake in each one. Instead they
+were rewritten with the **TypeScript compiler's own parser**, so element ranges
+are exact:
+
+- the element that *carries the handler* is gated — never an enclosing `<tr>`,
+  which would hide the record instead of the action on it;
+- braces are added only where the element sits among JSX children (inside
+  `(…)`, a ternary or an existing `x && …` they would read as an object
+  literal — the first attempt got this wrong and was thrown away);
+- an existing condition is **extended** rather than nested;
+- `const { can } = usePermissions()` is injected into any component that
+  lacked it, walking out past expression-bodied arrows to the component that
+  owns the list.
+
+**339 of 339 gated**, across 31 files. Four over-gates from handlers that share
+a helper (`UserAccountActions`, the backup folder) were then corrected by hand
+so each control asks for its own endpoint's right, not the union of every
+endpoint in the component — role change and reactivation are `settings:edit`,
+deactivate and purge are `settings:void_archive`.
+
+The 49 controls left unresolved are self-service, where the handler checks the
+caller against their own record rather than a permission.
+
+### One more thing it turned up
+
+`DocumentControlPage` decided administrator status by **comparing the role's
+name**:
+
+```ts
+const isAdmin = (user.roleName || '').toLowerCase() === 'system administrator';
+```
+
+The server decides it from `roles.is_administrator`, so renaming the role would
+have silently kept — or lost — the reserved capabilities. It reads the flag now,
+and the login payload reports that flag off the **access profile the user
+resolves to**, the same fact `requireAdministrator` uses. Static check **[5c]**
+fails the build if any client compares a role name again.
+
+### The proof, for every role
+
+Two new live checks replace screenshot-by-screenshot:
+
+**[9] Every write route agrees with the map, for every profile.** The audit
+reads the server's own guard off each static write route and asserts the
+effective permission map — the thing every button is drawn from — says the same.
+**3,275 probes** across all 15 profiles × every static write route. Where they
+disagree, a control is either shown and then refused, or hidden from somebody
+entitled to it. Administrator-only acts are recognised as the second gate they
+are and probed separately.
+
+**[10] Nothing has been hidden from the people who should see it.** The other
+direction, which matters just as much after a rewrite of this size: every one of
+the **160 distinct gates** the interface asks for anywhere is one the
+administrator profile actually holds, so no screen has been quietly emptied.
+
+Both pass. Alongside: **41 static checks**, `audit:controls` at **zero
+resolvable ungated controls**, `rbac:check` 19/19, `rbac:matrix` 14/14,
+`rbac:selfservice` 22/22, `core-documents-check` 20/20, `office-edit-check`
+74/74, `account-check` 37/37, `complaints-check` 38/38, `inventory-check` 43/43,
+`inventory-records-check` 56/56, `iqc-check` 38/38, `iqc-io-check` 80/80,
+`iqc-admin-check` 73/73.
+
+### What this does and does not settle
+
+`audit:controls` holds the count at zero: a new ungated control fails it. **[9]**
+holds every write route in agreement with the map for every profile. Between
+them, a control that is shown and then refused is now a build failure rather
+than something to be found in use.
+
+What they do not cover: a *read* that shows too much — a listing that returns
+other people's rows to somebody who may see the page but not the people on it.
+Three of those were found and fixed by hand (the attestation register, pending
+attestations, the distribution inbox — §12), but there is no automated check for
+that class yet. It needs a per-endpoint statement of whose rows the answer may
+contain, which does not exist in the code today.

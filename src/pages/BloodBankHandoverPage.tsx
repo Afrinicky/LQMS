@@ -294,7 +294,7 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
       </tr>)}
     </tbody></table>}
 
-    {tab === 'New Blood Unit' && <form className="form-grid" onSubmit={submitUnit}>
+    {tab === 'New Blood Unit' && can('blood_bank_handover', 'create') && <form className="form-grid" onSubmit={submitUnit}>
       <label>Unit number<input value={unitForm.unitNumber} onChange={e => setUnitForm({ ...unitForm, unitNumber: e.target.value })} required /></label>
       <label>Batch number<input value={unitForm.batchNumber} onChange={e => setUnitForm({ ...unitForm, batchNumber: e.target.value })} /></label>
       <label>Blood group<select value={unitForm.bloodGroup} onChange={e => setUnitForm({ ...unitForm, bloodGroup: e.target.value })} required>{BLOOD_GROUPS.map(g => <option key={g} value={g}>{g}</option>)}</select></label>
@@ -312,7 +312,7 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
       <button type="submit">Register blood unit</button>
     </form>}
 
-    {tab === 'Thursday Handover' && <form className="form-grid" onSubmit={submitHandover}>
+    {tab === 'Thursday Handover' && can('blood_bank_handover', 'create') && <form className="form-grid" onSubmit={submitHandover}>
       <label>Handover date<input type="date" value={handoverForm.handoverDate} onChange={e => setHandoverForm({ ...handoverForm, handoverDate: e.target.value })} required /></label>
       <label>Period start<input type="date" value={handoverForm.periodStart} onChange={e => setHandoverForm({ ...handoverForm, periodStart: e.target.value })} required /></label>
       <label>Period end<input type="date" value={handoverForm.periodEnd} onChange={e => setHandoverForm({ ...handoverForm, periodEnd: e.target.value })} required /></label>
@@ -346,10 +346,10 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
           <td>{formatBadge(h.status)}</td>
           <td>
             <button onClick={() => openHandover(h.id)}>Open</button>
-            {!h.outgoing_staff_signed_at && <button onClick={() => signOutgoing(h.id)}>Sign outgoing</button>}
-            {!h.incoming_staff_signed_at && <button onClick={() => signIncoming(h.id)}>Sign incoming</button>}
-            {!h.unit_head_reviewed_at && <button onClick={() => reviewHandover(h.id)}>Unit head review</button>}
-            {h.status !== 'closed' && <button onClick={() => closeHandover(h.id)}>Close</button>}
+            {!h.outgoing_staff_signed_at && can('blood_bank_handover', 'edit') && <button onClick={() => signOutgoing(h.id)}>Sign outgoing</button>}
+            {!h.incoming_staff_signed_at && can('blood_bank_handover', 'edit') && <button onClick={() => signIncoming(h.id)}>Sign incoming</button>}
+            {!h.unit_head_reviewed_at && can('blood_bank_handover', 'approve') && <button onClick={() => reviewHandover(h.id)}>Unit head review</button>}
+            {h.status !== 'closed' && can('blood_bank_handover', 'approve') && <button onClick={() => closeHandover(h.id)}>Close</button>}
           </td>
         </tr>)}
       </tbody></table>
@@ -367,17 +367,17 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
         <table className="data-table"><thead><tr><th>Unit #</th><th>Group</th><th>Component</th><th>Expiry</th><th>Screening</th><th>Status at handover</th></tr></thead><tbody>
           {(selectedHandover.units || []).map((u: BloodHandoverUnit) => <tr key={u.id}><td>{u.unit_number || '—'}</td><td>{u.blood_group || '—'}</td><td>{(u.component_type || '—').replace(/_/g, ' ')}</td><td>{u.expiry_date || '—'}</td><td>{formatBadge(u.screening_status)}</td><td>{formatBadge(u.unit_status_at_handover)}</td></tr>)}
         </tbody></table>
-        <form className="form-grid" onSubmit={addUnitToHandover}>
+        {can('blood_bank_handover', 'edit') && <form className="form-grid" onSubmit={addUnitToHandover}>
           <label>Add unit<select value={addUnitForm.bloodUnitId} onChange={e => setAddUnitForm({ ...addUnitForm, bloodUnitId: e.target.value })} required><option value="">—</option>{units.map(u => <option key={u.id} value={u.id}>{u.unit_number} ({u.blood_group})</option>)}</select></label>
           <label>Notes<input value={addUnitForm.notes} onChange={e => setAddUnitForm({ ...addUnitForm, notes: e.target.value })} /></label>
           <button type="submit">Add to handover</button>
-        </form>
+        </form>}
 
         <h4>Donation summaries</h4>
         <table className="data-table"><thead><tr><th>Date</th><th>Donor type</th><th>Screened</th><th>Accepted</th><th>Deferred</th><th>Collected</th></tr></thead><tbody>
           {(selectedHandover.donationSummaries || []).map((d: BloodDonationSummary) => <tr key={d.id}><td>{d.summary_date}</td><td>{(d.donor_type || '—').replace(/_/g, ' ')}</td><td>{d.number_screened}</td><td>{d.number_accepted}</td><td>{d.number_deferred}</td><td>{d.number_collected}</td></tr>)}
         </tbody></table>
-        <form className="form-grid" onSubmit={addDonationSummary}>
+        {can('blood_bank_handover', 'create') && <form className="form-grid" onSubmit={addDonationSummary}>
           <label>Summary date<input type="date" value={donationSummaryForm.summaryDate} onChange={e => setDonationSummaryForm({ ...donationSummaryForm, summaryDate: e.target.value })} required /></label>
           <label>Donor type<select value={donationSummaryForm.donorType} onChange={e => setDonationSummaryForm({ ...donationSummaryForm, donorType: e.target.value })}><option value="">—</option>{DONOR_TYPES.map(d => <option key={d} value={d}>{d.replace(/_/g, ' ')}</option>)}</select></label>
           <label>Screened<input type="number" value={donationSummaryForm.numberScreened} onChange={e => setDonationSummaryForm({ ...donationSummaryForm, numberScreened: e.target.value })} /></label>
@@ -385,19 +385,19 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
           <label>Deferred<input type="number" value={donationSummaryForm.numberDeferred} onChange={e => setDonationSummaryForm({ ...donationSummaryForm, numberDeferred: e.target.value })} /></label>
           <label>Collected<input type="number" value={donationSummaryForm.numberCollected} onChange={e => setDonationSummaryForm({ ...donationSummaryForm, numberCollected: e.target.value })} /></label>
           <button type="submit">Add donation summary</button>
-        </form>
+        </form>}
 
         <h4>Transfusion summaries</h4>
         <table className="data-table"><thead><tr><th>Date</th><th>Group</th><th>Component</th><th>Transfused</th></tr></thead><tbody>
           {(selectedHandover.transfusionSummaries || []).map((t: BloodTransfusionSummary) => <tr key={t.id}><td>{t.summary_date}</td><td>{t.blood_group || '—'}</td><td>{(t.component_type || '—').replace(/_/g, ' ')}</td><td>{t.number_transfused}</td></tr>)}
         </tbody></table>
-        <form className="form-grid" onSubmit={addTransfusionSummary}>
+        {can('blood_bank_handover', 'create') && <form className="form-grid" onSubmit={addTransfusionSummary}>
           <label>Summary date<input type="date" value={transfusionSummaryForm.summaryDate} onChange={e => setTransfusionSummaryForm({ ...transfusionSummaryForm, summaryDate: e.target.value })} required /></label>
           <label>Blood group<select value={transfusionSummaryForm.bloodGroup} onChange={e => setTransfusionSummaryForm({ ...transfusionSummaryForm, bloodGroup: e.target.value })}><option value="">—</option>{BLOOD_GROUPS.map(g => <option key={g} value={g}>{g}</option>)}</select></label>
           <label>Component<select value={transfusionSummaryForm.componentType} onChange={e => setTransfusionSummaryForm({ ...transfusionSummaryForm, componentType: e.target.value })}><option value="">—</option>{COMPONENT_TYPES.map(c => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}</select></label>
           <label>Number transfused<input type="number" value={transfusionSummaryForm.numberTransfused} onChange={e => setTransfusionSummaryForm({ ...transfusionSummaryForm, numberTransfused: e.target.value })} /></label>
           <button type="submit">Add transfusion summary</button>
-        </form>
+        </form>}
 
         {selectedHandover.links && selectedHandover.links.length > 0 && <>
           <h4>Linked records</h4>
@@ -405,14 +405,14 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
         </>}
 
         <div style={{ marginTop: 12 }}>
-          <button onClick={() => createHandoverAction(selectedHandover.id)}>Create action</button>{' '}
-          <button onClick={() => createHandoverNc(selectedHandover.id)}>Create NC</button>{' '}
+          {can('actions', 'create') && <button onClick={() => createHandoverAction(selectedHandover.id)}>Create action</button>}{' '}
+          {can('nc_capa', 'create') && <button onClick={() => createHandoverNc(selectedHandover.id)}>Create NC</button>}{' '}
         </div>
       </DetailModal>}
     </>}
 
     {tab === 'Donation Campaigns' && <>
-      <form className="form-grid" onSubmit={submitCampaign}>
+      {can('blood_bank_handover', 'create') && <form className="form-grid" onSubmit={submitCampaign}>
         <label>Campaign date<input type="date" value={campaignForm.campaignDate} onChange={e => setCampaignForm({ ...campaignForm, campaignDate: e.target.value })} required /></label>
         <label>Location<input value={campaignForm.location} onChange={e => setCampaignForm({ ...campaignForm, location: e.target.value })} required /></label>
         <label>Organizer<input value={campaignForm.organizer} onChange={e => setCampaignForm({ ...campaignForm, organizer: e.target.value })} /></label>
@@ -425,7 +425,7 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
         <label>Responsible staff<select value={campaignForm.responsibleStaffId} onChange={e => setCampaignForm({ ...campaignForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Remarks<textarea value={campaignForm.remarks} onChange={e => setCampaignForm({ ...campaignForm, remarks: e.target.value })} /></label>
         <button type="submit">Record campaign</button>
-      </form>
+      </form>}
       <table className="data-table"><thead><tr><th>Date</th><th>Location</th><th>Organizer</th><th>Screened</th><th>Collected</th><th>Family</th><th>Voluntary</th><th>Paid</th><th>Rejected</th><th>Responsible</th></tr></thead><tbody>
         {campaigns.map(c => <tr key={c.id}>
           <td>{c.campaign_date}</td><td>{c.location}</td><td>{c.organizer || '—'}</td>
@@ -438,7 +438,7 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
     </>}
 
     {tab === 'Adverse Events' && <>
-      <form className="form-grid" onSubmit={submitAdverse}>
+      {can('blood_bank_handover', 'create') && <form className="form-grid" onSubmit={submitAdverse}>
         <label>Event date<input type="date" value={adverseForm.eventDate} onChange={e => setAdverseForm({ ...adverseForm, eventDate: e.target.value })} required /></label>
         <label>Event type<select value={adverseForm.eventType} onChange={e => setAdverseForm({ ...adverseForm, eventType: e.target.value })} required>{ADVERSE_EVENT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Related unit<select value={adverseForm.relatedUnitId} onChange={e => setAdverseForm({ ...adverseForm, relatedUnitId: e.target.value })}><option value="">—</option>{units.map(u => <option key={u.id} value={u.id}>{u.unit_number} ({u.blood_group})</option>)}</select></label>
@@ -452,29 +452,29 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
         <label>Description<textarea value={adverseForm.description} onChange={e => setAdverseForm({ ...adverseForm, description: e.target.value })} required /></label>
         <label>Immediate action<textarea value={adverseForm.immediateAction} onChange={e => setAdverseForm({ ...adverseForm, immediateAction: e.target.value })} /></label>
         <button type="submit">Log adverse event</button>
-      </form>
+      </form>}
       <table className="data-table"><thead><tr><th>Number</th><th>Date</th><th>Type</th><th>Unit</th><th>Title</th><th>Severity</th><th>Outcome</th><th>Status</th><th>Actions</th></tr></thead><tbody>
         {adverseEvents.map(e => <tr key={e.id}>
           <td>{e.event_number}</td><td>{e.event_date}</td><td>{e.event_type.replace(/_/g, ' ')}</td>
           <td>{e.related_unit_number || '—'}</td><td>{e.title}</td><td>{formatBadge(e.severity)}</td>
           <td>{e.outcome || '—'}</td><td>{formatBadge(e.status)}</td>
           <td>
-            {!e.nc_id && <button onClick={() => createAdverseNc(e.id)}>Create NC</button>}
-            {!e.capa_id && <button onClick={() => createAdverseCapa(e.id)}>Create CAPA</button>}
-            {!e.safety_incident_id && <button onClick={() => createAdverseSafetyIncident(e.id)}>Create safety incident</button>}
-            {e.status !== 'closed' && <button onClick={() => closeAdverse(e.id)}>Close</button>}
+            {!e.nc_id && can('nc_capa', 'create') && <button onClick={() => createAdverseNc(e.id)}>Create NC</button>}
+            {!e.capa_id && can('nc_capa', 'create') && <button onClick={() => createAdverseCapa(e.id)}>Create CAPA</button>}
+            {!e.safety_incident_id && can('facilities_safety.incidents', 'create') && <button onClick={() => createAdverseSafetyIncident(e.id)}>Create safety incident</button>}
+            {e.status !== 'closed' && can('blood_bank_handover', 'approve') && <button onClick={() => closeAdverse(e.id)}>Close</button>}
           </td>
         </tr>)}
       </tbody></table>
     </>}
 
     {tab === 'Discards' && <>
-      <form className="form-grid" onSubmit={submitDiscard}>
+      {can('blood_bank_handover', 'edit') && <form className="form-grid" onSubmit={submitDiscard}>
         <label>Blood unit<select value={discardForm.unitId} onChange={e => setDiscardForm({ ...discardForm, unitId: e.target.value })} required><option value="">—</option>{units.filter(u => u.current_status !== 'discarded').map(u => <option key={u.id} value={u.id}>{u.unit_number} ({u.blood_group})</option>)}</select></label>
         <label>Reason<input value={discardForm.reason} onChange={e => setDiscardForm({ ...discardForm, reason: e.target.value })} required /></label>
         <label>Remarks<textarea value={discardForm.remarks} onChange={e => setDiscardForm({ ...discardForm, remarks: e.target.value })} /></label>
         <button type="submit">Mark as discard</button>
-      </form>
+      </form>}
       <table className="data-table"><thead><tr><th>Date</th><th>Unit #</th><th>Group</th><th>Component</th><th>Reason</th><th>Authorised by</th><th>Discarded by</th><th>NC/CAPA</th></tr></thead><tbody>
         {discards.map(d => <tr key={d.id}>
           <td>{d.discard_date}</td><td>{d.unit_number || '—'}</td><td>{d.blood_group || '—'}</td>
