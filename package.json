@@ -19,6 +19,7 @@
     "rbac:levels": "node scripts/rbac-levels.mjs",
     "audit:access": "node scripts/access-audit.mjs",
     "audit:access:live": "node scripts/access-audit-live.mjs",
+    "audit:controls": "node scripts/access-scan-controls.mjs",
     "check:accounts": "node scripts/account-check.mjs",
     "check:iqc": "node scripts/iqc-check.mjs",
     "rebuild:native": "electron-builder install-app-deps",

@@ -212,7 +212,7 @@ function ActivityCatalogue({ sections, staff, onChanged }: { sections: Section[]
                   ))}
                 </ul>
                 <div className="duty-actions">
-                  <button type="button" disabled={busy} onClick={() => void adopt(null)}>Create all {proposals.length}</button>
+                  {can('personnel.activities', 'create') && <button type="button" disabled={busy} onClick={() => void adopt(null)}>Create all {proposals.length}</button>}
                   <button type="button" className="secondary" onClick={() => setProposals(null)}>Not now</button>
                 </div>
               </>}
@@ -220,7 +220,7 @@ function ActivityCatalogue({ sections, staff, onChanged }: { sections: Section[]
         )}
 
         {showForm && (
-          <form className="form-grid activity-form" onSubmit={submit}>
+          can('personnel.activities', 'edit') && can('personnel.activities', 'create') && <form className="form-grid activity-form" onSubmit={submit}>
             <label>Name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required placeholder="Morning fridge temperature chart" /></label>
             <label>Code<input value={form.activityCode} onChange={e => setForm({ ...form, activityCode: e.target.value })} placeholder="auto" disabled={Boolean(editing)} /></label>
             <label>Kind of work
@@ -483,7 +483,7 @@ function Simplification({ onChanged }: { onChanged: () => void }) {
               </label>
             </div>
             <div className="duty-actions">
-              <button type="button" onClick={() => void saveFlag()}>Save</button>
+              {can('personnel.activities', 'edit') && <button type="button" onClick={() => void saveFlag()}>Save</button>}
               <button type="button" className="secondary" onClick={() => setEditing(null)}>Cancel</button>
             </div>
           </div>

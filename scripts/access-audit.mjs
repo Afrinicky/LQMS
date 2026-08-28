@@ -399,6 +399,30 @@ console.log('\n[5b] A reader is offered reading, not document control');
 }
 
 /* ==========================================================================
+   5c — "Administrator" is a flag, never a role's name
+   --------------------------------------------------------------------------
+   The server decides it from `roles.is_administrator`, so a laboratory may
+   rename or move the role. A client comparing `roleName === 'system
+   administrator'` disagrees with the server the moment they do — and the
+   comparison silently keeps, or loses, a reserved capability.
+   ========================================================================= */
+console.log('\n[5c] Administrator status is read from the flag, not a name');
+{
+  const offenders = [];
+  for (const p of CLIENT_FILES) {
+    read(p).split('\n').forEach((l, i) => {
+      if (/roleName[^\n]*===[^\n]*administrator/i.test(l) || /=== 'system administrator'/i.test(l)) {
+        offenders.push(`${path.basename(p)}:${i + 1}`);
+      }
+    });
+  }
+  check('no client compares a role name to decide administrator', offenders.length === 0, offenders.join(', '));
+  const auth = read('server/routes/auth.ts');
+  check('the auth payload reports the flag off the resolved access profile',
+    /isAdministrator: isAdministrator\(user\.id\)/.test(auth) && /isAdministrator\(Number\(user\.id\)\)/.test(auth));
+}
+
+/* ==========================================================================
    6 — The client hides rather than disables
    ========================================================================= */
 console.log('\n[6] A control the user may not use is not rendered at all');

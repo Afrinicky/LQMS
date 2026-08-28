@@ -233,20 +233,20 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
     </div>}
 
     {tab === 'Report Templates' && <>
-      <form className="form-grid" onSubmit={submitTemplate}>
+      {can('records_reports.generate', 'create') && <form className="form-grid" onSubmit={submitTemplate}>
         <label>Name<input value={templateForm.templateName} onChange={e => setTemplateForm({ ...templateForm, templateName: e.target.value })} required /></label>
         <label>Type<input value={templateForm.templateType} onChange={e => setTemplateForm({ ...templateForm, templateType: e.target.value })} placeholder="list / summary / register" /></label>
         <label>Module<select value={templateForm.moduleKey} onChange={e => setTemplateForm({ ...templateForm, moduleKey: e.target.value })}><option value="">—</option>{REPORT_MODULES.map(m => <option key={m} value={m}>{m}</option>)}</select></label>
         <label>Output format<select value={templateForm.outputFormat} onChange={e => setTemplateForm({ ...templateForm, outputFormat: e.target.value })}>{OUTPUT_FORMATS.map(f => <option key={f} value={f}>{f}</option>)}</select></label>
         <label>Description<textarea value={templateForm.description} onChange={e => setTemplateForm({ ...templateForm, description: e.target.value })} /></label>
         <button type="submit">Create template</button>
-      </form>
+      </form>}
       <table className="data-table"><thead><tr><th>Code</th><th>Name</th><th>Type</th><th>Module</th><th>Format</th><th>Active</th><th></th></tr></thead><tbody>
-        {templates.map(t => <tr key={t.id}><td>{t.template_code || '—'}</td><td>{t.template_name}</td><td>{t.template_type}</td><td>{t.module_key || '—'}</td><td>{t.output_format}</td><td>{t.is_active ? 'Yes' : 'No'}</td><td><button onClick={() => toggleTemplate(t.id)}>Toggle</button></td></tr>)}
+        {templates.map(t => <tr key={t.id}><td>{t.template_code || '—'}</td><td>{t.template_name}</td><td>{t.template_type}</td><td>{t.module_key || '—'}</td><td>{t.output_format}</td><td>{t.is_active ? 'Yes' : 'No'}</td><td>{can('records_reports.generate', 'edit') && <button onClick={() => toggleTemplate(t.id)}>Toggle</button>}</td></tr>)}
       </tbody></table>
     </>}
 
-    {tab === 'Generate Report' && <form className="form-grid" onSubmit={submitReport}>
+    {tab === 'Generate Report' && can('records_reports.generate', 'create') && <form className="form-grid" onSubmit={submitReport}>
       <label>Title<input value={reportForm.reportTitle} onChange={e => setReportForm({ ...reportForm, reportTitle: e.target.value })} required /></label>
       <label>Module<select value={reportForm.moduleKey} onChange={e => setReportForm({ ...reportForm, moduleKey: e.target.value })}>{REPORT_MODULES.map(m => <option key={m} value={m}>{m}</option>)}</select></label>
       <label>Date from<input type="date" value={reportForm.dateFrom} onChange={e => setReportForm({ ...reportForm, dateFrom: e.target.value })} /></label>
@@ -291,19 +291,19 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
     </>}
 
     {tab === 'Evidence Packs' && <>
-      <form className="form-grid" onSubmit={submitPack}>
+      {can('records_reports.evidence', 'create') && <form className="form-grid" onSubmit={submitPack}>
         <label>Title<input value={packForm.packTitle} onChange={e => setPackForm({ ...packForm, packTitle: e.target.value })} required /></label>
         <label>Purpose<input value={packForm.packPurpose} onChange={e => setPackForm({ ...packForm, packPurpose: e.target.value })} required placeholder="audit / management review / inspection" /></label>
         <label>Date from<input type="date" value={packForm.dateFrom} onChange={e => setPackForm({ ...packForm, dateFrom: e.target.value })} /></label>
         <label>Date to<input type="date" value={packForm.dateTo} onChange={e => setPackForm({ ...packForm, dateTo: e.target.value })} /></label>
         <label>Notes<textarea value={packForm.notes} onChange={e => setPackForm({ ...packForm, notes: e.target.value })} /></label>
         <button type="submit">Create pack</button>
-      </form>
+      </form>}
       <table className="data-table"><thead><tr><th>Number</th><th>Title</th><th>Purpose</th><th>Period</th><th>Status</th><th></th></tr></thead><tbody>
         {evidencePacks.map(p => <tr key={p.id}><td>{p.pack_number}</td><td>{p.pack_title}</td><td>{p.pack_purpose}</td><td>{p.date_from || '—'} → {p.date_to || '—'}</td><td>{formatBadge(p.status)}</td>
           <td>
             <button onClick={() => openPack(p.id)}>Open</button>
-            <button onClick={() => packAction(p.id, 'generate')}>Generate JSON</button>
+            {can('records_reports.evidence', 'create') && <button onClick={() => packAction(p.id, 'generate')}>Generate JSON</button>}
             {can('records_reports', 'print') && <button onClick={() => openPackPrint(p.id)}>Print</button>}
             {p.status === 'prepared' && <button onClick={() => packAction(p.id, 'review')}>Review</button>}
             {p.status === 'reviewed' && <button onClick={() => packAction(p.id, 'approve')}>Approve</button>}
@@ -315,16 +315,16 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
         <LinkedRecordsPanel moduleKey="records_reports" recordType="evidence_packs" recordId={selectedPack.id} title="Cross-module links for this evidence pack" />
         <h4>Items</h4>
         <table className="data-table"><thead><tr><th>#</th><th>Module / record</th><th>Title</th><th>Summary</th><th></th></tr></thead><tbody>
-          {(selectedPack.items || []).map(i => <tr key={i.id}><td>{i.display_order}</td><td>{i.module_key}/{i.record_type}#{i.record_id}</td><td>{i.item_title}</td><td>{i.item_summary || '—'}</td><td><button onClick={() => removePackItem(i.id)}>Remove</button></td></tr>)}
+          {(selectedPack.items || []).map(i => <tr key={i.id}><td>{i.display_order}</td><td>{i.module_key}/{i.record_type}#{i.record_id}</td><td>{i.item_title}</td><td>{i.item_summary || '—'}</td><td>{can('records_reports.evidence', 'edit') && <button onClick={() => removePackItem(i.id)}>Remove</button>}</td></tr>)}
         </tbody></table>
-        <form className="form-grid" onSubmit={addPackItem}>
+        {can('records_reports.evidence', 'create') && <form className="form-grid" onSubmit={addPackItem}>
           <label>Module<input value={packItemForm.moduleKey} onChange={e => setPackItemForm({ ...packItemForm, moduleKey: e.target.value })} required /></label>
           <label>Record type<input value={packItemForm.recordType} onChange={e => setPackItemForm({ ...packItemForm, recordType: e.target.value })} required /></label>
           <label>Record id<input value={packItemForm.recordId} onChange={e => setPackItemForm({ ...packItemForm, recordId: e.target.value })} required /></label>
           <label>Title<input value={packItemForm.itemTitle} onChange={e => setPackItemForm({ ...packItemForm, itemTitle: e.target.value })} required /></label>
           <label>Summary<textarea value={packItemForm.itemSummary} onChange={e => setPackItemForm({ ...packItemForm, itemSummary: e.target.value })} /></label>
           <button type="submit">Add item</button>
-        </form>
+        </form>}
       </DetailModal>}
     </>}
 
@@ -343,7 +343,7 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
     </>}
 
     {tab === 'Audit Trail Reviews' && <>
-      <form className="form-grid" onSubmit={submitAuditReview}>
+      {can('records_reports.audit', 'create') && <form className="form-grid" onSubmit={submitAuditReview}>
         <label>Review date<input type="date" value={auditReviewForm.reviewDate} onChange={e => setAuditReviewForm({ ...auditReviewForm, reviewDate: e.target.value })} required /></label>
         <label>From<input type="date" value={auditReviewForm.dateFrom} onChange={e => setAuditReviewForm({ ...auditReviewForm, dateFrom: e.target.value })} required /></label>
         <label>To<input type="date" value={auditReviewForm.dateTo} onChange={e => setAuditReviewForm({ ...auditReviewForm, dateTo: e.target.value })} required /></label>
@@ -351,17 +351,17 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
         <label><input type="checkbox" checked={auditReviewForm.unusualActivityNoted} onChange={e => setAuditReviewForm({ ...auditReviewForm, unusualActivityNoted: e.target.checked })} /> Unusual activity noted</label>
         <label>Findings summary<textarea value={auditReviewForm.findingsSummary} onChange={e => setAuditReviewForm({ ...auditReviewForm, findingsSummary: e.target.value })} /></label>
         <button type="submit">Create audit review</button>
-      </form>
+      </form>}
       <table className="data-table"><thead><tr><th>Number</th><th>Date</th><th>Period</th><th>Module</th><th>Unusual</th><th>Findings</th><th>Linked action</th><th>Status</th><th></th></tr></thead><tbody>
         {auditReviews.map(r => <tr key={r.id}><td>{r.review_number}</td><td>{r.review_date}</td><td>{r.date_from} → {r.date_to}</td><td>{r.module_key || '—'}</td><td>{r.unusual_activity_noted ? 'Yes' : 'No'}</td><td>{r.findings_summary || '—'}</td>
           <td>{r.action_id ? <small>#{r.action_id} {r.action_title ? `· ${r.action_title}` : ''} {r.action_status ? `(${r.action_status})` : ''}{r.action_due_date ? ` · due ${r.action_due_date}` : ''}</small> : '—'}</td>
           <td>{formatBadge(r.status)}</td>
-          <td>{!r.action_id && <button onClick={() => auditReviewCreateAction(r.id)}>Create action</button>}{r.status !== 'closed' && <button onClick={() => auditReviewClose(r.id)}>Close</button>}</td></tr>)}
+          <td>{!r.action_id && can('actions', 'create') && <button onClick={() => auditReviewCreateAction(r.id)}>Create action</button>}{r.status !== 'closed' && <button onClick={() => auditReviewClose(r.id)}>Close</button>}</td></tr>)}
       </tbody></table>
     </>}
 
     {tab === 'Retention Rules' && <>
-      <form className="form-grid" onSubmit={submitRule}>
+      {can('records_reports.retention', 'create') && <form className="form-grid" onSubmit={submitRule}>
         <label>Rule name<input value={ruleForm.ruleName} onChange={e => setRuleForm({ ...ruleForm, ruleName: e.target.value })} required /></label>
         <label>Module<input value={ruleForm.moduleKey} onChange={e => setRuleForm({ ...ruleForm, moduleKey: e.target.value })} required /></label>
         <label>Record type<input value={ruleForm.recordType} onChange={e => setRuleForm({ ...ruleForm, recordType: e.target.value })} required /></label>
@@ -369,9 +369,9 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
         <label>Archive action<select value={ruleForm.archiveAction} onChange={e => setRuleForm({ ...ruleForm, archiveAction: e.target.value })}>{ARCHIVE_ACTIONS.map(a => <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Notes<textarea value={ruleForm.notes} onChange={e => setRuleForm({ ...ruleForm, notes: e.target.value })} /></label>
         <button type="submit">Create rule</button>
-      </form>
+      </form>}
       <table className="data-table"><thead><tr><th>Rule</th><th>Module</th><th>Record type</th><th>Months</th><th>Archive action</th><th>Active</th><th></th></tr></thead><tbody>
-        {retentionRules.map(r => <tr key={r.id}><td>{r.rule_name}</td><td>{r.module_key}</td><td>{r.record_type}</td><td>{r.retention_period_months}</td><td>{r.archive_action.replace(/_/g, ' ')}</td><td>{r.is_active ? 'Yes' : 'No'}</td><td><button onClick={() => toggleRule(r.id)}>Toggle</button></td></tr>)}
+        {retentionRules.map(r => <tr key={r.id}><td>{r.rule_name}</td><td>{r.module_key}</td><td>{r.record_type}</td><td>{r.retention_period_months}</td><td>{r.archive_action.replace(/_/g, ' ')}</td><td>{r.is_active ? 'Yes' : 'No'}</td><td>{can('records_reports.retention', 'edit') && <button onClick={() => toggleRule(r.id)}>Toggle</button>}</td></tr>)}
       </tbody></table>
       <h3>Recent retention reviews</h3>
       <table className="data-table"><thead><tr><th>Number</th><th>Date</th><th>Module/type</th><th>Reviewed</th><th>Due for archive</th><th>Archived</th><th>Status</th></tr></thead><tbody>
@@ -380,7 +380,7 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
     </>}
 
     {tab === 'Backup/Restore Checks' && <>
-      <form className="form-grid" onSubmit={submitBackup}>
+      {can('records_reports.retention', 'create') && <form className="form-grid" onSubmit={submitBackup}>
         <label>Check date<input type="date" value={backupForm.checkDate} onChange={e => setBackupForm({ ...backupForm, checkDate: e.target.value })} required /></label>
         <label>Check type<input value={backupForm.checkType} onChange={e => setBackupForm({ ...backupForm, checkType: e.target.value })} required placeholder="scheduled / ad-hoc / restore_test" /></label>
         <label>Backup location<input value={backupForm.backupLocation} onChange={e => setBackupForm({ ...backupForm, backupLocation: e.target.value })} /></label>
@@ -389,16 +389,16 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
         <label>Restore test status<select value={backupForm.restoreTestStatus} onChange={e => setBackupForm({ ...backupForm, restoreTestStatus: e.target.value })}><option value="">—</option><option value="passed">passed</option><option value="failed">failed</option><option value="not_performed">not performed</option></select></label>
         <label>Findings<textarea value={backupForm.findings} onChange={e => setBackupForm({ ...backupForm, findings: e.target.value })} /></label>
         <button type="submit">Log backup check</button>
-      </form>
+      </form>}
       <table className="data-table"><thead><tr><th>Number</th><th>Date</th><th>Type</th><th>Backup</th><th>Restore test</th><th>Status</th><th>Findings</th><th></th></tr></thead><tbody>
         {backupChecks.map(c => <tr key={c.id}><td>{c.check_number}</td><td>{c.check_date}</td><td>{c.check_type}</td><td>{c.backup_status || '—'}</td><td>{c.restore_test_status || '—'}</td><td>{formatBadge(c.status)}</td><td>{c.findings || '—'}</td>
-          <td><button onClick={() => backupCreateAction(c.id)}>Create action</button>{c.status !== 'closed' && <button onClick={() => backupClose(c.id)}>Close</button>}</td></tr>)}
+          <td>{can('actions', 'create') && <button onClick={() => backupCreateAction(c.id)}>Create action</button>}{c.status !== 'closed' && <button onClick={() => backupClose(c.id)}>Close</button>}</td></tr>)}
       </tbody></table>
     </>}
 
     {tab === 'Data Integrity Checks' && <>
-      <button type="button" onClick={runBasicScan}>Run basic scan</button>
-      <form className="form-grid" onSubmit={submitIntegrity} style={{ marginTop: 12 }}>
+      {can('records_reports.retention', 'create') && <button type="button" onClick={runBasicScan}>Run basic scan</button>}
+      {can('records_reports.retention', 'create') && <form className="form-grid" onSubmit={submitIntegrity} style={{ marginTop: 12 }}>
         <label>Check date<input type="date" value={integrityForm.checkDate} onChange={e => setIntegrityForm({ ...integrityForm, checkDate: e.target.value })} required /></label>
         <label>Check type<input value={integrityForm.checkType} onChange={e => setIntegrityForm({ ...integrityForm, checkType: e.target.value })} required /></label>
         <label>Module<input value={integrityForm.moduleKey} onChange={e => setIntegrityForm({ ...integrityForm, moduleKey: e.target.value })} /></label>
@@ -406,10 +406,10 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
         <label>Issues found<input type="number" value={integrityForm.issuesFound} onChange={e => setIntegrityForm({ ...integrityForm, issuesFound: e.target.value })} /></label>
         <label>Findings summary<textarea value={integrityForm.findingsSummary} onChange={e => setIntegrityForm({ ...integrityForm, findingsSummary: e.target.value })} /></label>
         <button type="submit">Log manual check</button>
-      </form>
+      </form>}
       <table className="data-table"><thead><tr><th>Number</th><th>Date</th><th>Type</th><th>Module</th><th>Records</th><th>Issues</th><th>Status</th><th>Findings</th><th></th></tr></thead><tbody>
         {integrityChecks.map(c => <tr key={c.id}><td>{c.check_number}</td><td>{c.check_date}</td><td>{c.check_type}</td><td>{c.module_key || '—'}</td><td>{c.records_checked}</td><td>{c.issues_found}</td><td>{formatBadge(c.status)}</td><td><pre style={{ whiteSpace: 'pre-wrap', margin: 0, fontSize: 10 }}>{c.findings_summary || '—'}</pre></td>
-          <td><button onClick={() => integrityCreateAction(c.id)}>Create action</button>{c.status !== 'closed' && <button onClick={() => integrityClose(c.id)}>Close</button>}</td></tr>)}
+          <td>{can('actions', 'create') && <button onClick={() => integrityCreateAction(c.id)}>Create action</button>}{c.status !== 'closed' && <button onClick={() => integrityClose(c.id)}>Close</button>}</td></tr>)}
       </tbody></table>
     </>}
   </div>;

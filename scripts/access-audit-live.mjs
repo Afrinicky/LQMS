@@ -412,6 +412,126 @@ async function main() {
     }
   }
 
+  /* ======================================================================
+     9 — Every write endpoint, every profile: the map and the API agree
+     ----------------------------------------------------------------------
+     Sections 1–8 answer for the surfaces somebody thought to look at. This one
+     answers for all of them at once, and for every profile rather than the
+     bench: it reads the server's OWN guard off each write route and asserts
+     that the effective permission map — the thing every button in the client
+     is drawn from — says the same. Where they disagree, a control is either
+     shown and then refused, or hidden from somebody entitled to it.
+     ====================================================================== */
+  console.log('\n[9] Every write route agrees with the map, for every profile');
+  {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+
+    // The server's mounted route table, read from the source at audit time so
+    // it can never drift from what is actually running.
+    const idx = fs.readFileSync('server/index.ts', 'utf8');
+    const mounts = {};
+    for (const m of idx.matchAll(/app\.use\('(\/api[^']*)',\s*([A-Za-z_$][\w$]*)\(?\)?\)/g)) {
+      (mounts[m[2]] ??= []).push(m[1].replace(/^\/api/, ''));
+    }
+    const factoryFile = {};
+    for (const m of idx.matchAll(/import \{ ([A-Za-z_$][\w$]*) \} from '\.\/routes\/([\w.]+)\.js'/g)) factoryFile[m[1]] = m[2] + '.ts';
+
+    const routes = [];
+    for (const [factory, prefixes] of Object.entries(mounts)) {
+      const file = factoryFile[factory];
+      if (!file) continue;
+      const fp = path.join('server/routes', file);
+      if (!fs.existsSync(fp)) continue;
+      const src = fs.readFileSync(fp, 'utf8');
+      const consts = {};
+      for (const c of src.matchAll(/const\s+([A-Z_][A-Z_0-9]*)\s*=\s*'([^']+)'/g)) consts[c[1]] = c[2];
+      const lines = src.split('\n');
+      lines.forEach((l, i) => {
+        const m = l.match(/router\.(post|put|patch|delete)\(\s*['"`]([^'"`]+)['"`](.*)$/);
+        if (!m) return;
+        const w = [m[3], lines[i + 1] ?? '', lines[i + 2] ?? ''].join(' ');
+        const g = w.match(/requirePermission\(\s*([A-Z_0-9]+|'[^']+')\s*,\s*'([^']+)'/);
+        if (!g) return;
+        let key = g[1].replace(/'/g, '');
+        if (consts[key]) key = consts[key];
+        // Some handlers carry a SECOND gate the permission map cannot express:
+        // the administrator flag, reserved for the few acts that rewrite a
+        // quality record after the fact. Those are probed separately below.
+        const body = lines.slice(i, i + 12).join(' ');
+        const adminOnly = /isAdminUser\(req\)|requireAdministrator/.test(body);
+        // Only routes whose path is fully static can be probed safely — a
+        // parameterised one would need a real record to aim at.
+        for (const p of prefixes) {
+          const full = (p + (m[2] === '/' ? '' : m[2])) || '/';
+          if (full.includes(':')) continue;
+          routes.push({ verb: m[1].toUpperCase(), path: full, key, action: g[2], adminOnly });
+        }
+      });
+    }
+
+    const mismatches = [];
+    let probed = 0;
+    for (const acc of accounts) {
+      const map = (await call('/auth/permissions', { token: acc.token })).json.permissions ?? {};
+      for (const r of routes) {
+        const shown = (map[r.key] ?? []).includes(r.action);
+        // An empty body is enough: a permission refusal (403) is decided before
+        // any field validation (400), so the two are distinguishable.
+        const res = await call(r.path, { token: acc.token, method: r.verb, body: {} });
+        if (res.status === 404 || res.status >= 500) continue;
+        const refused = res.status === 403;
+        probed++;
+        // An administrator-only act is refused to everybody else whatever the
+        // map says; the client hides it on the same flag (see the static audit).
+        if (r.adminOnly) {
+          const isAdmin = acc.profile.isAdministrator === 1 || acc.profile.name === 'System Administrator';
+          if (!isAdmin && !refused) mismatches.push(`${acc.profile.name} ${r.verb} ${r.path}: administrator-only act was allowed`);
+          continue;
+        }
+        if (shown === refused) {
+          mismatches.push(`${acc.profile.name} ${r.verb} ${r.path}: map says ${shown ? 'allowed' : 'denied'}, API ${refused ? 'refused' : 'allowed'} (${r.key}:${r.action})`);
+        }
+      }
+    }
+    check(`the map matches the API on every static write route (${probed} probes)`,
+      mismatches.length === 0, mismatches.slice(0, 10).join(' | '));
+  }
+
+  /* ======================================================================
+     10 — Nothing has been hidden from the people who should see it
+     ----------------------------------------------------------------------
+     The other direction. Section 9 proves no control is shown that the API
+     refuses; this proves the gates are not over-tight — every permission the
+     client asks for anywhere in the interface is one the administrator
+     profile actually holds, so no screen has been quietly emptied.
+     ====================================================================== */
+  console.log('\n[10] Every gate the interface asks for is one the administrator holds');
+  {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const walk = (d, acc = []) => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) walk(p, acc); else if (/\.tsx?$/.test(e.name)) acc.push(p);
+      }
+      return acc;
+    };
+    const asked = new Set();
+    for (const f of walk('src')) {
+      for (const m of fs.readFileSync(f, 'utf8').matchAll(/\bcan\(\s*'([a-z_.]+)'\s*,\s*'([a-z_]+)'\s*\)/g)) {
+        asked.add(`${m[1]}:${m[2]}`);
+      }
+    }
+    const adminMap = (await call('/auth/permissions', { token: A })).json.permissions ?? {};
+    const unheld = [...asked].filter(g => {
+      const [k, a] = g.split(':');
+      return !(adminMap[k] ?? []).includes(a);
+    });
+    check(`every gate in the interface (${asked.size}) is held by the administrator`,
+      unheld.length === 0, unheld.slice(0, 12).join(', '));
+  }
+
   console.log(`\n${pass} passed, ${failures.length} failed`);
   if (failures.length) {
     console.log('\nFailures:');

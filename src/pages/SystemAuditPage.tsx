@@ -252,10 +252,10 @@ function Flags({ onChanged }: { onChanged: () => void }) {
                 <div className="flag-dismiss">
                   <input value={dismissing.note} autoFocus placeholder="Why does this not apply here?"
                     onChange={e => setDismissing({ id: flag.id, note: e.target.value })} />
-                  <button type="button" disabled={!dismissing.note.trim() || busyId === flag.id}
+                  {can('system_audit.flags', 'edit') && <button type="button" disabled={!dismissing.note.trim() || busyId === flag.id}
                     onClick={() => void act(flag.id, 'dismiss', { note: dismissing.note.trim() }).then(() => setDismissing(null))}>
                     Dismiss it
-                  </button>
+                  </button>}
                   <button type="button" className="secondary" onClick={() => setDismissing(null)}>Cancel</button>
                 </div>
               )}
@@ -264,19 +264,19 @@ function Flags({ onChanged }: { onChanged: () => void }) {
             {mayEdit && (flag.status === 'open' || flag.status === 'acknowledged') && (
               <div className="flag-actions">
                 {flag.status === 'open' && (
-                  <button type="button" className="pq-link" disabled={busyId === flag.id}
+                  can('system_audit.flags', 'edit') && <button type="button" className="pq-link" disabled={busyId === flag.id}
                     onClick={() => void act(flag.id, 'acknowledge')}>
                     <Eye size={12} /> Acknowledge
                   </button>
                 )}
-                <button type="button" className="pq-link" disabled={busyId === flag.id}
+                {can('system_audit.flags', 'edit') && <button type="button" className="pq-link" disabled={busyId === flag.id}
                   onClick={() => void act(flag.id, 'raise-action')} title="Raise a tracked action from this finding">
                   <ClipboardCheck size={12} /> Raise action
-                </button>
-                <button type="button" className="pq-link" disabled={busyId === flag.id}
+                </button>}
+                {can('system_audit.flags', 'edit') && <button type="button" className="pq-link" disabled={busyId === flag.id}
                   onClick={() => void act(flag.id, 'resolve')}>
                   <CheckCircle2 size={12} /> Resolve
-                </button>
+                </button>}
                 <button type="button" className="pq-link" onClick={() => setDismissing({ id: flag.id, note: '' })}>
                   Not applicable
                 </button>

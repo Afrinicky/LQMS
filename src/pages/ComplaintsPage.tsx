@@ -253,7 +253,7 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
         clock: receipt must be acknowledged within {targets.acknowledgeDays} day{targets.acknowledgeDays === 1 ? '' : 's'},
         and the complaint resolved within {targets.resolveDays}.
       </p>
-      <form className="form-grid" onSubmit={submit}>
+      {can('complaints', 'create') && <form className="form-grid" onSubmit={submit}>
         <label>Date received<input type="date" value={form.receivedDate} onChange={e => setForm({ ...form, receivedDate: e.target.value })} required /></label>
         <label>Complainant type
           <select value={form.complainantType} onChange={e => setForm({ ...form, complainantType: e.target.value })} required>
@@ -290,7 +290,7 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
           </select>
         </label>
         <button type="submit" disabled={loadState.loading}>{loadState.loading ? 'Logging…' : 'Log complaint'}</button>
-      </form>
+      </form>}
     </div>}
 
     {tab === 'Process targets' && <div className="card">
@@ -299,7 +299,7 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
         An assessor asks whether the laboratory meets the targets its own documented complaints procedure states.
         Set them to match that procedure — every complaint logged afterwards is dated against them.
       </p>
-      <form className="form-grid" onSubmit={saveTargets}>
+      {can('complaints', 'edit') && <form className="form-grid" onSubmit={saveTargets}>
         <label>Acknowledge receipt within
           <NumberField min={1} max={365} value={targets.acknowledgeDays}
             onValue={n => setTargets(t => ({ ...t, acknowledgeDays: n ?? 0 }))} /> </label>
@@ -307,7 +307,7 @@ export function ComplaintsPage({ embedded = false }: { embedded?: boolean } = {}
           <NumberField min={1} max={365} value={targets.resolveDays}
             onValue={n => setTargets(t => ({ ...t, resolveDays: n ?? 0 }))} /></label>
         <button type="submit" disabled={busy === 'targets'}>{busy === 'targets' ? 'Saving…' : 'Save targets'}</button>
-      </form>
+      </form>}
     </div>}
 
     {/* ---- One complaint, and the one thing it owes next ------------------- */}

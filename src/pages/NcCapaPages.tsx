@@ -432,7 +432,7 @@ export function NonconformitiesPage({ embedded = false }: { embedded?: boolean }
       <WorkflowStepper active="log" />
       <h3 style={{ marginTop: 0 }}>Log a nonconforming event</h3>
       <p className="muted" style={{ marginTop: 0 }}>Any staff member can record a nonconforming event. Capture the facts and any immediate action taken — nothing more is needed now. The event then flows to <strong>Risk Assessment</strong>, and where the risk warrants it, to <strong>Root Cause Analysis</strong> and <strong>CAPA</strong>.</p>
-      <form onSubmit={submitNew}>
+      {can('nc_capa', 'create') && <form onSubmit={submitNew}>
         <fieldset className="reg-section"><legend>Event details</legend><div className="form-grid">
           <label>Date of event<input type="date" value={form.eventDate} onChange={e => setForm({ ...form, eventDate: e.target.value })} required /></label>
           <label>Time of event<input type="time" value={form.timeOfEvent} onChange={e => setForm({ ...form, timeOfEvent: e.target.value })} /></label>
@@ -451,7 +451,7 @@ export function NonconformitiesPage({ embedded = false }: { embedded?: boolean }
         </div></fieldset>
         <EscalationNote cfg={cfg} />
         <button type="submit">Log event</button>
-      </form>
+      </form>}
     </div>}
 
     {tab === 'Risk Assessment' && <StageBoard kind="nc" stage="risk_assessment" sections={sections} cfg={cfg} onChanged={load} />}
@@ -500,7 +500,7 @@ function NcDetail({ nc, staff, sections, cfg, capa, onClose, onChanged, onError,
       <label style={{ gridColumn: '1 / -1' }}>Immediate action<textarea value={edit.immediateCorrection} onChange={e => setEdit({ ...edit, immediateCorrection: e.target.value })} /></label>
       {cfg.remedialActionEnabled && <label style={{ gridColumn: '1 / -1' }}>Remedial action<textarea value={edit.remedialAction} onChange={e => setEdit({ ...edit, remedialAction: e.target.value })} /></label>}
       <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8 }}>
-        <button onClick={saveAmendment}>Save amendment</button>
+        {can('settings', 'edit') && <button onClick={saveAmendment}>Save amendment</button>}
         <button className="secondary" onClick={() => setAmend(false)}>Cancel</button>
       </div>
     </div> : <>
@@ -544,6 +544,7 @@ function NcDetail({ nc, staff, sections, cfg, capa, onClose, onChanged, onError,
 // ==========================================================================
 
 export function IncidentsPage({ embedded = false }: { embedded?: boolean } = {}) {
+  const { can } = usePermissions();
   const { isEnabled } = useModules();
   const { staff, sections } = useLookupData();
   const cfg = useWorkflowConfig();
@@ -638,7 +639,7 @@ export function IncidentsPage({ embedded = false }: { embedded?: boolean } = {})
       <WorkflowStepper active="log" />
       <h3 style={{ marginTop: 0 }}>Report an incident or adverse event</h3>
       <p className="muted" style={{ marginTop: 0 }}>Any staff member can report an incident, adverse event, occurrence or near-miss — capture the facts and any immediate action. The event then flows to <strong>Risk Assessment</strong>, and where warranted, to <strong>Investigation</strong> and <strong>CAPA</strong>.</p>
-      <form className="form-grid" onSubmit={create}>
+      {can('nc_capa', 'create') && <form className="form-grid" onSubmit={create}>
         <label>Date &amp; time<input type="datetime-local" value={form.incidentDatetime} onChange={e => setForm({ ...form, incidentDatetime: e.target.value })} /></label>
         <label>Type<select value={form.incidentType} onChange={e => setForm({ ...form, incidentType: e.target.value })}>{INCIDENT_TYPES.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}</select></label>
         {form.incidentType === 'other' && <label>Specify type<input value={form.incidentTypeOther} onChange={e => setForm({ ...form, incidentTypeOther: e.target.value })} /></label>}
@@ -653,7 +654,7 @@ export function IncidentsPage({ embedded = false }: { embedded?: boolean } = {})
         <label className="check-inline" style={{ gridColumn: '1 / -1' }}><input type="checkbox" checked={form.affectsPatientSafety} onChange={e => setForm({ ...form, affectsPatientSafety: e.target.checked })} /> This event affects patient safety</label>
         <div style={{ gridColumn: '1 / -1' }}><EscalationNote cfg={cfg} /></div>
         <button type="submit">Report incident</button>
-      </form>
+      </form>}
     </div>}
 
     {tab === 'Risk Assessment' && <StageBoard kind="incident" stage="risk_assessment" sections={sections} cfg={cfg} onChanged={load} />}
@@ -897,6 +898,7 @@ function CapaTable({ rows, today, onOpen, showNextStep }: { rows: any[]; today: 
 function CapaDetailPanel({ capa, staff, cfg, onClose, onChanged, onError, onMsg }: {
   capa: CapaDetail; staff: Staff[]; cfg: WorkflowConfig; onClose: () => void; onChanged: () => void; onError: (m: string) => void; onMsg: (m: string) => void;
 }) {
+  const { can } = usePermissions();
   const c = capa as any;
   const [busy, setBusy] = useState(false);
   const next = nextStepFor(c);
@@ -954,7 +956,7 @@ function CapaDetailPanel({ capa, staff, cfg, onClose, onChanged, onError, onMsg 
         <label>Priority<select value={plan.priority} onChange={e => setPlan({ ...plan, priority: e.target.value })}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option></select></label>
         <label>Effectiveness check due<input type="date" value={plan.effectivenessDueDate} onChange={e => setPlan({ ...plan, effectivenessDueDate: e.target.value })} /></label>
       </div>
-      <button style={{ marginTop: 10 }} disabled={busy} onClick={() => call('plan', plan, 'Action plan saved — the CAPA is now in progress.')}>Save plan &amp; start</button>
+      {can('nc_capa', 'edit') && <button style={{ marginTop: 10 }} disabled={busy} onClick={() => call('plan', plan, 'Action plan saved — the CAPA is now in progress.')}>Save plan &amp; start</button>}
     </fieldset>}
 
     {capa.status === 'in_progress' && cfg.canFollowUp && <fieldset className="reg-section"><legend>Implementation</legend>
@@ -962,12 +964,12 @@ function CapaDetailPanel({ capa, staff, cfg, onClose, onChanged, onError, onMsg 
         <label style={{ gridColumn: '1 / -1' }}>Progress note<textarea value={progress} onChange={e => setProgress(e.target.value)} placeholder="What has been done since the last update?" /></label>
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-        <button className="secondary" disabled={busy || !progress.trim()} onClick={() => call('add-update', { updateText: progress, status: 'in_progress' }, 'Progress recorded.').then(() => setProgress(''))}>Add progress note</button>
+        {can('nc_capa', 'edit') && <button className="secondary" disabled={busy || !progress.trim()} onClick={() => call('add-update', { updateText: progress, status: 'in_progress' }, 'Progress recorded.').then(() => setProgress(''))}>Add progress note</button>}
       </div>
       <div className="form-grid" style={{ marginTop: 12 }}>
         <label style={{ gridColumn: '1 / -1' }}>Completion note (optional)<textarea value={completeNotes} onChange={e => setCompleteNotes(e.target.value)} /></label>
       </div>
-      <button disabled={busy} onClick={() => call('complete', { notes: completeNotes }, 'Actions marked complete — awaiting verification.')}>Mark actions complete</button>
+      {can('nc_capa', 'edit') && <button disabled={busy} onClick={() => call('complete', { notes: completeNotes }, 'Actions marked complete — awaiting verification.')}>Mark actions complete</button>}
     </fieldset>}
 
     {capa.status === 'completed' && cfg.canFollowUp && <fieldset className="reg-section"><legend>Verification</legend>
@@ -986,11 +988,11 @@ function CapaDetailPanel({ capa, staff, cfg, onClose, onChanged, onError, onMsg 
           </select></label>
           <label style={{ gridColumn: '1 / -1' }}>Evidence &amp; conclusion<textarea value={eff.notes} onChange={e => setEff({ ...eff, notes: e.target.value })} required /></label>
         </div>
-        <button style={{ marginTop: 10 }} disabled={busy || !eff.verdict || !eff.notes.trim()}
+        {can('nc_capa', 'edit') && <button style={{ marginTop: 10 }} disabled={busy || !eff.verdict || !eff.notes.trim()}
           onClick={() => call('effectiveness-review', { verdict: eff.verdict, effectivenessReviewNotes: eff.notes, effectivenessReviewDate: eff.date },
             eff.verdict === 'effective' ? 'Recorded as effective — the CAPA can now be closed.' : 'Recorded as not effective — the CAPA has been reopened for rework.')}>
           Save effectiveness review
-        </button>
+        </button>}
       </fieldset>}
 
     {capa.status === 'verified' && (!c.effectiveness_required || c.effectiveness_status === 'effective') && cfg.canFollowUp &&

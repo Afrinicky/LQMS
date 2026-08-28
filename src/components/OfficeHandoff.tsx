@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { usePermissions } from '../hooks/usePermissions';
 import { FileText, ExternalLink, Download, Upload, CheckCircle2, Loader2, RefreshCw, X } from 'lucide-react';
 import { api, API_BASE, getToken, type OfficeFileChangedPayload } from '../services/api';
 
@@ -301,6 +302,7 @@ export default function OfficeHandoff(props: {
   onSavedVersion: (versionId: number) => void;
   onError: (message: string) => void;
 }) {
+  const { can } = usePermissions();
   const { fileName, versionLabel, fileSize, canEdit } = props;
   // Auto-open for everybody who reaches this panel: they reached it by opening
   // a document, and the document is in Word. It used to auto-open only for an
@@ -324,7 +326,7 @@ export default function OfficeHandoff(props: {
         <button type="button" className="oh-primary" onClick={open} disabled={phase === 'opening'}>
           {phase === 'opening' ? <><Loader2 size={16} className="spin" /> Opening…</> : <><ExternalLink size={16} /> Open in {shortApp}</>}
         </button>
-        <button type="button" className="secondary" onClick={downloadCopy}><Download size={15} /> Download</button>
+        {can('documents.authoring', 'create') && can('documents.library', 'view') && can('documents.library', 'create') && <button type="button" className="secondary" onClick={downloadCopy}><Download size={15} /> Download</button>}
         {canEdit && <>
           <button type="button" className="secondary" onClick={() => uploadInput.current?.click()} disabled={uploading}>
             <Upload size={15} /> {uploading ? 'Uploading…' : 'Upload edit'}

@@ -158,6 +158,7 @@ const BUDGET_SCOPES: Array<{ key: string; label: string }> = [
 const TABS = ['Dashboard', 'Quality Configuration', 'Code of Conduct', 'Organogram & Deputisation', 'Budgetary Projection', 'Quality & Technical Records Review', 'Registrations & Licences', 'Meetings', 'Management Review'];
 
 export function OrganisationPage() {
+  const { can } = usePermissions();
   const { isEnabled } = useModules();
   const [searchParams, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState<string>(searchParams.get('tab') || 'Dashboard');
@@ -250,7 +251,7 @@ export function OrganisationPage() {
       <div className="card">
         <h3>Add registration / licence</h3>
         <p className="muted" style={{ marginTop: 0 }}>Facility licences, accreditation, practice registrations and permits. Enter the issuing body for your jurisdiction.</p>
-        <form className="form-grid" onSubmit={submitReg}>
+        {can('organisation.licences', 'create') && <form className="form-grid" onSubmit={submitReg}>
           <label>Type<select value={regForm.credentialType} onChange={e => setRegForm({ ...regForm, credentialType: e.target.value })}><option value="">—</option>{['facility_licence', 'accreditation', 'practice_registration', 'permit', 'certification', 'other'].map(c => <option key={c} value={c}>{pretty(c)}</option>)}</select></label>
           <label>Title<input value={regForm.title} onChange={e => setRegForm({ ...regForm, title: e.target.value })} required /></label>
           <label>Issuing body<input value={regForm.issuingBody} onChange={e => setRegForm({ ...regForm, issuingBody: e.target.value })} placeholder="regulator / authority name" /></label>
@@ -260,7 +261,7 @@ export function OrganisationPage() {
           <label>Responsible<select value={regForm.responsibleStaffId} onChange={e => setRegForm({ ...regForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
           <label>Status<select value={regForm.status} onChange={e => setRegForm({ ...regForm, status: e.target.value })}>{['active', 'pending_renewal', 'expired', 'withdrawn'].map(s => <option key={s} value={s}>{pretty(s)}</option>)}</select></label>
           <button type="submit">Add registration</button>
-        </form>
+        </form>}
       </div>
       <div className="card" style={{ marginTop: 16 }}>
         <h3>Registrations & licences register</h3>
@@ -513,7 +514,7 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
           {templates.map(t => <option key={t.key} value={t.key}>{t.title}</option>)}
         </select>
       </label>}
-      <form className="form-grid" onSubmit={submitSetup}>
+      {can('organisation.structure', 'edit') && can('organisation.structure', 'create') && <form className="form-grid" onSubmit={submitSetup}>
         <label>Title<input value={setupForm.title} onChange={e => setSetupForm({ ...setupForm, title: e.target.value })} required placeholder="e.g. Declaration of Impartiality (2026)" /></label>
         <label>Type<select value={setupForm.formType} onChange={e => setSetupForm({ ...setupForm, formType: e.target.value })}>{FORM_TYPES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}</select></label>
         <label>Version<input value={setupForm.version} onChange={e => setSetupForm({ ...setupForm, version: e.target.value })} /></label>
@@ -528,7 +529,7 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
         <label><input type="checkbox" checked={setupForm.requiresAnnualReaffirmation} onChange={e => setSetupForm({ ...setupForm, requiresAnnualReaffirmation: e.target.checked })} /> Requires annual re-affirmation</label>
         <label>{editingId && selected?.file_id ? 'Replace form file (optional)' : 'Attach a form file (optional)'}<input type="file" accept=".pdf,.doc,.docx,.rtf,.odt,.txt" onChange={e => setUploadFile(e.target.files?.[0] ?? null)} /></label>
         <button type="submit" disabled={saving} style={{ gridColumn: '1 / -1' }}>{saving ? 'Saving…' : editingId ? 'Save changes' : 'Publish & notify all staff'}</button>
-      </form>
+      </form>}
     </div>}
 
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 380px) 1fr', gap: 16, alignItems: 'start', marginTop: 12 }}>
@@ -605,14 +606,14 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
                 <li>Attach the signed copy below, then submit.</li>
               </ol>
             </div>}
-            <form onSubmit={signSelected}>
+            {can('organisation.structure', 'view') && <form onSubmit={signSelected}>
               {isFileOnly && <label style={{ display: 'block', margin: '6px 0' }}>Signed document (required)<input type="file" accept=".pdf,.doc,.docx,.rtf,.odt,.txt,.jpg,.jpeg,.png" onChange={e => setSignedFile(e.target.files?.[0] ?? null)} required /></label>}
               <label style={{ display: 'block', margin: '6px 0' }}>Affirmation (optional)<textarea value={signForm.affirmationText} onChange={e => setSignForm({ ...signForm, affirmationText: e.target.value })} placeholder="I have read, understood and agree to be bound by the terms of this declaration…" style={{ width: '100%' }} /></label>
               <label><input type="checkbox" checked={signForm.conflictDeclared} onChange={e => setSignForm({ ...signForm, conflictDeclared: e.target.checked })} /> I have a conflict of interest to declare</label>
               {signForm.conflictDeclared && <label style={{ display: 'block', margin: '6px 0' }}>Conflict details<textarea value={signForm.conflictDetails} onChange={e => setSignForm({ ...signForm, conflictDetails: e.target.value })} required style={{ width: '100%' }} /></label>}
               <label style={{ display: 'block', margin: '6px 0' }}>Notes (optional)<input value={signForm.notes} onChange={e => setSignForm({ ...signForm, notes: e.target.value })} /></label>
               <button type="submit" disabled={signing || (isFileOnly && !signedFile)}>{signing ? 'Submitting…' : isFileOnly ? '✔ Attach signed copy & record acknowledgement' : '✔ I have read & understood — Sign'}</button>
-            </form>
+            </form>}
           </div>}
 
           <div className="card" style={{ marginTop: 12 }}>
@@ -637,6 +638,7 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
 // every key position so absences never break the management system.
 // ============================================================================
 function OrganogramContinuityView({ staff, onError, onNotice }: { staff: Staff[]; onError: (m: string) => void; onNotice: (m: string) => void }) {
+  const { can } = usePermissions();
   const [tree, setTree] = useState<OrgTree | null>(null);
   const [positions, setPositions] = useState<Position[]>([]);
   const [plans, setPlans] = useState<ContinuityPlan[]>([]);
@@ -748,7 +750,7 @@ function OrganogramContinuityView({ staff, onError, onNotice }: { staff: Staff[]
               <td>{p.next_review_date || '—'}</td>
               <td>
                 <button className="link-btn" onClick={() => startEdit(p)}>Edit</button>{' '}
-                <button className="link-btn" style={{ color: '#dc2626' }} onClick={() => removePlan(p.id)}>Delete</button>
+                {can('organisation.structure', 'edit') && <button className="link-btn" style={{ color: '#dc2626' }} onClick={() => removePlan(p.id)}>Delete</button>}
               </td>
             </tr>)}
           </tbody>
@@ -763,7 +765,7 @@ function OrganogramContinuityView({ staff, onError, onNotice }: { staff: Staff[]
             <button className="drawer-close" onClick={() => setEditingId(null)}>×</button>
           </div>
           <div className="doc-drawer-body">
-            <form className="form-grid" onSubmit={submit}>
+            {can('organisation.budget', 'edit') && can('organisation.budget', 'create') && <form className="form-grid" onSubmit={submit}>
               <label>Key role<input value={form.keyRole} onChange={e => setForm({ ...form, keyRole: e.target.value })} required placeholder="e.g. Laboratory Manager" /></label>
               <label>Position<select value={form.positionId} onChange={e => setForm({ ...form, positionId: e.target.value })}><option value="">—</option>{positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>
               <label>Deputy position<select value={form.deputyPositionId} onChange={e => setForm({ ...form, deputyPositionId: e.target.value })}><option value="">—</option>{positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>
@@ -778,7 +780,7 @@ function OrganogramContinuityView({ staff, onError, onNotice }: { staff: Staff[]
               <label>Status<select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}><option value="active">Active</option><option value="retired">Retired</option></select></label>
               <label>Notes<textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
               <button type="submit">Save plan</button>
-            </form>
+            </form>}
           </div>
         </div>
       </div>
@@ -791,6 +793,7 @@ function OrganogramContinuityView({ staff, onError, onNotice }: { staff: Staff[]
 // equipment, service & maintenance, quality assurance and materials (IQC/EQA).
 // ============================================================================
 function BudgetProjectionView({ staff, onError, onNotice }: { staff: Staff[]; onError: (m: string) => void; onNotice: (m: string) => void }) {
+  const { can } = usePermissions();
   const currentYear = String(new Date().getFullYear());
   const [year, setYear] = useState(currentYear);
   const [rows, setRows] = useState<BudgetProjection[]>([]);
@@ -868,7 +871,7 @@ function BudgetProjectionView({ staff, onError, onNotice }: { staff: Staff[]; on
 
     <div className="card" style={{ marginTop: 12 }}>
       <h4 style={{ marginTop: 0 }}>{editingId ? 'Edit budget line' : 'Add budget line'}</h4>
-      <form className="form-grid" onSubmit={submit}>
+      {can('organisation.budget', 'edit') && can('organisation.budget', 'create') && <form className="form-grid" onSubmit={submit}>
         <label>Fiscal year<input value={form.fiscalYear} onChange={e => setForm({ ...form, fiscalYear: e.target.value })} required /></label>
         <label>Scope<select value={form.scope} onChange={e => setForm({ ...form, scope: e.target.value })}>{BUDGET_SCOPES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}</select></label>
         <label>Category / line item<input value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} placeholder="e.g. Full-Time Scientist, Analyzer maintenance" /></label>
@@ -882,7 +885,7 @@ function BudgetProjectionView({ staff, onError, onNotice }: { staff: Staff[]; on
         <label>Justification<textarea value={form.justification} onChange={e => setForm({ ...form, justification: e.target.value })} placeholder="ISO-aligned justification — why the item is needed" /></label>
         <button type="submit">{editingId ? 'Save changes' : 'Add line'}</button>
         {editingId && <button type="button" className="secondary" onClick={() => { setEditingId(null); setForm({ ...emptyForm, fiscalYear: year }); }}>Cancel</button>}
-      </form>
+      </form>}
     </div>
 
     <div className="card" style={{ marginTop: 12 }}>
@@ -932,6 +935,7 @@ function BudgetProjectionView({ staff, onError, onNotice }: { staff: Staff[]; on
 // frequency, letting the reviewer document findings and raise NC / CAPA.
 // ============================================================================
 function QtRecordsReviewView({ staff, onError, onNotice }: { staff: Staff[]; onError: (m: string) => void; onNotice: (m: string) => void }) {
+  const { can } = usePermissions();
   const [sub, setSub] = useState('Configuration');
   const [configs, setConfigs] = useState<QtReviewConfig[]>([]);
   const [reviews, setReviews] = useState<QtReview[]>([]);
@@ -1054,7 +1058,7 @@ function QtRecordsReviewView({ staff, onError, onNotice }: { staff: Staff[]; onE
 
       <div className="card" style={{ marginTop: 10 }}>
         <h4 style={{ marginTop: 0 }}>Document the review</h4>
-        <form onSubmit={submitReview}>
+        {can('organisation.records_review', 'create') && <form onSubmit={submitReview}>
           <div className="form-grid">
             <label>Findings<textarea value={reviewForm.findings} onChange={e => setReviewForm({ ...reviewForm, findings: e.target.value })} placeholder="What did the review find?" required /></label>
             <label>Recurrent problems<textarea value={reviewForm.recurrentProblems} onChange={e => setReviewForm({ ...reviewForm, recurrentProblems: e.target.value })} placeholder="Any recurring issues?" /></label>
@@ -1066,9 +1070,9 @@ function QtRecordsReviewView({ staff, onError, onNotice }: { staff: Staff[]; onE
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
             <button type="submit">Save review</button>
-            <button type="button" className="secondary" onClick={raiseNc}>Raise NC from finding</button>
+            {can('nc_capa', 'create') && <button type="button" className="secondary" onClick={raiseNc}>Raise NC from finding</button>}
           </div>
-        </form>
+        </form>}
       </div>
     </>}
 

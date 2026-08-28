@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
+import { usePermissions } from '../hooks/usePermissions';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
 import { useModules } from '../hooks/useModules';
@@ -97,6 +98,7 @@ function LeveyJenningsChart({ data }: { data: LeveyJenningsData }) {
 
 // ============= IQC =============
 export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
+  const { can } = usePermissions();
   const { isEnabled } = useModules();
   const { staff, sections, equipment } = useLookups();
   const [tab, setTab] = useState(embedded ? 'IQC Materials' : 'Dashboard');
@@ -210,7 +212,7 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
       {materials.map(m => <tr key={m.id}><td>{m.material_code}</td><td>{m.material_name}</td><td>{m.test_name}</td><td>{m.analyte}</td><td>{m.lot_number}</td><td>{m.expiry_date || '—'}</td><td>{m.is_active ? 'Active' : 'Inactive'}</td></tr>)}
     </tbody></table>}
 
-    {tab === 'New Material' && <form className="form-grid" onSubmit={submitMaterial}>
+    {tab === 'New Material' && can('iqc', 'create') && <form className="form-grid" onSubmit={submitMaterial}>
       <label>Material name<input value={materialForm.materialName} onChange={e => setMaterialForm({ ...materialForm, materialName: e.target.value })} required /></label>
       <label>Test name<input value={materialForm.testName} onChange={e => setMaterialForm({ ...materialForm, testName: e.target.value })} required /></label>
       <label>Analyte<input value={materialForm.analyte} onChange={e => setMaterialForm({ ...materialForm, analyte: e.target.value })} required /></label>
@@ -227,7 +229,7 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
       <button type="submit">Create IQC material</button>
     </form>}
 
-    {tab === 'Result Entry' && <form className="form-grid" onSubmit={submitResult}>
+    {tab === 'Result Entry' && can('iqc', 'create') && <form className="form-grid" onSubmit={submitResult}>
       <label>IQC material<select value={resultForm.iqcMaterialId} onChange={e => setResultForm({ ...resultForm, iqcMaterialId: e.target.value })} required><option value="">—</option>{materials.filter(m => m.is_active).map(m => <option key={m.id} value={m.id}>{m.material_name} / {m.lot_number}</option>)}</select></label>
       <label>Run date<input type="date" value={resultForm.runDate} onChange={e => setResultForm({ ...resultForm, runDate: e.target.value })} required /></label>
       <label>Run time<input type="time" value={resultForm.runTime} onChange={e => setResultForm({ ...resultForm, runTime: e.target.value })} /></label>
@@ -244,9 +246,9 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
         <td>{formatBadge(r.status)}</td><td>{r.rule_violation || '—'}</td>
         <td>{r.reviewed_at ? staffName(staff, r.reviewed_by_staff_id) : 'Pending'}</td>
         <td>
-          {!r.reviewed_at && <button onClick={() => reviewResult(r.id)}>Review</button>}
-          {!r.nc_id && <button onClick={() => createNc(r.id)}>Create NC</button>}
-          {!r.capa_id && <button onClick={() => createCapa(r.id)}>Create CAPA</button>}
+          {!r.reviewed_at && can('iqc', 'approve') && <button onClick={() => reviewResult(r.id)}>Review</button>}
+          {!r.nc_id && can('nc_capa', 'create') && <button onClick={() => createNc(r.id)}>Create NC</button>}
+          {!r.capa_id && can('nc_capa', 'create') && <button onClick={() => createCapa(r.id)}>Create CAPA</button>}
         </td>
       </tr>)}
     </tbody></table>}
@@ -265,14 +267,14 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
     </>}
 
     {tab === 'Lot Changes' && <>
-      <form className="form-grid" onSubmit={submitLotChange}>
+      {can('iqc', 'create') && <form className="form-grid" onSubmit={submitLotChange}>
         <label>Old material<select value={lotForm.oldIqcMaterialId} onChange={e => setLotForm({ ...lotForm, oldIqcMaterialId: e.target.value })}><option value="">—</option>{materials.map(m => <option key={m.id} value={m.id}>{m.material_name} / {m.lot_number}</option>)}</select></label>
         <label>New material<select value={lotForm.newIqcMaterialId} onChange={e => setLotForm({ ...lotForm, newIqcMaterialId: e.target.value })}><option value="">—</option>{materials.map(m => <option key={m.id} value={m.id}>{m.material_name} / {m.lot_number}</option>)}</select></label>
         <label>Change date<input type="date" value={lotForm.changeDate} onChange={e => setLotForm({ ...lotForm, changeDate: e.target.value })} required /></label>
         <label>Reason<input value={lotForm.reason} onChange={e => setLotForm({ ...lotForm, reason: e.target.value })} /></label>
         <label>Verification summary<textarea value={lotForm.verificationSummary} onChange={e => setLotForm({ ...lotForm, verificationSummary: e.target.value })} /></label>
         <button type="submit">Record lot change</button>
-      </form>
+      </form>}
       <table className="data-table"><thead><tr><th>Date</th><th>Old lot</th><th>New lot</th><th>Reason</th></tr></thead><tbody>
         {lotChanges.map(lc => <tr key={lc.id}><td>{lc.change_date}</td><td>{lc.old_material_name} / {lc.old_lot_number}</td><td>{lc.new_material_name} / {lc.new_lot_number}</td><td>{lc.reason || '—'}</td></tr>)}
       </tbody></table>
@@ -337,6 +339,7 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
 
 // ============= EQA =============
 export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
+  const { can } = usePermissions();
   const { isEnabled } = useModules();
   const { staff, sections } = useLookups();
   const [tab, setTab] = useState(embedded ? 'EQA Programs' : 'Dashboard');
@@ -443,7 +446,7 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
       {programs.map(p => <tr key={p.id}><td>{p.program_code}</td><td>{p.program_name}</td><td>{p.provider}</td><td>{p.test_area}</td><td>{p.frequency || '—'}</td><td>{p.is_active ? 'Yes' : 'No'}</td></tr>)}
     </tbody></table>}
 
-    {tab === 'New Program' && <form className="form-grid" onSubmit={submitProgram}>
+    {tab === 'New Program' && can('eqa', 'create') && <form className="form-grid" onSubmit={submitProgram}>
       <label>Program name<input value={programForm.programName} onChange={e => setProgramForm({ ...programForm, programName: e.target.value })} required /></label>
       <label>Provider<input value={programForm.provider} onChange={e => setProgramForm({ ...programForm, provider: e.target.value })} required /></label>
       <label>Test area<input value={programForm.testArea} onChange={e => setProgramForm({ ...programForm, testArea: e.target.value })} required /></label>
@@ -454,7 +457,7 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
     </form>}
 
     {tab === 'EQA Events' && <>
-      <form className="form-grid" onSubmit={submitEvent}>
+      {can('eqa', 'create') && <form className="form-grid" onSubmit={submitEvent}>
         <label>Program<select value={eventForm.eqaProgramId} onChange={e => setEventForm({ ...eventForm, eqaProgramId: e.target.value })} required><option value="">—</option>{programs.map(p => <option key={p.id} value={p.id}>{p.program_name}</option>)}</select></label>
         <label>Cycle name<input value={eventForm.cycleName} onChange={e => setEventForm({ ...eventForm, cycleName: e.target.value })} required /></label>
         <label>Received date<input type="date" value={eventForm.receivedDate} onChange={e => setEventForm({ ...eventForm, receivedDate: e.target.value })} /></label>
@@ -466,7 +469,7 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
         <label>Findings<textarea value={eventForm.findings} onChange={e => setEventForm({ ...eventForm, findings: e.target.value })} /></label>
         <label>Responsible<select value={eventForm.responsibleStaffId} onChange={e => setEventForm({ ...eventForm, responsibleStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <button type="submit">Create event</button>
-      </form>
+      </form>}
       <table className="data-table"><thead><tr><th>Program</th><th>Cycle</th><th>Received</th><th>Due</th><th>Submitted</th><th>Performance</th><th></th></tr></thead><tbody>
         {events.map(ev => <tr key={ev.id}>
           <td>{ev.program_name}</td><td>{ev.cycle_name}</td><td>{ev.received_date || '—'}</td><td>{ev.submission_due_date || '—'}</td><td>{ev.submitted_date || '—'}</td><td>{formatBadge(ev.performance_status)}</td>
@@ -478,6 +481,7 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
     {tab === 'Results' && selectedEvent && <>
       <h3>{selectedEvent.program_name} – {selectedEvent.cycle_name}</h3>
       {(() => {
+  const { can } = usePermissions();
         const kind = resultForm.resultKind;
         const isOrg = kind === 'organism_id';
         const isSus = kind === 'susceptibility';
@@ -488,7 +492,7 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
           </select>
         );
         return (
-          <form className="form-grid" onSubmit={submitResultRow}>
+          can('eqa', 'create') && <form className="form-grid" onSubmit={submitResultRow}>
             <label>Result kind<select value={kind} onChange={e => setResultForm({ ...resultForm, resultKind: e.target.value })}>
               <option value="general">Analyte / test (quantitative or qualitative)</option>
               <option value="organism_id">Organism identification</option>
@@ -523,8 +527,8 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
       {unsatisfactory.map(ev => <tr key={ev.id}>
         <td>{ev.program_name}</td><td>{ev.cycle_name}</td><td>{formatBadge(ev.performance_status)}</td><td>{ev.findings || '—'}</td>
         <td>
-          {!ev.nc_id && <button onClick={() => createNc(ev.id)}>Create NC</button>}
-          {!ev.capa_id && <button onClick={() => createCapa(ev.id)}>Create CAPA</button>}
+          {!ev.nc_id && can('nc_capa', 'create') && <button onClick={() => createNc(ev.id)}>Create NC</button>}
+          {!ev.capa_id && can('nc_capa', 'create') && <button onClick={() => createCapa(ev.id)}>Create CAPA</button>}
         </td>
       </tr>)}
     </tbody></table>}
@@ -577,6 +581,7 @@ export { VerificationValidationPage } from './VerificationValidationPage';
 
 // ============= Measurement Uncertainty =============
 export function MeasurementUncertaintyPage({ embedded = false }: { embedded?: boolean } = {}) {
+  const { can } = usePermissions();
   const { isEnabled } = useModules();
   const { equipment } = useLookups();
   const [tab, setTab] = useState(embedded ? 'MU Register' : 'Dashboard');
@@ -655,7 +660,7 @@ export function MeasurementUncertaintyPage({ embedded = false }: { embedded?: bo
       {records.map(r => <tr key={r.id}><td>{r.mu_number}</td><td>{r.test_name}</td><td>{r.analyte}</td><td>{r.method_name || '—'}</td><td>{r.equipment_name || '—'}</td><td>{r.calculation_date}</td><td>{r.expanded_uncertainty ?? r.uncertainty_value ?? '—'}</td><td>{formatBadge(r.status)}</td></tr>)}
     </tbody></table>}
 
-    {tab === 'New MU Record' && <form className="form-grid" onSubmit={submit}>
+    {tab === 'New MU Record' && can('measurement_uncertainty', 'create') && <form className="form-grid" onSubmit={submit}>
       <label>Test name<input value={form.testName} onChange={e => setForm({ ...form, testName: e.target.value })} required /></label>
       <label>Analyte<input value={form.analyte} onChange={e => setForm({ ...form, analyte: e.target.value })} required /></label>
       <label>Method name<input value={form.methodName} onChange={e => setForm({ ...form, methodName: e.target.value })} /></label>
@@ -678,8 +683,8 @@ export function MeasurementUncertaintyPage({ embedded = false }: { embedded?: bo
       {pending.map(r => <tr key={r.id}>
         <td>{r.mu_number}</td><td>{r.test_name}</td><td>{r.analyte}</td><td>{formatBadge(r.status)}</td>
         <td>
-          {r.status === 'draft' && <button onClick={() => reviewRecord(r.id)}>Mark in review</button>}
-          {r.status === 'in_review' && <button onClick={() => approveRecord(r.id)}>Approve</button>}
+          {r.status === 'draft' && can('measurement_uncertainty', 'edit') && <button onClick={() => reviewRecord(r.id)}>Mark in review</button>}
+          {r.status === 'in_review' && can('measurement_uncertainty', 'approve') && <button onClick={() => approveRecord(r.id)}>Approve</button>}
         </td>
       </tr>)}
     </tbody></table>}

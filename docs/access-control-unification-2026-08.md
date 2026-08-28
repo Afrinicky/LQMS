@@ -662,3 +662,122 @@ them are reachable.
 14/14, `rbac:selfservice` 22/22, `core-documents-check` 20/20,
 `office-edit-check` 74/74, `account-check` 37/37, `complaints-check` 38/38,
 `inventory-check` 43/43 and `iqc-io-check` 80/80.
+
+
+---
+
+## 13. Every role, every module — the sweep
+
+> *All these concerns I have raised are not only about biomedical scientists;
+> technicians and other roles are able to do the same.*
+
+Correct, and the four passes above were fixing what appeared in a screenshot.
+This one stopped doing that.
+
+### The inventory
+
+A scanner (`npm run audit:controls`, `scripts/access-scan-controls.mjs`) walks
+every `.tsx` file, finds each control that triggers a write — button, menu item,
+form — follows its handler to the API endpoint it calls, reads the guard the
+**server** puts on that endpoint, and reports the exact `can(key, action)` the
+control is missing.
+
+That derivation is the point. The gate is not a guess about what a control
+*ought* to need; it is **what the API will actually ask for**. A "Create NC"
+button on the blood-bank screen came out as `nc_capa:create`, not
+`blood_bank_handover:anything`, because that is the endpoint it calls.
+
+It found **388 ungated write controls across 42 files**, of which **339
+resolved to an exact gate**.
+
+### First, the reassurance
+
+The same pass read all **1,368 mounted routes**: **1,285 carry a
+`requirePermission` guard**, and the 24 unguarded writes are all self-service —
+your own appraisal acknowledgement, your own duty occurrence, your own mobile
+record, your own signature, your own push subscription — each checked inside the
+handler against the caller's own staff record. The one that looked like an
+exception, `POST /mobile/approvals/:type/:id/decision`, calls `canApprove`
+itself.
+
+**So this was never a hole in the data.** Every one of those 388 controls was
+already refused by the API. It was the other half of the rule — *what you cannot
+do you should not see* — that was broken, across every role, in 42 files.
+
+### The fix
+
+Hand-gating 339 controls invites a different mistake in each one. Instead they
+were rewritten with the **TypeScript compiler's own parser**, so element ranges
+are exact:
+
+- the element that *carries the handler* is gated — never an enclosing `<tr>`,
+  which would hide the record instead of the action on it;
+- braces are added only where the element sits among JSX children (inside
+  `(…)`, a ternary or an existing `x && …` they would read as an object
+  literal — the first attempt got this wrong and was thrown away);
+- an existing condition is **extended** rather than nested;
+- `const { can } = usePermissions()` is injected into any component that
+  lacked it, walking out past expression-bodied arrows to the component that
+  owns the list.
+
+**339 of 339 gated**, across 31 files. Four over-gates from handlers that share
+a helper (`UserAccountActions`, the backup folder) were then corrected by hand
+so each control asks for its own endpoint's right, not the union of every
+endpoint in the component — role change and reactivation are `settings:edit`,
+deactivate and purge are `settings:void_archive`.
+
+The 49 controls left unresolved are self-service, where the handler checks the
+caller against their own record rather than a permission.
+
+### One more thing it turned up
+
+`DocumentControlPage` decided administrator status by **comparing the role's
+name**:
+
+```ts
+const isAdmin = (user.roleName || '').toLowerCase() === 'system administrator';
+```
+
+The server decides it from `roles.is_administrator`, so renaming the role would
+have silently kept — or lost — the reserved capabilities. It reads the flag now,
+and the login payload reports that flag off the **access profile the user
+resolves to**, the same fact `requireAdministrator` uses. Static check **[5c]**
+fails the build if any client compares a role name again.
+
+### The proof, for every role
+
+Two new live checks replace screenshot-by-screenshot:
+
+**[9] Every write route agrees with the map, for every profile.** The audit
+reads the server's own guard off each static write route and asserts the
+effective permission map — the thing every button is drawn from — says the same.
+**3,275 probes** across all 15 profiles × every static write route. Where they
+disagree, a control is either shown and then refused, or hidden from somebody
+entitled to it. Administrator-only acts are recognised as the second gate they
+are and probed separately.
+
+**[10] Nothing has been hidden from the people who should see it.** The other
+direction, which matters just as much after a rewrite of this size: every one of
+the **160 distinct gates** the interface asks for anywhere is one the
+administrator profile actually holds, so no screen has been quietly emptied.
+
+Both pass. Alongside: **41 static checks**, `audit:controls` at **zero
+resolvable ungated controls**, `rbac:check` 19/19, `rbac:matrix` 14/14,
+`rbac:selfservice` 22/22, `core-documents-check` 20/20, `office-edit-check`
+74/74, `account-check` 37/37, `complaints-check` 38/38, `inventory-check` 43/43,
+`inventory-records-check` 56/56, `iqc-check` 38/38, `iqc-io-check` 80/80,
+`iqc-admin-check` 73/73.
+
+### What this does and does not settle
+
+`audit:controls` holds the count at zero: a new ungated control fails it. **[9]**
+holds every write route in agreement with the map for every profile. Between
+them, a control that is shown and then refused is now a build failure rather
+than something to be found in use.
+
+What they do not cover: a *read* that shows too much — a listing that returns
+other people's rows to somebody who may see the page but not the people on it.
+Three of those were found and fixed by hand (the attestation register, pending
+attestations, the distribution inbox — §12), but there is no automated check for
+that class yet. It needs a per-endpoint statement of whose rows the answer may
+contain, which does not exist in the code today.

@@ -250,7 +250,7 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
       </tr>)}
     </tbody></table>}
 
-    {tab === 'New Import' && <form className="form-grid" onSubmit={submitImport}>
+    {tab === 'New Import' && can('monthly_reports', 'create') && <form className="form-grid" onSubmit={submitImport}>
       <label>Report month<NumberField min={1} max={12} value={importForm.reportMonth} onValue={n => setImportForm({ ...importForm, reportMonth: n ?? 0 })} required /></label>
       <label>Report year<NumberField min={2000} max={2100} value={importForm.reportYear} onValue={n => setImportForm({ ...importForm, reportYear: n ?? 0 })} required /></label>
       <label>Import type<select value={importForm.importType} onChange={e => setImportForm({ ...importForm, importType: e.target.value })} required>{IMPORT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
@@ -286,7 +286,7 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
     </>}
 
     {tab === 'Mapping Rules' && <>
-      <form className="form-grid" onSubmit={submitRule}>
+      {can('monthly_reports', 'create') && <form className="form-grid" onSubmit={submitRule}>
         <label>Mapping name<input value={ruleForm.mappingName} onChange={e => setRuleForm({ ...ruleForm, mappingName: e.target.value })} required /></label>
         <label>Source pattern<input value={ruleForm.sourcePattern} onChange={e => setRuleForm({ ...ruleForm, sourcePattern: e.target.value })} required placeholder="e.g. FBC, regex:^Malaria|MP, Hb*" /></label>
         <label>Source field<select value={ruleForm.sourceField} onChange={e => setRuleForm({ ...ruleForm, sourceField: e.target.value })}>{MAPPING_SOURCE_FIELDS.map(f => <option key={f} value={f}>{f.replace(/_/g, ' ')}</option>)}</select></label>
@@ -297,13 +297,13 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
         <label>Department<select value={ruleForm.departmentId} onChange={e => setRuleForm({ ...ruleForm, departmentId: e.target.value })}><option value="">—</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
         <label>Section<select value={ruleForm.sectionId} onChange={e => setRuleForm({ ...ruleForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <button type="submit">Add mapping rule</button>
-      </form>
+      </form>}
       <table className="data-table"><thead><tr><th>Name</th><th>Pattern</th><th>Field</th><th>Report type</th><th>Section</th><th>Row</th><th>Rule</th><th>Active</th><th></th></tr></thead><tbody>
         {rules.map(r => <tr key={r.id}>
           <td>{r.mapping_name}</td><td><code>{r.source_pattern}</code></td><td>{r.source_field.replace(/_/g, ' ')}</td>
           <td>{r.report_type.replace(/_/g, ' ')}</td><td>{r.report_section}</td><td>{r.report_row}</td>
           <td>{r.counting_rule.replace(/_/g, ' ')}</td><td>{r.is_active ? 'Yes' : 'No'}</td>
-          <td><button onClick={() => toggleRule(r.id)}>{r.is_active ? 'Disable' : 'Enable'}</button></td>
+          <td>{can('monthly_reports', 'edit') && <button onClick={() => toggleRule(r.id)}>{r.is_active ? 'Disable' : 'Enable'}</button>}</td>
         </tr>)}
       </tbody></table>
     </>}
@@ -316,11 +316,11 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
           <td>{e.exception_message || '—'}</td><td>{formatBadge(e.status)}</td>
           <td>
             {e.status === 'open' && <button onClick={() => setResolveForm({ exceptionId: e.id, resolutionNotes: '' })}>Resolve</button>}
-            {e.status === 'open' && <button onClick={() => createExceptionAction(e.id)}>Create action</button>}
+            {e.status === 'open' && can('actions', 'create') && <button onClick={() => createExceptionAction(e.id)}>Create action</button>}
           </td>
         </tr>)}
       </tbody></table>
-      {resolveForm.exceptionId > 0 && <form className="form-grid" onSubmit={submitResolve} style={{ marginTop: 12 }}>
+      {resolveForm.exceptionId > 0 && can('monthly_reports', 'edit') && <form className="form-grid" onSubmit={submitResolve} style={{ marginTop: 12 }}>
         <h4>Resolve exception #{resolveForm.exceptionId}</h4>
         <label>Resolution notes<textarea value={resolveForm.resolutionNotes} onChange={e => setResolveForm({ ...resolveForm, resolutionNotes: e.target.value })} required /></label>
         <button type="submit">Mark resolved</button>{' '}
@@ -328,7 +328,7 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
       </form>}
     </>}
 
-    {tab === 'Generate Report' && <form className="form-grid" onSubmit={submitGenerate}>
+    {tab === 'Generate Report' && can('monthly_reports', 'create') && <form className="form-grid" onSubmit={submitGenerate}>
       <label>Report month<NumberField min={1} max={12} value={generateForm.reportMonth} onValue={n => setGenerateForm({ ...generateForm, reportMonth: n ?? 0 })} required /></label>
       <label>Report year<NumberField min={2000} max={2100} value={generateForm.reportYear} onValue={n => setGenerateForm({ ...generateForm, reportYear: n ?? 0 })} required /></label>
       <label>Report type<select value={generateForm.reportType} onChange={e => setGenerateForm({ ...generateForm, reportType: e.target.value })} required>{REPORT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>

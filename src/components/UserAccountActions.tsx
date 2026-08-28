@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { usePermissions } from '../hooks/usePermissions';
 import { UserX, UserCheck, KeyRound, Trash2, ShieldAlert, Loader2, ShieldCheck } from 'lucide-react';
 import { api } from '../services/api';
 import type { ApiUser } from '../../shared/types/api';
@@ -41,6 +42,7 @@ export default function UserAccountActions({ user, onChanged }: {
    *  shown in here would vanish before anybody read it. */
   onChanged: (message?: string) => void;
 }) {
+  const { can } = usePermissions();
   const [impact, setImpact] = useState<Impact | null>(null);
   const [confirming, setConfirming] = useState<'deactivate' | 'delete' | null>(null);
   // Force erase is for a demonstration login the live system grew around. It is
@@ -97,11 +99,11 @@ export default function UserAccountActions({ user, onChanged }: {
             {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
             {roles.length === 0 && <option value={String(user.roleId)}>{user.roleName ?? 'Current role'}</option>}
           </select>
-          <button type="button" disabled={!roleChanged || busy !== ''}
+          {can('settings', 'edit') && <button type="button" disabled={!roleChanged || busy !== ''}
             onClick={() => run('role', () => api(`/users/${user.id}`, { method: 'PUT', body: JSON.stringify({ roleId: Number(roleId) }) }),
               `${user.username} is now ${selectedRole?.name ?? 'in the new role'}. They have been signed out and will pick the new rights up at their next sign-in.`)}>
             {busy === 'role' ? <Loader2 size={13} className="spin" /> : null} Change role
-          </button>
+          </button>}
           {roleChanged && <button type="button" className="secondary" onClick={() => setRoleId(String(user.roleId))}>Cancel</button>}
           {!roleChanged && <span className="uaa-flag">Currently {user.roleName ?? selectedRole?.name ?? '—'}</span>}
         </div>
@@ -118,12 +120,12 @@ export default function UserAccountActions({ user, onChanged }: {
         <div className="uaa-do">
           <input type="text" value={tempPassword} onChange={e => setTempPassword(e.target.value)}
             placeholder="Temporary password" minLength={8} autoComplete="off" />
-          <button type="button" disabled={busy !== '' || tempPassword.length < 8}
+          {can('settings', 'edit') && <button type="button" disabled={busy !== '' || tempPassword.length < 8}
             onClick={() => run('temp', () => api(`/users/${user.id}/reset-password`, { method: 'POST', body: JSON.stringify({ newPassword: tempPassword }) }), 'Temporary password set. They must change it on first use.').then(() => setTempPassword(''))}>
             {busy === 'temp' ? <Loader2 size={13} className="spin" /> : null} Set temporary
-          </button>
+          </button>}
           {!user.mustChangePassword && (
-            <button type="button" className="secondary" disabled={busy !== ''}
+            can('settings', 'edit') && <button type="button" className="secondary" disabled={busy !== ''}
               onClick={() => run('force', () => api(`/users/${user.id}/require-password-change`, { method: 'POST', body: '{}' }), 'They will be asked to choose a new password at their next sign-in.')}>
               Require a change
             </button>
@@ -146,8 +148,8 @@ export default function UserAccountActions({ user, onChanged }: {
             confirming === 'deactivate' ? (
               <>
                 <span className="uaa-ask">Deactivate {user.username}?</span>
-                <button type="button" className="danger" disabled={busy !== ''}
-                  onClick={() => run('deact', () => api(`/users/${user.id}`, { method: 'DELETE' }), 'Account deactivated.')}>Yes, deactivate</button>
+                {can('settings', 'void_archive') && <button type="button" className="danger" disabled={busy !== ''}
+                  onClick={() => run('deact', () => api(`/users/${user.id}`, { method: 'DELETE' }), 'Account deactivated.')}>Yes, deactivate</button>}
                 <button type="button" className="secondary" onClick={() => setConfirming(null)}>Cancel</button>
               </>
             ) : (
@@ -155,7 +157,7 @@ export default function UserAccountActions({ user, onChanged }: {
                 title={impact?.blockers[0]} onClick={() => setConfirming('deactivate')}>Deactivate account</button>
             )
           ) : (
-            <button type="button" disabled={busy !== ''}
+            can('settings', 'edit') && <button type="button" disabled={busy !== ''}
               onClick={() => run('react', () => api(`/users/${user.id}/reactivate`, { method: 'POST', body: '{}' }), 'Account reactivated.')}>Reactivate</button>
           )}
         </div>
@@ -184,8 +186,8 @@ export default function UserAccountActions({ user, onChanged }: {
           {confirming === 'delete' ? (
             <>
               <span className="uaa-ask">Erase {user.username} for good?</span>
-              <button type="button" className="danger" disabled={busy !== ''}
-                onClick={() => run('del', () => api(`/users/${user.id}?mode=delete`, { method: 'DELETE' }), 'Account erased.')}>Yes, erase</button>
+              {can('settings', 'void_archive') && <button type="button" className="danger" disabled={busy !== ''}
+                onClick={() => run('del', () => api(`/users/${user.id}?mode=delete`, { method: 'DELETE' }), 'Account erased.')}>Yes, erase</button>}
               <button type="button" className="secondary" onClick={() => setConfirming(null)}>Cancel</button>
             </>
           ) : impact?.canDelete ? (
@@ -205,12 +207,12 @@ export default function UserAccountActions({ user, onChanged }: {
                 placeholder="Why is this account being erased?" />
               <div className="uaa-force-acts">
                 <button type="button" className="secondary" onClick={() => { setForcing(false); setForceReason(''); }}>Cancel</button>
-                <button type="button" className="danger" disabled={busy !== '' || forceReason.trim().length < 10}
+                {can('settings', 'void_archive') && <button type="button" className="danger" disabled={busy !== '' || forceReason.trim().length < 10}
                   onClick={() => run('purge',
                     () => api(`/users/${user.id}?mode=purge`, { method: 'DELETE', body: JSON.stringify({ reason: forceReason.trim() }) }),
                     'Account erased. The audit trail is unchanged.')}>
                   {busy === 'purge' ? <Loader2 size={13} className="spin" /> : null} Erase and detach
-                </button>
+                </button>}
               </div>
             </div>
           ) : (

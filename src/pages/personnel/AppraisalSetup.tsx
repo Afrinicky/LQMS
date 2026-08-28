@@ -332,6 +332,7 @@ function TemplateEditor({ template, mayEdit, mayCreate, mayApprove, mayArchive, 
     <ScaleLegend scale={APPRAISAL_SCALE_5} max={template.max_score} />
 
     {APPRAISAL_SECTIONS.map(section => {
+  const { can } = usePermissions();
       const rows = items.filter(i => i.section === section);
       const sectionWeight = rows.reduce((sum, r) => sum + (Number(r.weight) || 0), 0);
       return <section key={section} className="element-group">
@@ -363,7 +364,7 @@ function TemplateEditor({ template, mayEdit, mayCreate, mayApprove, mayArchive, 
           <label className="wide">How success is measured<input value={item.successMeasure} onChange={e => setItem({ ...item, successMeasure: e.target.value })} placeholder="The evidence an appraiser looks for" /></label>
           <label>Weight<input type="number" min={0.5} step="0.5" value={item.weight} onChange={e => setItem({ ...item, weight: e.target.value })} /></label>
           <div className="element-add-actions">
-            <button type="button" onClick={() => void addItem(section)}>Add item</button>
+            {can('supplier_inventory.stock', 'create') && <button type="button" onClick={() => void addItem(section)}>Add item</button>}
             <button type="button" className="secondary" onClick={() => setAddingTo(null)}>Cancel</button>
           </div>
         </div>}
@@ -384,6 +385,7 @@ function CycleDetail({ cycle, staff, templates, mayCreate, mayApprove, onClose, 
   onChanged: () => void;
   onStatus: (id: number, status: string, force?: boolean) => Promise<void>;
 }) {
+  const { can } = usePermissions();
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [raise, setRaise] = useState({ appraiserStaffId: '', reviewerStaffId: '', appraisalDate: cycle.period_end });
@@ -470,9 +472,9 @@ function CycleDetail({ cycle, staff, templates, mayCreate, mayApprove, onClose, 
         </div>
         {selectedStaff.length > 0 && <button type="button" className="link-button" onClick={() => setSelectedStaff([])}>Clear and use the whole scope</button>}
       </details>
-      <button type="button" disabled={!template} onClick={() => void doRaise()}>
+      {can('personnel.appraisals', 'create') && <button type="button" disabled={!template} onClick={() => void doRaise()}>
         {selectedStaff.length ? `Raise ${selectedStaff.length} appraisal(s)` : 'Raise appraisals for everybody in scope'}
-      </button>
+      </button>}
     </section>}
 
     {cycle.status === 'closed' && <p className="notice-warn">This cycle is closed. Reopen it to raise or change appraisals within it.</p>}

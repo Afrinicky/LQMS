@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { usePermissions } from '../hooks/usePermissions';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, Bell, Bot, FileSearch, RefreshCw, Send, ShieldCheck, Sparkles } from 'lucide-react';
 import { api } from '../services/api';
@@ -31,6 +32,7 @@ function SourceList({ sources }: { sources: AskSource[] }) {
 }
 
 function AskDennis() {
+  const { can } = usePermissions();
   type Msg = { role: 'user' | 'dennis'; content: string; sources?: AskSource[] };
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -57,13 +59,14 @@ function AskDennis() {
       {busy && <div className="chat-bubble dennis"><strong>Dennis</strong><p>Searching approved documents…</p></div>}</div>
     <div className="dennis-input">
       <textarea value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); send(); } }} placeholder="Ask Dennis a quality management question…"/>
-      <button onClick={send} disabled={busy}><Send size={16}/> Send</button>
+      {can('dennis', 'view') && <button onClick={send} disabled={busy}><Send size={16}/> Send</button>}
       <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={allowOnline} onChange={e=>setAllowOnline(e.target.checked)}/> Allow online AI (if enabled)</label>
       <button className="secondary" onClick={()=>setMessages([])}>Clear</button>
     </div></div><SafetyPanel/></div>;
 }
 
 function DocumentSearch() {
+  const { can } = usePermissions();
   const navigate = useNavigate();
   const [q, setQ] = useState('');
   const [type, setType] = useState('');
@@ -104,7 +107,7 @@ function DocumentSearch() {
       <select value={type} onChange={e=>setType(e.target.value)}><option value="">All types</option>{['SOP','Policy','Manual','Form','Register','Log'].map(t=><option key={t} value={t}>{t}</option>)}</select>
       <label style={{ fontSize: 12 }}><input type="checkbox" checked={currentOnly} onChange={e=>setCurrentOnly(e.target.checked)}/> Current only</label>
       <button onClick={search} disabled={busy}>Search</button>
-      <button className="secondary" onClick={indexAll} disabled={busy} title="Index all approved/current documents"><RefreshCw size={14}/> Reindex all approved</button>
+      {can('dennis', 'edit') && <button className="secondary" onClick={indexAll} disabled={busy} title="Index all approved/current documents"><RefreshCw size={14}/> Reindex all approved</button>}
     </div>
     {msg && <p className="muted" style={{ marginTop: 8 }}>{msg}</p>}
     {results && results.length === 0 && <div className="dennis-output" style={{ marginTop: 12 }}><strong>No matching approved documents found.</strong><Notice/></div>}
@@ -120,7 +123,7 @@ function DocumentSearch() {
         <p style={{ margin: '4px 0' }}>{String(r.excerpt || '').replace(/[〔〕]/g, '')}</p>
         <div style={{ display: 'flex', gap: 8 }}>
           {r.sourceDocumentId && <button className="secondary" onClick={()=>navigate('/documents')}>Open in Documents</button>}
-          {r.sourceDocumentId && <button className="secondary" onClick={()=>reindex(r.sourceDocumentId)}>Reindex</button>}
+          {r.sourceDocumentId && can('dennis', 'edit') && <button className="secondary" onClick={()=>reindex(r.sourceDocumentId)}>Reindex</button>}
         </div>
         <Notice/>
       </div>)}
@@ -130,6 +133,7 @@ function DocumentSearch() {
 }
 
 function Helper({ tab }: { tab: Tab }) {
+  const { can } = usePermissions();
   const cfg = HELPERS[tab];
   const [input, setInput] = useState('');
   const [recordId, setRecordId] = useState('');
@@ -157,7 +161,7 @@ function Helper({ tab }: { tab: Tab }) {
       <span className="muted" style={{ fontSize: 12, alignSelf: 'center' }}>Link a record to ground the draft.</span>
     </div>
     <textarea value={input} onChange={e=>setInput(e.target.value)} placeholder={`Paste ${tab} notes here. Do not include patient or donor identifiers.`}/>
-    <div className="button-grid">{cfg.buttons.map(([label, task])=><button key={label} disabled={busy} onClick={()=>run(task)}>{label}</button>)}</div>
+    <div className="button-grid">{cfg.buttons.map(([label, task])=>can('dennis', 'view') && <button key={label} disabled={busy} onClick={()=>run(task)}>{label}</button>)}</div>
     <div className="dennis-output">
       <strong>Dennis draft output {out?.mode ? `(${out.mode})` : ''}</strong>
       <p style={{ whiteSpace: 'pre-wrap' }}>{busy ? 'Dennis is drafting…' : (out?.draft || 'Select a Dennis action to generate a draft suggestion. Drafts are never auto-saved into official records.')}</p>
@@ -168,6 +172,7 @@ function Helper({ tab }: { tab: Tab }) {
 }
 
 function ReportWriter() {
+  const { can } = usePermissions();
   const reports = ['Monthly quality report','Management review input','Blood bank quality report','CAPA summary report','Internal audit report','Equipment downtime report','Complaint summary report','Training summary report','Risk summary report','Supplier performance summary'];
   const [reportType, setReportType] = useState(reports[0]);
   const [period, setPeriod] = useState('');
@@ -183,19 +188,20 @@ function ReportWriter() {
       <select value={reportType} onChange={e=>setReportType(e.target.value)}>{reports.map(r=><option key={r}>{r}</option>)}</select>
       <input type="month" value={period} onChange={e=>setPeriod(e.target.value)}/>
     </div>
-    <button onClick={gen} disabled={busy}>{busy ? 'Generating…' : 'Generate Draft'}</button>
+    {can('dennis', 'view') && <button onClick={gen} disabled={busy}>{busy ? 'Generating…' : 'Generate Draft'}</button>}
     <div className="dennis-output"><strong>Draft report {out?.mode ? `(${out.mode})` : ''}</strong><p style={{ whiteSpace: 'pre-wrap' }}>{out?.draft || 'Choose a report type and period, then generate a draft. Dennis produces drafts only.'}</p>{out && <><SourceList sources={out.sources}/><button className="secondary" onClick={()=>navigator.clipboard?.writeText(out.draft)}>Copy Draft</button></>}<Notice/></div>
   </div><SafetyPanel/></div>;
 }
 
 function IndicatorAnalyst() {
+  const { can } = usePermissions();
   const items=['Turnaround time','Sample rejection rate','EQA performance','IQC failures','Equipment downtime','Complaint trends','CAPA closure rate','Stock-outs','Blood unit expiry','Reagent expiry','Internal audit finding trends'];
   const [sel, setSel] = useState(items[0]);
   const [out, setOut] = useState<string>('');
   const [busy, setBusy] = useState(false);
   async function run() { setBusy(true); try { const r = await api<{ draft: string }>('/dennis/helper', { method: 'POST', body: JSON.stringify({ module: 'quality_indicators', task: 'summarize', inputText: `Summarise the ${sel} quality indicator. Do not change any values.` }) }); setOut(r.draft); } catch (e) { setOut((e as Error).message); } finally { setBusy(false); } }
   return <div className="card"><h3>Quality Indicator Analyst</h3><p className="muted">Dennis summarises and explains indicators — he never edits indicator values.</p>
-    <div style={{ display: 'flex', gap: 8 }}><select value={sel} onChange={e=>setSel(e.target.value)}>{items.map(i=><option key={i}>{i}</option>)}</select><button onClick={run} disabled={busy}>{busy?'Summarising…':'Summarize'}</button></div>
+    <div style={{ display: 'flex', gap: 8 }}><select value={sel} onChange={e=>setSel(e.target.value)}>{items.map(i=><option key={i}>{i}</option>)}</select>{can('dennis', 'view') && <button onClick={run} disabled={busy}>{busy?'Summarising…':'Summarize'}</button>}</div>
     <div className="dennis-output" style={{ marginTop: 10 }}><strong>{sel}</strong><p style={{ whiteSpace: 'pre-wrap' }}>{out || 'Select an indicator and click Summarize.'}</p><Notice/></div>
   </div>;
 }
@@ -222,6 +228,7 @@ function ActivityLog() {
 }
 
 function Settings() {
+  const { can } = usePermissions();
   const [s, setS] = useState<Record<string,string> | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -260,7 +267,7 @@ function Settings() {
     <label>Local endpoint URL<input value={s['dennis.local.endpoint']||''} onChange={e=>set('dennis.local.endpoint', e.target.value)} placeholder="http://localhost:11434"/></label>
     <label>Local chat model<input value={s['dennis.local.chatModel']||''} onChange={e=>set('dennis.local.chatModel', e.target.value)} placeholder="llama3.1"/></label>
     <label>Local embedding model<input value={s['dennis.local.embedModel']||''} onChange={e=>set('dennis.local.embedModel', e.target.value)} placeholder="nomic-embed-text"/></label>
-    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}><button className="secondary" type="button" onClick={()=>testConn('local')}>Test local connection</button><span className="badge">{test.local || 'not tested'}</span></div>
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>{can('dennis', 'edit') && <button className="secondary" type="button" onClick={()=>testConn('local')}>Test local connection</button>}<span className="badge">{test.local || 'not tested'}</span></div>
 
     <h4 style={{ margin: '12px 0 4px' }}>Online AI (Phase DENNIS-6 — disabled by default)</h4>
     <label><input type="checkbox" checked={bool('dennis.online.enabled')} onChange={e=>set('dennis.online.enabled', String(e.target.checked))}/> Online Dennis enabled</label>
@@ -269,11 +276,11 @@ function Settings() {
     <label>Model<input value={s['dennis.online.model']||''} onChange={e=>set('dennis.online.model', e.target.value)} placeholder="claude-sonnet-4-6"/></label>
     <label>API key<input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)} placeholder={s['dennis.online.apiKey'] ? `Saved (${s['dennis.online.apiKey']}) — type to replace` : 'Enter API key'}/></label>
     <label><input type="checkbox" checked={s['dennis.online.confirmRequired']!=='false'} onChange={e=>set('dennis.online.confirmRequired', String(e.target.checked))}/> Require confirmation before each online AI use</label>
-    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}><button className="secondary" type="button" onClick={()=>testConn('online')}>Test online connection</button><span className="badge">{test.online || 'not tested'}</span></div>
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>{can('dennis', 'edit') && <button className="secondary" type="button" onClick={()=>testConn('online')}>Test online connection</button>}<span className="badge">{test.online || 'not tested'}</span></div>
 
     <div className="warning" style={{ marginTop: 12 }}><AlertTriangle size={18}/>Online AI may send document text outside the hospital network. Use only for SOPs and non-patient documents. Online AI is restricted to the SOP/document analysis tools and is <strong>never</strong> used for patient records, NC/CAPA, audit findings, complaints, blood bank, staff, equipment, inventory, quality indicators, management review or any live operational data. Dennis redacts identifiers before any online call, and blocks online use entirely when patient/operational data is detected.</div>
     <p className="muted">TODO: API keys are stored in the local SECH_LIMS database. Use OS secure storage where available in a later hardening pass.</p>
-    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}><button onClick={save} disabled={busy}>{busy?'Saving…':'Save settings'}</button>{msg && <span className="muted" style={{ alignSelf: 'center' }}>{msg}</span>}</div>
+    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>{can('dennis', 'edit') && <button onClick={save} disabled={busy}>{busy?'Saving…':'Save settings'}</button>}{msg && <span className="muted" style={{ alignSelf: 'center' }}>{msg}</span>}</div>
   </div><SafetyPanel/></div>;
 }
 

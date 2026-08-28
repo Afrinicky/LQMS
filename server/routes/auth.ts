@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { isAdministrator } from '../middleware/administrator.js';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import { getDb } from '../db/database.js';
@@ -21,7 +22,7 @@ router.post('/login', (req, res) => {
     token,
     // isAdministrator is what the client uses to hide the few capabilities the
     // permission matrix does not grant. The server refuses them regardless.
-    user: { id: user.id, username: user.username, fullName: user.full_name, roleId: user.role_id, roleName: user.role_name, isAdministrator: Number(user.is_administrator) === 1, staffId: user.staff_id ?? null, staffName: user.staff_name ?? null, isActive: true, mustChangePassword: user.must_change_password === 1 },
+    user: { id: user.id, username: user.username, fullName: user.full_name, roleId: user.role_id, roleName: user.role_name, isAdministrator: isAdministrator(user.id), staffId: user.staff_id ?? null, staffName: user.staff_name ?? null, isActive: true, mustChangePassword: user.must_change_password === 1 },
     permissions: getEffectivePermissions(user.id),
   });
 });
@@ -29,7 +30,10 @@ router.get('/me', requireAuth, (req, res) => {
   const user = getDb().prepare('SELECT u.id, u.username, u.full_name fullName, u.role_id roleId, r.name roleName, r.is_administrator isAdministrator, u.staff_id staffId, s.full_name staffName, u.is_active isActive, u.must_change_password mustChangePassword FROM users u JOIN roles r ON r.id = u.role_id LEFT JOIN staff s ON s.id = u.staff_id WHERE u.id = ?').get(req.user!.id) as Record<string, unknown> | undefined;
   if (user) {
     user.mustChangePassword = user.mustChangePassword === 1;
-    user.isAdministrator = Number(user.isAdministrator) === 1;
+    // Read off the access profile the user resolves to, which is what the
+    // administrator gate itself asks — not off `users.role_id` directly, which
+    // would disagree the moment a position mapping applied.
+    user.isAdministrator = isAdministrator(Number(user.id));
   }
   res.json({ user, permissions: getEffectivePermissions(req.user!.id) });
 });
