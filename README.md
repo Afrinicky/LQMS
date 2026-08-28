@@ -569,26 +569,38 @@ new capability is off by default, so an existing single-PC install is unchanged.
 Two rules apply to every screen. Both are enforced by shared components rather
 than by convention, so a new page gets them for free.
 
-**A message goes to the action, not to the top of the page.** `Notice`
-(`src/components/ui/Feedback.tsx`) draws the banner where it is placed — an
-error about a form belongs beside that form and has to stay readable while it
-is corrected. If the banner appears somewhere the reader cannot see, which is
-the normal case for a page-level `error`/`notice` line above a form three
-screens long, the same message is also shown as a toast pinned to the control
-that was just used. The control is tracked from a capture-phase listener on the
-document, so no call site passes an anchor. A banner that is page furniture
-rather than an answer — a standing rule, a hint — is marked `silent` and never
-raises one.
+**A message goes to the control that caused it, and goes there only.** A page
+used to keep its "saved" and its "could not save" in one place: a line at the
+very top. But the button is rarely at the top — it is at the bottom of a form,
+or in a row halfway down a table — so a person pressed it, the page answered
+off-screen, and nothing appeared to happen.
+
+`Notice` (`src/components/ui/Feedback.tsx`) draws nothing where it is written
+when the control that was used is known. The message is drawn beside that
+control instead: one message, in one place, where the person is already
+looking. The control is tracked from a capture-phase listener on the document,
+so no call site passes an anchor, and its position is remembered as well as its
+node — a row that reloads after saving replaces the button that was pressed,
+and the message still appears where that button was.
 
     {error  && <Notice kind="error">{error}</Notice>}
     {notice && <Notice kind="success">{notice}</Notice>}
     <Notice kind="warn" silent>Escalation applies to this event.</Notice>
 
-The four kinds are `error`, `success`, `warn` and `info`. They share one shape:
-a tinted ground, a semantic rail down the left edge, an icon, and body text set
-for reading rather than for alarm. The legacy class names (`.error`,
-`.notice-ok`, `.notice-warn`, `.success-msg`) are styled to match, so a banner
-that has not been migrated still looks like the rest of the product.
+The banner in the page is the fallback, for the cases with no control to point
+at: a page that failed while loading, a background refresh, or a message whose
+content is too rich to repeat beside a button (a list, a link) and therefore
+belongs in the layout. `silent` marks a banner that is page furniture rather
+than an answer — a standing rule, a hint — which always draws in place.
+
+The four kinds are `error`, `success`, `warn` and `info`, and all four have one
+shape: a solid colour block carrying the icon, a heading, the sentence, and a
+way out. An error waits to be dismissed, because it is usually something to act
+on; a confirmation clears itself after a few seconds. Nothing animates — a
+message that slides in or counts itself down draws the eye to the movement
+rather than to the sentence. The legacy class names (`.error`, `.notice-ok`,
+`.notice-warn`, `.success-msg`) carry the same colours for markup that has not
+been migrated.
 
 **Text boxes hold their own text.** Every register here is one enormous page
 component holding a dozen tabs, a form and a table. Bound the obvious way —
