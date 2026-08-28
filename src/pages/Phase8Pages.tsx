@@ -90,6 +90,7 @@ const ASSESSMENT_TABS = ['Dashboard', 'Assessment Programmes', 'New Assessment',
   'Plan Assessment', 'Assessment Questions', 'Internal Audit Marks', 'Findings', 'Reports'];
 
 export function AssessmentsPage() {
+  const { canView } = usePermissions();
   const { can } = usePermissions();
   const { isEnabled } = useModules();
   const { staff, sections, departments } = useLookups();
@@ -318,8 +319,10 @@ export function AssessmentsPage() {
   const topTabs: { key: string; active: boolean; go: () => void }[] = [
     { key: 'Dashboard', active: tab === 'Dashboard', go: () => setTab('Dashboard') },
     { key: 'Internal Audit', active: inInternalAudit, go: () => setTab('Assessment Programmes') },
-    ...(isEnabled('risks') ? [{ key: 'Risk Management', active: tab === 'Risk Management', go: () => setTab('Risk Management') }] : []),
-    ...(isEnabled('quality_indicators') ? [{ key: 'Quality Indicator Monitoring', active: tab === 'Quality Indicator Monitoring', go: () => setTab('Quality Indicator Monitoring') }] : []),
+    // These two switch into other modules. Enabled says the laboratory runs
+    // them; canView says this person may open them.
+    ...(isEnabled('risks') && canView('risks') ? [{ key: 'Risk Management', active: tab === 'Risk Management', go: () => setTab('Risk Management') }] : []),
+    ...(isEnabled('quality_indicators') && canView('quality_indicators') ? [{ key: 'Quality Indicator Monitoring', active: tab === 'Quality Indicator Monitoring', go: () => setTab('Quality Indicator Monitoring') }] : []),
   ];
   return <div className="module-page">
     <PageHeader eyebrow="Assessments" title="Assessments" subtitle="Internal audits, risk management, and quality indicator monitoring." />

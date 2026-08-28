@@ -7,6 +7,7 @@ import DisabledModule from '../components/DisabledModule';
 import { MeetingsPage, ManagementReviewPage } from './Phase8Pages';
 import { Link, useSearchParams } from 'react-router-dom';
 import PermissionTabs from '../components/PermissionTabs';
+import { usePermissions } from '../hooks/usePermissions';
 import type {
   Staff, CodeOfConductRecord, BudgetProjection, OrganisationSummary, RegulatoryRegistration, LaboratoryConfig,
   EthicalDeclarationForm, EthicalDeclarationSignature, ContinuityPlan, QtReviewConfig, QtReview, Position, OrgTree,
@@ -289,6 +290,7 @@ const emptyDeclarationSetup = {
 };
 
 function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onError: (m: string) => void; onNotice: (m: string) => void }) {
+  const { can } = usePermissions();
   const staffName = (id?: number | null) => staff.find(s => s.id === id)?.fullName || '—';
   const [searchParams] = useSearchParams();
   const focusForm = searchParams.get('form');
@@ -481,7 +483,16 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
     w.document.write(html); w.document.close();
   }
 
-  const canManage = true; // Server enforces permissions
+  // Raising a declaration and signing one are different jobs. Every member of
+  // staff opens the form, reads it and signs their own acknowledgement — that
+  // is what `organisation.structure:view` buys, and the sign endpoint asks for
+  // exactly that. Setting one UP is a create, and the API has always refused it
+  // to a reader; this said `true` with a note that the server would enforce it,
+  // so bench staff were shown a button that could only ever fail. What you
+  // cannot do you should not see.
+  const canManage = can('organisation.structure', 'create');
+  const canEditForm = can('organisation.structure', 'edit');
+  const canDeleteForm = can('organisation.structure', 'void_archive');
   const isFileOnly = selected && !selected.body_content && !!selected.file_id;
 
   return <div>
@@ -561,13 +572,14 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
               </div>
               <button type="button" className="badge" onClick={() => void printDeclaration()} style={{ cursor: 'pointer' }}>🖨 Print</button>
               {selected.file_id && <a className="badge" onClick={() => void downloadFileById(selected.file_id!, selected.file_name || 'declaration')} style={{ cursor: 'pointer' }}>⬇ Download form</a>}
-              {/* Manage is deliberately understated — a small ⋯ that reveals edit/delete. */}
-              <button type="button" title="Manage this declaration" aria-label="Manage this declaration" onClick={() => setShowManage(v => !v)}
-                style={{ cursor: 'pointer', border: 'none', background: 'transparent', color: '#94a3b8', fontSize: 18, lineHeight: 1, padding: '0 6px' }}>⋯</button>
+              {/* Manage is deliberately understated — a small ⋯ that reveals edit/delete.
+                  It is not shown at all to somebody who may only read and sign. */}
+              {(canEditForm || canDeleteForm) && <button type="button" title="Manage this declaration" aria-label="Manage this declaration" onClick={() => setShowManage(v => !v)}
+                style={{ cursor: 'pointer', border: 'none', background: 'transparent', color: '#94a3b8', fontSize: 18, lineHeight: 1, padding: '0 6px' }}>⋯</button>}
             </div>
-            {showManage && <div style={{ marginTop: 8, display: 'flex', gap: 8, justifyContent: 'flex-end', borderTop: '1px dashed #e2e8f0', paddingTop: 8 }}>
-              <button type="button" className="secondary" onClick={() => startEdit(selected)}>✎ Edit declaration</button>
-              <button type="button" className="secondary" style={{ color: '#dc2626' }} onClick={() => void deleteDeclaration(selected)}>🗑 Delete declaration</button>
+            {showManage && (canEditForm || canDeleteForm) && <div style={{ marginTop: 8, display: 'flex', gap: 8, justifyContent: 'flex-end', borderTop: '1px dashed #e2e8f0', paddingTop: 8 }}>
+              {canEditForm && <button type="button" className="secondary" onClick={() => startEdit(selected)}>✎ Edit declaration</button>}
+              {canDeleteForm && <button type="button" className="secondary" style={{ color: '#dc2626' }} onClick={() => void deleteDeclaration(selected)}>🗑 Delete declaration</button>}
             </div>}
             {selected.description && <p style={{ marginTop: 8 }}>{selected.description}</p>}
             {selected.body_content && <div style={{ whiteSpace: 'pre-wrap', marginTop: 10, lineHeight: 1.55, borderTop: '1px solid #e2e8f0', paddingTop: 10 }}>{selected.body_content}</div>}

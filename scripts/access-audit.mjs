@@ -323,17 +323,79 @@ console.log('\n[4d] Opening a controlled document needs only the right to read i
    ========================================================================= */
 console.log('\n[5] Module pages filter their tab bars by permission');
 {
+  // Checking that a file merely MENTIONS PermissionTabs is not enough: Documents
+  // & Records imported it for its Dashboard/Documents/Records rail while a
+  // second bar right underneath mapped a raw `docTabs` array — which is how a
+  // Biomedical Scientist came to be offered New Document, Bulk Import and both
+  // approval queues. Every `className="tabs"` block is inspected on its own.
   const offenders = [];
-  for (const p of CLIENT_FILES.filter(f => f.startsWith(`src${path.sep}pages`))) {
-    const s = read(p);
-    if (!/className="tabs"/.test(s)) continue;
-    if (/PermissionTabs|usePermittedTabs|permittedTabs/.test(s)) continue;
-    // Settings has its own gate per page (see src/constants/settingsAccess.ts),
-    // and the NC/CAPA top bar is three routes, each gated on the same module.
-    if (/SettingsPages|ActivitySettingsPage/.test(p)) continue;
-    offenders.push(path.basename(p));
+  for (const p of CLIENT_FILES.filter(f => f.startsWith(`src${path.sep}pages`) || f.startsWith(`src${path.sep}components`))) {
+    const src = read(p);
+    // Settings has its own gate per page (src/constants/settingsAccess.ts).
+    if (/SettingsPages|ActivitySettingsPage|PermissionTabs\.tsx$/.test(p)) continue;
+    const lines = src.split('\n');
+    lines.forEach((line, i) => {
+      // Only the bars that choose a WORKSPACE. `tabs sub` / `view-switch` are
+      // inner switchers between views of one area the person already holds —
+      // gating them would be asking the same question twice.
+      if (!/className="tabs\b/.test(line)) return;
+      if (/className="tabs (sub|.*view-switch)/.test(line)) return;
+      // The bar and what it maps over, within the next few lines.
+      const block = lines.slice(i, i + 4).join(' ');
+      const mapped = block.match(/\{\s*([A-Za-z_$][\w$]*)\s*(?:\.filter\([^)]*\))?\.map\(/);
+      if (!mapped) return;                       // not a mapped bar
+      const ident = mapped[1];
+      // Filtered in place, right here in the bar.
+      if (/\.filter\([^)]*\bcan(View)?\(/.test(block)) return;
+      // Or the array itself is built from a permission filter, or is the
+      // output of usePermittedTabs.
+      // A fixed window after the declaration, not "up to the first semicolon":
+      // a filter body has semicolons of its own.
+      const at = src.search(new RegExp(`\\b(const|let)\\s+${ident}\\b`));
+      const body = at === -1 ? '' : src.slice(at, at + 900);
+      if (/usePermittedTabs|\bcan(View)?\(/.test(body)) return;
+      offenders.push(`${path.basename(p)}:${i + 1} maps ${ident} unfiltered`);
+    });
   }
-  check('every module page filters its tabs', offenders.length === 0, offenders.join(', '));
+  check('every tab bar filters what it draws', offenders.length === 0, offenders.slice(0, 8).join(' | '));
+}
+
+/* ==========================================================================
+   5b — Reading a document is not authoring it, and signing is not raising
+   --------------------------------------------------------------------------
+   A Biomedical Scientist reads the SOPs they must follow and signs what is put
+   in front of them. Offering them New Document, Bulk Import, the review and
+   approval queues, the laboratory-wide attestation register, or a "Set up
+   declaration" button is offering work the API refuses — and what you cannot
+   do you should not see.
+   ========================================================================= */
+console.log('\n[5b] A reader is offered reading, not document control');
+{
+  const docs = read('src/pages/DocumentControlPage.tsx');
+  check('the document tabs each name the right they need', /DOC_TAB_RIGHTS/.test(docs));
+  for (const [tab, key, action] of [
+    ['New Document', 'documents.authoring', 'create'],
+    ['Bulk Import', 'documents.authoring', 'create'],
+    ['Review Queue', 'documents.workflow', 'view'],
+    ['Approval Queue', 'documents.workflow', 'view'],
+    ['Attestations', 'documents.workflow', 'view'],
+  ]) {
+    const re = new RegExp(`'${tab}': \\{ key: '${key}', action: '${action}' \\}`);
+    check(`  ${tab} needs ${key}:${action}`, re.test(docs));
+  }
+  const server = read('server/routes/documents.ts');
+  check('the laboratory-wide attestation register is document control\'s',
+    /'\/attestations\/list', requirePermission\('documents\.workflow', 'view'\)/.test(server));
+  check('and a reader\'s pending list is their own',
+    /const mayOversee = resolvePermission\(req\.user!\.id, 'documents\.workflow', 'view'\)\.allowed/.test(server));
+
+  const org = read('src/pages/OrganisationPage.tsx');
+  check('setting up a declaration needs the right to create one',
+    /const canManage = can\('organisation\.structure', 'create'\)/.test(org)
+    && !/const canManage = true/.test(org));
+  check('and editing or deleting one is gated separately',
+    /const canEditForm = can\('organisation\.structure', 'edit'\)/.test(org)
+    && /const canDeleteForm = can\('organisation\.structure', 'void_archive'\)/.test(org));
 }
 
 /* ==========================================================================

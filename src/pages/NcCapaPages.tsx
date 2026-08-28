@@ -295,6 +295,7 @@ const NC_TOP_TABS = [
 ];
 
 export function NcCapaPage() {
+  const { canView } = usePermissions();
   const { isEnabled } = useModules();
   const location = useLocation();
   const navigate = useNavigate();
@@ -304,7 +305,9 @@ export function NcCapaPage() {
   return <div>
     <PageHeader eyebrow="Nonconforming Event Management" title="Nonconforming Event Management"
       subtitle="Nonconformities, incidents & adverse events, and corrective/preventive action — one connected workflow from logging to closure." />
-    <div className="tabs">{NC_TOP_TABS.map(t => <button key={t.key} type="button" className={active === t.key ? 'active' : ''} onClick={() => navigate(t.path)}>{t.label}</button>)}</div>
+    {/* All three submodules are Nonconforming Event Management, so they stand
+        or fall together with the right to view it. */}
+    <div className="tabs">{NC_TOP_TABS.filter(() => canView('nc_capa')).map(t => <button key={t.key} type="button" className={active === t.key ? 'active' : ''} onClick={() => navigate(t.path)}>{t.label}</button>)}</div>
     {active === 'nonconformities' && <NonconformitiesPage embedded />}
     {active === 'incidents' && <IncidentsPage embedded />}
     {active === 'capa' && <CapaPage embedded />}

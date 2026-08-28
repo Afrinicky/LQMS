@@ -324,6 +324,21 @@ async function main() {
         if (r.status !== 403) leaks.push(`${name}: ${label} returned ${r.status}, expected 403`);
       }
 
+      // Document control is not a reader's work. The tabs for these are gone
+      // from the bar; the API refuses them too.
+      for (const [label, path] of [
+        ['the laboratory-wide attestation register', '/documents/attestations/list'],
+        ['the attestation document picker', '/documents/attestations/documents'],
+      ]) {
+        const r = await call(path, { token: acc.token });
+        if (r.status !== 403) leaks.push(`${name}: ${label} returned ${r.status}, expected 403`);
+      }
+      // Raising a declaration is not signing one.
+      const raised = await call('/organisation/ethical-forms', {
+        token: acc.token, method: 'POST', body: { title: 'Audit probe', formType: 'code_of_conduct' },
+      });
+      if (raised.status !== 403) leaks.push(`${name}: setting up a declaration returned ${raised.status}, expected 403`);
+
       // 1–3. Notified, able to work, able to keep their own record.
       for (const [label, path] of [
         ['their own inbox', '/notifications?mine=true'],
@@ -333,6 +348,9 @@ async function main() {
         ['their own declarations', '/personnel/my-declarations'],
         ['the duty roster they are on', '/scheduling/duty-rosters'],
         ['the documents they must follow', '/documents'],
+        ['the attestation they owe', '/documents/attestations/pending'],
+        ['their document inbox', '/documents/distribution/inbox'],
+        ['the declarations put to them', '/organisation/ethical-forms'],
       ]) {
         const r = await call(path, { token: acc.token });
         if (r.status === 403) leaks.push(`${name}: ${label} was refused`);

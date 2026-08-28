@@ -575,3 +575,90 @@ and GET 200.
 `audit:access` check **[4d]** pins all six halves of this — 29 static checks in
 total now — so a future change cannot quietly make reading an SOP require the
 right to rewrite it.
+
+
+---
+
+## 12. Document control and declarations were offered to readers
+
+Two more surfaces were drawn to everybody who could open the module.
+
+**Documents & Records.** The tab bar was a plain array — `docTabs` — rendered
+without a permission in sight, so a Biomedical Scientist whose profile reads
+*Authoring: No access* and *Review & approval: No access* was offered **New
+Document**, **Bulk Import**, the **Review** and **Approval** queues, **Reviews
+Due**, the **Obsolete Register**, and an **Attestations** register carrying 3,158
+rows of every colleague's signing status. Each tab now names the right it needs:
+
+| Tab | Right |
+|---|---|
+| Document Register, My Inbox | `documents.library:view` |
+| New Document, Bulk Import | `documents.authoring:create` |
+| Review Queue, Approval Queue, Reviews Due, Attestations, Obsolete Register | `documents.workflow:view` |
+
+A tab filtered away cannot stay selected, and the Settings deep link that jumps
+straight to *New Document* now checks the same right before it does.
+
+The server was loose in the same place: `GET /documents/attestations/list` and
+`/attestations/documents` were guarded on `documents.library:view`, so reading
+the library bought the whole laboratory's attestation register. Both now take
+`documents.workflow:view`. `/attestations/pending` and `/distribution/inbox`
+accepted any `staffId`, letting a reader open a named colleague's outstanding
+signatures; they answer with the **caller's own** unless the caller holds
+`documents.workflow:view`.
+
+**Organisation → Code of Conduct.** The *Set up declaration* button was
+literally hardcoded:
+
+```ts
+const canManage = true; // Server enforces permissions
+```
+
+The API had always refused a reader (`POST /organisation/ethical-forms` needs
+`organisation.structure:create`), so the button could only ever fail — and what
+you cannot do you should not see. It now asks `organisation.structure:create`,
+and the ⋯ menu behind it asks `:edit` and `:void_archive` for editing and
+deleting. **Signing is untouched**: `/ethical-forms/:id/sign` needs only
+`organisation.structure:view`, which every member of staff holds, so a
+declaration put to somebody is still theirs to read and sign — they simply
+cannot raise one.
+
+Verified as a Biomedical Scientist against a running host — the tab bar now
+draws **Document Register** and **My Inbox** and nothing else, while
+`POST /documents`, the attestation register, the picker and
+`POST /ethical-forms` all answer 403, and the document register, their own
+document inbox, the attestation they owe, the declarations put to them and
+their notifications inbox all answer 200.
+
+### The audit that should have caught it
+
+Check **[5]** passed this file because it looked for the string
+`PermissionTabs` *anywhere* in it — and Documents & Records imports it for its
+Dashboard/Documents/Records rail while a second bar right underneath mapped a
+raw array. It now inspects **each `className="tabs"` block on its own** and
+requires the array it maps to be filtered by `can` / `canView` or produced by
+`usePermittedTabs`. Inner switchers (`tabs sub`, `view-switch`) are exempt —
+they choose between views of one area the person already holds.
+
+That found four more rails that switch into **other modules** while checking
+only whether the module was switched on, never whether the person may open it:
+
+| Page | Rail entry | Was | Now |
+|---|---|---|---|
+| Assessments | Risk Management | `isEnabled('risks')` | `+ canView('risks')` |
+| Assessments | Quality Indicator Monitoring | `isEnabled(…)` | `+ canView('quality_indicators')` |
+| Process Management | Blood banking | `isEnabled(…)` | `+ canView('blood_bank_handover')` |
+| Notifications | Records, Reports & Evidence | `isEnabled(…)` | `+ canView('records_reports')` |
+| Notifications | Monthly Reports & Archives | `isEnabled(…)` | `+ canView('monthly_reports')` |
+
+New check **[5b]** pins the document tabs to their rights by name, the
+attestation register to `documents.workflow`, and the declaration button to
+`organisation.structure:create`. The live audit now also proves, for every bench
+profile, that the attestation register and raising a declaration are refused
+while the attestation they owe, their document inbox and the declarations put to
+them are reachable.
+
+**39 static checks, 21 live**, alongside `rbac:check` 19/19, `rbac:matrix`
+14/14, `rbac:selfservice` 22/22, `core-documents-check` 20/20,
+`office-edit-check` 74/74, `account-check` 37/37, `complaints-check` 38/38,
+`inventory-check` 43/43 and `iqc-io-check` 80/80.

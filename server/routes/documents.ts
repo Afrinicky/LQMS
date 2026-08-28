@@ -243,7 +243,7 @@ export function documentControlRoutes() {
 
   // Every attestation ever assigned or signed — filterable by document code,
   // title, staff name, status. Powers the redesigned Attestation List tab.
-  router.get('/attestations/list', requirePermission('documents.library', 'view'), (req, res) => {
+  router.get('/attestations/list', requirePermission('documents.workflow', 'view'), (req, res) => {
     const db = getDb();
     flipOverdueAttestations(db);
     const filters: string[] = [];
@@ -272,7 +272,7 @@ export function documentControlRoutes() {
 
   // Documents that have at least one attestation (for the "pick a document"
   // search on the Attestation List tab).
-  router.get('/attestations/documents', requirePermission('documents.library', 'view'), (_req, res) => {
+  router.get('/attestations/documents', requirePermission('documents.workflow', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare(`
       SELECT d.id, d.document_code, d.title, d.document_type, d.status,
@@ -348,7 +348,13 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   router.get('/attestations/pending', requirePermission('documents.library', 'view'), (req, res) => {
     const db = getDb();
     flipOverdueAttestations(db);
-    const staffId = parseIntNullable(req.query.staffId);
+    // Whose pending attestations? Your own, unless you run document control.
+    // Without this, "read the library" listed every colleague's outstanding
+    // signatures — and let a reader ask for any named person's by id.
+    const asked = parseIntNullable(req.query.staffId);
+    const mayOversee = resolvePermission(req.user!.id, 'documents.workflow', 'view').allowed;
+    const staffId = mayOversee ? asked : (req.user?.staffId ?? -1);
+    if (!mayOversee && !req.user?.staffId) return res.json([]);
     const where = staffId ? 'WHERE a.staff_id = ? AND a.status IN (\'pending\',\'overdue\')' : 'WHERE a.status IN (\'pending\',\'overdue\')';
     const params: unknown[] = staffId ? [staffId] : [];
     res.json(db.prepare(`SELECT a.*, d.id AS doc_id, d.document_code, d.title, d.document_type, v.version_number FROM document_attestations a JOIN documents d ON d.id = COALESCE(a.document_id, (SELECT document_id FROM document_versions WHERE id = a.document_version_id)) LEFT JOIN document_versions v ON v.id = a.document_version_id ${where} ORDER BY a.due_date NULLS LAST, a.id DESC`).all(...params));
@@ -357,7 +363,12 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
   router.get('/distribution/inbox', requirePermission('documents.library', 'view'), (req, res) => {
     const db = getDb();
     flipOverdueAttestations(db);
-    const staffId = parseIntNullable(req.query.staffId) ?? req.user?.staffId ?? null;
+    // Your own inbox. Reading somebody else's takes the workflow right, which
+    // is what document control holds; a reader is answered with their own
+    // whatever id they ask for.
+    const asked = parseIntNullable(req.query.staffId);
+    const mayOversee = resolvePermission(req.user!.id, 'documents.workflow', 'view').allowed;
+    const staffId = (mayOversee ? asked : null) ?? req.user?.staffId ?? null;
     if (!staffId) return res.json([]);
     res.json(db.prepare(`
       SELECT dd.*, d.document_code, d.title, d.document_type, v.version_number,

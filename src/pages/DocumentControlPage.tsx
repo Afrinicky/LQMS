@@ -7,7 +7,7 @@ import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts, 
 import { useCappedRows } from '../hooks/useCappedRows';
 import { useAuth } from '../hooks/useAuth';
 import { useModules } from '../hooks/useModules';
-import { usePermissions } from '../hooks/usePermissions';
+import { usePermissions, type PermissionAction } from '../hooks/usePermissions';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import { api, API_BASE, getToken } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
@@ -217,7 +217,7 @@ export function DocumentControlPage() {
   // controlled-document workflow (owner, section, review schedule, versions).
   useEffect(() => {
     const nt = searchParams.get('new');
-    if (nt) { setSection('Documents'); setTab('New Document'); setDocForm(f => ({ ...f, documentType: nt })); setSearchParams({}, { replace: true }); }
+    if (nt && can('documents.authoring', 'create')) { setSection('Documents'); setTab('New Document'); setDocForm(f => ({ ...f, documentType: nt })); setSearchParams({}, { replace: true }); }
   }, [searchParams]);
   // Deep link from a dashboard alert: ?focus=documents:<id> opens the register
   // on the right tab; useFocusTarget then scrolls to and flashes the row.
@@ -570,7 +570,34 @@ export function DocumentControlPage() {
     }
   }
 
-  const docTabs = ['Document Register', 'New Document', 'Bulk Import', 'Review Queue', 'Approval Queue', 'Reviews Due', 'Attestations', 'My Inbox', 'Obsolete Register'];
+  /**
+   * The document-control tabs, and the right each one actually needs.
+   *
+   * This bar was a plain array rendered to everybody who could open the module,
+   * so a Biomedical Scientist — whose profile says No access to Authoring and
+   * to Review & approval — was offered New Document, Bulk Import, the Review
+   * and Approval queues, Reviews Due and the whole laboratory's Attestations
+   * register. What they need is the register they read from, the documents in
+   * their own inbox, and the attestation they owe. Nothing else.
+   */
+  const DOC_TAB_RIGHTS: Record<string, { key: string; action: PermissionAction }> = {
+    'Document Register': { key: 'documents.library', action: 'view' },
+    'My Inbox': { key: 'documents.library', action: 'view' },
+    'New Document': { key: 'documents.authoring', action: 'create' },
+    'Bulk Import': { key: 'documents.authoring', action: 'create' },
+    // The queues, the review calendar and the laboratory-wide attestation
+    // register are document control's own work, not a reader's.
+    'Review Queue': { key: 'documents.workflow', action: 'view' },
+    'Approval Queue': { key: 'documents.workflow', action: 'view' },
+    'Reviews Due': { key: 'documents.workflow', action: 'view' },
+    'Attestations': { key: 'documents.workflow', action: 'view' },
+    'Obsolete Register': { key: 'documents.workflow', action: 'view' },
+  };
+  const docTabs = ['Document Register', 'New Document', 'Bulk Import', 'Review Queue', 'Approval Queue', 'Reviews Due', 'Attestations', 'My Inbox', 'Obsolete Register']
+    .filter(name => {
+      const need = DOC_TAB_RIGHTS[name];
+      return !need || can(need.key, need.action);
+    });
   const obsoleteDocs = documents.filter(d => d.status === 'obsolete');
   const reviewQueue = documents.filter(d => d.status === 'under_review');
   const approvalQueue = documents.filter(d => d.status === 'reviewed');
@@ -596,6 +623,14 @@ export function DocumentControlPage() {
     if (vb == null) return -1;
     return (typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb), undefined, { numeric: true })) * sortBy.dir;
   });
+  // A tab filtered away must not stay selected — a deep link, a bookmark, or a
+  // right withdrawn mid-session lands the reader on the register rather than on
+  // a form they may not use.
+  useEffect(() => {
+    if (docTabs.length && !docTabs.includes(tab)) setTab(docTabs[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docTabs.join('|'), tab]);
+
   const previewVersionId = (d: DocumentRecord) => d.resolved_version_id ?? d.current_version_id ?? 0;
   const hasVersion = (d: DocumentRecord) => Boolean(d.resolved_version_id || d.current_version_id);
   const allVisibleSelected = filteredRegister.length > 0 && filteredRegister.every(d => selectedIds.has(d.id));
@@ -619,7 +654,7 @@ export function DocumentControlPage() {
   return <div className="module-page">
     <PageHeader eyebrow="Documents and Records" title="Documents &amp; Records" subtitle="Controlled documents and controlled records — creation, review, approval, distribution, attestation, retention and disposal." />
     {tabBar(section, SECTIONS as unknown as string[], s => setSection(s as (typeof SECTIONS)[number]))}
-    {section === 'Documents' && <div className="tabs dm-doc-tabs">
+    {section === 'Documents' && docTabs.length > 0 && <div className="tabs dm-doc-tabs">
       {docTabs.map(name => {
         const count = name === 'Review Queue' ? reviewQueue.length : name === 'Approval Queue' ? approvalQueue.length
           : name === 'Reviews Due' ? reviewsDue.length : name === 'Attestations' ? pendingAttestations.length
