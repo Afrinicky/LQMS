@@ -9,10 +9,12 @@ import { usePermissions } from '../hooks/usePermissions';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import { configureSound, playEvent, playSpec, primeAudio } from '../services/sound';
 import {
-  ACTIVITY_CATEGORIES, ACTIVITY_FREQUENCIES, ASSIGN_MODES, ASSIGN_MODE_LABELS,
-  CATEGORY_LABELS, EASE_RATING_LABELS, FREQUENCY_LABELS, REDESIGN_STATUS_LABELS,
-  REDESIGN_STATUSES, SOUND_EVENTS, SOUND_EVENT_LABELS, frequencyPhrase,
-  type ActivityCategory, type ActivityFrequency, type AssignMode, type RedesignStatus, type SoundEvent,
+  ACTIVITY_CATEGORIES, ACTIVITY_FREQUENCIES, ACTIVITY_TIERS, ASSIGN_MODES, ASSIGN_MODE_LABELS,
+  CATEGORY_LABELS, DEFAULT_TIER_FOR_CATEGORY, EASE_RATING_LABELS, FREQUENCY_LABELS,
+  REDESIGN_STATUS_LABELS, REDESIGN_STATUSES, SOUND_EVENTS, SOUND_EVENT_LABELS,
+  TIER_HINTS, TIER_LABELS, TIER_SHORT, frequencyPhrase,
+  type ActivityCategory, type ActivityFrequency, type ActivityTier, type AssignMode,
+  type RedesignStatus, type SoundEvent,
 } from '../../shared/constants/activities';
 import type {
   NotificationSound, Section, SchedulingPolicy, SoundSettingsResponse, Staff, UnitActivity,
@@ -52,6 +54,7 @@ const BLANK_FORM = {
   frequency: 'daily' as ActivityFrequency, intervalDays: '', dayOfMonth: '',
   weekdays: [] as number[],
   dueTime: '', assignMode: 'on_duty' as AssignMode, responsibleStaffId: '',
+  performerTier: 'general' as ActivityTier,
   priority: 'normal', estimatedMinutes: '', evidenceRequired: false,
   notifyLeadership: true, targetRoute: '', targetModuleKey: '',
 };
@@ -111,6 +114,7 @@ function ActivityCatalogue({ sections, staff, onChanged }: { sections: Section[]
       dueTime: activity.due_time ?? '',
       assignMode: activity.assign_mode as AssignMode,
       responsibleStaffId: String(activity.responsible_staff_id ?? ''),
+      performerTier: ((activity as { performer_tier?: string }).performer_tier ?? 'general') as ActivityTier,
       priority: activity.priority,
       estimatedMinutes: String(activity.estimated_minutes ?? ''),
       evidenceRequired: activity.evidence_required === 1,
@@ -224,7 +228,14 @@ function ActivityCatalogue({ sections, staff, onChanged }: { sections: Section[]
             <label>Name<input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required placeholder="Morning fridge temperature chart" /></label>
             <label>Code<input value={form.activityCode} onChange={e => setForm({ ...form, activityCode: e.target.value })} placeholder="auto" disabled={Boolean(editing)} /></label>
             <label>Kind of work
-              <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value as ActivityCategory })}>
+              {/* Choosing the category suggests the tier that kind of work
+                  usually sits at, so an analyser service does not quietly
+                  default to "anyone on duty". It is a starting point — the
+                  laboratory then sets its own below. */}
+              <select value={form.category} onChange={e => {
+                const category = e.target.value as ActivityCategory;
+                setForm(f => ({ ...f, category, performerTier: DEFAULT_TIER_FOR_CATEGORY[category] ?? f.performerTier }));
+              }}>
                 {ACTIVITY_CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
               </select>
             </label>
@@ -266,6 +277,17 @@ function ActivityCatalogue({ sections, staff, onChanged }: { sections: Section[]
               <select value={form.assignMode} onChange={e => setForm({ ...form, assignMode: e.target.value as AssignMode })}>
                 {ASSIGN_MODES.map(m => <option key={m} value={m}>{ASSIGN_MODE_LABELS[m]}</option>)}
               </select>
+            </label>
+            {/* Being rostered onto a bench is not the same as being competent
+                to do everything on it. This is the second half of "who does
+                it": the roster decides which person, the tier decides whether
+                that person is qualified. Whoever holds each tier is set per
+                access profile under People & Access. */}
+            <label>Who is competent to perform it
+              <select value={form.performerTier} onChange={e => setForm({ ...form, performerTier: e.target.value as ActivityTier })}>
+                {ACTIVITY_TIERS.map(t => <option key={t} value={t}>{TIER_LABELS[t]}</option>)}
+              </select>
+              <span className="muted">{TIER_HINTS[form.performerTier]}</span>
             </label>
             {form.assignMode === 'bench' && (
               <label>Bench
@@ -336,7 +358,13 @@ function ActivityCatalogue({ sections, staff, onChanged }: { sections: Section[]
                     </td>
                     <td>{a.section_name ?? <span className="muted">—</span>}</td>
                     <td>{frequencyPhrase(a.frequency, a.interval_days)}{a.due_time ? <div className="muted">by {a.due_time}</div> : null}</td>
-                    <td>{ASSIGN_MODE_LABELS[a.assign_mode as AssignMode] ?? a.assign_mode}{a.bench_name ? <div className="muted">{a.bench_name}</div> : null}</td>
+                    <td>
+                      {ASSIGN_MODE_LABELS[a.assign_mode as AssignMode] ?? a.assign_mode}
+                      {a.bench_name ? <div className="muted">{a.bench_name}</div> : null}
+                      <div className="muted" title={TIER_LABELS[((a as { performer_tier?: string }).performer_tier ?? 'general') as ActivityTier]}>
+                        {TIER_SHORT[((a as { performer_tier?: string }).performer_tier ?? 'general') as ActivityTier]} tier
+                      </div>
+                    </td>
                     <td>{missRate === null ? <span className="muted">no history</span>
                       : <span className={`badge ${missRate >= 40 ? 'overdue' : missRate > 0 ? 'warning' : 'done'}`}>{100 - missRate}% done</span>}</td>
                     <td>{a.avg_ease ? `${Number(a.avg_ease).toFixed(1)} / 5` : <span className="muted">—</span>}</td>

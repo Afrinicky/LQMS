@@ -21,9 +21,11 @@ import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { parseIntNullable, getCurrentStaffId } from './routeHelpers.js';
 import {
-  ACTIVITY_CATEGORIES, ACTIVITY_FREQUENCIES, ASSIGN_MODES, BUILTIN_SOUNDS,
-  DEFAULT_SOUND_FOR_EVENT, REDESIGN_STATUSES, SOUND_EVENTS,
+  ACTIVITY_CATEGORIES, ACTIVITY_FREQUENCIES, ACTIVITY_TIERS, ASSIGN_MODES, BUILTIN_SOUNDS,
+  DEFAULT_SOUND_FOR_EVENT, DEFAULT_TIER_FOR_CATEGORY, REDESIGN_STATUSES, SOUND_EVENTS,
+  TIER_ACTION, TIER_LABELS, tierFeatureKey,
 } from '../../shared/constants/activities.js';
+import { resolvePermission } from '../services/permissionResolver.js';
 import {
   adoptProposals, completeOccurrence, generateOccurrences, occurrencesOn,
   proposeActivities, refreshAssignments, runActivityTick, todosFor,
@@ -177,6 +179,115 @@ export function dutyActivityRoutes() {
     res.json({ ok: true, date });
   });
 
+  /**
+   * Routine Work — the whole recurring programme of the reader's unit, and
+   * their own place in it.
+   *
+   * `/today` answers "what is on my list right now?". This answers the wider
+   * question a member of staff actually has when they open the portal: what
+   * work does this bench carry, how often, who does each piece, and which of it
+   * is mine to do. Those are different questions and conflating them is why
+   * routine work used to be invisible until the morning it was overdue.
+   *
+   * Every activity in the unit is returned, including the ones this reader may
+   * not perform. That is deliberate. The programme is the unit's, not the
+   * person's: knowing that the analyser service happens monthly and that a
+   * scientist does it is exactly what a technician should know, and hiding it
+   * would leave them unable to tell whether the bench is being looked after.
+   * What the tier decides is whether they get a button, not whether they get
+   * the truth.
+   */
+  router.get('/routine', (req, res) => {
+    const db = getDb();
+    const date = isIsoDate(req.query.date) ? String(req.query.date) : todayIso();
+    const staffId = getCurrentStaffId(req);
+    const userId = req.user!.id;
+
+    try {
+      generateOccurrences(db, { from: date });
+      refreshAssignments(db, { from: date });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[duty] generation on /routine failed:', (err as Error).message);
+    }
+
+    const may = (key: string, action = TIER_ACTION) => resolvePermission(userId, key, action).allowed;
+    const tiers = {
+      general: may(tierFeatureKey('general')),
+      technical: may(tierFeatureKey('technical')),
+      supervisory: may(tierFeatureKey('supervisory')),
+      oversight: may('routine_work.oversight', 'view'),
+    };
+
+    const duty = staffId ? dutyContextFor(db, staffId, date) : {
+      date, month: date.slice(0, 7), shiftCode: null, shiftLabel: null, onDuty: false,
+      sectionId: null, sectionName: null, benchName: null, assignmentSource: null,
+      rosterStatus: null, rosterCarriedForward: false, benchCarriedForward: false,
+    };
+    const { mine } = staffId ? todosFor(db, staffId, date) : { mine: [] };
+
+    // Which unit's programme to show. The unit the roster put them in today
+    // comes first, because that is where they are working; their home section
+    // is the fallback for somebody not rostered, and for somebody who is
+    // neither the programme is empty rather than the whole laboratory's.
+    const homeSection = staffId
+      ? (db.prepare('SELECT section_id FROM staff WHERE id = ?').get(staffId) as { section_id?: number | null } | undefined)?.section_id ?? null
+      : null;
+    const sectionId = duty.sectionId ?? homeSection;
+
+    const programme = sectionId
+      ? db.prepare(`SELECT a.id, a.activity_code, a.name, a.description, a.instructions, a.category, a.frequency,
+             a.interval_days, a.due_time, a.section_id, a.performer_tier, a.assign_mode, a.priority,
+             a.estimated_minutes, a.evidence_required, a.target_route, a.target_module_key, a.is_active,
+             s.name AS section_name, b.name AS bench_name, e.name AS equipment_name,
+             (SELECT MAX(o.completed_at) FROM activity_occurrences o
+                WHERE o.activity_id = a.id AND o.status = 'done') AS last_done_at,
+             (SELECT st.full_name FROM activity_occurrences o LEFT JOIN staff st ON st.id = o.completed_by_staff_id
+                WHERE o.activity_id = a.id AND o.status = 'done'
+                ORDER BY o.completed_at DESC LIMIT 1) AS last_done_by
+           FROM unit_activities a
+           LEFT JOIN sections s ON s.id = a.section_id
+           LEFT JOIN section_benches b ON b.id = a.bench_id
+           LEFT JOIN equipment_items e ON e.id = a.equipment_id
+           WHERE a.is_active = 1 AND a.section_id = ?
+           ORDER BY CASE a.category WHEN 'environmental' THEN 0 WHEN 'cleaning' THEN 1 WHEN 'equipment' THEN 2
+                                    WHEN 'quality_control' THEN 3 ELSE 4 END, a.name`).all(sectionId) as any[]
+      : [];
+
+    // Attach this reader's own open occurrence to each activity, so a row can
+    // be worked from the programme without hunting for it in another list.
+    const openByActivity = new Map<number, any>();
+    for (const o of mine) {
+      if (o.status === 'pending' || o.status === 'in_progress') openByActivity.set(Number(o.activity_id), o);
+    }
+
+    const rows = programme.map(a => {
+      const open = openByActivity.get(Number(a.id));
+      return {
+        ...a,
+        mayPerform: may(tierFeatureKey(String(a.performer_tier || 'general'))),
+        open_occurrence_id: open?.id ?? null,
+        open_occurrence_status: open?.status ?? null,
+        open_occurrence_due: open?.due_at ?? open?.window_end ?? null,
+      };
+    });
+
+    const openMine = mine.filter(o => o.status === 'pending' || o.status === 'in_progress');
+    res.json({
+      date, duty, tiers, mine, programme: rows,
+      counts: {
+        due: openMine.length,
+        done: mine.filter(o => o.status === 'done' || o.status === 'not_applicable').length,
+        missed: mine.filter(o => o.status === 'missed').length,
+        // On my list, but the tier says somebody else performs it. Worth its
+        // own number: it is the one that should be zero, and when it is not,
+        // either the roster or the tier is wrong.
+        blocked: openMine.filter(o => !may(tierFeatureKey(String(o.performer_tier || 'general')))).length,
+        programme: rows.length,
+      },
+    });
+  });
+
   router.get('/context', (req, res) => {
     const db = getDb();
     const date = isIsoDate(req.query.date) ? String(req.query.date) : todayIso();
@@ -188,24 +299,48 @@ export function dutyActivityRoutes() {
   /* ======================================================================
      Working an occurrence
      ==================================================================== */
-  function assertAssigned(db: any, occurrenceId: number, staffId: number | null): { ok: boolean; occurrence?: any; error?: string } {
-    const occurrence = db.prepare('SELECT * FROM activity_occurrences WHERE id = ?').get(occurrenceId);
-    if (!occurrence) return { ok: false, error: 'Activity not found' };
-    if (staffId === null) return { ok: false, error: 'This account is not linked to a staff record.' };
+  /**
+   * May this caller work this occurrence?
+   *
+   * Two independent questions, and both have to be yes.
+   *
+   *   Is it theirs? The roster has to have placed them on it. A watcher may not
+   *   complete work they did not do, and somebody the roster never placed here
+   *   may not sign it off either — both put a name on a record that is not
+   *   true, which is the one thing a QMS cannot allow.
+   *
+   *   Are they competent to do it? Each activity names the tier of staff who
+   *   may perform it, and the tier is a permission feature. Being rostered onto
+   *   a bench does not by itself make somebody qualified to accept an IQC batch
+   *   or service an analyser. This is the check that says so, and it is the
+   *   same check the screens ask before drawing the "Done" button.
+   */
+  function assertMayWork(req: any, db: any, occurrenceId: number, staffId: number | null): { ok: boolean; occurrence?: any; error?: string; status?: number } {
+    const occurrence = db.prepare(`SELECT o.*, a.performer_tier, a.name AS activity_name
+       FROM activity_occurrences o JOIN unit_activities a ON a.id = o.activity_id WHERE o.id = ?`).get(occurrenceId);
+    if (!occurrence) return { ok: false, error: 'Activity not found', status: 404 };
+    if (staffId === null) return { ok: false, error: 'This account is not linked to a staff record.', status: 403 };
     const assigned = db.prepare('SELECT is_watcher FROM activity_assignees WHERE occurrence_id = ? AND staff_id = ?').get(occurrenceId, staffId) as any;
-    // A watcher may not complete work they did not do, and somebody the roster
-    // never placed here may not sign it off either. Both would put a name on a
-    // record that is not true, which is the one thing a QMS cannot allow.
-    if (!assigned) return { ok: false, error: 'This activity is not on your list. Only the staff the roster placed on it can complete it.' };
-    if (assigned.is_watcher) return { ok: false, error: 'You are watching this activity as oversight; the staff on duty complete it.' };
+    if (!assigned) return { ok: false, error: 'This activity is not on your list. Only the staff the roster placed on it can complete it.', status: 403 };
+    if (assigned.is_watcher) return { ok: false, error: 'You are watching this activity as oversight; the staff on duty complete it.', status: 403 };
+
+    const tier = String(occurrence.performer_tier || 'general');
+    const decision = resolvePermission(req.user!.id, tierFeatureKey(tier), TIER_ACTION);
+    if (!decision.allowed) {
+      return {
+        ok: false,
+        status: 403,
+        error: `"${occurrence.activity_name}" is set to be performed by: ${TIER_LABELS[tier as keyof typeof TIER_LABELS] ?? tier}. Ask whoever covers that tier in your unit, or ask an administrator to grant it to your profile.`,
+      };
+    }
     return { ok: true, occurrence };
   }
 
   router.post('/occurrences/:id/start', (req, res) => {
     const db = getDb();
     const id = Number(req.params.id);
-    const check = assertAssigned(db, id, getCurrentStaffId(req));
-    if (!check.ok) return res.status(check.error === 'Activity not found' ? 404 : 403).json({ error: check.error });
+    const check = assertMayWork(req, db, id, getCurrentStaffId(req));
+    if (!check.ok) return res.status(check.status ?? 403).json({ error: check.error });
     db.prepare("UPDATE activity_occurrences SET status = 'in_progress', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'").run(id);
     audit(req, { action: 'edit', entity: 'activity_occurrences', entityId: id, newValue: { status: 'in_progress' } });
     res.json({ ok: true });
@@ -215,8 +350,8 @@ export function dutyActivityRoutes() {
     const db = getDb();
     const id = Number(req.params.id);
     const staffId = getCurrentStaffId(req);
-    const check = assertAssigned(db, id, staffId);
-    if (!check.ok) return res.status(check.error === 'Activity not found' ? 404 : 403).json({ error: check.error });
+    const check = assertMayWork(req, db, id, staffId);
+    if (!check.ok) return res.status(check.status ?? 403).json({ error: check.error });
 
     const result = completeOccurrence(db, id, {
       staffId, userId: req.user!.id,
@@ -241,8 +376,8 @@ export function dutyActivityRoutes() {
     const db = getDb();
     const id = Number(req.params.id);
     const staffId = getCurrentStaffId(req);
-    const check = assertAssigned(db, id, staffId);
-    if (!check.ok) return res.status(check.error === 'Activity not found' ? 404 : 403).json({ error: check.error });
+    const check = assertMayWork(req, db, id, staffId);
+    if (!check.ok) return res.status(check.status ?? 403).json({ error: check.error });
     const reason = String(req.body?.reason ?? '').trim();
     if (!reason) return res.status(400).json({ error: 'A reason is required before an activity can be recorded as not applicable.' });
     db.prepare("UPDATE activity_occurrences SET status = 'not_applicable', completed_at = CURRENT_TIMESTAMP, completed_by_staff_id = ?, completion_note = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
@@ -327,6 +462,11 @@ export function dutyActivityRoutes() {
       assignMode: String(pick(b.assignMode, existing.assign_mode) ?? 'on_duty'),
       responsibleStaffId: b.responsibleStaffId !== undefined ? parseIntNullable(b.responsibleStaffId) : (existing.responsible_staff_id ?? null),
       priority: String(pick(b.priority, existing.priority) ?? 'normal'),
+      // Who is competent to perform it. A new activity falls back to the tier
+      // its category usually sits at rather than to the lowest one, so adding
+      // an analyser service does not silently make it everybody's job.
+      performerTier: String(pick(b.performerTier, existing.performer_tier)
+        ?? DEFAULT_TIER_FOR_CATEGORY[String(pick(b.category, existing.category) ?? 'other')] ?? 'general'),
       evidenceRequired: b.evidenceRequired !== undefined ? (b.evidenceRequired ? 1 : 0) : (existing.evidence_required ?? 0),
       notifyLeadership: b.notifyLeadership !== undefined ? (b.notifyLeadership ? 1 : 0) : (existing.notify_leadership ?? 1),
       soundKey: pick(b.soundKey, existing.sound_key) ?? null,
@@ -340,6 +480,7 @@ export function dutyActivityRoutes() {
     if (!ACTIVITY_FREQUENCIES.includes(v.frequency as any)) return `Frequency must be one of: ${ACTIVITY_FREQUENCIES.join(', ')}.`;
     if (!ACTIVITY_CATEGORIES.includes(v.category as any)) return `Category must be one of: ${ACTIVITY_CATEGORIES.join(', ')}.`;
     if (!ASSIGN_MODES.includes(v.assignMode as any)) return `Assignment must be one of: ${ASSIGN_MODES.join(', ')}.`;
+    if (!ACTIVITY_TIERS.includes(v.performerTier as any)) return `Who performs it must be one of: ${ACTIVITY_TIERS.join(', ')}.`;
     if (v.frequency === 'custom_days' && !v.intervalDays) return 'An interval in days is required for a custom frequency.';
     if (v.assignMode === 'named_staff' && !v.responsibleStaffId) return 'Name the member of staff responsible.';
     if (v.assignMode !== 'named_staff' && !v.sectionId) return 'A unit is required so the duty roster can resolve who does the work.';
@@ -361,12 +502,12 @@ export function dutyActivityRoutes() {
        (activity_code, name, description, instructions, category, department_id, section_id, bench_id, equipment_id,
         environmental_asset_id, monitoring_item_id, target_module_key, target_route, frequency, interval_days,
         weekdays, day_of_month, months, shift_codes, due_time, grace_minutes, assign_mode, responsible_staff_id,
-        priority, evidence_required, notify_leadership, sound_key, estimated_minutes, is_active, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        performer_tier, priority, evidence_required, notify_leadership, sound_key, estimated_minutes, is_active, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(code, v.name, v.description, v.instructions, v.category, v.departmentId, v.sectionId, v.benchId, v.equipmentId,
         v.environmentalAssetId, v.monitoringItemId, v.targetModuleKey, v.targetRoute, v.frequency, v.intervalDays,
         v.weekdays, v.dayOfMonth, v.months, v.shiftCodes, v.dueTime, v.graceMinutes, v.assignMode, v.responsibleStaffId,
-        v.priority, v.evidenceRequired, v.notifyLeadership, v.soundKey, v.estimatedMinutes, v.isActive, req.user!.id);
+        v.performerTier, v.priority, v.evidenceRequired, v.notifyLeadership, v.soundKey, v.estimatedMinutes, v.isActive, req.user!.id);
 
     const id = Number(result.lastInsertRowid);
     audit(req, { action: 'create', entity: 'unit_activities', entityId: id, newValue: { code, ...v } });
@@ -389,13 +530,13 @@ export function dutyActivityRoutes() {
          section_id = ?, bench_id = ?, equipment_id = ?, environmental_asset_id = ?, monitoring_item_id = ?,
          target_module_key = ?, target_route = ?, frequency = ?, interval_days = ?, weekdays = ?, day_of_month = ?,
          months = ?, shift_codes = ?, due_time = ?, grace_minutes = ?, assign_mode = ?, responsible_staff_id = ?,
-         priority = ?, evidence_required = ?, notify_leadership = ?, sound_key = ?, estimated_minutes = ?,
+         performer_tier = ?, priority = ?, evidence_required = ?, notify_leadership = ?, sound_key = ?, estimated_minutes = ?,
          is_active = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`)
       .run(v.name, v.description, v.instructions, v.category, v.departmentId, v.sectionId, v.benchId, v.equipmentId,
         v.environmentalAssetId, v.monitoringItemId, v.targetModuleKey, v.targetRoute, v.frequency, v.intervalDays,
         v.weekdays, v.dayOfMonth, v.months, v.shiftCodes, v.dueTime, v.graceMinutes, v.assignMode, v.responsibleStaffId,
-        v.priority, v.evidenceRequired, v.notifyLeadership, v.soundKey, v.estimatedMinutes, v.isActive, req.params.id);
+        v.performerTier, v.priority, v.evidenceRequired, v.notifyLeadership, v.soundKey, v.estimatedMinutes, v.isActive, req.params.id);
 
     audit(req, { action: 'edit', entity: 'unit_activities', entityId: req.params.id, oldValue: existing, newValue: v });
     try { refreshAssignments(db, {}); } catch { /* the scheduler will catch up */ }

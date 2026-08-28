@@ -4228,3 +4228,109 @@ button.cell-mark:disabled { cursor: default; }
   .portal-drawer, .portal-drawer-wrap.wide .portal-drawer { width: 100%; max-height: 100vh; border-radius: 0; border: 0; }
   .pr-photo-frame { width: 112px; }
 }
+
+/* ============================================================================
+   ROUTINE WORK — the recurring work of the bench
+   ----------------------------------------------------------------------------
+   Two surfaces. A worklist of what is due from this person right now, which
+   reuses the portal's task row; and the unit's whole programme as cards
+   grouped by the kind of work, where the tier badge is the load-bearing piece
+   of information — it is what tells a reader whether a row is theirs to do or
+   somebody else's to be aware of.
+   ========================================================================= */
+.rw-row .pt-row-main { padding-right: 10px; }
+.rw-side { align-items: flex-end; gap: 8px; flex-direction: column; padding: 10px 12px; }
+.rw-side .duty-done { white-space: nowrap; }
+.rw-side .duty-side-links { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+
+.rw-tier {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: var(--radius-pill);
+  font-size: 10px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;
+  border: 1px solid transparent; white-space: nowrap;
+}
+.rw-tier.t-general { background: rgba(52, 211, 153, 0.14); color: var(--success); border-color: rgba(52, 211, 153, 0.28); }
+.rw-tier.t-technical { background: var(--accent-soft); color: var(--accent-bright); border-color: rgba(78, 141, 255, 0.32); }
+.rw-tier.t-supervisory { background: rgba(167, 139, 250, 0.16); color: #C4B5FD; border-color: rgba(167, 139, 250, 0.32); }
+/* A tier this reader does not hold reads as closed, whatever its colour. */
+.rw-tier.is-locked { background: rgba(255, 255, 255, 0.05); color: var(--faint); border-color: var(--border); }
+
+.rw-locked {
+  display: flex; align-items: center; gap: 6px; margin: 6px 0 0;
+  font-size: 11.5px; color: var(--faint); line-height: 1.5;
+}
+.rw-watch {
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+  font-size: 11.5px; color: var(--faint);
+}
+.rw-note {
+  display: flex; align-items: center; gap: 8px; margin: 0 0 12px;
+  padding: 9px 13px; border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border);
+  color: var(--muted); font-size: 12.5px;
+}
+.rw-subhead {
+  margin: 16px 0 8px; font-size: 10.5px; text-transform: uppercase;
+  letter-spacing: 0.09em; color: var(--faint); font-weight: 700;
+}
+.rw-expand { display: grid; gap: 10px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.rw-expand label { display: grid; gap: 4px; font-size: 11.5px; color: var(--faint); }
+
+/* ---- The unit's programme ---- */
+.rw-groups { display: grid; gap: 20px; }
+.rw-group-head {
+  display: flex; align-items: center; gap: 9px; margin: 0 0 10px;
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted);
+}
+.rw-group-head::before { content: ''; width: 3px; height: 14px; border-radius: 2px; background: var(--accent-bright); }
+.rw-group-head.tone-crit::before { background: var(--danger); }
+.rw-group-head.tone-warn::before { background: var(--warning); }
+.rw-group-head.tone-ok::before { background: var(--success); }
+.rw-group-head span {
+  display: inline-grid; place-items: center; min-width: 20px; height: 19px; padding: 0 6px;
+  border-radius: var(--radius-pill); background: rgba(255, 255, 255, 0.06);
+  font-size: 10.5px; letter-spacing: 0; color: var(--faint);
+}
+
+.rw-cards {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px;
+}
+.rw-card {
+  display: grid; gap: 8px; align-content: start; padding: 13px 15px;
+  border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface);
+}
+.rw-card.is-due { border-color: rgba(245, 181, 68, 0.38); background: linear-gradient(160deg, rgba(245, 181, 68, 0.07), var(--surface) 60%); }
+.rw-card.is-locked { opacity: 0.78; }
+.rw-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.rw-card-name { font-size: 13px; font-weight: 700; color: var(--text); line-height: 1.35; }
+.rw-card-meta { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--faint); }
+.rw-card-meta span { display: inline-flex; align-items: center; gap: 4px; }
+.rw-card-desc {
+  margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--muted);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.rw-card-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  padding-top: 9px; border-top: 1px solid var(--border);
+}
+.rw-last { font-size: 11px; color: var(--muted); }
+.rw-last.none { color: var(--faint); font-style: italic; }
+.rw-who { font-size: 10.5px; color: var(--faint); text-align: right; max-width: 55%; }
+
+/* ---- Who performs what ---- */
+.rw-legend {
+  display: grid; gap: 9px; margin-top: 20px; padding: 14px 16px;
+  border-radius: var(--radius-sm); border: 1px dashed var(--border-strong);
+  background: rgba(255, 255, 255, 0.02);
+}
+.rw-legend-title { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--faint); font-weight: 700; }
+.rw-legend-row { display: flex; align-items: baseline; gap: 10px; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+.rw-legend-row .rw-tier { flex: 0 0 auto; }
+.rw-legend-foot { font-size: 11px; color: var(--faint); line-height: 1.55; margin-top: 2px; }
+
+@media (max-width: 700px) {
+  .rw-cards { grid-template-columns: 1fr; }
+  .rw-side { flex-direction: column; align-items: stretch; }
+  .rw-side .duty-side-links { justify-content: flex-start; }
+}

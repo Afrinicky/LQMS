@@ -78,6 +78,84 @@ export const CATEGORY_LABELS: Record<ActivityCategory, string> = {
 };
 
 /* ============================================================================
+   Who is competent to do it
+   ----------------------------------------------------------------------------
+   Being rostered onto a bench is not the same as being qualified to do
+   everything that happens on it. Charting a fridge temperature and
+   decontaminating a bench are work any member of staff on duty can and should
+   do. Running and accepting an IQC batch, or a technical service on an
+   analyser, is registered scientific work. Signing off a quarterly review of
+   the unit's programme is the supervisor's.
+
+   A laboratory that ignores this produces one of two failures: either the
+   system refuses ordinary work to the people who actually do it, or it lets an
+   intern put their name against a calibration. So each activity carries the
+   tier of staff competent to perform it, and the tier maps to a permission
+   feature — which means WHO holds each tier is set in Access Control like
+   everything else, per profile, and can be changed without touching code.
+
+   The tier gates PERFORMING the work. It does not gate seeing it: a member of
+   staff should be able to read their unit's whole programme and know what is
+   done on their bench, including the parts somebody else does.
+   ========================================================================= */
+export const ACTIVITY_TIERS = ['general', 'technical', 'supervisory'] as const;
+export type ActivityTier = (typeof ACTIVITY_TIERS)[number];
+
+export const TIER_LABELS: Record<ActivityTier, string> = {
+  general: 'Any member of staff on duty',
+  technical: 'Registered scientific staff',
+  supervisory: 'Unit supervisor and above',
+};
+
+/** The short form, for a badge on a crowded row. */
+export const TIER_SHORT: Record<ActivityTier, string> = {
+  general: 'General',
+  technical: 'Technical',
+  supervisory: 'Supervisory',
+};
+
+export const TIER_HINTS: Record<ActivityTier, string> = {
+  general: 'Environmental charting, decontamination, cleaning, stock and safety checks — the routine work of the bench.',
+  technical: 'IQC, calibration checks, method-related maintenance — work that needs a registered scientist.',
+  supervisory: 'Reviews, sign-offs and scheduled servicing that the unit supervisor owns.',
+};
+
+/**
+ * The permission feature each tier is granted through.
+ *
+ * Kept as a function rather than a bare map so the mapping is stated once and
+ * both the server guard and the screens ask the same question of it.
+ */
+export function tierFeatureKey(tier: string): string {
+  switch (tier) {
+    case 'supervisory': return 'routine_work.supervisory';
+    case 'technical': return 'routine_work.technical';
+    default: return 'routine_work.general';
+  }
+}
+
+/** Performing routine work is creating the record that it was done. */
+export const TIER_ACTION = 'create';
+
+/**
+ * The tier an activity in this category usually sits at, used as the default
+ * when one is created and as the suggestion in the configuration screen. It is
+ * only a starting point — a laboratory sets its own.
+ */
+export const DEFAULT_TIER_FOR_CATEGORY: Record<string, ActivityTier> = {
+  environmental: 'general',
+  cleaning: 'general',
+  stock: 'general',
+  safety: 'general',
+  handover: 'general',
+  records: 'general',
+  equipment: 'technical',
+  quality_control: 'technical',
+  reagent: 'technical',
+  other: 'general',
+};
+
+/* ============================================================================
    Who the occurrence lands on
    ========================================================================= */
 export const ASSIGN_MODES = ['on_duty', 'bench', 'unit_head', 'named_staff', 'whole_unit'] as const;

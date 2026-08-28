@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle, ArrowRight, BadgeCheck, BellRing, CalendarClock, CheckCircle2,
   ClipboardList, FileBadge, FileSignature, GraduationCap, IdCard, Inbox, KeyRound,
-  PenLine, Plus, ShieldAlert, Sliders, Sparkles, UserRound,
+  PenLine, Plus, Repeat, ShieldAlert, Sliders, Sparkles, UserRound,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useModules } from '../hooks/useModules';
@@ -24,6 +24,7 @@ import PortalDeclarations from './portal/PortalDeclarations';
 import PortalSchedule from './portal/PortalSchedule';
 import PortalTraining from './portal/PortalTraining';
 import PortalPreferences from './portal/PortalPreferences';
+import PortalRoutineWork from './portal/PortalRoutineWork';
 import { api } from '../services/api';
 import type { NotificationRecord } from '../../shared/types/api';
 
@@ -49,11 +50,11 @@ import type { NotificationRecord } from '../../shared/types/api';
    ========================================================================= */
 
 type PortalTab =
-  | 'Portal' | 'My Tasks' | 'My Inbox' | 'My Schedule' | 'My Record'
+  | 'Portal' | 'My Tasks' | 'Routine Work' | 'My Inbox' | 'My Schedule' | 'My Record'
   | 'My Documents' | 'My Training' | 'My Declarations' | 'Preferences';
 
 const TABS: PortalTab[] = [
-  'Portal', 'My Tasks', 'My Inbox', 'My Schedule', 'My Record',
+  'Portal', 'My Tasks', 'Routine Work', 'My Inbox', 'My Schedule', 'My Record',
   'My Documents', 'My Training', 'My Declarations', 'Preferences',
 ];
 
@@ -100,6 +101,7 @@ function PortalShell() {
 
       {tab === 'Portal' && <PortalHome onOpen={setTab} />}
       {tab === 'My Tasks' && <PortalTasks />}
+      {tab === 'Routine Work' && <PortalRoutineWork />}
       {tab === 'My Inbox' && <PortalInbox />}
       {tab === 'My Schedule' && <PortalSchedule />}
       {tab === 'My Record' && <PortalRecord />}
@@ -236,12 +238,12 @@ function PortalHome({ onOpen }: { onOpen: (tab: PortalTab) => void }) {
   // the portal that holds the work behind it — a number nobody can act on is
   // decoration, and this page has no room for decoration.
   const pulse = [
-    { label: 'To do today', value: activitiesDue, tone: activitiesDue ? 'warn' : 'ok', tab: 'My Tasks' as PortalTab },
+    { label: 'To do today', value: activitiesDue, tone: activitiesDue ? 'warn' : 'ok', tab: 'Routine Work' as PortalTab },
     { label: 'Assigned to me', value: assigned.length, tone: assigned.length ? 'info' : 'ok', tab: 'My Tasks' as PortalTab },
     { label: 'Unread alerts', value: unread, tone: unread ? 'info' : 'ok', tab: 'My Inbox' as PortalTab },
     { label: 'Overdue', value: overdueAlerts, tone: overdueAlerts ? 'crit' : 'ok', tab: 'My Inbox' as PortalTab },
     { label: 'To sign', value: declarations.pending.length, tone: declarations.pending.length ? 'warn' : 'ok', tab: 'My Declarations' as PortalTab },
-    { label: 'Done today', value: activitiesDone, tone: 'ok', tab: 'My Tasks' as PortalTab },
+    { label: 'Done today', value: activitiesDone, tone: 'ok', tab: 'Routine Work' as PortalTab },
   ];
 
   const tiles: Tile[] = [
@@ -250,6 +252,11 @@ function PortalHome({ onOpen }: { onOpen: (tab: PortalTab) => void }) {
       blurb: 'Everything with your name on it — today’s unit activities, actions, attestations and assigned tasks.',
       count: activitiesDue + assigned.length + queue.filter(t => t.status !== 'completed' && t.status !== 'cancelled').length,
       countLabel: 'open', tone: activitiesDue + assigned.length > 0 ? 'warn' : undefined,
+    },
+    {
+      tab: 'Routine Work', title: 'Routine work', icon: <Repeat size={20} />,
+      blurb: 'The recurring work of your bench — charting, decontamination, equipment care and controls — and who performs each one.',
+      count: activitiesDue, countLabel: 'due now', tone: activitiesDue > 0 ? 'warn' : undefined,
     },
     {
       tab: 'My Inbox', title: 'My inbox', icon: <Inbox size={20} />,

@@ -80,6 +80,59 @@ reader's own row highlighted and pulled to the top. Only `published` and
 planning a week around one that later changes is worse than not seeing it.
 `personnel.rosters: view` is in the baseline every member of staff holds.
 
+## Routine Work — and who is competent to do it
+
+The recurring work of a bench — environmental charting, bench and equipment
+decontamination, scheduled equipment maintenance, IQC — was already being
+scheduled and reminded on by the unit-activities engine. What it lacked was a
+place where a member of staff could see the whole programme, understand their
+part in it, and do their part. That is the **Routine Work** face of the portal:
+
+* **Due from me now** — what is on this person's list today, completed in one
+  tap, with the note and ease rating the simplification programme runs on.
+* **The unit's programme** — every active activity for their unit, grouped by
+  the kind of work, with its frequency, when it was last done and by whom.
+
+The whole programme is shown, including work this reader does not perform.
+A technician is entitled to know the analyser is serviced monthly even though a
+scientist services it; what the tier decides is whether they get a button, not
+whether they get the truth.
+
+### Three tiers, and they are permissions
+
+Being rostered onto a bench is not the same as being competent to do everything
+that happens on it. Each activity carries a **performer tier**, and each tier is
+an ordinary permission feature — so who holds it is an Access Control decision
+per profile, changeable without touching code:
+
+| Tier | `routine_work.…` | Default holders |
+| --- | --- | --- |
+| **General** — charting, decontamination, cleaning, stock and safety checks | `general` | Everyone (in the baseline) |
+| **Technical** — IQC, calibration checks, method-related maintenance | `technical` | Biomedical Scientist and above, POCT and Safety, the quality office |
+| **Supervisory** — reviews, sign-offs, scheduled servicing | `supervisory` | Section Head, Blood Bank Unit Head, Safety Manager, Quality Manager, Laboratory Manager |
+| **Oversight** — read what the whole unit was due to do and what was done | `oversight` | Unit heads, the quality office, Internal Auditor |
+
+Defaults live in one table (`ROUTINE_TECHNICAL_ROLES` and friends in
+`server/db/seed.ts`) for the same reason the Main Dashboard list does: "who is
+competent to do what" is a decision a laboratory should read in one place. A
+laboratory that has trained its technicians on the analysers grants them the
+technical tier in Access Control; one that treats fridge charts as supervised
+sets that activity's tier higher. Both are configuration, not code.
+
+The tier is set per activity under **Settings → Unit Activities & Reminders**,
+next to "who does it" — the roster decides *which person*, the tier decides
+*whether that person is qualified*. Choosing a category suggests the tier that
+kind of work usually sits at, so adding an analyser service does not quietly
+default to "anyone on duty".
+
+Enforcement is server-side in `assertMayWork`, which asks two independent
+questions and needs yes to both: did the roster place you on it, and do you hold
+its tier. It guards `start`, `complete` and `not-applicable` alike — writing an
+activity off as not applicable is as much a claim about the work as completing
+it. A refusal names the tier that does perform it, so the reply is useful rather
+than merely negative. `GET /duty/routine` returns `mayPerform` per activity so
+the screens ask the same question before drawing a control.
+
 ## The half of the file its subject keeps
 
 A personnel file has two halves. One is what the laboratory decides — post,

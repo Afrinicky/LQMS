@@ -308,6 +308,23 @@ export const FEATURES: FeatureDef[] = [
   { key: 'notifications.sounds', module: 'notifications', label: 'Reminder sounds', personal: true,
     desc: 'The chimes played on the desktop and mobile apps, and each person\'s own choice of them, set in My Portal.' },
 
+  // ── Routine Work ────────────────────────────────────────────────────────
+  // Three tiers of competence, granted per profile. They decide who may PERFORM
+  // a piece of recurring bench work, not who may see it: every member of staff
+  // reads their unit's whole programme, and each activity says which tier it
+  // needs. An activity's tier is set on the activity itself (Settings → Unit
+  // Activities), so a laboratory that treats an analyser service as ordinary
+  // bench work, or its fridge charts as supervised, configures that rather than
+  // arguing with the software.
+  { key: 'routine_work.general', module: 'routine_work', label: 'Perform general routine work', personal: true,
+    desc: 'Environmental charting, decontamination, cleaning, stock and safety checks — the routine work of the bench. Everyone on duty needs this.' },
+  { key: 'routine_work.technical', module: 'routine_work', label: 'Perform technical routine work',
+    desc: 'IQC, calibration checks and method-related maintenance — work that needs a registered scientist.' },
+  { key: 'routine_work.supervisory', module: 'routine_work', label: 'Perform supervisory routine work', sensitive: true,
+    desc: 'Reviews, sign-offs and scheduled servicing the unit supervisor owns.' },
+  { key: 'routine_work.oversight', module: 'routine_work', label: 'Oversee the unit programme',
+    desc: 'See what the whole unit was due to do and what was actually done, not only your own list.' },
+
   // ── System Audit ────────────────────────────────────────────────────────
   // Split three ways because they are three different jobs: reading the trail,
   // working the flags, and running the checks that produce them.
