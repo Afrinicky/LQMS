@@ -65,10 +65,52 @@ portal**, and closes back onto the list with the row gone. Nothing navigates.
 | Attestation | Document control's own viewer, lazy-imported, with its "I have read & understood" control |
 | Action assigned to me | A progress panel: In progress / Waiting for evidence / Submitted for review / Completed, plus notes |
 | Queued task | Start it, or mark it done |
-| Unit activity | Already one tap on the duty panel |
+| Unit activity | Done, I have started, or Not applicable — with a note |
+| Controlled document | Document control's viewer, read-only |
+| Anything else | The alert reader (below) |
 
-The same drawer serves the landing, My Tasks and My Declarations, so there is
-one way to sign a declaration however you reached it.
+The same drawer serves the landing, My Tasks, My Declarations **and the inbox**,
+so there is one way to sign a declaration however you reached it.
+
+### The inbox opens through the same drawer
+
+An alert is never the work. It is a pointer — "attestation required", "action
+due", "today: fridge temperature" — and following that pointer used to mean
+navigating: the alert's `action_url` names a module, a tab and a record to
+focus, so clicking one threw the reader out of their portal to do a job the
+portal was already holding for them, often twice over, since the same
+attestation sits in their task list.
+
+`src/pages/portal/notificationTarget.ts` resolves the pointer instead. Every
+alert carries `record_type` and `record_id` (older rows carry them only inside
+`action_url` as `?focus=type:id`, which is read as a fallback), and the portal
+has already loaded this person's attestations, declarations, actions, tasks and
+today's activities — so in the common case the record the alert names is
+sitting in memory and the matching panel opens with nothing fetched at all.
+
+| `record_type` | Opens |
+| --- | --- |
+| `document_attestations` | The document, to read and attest |
+| `ethical_declaration_forms`, `staff_declarations` | The declaration, to sign |
+| `actions` | The progress panel |
+| `user_task_queue` | Start it or mark it done |
+| `activity_occurrences` | Done / started / not applicable |
+| `documents` | The document, to read |
+| everything else | The alert reader |
+
+**The alert reader is the honest floor.** An equipment calibration, an expiring
+reagent batch, an IQC run awaiting review — these are done at the analyser, in
+the module that holds the record, and pretending the portal can perform them
+would be a worse lie than a jump. What the portal can do is refuse to throw the
+person out for *reading* one: the whole alert opens here — what it says, what it
+is about, when it is due, and its full history — and acknowledging, resolving or
+dismissing it happens here too, which is what most of these alerts actually
+need. An alert about the reader's own file offers to step to the portal face
+that holds it (My Documents, My Training, My Record, My Schedule). Only the
+"Open in …" button navigates, it appears only to somebody who holds view rights
+on that module, and it is a choice rather than a consequence of having clicked.
+
+The resolver never returns "navigate".
 
 ## The schedules, read in place
 
@@ -79,6 +121,23 @@ reader's own row highlighted and pulled to the top. Only `published` and
 `approved` schedules appear: a draft is somebody's work in progress, and
 planning a week around one that later changes is worse than not seeing it.
 `personnel.rosters: view` is in the baseline every member of staff holds.
+
+**They are drawn as the sheet on the wall.** The first version rendered them in
+the application's dark theme, and a roster read as a spreadsheet of somebody
+else's data. A roster is not that: it is a printed form the laboratory knows by
+sight — the orange header band, weekday letters over the dates, the month set in
+italics in the corner, names in typewriter face down the left, a week of leave
+running across as one bar reading ANNUAL LEAVE rather than seven cells reading
+AL. People find their line on it in a second because they have looked at that
+same sheet a hundred times. So the portal draws that sheet: same colours, same
+proportions, same merging of leave runs as `printShell()` in
+`server/routes/scheduling.ts`, which stays the authority on how the form
+prints — change one and change the other. The reassignment memo is rendered the
+same way, as the posted memo, down to the NB block and the signature rule.
+
+The screen keeps the two things paper cannot do: the reader's own line is lifted
+to the top and run through as if with a highlighter, and the name column stays
+pinned while the month scrolls.
 
 ## Signing an attestation from the list
 

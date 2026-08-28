@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useCallback, useMemo, useState } from 'react';
 import { AlertTriangle, ArrowRight, Bell, CheckCircle2, Inbox } from 'lucide-react';
 import { api } from '../../services/api';
-import { dueTone, isOpenAlert, usePortal } from './portalData';
+import { useDutyReminders } from '../../hooks/useDutyReminders';
+import { dueTone, isOpenAlert, usePortal, type PortalFace } from './portalData';
+import { resolveNotificationTarget } from './notificationTarget';
+import PortalTaskDrawer, { type PortalTaskTarget } from './PortalTaskDrawer';
 import type { NotificationRecord } from '../../../shared/types/api';
 
 /**
@@ -12,8 +14,16 @@ import type { NotificationRecord } from '../../../shared/types/api';
  * Reports because an alert is not a report. It is a piece of work waiting on
  * one named person, and it belongs beside the rest of their work.
  *
- * Opening a row marks it read and navigates to the record that raised it, so
- * the alert is a way into the job rather than a note about it.
+ * Opening a row marks it read and opens the record that raised it — here, over
+ * the portal. An attestation opens the document to sign, an action opens its
+ * progress panel, today's fridge check is one press. The alert is the way into
+ * the job, and the job happens where the person already is: being told what you
+ * owe and then thrown into a module you have never opened to do it is how an
+ * inbox becomes something people stop reading.
+ *
+ * `notificationTarget.ts` decides which panel an alert opens; where the work
+ * genuinely lives in another module, the alert itself opens here and is
+ * acknowledged, resolved or dismissed here.
  */
 const SEVERITY_RANK: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3, info: 4 };
 const SEV_TONE: Record<string, string> = { urgent: 'crit', high: 'crit', medium: 'warn', low: 'ok', info: 'info' };
@@ -48,6 +58,32 @@ export function filterInbox(list: NotificationRecord[], filter: InboxFilter, sea
   });
 }
 
+/**
+ * Opening an alert, wherever the reader clicked it.
+ *
+ * The landing shows the first few alerts and the inbox shows all of them;
+ * clicking one has to do the same thing in both places, so it is decided once,
+ * here. Marking it read is deliberately not awaited before the panel appears —
+ * a read receipt is bookkeeping, and it must never be what the reader waits on.
+ */
+export function useNotificationOpener() {
+  const { tasks, declarations, queue, reloadInbox } = usePortal();
+  const { data } = useDutyReminders();
+  const [target, setTarget] = useState<PortalTaskTarget | null>(null);
+
+  const open = useCallback((n: NotificationRecord) => {
+    const occurrences = [...(data?.mine ?? []), ...(data?.watching ?? [])];
+    setTarget(resolveNotificationTarget(n, { tasks, declarations, queue, occurrences }));
+    if (n.status === 'unread') {
+      void api(`/notifications/${n.id}/read`, { method: 'POST', body: JSON.stringify({}) })
+        .then(() => reloadInbox())
+        .catch(() => undefined);
+    }
+  }, [tasks, declarations, queue, data, reloadInbox]);
+
+  return { target, open, close: () => setTarget(null) };
+}
+
 export function InboxRow({ notification, onOpen, onTransition }: {
   notification: NotificationRecord;
   onOpen: (n: NotificationRecord) => void;
@@ -61,7 +97,7 @@ export function InboxRow({ notification, onOpen, onTransition }: {
     <li className={`pt-row sev-${tone}${n.status === 'unread' ? ' is-unread' : ''}`}>
       <span className={`pt-rail ${tone}`} />
       <button type="button" className="pt-row-main" onClick={() => onOpen(n)}
-        title={n.action_label ? `${n.action_label} — opens the record this alert is about` : 'Open the record this alert is about'}>
+        title={n.action_label ? `${n.action_label} — opens here, in your portal` : 'Open it here, in your portal'}>
         <span className="pt-row-title">
           {(n.severity === 'urgent' || n.severity === 'high')
             ? <AlertTriangle size={13} className="pt-sev-ico crit" />
@@ -91,9 +127,9 @@ export function InboxRow({ notification, onOpen, onTransition }: {
   );
 }
 
-export default function PortalInbox() {
-  const navigate = useNavigate();
+export default function PortalInbox({ onOpenFace }: { onOpenFace?: (face: PortalFace) => void }) {
   const { inbox, reloadInbox, setError } = usePortal();
+  const { target, open, close } = useNotificationOpener();
   const [filter, setFilter] = useState<InboxFilter>('active');
   const [search, setSearch] = useState('');
 
@@ -107,14 +143,6 @@ export default function PortalInbox() {
     all: inbox.length,
   }), [inbox]);
 
-  async function open(n: NotificationRecord) {
-    try {
-      if (n.status === 'unread') await api(`/notifications/${n.id}/read`, { method: 'POST', body: JSON.stringify({}) });
-      void reloadInbox();
-    } catch { /* opening the record matters more than recording the read */ }
-    if (n.action_url) navigate(n.action_url);
-  }
-
   async function transition(id: number, action: 'acknowledge' | 'resolve' | 'dismiss') {
     try {
       await api(`/notifications/${id}/${action}`, { method: 'POST', body: JSON.stringify({}) });
@@ -127,7 +155,7 @@ export default function PortalInbox() {
       <div className="pp-head">
         <div>
           <h3><Inbox size={16} /> My inbox</h3>
-          <p>Every alert routed to you. Opening one marks it read and takes you to the record it is about.</p>
+          <p>Every alert routed to you. Opening one marks it read and opens the work itself, right here.</p>
         </div>
         <input className="pp-search" value={search} onChange={e => setSearch(e.target.value)}
           placeholder="Search your alerts…" aria-label="Search your alerts" />
@@ -152,6 +180,7 @@ export default function PortalInbox() {
           {rows.map(n => <InboxRow key={n.id} notification={n} onOpen={open} onTransition={transition} />)}
         </ul>
       )}
+      {target && <PortalTaskDrawer target={target} onClose={close} onOpenFace={onOpenFace} />}
     </section>
   );
 }

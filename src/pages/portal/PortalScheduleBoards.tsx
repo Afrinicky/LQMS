@@ -41,10 +41,10 @@ function monthDays(month: string) {
   };
 }
 
-type ShiftType = { id: number; code: string; label: string; bg_color: string; text_color: string; display_order: number; is_active: number };
+type ShiftType = { id: number; code: string; label: string; category?: string; bg_color: string; text_color: string; display_order: number; is_active: number };
 type GridRow = { id: number; staff_id: number | null; label: string | null; staff_name?: string | null };
 type GridCell = { row_id: number; day: number; shift_code?: string | null; value?: string | null };
-type Roster = { id: number; roster_number: string; month: string; title: string; status: string; shift_codes: string; department_name?: string; rows: GridRow[]; cells: GridCell[]; shiftTypes: ShiftType[] };
+type Roster = { id: number; roster_number: string; month: string; title: string; status: string; shift_codes: string; department_name?: string; header_org?: string | null; header_facility?: string | null; header_subtitle?: string | null; rows: GridRow[]; cells: GridCell[]; shiftTypes: ShiftType[] };
 type Bench = { id: number; code?: string | null; name: string; is_active: number };
 type BenchSchedule = { id: number; schedule_number: string; section_name: string; month: string; title: string; status: string; rows: GridRow[]; cells: GridCell[]; benches: Bench[] };
 type ReassignRow = {
@@ -52,7 +52,7 @@ type ReassignRow = {
   supervisor_text?: string | null; deputy_name?: string | null; deputy_text?: string | null;
   members_text?: string | null; span_text?: string | null; supervisor_is_acting?: number;
 };
-type Reassignment = { id: number; schedule_number: string; month?: string | null; effective_date: string; subject: string; memo_from?: string | null; memo_to?: string | null; nb_notes?: string | null; status: string; rows: ReassignRow[] };
+type Reassignment = { id: number; schedule_number: string; month?: string | null; effective_date: string; subject: string; memo_from?: string | null; memo_to?: string | null; memo_date?: string | null; intro_text?: string | null; nb_notes?: string | null; signatory_name?: string | null; status: string; rows: ReassignRow[] };
 
 const statusChip = (s: string) => <span className={`badge ${s === 'approved' ? 'approved' : 'active'}`}>{s}</span>;
 
@@ -91,37 +91,62 @@ function BoardModal({ title, subtitle, onClose, onPrint, children }: {
             <button type="button" className="pd-close" onClick={onClose} aria-label="Close"><X size={18} /></button>
           </div>
         </div>
-        <div className="pd-body scroll-x">{children}</div>
+        <div className="pd-body scroll-x paper">{children}</div>
       </div>
     </div>
   );
 }
 
 /**
- * The monthly grid, read-only, with this person's own row picked out.
+ * The monthly grid, drawn as the sheet on the wall.
  *
- * A roster lists the whole department, and finding your own line in thirty of
- * them is the single most annoying thing about a printed roster. Here it is
- * highlighted and pulled to the top, which is the entire reason for reading it
- * inside your own portal rather than on the wall.
+ * The first version of this rendered the roster in the application's own dark
+ * theme, and it read as a spreadsheet of somebody else's data. A roster is not
+ * that. It is a printed sheet the laboratory knows by sight: the orange header
+ * band, the weekday letters over the dates, the month set in italics in the
+ * corner, names in typewriter face down the left, leave running across as a
+ * labelled bar. People find their line on it in a second because they have
+ * looked at that same sheet a hundred times.
+ *
+ * So this is that sheet — the same colours, the same proportions, the same
+ * merging of leave runs as `printShell` in server/routes/scheduling.ts, which
+ * is the authority on how the paper looks. Change one and change the other.
+ *
+ * The screen keeps the two things paper cannot do: the reader's own line is
+ * lifted to the top and marked, the way you would run a highlighter across it.
  */
-function MonthGrid({ month, rows, cells, myStaffId, legend, codeOf }: {
+type CellFace = { code: string; bg?: string | null; fg?: string | null; runLabel?: string | null };
+
+function PaperMast({ org, title }: { org?: React.ReactNode; title: string }) {
+  return (
+    <div className="paper-mast">
+      {org && <div className="paper-org">{org}</div>}
+      <div className="paper-doctitle">{title}</div>
+    </div>
+  );
+}
+
+function MonthGrid({ month, rows, cells, myStaffId, nameHeading = 'NAMES', legend, faceOf }: {
   month: string;
   rows: GridRow[];
   cells: GridCell[];
   myStaffId: number | null;
+  nameHeading?: string;
   legend?: React.ReactNode;
-  codeOf: (c: GridCell) => string;
+  /** How one cell is drawn: its code, its colours, and whether it merges into a run. */
+  faceOf: (c: GridCell) => CellFace;
 }) {
   const md = monthDays(month);
+  const days = useMemo(() => Array.from({ length: md.days }, (_, i) => i + 1), [md.days]);
+
   const byCell = useMemo(() => {
-    const m = new Map<string, string>();
+    const m = new Map<string, CellFace>();
     for (const c of cells) {
-      const v = codeOf(c);
-      if (v) m.set(`${c.row_id}:${c.day}`, v);
+      const face = faceOf(c);
+      if (face.code) m.set(`${c.row_id}:${c.day}`, face);
     }
     return m;
-  }, [cells, codeOf]);
+  }, [cells, faceOf]);
 
   const ordered = useMemo(() => {
     if (!myStaffId) return rows;
@@ -129,21 +154,52 @@ function MonthGrid({ month, rows, cells, myStaffId, legend, codeOf }: {
     return mine.length ? [...mine, ...rows.filter(r => Number(r.staff_id) !== Number(myStaffId))] : rows;
   }, [rows, myStaffId]);
 
+  // A week of leave is one bar reading "ANNUAL LEAVE", not seven cells reading
+  // "AL" — exactly as it prints, and the reason the paper is readable at all.
+  function drawRow(row: GridRow) {
+    const out: React.ReactNode[] = [];
+    let d = 1;
+    while (d <= md.days) {
+      const face = byCell.get(`${row.id}:${d}`);
+      if (face?.runLabel) {
+        let span = 1;
+        while (d + span <= md.days && byCell.get(`${row.id}:${d + span}`)?.code === face.code) span++;
+        if (span >= 2) {
+          out.push(
+            <td key={d} colSpan={span} className="pg-run" style={{ background: face.bg || undefined, color: face.fg || undefined }}>
+              {face.runLabel.toUpperCase()}
+            </td>,
+          );
+          d += span;
+          continue;
+        }
+      }
+      out.push(
+        <td key={d} className={md.isWeekend(d) ? 'we' : ''}
+          style={face ? { background: face.bg || undefined, color: face.fg || undefined, fontWeight: 700 } : undefined}>
+          {face?.code ?? ''}
+        </td>,
+      );
+      d++;
+    }
+    return out;
+  }
+
   return (
     <>
-      <table className="portal-grid">
+      <table className="paper-grid">
+        <colgroup>
+          <col className="pg-namecol" />
+          {days.map(d => <col key={d} />)}
+        </colgroup>
         <thead>
           <tr>
-            <th className="pg-name">{md.label}</th>
-            {Array.from({ length: md.days }, (_, i) => i + 1).map(d => (
-              <th key={d} className={md.isWeekend(d) ? 'we' : ''}>{md.weekday(d)}</th>
-            ))}
+            <td className="pg-month">{md.label}</td>
+            {days.map(d => <td key={d} className={md.isWeekend(d) ? 'hdr-we' : 'hdr'}>{md.weekday(d)}</td>)}
           </tr>
           <tr>
-            <th className="pg-name">Staff</th>
-            {Array.from({ length: md.days }, (_, i) => i + 1).map(d => (
-              <th key={d} className={md.isWeekend(d) ? 'we' : ''}>{d}</th>
-            ))}
+            <th className="pg-name">{nameHeading}</th>
+            {days.map(d => <td key={d} className={md.isWeekend(d) ? 'hdr-we' : 'hdr'}>{d}</td>)}
           </tr>
         </thead>
         <tbody>
@@ -155,16 +211,16 @@ function MonthGrid({ month, rows, cells, myStaffId, legend, codeOf }: {
                   {row.staff_id ? row.staff_name : row.label}
                   {isMine && <span className="pg-you">you</span>}
                 </td>
-                {Array.from({ length: md.days }, (_, i) => i + 1).map(d => (
-                  <td key={d} className={md.isWeekend(d) ? 'we' : ''}>{byCell.get(`${row.id}:${d}`) || ''}</td>
-                ))}
+                {drawRow(row)}
               </tr>
             );
           })}
-          {ordered.length === 0 && <tr><td className="pg-name" colSpan={md.days + 1}>Nobody has been placed on this schedule yet.</td></tr>}
+          {ordered.length === 0 && (
+            <tr><td className="pg-name pg-empty" colSpan={md.days + 1}>Nobody has been placed on this schedule yet.</td></tr>
+          )}
         </tbody>
       </table>
-      {legend && <div className="pg-legend">{legend}</div>}
+      {legend && <div className="paper-legend">{legend}</div>}
     </>
   );
 }
@@ -230,20 +286,37 @@ export function PortalDutyRosters({ myStaffId }: { myStaffId: number | null }) {
           onClose={() => setOpen(null)}
           onPrint={can('personnel.rosters', 'print') ? () => void openPrint(`/scheduling/duty-rosters/${open.id}/print`, setError) : undefined}
         >
+          <PaperMast
+            org={<>
+              {open.header_org || open.department_name || 'Laboratory'}
+              {open.header_facility && <><br />{open.header_facility}</>}
+              {open.header_subtitle && open.header_subtitle !== open.header_facility && <><br />{open.header_subtitle}</>}
+            </>}
+            title={(open.title || 'DUTY ROSTER').toUpperCase()}
+          />
           <MonthGrid
             month={open.month}
             rows={open.rows}
             cells={open.cells}
             myStaffId={myStaffId}
-            codeOf={c => c.shift_code ?? ''}
+            nameHeading="NAMES"
+            faceOf={c => {
+              const code = c.shift_code ?? '';
+              const st = code ? shiftByCode.get(code) : undefined;
+              return {
+                code,
+                bg: st?.bg_color,
+                fg: st?.text_color,
+                runLabel: st?.category === 'leave' ? (st.label || code) : null,
+              };
+            }}
             legend={(open.shiftTypes ?? []).filter(s => s.is_active).map(s => (
               <span key={s.id} className="pg-key">
-                <span className="pg-key-code" style={{ background: s.bg_color || 'var(--panel-2)', color: s.text_color || 'var(--text)' }}>{s.code}</span>
-                {s.label}
+                <b>{s.code}</b>: {(s.label || '').toUpperCase()}
               </span>
             ))}
           />
-          {shiftByCode.size === 0 && <p className="muted">No shift types are configured.</p>}
+          {shiftByCode.size === 0 && <p className="paper-note">No shift types are configured.</p>}
         </BoardModal>
       )}
     </section>
@@ -325,16 +398,19 @@ export function PortalBenchSchedules({ myStaffId, mySectionName }: { myStaffId: 
           onClose={() => setOpen(null)}
           onPrint={can('personnel.rosters', 'print') ? () => void openPrint(`/scheduling/bench-schedules/${open.id}/print`, setError) : undefined}
         >
+          <PaperMast
+            org={open.section_name}
+            title={`${(open.section_name || '').toUpperCase()} — BENCH SCHEDULE — ${monthDays(open.month).label}`}
+          />
           <MonthGrid
             month={open.month}
             rows={open.rows}
             cells={open.cells}
             myStaffId={myStaffId}
-            codeOf={c => c.value ?? ''}
+            nameHeading="STAFF"
+            faceOf={c => ({ code: c.value ?? '' })}
             legend={(open.benches ?? []).filter(b => b.is_active).map(b => (
-              <span key={b.id} className="pg-key">
-                <span className="pg-key-code">{b.code || b.name}</span>{b.name}
-              </span>
+              <span key={b.id} className="pg-key"><b>{b.code || b.name}</b>: {b.name}</span>
             ))}
           />
         </BoardModal>
@@ -404,30 +480,50 @@ export function PortalReassignments({ myStaffId, mySectionName }: { myStaffId: n
           onClose={() => setOpen(null)}
           onPrint={can('personnel.rosters', 'print') ? () => void openPrint(`/scheduling/reassignments/${open.id}/print`, setError) : undefined}
         >
-          <table className="data-table ps-memo">
-            <thead><tr><th>Unit</th><th>Supervisor</th><th>Deputy</th><th><Users size={12} /> Members</th></tr></thead>
-            <tbody>
-              {open.rows.map(row => row.is_span ? (
-                <tr key={row.id} className="ps-span"><td colSpan={4}>{row.span_text || row.unit_label}</td></tr>
-              ) : (
-                <tr key={row.id} className={isMine(row) ? 'is-mine' : ''}>
-                  <td>
-                    {row.unit_label}
-                    {isMine(row) && <span className="pg-you">your unit</span>}
-                  </td>
-                  <td>
-                    {row.supervisor_name || row.supervisor_text || '—'}
-                    {row.supervisor_is_acting ? <span className="badge warning">acting</span> : null}
-                  </td>
-                  <td>{row.deputy_name || row.deputy_text || '—'}</td>
-                  <td className="ps-members">{row.members_text || '—'}</td>
-                </tr>
-              ))}
-              {open.rows.length === 0 && <tr><td colSpan={4} className="muted">This memo has no unit rows.</td></tr>}
-            </tbody>
-          </table>
-          {open.nb_notes && <p className="ps-nb">{open.nb_notes}</p>}
-          {myStaffId === null && <p className="muted">Link your account to your staff record to have your own unit picked out.</p>}
+          {/* The memo as it is posted: heading, the four metalines, the unit table,
+              the NB block and the signature rule — the same sheet the print makes. */}
+          <div className="paper-memo">
+            <h4>MEMO</h4>
+            <p className="pm-line"><b>TO:</b> {open.memo_to || 'All Laboratory Staff'}</p>
+            <p className="pm-line"><b>FROM:</b> {open.memo_from || '—'}</p>
+            <p className="pm-line"><b>DATE:</b> {open.memo_date || open.effective_date}</p>
+            <p className="pm-line"><b>SUBJECT:</b> {open.subject}</p>
+            {open.intro_text && <p className="pm-line pm-intro">{open.intro_text}</p>}
+
+            <table className="pm-table">
+              <thead><tr><th>UNIT</th><th>SUPERVISOR</th><th>DEPUTY SUPERVISOR</th><th><Users size={12} /> MEMBER(S)</th></tr></thead>
+              <tbody>
+                {open.rows.map(row => row.is_span ? (
+                  <tr key={row.id}><td><b>{row.unit_label}</b></td><td colSpan={3}>{row.span_text || row.members_text || ''}</td></tr>
+                ) : (
+                  <tr key={row.id} className={isMine(row) ? 'is-mine' : ''}>
+                    <td>
+                      <b>{row.unit_label}</b>
+                      {isMine(row) && <span className="pg-you">your unit</span>}
+                    </td>
+                    <td>
+                      {row.supervisor_text || row.supervisor_name || ''}
+                      {row.supervisor_is_acting ? <small>(Acting Unit Supervisor)</small> : null}
+                    </td>
+                    <td>{row.deputy_text || row.deputy_name || ''}</td>
+                    <td>{row.members_text || ''}</td>
+                  </tr>
+                ))}
+                {open.rows.length === 0 && <tr><td colSpan={4}>This memo has no unit rows.</td></tr>}
+              </tbody>
+            </table>
+
+            {open.nb_notes && (
+              <div className="pm-nb">
+                <u><b>NB:</b></u>
+                {String(open.nb_notes).split('\n').filter(Boolean).map((n, i) => <b key={i}>{n}</b>)}
+              </div>
+            )}
+            {open.signatory_name && (
+              <div className="pm-sign">……………………………………<br />{open.signatory_name}</div>
+            )}
+          </div>
+          {myStaffId === null && <p className="paper-note">Link your account to your staff record to have your own unit picked out.</p>}
         </BoardModal>
       )}
     </section>

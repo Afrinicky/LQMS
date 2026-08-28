@@ -1,8 +1,11 @@
 import { Suspense, lazy, useEffect, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Download, FileSignature, Loader2, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { usePermissions } from '../../hooks/usePermissions';
+import { AlertTriangle, Ban, Bell, CheckCircle2, Download, FileSignature, Loader2, PlayCircle, X } from 'lucide-react';
 import { api, API_BASE, getToken } from '../../services/api';
-import { downloadFileById, titleCase, usePortal } from './portalData';
-import type { MyDeclaration } from '../../../shared/types/api';
+import { useDutyReminders } from '../../hooks/useDutyReminders';
+import { downloadFileById, dueTone, titleCase, usePortal, type PortalFace } from './portalData';
+import type { ActivityOccurrence, MyDeclaration, NotificationRecord } from '../../../shared/types/api';
 
 /**
  * Doing the work, without leaving the portal.
@@ -16,10 +19,18 @@ import type { MyDeclaration } from '../../../shared/types/api';
  *
  * So every kind of task the portal can raise now opens its own completion
  * surface here, over the portal, and closes back onto the list with the item
- * gone. Nothing navigates. The four kinds are genuinely different jobs —
- * signing a declaration is not attesting to a document, and neither is
- * reporting progress on an action — so this is a switch over four small
- * purpose-built panels rather than one form pretending to fit them all.
+ * gone. Nothing navigates. The kinds are genuinely different jobs — signing a
+ * declaration is not attesting to a document, and neither is reporting
+ * progress on an action — so this is a switch over small purpose-built panels
+ * rather than one form pretending to fit them all.
+ *
+ * The inbox opens through here too. An alert is a pointer at a record, and the
+ * record it points at is usually one of the kinds above, so clicking an alert
+ * lands on the same panel the task list would have opened. The alerts that
+ * point at work the portal genuinely cannot do — an equipment calibration, an
+ * IQC review — still open here, as a reader, and are acknowledged, resolved or
+ * dismissed here. Only if the reader then asks to be taken to the module does
+ * anything navigate, and only if they hold the rights to it.
  */
 
 // Document control's viewer, borrowed. It already renders a controlled
@@ -31,7 +42,16 @@ export type PortalTaskTarget =
   | { kind: 'declaration'; declaration: MyDeclaration }
   | { kind: 'attestation'; attestationId: number; documentId: number; versionId: number; title: string }
   | { kind: 'action'; id: number; title: string; description?: string | null; status: string; dueDate?: string | null }
-  | { kind: 'queueTask'; id: number; title: string; description?: string | null; status: string };
+  | { kind: 'queueTask'; id: number; title: string; description?: string | null; status: string }
+  /** A recurring unit activity due today — completed here, in one press. */
+  | { kind: 'occurrence'; occurrence: ActivityOccurrence }
+  /** A controlled document to read. No signature is owed; this is the reader. */
+  | { kind: 'document'; documentId: number; title: string }
+  /**
+   * An alert about work that lives elsewhere. Read here, dealt with here — see
+   * `AlertTask` for why this exists and what it deliberately does not do.
+   */
+  | { kind: 'alert'; notification: NotificationRecord };
 
 /** Upload a file to my own record and return its id. Self-scoped, no rights needed. */
 async function uploadPersonalFile(file: File, purpose: string): Promise<number> {
@@ -48,7 +68,12 @@ async function uploadPersonalFile(file: File, purpose: string): Promise<number> 
   return Number((await res.json()).id);
 }
 
-export default function PortalTaskDrawer({ target, onClose }: { target: PortalTaskTarget; onClose: (completed?: boolean) => void }) {
+export default function PortalTaskDrawer({ target, onClose, onOpenFace }: {
+  target: PortalTaskTarget;
+  onClose: (completed?: boolean) => void;
+  /** Step to another face of the portal — still the portal, never another module. */
+  onOpenFace?: (face: PortalFace) => void;
+}) {
   // Escape closes it, like every other overlay in the application.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(false); };
@@ -57,10 +82,12 @@ export default function PortalTaskDrawer({ target, onClose }: { target: PortalTa
   }, [onClose]);
 
   // The document viewer is a window in its own right and brings its own frame.
-  if (target.kind === 'attestation') {
+  if (target.kind === 'attestation' || target.kind === 'document') {
     return (
       <Suspense fallback={<div className="portal-drawer-wrap"><div className="portal-drawer"><p className="muted">Opening the document…</p></div></div>}>
-        <AttestationTask target={target} onClose={onClose} />
+        {target.kind === 'attestation'
+          ? <AttestationTask target={target} onClose={onClose} />
+          : <DocumentTask target={target} onClose={onClose} />}
       </Suspense>
     );
   }
@@ -71,6 +98,8 @@ export default function PortalTaskDrawer({ target, onClose }: { target: PortalTa
         {target.kind === 'declaration' && <DeclarationTask declaration={target.declaration} onClose={onClose} />}
         {target.kind === 'action' && <ActionTask target={target} onClose={onClose} />}
         {target.kind === 'queueTask' && <QueueTask target={target} onClose={onClose} />}
+        {target.kind === 'occurrence' && <OccurrenceTask occurrence={target.occurrence} onClose={onClose} />}
+        {target.kind === 'alert' && <AlertTask notification={target.notification} onClose={onClose} onOpenFace={onOpenFace} />}
       </div>
     </div>
   );
@@ -334,6 +363,293 @@ function QueueTask({ target, onClose }: {
         </button>
         <button type="button" className="secondary" onClick={() => onClose(false)}>Not now</button>
         {problem && <p className="pd-error"><AlertTriangle size={14} /> {problem}</p>}
+      </div>
+    </>
+  );
+}
+
+
+/* ----------------------------------------------------------------------------
+   Do today's unit activity
+   ------------------------------------------------------------------------- */
+/**
+ * A recurring activity — a fridge temperature, a bench decontamination — raised
+ * as an alert. These are the shortest jobs in the laboratory and the ones most
+ * often skipped when recording them is a chore, so this panel is one press:
+ * "Done", with a note only for whoever wants to leave one.
+ */
+function OccurrenceTask({ occurrence, onClose }: { occurrence: ActivityOccurrence; onClose: (completed?: boolean) => void }) {
+  const { setNotice } = usePortal();
+  const { complete, start, markNotApplicable, refresh } = useDutyReminders();
+  const [note, setNote] = useState('');
+  const [reason, setReason] = useState('');
+  const [showNa, setShowNa] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const o = occurrence;
+  const open = o.status === 'pending' || o.status === 'in_progress';
+
+  async function run(what: 'done' | 'start' | 'na') {
+    setBusy(what); setProblem(null);
+    try {
+      if (what === 'done') await complete(o.id, { note: note.trim() || undefined });
+      else if (what === 'start') await start(o.id);
+      else await markNotApplicable(o.id, reason.trim());
+      await refresh();
+      setNotice(what === 'done' ? `Recorded: ${o.activity_name}.`
+        : what === 'start' ? `Started: ${o.activity_name}.`
+        : `Marked not applicable: ${o.activity_name}.`);
+      onClose(true);
+    } catch (e) { setProblem((e as Error).message); }
+    finally { setBusy(null); }
+  }
+
+  return (
+    <>
+      <DrawerHead
+        eyebrow={[o.section_name, o.bench_name, o.occurrence_date].filter(Boolean).join(' · ') || 'Unit activity'}
+        title={o.activity_name || 'Unit activity'}
+        onClose={() => onClose(false)}
+      />
+      <div className="pd-body">
+        {o.instructions ? <p className="pd-desc">{o.instructions}</p> : <p className="muted">No standing instruction was recorded for this one.</p>}
+        {!open && <p className="pd-meta">Already {o.status === 'not_applicable' ? 'marked not applicable' : o.status}{o.completed_by_name ? ` by ${o.completed_by_name}` : ''}.</p>}
+
+        {open && (
+          <div className="pd-form">
+            <label className="pd-field">
+              <span>Note (optional)</span>
+              <input value={note} onChange={e => setNote(e.target.value)} placeholder="Anything worth recording — a reading, a fault, a substitution." />
+            </label>
+            {showNa && (
+              <label className="pd-field">
+                <span>Why does this not apply today? <em>Required</em></span>
+                <input value={reason} onChange={e => setReason(e.target.value)} placeholder="Bench closed, analyser down, no samples…" />
+              </label>
+            )}
+          </div>
+        )}
+
+        {problem && <p className="pd-error"><AlertTriangle size={14} /> {problem}</p>}
+      </div>
+      <div className="pd-foot">
+        {open && !showNa && (
+          <>
+            <button type="button" disabled={!!busy} onClick={() => void run('done')}>
+              {busy === 'done' ? <><Loader2 size={14} className="pd-spin" /> Recording…</> : <><CheckCircle2 size={14} /> Done</>}
+            </button>
+            {o.status === 'pending' && (
+              <button type="button" className="secondary" disabled={!!busy} onClick={() => void run('start')}>
+                <PlayCircle size={14} /> {busy === 'start' ? 'Starting…' : 'I have started'}
+              </button>
+            )}
+            <button type="button" className="secondary" disabled={!!busy} onClick={() => setShowNa(true)}>
+              <Ban size={14} /> Not applicable
+            </button>
+          </>
+        )}
+        {open && showNa && (
+          <>
+            <button type="button" disabled={!reason.trim() || !!busy} onClick={() => void run('na')}>
+              {busy === 'na' ? <><Loader2 size={14} className="pd-spin" /> Saving…</> : 'Record it as not applicable'}
+            </button>
+            <button type="button" className="secondary" onClick={() => setShowNa(false)}>Back</button>
+          </>
+        )}
+        <button type="button" className="secondary" onClick={() => onClose(false)}>Close</button>
+      </div>
+    </>
+  );
+}
+
+/* ----------------------------------------------------------------------------
+   Read a controlled document
+   ------------------------------------------------------------------------- */
+/**
+ * An alert about a document — issued, revised, due for review — opens the
+ * document, here. Only the id is known at that point, so the current version is
+ * resolved first; a person without document rights is told so plainly rather
+ * than shown an empty window.
+ */
+function DocumentTask({ target, onClose }: {
+  target: Extract<PortalTaskTarget, { kind: 'document' }>;
+  onClose: (completed?: boolean) => void;
+}) {
+  const { setError } = usePortal();
+  const [versionId, setVersionId] = useState<number | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    api<{ current_version_id?: number | null; versions?: Array<{ id: number }> }>(`/documents/${target.documentId}`)
+      .then(d => {
+        if (!live) return;
+        const id = Number(d.current_version_id ?? d.versions?.[d.versions.length - 1]?.id ?? 0);
+        if (id) setVersionId(id);
+        else setProblem('This document has no file attached yet, so there is nothing to read.');
+      })
+      .catch(e => { if (live) setProblem((e as Error).message); });
+    return () => { live = false; };
+  }, [target.documentId]);
+
+  if (problem) {
+    return (
+      <div className="portal-drawer-wrap" role="dialog" aria-modal="true" onClick={() => onClose(false)}>
+        <div className="portal-drawer" onClick={e => e.stopPropagation()}>
+          <DrawerHead eyebrow="Controlled document" title={target.title} onClose={() => onClose(false)} />
+          <div className="pd-body"><p className="pd-error"><AlertTriangle size={14} /> {problem}</p></div>
+          <div className="pd-foot"><button type="button" className="secondary" onClick={() => onClose(false)}>Close</button></div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!versionId) {
+    return <div className="portal-drawer-wrap"><div className="portal-drawer"><p className="muted">Opening the document…</p></div></div>;
+  }
+
+  return (
+    <DocumentViewer
+      docId={target.documentId}
+      versionId={versionId}
+      onClose={() => onClose(false)}
+      onAttest={() => undefined}
+      onSaved={() => undefined}
+      onError={setError}
+    />
+  );
+}
+
+/* ----------------------------------------------------------------------------
+   Read an alert whose work lives in another module
+   ------------------------------------------------------------------------- */
+/**
+ * The honest fallback.
+ *
+ * Most alerts point at something the portal can finish. Some do not: an
+ * equipment calibration falls due, a batch of reagent expires, an IQC run wants
+ * reviewing. Those are done at the analyser, in the module that holds the
+ * record, and pretending otherwise would be a worse lie than a jump.
+ *
+ * What the portal can still do is refuse to throw the person out for reading
+ * one. The whole alert opens here — what it says, what it is about, when it is
+ * due, and everything that has happened to it — and acknowledging, resolving or
+ * dismissing it happens here too, which is what most of these alerts actually
+ * need. Only the "Open in …" button navigates, and it appears only when the
+ * reader holds view rights on that module. It is a choice, not a consequence of
+ * having clicked.
+ */
+const ALERT_FACE: Record<string, PortalFace> = {
+  staff_documents: 'My Documents',
+  training_records: 'My Training',
+  training_events: 'My Training',
+  competency_assessments: 'My Training',
+  performance_appraisals: 'My Record',
+  technical_authorizations: 'My Record',
+  duty_rosters: 'My Schedule',
+  duty_roster_assignments: 'My Schedule',
+  bench_schedules: 'My Schedule',
+  staff_declarations: 'My Declarations',
+};
+
+function AlertTask({ notification, onClose, onOpenFace }: {
+  notification: NotificationRecord;
+  onClose: (completed?: boolean) => void;
+  onOpenFace?: (face: PortalFace) => void;
+}) {
+  const navigate = useNavigate();
+  const { canView } = usePermissions();
+  const { reloadInbox, setNotice } = usePortal();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [events, setEvents] = useState<Array<{ id: number; event_type: string; note?: string | null; created_at: string }>>(notification.events ?? []);
+
+  const n = notification;
+  const due = dueTone(n.due_date);
+  const face = n.record_type ? ALERT_FACE[n.record_type] : undefined;
+  // Where the record actually lives. Offered, never taken automatically, and
+  // only to somebody who may open that module at all.
+  const elsewhere = n.action_url && n.module_key && canView(n.module_key) ? n.action_url : null;
+
+  // The history is worth having and cheap; a reader who may not see it simply
+  // gets the alert without it.
+  useEffect(() => {
+    let live = true;
+    api<{ events?: typeof events }>(`/notifications/${n.id}`)
+      .then(r => { if (live && r.events) setEvents(r.events); })
+      .catch(() => undefined);
+    return () => { live = false; };
+  }, [n.id]);
+
+  async function transition(action: 'acknowledge' | 'resolve' | 'dismiss') {
+    setBusy(action); setProblem(null);
+    try {
+      await api(`/notifications/${n.id}/${action}`, { method: 'POST', body: JSON.stringify({}) });
+      await reloadInbox();
+      setNotice(action === 'resolve' ? 'Marked resolved.' : action === 'dismiss' ? 'Dismissed.' : 'Acknowledged.');
+      onClose(true);
+    } catch (e) { setProblem((e as Error).message); }
+    finally { setBusy(null); }
+  }
+
+  return (
+    <>
+      <DrawerHead
+        eyebrow={[(n.module_key || 'general').replace(/_/g, ' '), (n.notification_type || '').replace(/_/g, ' ')].filter(Boolean).join(' · ')}
+        title={n.title}
+        onClose={() => onClose(false)}
+      />
+      <div className="pd-body">
+        {n.message && <p className="pd-desc">{n.message}</p>}
+        <p className="pd-meta">
+          <span className={`badge${n.severity === 'urgent' || n.severity === 'high' ? ' overdue' : n.severity === 'medium' ? ' warning' : ''}`}>{titleCase(n.severity)}</span>
+          {due && <span className={`pt-due ${due.tone}`}>{due.text}</span>}
+          <span>Raised {String(n.created_at).slice(0, 16).replace('T', ' ')}</span>
+          {n.notification_number && <span>{n.notification_number}</span>}
+        </p>
+
+        {events.length > 0 && (
+          <ul className="pd-events">
+            {events.map(e => (
+              <li key={e.id}>
+                <strong>{titleCase(e.event_type)}</strong>
+                <span>{String(e.created_at).slice(0, 16).replace('T', ' ')}</span>
+                {e.note && <em>{e.note}</em>}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <p className="pd-hint">
+          {face
+            ? 'This is about your own record — you can look at it in your portal.'
+            : 'This one is carried out where the record lives. Deal with the alert here; open the module only if you need to.'}
+        </p>
+
+        {problem && <p className="pd-error"><AlertTriangle size={14} /> {problem}</p>}
+      </div>
+      <div className="pd-foot">
+        <button type="button" disabled={!!busy} onClick={() => void transition('resolve')}>
+          {busy === 'resolve' ? <><Loader2 size={14} className="pd-spin" /> Saving…</> : <><CheckCircle2 size={14} /> It is dealt with</>}
+        </button>
+        <button type="button" className="secondary" disabled={!!busy} onClick={() => void transition('acknowledge')}>
+          <Bell size={14} /> {busy === 'acknowledge' ? 'Saving…' : 'Seen it'}
+        </button>
+        <button type="button" className="secondary" disabled={!!busy} onClick={() => void transition('dismiss')}>
+          {busy === 'dismiss' ? 'Saving…' : 'Does not apply'}
+        </button>
+        {face && onOpenFace && (
+          <button type="button" className="secondary" onClick={() => { onOpenFace(face); onClose(false); }}>
+            Open my {face.replace(/^My /, '')}
+          </button>
+        )}
+        {elsewhere && (
+          <button type="button" className="link" title="Leaves your portal"
+            onClick={() => { onClose(false); navigate(elsewhere); }}>
+            Open in {(n.module_key || '').replace(/_/g, ' ')}
+          </button>
+        )}
       </div>
     </>
   );

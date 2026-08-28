@@ -14,8 +14,8 @@ import DisabledModule from '../components/DisabledModule';
 import DutyTodoCard from '../components/DutyTodoCard';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
 import { WaveBackground, MedicalLabBackgroundMarks } from '../components/ui';
-import { PortalProvider, initialsOf, isOpenAlert, usePortal } from './portal/portalData';
-import PortalInbox, { InboxRow, filterInbox } from './portal/PortalInbox';
+import { PORTAL_FACES, PortalProvider, initialsOf, isOpenAlert, usePortal, type PortalFace } from './portal/portalData';
+import PortalInbox, { InboxRow, filterInbox, useNotificationOpener } from './portal/PortalInbox';
 import PortalTasks, { OwedRow, useOwedWork } from './portal/PortalTasks';
 import PortalTaskDrawer, { type PortalTaskTarget } from './portal/PortalTaskDrawer';
 import PortalRecord, { LinkStaffPrompt } from './portal/PortalRecord';
@@ -25,8 +25,6 @@ import PortalSchedule from './portal/PortalSchedule';
 import PortalTraining from './portal/PortalTraining';
 import PortalPreferences from './portal/PortalPreferences';
 import PortalRoutineWork from './portal/PortalRoutineWork';
-import { api } from '../services/api';
-import type { NotificationRecord } from '../../shared/types/api';
 
 /* ============================================================================
    MY PORTAL — the member of staff's own workspace.
@@ -49,14 +47,10 @@ import type { NotificationRecord } from '../../shared/types/api';
    whole laboratory without giving anybody sight of a colleague's file.
    ========================================================================= */
 
-type PortalTab =
-  | 'Portal' | 'My Tasks' | 'Routine Work' | 'My Inbox' | 'My Schedule' | 'My Record'
-  | 'My Documents' | 'My Training' | 'My Declarations' | 'Preferences';
-
-const TABS: PortalTab[] = [
-  'Portal', 'My Tasks', 'Routine Work', 'My Inbox', 'My Schedule', 'My Record',
-  'My Documents', 'My Training', 'My Declarations', 'Preferences',
-];
+// The faces themselves live in portalData, because the task drawer needs to
+// name one too and must not import this page to do it.
+type PortalTab = PortalFace;
+const TABS = PORTAL_FACES;
 
 /** The rectangular features on the landing. Each steps into one face of the file. */
 type Tile = {
@@ -102,7 +96,7 @@ function PortalShell() {
       {tab === 'Portal' && <PortalHome onOpen={setTab} />}
       {tab === 'My Tasks' && <PortalTasks />}
       {tab === 'Routine Work' && <PortalRoutineWork />}
-      {tab === 'My Inbox' && <PortalInbox />}
+      {tab === 'My Inbox' && <PortalInbox onOpenFace={setTab} />}
       {tab === 'My Schedule' && <PortalSchedule />}
       {tab === 'My Record' && <PortalRecord />}
       {tab === 'My Documents' && <PortalDocuments />}
@@ -215,14 +209,16 @@ function PortalHero({ onOpen }: { onOpen: (tab: PortalTab) => void }) {
    The landing itself.
    ------------------------------------------------------------------------- */
 function PortalHome({ onOpen }: { onOpen: (tab: PortalTab) => void }) {
-  const navigate = useNavigate();
-  const { inbox, declarations, documents, tasks, queue, profile, reload, setNotice, reloadInbox } = usePortal();
+  const { inbox, declarations, documents, tasks, queue, profile, reload, setNotice } = usePortal();
   const { data } = useDutyReminders();
   const { assigned, coming } = useOwedWork();
   // The landing shows the first few rows of the same list the My Tasks face
   // shows, and clicking one does the same thing: it opens here, over the
   // portal, rather than sending anybody to another workspace.
   const [openTask, setOpenTask] = useState<PortalTaskTarget | null>(null);
+  // An alert opens exactly as it does on the inbox face — same resolution, same
+  // panel, over the portal.
+  const { target: openAlertTarget, open: openAlert, close: closeAlert } = useNotificationOpener();
 
   const openAlerts = useMemo(() => inbox.filter(isOpenAlert), [inbox]);
   const unread = openAlerts.filter(n => n.status === 'unread').length;
@@ -260,7 +256,7 @@ function PortalHome({ onOpen }: { onOpen: (tab: PortalTab) => void }) {
     },
     {
       tab: 'My Inbox', title: 'My inbox', icon: <Inbox size={20} />,
-      blurb: 'Every alert the laboratory routed to you. Opening one takes you to the record it is about.',
+      blurb: 'Every alert the laboratory routed to you. Opening one opens the work behind it, here.',
       count: openAlerts.length, countLabel: unread ? `${unread} unread` : 'open',
       tone: urgentAlerts > 0 ? 'crit' : undefined,
     },
@@ -300,13 +296,6 @@ function PortalHome({ onOpen }: { onOpen: (tab: PortalTab) => void }) {
     },
   ];
 
-  async function openAlert(n: NotificationRecord) {
-    try {
-      if (n.status === 'unread') await api(`/notifications/${n.id}/read`, { method: 'POST', body: JSON.stringify({}) });
-      void reloadInbox();
-    } catch { /* the record matters more than the read receipt */ }
-    if (n.action_url) navigate(n.action_url);
-  }
 
   return (
     <div className="portal-home">
@@ -427,7 +416,8 @@ function PortalHome({ onOpen }: { onOpen: (tab: PortalTab) => void }) {
         </div>
       </div>
 
-      {openTask && <PortalTaskDrawer target={openTask} onClose={() => setOpenTask(null)} />}
+      {openTask && <PortalTaskDrawer target={openTask} onClose={() => setOpenTask(null)} onOpenFace={onOpen} />}
+      {openAlertTarget && <PortalTaskDrawer target={openAlertTarget} onClose={closeAlert} onOpenFace={onOpen} />}
     </div>
   );
 }

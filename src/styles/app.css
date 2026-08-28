@@ -4127,6 +4127,23 @@ button.cell-mark:disabled { cursor: default; }
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   padding: 14px 20px 18px; border-top: 1px solid var(--border);
 }
+.pd-foot button.link {
+  background: none; border: none; box-shadow: none; padding: 6px 2px;
+  color: var(--faint); font-size: 12px; text-decoration: underline; text-underline-offset: 3px;
+  margin-left: auto;
+}
+.pd-foot button.link:hover { color: var(--text); transform: none; }
+
+/* The alert reader: what the alert says, and everything that has happened to it. */
+.pd-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pd-events { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--border); }
+.pd-events li {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  padding: 8px 12px; background: var(--surface); font-size: 12px; color: var(--muted);
+}
+.pd-events strong { color: var(--text); font-size: 12.5px; font-weight: 650; }
+.pd-events span { color: var(--faint); font-size: 11.5px; }
+.pd-events em { font-style: normal; flex: 1 1 100%; color: var(--muted); }
 
 /* ---- Read-only schedule grids ---- */
 .ps-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
@@ -4140,36 +4157,81 @@ button.cell-mark:disabled { cursor: default; }
 .ps-list-main strong { font-size: 13px; }
 .ps-list-main span { font-size: 11.5px; color: var(--faint); }
 
-.portal-grid { border-collapse: collapse; font-size: 11px; table-layout: fixed; width: max-content; }
-.portal-grid th, .portal-grid td {
-  border: 1px solid var(--border); padding: 3px 2px; text-align: center;
-  width: 26px; height: 24px; overflow: hidden;
+/* ---- The schedules, drawn as the sheet on the wall ----------------------
+   A roster is a printed sheet the laboratory recognises on sight: orange
+   header band, weekday letters over the dates, month in italics in the
+   corner, typewriter names down the left, leave running across as a bar.
+   Rendering it in the app's dark theme turned it into a spreadsheet of
+   somebody else's data, so it is drawn here as the paper it is — the colours
+   and proportions are taken from printShell() in server/routes/scheduling.ts,
+   which is the authority on how the form actually prints. Change one, change
+   the other.
+
+   Paper is white in a dark application on purpose: it is a document being
+   read, not a panel of the interface, and it stays legible in both themes
+   because it does not follow either. */
+.pd-body.paper {
+  background: #fff; color: #111; font-family: Arial, Helvetica, sans-serif;
+  padding: 20px 22px 26px;
 }
-.portal-grid th { background: var(--panel-2); color: var(--text); font-weight: 700; font-size: 10.5px; }
-.portal-grid th.we, .portal-grid td.we { background: rgba(255, 255, 255, 0.05); }
-.portal-grid th.pg-name, .portal-grid td.pg-name {
-  width: 190px; min-width: 190px; text-align: left; padding-left: 10px;
-  white-space: nowrap; font-weight: 700; position: sticky; left: 0; z-index: 1;
-  background: var(--card);
+.paper-mast { text-align: center; margin-bottom: 12px; }
+.paper-org { font-weight: 700; font-size: 15px; line-height: 1.35; letter-spacing: 0.3px; color: #111; }
+.paper-doctitle {
+  margin-top: 7px; font-weight: 700; font-size: 15px; letter-spacing: 2px;
+  text-decoration: underline; text-underline-offset: 4px; color: #111;
 }
-.portal-grid td { color: var(--text); font-weight: 700; }
-.portal-grid tr.is-mine td { background: rgba(78, 141, 255, 0.14); }
-.portal-grid tr.is-mine td.pg-name { background: var(--accent-soft); color: var(--accent-bright); }
+.paper-note { margin: 12px 0 0; font-size: 11.5px; color: #555; }
+
+.paper-grid { border-collapse: collapse; table-layout: fixed; width: max-content; min-width: 100%; }
+.paper-grid th, .paper-grid td {
+  border: 1px solid #444; text-align: center; font-size: 12px; padding: 2px 1px;
+  height: 28px; width: 26px; overflow: hidden; white-space: nowrap; color: #111; background: #fff;
+}
+.paper-grid col.pg-namecol { width: 168px; }
+.paper-grid .hdr { background: #c85a2a; color: #fff; font-weight: 700; }
+.paper-grid .hdr-we { background: #a8471f; color: #fff; font-weight: 700; }
+.paper-grid td.we { background: #f3d9cc; }
+.paper-grid td.pg-month {
+  background: #fff; color: #c85a2a; font-weight: 700; font-style: italic;
+  text-align: left; padding-left: 7px;
+}
+.paper-grid th.pg-name, .paper-grid td.pg-name {
+  width: 168px; min-width: 168px; text-align: left; padding: 2px 6px;
+  font-family: 'Courier New', Courier, monospace; font-size: 11px; font-weight: 700;
+  position: sticky; left: 0; z-index: 1; background: #fff;
+}
+.paper-grid td.pg-run { font-weight: 700; letter-spacing: 1px; font-size: 11px; }
+.paper-grid td.pg-empty { font-family: Arial, Helvetica, sans-serif; font-weight: 400; color: #555; }
+/* The one thing paper cannot do: your own line, run through with a highlighter. */
+.paper-grid tr.is-mine > td { box-shadow: inset 0 0 0 99px rgba(255, 214, 0, 0.22); }
+.paper-grid tr.is-mine > td.pg-name { box-shadow: inset 0 0 0 99px rgba(255, 214, 0, 0.34); }
 .pg-you {
-  margin-left: 8px; padding: 1px 7px; border-radius: var(--radius-pill);
-  background: var(--accent); color: #fff; font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase;
+  margin-left: 7px; padding: 1px 6px; border-radius: var(--radius-pill);
+  background: #c85a2a; color: #fff; font-size: 9px; letter-spacing: 0.06em;
+  text-transform: uppercase; font-family: Arial, Helvetica, sans-serif;
 }
-.pg-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 14px; font-size: 11.5px; color: var(--muted); }
-.pg-key { display: inline-flex; align-items: center; gap: 6px; }
-.pg-key-code {
-  display: inline-grid; place-items: center; min-width: 24px; padding: 2px 6px;
-  border-radius: 5px; background: var(--panel-2); color: var(--text);
-  font-weight: 800; font-size: 10.5px;
+.paper-legend {
+  margin-top: 15px; font-size: 12.5px; font-family: 'Courier New', Courier, monospace;
+  font-weight: 700; color: #111;
 }
-.ps-memo tr.is-mine > td { background: var(--accent-soft); }
-.ps-memo tr.ps-span td { background: var(--panel-2); font-style: italic; color: var(--muted); }
-.ps-members { font-size: 11.5px; color: var(--muted); max-width: 420px; }
-.ps-nb { margin: 14px 0 0; font-size: 12px; color: var(--faint); white-space: pre-wrap; line-height: 1.6; }
+.paper-legend .pg-key { display: inline-block; margin: 0 30px 4px 0; white-space: nowrap; }
+
+/* The reassignment memo, as it is posted. */
+.paper-memo { font-family: 'Times New Roman', Times, serif; color: #111; }
+.paper-memo h4 { font-size: 25px; margin: 0 0 8px; font-family: 'Times New Roman', Times, serif; font-weight: 700; color: #111; }
+.paper-memo .pm-line { font-size: 13px; margin: 2px 0; line-height: 1.5; }
+.paper-memo .pm-intro { margin-top: 10px; }
+.pm-table { border-collapse: collapse; width: 100%; margin: 14px 0; }
+.pm-table th, .pm-table td {
+  border: 1px solid #333; padding: 6px 8px; text-align: left; font-size: 12.5px;
+  vertical-align: top; color: #111; background: #fff;
+}
+.pm-table th { font-weight: 700; }
+.pm-table small { display: block; font-size: 11px; }
+.pm-table tr.is-mine > td { box-shadow: inset 0 0 0 99px rgba(255, 214, 0, 0.22); }
+.pm-nb { font-size: 12.5px; margin-top: 12px; }
+.pm-nb b { display: block; margin: 8px 0 4px; font-weight: 700; }
+.pm-sign { margin-top: 26px; font-size: 13px; }
 
 /* ---- Self-service forms (documents, training, my details) ---- */
 .pf-form {
