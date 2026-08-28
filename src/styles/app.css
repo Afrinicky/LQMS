@@ -4461,19 +4461,19 @@ button.cell-mark:disabled { cursor: default; }
 .fb-notice {
   display: flex;
   align-items: stretch;
-  margin: 12px 0;
-  border-radius: 6px;
+  margin: 10px 0;
+  border-radius: 7px;
   background: #FFFFFF;
   color: #1F2933;
   overflow: hidden;
-  box-shadow: 0 1px 3px rgba(8, 13, 26, 0.30), 0 6px 18px rgba(8, 13, 26, 0.22);
-  font-size: 13px;
-  line-height: 1.5;
+  box-shadow: 0 1px 2px rgba(8, 13, 26, 0.26), 0 4px 12px rgba(8, 13, 26, 0.20);
+  font-size: 12.5px;
+  line-height: 1.45;
 }
 
 /* The colour block. Full height, one flat colour, a white glyph. */
 .fb-notice .fb-ico {
-  flex: 0 0 52px;
+  flex: 0 0 36px;
   display: grid;
   place-items: center;
   color: #FFFFFF;
@@ -4483,15 +4483,15 @@ button.cell-mark:disabled { cursor: default; }
 .fb-notice .fb-main {
   flex: 1 1 auto;
   min-width: 0;
-  padding: 11px 14px 12px;
+  padding: 7px 11px 8px;
 }
 .fb-notice .fb-title {
   display: block;
-  font-size: 14px;
+  font-size: 12.5px;
   font-weight: 700;
   letter-spacing: -0.005em;
   color: #14202E;
-  margin-bottom: 1px;
+  margin-bottom: 0;
 }
 .fb-notice .fb-text {
   color: #4A5666;
@@ -4507,7 +4507,7 @@ button.cell-mark:disabled { cursor: default; }
 .fb-notice .fb-x:active {
   flex: 0 0 auto;
   align-self: center;
-  width: 30px; height: 30px; min-width: 0; margin: 0 8px 0 4px; padding: 0;
+  width: 24px; height: 24px; min-width: 0; margin: 0 6px 0 2px; padding: 0;
   display: grid; place-items: center;
   border: 0; border-radius: 4px; background: none;
   color: #98A2B0; cursor: pointer;
@@ -4524,11 +4524,11 @@ button.cell-mark:disabled { cursor: default; }
 .fb-layer { position: fixed; inset: 0; z-index: 2000; pointer-events: none; }
 .fb-at-action {
   position: fixed;
-  width: 380px;
+  width: 300px;
   max-width: calc(100vw - 32px);
   margin: 0;
   pointer-events: auto;
-  box-shadow: 0 2px 6px rgba(8, 13, 26, 0.34), 0 16px 40px rgba(8, 13, 26, 0.40);
+  box-shadow: 0 2px 5px rgba(8, 13, 26, 0.32), 0 10px 28px rgba(8, 13, 26, 0.38);
 }
 @media (max-width: 560px) {
   .fb-at-action { left: 16px !important; right: 16px; width: auto; }
@@ -4545,16 +4545,16 @@ button.cell-mark:disabled { cursor: default; }
 .notice-warn,
 .notice-info,
 .banner-success {
-  margin: 12px 0;
-  padding: 11px 14px;
-  border-radius: 6px;
+  margin: 10px 0;
+  padding: 8px 12px;
+  border-radius: 7px;
   border: 0;
   background: #FFFFFF;
   color: #4A5666;
-  font-size: 13px;
-  line-height: 1.5;
-  box-shadow: 0 1px 3px rgba(8, 13, 26, 0.30), 0 6px 18px rgba(8, 13, 26, 0.22);
-  border-left: 6px solid var(--border);
+  font-size: 12.5px;
+  line-height: 1.45;
+  box-shadow: 0 1px 2px rgba(8, 13, 26, 0.26), 0 4px 12px rgba(8, 13, 26, 0.20);
+  border-left: 5px solid var(--border);
 }
 .error ul, .notice-ok ul, .notice-warn ul, .notice-info ul { margin: 6px 0 0; padding-left: 18px; }
 .error a, .notice-ok a, .notice-warn a, .notice-info a { color: #1D5FD0; }

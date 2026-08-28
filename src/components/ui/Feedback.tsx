@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, CheckCircle2, Info, X, XCircle } from 'lucide-react';
+import { onWriteOutcome, writeOutcomeCounts } from '../../services/api';
 
 /**
  * Where an answer appears, and what it looks like.
@@ -127,26 +128,30 @@ let nextId = 1;
 const subscribers = new Set<() => void>();
 function publish() { for (const fn of subscribers) fn(); }
 
-/** The last message shown, so a page re-drawing does not repeat it. */
-let lastSignature = '';
-let lastSignatureAt = 0;
-const REPEAT_MS = 3000;
-
 /** Shows a message beside the control the person just used. */
 export function notifyAtAction(kind: NoticeKind, message: string, point?: Point | null): number {
   const where = point ?? actionPoint();
   if (!where) return 0;
 
-  const signature = `${kind}:${message}`;
-  const now = Date.now();
-  if (signature === lastSignature && now - lastSignatureAt < REPEAT_MS) return 0;
-  lastSignature = signature;
-  lastSignatureAt = now;
+  // The same sentence, still on screen, said again: it does not need to be
+  // drawn twice — it needs to move to the control that has just been used.
+  // Pressing Sign on one row and then on the next should walk the refusal down
+  // the table rather than leave it behind at the first row.
+  if (current && current.kind === kind && current.message === message) {
+    current = { ...current, point: where };
+    publish();
+    return current.id;
+  }
 
   const id = nextId++;
   current = { id, kind, message, point: where };
   publish();
   return id;
+}
+
+/** True when this exact sentence is the one on screen. */
+function isShowing(kind: NoticeKind, message: string) {
+  return Boolean(current && current.kind === kind && current.message === message);
 }
 
 export function dismissToast(id: number) {
@@ -171,14 +176,14 @@ function useCurrent() {
 function Body({ kind, message, onClose }: { kind: NoticeKind; message: ReactNode; onClose?: () => void }) {
   const Icon = ICONS[kind];
   return <>
-    <span className="fb-ico"><Icon size={20} strokeWidth={2.2} aria-hidden /></span>
+    <span className="fb-ico"><Icon size={16} strokeWidth={2.3} aria-hidden /></span>
     <div className="fb-main">
       <strong className="fb-title">{TITLES[kind]}</strong>
       <div className="fb-text">{message}</div>
     </div>
     {onClose && (
       <button type="button" className="fb-x" onClick={onClose} aria-label="Dismiss">
-        <X size={16} />
+        <X size={13} />
       </button>
     )}
   </>;
@@ -207,11 +212,34 @@ export function Notice({
   const text = typeof children === 'string' || typeof children === 'number' ? String(children) : '';
   const sendable = !silent && text.trim() !== '';
   const [sent, setSent] = useState(false);
+  const [, redraw] = useState(0);
 
+  // A second identical refusal changes nothing in this component's props — the
+  // page set its state to the string it already held — so the only way to hear
+  // about it is from the request layer, which knows a write just came back.
+  useEffect(() => {
+    if (!sendable) return;
+    return onWriteOutcome(() => redraw(n => n + 1));
+  }, [sendable]);
+
+  // Runs after every render, and does something only when there is genuinely
+  // something new to say: a different sentence, or the same one after another
+  // write settled the same way.
+  const answered = useRef<{ text: string; kind: NoticeKind; count: number } | null>(null);
   useLayoutEffect(() => {
-    if (!sendable) { setSent(false); return; }
-    setSent(notifyAtAction(kind, text) !== 0 || wasJustShown(kind, text));
-  }, [text, kind, sendable]);
+    if (!sendable) {
+      answered.current = null;
+      if (sent) setSent(false);
+      return;
+    }
+    const counts = writeOutcomeCounts();
+    const count = kind === 'error' ? counts.failures : counts.successes;
+    const last = answered.current;
+    if (last && last.text === text && last.kind === kind && last.count === count) return;
+    answered.current = { text, kind, count };
+    const delivered = notifyAtAction(kind, text) !== 0 || isShowing(kind, text);
+    if (delivered !== sent) setSent(delivered);
+  });
 
   if (sent) return null;
 
@@ -226,17 +254,8 @@ export function Notice({
   );
 }
 
-/**
- * True when this exact message is the one already on screen. A page that
- * re-renders must not fall back to drawing the banner as well, or the reader
- * gets the same sentence twice — once at the control and once at the top.
- */
-function wasJustShown(kind: NoticeKind, text: string) {
-  return lastSignature === `${kind}:${text}` && Date.now() - lastSignatureAt < REPEAT_MS;
-}
-
 const GAP = 8;
-const WIDTH = 380;
+const WIDTH = 300;
 
 /** Keeps the message beside its control as the page moves under it. */
 function ActionMessage({ toast }: { toast: Toast }) {
