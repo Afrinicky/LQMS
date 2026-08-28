@@ -81,6 +81,22 @@ export type PortalData = {
   linkStaff: (staffId: number) => Promise<void>;
 };
 
+/**
+ * The faces of the portal.
+ *
+ * Declared here rather than on the page because more than the page needs to
+ * name one: a notification opened in place may offer "take me to my training",
+ * and the drawer that offers it must not import the page that mounts it.
+ */
+export type PortalFace =
+  | 'Portal' | 'My Tasks' | 'Routine Work' | 'My Inbox' | 'My Schedule' | 'My Record'
+  | 'My Documents' | 'My Training' | 'My Declarations' | 'Preferences';
+
+export const PORTAL_FACES: PortalFace[] = [
+  'Portal', 'My Tasks', 'Routine Work', 'My Inbox', 'My Schedule', 'My Record',
+  'My Documents', 'My Training', 'My Declarations', 'Preferences',
+];
+
 const PortalContext = createContext<PortalData | undefined>(undefined);
 
 const TODAY = () => new Date().toISOString().slice(0, 10);
