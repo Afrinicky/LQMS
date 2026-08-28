@@ -207,15 +207,18 @@ async function main() {
       `got ${legacy.status} ${JSON.stringify(legacy.json)}`);
 
     // Map a position to a profile and the holders work under that profile.
-    const positions = (await call('/positions', { token: A })).json ?? [];
+    const positions = ((await call('/permissions/catalogue', { token: A })).json?.positions ?? []).filter(p => p.isActive !== 0);
     const position = positions[0];
     const openProfile = ((await call('/roles', { token: A })).json ?? []).find(r => r.name === 'Audit Viewer');
+    const wasMappedTo = position.accessProfileId ?? null;
     const mapped = await call(`/positions/${position.id}/access-profile`, { token: A, method: 'PUT', body: { accessProfileId: openProfile.id } });
     check('a position can be mapped to an access profile', mapped.status === 200, JSON.stringify(mapped.json));
     const catalogue = (await call('/permissions/catalogue', { token: A })).json;
     const row = (catalogue.positions ?? []).find(p => p.id === position.id);
     check('the merged screen shows the mapping', row?.accessProfileId === openProfile.id, JSON.stringify(row));
-    await call(`/positions/${position.id}/access-profile`, { token: A, method: 'PUT', body: { accessProfileId: null } });
+    // Put it back exactly as it was — an audit that leaves the organogram
+    // half-wired is a bug it then reports against itself.
+    await call(`/positions/${position.id}/access-profile`, { token: A, method: 'PUT', body: { accessProfileId: wasMappedTo } });
   }
 
   /* ======================================================================
@@ -267,6 +270,128 @@ async function main() {
     check('a disabled module leaves the administrator’s map', !map.eqa, JSON.stringify(map.eqa));
     check('and its API is refused even to the administrator', (await call('/eqa/programs', { token: A })).status === 403);
     await call('/system-modules/eqa', { token: A, method: 'PUT', body: { enabled: true } });
+  }
+
+  /* ======================================================================
+     6 — The preset does what the laboratory asked of it
+     ----------------------------------------------------------------------
+     Everyone outside management needs three things and only three: to be told
+     what they must do, to do their daily job, and to keep their own record.
+     Everything else must be out of reach — not greyed out, not refused after
+     the click, but absent.
+     ====================================================================== */
+  console.log('\n[6] Bench profiles: notified, able to work, and nothing else');
+  {
+    const BENCH = ['Technician', 'Biomedical Scientist', 'Stores Officer', 'Customer Service Officer'];
+    const MANAGEMENT = ['System Administrator', 'Laboratory Manager', 'Quality Manager', 'Section Head'];
+
+    // Settings is administration. Only the administrator profile holds the key.
+    const settingsHolders = [];
+    for (const acc of accounts) {
+      const map = (await call('/auth/permissions', { token: acc.token })).json.permissions ?? {};
+      if (map.settings) settingsHolders.push(acc.profile.name);
+    }
+    check('only the administrator profile holds Settings',
+      settingsHolders.length === 1 && settingsHolders[0] === 'System Administrator',
+      settingsHolders.join(', '));
+
+    const leaks = [];
+    for (const name of BENCH) {
+      const acc = accounts.find(a => a.profile.name === name);
+      if (!acc) continue;
+      const map = (await call('/auth/permissions', { token: acc.token })).json.permissions ?? {};
+      const can = (k, a) => (map[k] ?? []).includes(a);
+
+      // 4. Not supposed to see or touch what they are not obliged to do.
+      if (map.settings) leaks.push(`${name}: Settings is in the map`);
+      if (can('personnel', 'edit')) leaks.push(`${name}: personnel:edit (module union leak)`);
+      if (can('personnel.rosters', 'edit')) leaks.push(`${name}: may edit the duty roster`);
+      if (can('personnel.rosters', 'approve')) leaks.push(`${name}: may approve the duty roster`);
+      if (can('personnel.activities', 'edit')) leaks.push(`${name}: may set unit activities`);
+      if (map['personnel.register']) leaks.push(`${name}: may open the personnel register`);
+      if (map['personnel.appraisals']) leaks.push(`${name}: may open appraisals`);
+
+      for (const [label, path, method, body] of [
+        ['Settings → People & Access', '/users'],
+        ['Settings → modules', '/system-modules'],
+        ['Settings → sections', '/section-config/sections'],
+        ['create a duty roster', '/scheduling/duty-rosters', 'POST', { month: '2030-01' }],
+        ['approve a duty roster', '/scheduling/duty-rosters/1/approve', 'POST', {}],
+        ['appoint an acting unit head', '/scheduling/acting-unit-heads', 'POST', { sectionId: 1, staffId: 1 }],
+        ['export the staff register', '/staff/export'],
+      ]) {
+        const r = await call(path, { token: acc.token, method, body });
+        if (r.status !== 403) leaks.push(`${name}: ${label} returned ${r.status}, expected 403`);
+      }
+
+      // 1–3. Notified, able to work, able to keep their own record.
+      for (const [label, path] of [
+        ['their own inbox', '/notifications?mine=true'],
+        ['what is due', '/notifications/calendar'],
+        ['their own profile', '/personnel/my-profile'],
+        ['their own tasks', '/personnel/my-tasks'],
+        ['their own declarations', '/personnel/my-declarations'],
+        ['the duty roster they are on', '/scheduling/duty-rosters'],
+        ['the documents they must follow', '/documents'],
+      ]) {
+        const r = await call(path, { token: acc.token });
+        if (r.status === 403) leaks.push(`${name}: ${label} was refused`);
+      }
+    }
+    check('bench profiles are shut out of administration and rosters', leaks.length === 0,
+      leaks.slice(0, 10).join(' | '));
+
+    // Raising what they find is everyone's job. A 400 is the field validation
+    // talking, which means the guard let them through — a 403 would not.
+    const raising = [];
+    for (const name of BENCH) {
+      const acc = accounts.find(a => a.profile.name === name);
+      if (!acc) continue;
+      for (const [label, path, body] of [
+        ['report a nonconformity', '/nonconformities', { title: 'Audit probe', eventDate: '2030-01-01', description: 'probe' }],
+        ['log a complaint', '/complaints', { title: 'Audit probe', receivedDate: '2030-01-01', description: 'probe' }],
+        ['report a safety incident', '/facilities-safety/incidents', { incidentDate: '2030-01-01', description: 'probe', severity: 'low' }],
+      ]) {
+        const r = await call(path, { token: acc.token, method: 'POST', body });
+        if (r.status === 403) raising.push(`${name}: ${label} was refused`);
+      }
+    }
+    check('every member of staff can raise an NC, a complaint and a safety incident',
+      raising.length === 0, raising.join(' | '));
+
+    const missing = MANAGEMENT.filter(n => !accounts.some(a => a.profile.name === n));
+    check('the management profiles exist', missing.length === 0, missing.join(', '));
+  }
+
+  /* ======================================================================
+     7 — Every organogram position says which profile its holders work under
+     ====================================================================== */
+  console.log('\n[7] The organogram is wired to the access model');
+  {
+    const catalogue = (await call('/permissions/catalogue', { token: A })).json;
+    const active = (catalogue.positions ?? []).filter(p => p.isActive !== 0);
+    const unmapped = active.filter(p => p.accessProfileId === null);
+    check('every active position is mapped to an access profile', unmapped.length === 0,
+      unmapped.map(p => p.title).join(', '));
+  }
+
+  /* ======================================================================
+     8 — An inbox is one person's
+     ====================================================================== */
+  console.log('\n[8] An inbox shows one person their own work');
+  {
+    const bench = accounts.find(a => a.profile.name === 'Technician');
+    if (!bench) {
+      console.log('   (skipped: no Technician profile in this database)');
+    } else {
+      const mine = (await call('/notifications', { token: bench.token })).json ?? [];
+      const strangers = mine.filter(n => n.assigned_to_staff_id && n.assigned_to_staff_id !== bench.user.staffId);
+      check('the default listing carries nobody else\'s work', strangers.length === 0,
+        `${strangers.length} of ${mine.length} rows belong to somebody else`);
+      const everyone = await call('/notifications?all=true', { token: bench.token });
+      check('and asking for everybody\'s does not widen it',
+        (everyone.json ?? []).filter(n => n.assigned_to_staff_id && n.assigned_to_staff_id !== bench.user.staffId).length === 0);
+    }
   }
 
   console.log(`\n${pass} passed, ${failures.length} failed`);

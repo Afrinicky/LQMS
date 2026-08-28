@@ -588,7 +588,7 @@ export function informationManagementRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/releases', requirePermission('information_management', 'create'), (req, res) => {
+  router.post('/releases', requirePermission('information_management.change', 'create'), (req, res) => {
     if (!parseIntNullable(req.body.systemId)) return res.status(400).json({ error: 'systemId is required' });
     if (!req.body.versionLabel) return res.status(400).json({ error: 'versionLabel is required' });
     if (!req.body.releaseDate) return res.status(400).json({ error: 'releaseDate is required' });
@@ -610,7 +610,7 @@ export function informationManagementRoutes() {
     res.json(row);
   });
 
-  router.put('/releases/:id', requirePermission('information_management', 'edit'), (req, res) => {
+  router.put('/releases/:id', requirePermission('information_management.change', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM software_release_records WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Release not found' });
@@ -621,7 +621,7 @@ export function informationManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/releases/:id/approve', requirePermission('information_management', 'approve'), (req, res) => {
+  router.post('/releases/:id/approve', requirePermission('information_management.change', 'approve'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM software_release_records WHERE id = ?').get(req.params.id) as any;
     if (!row) return res.status(404).json({ error: 'Release not found' });
@@ -632,7 +632,7 @@ export function informationManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/releases/:id/deploy', requirePermission('information_management', 'edit'), (req, res) => {
+  router.post('/releases/:id/deploy', requirePermission('information_management.change', 'edit'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM software_release_records WHERE id = ?').get(req.params.id) as any;
     if (!row) return res.status(404).json({ error: 'Release not found' });
@@ -642,7 +642,7 @@ export function informationManagementRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/releases/:id/archive', requirePermission('information_management', 'edit'), (req, res) => {
+  router.post('/releases/:id/archive', requirePermission('information_management.change', 'edit'), (req, res) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM software_release_records WHERE id = ?').get(req.params.id) as any;
     if (!row) return res.status(404).json({ error: 'Release not found' });

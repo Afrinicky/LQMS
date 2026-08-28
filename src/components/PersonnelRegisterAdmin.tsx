@@ -91,7 +91,7 @@ export default function PersonnelRegisterAdmin() {
   const mayEdit = can('personnel.register', 'edit');
   const mayRemove = can('personnel.register', 'void_archive');
   const mayImport = can('personnel.register', 'create');
-  const mayExport = can('personnel.register', 'export') || can('personnel', 'export');
+  const mayExport = can('personnel.register', 'export');
 
   const load = () => Promise.all([
     api<Staff[]>('/staff').then(setStaff),

@@ -110,7 +110,7 @@ export function formsRoutes() {
   const router = Router();
 
   // ── Templates ──
-  router.get('/templates', requirePermission('records_reports', 'view'), (req, res) => {
+  router.get('/templates', requirePermission('records_reports.generate', 'view'), (req, res) => {
     const db = getDb();
     const includeInactive = req.query.all === '1';
     const category = req.query.category ? String(req.query.category) : null;
@@ -123,7 +123,7 @@ export function formsRoutes() {
     res.json(db.prepare(q).all(...params));
   });
 
-  router.get('/templates/:key', requirePermission('records_reports', 'view'), (req, res) => {
+  router.get('/templates/:key', requirePermission('records_reports.generate', 'view'), (req, res) => {
     const db = getDb();
     const row = /^\d+$/.test(req.params.key)
       ? db.prepare('SELECT * FROM form_templates WHERE id = ?').get(req.params.key)
@@ -133,7 +133,7 @@ export function formsRoutes() {
     res.json({ ...row, schema: JSON.parse(t.schema_json) });
   });
 
-  router.post('/templates', requirePermission('records_reports', 'create'), (req, res) => {
+  router.post('/templates', requirePermission('records_reports.generate', 'create'), (req, res) => {
     const { templateKey, title, category, description, moduleKey, schema, requiresSignature } = req.body ?? {};
     if (!templateKey || !title || !schema) return res.status(400).json({ error: 'templateKey, title and schema are required' });
     let schemaStr: string;
@@ -148,7 +148,7 @@ export function formsRoutes() {
     res.status(201).json({ id, templateKey });
   });
 
-  router.put('/templates/:id', requirePermission('records_reports', 'edit'), (req, res) => {
+  router.put('/templates/:id', requirePermission('records_reports.generate', 'edit'), (req, res) => {
     const db = getDb();
     const existing = db.prepare('SELECT * FROM form_templates WHERE id = ?').get(req.params.id) as { version: number } | undefined;
     if (!existing) return res.status(404).json({ error: 'Template not found' });
@@ -164,7 +164,7 @@ export function formsRoutes() {
     res.json({ ok: true });
   });
 
-  router.post('/templates/:id/toggle', requirePermission('records_reports', 'edit'), (req, res) => {
+  router.post('/templates/:id/toggle', requirePermission('records_reports.generate', 'edit'), (req, res) => {
     const db = getDb();
     const t = db.prepare('SELECT is_active FROM form_templates WHERE id = ?').get(req.params.id) as { is_active: number } | undefined;
     if (!t) return res.status(404).json({ error: 'Template not found' });
@@ -175,7 +175,7 @@ export function formsRoutes() {
   });
 
   // ── Submissions ──
-  router.post('/submissions', requirePermission('records_reports', 'create'), (req, res) => {
+  router.post('/submissions', requirePermission('records_reports.generate', 'create'), (req, res) => {
     const { templateKey, answers, signatureImageFileId, meaning } = req.body ?? {};
     if (!templateKey || !answers || typeof answers !== 'object') return res.status(400).json({ error: 'templateKey and answers are required' });
     const db = getDb();

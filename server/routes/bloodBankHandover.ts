@@ -679,7 +679,7 @@ export function bloodBankHandoverRoutes() {
     res.status(201).json({ id: capaId, capaNumber });
   });
 
-  router.post('/adverse-events/:id/create-safety-incident', requirePermission('facilities_safety', 'create'), (req, res) => {
+  router.post('/adverse-events/:id/create-safety-incident', requirePermission('facilities_safety.incidents', 'create'), (req, res) => {
     const db = getDb();
     const event = db.prepare('SELECT * FROM blood_adverse_events WHERE id = ?').get(req.params.id) as any;
     if (!event) return res.status(404).json({ error: 'Adverse event not found' });

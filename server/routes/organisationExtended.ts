@@ -6,18 +6,28 @@ import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getCurrentStaffId } from './routeHelpers.js';
 import { DECLARATION_TEMPLATES, DECLARATION_FORM_TYPES } from '../../shared/constants/declarations.js';
 
-// Notify all active staff via the notifications table (rich, actionable form).
+/**
+ * Tell every member of staff there is something for them to sign.
+ *
+ * Addressed to the STAFF RECORD. It used to select `users … WHERE staff_id IS
+ * NOT NULL`, so a code of conduct went only to people who already had a linked
+ * login — everybody else was simply skipped, permanently. The inbox matches on
+ * `assigned_to_staff_id`, so a row written now is waiting whenever the account
+ * appears.
+ */
 function notifyAllStaff(db: any, moduleKey: string, title: string, message: string, actionUrl: string, actionLabel: string, notificationType: string, severity: string) {
-  const users = db.prepare('SELECT u.id, u.staff_id FROM users u WHERE u.is_active = 1 AND u.staff_id IS NOT NULL').all() as Array<{ id: number; staff_id: number }>;
-  const stmt = db.prepare(`INSERT INTO notifications (user_id, module_key, title, message, status, severity, notification_type, record_type, record_id, assigned_to_staff_id, action_url, action_label, created_by)
-    VALUES (?, ?, ?, ?, 'unread', ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const staff = db.prepare('SELECT id FROM staff WHERE is_active = 1').all() as Array<{ id: number }>;
+  const accountOf = db.prepare('SELECT id FROM users WHERE staff_id = ? AND is_active = 1 ORDER BY id LIMIT 1');
+  const stmt = db.prepare(`INSERT INTO notifications (user_id, module_key, title, message, status, severity, notification_type, record_type, record_id, assigned_to_staff_id, assigned_to_user_id, action_url, action_label, created_by)
+    VALUES (?, ?, ?, ?, 'unread', ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const tx = db.transaction(() => {
-    for (const u of users) {
-      stmt.run(u.id, moduleKey, title, message, severity, notificationType, null, null, u.staff_id, actionUrl, actionLabel, u.id);
+    for (const s of staff) {
+      const account = accountOf.get(s.id) as { id: number } | undefined;
+      stmt.run(account?.id ?? null, moduleKey, title, message, severity, notificationType, null, null, s.id, account?.id ?? null, actionUrl, actionLabel, account?.id ?? null);
     }
   });
   tx();
-  return users.length;
+  return staff.length;
 }
 
 export function organisationExtendedRoutes() {

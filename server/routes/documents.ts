@@ -70,9 +70,23 @@ function flipOverdueAttestations(db: any) {
   db.prepare("UPDATE document_attestations SET status = 'overdue' WHERE status = 'pending' AND due_date IS NOT NULL AND due_date < date('now')").run();
 }
 
+/**
+ * Tell a member of staff there is something for them to do.
+ *
+ * Addressed to the STAFF RECORD, not to a login account. It used to loop over
+ * `users WHERE staff_id = ?` and insert one row per account — so a person with
+ * no account yet, or whose account was linked to their staff record after the
+ * document went out, got no row at all and never would. That is why a hundred
+ * attestations sat unread while the bench inboxes they belonged in were empty.
+ *
+ * One row per person, keyed on `assigned_to_staff_id`, which is what the inbox
+ * matches on. `user_id` is filled in as well when an account already exists, so
+ * the older code paths that read it keep working; when the account is created
+ * or linked later, the waiting task is simply there.
+ */
 function notifyStaff(db: any, staffId: number | null, moduleKey: string, title: string, message: string, opts?: { recordType?: string; recordId?: string | number; actionUrl?: string; actionLabel?: string; severity?: string; notificationType?: string; dueDate?: string | null }) {
   if (!staffId) return;
-  const users = db.prepare('SELECT id FROM users WHERE staff_id = ? AND is_active = 1').all(staffId) as Array<{ id: number }>;
+  const account = db.prepare('SELECT id FROM users WHERE staff_id = ? AND is_active = 1 ORDER BY id LIMIT 1').get(staffId) as { id: number } | undefined;
   const type = opts?.notificationType || 'follow_up';
   const severity = opts?.severity || 'medium';
   const rt = opts?.recordType || null;
@@ -80,14 +94,14 @@ function notifyStaff(db: any, staffId: number | null, moduleKey: string, title: 
   const url = opts?.actionUrl || null;
   const label = opts?.actionLabel || null;
   const due = opts?.dueDate || null;
-  for (const u of users) {
-    // Rich, actionable notification: title + message + a link to the source
-    // record, so the inbox and dashboard can navigate the user straight to the
-    // action they need to take (and auto-resolve once completed).
-    db.prepare(`INSERT INTO notifications (user_id, module_key, title, message, status, severity, notification_type, record_type, record_id, assigned_to_staff_id, action_url, action_label, due_date, created_by)
-      VALUES (?, ?, ?, ?, 'unread', ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(u.id, moduleKey, title, message, severity, type, rt, rid, staffId, url, label, due, u.id);
+  // Never raise the same task twice for the same person and record.
+  if (rt && rid) {
+    const existing = db.prepare('SELECT id FROM notifications WHERE assigned_to_staff_id = ? AND record_type = ? AND record_id = ?').get(staffId, rt, rid);
+    if (existing) return;
   }
+  db.prepare(`INSERT INTO notifications (user_id, module_key, title, message, status, severity, notification_type, record_type, record_id, assigned_to_staff_id, assigned_to_user_id, action_url, action_label, due_date, created_by)
+    VALUES (?, ?, ?, ?, 'unread', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(account?.id ?? null, moduleKey, title, message, severity, type, rt, rid, staffId, account?.id ?? null, url, label, due, account?.id ?? null);
 }
 
 function htmlEscape(v: unknown) { return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }

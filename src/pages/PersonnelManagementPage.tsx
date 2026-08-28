@@ -80,7 +80,7 @@ export function PersonnelManagementPage() {
   // name. The old test matched any role whose title happened to contain
   // "manager", "head", "administrator" or "supervisor", so a custom role such
   // as "Bench Head" silently gained roster editing nobody had granted it.
-  const canEditRosters = can('personnel', 'edit');
+  const canEditRosters = can('personnel.rosters', 'edit');
   const { staff, sections, departments, positions, reloadStaff } = useLookups();
   const [tab, setTab] = useState('Dashboard');
   const [error, setError] = useState<string | null>(null);
@@ -344,8 +344,8 @@ export function PersonnelManagementPage() {
         <div className="section-head" style={{ alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <h3 style={{ margin: 0 }}>Master Personnel Register</h3>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            {can('personnel', 'export') && <button type="button" className="secondary" disabled={!!regBusy} title="Download the register as an Excel workbook" onClick={() => downloadRegister('/staff/export', 'Master_Personnel_Register.xlsx')}><Download size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />{regBusy === '/staff/export' ? 'Exporting…' : 'Export'}</button>}
-            {can('personnel', 'create') && <>
+            {can('personnel.register', 'export') && <button type="button" className="secondary" disabled={!!regBusy} title="Download the register as an Excel workbook" onClick={() => downloadRegister('/staff/export', 'Master_Personnel_Register.xlsx')}><Download size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />{regBusy === '/staff/export' ? 'Exporting…' : 'Export'}</button>}
+            {can('personnel.register', 'create') && <>
               <button type="button" className="secondary" disabled={!!regBusy} title="Upload a completed register workbook" onClick={() => importInputRef.current?.click()}><Upload size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />{regBusy === 'import' ? 'Importing…' : 'Import'}</button>
               <input ref={importInputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) void importRegister(f); }} />
             </>}

@@ -28,7 +28,7 @@ export function monitoringRoutes() {
     res.json(db.prepare('SELECT * FROM monitoring_records ORDER BY created_at DESC').all());
   });
 
-  router.post('/', requirePermission('monitoring', 'create'), (req, res) => {
+  router.post('/', requirePermission('monitoring.readings', 'create'), (req, res) => {
     const db = getDb();
     const createdAt = new Date().toISOString();
     const monitoringNumber = generateRecordNumber(db, 'monitoring_records', 'MON', createdAt);
@@ -257,7 +257,7 @@ export function monitoringRoutes() {
     res.json(item);
   });
 
-  router.put('/:id', requirePermission('monitoring', 'edit'), (req, res) => {
+  router.put('/:id', requirePermission('monitoring.readings', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM monitoring_records WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Monitoring record not found' });

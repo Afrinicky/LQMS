@@ -2045,13 +2045,13 @@ export function commonRoutes() {
     audit(req, { action: 'import', entity: 'staff', newValue: { created: result.created, updated: result.updated, skipped: result.skipped } });
     res.json(result);
   });
-  router.post('/files', requirePermission('documents', 'create'), upload.single('file'), (req, res) => {
+  router.post('/files', requirePermission('documents.library', 'create'), upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const r = getDb().prepare('INSERT INTO files (original_name, stored_name, mime_type, size_bytes, storage_area, uploaded_by) VALUES (?, ?, ?, ?, ?, ?)').run(req.file.originalname, req.file.filename, req.file.mimetype, req.file.size, 'uploads', req.user!.id);
     audit(req, { action: 'create', entity: 'files', entityId: r.lastInsertRowid, newValue: { originalName: req.file.originalname, storedName: req.file.filename } });
     res.status(201).json({ id: r.lastInsertRowid, storedName: req.file.filename });
   });
-  router.post('/evidence', requirePermission('documents', 'create'), upload.single('file'), (req, res) => {
+  router.post('/evidence', requirePermission('records_reports.evidence', 'create'), upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     fs.renameSync(req.file.path, path.join(evidenceRoot, req.file.filename));
     const file = getDb().prepare('INSERT INTO files (original_name, stored_name, mime_type, size_bytes, storage_area, uploaded_by) VALUES (?, ?, ?, ?, ?, ?)').run(req.file.originalname, req.file.filename, req.file.mimetype, req.file.size, 'evidence', req.user!.id);
@@ -2119,7 +2119,7 @@ export function commonRoutes() {
   });
 
   router.get('/documents', requirePermission('documents', 'view'), (_req, res) => res.json(getDb().prepare('SELECT * FROM documents ORDER BY created_at DESC').all()));
-  router.post('/documents/import-master-list', requirePermission('documents', 'create'), (req, res) => { audit(req, { action: 'create', entity: 'documents', newValue: req.body }); res.json({ ok: true, message: 'MVP import placeholder accepted. CSV parsing will be implemented in the next phase.' }); });
+  router.post('/documents/import-master-list', requirePermission('documents.masterlist', 'create'), (req, res) => { audit(req, { action: 'create', entity: 'documents', newValue: req.body }); res.json({ ok: true, message: 'MVP import placeholder accepted. CSV parsing will be implemented in the next phase.' }); });
 
   router.get('/actions', requirePermission('actions', 'view'), (req, res) => {
     const db = getDb();

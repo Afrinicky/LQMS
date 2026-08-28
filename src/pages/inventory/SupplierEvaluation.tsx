@@ -47,7 +47,7 @@ const emptyEval = { supplierId: '', frameworkId: '', evaluationDate: new Date().
 
 function EvaluationList({ suppliers }: { suppliers: Supplier[] }) {
   const { can } = usePermissions();
-  const mayEvaluate = can('supplier_inventory', 'approve');
+  const mayEvaluate = can('supplier_inventory.suppliers', 'approve');
   const [rows, setRows] = useState<SupplierEvalAssessment[]>([]);
   const [frameworks, setFrameworks] = useState<SupplierEvalFramework[]>([]);
   const [creating, setCreating] = useState(false);
@@ -330,7 +330,7 @@ const emptyFramework = { title: '', category: '', versionLabel: '1.0', purpose: 
 
 function FrameworkList() {
   const { can } = usePermissions();
-  const mayCreate = can('supplier_inventory', 'create');
+  const mayCreate = can('supplier_inventory.suppliers', 'create');
   const [frameworks, setFrameworks] = useState<SupplierEvalFramework[]>([]);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState(emptyFramework);
@@ -393,10 +393,10 @@ function FrameworkList() {
 
 function FrameworkEditor({ id, onClose, onListChanged }: { id: number; onClose: () => void; onListChanged: () => Promise<void> }) {
   const { can } = usePermissions();
-  const mayEdit = can('supplier_inventory', 'edit');
-  const mayCreate = can('supplier_inventory', 'create');
-  const mayApprove = can('supplier_inventory', 'approve');
-  const mayArchive = can('supplier_inventory', 'void_archive');
+  const mayEdit = can('supplier_inventory.suppliers', 'edit');
+  const mayCreate = can('supplier_inventory.suppliers', 'create');
+  const mayApprove = can('supplier_inventory.suppliers', 'approve');
+  const mayArchive = can('supplier_inventory.suppliers', 'void_archive');
   const mayPrint = can('supplier_inventory', 'print');
   const [framework, setFramework] = useState<SupplierEvalFramework | null>(null);
   const [error, setError] = useState<string | null>(null);
