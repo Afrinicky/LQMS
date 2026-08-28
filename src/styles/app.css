@@ -4334,3 +4334,52 @@ button.cell-mark:disabled { cursor: default; }
   .rw-side { flex-direction: column; align-items: stretch; }
   .rw-side .duty-side-links { justify-content: flex-start; }
 }
+
+/* ---- Signing a row from the list ------------------------------------------
+   Two clicks, not one: an attestation is a signed statement that a named
+   person read a controlled document, and a single unguarded click sitting
+   beside far lighter buttons would collect signatures nobody meant to give.
+   The confirm replaces the button in place, so it stays quick without
+   becoming careless. */
+.pt-quick {
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+  padding: 6px 11px; font-size: 11.5px; font-weight: 600; border-radius: 8px;
+  border: 1px solid var(--border-strong); background: transparent;
+  color: var(--muted); box-shadow: none;
+}
+.pt-quick:hover { color: var(--text); border-color: var(--accent); background: var(--accent-soft); transform: none; }
+.pt-quick-confirm {
+  display: inline-flex; align-items: center; gap: 7px; flex-wrap: wrap; justify-content: flex-end;
+  font-size: 11px; color: var(--muted); max-width: 260px; text-align: right;
+}
+.pt-quick.yes { background: var(--success-bg); border-color: rgba(52, 211, 153, 0.35); color: var(--success); }
+.pt-quick.no { padding: 6px 9px; }
+.pt-quick-error {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; color: var(--danger); max-width: 240px; text-align: right; line-height: 1.4;
+}
+
+/* ---- Job descriptions -----------------------------------------------------
+   The document itself, read where the person already is. No copy of the
+   content lives in either screen: both list which document applies and open
+   document control's viewer, so there is one job description, not three that
+   will eventually disagree. */
+.pjd-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.pjd-list > li {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+  padding: 12px 15px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface);
+}
+.pjd-list > li:hover { border-color: var(--border-strong); }
+.pjd-main { display: grid; gap: 5px; min-width: 0; flex: 1; }
+.pjd-title { font-size: 13.5px; font-weight: 700; color: var(--text); }
+.pjd-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; font-size: 11.5px; color: var(--faint); }
+
+.jd-gaps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-width: 640px; }
+.jd-gaps > li {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 9px 13px; border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-strong); background: rgba(255, 255, 255, 0.02);
+  font-size: 12.5px; color: var(--muted);
+}
+.pjd-nofile { font-size: 11.5px; font-style: italic; white-space: nowrap; }

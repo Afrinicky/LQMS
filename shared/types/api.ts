@@ -550,6 +550,26 @@ export type RoutineWorkResponse = {
   counts:{ due:number; done:number; missed:number; blocked:number; programme:number };
 };
 
+/**
+ * A job description as the portal and Personnel Management read it: the
+ * controlled document itself, plus the post or person it describes.
+ */
+export type JobDescriptionDoc = {
+  id:number; document_code?:string|null; title:string; document_type:string; status:string;
+  next_review_date?:string|null;
+  applies_to_position_id?:number|null; applies_to_staff_id?:number|null;
+  position_title?:string|null; staff_name?:string|null;
+  current_version_id?:number|null; version_number?:string|null; version_label?:string|null;
+  effective_date?:string|null; file_id?:number|null; file_name?:string|null;
+  owner_name?:string|null; created_at?:string; updated_at?:string|null;
+};
+
+/** The register view: what exists, and which active posts have nothing. */
+export type JobDescriptionRegister = {
+  documents: JobDescriptionDoc[];
+  gaps: Array<{ id:number; title:string; staff_count:number }>;
+};
+
 export type ActivityAssignee = { id:number; occurrence_id:number; staff_id:number; user_id?:number|null; assignment_source:string; shift_code?:string|null; bench_name?:string|null; is_watcher:number; notified_at?:string|null; staff_name?:string|null };
 export type ActivityFeedback = { id:number; activity_id:number; occurrence_id?:number|null; staff_id?:number|null; ease_rating?:number|null; minutes_taken?:number|null; comment?:string|null; created_at:string; staff_name?:string|null; activity_name?:string|null };
 export type DutyContext = { date:string; month:string; shiftCode:string|null; shiftLabel:string|null; onDuty:boolean; sectionId:number|null; sectionName:string|null; benchName:string|null; assignmentSource:string|null; rosterStatus:string|null; rosterCarriedForward:boolean; benchCarriedForward:boolean };

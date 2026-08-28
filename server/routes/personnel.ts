@@ -539,6 +539,99 @@ export function personnelRoutes() {
     res.json({ ok: true, changed: sets.length });
   });
 
+  /* ---- Job descriptions -------------------------------------------------
+   * A job description is a controlled document like any other: written,
+   * reviewed, approved, versioned and issued through document control. What
+   * makes it different is that it is the one document whose whole purpose is to
+   * describe a particular job, so it has somewhere to say which — a position,
+   * or occasionally one named person.
+   *
+   * These two routes are the consequence. Neither holds a copy of anything:
+   * both read the document register and return the same rows Document Control
+   * would, so a job description is uploaded ONCE and appears in three places —
+   * the document library, Personnel Management, and the portal of every person
+   * who holds that post. Keeping a second copy on the staff file was the
+   * alternative, and it is how a laboratory ends up with two job descriptions
+   * that disagree.
+   * --------------------------------------------------------------------- */
+  const JOB_DESCRIPTION_TYPE = 'Job Description';
+  // In force, in document control's own vocabulary: approved and issued as the
+  // current version, or current but due for its periodic review. A document due
+  // for review is still the one people must follow — it is not withdrawn.
+  const JD_IN_FORCE = ['approved', 'current', 'due_review'];
+
+  /** The columns both routes return, so the register and the portal agree. */
+  const JD_SELECT = `SELECT d.id, d.document_code, d.title, d.document_type, d.status,
+      d.next_review_date, d.applies_to_position_id, d.applies_to_staff_id,
+      d.current_version_id, d.updated_at, d.created_at,
+      p.title AS position_title, st.full_name AS staff_name,
+      v.version_number, v.version_label, v.effective_date, v.file_id,
+      f.original_name AS file_name,
+      own.full_name AS owner_name
+    FROM documents d
+    LEFT JOIN positions p ON p.id = d.applies_to_position_id
+    LEFT JOIN staff st ON st.id = d.applies_to_staff_id
+    LEFT JOIN document_versions v ON v.id = d.current_version_id
+    LEFT JOIN files f ON f.id = v.file_id
+    LEFT JOIN staff own ON own.id = d.owner_staff_id`;
+
+  /**
+   * My job description(s).
+   *
+   * Matched two ways, in order of specificity: one issued to me by name wins,
+   * otherwise the one for each post I actively hold. A person acting up in a
+   * second post sees both descriptions, which is the honest answer — they are
+   * doing both jobs.
+   *
+   * Only issued documents are returned. A draft job description is somebody's
+   * work in progress, and a member of staff reading their duties from a draft
+   * that later changes is worse than reading nothing.
+   */
+  router.get('/my-job-descriptions', (req, res) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    const staffId = req.user.staffId;
+    if (!staffId) return res.json([]);
+    const db = getDb();
+    const rows = db.prepare(`${JD_SELECT}
+      WHERE d.document_type = ?
+        AND d.status IN (${JD_IN_FORCE.map(() => '?').join(', ')})
+        AND (
+          d.applies_to_staff_id = ?
+          OR d.applies_to_position_id IN (
+            SELECT spa.position_id FROM staff_position_assignments spa
+            WHERE spa.staff_id = ? AND spa.is_active = 1
+          )
+        )
+      ORDER BY CASE WHEN d.applies_to_staff_id = ? THEN 0 ELSE 1 END, d.title`)
+      .all(JOB_DESCRIPTION_TYPE, ...JD_IN_FORCE, staffId, staffId, staffId);
+    res.json(rows);
+  });
+
+  /**
+   * The register of job descriptions, for Personnel Management.
+   *
+   * `personnel.register` because this is the whole laboratory's — who has a
+   * description on file, which post it covers, and which posts have none. That
+   * last one is the question an assessor asks, so a position with no issued
+   * description is returned too, as a gap rather than a silence.
+   */
+  router.get('/job-descriptions', requirePermission('personnel.register', 'view'), (req, res) => {
+    const db = getDb();
+    const documents = db.prepare(`${JD_SELECT}
+      WHERE d.document_type = ? AND d.status != 'obsolete'
+      ORDER BY COALESCE(p.title, st.full_name, d.title)`).all(JOB_DESCRIPTION_TYPE) as any[];
+
+    const covered = new Set(documents
+      .filter(d => d.applies_to_position_id && JD_IN_FORCE.includes(String(d.status)))
+      .map(d => Number(d.applies_to_position_id)));
+    const gaps = (db.prepare(`SELECT p.id, p.title,
+          (SELECT COUNT(*) FROM staff_position_assignments spa WHERE spa.position_id = p.id AND spa.is_active = 1) AS staff_count
+        FROM positions p WHERE p.is_active = 1 ORDER BY p.title`).all() as any[])
+      .filter(p => !covered.has(Number(p.id)));
+
+    res.json({ documents, gaps });
+  });
+
   /**
    * A file the caller is attaching to their own record.
    *

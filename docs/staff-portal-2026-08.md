@@ -80,6 +80,58 @@ reader's own row highlighted and pulled to the top. Only `published` and
 planning a week around one that later changes is worse than not seeing it.
 `personnel.rosters: view` is in the baseline every member of staff holds.
 
+## Signing an attestation from the list
+
+An attestation row carries two controls now. **Read & attest** opens the
+document in document control's own viewer, as before. **Sign** records it from
+the list, for the case that is genuinely common — somebody who read the SOP at
+the bench, or read it here yesterday and is clearing their list this morning.
+
+It is two clicks, deliberately. An attestation is a signed statement that a
+named person read and understood a controlled document; a single unguarded
+click, sitting beside "Done" buttons that mean far less, would collect
+signatures nobody intended to give. So the first click replaces the button with
+the sentence being signed and a confirm, in place on the row — still quick, no
+dialog and no navigation, but nobody signs by accident.
+
+## Job descriptions
+
+A job description is a controlled document like any other: written, reviewed,
+approved, versioned and issued through Documents & Records. What makes it
+different is that it is the one document whose purpose is to describe a
+particular job — so `documents` gained two columns saying which:
+
+* `applies_to_position_id` — the post it describes. Everybody holding that post
+  sees it.
+* `applies_to_staff_id` — for a laboratory that issues a personalised
+  description. One issued by name takes precedence over the one for the post.
+
+Both are distinct from `owner_position_id`, which already existed and means
+something else: the post responsible for keeping the document current.
+
+The consequence is that a job description is **uploaded once and appears in
+three places**, none of which holds a copy:
+
+| Where | What it is |
+| --- | --- |
+| Documents & Records | the document itself, with the two new fields on the form when the type is Job Description |
+| Personnel Management → Job Descriptions | the register: which post, which version, which status — and **which active posts have none**, with how many people hold each |
+| My Portal → My Record | the holder's own, opened in document control's viewer |
+
+Keeping a second copy on the staff file was the alternative, and it is how a
+laboratory ends up with two job descriptions that disagree — with the one the
+member of staff reads being the stale one. So all three surfaces read the
+register (`GET /personnel/my-job-descriptions`, self-scoped;
+`GET /personnel/job-descriptions`, gated on `personnel.register`) and open the
+same viewer. When a new version is issued, what is read in the portal changes
+with it, because it is the same document.
+
+Only documents in force reach a portal — `approved`, `current` or `due_review`.
+A draft job description is somebody's work in progress, and a member of staff
+reading their duties from one that later changes is worse than reading nothing.
+A description registered without a file says so on the row rather than offering
+to open an empty window.
+
 ## Routine Work — and who is competent to do it
 
 The recurring work of a bench — environmental charting, bench and equipment
