@@ -5582,6 +5582,7 @@ CREATE TABLE IF NOT EXISTS unit_activities (
   due_time TEXT,                           -- HH:MM the work should be done by
   grace_minutes INTEGER NOT NULL DEFAULT 0,
   assign_mode TEXT NOT NULL DEFAULT 'on_duty',  -- on_duty|bench|unit_head|named_staff|whole_unit
+  performer_tier TEXT NOT NULL DEFAULT 'general',  -- general|technical|supervisory: who is competent to perform it
   responsible_staff_id INTEGER REFERENCES staff(id),
   priority TEXT NOT NULL DEFAULT 'normal',
   evidence_required INTEGER NOT NULL DEFAULT 0,
@@ -5789,6 +5790,18 @@ CREATE TABLE IF NOT EXISTS system_audit_scans (
   detail TEXT
 );
 `);
+
+  // Which tier of staff is competent to PERFORM an activity.
+  //
+  // Being rostered onto a bench is not the same as being qualified to do
+  // everything that happens on it: charting a fridge is work anyone on duty
+  // does, accepting an IQC batch is a registered scientist's, and signing off a
+  // quarterly review is the supervisor's. The tier maps to a permission
+  // feature, so who holds each one is an Access Control decision per profile
+  // rather than something wired into the code. Activities that pre-date the
+  // column default to 'general', which is effectively what they already were.
+  const activityCols = new Set((database.prepare('PRAGMA table_info(unit_activities)').all() as Array<{ name: string }>).map(c => c.name));
+  if (!activityCols.has('performer_tier')) database.exec("ALTER TABLE unit_activities ADD COLUMN performer_tier TEXT NOT NULL DEFAULT 'general'");
 
   // duty_rosters, reassignment_schedules and bench_schedules pre-date automatic
   // roll-forward: mark the ones the system created itself so a carried-forward

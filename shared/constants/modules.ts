@@ -14,6 +14,13 @@ export const MODULES: ModuleDefinition[] = [
   // the Main Dashboard is management's view of the whole laboratory, and this
   // is one person's view of their own working file and everything they owe.
   { key: 'staff_portal', label: 'My Portal', path: '/my-portal', protected: true },
+  // Routine Work — the recurring bench work (environmental charting,
+  // decontamination, equipment care, IQC) that staff perform from inside their
+  // portal. It is a module so that it can be switched off for a laboratory and
+  // so its tiers are permissions like everything else, but it is deliberately
+  // absent from NAV_SECTIONS: it has no workspace of its own, and its path
+  // points at the portal face where the work is actually done.
+  { key: 'routine_work', label: 'Routine Work', path: '/my-portal', protected: true },
   { key: 'documents', label: 'Documents & Records', path: '/documents', protected: true },
   { key: 'dennis', label: 'Dennis', path: '/dennis', protected: true },
   { key: 'organisation', label: 'Organisation & Leadership', path: '/organisation', protected: true },

@@ -92,7 +92,7 @@ export function seedDefaults() {
     // Bump whenever the table below changes in a way an existing laboratory
     // must receive — a right withdrawn, or a new area added to a role. See the
     // note beside the application loop for why this exists.
-    const ROLE_DEFAULTS_VERSION = '2026.08-features.7-staff-portal';
+    const ROLE_DEFAULTS_VERSION = '2026.08-features.8-routine-tiers';
 
     // Every member of staff, whatever their rank: their own record, their own
     // inbox, the launchpad, the ability to raise a safety incident or a
@@ -135,6 +135,11 @@ export function seedDefaults() {
       // their own staff record and nothing else.
       contribute: [
         'nc_capa', 'facilities_safety.incidents', 'actions', 'complaints',
+        // The routine work of the bench — charting a fridge, decontaminating a
+        // bench, a stock check — is what being on duty means. Everyone on duty
+        // does it, so the general tier is part of the baseline; the technical
+        // and supervisory tiers belong to the jobs that carry them, below.
+        'routine_work.general',
       ],
     };
 
@@ -481,6 +486,46 @@ export function seedDefaults() {
         ],
       },
     };
+
+    // ---- Who may perform which tier of routine work ------------------------
+    // The recurring work of a unit is not one job. Charting a fridge and
+    // decontaminating a bench are done by whoever is on duty. Running and
+    // accepting an IQC batch, or a technical service on an analyser, is
+    // registered scientific work. Reviewing and signing off the unit's
+    // programme is the supervisor's.
+    //
+    // Stated here in one table for the same reason the dashboard is: "who is
+    // competent to do what" is a decision a laboratory should be able to read
+    // in one place and change deliberately. Each entry is the DEFAULT — the
+    // Access Control screen carries these three features like any other, so a
+    // laboratory that trains its technicians on the analysers grants them the
+    // technical tier there without touching this file.
+    //
+    // The general tier is in the baseline above and so is not repeated.
+    const ROUTINE_TECHNICAL_ROLES = [
+      'Biomedical Scientist', 'Section Head', 'Blood Bank Unit Head', 'POCT Officer',
+      'Safety Manager', 'Quality Team Member', 'Quality Manager', 'Laboratory Manager',
+    ];
+    const ROUTINE_SUPERVISORY_ROLES = [
+      'Section Head', 'Blood Bank Unit Head', 'Safety Manager', 'Quality Manager', 'Laboratory Manager',
+    ];
+    // Reading what the whole unit was due to do, and what was actually done.
+    // Auditing the programme is not performing it, so the Internal Auditor is
+    // here and in neither list above.
+    const ROUTINE_OVERSIGHT_ROLES = [
+      'Section Head', 'Blood Bank Unit Head', 'Safety Manager', 'Quality Team Member',
+      'Quality Manager', 'Laboratory Manager', 'Internal Auditor',
+    ];
+    const addRoutine = (roleNames: string[], key: string, level: AccessLevel) => {
+      for (const roleName of roleNames) {
+        const role = ROLE_ACCESS[roleName];
+        if (!role) continue;
+        role[level] = [...(role[level] ?? []), key];
+      }
+    };
+    addRoutine(ROUTINE_TECHNICAL_ROLES, 'routine_work.technical', 'contribute');
+    addRoutine(ROUTINE_SUPERVISORY_ROLES, 'routine_work.supervisory', 'contribute');
+    addRoutine(ROUTINE_OVERSIGHT_ROLES, 'routine_work.oversight', 'view');
 
     // ---- Who sees the Main Dashboard ---------------------------------------
     // The Main Dashboard answers a management question — how is the laboratory

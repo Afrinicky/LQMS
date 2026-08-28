@@ -470,7 +470,7 @@ export function completeOccurrence(db: Db, occurrenceId: number, input: { staffI
    ========================================================================= */
 const TODO_SELECT = `SELECT o.*, a.name AS activity_name, a.activity_code, a.category, a.frequency, a.interval_days,
      a.priority, a.instructions, a.target_route, a.target_module_key, a.estimated_minutes, a.evidence_required,
-     a.sound_key, a.redesign_status, s.name AS section_name, asg.assignment_source, asg.is_watcher,
+     a.performer_tier, a.sound_key, a.redesign_status, s.name AS section_name, asg.assignment_source, asg.is_watcher,
      asg.shift_code, asg.bench_name, cs.full_name AS completed_by_name
    FROM activity_occurrences o
    JOIN unit_activities a ON a.id = o.activity_id
