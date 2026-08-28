@@ -3,14 +3,21 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowRight, CalendarClock, CalendarRange, ShieldAlert } from 'lucide-react';
 import { useDutyReminders } from '../../hooks/useDutyReminders';
 import { dueTone, usePortal } from './portalData';
+import { PortalBenchSchedules, PortalDutyRosters, PortalReassignments } from './PortalScheduleBoards';
 
 /**
  * My schedule — when this person is working, and what falls due while they are.
  *
- * The duty roster is published for the whole laboratory, which is exactly why
- * a member of staff struggles to find their own line in it. This is only their
- * line: the shifts they are on, the bench they are on today, the rosters they
- * personally owe, and the review-calendar items naming them.
+ * Two things, in this order. First their own line: where they are today, the
+ * shifts assigned to them, the rosters they personally owe, the review items
+ * naming them. Then the schedules themselves — the department roster, the unit
+ * reassignment memo, their unit's bench schedule — read in place.
+ *
+ * The second part is here because being off the roster this week does not stop
+ * a person needing to read it. Somebody on leave still has to know when they
+ * are back on nights, and a scientist covering another bench needs that unit's
+ * schedule. Sending them to Personnel Management for it was no answer at all:
+ * most of the laboratory cannot open Personnel Management.
  */
 export default function PortalSchedule() {
   const navigate = useNavigate();
@@ -18,6 +25,7 @@ export default function PortalSchedule() {
   const { data } = useDutyReminders();
 
   const staffId = (profile?.staff as { id?: number } | null)?.id ?? null;
+  const sectionName = (profile?.staff as { section_name?: string | null } | null)?.section_name ?? null;
   const mineOnCalendar = useMemo(
     () => (staffId ? calendar.filter(c => c.responsible_staff_id === staffId && c.status !== 'completed' && c.status !== 'cancelled') : [])
       .sort((a, b) => String(a.due_date).localeCompare(String(b.due_date))),
@@ -114,6 +122,12 @@ export default function PortalSchedule() {
           </table>
         )}
       </section>
+
+      {/* The laboratory's published schedules, read here rather than fetched
+          from a workspace most of the bench may not open. */}
+      <PortalDutyRosters myStaffId={staffId} />
+      <PortalReassignments myStaffId={staffId} mySectionName={sectionName} />
+      <PortalBenchSchedules myStaffId={staffId} mySectionName={sectionName} />
 
       <section className="portal-panel">
         <div className="pp-head">

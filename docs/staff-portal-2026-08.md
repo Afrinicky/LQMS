@@ -51,6 +51,74 @@ and `src/pages/personnel/UserPortal.tsx` were superseded and removed. The
 alert-target map now sends activity alerts to `/my-portal?tab=My Tasks` instead
 of the dashboard, and the topbar bell and user chip both open the portal.
 
+## The portal is where the work happens
+
+The first version told a member of staff what they owed and then sent them
+somewhere else to do it. That is most of the way to useless — the reason the
+list is worth having is that the list is where the work happens — so every kind
+of task the portal raises now opens its own completion surface **over the
+portal**, and closes back onto the list with the row gone. Nothing navigates.
+
+| Task | What opens |
+| --- | --- |
+| Declaration | The text, the acknowledgement, a conflict-of-interest box, and (for a form issued as a file) download-sign-attach |
+| Attestation | Document control's own viewer, lazy-imported, with its "I have read & understood" control |
+| Action assigned to me | A progress panel: In progress / Waiting for evidence / Submitted for review / Completed, plus notes |
+| Queued task | Start it, or mark it done |
+| Unit activity | Already one tap on the duty panel |
+
+The same drawer serves the landing, My Tasks and My Declarations, so there is
+one way to sign a declaration however you reached it.
+
+## The schedules, read in place
+
+Being off the roster this week does not stop a person needing to read it.
+**My Schedule** now carries the published duty roster, the unit reassignment
+memo and bench schedules — read-only grids opened over the portal, with the
+reader's own row highlighted and pulled to the top. Only `published` and
+`approved` schedules appear: a draft is somebody's work in progress, and
+planning a week around one that later changes is worse than not seeing it.
+`personnel.rosters: view` is in the baseline every member of staff holds.
+
+## The half of the file its subject keeps
+
+A personnel file has two halves. One is what the laboratory decides — post,
+unit, staff number, appointment — and it stays with Personnel Management, is
+shown with a padlock, and says so. The other is what the person knows and the
+laboratory does not, and it was going stale because updating it meant asking
+somebody to type it in.
+
+Staff now maintain that half themselves:
+
+* **My Record** — phone, email, emergency contact, date of birth, ID, and their
+  qualifications, regulator, licence number and expiry. Plus a **passport
+  photograph**: any picture is cropped to 7:9 and re-encoded in the browser
+  before it is sent, so a phone photograph arrives the right shape and a
+  fraction of the 2 MB cap.
+* **My Documents** — upload, correct and remove their own certificates and
+  licences.
+* **My Training** — courses, conferences and qualifications completed outside
+  the laboratory's own register (`staff_cpd_records`), with the certificate
+  attached.
+
+The line is drawn at consequence, and at evidence. A field that decides what
+somebody may do is not theirs. And once Personnel Management has **verified** a
+document or a training record it becomes evidence and stops being editable from
+the portal — a verified record whose subject can still quietly change the dates
+is not evidence of anything. A document the register placed on the file is
+read-only there from the start. Every self-service change is written to the
+audit trail with its old value.
+
+Endpoints (all self-scoped; none accepts a staff id from the body):
+`PUT /personnel/my-profile`, `POST /personnel/my-upload`,
+`POST|PUT|DELETE /personnel/my-documents[/:id]`,
+`GET|POST|PUT|DELETE /personnel/my-training[/:id]`,
+`POST|GET|DELETE /personnel/my-photo`, and
+`POST /actions/:id/my-progress` — which moves an action only along the *doing*
+half of its lifecycle. Verified and Closed are the verifier's words and are
+refused: an assignee marking their own work verified is the thing an audit trail
+exists to prevent.
+
 ## Access
 
 * `staff_portal` is granted to the **whole laboratory** at Manage level in the

@@ -16,7 +16,8 @@ import { ChangePasswordModal } from '../components/ChangePasswordModal';
 import { WaveBackground, MedicalLabBackgroundMarks } from '../components/ui';
 import { PortalProvider, initialsOf, isOpenAlert, usePortal } from './portal/portalData';
 import PortalInbox, { InboxRow, filterInbox } from './portal/PortalInbox';
-import PortalTasks, { useOwedWork } from './portal/PortalTasks';
+import PortalTasks, { OwedRow, useOwedWork } from './portal/PortalTasks';
+import PortalTaskDrawer, { type PortalTaskTarget } from './portal/PortalTaskDrawer';
 import PortalRecord, { LinkStaffPrompt } from './portal/PortalRecord';
 import PortalDocuments from './portal/PortalDocuments';
 import PortalDeclarations from './portal/PortalDeclarations';
@@ -116,7 +117,7 @@ function PortalShell() {
    ------------------------------------------------------------------------- */
 function PortalHero({ onOpen }: { onOpen: (tab: PortalTab) => void }) {
   const { user } = useAuth();
-  const { profile, staff, hasSignature, signatureUrl, uploadSignature, setError } = usePortal();
+  const { profile, staff, hasSignature, signatureUrl, photoUrl, uploadSignature, setError } = usePortal();
   const { data } = useDutyReminders();
   const [showPassword, setShowPassword] = useState(false);
   const sigInput = useRef<HTMLInputElement>(null);
@@ -141,7 +142,12 @@ function PortalHero({ onOpen }: { onOpen: (tab: PortalTab) => void }) {
       </div>
 
       <div className="ph-identity">
-        <span className="ph-avatar">{initialsOf(fullName)}</span>
+        {/* The photograph if there is one, initials if not. A face is how a
+            colleague recognises a record, and how the person recognises their
+            own portal the moment it opens. */}
+        {photoUrl
+          ? <img className="ph-avatar ph-avatar-photo" src={photoUrl} alt={`${fullName} — profile picture`} />
+          : <span className="ph-avatar">{initialsOf(fullName)}</span>}
         <div className="ph-who">
           <span className="eyebrow">My Portal · Staff workspace</span>
           <h2>{fullName}</h2>
@@ -211,6 +217,10 @@ function PortalHome({ onOpen }: { onOpen: (tab: PortalTab) => void }) {
   const { inbox, declarations, documents, tasks, queue, profile, reloadInbox } = usePortal();
   const { data } = useDutyReminders();
   const { assigned, coming } = useOwedWork();
+  // The landing shows the first few rows of the same list the My Tasks face
+  // shows, and clicking one does the same thing: it opens here, over the
+  // portal, rather than sending anybody to another workspace.
+  const [openTask, setOpenTask] = useState<PortalTaskTarget | null>(null);
 
   const openAlerts = useMemo(() => inbox.filter(isOpenAlert), [inbox]);
   const unread = openAlerts.filter(n => n.status === 'unread').length;
@@ -343,19 +353,7 @@ function PortalHome({ onOpen }: { onOpen: (tab: PortalTab) => void }) {
               <div className="pp-clear"><Sparkles size={18} /><span>Nothing is assigned to you right now.</span></div>
             ) : (
               <ul className="pt-list">
-                {assigned.slice(0, 5).map(r => (
-                  <li key={r.key} className="pt-row">
-                    <span className="pt-rail info" />
-                    <button type="button" className="pt-row-main" onClick={() => navigate(r.to)}>
-                      <span className="pt-row-title">{r.title}</span>
-                      {r.detail && <span className="pt-row-msg">{r.detail}</span>}
-                      <span className="pt-row-meta"><span className="badge">{r.badge}</span>{r.due && <span>{r.due}</span>}</span>
-                    </button>
-                    <div className="pt-row-side">
-                      <button type="button" className="pt-open" onClick={() => navigate(r.to)}>{r.cta} <ArrowRight size={13} /></button>
-                    </div>
-                  </li>
-                ))}
+                {assigned.slice(0, 5).map(r => <OwedRow key={r.key} row={r} onOpen={setOpenTask} />)}
               </ul>
             )}
             {assigned.length > 5 && (
@@ -418,6 +416,8 @@ function PortalHome({ onOpen }: { onOpen: (tab: PortalTab) => void }) {
           </section>
         </div>
       </div>
+
+      {openTask && <PortalTaskDrawer target={openTask} onClose={() => setOpenTask(null)} />}
     </div>
   );
 }

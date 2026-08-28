@@ -4047,3 +4047,184 @@ button.cell-mark:disabled { cursor: default; }
 @media (max-width: 520px) {
   .portal-tiles { grid-template-columns: 1fr; }
 }
+
+/* ============================================================================
+   MY PORTAL — doing the work in place
+   ----------------------------------------------------------------------------
+   Every task the portal raises is completed over the portal rather than by
+   navigating to the module that owns it, so the portal needs its own drawer,
+   its own read-only schedule grids, and its own forms. They are styled as one
+   family: the same panel surface, the same rails, the same quiet chrome.
+   ========================================================================= */
+.portal-drawer-wrap {
+  position: fixed; inset: 0; z-index: 900;
+  display: grid; place-items: center; padding: 28px;
+  background: rgba(4, 8, 20, 0.72); backdrop-filter: blur(3px);
+  animation: pd-fade 0.14s ease;
+}
+@keyframes pd-fade { from { opacity: 0; } to { opacity: 1; } }
+
+.portal-drawer {
+  width: min(720px, 100%); max-height: 88vh;
+  display: flex; flex-direction: column;
+  border-radius: var(--radius-lg); border: 1px solid var(--border-strong);
+  background: linear-gradient(160deg, var(--panel) 0%, var(--card) 60%);
+  box-shadow: var(--shadow);
+  animation: pd-rise 0.16s ease;
+}
+.portal-drawer-wrap.wide .portal-drawer, .portal-drawer.wide { width: min(1240px, 100%); }
+@keyframes pd-rise { from { transform: translateY(10px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+.pd-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;
+  padding: 18px 20px 14px; border-bottom: 1px solid var(--border);
+}
+.pd-head h3 { margin: 2px 0 0; font-size: 17px; letter-spacing: -0.01em; }
+.pd-head-actions { display: flex; align-items: center; gap: 8px; }
+.pd-close {
+  display: grid; place-items: center; width: 32px; height: 32px; padding: 0;
+  border-radius: 9px; border: 1px solid var(--border); background: transparent;
+  color: var(--muted); box-shadow: none; flex: 0 0 auto;
+}
+.pd-close:hover { color: var(--text); border-color: var(--border-strong); transform: none; }
+
+.pd-body { padding: 18px 20px; overflow-y: auto; display: grid; gap: 14px; }
+.pd-body.scroll-x { overflow-x: auto; }
+.pd-meta { margin: 4px 0 0; font-size: 12px; color: var(--faint); }
+.pd-desc { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--muted); }
+.pd-doc {
+  white-space: pre-wrap; line-height: 1.65; font-size: 13.5px; color: var(--text);
+  max-height: 38vh; overflow-y: auto; padding: 14px 16px;
+  border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface);
+}
+.pd-ack {
+  margin: 0; padding: 10px 14px; font-style: italic; color: var(--muted);
+  border-left: 3px solid var(--accent); background: var(--accent-soft);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: 13px;
+}
+.pd-fileonly { display: grid; gap: 10px; justify-items: start; font-size: 13px; color: var(--muted); }
+.pd-fileonly p { margin: 0; }
+
+.pd-form { display: grid; gap: 12px; }
+.pd-check { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; color: var(--text); line-height: 1.5; }
+.pd-check input { margin-top: 2px; flex: 0 0 auto; }
+.pd-field { display: grid; gap: 5px; font-size: 12px; color: var(--faint); }
+.pd-field > span { display: flex; gap: 6px; align-items: baseline; }
+.pd-field em { font-style: normal; font-size: 10.5px; color: var(--warning); text-transform: uppercase; letter-spacing: 0.06em; }
+.pd-choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.pd-choices button {
+  padding: 7px 13px; border-radius: var(--radius-pill); font-size: 12px; font-weight: 600;
+  border: 1px solid var(--border); background: var(--surface); color: var(--muted); box-shadow: none;
+}
+.pd-choices button:hover { border-color: var(--border-strong); color: var(--text); transform: none; }
+.pd-choices button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.pd-hint { margin: 0; font-size: 11.5px; color: var(--faint); line-height: 1.5; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.pd-error { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 12.5px; color: var(--danger); }
+.pd-spin { animation: pd-turn 0.9s linear infinite; }
+@keyframes pd-turn { to { transform: rotate(360deg); } }
+
+.pd-foot {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 14px 20px 18px; border-top: 1px solid var(--border);
+}
+
+/* ---- Read-only schedule grids ---- */
+.ps-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ps-list > li > button {
+  width: 100%; display: flex; align-items: center; gap: 12px; text-align: left;
+  padding: 11px 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface); box-shadow: none; color: var(--text);
+}
+.ps-list > li > button:hover { border-color: var(--accent); background: var(--accent-soft); transform: none; }
+.ps-list-main { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.ps-list-main strong { font-size: 13px; }
+.ps-list-main span { font-size: 11.5px; color: var(--faint); }
+
+.portal-grid { border-collapse: collapse; font-size: 11px; table-layout: fixed; width: max-content; }
+.portal-grid th, .portal-grid td {
+  border: 1px solid var(--border); padding: 3px 2px; text-align: center;
+  width: 26px; height: 24px; overflow: hidden;
+}
+.portal-grid th { background: var(--panel-2); color: var(--text); font-weight: 700; font-size: 10.5px; }
+.portal-grid th.we, .portal-grid td.we { background: rgba(255, 255, 255, 0.05); }
+.portal-grid th.pg-name, .portal-grid td.pg-name {
+  width: 190px; min-width: 190px; text-align: left; padding-left: 10px;
+  white-space: nowrap; font-weight: 700; position: sticky; left: 0; z-index: 1;
+  background: var(--card);
+}
+.portal-grid td { color: var(--text); font-weight: 700; }
+.portal-grid tr.is-mine td { background: rgba(78, 141, 255, 0.14); }
+.portal-grid tr.is-mine td.pg-name { background: var(--accent-soft); color: var(--accent-bright); }
+.pg-you {
+  margin-left: 8px; padding: 1px 7px; border-radius: var(--radius-pill);
+  background: var(--accent); color: #fff; font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase;
+}
+.pg-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 14px; font-size: 11.5px; color: var(--muted); }
+.pg-key { display: inline-flex; align-items: center; gap: 6px; }
+.pg-key-code {
+  display: inline-grid; place-items: center; min-width: 24px; padding: 2px 6px;
+  border-radius: 5px; background: var(--panel-2); color: var(--text);
+  font-weight: 800; font-size: 10.5px;
+}
+.ps-memo tr.is-mine > td { background: var(--accent-soft); }
+.ps-memo tr.ps-span td { background: var(--panel-2); font-style: italic; color: var(--muted); }
+.ps-members { font-size: 11.5px; color: var(--muted); max-width: 420px; }
+.ps-nb { margin: 14px 0 0; font-size: 12px; color: var(--faint); white-space: pre-wrap; line-height: 1.6; }
+
+/* ---- Self-service forms (documents, training, my details) ---- */
+.pf-form {
+  margin: 4px 0 16px; padding: 16px;
+  border-radius: var(--radius); border: 1px solid var(--accent-soft);
+  background: linear-gradient(160deg, rgba(78, 141, 255, 0.06), var(--surface) 60%);
+}
+.pf-form-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.pf-form-head h4 { margin: 0; font-size: 13.5px; }
+.pf-legend {
+  margin: 16px 0 8px; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.09em;
+  color: var(--faint); font-weight: 700;
+}
+.pf-legend:first-of-type { margin-top: 0; }
+.pf-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.pf-grid label { display: grid; gap: 5px; font-size: 11.5px; color: var(--faint); }
+.pf-grid label > span { font-weight: 600; }
+.pf-grid .pf-wide { grid-column: 1 / -1; }
+.pf-form-foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; }
+.pp-head-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.link-button.danger { color: var(--danger); }
+
+/* ---- Passport photograph ---- */
+.pr-photo {
+  display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start;
+  padding: 16px; margin-bottom: 18px;
+  border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface);
+}
+.pr-photo-frame {
+  flex: 0 0 auto; width: 140px; aspect-ratio: 7 / 9;
+  display: grid; place-items: center; overflow: hidden;
+  border-radius: var(--radius-sm); border: 1px solid var(--border-strong);
+  background: rgba(255, 255, 255, 0.04);
+}
+.pr-photo-frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pr-photo-empty { display: grid; gap: 6px; justify-items: center; color: var(--faint); }
+.pr-photo-empty small { font-size: 10.5px; }
+.pr-photo-side { flex: 1; min-width: 220px; display: grid; gap: 8px; align-content: start; }
+.pr-photo-side h4 { margin: 0; font-size: 13.5px; }
+.pr-photo-side p { margin: 0; font-size: 12px; line-height: 1.55; max-width: 52ch; }
+
+/* A photograph is a portrait, so the hero frame becomes one rather than
+   cropping a face into a square. The initials avatar stays square. */
+.ph-avatar-photo {
+  width: 62px; height: 80px; aspect-ratio: 7 / 9;
+  object-fit: cover; padding: 0; border-radius: 14px;
+  border: 1px solid var(--border-strong); box-shadow: var(--shadow-sm);
+}
+
+/* A field the person may see but not change, and told which. */
+.pr-managed dt { display: flex; align-items: center; gap: 5px; opacity: 0.85; }
+.pr-managed dt svg { opacity: 0.7; }
+
+@media (max-width: 700px) {
+  .portal-drawer-wrap { padding: 0; align-items: stretch; }
+  .portal-drawer, .portal-drawer-wrap.wide .portal-drawer { width: 100%; max-height: 100vh; border-radius: 0; border: 0; }
+  .pr-photo-frame { width: 112px; }
+}
