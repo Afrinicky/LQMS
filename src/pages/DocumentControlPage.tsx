@@ -30,7 +30,15 @@ const TAB_MODULE = 'documents';
 const tabBar = (active: string, tabs: string[], onChange: (name: string) => void) =>
   <PermissionTabs moduleKey={TAB_MODULE} tabs={tabs} active={active} onChange={onChange} />;
 
-const DOCUMENT_TYPES = ['SOP', 'Policy', 'Manual', 'Form', 'Register', 'Log', 'Tracker', 'Job Aid', 'Quality Manual', 'Handbook', 'Safety Manual', 'Master List', 'External Document', 'Reference Document', 'Other'];
+const DOCUMENT_TYPES = ['SOP', 'Policy', 'Manual', 'Form', 'Register', 'Log', 'Tracker', 'Job Aid', 'Job Description', 'Quality Manual', 'Handbook', 'Safety Manual', 'Master List', 'External Document', 'Reference Document', 'Other'];
+/**
+ * A job description is a controlled document like any other, with one addition:
+ * it is the only kind whose purpose is to describe a particular job, so it can
+ * say which. Naming the position puts it in front of everybody who holds that
+ * post — in Personnel Management and in each of their portals — from this one
+ * upload, with no second copy to drift out of step.
+ */
+const JOB_DESCRIPTION_TYPE = 'Job Description';
 const ACCESS_LEVELS = ['public', 'internal', 'restricted', 'confidential'];
 const REVIEW_OUTCOMES = ['no_change', 'minor_revision', 'major_revision', 'obsolete'];
 const TARGET_TYPES = ['staff', 'position', 'section', 'department'];
@@ -115,13 +123,41 @@ async function fetchBlobUrl(path: string): Promise<string> {
   return URL.createObjectURL(await r.blob());
 }
 
-const emptyDocForm = { documentCode: '', title: '', documentType: 'SOP', sectionCategory: '', departmentId: '', sectionId: '', ownerStaffId: '', reviewFrequencyMonths: '12', nextReviewDate: '', accessLevel: 'internal', isControlled: true, fileId: '', versionNumber: '1.0', revisionSummary: '', effectiveDate: '', formatMedium: '', controlledLocations: '', retentionPeriod: '', remarks: '' };
+const emptyDocForm = { documentCode: '', title: '', documentType: 'SOP', sectionCategory: '', departmentId: '', sectionId: '', ownerStaffId: '', appliesToPositionId: '', appliesToStaffId: '', reviewFrequencyMonths: '12', nextReviewDate: '', accessLevel: 'internal', isControlled: true, fileId: '', versionNumber: '1.0', revisionSummary: '', effectiveDate: '', formatMedium: '', controlledLocations: '', retentionPeriod: '', remarks: '' };
 const emptyVersionForm = { versionNumber: '', revisionSummary: '', fileId: '', effectiveDate: '' };
 const emptyReviewForm = { reviewDate: '', reviewOutcome: 'no_change', reviewNotes: '', nextReviewDate: '', actionRequired: false };
 const emptyAttestForm = { targetType: 'staff', staffIds: [] as number[], positionId: '', sectionId: '', departmentId: '', dueDate: '', notes: '' };
 const emptyPrintForm = { printPurpose: '', controlledCopy: false, copyNumber: '', watermark: '' };
 
 const SECTIONS = ['Dashboard', 'Documents', 'Records', 'Central Archive', 'Master List', 'Laboratory Profile'] as const;
+/**
+ * The document-control tabs, and the right each one actually needs.
+ *
+ * This bar was a plain array rendered to everybody who could open the module,
+ * so a Biomedical Scientist — whose profile says No access to Authoring and
+ * to Review & approval — was offered New Document, Bulk Import, the Review
+ * and Approval queues, Reviews Due and the whole laboratory's Attestations
+ * register. What they need is the register they read from, the documents in
+ * their own inbox, and the attestation they owe. Nothing else.
+ *
+ * Both live at module scope so the bar and the ?subtab= deep link answer the
+ * same question: a tab a person may not see cannot be opened by putting its
+ * name in a URL either.
+ */
+const DOC_TABS = ['Document Register', 'New Document', 'Bulk Import', 'Review Queue', 'Approval Queue', 'Reviews Due', 'Attestations', 'My Inbox', 'Obsolete Register'];
+const DOC_TAB_RIGHTS: Record<string, { key: string; action: PermissionAction }> = {
+  'Document Register': { key: 'documents.library', action: 'view' },
+  'My Inbox': { key: 'documents.library', action: 'view' },
+  'New Document': { key: 'documents.authoring', action: 'create' },
+  'Bulk Import': { key: 'documents.authoring', action: 'create' },
+  // The queues, the review calendar and the laboratory-wide attestation
+  // register are document control's own work, not a reader's.
+  'Review Queue': { key: 'documents.workflow', action: 'view' },
+  'Approval Queue': { key: 'documents.workflow', action: 'view' },
+  'Reviews Due': { key: 'documents.workflow', action: 'view' },
+  'Attestations': { key: 'documents.workflow', action: 'view' },
+  'Obsolete Register': { key: 'documents.workflow', action: 'view' },
+};
 
 // Roles with governance authority over the register (change ownership, bulk
 // actions). The server independently enforces the documents "approve"
@@ -228,6 +264,20 @@ export function DocumentControlPage() {
     const focus = searchParams.get('focus');
     if (focus && focus.startsWith('documents:')) { setSection('Documents'); setTab('Document Register'); }
   }, [searchParams]);
+  // Deep link from My Portal: ?subtab=My Inbox lands a member of staff on the
+  // documents awaiting their attestation. Without this the link opened the
+  // register and left them to find the tab, which is the gap the portal exists
+  // to close. Matching ignores case and punctuation so a renamed tab survives.
+  useEffect(() => {
+    const wanted = searchParams.get('subtab');
+    if (!wanted) return;
+    const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const match = DOC_TABS.find(t => norm(t) === norm(wanted));
+    if (!match) return;
+    const need = DOC_TAB_RIGHTS[match];
+    if (need && !can(need.key, need.action)) return;
+    setSection('Documents'); setTab(match);
+  }, [searchParams, can]);
   // Deep link from Settings → Core Documents: ?open=<id> opens the document
   // itself, because clicking the laboratory's Quality Manual should show the
   // Quality Manual, not a register row that happens to mention it.
@@ -573,34 +623,10 @@ export function DocumentControlPage() {
     }
   }
 
-  /**
-   * The document-control tabs, and the right each one actually needs.
-   *
-   * This bar was a plain array rendered to everybody who could open the module,
-   * so a Biomedical Scientist — whose profile says No access to Authoring and
-   * to Review & approval — was offered New Document, Bulk Import, the Review
-   * and Approval queues, Reviews Due and the whole laboratory's Attestations
-   * register. What they need is the register they read from, the documents in
-   * their own inbox, and the attestation they owe. Nothing else.
-   */
-  const DOC_TAB_RIGHTS: Record<string, { key: string; action: PermissionAction }> = {
-    'Document Register': { key: 'documents.library', action: 'view' },
-    'My Inbox': { key: 'documents.library', action: 'view' },
-    'New Document': { key: 'documents.authoring', action: 'create' },
-    'Bulk Import': { key: 'documents.authoring', action: 'create' },
-    // The queues, the review calendar and the laboratory-wide attestation
-    // register are document control's own work, not a reader's.
-    'Review Queue': { key: 'documents.workflow', action: 'view' },
-    'Approval Queue': { key: 'documents.workflow', action: 'view' },
-    'Reviews Due': { key: 'documents.workflow', action: 'view' },
-    'Attestations': { key: 'documents.workflow', action: 'view' },
-    'Obsolete Register': { key: 'documents.workflow', action: 'view' },
-  };
-  const docTabs = ['Document Register', 'New Document', 'Bulk Import', 'Review Queue', 'Approval Queue', 'Reviews Due', 'Attestations', 'My Inbox', 'Obsolete Register']
-    .filter(name => {
-      const need = DOC_TAB_RIGHTS[name];
-      return !need || can(need.key, need.action);
-    });
+  const docTabs = DOC_TABS.filter(name => {
+    const need = DOC_TAB_RIGHTS[name];
+    return !need || can(need.key, need.action);
+  });
   const obsoleteDocs = documents.filter(d => d.status === 'obsolete');
   const reviewQueue = documents.filter(d => d.status === 'under_review');
   const approvalQueue = documents.filter(d => d.status === 'reviewed');
@@ -923,6 +949,25 @@ export function DocumentControlPage() {
       <label>Department<select value={docForm.departmentId} onChange={e => setDocForm({ ...docForm, departmentId: e.target.value })}><option value="">—</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
       <label>Section<select value={docForm.sectionId} onChange={e => setDocForm({ ...docForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
       <label>Owner / author<select value={docForm.ownerStaffId} onChange={e => setDocForm({ ...docForm, ownerStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+      {/* Only a job description asks who it is about. Every other document type
+          is about a process, and offering these fields for an SOP would invite
+          somebody to fill them in and wonder why nothing happened. */}
+      {docForm.documentType === JOB_DESCRIPTION_TYPE && <>
+        <label>Describes which post
+          <select value={docForm.appliesToPositionId} onChange={e => setDocForm({ ...docForm, appliesToPositionId: e.target.value, appliesToStaffId: e.target.value ? '' : docForm.appliesToStaffId })}>
+            <option value="">— choose the position —</option>
+            {positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+          </select>
+          <span className="hint">Once issued, everybody holding this post sees it on their own portal and on their personnel record.</span>
+        </label>
+        <label>…or one named member of staff
+          <select value={docForm.appliesToStaffId} onChange={e => setDocForm({ ...docForm, appliesToStaffId: e.target.value, appliesToPositionId: e.target.value ? '' : docForm.appliesToPositionId })}>
+            <option value="">— none —</option>
+            {staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
+          </select>
+          <span className="hint">For a personalised description. A description issued to one person overrides the one for their post.</span>
+        </label>
+      </>}
       <label>Review frequency (months)<input type="number" min={1} value={docForm.reviewFrequencyMonths} onChange={e => setDocForm({ ...docForm, reviewFrequencyMonths: e.target.value })} /></label>
       <label>Next review date<input type="date" value={docForm.nextReviewDate} onChange={e => setDocForm({ ...docForm, nextReviewDate: e.target.value })} /></label>
       <label>Access level<select value={docForm.accessLevel} onChange={e => setDocForm({ ...docForm, accessLevel: e.target.value })}>{ACCESS_LEVELS.map(a => <option key={a} value={a}>{a}</option>)}</select></label>
@@ -1376,7 +1421,14 @@ function WordToolbar({ editorRef }: { editorRef: { current: HTMLDivElement | nul
   </div>;
 }
 
-function DocumentViewer(props: { docId: number; versionId: number; attestationId?: number; workflowStatus?: string; documents?: DocumentRecord[]; onWorkflowAction?: (action: string) => Promise<void>; onClose: () => void; onAttest: (attId: number, docId: number) => void; onSaved: () => void; onError: (m: string) => void }) {
+/**
+ * The controlled-document window. Exported because My Portal opens it too: a
+ * member of staff who owes an attestation should read and sign the document
+ * where they were told about it, rather than being sent to a workspace to
+ * find it. It is lazy-imported there so the portal does not carry document
+ * control's weight for everyone who never opens a document.
+ */
+export function DocumentViewer(props: { docId: number; versionId: number; attestationId?: number; workflowStatus?: string; documents?: DocumentRecord[]; onWorkflowAction?: (action: string) => Promise<void>; onClose: () => void; onAttest: (attId: number, docId: number) => void; onSaved: () => void; onError: (m: string) => void }) {
   const { docId, versionId, attestationId, workflowStatus, documents, onWorkflowAction, onClose, onAttest, onSaved, onError } = props;
   const { can } = usePermissions();
   // Writing a new version of a controlled document — including one that arrives

@@ -92,12 +92,14 @@ export type FeatureDef = {
 
 export const FEATURES: FeatureDef[] = [
   // ── Personnel Management ────────────────────────────────────────────────
+  // Governs no tab in the Personnel workspace any more: a person's own record
+  // is My Portal, which is a module in its own right. The key remains because
+  // the self-service endpoints behind the portal are gated on it.
   { key: 'personnel.self', module: 'personnel', label: 'My own record', personal: true,
-    desc: 'A member of staff maintaining their own profile, documents and training history.',
-    tabs: ['My Profile'] },
+    desc: 'A member of staff maintaining their own profile, documents and training history in My Portal.' },
   { key: 'personnel.register', module: 'personnel', label: 'Personnel register', sensitive: true,
-    desc: 'The master register of all staff — opening, adding and editing other people\'s records.',
-    tabs: ['Master Personnel Register', 'Add Staff', 'Staff Documents'] },
+    desc: 'The master register of all staff — opening, adding and editing other people\'s records, and the job descriptions issued for each post.',
+    tabs: ['Master Personnel Register', 'Add Staff', 'Staff Documents', 'Job Descriptions'] },
   { key: 'personnel.orientation', module: 'personnel', label: 'Orientation & induction',
     desc: 'Induction checklists and sign-off for new staff.',
     tabs: ['Orientation & Induction'] },
@@ -291,17 +293,37 @@ export const FEATURES: FeatureDef[] = [
     desc: 'Improvement registers and summaries.', tabs: ['Reports'] },
 
   // ── Notifications & Reports ─────────────────────────────────────────────
+  // The inbox itself now lives in My Portal — a person's alerts belong beside
+  // the work they are about, not in a workspace of their own. This key still
+  // governs every inbox and task endpoint the portal calls, so it stays, and
+  // the whole laboratory holds it.
   { key: 'notifications.inbox', module: 'notifications', label: 'My inbox & tasks', personal: true,
-    desc: 'A member of staff\'s own alerts and assigned tasks. Everyone needs this.',
-    tabs: ['Dashboard', 'Full Inbox', 'My Tasks', 'Preferences'] },
+    desc: 'A member of staff\'s own alerts and assigned tasks, read and worked in My Portal. Everyone needs this.' },
   { key: 'notifications.calendar', module: 'notifications', label: 'Review calendar',
-    desc: 'The scheduled review and due-date calendar.', tabs: ['Review Calendar'] },
+    desc: 'The laboratory-wide alert picture and the scheduled review and due-date calendar.',
+    tabs: ['Alert Overview', 'Review Calendar'] },
   { key: 'notifications.rules', module: 'notifications', label: 'Alert rules', sensitive: true,
     desc: 'Configuring which alerts are raised, to whom, and running a scan.',
     tabs: ['Notification Rules', 'Generate Alerts'] },
   { key: 'notifications.sounds', module: 'notifications', label: 'Reminder sounds', personal: true,
-    desc: 'The chimes played on the desktop and mobile apps, and each person\'s own choice of them.',
-    tabs: ['Reminder Sounds'] },
+    desc: 'The chimes played on the desktop and mobile apps, and each person\'s own choice of them, set in My Portal.' },
+
+  // ── Routine Work ────────────────────────────────────────────────────────
+  // Three tiers of competence, granted per profile. They decide who may PERFORM
+  // a piece of recurring bench work, not who may see it: every member of staff
+  // reads their unit's whole programme, and each activity says which tier it
+  // needs. An activity's tier is set on the activity itself (Settings → Unit
+  // Activities), so a laboratory that treats an analyser service as ordinary
+  // bench work, or its fridge charts as supervised, configures that rather than
+  // arguing with the software.
+  { key: 'routine_work.general', module: 'routine_work', label: 'Perform general routine work', personal: true,
+    desc: 'Environmental charting, decontamination, cleaning, stock and safety checks — the routine work of the bench. Everyone on duty needs this.' },
+  { key: 'routine_work.technical', module: 'routine_work', label: 'Perform technical routine work',
+    desc: 'IQC, calibration checks and method-related maintenance — work that needs a registered scientist.' },
+  { key: 'routine_work.supervisory', module: 'routine_work', label: 'Perform supervisory routine work', sensitive: true,
+    desc: 'Reviews, sign-offs and scheduled servicing the unit supervisor owns.' },
+  { key: 'routine_work.oversight', module: 'routine_work', label: 'Oversee the unit programme',
+    desc: 'See what the whole unit was due to do and what was actually done, not only your own list.' },
 
   // ── System Audit ────────────────────────────────────────────────────────
   // Split three ways because they are three different jobs: reading the trail,

@@ -405,6 +405,20 @@ export type DeclarationTemplate = { key:string; formType:string; title:string; p
 export type EthicalDeclarationSignature = { id:number; form_id:number; staff_id:number; staff_name?:string|null; employee_no?:string|null; section_name?:string|null; signed_at:string; conflict_declared:number; conflict_details?:string|null; affirmation_text?:string|null; notes?:string|null; signed_file_id?:number|null; signed_file_name?:string|null; signature_file_id?:number|null };
 export type MyDeclaration = { id:number; form_number?:string|null; title:string; form_type:string; version?:string|null; effective_date?:string|null; body_content?:string|null; acknowledgement_statement?:string|null; file_id?:number|null; file_name?:string|null; issued_by?:string|null; signature_id?:number; signed_at?:string; conflict_declared?:number; conflict_details?:string|null; affirmation_text?:string|null; signed_file_id?:number|null };
 export type MyDeclarations = { signed: MyDeclaration[]; pending: MyDeclaration[] };
+/**
+ * Training a member of staff recorded about themselves — the weekend course,
+ * the webinar, the qualification taken in their own time. Separate from the
+ * laboratory's training register on purpose: a record its subject entered is a
+ * declaration until Personnel Management verifies it against the certificate.
+ */
+export type StaffCpdRecord = {
+  id:number; staff_id:number; title:string; provider?:string|null; training_type:string;
+  start_date?:string|null; end_date?:string|null; hours?:number|null; location?:string|null;
+  description?:string|null; file_id?:number|null; file_name?:string|null;
+  verification_status:'declared'|'verified'|'rejected'|string;
+  verified_by_staff_id?:number|null; verified_by_name?:string|null; verified_at?:string|null;
+  verifier_remarks?:string|null; created_at:string; updated_at?:string|null;
+};
 export type ContinuityPlan = { id:number; plan_number:string; position_id?:number|null; position_title?:string|null; key_role:string; deputy_position_id?:number|null; deputy_position_title?:string|null; deputy_staff_id?:number|null; deputy_name?:string|null; acting_arrangement?:string|null; authority_scope?:string|null; handover_procedure?:string|null; activation_trigger?:string|null; training_status?:string|null; last_tested_date?:string|null; next_review_date?:string|null; status:string; notes?:string|null; created_at:string; updated_at?:string|null };
 export type QtReviewConfig = { id:number; area_key:string; area_label:string; frequency:string; responsible_staff_id?:number|null; responsible_name?:string|null; next_review_date?:string|null; last_review_date?:string|null; is_active:number; notes?:string|null };
 export type QtReview = { id:number; review_number:string; area_key:string; period_start:string; period_end:string; reviewed_by_staff_id?:number|null; reviewer_name?:string|null; reviewed_at?:string|null; data_snapshot?:string|null; findings?:string|null; recurrent_problems?:string|null; actions_planned?:string|null; status:string; linked_nc_id?:number|null; linked_capa_id?:number|null; follow_up_due_date?:string|null; follow_up_status:string; next_review_due?:string|null; created_at:string; updated_at?:string|null };
@@ -502,8 +516,60 @@ export type EnvReportType = { key:string; label:string };
 /* ============================================================================
    Unit activities, duty reminders and the sound catalogue
    ========================================================================= */
-export type UnitActivity = { id:number; activity_code:string; name:string; description?:string|null; instructions?:string|null; category:string; department_id?:number|null; section_id?:number|null; bench_id?:number|null; equipment_id?:number|null; environmental_asset_id?:number|null; monitoring_item_id?:number|null; target_module_key?:string|null; target_route?:string|null; frequency:string; interval_days?:number|null; weekdays?:string|null; day_of_month?:number|null; months?:string|null; shift_codes?:string|null; due_time?:string|null; grace_minutes:number; assign_mode:string; responsible_staff_id?:number|null; priority:string; evidence_required:number; notify_leadership:number; sound_key?:string|null; redesign_status:string; redesign_note?:string|null; simplicity_rating?:number|null; redesign_flagged_by?:number|null; redesign_flagged_at?:string|null; estimated_minutes?:number|null; is_active:number; created_by?:number|null; created_at:string; updated_at?:string|null; section_name?:string|null; bench_name?:string|null; equipment_name?:string|null; responsible_name?:string|null; avg_ease?:number|null; completion_rate?:number|null; missed_count?:number|null };
-export type ActivityOccurrence = { id:number; activity_id:number; period_key:string; occurrence_date:string; window_start:string; window_end:string; due_at?:string|null; section_id?:number|null; status:string; completed_at?:string|null; completed_by_staff_id?:number|null; completion_note?:string|null; linked_record_type?:string|null; linked_record_id?:string|null; evidence_file_id?:number|null; reminded_at?:string|null; escalated_at?:string|null; missed_flagged_at?:string|null; created_at:string; updated_at?:string|null; activity_name?:string; activity_code?:string; category?:string; frequency?:string; interval_days?:number|null; priority?:string; instructions?:string|null; target_route?:string|null; target_module_key?:string|null; section_name?:string|null; estimated_minutes?:number|null; evidence_required?:number; sound_key?:string|null; redesign_status?:string; assignment_source?:string; is_watcher?:number; shift_code?:string|null; bench_name?:string|null; done_count?:number|null; completed_by_name?:string|null; assignee_names?:string|null };
+export type UnitActivity = { id:number; activity_code:string; name:string; description?:string|null; instructions?:string|null; category:string; department_id?:number|null; section_id?:number|null; bench_id?:number|null; equipment_id?:number|null; environmental_asset_id?:number|null; monitoring_item_id?:number|null; target_module_key?:string|null; target_route?:string|null; frequency:string; interval_days?:number|null; weekdays?:string|null; day_of_month?:number|null; months?:string|null; shift_codes?:string|null; due_time?:string|null; grace_minutes:number; assign_mode:string; responsible_staff_id?:number|null; performer_tier?:string; priority:string; evidence_required:number; notify_leadership:number; sound_key?:string|null; redesign_status:string; redesign_note?:string|null; simplicity_rating?:number|null; redesign_flagged_by?:number|null; redesign_flagged_at?:string|null; estimated_minutes?:number|null; is_active:number; created_by?:number|null; created_at:string; updated_at?:string|null; section_name?:string|null; bench_name?:string|null; equipment_name?:string|null; responsible_name?:string|null; avg_ease?:number|null; completion_rate?:number|null; missed_count?:number|null };
+export type ActivityOccurrence = { id:number; activity_id:number; period_key:string; occurrence_date:string; window_start:string; window_end:string; due_at?:string|null; section_id?:number|null; status:string; completed_at?:string|null; completed_by_staff_id?:number|null; completion_note?:string|null; linked_record_type?:string|null; linked_record_id?:string|null; evidence_file_id?:number|null; reminded_at?:string|null; escalated_at?:string|null; missed_flagged_at?:string|null; created_at:string; updated_at?:string|null; activity_name?:string; activity_code?:string; category?:string; frequency?:string; interval_days?:number|null; priority?:string; instructions?:string|null; target_route?:string|null; target_module_key?:string|null; section_name?:string|null; estimated_minutes?:number|null; evidence_required?:number; performer_tier?:string; sound_key?:string|null; redesign_status?:string; assignment_source?:string; is_watcher?:number; shift_code?:string|null; bench_name?:string|null; done_count?:number|null; completed_by_name?:string|null; assignee_names?:string|null };
+/**
+ * One activity in a unit's routine programme, as the portal reads it: the
+ * definition, the tier of staff competent to perform it, and whether THIS
+ * reader is one of them.
+ */
+export type RoutineActivity = {
+  id:number; activity_code:string; name:string; description?:string|null; instructions?:string|null;
+  category:string; frequency:string; interval_days?:number|null; due_time?:string|null;
+  section_id?:number|null; section_name?:string|null; bench_name?:string|null;
+  equipment_name?:string|null; target_route?:string|null; target_module_key?:string|null;
+  performer_tier:string; assign_mode:string; priority:string; estimated_minutes?:number|null;
+  evidence_required?:number; is_active:number;
+  /** Whether the signed-in reader holds the tier this activity asks for. */
+  mayPerform:boolean;
+  /** Their most recent occurrence of it, when there is one. */
+  last_done_at?:string|null; last_done_by?:string|null;
+  /** Open occurrence for this reader right now, if any. */
+  open_occurrence_id?:number|null; open_occurrence_status?:string|null; open_occurrence_due?:string|null;
+};
+
+export type RoutineWorkResponse = {
+  date:string;
+  duty:DutyContext;
+  /** The tiers this reader may perform, and whether they may see the unit view. */
+  tiers:{ general:boolean; technical:boolean; supervisory:boolean; oversight:boolean };
+  /** Occurrences assigned to this reader, open or closed today. */
+  mine:ActivityOccurrence[];
+  /** The unit's programme — every active activity for their unit. */
+  programme:RoutineActivity[];
+  counts:{ due:number; done:number; missed:number; blocked:number; programme:number };
+};
+
+/**
+ * A job description as the portal and Personnel Management read it: the
+ * controlled document itself, plus the post or person it describes.
+ */
+export type JobDescriptionDoc = {
+  id:number; document_code?:string|null; title:string; document_type:string; status:string;
+  next_review_date?:string|null;
+  applies_to_position_id?:number|null; applies_to_staff_id?:number|null;
+  position_title?:string|null; staff_name?:string|null;
+  current_version_id?:number|null; version_number?:string|null; version_label?:string|null;
+  effective_date?:string|null; file_id?:number|null; file_name?:string|null;
+  owner_name?:string|null; created_at?:string; updated_at?:string|null;
+};
+
+/** The register view: what exists, and which active posts have nothing. */
+export type JobDescriptionRegister = {
+  documents: JobDescriptionDoc[];
+  gaps: Array<{ id:number; title:string; staff_count:number }>;
+};
+
 export type ActivityAssignee = { id:number; occurrence_id:number; staff_id:number; user_id?:number|null; assignment_source:string; shift_code?:string|null; bench_name?:string|null; is_watcher:number; notified_at?:string|null; staff_name?:string|null };
 export type ActivityFeedback = { id:number; activity_id:number; occurrence_id?:number|null; staff_id?:number|null; ease_rating?:number|null; minutes_taken?:number|null; comment?:string|null; created_at:string; staff_name?:string|null; activity_name?:string|null };
 export type DutyContext = { date:string; month:string; shiftCode:string|null; shiftLabel:string|null; onDuty:boolean; sectionId:number|null; sectionName:string|null; benchName:string|null; assignmentSource:string|null; rosterStatus:string|null; rosterCarriedForward:boolean; benchCarriedForward:boolean };

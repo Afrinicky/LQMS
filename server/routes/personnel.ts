@@ -1,13 +1,36 @@
 import { Router } from 'express';
 import multer from 'multer';
 import * as XLSX from 'xlsx';
-import { getDb } from '../db/database.js';
+import { getDb, uploadRoot } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
+import { safeStoredFilename } from '../utils/safeFilename.js';
+import fs from 'node:fs';
+import path from 'node:path';
 
+// The register import parses a workbook and never keeps it, so it stays in
+// memory. A file a member of staff attaches to their own record is kept, so it
+// goes to disk under the same upload root every other stored file uses.
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+const fileUpload = multer({
+  storage: multer.diskStorage({ destination: (_req, _file, cb) => cb(null, uploadRoot), filename: (_req, file, cb) => cb(null, safeStoredFilename(file.originalname)) }),
+  limits: { fileSize: 25 * 1024 * 1024 },
+});
+
+/** Stream a stored file back to the caller. False when there is nothing to send. */
+function streamStoredFile(res: import('express').Response, fileId: number | null | undefined): boolean {
+  if (!fileId) return false;
+  const file = getDb().prepare('SELECT stored_name, mime_type FROM files WHERE id = ?').get(fileId) as { stored_name: string; mime_type: string } | undefined;
+  if (!file) return false;
+  const fp = path.join(uploadRoot, file.stored_name);
+  if (!fs.existsSync(fp)) return false;
+  res.setHeader('Content-Type', file.mime_type || 'image/jpeg');
+  res.setHeader('Cache-Control', 'private, max-age=60');
+  fs.createReadStream(fp).pipe(res);
+  return true;
+}
 
 const ORIENTATION_STEPS = ['welcome_orientation', 'safety_training', 'ethics_training', 'lis_training', 'equipment_training', 'sop_review', 'competency_baseline', 'department_induction'] as const;
 
@@ -333,7 +356,7 @@ export function personnelRoutes() {
     const authorizations = db.prepare(
       "SELECT * FROM technical_authorizations WHERE staff_id = ? AND is_active = 1 AND (expires_at IS NULL OR expires_at = '' OR date(expires_at) >= date('now'))"
     ).all(staffId);
-    res.json({ user, staff, positions, authorizations, hasSignature: Boolean(staff?.signature_file_id) });
+    res.json({ user, staff, positions, authorizations, hasSignature: Boolean(staff?.signature_file_id), hasPhoto: Boolean((staff as { photo_file_id?: number | null } | undefined)?.photo_file_id) });
   });
 
   router.get('/my-tasks', (req, res) => {
@@ -420,6 +443,399 @@ export function personnelRoutes() {
     db.prepare('UPDATE users SET staff_id = ? WHERE id = ?').run(req.body.staffId, req.user.id);
     audit(req, { action: 'self_link_staff', entity: 'users', entityId: req.user.id, oldValue: { staffId: null }, newValue: { staffId: req.body.staffId, matchedOn: nameMatch ? 'full_name' : 'email' } });
     res.json({ ok: true, staffId: req.body.staffId });
+  });
+
+  /* ──────────────────────────────────────────────────────────────────────
+   * Self-maintenance — the part of the file its subject keeps
+   * ────────────────────────────────────────────────────────────────────────
+   * A personnel file has two halves that are easy to confuse. One is what the
+   * laboratory decides about a person: their post, their unit, their staff
+   * number, their appointment, whether they are still employed. The other is
+   * what the person knows and the laboratory does not: that they have moved
+   * house, changed their phone, renewed a practising licence, finished a
+   * course at the weekend, or that their next of kin is somebody else now.
+   *
+   * The second half used to be maintained by asking somebody in Personnel
+   * Management to type it in, which is why it went stale. These routes hand
+   * it back to the person it belongs to. Everything here is bound to the
+   * caller's own staff record and nothing accepts a staff id from the body —
+   * a member of staff maintaining their own file must never become a way to
+   * edit a colleague's.
+   *
+   * The line is drawn at consequence. A field that decides what somebody may
+   * do, what they are paid, or where they work is a management decision and
+   * stays out. A field that is simply a fact about them that they are the
+   * best source for is theirs, and every change is written to the audit trail
+   * with its old value so the register can always be reconstructed.
+   * ──────────────────────────────────────────────────────────────────────── */
+
+  /**
+   * The staff columns a person may set on themselves.
+   *
+   * Read this list as the answer to "what would it cost if this were wrong?".
+   * A wrong phone number costs a phone call. A wrong designation costs the
+   * access their profile grants — which is why designation, job title, unit,
+   * section, staff number, appointment, category, cadre, rank, availability
+   * and the exit fields are all absent, and always should be.
+   *
+   * Qualifications and the professional licence ARE here: the person renewing
+   * the licence is the only one who knows the new number the day it changes,
+   * and the certificate that proves it goes onto their file as a document for
+   * Personnel Management to verify. The claim is theirs; the verification is
+   * not.
+   */
+  const SELF_EDITABLE_STAFF_FIELDS: Record<string, string> = {
+    phone: 'phone',
+    email: 'email',
+    dateOfBirth: 'date_of_birth',
+    gender: 'gender',
+    nationalIdType: 'national_id_type',
+    nationalIdNumber: 'national_id_number',
+    emergencyContact: 'emergency_contact',
+    emergencyContactPhone: 'emergency_contact_phone',
+    emergencyContactRelation: 'emergency_contact_relation',
+    qualifications: 'qualifications',
+    professionalRegulator: 'professional_regulator',
+    professionalLicence: 'professional_licence',
+    licenceExpiryDate: 'licence_expiry_date',
+  };
+
+  router.put('/my-profile', (req, res) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    const db = getDb();
+    const staffId = req.user.staffId;
+    if (!staffId) return res.status(400).json({ error: 'Your account is not linked to a staff record.' });
+    const before = db.prepare('SELECT * FROM staff WHERE id = ?').get(staffId) as Record<string, unknown> | undefined;
+    if (!before) return res.status(404).json({ error: 'Staff record not found.' });
+
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    const changed: Record<string, { from: unknown; to: unknown }> = {};
+    for (const [key, column] of Object.entries(SELF_EDITABLE_STAFF_FIELDS)) {
+      if (!(key in req.body)) continue;
+      const raw = req.body[key];
+      const value = raw === null || raw === undefined || String(raw).trim() === '' ? null : String(raw).trim();
+      if ((before[column] ?? null) === value) continue;
+      sets.push(`${column} = ?`);
+      values.push(value);
+      changed[column] = { from: before[column] ?? null, to: value };
+    }
+    // A request that names only fields nobody may set on themselves is a
+    // refusal, not a silent success: the caller should learn the field is not
+    // theirs rather than believe the change was saved.
+    if (sets.length === 0) {
+      const offered = Object.keys(req.body ?? {});
+      const unknownFields = offered.filter(k => !(k in SELF_EDITABLE_STAFF_FIELDS));
+      if (unknownFields.length > 0 && offered.length === unknownFields.length) {
+        return res.status(400).json({
+          error: `These details are maintained by Personnel Management and cannot be changed here: ${unknownFields.join(', ')}.`,
+        });
+      }
+      return res.json({ ok: true, changed: 0 });
+    }
+    values.push(staffId);
+    db.prepare(`UPDATE staff SET ${sets.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...values);
+    audit(req, { action: 'self_edit', entity: 'staff', entityId: staffId, oldValue: Object.fromEntries(Object.entries(changed).map(([k, v]) => [k, v.from])), newValue: Object.fromEntries(Object.entries(changed).map(([k, v]) => [k, v.to])) });
+    res.json({ ok: true, changed: sets.length });
+  });
+
+  /* ---- Job descriptions -------------------------------------------------
+   * A job description is a controlled document like any other: written,
+   * reviewed, approved, versioned and issued through document control. What
+   * makes it different is that it is the one document whose whole purpose is to
+   * describe a particular job, so it has somewhere to say which — a position,
+   * or occasionally one named person.
+   *
+   * These two routes are the consequence. Neither holds a copy of anything:
+   * both read the document register and return the same rows Document Control
+   * would, so a job description is uploaded ONCE and appears in three places —
+   * the document library, Personnel Management, and the portal of every person
+   * who holds that post. Keeping a second copy on the staff file was the
+   * alternative, and it is how a laboratory ends up with two job descriptions
+   * that disagree.
+   * --------------------------------------------------------------------- */
+  const JOB_DESCRIPTION_TYPE = 'Job Description';
+  // In force, in document control's own vocabulary: approved and issued as the
+  // current version, or current but due for its periodic review. A document due
+  // for review is still the one people must follow — it is not withdrawn.
+  const JD_IN_FORCE = ['approved', 'current', 'due_review'];
+
+  /** The columns both routes return, so the register and the portal agree. */
+  const JD_SELECT = `SELECT d.id, d.document_code, d.title, d.document_type, d.status,
+      d.next_review_date, d.applies_to_position_id, d.applies_to_staff_id,
+      d.current_version_id, d.updated_at, d.created_at,
+      p.title AS position_title, st.full_name AS staff_name,
+      v.version_number, v.version_label, v.effective_date, v.file_id,
+      f.original_name AS file_name,
+      own.full_name AS owner_name
+    FROM documents d
+    LEFT JOIN positions p ON p.id = d.applies_to_position_id
+    LEFT JOIN staff st ON st.id = d.applies_to_staff_id
+    LEFT JOIN document_versions v ON v.id = d.current_version_id
+    LEFT JOIN files f ON f.id = v.file_id
+    LEFT JOIN staff own ON own.id = d.owner_staff_id`;
+
+  /**
+   * My job description(s).
+   *
+   * Matched two ways, in order of specificity: one issued to me by name wins,
+   * otherwise the one for each post I actively hold. A person acting up in a
+   * second post sees both descriptions, which is the honest answer — they are
+   * doing both jobs.
+   *
+   * Only issued documents are returned. A draft job description is somebody's
+   * work in progress, and a member of staff reading their duties from a draft
+   * that later changes is worse than reading nothing.
+   */
+  router.get('/my-job-descriptions', (req, res) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    const staffId = req.user.staffId;
+    if (!staffId) return res.json([]);
+    const db = getDb();
+    const rows = db.prepare(`${JD_SELECT}
+      WHERE d.document_type = ?
+        AND d.status IN (${JD_IN_FORCE.map(() => '?').join(', ')})
+        AND (
+          d.applies_to_staff_id = ?
+          OR d.applies_to_position_id IN (
+            SELECT spa.position_id FROM staff_position_assignments spa
+            WHERE spa.staff_id = ? AND spa.is_active = 1
+          )
+        )
+      ORDER BY CASE WHEN d.applies_to_staff_id = ? THEN 0 ELSE 1 END, d.title`)
+      .all(JOB_DESCRIPTION_TYPE, ...JD_IN_FORCE, staffId, staffId, staffId);
+    res.json(rows);
+  });
+
+  /**
+   * The register of job descriptions, for Personnel Management.
+   *
+   * `personnel.register` because this is the whole laboratory's — who has a
+   * description on file, which post it covers, and which posts have none. That
+   * last one is the question an assessor asks, so a position with no issued
+   * description is returned too, as a gap rather than a silence.
+   */
+  router.get('/job-descriptions', requirePermission('personnel.register', 'view'), (req, res) => {
+    const db = getDb();
+    const documents = db.prepare(`${JD_SELECT}
+      WHERE d.document_type = ? AND d.status != 'obsolete'
+      ORDER BY COALESCE(p.title, st.full_name, d.title)`).all(JOB_DESCRIPTION_TYPE) as any[];
+
+    const covered = new Set(documents
+      .filter(d => d.applies_to_position_id && JD_IN_FORCE.includes(String(d.status)))
+      .map(d => Number(d.applies_to_position_id)));
+    const gaps = (db.prepare(`SELECT p.id, p.title,
+          (SELECT COUNT(*) FROM staff_position_assignments spa WHERE spa.position_id = p.id AND spa.is_active = 1) AS staff_count
+        FROM positions p WHERE p.is_active = 1 ORDER BY p.title`).all() as any[])
+      .filter(p => !covered.has(Number(p.id)));
+
+    res.json({ documents, gaps });
+  });
+
+  /**
+   * A file the caller is attaching to their own record.
+   *
+   * The general /files endpoint asks for the right to author controlled
+   * documents, which a member of staff at the bench does not have and should
+   * not need in order to attach a copy of their own practising licence. This
+   * one asks only that they are signed in, and every row it writes is
+   * attributed to them.
+   */
+  router.post('/my-upload', fileUpload.single('file'), (req, res) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    if (!req.file) return res.status(400).json({ error: 'No file was attached.' });
+    const r = getDb().prepare('INSERT INTO files (original_name, stored_name, mime_type, size_bytes, storage_area, uploaded_by) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(req.file.originalname, req.file.filename, req.file.mimetype, req.file.size, 'uploads', req.user.id);
+    audit(req, { action: 'create', entity: 'files', entityId: r.lastInsertRowid, newValue: { originalName: req.file.originalname, purpose: String(req.body?.purpose ?? 'personal_record') } });
+    res.status(201).json({ id: r.lastInsertRowid, storedName: req.file.filename });
+  });
+
+  /* ---- Passport photograph ----------------------------------------------
+   * Capped at 2 MB and images only. The cap is not arbitrary: a passport
+   * photograph is a small picture of a face, and anything larger than this is
+   * a camera's full-resolution output that nobody asked for — it fills the
+   * data directory, slows every register that shows a face, and carries the
+   * original's location metadata with it. The portal reduces the picture to
+   * passport proportions before it is sent, so a phone photograph arrives here
+   * already the right shape and a small fraction of the limit.
+   * --------------------------------------------------------------------- */
+  const PHOTO_MAX_BYTES = 2 * 1024 * 1024;
+  const photoUpload = multer({
+    storage: multer.diskStorage({ destination: (_req, _file, cb) => cb(null, uploadRoot), filename: (_req, file, cb) => cb(null, safeStoredFilename(file.originalname)) }),
+    limits: { fileSize: PHOTO_MAX_BYTES },
+  });
+
+  router.post('/my-photo', (req, res) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    photoUpload.single('file')(req, res, (err: unknown) => {
+      // Multer rejects an oversized file by aborting the request, which without
+      // this handler surfaces as a bare 500. The person uploading deserves to
+      // be told the actual limit.
+      if (err) {
+        const code = (err as { code?: string }).code;
+        if (code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'A profile picture must be 2 MB or smaller.' });
+        return res.status(400).json({ error: (err as Error).message || 'The picture could not be uploaded.' });
+      }
+      const staffId = req.user!.staffId;
+      if (!staffId) return res.status(400).json({ error: 'Your account is not linked to a staff record.' });
+      if (!req.file) return res.status(400).json({ error: 'No picture was attached.' });
+      if (!/^image\//.test(req.file.mimetype)) return res.status(400).json({ error: 'A profile picture must be an image file.' });
+      const db = getDb();
+      const previous = (db.prepare('SELECT photo_file_id FROM staff WHERE id = ?').get(staffId) as { photo_file_id?: number | null } | undefined)?.photo_file_id ?? null;
+      const file = db.prepare('INSERT INTO files (original_name, stored_name, mime_type, size_bytes, storage_area, uploaded_by) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(req.file.originalname, req.file.filename, req.file.mimetype, req.file.size, 'uploads', req.user!.id);
+      const fileId = Number(file.lastInsertRowid);
+      db.prepare('UPDATE staff SET photo_file_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(fileId, staffId);
+      audit(req, { action: 'set_photo', entity: 'staff', entityId: staffId, oldValue: { photoFileId: previous }, newValue: { photoFileId: fileId } });
+      res.status(201).json({ ok: true, fileId });
+    });
+  });
+
+  router.get('/my-photo/image', (req, res) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    const staffId = req.user.staffId;
+    const row = staffId ? getDb().prepare('SELECT photo_file_id FROM staff WHERE id = ?').get(staffId) as { photo_file_id?: number | null } | undefined : undefined;
+    if (!streamStoredFile(res, row?.photo_file_id)) res.status(404).json({ error: 'No profile picture on file' });
+  });
+
+  router.delete('/my-photo', (req, res) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    const staffId = req.user.staffId;
+    if (!staffId) return res.status(400).json({ error: 'Your account is not linked to a staff record.' });
+    const db = getDb();
+    const previous = (db.prepare('SELECT photo_file_id FROM staff WHERE id = ?').get(staffId) as { photo_file_id?: number | null } | undefined)?.photo_file_id ?? null;
+    db.prepare('UPDATE staff SET photo_file_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(staffId);
+    audit(req, { action: 'clear_photo', entity: 'staff', entityId: staffId, oldValue: { photoFileId: previous } });
+    res.json({ ok: true });
+  });
+
+  const STAFF_DOC_TYPES = ['CV', 'Qualification', 'Licence', 'Certificate', 'Contract', 'Job description', 'ID', 'Reference', 'Other'];
+
+  /** Add a document to my own file. Always unverified — a claim, until checked. */
+  router.post('/my-documents', (req, res) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    const staffId = req.user.staffId;
+    if (!staffId) return res.status(400).json({ error: 'Your account is not linked to a staff record.' });
+    const title = String(req.body.title ?? '').trim();
+    if (!title) return res.status(400).json({ error: 'A title is required.' });
+    const documentType = STAFF_DOC_TYPES.includes(String(req.body.documentType)) ? String(req.body.documentType) : 'Other';
+    const db = getDb();
+    const r = db.prepare(`INSERT INTO staff_documents (staff_id, document_type, title, file_id, issue_date, expiry_date, verification_status, remarks, source, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, 'self', ?)`).run(
+      staffId, documentType, title, parseIntNullable(req.body.fileId),
+      req.body.issueDate || null, req.body.expiryDate || null, req.body.remarks ?? null, req.user.id);
+    audit(req, { action: 'self_create', entity: 'staff_documents', entityId: r.lastInsertRowid, newValue: { staffId, documentType, title } });
+    res.status(201).json({ id: r.lastInsertRowid });
+  });
+
+  /**
+   * Correct a document I added, while it is still mine to correct.
+   *
+   * Once Personnel Management has verified it, it is evidence: somebody signed
+   * their name against that title and those dates, and quietly rewriting them
+   * afterwards would make the verification meaningless. From then on a change
+   * goes through the register.
+   */
+  function ownPendingDocument(req: import('express').Request) {
+    const staffId = req.user?.staffId;
+    if (!staffId) return { error: 'Your account is not linked to a staff record.', status: 400 as const };
+    const row = getDb().prepare('SELECT * FROM staff_documents WHERE id = ?').get(req.params.id) as
+      { staff_id: number; verification_status: string; source?: string; document_type: string; title: string } | undefined;
+    if (!row) return { error: 'Document not found.', status: 404 as const };
+    if (Number(row.staff_id) !== Number(staffId)) return { error: 'That document is not on your file.', status: 403 as const };
+    if (row.source !== 'self') return { error: 'This document was placed on your file by Personnel Management. Ask them to change it.', status: 403 as const };
+    if (row.verification_status === 'verified') return { error: 'This document has been verified and can no longer be changed here. Ask Personnel Management.', status: 403 as const };
+    return { row };
+  }
+
+  router.put('/my-documents/:id', (req, res) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    const found = ownPendingDocument(req);
+    if ('error' in found) return res.status(found.status).json({ error: found.error });
+    const db = getDb();
+    const documentType = STAFF_DOC_TYPES.includes(String(req.body.documentType)) ? String(req.body.documentType) : found.row.document_type;
+    const title = String(req.body.title ?? '').trim() || found.row.title;
+    db.prepare(`UPDATE staff_documents SET document_type = ?, title = ?, file_id = COALESCE(?, file_id), issue_date = ?, expiry_date = ?, remarks = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(documentType, title, parseIntNullable(req.body.fileId), req.body.issueDate || null, req.body.expiryDate || null, req.body.remarks ?? null, req.params.id);
+    audit(req, { action: 'self_edit', entity: 'staff_documents', entityId: Number(req.params.id), oldValue: found.row, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  router.delete('/my-documents/:id', (req, res) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    const found = ownPendingDocument(req);
+    if ('error' in found) return res.status(found.status).json({ error: found.error });
+    getDb().prepare('DELETE FROM staff_documents WHERE id = ?').run(req.params.id);
+    audit(req, { action: 'self_delete', entity: 'staff_documents', entityId: Number(req.params.id), oldValue: found.row });
+    res.json({ ok: true });
+  });
+
+  /* ---- Training and CPD a member of staff records about themselves ---- */
+  const CPD_TYPES = ['external_course', 'conference', 'webinar', 'workshop', 'qualification', 'in_house', 'self_study', 'other'];
+
+  router.get('/my-training', (req, res) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    const staffId = req.user.staffId;
+    if (!staffId) return res.json([]);
+    res.json(getDb().prepare(`SELECT c.*, f.original_name AS file_name, v.full_name AS verified_by_name
+      FROM staff_cpd_records c
+      LEFT JOIN files f ON f.id = c.file_id
+      LEFT JOIN staff v ON v.id = c.verified_by_staff_id
+      WHERE c.staff_id = ? ORDER BY COALESCE(c.end_date, c.start_date, c.created_at) DESC, c.id DESC`).all(staffId));
+  });
+
+  router.post('/my-training', (req, res) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    const staffId = req.user.staffId;
+    if (!staffId) return res.status(400).json({ error: 'Your account is not linked to a staff record.' });
+    const title = String(req.body.title ?? '').trim();
+    if (!title) return res.status(400).json({ error: 'What was the training called?' });
+    const trainingType = CPD_TYPES.includes(String(req.body.trainingType)) ? String(req.body.trainingType) : 'external_course';
+    const hours = req.body.hours === '' || req.body.hours === null || req.body.hours === undefined ? null : Number(req.body.hours);
+    const r = getDb().prepare(`INSERT INTO staff_cpd_records (staff_id, title, provider, training_type, start_date, end_date, hours, location, description, file_id, verification_status, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'declared', ?)`).run(
+      staffId, title, req.body.provider ?? null, trainingType,
+      req.body.startDate || null, req.body.endDate || null,
+      Number.isFinite(hours) ? hours : null,
+      req.body.location ?? null, req.body.description ?? null,
+      parseIntNullable(req.body.fileId), req.user.id);
+    audit(req, { action: 'self_create', entity: 'staff_cpd_records', entityId: r.lastInsertRowid, newValue: { staffId, title, trainingType } });
+    res.status(201).json({ id: r.lastInsertRowid });
+  });
+
+  function ownDeclaredTraining(req: import('express').Request) {
+    const staffId = req.user?.staffId;
+    if (!staffId) return { error: 'Your account is not linked to a staff record.', status: 400 as const };
+    const row = getDb().prepare('SELECT * FROM staff_cpd_records WHERE id = ?').get(req.params.id) as { staff_id: number; verification_status: string } | undefined;
+    if (!row) return { error: 'Training record not found.', status: 404 as const };
+    if (Number(row.staff_id) !== Number(staffId)) return { error: 'That training record is not yours.', status: 403 as const };
+    if (row.verification_status === 'verified') return { error: 'This record has been verified and can no longer be changed here. Ask Personnel Management.', status: 403 as const };
+    return { row };
+  }
+
+  router.put('/my-training/:id', (req, res) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    const found = ownDeclaredTraining(req);
+    if ('error' in found) return res.status(found.status).json({ error: found.error });
+    const prev = found.row as Record<string, unknown>;
+    const trainingType = CPD_TYPES.includes(String(req.body.trainingType)) ? String(req.body.trainingType) : String(prev.training_type);
+    const title = String(req.body.title ?? '').trim() || String(prev.title);
+    const hours = req.body.hours === '' || req.body.hours === null || req.body.hours === undefined ? null : Number(req.body.hours);
+    getDb().prepare(`UPDATE staff_cpd_records SET title = ?, provider = ?, training_type = ?, start_date = ?, end_date = ?, hours = ?, location = ?, description = ?, file_id = COALESCE(?, file_id), updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(title, req.body.provider ?? null, trainingType, req.body.startDate || null, req.body.endDate || null,
+        Number.isFinite(hours) ? hours : null, req.body.location ?? null, req.body.description ?? null,
+        parseIntNullable(req.body.fileId), req.params.id);
+    audit(req, { action: 'self_edit', entity: 'staff_cpd_records', entityId: Number(req.params.id), oldValue: prev, newValue: req.body });
+    res.json({ ok: true });
+  });
+
+  router.delete('/my-training/:id', (req, res) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    const found = ownDeclaredTraining(req);
+    if ('error' in found) return res.status(found.status).json({ error: found.error });
+    getDb().prepare('DELETE FROM staff_cpd_records WHERE id = ?').run(req.params.id);
+    audit(req, { action: 'self_delete', entity: 'staff_cpd_records', entityId: Number(req.params.id), oldValue: found.row });
+    res.json({ ok: true });
   });
 
   /* ──────────────────────────────────────────────────────────────────────

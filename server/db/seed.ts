@@ -92,7 +92,9 @@ export function seedDefaults() {
     // Bump whenever the table below changes in a way an existing laboratory
     // must receive — a right withdrawn, or a new area added to a role. See the
     // note beside the application loop for why this exists.
-    const ROLE_DEFAULTS_VERSION = '2026.08-features.7-bulk-io-reserved';
+    // Both the routine-work tiers and the bulk-import reservation below have to
+    // reach a laboratory that is already running, so the marker moves past both.
+    const ROLE_DEFAULTS_VERSION = '2026.08-features.9-routine-tiers-bulk-io';
 
     // ── Bulk export and import ─────────────────────────────────────────────
     // Downloading a whole register as a spreadsheet, or loading one back in,
@@ -123,30 +125,41 @@ export function seedDefaults() {
     // that job below.
     const EVERYONE: Partial<Record<AccessLevel, string[]>> = {
       view: [
-        'home', 'dashboard', 'dennis',
+        'home', 'dennis',
         // The documents they must follow, and attest to when one is issued.
         'documents.library',
         // The code of conduct and the organogram they sign against.
         'organisation.structure',
-        // What is due, and when.
+        // What is due across the laboratory, and when.
         'notifications.calendar',
         // The duty roster and bench schedule they are ON. Reading the roster is
         // how a person knows which shift they work; changing it belongs to
         // whoever builds it, which is why this is View and stops there.
         'personnel.rosters',
       ],
-      // A person's own record, own inbox, own reminder sounds. `personal`
-      // features, so this level governs what they see of OTHER people's — which
-      // is nothing — while their own is always theirs.
-      manage: ['personnel.self', 'notifications.inbox', 'notifications.sounds'],
+      // A person's own record, own inbox, own reminder sounds, and the portal
+      // that gathers all three. `personal` features, so this level governs what
+      // they see of OTHER people's — which is nothing — while their own is
+      // always theirs.
+      //
+      // The Main Dashboard is deliberately NOT here any more. It is the
+      // laboratory's management view, granted below to the roles accountable
+      // for the laboratory; everybody's own working day lives in My Portal,
+      // which is why the portal is granted here instead and to everyone.
+      manage: ['staff_portal', 'personnel.self', 'notifications.inbox', 'notifications.sounds'],
       // Their own declarations, training and duties are NOT granted here on
       // purpose. Those registers list the whole laboratory, and `view` on one
       // is the right to read everybody's. A person reaches their own through
       // the self-service routes (`/personnel/my-declarations`, `/my-tasks`,
-      // `/my-profile`) and the User Portal, which check the caller against
+      // `/my-profile`) and My Portal, which check the caller against
       // their own staff record and nothing else.
       contribute: [
         'nc_capa', 'facilities_safety.incidents', 'actions', 'complaints',
+        // The routine work of the bench — charting a fridge, decontaminating a
+        // bench, a stock check — is what being on duty means. Everyone on duty
+        // does it, so the general tier is part of the baseline; the technical
+        // and supervisory tiers belong to the jobs that carry them, below.
+        'routine_work.general',
       ],
     };
 
@@ -493,6 +506,63 @@ export function seedDefaults() {
         ],
       },
     };
+
+    // ---- Who may perform which tier of routine work ------------------------
+    // The recurring work of a unit is not one job. Charting a fridge and
+    // decontaminating a bench are done by whoever is on duty. Running and
+    // accepting an IQC batch, or a technical service on an analyser, is
+    // registered scientific work. Reviewing and signing off the unit's
+    // programme is the supervisor's.
+    //
+    // Stated here in one table for the same reason the dashboard is: "who is
+    // competent to do what" is a decision a laboratory should be able to read
+    // in one place and change deliberately. Each entry is the DEFAULT — the
+    // Access Control screen carries these three features like any other, so a
+    // laboratory that trains its technicians on the analysers grants them the
+    // technical tier there without touching this file.
+    //
+    // The general tier is in the baseline above and so is not repeated.
+    const ROUTINE_TECHNICAL_ROLES = [
+      'Biomedical Scientist', 'Section Head', 'Blood Bank Unit Head', 'POCT Officer',
+      'Safety Manager', 'Quality Team Member', 'Quality Manager', 'Laboratory Manager',
+    ];
+    const ROUTINE_SUPERVISORY_ROLES = [
+      'Section Head', 'Blood Bank Unit Head', 'Safety Manager', 'Quality Manager', 'Laboratory Manager',
+    ];
+    // Reading what the whole unit was due to do, and what was actually done.
+    // Auditing the programme is not performing it, so the Internal Auditor is
+    // here and in neither list above.
+    const ROUTINE_OVERSIGHT_ROLES = [
+      'Section Head', 'Blood Bank Unit Head', 'Safety Manager', 'Quality Team Member',
+      'Quality Manager', 'Laboratory Manager', 'Internal Auditor',
+    ];
+    const addRoutine = (roleNames: string[], key: string, level: AccessLevel) => {
+      for (const roleName of roleNames) {
+        const role = ROLE_ACCESS[roleName];
+        if (!role) continue;
+        role[level] = [...(role[level] ?? []), key];
+      }
+    };
+    addRoutine(ROUTINE_TECHNICAL_ROLES, 'routine_work.technical', 'contribute');
+    addRoutine(ROUTINE_SUPERVISORY_ROLES, 'routine_work.supervisory', 'contribute');
+    addRoutine(ROUTINE_OVERSIGHT_ROLES, 'routine_work.oversight', 'view');
+
+    // ---- Who sees the Main Dashboard ---------------------------------------
+    // The Main Dashboard answers a management question — how is the laboratory
+    // doing — from figures drawn across every module. It belongs to the people
+    // accountable for that answer and to nobody else; everyone else's own day
+    // is in My Portal, which the baseline above grants to the whole laboratory.
+    //
+    // The list is here, in one place, rather than a line buried in four role
+    // blocks, so "who can see the laboratory's overview" stays a single visible
+    // decision. The System Administrator holds everything and is not listed.
+    const MAIN_DASHBOARD_ROLES = [
+      'Laboratory Manager', 'Quality Manager', 'Section Head', 'Blood Bank Unit Head',
+    ];
+    for (const roleName of MAIN_DASHBOARD_ROLES) {
+      const role = ROLE_ACCESS[roleName];
+      if (role) role.view = [...(role.view ?? []), 'dashboard'];
+    }
 
     // Fold the shared baseline into every role without overwriting a role's own,
     // higher, level for the same key.

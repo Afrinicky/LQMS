@@ -5108,6 +5108,12 @@ CREATE INDEX IF NOT EXISTS idx_form_sub_template ON form_submissions(template_ke
   // Signature on file: each staff member uploads their signature once; it is
   // then reused for every electronic signing in place of drawing one each time.
   if (!staffSelfCols.has('signature_file_id')) database.exec('ALTER TABLE staff ADD COLUMN signature_file_id INTEGER REFERENCES files(id)');
+  // Passport photograph. A personnel file has carried one on paper for as long
+  // as personnel files have existed — it is how a laboratory confirms the
+  // person at the bench is the person on the record, and what an ID badge and
+  // a printed register are made from. Stored like the signature: one file id
+  // on the staff row, uploaded by its subject, replaced rather than versioned.
+  if (!staffSelfCols.has('photo_file_id')) database.exec('ALTER TABLE staff ADD COLUMN photo_file_id INTEGER REFERENCES files(id)');
 
   // Why somebody left, and when.
   //
@@ -5123,6 +5129,50 @@ CREATE INDEX IF NOT EXISTS idx_form_sub_template ON form_submissions(template_ke
   if (!staffSelfCols.has('exit_notes')) database.exec('ALTER TABLE staff ADD COLUMN exit_notes TEXT');
   if (!staffSelfCols.has('exit_recorded_at')) database.exec('ALTER TABLE staff ADD COLUMN exit_recorded_at TEXT');
   if (!staffSelfCols.has('exit_recorded_by')) database.exec('ALTER TABLE staff ADD COLUMN exit_recorded_by INTEGER REFERENCES users(id)');
+
+  // Staff-declared training and CPD.
+  //
+  // The training register belongs to the laboratory: management schedules an
+  // event, records who attended, keeps the evidence. But a great deal of a
+  // scientist's continuing professional development happens outside that
+  // register — a weekend course, a webinar, a conference, a qualification
+  // taken in their own time — and until now there was nowhere for it to go.
+  // The person it belongs to could not put it on their own file, so at
+  // appraisal it did not exist.
+  //
+  // This is that place, and it is deliberately separate from `training_events`
+  // rather than mixed into it: a record somebody entered about themselves is
+  // not the same evidence as one the laboratory ran and witnessed. It carries
+  // its own verification state so Personnel Management can confirm it against
+  // the certificate, and until they do it reads as declared, not proven.
+  database.exec(`CREATE TABLE IF NOT EXISTS staff_cpd_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id INTEGER NOT NULL REFERENCES staff(id),
+    title TEXT NOT NULL,
+    provider TEXT,
+    training_type TEXT NOT NULL DEFAULT 'external_course',
+    start_date TEXT,
+    end_date TEXT,
+    hours REAL,
+    location TEXT,
+    description TEXT,
+    file_id INTEGER REFERENCES files(id),
+    verification_status TEXT NOT NULL DEFAULT 'declared',
+    verified_by_staff_id INTEGER REFERENCES staff(id),
+    verified_at TEXT,
+    verifier_remarks TEXT,
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT
+  );`);
+  database.exec('CREATE INDEX IF NOT EXISTS idx_staff_cpd_staff ON staff_cpd_records(staff_id)');
+
+  // Who added a staff document, and whether the person it is about added it
+  // themselves. Personnel Management verifies either way, but a file the
+  // subject uploaded is a claim awaiting confirmation rather than a record the
+  // laboratory placed there, and the register should be able to say which.
+  const staffDocCols = new Set((database.prepare('PRAGMA table_info(staff_documents)').all() as Array<{ name: string }>).map(c => c.name));
+  if (!staffDocCols.has('source')) database.exec("ALTER TABLE staff_documents ADD COLUMN source TEXT NOT NULL DEFAULT 'register'");
 
   // ===================================================================
   // Complaints — ISO 15189:2022 §7.4
@@ -5532,6 +5582,26 @@ CREATE INDEX IF NOT EXISTS idx_supply_sources_active ON supply_sources(is_active
   // the register can mark it and the viewer can be reached from either side.
   const docCoreCols = new Set((database.prepare('PRAGMA table_info(documents)').all() as Array<{ name: string }>).map(c => c.name));
   if (!docCoreCols.has('core_slot_key')) database.exec('ALTER TABLE documents ADD COLUMN core_slot_key TEXT');
+
+  // Who a document is ABOUT, as opposed to who owns it.
+  //
+  // A job description is a controlled document like any other — it is written,
+  // reviewed, approved, versioned and issued through document control — but it
+  // is also the one kind of document whose whole purpose is to describe a
+  // particular job. Until now there was nowhere to say which job, so a
+  // laboratory could register "Job Description — Biomedical Scientist" and the
+  // Biomedical Scientists still had no way to find it.
+  //
+  // `owner_position_id` already exists and means something different: the post
+  // RESPONSIBLE for keeping the document current. These two say who it APPLIES
+  // to. A job description normally names a position, and everybody holding that
+  // position sees it; a laboratory that issues a personalised description names
+  // the staff member instead. Both are optional and both are ignored for every
+  // other document type.
+  if (!docCoreCols.has('applies_to_position_id')) database.exec('ALTER TABLE documents ADD COLUMN applies_to_position_id INTEGER REFERENCES positions(id)');
+  if (!docCoreCols.has('applies_to_staff_id')) database.exec('ALTER TABLE documents ADD COLUMN applies_to_staff_id INTEGER REFERENCES staff(id)');
+  database.exec('CREATE INDEX IF NOT EXISTS idx_documents_applies_position ON documents(applies_to_position_id)');
+  database.exec('CREATE INDEX IF NOT EXISTS idx_documents_applies_staff ON documents(applies_to_staff_id)');
   // Adopt whatever already matches a slot's document type, so a laboratory that
   // registered its manuals before this existed finds them already in place.
   database.exec(`UPDATE core_document_slots SET document_id = (
@@ -5584,6 +5654,7 @@ CREATE TABLE IF NOT EXISTS unit_activities (
   due_time TEXT,                           -- HH:MM the work should be done by
   grace_minutes INTEGER NOT NULL DEFAULT 0,
   assign_mode TEXT NOT NULL DEFAULT 'on_duty',  -- on_duty|bench|unit_head|named_staff|whole_unit
+  performer_tier TEXT NOT NULL DEFAULT 'general',  -- general|technical|supervisory: who is competent to perform it
   responsible_staff_id INTEGER REFERENCES staff(id),
   priority TEXT NOT NULL DEFAULT 'normal',
   evidence_required INTEGER NOT NULL DEFAULT 0,
@@ -5791,6 +5862,18 @@ CREATE TABLE IF NOT EXISTS system_audit_scans (
   detail TEXT
 );
 `);
+
+  // Which tier of staff is competent to PERFORM an activity.
+  //
+  // Being rostered onto a bench is not the same as being qualified to do
+  // everything that happens on it: charting a fridge is work anyone on duty
+  // does, accepting an IQC batch is a registered scientist's, and signing off a
+  // quarterly review is the supervisor's. The tier maps to a permission
+  // feature, so who holds each one is an Access Control decision per profile
+  // rather than something wired into the code. Activities that pre-date the
+  // column default to 'general', which is effectively what they already were.
+  const activityCols = new Set((database.prepare('PRAGMA table_info(unit_activities)').all() as Array<{ name: string }>).map(c => c.name));
+  if (!activityCols.has('performer_tier')) database.exec("ALTER TABLE unit_activities ADD COLUMN performer_tier TEXT NOT NULL DEFAULT 'general'");
 
   // duty_rosters, reassignment_schedules and bench_schedules pre-date automatic
   // roll-forward: mark the ones the system created itself so a carried-forward

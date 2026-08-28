@@ -68,8 +68,10 @@ async function main() {
   console.log('\n[2] A role without settings rights cannot see or reach Settings');
   check('technician has no settings entry in the map', !tech.permissions.settings, JSON.stringify(tech.permissions.settings));
   check('GET /users is refused', (await call('/users', { token: T })).status === 403);
-  check('technician CAN see home + dashboard (shell stays usable)',
-    !!tech.permissions.home && !!tech.permissions.dashboard);
+  check('technician CAN see home + My Portal (their own workspace)',
+    !!tech.permissions.home && !!tech.permissions.staff_portal);
+  check('technician CANNOT see the Main Dashboard (management view)',
+    !tech.permissions.dashboard, JSON.stringify(tech.permissions.dashboard));
   check('technician CAN see organisation (seed gap fixed)', !!tech.permissions.organisation,
     JSON.stringify(tech.permissions.organisation));
 

@@ -12,7 +12,7 @@
  *
  *   node scripts/alerts-check.mjs
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { ALERT_TARGETS } from '../shared/constants/alertTargets.ts';
 
 const BASE = process.env.API || 'http://127.0.0.1:4431/api';
@@ -127,8 +127,16 @@ const pageSource = ['Phase3Pages', 'Phase4Pages', 'Phase8Pages', 'PersonnelManag
   'IqcPage', 'QMSPages', 'NcCapaPages', 'OrganisationPage', 'CustomerFocusPage', 'POCTPage',
   'InformationManagementPage', 'ProcessManagementPage', 'MonthlyReportsPage', 'BloodBankHandoverPage',
   'VerificationValidationPage', 'EnvironmentalMonitoringPage', 'SystemAuditPage', 'ComplaintsPage',
-  'CorePages', 'NotificationsPage']
-  .map(f => readFileSync(new URL(`../src/pages/${f}.tsx`, import.meta.url), 'utf8')).join('\n');
+  'CorePages', 'NotificationsPage', 'StaffPortalPage']
+  .map(f => readFileSync(new URL(`../src/pages/${f}.tsx`, import.meta.url), 'utf8'))
+  // My Portal draws its tabs from StaffPortalPage but renders each one from a
+  // file of its own, so the faces have to be read too — otherwise a tab that
+  // genuinely exists reads as missing, which is the failure this list exists
+  // to prevent.
+  .concat(readdirSync(new URL('../src/pages/portal/', import.meta.url))
+    .filter(f => /\.tsx?$/.test(f))
+    .map(f => readFileSync(new URL(`../src/pages/portal/${f}`, import.meta.url), 'utf8')))
+  .join('\n');
 
 const namedTabs = [...new Set(Object.values(ALERT_TARGETS).flatMap(t => [t.tab, t.subtab]).filter(Boolean))];
 const missingTabs = namedTabs.filter(t => !pageSource.includes(`'${t}'`));

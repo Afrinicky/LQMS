@@ -78,14 +78,16 @@ export default function AppLayout() {
   // follows the user again (active section open, the rest closed).
   useEffect(() => { setSectionOverrides({}); }, [activeSectionKey]);
 
-  const showInbox = canView('notifications');
+  // The bell is the person's own inbox, which every member of staff has —
+  // it is not the Notifications workspace, and no longer asks for its rights.
+  const showInbox = canView('staff_portal');
 
   useEffect(() => {
     if (!user || !showInbox) { setUnread(null); return; }
     let cancelled = false;
     const fetchUnread = () => {
-      api<{ unreadNotifications: number }>('/dashboard/notifications-summary')
-        .then(s => { if (!cancelled) setUnread(s.unreadNotifications); })
+      api<{ myUnreadNotifications: number }>('/dashboard/my-work-summary')
+        .then(s => { if (!cancelled) setUnread(s.myUnreadNotifications); })
         .catch(() => {});
     };
     fetchUnread();
@@ -188,16 +190,17 @@ export default function AppLayout() {
           <div className="topbar-actions">
             <span className="health-pill"><span className="dot" /><span>System Healthy</span></span>
             {showInbox && (
-              <button className="icon-btn" type="button" aria-label="Notifications" onClick={() => navigate('/notifications')}>
+              <button className="icon-btn" type="button" aria-label="My inbox"
+                title="My inbox" onClick={() => navigate('/my-portal?tab=My%20Inbox')}>
                 <Bell size={18} />
                 {unread !== null && unread > 0 && <span className="icon-badge">{unread > 99 ? '99+' : unread}</span>}
               </button>
             )}
-            {/* The chip opens the dashboard, where a staff member's own profile
-                now lives. It used to open Settings, which most roles may not
-                even see. */}
-            <button className="user-chip" type="button" title="My profile"
-              onClick={() => navigate(canView('dashboard') ? '/dashboard' : '/home')}>
+            {/* The chip opens My Portal — the one page in the system that is
+                about the person clicking it. It used to open Settings, then the
+                dashboard; neither was theirs. */}
+            <button className="user-chip" type="button" title="My Portal"
+              onClick={() => navigate('/my-portal')}>
               <span className="user-avatar">{initials(user?.fullName)}</span>
               <span className="user-meta">
                 <strong>{user?.fullName ?? 'User'}</strong>

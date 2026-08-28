@@ -2181,6 +2181,48 @@ export function commonRoutes() {
     res.json({ ok: true });
   });
 
+  /**
+   * The assignee reporting on their own action.
+   *
+   * Editing the action tracker is a management right: who an action is
+   * assigned to, when it is due, and whether it may be closed are decisions
+   * about other people's work. But the person the action was given to has to
+   * be able to say "I have started this" and "I have done this" without
+   * holding that right, or the tracker only ever reflects what a manager last
+   * had time to type in.
+   *
+   * So this route is narrow on purpose. It touches one action, only if the
+   * caller is the person it is assigned to, and it can move it only along the
+   * doing half of the lifecycle. Verified and Closed are the verifier's words
+   * and are refused here — an assignee marking their own work verified is the
+   * thing an audit trail exists to prevent.
+   */
+  const ASSIGNEE_STATUSES = ['In progress', 'Waiting for evidence', 'Submitted for review', 'Completed'];
+
+  router.post('/actions/:id/my-progress', requirePermission('actions', 'view'), (req, res) => {
+    const db = getDb();
+    const staffId = req.user?.staffId ?? null;
+    if (!staffId) return res.status(400).json({ error: 'Your account is not linked to a staff record.' });
+    const action = db.prepare('SELECT * FROM actions WHERE id = ?').get(req.params.id) as { id: number; assigned_to_staff_id: number | null; status: string; completion_notes: string | null } | undefined;
+    if (!action) return res.status(404).json({ error: 'Action not found' });
+    if (Number(action.assigned_to_staff_id) !== Number(staffId)) {
+      return res.status(403).json({ error: 'You can only report progress on an action assigned to you.' });
+    }
+    const status = String(req.body.status ?? '');
+    if (!ASSIGNEE_STATUSES.includes(status)) {
+      return res.status(400).json({ error: `Choose one of: ${ASSIGNEE_STATUSES.join(', ')}. Verifying and closing an action belong to whoever raised it.` });
+    }
+    const notes = req.body.completionNotes === undefined ? action.completion_notes : (String(req.body.completionNotes).trim() || null);
+    db.prepare('UPDATE actions SET status = ?, completion_notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(status, notes, action.id);
+    // Clear the alerts that were chasing this person for it.
+    if (status === 'Completed' && tableExists(db, 'notifications')) {
+      db.prepare("UPDATE notifications SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP, resolved_by_staff_id = ? WHERE assigned_to_staff_id = ? AND module_key = 'actions' AND record_id = ? AND status NOT IN ('resolved','dismissed')")
+        .run(staffId, staffId, String(action.id));
+    }
+    audit(req, { action: 'assignee_progress', entity: 'actions', entityId: action.id, oldValue: { status: action.status }, newValue: { status, completionNotes: notes } });
+    res.json({ ok: true, status });
+  });
+
   router.get('/permissions', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT * FROM permissions ORDER BY module_key, action').all()));
 
   // ======================================================================
