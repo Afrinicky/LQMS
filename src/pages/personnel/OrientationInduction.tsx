@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
-import { api } from '../../services/api';
+import { api, errorText, apiRead } from '../../services/api';
 import { usePermissions } from '../../hooks/usePermissions';
 import {
   ORIENTATION_AUDIENCES, ORIENTATION_AUDIENCE_LABELS,
@@ -96,18 +96,18 @@ function RecordsView({ staff, staffName, mayCreate, mayEdit, onError, onNotice }
   const load = useCallback(async () => {
     try {
       const [fw, recs] = await Promise.all([
-        api<OrientationFramework[]>('/personnel/orientation-frameworks?status=active'),
-        api<StaffOrientation[]>('/personnel/orientations'),
+        apiRead<OrientationFramework[]>('/personnel/orientation-frameworks?status=active', []),
+        apiRead<StaffOrientation[]>('/personnel/orientations', []),
       ]);
       setFrameworks(fw); setRecords(recs);
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }, [onError]);
   useEffect(() => { void load(); }, [load]);
 
   const openRecord = useCallback(async (id: number) => {
     onError(null);
     try { setSelected(await api<StaffOrientation>(`/personnel/orientations/${id}`)); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }, [onError]);
 
   async function submitNew(e: FormEvent) {
@@ -117,7 +117,7 @@ function RecordsView({ staff, staffName, mayCreate, mayEdit, onError, onNotice }
       setForm(emptyRecordForm); setShowNew(false);
       await load(); onNotice('Orientation record raised. Work the checklist down as each item is completed.');
       await openRecord(created.id);
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }
 
   async function setItemStatus(item: StaffOrientationItem, status: string) {
@@ -126,20 +126,20 @@ function RecordsView({ staff, staffName, mayCreate, mayEdit, onError, onNotice }
     try {
       await api(`/personnel/orientations/${selected.id}/items/${item.id}`, { method: 'PUT', body: JSON.stringify({ status }) });
       await openRecord(selected.id); await load();
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }
 
   async function saveRemark(item: StaffOrientationItem, remarks: string) {
     if (!selected) return;
     try { await api(`/personnel/orientations/${selected.id}/items/${item.id}`, { method: 'PUT', body: JSON.stringify({ status: item.status, remarks }) }); await openRecord(selected.id); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
 
   async function updateRecord(patch: Record<string, unknown>) {
     if (!selected) return;
     onError(null);
     try { await api(`/personnel/orientations/${selected.id}`, { method: 'PUT', body: JSON.stringify(patch) }); await openRecord(selected.id); await load(); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
 
   const grouped = useMemo(() => {
@@ -331,14 +331,14 @@ function FrameworksView({ sections, departments, mayCreate, mayEdit, mayApprove,
     try {
       const q = statusFilter ? `?status=${statusFilter}` : '';
       setFrameworks(await api<OrientationFramework[]>(`/personnel/orientation-frameworks${q}`));
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }, [statusFilter, onError]);
   useEffect(() => { void load(); }, [load]);
 
   const openFramework = useCallback(async (id: number) => {
     onError(null);
     try { setSelected(await api<OrientationFramework>(`/personnel/orientation-frameworks/${id}`)); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }, [onError]);
 
   async function submitNew(e: FormEvent) {
@@ -348,38 +348,38 @@ function FrameworksView({ sections, departments, mayCreate, mayEdit, mayApprove,
       setForm(emptyFramework); setCreating(false);
       await load(); onNotice('Framework created as a draft. Add its checklist items, then activate it.');
       await openFramework(created.id);
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }
 
   async function setStatus(id: number, status: string) {
     onError(null);
     try { const fresh = await api<OrientationFramework>(`/personnel/orientation-frameworks/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) }); setSelected(fresh); await load(); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
 
   async function duplicate(id: number) {
     onError(null);
     try { const created = await api<{ id: number }>(`/personnel/orientation-frameworks/${id}/duplicate`, { method: 'POST', body: JSON.stringify({}) }); await load(); onNotice('Framework duplicated as a new draft.'); await openFramework(created.id); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
 
   async function removeFramework(id: number) {
     if (!confirm('Delete this draft framework? This cannot be undone.')) return;
     onError(null);
     try { await api(`/personnel/orientation-frameworks/${id}`, { method: 'DELETE' }); setSelected(null); await load(); onNotice('Framework deleted.'); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
 
   async function saveMeta(patch: Record<string, unknown>) {
     if (!selected) return; onError(null);
     try { const fresh = await api<OrientationFramework>(`/personnel/orientation-frameworks/${selected.id}`, { method: 'PUT', body: JSON.stringify(patch) }); setSelected(fresh); await load(); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
 
   async function addItem(e: FormEvent) {
     e.preventDefault(); if (!selected) return; onError(null);
     try { const fresh = await api<OrientationFramework>(`/personnel/orientation-frameworks/${selected.id}/items`, { method: 'POST', body: JSON.stringify(itemForm) }); setSelected(fresh); setItemForm({ ...emptyItem, groupTitle: itemForm.groupTitle }); await load(); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
 
   async function saveItem(e: FormEvent) {
@@ -389,13 +389,13 @@ function FrameworksView({ sections, departments, mayCreate, mayEdit, mayApprove,
         groupTitle: editingItem.group_title, itemText: editingItem.item_text, itemDescription: editingItem.item_description, responsibleRole: editingItem.responsible_role,
       }) });
       setSelected(fresh); setEditingItem(null); await load();
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }
 
   async function deleteItem(itemId: number) {
     if (!selected) return; onError(null);
     try { const fresh = await api<OrientationFramework>(`/personnel/orientation-framework-items/${itemId}`, { method: 'DELETE' }); setSelected(fresh); await load(); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
 
   const grouped = useMemo(() => {

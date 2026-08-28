@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { KeyRound, X } from 'lucide-react';
-import { api } from '../services/api';
+import { api, errorText } from '../services/api';
 
 /**
  * Self-service password change for the desktop app. Any signed-in user confirms
@@ -29,7 +29,7 @@ export function ChangePasswordModal({ onClose, required = false, onChanged }: { 
       await api('/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: current, newPassword: next }) });
       setDone(true);
       onChanged?.();
-    } catch (err) { setError((err as Error).message); } finally { setBusy(false); }
+    } catch (err) { setError(errorText(err)); } finally { setBusy(false); }
   }
 
   const type = show ? 'text' : 'password';

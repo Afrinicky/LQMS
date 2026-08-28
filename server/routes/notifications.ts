@@ -939,7 +939,15 @@ function computeSummary(req: any) {
   const today = new Date().toISOString().slice(0, 10);
   const soon = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const count = (sql: string, ...params: unknown[]) => (db.prepare(sql).get(...params) as { count: number }).count;
-  const mineFilter = req.user?.staffId ? ` AND (assigned_to_staff_id = ${Number(req.user.staffId)} OR assigned_to_staff_id IS NULL)` : '';
+  const mine = req.user?.staffId ? Number(req.user.staffId) : null;
+
+  // Every screen in the system opens on this, and `notifications` is the table
+  // that grows fastest — one row per person per controlled document, per due
+  // activity, per alert. Each of these counts is answered from an index over
+  // the column it filters on (see the index block at the end of migrate()), so
+  // it is a lookup rather than a walk of the whole table. Folding them into one
+  // conditional-sum pass looks cheaper and is not: with nothing to filter on,
+  // that one pass reads every row, which is slower than all of these together.
   const byModuleRows = db.prepare("SELECT module_key, COUNT(*) AS c FROM notifications WHERE status IN ('unread','read','acknowledged') GROUP BY module_key").all() as Array<{ module_key: string; c: number }>;
   const byModule: Record<string, number> = {};
   for (const r of byModuleRows) byModule[r.module_key || 'unknown'] = r.c;
@@ -950,8 +958,12 @@ function computeSummary(req: any) {
     dueSoon: count("SELECT COUNT(*) count FROM notifications WHERE due_date > ? AND due_date <= ? AND status NOT IN ('resolved','dismissed')", today, soon),
     overdue: count("SELECT COUNT(*) count FROM notifications WHERE due_date IS NOT NULL AND due_date < ? AND status NOT IN ('resolved','dismissed')", today),
     openTasks: count("SELECT COUNT(*) count FROM user_task_queue WHERE status IN ('open','in_progress','overdue')"),
-    myOpenTasks: req.user?.staffId ? count("SELECT COUNT(*) count FROM user_task_queue WHERE status IN ('open','in_progress','overdue') AND assigned_to_staff_id = ?", req.user.staffId) : 0,
-    pendingApprovals: count("SELECT COUNT(*) count FROM notifications WHERE notification_type = 'approval_required' AND status NOT IN ('resolved','dismissed')" + mineFilter),
+    myOpenTasks: mine ? count("SELECT COUNT(*) count FROM user_task_queue WHERE status IN ('open','in_progress','overdue') AND assigned_to_staff_id = ?", mine) : 0,
+    // The staff id is bound rather than written into the SQL: interpolating it
+    // meant a new prepared statement — and a new query plan — per person.
+    pendingApprovals: mine
+      ? count("SELECT COUNT(*) count FROM notifications WHERE notification_type = 'approval_required' AND status NOT IN ('resolved','dismissed') AND (assigned_to_staff_id = ? OR assigned_to_staff_id IS NULL)", mine)
+      : count("SELECT COUNT(*) count FROM notifications WHERE notification_type = 'approval_required' AND status NOT IN ('resolved','dismissed')"),
     reviewItemsDue: count("SELECT COUNT(*) count FROM review_calendar_items WHERE status IN ('pending','due_soon','overdue') AND due_date <= ?", soon),
     followUpsDue: count("SELECT COUNT(*) count FROM notifications WHERE notification_type = 'follow_up' AND status NOT IN ('resolved','dismissed')"),
     byModule

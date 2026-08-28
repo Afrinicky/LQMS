@@ -4,7 +4,7 @@ import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, BarMeter, BarChart, CHART_COLORS, ModuleAlerts, DetailModal, RegisterSearch } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { Download, Upload } from 'lucide-react';
-import { api, API_BASE, getToken } from '../services/api';
+import { api, API_BASE, getToken, errorText, apiRead } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import { DutyRosterBoard, ReassignmentBoard, BenchScheduleBoard, ActingSupervisorsBoard } from './SchedulingBoards';
 import DisabledModule from '../components/DisabledModule';
@@ -127,14 +127,14 @@ export function PersonnelManagementPage() {
     try {
       const [sum, sd, decl, tr, rs] = await Promise.all([
         api<PersonnelSummary>('/dashboard/personnel-summary').catch(() => null),
-        api<StaffDocument[]>('/personnel/staff-documents'),
-        api<StaffDeclaration[]>('/personnel/declarations'),
-        api<TrainingEvent[]>('/personnel/training'),
-        api<DutyRoster[]>('/personnel/rosters')
+        apiRead<StaffDocument[]>('/personnel/staff-documents', []),
+        apiRead<StaffDeclaration[]>('/personnel/declarations', []),
+        apiRead<TrainingEvent[]>('/personnel/training', []),
+        apiRead<DutyRoster[]>('/personnel/rosters', [])
       ]);
       if (sum) setSummary(sum);
       setStaffDocs(sd); setDeclarations(decl); setTrainings(tr); setRosters(rs);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   useEffect(() => { if (isEnabled('personnel')) void load(); }, [isEnabled]);
   if (!isEnabled('personnel')) return <DisabledModule />;
@@ -157,12 +157,12 @@ export function PersonnelManagementPage() {
       await api('/personnel/staff-documents', { method: 'POST', body: JSON.stringify({ ...docForm, fileId }) });
       setDocForm({ staffId: '', documentType: 'CV', title: '', issueDate: '', expiryDate: '', remarks: '' }); setDocFile(null);
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function verifyStaffDoc(id: number) {
     try { await api(`/personnel/staff-documents/${id}/verify`, { method: 'POST', body: JSON.stringify({ verificationStatus: 'verified' }) }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function submitDeclaration(e: FormEvent) {
@@ -171,7 +171,7 @@ export function PersonnelManagementPage() {
       await api('/personnel/declarations', { method: 'POST', body: JSON.stringify(declForm) });
       setDeclForm({ declarationType: 'ethical_declaration', title: '', description: '', staffId: '', impartialityConfirmed: true, confidentialityConfirmed: true, codeOfConductAck: true, conflictOfInterest: 'None Declared', formCompletedDate: '', reviewedByStaffId: '', nextReviewDate: '' });
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   function editStaff(s: Staff) {
@@ -199,7 +199,7 @@ export function PersonnelManagementPage() {
       setStaffForm(emptyStaffForm); setEditingStaffId(null);
       await reloadStaff();
       setTab('Master Personnel Register');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function downloadRegister(path: string, fallback: string) {
@@ -213,7 +213,7 @@ export function PersonnelManagementPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a'); a.href = url; a.download = m ? m[1] : fallback; document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setRegBusy(''); }
   }
 
@@ -229,13 +229,13 @@ export function PersonnelManagementPage() {
       if (!res.ok) throw new Error(data.error ?? res.statusText);
       setRegResult(data as { created: number; updated: number; skipped?: number; errors: string[] });
       await reloadStaff();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setRegBusy(''); if (importInputRef.current) importInputRef.current.value = ''; }
   }
 
   async function signDeclaration(id: number) {
     try { await api(`/personnel/declarations/${id}/sign`, { method: 'POST', body: JSON.stringify({}) }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function submitTraining(e: FormEvent) {
@@ -244,12 +244,12 @@ export function PersonnelManagementPage() {
       await api('/personnel/training', { method: 'POST', body: JSON.stringify(trainingForm) });
       setTrainingForm({ title: '', description: '', trainingType: '', sectionId: '', trainerStaffId: '', trainingDate: '', startTime: '', endTime: '', location: '' });
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function openTraining(id: number) {
     try { setSelectedTraining(await api<TrainingEvent>(`/personnel/training/${id}`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function submitAttendance(e: FormEvent) {
@@ -259,7 +259,7 @@ export function PersonnelManagementPage() {
       await api(`/personnel/training/${selectedTraining.id}/attendance`, { method: 'POST', body: JSON.stringify(attendanceForm) });
       setAttendanceForm({ staffId: '', attendanceStatus: 'attended', remarks: '' });
       await openTraining(selectedTraining.id);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function submitRoster(e: FormEvent) {
@@ -268,14 +268,14 @@ export function PersonnelManagementPage() {
       await api('/personnel/rosters', { method: 'POST', body: JSON.stringify(rosterForm) });
       setRosterForm({ departmentId: '', sectionId: '', rosterStartDate: '', rosterEndDate: '', notes: '' });
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function openRoster(id: number) {
     try {
       setSelectedRoster(await api<DutyRoster>(`/personnel/rosters/${id}`));
       setRosterCoverage(await api<RosterCoverage>(`/personnel/rosters/${id}/coverage`));
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function linkMyStaff(staffId: number) {
@@ -286,7 +286,7 @@ export function PersonnelManagementPage() {
         api<StaffSuggestionsResponse>('/personnel/staff-suggestions')
       ]);
       setMyProfile(prof); setStaffSuggestions(sug);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function submitAssignment(e: FormEvent) {
@@ -296,12 +296,12 @@ export function PersonnelManagementPage() {
       await api(`/personnel/rosters/${selectedRoster.id}/assignments`, { method: 'POST', body: JSON.stringify(assignForm) });
       setAssignForm({ staffId: '', dutyDate: '', shiftName: '', startTime: '', endTime: '', dutyRole: '', notes: '' });
       await openRoster(selectedRoster.id);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function approveRoster(id: number) {
     try { await api(`/personnel/rosters/${id}/approve`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selectedRoster?.id === id) await openRoster(id); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   const tabs = ['Dashboard', 'Master Personnel Register', 'Add Staff', 'Staff Documents', 'Job Descriptions', 'Orientation & Induction', 'Declarations', 'Training Events', 'Competency Assessments', 'Performance Appraisals', 'Technical Authorizations', 'Duty Roster', 'Unit Reassignments', 'Unit Supervisors', 'Bench Schedules', 'Reports'];
@@ -349,7 +349,7 @@ export function PersonnelManagementPage() {
           <h3 style={{ margin: 0 }}>Master Personnel Register</h3>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             {can('personnel.register', 'export') && <button type="button" className="secondary" disabled={!!regBusy} title="Download the register as an Excel workbook" onClick={() => downloadRegister('/staff/export', 'Master_Personnel_Register.xlsx')}><Download size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />{regBusy === '/staff/export' ? 'Exporting…' : 'Export'}</button>}
-            {can('personnel.register', 'create') && <>
+            {can('personnel.register', 'import') && <>
               <button type="button" className="secondary" disabled={!!regBusy} title="Upload a completed register workbook" onClick={() => importInputRef.current?.click()}><Upload size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />{regBusy === 'import' ? 'Importing…' : 'Import'}</button>
               <input ref={importInputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) void importRegister(f); }} />
             </>}
@@ -562,7 +562,7 @@ function JobDescriptionsTab({ onError }: { onError: (m: string | null) => void }
   useEffect(() => {
     api<JobDescriptionRegister>('/personnel/job-descriptions')
       .then(setData)
-      .catch(e => { onError((e as Error).message); setData({ documents: [], gaps: [] }); });
+      .catch(e => { onError(errorText(e)); setData({ documents: [], gaps: [] }); });
   }, [onError]);
 
   if (!data) return <p className="muted">Loading the job description register…</p>;

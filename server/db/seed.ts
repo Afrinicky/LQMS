@@ -92,7 +92,27 @@ export function seedDefaults() {
     // Bump whenever the table below changes in a way an existing laboratory
     // must receive — a right withdrawn, or a new area added to a role. See the
     // note beside the application loop for why this exists.
-    const ROLE_DEFAULTS_VERSION = '2026.08-features.8-routine-tiers';
+    // Both the routine-work tiers and the bulk-import reservation below have to
+    // reach a laboratory that is already running, so the marker moves past both.
+    const ROLE_DEFAULTS_VERSION = '2026.08-features.9-routine-tiers-bulk-io';
+
+    // ── Bulk export and import ─────────────────────────────────────────────
+    // Downloading a whole register as a spreadsheet, or loading one back in,
+    // moves the laboratory's data in a single action. It is nothing like the
+    // day-to-day work of logging a maintenance job or receiving a delivery,
+    // and the people who do that work have no reason to do this.
+    //
+    // So on the equipment and stores registers it is settled by exact action
+    // rather than by level: the three people accountable for the laboratory's
+    // records hold it, and nobody else does, whatever level they work at. That
+    // cuts both ways — the Quality Manager only READS the maintenance register
+    // and still gets the export, while a Biomedical Scientist who MANAGES it
+    // does not, and never sees the buttons.
+    const BULK_IO_ACTIONS = new Set(['export', 'import']);
+    const BULK_IO_HOLDERS = new Set(['System Administrator', 'Laboratory Manager', 'Quality Manager']);
+    const BULK_IO_MODULES = new Set(['equipment', 'supplier_inventory']);
+    const reservesBulkIo = (permKey: string) =>
+      BULK_IO_MODULES.has(permKey) || BULK_IO_MODULES.has(permKey.split('.')[0]);
 
     // Every member of staff, whatever their rank: their own record, their own
     // inbox, the launchpad, the ability to raise a safety incident or a
@@ -611,7 +631,12 @@ export function seedDefaults() {
         // module off for the role.
         if (featuresOfModule(permission.module_key).length > 0) continue;
         const level = levels[permission.module_key];
-        const allowed = level && LEVEL_ACTIONS[level].includes(permission.action) ? 1 : 0;
+        let allowed = level && LEVEL_ACTIONS[level].includes(permission.action) ? 1 : 0;
+        // The reserved areas above: the action is decided by who the profile
+        // is, not by the level it happens to sit at.
+        if (BULK_IO_ACTIONS.has(permission.action) && reservesBulkIo(permission.module_key)) {
+          allowed = BULK_IO_HOLDERS.has(roleName) ? 1 : 0;
+        }
         if (reapply) {
           // Write the whole position, allowed AND denied, so a right this role
           // should not hold is actively withdrawn rather than left behind.

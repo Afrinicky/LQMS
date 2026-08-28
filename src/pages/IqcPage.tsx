@@ -3,7 +3,7 @@ import {
   FlaskConical, Beaker, CheckCircle2, AlertTriangle, LineChart, Plus, Trash2,
   ClipboardCheck, ShieldCheck, ArrowRight, Info, Pencil,
 } from 'lucide-react';
-import { api } from '../services/api';
+import { api, errorText, apiRead } from '../services/api';
 import { useModules } from '../hooks/useModules';
 import { usePermissions } from '../hooks/usePermissions';
 import { useAuth } from '../hooks/useAuth';
@@ -123,12 +123,12 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
   const load = useCallback(async () => {
     try {
       const [mats, rns] = await Promise.all([
-        api<Material[]>('/iqc/materials'),
-        api<Run[]>('/iqc/runs'),
+        apiRead<Material[]>('/iqc/materials', []),
+        apiRead<Run[]>('/iqc/runs', []),
       ]);
       setMaterials(mats); setRuns(rns);
       api<Record<string, number>>('/dashboard/iqc-summary').then(setSummary).catch(() => undefined);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }, []);
 
   useEffect(() => { if (embedded || isEnabled('iqc')) void load(); }, [embedded, isEnabled, load]);
@@ -446,7 +446,7 @@ function ControlActions({ material, isAdmin, onEdit, onChanged, onError, onNotic
   const openRemoval = async () => {
     setConfirming('retire'); setReason(''); setImpact(null);
     try { setImpact(await api(`/iqc/materials/${material.id}/deletion-impact`)); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   };
 
   async function remove(mode: 'retire' | 'delete', force = false) {
@@ -455,7 +455,7 @@ function ControlActions({ material, isAdmin, onEdit, onChanged, onError, onNotic
       const r = await api<{ message: string }>(`/iqc/materials/${material.id}?mode=${mode}${force ? '&force=1' : ''}`,
         { method: 'DELETE', body: JSON.stringify({ reason }) });
       setConfirming(null); await onChanged(); onNotice(r.message);
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
     finally { setBusy(false); }
   }
 
@@ -465,7 +465,7 @@ function ControlActions({ material, isAdmin, onEdit, onChanged, onError, onNotic
       const r = await api<{ warning: string | null }>(`/iqc/materials/${material.id}/reactivate`, { method: 'POST', body: '{}' });
       await onChanged();
       onNotice(r.warning ?? `${material.material_name} lot ${material.lot_number} is back in use.`);
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
     finally { setBusy(false); }
   }
 
@@ -607,7 +607,7 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
         r.affectedRuns ? `${r.affectedRuns} recorded run(s) now read against the new target` : null,
       ].filter(Boolean);
       await onSaved(`${material.material_name} lot ${form.lotNumber} updated${notes.length ? ` — ${notes.join(', ')}` : ''}.`);
-    } catch (err) { onError((err as Error).message); }
+    } catch (err) { onError(errorText(err)); }
     finally { setBusy(false); }
   }
 
@@ -833,7 +833,7 @@ function DefineControl({ sections, staff, equipment, onSaved, onError }: {
       await onSaved();
       setForm(f => ({ ...f, materialName: '', lotNumber: '', levelLabel: '', expectedOrganism: '' }));
       setRows([emptyAnalyte()]);
-    } catch (err) { onError((err as Error).message); }
+    } catch (err) { onError(errorText(err)); }
     finally { setBusy(false); }
   }
 
@@ -1092,7 +1092,7 @@ function RunControl({ materials, equipment, staff, onRecorded, onError }: {
         r!.status === 'out_of_control'
           ? `Run ${r!.runNumber} recorded and REJECTED. Patient results are withheld until this is investigated.`
           : `Run ${r!.runNumber} recorded — ${r!.status === 'warning' ? 'warning flagged' : 'in control'}.`);
-    } catch (err) { onError((err as Error).message); }
+    } catch (err) { onError(errorText(err)); }
     finally { setBusy(false); }
   }
 
@@ -1274,7 +1274,7 @@ function RunReview({ runs, onChanged, canApprove, isAdmin, equipment, staff, onE
     try {
       await api(`/iqc/runs/${run.id}/review`, { method: 'POST', body: JSON.stringify({ correctiveAction: action[run.id] ?? '' }) });
       onChanged();
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
     finally { setBusy(null); }
   };
   const release = async (run: Run, released: boolean) => {
@@ -1282,7 +1282,7 @@ function RunReview({ runs, onChanged, canApprove, isAdmin, equipment, staff, onE
     try {
       await api(`/iqc/runs/${run.id}/release`, { method: 'POST', body: JSON.stringify({ released, note: action[run.id] ?? '' }) });
       onChanged();
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
     finally { setBusy(null); }
   };
 
@@ -1411,7 +1411,7 @@ function RunCorrection({ run, mode, equipment, staff, onClose, onDone, onError }
         }
         setValues(v);
       })
-      .catch(e => onError((e as Error).message));
+      .catch(e => onError(errorText(e)));
   }, [mode, run.id, onError]);
 
   const qualitative = run.control_type === 'qualitative';
@@ -1427,7 +1427,7 @@ function RunCorrection({ run, mode, equipment, staff, onClose, onDone, onError }
       const out = await api<{ status: string; ruleSummary: string | null; reviewCleared: boolean; message: string }>(
         `/iqc/runs/${run.id}`, { method: 'PUT', body: JSON.stringify({ ...meta, readings, reason }) });
       await onDone(`${out.message} It now reads ${STATUS_LABEL[out.status]}${out.ruleSummary ? ` — ${out.ruleSummary}` : ''}.`);
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
     finally { setBusy(false); }
   }
 
@@ -1436,7 +1436,7 @@ function RunCorrection({ run, mode, equipment, staff, onClose, onDone, onError }
     try {
       const out = await api<{ message: string }>(`/iqc/runs/${run.id}`, { method: 'DELETE', body: JSON.stringify({ reason }) });
       await onDone(out.message);
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
     finally { setBusy(false); }
   }
 
@@ -1550,7 +1550,7 @@ function ChartTab({ materials, onError }: { materials: Material[]; onError: (m: 
 
   useEffect(() => {
     if (!analyteId) { setData(null); return; }
-    api<ChartData>(`/iqc/analytes/${analyteId}/chart${q}`).then(setData).catch(e => onError((e as Error).message));
+    api<ChartData>(`/iqc/analytes/${analyteId}/chart${q}`).then(setData).catch(e => onError(errorText(e)));
   }, [analyteId, q, onError]);
 
   const analyteName = analytes.find(a => String(a.id) === analyteId)?.analyte ?? 'chart';
@@ -1608,7 +1608,7 @@ function LotChanges({ materials, onError, canCreate }: { materials: Material[]; 
   async function submit(e: FormEvent) {
     e.preventDefault();
     try { await api('/iqc/lot-change', { method: 'POST', body: JSON.stringify(form) }); setForm(f => ({ ...f, reason: '', verificationSummary: '' })); load(); }
-    catch (err) { onError((err as Error).message); }
+    catch (err) { onError(errorText(err)); }
   }
   const name = (id: unknown) => materials.find(m => m.id === Number(id))?.material_name ?? '—';
 

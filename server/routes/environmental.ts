@@ -153,7 +153,7 @@ export function environmentalRoutes() {
     sendXlsx(res, buildReadingsWorkbook(true, req.query.from as string, req.query.to as string), 'Environmental_Readings.xlsx');
     audit(req, { action: 'export', entity: 'environmental_readings', entityId: null });
   });
-  router.post('/readings/import', requirePermission(MODULE, 'create'), xlsxUpload.single('file'), (req, res) => {
+  router.post('/readings/import', requirePermission(MODULE, 'import'), xlsxUpload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the Environmental Readings .xlsx file.' });
     try {
       const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
@@ -333,7 +333,7 @@ export function environmentalRoutes() {
   });
 
   // Import a data-logger CSV (columns: timestamp, temperature[, humidity]).
-  router.post('/devices/:id/import-csv', numericOnly, requirePermission(MODULE, 'create'), (req, res) => {
+  router.post('/devices/:id/import-csv', numericOnly, requirePermission(MODULE, 'import'), (req, res) => {
     const db = getDb();
     const device = db.prepare('SELECT * FROM environmental_devices WHERE id = ?').get(req.params.id) as any;
     if (!device?.asset_id) return res.status(400).json({ error: 'Assign this device to an asset first.' });

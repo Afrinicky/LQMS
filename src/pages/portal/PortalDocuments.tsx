@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { AlertTriangle, FileBadge, Loader2, Paperclip, Pencil, Plus, Trash2, Upload, X } from 'lucide-react';
-import { api } from '../../services/api';
+import { api, errorText } from '../../services/api';
 import { downloadFileById, isOverdue, titleCase, usePortal } from './portalData';
 import { uploadPersonalFile } from './PortalTaskDrawer';
 import type { StaffDocument } from '../../../shared/types/api';
@@ -89,7 +89,7 @@ export default function PortalDocuments() {
   async function remove(d: StaffDocument) {
     if (!window.confirm(`Remove "${d.title}" from your file? This cannot be undone.`)) return;
     try { await api(`/personnel/my-documents/${d.id}`, { method: 'DELETE' }); await reload(); setNotice('Document removed.'); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   return (
@@ -175,7 +175,7 @@ export default function PortalDocuments() {
                     <td className="pr-actions-cell">
                       {d.file_id && (
                         <button type="button" className="link-button"
-                          onClick={() => downloadFileById(d.file_id!, d.file_name || d.title).catch(e => setError((e as Error).message))}>
+                          onClick={() => downloadFileById(d.file_id!, d.file_name || d.title).catch(e => setError(errorText(e)))}>
                           Download
                         </button>
                       )}

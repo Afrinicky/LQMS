@@ -379,6 +379,52 @@ async function main() {
 
     const missing = MANAGEMENT.filter(n => !accounts.some(a => a.profile.name === n));
     check('the management profiles exist', missing.length === 0, missing.join(', '));
+
+    // ── Bulk export and import ────────────────────────────────────────────
+    // Taking the equipment or stores register out as a spreadsheet, or writing
+    // one back in, belongs to the three people accountable for the
+    // laboratory's records. Everyone else keeps the daily right to make an
+    // entry and never sees the buttons.
+    const IO_LEADERS = ['System Administrator', 'Laboratory Manager', 'Quality Manager'];
+    const IO_AREAS = [
+      'equipment.maintenance', 'equipment.register', 'equipment.verification',
+      'supplier_inventory.stock', 'supplier_inventory.suppliers', 'supplier_inventory.storage',
+    ];
+    const ioLeaks = [];
+    for (const acc of accounts) {
+      const map = (await call('/auth/permissions', { token: acc.token })).json.permissions ?? {};
+      const leader = IO_LEADERS.includes(acc.profile.name);
+      for (const area of IO_AREAS) {
+        for (const action of ['export', 'import']) {
+          const held = (map[area] ?? []).includes(action);
+          const mayView = (map[area] ?? []).includes('view');
+          if (held && !leader) ioLeaks.push(`${acc.profile.name} holds ${area}:${action}`);
+          // A leader who can read the register must be able to move it.
+          if (!held && leader && mayView) ioLeaks.push(`${acc.profile.name} lacks ${area}:${action}`);
+        }
+      }
+      // Reserving the bulk right must not have cost the bench the daily one:
+      // whoever logs a maintenance job still logs it. (Profiles that only read
+      // the register — the quality office, the internal auditor — are meant to
+      // hold view alone, so they are not asked this.)
+      if (BENCH.includes(acc.profile.name)
+          && (map['equipment.maintenance'] ?? []).includes('view')
+          && !(map['equipment.maintenance'] ?? []).includes('create')) {
+        ioLeaks.push(`${acc.profile.name} lost the daily right to log maintenance`);
+      }
+    }
+    check('bulk export and import of the equipment and stores registers is the leadership\'s alone',
+      ioLeaks.length === 0, ioLeaks.slice(0, 10).join(' | '));
+
+    // And the API says the same thing, not just the map the client is handed.
+    const ioApi = [];
+    for (const acc of accounts) {
+      const leader = IO_LEADERS.includes(acc.profile.name);
+      const r = await call('/equipment/maintenance/export', { token: acc.token });
+      if (!leader && r.status !== 403) ioApi.push(`${acc.profile.name}: the maintenance export returned ${r.status}, expected 403`);
+      if (leader && r.status === 403) ioApi.push(`${acc.profile.name}: the maintenance export was refused`);
+    }
+    check('and the endpoint behind it refuses everybody else', ioApi.length === 0, ioApi.slice(0, 8).join(' | '));
   }
 
   /* ======================================================================

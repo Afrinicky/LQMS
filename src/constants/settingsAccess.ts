@@ -43,7 +43,7 @@ export const SETTINGS_TABS: SettingsTab[] = [
   { to: '/settings/scheduling', label: 'Roster & Scheduling', module: 'personnel.rosters', action: 'edit', grantsEntry: true },
   { to: '/settings/activities', label: 'Unit Activities & Reminders', module: 'personnel.activities', action: 'edit', grantsEntry: true },
   { to: '/settings/system', label: 'System', module: 'settings', action: 'edit', administration: true, grantsEntry: true },
-  { to: '/settings/document-import', label: 'Document Master List Import', module: 'documents.masterlist', action: 'create', grantsEntry: true },
+  { to: '/settings/document-import', label: 'Document Master List Import', module: 'documents.masterlist', action: 'import', grantsEntry: true },
   { to: '/settings/evidence', label: 'Evidence Upload', module: 'records_reports.evidence', action: 'create', grantsEntry: true },
   { to: '/settings/actions', label: 'Action Tracker', module: 'actions', action: 'view', grantsEntry: false },
 ];

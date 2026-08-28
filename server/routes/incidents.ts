@@ -75,7 +75,7 @@ export function incidentRoutes() {
   }
   router.get('/register/template', requirePermission('nc_capa', 'export'), (_req, res) => sendWorkbook(res, incWorkbook(false), 'Incidents_Template.xlsx'));
   router.get('/register/export', requirePermission('nc_capa', 'export'), (_req, res) => sendWorkbook(res, incWorkbook(true), 'Incidents.xlsx'));
-  router.post('/register/import', requirePermission('nc_capa', 'create'), incXlsxUpload.single('file'), (req, res) => {
+  router.post('/register/import', requirePermission('nc_capa', 'import'), incXlsxUpload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the Incidents .xlsx file.' });
     try {
       const rows = readSheet(req.file.buffer, 'INCIDENT');

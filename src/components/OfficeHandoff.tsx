@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePermissions } from '../hooks/usePermissions';
 import { FileText, ExternalLink, Download, Upload, CheckCircle2, Loader2, RefreshCw, X } from 'lucide-react';
-import { api, API_BASE, getToken, type OfficeFileChangedPayload } from '../services/api';
+import { api, API_BASE, getToken, type OfficeFileChangedPayload, errorText } from '../services/api';
 
 /* ============================================================================
    OPENING A CONTROLLED DOCUMENT IN MICROSOFT OFFICE
@@ -118,7 +118,7 @@ export function useOfficeRoundTrip(opts: RoundTripOptions) {
       a.href = url; a.download = fileName || 'document';
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 8000);
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }
 
   // ---- The desktop route: hand the file to the OS and watch it ------------
@@ -139,7 +139,7 @@ export function useOfficeRoundTrip(opts: RoundTripOptions) {
       setWatchId(result.watchId);
       setPhase('open');
       setMessage(null);
-    } catch (e) { setPhase('failed'); setMessage((e as Error).message); }
+    } catch (e) { setPhase('failed'); setMessage(errorText(e)); }
   }, [appName, docId, fileId, fileName, versionId]);
 
   // Each save from Office arrives here as bytes and goes straight back in as a
@@ -169,7 +169,7 @@ export function useOfficeRoundTrip(opts: RoundTripOptions) {
         setLastSavedAt(new Date().toISOString());
         setPhase('open');
         onSavedVersion(created.id);
-      } catch (e) { setPhase('open'); onError((e as Error).message); }
+      } catch (e) { setPhase('open'); onError(errorText(e)); }
     });
     return unsubscribe;
   }, [watchId, canSaveBack, docId, appName, onSavedVersion, onError]);
@@ -186,7 +186,7 @@ export function useOfficeRoundTrip(opts: RoundTripOptions) {
       const a = document.createElement('a');
       a.href = s.officeUri; a.rel = 'noopener';
       document.body.appendChild(a); a.click(); a.remove();
-    } catch (e) { setPhase('failed'); setMessage((e as Error).message); }
+    } catch (e) { setPhase('failed'); setMessage(errorText(e)); }
   }, [docId, versionId]);
 
   // Word saves over the wire without telling this page, so the handoff is
@@ -259,7 +259,7 @@ export function useOfficeRoundTrip(opts: RoundTripOptions) {
       setSaves(n => n + 1);
       setLastSavedAt(new Date().toISOString());
       onSavedVersion(created.id);
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
     finally { setUploading(false); if (uploadInput.current) uploadInput.current.value = ''; }
   }
 

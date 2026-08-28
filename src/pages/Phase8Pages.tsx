@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts, DetailModal } from '../components/ui';
 import { useModules } from '../hooks/useModules';
-import { api, API_BASE, getToken } from '../services/api';
+import { api, API_BASE, getToken, errorText } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import { RisksPage } from './QMSPages';
 import { usePermissions } from '../hooks/usePermissions';
@@ -129,7 +129,7 @@ export function AssessmentsPage() {
       setPrograms(await api<AssessmentProgram[]>('/assessments'));
       setFindings(await api<AssessmentFinding[]>('/assessments/findings'));
       setChecklists(await api<AssessmentChecklist[]>('/assessments/checklists').catch(() => []));
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   useEffect(() => { if (isEnabled('assessments')) void load(); }, [isEnabled]);
   // The internal-audit bar only renders once one of its tabs is active, so an
@@ -142,7 +142,7 @@ export function AssessmentsPage() {
   // Checklist library helpers
   async function openChecklist(id: number) {
     try { setSelectedChecklist(await api<AssessmentChecklist>(`/assessments/checklists/${id}`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function submitChecklist(e: FormEvent) {
     e.preventDefault(); setError(null);
@@ -150,11 +150,11 @@ export function AssessmentsPage() {
       await api('/assessments/checklists', { method: 'POST', body: JSON.stringify(chForm) });
       setChForm({ checklistCode: '', checklistName: '', checklistType: 'general', description: '', sourceName: '', versionLabel: '', effectiveDate: '', markingEnabled: false, internalThresholdLabel: '', internalPassMark: '' });
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
-  async function toggleChecklist(id: number) { try { await api(`/assessments/checklists/${id}/toggle`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selectedChecklist?.id === id) await openChecklist(id); } catch (e) { setError((e as Error).message); } }
-  async function archiveChecklist(id: number) { try { await api(`/assessments/checklists/${id}/archive`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selectedChecklist?.id === id) await openChecklist(id); } catch (e) { setError((e as Error).message); } }
-  async function updateChecklistMarking(id: number, markingEnabled: boolean) { try { await api(`/assessments/checklists/${id}`, { method: 'PUT', body: JSON.stringify({ markingEnabled }) }); await load(); if (selectedChecklist?.id === id) await openChecklist(id); } catch (e) { setError((e as Error).message); } }
+  async function toggleChecklist(id: number) { try { await api(`/assessments/checklists/${id}/toggle`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selectedChecklist?.id === id) await openChecklist(id); } catch (e) { setError(errorText(e)); } }
+  async function archiveChecklist(id: number) { try { await api(`/assessments/checklists/${id}/archive`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selectedChecklist?.id === id) await openChecklist(id); } catch (e) { setError(errorText(e)); } }
+  async function updateChecklistMarking(id: number, markingEnabled: boolean) { try { await api(`/assessments/checklists/${id}`, { method: 'PUT', body: JSON.stringify({ markingEnabled }) }); await load(); if (selectedChecklist?.id === id) await openChecklist(id); } catch (e) { setError(errorText(e)); } }
   async function addSection(e: FormEvent) {
     e.preventDefault(); setError(null);
     if (!selectedChecklist) return;
@@ -162,7 +162,7 @@ export function AssessmentsPage() {
       await api(`/assessments/checklists/${selectedChecklist.id}/sections`, { method: 'POST', body: JSON.stringify(secForm) });
       setSecForm({ sectionTitle: '', sectionCode: '', sectionDescription: '', displayOrder: '0', sectionPossibleMarks: '', sectionWeight: '' });
       await openChecklist(selectedChecklist.id);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   async function addQuestion(e: FormEvent) {
     e.preventDefault(); setError(null);
@@ -171,14 +171,14 @@ export function AssessmentsPage() {
       await api(`/assessments/checklists/${selectedChecklist.id}/questions`, { method: 'POST', body: JSON.stringify(qForm) });
       setQForm({ questionText: '', questionCode: '', sectionId: '', responseType: 'met_partial_not_met', guidance: '', expectedEvidence: '', maxMarks: '', weight: '', scoringGuidance: '', isRequired: false });
       await openChecklist(selectedChecklist.id);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   // Planning helpers
   async function loadPlanChecklist(id: string) {
     if (!id) { setPlanChecklistDetail(null); return; }
     try { setPlanChecklistDetail(await api<AssessmentChecklist>(`/assessments/checklists/${id}`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function savePlan() {
     setError(null);
@@ -191,7 +191,7 @@ export function AssessmentsPage() {
       alert(`Saved ${result.savedCount} question(s). Possible marks at selection: ${result.totalPossibleAtSelection}.`);
       setPlanSelectedSections([]); setPlanSelectedQuestions([]); setPlanNotes('');
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   // Response helpers
@@ -210,7 +210,7 @@ export function AssessmentsPage() {
         existingResponseId: q.response_id
       };
       setRespValues(init);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   async function saveResponse(questionId: number) {
     if (!respAssessmentId) return;
@@ -219,31 +219,31 @@ export function AssessmentsPage() {
     try {
       await api(`/assessments/${respAssessmentId}/question-response`, { method: 'POST', body: JSON.stringify({ questionId, response: v.response, evidenceSummary: v.evidenceSummary, marksAwarded: v.marksAwarded, scoreComment: v.scoreComment, findingRequired: v.findingRequired }) });
       alert('Response saved.');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   // Score summary helpers
   async function loadScoreSummary(id: string) {
     if (!id) { setScoreSummary(null); return; }
     try { setScoreSummary(await api<AssessmentInternalScoreSummary>(`/assessments/${id}/internal-score-summary`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   // Delete helpers (history-safe)
   async function deleteChecklist(id: number) {
     if (!confirm('Delete this checklist? Only unused checklists can be deleted; otherwise archive.')) return;
     try { await api(`/assessments/checklists/${id}`, { method: 'DELETE' }); if (selectedChecklist?.id === id) setSelectedChecklist(null); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function deleteSection(checklistId: number, sectionId: number) {
     if (!confirm('Delete this section? Only sections with no questions and no assessment usage can be deleted.')) return;
     try { await api(`/assessments/checklists/${checklistId}/sections/${sectionId}`, { method: 'DELETE' }); await openChecklist(checklistId); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function deleteQuestion(checklistId: number, questionId: number) {
     if (!confirm('Delete this question? Only questions never used in any assessment can be deleted; otherwise deactivate.')) return;
     try { await api(`/assessments/checklists/${checklistId}/questions/${questionId}`, { method: 'DELETE' }); await openChecklist(checklistId); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   // Print helper — opens server-rendered HTML in a new tab so the OS print
@@ -259,7 +259,7 @@ export function AssessmentsPage() {
       w.document.open();
       w.document.write(html);
       w.document.close();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   // File import helper (CSV / XLSX)
@@ -283,7 +283,7 @@ export function AssessmentsPage() {
       alert(`Imported checklist #${data.id}: ${data.sectionsInserted} section(s), ${data.questionsInserted} question(s).`);
       setImportFile(null); setImportMeta({ checklistName: '', checklistType: 'general', markingEnabled: false, internalPassMark: '' });
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   // Response history viewer
@@ -292,7 +292,7 @@ export function AssessmentsPage() {
   async function loadHistory(responseId: number) {
     if (!respAssessmentId) return;
     try { setHistoryResponseId(responseId); setHistory(await api(`/assessments/${respAssessmentId}/question-response/${responseId}/history`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function submitProgram(e: FormEvent) {
@@ -301,18 +301,18 @@ export function AssessmentsPage() {
       await api('/assessments', { method: 'POST', body: JSON.stringify(progForm) });
       setProgForm({ title: '', assessmentType: 'internal_audit', departmentId: '', sectionId: '', plannedStartDate: '', plannedEndDate: '', leadAssessorStaffId: '', scope: '', objectives: '' });
       await load(); setTab('Assessment Programmes');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
-  async function open(id: number) { try { setSelected(await api<AssessmentProgram>(`/assessments/${id}`)); } catch (e) { setError((e as Error).message); } }
+  async function open(id: number) { try { setSelected(await api<AssessmentProgram>(`/assessments/${id}`)); } catch (e) { setError(errorText(e)); } }
   async function submitFinding(e: FormEvent) {
     e.preventDefault(); setError(null);
     if (!selected) return;
     try { await api(`/assessments/${selected.id}/findings`, { method: 'POST', body: JSON.stringify(findForm) }); setFindForm({ findingType: 'observation', findingDate: '', title: '', description: '', severity: 'medium', evidenceSummary: '', responsibleStaffId: '' }); await open(selected.id); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
-  async function createNc(id: number) { try { await api(`/assessments/findings/${id}/create-nc`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selected) await open(selected.id); } catch (e) { setError((e as Error).message); } }
-  async function createCapa(id: number) { try { await api(`/assessments/findings/${id}/create-capa`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selected) await open(selected.id); } catch (e) { setError((e as Error).message); } }
-  async function closeFinding(id: number) { try { await api(`/assessments/findings/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selected) await open(selected.id); } catch (e) { setError((e as Error).message); } }
+  async function createNc(id: number) { try { await api(`/assessments/findings/${id}/create-nc`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selected) await open(selected.id); } catch (e) { setError(errorText(e)); } }
+  async function createCapa(id: number) { try { await api(`/assessments/findings/${id}/create-capa`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selected) await open(selected.id); } catch (e) { setError(errorText(e)); } }
+  async function closeFinding(id: number) { try { await api(`/assessments/findings/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selected) await open(selected.id); } catch (e) { setError(errorText(e)); } }
 
   const INTERNAL_AUDIT_TABS = ['Assessment Programmes', 'New Assessment', 'Checklist Library', 'Plan Assessment', 'Assessment Questions', 'Internal Audit Marks', 'Findings', 'Reports'];
   const inInternalAudit = INTERNAL_AUDIT_TABS.includes(tab);
@@ -393,8 +393,9 @@ export function AssessmentsPage() {
           </td>
         </tr>)}
       </tbody></table>
-      {/* Bringing a checklist in creates records; reading the register does not. */}
-      {can('assessments', 'create') && <>
+      {/* Loading a whole checklist in from a spreadsheet is a bulk import, not
+          the everyday right to add a question. */}
+      {can('assessments', 'import') && <>
       <h3>Import checklist from CSV / XLSX</h3>
       <p><small>Expected columns: SectionTitle, QuestionText (required), and optionally SectionCode, SectionPossibleMarks, SectionWeight, QuestionCode, ResponseType, MaxMarks, Weight, Guidance, ExpectedEvidence, ScoringGuidance, IsRequired. Rows are grouped into sections by SectionTitle.</small></p>
       <form className="form-grid" onSubmit={submitFileImport}>
@@ -587,19 +588,19 @@ export function MeetingsPage({ embedded = false }: { embedded?: boolean } = {}) 
   const [attForm, setAttForm] = useState({ staffId: '', attendanceStatus: 'present', remarks: '' });
   const [actForm, setActForm] = useState({ title: '', description: '', assignedToStaffId: '', dueDate: '', priority: 'normal' });
 
-  async function load() { try { setMeetings(await api<Meeting[]>('/meetings')); } catch (e) { setError((e as Error).message); } }
+  async function load() { try { setMeetings(await api<Meeting[]>('/meetings')); } catch (e) { setError(errorText(e)); } }
   useEffect(() => { if (embedded || isEnabled('meetings')) void load(); }, [isEnabled]);
   if (!embedded && !isEnabled('meetings')) return <DisabledModule />;
 
   async function submit(e: FormEvent) {
     e.preventDefault(); setError(null);
     try { await api('/meetings', { method: 'POST', body: JSON.stringify(form) }); setForm({ meetingType: 'quality_meeting', title: '', meetingDate: '', startTime: '', endTime: '', location: '', chairStaffId: '', secretaryStaffId: '', agenda: '', minutes: '' }); await load(); setTab('Meetings'); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
-  async function open(id: number) { try { setSelected(await api<Meeting>(`/meetings/${id}`)); } catch (e) { setError((e as Error).message); } }
-  async function submitAtt(e: FormEvent) { e.preventDefault(); setError(null); if (!selected) return; try { await api(`/meetings/${selected.id}/attendance`, { method: 'POST', body: JSON.stringify(attForm) }); setAttForm({ staffId: '', attendanceStatus: 'present', remarks: '' }); await open(selected.id); } catch (e) { setError((e as Error).message); } }
-  async function submitAct(e: FormEvent) { e.preventDefault(); setError(null); if (!selected) return; try { await api(`/meetings/${selected.id}/create-action`, { method: 'POST', body: JSON.stringify(actForm) }); setActForm({ title: '', description: '', assignedToStaffId: '', dueDate: '', priority: 'normal' }); await open(selected.id); } catch (e) { setError((e as Error).message); } }
-  async function closeMtg(id: number) { try { await api(`/meetings/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selected) await open(id); } catch (e) { setError((e as Error).message); } }
+  async function open(id: number) { try { setSelected(await api<Meeting>(`/meetings/${id}`)); } catch (e) { setError(errorText(e)); } }
+  async function submitAtt(e: FormEvent) { e.preventDefault(); setError(null); if (!selected) return; try { await api(`/meetings/${selected.id}/attendance`, { method: 'POST', body: JSON.stringify(attForm) }); setAttForm({ staffId: '', attendanceStatus: 'present', remarks: '' }); await open(selected.id); } catch (e) { setError(errorText(e)); } }
+  async function submitAct(e: FormEvent) { e.preventDefault(); setError(null); if (!selected) return; try { await api(`/meetings/${selected.id}/create-action`, { method: 'POST', body: JSON.stringify(actForm) }); setActForm({ title: '', description: '', assignedToStaffId: '', dueDate: '', priority: 'normal' }); await open(selected.id); } catch (e) { setError(errorText(e)); } }
+  async function closeMtg(id: number) { try { await api(`/meetings/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selected) await open(id); } catch (e) { setError(errorText(e)); } }
 
   const tabs = ['Dashboard', 'Meetings', 'New Meeting', 'Attendance', 'Action Items', 'Reports'];
   return <div className={embedded ? '' : 'module-page'}>
@@ -676,17 +677,17 @@ export function ManagementReviewPage({ embedded = false }: { embedded?: boolean 
   const [inputForm, setInputForm] = useState({ inputArea: '', summary: '', issues: '', actionsRequired: '' });
   const [actForm, setActForm] = useState({ title: '', description: '', assignedToStaffId: '', dueDate: '', priority: 'normal' });
 
-  async function load() { try { setReviews(await api<ManagementReview[]>('/management-review')); } catch (e) { setError((e as Error).message); } }
+  async function load() { try { setReviews(await api<ManagementReview[]>('/management-review')); } catch (e) { setError(errorText(e)); } }
   useEffect(() => { if (embedded || isEnabled('management_review')) void load(); }, [isEnabled]);
   if (!embedded && !isEnabled('management_review')) return <DisabledModule />;
 
-  async function submit(e: FormEvent) { e.preventDefault(); setError(null); try { await api('/management-review', { method: 'POST', body: JSON.stringify(form) }); setForm({ reviewPeriodStart: '', reviewPeriodEnd: '', reviewDate: '', chairStaffId: '', secretaryStaffId: '', summary: '', conclusions: '', decisions: '' }); await load(); setTab('Review Register'); } catch (e) { setError((e as Error).message); } }
-  async function open(id: number) { try { setSelected(await api<ManagementReview>(`/management-review/${id}`)); } catch (e) { setError((e as Error).message); } }
-  async function generate(id: number) { try { await api(`/management-review/${id}/generate-inputs`, { method: 'POST', body: JSON.stringify({}) }); await open(id); } catch (e) { setError((e as Error).message); } }
-  async function addInput(e: FormEvent) { e.preventDefault(); setError(null); if (!selected) return; try { await api(`/management-review/${selected.id}/add-input`, { method: 'POST', body: JSON.stringify(inputForm) }); setInputForm({ inputArea: '', summary: '', issues: '', actionsRequired: '' }); await open(selected.id); } catch (e) { setError((e as Error).message); } }
-  async function addAction(e: FormEvent) { e.preventDefault(); setError(null); if (!selected) return; try { await api(`/management-review/${selected.id}/create-action`, { method: 'POST', body: JSON.stringify(actForm) }); setActForm({ title: '', description: '', assignedToStaffId: '', dueDate: '', priority: 'normal' }); await open(selected.id); } catch (e) { setError((e as Error).message); } }
-  async function approve(id: number) { try { await api(`/management-review/${id}/approve`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selected) await open(id); } catch (e) { setError((e as Error).message); } }
-  async function closeReview(id: number) { try { await api(`/management-review/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selected) await open(id); } catch (e) { setError((e as Error).message); } }
+  async function submit(e: FormEvent) { e.preventDefault(); setError(null); try { await api('/management-review', { method: 'POST', body: JSON.stringify(form) }); setForm({ reviewPeriodStart: '', reviewPeriodEnd: '', reviewDate: '', chairStaffId: '', secretaryStaffId: '', summary: '', conclusions: '', decisions: '' }); await load(); setTab('Review Register'); } catch (e) { setError(errorText(e)); } }
+  async function open(id: number) { try { setSelected(await api<ManagementReview>(`/management-review/${id}`)); } catch (e) { setError(errorText(e)); } }
+  async function generate(id: number) { try { await api(`/management-review/${id}/generate-inputs`, { method: 'POST', body: JSON.stringify({}) }); await open(id); } catch (e) { setError(errorText(e)); } }
+  async function addInput(e: FormEvent) { e.preventDefault(); setError(null); if (!selected) return; try { await api(`/management-review/${selected.id}/add-input`, { method: 'POST', body: JSON.stringify(inputForm) }); setInputForm({ inputArea: '', summary: '', issues: '', actionsRequired: '' }); await open(selected.id); } catch (e) { setError(errorText(e)); } }
+  async function addAction(e: FormEvent) { e.preventDefault(); setError(null); if (!selected) return; try { await api(`/management-review/${selected.id}/create-action`, { method: 'POST', body: JSON.stringify(actForm) }); setActForm({ title: '', description: '', assignedToStaffId: '', dueDate: '', priority: 'normal' }); await open(selected.id); } catch (e) { setError(errorText(e)); } }
+  async function approve(id: number) { try { await api(`/management-review/${id}/approve`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selected) await open(id); } catch (e) { setError(errorText(e)); } }
+  async function closeReview(id: number) { try { await api(`/management-review/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selected) await open(id); } catch (e) { setError(errorText(e)); } }
 
   const tabs = ['Dashboard', 'Review Register', 'New Review', 'Inputs', 'Actions', 'Reports'];
   return <div className={embedded ? '' : 'module-page'}>
@@ -761,16 +762,16 @@ export function QualityIndicatorsPage({ embedded = false }: { embedded?: boolean
   const [form, setForm] = useState({ indicatorCode: '', indicatorName: '', sectionId: '', description: '', numeratorDefinition: '', denominatorDefinition: '', targetValue: '', warningThreshold: '', criticalThreshold: '', frequency: 'monthly', responsibleStaffId: '', reviewerStaffId: '' });
   const [resForm, setResForm] = useState({ periodStart: '', periodEnd: '', numeratorValue: '', denominatorValue: '', interpretation: '' });
 
-  async function load() { try { setIndicators(await api<QualityIndicator[]>('/quality-indicators')); } catch (e) { setError((e as Error).message); } }
-  async function loadResults(id: string) { if (!id) { setResults([]); return; } try { setResults(await api<QualityIndicatorResult[]>(`/quality-indicators/${id}/results`)); } catch (e) { setError((e as Error).message); } }
+  async function load() { try { setIndicators(await api<QualityIndicator[]>('/quality-indicators')); } catch (e) { setError(errorText(e)); } }
+  async function loadResults(id: string) { if (!id) { setResults([]); return; } try { setResults(await api<QualityIndicatorResult[]>(`/quality-indicators/${id}/results`)); } catch (e) { setError(errorText(e)); } }
   useEffect(() => { if (embedded || isEnabled('quality_indicators')) void load(); }, [isEnabled]);
   if (!embedded && !isEnabled('quality_indicators')) return <DisabledModule />;
 
-  async function submit(e: FormEvent) { e.preventDefault(); setError(null); try { await api('/quality-indicators', { method: 'POST', body: JSON.stringify(form) }); setForm({ indicatorCode: '', indicatorName: '', sectionId: '', description: '', numeratorDefinition: '', denominatorDefinition: '', targetValue: '', warningThreshold: '', criticalThreshold: '', frequency: 'monthly', responsibleStaffId: '', reviewerStaffId: '' }); await load(); setTab('Indicator Register'); } catch (e) { setError((e as Error).message); } }
-  async function submitResult(e: FormEvent) { e.preventDefault(); setError(null); if (!selectedId) return setError('Select an indicator'); try { await api(`/quality-indicators/${selectedId}/results`, { method: 'POST', body: JSON.stringify(resForm) }); setResForm({ periodStart: '', periodEnd: '', numeratorValue: '', denominatorValue: '', interpretation: '' }); await loadResults(selectedId); } catch (e) { setError((e as Error).message); } }
-  async function review(id: number) { try { await api(`/quality-indicators/results/${id}/review`, { method: 'POST', body: JSON.stringify({}) }); await loadResults(selectedId); } catch (e) { setError((e as Error).message); } }
-  async function createNc(id: number) { try { await api(`/quality-indicators/results/${id}/create-nc`, { method: 'POST', body: JSON.stringify({}) }); await loadResults(selectedId); } catch (e) { setError((e as Error).message); } }
-  async function createCapa(id: number) { try { await api(`/quality-indicators/results/${id}/create-capa`, { method: 'POST', body: JSON.stringify({}) }); await loadResults(selectedId); } catch (e) { setError((e as Error).message); } }
+  async function submit(e: FormEvent) { e.preventDefault(); setError(null); try { await api('/quality-indicators', { method: 'POST', body: JSON.stringify(form) }); setForm({ indicatorCode: '', indicatorName: '', sectionId: '', description: '', numeratorDefinition: '', denominatorDefinition: '', targetValue: '', warningThreshold: '', criticalThreshold: '', frequency: 'monthly', responsibleStaffId: '', reviewerStaffId: '' }); await load(); setTab('Indicator Register'); } catch (e) { setError(errorText(e)); } }
+  async function submitResult(e: FormEvent) { e.preventDefault(); setError(null); if (!selectedId) return setError('Select an indicator'); try { await api(`/quality-indicators/${selectedId}/results`, { method: 'POST', body: JSON.stringify(resForm) }); setResForm({ periodStart: '', periodEnd: '', numeratorValue: '', denominatorValue: '', interpretation: '' }); await loadResults(selectedId); } catch (e) { setError(errorText(e)); } }
+  async function review(id: number) { try { await api(`/quality-indicators/results/${id}/review`, { method: 'POST', body: JSON.stringify({}) }); await loadResults(selectedId); } catch (e) { setError(errorText(e)); } }
+  async function createNc(id: number) { try { await api(`/quality-indicators/results/${id}/create-nc`, { method: 'POST', body: JSON.stringify({}) }); await loadResults(selectedId); } catch (e) { setError(errorText(e)); } }
+  async function createCapa(id: number) { try { await api(`/quality-indicators/results/${id}/create-capa`, { method: 'POST', body: JSON.stringify({}) }); await loadResults(selectedId); } catch (e) { setError(errorText(e)); } }
 
   const tabs = ['Dashboard', 'Indicator Register', 'New Indicator', 'Results Entry', 'Trends', 'Reports'];
   return <div className={embedded ? '' : 'module-page'}>
@@ -885,15 +886,15 @@ export function ContinualImprovementPage() {
   const [updForm, setUpdForm] = useState({ updateDate: '', updateText: '', progressStatus: 'in_progress' });
   const [actForm, setActForm] = useState({ title: '', description: '', assignedToStaffId: '', dueDate: '', priority: 'normal' });
 
-  async function load() { try { setProjects(await api<ImprovementProject[]>('/improvement')); } catch (e) { setError((e as Error).message); } }
+  async function load() { try { setProjects(await api<ImprovementProject[]>('/improvement')); } catch (e) { setError(errorText(e)); } }
   useEffect(() => { if (isEnabled('continual_improvement')) void load(); }, [isEnabled]);
   if (!isEnabled('continual_improvement')) return <DisabledModule />;
 
-  async function submit(e: FormEvent) { e.preventDefault(); setError(null); try { await api('/improvement', { method: 'POST', body: JSON.stringify(form) }); setForm({ title: '', improvementArea: 'turnaround_time', aimStatement: '', baselineMeasure: '', targetMeasure: '', startDate: '', expectedCompletionDate: '', responsibleStaffId: '', sourceModule: '', sourceRecordId: '' }); await load(); setTab('Improvement Projects'); } catch (e) { setError((e as Error).message); } }
-  async function open(id: number) { try { setSelected(await api<ImprovementProject>(`/improvement/${id}`)); } catch (e) { setError((e as Error).message); } }
-  async function addUpdate(e: FormEvent) { e.preventDefault(); setError(null); if (!selected) return; try { await api(`/improvement/${selected.id}/update`, { method: 'POST', body: JSON.stringify(updForm) }); setUpdForm({ updateDate: '', updateText: '', progressStatus: 'in_progress' }); await open(selected.id); } catch (e) { setError((e as Error).message); } }
-  async function addAction(e: FormEvent) { e.preventDefault(); setError(null); if (!selected) return; try { await api(`/improvement/${selected.id}/create-action`, { method: 'POST', body: JSON.stringify(actForm) }); setActForm({ title: '', description: '', assignedToStaffId: '', dueDate: '', priority: 'normal' }); await open(selected.id); } catch (e) { setError((e as Error).message); } }
-  async function closeProject(id: number) { const summary = prompt('Outcome summary?'); if (!summary) return; try { await api(`/improvement/${id}/close`, { method: 'POST', body: JSON.stringify({ outcomeSummary: summary }) }); await load(); if (selected) await open(id); } catch (e) { setError((e as Error).message); } }
+  async function submit(e: FormEvent) { e.preventDefault(); setError(null); try { await api('/improvement', { method: 'POST', body: JSON.stringify(form) }); setForm({ title: '', improvementArea: 'turnaround_time', aimStatement: '', baselineMeasure: '', targetMeasure: '', startDate: '', expectedCompletionDate: '', responsibleStaffId: '', sourceModule: '', sourceRecordId: '' }); await load(); setTab('Improvement Projects'); } catch (e) { setError(errorText(e)); } }
+  async function open(id: number) { try { setSelected(await api<ImprovementProject>(`/improvement/${id}`)); } catch (e) { setError(errorText(e)); } }
+  async function addUpdate(e: FormEvent) { e.preventDefault(); setError(null); if (!selected) return; try { await api(`/improvement/${selected.id}/update`, { method: 'POST', body: JSON.stringify(updForm) }); setUpdForm({ updateDate: '', updateText: '', progressStatus: 'in_progress' }); await open(selected.id); } catch (e) { setError(errorText(e)); } }
+  async function addAction(e: FormEvent) { e.preventDefault(); setError(null); if (!selected) return; try { await api(`/improvement/${selected.id}/create-action`, { method: 'POST', body: JSON.stringify(actForm) }); setActForm({ title: '', description: '', assignedToStaffId: '', dueDate: '', priority: 'normal' }); await open(selected.id); } catch (e) { setError(errorText(e)); } }
+  async function closeProject(id: number) { const summary = prompt('Outcome summary?'); if (!summary) return; try { await api(`/improvement/${id}/close`, { method: 'POST', body: JSON.stringify({ outcomeSummary: summary }) }); await load(); if (selected) await open(id); } catch (e) { setError(errorText(e)); } }
 
   const tabs = ['Dashboard', 'Improvement Projects', 'New Project', 'Updates', 'Reports'];
   return <div className="module-page">

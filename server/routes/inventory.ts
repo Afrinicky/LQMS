@@ -374,7 +374,7 @@ export function inventoryRoutes() {
       `Stock_Item_Register-${new Date().toISOString().slice(0, 10)}.xlsx`);
   });
 
-  router.post('/items/import', requirePermission('supplier_inventory.stock', 'create'), upload.single('file'), (req, res) => {
+  router.post('/items/import', requirePermission('supplier_inventory.stock', 'import'), upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded.' });
     let rows: Record<string, unknown>[];
     try { rows = readSheet(req.file.buffer, 'STOCK'); }
@@ -1340,7 +1340,7 @@ export function inventoryRoutes() {
       `Supplier_Register-${new Date().toISOString().slice(0, 10)}.xlsx`);
   });
 
-  router.post('/suppliers/import', requirePermission('supplier_inventory.suppliers', 'create'), upload.single('file'), (req, res) => {
+  router.post('/suppliers/import', requirePermission('supplier_inventory.suppliers', 'import'), upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded.' });
     let rows: Record<string, unknown>[];
     try { rows = readSheet(req.file.buffer, 'SUPPLIER'); }

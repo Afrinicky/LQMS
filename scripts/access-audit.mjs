@@ -110,7 +110,9 @@ console.log('\n[2] Export / import / print routes ask for export / create / prin
       const g = window.match(/requirePermission\(\s*([A-Z_0-9]+|'[^']+')\s*,\s*'([^']+)'/);
       const action = g?.[2];
       // A GET that lists import batches is a read of the register, not an import.
-      const want = isExport ? 'export' : isImport ? (verb === 'get' ? null : 'create') : 'print';
+      // Loading a spreadsheet back into a register asks for `import`, its own
+      // action — not `create`, which is the everyday right to make one entry.
+      const want = isExport ? 'export' : isImport ? (verb === 'get' ? null : 'import') : 'print';
       if (want === null) return;
       if (action !== want) offenders.push(`${path.basename(p)} ${verb.toUpperCase()} ${route} [${action ?? 'unguarded'}] wants ${want}`);
     });
@@ -433,6 +435,161 @@ console.log('\n[6] A control the user may not use is not rendered at all');
   const toolbar = read('src/components/XlsxToolbar.tsx');
   check('the shared Excel toolbar renders nothing when nothing is permitted',
     /if \(!mayExport && !mayPrint && !canImportHere\) return null;/.test(toolbar));
+  check('and asks for import, not create, before offering the file picker',
+    /can\(module, 'import'\)/.test(toolbar));
+}
+
+/* ==========================================================================
+   7 — A refusal is never how the user learns what exists
+   ========================================================================= */
+console.log('\n[7] Restricted items are hidden, not announced through an error');
+{
+  // The server's own guard table, read from source — the same derivation the
+  // control scanner uses, so a toolbar's right can never be a guess.
+  const guards = (() => {
+    const idx = read('server/index.ts');
+    const mounts = {}, factoryFile = {};
+    for (const m of idx.matchAll(/app\.use\('(\/api[^']*)',\s*([A-Za-z_$][\w$]*)\(?\)?\)/g)) (mounts[m[2]] ??= []).push(m[1].replace(/^\/api/, ''));
+    for (const m of idx.matchAll(/import \{ ([A-Za-z_$][\w$]*) \} from '\.\/routes\/([\w.]+)\.js'/g)) factoryFile[m[1]] = m[2] + '.ts';
+    const out = [];
+    for (const [factory, prefixes] of Object.entries(mounts)) {
+      const file = factoryFile[factory];
+      if (!file || !fs.existsSync(path.join('server/routes', file))) continue;
+      const src = read(path.join('server/routes', file));
+      const consts = {};
+      for (const c of src.matchAll(/const\s+([A-Z_][A-Z_0-9]*)\s*=\s*'([^']+)'/g)) consts[c[1]] = c[2];
+      const lines = src.split('\n');
+      lines.forEach((l, i) => {
+        const m = l.match(/router\.(get|post|put|patch|delete)\(\s*['"`]([^'"`]+)['"`](.*)$/);
+        if (!m) return;
+        const w = [m[3], lines[i + 1] ?? '', lines[i + 2] ?? ''].join(' ');
+        const g = w.match(/requirePermission\(\s*([A-Z_0-9]+|'[^']+')\s*,\s*'([^']+)'/);
+        let key = g ? g[1].replace(/'/g, '') : null;
+        if (key && consts[key]) key = consts[key];
+        for (const p2 of prefixes) out.push({ verb: m[1].toUpperCase(), path: (p2 + (m[2] === '/' ? '' : m[2])) || '/', key, action: g ? g[2] : null });
+      });
+    }
+    return out;
+  })();
+  const lookup = (verb, clientPath) => {
+    const cp = clientPath.replace(/\$\{[^}]*\}/g, ':x').replace(/\?.*$/, '').replace(/\/+$/, '') || '/';
+    const cparts = cp.split('/').filter(Boolean);
+    let best = null;
+    for (const r of guards) {
+      if (r.verb !== verb) continue;
+      const rparts = r.path.split('/').filter(Boolean);
+      if (rparts.length !== cparts.length) continue;
+      let score = 0, ok = true;
+      for (let i = 0; i < rparts.length; i++) {
+        if (rparts[i].startsWith(':') || cparts[i] === ':x') { score += 1; continue; }
+        if (rparts[i] !== cparts[i]) { ok = false; break; }
+        score += 3;
+      }
+      if (ok && (!best || score > best.score)) best = { ...r, score };
+    }
+    return best;
+  };
+
+  // (a) An Excel toolbar asks for the right the endpoint behind it asks for.
+  // Naming the module instead of the feature hands Export/Import to everybody
+  // who holds any feature in that module, because a module right is the union
+  // of its features — which is how equipment maintenance came to offer its
+  // register to the whole bench.
+  const toolbarOffenders = [];
+  for (const f of CLIENT_FILES.filter(p => /\.tsx$/.test(p) && !p.endsWith('XlsxToolbar.tsx'))) {
+    const src = read(f);
+    for (const m of src.matchAll(/<XlsxToolbar\b/g)) {
+      let i = m.index + m[0].length, depth = 1;
+      while (i < src.length && depth > 0) { if (src[i] === '<') depth++; else if (src[i] === '>') depth--; i++; }
+      const tag = src.slice(m.index, i);
+      const line = src.slice(0, m.index).split('\n').length;
+      const declared = tag.match(/module=\{?"?([\w.]+)"?\}?/)?.[1];
+      if (!declared || !VALID.has(declared)) continue; // a constant, checked elsewhere
+      for (const [, prop, p2] of tag.matchAll(/(exportPath|templatePath|importPath|printPath)=\{?[`"]([^`"]+)[`"]/g)) {
+        const g = lookup(prop === 'importPath' ? 'POST' : 'GET', p2);
+        if (!g?.key || g.key === declared) continue;
+        toolbarOffenders.push(`${path.basename(f)}:${line} offers ${p2} on ${declared} but the server asks ${g.key}`);
+      }
+    }
+  }
+  check('every Excel toolbar names the right its own endpoints ask for',
+    toolbarOffenders.length === 0, toolbarOffenders.slice(0, 6).join(' | '));
+
+  // (a2) Loading a spreadsheet into a register asks for `import`. `create` is
+  // the right to make one entry — held by everybody who does the work — and it
+  // is not the right to overwrite the register in one action. Every client
+  // path that names one of those endpoints, and the control that fires it,
+  // must ask for `import`. (An in-app copy such as `import-elements`, which
+  // moves records between two records already in the system, is a create.)
+  const IMPORT_PATH = /['"`\/]([\w-]+\/)*(import|import-csv|import-file|import-master-list)(['"`]|$)/;
+  const importOffenders = [];
+  for (const f of CLIENT_FILES.filter(p => /\.tsx$/.test(p))) {
+    const lines = read(f).split('\n');
+    lines.forEach((l, i) => {
+      const paths = [...l.matchAll(/['"`]((?:\$\{[^}]*\}|[\w./:-])*)['"`]/g)].map(m => m[1]);
+      if (!paths.some(p2 => IMPORT_PATH.test(`"${p2}"`) && /^[\/$]/.test(p2))) return;
+      // The upload handler is written well away from the button that calls it,
+      // so the screen as a whole is what has to carry the right. Which control
+      // carries which gate is the control scanner's question, not this one's.
+      const src = read(f);
+      if (/can\([^)]*,\s*'import'\s*\)/.test(src)) return;
+      // The shared toolbar carries its own gate, checked above.
+      if (/importPath|<XlsxToolbar/.test(src)) return;
+      importOffenders.push(`${path.basename(f)}:${i + 1}`);
+    });
+  }
+  check('every spreadsheet import is gated on the import right, not create',
+    importOffenders.length === 0, importOffenders.slice(0, 6).join(', '));
+
+  // (b) No screen puts a caught error's raw text on the page. errorText()
+  // resolves a refused READ to nothing to show, so a restriction on one item
+  // cannot paint "Permission denied" across a module the person may open.
+  const rawBanner = [];
+  for (const f of CLIENT_FILES) {
+    if (f.endsWith('services/api.ts')) continue;
+    read(f).split('\n').forEach((l, i) => {
+      if (/\b(setError|setContentError|onError|setMsg|setMessage|setOut)\(\((e|err|ex) as Error\)\.message\)/.test(l)) rawBanner.push(`${path.basename(f)}:${i + 1}`);
+    });
+  }
+  check('no screen banners a caught error without errorText()',
+    rawBanner.length === 0, `${rawBanner.length} sites: ${rawBanner.slice(0, 5).join(', ')}`);
+  const apiSrc = read('src/services/api.ts');
+  check('errorText() swallows a refused read and keeps a refused write',
+    /e\.status === 403 && \(e\.method === 'GET' \|\| e\.method === 'HEAD'\)/.test(apiSrc));
+  check('apiRead() answers a refusal with the caller\'s fallback',
+    /export async function apiRead<T>/.test(apiSrc) && /if \(isPermissionDenied\(e\)\) return fallback;/.test(apiSrc));
+
+  // (c) A page loader must not lose every result because one member of it was
+  // refused. Any member of a Promise.all whose guard differs from its
+  // neighbours has to be an apiRead (or carry its own catch).
+  const loaderOffenders = [];
+  for (const f of CLIENT_FILES) {
+    const lines = read(f).split('\n');
+    lines.forEach((line, i) => {
+      if (!/Promise\.all\(\[/.test(line)) return;
+      let depth = 0, end = i;
+      for (let j = i; j < Math.min(lines.length, i + 60); j++) {
+        for (const ch of lines[j]) { if (ch === '[') depth++; else if (ch === ']') depth--; }
+        end = j; if (depth <= 0 && j > i) break;
+      }
+      const members = [];
+      for (let j = i; j <= end; j++) {
+        for (const m of lines[j].matchAll(/\bapi(?:Read)?(?:<[^(]*?>)?\(\s*[`'"]([^`'"]+)[`'"]/g)) {
+          const bare = /\bapi(?:<[^(]*?>)?\(/.test(lines[j].slice(Math.max(0, m.index - 4), m.index + 4));
+          members.push({ line: j + 1, path: m[1], raw: bare && !/\.catch\(/.test(lines[j]), text: lines[j].trim() });
+        }
+      }
+      const keys = new Set(members.map(m => lookup('GET', m.path)?.key ?? '(open)'));
+      if (keys.size < 2) return;
+      for (const m of members) {
+        if (!m.raw) continue;
+        if (/method:\s*'(POST|PUT|PATCH|DELETE)'/.test(m.text)) continue;
+        loaderOffenders.push(`${path.basename(f)}:${m.line} ${m.path}`);
+      }
+    });
+  }
+  check('no loader loses a whole module because one item in it was refused',
+    loaderOffenders.length === 0, `${loaderOffenders.length}: ${loaderOffenders.slice(0, 5).join(' | ')}`);
 }
 
 console.log(`\n${pass} passed, ${failures.length} failed`);

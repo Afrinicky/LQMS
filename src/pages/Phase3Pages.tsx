@@ -16,7 +16,7 @@ const RECEIVING_TABS = ['Goods receipt', 'Batches & lots'] as const;
 // two ends, so they share a tab rather than competing for the top bar.
 const STOCK_MANAGEMENT_TABS = ['Stock take', 'Stock movements'] as const;
 import { useModules } from '../hooks/useModules';
-import { api, API_BASE, getToken, ApiError } from '../services/api';
+import { api, API_BASE, getToken, ApiError, errorText, apiRead } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import ScannedRecordUpload from '../components/ScannedRecordUpload';
 import XlsxToolbar from '../components/XlsxToolbar';
@@ -262,7 +262,7 @@ export function EquipmentPage() {
     setLoading(true);
     try {
       const [list, ops] = await Promise.all([
-        api<EquipmentItem[]>('/equipment'),
+        apiRead<EquipmentItem[]>('/equipment', []),
         api<OperationsSummary>('/dashboard/operations-summary').catch(() => null)
       ]);
       setEquipment(list);
@@ -271,7 +271,7 @@ export function EquipmentPage() {
       api<{ number: string }>('/equipment/config/next-number').then(r => setNextNumber(r.number)).catch(() => setNextNumber(''));
       api<EquipmentSchedule[]>('/equipment/schedules/due').then(r => setScheduleDueCount(r.length)).catch(() => setScheduleDueCount(0));
       api<EquipmentAdverseEvent[]>('/equipment/adverse-events').then(r => setOpenAdverseCount(r.filter(a => a.status !== 'closed').length)).catch(() => setOpenAdverseCount(0));
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setLoading(false); }
   }
 
@@ -289,12 +289,12 @@ export function EquipmentPage() {
   async function openDetail(id: number) {
     setError(null);
     try { setSelected(await api<EquipmentDetail>(`/equipment/${id}`)); setTab('Equipment Profile'); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function reloadSelected() {
     if (!selected) return;
     try { setSelected(await api<EquipmentDetail>(`/equipment/${selected.id}`)); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function downloadEquipmentRegister(path: string, fallback: string) {
@@ -308,7 +308,7 @@ export function EquipmentPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a'); a.href = url; a.download = m ? m[1] : fallback; document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setRegBusy(''); }
   }
   async function importEquipmentRegister(file: File) {
@@ -320,7 +320,7 @@ export function EquipmentPage() {
       const data = await res.json().catch(() => ({ error: res.statusText }));
       if (!res.ok) throw new Error(data.error ?? res.statusText);
       setRegResult(data); await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setRegBusy(''); if (equipImportRef.current) equipImportRef.current.value = ''; }
   }
 
@@ -333,7 +333,7 @@ export function EquipmentPage() {
       setEquipForm({ ...emptyEquipForm }); setNewIfuFile(null);
       await load();
       setTab('Equipment Register');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function submitBreakdown(e: FormEvent) {
@@ -344,20 +344,20 @@ export function EquipmentPage() {
       await api(`/equipment/${breakdownForm.equipmentId}/breakdown`, { method: 'POST', body: JSON.stringify(breakdownForm) });
       setBreakdownForm({ equipmentId: '', breakdownDate: '', reportedByStaffId: '', description: '', serviceImpact: '', immediateAction: '', equipmentStatus: 'out_of_service', repairAction: '', serviceProvider: '' });
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function createBreakdownNc(breakdownId: number) {
     try { await api(`/equipment/breakdowns/${breakdownId}/create-nc`, { method: 'POST', body: JSON.stringify({}) }); if (selected) await openDetail(selected.id); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function createBreakdownCapa(breakdownId: number) {
     try { await api(`/equipment/breakdowns/${breakdownId}/create-capa`, { method: 'POST', body: JSON.stringify({}) }); if (selected) await openDetail(selected.id); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function returnToService(breakdownId: number) {
     try { await api(`/equipment/breakdowns/${breakdownId}/return-to-service`, { method: 'POST', body: JSON.stringify({ equipmentStatus: 'operational' }) }); if (selected) await openDetail(selected.id); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   return <div>
@@ -395,7 +395,7 @@ export function EquipmentPage() {
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span className="muted" style={{ fontSize: 13 }}>Click a row to open its profile.</span>
           {can('equipment.register', 'export') && <button type="button" className="secondary" disabled={!!regBusy} title="Download the equipment register as an Excel workbook" onClick={() => downloadEquipmentRegister('/equipment/register/export', 'Equipment_Register.xlsx')}>{regBusy === '/equipment/register/export' ? 'Exporting…' : 'Export'}</button>}
-          {can('equipment.register', 'create') && <>
+          {can('equipment.register', 'import') && <>
             <button type="button" className="secondary" disabled={!!regBusy} title="Upload a completed equipment register workbook" onClick={() => equipImportRef.current?.click()}>{regBusy === 'import' ? 'Importing…' : 'Import'}</button>
             <input ref={equipImportRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) void importEquipmentRegister(f); }} />
           </>}
@@ -552,7 +552,7 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
       if (ifuFile) payload.ifuFileId = await uploadEquipFile(ifuFile);
       await api(`/equipment/${item.id}`, { method: 'PUT', body: JSON.stringify(payload) });
       setIfuFile(null); onSaved(); setEditing(false);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setSaving(false); }
   }
   async function submitDecommission() {
@@ -562,7 +562,7 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
       const disposalEvidenceFileId = await uploadEquipFile(decomFile);
       await api(`/equipment/${item.id}/decommission`, { method: 'POST', body: JSON.stringify({ ...decomForm, disposalEvidenceFileId }) });
       setDecomForm(emptyDecom); setDecomFile(null); setShowDecommission(false); onSaved();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setSaving(false); }
   }
 
@@ -804,33 +804,33 @@ function EquipmentLifecycleTab({ kind, equipment, staff, setError, onChanged }: 
       setForm(blankForm); setResponses({}); setRecordFile(null);
       const list = await api<any[]>(`/equipment/${equipId}/${recordsPath}`); setRecords(list);
       onChanged();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(false); }
   }
 
   async function openDetail(id: number) {
     try { setOpenRecord(await api<any>(`/equipment/${recordsPath}/${id}`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function review(id: number, outcome: string) {
     try {
       await api(`/equipment/${recordsPath}/${id}/review`, { method: 'POST', body: JSON.stringify({ reviewOutcome: outcome }) });
       const list = await api<any[]>(`/equipment/${equipId}/${recordsPath}`); setRecords(list);
       if (openRecord?.id === id) await openDetail(id);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   async function addItem() {
     if (!newPrompt.trim()) return;
     try { await api(`/equipment/checklists/${checklistType}`, { method: 'POST', body: JSON.stringify({ prompt: newPrompt.trim() }) }); setNewPrompt(''); loadItems(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function retireItem(it: EquipmentChecklistItem) {
     try { await api(`/equipment/checklists/items/${it.id}`, { method: 'PUT', body: JSON.stringify({ isActive: 0 }) }); loadItems(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function saveItemPrompt(it: EquipmentChecklistItem, prompt: string) {
     try { await api(`/equipment/checklists/items/${it.id}`, { method: 'PUT', body: JSON.stringify({ prompt }) }); loadItems(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   return <div className="card">
@@ -935,7 +935,7 @@ function ReferenceStandardsPanel({ staff, setError }: { staff: Staff[]; setError
     e.preventDefault(); setError(null);
     if (!form.name) { setError('Enter a name.'); return; }
     try { await api('/equipment/reference-standards', { method: 'POST', body: JSON.stringify(form) }); setForm(blank); load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   const today = new Date().toISOString().slice(0, 10);
   return <div className="card" style={{ marginTop: 16 }}>
@@ -990,11 +990,11 @@ function EquipmentMaintenanceTab({ equipment, staff, sections, setError, onChang
     try {
       await api(`/equipment/${equipId}/schedules`, { method: 'POST', body: JSON.stringify(schedForm) });
       setSchedForm(blankSched); loadForEquip(equipId); loadDue(); onChanged();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   async function toggleSchedule(s: EquipmentSchedule) {
     try { await api(`/equipment/schedules/${s.id}`, { method: 'PUT', body: JSON.stringify({ isActive: s.is_active ? 0 : 1 }) }); loadForEquip(equipId); loadDue(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function submitMaintenance(e: FormEvent) {
@@ -1005,7 +1005,7 @@ function EquipmentMaintenanceTab({ equipment, staff, sections, setError, onChang
       const evidenceFileId = await uploadEquipFile(maintFile);
       await api(`/equipment/${equipId}/maintenance`, { method: 'POST', body: JSON.stringify({ ...maintForm, evidenceFileId }) });
       setMaintForm(blankMaint); setMaintFile(null); loadForEquip(equipId); loadDue(); onChanged();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(false); }
   }
 
@@ -1015,7 +1015,7 @@ function EquipmentMaintenanceTab({ equipment, staff, sections, setError, onChang
     try {
       await api(`/equipment/${s.equipment_id}/maintenance`, { method: 'POST', body: JSON.stringify({ maintenanceDate: today, maintenanceType: s.schedule_type === 'servicing' ? 'service' : 'preventive', scheduleId: s.id, status: 'completed', providerType: s.provider_type ?? null, serviceProvider: s.provider_name ?? null }) });
       loadDue(); if (String(s.equipment_id) === equipId) loadForEquip(equipId); onChanged();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   return <div>
@@ -1024,7 +1024,7 @@ function EquipmentMaintenanceTab({ equipment, staff, sections, setError, onChang
         <h3 style={{ margin: 0 }}>Maintenance records — Excel</h3>
       </div>
       <p className="muted" style={{ marginTop: 0 }}>Export all logged maintenance to Excel, or bulk-import maintenance records from a spreadsheet (rows are matched to equipment by their identifier). Download the template for the exact columns.</p>
-      <XlsxToolbar module="equipment" exportPath="/equipment/maintenance/export" templatePath="/equipment/maintenance/template" importPath="/equipment/maintenance/import" exportName="Equipment_Maintenance_Records.xlsx" onImported={() => { loadDue(); if (equipId) loadForEquip(equipId); onChanged(); }} />
+      <XlsxToolbar module="equipment.maintenance" exportPath="/equipment/maintenance/export" templatePath="/equipment/maintenance/template" importPath="/equipment/maintenance/import" exportName="Equipment_Maintenance_Records.xlsx" onImported={() => { loadDue(); if (equipId) loadForEquip(equipId); onChanged(); }} />
     </div>
     <div className="card" style={{ marginTop: 16 }}>
       <h3>Due &amp; overdue</h3>
@@ -1119,7 +1119,7 @@ function EquipmentAdverseEventsTab({ equipment, staff, setError, onChanged }: { 
     try {
       await api(`/equipment/${form.equipmentId}/adverse-events`, { method: 'POST', body: JSON.stringify(form) });
       setForm(blank); load(); onChanged();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(false); }
   }
 
@@ -1128,23 +1128,23 @@ function EquipmentAdverseEventsTab({ equipment, staff, setError, onChanged }: { 
       const rec = await api<EquipmentAdverseEvent>(`/equipment/adverse-events/${id}`);
       setOpen(rec);
       setEdit({ severity: rec.severity ?? '', patientHarm: rec.patient_harm ?? '', investigation: rec.investigation ?? '', investigatedByStaffId: rec.investigated_by_staff_id ? String(rec.investigated_by_staff_id) : '', investigationDate: rec.investigation_date ?? '', correctiveAction: rec.corrective_action ?? '', followUp: rec.follow_up ?? '', followUpDate: rec.follow_up_date ?? '', retrospectiveImpactRequired: !!rec.retrospective_impact_required, resultsAffected: !!rec.results_affected, affectedPeriodFrom: rec.affected_period_from ?? '', affectedPeriodTo: rec.affected_period_to ?? '', retrospectiveImpactSummary: rec.retrospective_impact_summary ?? '', reportedToManufacturer: !!rec.reported_to_manufacturer, reportedToAuthority: !!rec.reported_to_authority, reportReference: rec.report_reference ?? '', reportDate: rec.report_date ?? '', status: rec.status });
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   async function saveDetail() {
     if (!open) return; setError(null); setBusy(true);
     try { await api(`/equipment/adverse-events/${open.id}`, { method: 'PUT', body: JSON.stringify(edit) }); await openDetail(open.id); load(); onChanged(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
     finally { setBusy(false); }
   }
   async function createCapa() {
     if (!open) return;
     try { await api(`/equipment/adverse-events/${open.id}/create-capa`, { method: 'POST', body: JSON.stringify({}) }); await openDetail(open.id); load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function createNc() {
     if (!open) return;
     try { await api(`/equipment/adverse-events/${open.id}/create-nc`, { method: 'POST', body: JSON.stringify({}) }); await openDetail(open.id); load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   return <div>
@@ -1235,7 +1235,7 @@ function EquipmentCompetencyTab({ equipment, staff, setError, onChanged }: { equ
     try {
       await api(`/equipment/${form.equipmentId}/competencies`, { method: 'POST', body: JSON.stringify(form) });
       setForm(blank); load(); onChanged();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(false); }
   }
 
@@ -1296,7 +1296,7 @@ function EquipmentFilesTab({ equipment, sections, departments, setError, onChang
       await api(`/equipment/${equipId}/documents`, { method: 'POST', body: JSON.stringify({ documentId: created.id }) });
       setForm(blank); setFile(null); if (fileRef.current) fileRef.current.value = '';
       load(equipId); onChanged();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(false); }
   }
 
@@ -1450,9 +1450,9 @@ export function InventoryPage() {
     setLoading(true);
     try {
       const [its, bts, sups, ops] = await Promise.all([
-        api<InventoryItem[]>('/supplier-inventory/items'),
-        api<InventoryBatch[]>('/supplier-inventory/batches'),
-        api<Supplier[]>('/supplier-inventory/suppliers'),
+        apiRead<InventoryItem[]>('/supplier-inventory/items', []),
+        apiRead<InventoryBatch[]>('/supplier-inventory/batches', []),
+        apiRead<Supplier[]>('/supplier-inventory/suppliers', []),
         api<OperationsSummary>('/dashboard/operations-summary').catch(() => null)
       ]);
       setItems(its); setBatches(bts); setSuppliers(sups);
@@ -1475,13 +1475,13 @@ export function InventoryPage() {
       api<BarcodePolicy>('/supplier-inventory/barcode-policy')
         .then(p => { setBarcodePolicy(p); setItemForm(f => ({ ...f, barcodeSource: p.defaultSource })); })
         .catch(() => undefined);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setLoading(false); }
   }
   async function submitStorageInspection(e: FormEvent) {
     e.preventDefault(); setError(null);
     try { await api('/supplier-inventory/storage-inspections', { method: 'POST', body: JSON.stringify(stiForm) }); setStiForm({ inspectionDate: '', locationId: '', storageArea: '', coldStorageAdequate: false, temperatureMonitored: false, humidityMonitored: false, ventilationAdequate: false, accessControlled: false, organisedFefo: false, outcome: '', findings: '', correctiveAction: '', nextDueDate: '' }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   useEffect(() => { if (isEnabled('supplier_inventory')) void load(); }, [isEnabled]);
 
@@ -1491,7 +1491,7 @@ export function InventoryPage() {
 
   async function openDetail(id: number, mode: 'view' | 'edit' = 'view') {
     try { setSelected(await api<InventoryItemDetail>(`/supplier-inventory/items/${id}`)); setDetailMode(mode); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   // Removing anything asks what it would cost before it asks whether to do it.
@@ -1499,12 +1499,12 @@ export function InventoryPage() {
     if (!item) return;
     setError(null); setNotice(null);
     try { setRemoving(await api<ItemDeletionImpact>(`/supplier-inventory/items/${item.id}/deletion-impact`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function openSupplierRemoval(sup: Supplier) {
     setError(null); setNotice(null);
     try { setRemovingSupplier(await api<SupplierDeletionImpact>(`/supplier-inventory/suppliers/${sup.id}/deletion-impact`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function submitItem(e: FormEvent) {
@@ -1517,7 +1517,7 @@ export function InventoryPage() {
         manufacturer: '', catalogueNumber: '', barcodeSource: barcodePolicy.defaultSource, productBarcode: '',
       });
       await load(); setTab('Item Register');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   // The register as a spreadsheet — the laboratory's own rows, not a blank
@@ -1533,7 +1533,7 @@ export function InventoryPage() {
       const a = document.createElement('a');
       a.href = url; a.download = named ? named[1] : fallback;
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setRegBusy(''); }
   }
   const downloadRegister = () => downloadFile('/supplier-inventory/items/export', 'Stock_Item_Register.xlsx', 'export');
@@ -1549,7 +1549,7 @@ export function InventoryPage() {
       if (!res.ok) throw new Error(data.error ?? res.statusText);
       setRegResult(data);
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setRegBusy(''); if (importRef.current) importRef.current.value = ''; }
   }
 
@@ -1560,7 +1560,7 @@ export function InventoryPage() {
     try {
       const hit = await api<{ kind: string; id: number; itemId?: number }>(`/supplier-inventory/scan/${encodeURIComponent(code.trim())}`);
       await openDetail(hit.kind === 'batch' ? (hit.itemId ?? hit.id) : hit.id);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   /**
@@ -1596,7 +1596,7 @@ export function InventoryPage() {
       if (parsed?.lot || parsed?.expiry) {
         setBatchForm(f => ({ ...f, batchNumber: parsed.lot || f.batchNumber, lotNumber: parsed.lot || f.lotNumber, expiryDate: parsed.expiry || f.expiryDate, productBarcode: code.trim() }));
         setReceiptNote('That product is not on the register yet — register it first, then choose it above. The lot and expiry from the box have been kept.');
-      } else setError((e as Error).message);
+      } else setError(errorText(e));
     }
   }
 
@@ -1613,7 +1613,7 @@ export function InventoryPage() {
       setReceiptNote(null);
       setStockKey(k => k + 1);
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function submitMovement(e: FormEvent, overrideFefo = false) {
@@ -1631,7 +1631,7 @@ export function InventoryPage() {
       // and the reason is written into the movement when they do.
       if (err instanceof ApiError && err.status === 409 && err.data.fefo) {
         setFefoWarning({ message: err.message, batchId: (err.data.fefo as { batchId: number }).batchId });
-      } else setError((err as Error).message);
+      } else setError(errorText(err));
     }
   }
 
@@ -1641,7 +1641,7 @@ export function InventoryPage() {
       await api('/supplier-inventory/suppliers', { method: 'POST', body: JSON.stringify(supplierForm) });
       setSupplierForm({ name: '', contactPerson: '', phone: '', email: '', address: '', itemCategory: '', evaluationRequired: false });
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function submitEvaluation(e: FormEvent) {
@@ -1651,17 +1651,17 @@ export function InventoryPage() {
       await api(`/supplier-inventory/suppliers/${evalForm.supplierId}/evaluation`, { method: 'POST', body: JSON.stringify(evalForm) });
       setEvalForm({ supplierId: '', evaluationDate: '', rating: '', findings: '', actionRequired: '', nextEvaluationDate: '' });
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function acceptBatch(batchId: number, status: string) {
     try { await api(`/supplier-inventory/batches/${batchId}/acceptance`, { method: 'POST', body: JSON.stringify({ acceptanceStatus: status }) }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function createBatchNc(batchId: number) {
     try { await api(`/supplier-inventory/batches/${batchId}/create-nc`, { method: 'POST', body: JSON.stringify({}) }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   return <div>
@@ -1707,7 +1707,7 @@ export function InventoryPage() {
           {can('supplier_inventory.stock', 'export') && <button type="button" className="secondary" disabled={regBusy === 'export'}
             title="Download the register the laboratory actually holds — the same file the import accepts"
             onClick={downloadRegister}>{regBusy === 'export' ? 'Exporting…' : 'Export register'}</button>}
-          {can('supplier_inventory.stock', 'create') && <>
+          {can('supplier_inventory.stock', 'import') && <>
             <button type="button" disabled={regBusy === 'import'} onClick={() => importRef.current?.click()}>
               {regBusy === 'import' ? 'Importing…' : 'Import'}
             </button>
@@ -2098,7 +2098,7 @@ export function InventoryPage() {
             {can('supplier_inventory.suppliers', 'export') && <button type="button" className="secondary" disabled={regBusy === 'suppliers'}
               onClick={() => void downloadFile('/supplier-inventory/suppliers/export', 'Supplier_Register.xlsx', 'suppliers')}>
               {regBusy === 'suppliers' ? 'Exporting…' : 'Export'}</button>}
-            {can('supplier_inventory.suppliers', 'create') && <>
+            {can('supplier_inventory.suppliers', 'import') && <>
               <button type="button" disabled={regBusy === 'import'} onClick={() => supplierImportRef.current?.click()}>
                 {regBusy === 'import' ? 'Importing…' : 'Import'}</button>
               <input ref={supplierImportRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }}
@@ -2310,7 +2310,7 @@ function ReasonPrompt({ title, intro, confirmLabel, danger, placeholder, onClose
     if (!reason.trim()) { setError('A reason is required — it is what the record will say.'); return; }
     setBusy(true); setError(null);
     try { await onConfirm(reason.trim()); }
-    catch (e) { setError((e as Error).message); setBusy(false); }
+    catch (e) { setError(errorText(e)); setBusy(false); }
   }
 
   return <DetailModal open onClose={onClose} width="narrow" title={title}
@@ -2365,7 +2365,7 @@ function BatchEditModal({ batch, suppliers, storagePlaces, supplySources, procur
     try {
       await api(`/supplier-inventory/batches/${batch.id}`, { method: 'PUT', body: JSON.stringify(form) });
       await onSaved(`${batch.batch_number ? `Batch ${batch.batch_number}` : 'The delivery'} was corrected.`);
-    } catch (err) { setError((err as Error).message); setBusy(false); }
+    } catch (err) { setError(errorText(err)); setBusy(false); }
   }
 
   return <DetailModal open onClose={onClose} title={`Correct the receipt of ${batch.item_name ?? 'this delivery'}`}
@@ -2447,7 +2447,7 @@ function StockAdjustModal({ item, reasons, onClose, onDone }: {
         { method: 'POST', body: JSON.stringify({ direction, quantity: Number(quantity), reason, note, batchId: batchId || null }) });
       const lotWords = r.allocation.map(a => `${a.quantity} from ${a.batchNumber || `lot #${a.batchId}`}`).join(', ');
       await onDone(`${quantity} ${item.unit || ''} ${direction === 'debit' ? 'taken off' : 'put back on'} the shelf — ${lotWords}.`.replace(/\s+/g, ' '));
-    } catch (err) { setError((err as Error).message); setBusy(false); }
+    } catch (err) { setError(errorText(err)); setBusy(false); }
   }
 
   return <DetailModal open onClose={onClose} width="narrow" title={`Adjust the stock of ${item.name}`}
@@ -2540,7 +2540,7 @@ function InventoryDetailPanel({
       await api(`/supplier-inventory/items/${item.id}`, { method: 'PUT', body: JSON.stringify(form) });
       setMode('view');
       await onSaved();
-    } catch (err) { setError((err as Error).message); }
+    } catch (err) { setError(errorText(err)); }
     finally { setBusy(false); }
   }
 
@@ -2747,7 +2747,7 @@ function ItemRemovalModal({ impact, busy, onClose, onDone, setError }: {
       await onDone(r.message);
     } catch (e) {
       if (e instanceof ApiError && e.status === 409 && e.data.needsForce) setConfirming(true);
-      else setError((e as Error).message);
+      else setError(errorText(e));
     } finally { setWorking(''); }
   }
 
@@ -2803,7 +2803,7 @@ function SupplierDetailPanel({ supplier, evaluations, can, onClose, onSaved, onR
     try {
       await api(`/supplier-inventory/suppliers/${supplier.id}`, { method: 'PUT', body: JSON.stringify(form) });
       await onSaved();
-    } catch (err) { setError((err as Error).message); }
+    } catch (err) { setError(errorText(err)); }
     finally { setBusy(false); }
   }
 
@@ -2881,7 +2881,7 @@ function SupplierRemovalModal({ impact, onClose, onDone, setError }: {
       await onDone(r.message);
     } catch (e) {
       if (e instanceof ApiError && e.status === 409 && e.data.needsForce) setConfirming(true);
-      else setError((e as Error).message);
+      else setError(errorText(e));
     } finally { setWorking(''); }
   }
 
@@ -2931,14 +2931,14 @@ export function MonitoringPage({ embedded = false }: { embedded?: boolean } = {}
     setLoading(true);
     try {
       const [its, rds, ops, legacy] = await Promise.all([
-        api<MonitoringItem[]>('/monitoring/items'),
-        api<MonitoringReading[]>('/monitoring/readings'),
+        apiRead<MonitoringItem[]>('/monitoring/items', []),
+        apiRead<MonitoringReading[]>('/monitoring/readings', []),
         api<OperationsSummary>('/dashboard/operations-summary').catch(() => null),
         api<MonitoringRecord[]>('/monitoring').catch(() => [])
       ]);
       setItems(its); setReadings(rds); setLegacyRecords(legacy);
       if (ops) setSummary(ops);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setLoading(false); }
   }
   useEffect(() => { if (embedded || isEnabled('monitoring')) void load(); }, [isEnabled]);
@@ -2953,7 +2953,7 @@ export function MonitoringPage({ embedded = false }: { embedded?: boolean } = {}
       await api('/monitoring/items', { method: 'POST', body: JSON.stringify(itemForm) });
       setItemForm({ name: '', monitoringType: '', parameter: '', unit: '', sectionId: '', locationId: '', lowerLimit: '', upperLimit: '', warningLowerLimit: '', warningUpperLimit: '', criticalLowerLimit: '', criticalUpperLimit: '', frequency: '', responsibleStaffId: '', ncTriggerEnabled: false });
       await load(); setTab('Monitoring Items');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function submitReading(e: FormEvent) {
@@ -2963,20 +2963,20 @@ export function MonitoringPage({ embedded = false }: { embedded?: boolean } = {}
       await api(`/monitoring/items/${readingForm.itemId}/readings`, { method: 'POST', body: JSON.stringify(readingForm) });
       setReadingForm({ itemId: '', readingDate: '', readingTime: '', value: '', comment: '', immediateAction: '' });
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function createNcForReading(id: number) {
     try { await api(`/monitoring/readings/${id}/create-nc`, { method: 'POST', body: JSON.stringify({}) }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function createCapaForReading(id: number) {
     try { await api(`/monitoring/readings/${id}/create-capa`, { method: 'POST', body: JSON.stringify({}) }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function reviewReading(id: number) {
     try { await api(`/monitoring/readings/${id}/review`, { method: 'POST', body: JSON.stringify({}) }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   return <div>
@@ -3107,7 +3107,7 @@ export function SafetyPage() {
     setLoading(true);
     try {
       const [list, sum, eq, insp, wst, chm, imm] = await Promise.all([
-        api<SafetyIncident[]>('/facilities-safety/incidents'),
+        apiRead<SafetyIncident[]>('/facilities-safety/incidents', []),
         api<FacilitiesSafetySummary>('/facilities-safety/summary').catch(() => null),
         api<SafetyEquipment[]>('/facilities-safety/equipment').catch(() => []),
         api<SafetyInspection[]>('/facilities-safety/inspections').catch(() => []),
@@ -3117,7 +3117,7 @@ export function SafetyPage() {
       ]);
       setIncidents(list); if (sum) setSummary(sum);
       setEquipment(eq); setInspections(insp); setWaste(wst); setChemicals(chm); setImmunizations(imm);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setLoading(false); }
   }
   useEffect(() => { if (isEnabled('facilities_safety')) void load(); }, [isEnabled]);
@@ -3126,11 +3126,11 @@ export function SafetyPage() {
 
   async function openDetail(id: number) {
     try { setSelected(await api<SafetyIncident & { links?: any[] }>(`/facilities-safety/incidents/${id}`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function openInspection(id: number) {
     try { setSelectedInsp(await api<SafetyInspection & { links?: any[] }>(`/facilities-safety/inspections/${id}`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function submit(e: FormEvent) {
@@ -3139,7 +3139,7 @@ export function SafetyPage() {
       await api('/facilities-safety/incidents', { method: 'POST', body: JSON.stringify(form) });
       setForm({ incidentDate: '', incidentType: '', title: '', description: '', category: '', severity: '', sectionId: '', locationId: '', reportedByStaffId: '', immediateAction: '', personsInvolved: '', reportedTo: '', status: 'open' });
       await load(); setTab('Safety Incidents');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   async function submitEquip(e: FormEvent) {
     e.preventDefault(); setError(null);
@@ -3147,7 +3147,7 @@ export function SafetyPage() {
       await api('/facilities-safety/equipment', { method: 'POST', body: JSON.stringify(equipForm) });
       setEquipForm({ name: '', equipmentType: '', serialNumber: '', locationId: '', sectionId: '', responsibleStaffId: '', status: 'operational', inspectionFrequency: '', nextInspectionDue: '', certificationFrequency: '', nextCertificationDue: '', notes: '' });
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   async function submitInsp(e: FormEvent) {
     e.preventDefault(); setError(null);
@@ -3155,7 +3155,7 @@ export function SafetyPage() {
       await api('/facilities-safety/inspections', { method: 'POST', body: JSON.stringify(inspForm) });
       setInspForm({ inspectionType: '', inspectionDate: '', sectionId: '', locationId: '', conductedByStaffId: '', scope: '', findingsSummary: '', outcome: '', correctiveAction: '', nextDueDate: '' });
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   async function submitWaste(e: FormEvent) {
     e.preventDefault(); setError(null);
@@ -3163,7 +3163,7 @@ export function SafetyPage() {
       await api('/facilities-safety/waste', { method: 'POST', body: JSON.stringify(wasteForm) });
       setWasteForm({ disposalDate: '', wasteType: '', quantity: '', unit: '', disposalMethod: '', handledByStaffId: '', carrierOrDestination: '', manifestReference: '', sectionId: '', notes: '' });
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   async function submitChem(e: FormEvent) {
     e.preventDefault(); setError(null);
@@ -3171,7 +3171,7 @@ export function SafetyPage() {
       await api('/facilities-safety/chemicals', { method: 'POST', body: JSON.stringify(chemForm) });
       setChemForm({ name: '', hazardClass: '', casNumber: '', sdsReference: '', sdsOnFile: false, storageLocationId: '', segregationGroup: '', quantity: '', unit: '', expiryDate: '', spillMeasures: '', status: 'in_use', notes: '' });
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   async function submitImm(e: FormEvent) {
     e.preventDefault(); setError(null);
@@ -3179,15 +3179,15 @@ export function SafetyPage() {
       await api('/facilities-safety/immunizations', { method: 'POST', body: JSON.stringify(immForm) });
       setImmForm({ staffId: '', recordType: 'vaccination', vaccineOrAgent: '', doseOrStage: '', dateAdministered: '', nextDueDate: '', provider: '', exposureDate: '', exposureSource: '', followUpSummary: '', outcome: '', declinationSigned: false, notes: '' });
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
-  async function createNc(id: number) { try { await api(`/facilities-safety/incidents/${id}/create-nc`, { method: 'POST', body: JSON.stringify({}) }); if (selected) await openDetail(selected.id); await load(); } catch (e) { setError((e as Error).message); } }
-  async function createCapa(id: number) { try { await api(`/facilities-safety/incidents/${id}/create-capa`, { method: 'POST', body: JSON.stringify({}) }); if (selected) await openDetail(selected.id); await load(); } catch (e) { setError((e as Error).message); } }
-  async function closeIncident(id: number) { try { await api(`/facilities-safety/incidents/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); if (selected) await openDetail(selected.id); await load(); } catch (e) { setError((e as Error).message); } }
-  async function inspNc(id: number) { try { await api(`/facilities-safety/inspections/${id}/create-nc`, { method: 'POST', body: JSON.stringify({}) }); if (selectedInsp) await openInspection(selectedInsp.id); await load(); } catch (e) { setError((e as Error).message); } }
-  async function inspCapa(id: number) { try { await api(`/facilities-safety/inspections/${id}/create-capa`, { method: 'POST', body: JSON.stringify({}) }); if (selectedInsp) await openInspection(selectedInsp.id); await load(); } catch (e) { setError((e as Error).message); } }
-  async function inspClose(id: number) { try { await api(`/facilities-safety/inspections/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); if (selectedInsp) await openInspection(selectedInsp.id); await load(); } catch (e) { setError((e as Error).message); } }
+  async function createNc(id: number) { try { await api(`/facilities-safety/incidents/${id}/create-nc`, { method: 'POST', body: JSON.stringify({}) }); if (selected) await openDetail(selected.id); await load(); } catch (e) { setError(errorText(e)); } }
+  async function createCapa(id: number) { try { await api(`/facilities-safety/incidents/${id}/create-capa`, { method: 'POST', body: JSON.stringify({}) }); if (selected) await openDetail(selected.id); await load(); } catch (e) { setError(errorText(e)); } }
+  async function closeIncident(id: number) { try { await api(`/facilities-safety/incidents/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); if (selected) await openDetail(selected.id); await load(); } catch (e) { setError(errorText(e)); } }
+  async function inspNc(id: number) { try { await api(`/facilities-safety/inspections/${id}/create-nc`, { method: 'POST', body: JSON.stringify({}) }); if (selectedInsp) await openInspection(selectedInsp.id); await load(); } catch (e) { setError(errorText(e)); } }
+  async function inspCapa(id: number) { try { await api(`/facilities-safety/inspections/${id}/create-capa`, { method: 'POST', body: JSON.stringify({}) }); if (selectedInsp) await openInspection(selectedInsp.id); await load(); } catch (e) { setError(errorText(e)); } }
+  async function inspClose(id: number) { try { await api(`/facilities-safety/inspections/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); if (selectedInsp) await openInspection(selectedInsp.id); await load(); } catch (e) { setError(errorText(e)); } }
 
   const openIncidents = summary?.openIncidents ?? incidents.filter(i => i.status !== 'closed').length;
 

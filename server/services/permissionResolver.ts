@@ -48,7 +48,7 @@
  *     guard keeps working once the module has been split up.
  *  d. A disabled module, or an inactive user, grants nothing at all.
  */
-import { getDb } from '../db/database.js';
+import { getDb, accessEpoch } from '../db/database.js';
 import { MODULES, PERMISSION_ACTIONS } from '../../shared/constants/modules.js';
 import { FEATURES, featuresOfModule, isFeatureKey, getFeature, LEVEL_ACTIONS, levelForActions, type AccessLevel } from '../../shared/constants/features.js';
 
@@ -112,10 +112,42 @@ export function profileIdForUser(userId: number): { profileId: number | null; vi
   return { profileId: user.role_id, via: 'account' };
 }
 
+/* ==========================================================================
+   The cache
+   --------------------------------------------------------------------------
+   Building the map below is a dozen queries and several thousand entries, and
+   a single screen asks this module hundreds of questions — one per route
+   guard, one per dashboard tile, one for the modules the sidebar may draw.
+   Answering each of them from scratch is what made the dashboards slow.
+
+   The answer for a person only changes when something the build reads is
+   written, and the database layer counts those writes for us. So the map is
+   kept until that count moves, and thrown away whole when it does — a stale
+   permission is not a performance problem, it is a security one, and this
+   cache cannot go stale by mistake because it does not decide for itself when
+   it is out of date.
+   ========================================================================= */
+const grantCache = new Map<number, Map<string, Grant>>();
+let cachedEpoch = -1;
+
+function cachedGrants(userId: number): Map<string, Grant> {
+  const epoch = accessEpoch();
+  if (epoch !== cachedEpoch) { grantCache.clear(); cachedEpoch = epoch; }
+  const hit = grantCache.get(userId);
+  if (hit) return hit;
+  const built = computeGrants(userId);
+  // The epoch may have moved while we were building — a write inside the same
+  // tick — in which case what we just built is already suspect. Re-read it
+  // rather than storing it.
+  if (accessEpoch() !== epoch) return built;
+  grantCache.set(userId, built);
+  return built;
+}
+
 /**
  * Resolve every (key, action) pair for a user in a handful of queries.
  * Used directly for the client permission map, and by `resolvePermission` so
- * a single implementation decides both.
+ * a single implementation decides both. Callers go through `cachedGrants`.
  */
 function computeGrants(userId: number): Map<string, Grant> {
   const db = getDb();
@@ -257,7 +289,7 @@ export function resolvePermission(userId: number, permKey: string, action: strin
     }
   }
 
-  const grant = computeGrants(userId).get(`${permKey}:${action}`);
+  const grant = cachedGrants(userId).get(`${permKey}:${action}`);
   if (grant?.allowed) return { allowed: true, source: grant.source, reason: grant.reason };
   if (grant) return { allowed: false, source: grant.source, reason: grant.reason };
   return { allowed: false, source: SOURCE_NONE, reason: 'No permission source allows this action.' };
@@ -298,7 +330,7 @@ export function canReachPersonalRecord(
  * see it" on both sides of the wire.
  */
 export function getEffectivePermissions(userId: number): PermissionMap {
-  const grants = computeGrants(userId);
+  const grants = cachedGrants(userId);
   const map: PermissionMap = {};
   for (const permKey of ALL_PERM_KEYS) {
     const actions = PERMISSION_ACTIONS.filter(a => grants.get(`${permKey}:${a}`)?.allowed === true);

@@ -4,7 +4,7 @@ import {
   AlertTriangle, ArrowRight, CheckCircle2, ClipboardCheck, Clock, Eye, Lock,
   Loader2, Repeat, ShieldAlert, SlashIcon, Sparkles,
 } from 'lucide-react';
-import { api } from '../../services/api';
+import { api, errorText } from '../../services/api';
 import { useDutyReminders } from '../../hooks/useDutyReminders';
 import {
   CATEGORY_LABELS, TIER_HINTS, TIER_LABELS, TIER_SHORT,
@@ -245,7 +245,7 @@ export default function PortalRoutineWork() {
 
   const load = useCallback(async () => {
     try { setData(await api<RoutineWorkResponse>('/duty/routine')); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
     finally { setLoading(false); }
   }, [setError]);
 

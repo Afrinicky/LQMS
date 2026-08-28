@@ -60,7 +60,12 @@ export const MODULES: ModuleDefinition[] = [
   { key: 'settings', label: 'Settings', path: '/settings', protected: true }
 ];
 
-export const PERMISSION_ACTIONS = ['view', 'create', 'edit', 'void_archive', 'export', 'print', 'approve'] as const;
+// `import` is deliberately separate from `create`. Adding one maintenance job
+// is the daily work of the bench; loading a spreadsheet of them writes over the
+// register in one action, and belongs with `export` — with whoever is trusted
+// to move the laboratory's data in bulk — not with everybody who may make an
+// entry.
+export const PERMISSION_ACTIONS = ['view', 'create', 'edit', 'void_archive', 'export', 'import', 'print', 'approve'] as const;
 export const PERMISSION_SOURCES = ['Role default', 'Position default', 'Section scope', 'Technical authorization', 'Manual override', 'Denied override'] as const;
 export const TECHNICAL_AUTHORIZATION_LEVELS = ['View only', 'Perform', 'Review', 'Verify', 'Approve', 'Supervise', 'Train others'] as const;
 

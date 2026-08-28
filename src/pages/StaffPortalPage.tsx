@@ -25,6 +25,7 @@ import PortalSchedule from './portal/PortalSchedule';
 import PortalTraining from './portal/PortalTraining';
 import PortalPreferences from './portal/PortalPreferences';
 import PortalRoutineWork from './portal/PortalRoutineWork';
+import { errorText } from '../services/api';
 
 /* ============================================================================
    MY PORTAL — the member of staff's own workspace.
@@ -184,7 +185,7 @@ function PortalHero({ onOpen }: { onOpen: (tab: PortalTab) => void }) {
         <input ref={sigInput} type="file" accept="image/*" hidden
           onChange={e => {
             const f = e.target.files?.[0];
-            if (f) uploadSignature(f).catch(err => setError((err as Error).message));
+            if (f) uploadSignature(f).catch(err => setError(errorText(err)));
             if (sigInput.current) sigInput.current.value = '';
           }} />
         <div className="ph-self-btns">

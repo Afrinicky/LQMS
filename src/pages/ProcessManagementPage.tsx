@@ -3,7 +3,7 @@ import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { usePermissions } from '../hooks/usePermissions';
-import { api } from '../services/api';
+import { api, errorText, apiRead } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import { useTabParam } from '../hooks/useTabParam';
 import XlsxToolbar from '../components/XlsxToolbar';
@@ -101,16 +101,16 @@ export function ProcessManagementPage() {
     try {
       const [sum, t, c, rj, ru, cr, lb, rt, so, am, rv] = await Promise.all([
         api<ProcessManagementSummary>('/dashboard/process-management-summary').catch(() => null),
-        api<LabTestCatalog[]>('/process-management/tests'),
-        api<SpecimenAcceptanceCriteria[]>('/process-management/acceptance-criteria'),
-        api<SpecimenRejectionRecord[]>('/process-management/specimen-rejections'),
-        api<CriticalResultRule[]>('/process-management/critical-result-rules'),
-        api<CriticalResultNotification[]>('/process-management/critical-results'),
-        api<ReferralLaboratory[]>('/process-management/referral-labs'),
-        api<ReferralTest[]>('/process-management/referral-tests'),
-        api<ReferralSendout[]>('/process-management/referral-sendouts'),
-        api<ReportAmendmentLog[]>('/process-management/report-amendments'),
-        api<ProcessReviewRecord[]>('/process-management/process-reviews')
+        apiRead<LabTestCatalog[]>('/process-management/tests', []),
+        apiRead<SpecimenAcceptanceCriteria[]>('/process-management/acceptance-criteria', []),
+        apiRead<SpecimenRejectionRecord[]>('/process-management/specimen-rejections', []),
+        apiRead<CriticalResultRule[]>('/process-management/critical-result-rules', []),
+        apiRead<CriticalResultNotification[]>('/process-management/critical-results', []),
+        apiRead<ReferralLaboratory[]>('/process-management/referral-labs', []),
+        apiRead<ReferralTest[]>('/process-management/referral-tests', []),
+        apiRead<ReferralSendout[]>('/process-management/referral-sendouts', []),
+        apiRead<ReportAmendmentLog[]>('/process-management/report-amendments', []),
+        apiRead<ProcessReviewRecord[]>('/process-management/process-reviews', [])
       ]);
       if (sum) setSummary(sum);
       setTests(t); setCriteria(c); setRejections(rj); setRules(ru); setCriticals(cr);
@@ -123,7 +123,7 @@ export function ProcessManagementPage() {
         api<ContingencyPlan[]>('/process-management/contingency-plans').catch(() => []),
       ]);
       setPreExam(px); setReceipts(rcp); setRefIntervals(ri); setComparability(cmp); setContingency(ctp);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   useEffect(() => { if (isEnabled('process_management')) void load(); }, [isEnabled]);
   // A dashboard alert names the tab it wants; the phase bar that holds it only
@@ -135,45 +135,45 @@ export function ProcessManagementPage() {
 
   async function post(path: string, body: any) { return api(path, { method: 'POST', body: JSON.stringify(body) }); }
 
-  async function submitTest(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/tests', testForm); setTestForm({ testCode: '', testName: '', departmentId: '', sectionId: '', sampleType: '', containerType: '', minimumVolume: '', methodName: '', methodSummary: '', tatTargetMinutes: '', reportableRange: '', referenceIntervalSummary: '', criticalResultApplicable: false, status: 'active' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function toggleTest(id: number) { try { await post(`/process-management/tests/${id}/toggle`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitCriteria(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/acceptance-criteria', criteriaForm); setCriteriaForm({ criteriaCode: '', testCatalogId: '', sampleType: '', containerType: '', acceptanceCriteria: '', rejectionCriteria: '', transportCondition: '', stabilitySummary: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function toggleCriteria(id: number) { try { await post(`/process-management/acceptance-criteria/${id}/toggle`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitRejection(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/specimen-rejections', rejectionForm); setRejectionForm({ rejectionDate: '', requestReference: '', patientReference: '', patientType: '', sectionId: '', testCatalogId: '', testName: '', sampleType: '', rejectionReason: '', communicatedTo: '', communicationDate: '', immediateAction: '', repeatSampleRequested: false }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function rejectionCreateNc(id: number) { try { await post(`/process-management/specimen-rejections/${id}/create-nc`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function rejectionCreateAction(id: number) { const title = prompt('Action title?'); if (!title) return; try { await post(`/process-management/specimen-rejections/${id}/create-action`, { title }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function closeRejection(id: number) { try { await post(`/process-management/specimen-rejections/${id}/close`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitRule(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/critical-result-rules', ruleForm); setRuleForm({ ruleCode: '', testCatalogId: '', analyteName: '', unit: '', lowCriticalValue: '', highCriticalValue: '', notificationTimeframeMinutes: '', escalationInstruction: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function toggleRule(id: number) { try { await post(`/process-management/critical-result-rules/${id}/toggle`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitCritical(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/critical-results', criticalForm); setCriticalForm({ eventDate: '', eventTime: '', requestReference: '', patientReference: '', patientType: '', sectionId: '', testCatalogId: '', analyteName: '', resultValue: '', unit: '', criticalRuleId: '', notifiedTo: '', notificationMethod: '', notificationTime: '', readBackConfirmed: false, escalationNotes: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function ackCritical(id: number) { try { await post(`/process-management/critical-results/${id}/acknowledge`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function criticalCreateNc(id: number) { try { await post(`/process-management/critical-results/${id}/create-nc`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function criticalCreateAction(id: number) { const title = prompt('Action title?'); if (!title) return; try { await post(`/process-management/critical-results/${id}/create-action`, { title }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function closeCritical(id: number) { try { await post(`/process-management/critical-results/${id}/close`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitLab(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/referral-labs', labForm); setLabForm({ referralLabCode: '', referralLabName: '', contactPerson: '', phone: '', email: '', address: '', serviceScope: '', accreditationOrApprovalNote: '', status: 'active' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function setLabStatus(id: number, status: string) { try { await post(`/process-management/referral-labs/${id}/status`, { status }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitRefTest(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/referral-tests', refTestForm); setRefTestForm({ referralLabId: '', testCatalogId: '', referralTestName: '', sampleRequirement: '', expectedTatDays: '', transportCondition: '', costNote: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function toggleRefTest(id: number) { try { await post(`/process-management/referral-tests/${id}/toggle`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitSendout(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/referral-sendouts', sendoutForm); setSendoutForm({ sendoutDate: '', referralLabId: '', referralTestId: '', requestReference: '', patientReference: '', patientType: '', sampleType: '', courierOrTransport: '', expectedReturnDate: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function sendoutCreateNc(id: number) { try { await post(`/process-management/referral-sendouts/${id}/create-nc`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function sendoutCreateAction(id: number) { const title = prompt('Action title?'); if (!title) return; try { await post(`/process-management/referral-sendouts/${id}/create-action`, { title }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function closeSendout(id: number) { try { await post(`/process-management/referral-sendouts/${id}/close`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitAmendment(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/report-amendments', amendmentForm); setAmendmentForm({ amendmentDate: '', requestReference: '', patientReference: '', patientType: '', sectionId: '', testCatalogId: '', reasonForAmendment: '', originalReportSummary: '', amendedReportSummary: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function authorizeAmendment(id: number) { try { await post(`/process-management/report-amendments/${id}/authorize`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function amendmentCreateNc(id: number) { try { await post(`/process-management/report-amendments/${id}/create-nc`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function amendmentCreateAction(id: number) { const title = prompt('Action title?'); if (!title) return; try { await post(`/process-management/report-amendments/${id}/create-action`, { title }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function closeAmendment(id: number) { try { await post(`/process-management/report-amendments/${id}/close`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitReview(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/process-reviews', reviewForm); setReviewForm({ reviewPeriodStart: '', reviewPeriodEnd: '', departmentId: '', sectionId: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function generateReviewSummary(id: number) { try { await post(`/process-management/process-reviews/${id}/generate-summary`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function approveReview(id: number) { try { await post(`/process-management/process-reviews/${id}/approve`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function closeReview(id: number) { try { await post(`/process-management/process-reviews/${id}/close`, {}); await load(); } catch (e) { setError((e as Error).message); } }
+  async function submitTest(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/tests', testForm); setTestForm({ testCode: '', testName: '', departmentId: '', sectionId: '', sampleType: '', containerType: '', minimumVolume: '', methodName: '', methodSummary: '', tatTargetMinutes: '', reportableRange: '', referenceIntervalSummary: '', criticalResultApplicable: false, status: 'active' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function toggleTest(id: number) { try { await post(`/process-management/tests/${id}/toggle`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitCriteria(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/acceptance-criteria', criteriaForm); setCriteriaForm({ criteriaCode: '', testCatalogId: '', sampleType: '', containerType: '', acceptanceCriteria: '', rejectionCriteria: '', transportCondition: '', stabilitySummary: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function toggleCriteria(id: number) { try { await post(`/process-management/acceptance-criteria/${id}/toggle`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitRejection(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/specimen-rejections', rejectionForm); setRejectionForm({ rejectionDate: '', requestReference: '', patientReference: '', patientType: '', sectionId: '', testCatalogId: '', testName: '', sampleType: '', rejectionReason: '', communicatedTo: '', communicationDate: '', immediateAction: '', repeatSampleRequested: false }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function rejectionCreateNc(id: number) { try { await post(`/process-management/specimen-rejections/${id}/create-nc`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function rejectionCreateAction(id: number) { const title = prompt('Action title?'); if (!title) return; try { await post(`/process-management/specimen-rejections/${id}/create-action`, { title }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function closeRejection(id: number) { try { await post(`/process-management/specimen-rejections/${id}/close`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitRule(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/critical-result-rules', ruleForm); setRuleForm({ ruleCode: '', testCatalogId: '', analyteName: '', unit: '', lowCriticalValue: '', highCriticalValue: '', notificationTimeframeMinutes: '', escalationInstruction: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function toggleRule(id: number) { try { await post(`/process-management/critical-result-rules/${id}/toggle`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitCritical(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/critical-results', criticalForm); setCriticalForm({ eventDate: '', eventTime: '', requestReference: '', patientReference: '', patientType: '', sectionId: '', testCatalogId: '', analyteName: '', resultValue: '', unit: '', criticalRuleId: '', notifiedTo: '', notificationMethod: '', notificationTime: '', readBackConfirmed: false, escalationNotes: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function ackCritical(id: number) { try { await post(`/process-management/critical-results/${id}/acknowledge`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function criticalCreateNc(id: number) { try { await post(`/process-management/critical-results/${id}/create-nc`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function criticalCreateAction(id: number) { const title = prompt('Action title?'); if (!title) return; try { await post(`/process-management/critical-results/${id}/create-action`, { title }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function closeCritical(id: number) { try { await post(`/process-management/critical-results/${id}/close`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitLab(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/referral-labs', labForm); setLabForm({ referralLabCode: '', referralLabName: '', contactPerson: '', phone: '', email: '', address: '', serviceScope: '', accreditationOrApprovalNote: '', status: 'active' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function setLabStatus(id: number, status: string) { try { await post(`/process-management/referral-labs/${id}/status`, { status }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitRefTest(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/referral-tests', refTestForm); setRefTestForm({ referralLabId: '', testCatalogId: '', referralTestName: '', sampleRequirement: '', expectedTatDays: '', transportCondition: '', costNote: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function toggleRefTest(id: number) { try { await post(`/process-management/referral-tests/${id}/toggle`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitSendout(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/referral-sendouts', sendoutForm); setSendoutForm({ sendoutDate: '', referralLabId: '', referralTestId: '', requestReference: '', patientReference: '', patientType: '', sampleType: '', courierOrTransport: '', expectedReturnDate: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function sendoutCreateNc(id: number) { try { await post(`/process-management/referral-sendouts/${id}/create-nc`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function sendoutCreateAction(id: number) { const title = prompt('Action title?'); if (!title) return; try { await post(`/process-management/referral-sendouts/${id}/create-action`, { title }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function closeSendout(id: number) { try { await post(`/process-management/referral-sendouts/${id}/close`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitAmendment(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/report-amendments', amendmentForm); setAmendmentForm({ amendmentDate: '', requestReference: '', patientReference: '', patientType: '', sectionId: '', testCatalogId: '', reasonForAmendment: '', originalReportSummary: '', amendedReportSummary: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function authorizeAmendment(id: number) { try { await post(`/process-management/report-amendments/${id}/authorize`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function amendmentCreateNc(id: number) { try { await post(`/process-management/report-amendments/${id}/create-nc`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function amendmentCreateAction(id: number) { const title = prompt('Action title?'); if (!title) return; try { await post(`/process-management/report-amendments/${id}/create-action`, { title }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function closeAmendment(id: number) { try { await post(`/process-management/report-amendments/${id}/close`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitReview(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/process-reviews', reviewForm); setReviewForm({ reviewPeriodStart: '', reviewPeriodEnd: '', departmentId: '', sectionId: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function generateReviewSummary(id: number) { try { await post(`/process-management/process-reviews/${id}/generate-summary`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function approveReview(id: number) { try { await post(`/process-management/process-reviews/${id}/approve`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function closeReview(id: number) { try { await post(`/process-management/process-reviews/${id}/close`, {}); await load(); } catch (e) { setError(errorText(e)); } }
 
-  async function submitPreExam(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/pre-examination', preExamForm); setPreExamForm({ title: '', testCatalogId: '', sampleType: '', containerAdditive: '', patientPreparation: '', collectionInstructions: '', transportCondition: '', stabilitySummary: '', storageCondition: '', status: 'active', sectionId: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitReceipt(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/sample-receipts', receiptForm); setReceiptForm({ receiptDate: '', receiptTime: '', requestReference: '', patientReference: '', patientType: '', sampleType: '', sectionId: '', testCatalogId: '', receivedByStaffId: '', condition: 'acceptable', conditionNotes: '', temperature: '', requestComplete: true, urgent: false }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function rejectReceipt(id: number) { const reason = prompt('Rejection reason?'); if (!reason) return; try { await post(`/process-management/sample-receipts/${id}/reject`, { rejectionReason: reason }); await load(); setTab('Specimen Rejections'); } catch (e) { setError((e as Error).message); } }
-  async function submitRi(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/reference-intervals', riForm); setRiForm({ testCatalogId: '', analyte: '', sampleType: '', population: '', lowerLimit: '', upperLimit: '', unit: '', clinicalDecisionLimit: '', source: '', effectiveDate: '', reviewDate: '', status: 'active', communicatedToUsers: false }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitCmp(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/comparability', cmpForm); setCmpForm({ studyDate: '', testName: '', analyte: '', methodA: '', methodB: '', sampleCount: '', acceptanceCriteria: '', outcome: '', findings: '', actionTaken: '', nextDueDate: '', status: 'open' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitCtp(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/contingency-plans', ctpForm); setCtpForm({ scenarioType: '', title: '', triggerDescription: '', responseActions: '', backupArrangement: '', responsibleStaffId: '', lastTestedDate: '', testOutcome: '', nextTestDue: '', status: 'active', notes: '' }); await load(); } catch (e) { setError((e as Error).message); } }
+  async function submitPreExam(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/pre-examination', preExamForm); setPreExamForm({ title: '', testCatalogId: '', sampleType: '', containerAdditive: '', patientPreparation: '', collectionInstructions: '', transportCondition: '', stabilitySummary: '', storageCondition: '', status: 'active', sectionId: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitReceipt(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/sample-receipts', receiptForm); setReceiptForm({ receiptDate: '', receiptTime: '', requestReference: '', patientReference: '', patientType: '', sampleType: '', sectionId: '', testCatalogId: '', receivedByStaffId: '', condition: 'acceptable', conditionNotes: '', temperature: '', requestComplete: true, urgent: false }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function rejectReceipt(id: number) { const reason = prompt('Rejection reason?'); if (!reason) return; try { await post(`/process-management/sample-receipts/${id}/reject`, { rejectionReason: reason }); await load(); setTab('Specimen Rejections'); } catch (e) { setError(errorText(e)); } }
+  async function submitRi(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/reference-intervals', riForm); setRiForm({ testCatalogId: '', analyte: '', sampleType: '', population: '', lowerLimit: '', upperLimit: '', unit: '', clinicalDecisionLimit: '', source: '', effectiveDate: '', reviewDate: '', status: 'active', communicatedToUsers: false }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitCmp(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/comparability', cmpForm); setCmpForm({ studyDate: '', testName: '', analyte: '', methodA: '', methodB: '', sampleCount: '', acceptanceCriteria: '', outcome: '', findings: '', actionTaken: '', nextDueDate: '', status: 'open' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitCtp(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/process-management/contingency-plans', ctpForm); setCtpForm({ scenarioType: '', title: '', triggerDescription: '', responseActions: '', backupArrangement: '', responsibleStaffId: '', lastTestedDate: '', testOutcome: '', nextTestDue: '', status: 'active', notes: '' }); await load(); } catch (e) { setError(errorText(e)); } }
 
   const testName = (id?: number) => tests.find(t => t.id === id)?.test_name;
 
@@ -299,7 +299,7 @@ export function ProcessManagementPage() {
     </>}
 
     {tab === 'Reference Intervals' && <>
-      <XlsxToolbar module="process_management" exportPath="/process-management/reference-intervals/export" templatePath="/process-management/reference-intervals/template" importPath="/process-management/reference-intervals/import" exportName="Reference_Intervals.xlsx" onImported={load} />
+      <XlsxToolbar module="process_management.intervals" exportPath="/process-management/reference-intervals/export" templatePath="/process-management/reference-intervals/template" importPath="/process-management/reference-intervals/import" exportName="Reference_Intervals.xlsx" onImported={load} />
       <form className="form-grid" onSubmit={submitRi}>
         <label>Test<select value={riForm.testCatalogId} onChange={e => setRiForm({ ...riForm, testCatalogId: e.target.value })}><option value="">—</option>{tests.map(t => <option key={t.id} value={t.id}>{t.test_name}</option>)}</select></label>
         <label>Analyte<input value={riForm.analyte} onChange={e => setRiForm({ ...riForm, analyte: e.target.value })} required /></label>

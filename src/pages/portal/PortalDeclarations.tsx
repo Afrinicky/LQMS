@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ArrowRight, FileSignature, Printer } from 'lucide-react';
-import { API_BASE, getToken } from '../../services/api';
+import { API_BASE, getToken, errorText } from '../../services/api';
 import { downloadFileById, titleCase, usePortal } from './portalData';
 import PortalTaskDrawer, { type PortalTaskTarget } from './PortalTaskDrawer';
 import type { MyDeclaration } from '../../../shared/types/api';
@@ -138,7 +138,7 @@ export default function PortalDeclarations() {
                     <button type="button" className="link-button" onClick={() => void print(d)}><Printer size={12} /> Print</button>
                     {d.signed_file_id && (
                       <button type="button" className="link-button"
-                        onClick={() => downloadFileById(d.signed_file_id!, `signed-${d.form_number || d.id}`).catch(e => setError((e as Error).message))}>
+                        onClick={() => downloadFileById(d.signed_file_id!, `signed-${d.form_number || d.id}`).catch(e => setError(errorText(e)))}>
                         Signed copy
                       </button>
                     )}
@@ -171,7 +171,7 @@ export default function PortalDeclarations() {
                   <button type="button" onClick={() => void print(reading)}><Printer size={14} /> Print</button>
                   {reading.signed_file_id && (
                     <button type="button" className="secondary"
-                      onClick={() => downloadFileById(reading.signed_file_id!, `signed-${reading.form_number || reading.id}`).catch(e => setError((e as Error).message))}>
+                      onClick={() => downloadFileById(reading.signed_file_id!, `signed-${reading.form_number || reading.id}`).catch(e => setError(errorText(e)))}>
                       Download signed copy
                     </button>
                   )}

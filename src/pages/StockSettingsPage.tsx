@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { usePermissions } from '../hooks/usePermissions';
 import { Plus, Warehouse, Thermometer, Barcode, Trash2, Pencil, Truck } from 'lucide-react';
-import { api } from '../services/api';
+import { api, errorText , apiRead } from '../services/api';
 import { DetailModal, NumberField } from '../components/ui';
 import {
   STORAGE_KINDS, STORAGE_KIND_LABELS, isColdStorage,
@@ -65,18 +65,18 @@ export default function StockSettingsPage() {
   const [editingSource, setEditingSource] = useState<SupplySource | null>(null);
 
   const load = () => Promise.all([
-    api<StorageLocation[]>('/supplier-inventory/storage-locations?includeInactive=true').then(setPlaces),
-    api<BarcodePolicy>('/supplier-inventory/barcode-policy').then(p => setPolicy(normaliseBarcodePolicy(p))),
+    apiRead<StorageLocation[]>('/supplier-inventory/storage-locations?includeInactive=true', []).then(setPlaces),
+    apiRead<BarcodePolicy | null>('/supplier-inventory/barcode-policy', null).then(p => { if (p) setPolicy(normaliseBarcodePolicy(p)); }),
     api<Section[]>('/sections').then(setSections).catch(() => setSections([])),
     api<ProcurementPolicy>('/supplier-inventory/procurement-policy').then(p => setProcurement(normaliseProcurementPolicy(p))).catch(() => undefined),
     api<SupplySource[]>('/supplier-inventory/supply-sources?includeInactive=true').then(setSources).catch(() => setSources([])),
-  ]).catch(e => setError((e as Error).message));
+  ]).catch(e => setError(errorText(e)));
   useEffect(() => { void load(); }, []);
 
   async function run(label: string, fn: () => Promise<unknown>, done: string) {
     setBusy(label); setError(null); setNotice(null);
     try { await fn(); setNotice(done); await load(); return true; }
-    catch (e) { setError((e as Error).message); return false; }
+    catch (e) { setError(errorText(e)); return false; }
     finally { setBusy(null); }
   }
 

@@ -29,7 +29,7 @@ type PermissionContextValue = {
   refresh: () => Promise<void>;
 };
 
-export type PermissionAction = 'view' | 'create' | 'edit' | 'void_archive' | 'export' | 'print' | 'approve';
+export type PermissionAction = 'view' | 'create' | 'edit' | 'void_archive' | 'export' | 'import' | 'print' | 'approve';
 
 const PermissionContext = createContext<PermissionContextValue | undefined>(undefined);
 

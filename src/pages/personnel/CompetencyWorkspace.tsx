@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { ClipboardCheck, Grid3x3, LayoutList, Pencil, Plus, ShieldAlert, Trash2 } from 'lucide-react';
 import { DetailModal, EmptyState, KpiStrip, RowMenu } from '../../components/ui';
-import { api } from '../../services/api';
+import { api, errorText , apiRead } from '../../services/api';
 import { useAuth } from '../../hooks/useAuth';
 import { usePermissions } from '../../hooks/usePermissions';
 import { focusAttr } from '../../hooks/useFocusTarget';
@@ -74,12 +74,12 @@ export default function CompetencyWorkspace({ staff, sections, departments, posi
     try {
       const query = new URLSearchParams(Object.entries(filters).filter(([, v]) => v) as [string, string][]).toString();
       const [rows, summary] = await Promise.all([
-        api<CompetencyAssessment[]>(`/personnel/competency${query ? `?${query}` : ''}`),
+        apiRead<CompetencyAssessment[]>(`/personnel/competency${query ? `?${query}` : ''}`, []),
         api<CompetencyOverview>('/personnel/competency-overview').catch(() => null),
       ]);
       setAssessments(rows);
       if (summary) setOverview(summary);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setLoading(false); }
   }, [filters]);
 
@@ -99,7 +99,7 @@ export default function CompetencyWorkspace({ staff, sections, departments, posi
       setCreating(false);
       await loadRegister();
       setSelectedId(created.id);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   const chosenFramework = frameworkOptions.find(f => String(f.id) === form.frameworkId);
@@ -303,7 +303,7 @@ function AssessmentEditor({ assessmentId, staff, sections, positions, mayEdit, m
 
   const load = useCallback(async () => {
     try { setRecord(await api<CompetencyAssessment>(`/personnel/competency/${assessmentId}`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }, [assessmentId]);
 
   useEffect(() => { void load(); }, [load]);
@@ -334,7 +334,7 @@ function AssessmentEditor({ assessmentId, staff, sections, positions, mayEdit, m
       await api(`/personnel/competency/${assessmentId}${path}`, { method: 'POST', body: JSON.stringify(body) });
       setNotice(message);
       await refresh();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function removeRecord() {
@@ -343,7 +343,7 @@ function AssessmentEditor({ assessmentId, staff, sections, positions, mayEdit, m
       await api(`/personnel/competency/${assessmentId}`, { method: 'DELETE', body: JSON.stringify({ adminOverride: true }) });
       onClose();
       await onChanged();
-    } catch (e) { setError((e as Error).message); setConfirmDelete(false); }
+    } catch (e) { setError(errorText(e)); setConfirmDelete(false); }
   }
 
   const tabs: EditorTab[] = ['Scoring', 'Sample performance', 'Evidence', 'Assessment', 'Sign-off'];
@@ -495,7 +495,7 @@ function ScoringGrid({ record, maxScore, scorable, override, onError, onChanged 
       await api(`/personnel/competency/${record.id}/items`, { method: 'PUT', body: JSON.stringify({ items: payload, adminOverride: override }) });
       setDraft({}); setSavedAt(new Date().toLocaleTimeString());
       await onChanged();
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
     finally { setSaving(false); }
   }
 
@@ -507,13 +507,13 @@ function ScoringGrid({ record, maxScore, scorable, override, onError, onChanged 
       setExtra({ elementText: '', groupTitle: '', performanceCriteria: '', method: 'direct_observation', isCritical: false });
       setAdding(false);
       await onChanged();
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }
 
   async function removeElement(id: number) {
     onError(null);
     try { await api(`/personnel/competency/${record.id}/items/${id}`, { method: 'DELETE', body: JSON.stringify({ adminOverride: override }) }); await onChanged(); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
 
   /** Set every unscored, applicable element to one rating in a single sweep. */
@@ -682,13 +682,13 @@ function SampleChecks({ record, scorable, override, onError, onChanged }: {
       await api(`/personnel/competency/${record.id}/sample-checks`, { method: 'POST', body: JSON.stringify({ ...form, adminOverride: override }) });
       setForm({ checkType: form.checkType, sampleId: '', dateTested: form.dateTested, testPerformed: '', staffResult: '', referenceResult: '', agreement: 'acceptable', remarks: '' });
       await onChanged();
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }
 
   async function remove(id: number) {
     onError(null);
     try { await api(`/personnel/competency/${record.id}/sample-checks/${id}`, { method: 'DELETE' }); await onChanged(); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
 
   return <div className="sample-checks">
@@ -775,7 +775,7 @@ function AssessmentDetails({ record, staff, sections, positions, editable, overr
       await api(`/personnel/competency/${record.id}`, { method: 'PUT', body: JSON.stringify({ ...form, adminOverride: override }) });
       setSaved(true);
       await onChanged();
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }
 
   if (!editable) {
@@ -1037,7 +1037,7 @@ function CoverageMatrix({ sections, mayPrint, onOpenAssessment }: {
 
   useEffect(() => {
     api<CompetencyMatrix>(`/personnel/competency-matrix${sectionId ? `?sectionId=${sectionId}` : ''}`)
-      .then(setMatrix).catch(e => setError((e as Error).message));
+      .then(setMatrix).catch(e => setError(errorText(e)));
   }, [sectionId]);
 
   if (error) return <div className="error">{error}</div>;

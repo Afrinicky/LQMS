@@ -3,7 +3,7 @@ import {
   AlertTriangle, CheckCircle2, ClipboardList, Lightbulb, Play, Plus, RefreshCw,
   Sparkles, Volume2, Wand2,
 } from 'lucide-react';
-import { api } from '../services/api';
+import { api, errorText } from '../services/api';
 import { NumberField } from '../components/ui';
 import { usePermissions } from '../hooks/usePermissions';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
@@ -83,7 +83,7 @@ function ActivityCatalogue({ sections, staff, onChanged }: { sections: Section[]
       const params = filterSection ? `?sectionId=${filterSection}` : '';
       setActivities(await api<UnitActivity[]>(`/duty/activities${params}`));
       setError(null);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }, [filterSection]);
 
   useEffect(() => { void load(); }, [load]);
@@ -150,13 +150,13 @@ function ActivityCatalogue({ sections, staff, onChanged }: { sections: Section[]
       }
       setForm({ ...BLANK_FORM }); setEditing(null); setShowForm(false);
       await load(); onChanged();
-    } catch (err) { setError((err as Error).message); } finally { setBusy(false); }
+    } catch (err) { setError(errorText(err)); } finally { setBusy(false); }
   }
 
   async function loadProposals() {
     setBusy(true); setError(null);
     try { setProposals(await api<Proposal[]>('/duty/activities-proposals')); }
-    catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+    catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   }
 
   async function adopt(sourceKeys: string[] | null) {
@@ -168,13 +168,13 @@ function ActivityCatalogue({ sections, staff, onChanged }: { sections: Section[]
       setNotice(`${result.created} activit${result.created === 1 ? 'y' : 'ies'} created from your existing configuration.`);
       setProposals(null);
       await load(); onChanged();
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+    } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   }
 
   async function deactivate(activity: UnitActivity) {
     if (!confirm(`Stop scheduling "${activity.name}"? Completed records are kept.`)) return;
     try { await api(`/duty/activities/${activity.id}`, { method: 'DELETE' }); await load(); onChanged(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   return (
@@ -395,7 +395,7 @@ function Simplification({ onChanged }: { onChanged: () => void }) {
 
   const load = useCallback(async () => {
     try { setActivities(await api<UnitActivity[]>('/duty/activities')); setError(null); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }, []);
   useEffect(() => { void load(); }, [load]);
   useFocusTarget(activities);
@@ -410,7 +410,7 @@ function Simplification({ onChanged }: { onChanged: () => void }) {
       setNotice('Flag updated.');
       setEditing(null);
       await load(); onChanged();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   // Hardest first: the ones with the worst completion rate and the worst
@@ -540,7 +540,7 @@ function SchedulingPolicyTab() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => { api<SchedulingPolicy>('/duty/policy').then(setPolicy).catch(e => setError((e as Error).message)); }, []);
+  useEffect(() => { api<SchedulingPolicy>('/duty/policy').then(setPolicy).catch(e => setError(errorText(e))); }, []);
 
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -568,7 +568,7 @@ function SchedulingPolicyTab() {
         }),
       });
       setPolicy(saved); setNotice('Policy saved.');
-    } catch (err) { setError((err as Error).message); } finally { setBusy(false); }
+    } catch (err) { setError(errorText(err)); } finally { setBusy(false); }
   }
 
   async function runTick() {
@@ -576,7 +576,7 @@ function SchedulingPolicyTab() {
     try {
       await api('/duty/run-tick', { method: 'POST', body: JSON.stringify({}) });
       setNotice('Schedules carried forward where needed, and today\'s activity lists rebuilt.');
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+    } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   }
 
   if (!policy) return <div className="card">{error ? <p className="form-error">{error}</p> : 'Loading…'}</div>;
@@ -675,7 +675,7 @@ function ReminderSounds() {
       setDraft({ ...base });
       configureSound({ sounds: payload.sounds as Array<{ sound_key: string; tone_spec?: string | null }> });
       setError(null);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }, [scope]);
 
   useEffect(() => { primeAudio(); void load(); }, [load]);
@@ -711,12 +711,12 @@ function ReminderSounds() {
         { method: 'PUT', body: JSON.stringify(body) });
       setNotice(scope === 'laboratory' ? 'Laboratory default saved. It applies to everyone who has not set their own.' : 'Your sounds are saved.');
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function resetMine() {
     try { await api('/duty/sound-settings', { method: 'DELETE' }); setNotice('Your override is cleared — you follow the laboratory default again.'); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   if (!data) return <div className="card">{error ? <p className="form-error">{error}</p> : 'Loading…'}</div>;

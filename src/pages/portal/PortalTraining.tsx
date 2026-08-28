@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { AlertTriangle, BookOpenCheck, GraduationCap, Loader2, Paperclip, Pencil, Plus, Target, Trash2, Upload, X } from 'lucide-react';
-import { api } from '../../services/api';
+import { api, errorText } from '../../services/api';
 import { downloadFileById, dueTone, titleCase, usePortal } from './portalData';
 import { uploadPersonalFile } from './PortalTaskDrawer';
 import type { StaffCpdRecord } from '../../../shared/types/api';
@@ -107,7 +107,7 @@ export default function PortalTraining() {
   async function remove(r: StaffCpdRecord) {
     if (!window.confirm(`Remove "${r.title}" from your training record?`)) return;
     try { await api(`/personnel/my-training/${r.id}`, { method: 'DELETE' }); await reload(); setNotice('Training record removed.'); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   return (
@@ -198,7 +198,7 @@ export default function PortalTraining() {
                     <td className="pr-actions-cell">
                       {r.file_id && (
                         <button type="button" className="link-button"
-                          onClick={() => downloadFileById(r.file_id!, r.file_name || r.title).catch(e => setError((e as Error).message))}>
+                          onClick={() => downloadFileById(r.file_id!, r.file_name || r.title).catch(e => setError(errorText(e)))}>
                           Certificate
                         </button>
                       )}

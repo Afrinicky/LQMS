@@ -100,7 +100,7 @@ export function nonconformityRoutes() {
   }
   router.get('/register/template', requirePermission('nc_capa', 'export'), (_req, res) => sendWorkbook(res, ncWorkbook(false), 'Nonconformities_Template.xlsx'));
   router.get('/register/export', requirePermission('nc_capa', 'export'), (_req, res) => sendWorkbook(res, ncWorkbook(true), 'Nonconformities.xlsx'));
-  router.post('/register/import', requirePermission('nc_capa', 'create'), ncXlsxUpload.single('file'), (req, res) => {
+  router.post('/register/import', requirePermission('nc_capa', 'import'), ncXlsxUpload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the Nonconformities .xlsx file.' });
     try {
       const rows = readSheet(req.file.buffer, 'NONCON');

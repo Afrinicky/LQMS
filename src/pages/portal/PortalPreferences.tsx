@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BellRing, Play, Volume2 } from 'lucide-react';
-import { api } from '../../services/api';
+import { api, errorText } from '../../services/api';
 import { playSound, primeAudio } from '../../services/sound';
 import { SOUND_EVENT_LABELS, SOUND_EVENTS, type SoundEvent } from '../../../shared/constants/activities';
 import { titleCase, usePortal } from './portalData';
@@ -79,7 +79,7 @@ export default function PortalPreferences() {
       await api('/notifications/preferences', { method: 'PUT', body: JSON.stringify({ preferences: payload }) });
       await load();
       setNotice('Your alert preferences have been saved.');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setSaving(false); }
   }
 
@@ -87,12 +87,12 @@ export default function PortalPreferences() {
     try {
       const next = await api<SoundSettings>('/duty/sound-settings', { method: 'PUT', body: JSON.stringify(patch) });
       setSound(s => (s ? { ...s, ...next } : s));
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function followLaboratory() {
     try { await api('/duty/sound-settings', { method: 'DELETE' }); await load(); setNotice('Your device now follows the laboratory’s reminder settings.'); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   const eff = (sound?.effective ?? {}) as Record<string, number | string | null>;

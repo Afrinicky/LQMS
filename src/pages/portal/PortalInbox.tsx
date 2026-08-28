@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { AlertTriangle, ArrowRight, Bell, CheckCircle2, Inbox } from 'lucide-react';
-import { api } from '../../services/api';
+import { api, errorText } from '../../services/api';
 import { useDutyReminders } from '../../hooks/useDutyReminders';
 import { dueTone, isOpenAlert, usePortal, type PortalFace } from './portalData';
 import { resolveNotificationTarget } from './notificationTarget';
@@ -147,7 +147,7 @@ export default function PortalInbox({ onOpenFace }: { onOpenFace?: (face: Portal
     try {
       await api(`/notifications/${id}/${action}`, { method: 'POST', body: JSON.stringify({}) });
       await reloadInbox();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   return (

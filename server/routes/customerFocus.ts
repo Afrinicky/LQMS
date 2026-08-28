@@ -635,7 +635,7 @@ export function customerFocusRoutes() {
     res.json(db.prepare('SELECT * FROM customer_focus_import_batches ORDER BY created_at DESC').all());
   });
 
-  router.post('/imports', requirePermission('customer_focus.imports', 'create'), uploadInstance.single('file'), (req, res) => {
+  router.post('/imports', requirePermission('customer_focus.imports', 'import'), uploadInstance.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'A file upload is required' });
     if (!req.body.importType) return res.status(400).json({ error: 'importType is required' });
     if (!IMPORT_TYPES.includes(req.body.importType)) return res.status(400).json({ error: `importType must be one of: ${IMPORT_TYPES.join(', ')}` });

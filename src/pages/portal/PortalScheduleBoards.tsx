@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CalendarDays, ChevronRight, Grid3x3, Layers, Printer, Users, X } from 'lucide-react';
-import { api, API_BASE, getToken } from '../../services/api';
+import { api, API_BASE, getToken, errorText } from '../../services/api';
 import { usePermissions } from '../../hooks/usePermissions';
 import { usePortal } from './portalData';
 
@@ -65,7 +65,7 @@ async function openPrint(path: string, onError: (m: string) => void) {
     const w = window.open('', '_blank');
     if (!w) { onError('Allow pop-ups to open the print view.'); return; }
     w.document.open(); w.document.write(html); w.document.close();
-  } catch (e) { onError((e as Error).message); }
+  } catch (e) { onError(errorText(e)); }
 }
 
 /** A schedule opened over the portal. Wide, scrollable, and closes on Escape. */
@@ -244,7 +244,7 @@ export function PortalDutyRosters({ myStaffId }: { myStaffId: number | null }) {
   const openRoster = useCallback(async (id: number) => {
     setBusy(true);
     try { setOpen(await api<Roster>(`/scheduling/duty-rosters/${id}`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
     finally { setBusy(false); }
   }, [setError]);
 
@@ -350,7 +350,7 @@ export function PortalBenchSchedules({ myStaffId, mySectionName }: { myStaffId: 
 
   async function openSchedule(id: number) {
     try { setOpen(await api<BenchSchedule>(`/scheduling/bench-schedules/${id}`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   return (
@@ -436,7 +436,7 @@ export function PortalReassignments({ myStaffId, mySectionName }: { myStaffId: n
 
   async function openMemo(id: number) {
     try { setOpen(await api<Reassignment>(`/scheduling/reassignments/${id}`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   // The row that concerns this reader: their unit's, so a memo moving people

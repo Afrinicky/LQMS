@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { Download, Upload, FileSpreadsheet, Printer } from 'lucide-react';
 import { downloadXlsx, uploadXlsx, openPrintable, type ImportResult } from '../services/xlsx';
 import { usePermissions } from '../hooks/usePermissions';
+import { errorText } from '../services/api';
 
 // Reusable Export / Import (Excel) toolbar. Give it the export, template and
 // import endpoints; it handles the download, the file picker and shows the
@@ -35,7 +36,7 @@ export default function XlsxToolbar({
 }) {
   const { can } = usePermissions();
   const mayExport = can(module, 'export') && !!exportPath && !importOnly;
-  const mayImport = can(module, 'create') && !exportOnly;
+  const mayImport = can(module, 'import') && !exportOnly;
   const mayPrint = can(module, 'print') && !!printPath && !importOnly;
   const [busy, setBusy] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -55,18 +56,18 @@ export default function XlsxToolbar({
 
   async function doExport(path: string, name: string, key: string) {
     setError(null); setBusy(key);
-    try { await downloadXlsx(path, name); } catch (e) { setError((e as Error).message); } finally { setBusy(''); }
+    try { await downloadXlsx(path, name); } catch (e) { setError(errorText(e)); } finally { setBusy(''); }
   }
   async function doPrint() {
     if (!printPath) return;
     setError(null); setBusy('print');
-    try { await openPrintable(withRange(printPath)); } catch (e) { setError((e as Error).message); } finally { setBusy(''); }
+    try { await openPrintable(withRange(printPath)); } catch (e) { setError(errorText(e)); } finally { setBusy(''); }
   }
   async function doImport(file: File) {
     if (!importPath) return;
     setError(null); setResult(null); setBusy('import');
     try { const r = await uploadXlsx(importPath, file); setResult(r); onImported?.(r); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
     finally { setBusy(''); if (inputRef.current) inputRef.current.value = ''; }
   }
 

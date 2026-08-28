@@ -2,7 +2,7 @@ import { Suspense, lazy, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
 import { AlertTriangle, Ban, Bell, CheckCircle2, Download, FileSignature, Loader2, PlayCircle, X } from 'lucide-react';
-import { api, API_BASE, getToken } from '../../services/api';
+import { api, API_BASE, getToken, errorText } from '../../services/api';
 import { useDutyReminders } from '../../hooks/useDutyReminders';
 import { downloadFileById, dueTone, titleCase, usePortal, type PortalFace } from './portalData';
 import type { ActivityOccurrence, MyDeclaration, NotificationRecord } from '../../../shared/types/api';
@@ -121,6 +121,7 @@ function DrawerHead({ eyebrow, title, onClose }: { eyebrow: string; title: strin
    Sign a declaration
    ------------------------------------------------------------------------- */
 function DeclarationTask({ declaration, onClose }: { declaration: MyDeclaration; onClose: (completed?: boolean) => void }) {
+  const { can } = usePermissions();
   const { reload, setNotice, setError } = usePortal();
   const d = declaration;
   const [read, setRead] = useState(false);
@@ -216,9 +217,9 @@ function DeclarationTask({ declaration, onClose }: { declaration: MyDeclaration;
       </div>
 
       <div className="pd-foot">
-        <button type="button" disabled={blocked || busy} onClick={() => void sign()}>
+        {can('organisation.structure', 'view') && <button type="button" disabled={blocked || busy} onClick={() => void sign()}>
           {busy ? <><Loader2 size={14} className="pd-spin" /> Signing…</> : <><FileSignature size={14} /> Sign this declaration</>}
-        </button>
+        </button>}
         <button type="button" className="secondary" onClick={() => onClose(false)}>Not now</button>
         {!read && <span className="pd-hint">Confirm you have read it before signing.</span>}
       </div>
@@ -241,7 +242,7 @@ function AttestationTask({ target, onClose }: {
       await reload();
       setNotice('Attestation signed. It is recorded against the document.');
       onClose(true);
-    } catch (e) { setError((e as Error).message); onClose(false); }
+    } catch (e) { setError(errorText(e)); onClose(false); }
   }
 
   return (
@@ -266,6 +267,7 @@ function ActionTask({ target, onClose }: {
   target: Extract<PortalTaskTarget, { kind: 'action' }>;
   onClose: (completed?: boolean) => void;
 }) {
+  const { can } = usePermissions();
   const { reload, setNotice } = usePortal();
   const [status, setStatus] = useState(ASSIGNEE_STATUSES.includes(target.status) ? target.status : 'In progress');
   const [notes, setNotes] = useState('');
@@ -315,9 +317,9 @@ function ActionTask({ target, onClose }: {
         {problem && <p className="pd-error"><AlertTriangle size={14} /> {problem}</p>}
       </div>
       <div className="pd-foot">
-        <button type="button" disabled={busy} onClick={() => void save()}>
+        {can('actions', 'view') && <button type="button" disabled={busy} onClick={() => void save()}>
           {busy ? <><Loader2 size={14} className="pd-spin" /> Saving…</> : <><CheckCircle2 size={14} /> Save my update</>}
-        </button>
+        </button>}
         <button type="button" className="secondary" onClick={() => onClose(false)}>Cancel</button>
       </div>
     </>

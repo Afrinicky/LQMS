@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePermissions } from '../hooks/usePermissions';
 import { Search, ShieldCheck, User, Users, Briefcase, RotateCcw, Info, History, BadgeCheck, ChevronDown, ChevronRight } from 'lucide-react';
-import { api } from '../services/api';
+import { api, errorText } from '../services/api';
 import { MODULES, PERMISSION_ACTIONS } from '../../shared/constants/modules';
 import {
   FEATURES, ACCESS_LEVELS, LEVEL_LABELS, LEVEL_HINTS, LEVEL_ACTIONS,
@@ -239,7 +239,7 @@ function ProfilesTab({ catalogue, reload }: { catalogue: AccessCatalogue | null;
       await api('/permissions/level', { method: 'POST', body: JSON.stringify({ scope: 'profile', subjectId: profileId, permKey: areaKey, level }) });
       await reload();
       setNotice(`${LEVEL_LABELS[level]} set for “${AREA_LABEL.get(areaKey) ?? areaKey}”.`);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(null); }
   }
 
@@ -253,7 +253,7 @@ function ProfilesTab({ catalogue, reload }: { catalogue: AccessCatalogue | null;
       await api('/permissions/level', { method: 'POST', body: JSON.stringify({ scope: 'profile', subjectId: profileId, permKey: moduleKey, level }) });
       await reload();
       setNotice(`${LEVEL_LABELS[level]} applied to all of ${MODULE_LABEL.get(moduleKey) ?? moduleKey}.`);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(null); }
   }
 
@@ -265,7 +265,7 @@ function ProfilesTab({ catalogue, reload }: { catalogue: AccessCatalogue | null;
       setNotice(accessProfileId === null
         ? 'Position unmapped — the people holding it follow the profile on their own account.'
         : 'Position mapped. Everyone holding it now works under this access profile.');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(null); }
   }
 
@@ -281,7 +281,7 @@ function ProfilesTab({ catalogue, reload }: { catalogue: AccessCatalogue | null;
       // A new profile grants nothing until somebody decides otherwise — least
       // privilege by default, rather than a blank that quietly inherits.
       setNotice(`“${name}” created with no access anywhere. Grant it what the job needs.`);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(null); }
   }
 
@@ -292,7 +292,7 @@ function ProfilesTab({ catalogue, reload }: { catalogue: AccessCatalogue | null;
       await api(`/roles/${profileId}`, { method: 'PUT', body: JSON.stringify({ name: name.trim(), description: profile?.description ?? null }) });
       await reload();
       setNotice('Access profile renamed.');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(null); setRenaming(null); }
   }
 
@@ -305,7 +305,7 @@ function ProfilesTab({ catalogue, reload }: { catalogue: AccessCatalogue | null;
       setProfileId(null);
       await reload();
       setNotice('Access profile removed.');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(null); }
   }
 
@@ -513,7 +513,7 @@ function IndividualsTab({ catalogue, reload }: { catalogue: AccessCatalogue | nu
       setNotice(level === 'inherit'
         ? `“${AREA_LABEL.get(areaKey) ?? areaKey}” now follows the access profile again.`
         : `${LEVEL_LABELS[level]} set for this person on “${AREA_LABEL.get(areaKey) ?? areaKey}” — this overrides their profile.`);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(null); }
   }
 
@@ -524,7 +524,7 @@ function IndividualsTab({ catalogue, reload }: { catalogue: AccessCatalogue | nu
       await api(`/permissions/user-override/${userId}`, { method: 'DELETE' });
       await reload(); await loadEffective();
       setNotice('Every personal decision removed — this person follows their access profile.');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(null); }
   }
 
@@ -624,7 +624,7 @@ export function AccessControl() {
 
   const reload = useCallback(async () => {
     try { setCatalogue(await api<AccessCatalogue>('/permissions/catalogue')); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }, []);
   useEffect(() => { void reload(); }, [reload]);
 

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { api, API_BASE, getToken } from '../services/api';
+import { api, API_BASE, getToken, errorText } from '../services/api';
 import type { Staff, Section, ActingUnitHead, UnitSupervisor, UnitSupervisors } from '../../shared/types/api';
 import { usePermissions } from '../hooks/usePermissions';
 
@@ -38,7 +38,7 @@ async function openPrintPage(path: string, onError: (m: string) => void) {
     const w = window.open('', '_blank');
     if (!w) { onError('Pop-up blocked. Allow pop-ups to open the print dialog.'); return; }
     w.document.open(); w.document.write(html); w.document.close();
-  } catch (e) { onError((e as Error).message); }
+  } catch (e) { onError(errorText(e)); }
 }
 
 const statusBadge = (s: string) => <span className={`badge ${s === 'approved' ? 'approved' : s === 'published' ? 'active' : ''}`}>{s}</span>;
@@ -60,7 +60,7 @@ export function DutyRosterBoard({ staff, canEdit }: { staff: Staff[]; canEdit: b
   const [addStaffId, setAddStaffId] = useState('');
   const [addLabel, setAddLabel] = useState('');
 
-  function loadList() { api<typeof rosters>('/scheduling/duty-rosters').then(setRosters).catch(e => setError((e as Error).message)); }
+  function loadList() { api<typeof rosters>('/scheduling/duty-rosters').then(setRosters).catch(e => setError(errorText(e))); }
   useEffect(() => { loadList(); }, []);
 
   async function open(id: number) {
@@ -71,7 +71,7 @@ export function DutyRosterBoard({ staff, canEdit }: { staff: Staff[]; canEdit: b
       const m = new Map<string, string>();
       for (const c of r.cells) if (c.shift_code) m.set(`${c.row_id}:${c.day}`, c.shift_code);
       setCellMap(m); dirty.current = new Set();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function createRoster(e: FormEvent) {
@@ -80,7 +80,7 @@ export function DutyRosterBoard({ staff, canEdit }: { staff: Staff[]; canEdit: b
       const r = await api<{ id: number }>('/scheduling/duty-rosters', { method: 'POST', body: JSON.stringify({ month: newMonth, copyFromId: copyFrom || undefined }) });
       setCopyFrom(''); loadList(); await open(r.id);
       setMsg(copyFrom ? 'Roster created from the previous month — adjust the cells and publish.' : 'Roster created with every active staff member. Paint the shifts below.');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   const enabledShifts = useMemo(() => {
@@ -120,26 +120,26 @@ export function DutyRosterBoard({ staff, canEdit }: { staff: Staff[]; canEdit: b
     try {
       await api(`/scheduling/duty-rosters/${roster.id}/cells`, { method: 'POST', body: JSON.stringify({ cells }) });
       dirty.current = new Set(); setMsg('Saved.');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   async function addRow(e: FormEvent) {
     e.preventDefault(); if (!roster) return;
     try {
       await api(`/scheduling/duty-rosters/${roster.id}/rows`, { method: 'POST', body: JSON.stringify({ staffId: addStaffId || null, label: addStaffId ? null : (addLabel || null) }) });
       setAddStaffId(''); setAddLabel(''); await open(roster.id);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   async function deleteRow(rowId: number) {
     if (!roster || !confirm('Remove this row?')) return;
-    try { await api(`/scheduling/duty-roster-rows/${rowId}`, { method: 'DELETE' }); await open(roster.id); } catch (e) { setError((e as Error).message); }
+    try { await api(`/scheduling/duty-roster-rows/${rowId}`, { method: 'DELETE' }); await open(roster.id); } catch (e) { setError(errorText(e)); }
   }
   async function act(path: string, ok: string) {
     if (!roster) return; setError(null);
-    try { await api(`/scheduling/duty-rosters/${roster.id}/${path}`, { method: 'POST', body: JSON.stringify({}) }); setMsg(ok); loadList(); await open(roster.id); } catch (e) { setError((e as Error).message); }
+    try { await api(`/scheduling/duty-rosters/${roster.id}/${path}`, { method: 'POST', body: JSON.stringify({}) }); setMsg(ok); loadList(); await open(roster.id); } catch (e) { setError(errorText(e)); }
   }
   async function removeRoster(id: number) {
     if (!confirm('Delete this entire roster?')) return;
-    try { await api(`/scheduling/duty-rosters/${id}`, { method: 'DELETE' }); if (roster?.id === id) setRoster(null); loadList(); } catch (e) { setError((e as Error).message); }
+    try { await api(`/scheduling/duty-rosters/${id}`, { method: 'DELETE' }); if (roster?.id === id) setRoster(null); loadList(); } catch (e) { setError(errorText(e)); }
   }
 
   return <div>
@@ -269,17 +269,17 @@ export function ReassignmentBoard({ staff, sections, canEdit, onNavigate }: { st
   const [editingRow, setEditingRow] = useState<ReRow | null>(null);
   const [heads, setHeads] = useState<Record<number, UnitSupervisor>>({});
 
-  function loadList() { api<typeof list>('/scheduling/reassignments').then(setList).catch(e => setError((e as Error).message)); }
+  function loadList() { api<typeof list>('/scheduling/reassignments').then(setList).catch(e => setError(errorText(e))); }
   useEffect(() => { loadList(); }, []);
   useEffect(() => { api<UnitSupervisors>('/scheduling/unit-supervisors').then(r => setHeads(Object.fromEntries(r.units.map(u => [u.section_id, u])))).catch(() => setHeads({})); }, []);
-  async function open(id: number) { setError(null); setMsg(null); setEditingRow(null); try { setSched(await api<Reassign>(`/scheduling/reassignments/${id}`)); } catch (e) { setError((e as Error).message); } }
+  async function open(id: number) { setError(null); setMsg(null); setEditingRow(null); try { setSched(await api<Reassign>(`/scheduling/reassignments/${id}`)); } catch (e) { setError(errorText(e)); } }
   async function create(e: FormEvent) {
     e.preventDefault(); setError(null);
     try { const r = await api<{ id: number }>('/scheduling/reassignments', { method: 'POST', body: JSON.stringify({ month: newMonth, copyFromId: copyFrom || undefined }) }); setCopyFrom(''); loadList(); await open(r.id); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function saveHeader(patch: Record<string, unknown>) {
-    if (!sched) return; try { await api(`/scheduling/reassignments/${sched.id}`, { method: 'PUT', body: JSON.stringify(patch) }); await open(sched.id); setMsg('Saved.'); } catch (e) { setError((e as Error).message); }
+    if (!sched) return; try { await api(`/scheduling/reassignments/${sched.id}`, { method: 'PUT', body: JSON.stringify(patch) }); await open(sched.id); setMsg('Saved.'); } catch (e) { setError(errorText(e)); }
   }
   // Add or update a unit row — same form, in place, so an existing row can be
   // corrected rather than deleted and retyped.
@@ -290,11 +290,11 @@ export function ReassignmentBoard({ staff, sections, canEdit, onNavigate }: { st
       if (editingId) await api(`/scheduling/reassignment-rows/${editingId}`, { method: 'PUT', body: JSON.stringify(body) });
       else await api(`/scheduling/reassignments/${sched.id}/rows`, { method: 'POST', body: JSON.stringify(body) });
       setEditingRow(null); await open(sched.id);
-    } catch (e) { setError((e as Error).message); throw e; }
+    } catch (e) { setError(errorText(e)); throw e; }
   }
-  async function delRow(id: number) { if (!sched) return; try { await api(`/scheduling/reassignment-rows/${id}`, { method: 'DELETE' }); if (editingRow?.id === id) setEditingRow(null); await open(sched.id); } catch (e) { setError((e as Error).message); } }
-  async function act(path: string, ok: string) { if (!sched) return; try { const r = await api<{ staffReassigned?: number[] }>(`/scheduling/reassignments/${sched.id}/${path}`, { method: 'POST', body: JSON.stringify({}) }); setMsg(ok + (r?.staffReassigned?.length ? ` ${r.staffReassigned.length} staff moved to their new unit on the register.` : '')); loadList(); await open(sched.id); } catch (e) { setError((e as Error).message); } }
-  async function remove(id: number) { if (!confirm('Delete this schedule?')) return; try { await api(`/scheduling/reassignments/${id}`, { method: 'DELETE' }); if (sched?.id === id) setSched(null); loadList(); } catch (e) { setError((e as Error).message); } }
+  async function delRow(id: number) { if (!sched) return; try { await api(`/scheduling/reassignment-rows/${id}`, { method: 'DELETE' }); if (editingRow?.id === id) setEditingRow(null); await open(sched.id); } catch (e) { setError(errorText(e)); } }
+  async function act(path: string, ok: string) { if (!sched) return; try { const r = await api<{ staffReassigned?: number[] }>(`/scheduling/reassignments/${sched.id}/${path}`, { method: 'POST', body: JSON.stringify({}) }); setMsg(ok + (r?.staffReassigned?.length ? ` ${r.staffReassigned.length} staff moved to their new unit on the register.` : '')); loadList(); await open(sched.id); } catch (e) { setError(errorText(e)); } }
+  async function remove(id: number) { if (!confirm('Delete this schedule?')) return; try { await api(`/scheduling/reassignments/${id}`, { method: 'DELETE' }); if (sched?.id === id) setSched(null); loadList(); } catch (e) { setError(errorText(e)); } }
 
   return <div>
     {error && <div className="error">{error}</div>}
@@ -457,7 +457,7 @@ export function BenchScheduleBoard({ sections, canEdit }: { sections: Section[];
   const [cellMap, setCellMap] = useState<Map<string, string>>(new Map());
   const dirty = useRef<Set<string>>(new Set());
 
-  function loadList() { api<typeof list>('/scheduling/bench-schedules').then(setList).catch(e => setError((e as Error).message)); }
+  function loadList() { api<typeof list>('/scheduling/bench-schedules').then(setList).catch(e => setError(errorText(e))); }
   useEffect(() => { loadList(); }, []);
   // Bench schedules for the unit chosen in the create form, offered as templates.
   const templatesForSection = form.sectionId ? list.filter(s => String(s.section_id) === form.sectionId) : list;
@@ -467,23 +467,23 @@ export function BenchScheduleBoard({ sections, canEdit }: { sections: Section[];
       const b = await api<Bench>(`/scheduling/bench-schedules/${id}`);
       setBs(b); const m = new Map<string, string>(); for (const c of b.cells) if (c.value) m.set(`${c.row_id}:${c.day}`, c.value); setCellMap(m); dirty.current = new Set();
       setPaint(b.benches[0]?.code || b.benches[0]?.name || '');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   async function create(e: FormEvent) {
     e.preventDefault(); setError(null);
     if (!form.sectionId) { setError('Pick a unit.'); return; }
     try { const r = await api<{ id: number }>('/scheduling/bench-schedules', { method: 'POST', body: JSON.stringify({ ...form, copyFromId: copyFrom || undefined }) }); setCopyFrom(''); loadList(); await open(r.id); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   const md = bs ? monthDays(bs.month) : null;
   function setCell(rowId: number, day: number, v: string) { const key = `${rowId}:${day}`; setCellMap(prev => { const n = new Map(prev); if (v) n.set(key, v); else n.delete(key); return n; }); dirty.current.add(key); }
   async function save() {
     if (!bs) return; setError(null);
     const cells = Array.from(dirty.current).map(key => { const [rowId, day] = key.split(':').map(Number); return { rowId, day, value: cellMap.get(key) || '' }; });
-    try { await api(`/scheduling/bench-schedules/${bs.id}/cells`, { method: 'POST', body: JSON.stringify({ cells }) }); dirty.current = new Set(); setMsg('Saved.'); } catch (e) { setError((e as Error).message); }
+    try { await api(`/scheduling/bench-schedules/${bs.id}/cells`, { method: 'POST', body: JSON.stringify({ cells }) }); dirty.current = new Set(); setMsg('Saved.'); } catch (e) { setError(errorText(e)); }
   }
-  async function act(path: string, ok: string) { if (!bs) return; try { await api(`/scheduling/bench-schedules/${bs.id}/${path}`, { method: 'POST', body: JSON.stringify({}) }); setMsg(ok); loadList(); await open(bs.id); } catch (e) { setError((e as Error).message); } }
-  async function remove(id: number) { if (!confirm('Delete this bench schedule?')) return; try { await api(`/scheduling/bench-schedules/${id}`, { method: 'DELETE' }); if (bs?.id === id) setBs(null); loadList(); } catch (e) { setError((e as Error).message); } }
+  async function act(path: string, ok: string) { if (!bs) return; try { await api(`/scheduling/bench-schedules/${bs.id}/${path}`, { method: 'POST', body: JSON.stringify({}) }); setMsg(ok); loadList(); await open(bs.id); } catch (e) { setError(errorText(e)); } }
+  async function remove(id: number) { if (!confirm('Delete this bench schedule?')) return; try { await api(`/scheduling/bench-schedules/${id}`, { method: 'DELETE' }); if (bs?.id === id) setBs(null); loadList(); } catch (e) { setError(errorText(e)); } }
 
   return <div>
     {error && <div className="error">{error}</div>}
@@ -562,8 +562,8 @@ export function ActingSupervisorsBoard({ staff, sections, canEdit }: { staff: St
   const [msg, setMsg] = useState<string | null>(null);
 
   function load() {
-    api<UnitSupervisors>('/scheduling/unit-supervisors').then(setSups).catch(e => setError((e as Error).message));
-    api<ActingUnitHead[]>('/scheduling/acting-unit-heads').then(setAppts).catch(e => setError((e as Error).message));
+    api<UnitSupervisors>('/scheduling/unit-supervisors').then(setSups).catch(e => setError(errorText(e)));
+    api<ActingUnitHead[]>('/scheduling/acting-unit-heads').then(setAppts).catch(e => setError(errorText(e)));
   }
   useEffect(() => { load(); }, []);
 
@@ -572,18 +572,18 @@ export function ActingSupervisorsBoard({ staff, sections, canEdit }: { staff: St
     try {
       await api('/scheduling/acting-unit-heads', { method: 'POST', body: JSON.stringify(form) });
       setForm(emptyActing); setShowForm(false); setMsg('Acting unit head appointed.'); load();
-    } catch (err) { setError((err as Error).message); }
+    } catch (err) { setError(errorText(err)); }
   }
   async function endNow(id: number) {
     setError(null); setMsg(null);
     try { await api(`/scheduling/acting-unit-heads/${id}/end`, { method: 'POST', body: JSON.stringify({}) }); setMsg('Acting period ended; the substantive head resumes.'); load(); }
-    catch (err) { setError((err as Error).message); }
+    catch (err) { setError(errorText(err)); }
   }
   async function remove(id: number) {
     if (!confirm('Delete this acting appointment for good?')) return;
     setError(null);
     try { await api(`/scheduling/acting-unit-heads/${id}`, { method: 'DELETE' }); load(); }
-    catch (err) { setError((err as Error).message); }
+    catch (err) { setError(errorText(err)); }
   }
 
   const startForSection = (sectionId: number | null | undefined) => {

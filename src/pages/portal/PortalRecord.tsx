@@ -6,6 +6,7 @@ import {
 import { ChangePasswordModal } from '../../components/ChangePasswordModal';
 import { titleCase, usePortal, type SelfEditableProfile } from './portalData';
 import type { JobDescriptionDoc } from '../../../shared/types/api';
+import { errorText } from '../../services/api';
 
 // The controlled-document window, borrowed so a job description is read here
 // exactly as it is read in Document Control — same version, same watermark,
@@ -68,7 +69,7 @@ export function LinkStaffPrompt() {
                 <td>
                   {s.already_taken
                     ? <em className="muted">linked to another user</em>
-                    : <button type="button" onClick={() => linkStaff(s.id).catch(e => setError((e as Error).message))}>This is me</button>}
+                    : <button type="button" onClick={() => linkStaff(s.id).catch(e => setError(errorText(e)))}>This is me</button>}
                 </td>
               </tr>
             ))}
@@ -121,7 +122,7 @@ function PhotoPanel() {
           </button>
           {photoUrl && (
             <button type="button" className="secondary" disabled={busy}
-              onClick={() => removePhoto().catch(e => setError((e as Error).message))}>
+              onClick={() => removePhoto().catch(e => setError(errorText(e)))}>
               <Trash2 size={14} /> Remove
             </button>
           )}
@@ -464,7 +465,7 @@ export default function PortalRecord() {
             <input ref={sigInput} type="file" accept="image/*" hidden
               onChange={e => {
                 const f = e.target.files?.[0];
-                if (f) uploadSignature(f).catch(err => setError((err as Error).message));
+                if (f) uploadSignature(f).catch(err => setError(errorText(err)));
                 if (sigInput.current) sigInput.current.value = '';
               }} />
             <div className="pr-btns">

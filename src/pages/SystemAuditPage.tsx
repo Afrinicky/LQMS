@@ -11,7 +11,7 @@ import DisabledModule from '../components/DisabledModule';
 import { useModules } from '../hooks/useModules';
 import { usePermissions } from '../hooks/usePermissions';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
-import { api } from '../services/api';
+import { api, errorText } from '../services/api';
 import {
   AUDIT_FLAG_CATEGORY_LABELS, AUDIT_SEVERITIES, AUDIT_SEVERITY_RANK,
   SCHEDULE_KIND_LABELS, type ScheduleKind,
@@ -169,7 +169,7 @@ function Flags({ onChanged }: { onChanged: () => void }) {
     if (filter.severity) params.set('severity', filter.severity);
     if (filter.search) params.set('search', filter.search);
     try { setFlags(await api<SystemAuditFlag[]>(`/system-audit/flags?${params.toString()}`)); setError(null); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }, [filter]);
 
   useEffect(() => { void load(); }, [load]);
@@ -180,7 +180,7 @@ function Flags({ onChanged }: { onChanged: () => void }) {
     try {
       await api(`/system-audit/flags/${id}/${path}`, { method: 'POST', body: JSON.stringify(body) });
       await load(); onChanged();
-    } catch (e) { setError((e as Error).message); } finally { setBusyId(null); }
+    } catch (e) { setError(errorText(e)); } finally { setBusyId(null); }
   }
 
   const grouped = useMemo(() => {
@@ -310,7 +310,7 @@ function NotDone() {
     const from = new Date(Date.now() - range * 86400000);
     const iso = (d: Date) => d.toISOString().slice(0, 10);
     api<NotDoneRow[]>(`/system-audit/not-done?from=${iso(from)}&to=${iso(to)}`)
-      .then(setRows).catch(e => setError((e as Error).message));
+      .then(setRows).catch(e => setError(errorText(e)));
   }, [range]);
   useFocusTarget(rows);
 
@@ -398,7 +398,7 @@ function Schedules() {
 
   useEffect(() => {
     api<{ obligations: ScheduleObligation[]; carryForwards: CarryForwardRow[] }>('/system-audit/schedules')
-      .then(setData).catch(e => setError((e as Error).message));
+      .then(setData).catch(e => setError(errorText(e)));
   }, []);
 
   if (error) return <div className="card"><p className="form-error">{error}</p></div>;
@@ -478,7 +478,7 @@ function LiveTrail() {
 
   const load = useCallback(async () => {
     try { setData(await api<SystemAuditTrailResponse>(`/system-audit/trail?${query}`)); setError(null); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }, [query]);
 
   useEffect(() => { void load(); }, [load]);
@@ -567,7 +567,7 @@ function Checks({ onScan, scanning }: { onScan: () => void; scanning: boolean })
   useEffect(() => {
     Promise.all([api<CheckRow[]>('/system-audit/checks'), api<SystemAuditScan[]>('/system-audit/scans')])
       .then(([c, s]) => { setChecks(c); setScans(s); })
-      .catch(e => setError((e as Error).message));
+      .catch(e => setError(errorText(e)));
   }, [scanning]);
 
   const byCategory = useMemo(() => {
@@ -648,7 +648,7 @@ export function SystemAuditPage() {
 
   const loadSummary = useCallback(async () => {
     try { setSummary(await api<SystemAuditSummary>('/system-audit/summary')); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }, []);
 
   useEffect(() => { void loadSummary(); }, [loadSummary]);
@@ -656,7 +656,7 @@ export function SystemAuditPage() {
   const runScan = useCallback(async () => {
     setScanning(true);
     try { await api('/system-audit/scan', { method: 'POST', body: JSON.stringify({}) }); await loadSummary(); }
-    catch (e) { setError((e as Error).message); } finally { setScanning(false); }
+    catch (e) { setError(errorText(e)); } finally { setScanning(false); }
   }, [loadSummary]);
 
   if (!isEnabled('system_audit')) return <DisabledModule />;

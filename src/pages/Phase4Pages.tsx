@@ -3,7 +3,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
 import { useModules } from '../hooks/useModules';
-import { api } from '../services/api';
+import { api, errorText, apiRead } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import ScannedRecordUpload from '../components/ScannedRecordUpload';
 import XlsxToolbar from '../components/XlsxToolbar';
@@ -116,14 +116,14 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
   async function load() {
     try {
       const [mats, ress, lots, sum] = await Promise.all([
-        api<IqcMaterial[]>('/iqc/materials'),
-        api<IqcResult[]>('/iqc/results'),
-        api<IqcLotChange[]>('/iqc/lot-changes'),
+        apiRead<IqcMaterial[]>('/iqc/materials', []),
+        apiRead<IqcResult[]>('/iqc/results', []),
+        apiRead<IqcLotChange[]>('/iqc/lot-changes', []),
         api<IqcSummary>('/dashboard/iqc-summary').catch(() => null)
       ]);
       setMaterials(mats); setResults(ress); setLotChanges(lots);
       if (sum) setSummary(sum);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   useEffect(() => { if (embedded || isEnabled('iqc')) void load(); }, [isEnabled]);
   if (!embedded && !isEnabled('iqc')) return <DisabledModule />;
@@ -131,7 +131,7 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
   async function loadLj(id: string) {
     if (!id) { setLj(null); return; }
     try { setLj(await api<LeveyJenningsData>(`/iqc/materials/${id}/levey-jennings`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function submitMaterial(e: FormEvent) {
@@ -140,7 +140,7 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
       await api('/iqc/materials', { method: 'POST', body: JSON.stringify(materialForm) });
       setMaterialForm({ materialName: '', testName: '', analyte: '', lotNumber: '', manufacturer: '', expiryDate: '', storageCondition: '', sectionId: '', targetMean: '', targetSd: '', acceptableLow: '', acceptableHigh: '', equipmentId: '', isActive: true });
       await load(); setTab('IQC Materials');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function submitResult(e: FormEvent) {
@@ -150,7 +150,7 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
       await api(`/iqc/materials/${resultForm.iqcMaterialId}/results`, { method: 'POST', body: JSON.stringify(resultForm) });
       setResultForm({ iqcMaterialId: '', runDate: '', runTime: '', resultValue: '', equipmentId: '', comment: '', immediateAction: '' });
       await load(); setTab('QC Failures');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function submitLotChange(e: FormEvent) {
@@ -159,20 +159,20 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
       await api('/iqc/lot-change', { method: 'POST', body: JSON.stringify(lotForm) });
       setLotForm({ oldIqcMaterialId: '', newIqcMaterialId: '', changeDate: '', reason: '', verificationSummary: '' });
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function reviewResult(id: number) {
     try { await api(`/iqc/results/${id}/review`, { method: 'POST', body: JSON.stringify({}) }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function createNc(id: number) {
     try { await api(`/iqc/results/${id}/create-nc`, { method: 'POST', body: JSON.stringify({}) }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function createCapa(id: number) {
     try { await api(`/iqc/results/${id}/create-capa`, { method: 'POST', body: JSON.stringify({}) }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   const tabs = ['Dashboard', 'IQC Materials', 'New Material', 'Result Entry', 'QC Failures', 'Levey-Jennings', 'Lot Changes', 'Scanned Records', 'Reports'].filter(name => !embedded || name !== 'Dashboard');
@@ -355,13 +355,13 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
   async function load() {
     try {
       const [progs, evs, sum] = await Promise.all([
-        api<EqaProgram[]>('/eqa/programs'),
-        api<EqaEvent[]>('/eqa/events'),
+        apiRead<EqaProgram[]>('/eqa/programs', []),
+        apiRead<EqaEvent[]>('/eqa/events', []),
         api<EqaSummary>('/dashboard/eqa-summary').catch(() => null)
       ]);
       setPrograms(progs); setEvents(evs);
       if (sum) setSummary(sum);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   useEffect(() => { if (embedded || isEnabled('eqa')) void load(); }, [isEnabled]);
   if (!embedded && !isEnabled('eqa')) return <DisabledModule />;
@@ -372,7 +372,7 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
       await api('/eqa/programs', { method: 'POST', body: JSON.stringify(programForm) });
       setProgramForm({ programName: '', provider: '', testArea: '', sectionId: '', frequency: '', contact: '', isActive: true });
       await load(); setTab('EQA Programs');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function submitEvent(e: FormEvent) {
@@ -382,12 +382,12 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
       await api(`/eqa/programs/${eventForm.eqaProgramId}/events`, { method: 'POST', body: JSON.stringify(eventForm) });
       setEventForm({ eqaProgramId: '', cycleName: '', receivedDate: '', submissionDueDate: '', submittedDate: '', resultReceivedDate: '', performanceStatus: '', score: '', findings: '', responsibleStaffId: '' });
       await load(); setTab('EQA Events');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function openEvent(id: number) {
     try { setSelectedEvent(await api(`/eqa/events/${id}`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function submitResultRow(e: FormEvent) {
@@ -397,16 +397,16 @@ export function EqaPage({ embedded = false }: { embedded?: boolean } = {}) {
       await api(`/eqa/events/${selectedEvent.id}/results`, { method: 'POST', body: JSON.stringify(resultForm) });
       setResultForm({ resultKind: 'general', analyteOrTest: '', antimicrobial: '', reportedResult: '', expectedResult: '', performance: '', comment: '' });
       await openEvent(selectedEvent.id);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function createNc(id: number) {
     try { await api(`/eqa/events/${id}/create-nc`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selectedEvent?.id === id) await openEvent(id); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function createCapa(id: number) {
     try { await api(`/eqa/events/${id}/create-capa`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selectedEvent?.id === id) await openEvent(id); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   const tabs = ['Dashboard', 'EQA Programs', 'New Program', 'EQA Events', 'Results', 'Unsatisfactory Performance', 'Reports'].filter(name => !embedded || name !== 'Dashboard');
@@ -593,12 +593,12 @@ export function MeasurementUncertaintyPage({ embedded = false }: { embedded?: bo
   async function load() {
     try {
       const [recs, sum] = await Promise.all([
-        api<MeasurementUncertaintyRecord[]>('/measurement-uncertainty'),
+        apiRead<MeasurementUncertaintyRecord[]>('/measurement-uncertainty', []),
         api<MeasurementUncertaintySummary>('/dashboard/measurement-uncertainty-summary').catch(() => null)
       ]);
       setRecords(recs);
       if (sum) setSummary(sum);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   useEffect(() => { if (embedded || isEnabled('measurement_uncertainty')) void load(); }, [isEnabled]);
   if (!embedded && !isEnabled('measurement_uncertainty')) return <DisabledModule />;
@@ -609,16 +609,16 @@ export function MeasurementUncertaintyPage({ embedded = false }: { embedded?: bo
       await api('/measurement-uncertainty', { method: 'POST', body: JSON.stringify(form) });
       setForm({ testName: '', analyte: '', methodName: '', equipmentId: '', calculationDate: '', dataPeriodStart: '', dataPeriodEnd: '', sourceData: '', meanValue: '', sdValue: '', cvPercent: '', uncertaintyValue: '', expandedUncertainty: '', coverageFactor: '2', interpretation: '', status: 'draft' });
       await load(); setTab('MU Register');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function reviewRecord(id: number) {
     try { await api(`/measurement-uncertainty/${id}/review`, { method: 'POST', body: JSON.stringify({}) }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function approveRecord(id: number) {
     try { await api(`/measurement-uncertainty/${id}/approve`, { method: 'POST', body: JSON.stringify({}) }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   const tabs = ['Dashboard', 'MU Register', 'New MU Record', 'Review/Approval', 'Reports'].filter(name => !embedded || name !== 'Dashboard');

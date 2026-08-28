@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { api, API_BASE, getToken } from '../../services/api';
+import { api, API_BASE, getToken, errorText } from '../../services/api';
 import type {
   MyProfile, MyTasks, MyDeclarations, StaffDocument, NotificationRecord,
   StaffSuggestionsResponse, UserTaskQueueItem, ReviewCalendarItem, StaffCpdRecord,
@@ -139,7 +139,7 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
     // The profile is the one call the portal cannot do without: it decides
     // whether this account even has a staff record to show. Everything else
     // degrades to an empty panel rather than taking the page down with it.
-    const prof = await api<MyProfile>('/personnel/my-profile').catch(e => { setError((e as Error).message); return null; });
+    const prof = await api<MyProfile>('/personnel/my-profile').catch(e => { setError(errorText(e)); return null; });
     if (prof) { setProfile(prof); setError(null); }
     await Promise.all([
       api<MyTasks>('/personnel/my-tasks').then(setTasks).catch(() => undefined),

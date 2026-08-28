@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts, DetailModal } from '../components/ui';
 import { useModules } from '../hooks/useModules';
-import { api } from '../services/api';
+import { api, errorText, apiRead } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import type {
   Location, Section, Staff, MonitoringItem,
@@ -85,22 +85,22 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
     try {
       const [sum, u, h, c, ae, d] = await Promise.all([
         api<BloodBankSummary>('/dashboard/blood-bank-summary').catch(() => null),
-        api<BloodUnit[]>('/blood-bank-handover/units'),
-        api<BloodBankHandover[]>('/blood-bank-handover/handovers'),
-        api<BloodDonationCampaign[]>('/blood-bank-handover/campaigns'),
-        api<BloodAdverseEvent[]>('/blood-bank-handover/adverse-events'),
+        apiRead<BloodUnit[]>('/blood-bank-handover/units', []),
+        apiRead<BloodBankHandover[]>('/blood-bank-handover/handovers', []),
+        apiRead<BloodDonationCampaign[]>('/blood-bank-handover/campaigns', []),
+        apiRead<BloodAdverseEvent[]>('/blood-bank-handover/adverse-events', []),
         api<BloodDiscard[]>('/blood-bank-handover/discards').catch(() => [])
       ]);
       if (sum) setSummary(sum);
       setUnits(u); setHandovers(h); setCampaigns(c); setAdverseEvents(ae); setDiscards(d);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   useEffect(() => { if (embedded || isEnabled('blood_bank_handover')) void load(); }, [isEnabled]);
   if (!embedded && !isEnabled('blood_bank_handover')) return <DisabledModule />;
 
   async function openHandover(id: number) {
     try { setSelectedHandover(await api<BloodBankHandover>(`/blood-bank-handover/handovers/${id}`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function submitUnit(e: FormEvent) {
@@ -108,7 +108,7 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
     try {
       await api('/blood-bank-handover/units', { method: 'POST', body: JSON.stringify(unitForm) });
       setUnitForm(emptyUnitForm); await load(); setTab('Blood Units');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function submitHandover(e: FormEvent) {
@@ -116,7 +116,7 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
     try {
       await api('/blood-bank-handover/handovers', { method: 'POST', body: JSON.stringify(handoverForm) });
       setHandoverForm(emptyHandoverForm); await load(); setTab('Handovers');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function submitCampaign(e: FormEvent) {
@@ -124,7 +124,7 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
     try {
       await api('/blood-bank-handover/campaigns', { method: 'POST', body: JSON.stringify(campaignForm) });
       setCampaignForm(emptyCampaignForm); await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function submitAdverse(e: FormEvent) {
@@ -132,7 +132,7 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
     try {
       await api('/blood-bank-handover/adverse-events', { method: 'POST', body: JSON.stringify(adverseForm) });
       setAdverseForm(emptyAdverseForm); await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function submitDiscard(e: FormEvent) {
@@ -141,7 +141,7 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
     try {
       await api(`/blood-bank-handover/units/${discardForm.unitId}/discard`, { method: 'POST', body: JSON.stringify({ reason: discardForm.reason, remarks: discardForm.remarks }) });
       setDiscardForm({ unitId: '', reason: '', remarks: '' }); await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function addUnitToHandover(e: FormEvent) {
@@ -151,7 +151,7 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
       await api(`/blood-bank-handover/handovers/${selectedHandover.id}/add-unit`, { method: 'POST', body: JSON.stringify(addUnitForm) });
       setAddUnitForm({ bloodUnitId: '', notes: '' });
       await openHandover(selectedHandover.id);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function addDonationSummary(e: FormEvent) {
@@ -161,7 +161,7 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
       await api(`/blood-bank-handover/handovers/${selectedHandover.id}/donation-summary`, { method: 'POST', body: JSON.stringify(donationSummaryForm) });
       setDonationSummaryForm({ summaryDate: '', donorType: '', numberScreened: '', numberAccepted: '', numberDeferred: '', numberCollected: '', remarks: '' });
       await openHandover(selectedHandover.id);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function addTransfusionSummary(e: FormEvent) {
@@ -171,56 +171,56 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
       await api(`/blood-bank-handover/handovers/${selectedHandover.id}/transfusion-summary`, { method: 'POST', body: JSON.stringify(transfusionSummaryForm) });
       setTransfusionSummaryForm({ summaryDate: '', bloodGroup: '', componentType: '', numberTransfused: '', remarks: '' });
       await openHandover(selectedHandover.id);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function signOutgoing(id: number) {
     try { await api(`/blood-bank-handover/handovers/${id}/sign-outgoing`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selectedHandover?.id === id) await openHandover(id); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function signIncoming(id: number) {
     try { await api(`/blood-bank-handover/handovers/${id}/sign-incoming`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selectedHandover?.id === id) await openHandover(id); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function reviewHandover(id: number) {
     try { await api(`/blood-bank-handover/handovers/${id}/review`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selectedHandover?.id === id) await openHandover(id); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function closeHandover(id: number) {
     try { await api(`/blood-bank-handover/handovers/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selectedHandover?.id === id) await openHandover(id); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function createHandoverNc(id: number) {
     try { await api(`/blood-bank-handover/handovers/${id}/create-nc`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selectedHandover?.id === id) await openHandover(id); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function createHandoverAction(id: number) {
     const title = prompt('Action title?');
     if (!title) return;
     try { await api(`/blood-bank-handover/handovers/${id}/create-action`, { method: 'POST', body: JSON.stringify({ title }) }); await load(); if (selectedHandover?.id === id) await openHandover(id); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function createAdverseNc(id: number) {
     try { await api(`/blood-bank-handover/adverse-events/${id}/create-nc`, { method: 'POST', body: JSON.stringify({}) }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function createAdverseCapa(id: number) {
     try { await api(`/blood-bank-handover/adverse-events/${id}/create-capa`, { method: 'POST', body: JSON.stringify({}) }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function createAdverseSafetyIncident(id: number) {
     try { await api(`/blood-bank-handover/adverse-events/${id}/create-safety-incident`, { method: 'POST', body: JSON.stringify({}) }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function closeAdverse(id: number) {
     try { await api(`/blood-bank-handover/adverse-events/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function loadMonthlySummary() {
     try { setMonthlySummary(await api<BloodMonthlySummary>(`/blood-bank-handover/monthly-summary?month=${monthSelector}`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function downloadMonthlySummaryCsv() {
@@ -234,12 +234,12 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
       a.href = url; a.download = `blood-bank-monthly-${monthSelector}.csv`;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function loadReports() {
     try { setReports(await api<BloodBankReports>('/blood-bank-handover/reports')); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   useEffect(() => { if (tab === 'Reports' && (embedded || isEnabled('blood_bank_handover')) && !reports) void loadReports(); }, [tab, isEnabled, reports]);
 

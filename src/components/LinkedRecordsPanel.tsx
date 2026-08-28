@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '../services/api';
+import { api, errorText } from '../services/api';
 
 type LinkRow = {
   id: number;
@@ -20,7 +20,7 @@ export function LinkedRecordsPanel({ moduleKey, recordType, recordId, title }: {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     const params = new URLSearchParams({ module_key: moduleKey, record_type: recordType, record_id: String(recordId) });
-    api<LinkedView>(`/common/linked-records?${params.toString()}`).then(setData).catch(e => setError((e as Error).message));
+    api<LinkedView>(`/common/linked-records?${params.toString()}`).then(setData).catch(e => setError(errorText(e)));
   }, [moduleKey, recordType, recordId]);
   if (error) return <div className="card"><h4>{title ?? 'Linked records'}</h4><p className="error">{error}</p></div>;
   if (!data) return <div className="card"><h4>{title ?? 'Linked records'}</h4><p>Loading…</p></div>;
