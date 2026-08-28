@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '../../services/api';
+import { api, errorText } from '../../services/api';
 import { KpiStrip, ChartCard, DonutChart, BarChart, BarMeter, Sparkline, CHART_COLORS } from '../../components/ui';
 import type { StockStatus } from '../../../shared/constants/stockControl';
 import { StatusBadge, qty } from './StockControl';
@@ -43,7 +43,7 @@ export function InventoryReports({ refreshKey }: { refreshKey: number }) {
   const [months, setMonths] = useState(12);
 
   useEffect(() => {
-    api<Reports>(`/supplier-inventory/reports?months=${months}`).then(setData).catch(e => setError((e as Error).message));
+    api<Reports>(`/supplier-inventory/reports?months=${months}`).then(setData).catch(e => setError(errorText(e)));
   }, [refreshKey, months]);
 
   if (error) return <div className="card"><div className="error">{error}</div></div>;

@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Trash2, ClipboardList, PackageCheck, Printer, Lock, LockOpen, Undo2, FileText, X } from 'lucide-react';
-import { api, API_BASE, getToken, ApiError } from '../../services/api';
+import { api, API_BASE, getToken, ApiError, errorText } from '../../services/api';
 import { DetailModal, KpiStrip, ChartCard, DonutChart, BarChart, BarMeter, Sparkline, RowMenu, RegisterSearch, CHART_COLORS } from '../../components/ui';
 import BarcodeScanner from '../../components/BarcodeScanner';
 import type { Section, Staff, Department } from '../../../shared/types/api';
@@ -93,7 +93,7 @@ export function StockLedger({ onOpenItem, refreshKey }: { onOpenItem: (id: numbe
     setLoading(true);
     api<{ rows: LedgerRow[] }>('/supplier-inventory/ledger')
       .then(d => setRows(d.rows))
-      .catch(e => setError((e as Error).message))
+      .catch(e => setError(errorText(e)))
       .finally(() => setLoading(false));
   }, [refreshKey]);
 
@@ -139,7 +139,7 @@ export function StockLedger({ onOpenItem, refreshKey }: { onOpenItem: (id: numbe
         </div>
         <div className="reg-head-actions" style={{ marginLeft: 'auto' }}>
           <RegisterSearch onQuery={setDeferred} placeholder="Search item, code, category, shelf…" />
-          {can('supplier_inventory.stock', 'export') && <button type="button" className="secondary" onClick={() => void download('/supplier-inventory/ledger/export', 'Stock_Control_Ledger.xlsx').catch(e => setError((e as Error).message))}>Export</button>}
+          {can('supplier_inventory.stock', 'export') && <button type="button" className="secondary" onClick={() => void download('/supplier-inventory/ledger/export', 'Stock_Control_Ledger.xlsx').catch(e => setError(errorText(e)))}>Export</button>}
         </div>
       </div>
 
@@ -203,7 +203,7 @@ export function BinCard({ itemId, onClose, onOpenItem }: { itemId: number; onClo
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api(`/supplier-inventory/ledger/${itemId}`).then(setData).catch(e => setError((e as Error).message));
+    api(`/supplier-inventory/ledger/${itemId}`).then(setData).catch(e => setError(errorText(e)));
   }, [itemId]);
 
   const p = data?.position as LedgerRow | null;
@@ -337,7 +337,7 @@ export function IssueDesk({ items, sections, staff, departments, reasons, destin
         else next.push({ itemId: id, quantity: '1' });
         return next;
       });
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function submit(e: FormEvent) {
@@ -369,7 +369,7 @@ export function IssueDesk({ items, sections, staff, departments, reasons, destin
       setVoucher(r);
       setLines([{ itemId: '', quantity: '' }]); setPurpose(''); setNote('');
       onIssued();
-    } catch (err) { setError((err as Error).message); }
+    } catch (err) { setError(errorText(err)); }
     finally { setBusy(false); }
   }
 
@@ -581,7 +581,7 @@ function CancelVoucherPrompt({ voucher, onClose, onDone }: { voucher: any; onClo
     try {
       await api(`/supplier-inventory/issues/${voucher.id}/cancel`, { method: 'POST', body: JSON.stringify({ reason: reason.trim() }) });
       onDone();
-    } catch (e) { setError((e as Error).message); setBusy(false); }
+    } catch (e) { setError(errorText(e)); setBusy(false); }
   }
 
   return <DetailModal open onClose={onClose} width="narrow" title={`Cancel ${voucher.issue_number}`}
@@ -608,7 +608,7 @@ function IssueDetail({ id, onClose, onChanged, canVoid }: {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const load = () => api(`/supplier-inventory/issues/${id}`).then(setData).catch(e => setError((e as Error).message));
+  const load = () => api(`/supplier-inventory/issues/${id}`).then(setData).catch(e => setError(errorText(e)));
   useEffect(() => { void load(); }, [id]);
 
   async function sendReturn() {
@@ -620,7 +620,7 @@ function IssueDetail({ id, onClose, onChanged, canVoid }: {
     try {
       await api(`/supplier-inventory/issues/${id}/return`, { method: 'POST', body: JSON.stringify({ lines, reason: 'Returned unused' }) });
       setReturning({}); await load(); onChanged?.();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(false); }
   }
 
@@ -740,7 +740,7 @@ export function StockTake({ places, staff, items, categories, canVoid, onPosted 
       }
       setOpen(r.id);
       setPickedItems([]);
-    } catch (err) { setError((err as Error).message); }
+    } catch (err) { setError(errorText(err)); }
     finally { setBusy(false); }
   }
 
@@ -882,7 +882,7 @@ export function StockTake({ places, staff, items, categories, canVoid, onPosted 
             <td className="reg-actions-col" onClick={e => e.stopPropagation()}>
               <RowMenu label={`Manage ${c.count_number}`}>{close => <>
                 <button type="button" role="menuitem" onClick={() => { close(); setOpen(c.id); }}><FileText size={14} /> Open the sheet</button>
-                {can('supplier_inventory.stock', 'export') && <button type="button" role="menuitem" onClick={() => { close(); void download(`/supplier-inventory/counts/${c.id}/export`, `${c.count_number}.xlsx`).catch(e => setError((e as Error).message)); }}>
+                {can('supplier_inventory.stock', 'export') && <button type="button" role="menuitem" onClick={() => { close(); void download(`/supplier-inventory/counts/${c.id}/export`, `${c.count_number}.xlsx`).catch(e => setError(errorText(e))); }}>
                   <Printer size={14} /> Export the variance sheet
                 </button>}
                 {canVoid && c.status === 'open' && <button type="button" role="menuitem" className="danger" onClick={() => { close(); setCancelling(c); }}>
@@ -913,7 +913,7 @@ function AbandonCountPrompt({ count, onClose, onDone }: { count: any; onClose: (
     try {
       await api(`/supplier-inventory/counts/${count.id}/cancel`, { method: 'POST', body: JSON.stringify({ reason: reason.trim() }) });
       onDone();
-    } catch (e) { setError((e as Error).message); setBusy(false); }
+    } catch (e) { setError(errorText(e)); setBusy(false); }
   }
 
   return <DetailModal open onClose={onClose} width="narrow" title={`Abandon ${count.count_number}`}
@@ -954,7 +954,7 @@ function CountSheet({ id, items, canVoid, onClose, onPosted }: {
   const [adding, setAdding] = useState(false);
   const [addForm, setAddForm] = useState({ itemId: '', batchId: '', countedQuantity: '', reason: '', note: '' });
 
-  const load = () => api(`/supplier-inventory/counts/${id}`).then(d => { setData(d); setEdits({}); }).catch(e => setError((e as Error).message));
+  const load = () => api(`/supplier-inventory/counts/${id}`).then(d => { setData(d); setEdits({}); }).catch(e => setError(errorText(e)));
   useEffect(() => { void load(); }, [id]);
 
   const posted = data?.status === 'posted';
@@ -1032,7 +1032,7 @@ function CountSheet({ id, items, canVoid, onClose, onPosted }: {
       if (payload.length) await api(`/supplier-inventory/counts/${id}/lines`, { method: 'PUT', body: JSON.stringify({ lines: payload }) });
       if (then) await then();
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(''); }
   }
 
@@ -1062,7 +1062,7 @@ function CountSheet({ id, items, canVoid, onClose, onPosted }: {
       await api(`/supplier-inventory/counts/${id}/lines`, { method: 'POST', body: JSON.stringify(addForm) });
       setAdding(false); setAddForm({ itemId: '', batchId: '', countedQuantity: '', reason: '', note: '' });
       await load();
-    } catch (err) { setError((err as Error).message); }
+    } catch (err) { setError(errorText(err)); }
     finally { setBusy(''); }
   }
 
@@ -1075,7 +1075,7 @@ function CountSheet({ id, items, canVoid, onClose, onPosted }: {
         : abandoned ? <span className="badge" style={{ background: '#fde2e2', color: '#b42318' }}>abandoned</span>
         : <span className="badge warn">open</span>}
       {Boolean(data.blind) && <span className="badge">blind count</span>}
-      {can('supplier_inventory.stock', 'export') && <button type="button" className="secondary" onClick={() => void download(`/supplier-inventory/counts/${id}/export`, `${data.count_number}.xlsx`).catch(e => setError((e as Error).message))}>
+      {can('supplier_inventory.stock', 'export') && <button type="button" className="secondary" onClick={() => void download(`/supplier-inventory/counts/${id}/export`, `${data.count_number}.xlsx`).catch(e => setError(errorText(e)))}>
         <Printer size={14} /> Export
       </button>}
     </>}
@@ -1168,7 +1168,7 @@ function CountSheet({ id, items, canVoid, onClose, onPosted }: {
                 {!hideBook && <button type="button" className="tiny" title="Record it as agreeing with the register"
                   onClick={() => patch(l, { counted: String(l.system_quantity) })}>Agrees</button>}
                 {l.added_manually && <button type="button" className="tiny danger" title="Take this line off the sheet"
-                  onClick={() => void api(`/supplier-inventory/counts/${id}/lines/${l.id}`, { method: 'DELETE' }).then(load).catch(e => setError((e as Error).message))}>
+                  onClick={() => void api(`/supplier-inventory/counts/${id}/lines/${l.id}`, { method: 'DELETE' }).then(load).catch(e => setError(errorText(e)))}>
                   <Trash2 size={13} />
                 </button>}
               </div>}

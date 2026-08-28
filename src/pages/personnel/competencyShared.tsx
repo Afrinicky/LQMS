@@ -1,6 +1,6 @@
 import { useRef, useState, type ReactNode } from 'react';
 import { Paperclip, Printer, Trash2, Upload } from 'lucide-react';
-import { api, API_BASE, getToken } from '../../services/api';
+import { api, API_BASE, getToken, errorText } from '../../services/api';
 import { openPrintable } from '../../services/xlsx';
 import type { RecordAttachment } from '../../../shared/types/api';
 
@@ -140,7 +140,7 @@ export function PrintButton({ path, label = 'Print', disabled, title }: { path: 
       onClick={async () => {
         setError(null); setBusy(true);
         try { await openPrintable(path); }
-        catch (e) { setError((e as Error).message); }
+        catch (e) { setError(errorText(e)); }
         finally { setBusy(false); }
       }}>
       <Printer size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />{busy ? 'Preparing…' : label}
@@ -192,14 +192,14 @@ export function EvidencePanel({ basePath, attachments, canEdit, onChanged, itemC
       setFile(null); setTitle(''); setDescription(''); setItemId('');
       if (inputRef.current) inputRef.current.value = '';
       await onChanged();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(false); }
   }
 
   async function remove(id: number) {
     setError(null);
     try { await api(`${basePath}/attachments/${id}`, { method: 'DELETE' }); await onChanged(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   return <div className="evidence-panel">

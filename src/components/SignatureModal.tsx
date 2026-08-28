@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { PenLine, X, Upload } from 'lucide-react';
-import { api, API_BASE, getToken } from '../services/api';
+import { api, API_BASE, getToken, errorText } from '../services/api';
 
 /**
  * "My signature" — upload a signature once; the Host then applies it to every
@@ -27,7 +27,7 @@ export function SignatureModal({ onClose }: { onClose: () => void }) {
   function refresh() {
     api<{ hasSignature: boolean; staffLinked?: boolean }>('/signatures/me')
       .then(r => { setHasSignature(r.hasSignature); setStaffLinked(r.staffLinked !== false); if (r.hasSignature) fetchSignatureUrl().then(setImgUrl); else setImgUrl(null); })
-      .catch(e => setError((e as Error).message));
+      .catch(e => setError(errorText(e)));
   }
   useEffect(refresh, []);
   useEffect(() => () => { if (imgUrl) URL.revokeObjectURL(imgUrl); }, [imgUrl]);
@@ -41,7 +41,7 @@ export function SignatureModal({ onClose }: { onClose: () => void }) {
       await api('/signatures/me', { method: 'POST', body: fd });
       setNotice('Signature saved. It will be applied to everything you sign.');
       refresh();
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+    } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   }
 
   return (

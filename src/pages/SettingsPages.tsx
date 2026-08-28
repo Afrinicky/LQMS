@@ -5,7 +5,7 @@ import {
   ShieldCheck, AlertTriangle, CheckCircle2, Cloud, HardDrive, Archive, FolderOpen,
   Download, Upload, Plus, FileText, Search,
 } from 'lucide-react';
-import { api, API_BASE, getToken } from '../services/api';
+import { api, API_BASE, getToken, errorText , apiRead } from '../services/api';
 import {
   SCHEDULE_PRESETS, DAY_NAMES, describeRetention, normaliseSchedule, type BackupSchedule,
 } from '../../shared/constants/backup';
@@ -119,13 +119,13 @@ export function RegisterStaff() {
       setSuccess(`Staff record created (#${res.staffId})${res.userId ? ` with linked login account (user #${res.userId})` : ''}. Positions, permissions and personnel records are now linked.`);
       setForm(blank); setPositionIds([]); setCreateUser(false); setAccount({ username: '', password: '', roleId: '' });
       loadLookups();
-    } catch (err) { setError((err as Error).message); }
+    } catch (err) { setError(errorText(err)); }
   }
 
   async function openProfile(id: number) {
     setError(null);
     try { setProfile(await api<StaffProfile>(`/staff/${id}`)); }
-    catch (err) { setError((err as Error).message); }
+    catch (err) { setError(errorText(err)); }
   }
 
   const moduleLabel = (key: string) => MODULES.find(m => m.key === key)?.label ?? key;
@@ -276,7 +276,7 @@ export function UsersAccess(){
       form.reset();
       setSuccess('User account created.');
       load();
-    } catch (err) { setError((err as Error).message); }
+    } catch (err) { setError(errorText(err)); }
   }
   async function linkStaff(userId:number, staffId:number|null){
     setError(null); setSuccess(null);
@@ -284,7 +284,7 @@ export function UsersAccess(){
       await api(`/users/${userId}`,{method:'PUT',body:JSON.stringify({staffId})});
       setSuccess(staffId?'Account linked to staff record.':'Account unlinked from staff.');
       setOpenUser(null); setLinkSel(''); load();
-    } catch (err) { setError((err as Error).message); }
+    } catch (err) { setError(errorText(err)); }
   }
   const unlinkedStaff = staff.filter(s => !s.userId);
   return <><PasswordResetApprovals />
@@ -365,7 +365,7 @@ export function Positions(){
     try {
       await api('/positions',{method:'POST',body:JSON.stringify({title:fd.get('title'),description:fd.get('description'),reportsToPositionId:fd.get('reportsToPositionId')||null})});
       e.currentTarget.reset(); load();
-    } catch (err) { setError((err as Error).message); }
+    } catch (err) { setError(errorText(err)); }
   }
   async function addStaff(e:FormEvent<HTMLFormElement>){
     e.preventDefault(); setError(null);
@@ -373,7 +373,7 @@ export function Positions(){
     try {
       await api('/staff',{method:'POST',body:JSON.stringify({employeeNo:fd.get('employeeNo'),fullName:fd.get('fullName'),email:fd.get('email'),phone:fd.get('phone'),sectionId:fd.get('sectionId')||null,positionId:Number(fd.get('positionId'))})});
       e.currentTarget.reset(); load();
-    } catch (err) { setError((err as Error).message); }
+    } catch (err) { setError(errorText(err)); }
   }
   function startEdit(p:Position){ setEditing(p); setEditForm({ title:p.title, reportsToPositionId:p.reportsToPositionId?String(p.reportsToPositionId):'', isActive:p.isActive!==false }); }
   async function saveEdit(e:FormEvent<HTMLFormElement>){
@@ -382,17 +382,17 @@ export function Positions(){
     try {
       await api(`/positions/${editing.id}`,{method:'PUT',body:JSON.stringify({ title:editForm.title, reportsToPositionId:editForm.reportsToPositionId||null, isActive:editForm.isActive })});
       setEditing(null); load();
-    } catch (err) { setError((err as Error).message); }
+    } catch (err) { setError(errorText(err)); }
   }
   async function toggleStatus(p:Position){
     setError(null);
     try { await api(`/positions/${p.id}`,{method:'PUT',body:JSON.stringify({ isActive:p.isActive===false })}); load(); }
-    catch (err) { setError((err as Error).message); }
+    catch (err) { setError(errorText(err)); }
   }
   async function removePosition(p:Position){
     setError(null);
     try { await api(`/positions/${p.id}`,{method:'DELETE'}); load(); }
-    catch (err) { setError((err as Error).message); }
+    catch (err) { setError(errorText(err)); }
   }
   const byId = (id?: number | null) => positions.find(p => p.id === id)?.title;
 
@@ -472,9 +472,9 @@ function RankConfig() {
   const [ranks, setRanks] = useState<ProfessionalRank[]>([]);
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const load = () => api<ProfessionalRank[]>('/professional-ranks').then(setRanks).catch(e => setError((e as Error).message));
+  const load = () => api<ProfessionalRank[]>('/professional-ranks').then(setRanks).catch(e => setError(errorText(e)));
   useEffect(() => { void load(); }, []);
-  async function call(path: string, options: RequestInit) { setError(null); try { await api(path, options); await load(); return true; } catch (e) { setError((e as Error).message); return false; } }
+  async function call(path: string, options: RequestInit) { setError(null); try { await api(path, options); await load(); return true; } catch (e) { setError(errorText(e)); return false; } }
   async function add(e: FormEvent) { e.preventDefault(); if (!name.trim()) return; if (await call('/professional-ranks', { method: 'POST', body: JSON.stringify({ name: name.trim() }) })) setName(''); }
   function move(r: ProfessionalRank, dir: -1 | 1) {
     const sorted = [...ranks].sort((a, b) => a.sortOrder - b.sortOrder);
@@ -518,8 +518,8 @@ function Organogram({ staff, onChanged }: { staff: Staff[]; onChanged: () => voi
   const viewportRef=useRef<HTMLDivElement>(null);
   const chartRef=useRef<HTMLDivElement>(null);
   const load=()=>{
-    api<OrgNodeData[]>('/organogram').then(setNodes).catch(e=>setError((e as Error).message));
-    api<OrgTree>('/organogram/tree').then(t=>setTree(t.roots)).catch(e=>setError((e as Error).message));
+    api<OrgNodeData[]>('/organogram').then(setNodes).catch(e=>setError(errorText(e)));
+    api<OrgTree>('/organogram/tree').then(t=>setTree(t.roots)).catch(e=>setError(errorText(e)));
   };
   useEffect(()=>{void load()},[]);
 
@@ -527,7 +527,7 @@ function Organogram({ staff, onChanged }: { staff: Staff[]; onChanged: () => voi
   async function call(path:string, options:RequestInit, okMsg?:string){
     setError(null); setSuccess(null);
     try { await api(path,options); if(okMsg) setSuccess(okMsg); refresh(); return true; }
-    catch(e){ setError((e as Error).message); return false; }
+    catch(e){ setError(errorText(e)); return false; }
   }
 
   const childrenOf = (id:number|null) => nodes.filter(n => n.reportsToPositionId === id).sort((a,b)=>a.title.localeCompare(b.title));
@@ -725,14 +725,14 @@ export function ConfigListsPage() {
   const [editing, setEditing] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState({ label: '', archetype: '' });
 
-  function load() { api<ConfigListView[]>('/config/option-lists').then(ls => { setLists(ls); if (!activeKey && ls.length) setActiveKey(ls[0].key); }).catch(e => setError((e as Error).message)); }
+  function load() { api<ConfigListView[]>('/config/option-lists').then(ls => { setLists(ls); if (!activeKey && ls.length) setActiveKey(ls[0].key); }).catch(e => setError(errorText(e))); }
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const list = lists.find(l => l.key === activeKey);
 
   async function call(path: string, options: RequestInit, okMsg?: string) {
     setError(null); setSuccess(null);
     try { await api(path, options); if (okMsg) setSuccess(okMsg); load(); return true; }
-    catch (e) { setError((e as Error).message); return false; }
+    catch (e) { setError(errorText(e)); return false; }
   }
   async function addOption(e: FormEvent) {
     e.preventDefault();
@@ -824,8 +824,8 @@ export function SectionConfig() {
   const [success, setSuccess] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
 
-  function loadSections() { api<SectionConfigRow[]>('/section-config/sections').then(setSections).catch(e => setError((e as Error).message)); }
-  function loadDetail(id: number) { api<SectionConfigDetail>(`/section-config/sections/${id}`).then(setDetail).catch(e => setError((e as Error).message)); }
+  function loadSections() { api<SectionConfigRow[]>('/section-config/sections').then(setSections).catch(e => setError(errorText(e))); }
+  function loadDetail(id: number) { api<SectionConfigDetail>(`/section-config/sections/${id}`).then(setDetail).catch(e => setError(errorText(e))); }
   useEffect(() => {
     loadSections();
     api<Department[]>('/departments').then(setDepartments).catch(() => setDepartments([]));
@@ -837,7 +837,7 @@ export function SectionConfig() {
   async function call(path: string, options: RequestInit, okMsg?: string) {
     setError(null); setSuccess(null);
     try { await api(path, options); if (okMsg) setSuccess(okMsg); refresh(); return true; }
-    catch (e) { setError((e as Error).message); return false; }
+    catch (e) { setError(errorText(e)); return false; }
   }
 
   // --- new unit ---
@@ -855,7 +855,7 @@ export function SectionConfig() {
       const r = await api<{ deactivated?: boolean; message?: string }>(`/section-config/sections/${selectedId}`, { method: 'DELETE' });
       setSuccess(r?.message || (r?.deactivated ? 'Unit deactivated (it is in use).' : 'Unit deleted.'));
       setSelectedId(null); setDetail(null); loadSections();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   return <div className="section-config">
@@ -1296,9 +1296,9 @@ function SectionBenches({ sectionId }: { sectionId: number }) {
   const [rows, setRows] = useState<BenchRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({ name: '', code: '', description: '' });
-  function load() { api<BenchRow[]>(`/scheduling/sections/${sectionId}/benches`).then(setRows).catch(e => setError((e as Error).message)); }
+  function load() { api<BenchRow[]>(`/scheduling/sections/${sectionId}/benches`).then(setRows).catch(e => setError(errorText(e))); }
   useEffect(() => { load(); }, [sectionId]);
-  async function call(path: string, options: RequestInit) { setError(null); try { await api(path, options); load(); return true; } catch (e) { setError((e as Error).message); return false; } }
+  async function call(path: string, options: RequestInit) { setError(null); try { await api(path, options); load(); return true; } catch (e) { setError(errorText(e)); return false; } }
   async function add(e: FormEvent) { e.preventDefault(); if (!form.name.trim()) return; const ok = await call(`/scheduling/sections/${sectionId}/benches`, { method: 'POST', body: JSON.stringify(form) }); if (ok) setForm({ name: '', code: '', description: '' }); }
   return <>
     <p className="hint">Benches / workspaces in this unit. Staff on the unit's monthly <Link to="/personnel">Bench Schedule</Link> are assigned to these each day. The short code is what appears in the schedule grid cells.</p>
@@ -1453,7 +1453,7 @@ export function BackupRestore(){
       setBackups(list.backups); setLocation(list.location);
       if (st) setStatus(st);
       if (kindList.length) setKinds(kindList);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   };
   useEffect(() => { void load(); }, []);
 
@@ -1470,7 +1470,7 @@ export function BackupRestore(){
       if (failed.length) setError(`${text}. Could not reach ${failed.map(c => `${c.destinationName} (${c.error})`).join('; ')}.`);
       else setMessage(text);
       await load();
-    } catch (e) { setError((e as Error).message); } finally { setBusy(''); }
+    } catch (e) { setError(errorText(e)); } finally { setBusy(''); }
   }
 
   async function download(entry: BackupEntry) {
@@ -1485,7 +1485,7 @@ export function BackupRestore(){
       a.href = url; a.download = entry.fileName;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   const CONFIRM = 'This REPLACES the current database, uploads, evidence and config with the contents of the backup. A pre-restore safety backup is created automatically first. You may need to sign in again afterwards.\n\nContinue?';
@@ -1497,7 +1497,7 @@ export function BackupRestore(){
       const r = await api<{ message: string; safetyBackup: string }>('/backup/restore', { method: 'POST', body: JSON.stringify({ fileName: entry.fileName }) });
       setMessage(`${r.message} (Safety snapshot saved as ${r.safetyBackup}.)`);
       await load();
-    } catch (e) { setError((e as Error).message); } finally { setBusy(''); }
+    } catch (e) { setError(errorText(e)); } finally { setBusy(''); }
   }
 
   async function restoreFromUpload() {
@@ -1512,7 +1512,7 @@ export function BackupRestore(){
       setRestoreFile(null);
       if (fileRef.current) fileRef.current.value = '';
       await load();
-    } catch (e) { setError((e as Error).message); } finally { setBusy(''); }
+    } catch (e) { setError(errorText(e)); } finally { setBusy(''); }
   }
 
   async function syncNow() {
@@ -1521,7 +1521,7 @@ export function BackupRestore(){
       const r = await api<{ ok: boolean; message: string }>('/backup/destinations/sync', { method: 'POST', body: '{}' });
       if (r.ok) setMessage(r.message); else setError(r.message);
       await load();
-    } catch (e) { setError((e as Error).message); } finally { setBusy(''); }
+    } catch (e) { setError(errorText(e)); } finally { setBusy(''); }
   }
 
   async function prune() {
@@ -1531,7 +1531,7 @@ export function BackupRestore(){
       const r = await api<{ message: string }>('/backup/prune', { method: 'POST', body: '{}' });
       setMessage(r.message);
       await load();
-    } catch (e) { setError((e as Error).message); } finally { setBusy(''); }
+    } catch (e) { setError(errorText(e)); } finally { setBusy(''); }
   }
 
   async function factoryReset() {
@@ -1543,7 +1543,7 @@ export function BackupRestore(){
       setResetConfirm('');
       setMessage(`${r.message} A safety backup was saved as ${r.backup}. Signing out…`);
       setTimeout(() => { void logout().catch(() => undefined).finally(() => window.location.reload()); }, 1800);
-    } catch (e) { setError((e as Error).message); setBusy(''); }
+    } catch (e) { setError(errorText(e)); setBusy(''); }
   }
 
   const syncedNames = new Set<string>();
@@ -1785,7 +1785,7 @@ function ScheduleCard({ status, readOnly, onSaved, onError }: {
     try {
       const r = await api<{ description: string; nextRun: string | null }>('/backup/schedule', { method: 'PUT', body: JSON.stringify(schedule) });
       await onSaved(schedule!.enabled ? `${r.description} Next backup ${whenNext(r.nextRun)}.` : 'Automatic backups are off.');
-    } catch (e) { onError((e as Error).message); } finally { setBusy(false); }
+    } catch (e) { onError(errorText(e)); } finally { setBusy(false); }
   }
 
   return (
@@ -1927,7 +1927,7 @@ function DestinationsCard({ status, kinds, readOnly, canSync, onChanged, onError
   async function act(key: string, run: () => Promise<{ message?: string }>) {
     setWorking(key);
     try { const r = await run(); await onChanged(r.message ?? 'Done.'); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
     finally { setWorking(''); }
   }
 
@@ -2067,7 +2067,7 @@ function DestinationForm({ def, existing, onCancel, onSaved, onError }: {
         existing ? `/backup/destinations/${existing.id}` : '/backup/destinations',
         { method: existing ? 'PUT' : 'POST', body: JSON.stringify({ kind: def.kind, name, config }) });
       await onSaved(`${r.destination.name} saved and verified.${r.note ? ` ${r.note}` : ''}`);
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
     finally { setBusy(false); }
   }
 
@@ -2139,7 +2139,7 @@ function FolderCard({ status, readOnly, onChanged, onError }: {
   async function run(key: string, fn: () => Promise<{ message?: string; note?: string }>) {
     setBusy(key);
     try { const r = await fn(); await onChanged(r.message ?? r.note ?? 'Done.'); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
     finally { setBusy(''); }
   }
 
@@ -2371,7 +2371,7 @@ function EquipmentNumbering() {
     try {
       const r = await api<{ pattern: EquipmentPattern; preview: string }>('/equipment/config/id-pattern', { method: 'PUT', body: JSON.stringify({ pattern }) });
       setPattern(r.pattern); setServerPreview(r.preview); setSuccess('Saved. New equipment will use this pattern.');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(false); }
   }
 
@@ -2449,12 +2449,12 @@ function LabDocuments({ category, docTypes, onChanged }: { category: string; doc
       await api('/laboratory-documents', { method: 'POST', body: JSON.stringify({ category, ...form, fileId }) });
       setForm(blank); setFile(null); if (fileRef.current) fileRef.current.value = '';
       load(); onChanged?.();
-    } catch (err) { setError((err as Error).message); } finally { setBusy(false); }
+    } catch (err) { setError(errorText(err)); } finally { setBusy(false); }
   }
   async function remove(id: number) {
     if (!confirm('Remove this document entry? The uploaded file remains in the file store.')) return;
     try { await api(`/laboratory-documents/${id}`, { method: 'DELETE' }); load(); onChanged?.(); }
-    catch (err) { setError((err as Error).message); }
+    catch (err) { setError(errorText(err)); }
   }
 
   return <>
@@ -2527,15 +2527,15 @@ function CoreDocumentsTab({ qualityManualSummary, onSummaryChange, onSaveSummary
   const [renameTo, setRenameTo] = useState('');
 
   const load = () => Promise.all([
-    api<CoreSlot[]>('/laboratory/core-documents').then(setSlots),
+    apiRead<CoreSlot[]>('/laboratory/core-documents', []).then(setSlots),
     api<typeof docs>('/documents').then(setDocs).catch(() => setDocs([])),
-  ]).catch(e => setError((e as Error).message));
+  ]).catch(e => setError(errorText(e)));
   useEffect(() => { void load(); }, []);
 
   async function run(label: string, fn: () => Promise<unknown>, done: string) {
     setBusy(label); setError(null); setNotice(null);
     try { await fn(); setNotice(done); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
     finally { setBusy(null); }
   }
 
@@ -2785,13 +2785,13 @@ function LabLogo() {
       const data = await res.json();
       await api('/laboratory-profile', { method: 'PUT', body: JSON.stringify({ logoFileId: data.id }) });
       setLogoFileId(Number(data.id)); await loadPreview(Number(data.id));
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(false); if (inputRef.current) inputRef.current.value = ''; }
   }
   async function remove() {
     setError(null);
     try { await api('/laboratory-profile', { method: 'PUT', body: JSON.stringify({ logoFileId: null }) }); setLogoFileId(null); setUrl(null); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   return <div className="card">
@@ -2854,40 +2854,40 @@ export function MyLaboratory() {
   async function saveProfile(extra: Record<string, unknown> = {}) {
     setError(null); setSuccess(null);
     try { await api('/laboratory-profile', { method: 'PUT', body: JSON.stringify({ ...form, ...extra }) }); setSuccess('Saved.'); }
-    catch (err) { setError((err as Error).message); }
+    catch (err) { setError(errorText(err)); }
   }
   async function completeRegistration() {
     setError(null); setSuccess(null);
     try { await api('/laboratory-profile', { method: 'PUT', body: JSON.stringify({ ...form, registrationComplete: true }) }); setRegistrationComplete(true); setSuccess('Laboratory registration marked complete.'); }
-    catch (err) { setError((err as Error).message); }
+    catch (err) { setError(errorText(err)); }
   }
   async function addDepartment(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); setError(null);
     const fd = new FormData(e.currentTarget);
     try { await api('/departments', { method: 'POST', body: JSON.stringify({ name: fd.get('name') }) }); e.currentTarget.reset(); load(); }
-    catch (err) { setError((err as Error).message); }
+    catch (err) { setError(errorText(err)); }
   }
   async function toggleDepartment(d: Department) {
     try { await api(`/departments/${d.id}`, { method: 'PUT', body: JSON.stringify({ isActive: d.is_active ? false : true }) }); load(); }
-    catch (err) { setError((err as Error).message); }
+    catch (err) { setError(errorText(err)); }
   }
   async function addPolicy(e: FormEvent) {
     e.preventDefault(); setError(null);
     try { await api('/quality-policies', { method: 'POST', body: JSON.stringify(policyForm) }); setPolicyForm({ title: '', policyStatement: '', referenceNote: '' }); loadPolicies(); }
-    catch (err) { setError((err as Error).message); }
+    catch (err) { setError(errorText(err)); }
   }
-  async function removePolicy(id: number) { if (!confirm('Delete this policy?')) return; try { await api(`/quality-policies/${id}`, { method: 'DELETE' }); loadPolicies(); } catch (err) { setError((err as Error).message); } }
+  async function removePolicy(id: number) { if (!confirm('Delete this policy?')) return; try { await api(`/quality-policies/${id}`, { method: 'DELETE' }); loadPolicies(); } catch (err) { setError(errorText(err)); } }
   async function addObjective(e: FormEvent) {
     e.preventDefault(); setError(null);
     try { await api('/quality-objectives', { method: 'POST', body: JSON.stringify({ ...objForm, year: null }) }); setObjForm({ objective: '', target: '', measure: '', responsibleStaffId: '', referenceNote: '' }); loadObjectives(); }
-    catch (err) { setError((err as Error).message); }
+    catch (err) { setError(errorText(err)); }
   }
   async function addAnnual(e: FormEvent) {
     e.preventDefault(); setError(null);
     try { await api('/quality-objectives', { method: 'POST', body: JSON.stringify(annualForm) }); setAnnualForm({ objective: '', target: '', measure: '', year: String(thisYear), responsibleStaffId: '', status: 'active' }); loadObjectives(); }
-    catch (err) { setError((err as Error).message); }
+    catch (err) { setError(errorText(err)); }
   }
-  async function removeObjective(id: number) { if (!confirm('Delete this objective?')) return; try { await api(`/quality-objectives/${id}`, { method: 'DELETE' }); loadObjectives(); } catch (err) { setError((err as Error).message); } }
+  async function removeObjective(id: number) { if (!confirm('Delete this objective?')) return; try { await api(`/quality-objectives/${id}`, { method: 'DELETE' }); loadObjectives(); } catch (err) { setError(errorText(err)); } }
 
   const standingObjectives = objectives.filter(o => o.year === null || o.year === undefined);
   const annualObjectives = objectives.filter(o => o.year != null);
@@ -3064,7 +3064,7 @@ export function RemoteStaffAccess() {
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const loadUsers = () => api<RemoteCloudUser[]>('/remote-access/users').then(setUsers).catch(e => setError((e as Error).message));
+  const loadUsers = () => api<RemoteCloudUser[]>('/remote-access/users').then(setUsers).catch(e => setError(errorText(e)));
   const load = () => {
     api<{ cloudConfigured: boolean }>('/remote-access/status')
       .then(s => { setConfigured(s.cloudConfigured); if (s.cloudConfigured) loadUsers(); })
@@ -3094,17 +3094,17 @@ export function RemoteStaffAccess() {
       setMessage(`Remote access created for ${form.email}. Share this temporary password securely (they must change it on first sign-in): ${form.password}`);
       setForm({ staffId: '', email: '', role: '', password: '' });
       load();
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+    } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   }
   async function changeStatus(u: RemoteCloudUser, status: 'active' | 'disabled') {
     setError(null); setMessage(null);
     try { await api(`/remote-access/users/${u.id}/status`, { method: 'POST', body: JSON.stringify({ status }) }); loadUsers(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function refresh(u: RemoteCloudUser) {
     setError(null); setMessage(null);
     try { await api(`/remote-access/users/${u.id}/refresh`, { method: 'POST' }); setMessage(`Recomputed remote access for ${u.email}.`); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   if (configured === null) return <div className="card"><h3>Remote Staff Access</h3><p className="muted">Loading…</p></div>;
@@ -3220,14 +3220,14 @@ function QualityWorkflowSettings() {
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { api<QualityWorkflowCfg>('/nonconformities/config').then(setCfg).catch(e => setError((e as Error).message)); }, []);
+  useEffect(() => { api<QualityWorkflowCfg>('/nonconformities/config').then(setCfg).catch(e => setError(errorText(e))); }, []);
 
   async function save(patch: Partial<QualityWorkflowCfg>) {
     setBusy(true); setError(null); setMsg(null);
     try {
       const r = await api<QualityWorkflowCfg>('/nonconformities/config', { method: 'PUT', body: JSON.stringify(patch) });
       setCfg(c => ({ ...(c as QualityWorkflowCfg), ...r })); setMsg('Saved.');
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+    } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   }
 
   return <div>
@@ -3381,7 +3381,7 @@ export function ConnectivityMode() {
   const [message, setMessage] = useState<string | null>(null);
 
   const load = () => {
-    api<SystemConnectivity>('/system/connectivity').then(setInfo).catch(e => setError((e as Error).message));
+    api<SystemConnectivity>('/system/connectivity').then(setInfo).catch(e => setError(errorText(e)));
     api<SyncStatus>('/sync/status').then(setSync).catch(() => setSync(null));
   };
   useEffect(() => { void load(); }, []);
@@ -3396,7 +3396,7 @@ export function ConnectivityMode() {
         : 'Local mode enabled. The host runs fully offline.');
       await load();
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorText(e));
     } finally {
       setBusy(false);
     }
@@ -3409,7 +3409,7 @@ export function ConnectivityMode() {
       setMessage(r.message || 'Full re-sync complete.');
       await load();
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorText(e));
     } finally {
       setBusy(false);
     }
@@ -3480,13 +3480,13 @@ export function RosterSettings() {
   const [success, setSuccess] = useState<string | null>(null);
   const [form, setForm] = useState({ code: '', label: '', category: 'shift', bgColor: '#ffffff', textColor: '#111111' });
 
-  function load() { api<ShiftTypeRow[]>('/scheduling/shift-types').then(setRows).catch(e => setError((e as Error).message)); }
+  function load() { api<ShiftTypeRow[]>('/scheduling/shift-types').then(setRows).catch(e => setError(errorText(e))); }
   useEffect(() => { load(); }, []);
 
   async function call(path: string, options: RequestInit, ok?: string) {
     setError(null); setSuccess(null);
     try { await api(path, options); if (ok) setSuccess(ok); load(); return true; }
-    catch (e) { setError((e as Error).message); return false; }
+    catch (e) { setError(errorText(e)); return false; }
   }
   async function add(e: FormEvent) {
     e.preventDefault();

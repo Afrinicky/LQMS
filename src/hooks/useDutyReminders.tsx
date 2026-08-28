@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { api } from '../services/api';
+import { api, errorText } from '../services/api';
 import { configureSound, playEvent, primeAudio } from '../services/sound';
 import { useAuth } from './useAuth';
 import type { ActivityOccurrence, DutyContext, ScheduleObligation } from '../../shared/types/api';
@@ -135,7 +135,7 @@ export function DutyReminderProvider({ children }: { children: React.ReactNode }
       firstLoad.current = false;
       setData(payload);
     } catch (err) {
-      setError((err as Error).message);
+      setError(errorText(err));
     } finally {
       setLoading(false);
     }

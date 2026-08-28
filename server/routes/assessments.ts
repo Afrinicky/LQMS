@@ -173,7 +173,7 @@ export function assessmentsRoutes() {
     res.status(201).json({ id });
   });
 
-  router.post('/checklists/import', requirePermission('assessments', 'create'), (req, res) => {
+  router.post('/checklists/import', requirePermission('assessments', 'import'), (req, res) => {
     const c = req.body.checklist;
     if (!c || !c.checklistName || !c.checklistType) return res.status(400).json({ error: 'checklist.checklistName and checklist.checklistType are required' });
     const sections = Array.isArray(req.body.sections) ? req.body.sections : [];
@@ -202,7 +202,7 @@ export function assessmentsRoutes() {
     res.status(201).json({ id: checklistId, sectionsInserted, questionsInserted });
   });
 
-  router.post('/checklists/import-file', requirePermission('assessments', 'create'), uploadInstance.single('file'), (req, res) => {
+  router.post('/checklists/import-file', requirePermission('assessments', 'import'), uploadInstance.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'A file upload is required' });
     if (!req.body.checklistName) return res.status(400).json({ error: 'checklistName is required' });
     if (!req.body.checklistType) return res.status(400).json({ error: 'checklistType is required' });

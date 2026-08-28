@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts, DetailModal, NumberField } from '../components/ui';
 import { useModules } from '../hooks/useModules';
-import { api, API_BASE, getToken } from '../services/api';
+import { api, API_BASE, getToken, errorText, apiRead } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import { usePermissions } from '../hooks/usePermissions';
 import PermissionTabs from '../components/PermissionTabs';
@@ -70,15 +70,15 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
     try {
       const [sum, imp, mr, ex, rep, tats] = await Promise.all([
         api<MonthlyReportsSummary>('/dashboard/monthly-reports-summary').catch(() => null),
-        api<LhimsImportBatch[]>('/monthly-reports/imports'),
-        api<ReportMappingRule[]>('/monthly-reports/mapping-rules'),
-        api<MonthlyReportException[]>('/monthly-reports/exceptions'),
-        api<MonthlyReportBatch[]>('/monthly-reports/reports'),
-        api<TatRecord[]>('/monthly-reports/tat')
+        apiRead<LhimsImportBatch[]>('/monthly-reports/imports', []),
+        apiRead<ReportMappingRule[]>('/monthly-reports/mapping-rules', []),
+        apiRead<MonthlyReportException[]>('/monthly-reports/exceptions', []),
+        apiRead<MonthlyReportBatch[]>('/monthly-reports/reports', []),
+        apiRead<TatRecord[]>('/monthly-reports/tat', [])
       ]);
       if (sum) setSummary(sum);
       setImports(imp); setRules(mr); setExceptions(ex); setReports(rep); setTatRecords(tats);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   useEffect(() => { if (embedded || isEnabled('monthly_reports')) void load(); }, [isEnabled]);
   if (!embedded && !isEnabled('monthly_reports')) return <DisabledModule />;
@@ -98,12 +98,12 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
       if (!response.ok) throw new Error((await response.json().catch(() => ({ error: response.statusText }))).error ?? response.statusText);
       setImportForm({ reportMonth: initialMonth, reportYear: initialYear, importType: 'opd_worksheet', notes: '', file: null });
       await load(); setTab('Import Batches');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function processImport(id: number) {
     try { await api(`/monthly-reports/imports/${id}/process`, { method: 'POST', body: JSON.stringify({}) }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function openImport(id: number) {
@@ -111,7 +111,7 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
       const detail = await api<LhimsImportBatch>(`/monthly-reports/imports/${id}`);
       const rows = await api<LhimsImportRow[]>(`/monthly-reports/imports/${id}/rows?limit=200`);
       setSelectedImport({ ...detail, rows });
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function submitRule(e: FormEvent) {
@@ -120,12 +120,12 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
       await api('/monthly-reports/mapping-rules', { method: 'POST', body: JSON.stringify(ruleForm) });
       setRuleForm({ mappingName: '', sourcePattern: '', sourceField: 'test_name', reportType: 'combined_lab_monthly', reportSection: '', reportRow: '', countingRule: 'count_rows', departmentId: '', sectionId: '', isActive: true });
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function toggleRule(id: number) {
     try { await api(`/monthly-reports/mapping-rules/${id}/toggle`, { method: 'POST', body: JSON.stringify({}) }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function submitGenerate(e: FormEvent) {
@@ -135,32 +135,32 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
       await api('/monthly-reports/reports/generate', { method: 'POST', body: JSON.stringify(generateForm) });
       setGenerateForm({ ...generateForm, importBatchIds: [], notes: '' });
       await load(); setTab('Monthly Reports');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function openReport(id: number) {
     try { setSelectedReport(await api<MonthlyReportBatch>(`/monthly-reports/reports/${id}`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function reviewReport(id: number) {
     try { await api(`/monthly-reports/reports/${id}/review`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selectedReport?.id === id) await openReport(id); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function approveReport(id: number, override: boolean) {
     try { await api(`/monthly-reports/reports/${id}/approve`, { method: 'POST', body: JSON.stringify({ overrideUnresolvedExceptions: override }) }); await load(); if (selectedReport?.id === id) await openReport(id); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function exportReport(id: number, format: 'csv' | 'html' | 'doc') {
     try { await api(`/monthly-reports/reports/${id}/export`, { method: 'POST', body: JSON.stringify({ format }) }); await load(); if (selectedReport?.id === id) await openReport(id); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function loadArchive() {
     try { setArchive(await api<MonthlyReportArchiveEntry[]>('/monthly-reports/archive')); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   useEffect(() => { if (tab === 'Reports/Exports' && isEnabled('monthly_reports')) void loadArchive(); }, [tab, isEnabled]);
 
@@ -175,7 +175,7 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
       a.href = url; a.download = name;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function submitResolve(e: FormEvent) {
@@ -185,19 +185,19 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
       await api(`/monthly-reports/exceptions/${resolveForm.exceptionId}/resolve`, { method: 'POST', body: JSON.stringify({ resolutionNotes: resolveForm.resolutionNotes }) });
       setResolveForm({ exceptionId: 0, resolutionNotes: '' });
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function createExceptionAction(id: number) {
     const title = prompt('Action title for this exception?');
     if (!title) return;
     try { await api(`/monthly-reports/exceptions/${id}/create-action`, { method: 'POST', body: JSON.stringify({ title }) }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function loadTatSummary() {
     try { setTatSummary(await api<TatSummary>(`/monthly-reports/tat/summary?month=${tatFilter.month}&year=${tatFilter.year}`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   const tabs = ['Dashboard', 'Raw Archive', 'New Import', 'Import Batches', 'Mapping Rules', 'Exceptions', 'Generate Report', 'Monthly Reports', 'TAT Summary', 'Reports/Exports'];
@@ -250,7 +250,7 @@ export function MonthlyReportsPage({ embedded = false }: { embedded?: boolean } 
       </tr>)}
     </tbody></table>}
 
-    {tab === 'New Import' && can('monthly_reports', 'create') && <form className="form-grid" onSubmit={submitImport}>
+    {tab === 'New Import' && can('monthly_reports', 'import') && <form className="form-grid" onSubmit={submitImport}>
       <label>Report month<NumberField min={1} max={12} value={importForm.reportMonth} onValue={n => setImportForm({ ...importForm, reportMonth: n ?? 0 })} required /></label>
       <label>Report year<NumberField min={2000} max={2100} value={importForm.reportYear} onValue={n => setImportForm({ ...importForm, reportYear: n ?? 0 })} required /></label>
       <label>Import type<select value={importForm.importType} onChange={e => setImportForm({ ...importForm, importType: e.target.value })} required>{IMPORT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>

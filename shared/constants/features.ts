@@ -35,7 +35,7 @@ export const LEVEL_ACTIONS: Record<AccessLevel, string[]> = {
   view: ['view', 'print'],
   contribute: ['view', 'print', 'create'],
   manage: ['view', 'print', 'create', 'edit', 'export'],
-  full: ['view', 'print', 'create', 'edit', 'export', 'void_archive', 'approve'],
+  full: ['view', 'print', 'create', 'edit', 'export', 'import', 'void_archive', 'approve'],
 };
 
 export const LEVEL_LABELS: Record<AccessLevel, string> = {
@@ -51,7 +51,7 @@ export const LEVEL_HINTS: Record<AccessLevel, string> = {
   view: 'Can open and print, but change nothing.',
   contribute: 'Can add new records, but not alter or remove existing ones.',
   manage: 'Can add, change and export records.',
-  full: 'Everything in Manage, plus approving and archiving.',
+  full: 'Everything in Manage, plus approving, archiving and loading a spreadsheet back in.',
 };
 
 /** The level whose action set matches a list of granted actions. */

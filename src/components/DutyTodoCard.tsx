@@ -7,6 +7,7 @@ import {
 import { useDutyReminders } from '../hooks/useDutyReminders';
 import { CATEGORY_LABELS, frequencyPhrase, type ActivityCategory } from '../../shared/constants/activities';
 import type { ActivityOccurrence } from '../../shared/types/api';
+import { errorText } from '../services/api';
 
 /**
  * "What am I on duty to do today?" — the panel the whole feature exists for.
@@ -83,7 +84,7 @@ function OccurrenceRow({ occurrence, watching = false }: { occurrence: ActivityO
 
   async function run(action: () => Promise<void>) {
     setBusy(true); setError(null);
-    try { await action(); } catch (err) { setError((err as Error).message); } finally { setBusy(false); }
+    try { await action(); } catch (err) { setError(errorText(err)); } finally { setBusy(false); }
   }
 
   return (

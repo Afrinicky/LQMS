@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { Archive, ChevronDown, ChevronRight, Copy, CopyPlus, Pencil, Plus, RotateCcw, ShieldAlert, Trash2 } from 'lucide-react';
 import { DetailModal, EmptyState, RowMenu } from '../../components/ui';
-import { api } from '../../services/api';
+import { api, errorText } from '../../services/api';
 import { usePermissions } from '../../hooks/usePermissions';
 import { PrintButton, ScaleLegend, badgeFor, labelise } from './competencyShared';
 import {
@@ -51,7 +51,7 @@ export default function CompetencyFrameworks({ sections, departments, onChanged 
     try {
       const query = statusFilter ? `?status=${statusFilter}` : '';
       setFrameworks(await api<CompetencyFramework[]>(`/personnel/competency-frameworks${query}`));
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setLoading(false); }
   }, [statusFilter]);
 
@@ -59,7 +59,7 @@ export default function CompetencyFrameworks({ sections, departments, onChanged 
 
   const openFramework = useCallback(async (id: number) => {
     try { setSelected(await api<CompetencyFramework>(`/personnel/competency-frameworks/${id}`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }, []);
 
   async function submitNew(event: FormEvent) {
@@ -69,7 +69,7 @@ export default function CompetencyFrameworks({ sections, departments, onChanged 
       setForm(emptyFramework); setCreating(false);
       await load(); onChanged?.();
       await openFramework(created.id);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function setStatus(id: number, status: string) {
@@ -78,7 +78,7 @@ export default function CompetencyFrameworks({ sections, departments, onChanged 
       await api(`/personnel/competency-frameworks/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) });
       await load(); onChanged?.();
       if (selected?.id === id) await openFramework(id);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function duplicate(id: number) {
@@ -87,13 +87,13 @@ export default function CompetencyFrameworks({ sections, departments, onChanged 
       const created = await api<{ id: number }>(`/personnel/competency-frameworks/${id}/duplicate`, { method: 'POST', body: JSON.stringify({}) });
       await load(); onChanged?.();
       await openFramework(created.id);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function remove(id: number) {
     setError(null);
     try { await api(`/personnel/competency-frameworks/${id}`, { method: 'DELETE' }); setSelected(null); await load(); onChanged?.(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   return <div className="framework-manager">
@@ -327,13 +327,13 @@ function ElementBuilder({ framework, groups, elements, editable, onError, onChan
     if (!newGroup.trim()) return;
     onError(null);
     try { await api(`${base}/groups`, { method: 'POST', body: JSON.stringify({ groupTitle: newGroup.trim() }) }); setNewGroup(''); await onChanged(); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
 
   async function removeGroup(id: number) {
     onError(null);
     try { await api(`${base}/groups/${id}`, { method: 'DELETE' }); await onChanged(); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
 
   async function addElement(groupId: number | 'none') {
@@ -344,19 +344,19 @@ function ElementBuilder({ framework, groups, elements, editable, onError, onChan
       setElement({ elementText: '', performanceCriteria: '', expectedEvidence: '', defaultMethod: 'direct_observation', weight: '1', isCritical: false });
       setAddingTo(null);
       await onChanged();
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }
 
   async function removeElement(id: number) {
     onError(null);
     try { await api(`${base}/elements/${id}`, { method: 'DELETE' }); await onChanged(); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
 
   async function toggleCritical(id: number, current: number, groupId: number | null | undefined) {
     onError(null);
     try { await api(`${base}/elements/${id}`, { method: 'PUT', body: JSON.stringify({ isCritical: !current, groupId: groupId ?? '' }) }); await onChanged(); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
 
   const addForm = (groupId: number | 'none') => <div className="element-add">
@@ -488,7 +488,7 @@ function ImportElements({ targetId, onError, onClose, onChanged }: {
   useEffect(() => {
     api<CompetencyFramework[]>('/personnel/competency-frameworks')
       .then(list => setOptions(list.filter(f => f.id !== targetId)))
-      .catch(e => onError((e as Error).message));
+      .catch(e => onError(errorText(e)));
   }, [targetId, onError]);
 
   useEffect(() => {
@@ -496,7 +496,7 @@ function ImportElements({ targetId, onError, onClose, onChanged }: {
     if (!sourceId) return;
     setLoading(true);
     api<CompetencyFramework>(`/personnel/competency-frameworks/${sourceId}`)
-      .then(setSource).catch(e => onError((e as Error).message)).finally(() => setLoading(false));
+      .then(setSource).catch(e => onError(errorText(e))).finally(() => setLoading(false));
   }, [sourceId, onError]);
 
   const sourceGroups = source?.groups ?? [];
@@ -530,7 +530,7 @@ function ImportElements({ targetId, onError, onClose, onChanged }: {
       });
       await onChanged();
       onClose();
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
     finally { setBusy(false); }
   }
 
@@ -633,7 +633,7 @@ function FrameworkDetails({ framework, sections, departments, editable, onError,
       await api(`/personnel/competency-frameworks/${framework.id}`, { method: 'PUT', body: JSON.stringify(form) });
       setSaved(true);
       await onChanged();
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }
 
   if (!editable) {

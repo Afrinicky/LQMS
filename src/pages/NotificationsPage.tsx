@@ -5,7 +5,7 @@ import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, AlertsByModule } from '../components/ui';
 import { useModules } from '../hooks/useModules';
 import { usePermissions } from '../hooks/usePermissions';
-import { api } from '../services/api';
+import { api, errorText, apiRead } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import { RecordsReportsPage } from './RecordsReportsPage';
 import { MonthlyReportsPage } from './MonthlyReportsPage';
@@ -58,16 +58,16 @@ export function NotificationsPage() {
     try {
       const [sum, n, t, c, r, p, s] = await Promise.all([
         api<NotificationsSummary>('/dashboard/notifications-summary').catch(() => null),
-        api<NotificationRecord[]>('/notifications?mine=true'),
-        api<UserTaskQueueItem[]>('/notifications/tasks?mine=true'),
-        api<ReviewCalendarItem[]>('/notifications/calendar'),
-        api<NotificationRule[]>('/notifications/rules'),
-        api<NotificationPreference[]>('/notifications/preferences'),
+        apiRead<NotificationRecord[]>('/notifications?mine=true', []),
+        apiRead<UserTaskQueueItem[]>('/notifications/tasks?mine=true', []),
+        apiRead<ReviewCalendarItem[]>('/notifications/calendar', []),
+        apiRead<NotificationRule[]>('/notifications/rules', []),
+        apiRead<NotificationPreference[]>('/notifications/preferences', []),
         api<Staff[]>('/staff').catch(() => []),
       ]);
       if (sum) setSummary(sum);
       setNotifications(n); setTasks(t); setCalendar(c); setRules(r); setPrefs(p); setStaff(s);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   useEffect(() => { if (isEnabled('notifications')) void load(); }, [isEnabled]);
 
@@ -85,7 +85,7 @@ export function NotificationsPage() {
 
   async function transition(id: number, action: 'read' | 'acknowledge' | 'resolve' | 'dismiss') {
     try { await api(`/notifications/${id}/${action}`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selected?.id === id) setSelected(null); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function openNotification(n: NotificationRecord) {
@@ -94,24 +94,24 @@ export function NotificationsPage() {
       if (n.action_url) navigate(n.action_url);
       else setSelected(n);
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function generateAlerts() {
     try { setGenerateResult(await api(`/notifications/auto-scan`, { method: 'POST', body: JSON.stringify({}) })); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function reloadCalendar() {
     const params = new URLSearchParams();
     Object.entries(calFilter).forEach(([k, v]) => { if (v) params.set(k, String(v)); });
     try { setCalendar(await api<ReviewCalendarItem[]>(`/notifications/calendar?${params.toString()}`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function completeCalendarItem(id: number) {
     try { await api(`/notifications/calendar/${id}/complete`, { method: 'POST', body: JSON.stringify({}) }); await reloadCalendar(); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function submitTask(e: FormEvent) {
@@ -119,18 +119,18 @@ export function NotificationsPage() {
     try { await api('/notifications/tasks', { method: 'POST', body: JSON.stringify(taskForm) });
       setTaskForm({ title: '', description: '', moduleKey: '', priority: 'normal', dueDate: '', assignedToStaffId: '' });
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
-  async function taskAction(id: number, action: 'start' | 'complete' | 'cancel') { try { await api(`/notifications/tasks/${id}/${action}`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError((e as Error).message); } }
+  async function taskAction(id: number, action: 'start' | 'complete' | 'cancel') { try { await api(`/notifications/tasks/${id}/${action}`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError(errorText(e)); } }
 
   async function submitRule(e: FormEvent) {
     e.preventDefault(); setError(null);
     try { await api('/notifications/rules', { method: 'POST', body: JSON.stringify(ruleForm) });
       setRuleForm({ ruleName: '', moduleKey: '', triggerType: 'due_soon', dueField: '', reminderDaysBefore: '7', escalationDaysAfter: '14' });
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
-  async function toggleRule(id: number) { try { await api(`/notifications/rules/${id}/toggle`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError((e as Error).message); } }
+  async function toggleRule(id: number) { try { await api(`/notifications/rules/${id}/toggle`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError(errorText(e)); } }
 
   async function savePrefs() {
     const payload = MODULES_FOR_PREFS.map(m => {
@@ -138,7 +138,7 @@ export function NotificationsPage() {
       return { moduleKey: m, inAppEnabled: cur ? !!cur.in_app_enabled : true, digestEnabled: cur ? !!cur.digest_enabled : false, emailEnabled: cur ? !!cur.email_enabled : false, smsEnabled: cur ? !!cur.sms_enabled : false };
     });
     try { await api('/notifications/preferences', { method: 'PUT', body: JSON.stringify({ preferences: payload }) }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   function setPrefField(moduleKey: string, field: 'in_app_enabled' | 'digest_enabled' | 'email_enabled' | 'sms_enabled', value: boolean) {

@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Upload, FileSpreadsheet, Search, Pencil, Archive, RotateCcw, Trash2, AlertTriangle, ShieldAlert, Users } from 'lucide-react';
-import { api, API_BASE, getToken } from '../services/api';
+import { api, API_BASE, getToken, errorText } from '../services/api';
 import { usePermissions } from '../hooks/usePermissions';
 import { DetailModal, RowMenu } from './ui';
 import {
@@ -90,13 +90,13 @@ export default function PersonnelRegisterAdmin() {
 
   const mayEdit = can('personnel.register', 'edit');
   const mayRemove = can('personnel.register', 'void_archive');
-  const mayImport = can('personnel.register', 'create');
+  const mayImport = can('personnel.register', 'import');
   const mayExport = can('personnel.register', 'export');
 
   const load = () => Promise.all([
     api<Staff[]>('/staff').then(setStaff),
     api<Staff[]>('/staff?status=retired').then(setFormer).catch(() => setFormer([])),
-  ]).catch(e => setError((e as Error).message));
+  ]).catch(e => setError(errorText(e)));
   useEffect(() => {
     void load();
     api<Section[]>('/sections').then(setSections).catch(() => setSections([]));
@@ -124,7 +124,7 @@ export default function PersonnelRegisterAdmin() {
       const a = document.createElement('a');
       a.href = url; a.download = named ? named[1] : fallback;
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(null); }
   }
 
@@ -138,7 +138,7 @@ export default function PersonnelRegisterAdmin() {
       if (!res.ok) throw new Error(data.error ?? res.statusText);
       setImportResult(data as ImportResult);
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(null); if (importInput.current) importInput.current.value = ''; }
   }
 
@@ -157,7 +157,7 @@ export default function PersonnelRegisterAdmin() {
       setNotice(`${editing.fullName} updated.`);
       setEditing(null);
       await load();
-    } catch (err) { setError((err as Error).message); }
+    } catch (err) { setError(errorText(err)); }
     finally { setBusy(null); }
   }
 
@@ -168,7 +168,7 @@ export default function PersonnelRegisterAdmin() {
       await api(`/staff/${s.id}/reactivate`, { method: 'POST', body: JSON.stringify({}) });
       setNotice(`${s.fullName} is back in the active register.`);
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(null); }
   }
 
@@ -189,7 +189,7 @@ export default function PersonnelRegisterAdmin() {
         + `${r.accountDeactivated ? ', and their login account deactivated' : ''}. Their history is unchanged.`);
       setDeparting(null);
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(null); }
   }
 
@@ -199,7 +199,7 @@ export default function PersonnelRegisterAdmin() {
     setConfirmName(''); setForceReason(''); setForcing(false);
     try {
       setDeleting(await api<DeletionImpact>(`/staff/${s.id}/deletion-impact`));
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(null); }
   }
   async function doDelete(mode: 'delete' | 'purge') {
@@ -216,7 +216,7 @@ export default function PersonnelRegisterAdmin() {
         + '.');
       setDeleting(null);
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(null); }
   }
 

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { usePermissions } from '../hooks/usePermissions';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, Bell, Bot, FileSearch, RefreshCw, Send, ShieldCheck, Sparkles } from 'lucide-react';
-import { api } from '../services/api';
+import { api, errorText } from '../services/api';
 import { DENNIS_NOTICE, dennisSafetyRules } from '../services/dennisService';
 
 const tabs = ['Ask Dennis','Document Search','CAPA Helper','Audit Helper','Report Writer','Quality Indicator Analyst','Training Helper','Blood Bank Quality Assistant','Risk Assistant','Equipment Assistant','Inventory and Supplier Assistant','Dennis Alerts','Dennis Activity Log','Dennis Settings'] as const;
@@ -87,16 +87,16 @@ function DocumentSearch() {
       if (currentOnly) params.set('currentOnly', 'true');
       const r = await api<{ results: any[] }>(`/dennis/search?${params.toString()}`);
       setResults(r.results);
-    } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
+    } catch (e) { setMsg(errorText(e)); } finally { setBusy(false); }
   }
   async function indexAll() {
     setBusy(true); setMsg(null);
     try { const r = await api<{ indexed: number; skipped: number; failed: number; total: number }>('/dennis/index-all', { method: 'POST', body: '{}' }); setMsg(`Indexed ${r.indexed}, skipped ${r.skipped}, failed ${r.failed} of ${r.total} approved/current documents.`); await loadStats(); }
-    catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
+    catch (e) { setMsg(errorText(e)); } finally { setBusy(false); }
   }
   async function reindex(sourceId: number) {
     try { await api(`/dennis/index/${sourceId}`, { method: 'POST', body: '{}' }); setMsg(`Reindexed document #${sourceId}.`); await loadStats(); }
-    catch (e) { setMsg((e as Error).message); }
+    catch (e) { setMsg(errorText(e)); }
   }
 
   return <div className="dennis-grid two"><div className="card">
@@ -199,7 +199,7 @@ function IndicatorAnalyst() {
   const [sel, setSel] = useState(items[0]);
   const [out, setOut] = useState<string>('');
   const [busy, setBusy] = useState(false);
-  async function run() { setBusy(true); try { const r = await api<{ draft: string }>('/dennis/helper', { method: 'POST', body: JSON.stringify({ module: 'quality_indicators', task: 'summarize', inputText: `Summarise the ${sel} quality indicator. Do not change any values.` }) }); setOut(r.draft); } catch (e) { setOut((e as Error).message); } finally { setBusy(false); } }
+  async function run() { setBusy(true); try { const r = await api<{ draft: string }>('/dennis/helper', { method: 'POST', body: JSON.stringify({ module: 'quality_indicators', task: 'summarize', inputText: `Summarise the ${sel} quality indicator. Do not change any values.` }) }); setOut(r.draft); } catch (e) { setOut(errorText(e)); } finally { setBusy(false); } }
   return <div className="card"><h3>Quality Indicator Analyst</h3><p className="muted">Dennis summarises and explains indicators — he never edits indicator values.</p>
     <div style={{ display: 'flex', gap: 8 }}><select value={sel} onChange={e=>setSel(e.target.value)}>{items.map(i=><option key={i}>{i}</option>)}</select>{can('dennis', 'view') && <button onClick={run} disabled={busy}>{busy?'Summarising…':'Summarize'}</button>}</div>
     <div className="dennis-output" style={{ marginTop: 10 }}><strong>{sel}</strong><p style={{ whiteSpace: 'pre-wrap' }}>{out || 'Select an indicator and click Summarize.'}</p><Notice/></div>
@@ -246,7 +246,7 @@ function Settings() {
       if (apiKey) payload['dennis.online.apiKey'] = apiKey; else delete payload['dennis.online.apiKey'];
       await api('/dennis/settings', { method: 'PUT', body: JSON.stringify({ settings: payload }) });
       setApiKey(''); setMsg('Saved.'); await load();
-    } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
+    } catch (e) { setMsg(errorText(e)); } finally { setBusy(false); }
   }
   async function testConn(which:'local'|'online') {
     setTest(t=>({ ...t, [which]: 'Testing…' }));

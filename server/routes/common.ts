@@ -1939,7 +1939,7 @@ export function commonRoutes() {
   const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } });
 
   // ===== People & Access — staff Excel import (export lives near the staff routes) =====
-  router.post('/staff/import', requirePermission('personnel.register', 'create'), upload.single('file'), (req, res) => {
+  router.post('/staff/import', requirePermission('personnel.register', 'import'), upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const db = getDb();
     let rows: Record<string, unknown>[] = [];
@@ -2119,7 +2119,7 @@ export function commonRoutes() {
   });
 
   router.get('/documents', requirePermission('documents', 'view'), (_req, res) => res.json(getDb().prepare('SELECT * FROM documents ORDER BY created_at DESC').all()));
-  router.post('/documents/import-master-list', requirePermission('documents.masterlist', 'create'), (req, res) => { audit(req, { action: 'create', entity: 'documents', newValue: req.body }); res.json({ ok: true, message: 'MVP import placeholder accepted. CSV parsing will be implemented in the next phase.' }); });
+  router.post('/documents/import-master-list', requirePermission('documents.masterlist', 'import'), (req, res) => { audit(req, { action: 'create', entity: 'documents', newValue: req.body }); res.json({ ok: true, message: 'MVP import placeholder accepted. CSV parsing will be implemented in the next phase.' }); });
 
   router.get('/actions', requirePermission('actions', 'view'), (req, res) => {
     const db = getDb();
@@ -2715,7 +2715,7 @@ export function commonRoutes() {
   }
   router.get('/section-config/sections/:id/tests/template', requirePermission('settings', 'export'), (req, res) => sendWorkbook(res, testMenuWorkbook(Number(req.params.id), false), 'Test_Menu_Template.xlsx'));
   router.get('/section-config/sections/:id/tests/export', requirePermission('settings', 'export'), (req, res) => sendWorkbook(res, testMenuWorkbook(Number(req.params.id), true), 'Test_Menu.xlsx'));
-  router.post('/section-config/sections/:id/tests/import', requirePermission('settings', 'create'), testMenuUpload.single('file'), (req, res) => {
+  router.post('/section-config/sections/:id/tests/import', requirePermission('settings', 'import'), testMenuUpload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the Test Menu .xlsx file.' });
     const db = getDb();
     const section = db.prepare('SELECT department_id FROM sections WHERE id = ?').get(req.params.id) as { department_id: number | null } | undefined;

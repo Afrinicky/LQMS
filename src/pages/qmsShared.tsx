@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, API_BASE, getToken } from '../services/api';
+import { api, API_BASE, getToken, errorText } from '../services/api';
 import type { CapaRecord, ComplaintEvent, ComplaintRecord, NonconformingEvent, RiskRecord, Section, Staff } from '../../shared/types/api';
 
 // Shared vocabulary and helpers for the quality modules (nonconformities,
@@ -13,7 +13,7 @@ export async function openPrintWindow(path: string, onError: (m: string) => void
     if (!res.ok) throw new Error(await res.text() || res.statusText);
     const w = window.open('', '_blank'); if (!w) { onError('Allow pop-ups to open the report.'); return; }
     w.document.open(); w.document.write(await res.text()); w.document.close();
-  } catch (e) { onError((e as Error).message); }
+  } catch (e) { onError(errorText(e)); }
 }
 
 export const NC_TYPE_OPTIONS = [

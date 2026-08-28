@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
 import { useModules } from '../hooks/useModules';
-import { api, API_BASE, getToken } from '../services/api';
+import { api, API_BASE, getToken, errorText, apiRead } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import { MeetingsPage, ManagementReviewPage } from './Phase8Pages';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -185,7 +185,7 @@ export function OrganisationPage() {
       if (sum) setSummary(sum);
       setConduct(coc); setBudget(bud); setRegistrations(reg); setStaff(stf);
       api<LaboratoryConfig>('/laboratory-config').then(setConfig).catch(() => setConfig(null));
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   useEffect(() => { if (isEnabled('organisation')) void load(); }, [isEnabled]);
   useEffect(() => { const t = searchParams.get('tab'); if (t && t !== tab) setTab(t); }, [searchParams]);
@@ -199,7 +199,7 @@ export function OrganisationPage() {
   async function submitReg(e: FormEvent) {
     e.preventDefault(); setError(null);
     try { await api('/organisation/registrations', { method: 'POST', body: JSON.stringify(regForm) }); setRegForm({ credentialType: '', title: '', issuingBody: '', reference: '', issueDate: '', expiryDate: '', responsibleStaffId: '', status: 'active' }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   const budgetByScope = BUDGET_SCOPES.map((c, i) => ({
@@ -318,7 +318,7 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
         const focus = list.find(f => String(f.id) === focusForm);
         if (focus) void openForm(focus);
       }
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }
   useEffect(() => { void load(); }, []);
   useEffect(() => { api<DeclarationTemplate[]>('/organisation/declaration-templates').then(setTemplates).catch(() => setTemplates([])); }, []);
@@ -332,7 +332,7 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
       setSelected(detail);
       setSignatures(detail.signatures || []);
       if (detail.file_id) fetchBlobUrl(`/files/${detail.file_id}/raw`).then(setPreviewUrl).catch(() => setPreviewUrl(null));
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }
 
   // Choosing a template copies its wording onto the editable setup form. The
@@ -376,7 +376,7 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
       setSelected(null); setShowManage(false);
       await load();
       onNotice('Declaration deleted.');
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }
 
   async function submitSetup(e: FormEvent) {
@@ -396,7 +396,7 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
         await load();
         onNotice('Declaration published. Every active staff has been notified in their inbox to open, read and sign it.');
       }
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
     finally { setSaving(false); }
   }
 
@@ -416,7 +416,7 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
       const fresh = await api<EthicalDeclarationForm & { signatures: EthicalDeclarationSignature[] }>(`/organisation/ethical-forms/${selected.id}`);
       setSelected(fresh); setSignatures(fresh.signatures || []);
       onNotice('Your acknowledgement has been signed and recorded. Thank you.');
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
     finally { setSigning(false); }
   }
 
@@ -654,7 +654,7 @@ function OrganogramContinuityView({ staff, onError, onNotice }: { staff: Staff[]
         api<ContinuityPlan[]>('/organisation/continuity-plans').catch(() => []),
       ]);
       setTree(t); setPositions(p); setPlans(pl);
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }
   useEffect(() => { void load(); }, []);
 
@@ -679,13 +679,13 @@ function OrganogramContinuityView({ staff, onError, onNotice }: { staff: Staff[]
       else if (editingId) await api(`/organisation/continuity-plans/${editingId}`, { method: 'PUT', body: JSON.stringify(form) });
       setEditingId(null); setForm(emptyPlan);
       await load(); onNotice('Continuity plan saved.');
-    } catch (err) { onError((err as Error).message); }
+    } catch (err) { onError(errorText(err)); }
   }
 
   async function removePlan(id: number) {
     if (!confirm('Delete this continuity plan?')) return;
     try { await api(`/organisation/continuity-plans/${id}`, { method: 'DELETE' }); await load(); onNotice('Plan deleted.'); }
-    catch (err) { onError((err as Error).message); }
+    catch (err) { onError(errorText(err)); }
   }
 
   const staffName = (id?: number | null) => staff.find(s => s.id === id)?.fullName || '—';
@@ -805,12 +805,12 @@ function BudgetProjectionView({ staff, onError, onNotice }: { staff: Staff[]; on
   async function load() {
     try {
       const [b, br] = await Promise.all([
-        api<BudgetProjection[]>('/organisation/budget'),
+        apiRead<BudgetProjection[]>('/organisation/budget', []),
         api<{ rows: any[]; totals: Record<string, number>; grand: number }>(`/organisation/budget/breakdown?year=${year}`).catch(() => null),
       ]);
       setRows(b);
       if (br) setBreakdown({ totals: br.totals, grand: br.grand });
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }
   useEffect(() => { void load(); }, [year]);
 
@@ -827,7 +827,7 @@ function BudgetProjectionView({ staff, onError, onNotice }: { staff: Staff[]; on
       setEditingId(null);
       await load();
       onNotice('Budget line saved.');
-    } catch (err) { onError((err as Error).message); }
+    } catch (err) { onError(errorText(err)); }
   }
 
   function edit(r: BudgetProjection) {
@@ -948,11 +948,11 @@ function QtRecordsReviewView({ staff, onError, onNotice }: { staff: Staff[]; onE
   async function load() {
     try {
       const [c, r] = await Promise.all([
-        api<QtReviewConfig[]>('/organisation/qt-reviews/configs'),
-        api<QtReview[]>('/organisation/qt-reviews'),
+        apiRead<QtReviewConfig[]>('/organisation/qt-reviews/configs', []),
+        apiRead<QtReview[]>('/organisation/qt-reviews', []),
       ]);
       setConfigs(c); setReviews(r);
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }
   useEffect(() => { void load(); }, []);
 
@@ -961,7 +961,7 @@ function QtRecordsReviewView({ staff, onError, onNotice }: { staff: Staff[]; onE
     try {
       const d = await api(`/organisation/qt-reviews/data/${selectedArea}?periodStart=${period.start}&periodEnd=${period.end}`);
       setData(d);
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
     finally { setDataBusy(false); }
   }
   useEffect(() => { if (sub === 'Run Review') void fetchArea(); }, [selectedArea, period.start, period.end, sub]);
@@ -970,7 +970,7 @@ function QtRecordsReviewView({ staff, onError, onNotice }: { staff: Staff[]; onE
     try {
       await api(`/organisation/qt-reviews/configs/${cfg.area_key}`, { method: 'PUT', body: JSON.stringify(patch) });
       await load(); onNotice('Frequency updated.');
-    } catch (err) { onError((err as Error).message); }
+    } catch (err) { onError(errorText(err)); }
   }
 
   async function submitReview(e: FormEvent) {
@@ -985,7 +985,7 @@ function QtRecordsReviewView({ staff, onError, onNotice }: { staff: Staff[]; onE
       });
       setReviewForm({ findings: '', recurrentProblems: '', actionsPlanned: '', followUpDueDate: '', followUpStatus: 'pending', nextReviewDue: '', status: 'draft' });
       await load(); onNotice('Review recorded.');
-    } catch (err) { onError((err as Error).message); }
+    } catch (err) { onError(errorText(err)); }
   }
 
   async function raiseNc() {
@@ -1001,7 +1001,7 @@ function QtRecordsReviewView({ staff, onError, onNotice }: { staff: Staff[]; onE
         }),
       });
       onNotice('Nonconforming event raised from this review. Head to NC/CAPA to assign and follow up.');
-    } catch (err) { onError((err as Error).message); }
+    } catch (err) { onError(errorText(err)); }
   }
 
   const staffName = (id?: number | null) => staff.find(s => s.id === id)?.fullName || '—';

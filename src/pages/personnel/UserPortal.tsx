@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, API_BASE, getToken } from '../../services/api';
+import { api, API_BASE, getToken, errorText } from '../../services/api';
 import type {
   MyProfile, MyTasks, MyDeclarations, MyDeclaration, StaffDocument, NotificationRecord, StaffSuggestionsResponse,
 } from '../../../shared/types/api';
@@ -59,7 +59,7 @@ export default function UserPortal({ onLinkStaff }: { onLinkStaff?: (staffId: nu
 
   const load = useCallback(async () => {
     setError(null);
-    const prof = await api<MyProfile>('/personnel/my-profile').catch(e => { setError((e as Error).message); return null; });
+    const prof = await api<MyProfile>('/personnel/my-profile').catch(e => { setError(errorText(e)); return null; });
     if (prof) setProfile(prof);
     api<MyTasks>('/personnel/my-tasks').then(setTasks).catch(() => undefined);
     api<MyDeclarations>('/personnel/my-declarations').then(setDeclarations).catch(() => undefined);
@@ -80,7 +80,7 @@ export default function UserPortal({ onLinkStaff }: { onLinkStaff?: (staffId: nu
   async function linkStaff(staffId: number) {
     setError(null);
     try { await api('/personnel/link-my-staff', { method: 'POST', body: JSON.stringify({ staffId }) }); onLinkStaff?.(staffId); await load(); setNotice('Your account is now linked to your staff record.'); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function uploadSignature(file: File) {
@@ -94,7 +94,7 @@ export default function UserPortal({ onLinkStaff }: { onLinkStaff?: (staffId: nu
       // Force the image to refresh.
       setSigUrl(null); setTimeout(() => fetchBlobUrl('/signatures/me/image').then(setSigUrl).catch(() => undefined), 200);
       setNotice('Signature saved. It will now appear wherever you sign.');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { if (sigInput.current) sigInput.current.value = ''; }
   }
 

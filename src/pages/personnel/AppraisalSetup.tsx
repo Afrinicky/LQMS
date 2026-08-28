@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { Copy, Plus, Trash2 } from 'lucide-react';
 import { DetailModal, EmptyState } from '../../components/ui';
-import { api } from '../../services/api';
+import { api, errorText, apiRead } from '../../services/api';
 import { usePermissions } from '../../hooks/usePermissions';
 import { PrintButton, ScaleLegend, badgeFor, labelise } from './competencyShared';
 import {
@@ -56,18 +56,18 @@ export default function AppraisalSetup({ staff, sections, departments, onChanged
   const load = useCallback(async () => {
     try {
       const [t, c] = await Promise.all([
-        api<AppraisalTemplate[]>('/personnel/appraisal-templates'),
-        api<AppraisalCycle[]>('/personnel/appraisal-cycles'),
+        apiRead<AppraisalTemplate[]>('/personnel/appraisal-templates', []),
+        apiRead<AppraisalCycle[]>('/personnel/appraisal-cycles', []),
       ]);
       setTemplates(t); setCycles(c);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }, []);
 
   useEffect(() => { void load(); }, [load]);
 
   const reopenTemplate = useCallback(async (id: number) => {
     try { setOpenTemplate(await api<AppraisalTemplate>(`/personnel/appraisal-templates/${id}`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }, []);
 
   async function submitTemplate(event: FormEvent) {
@@ -77,7 +77,7 @@ export default function AppraisalSetup({ staff, sections, departments, onChanged
       setTemplateForm(emptyTemplate); setCreatingTemplate(false);
       await load(); onChanged?.();
       await reopenTemplate(created.id);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function submitCycle(event: FormEvent) {
@@ -86,7 +86,7 @@ export default function AppraisalSetup({ staff, sections, departments, onChanged
       await api('/personnel/appraisal-cycles', { method: 'POST', body: JSON.stringify(cycleForm) });
       setCycleForm(emptyCycle); setCreatingCycle(false);
       await load(); onChanged?.();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function templateStatus(id: number, status: string) {
@@ -95,7 +95,7 @@ export default function AppraisalSetup({ staff, sections, departments, onChanged
       await api(`/personnel/appraisal-templates/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) });
       await load(); onChanged?.();
       if (openTemplate?.id === id) await reopenTemplate(id);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function cycleStatus(id: number, status: string, force = false) {
@@ -104,7 +104,7 @@ export default function AppraisalSetup({ staff, sections, departments, onChanged
       await api(`/personnel/appraisal-cycles/${id}/status`, { method: 'POST', body: JSON.stringify({ status, force }) });
       await load(); onChanged?.();
       if (openCycle?.id === id) setOpenCycle(c => c && { ...c, status });
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   const activeTemplates = templates.filter(t => t.status === 'active');
@@ -281,25 +281,25 @@ function TemplateEditor({ template, mayEdit, mayCreate, mayApprove, mayArchive, 
       setItem({ section, itemTitle: '', itemDescription: '', successMeasure: '', weight: '1' });
       setAddingTo(null);
       await refresh();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function removeItem(id: number) {
     setError(null);
     try { await api(`${base}/items/${id}`, { method: 'DELETE' }); await refresh(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function duplicate() {
     setError(null);
     try { await api(`${base}/duplicate`, { method: 'POST', body: JSON.stringify({}) }); onListChanged(); onClose(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function remove() {
     setError(null);
     try { await api(base, { method: 'DELETE' }); onListChanged(); onClose(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   return <DetailModal
@@ -402,7 +402,7 @@ function CycleDetail({ cycle, staff, templates, mayCreate, mayApprove, onClose, 
       setNotice(`${result.created} appraisal(s) raised${result.skipped.length ? `; ${result.skipped.length} already had one in this cycle.` : '.'}`);
       setSelectedStaff([]);
       onChanged();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   return <DetailModal

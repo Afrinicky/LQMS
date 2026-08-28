@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ModuleAlerts, DetailModal, RegisterSearch } from '../components/ui';
 import { useCappedRows } from '../hooks/useCappedRows';
-import { api, API_BASE, getToken } from '../services/api';
+import { api, API_BASE, getToken, errorText } from '../services/api';
 import { useModules } from '../hooks/useModules';
 import DisabledModule from '../components/DisabledModule';
 import RiskMatrix, { riskLevelBadge, bandFor } from '../components/RiskMatrix';
@@ -152,7 +152,7 @@ function StageBoard({ kind, stage, sections, cfg, onChanged }: {
           investigation_team: r.investigation_team, rca_method: r.rca_method, root_cause: r.root_cause, contributing_factors: r.contributing_factors,
         });
       setItems(mapped.sort((a, b) => (b.date || '').localeCompare(a.date || '')));
-    }).catch(e => setError((e as Error).message));
+    }).catch(e => setError(errorText(e)));
   }
   useEffect(() => { load(); }, [stage, kind, sections.length]);
 
@@ -182,7 +182,7 @@ function StageBoard({ kind, stage, sections, cfg, onChanged }: {
       if (r.capaNumber) bits.push(`CAPA ${r.capaNumber} was raised.`);
       setMsg(bits.join(' '));
       setSel(null); load(); onChanged();
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+    } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   }
   async function submitRca() {
     if (!sel) return;
@@ -201,7 +201,7 @@ function StageBoard({ kind, stage, sections, cfg, onChanged }: {
       if (!res.ok) throw new Error(data.error ?? res.statusText);
       setMsg(`Root cause recorded for ${sel.ref}. Ready for CAPA.`);
       setSel(null); load(); onChanged();
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+    } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   }
 
   const previewScore = occ && sev ? occ * sev : null;
@@ -475,12 +475,12 @@ function NcDetail({ nc, staff, sections, cfg, capa, onClose, onChanged, onError,
 
   async function saveAmendment() {
     try { await api(`/nonconformities/${nc.id}`, { method: 'PUT', body: JSON.stringify(edit) }); setAmend(false); onMsg('Record amended.'); onChanged(); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
   async function closeNc() {
     if (!confirm('Close this nonconformity?')) return;
     try { await api(`/nonconformities/${nc.id}/close`, { method: 'POST', body: JSON.stringify({ status: 'closed' }) }); onMsg('Nonconformity closed.'); onChanged(); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
 
   return <DetailModal
@@ -562,9 +562,9 @@ export function IncidentsPage({ embedded = false }: { embedded?: boolean } = {})
   };
   const [form, setForm] = useState(blank);
 
-  function load() { api<Incident[]>('/incidents').then(setList).catch(e => setError((e as Error).message)); }
+  function load() { api<Incident[]>('/incidents').then(setList).catch(e => setError(errorText(e))); }
   useEffect(() => { if (isEnabled('nc_capa')) load(); }, [isEnabled]);
-  async function openDetail(id: number) { try { setSel(await api<Incident>(`/incidents/${id}`)); } catch (e) { setError((e as Error).message); } }
+  async function openDetail(id: number) { try { setSel(await api<Incident>(`/incidents/${id}`)); } catch (e) { setError(errorText(e)); } }
 
   async function create(e: FormEvent) {
     e.preventDefault(); setError(null); setMsg(null);
@@ -573,7 +573,7 @@ export function IncidentsPage({ embedded = false }: { embedded?: boolean } = {})
       const r = await api<{ id: number; incidentNumber: string }>('/incidents', { method: 'POST', body: JSON.stringify(form) });
       setForm(blank); load(); setMsg(`Incident ${r.incidentNumber} reported. It now appears in the Risk Assessment queue.`);
       setTab('Risk Assessment');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   const stages = useMemo(() => ({
@@ -674,16 +674,16 @@ function IncidentDetail({ incident: i, cfg, onClose, onChanged, onError, onMsg }
 
   async function save(patch: Record<string, unknown>) {
     try { await api(`/incidents/${i.id}`, { method: 'PUT', body: JSON.stringify(patch) }); onChanged(); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
   async function escalateToNc() {
     try { const r = await api<{ ncNumber: string }>(`/incidents/${i.id}/create-nc`, { method: 'POST', body: JSON.stringify({}) }); onMsg(`Nonconformity ${r.ncNumber} raised from this incident.`); onChanged(); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
   async function closeIncident() {
     if (!confirm('Close this incident?')) return;
     try { await api(`/incidents/${i.id}/approve`, { method: 'POST', body: JSON.stringify({}) }); onMsg('Incident closed.'); onChanged(); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
 
   return <div className="card" style={{ marginTop: 16, borderTop: '3px solid #c1121f' }}>
@@ -795,11 +795,11 @@ export function CapaPage({ embedded = false }: { embedded?: boolean } = {}) {
   const [sourceFilter, setSourceFilter] = useState('');
 
   function load() {
-    api<any[]>('/capa').then(setList).catch(e => setError((e as Error).message));
+    api<any[]>('/capa').then(setList).catch(e => setError(errorText(e)));
     api<CapaSummary>('/capa/summary').then(setSummary).catch(() => setSummary(null));
   }
   useEffect(() => { if (isEnabled('nc_capa')) load(); }, [isEnabled]);
-  async function openDetail(id: number) { try { setSel(await api<CapaDetail>(`/capa/${id}`)); setError(null); } catch (e) { setError((e as Error).message); } }
+  async function openDetail(id: number) { try { setSel(await api<CapaDetail>(`/capa/${id}`)); setError(null); } catch (e) { setError(errorText(e)); } }
 
   const today = new Date().toISOString().slice(0, 10);
   const worklist = useMemo(() => {
@@ -918,7 +918,7 @@ function CapaDetailPanel({ capa, staff, cfg, onClose, onChanged, onError, onMsg 
   async function call(path: string, body: unknown, okMsg: string) {
     setBusy(true); onError('');
     try { await api(`/capa/${capa.id}/${path}`, { method: 'POST', body: JSON.stringify(body) }); onMsg(okMsg); onChanged(); }
-    catch (e) { onError((e as Error).message); } finally { setBusy(false); }
+    catch (e) { onError(errorText(e)); } finally { setBusy(false); }
   }
 
   return <DetailModal

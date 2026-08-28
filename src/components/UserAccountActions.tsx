@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { usePermissions } from '../hooks/usePermissions';
 import { UserX, UserCheck, KeyRound, Trash2, ShieldAlert, Loader2, ShieldCheck } from 'lucide-react';
-import { api } from '../services/api';
+import { api, errorText } from '../services/api';
 import type { ApiUser } from '../../shared/types/api';
 
 /**
@@ -59,7 +59,7 @@ export default function UserAccountActions({ user, onChanged }: {
 
   useEffect(() => {
     setImpact(null);
-    api<Impact>(`/users/${user.id}/deletion-impact`).then(setImpact).catch(e => setError((e as Error).message));
+    api<Impact>(`/users/${user.id}/deletion-impact`).then(setImpact).catch(e => setError(errorText(e)));
   }, [user.id]);
 
   useEffect(() => { setRoleId(String(user.roleId)); }, [user.roleId, user.id]);
@@ -71,7 +71,7 @@ export default function UserAccountActions({ user, onChanged }: {
   const run = async (label: string, fn: () => Promise<unknown>, done: string) => {
     setBusy(label); setError(null); setNotice(null);
     try { await fn(); setNotice(done); onChanged(done); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
     finally { setBusy(''); setConfirming(null); }
   };
 

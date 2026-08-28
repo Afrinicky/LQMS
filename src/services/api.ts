@@ -83,10 +83,43 @@ export function setToken(token: string | null) { if (token) localStorage.setItem
  * can only offer "issue that one instead" if it can see which one.
  */
 export class ApiError extends Error {
-  constructor(message: string, readonly status: number, readonly data: Record<string, unknown>) {
+  constructor(message: string, readonly status: number, readonly data: Record<string, unknown>, readonly method = 'GET') {
     super(message);
     this.name = 'ApiError';
   }
+}
+
+/** True when the server refused the call because of who the caller is. */
+export function isPermissionDenied(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 403;
+}
+
+/**
+ * The text a screen should put in its error banner for a failed call — empty
+ * when a READ was refused on permission grounds.
+ *
+ * A person who may not reach something is never told they may not reach it.
+ * Screens hide what their user has no right to; a red "Permission denied"
+ * across a module the person legitimately opened is the opposite of that — it
+ * announces the existence of the very thing that was meant to be out of sight,
+ * and it does so for a restriction on one item inside the module. So a refused
+ * read resolves to nothing to show. A refused WRITE keeps its message: the
+ * control should have been hidden, and if one slipped through, silence would
+ * leave the person clicking a button that does nothing.
+ */
+export function errorText(e: unknown): string {
+  if (e instanceof ApiError && e.status === 403 && (e.method === 'GET' || e.method === 'HEAD')) return '';
+  return e instanceof Error ? e.message : String(e ?? '');
+}
+
+/**
+ * A read whose subject the caller may not be entitled to. A refusal comes back
+ * as `fallback` instead of throwing, so one restricted item inside a module
+ * cannot take down the loader that fetches the rest of it. Every other failure
+ * (offline, server fault) still throws and still reaches the banner.
+ */
+export async function apiRead<T>(path: string, fallback: T): Promise<T> {
+  try { return await api<T>(path); } catch (e) { if (isPermissionDenied(e)) return fallback; throw e; }
 }
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -97,7 +130,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
   if (!response.ok) {
     const body = await response.json().catch(() => ({ error: response.statusText })) as Record<string, unknown>;
-    throw new ApiError(String(body.error ?? response.statusText), response.status, body);
+    throw new ApiError(String(body.error ?? response.statusText), response.status, body, String(options.method ?? 'GET').toUpperCase());
   }
   return response.json() as Promise<T>;
 }

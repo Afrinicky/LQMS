@@ -473,7 +473,7 @@ export function personnelRoutes() {
     sendWorkbook(res, registerWorkbook(true), 'Master_Personnel_Register.xlsx');
   });
 
-  router.post('/register/import', requirePermission('personnel.register', 'create'), upload.single('file'), (req, res) => {
+  router.post('/register/import', requirePermission('personnel.register', 'import'), upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the Master Personnel Register .xlsx file.' });
     let rows: Record<string, unknown>[];
     try {

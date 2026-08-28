@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, NumberField } from '../components/ui';
 import { useModules } from '../hooks/useModules';
-import { api, API_BASE, getToken } from '../services/api';
+import { api, API_BASE, getToken, errorText } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import ScannedRecordUpload from '../components/ScannedRecordUpload';
 import XlsxToolbar from '../components/XlsxToolbar';
@@ -308,9 +308,9 @@ function AssetsTab({ assets, devices, lookups, onChanged, onError, onFlash }: an
       ['tempMin', 'tempMax', 'humidityMin', 'humidityMax'].forEach(k => { body[k] = form[k as keyof typeof form] === '' ? null : Number(form[k as keyof typeof form]); });
       await api('/environmental/assets', { method: 'POST', body: JSON.stringify(body) });
       setForm(blank); onChanged(); onFlash('Asset registered.');
-    } catch (err) { onError((err as Error).message); }
+    } catch (err) { onError(errorText(err)); }
   }
-  async function remove(id: number) { if (!confirm('Delete this asset and its readings link?')) return; try { await api(`/environmental/assets/${id}`, { method: 'DELETE' }); onChanged(); } catch (e) { onError((e as Error).message); } }
+  async function remove(id: number) { if (!confirm('Delete this asset and its readings link?')) return; try { await api(`/environmental/assets/${id}`, { method: 'DELETE' }); onChanged(); } catch (e) { onError(errorText(e)); } }
   return <>
     <div className="card">
       <h3>Register monitored asset</h3>
@@ -351,12 +351,12 @@ function DevicesTab({ devices, assets, locations, drivers, commMethods, onChange
   async function submit(e: FormEvent) {
     e.preventDefault(); onError(null);
     try { await api('/environmental/devices', { method: 'POST', body: JSON.stringify({ ...form, driverKey: form.driverKey || form.communicationMethod }) }); setForm(blank); onChanged(); onFlash('Device registered.'); }
-    catch (err) { onError((err as Error).message); }
+    catch (err) { onError(errorText(err)); }
   }
-  async function pollNow(id: number) { onError(null); try { const r = await api<any>(`/environmental/devices/${id}/poll`, { method: 'POST', body: JSON.stringify({}) }); onChanged(); onFlash(`Reading captured: ${r.sample?.temperature ?? '—'}°C (${r.status}).`); } catch (e) { onError((e as Error).message); } }
-  async function importCsv(id: number) { const text = csv[id]; if (!text) return; onError(null); try { const r = await api<{ imported: number }>(`/environmental/devices/${id}/import-csv`, { method: 'POST', body: JSON.stringify({ csv: text }) }); onChanged(); onFlash(`Imported ${r.imported} readings.`); setCsv({ ...csv, [id]: '' }); } catch (e) { onError((e as Error).message); } }
+  async function pollNow(id: number) { onError(null); try { const r = await api<any>(`/environmental/devices/${id}/poll`, { method: 'POST', body: JSON.stringify({}) }); onChanged(); onFlash(`Reading captured: ${r.sample?.temperature ?? '—'}°C (${r.status}).`); } catch (e) { onError(errorText(e)); } }
+  async function importCsv(id: number) { const text = csv[id]; if (!text) return; onError(null); try { const r = await api<{ imported: number }>(`/environmental/devices/${id}/import-csv`, { method: 'POST', body: JSON.stringify({ csv: text }) }); onChanged(); onFlash(`Imported ${r.imported} readings.`); setCsv({ ...csv, [id]: '' }); } catch (e) { onError(errorText(e)); } }
   async function onFile(id: number, file?: File) { if (!file) return; setCsv({ ...csv, [id]: await file.text() }); }
-  async function remove(id: number) { if (!confirm('Delete this device?')) return; try { await api(`/environmental/devices/${id}`, { method: 'DELETE' }); onChanged(); } catch (e) { onError((e as Error).message); } }
+  async function remove(id: number) { if (!confirm('Delete this device?')) return; try { await api(`/environmental/devices/${id}`, { method: 'DELETE' }); onChanged(); } catch (e) { onError(errorText(e)); } }
   return <>
     <div className="card">
       <h3>Register device / data logger</h3>
@@ -387,7 +387,7 @@ function DevicesTab({ devices, assets, locations, drivers, commMethods, onChange
             {d.asset_id && can('facilities_safety.environment', 'edit') && <button className="secondary" onClick={() => pollNow(d.id)}>Poll now</button>}{' '}
             {d.communication_method === 'csv_import' && d.asset_id && <>
               <input type="file" accept=".csv,text/csv" onChange={e => onFile(d.id, e.target.files?.[0])} style={{ maxWidth: 150 }} />
-              {can(ENV, 'create') && <button className="secondary" disabled={!csv[d.id]} onClick={() => importCsv(d.id)}>Import</button>}{' '}
+              {can(ENV, 'import') && <button className="secondary" disabled={!csv[d.id]} onClick={() => importCsv(d.id)}>Import</button>}{' '}
             </>}
             <button className="secondary" onClick={() => remove(d.id)}>Delete</button>
           </td>
@@ -408,7 +408,7 @@ function ManualEntryTab({ assets, staff, onSaved, onError, onFlash }: any) {
     try {
       const r = await api<{ status: string }>(`/environmental/assets/${form.assetId}/readings`, { method: 'POST', body: JSON.stringify(form) });
       onFlash(`Reading recorded (${r.status}).`); setForm(blank); onSaved();
-    } catch (err) { onError((err as Error).message); }
+    } catch (err) { onError(errorText(err)); }
   }
   return <div className="card">
     <h3>Manual reading</h3>
@@ -433,8 +433,8 @@ function AlertsTab({ alerts, onChanged, onError }: any) {
   const { can } = usePermissions();
   const [filter, setFilter] = useState('active');
   const shown = alerts.filter((a: EnvAlert) => filter === 'all' || a.status === filter);
-  async function ack(id: number) { try { await api(`/environmental/alerts/${id}/acknowledge`, { method: 'POST', body: JSON.stringify({}) }); onChanged(); } catch (e) { onError((e as Error).message); } }
-  async function resolve(id: number) { try { await api(`/environmental/alerts/${id}/resolve`, { method: 'POST', body: JSON.stringify({}) }); onChanged(); } catch (e) { onError((e as Error).message); } }
+  async function ack(id: number) { try { await api(`/environmental/alerts/${id}/acknowledge`, { method: 'POST', body: JSON.stringify({}) }); onChanged(); } catch (e) { onError(errorText(e)); } }
+  async function resolve(id: number) { try { await api(`/environmental/alerts/${id}/resolve`, { method: 'POST', body: JSON.stringify({}) }); onChanged(); } catch (e) { onError(errorText(e)); } }
   return <div className="card">
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
       <h3 style={{ margin: 0 }}>Alerts</h3>
@@ -450,8 +450,8 @@ function AlertsTab({ alerts, onChanged, onError }: any) {
 
 function ExcursionsTab({ excursions, onChanged, onError, onFlash }: any) {
   const { can } = usePermissions();
-  async function ack(id: number) { try { await api(`/environmental/excursions/${id}/acknowledge`, { method: 'POST', body: JSON.stringify({ investigationStatus: 'investigating' }) }); onChanged(); } catch (e) { onError((e as Error).message); } }
-  async function createNc(id: number) { try { const r = await api<{ ncNumber: string }>(`/environmental/excursions/${id}/create-nc`, { method: 'POST', body: JSON.stringify({}) }); onChanged(); onFlash(`Created ${r.ncNumber}.`); } catch (e) { onError((e as Error).message); } }
+  async function ack(id: number) { try { await api(`/environmental/excursions/${id}/acknowledge`, { method: 'POST', body: JSON.stringify({ investigationStatus: 'investigating' }) }); onChanged(); } catch (e) { onError(errorText(e)); } }
+  async function createNc(id: number) { try { const r = await api<{ ncNumber: string }>(`/environmental/excursions/${id}/create-nc`, { method: 'POST', body: JSON.stringify({}) }); onChanged(); onFlash(`Created ${r.ncNumber}.`); } catch (e) { onError(errorText(e)); } }
   return <div className="card">
     <h3>Temperature excursions</h3>
     <p className="muted" style={{ marginTop: 0 }}>An excursion opens when temperature leaves the acceptable band and closes when it returns. Sustained excursions auto-create a Nonconformity (and linked CAPA).</p>
@@ -468,7 +468,7 @@ function SettingsTab({ settings, onSaved, onError, onFlash }: any) {
   const [f, setF] = useState<any>(null);
   useEffect(() => { if (settings) setF({ pollingEnabled: !!settings.polling_enabled, defaultPollIntervalSeconds: settings.default_poll_interval_seconds, excursionNcMinutes: settings.excursion_nc_minutes, batteryLowThreshold: settings.battery_low_threshold, noCommMinutes: settings.no_comm_minutes, preventExpiredDevices: !!settings.prevent_expired_devices, webhookUrl: (settings as any).webhook_url ?? '' }); }, [settings]);
   if (!f) return <p>Loading settings…</p>;
-  async function save(e: FormEvent) { e.preventDefault(); onError(null); try { await api('/environmental/settings', { method: 'PUT', body: JSON.stringify(f) }); onFlash('Settings saved.'); onSaved(); } catch (err) { onError((err as Error).message); } }
+  async function save(e: FormEvent) { e.preventDefault(); onError(null); try { await api('/environmental/settings', { method: 'PUT', body: JSON.stringify(f) }); onFlash('Settings saved.'); onSaved(); } catch (err) { onError(errorText(err)); } }
   return <div className="card">
     <h3>Monitoring settings</h3>
     {can('facilities_safety.environment', 'edit') && <form className="form-grid" onSubmit={save}>
@@ -498,10 +498,10 @@ function NotificationsTab({ onError, onFlash }: any) {
     api<EnvNotificationQueueItem[]>('/environmental/notification-queue').then(setQueue).catch(() => {});
   }
   useEffect(() => { load(); }, []);
-  async function addRule(e: FormEvent) { e.preventDefault(); onError(null); try { await api('/environmental/escalation-rules', { method: 'POST', body: JSON.stringify(form) }); setForm(blank); load(); onFlash('Escalation rule added.'); } catch (err) { onError((err as Error).message); } }
-  async function removeRule(id: number) { if (!confirm('Delete this rule?')) return; try { await api(`/environmental/escalation-rules/${id}`, { method: 'DELETE' }); load(); } catch (e) { onError((e as Error).message); } }
-  async function toggleRule(r: EnvEscalationRule) { try { await api(`/environmental/escalation-rules/${r.id}`, { method: 'PUT', body: JSON.stringify({ isActive: !r.is_active }) }); load(); } catch (e) { onError((e as Error).message); } }
-  async function test(key: string) { onError(null); try { const r = await api<{ ok: boolean; error?: string }>(`/environmental/channels/${key}/test`, { method: 'POST', body: JSON.stringify({}) }); onFlash(r.ok ? `Test sent via ${key}.` : `Test not sent: ${r.error}`); load(); } catch (e) { onError((e as Error).message); } }
+  async function addRule(e: FormEvent) { e.preventDefault(); onError(null); try { await api('/environmental/escalation-rules', { method: 'POST', body: JSON.stringify(form) }); setForm(blank); load(); onFlash('Escalation rule added.'); } catch (err) { onError(errorText(err)); } }
+  async function removeRule(id: number) { if (!confirm('Delete this rule?')) return; try { await api(`/environmental/escalation-rules/${id}`, { method: 'DELETE' }); load(); } catch (e) { onError(errorText(e)); } }
+  async function toggleRule(r: EnvEscalationRule) { try { await api(`/environmental/escalation-rules/${r.id}`, { method: 'PUT', body: JSON.stringify({ isActive: !r.is_active }) }); load(); } catch (e) { onError(errorText(e)); } }
+  async function test(key: string) { onError(null); try { const r = await api<{ ok: boolean; error?: string }>(`/environmental/channels/${key}/test`, { method: 'POST', body: JSON.stringify({}) }); onFlash(r.ok ? `Test sent via ${key}.` : `Test not sent: ${r.error}`); load(); } catch (e) { onError(errorText(e)); } }
   return <>
     <div className="card">
       <h3>Notification channels</h3>
@@ -546,7 +546,7 @@ function InsightsTab({ onError, onFlash }: any) {
   async function createAction(i: EnvInsight) {
     onError(null);
     try { await api('/environmental/insights/create-action', { method: 'POST', body: JSON.stringify({ assetId: i.asset_id, title: `${i.asset_name}: ${i.category} follow-up`, description: `${i.message}${i.recommendation ? '\n\nRecommendation: ' + i.recommendation : ''}`, priority: i.severity === 'critical' ? 'high' : 'normal' }) }); onFlash('Action created in the Action Tracker.'); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
   const maintenance = insights.filter(i => i.maintenance);
   const observations = insights.filter(i => !i.maintenance);

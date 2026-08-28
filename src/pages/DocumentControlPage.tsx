@@ -9,7 +9,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useModules } from '../hooks/useModules';
 import { usePermissions, type PermissionAction } from '../hooks/usePermissions';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
-import { api, API_BASE, getToken } from '../services/api';
+import { api, API_BASE, getToken, errorText, apiRead } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import DocumentScanner from '../components/DocumentScanner';
 import PermissionTabs from '../components/PermissionTabs';
@@ -204,7 +204,7 @@ export function DocumentControlPage() {
       const [sum, recSum, docs, due, att, ib] = await Promise.all([
         api<DocumentControlSummary>('/dashboard/document-control-summary').catch(() => null),
         api<RecordControlSummary>('/documents/records/summary').catch(() => null),
-        api<DocumentRecord[]>('/documents'),
+        apiRead<DocumentRecord[]>('/documents', []),
         api<DocumentRecord[]>('/documents/reviews/due').catch(() => []),
         api<DocumentAttestation[]>('/documents/attestations/pending').catch(() => []),
         api<DistributionInboxEntry[]>('/documents/distribution/inbox').catch(() => [])
@@ -212,7 +212,7 @@ export function DocumentControlPage() {
       if (sum) setSummary(sum);
       if (recSum) setRecordSummary(recSum);
       setDocuments(docs); setReviewsDue(due); setPendingAttestations(att); setInbox(ib);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   useEffect(() => { if (isEnabled('documents')) void load(); }, [isEnabled]);
   // Deep link from Settings → My Laboratory: open the New Document form with the
@@ -254,7 +254,7 @@ export function DocumentControlPage() {
       if (docForm.sectionCategory) params.set('sectionCode', docForm.sectionCategory);
       const r = await api<{ code: string }>(`/documents/next-code?${params.toString()}`);
       setDocForm(f => ({ ...f, documentCode: r.code }));
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   // When a file is chosen for a new document, read its title and number from the
@@ -292,7 +292,7 @@ export function DocumentControlPage() {
       setDocForm(emptyDocForm); setNewDocFile(null);
       await load(); setSection('Documents'); setTab('Document Register');
       flash(`Document created as ${created.documentCode}. It is now in Draft — submit it for review when ready.`);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   // Derive "SECHPO026" from "SECHPO026 Document Control Procedure.pdf".
@@ -344,13 +344,13 @@ export function DocumentControlPage() {
 
   async function openDoc(id: number) {
     try { setSelectedDoc(await api<DocumentRecord>(`/documents/${id}`)); setSection('Documents'); setTab('Document Register'); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function runExport(path: string, fallback: string) {
     setError(null); setExportBusy(path);
     try { await downloadExport(path, fallback); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
     finally { setExportBusy(''); }
   }
 
@@ -363,7 +363,7 @@ export function DocumentControlPage() {
       await api(`/documents/${selectedDoc.id}/versions`, { method: 'POST', body: JSON.stringify(payload) });
       setVersionForm(emptyVersionForm); setVersionFile(null);
       await openDoc(selectedDoc.id); await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function submitReview(e: FormEvent) {
@@ -374,7 +374,7 @@ export function DocumentControlPage() {
       setReviewForm(emptyReviewForm);
       await openDoc(selectedDoc.id); await load();
       flash('Review recorded. The document is now Reviewed and ready for approval by the Laboratory Manager.');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function submitAttest(e: FormEvent) {
@@ -389,7 +389,7 @@ export function DocumentControlPage() {
       await api(`/documents/${selectedDoc.id}/assign-attestation`, { method: 'POST', body: JSON.stringify(payload) });
       setAttestForm(emptyAttestForm);
       await openDoc(selectedDoc.id); await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function distributeAll(docId: number) {
@@ -397,7 +397,7 @@ export function DocumentControlPage() {
       const r = await api<{ assigned: number }>(`/documents/${docId}/distribute-all`, { method: 'POST', body: JSON.stringify({}) });
       await openDoc(docId); await load();
       flash(`Distributed to ${r.assigned} staff member(s) for attestation. It now appears in their inbox, notifications and dashboard.`);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function signAttestation(attestationId: number, documentId: number) {
@@ -405,7 +405,7 @@ export function DocumentControlPage() {
       await api(`/documents/${documentId}/attest`, { method: 'POST', body: JSON.stringify({ attestationId }) });
       await load(); if (selectedDoc?.id === documentId) await openDoc(documentId);
       flash('Attestation signed. Thank you — your acknowledgement is recorded against this document.');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function submitPrint(e: FormEvent) {
@@ -415,7 +415,7 @@ export function DocumentControlPage() {
       await api(`/documents/${selectedDoc.id}/print-log`, { method: 'POST', body: JSON.stringify(printForm) });
       setPrintForm(emptyPrintForm);
       await openDoc(selectedDoc.id);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function submitDoc_obsolete() {
@@ -425,13 +425,13 @@ export function DocumentControlPage() {
       await api(`/documents/${selectedDoc.id}/mark-obsolete`, { method: 'POST', body: JSON.stringify({ obsoleteReason }) });
       setObsoleteReason('');
       await openDoc(selectedDoc.id); await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function submitForReview() {
     if (!selectedDoc) return;
     try { await api(`/documents/${selectedDoc.id}/submit-review`, { method: 'POST', body: JSON.stringify({}) }); await openDoc(selectedDoc.id); await load(); flash('Submitted for review. An authorised reviewer can now record their review.'); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   // Open the guarded delete confirmation for one document (from the drawer) or
@@ -464,7 +464,7 @@ export function DocumentControlPage() {
         if (r.failed > 0) setError(`Deleted ${r.deleted} document(s); ${r.failed} could not be deleted.`);
         else flash(`Permanently deleted ${r.deleted} document(s).`);
       }
-    } catch (e) { setDeleteModal(m => m && { ...m, busy: false }); setError((e as Error).message); }
+    } catch (e) { setDeleteModal(m => m && { ...m, busy: false }); setError(errorText(e)); }
   }
 
   // Kept for the drawer's delete action — opens the same guarded modal.
@@ -473,7 +473,7 @@ export function DocumentControlPage() {
   async function approveDoc() {
     if (!selectedDoc) return;
     try { const r = await api<{ distributed: number }>(`/documents/${selectedDoc.id}/approve`, { method: 'POST', body: JSON.stringify({}) }); await openDoc(selectedDoc.id); await load(); flash(`Approved and issued as the current version. Automatically distributed to ${r.distributed} staff for attestation.`); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   // Drive a lifecycle transition from the workflow viewer (status-badge click).
@@ -548,7 +548,7 @@ export function DocumentControlPage() {
     try {
       await api(`/documents/${selectedDoc.id}/versions/${versionId}/mark-obsolete`, { method: 'POST', body: JSON.stringify({ obsoleteReason: reason }) });
       await openDoc(selectedDoc.id); await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   function openPrintPreview(versionId?: number) {
@@ -569,7 +569,7 @@ export function DocumentControlPage() {
           const w = window.open('', '_blank');
           if (w) { w.document.write(html); w.document.close(); }
         })
-        .catch(e => setError((e as Error).message));
+        .catch(e => setError(errorText(e)));
     }
   }
 
@@ -1060,7 +1060,7 @@ export function DocumentControlPage() {
 // ============================================================================
 function LaboratoryProfileView({ staff, documents, onOpenDoc, onPreview, onError }: { staff: Staff[]; documents: DocumentRecord[]; onOpenDoc: (id: number) => void; onPreview: (d: DocumentRecord) => void; onError: (m: string) => void }) {
   const [config, setConfig] = useState<import('../../shared/types/api').LaboratoryConfig | null>(null);
-  useEffect(() => { api<import('../../shared/types/api').LaboratoryConfig>('/laboratory-config').then(setConfig).catch(e => onError((e as Error).message)); }, []);
+  useEffect(() => { api<import('../../shared/types/api').LaboratoryConfig>('/laboratory-config').then(setConfig).catch(e => onError(errorText(e))); }, []);
   if (!config) return <div className="card"><p>Loading laboratory profile…</p></div>;
   const p = config.profile;
   // Core documents are the controlled documents in the register (full metadata),
@@ -1166,7 +1166,7 @@ function MasterListView({ exportBusy, onExport, onError, documents, onPreview }:
   const { can } = usePermissions();
   const [data, setData] = useState<MasterListResponse | null>(null);
   const [sub, setSub] = useState('Document Register');
-  useEffect(() => { api<MasterListResponse>('/documents/masterlist').then(setData).catch(e => onError((e as Error).message)); }, []);
+  useEffect(() => { api<MasterListResponse>('/documents/masterlist').then(setData).catch(e => onError(errorText(e))); }, []);
 
   const subs = ['Document Register', 'Records Register', 'Obsolete Document Register'];
   if (!data) return <p>Loading master list…</p>;
@@ -1491,13 +1491,13 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
     if (!newComment.trim()) return;
     setBusy(true);
     try { await api(`/documents/${docId}/comments`, { method: 'POST', body: JSON.stringify({ comment: newComment, stage: workflowStatus, documentVersionId: activeVersionId }) }); setNewComment(''); await loadComments(); }
-    catch (e) { onError((e as Error).message); } finally { setBusy(false); }
+    catch (e) { onError(errorText(e)); } finally { setBusy(false); }
   }
   async function doWorkflow(action: string) {
     if (!onWorkflowAction) return;
     setBusy(true);
     try { await onWorkflowAction(action); onClose(); }
-    catch (e) { onError((e as Error).message); } finally { setBusy(false); }
+    catch (e) { onError(errorText(e)); } finally { setBusy(false); }
   }
   const WF: Record<string, { label: string; action: string }> = {
     draft: { label: 'Accept & submit for review →', action: 'submit' },
@@ -1532,14 +1532,14 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
           fetchBlobUrl(`/files/${c.file_id}/raw`).then(u => { url = u; setFileUrl(u); }).catch(() => {});
         }
       })
-      .catch(e => { setContentError((e as Error).message); onError((e as Error).message); });
+      .catch(e => { setContentError(errorText(e)); onError(errorText(e)); });
     return () => { if (url) URL.revokeObjectURL(url); };
   }, [docId, activeVersionId]);
 
   async function reExtract() {
     setBusy(true);
     try { await api(`/documents/${docId}/versions/${activeVersionId}/re-extract`, { method: 'POST', body: JSON.stringify({}) }); const c = await api<VersionContent>(`/documents/${docId}/versions/${activeVersionId}/content`); setContent(c); }
-    catch (e) { onError((e as Error).message); } finally { setBusy(false); }
+    catch (e) { onError(errorText(e)); } finally { setBusy(false); }
   }
   async function saveContent() {
     if (!editorRef.current) return;
@@ -1548,7 +1548,7 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
       await api(`/documents/${docId}/versions/${activeVersionId}/content`, { method: 'PUT', body: JSON.stringify({ contentHtml: editorRef.current.innerHTML, contentText: editorRef.current.innerText }) });
       const c = await api<VersionContent>(`/documents/${docId}/versions/${activeVersionId}/content`); setContent(c);
       setEditing(false); onSaved();
-    } catch (e) { onError((e as Error).message); } finally { setBusy(false); }
+    } catch (e) { onError(errorText(e)); } finally { setBusy(false); }
   }
 
   // Build a real .docx from the in-app edited content and download it straight away.
@@ -1559,7 +1559,7 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
       const url = await fetchBlobUrl(`/files/${r.fileId}/download`);
       const a = document.createElement('a'); a.href = url; a.download = r.originalName; a.click();
       setTimeout(() => URL.revokeObjectURL(url), 4000);
-    } catch (e) { onError((e as Error).message); } finally { setExportBusy(null); }
+    } catch (e) { onError(errorText(e)); } finally { setExportBusy(null); }
   }
   // Build a real .docx and attach it as the document's newest version, so the
   // in-app edits round-trip into the official record as an openable Word file.
@@ -1568,7 +1568,7 @@ function DocumentViewer(props: { docId: number; versionId: number; attestationId
     try {
       await api(`/documents/${docId}/versions/${activeVersionId}/export-docx/save-as-version`, { method: 'POST', body: JSON.stringify({}) });
       onSaved(); onClose();
-    } catch (e) { onError((e as Error).message); } finally { setExportBusy(null); }
+    } catch (e) { onError(errorText(e)); } finally { setExportBusy(null); }
   }
 
   const isPdf = content?.file_mime === 'application/pdf' || /\.pdf$/i.test(content?.file_name || '');
@@ -1919,7 +1919,7 @@ function MasterListDetailsForm({ doc, onSaved, onError }: { doc: any; onSaved: (
   async function save(e: FormEvent) {
     e.preventDefault();
     try { await api(`/documents/${doc.id}`, { method: 'PUT', body: JSON.stringify(f) }); onSaved(); }
-    catch (err) { onError((err as Error).message); }
+    catch (err) { onError(errorText(err)); }
   }
   return <details style={{ margin: '8px 0' }}>
     <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Master-list details — format, distribution, retention, remarks</summary>
@@ -1951,7 +1951,7 @@ function DocumentDetailPanel(props: any) {
 
   async function saveCode() {
     try { await api(`/documents/${doc.id}`, { method: 'PUT', body: JSON.stringify({ documentCode: codeEdit }) }); onCodeSaved(); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
   const signedCount = (doc.attestations || []).filter((a: any) => a.status === 'signed').length;
   const pendingCount = (doc.attestations || []).filter((a: any) => a.status !== 'signed').length;
@@ -2123,20 +2123,20 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
   async function loadAll() {
     try {
       const [rg, sc, rl, dl, bl] = await Promise.all([
-        api<RecordRegisterEntry[]>('/documents/records/register'),
-        api<RetentionScheduleRule[]>('/documents/records/retention-schedule'),
-        api<RecordReviewLogEntry[]>('/documents/records/review-log'),
-        api<RecordDestructionEntry[]>('/documents/records/destruction-log'),
-        api<RecordBackupEntry[]>('/documents/records/backup-log'),
+        apiRead<RecordRegisterEntry[]>('/documents/records/register', []),
+        apiRead<RetentionScheduleRule[]>('/documents/records/retention-schedule', []),
+        apiRead<RecordReviewLogEntry[]>('/documents/records/review-log', []),
+        apiRead<RecordDestructionEntry[]>('/documents/records/destruction-log', []),
+        apiRead<RecordBackupEntry[]>('/documents/records/backup-log', []),
       ]);
       setRegister(rg); setSchedule(sc); setReviewLog(rl); setDestruction(dl); setBackups(bl);
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }
   useEffect(() => { void loadAll(); }, []);
 
   async function submit(path: string, body: unknown, reset: () => void) {
     try { await api(`/documents/records/${path}`, { method: 'POST', body: JSON.stringify(body) }); reset(); await loadAll(); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
 
   async function submitRecord(e: FormEvent) {
@@ -2148,14 +2148,14 @@ function RecordControl({ staff, sections, departments, documents, onError, expor
       await api('/documents/records/register', { method: 'POST', body: JSON.stringify(payload) });
       setRegForm(emptyReg); setRecordFile(null);
       await loadAll();
-    } catch (err) { onError((err as Error).message); }
+    } catch (err) { onError(errorText(err)); }
     finally { setSavingRecord(false); }
   }
 
   async function downloadRecordFile(r: RecordRegisterEntry) {
     if (!r.file_id) return;
     try { await downloadExport(`/files/${r.file_id}/download`, r.file_name || `record-${r.record_code || r.id}`); }
-    catch (err) { onError((err as Error).message); }
+    catch (err) { onError(errorText(err)); }
   }
 
   const filteredRegister = useMemo(() => register.filter(r => {
@@ -2337,7 +2337,7 @@ function AttestationsTabView({ pending, staff, documents, onSignAttestation, onO
       if (searchTerm.trim()) q.set('q', searchTerm.trim());
       const list = await api<AttestationListRow[]>(`/documents/attestations/list?${q.toString()}`);
       setRows(list);
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
     finally { setBusy(false); }
   };
   useEffect(() => { loadForDoc(selectedDocId); }, [selectedDocId]);
@@ -2361,7 +2361,7 @@ function AttestationsTabView({ pending, staff, documents, onSignAttestation, onO
       const html = await res.text();
       const w = window.open('', '_blank');
       if (w) { w.document.write(html); w.document.close(); setTimeout(() => { try { w.focus(); w.print(); } catch { /* pop-up may be blocked */ } }, 400); }
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }
 
   const selectedDoc = docList.find(d => d.id === selectedDocId);
@@ -2515,12 +2515,12 @@ function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onEr
       if (search.to) params.set('to', search.to);
       const [s, r, sch] = await Promise.all([
         api<CentralArchiveSummaryLocal>('/archives/summary').catch(() => null),
-        api<CentralArchiveRow[]>(`/archives?${params.toString()}`),
+        apiRead<CentralArchiveRow[]>(`/archives?${params.toString()}`, []),
         api<CentralArchiveScheduleRow[]>('/archives/schedules/list').catch(() => []),
       ]);
       if (s) setSummary(s);
       setRows(r); setSchedules(sch);
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }
   useEffect(() => { void load(); }, []);
 
@@ -2537,7 +2537,7 @@ function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onEr
       setArchiveFile(null);
       await load();
       onNotice('Archive uploaded and registered in the central archive.');
-    } catch (err) { onError((err as Error).message); }
+    } catch (err) { onError(errorText(err)); }
     finally { setUploadBusy(false); }
   }
 
@@ -2549,7 +2549,7 @@ function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onEr
       onNotice(`Patient results archive created with ${r.rows} row(s).`);
       setPatientForm({ title: '', periodStart: '', periodEnd: '', format: 'excel', retentionPeriodMonths: '60', cloudUrl: '', cloudProvider: '', storageLocation: '', notes: '' });
       await load();
-    } catch (err) { onError((err as Error).message); }
+    } catch (err) { onError(errorText(err)); }
     finally { setPatientBusy(false); }
   }
 
@@ -2559,7 +2559,7 @@ function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onEr
       await api('/archives/schedules', { method: 'POST', body: JSON.stringify(scheduleForm) });
       await load();
       onNotice('Archive schedule saved.');
-    } catch (err) { onError((err as Error).message); }
+    } catch (err) { onError(errorText(err)); }
   }
 
   async function downloadArchive(row: CentralArchiveRow) {
@@ -2569,7 +2569,7 @@ function CentralArchiveView({ staff, onError, onNotice }: { staff: Staff[]; onEr
       const a = document.createElement('a'); a.href = url; a.download = row.file_name || `archive-${row.archive_number}`; a.click();
       setTimeout(() => URL.revokeObjectURL(url), 4000);
       await api(`/archives/${row.id}/retrieve`, { method: 'POST', body: JSON.stringify({ reason: 'Downloaded from Documents & Records' }) }).catch(() => {});
-    } catch (err) { onError((err as Error).message); }
+    } catch (err) { onError(errorText(err)); }
   }
 
   const totalBytes = rows.reduce((s, r) => s + (r.size_bytes || 0), 0);

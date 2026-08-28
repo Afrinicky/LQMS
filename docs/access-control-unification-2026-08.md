@@ -781,3 +781,243 @@ Three of those were found and fixed by hand (the attestation register, pending
 attestations, the distribution inbox — §12), but there is no automated check for
 that class yet. It needs a per-endpoint statement of whose rows the answer may
 contain, which does not exist in the code today.
+
+---
+
+# Part 3 — the refusal that announced itself, and the dashboard that would not open
+
+Four things were reported after the sweep, and all four turn out to be the same
+mistake seen from different angles: **the system was telling people about things
+it had already decided to keep from them.**
+
+## 14. "Permission denied" written across a module the person may open
+
+A module page opens by asking the server for everything inside it at once:
+
+```ts
+const [sum, sd, decl, tr, rs] = await Promise.all([
+  api<PersonnelSummary>('/dashboard/personnel-summary').catch(() => null),
+  api<StaffDocument[]>('/personnel/staff-documents'),   // personnel.register
+  api<StaffDeclaration[]>('/personnel/declarations'),   // personnel.declarations
+  api<TrainingEvent[]>('/personnel/training'),          // personnel.training
+  api<DutyRoster[]>('/personnel/rosters'),              // personnel.rosters
+]);
+```
+
+Five reads, four different rights. A Biomedical Scientist holds the roster and
+nothing else, so three of the five come back **403** — and because `Promise.all`
+rejects on the first refusal, the whole loader falls into its `catch`, which
+does this:
+
+```ts
+} catch (e) { setError((e as Error).message); }
+```
+
+The message is the server's, and the server's message is `Permission denied`. So
+one restriction on one feature painted a red banner across the entire module,
+threw away the two results the person *was* entitled to, and — worst of all —
+announced the existence of the very thing that was meant to be out of sight.
+
+Measured against a running system, this was not an edge case. Every screen the
+report named had at least one refused read on load:
+
+| Screen | Biomedical Scientist | Technician | Stores Officer | Customer Service |
+|---|---|---|---|---|
+| Personnel Management | 3 of 5 refused | 3 of 5 | 3 of 5 | 3 of 5 |
+| Process Management | 1 of 6 | 3 of 6 | 6 of 6 | 3 of 6 |
+| Customer Focus | 4 of 6 | 4 of 6 | 6 of 6 | 1 of 6 |
+| Supplier & Inventory | 1 of 2 | 1 of 2 | 0 of 2 | 2 of 2 |
+| Notifications & Reports | 0 of 2 | 1 of 2 | 1 of 2 | 1 of 2 |
+
+### The rule
+
+**A person who may not reach something is never told they may not reach it.**
+
+Two changes carry it, both in `src/services/api.ts`:
+
+```ts
+export function errorText(e: unknown): string {
+  if (e instanceof ApiError && e.status === 403 && (e.method === 'GET' || e.method === 'HEAD')) return '';
+  return e instanceof Error ? e.message : String(e ?? '');
+}
+
+export async function apiRead<T>(path: string, fallback: T): Promise<T> {
+  try { return await api<T>(path); } catch (e) { if (isPermissionDenied(e)) return fallback; throw e; }
+}
+```
+
+`errorText` resolves a **refused read** to nothing to show — the screen simply
+has nothing there, which is what a restriction is supposed to look like. A
+refused **write** keeps its message: the control should have been hidden, and if
+one ever slips through, silence would leave somebody clicking a button that does
+nothing. Every one of the **769 catch sites** across 48 files now goes through
+it.
+
+`apiRead` answers a refusal with the caller's own fallback, so one restricted
+item cannot take the module down with it. **97 loader reads** were moved onto
+it — every member of every `Promise.all` that mixes rights.
+
+The scanner that found them is kept: `npm run audit:reads` derives each client
+read's guard from the server's own route table and reports any loader that would
+still lose its module on one refusal. It is at **zero**, and the static audit
+fails the build if it stops being.
+
+## 15. Export and import of the registers, offered to the whole bench
+
+The maintenance toolbar named the **module**:
+
+```tsx
+<XlsxToolbar module="equipment" exportPath="/equipment/maintenance/export" … />
+```
+
+A module right is the union of its features, so anyone holding anything in
+Equipment satisfied `can('equipment', 'export')` — and the server, which asks
+`equipment.maintenance`, then refused them. Shown, then refused: the exact
+complaint. The same was true of reference intervals in Process Management.
+
+Both now name the feature, and an audit check derives the right each toolbar
+needs **from the endpoints behind its own buttons**, so a toolbar can never
+again ask a different question from the route it calls.
+
+### `import` is now its own action
+
+Restricting import was impossible while it shared `create` with the everyday
+right to make an entry: withdraw it and the bench could no longer log a
+maintenance job. So `import` was separated out.
+
+```ts
+export const PERMISSION_ACTIONS = ['view', 'create', 'edit', 'void_archive', 'export', 'import', 'print', 'approve'];
+```
+
+Adding one maintenance record is `create`. Loading a spreadsheet of them over
+the register is `import`. **22 endpoints** moved across, and every control that
+fires one moved with them — including two that were found only by looking for
+them: the staff register's bulk import in `PersonnelRegisterAdmin` and in
+Personnel Management, both of which had been offered to anyone who could add a
+member of staff.
+
+### And it is the leadership's
+
+Bulk movement of the equipment and stores registers is now decided by **who the
+profile is**, not by the level it happens to sit at:
+
+```ts
+const BULK_IO_ACTIONS  = new Set(['export', 'import']);
+const BULK_IO_HOLDERS  = new Set(['System Administrator', 'Laboratory Manager', 'Quality Manager']);
+const BULK_IO_MODULES  = new Set(['equipment', 'supplier_inventory']);
+```
+
+It cuts both ways, which is why it could not be expressed as a level: the
+Quality Manager only *reads* the maintenance register and still gets the export,
+while a Biomedical Scientist who *manages* it does not — and never sees the
+buttons.
+
+```
+profile                      maintenance   register      stock  suppliers        iqc
+Biomedical Scientist                 --c        ---        --c        ---        E-c
+Technician                           --c        ---        --c        ---        --c
+Section Head                         --c        --c        --c        ---        EIc
+Stores Officer                       ---        ---        --c        ---        ---
+Quality Manager                      EI-        EI-        EI-        EI-        EIc
+Laboratory Manager                   EIc        EIc        EIc        EIc        EIc
+System Administrator                 EIc        EIc        EIc        EIc        EIc
+                                     ↑↑↑
+                          E = export, I = import, c = the daily right to add one
+```
+
+The daily right survives untouched — that is asserted too, so a future
+tightening cannot quietly stop the bench from doing its work.
+
+## 16. The dashboards
+
+Two causes, both paid on every single page load by every member of staff.
+
+**The permission resolver had no memory.** Working out what one person may do
+means reading the profile, the individual overrides, the position mapping and
+the module switches, then folding four invariants over every key and action — a
+dozen queries and several thousand map entries. It was rebuilt *from scratch for
+every question asked*, and one screen asks hundreds: one per route guard, one
+per dashboard tile, one for the list of modules the sidebar may draw.
+
+The map is now kept, and thrown away whole the moment anything it reads is
+written. The counter that decides this is bumped **by intercepting the prepared
+statement**, not by calling it at each write site:
+
+```ts
+const ACCESS_INPUT_TABLES = /\b(role_permissions|user_permission_overrides|permissions|positions|staff_position_assignments|system_modules|users|roles)\b/i;
+```
+
+A write site that forgot to invalidate would hand somebody a permission they no
+longer have, and no test would catch it. Here it cannot be forgotten: the
+statement itself carries the tables it touches. `npm run audit:cache` proves the
+two things that matter against a real database — a right granted is visible on
+the very next question, a right withdrawn is gone on it — through all three
+doors the resolver answers (14/14).
+
+| | before | after |
+|---|---|---|
+| one permission question | 4.26 ms | **0.04 ms** |
+| the permission map a screen is handed | 4.85 ms | **0.52 ms** |
+
+**The summaries scanned tables that grow forever.** `notifications` takes one
+row per person per controlled document, per due activity, per alert — thousands
+within weeks — and the notification summary alone runs ten counts over it,
+filtering on status, severity, due date, type and addressee. There was **not one
+index on any of them**. Every count was a full scan, so the dashboard got slower
+every day the laboratory used it.
+
+Indexes now cover exactly those filters, plus the task queue, the review
+calendar and the audit log; `ANALYZE` runs at startup so the plans stay honest
+as the data grows. At 50,000 notifications a single count went from **5.6 ms to
+0.5 ms**.
+
+One thing that looked like an improvement and was not: folding the ten counts
+into a single conditional-sum pass. It reads *every* row, because there is
+nothing left to filter on — 27 ms against 0.5 ms each for the indexed counts.
+The counts were put back, with a note saying why, and the staff id in the
+pending-approvals count is now bound rather than written into the SQL (it was
+producing a new prepared statement, and a new query plan, per person).
+
+`npm run audit:dashboard` seeds 50,000 notifications and holds all of it to a
+budget:
+
+```
+  PASS  one permission question — 0.036ms (budget 0.5ms)
+  PASS  the whole permission map a screen is handed — 0.517ms (budget 3ms)
+  PASS  the notification summary every dashboard opens on — 20.98ms (budget 25ms)
+  PASS  one dashboard load, end to end — 21.64ms (budget 30ms)
+```
+
+## 17. What the audits now prove
+
+Four new checks, all in the build:
+
+- **every Excel toolbar names the right its own endpoints ask for** — derived
+  from the server's route table, so it cannot be a guess;
+- **every spreadsheet import is gated on `import`, not `create`**;
+- **no screen banners a caught error without `errorText()`** — all 769 sites;
+- **no loader loses a whole module because one item in it was refused**.
+
+And one existing scanner was made stricter. `audit:controls` used to skip any
+control that had *a* gate; it now compares that gate against what the server
+actually asks and fails when the gate is **looser** — a control shown to
+somebody the server will refuse. A stricter gate is a deliberate choice and is
+allowed; the implication test uses the level table, so `can(x,'edit')` guarding
+a `create` endpoint passes and `can(x,'create')` guarding an `import` one does
+not.
+
+Green as of this change: **48 static checks**, **25 live checks** (3,275 write
+probes across every profile), `audit:controls` zero ungated and zero mis-gated,
+`audit:reads` zero exposed loaders, `audit:cache` 14/14, `audit:dashboard` 4/4,
+`rbac:check` 19/19, `account-check` 37/37, `core-documents-check` 20/20,
+`office-edit-check` 74/74, `complaints-check` 38/38, `inventory-check` 43/43,
+`inventory-records-check` 56/56, `iqc-check` 38/38, `iqc-io-check` 80/80,
+`iqc-admin-check` 73/73, `alerts-check` 31/31. Build and typecheck clean.
+
+### Still not covered
+
+The gap named at the end of Part 2 is unchanged: a *read* that returns other
+people's rows to somebody who may see the page but not the people on it. Part 3
+makes those reads quieter, not narrower — a refusal no longer announces itself,
+but nothing here decides whose rows an answer may contain. That still needs a
+per-endpoint statement of ownership, which the code does not have.

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
-import { api, API_BASE, getToken } from '../services/api';
+import { api, API_BASE, getToken, errorText } from '../services/api';
 import DocumentScanner from './DocumentScanner';
 import { usePermissions } from '../hooks/usePermissions';
 
@@ -33,7 +33,7 @@ async function downloadFile(fileId: number, name: string, onError: (m: string) =
     const url = URL.createObjectURL(await res.blob());
     const a = document.createElement('a'); a.href = url; a.download = name || `record-${fileId}`; document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
-  } catch (e) { onError((e as Error).message); }
+  } catch (e) { onError(errorText(e)); }
 }
 
 export default function ScannedRecordUpload({
@@ -102,12 +102,12 @@ export default function ScannedRecordUpload({
       setMsg(data.ncNumber ? `Saved. An out-of-range reading was flagged — nonconformity ${data.ncNumber} was raised for follow-up.` : 'Saved.');
       setForm(blank); setFile(null); if (fileRef.current) fileRef.current.value = '';
       load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(false); }
   }
   async function remove(id: number) {
     if (!confirm('Delete this scanned record?')) return;
-    try { await api(`/scanned-records/${id}`, { method: 'DELETE' }); load(); } catch (e) { setError((e as Error).message); }
+    try { await api(`/scanned-records/${id}`, { method: 'DELETE' }); load(); } catch (e) { setError(errorText(e)); }
   }
 
   return <div className="card" style={{ marginTop: 16 }}>

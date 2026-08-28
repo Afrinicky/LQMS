@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, Copy, Plus, Trash2 } from 'lucide-react';
 import { DetailModal, EmptyState } from '../../components/ui';
-import { api } from '../../services/api';
+import { api, errorText } from '../../services/api';
 import { usePermissions } from '../../hooks/usePermissions';
 import {
   PrintButton, RatingPicker, ScaleLegend, ScoreDial, StatCell, badgeFor, labelise,
@@ -59,7 +59,7 @@ function EvaluationList({ suppliers }: { suppliers: Supplier[] }) {
   const load = useCallback(async () => {
     setLoading(true);
     try { setRows(await api<SupplierEvalAssessment[]>(`${BASE}/eval-assessments`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
     finally { setLoading(false); }
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -70,7 +70,7 @@ function EvaluationList({ suppliers }: { suppliers: Supplier[] }) {
     try {
       const created = await api<{ id: number }>(`${BASE}/eval-assessments`, { method: 'POST', body: JSON.stringify(form) });
       setForm(emptyEval); setCreating(false); await load(); setSelectedId(created.id);
-    } catch (err) { setError((err as Error).message); }
+    } catch (err) { setError(errorText(err)); }
   }
 
   return <>
@@ -138,7 +138,7 @@ function EvaluationEditor({ id, mayEvaluate, onClose, onChanged }: { id: number;
 
   const load = useCallback(async () => {
     try { setRecord(await api<SupplierEvalAssessment>(`${BASE}/eval-assessments/${id}`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }, [id]);
   useEffect(() => { void load(); }, [load]);
   const refresh = useCallback(async () => { await load(); await onChanged(); }, [load, onChanged]);
@@ -208,7 +208,7 @@ function ScoringGrid({ record, maxScore, scorable, onError, onChanged }: {
       });
       await api(`${BASE}/eval-assessments/${record.id}/items`, { method: 'PUT', body: JSON.stringify({ items: payload }) });
       setDraft({}); await onChanged();
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
     finally { setSaving(false); }
   }
 
@@ -286,7 +286,7 @@ function Conclusion({ record, summary, mayEvaluate, onError, onNotice, onChanged
   async function act(path: string, body: unknown, message: string) {
     onError(null); onNotice(null);
     try { await api(`${BASE}/eval-assessments/${record.id}${path}`, { method: 'POST', body: JSON.stringify(body) }); onNotice(message); await onChanged(); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
 
   return <div className="sign-off">
@@ -342,7 +342,7 @@ function FrameworkList() {
   const load = useCallback(async () => {
     setLoading(true);
     try { setFrameworks(await api<SupplierEvalFramework[]>(`${BASE}/eval-frameworks`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
     finally { setLoading(false); }
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -350,7 +350,7 @@ function FrameworkList() {
   async function submitNew(e: FormEvent) {
     e.preventDefault(); setError(null);
     try { const c = await api<{ id: number }>(`${BASE}/eval-frameworks`, { method: 'POST', body: JSON.stringify(form) }); setForm(emptyFramework); setCreating(false); await load(); setSelectedId(c.id); }
-    catch (err) { setError((err as Error).message); }
+    catch (err) { setError(errorText(err)); }
   }
 
   return <>
@@ -404,7 +404,7 @@ function FrameworkEditor({ id, onClose, onListChanged }: { id: number; onClose: 
 
   const load = useCallback(async () => {
     try { setFramework(await api<SupplierEvalFramework>(`${BASE}/eval-frameworks/${id}`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }, [id]);
   useEffect(() => { void load(); }, [load]);
   const refresh = useCallback(async () => { await load(); await onListChanged(); }, [load, onListChanged]);
@@ -416,17 +416,17 @@ function FrameworkEditor({ id, onClose, onListChanged }: { id: number; onClose: 
   async function setStatus(status: string) {
     setError(null);
     try { await api(`${BASE}/eval-frameworks/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) }); await refresh(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function duplicate() {
     setError(null);
     try { await api(`${BASE}/eval-frameworks/${id}/duplicate`, { method: 'POST', body: JSON.stringify({}) }); await onListChanged(); onClose(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function remove() {
     setError(null);
     try { await api(`${BASE}/eval-frameworks/${id}`, { method: 'DELETE' }); await onListChanged(); onClose(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   return <DetailModal open onClose={onClose} width="wide"
@@ -465,16 +465,16 @@ function QuestionBuilder({ framework, editable, onError, onChanged }: {
     if (!newGroup.trim()) return;
     onError(null);
     try { await api(`${base}/groups`, { method: 'POST', body: JSON.stringify({ groupTitle: newGroup.trim() }) }); setNewGroup(''); await onChanged(); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
-  async function removeGroup(gid: number) { onError(null); try { await api(`${base}/groups/${gid}`, { method: 'DELETE' }); await onChanged(); } catch (e) { onError((e as Error).message); } }
+  async function removeGroup(gid: number) { onError(null); try { await api(`${base}/groups/${gid}`, { method: 'DELETE' }); await onChanged(); } catch (e) { onError(errorText(e)); } }
   async function addElement(groupId: number | 'none') {
     if (!q.elementText.trim()) { onError('A question is required.'); return; }
     onError(null);
     try { await api(`${base}/elements`, { method: 'POST', body: JSON.stringify({ ...q, groupId: groupId === 'none' ? '' : groupId }) }); setQ({ elementText: '', performanceCriteria: '', weight: '1', isCritical: false }); setAddingTo(null); await onChanged(); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
-  async function removeElement(eid: number) { onError(null); try { await api(`${base}/elements/${eid}`, { method: 'DELETE' }); await onChanged(); } catch (e) { onError((e as Error).message); } }
+  async function removeElement(eid: number) { onError(null); try { await api(`${base}/elements/${eid}`, { method: 'DELETE' }); await onChanged(); } catch (e) { onError(errorText(e)); } }
 
   const addForm = (groupId: number | 'none') => <div className="element-add">
     <label className="wide">Question<input autoFocus value={q.elementText} onChange={e => setQ({ ...q, elementText: e.target.value })} placeholder="e.g. Delivers within the agreed lead time" /></label>

@@ -431,7 +431,7 @@ export function monthlyReportsRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/imports', requirePermission('monthly_reports', 'create'), upload.single('file'), (req, res) => {
+  router.post('/imports', requirePermission('monthly_reports', 'import'), upload.single('file'), (req, res) => {
     const reportMonth = parseIntNullable(req.body.reportMonth);
     const reportYear = parseIntNullable(req.body.reportYear);
     if (reportMonth === null || reportMonth < 1 || reportMonth > 12) return res.status(400).json({ error: 'reportMonth is required (1-12)' });

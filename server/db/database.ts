@@ -32,12 +32,62 @@ export function ensureDataDirs() {
   for (const dir of [dataRoot, uploadRoot, evidenceRoot, defaultBackupRoot, configRoot]) fs.mkdirSync(dir, { recursive: true });
 }
 
+/* ==========================================================================
+   The access epoch
+   --------------------------------------------------------------------------
+   Working out what one person may do means reading the access profile, the
+   individual overrides, the position mapping and the module switches, then
+   folding four invariants over every key and action — a dozen queries and
+   several thousand map entries. A single screen asks that question hundreds of
+   times: once per route guard, once per dashboard tile, once for the list of
+   modules the sidebar may show. Rebuilding it for each of them is what made
+   the dashboards take seconds to appear.
+
+   So the resolver caches the map it builds, and this counter is how it knows
+   when to throw it away. Anything the resolver reads bumps it on write.
+
+   The bump is intercepted at the statement rather than called at each write
+   site, because a site that forgot to call it would hand somebody a permission
+   they no longer have — or withhold one they were just granted — and no test
+   would catch it. Here it cannot be forgotten: the statement itself carries
+   the tables it touches.
+   ========================================================================= */
+const ACCESS_INPUT_TABLES = /\b(role_permissions|user_permission_overrides|permissions|positions|staff_position_assignments|system_modules|users|roles)\b/i;
+const IS_WRITE = /^\s*(INSERT|UPDATE|DELETE|REPLACE|CREATE|ALTER|DROP)\b/i;
+let accessEpochValue = 1;
+/** Changes whenever anything the permission resolver reads has been written. */
+export function accessEpoch() { return accessEpochValue; }
+/** Force every cached access decision to be rebuilt (used when the DB is swapped). */
+export function bumpAccessEpoch() { accessEpochValue++; }
+
+function watchAccessInputs(connection: Database.Database) {
+  const originalPrepare = connection.prepare.bind(connection);
+  const originalExec = connection.exec.bind(connection);
+  (connection as { prepare: typeof originalPrepare }).prepare = ((sql: string) => {
+    const statement = originalPrepare(sql);
+    if (!IS_WRITE.test(sql) || !ACCESS_INPUT_TABLES.test(sql)) return statement;
+    const run = statement.run.bind(statement);
+    (statement as { run: typeof run }).run = ((...args: unknown[]) => {
+      const result = run(...args as Parameters<typeof run>);
+      if (result.changes > 0) accessEpochValue++;
+      return result;
+    }) as typeof run;
+    return statement;
+  }) as typeof originalPrepare;
+  (connection as { exec: typeof originalExec }).exec = ((sql: string) => {
+    const result = originalExec(sql);
+    if (IS_WRITE.test(sql) && ACCESS_INPUT_TABLES.test(sql)) accessEpochValue++;
+    return result;
+  }) as typeof originalExec;
+}
+
 export function getDb() {
   if (!db) {
     ensureDataDirs();
     db = new Database(dbPath);
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');
+    watchAccessInputs(db);
     migrate(db);
   }
   return db;
@@ -55,6 +105,8 @@ export function closeDb() {
       db.close();
     } catch { /* already closed */ }
     db = undefined;
+    // A reopened database is a different set of grants until proven otherwise.
+    accessEpochValue++;
   }
 }
 
@@ -6351,7 +6403,65 @@ CREATE INDEX IF NOT EXISTS idx_appraisal_attachments ON appraisal_attachments(ap
     }
   }
 
+  /* ==========================================================================
+     What the dashboards read
+     --------------------------------------------------------------------------
+     Every screen in the system opens on a summary, and a summary is a dozen
+     COUNT(*)s over the tables that grow fastest. `notifications` is the worst
+     of them: one row per person per controlled document, per due activity, per
+     alert — thousands within weeks of going live — and the notification
+     summary alone runs ten counts over it, filtering on status, severity, due
+     date, type and who it is addressed to. Without an index each of those is a
+     full scan of the table, so the dashboard got slower every day the
+     laboratory used it. The same is true of the task queue and the review
+     calendar the dashboards read beside it.
 
+     These are covering indexes for exactly the filters those summaries use.
+     They cost a little on write — a notification is inserted once — and turn
+     the reads, which happen on every page load for every member of staff, from
+     scans into lookups.
+     ========================================================================= */
+  // A column named here may have arrived in a later migration than the table,
+  // so each index is created only once its columns are actually present —
+  // a missing one would abort the migration and take the database with it.
+  {
+    const columnsOf = (table: string) =>
+      new Set((database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(c => c.name));
+    const wanted: Array<[string, string, string[]]> = [
+      ['idx_notifications_status', 'notifications', ['status', 'severity']],
+      ['idx_notifications_due', 'notifications', ['due_date', 'status']],
+      ['idx_notifications_type', 'notifications', ['notification_type', 'status']],
+      ['idx_notifications_module', 'notifications', ['module_key', 'status']],
+      // Covering, in that order: the dashboard's "alerts by module" tile filters
+      // on status and groups by module, and this lets it answer from the index
+      // without touching a row of the table.
+      ['idx_notifications_status_module', 'notifications', ['status', 'module_key']],
+      ['idx_notifications_assignee', 'notifications', ['assigned_to_staff_id', 'status']],
+      ['idx_notifications_user', 'notifications', ['user_id', 'status']],
+      ['idx_task_queue_status', 'user_task_queue', ['status', 'assigned_to_staff_id']],
+      ['idx_task_queue_assignee', 'user_task_queue', ['assigned_to_staff_id', 'status', 'due_date']],
+      ['idx_review_calendar_due', 'review_calendar_items', ['status', 'due_date']],
+      ['idx_audit_logs_created', 'audit_logs', ['created_at']],
+      ['idx_audit_logs_entity', 'audit_logs', ['entity', 'created_at']],
+    ];
+    const tables = new Map<string, Set<string>>();
+    for (const [name, table, cols] of wanted) {
+      if (!tables.has(table)) {
+        const exists = database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+        tables.set(table, exists ? columnsOf(table) : new Set<string>());
+      }
+      const present = tables.get(table)!;
+      if (present.size === 0 || !cols.every(c => present.has(c))) continue;
+      database.exec(`CREATE INDEX IF NOT EXISTS ${name} ON ${table}(${cols.join(', ')})`);
+    }
+  }
+
+  // SQLite plans a query from the statistics it collected the last time it was
+  // asked to. A database that has been running for months without ANALYZE
+  // plans against the shape it had on the day it was created, which is how an
+  // indexed column still ends up scanned. Refreshing it at startup is cheap
+  // and keeps the plans honest as the laboratory's data grows.
+  try { database.exec('ANALYZE'); } catch { /* statistics are an optimisation, not a requirement */ }
 }
 
 /**

@@ -99,7 +99,7 @@ export function equipmentRoutes() {
   });
 
   // Rows are matched by Identifier: existing items are updated, new ones created.
-  router.post('/register/import', requirePermission('equipment.register', 'create'), upload.single('file'), (req, res) => {
+  router.post('/register/import', requirePermission('equipment.register', 'import'), upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the Equipment Register .xlsx file.' });
     try {
       const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
@@ -192,7 +192,7 @@ export function equipmentRoutes() {
   }
   router.get('/maintenance/template', requirePermission('equipment.maintenance', 'export'), (_req, res) => sendWorkbook(res, buildMaintenanceWorkbook(false), 'Equipment_Maintenance_Template.xlsx'));
   router.get('/maintenance/export', requirePermission('equipment.maintenance', 'export'), (_req, res) => sendWorkbook(res, buildMaintenanceWorkbook(true), 'Equipment_Maintenance_Records.xlsx'));
-  router.post('/maintenance/import', requirePermission('equipment.maintenance', 'create'), upload.single('file'), (req, res) => {
+  router.post('/maintenance/import', requirePermission('equipment.maintenance', 'import'), upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded. Attach the Equipment Maintenance .xlsx file.' });
     try {
       const wb = XLSX.read(req.file.buffer, { type: 'buffer' });

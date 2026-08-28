@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts, DetailModal } from '../components/ui';
 import { useModules } from '../hooks/useModules';
-import { api, API_BASE, getToken } from '../services/api';
+import { api, API_BASE, getToken, errorText, apiRead } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import { ComplaintsPage } from './QMSPages';
 import { usePermissions } from '../hooks/usePermissions';
@@ -87,12 +87,12 @@ export function CustomerFocusPage() {
     try {
       const [sum, st, sa, fb, sv, cm, im] = await Promise.all([
         api<CustomerFocusSummary>('/dashboard/customer-focus-summary').catch(() => null),
-        api<CustomerStakeholder[]>('/customer-focus/stakeholders'),
-        api<ServiceAgreement[]>('/customer-focus/service-agreements'),
-        api<CustomerFeedback[]>('/customer-focus/feedback'),
-        api<SatisfactionSurvey[]>('/customer-focus/surveys'),
-        api<CustomerCommunicationLog[]>('/customer-focus/communications'),
-        api<CustomerFocusImportBatch[]>('/customer-focus/imports')
+        apiRead<CustomerStakeholder[]>('/customer-focus/stakeholders', []),
+        apiRead<ServiceAgreement[]>('/customer-focus/service-agreements', []),
+        apiRead<CustomerFeedback[]>('/customer-focus/feedback', []),
+        apiRead<SatisfactionSurvey[]>('/customer-focus/surveys', []),
+        apiRead<CustomerCommunicationLog[]>('/customer-focus/communications', []),
+        apiRead<CustomerFocusImportBatch[]>('/customer-focus/imports', [])
       ]);
       if (sum) setSummary(sum);
       setStakeholders(st); setAgreements(sa); setFeedback(fb); setSurveys(sv); setCommunications(cm); setImports(im);
@@ -101,7 +101,7 @@ export function CustomerFocusPage() {
         api<LaboratoryHandbookEntry[]>('/customer-focus/handbook').catch(() => []),
       ]);
       setAdvisory(adv); setHandbook(hb);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   useEffect(() => { if (isEnabled('customer_focus')) void load(); }, [isEnabled]);
   if (!isEnabled('customer_focus')) return <DisabledModule />;
@@ -112,18 +112,18 @@ export function CustomerFocusPage() {
       setSurveyResponses(await api<SatisfactionSurveyResponse[]>(`/customer-focus/surveys/${id}/responses`));
       setAnalytics(await api<SurveyAnalytics>(`/customer-focus/surveys/${id}/analytics`).catch(() => null));
       setRespForm(r => ({ ...r, answers: {} }));
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function loadAllResponses() {
     try { setAllResponses(await api<SatisfactionSurveyResponse[]>('/customer-focus/responses')); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   useEffect(() => { if (tab === 'Survey Responses' && !selectedSurvey) void loadAllResponses(); }, [tab, selectedSurvey]);
 
   async function loadAgreementPerformance(id: number) {
     try { setPerformance(await api<ServiceAgreementPerformance>(`/customer-focus/service-agreements/${id}/performance`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function submitStakeholder(e: FormEvent) {
@@ -132,9 +132,9 @@ export function CustomerFocusPage() {
       await api('/customer-focus/stakeholders', { method: 'POST', body: JSON.stringify(stakeForm) });
       setStakeForm({ stakeholderName: '', stakeholderType: 'internal_unit', organisation: '', contactPerson: '', email: '', phone: '', address: '', departmentId: '', sectionId: '', notes: '' });
       await load(); setTab('Stakeholders');
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
-  async function toggleStakeholder(id: number) { try { await api(`/customer-focus/stakeholders/${id}/toggle`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError((e as Error).message); } }
+  async function toggleStakeholder(id: number) { try { await api(`/customer-focus/stakeholders/${id}/toggle`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError(errorText(e)); } }
 
   async function submitAgreement(e: FormEvent) {
     e.preventDefault(); setError(null);
@@ -142,10 +142,10 @@ export function CustomerFocusPage() {
       await api('/customer-focus/service-agreements', { method: 'POST', body: JSON.stringify(agreeForm) });
       setAgreeForm({ stakeholderId: '', agreementTitle: '', serviceScope: '', startDate: '', endDate: '', reviewDueDate: '', responsibleStaffId: '', agreedTurnaround: '', reportingFormat: '', notes: '' });
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
-  async function approveAgreement(id: number) { try { await api(`/customer-focus/service-agreements/${id}/approve`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function archiveAgreement(id: number) { try { await api(`/customer-focus/service-agreements/${id}/archive`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError((e as Error).message); } }
+  async function approveAgreement(id: number) { try { await api(`/customer-focus/service-agreements/${id}/approve`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function archiveAgreement(id: number) { try { await api(`/customer-focus/service-agreements/${id}/archive`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError(errorText(e)); } }
 
   async function submitFeedback(e: FormEvent) {
     e.preventDefault(); setError(null);
@@ -153,13 +153,13 @@ export function CustomerFocusPage() {
       await api('/customer-focus/feedback', { method: 'POST', body: JSON.stringify(feedbackForm) });
       setFeedbackForm({ feedbackDate: '', feedbackType: 'concern', sourceChannel: '', stakeholderId: '', contactName: '', contactDetail: '', title: '', description: '', urgency: 'medium', sentiment: '', assignedToStaffId: '', followUpDueDate: '' });
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
-  async function escalateToComplaint(id: number) { try { await api(`/customer-focus/feedback/${id}/create-complaint`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function feedbackCreateAction(id: number) { const title = prompt('Action title?'); if (!title) return; try { await api(`/customer-focus/feedback/${id}/create-action`, { method: 'POST', body: JSON.stringify({ title }) }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function feedbackCreateNc(id: number) { try { await api(`/customer-focus/feedback/${id}/create-nc`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function feedbackCreateCapa(id: number) { try { await api(`/customer-focus/feedback/${id}/create-capa`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function closeFeedback(id: number) { const summary = prompt('Resolution summary (optional)?') || ''; try { await api(`/customer-focus/feedback/${id}/close`, { method: 'POST', body: JSON.stringify({ resolutionSummary: summary }) }); await load(); } catch (e) { setError((e as Error).message); } }
+  async function escalateToComplaint(id: number) { try { await api(`/customer-focus/feedback/${id}/create-complaint`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function feedbackCreateAction(id: number) { const title = prompt('Action title?'); if (!title) return; try { await api(`/customer-focus/feedback/${id}/create-action`, { method: 'POST', body: JSON.stringify({ title }) }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function feedbackCreateNc(id: number) { try { await api(`/customer-focus/feedback/${id}/create-nc`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function feedbackCreateCapa(id: number) { try { await api(`/customer-focus/feedback/${id}/create-capa`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function closeFeedback(id: number) { const summary = prompt('Resolution summary (optional)?') || ''; try { await api(`/customer-focus/feedback/${id}/close`, { method: 'POST', body: JSON.stringify({ resolutionSummary: summary }) }); await load(); } catch (e) { setError(errorText(e)); } }
   async function printFeedback(id: number) {
     try {
       const token = getToken();
@@ -169,7 +169,7 @@ export function CustomerFocusPage() {
       const w = window.open('', '_blank');
       if (!w) { setError('Pop-up blocked. Allow pop-ups to open the print dialog.'); return; }
       w.document.open(); w.document.write(html); w.document.close();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function submitSurvey(e: FormEvent) {
@@ -178,7 +178,7 @@ export function CustomerFocusPage() {
       await api('/customer-focus/surveys', { method: 'POST', body: JSON.stringify(surveyForm) });
       setSurveyForm({ surveyTitle: '', surveyType: 'clinician_satisfaction', description: '', audience: '', periodStart: '', periodEnd: '' });
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   async function addQuestion(e: FormEvent) {
     e.preventDefault(); setError(null);
@@ -187,10 +187,10 @@ export function CustomerFocusPage() {
       await api(`/customer-focus/surveys/${selectedSurvey.id}/questions`, { method: 'POST', body: JSON.stringify(questionForm) });
       setQuestionForm({ questionText: '', questionType: 'scale', scaleMin: '1', scaleMax: '5', optionsText: '', isRequired: false, displayOrder: '0', questionCode: '' });
       await openSurvey(selectedSurvey.id);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
-  async function approveSurvey(id: number) { try { await api(`/customer-focus/surveys/${id}/approve`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selectedSurvey?.id === id) await openSurvey(id); } catch (e) { setError((e as Error).message); } }
-  async function closeSurvey(id: number) { try { await api(`/customer-focus/surveys/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selectedSurvey?.id === id) await openSurvey(id); } catch (e) { setError((e as Error).message); } }
+  async function approveSurvey(id: number) { try { await api(`/customer-focus/surveys/${id}/approve`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selectedSurvey?.id === id) await openSurvey(id); } catch (e) { setError(errorText(e)); } }
+  async function closeSurvey(id: number) { try { await api(`/customer-focus/surveys/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); await load(); if (selectedSurvey?.id === id) await openSurvey(id); } catch (e) { setError(errorText(e)); } }
 
   async function submitResponse(e: FormEvent) {
     e.preventDefault(); setError(null);
@@ -200,7 +200,7 @@ export function CustomerFocusPage() {
       await api(`/customer-focus/surveys/${selectedSurvey.id}/responses`, { method: 'POST', body: JSON.stringify({ ...respForm, stakeholderId: respForm.stakeholderId || null, answers }) });
       setRespForm({ responseDate: '', respondentName: '', respondentRole: '', sourceChannel: '', stakeholderId: '', overallComment: '', answers: {} });
       await openSurvey(selectedSurvey.id);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function submitCommunication(e: FormEvent) {
@@ -209,10 +209,10 @@ export function CustomerFocusPage() {
       await api('/customer-focus/communications', { method: 'POST', body: JSON.stringify(commForm) });
       setCommForm({ communicationDate: '', communicationType: 'update', direction: 'outbound', channel: '', subject: '', messageSummary: '', stakeholderId: '', feedbackId: '', contactName: '', contactDetail: '', followUpDueDate: '' });
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
-  async function commCreateAction(id: number) { const title = prompt('Action title?'); if (!title) return; try { await api(`/customer-focus/communications/${id}/create-action`, { method: 'POST', body: JSON.stringify({ title }) }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function closeComm(id: number) { try { await api(`/customer-focus/communications/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError((e as Error).message); } }
+  async function commCreateAction(id: number) { const title = prompt('Action title?'); if (!title) return; try { await api(`/customer-focus/communications/${id}/create-action`, { method: 'POST', body: JSON.stringify({ title }) }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function closeComm(id: number) { try { await api(`/customer-focus/communications/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError(errorText(e)); } }
 
   async function submitImport(e: FormEvent) {
     e.preventDefault(); setError(null);
@@ -227,12 +227,12 @@ export function CustomerFocusPage() {
       if (!response.ok) throw new Error((await response.json().catch(() => ({ error: response.statusText }))).error ?? response.statusText);
       setImportForm({ importType: 'feedback', notes: '', file: null });
       await load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
-  async function processImport(id: number) { try { await api(`/customer-focus/imports/${id}/process`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError((e as Error).message); } }
+  async function processImport(id: number) { try { await api(`/customer-focus/imports/${id}/process`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError(errorText(e)); } }
 
-  async function submitAdvisory(e: FormEvent) { e.preventDefault(); setError(null); try { await api('/customer-focus/advisory', { method: 'POST', body: JSON.stringify(advForm) }); setAdvForm({ serviceDate: '', serviceType: '', requester: '', stakeholderId: '', providedByStaffId: '', subject: '', adviceSummary: '', communicationChannel: '', followUpRequired: false, followUpDueDate: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitHandbook(e: FormEvent) { e.preventDefault(); setError(null); try { await api('/customer-focus/handbook', { method: 'POST', body: JSON.stringify(hbForm) }); setHbForm({ section: '', title: '', content: '', version: '', effectiveDate: '', reviewDate: '', status: 'active', displayOrder: '0' }); await load(); } catch (e) { setError((e as Error).message); } }
+  async function submitAdvisory(e: FormEvent) { e.preventDefault(); setError(null); try { await api('/customer-focus/advisory', { method: 'POST', body: JSON.stringify(advForm) }); setAdvForm({ serviceDate: '', serviceType: '', requester: '', stakeholderId: '', providedByStaffId: '', subject: '', adviceSummary: '', communicationChannel: '', followUpRequired: false, followUpDueDate: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitHandbook(e: FormEvent) { e.preventDefault(); setError(null); try { await api('/customer-focus/handbook', { method: 'POST', body: JSON.stringify(hbForm) }); setHbForm({ section: '', title: '', content: '', version: '', effectiveDate: '', reviewDate: '', status: 'active', displayOrder: '0' }); await load(); } catch (e) { setError(errorText(e)); } }
   const pretty = (s?: string) => s ? s.replace(/_/g, ' ') : '—';
 
   const tabs = ['Dashboard', ...(isEnabled('complaints') ? ['Complaints'] : []), 'Advisory Services', 'Laboratory Handbook', 'Stakeholders', 'New Stakeholder', 'Service Agreements', 'Feedback Intake', 'Satisfaction Surveys', 'Survey Responses', 'Communication Log', 'Imports', 'Reports'];
@@ -527,7 +527,7 @@ export function CustomerFocusPage() {
       <p><small>Supported import types: feedback, survey_responses, stakeholders, other. CSV / XLSX. Stakeholder import expects columns like stakeholderName, stakeholderType, organisation, email. Feedback import expects feedbackDate, feedbackType, title, description.</small></p>
       {/* Reading the batch register is one right; putting a file into it is
           another. A "View" user sees the history and not the upload form. */}
-      {can('customer_focus.imports', 'create') && <form className="form-grid" onSubmit={submitImport}>
+      {can('customer_focus.imports', 'import') && <form className="form-grid" onSubmit={submitImport}>
         <label>Import type<select value={importForm.importType} onChange={e => setImportForm({ ...importForm, importType: e.target.value })}>{IMPORT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
         <label>File<input type="file" accept=".csv,.xlsx,.xls" onChange={e => setImportForm({ ...importForm, file: e.target.files?.[0] ?? null })} required /></label>
         <label>Notes<textarea value={importForm.notes} onChange={e => setImportForm({ ...importForm, notes: e.target.value })} /></label>

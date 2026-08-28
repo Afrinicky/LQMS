@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Lock, LockOpen, TrendingUp } from 'lucide-react';
-import { api } from '../../services/api';
+import { api, errorText } from '../../services/api';
 import { DetailModal, KpiStrip, ChartCard, Sparkline, BarChart, RegisterSearch, CHART_COLORS } from '../../components/ui';
 import { useCappedRows } from '../../hooks/useCappedRows';
 import { STOCK_STATUS_LABELS, VEN_CLASSES, VEN_LABELS, SERVICE_LEVEL_Z, type StockStatus } from '../../../shared/constants/stockControl';
@@ -56,7 +56,7 @@ export function ForecastingPanel({ canEdit, refreshKey, onApplied }: { canEdit: 
     setLoading(true);
     api<{ rows: Advice[] }>(`/supplier-inventory/forecast?months=${months}`)
       .then(d => setRows(d.rows))
-      .catch(e => setError((e as Error).message))
+      .catch(e => setError(errorText(e)))
       .finally(() => setLoading(false));
   };
   useEffect(load, [refreshKey, months]);
@@ -91,7 +91,7 @@ export function ForecastingPanel({ canEdit, refreshKey, onApplied }: { canEdit: 
         + (r.skipped.length ? `. ${r.skipped.length} skipped — ${r.skipped[0].reason}.` : '.'));
       setPicked(new Set());
       load(); onApplied();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(false); }
   }
 
@@ -220,7 +220,7 @@ function PlanningPanel({ advice, canEdit, onClose, onSaved }: {
     try {
       await api(`/supplier-inventory/planning/${it.id}`, { method: 'PUT', body: JSON.stringify(form) });
       onSaved();
-    } catch (err) { setError((err as Error).message); }
+    } catch (err) { setError(errorText(err)); }
     finally { setBusy(''); }
   }
   async function applyProposed() {
@@ -228,7 +228,7 @@ function PlanningPanel({ advice, canEdit, onClose, onSaved }: {
     try {
       await api('/supplier-inventory/forecast/apply', { method: 'POST', body: JSON.stringify({ itemIds: [it.id] }) });
       onSaved();
-    } catch (err) { setError((err as Error).message); }
+    } catch (err) { setError(errorText(err)); }
     finally { setBusy(''); }
   }
 

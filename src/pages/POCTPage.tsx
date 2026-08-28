@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts, NumberField } from '../components/ui';
 import { useModules } from '../hooks/useModules';
-import { api, API_BASE, getToken } from '../services/api';
+import { api, API_BASE, getToken, errorText, apiRead } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import { usePermissions } from '../hooks/usePermissions';
 import PermissionTabs from '../components/PermissionTabs';
@@ -86,22 +86,22 @@ export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
     try {
       const [sum, s, d, t, a, rl, qm, qr, eq, mn, inc, rv] = await Promise.all([
         api<PoctSummary>('/dashboard/poct-summary').catch(() => null),
-        api<PoctSite[]>('/poct/sites'),
-        api<PoctDevice[]>('/poct/devices'),
-        api<PoctTest[]>('/poct/tests'),
-        api<PoctOperatorAuthorization[]>('/poct/authorizations'),
-        api<PoctReagentLot[]>('/poct/reagent-lots'),
-        api<PoctQcMaterial[]>('/poct/qc-materials'),
-        api<PoctQcResult[]>('/poct/qc-results'),
-        api<PoctEqaEvent[]>('/poct/eqa-events'),
-        api<PoctMaintenanceLog[]>('/poct/maintenance'),
-        api<PoctIncident[]>('/poct/incidents'),
-        api<PoctMonthlyReview[]>('/poct/monthly-reviews')
+        apiRead<PoctSite[]>('/poct/sites', []),
+        apiRead<PoctDevice[]>('/poct/devices', []),
+        apiRead<PoctTest[]>('/poct/tests', []),
+        apiRead<PoctOperatorAuthorization[]>('/poct/authorizations', []),
+        apiRead<PoctReagentLot[]>('/poct/reagent-lots', []),
+        apiRead<PoctQcMaterial[]>('/poct/qc-materials', []),
+        apiRead<PoctQcResult[]>('/poct/qc-results', []),
+        apiRead<PoctEqaEvent[]>('/poct/eqa-events', []),
+        apiRead<PoctMaintenanceLog[]>('/poct/maintenance', []),
+        apiRead<PoctIncident[]>('/poct/incidents', []),
+        apiRead<PoctMonthlyReview[]>('/poct/monthly-reviews', [])
       ]);
       if (sum) setSummary(sum);
       setSites(s); setDevices(d); setTests(t); setAuthorizations(a); setReagentLots(rl);
       setQcMaterials(qm); setQcResults(qr); setEqaEvents(eq); setMaintenance(mn); setIncidents(inc); setReviews(rv);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   useEffect(() => { if (embedded || isEnabled('poct')) void load(); }, [isEnabled]);
   if (!embedded && !isEnabled('poct')) return <DisabledModule />;
@@ -117,7 +117,7 @@ export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
       const w = window.open('', '_blank');
       if (!w) { setError('Pop-up blocked. Allow pop-ups to open the print dialog.'); return; }
       w.document.open(); w.document.write(html); w.document.close();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function loadTrend() {
@@ -126,43 +126,43 @@ export function POCTPage({ embedded = false }: { embedded?: boolean } = {}) {
       const params = new URLSearchParams({ deviceId: trendFilter.deviceId, testId: trendFilter.testId });
       if (trendFilter.materialId) params.set('materialId', trendFilter.materialId);
       setTrendData(await api(`/poct/qc-trend?${params.toString()}`));
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
-  async function loadActions() { try { setPoctActions(await api<any[]>('/poct/actions')); } catch (e) { setError((e as Error).message); } }
+  async function loadActions() { try { setPoctActions(await api<any[]>('/poct/actions')); } catch (e) { setError(errorText(e)); } }
   useEffect(() => { if (tab === 'Reports' && (embedded || isEnabled('poct'))) void loadActions(); }, [tab, isEnabled]);
 
-  async function submitSite(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/poct/sites', siteForm); setSiteForm({ siteCode: '', siteName: '', departmentId: '', sectionId: '', locationId: '', serviceArea: '', responsibleStaffId: '', contactPerson: '', notes: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function toggleSite(id: number) { try { await post(`/poct/sites/${id}/toggle`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitDevice(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/poct/devices', deviceForm); setDeviceForm({ siteId: '', deviceCode: '', deviceName: '', deviceType: '', manufacturer: '', model: '', serialNumber: '', testMenuSummary: '', installationDate: '', nextServiceDue: '', notes: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function setDeviceStatus(id: number, status: string) { try { await post(`/poct/devices/${id}/status`, { status }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitTest(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/poct/tests', testForm); setTestForm({ testCode: '', testName: '', sampleType: '', resultUnit: '', methodSummary: '', deviceType: '', clinicalArea: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function toggleTest(id: number) { try { await post(`/poct/tests/${id}/toggle`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitAuth(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/poct/authorizations', authForm); setAuthForm({ staffId: '', siteId: '', deviceId: '', testId: '', authorizationLevel: 'perform', authorizedDate: '', expiryDate: '', restrictions: '', competencyAssessmentId: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function approveAuth(id: number) { try { await post(`/poct/authorizations/${id}/approve`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function revokeAuth(id: number) { const reason = prompt('Reason for revocation?') || ''; try { await post(`/poct/authorizations/${id}/revoke`, { reason }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitReagent(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/poct/reagent-lots', reagentForm); setReagentForm({ lotNumber: '', reagentName: '', deviceId: '', testId: '', manufacturer: '', receivedDate: '', openedDate: '', expiryDate: '', storageCondition: '', status: 'received' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitQcMaterial(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/poct/qc-materials', qcMaterialForm); setQcMaterialForm({ materialCode: '', materialName: '', deviceId: '', testId: '', lotNumber: '', manufacturer: '', expiryDate: '', targetValue: '', acceptableLow: '', acceptableHigh: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitQcResult(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/poct/qc-results', qcResultForm); setQcResultForm({ qcDate: '', qcTime: '', siteId: '', deviceId: '', testId: '', qcMaterialId: '', reagentLotId: '', resultValue: '', expectedResult: '', interpretation: '', immediateAction: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function reviewQc(id: number) { try { await post(`/poct/qc-results/${id}/review`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function qcCreateNc(id: number) { try { await post(`/poct/qc-results/${id}/create-nc`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function qcCreateCapa(id: number) { try { await post(`/poct/qc-results/${id}/create-capa`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitEqa(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/poct/eqa-events', eqaForm); setEqaForm({ siteId: '', deviceId: '', testId: '', eqaProgramId: '', cycleName: '', receivedDate: '', dueDate: '', submittedDate: '', resultReceivedDate: '', performanceStatus: 'pending', findings: '', correctiveActionRequired: false, responsibleStaffId: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function eqaCreateNc(id: number) { try { await post(`/poct/eqa-events/${id}/create-nc`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function eqaCreateCapa(id: number) { try { await post(`/poct/eqa-events/${id}/create-capa`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function closeEqa(id: number) { try { await post(`/poct/eqa-events/${id}/close`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitMaint(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/poct/maintenance', maintForm); setMaintForm({ siteId: '', deviceId: '', maintenanceDate: '', maintenanceType: 'daily_check', description: '', outcome: '', nextDueDate: '', performedByStaffId: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function closeMaint(id: number) { try { await post(`/poct/maintenance/${id}/close`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitIncident(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/poct/incidents', incidentForm); setIncidentForm({ incidentDate: '', siteId: '', deviceId: '', testId: '', title: '', description: '', immediateAction: '', severity: 'medium', outcome: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function incidentCreateAction(id: number) { const title = prompt('Action title?'); if (!title) return; try { await post(`/poct/incidents/${id}/create-action`, { title }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function incidentCreateNc(id: number) { try { await post(`/poct/incidents/${id}/create-nc`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function incidentCreateCapa(id: number) { try { await post(`/poct/incidents/${id}/create-capa`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function closeIncident(id: number) { const outcome = prompt('Outcome summary?') || ''; try { await post(`/poct/incidents/${id}/close`, { outcome }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitReview(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/poct/monthly-reviews', reviewForm); setReviewForm({ reviewMonth: new Date().getMonth() + 1, reviewYear: new Date().getFullYear(), siteId: '', summary: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function generateReviewSummary(id: number) { try { await post(`/poct/monthly-reviews/${id}/generate-summary`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function reviewReview(id: number) { try { await post(`/poct/monthly-reviews/${id}/review`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function approveReview(id: number) { try { await post(`/poct/monthly-reviews/${id}/approve`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function closeReview(id: number) { try { await post(`/poct/monthly-reviews/${id}/close`, {}); await load(); } catch (e) { setError((e as Error).message); } }
+  async function submitSite(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/poct/sites', siteForm); setSiteForm({ siteCode: '', siteName: '', departmentId: '', sectionId: '', locationId: '', serviceArea: '', responsibleStaffId: '', contactPerson: '', notes: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function toggleSite(id: number) { try { await post(`/poct/sites/${id}/toggle`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitDevice(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/poct/devices', deviceForm); setDeviceForm({ siteId: '', deviceCode: '', deviceName: '', deviceType: '', manufacturer: '', model: '', serialNumber: '', testMenuSummary: '', installationDate: '', nextServiceDue: '', notes: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function setDeviceStatus(id: number, status: string) { try { await post(`/poct/devices/${id}/status`, { status }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitTest(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/poct/tests', testForm); setTestForm({ testCode: '', testName: '', sampleType: '', resultUnit: '', methodSummary: '', deviceType: '', clinicalArea: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function toggleTest(id: number) { try { await post(`/poct/tests/${id}/toggle`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitAuth(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/poct/authorizations', authForm); setAuthForm({ staffId: '', siteId: '', deviceId: '', testId: '', authorizationLevel: 'perform', authorizedDate: '', expiryDate: '', restrictions: '', competencyAssessmentId: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function approveAuth(id: number) { try { await post(`/poct/authorizations/${id}/approve`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function revokeAuth(id: number) { const reason = prompt('Reason for revocation?') || ''; try { await post(`/poct/authorizations/${id}/revoke`, { reason }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitReagent(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/poct/reagent-lots', reagentForm); setReagentForm({ lotNumber: '', reagentName: '', deviceId: '', testId: '', manufacturer: '', receivedDate: '', openedDate: '', expiryDate: '', storageCondition: '', status: 'received' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitQcMaterial(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/poct/qc-materials', qcMaterialForm); setQcMaterialForm({ materialCode: '', materialName: '', deviceId: '', testId: '', lotNumber: '', manufacturer: '', expiryDate: '', targetValue: '', acceptableLow: '', acceptableHigh: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitQcResult(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/poct/qc-results', qcResultForm); setQcResultForm({ qcDate: '', qcTime: '', siteId: '', deviceId: '', testId: '', qcMaterialId: '', reagentLotId: '', resultValue: '', expectedResult: '', interpretation: '', immediateAction: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function reviewQc(id: number) { try { await post(`/poct/qc-results/${id}/review`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function qcCreateNc(id: number) { try { await post(`/poct/qc-results/${id}/create-nc`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function qcCreateCapa(id: number) { try { await post(`/poct/qc-results/${id}/create-capa`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitEqa(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/poct/eqa-events', eqaForm); setEqaForm({ siteId: '', deviceId: '', testId: '', eqaProgramId: '', cycleName: '', receivedDate: '', dueDate: '', submittedDate: '', resultReceivedDate: '', performanceStatus: 'pending', findings: '', correctiveActionRequired: false, responsibleStaffId: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function eqaCreateNc(id: number) { try { await post(`/poct/eqa-events/${id}/create-nc`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function eqaCreateCapa(id: number) { try { await post(`/poct/eqa-events/${id}/create-capa`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function closeEqa(id: number) { try { await post(`/poct/eqa-events/${id}/close`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitMaint(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/poct/maintenance', maintForm); setMaintForm({ siteId: '', deviceId: '', maintenanceDate: '', maintenanceType: 'daily_check', description: '', outcome: '', nextDueDate: '', performedByStaffId: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function closeMaint(id: number) { try { await post(`/poct/maintenance/${id}/close`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitIncident(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/poct/incidents', incidentForm); setIncidentForm({ incidentDate: '', siteId: '', deviceId: '', testId: '', title: '', description: '', immediateAction: '', severity: 'medium', outcome: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function incidentCreateAction(id: number) { const title = prompt('Action title?'); if (!title) return; try { await post(`/poct/incidents/${id}/create-action`, { title }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function incidentCreateNc(id: number) { try { await post(`/poct/incidents/${id}/create-nc`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function incidentCreateCapa(id: number) { try { await post(`/poct/incidents/${id}/create-capa`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function closeIncident(id: number) { const outcome = prompt('Outcome summary?') || ''; try { await post(`/poct/incidents/${id}/close`, { outcome }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitReview(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/poct/monthly-reviews', reviewForm); setReviewForm({ reviewMonth: new Date().getMonth() + 1, reviewYear: new Date().getFullYear(), siteId: '', summary: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function generateReviewSummary(id: number) { try { await post(`/poct/monthly-reviews/${id}/generate-summary`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function reviewReview(id: number) { try { await post(`/poct/monthly-reviews/${id}/review`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function approveReview(id: number) { try { await post(`/poct/monthly-reviews/${id}/approve`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function closeReview(id: number) { try { await post(`/poct/monthly-reviews/${id}/close`, {}); await load(); } catch (e) { setError(errorText(e)); } }
 
   const tabs = ['Dashboard', 'Sites', 'Devices', 'Test Menu', 'Operator Authorizations', 'Reagent Lots', 'QC Monitoring', 'EQA Monitoring', 'Maintenance Logs', 'Incidents', 'Monthly Reviews', 'Reports'].filter(name => !embedded || name !== 'Dashboard');
 

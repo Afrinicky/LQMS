@@ -71,7 +71,34 @@ function lookup(method, clientPath) {
 
 function walk(d,acc=[]){for(const e of fs.readdirSync(d,{withFileTypes:true})){const p=path.join(d,e.name);if(e.isDirectory())walk(p,acc);else if(/\.tsx$/.test(e.name))acc.push(p);}return acc;}
 
+
+// Does holding `asked` guarantee holding `needed`? A gate that is STRICTER than
+// the endpoint behind it is a deliberate choice, not a hole — the button is
+// simply offered to fewer people than the server would accept. A gate that is
+// LOOSER is the bug: it shows a control to somebody the server will refuse.
+//
+// Two things make the guarantee:
+//   · same area — every access level that grants `asked` also grants `needed`;
+//   · a feature vs its module — any right on a feature implies view on the
+//     module, because view is the floor and a module is the union of its
+//     features.
+const LEVEL_ACTIONS = {
+  none: [], view: ['view','print'], contribute: ['view','print','create'],
+  manage: ['view','print','create','edit','export'],
+  full: ['view','print','create','edit','export','import','void_archive','approve'],
+};
+function implies(asked, needed) {
+  if (asked === needed) return true;
+  const [ak, aa] = asked.split(':'); const [nk, na] = needed.split(':');
+  if (ak === nk) {
+    const levels = Object.values(LEVEL_ACTIONS).filter(as => as.includes(aa));
+    return levels.length > 0 && levels.every(as => as.includes(na));
+  }
+  return ak.startsWith(nk + '.') && na === 'view';
+}
+
 const out = [];
+const misgated = [];
 for (const f of walk('src')) {
   const src = fs.readFileSync(f,'utf8');
   const lines = src.split('\n');
@@ -93,7 +120,6 @@ for (const f of walk('src')) {
     for (const w of writerCalls.keys()) if (new RegExp(`[^\\w$]${w}\\s*[(),}]|=\\{${w}\\}`).test(line)) { fn = w; break; }
     if (!fn) return;
     const ctx = lines.slice(Math.max(0,i-3), i+1).join('\n');
-    if (/\bcan\(|\bcanView\(|\bmay[A-Z]\w*|\bcan[A-Z]\w*|<Can\b|isAdmin|editable|permitted/.test(ctx)) return;
     const gates = new Set();
     for (const c of writerCalls.get(fn)) {
       const r = lookup(c.method, c.path);
@@ -101,15 +127,38 @@ for (const f of walk('src')) {
       else if (r) gates.add(`(${r.action ?? 'unguarded'})`);
       else gates.add('(?)');
     }
+    const guarded = /\bcan\(|\bcanView\(|\bmay[A-Z]\w*|\bcan[A-Z]\w*|<Can\b|isAdmin|editable|permitted/.test(ctx);
+    if (guarded) {
+      // A gate that is present but asks the wrong question is worse than none:
+      // it reads as deliberate. Only literal `can('key','action')` gates can be
+      // compared — a derived boolean (canEdit, mayImport) is decided elsewhere.
+      const derived = /\bcanView\(|\bmay[A-Z]\w*|\bcan[A-Z]\w*|<Can\b|isAdmin|editable|permitted/.test(line)
+        // A key held in a constant (`can(ENV, 'import')`) cannot be compared here.
+        || /\bcan\(\s*[A-Za-z_$]/.test(line);
+      if (derived) return;
+      // Only the gate ON the control's own line: a neighbour's gate says
+      // nothing about this one.
+      const asked = new Set([...line.matchAll(/can\(\s*'([^']+)'\s*,\s*'([^']+)'\s*\)/g)].map(m => `${m[1]}:${m[2]}`));
+      if (asked.size === 0) return;
+      const exact = [...gates].filter(g => !g.startsWith('('));
+      if (exact.length === 0) return;
+      const missing = exact.filter(g => ![...asked].some(a => implies(a, g)));
+      if (missing.length === 0) return;
+      misgated.push({ file:f, line:i+1, fn, asked:[...asked], needs: missing, text: line.trim().slice(0,90) });
+      return;
+    }
     out.push({ file:f, line:i+1, fn, gates:[...gates], text: line.trim().slice(0,90) });
   });
 }
 const resolved = out.filter(o=>o.gates.every(g=>!g.startsWith('(')));
-console.log(`${out.length} ungated controls; ${resolved.length} resolve to an exact gate\n`);
+console.log(`${out.length} ungated controls; ${resolved.length} resolve to an exact gate`);
+console.log(`${misgated.length} controls carry a gate that asks for the wrong right\n`);
+for (const m of misgated) console.log(`  ${m.file}:${m.line}  asks ${m.asked.join(' + ')} — server wants ${m.needs.join(' + ')}\n      ${m.text}`);
+if (misgated.length) console.log('');
 const byFile={}; for(const o of out)(byFile[o.file]??=[]).push(o);
 for (const [f,rs] of Object.entries(byFile).sort((a,b)=>b[1].length-a[1].length)) {
   const res = rs.filter(r=>r.gates.every(g=>!g.startsWith('(')));
   console.log(`${String(rs.length).padStart(3)} (${res.length} exact)  ${f}`);
 }
 fs.writeFileSync('/tmp/sechlims-ungated-controls.json', JSON.stringify(out, null, 1));
-if (resolved.length > 0) process.exit(1);
+if (resolved.length > 0 || misgated.length > 0) process.exit(1);

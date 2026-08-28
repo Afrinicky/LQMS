@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, DetailModal } from '../components/ui';
 import { useModules } from '../hooks/useModules';
-import { api, API_BASE, getToken } from '../services/api';
+import { api, API_BASE, getToken, errorText, apiRead } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import { LinkedRecordsPanel } from '../components/LinkedRecordsPanel';
 import { usePermissions } from '../hooks/usePermissions';
@@ -62,21 +62,21 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
     try {
       const [sum, t, r, pj, ep, ar, rl, rr, bc, ic, s] = await Promise.all([
         api<RecordsReportsSummary>('/dashboard/records-reports-summary').catch(() => null),
-        api<ReportTemplate[]>('/records-reports/templates'),
-        api<ReportRequest[]>('/records-reports/reports'),
-        api<PrintJob[]>('/records-reports/print-jobs'),
-        api<EvidencePack[]>('/records-reports/evidence-packs'),
-        api<AuditTrailReview[]>('/records-reports/audit-reviews'),
-        api<RecordRetentionRule[]>('/records-reports/retention-rules'),
-        api<RecordRetentionReview[]>('/records-reports/retention-reviews'),
-        api<BackupRestoreCheck[]>('/records-reports/backup-checks'),
-        api<DataIntegrityCheck[]>('/records-reports/data-integrity-checks'),
+        apiRead<ReportTemplate[]>('/records-reports/templates', []),
+        apiRead<ReportRequest[]>('/records-reports/reports', []),
+        apiRead<PrintJob[]>('/records-reports/print-jobs', []),
+        apiRead<EvidencePack[]>('/records-reports/evidence-packs', []),
+        apiRead<AuditTrailReview[]>('/records-reports/audit-reviews', []),
+        apiRead<RecordRetentionRule[]>('/records-reports/retention-rules', []),
+        apiRead<RecordRetentionReview[]>('/records-reports/retention-reviews', []),
+        apiRead<BackupRestoreCheck[]>('/records-reports/backup-checks', []),
+        apiRead<DataIntegrityCheck[]>('/records-reports/data-integrity-checks', []),
         api<Staff[]>('/staff').catch(() => [])
       ]);
       if (sum) setSummary(sum);
       setTemplates(t); setReports(r); setPrintJobs(pj); setEvidencePacks(ep); setAuditReviews(ar);
       setRetentionRules(rl); setRetentionReviews(rr); setBackupChecks(bc); setIntegrityChecks(ic); setStaff(s);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   useEffect(() => { if (embedded || isEnabled('records_reports')) void load(); }, [isEnabled]);
   if (!embedded && !isEnabled('records_reports')) return <DisabledModule />;
@@ -87,51 +87,51 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
     try {
       setAuditRows(await api<AuditLogRow[]>(`/records-reports/audit-trail?${params.toString()}`));
       setAuditSummary(await api<AuditTrailSummary>(`/records-reports/audit-trail/summary?${params.toString()}`));
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function openPack(id: number) {
     try { setSelectedPack(await api<EvidencePack>(`/records-reports/evidence-packs/${id}`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function submitTemplate(e: FormEvent) {
     e.preventDefault(); setError(null);
     try { await api('/records-reports/templates', { method: 'POST', body: JSON.stringify(templateForm) }); setTemplateForm({ templateName: '', templateType: 'list', moduleKey: '', outputFormat: 'html', description: '' }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
-  async function toggleTemplate(id: number) { try { await api(`/records-reports/templates/${id}/toggle`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError((e as Error).message); } }
+  async function toggleTemplate(id: number) { try { await api(`/records-reports/templates/${id}/toggle`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError(errorText(e)); } }
 
   async function submitReport(e: FormEvent) {
     e.preventDefault(); setError(null);
     try { await api('/records-reports/reports', { method: 'POST', body: JSON.stringify(reportForm) }); setReportForm({ reportTitle: '', moduleKey: 'actions', dateFrom: '', dateTo: '', filterJson: '' }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
-  async function generateReport(id: number) { try { await api(`/records-reports/reports/${id}/generate`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function reviewReport(id: number) { try { await api(`/records-reports/reports/${id}/review`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function approveReport(id: number) { try { await api(`/records-reports/reports/${id}/approve`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function exportReport(id: number, format: string) { try { const r = await api<{ exportNumber: string; fileName: string; rowCount: number }>(`/records-reports/reports/${id}/export`, { method: 'POST', body: JSON.stringify({ format }) }); alert(`Exported ${r.exportNumber}: ${r.fileName} · ${r.rowCount} row(s)`); await load(); } catch (e) { setError((e as Error).message); } }
+  async function generateReport(id: number) { try { await api(`/records-reports/reports/${id}/generate`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function reviewReport(id: number) { try { await api(`/records-reports/reports/${id}/review`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function approveReport(id: number) { try { await api(`/records-reports/reports/${id}/approve`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function exportReport(id: number, format: string) { try { const r = await api<{ exportNumber: string; fileName: string; rowCount: number }>(`/records-reports/reports/${id}/export`, { method: 'POST', body: JSON.stringify({ format }) }); alert(`Exported ${r.exportNumber}: ${r.fileName} · ${r.rowCount} row(s)`); await load(); } catch (e) { setError(errorText(e)); } }
 
   async function submitPrint(e: FormEvent) {
     e.preventDefault(); setError(null);
     try { await api('/records-reports/print-jobs', { method: 'POST', body: JSON.stringify(printForm) }); setPrintForm({ moduleKey: '', recordType: '', recordId: '', printTitle: '', printPurpose: '', controlledCopy: false, copyNumber: '', watermark: '' }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function submitPack(e: FormEvent) {
     e.preventDefault(); setError(null);
     try { await api('/records-reports/evidence-packs', { method: 'POST', body: JSON.stringify(packForm) }); setPackForm({ packTitle: '', packPurpose: '', dateFrom: '', dateTo: '', notes: '' }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function addPackItem(e: FormEvent) {
     e.preventDefault(); setError(null); if (!selectedPack) return;
     try { await api(`/records-reports/evidence-packs/${selectedPack.id}/items`, { method: 'POST', body: JSON.stringify(packItemForm) }); setPackItemForm({ moduleKey: '', recordType: '', recordId: '', itemTitle: '', itemSummary: '' }); await openPack(selectedPack.id); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function removePackItem(itemId: number) {
     if (!selectedPack) return;
     try { await api(`/records-reports/evidence-packs/${selectedPack.id}/items/${itemId}`, { method: 'DELETE' }); await openPack(selectedPack.id); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function openPackPrint(id: number) {
     try {
@@ -142,60 +142,60 @@ export function RecordsReportsPage({ embedded = false }: { embedded?: boolean } 
       const w = window.open('', '_blank');
       if (!w) { setError('Pop-up blocked. Allow pop-ups to open the print dialog.'); return; }
       w.document.open(); w.document.write(html); w.document.close();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   async function packAction(id: number, action: 'generate' | 'review' | 'approve' | 'archive') {
     try { await api(`/records-reports/evidence-packs/${id}/${action}`, { method: 'POST', body: JSON.stringify({}) }); if (selectedPack?.id === id) await openPack(id); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
 
   async function submitAuditReview(e: FormEvent) {
     e.preventDefault(); setError(null);
     try { await api('/records-reports/audit-reviews', { method: 'POST', body: JSON.stringify(auditReviewForm) }); setAuditReviewForm({ reviewDate: '', dateFrom: '', dateTo: '', moduleKey: '', findingsSummary: '', unusualActivityNoted: false }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function auditReviewCreateAction(id: number) {
     const title = prompt('Action title?'); if (!title) return;
     try { await api(`/records-reports/audit-reviews/${id}/create-action`, { method: 'POST', body: JSON.stringify({ title }) }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
-  async function auditReviewClose(id: number) { try { await api(`/records-reports/audit-reviews/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError((e as Error).message); } }
+  async function auditReviewClose(id: number) { try { await api(`/records-reports/audit-reviews/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError(errorText(e)); } }
 
   async function submitRule(e: FormEvent) {
     e.preventDefault(); setError(null);
     try { await api('/records-reports/retention-rules', { method: 'POST', body: JSON.stringify(ruleForm) }); setRuleForm({ ruleName: '', moduleKey: 'documents', recordType: 'documents', retentionPeriodMonths: '60', archiveAction: 'flag_for_review', notes: '' }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
-  async function toggleRule(id: number) { try { await api(`/records-reports/retention-rules/${id}/toggle`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError((e as Error).message); } }
+  async function toggleRule(id: number) { try { await api(`/records-reports/retention-rules/${id}/toggle`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError(errorText(e)); } }
 
   async function submitBackup(e: FormEvent) {
     e.preventDefault(); setError(null);
     try { await api('/records-reports/backup-checks', { method: 'POST', body: JSON.stringify(backupForm) }); setBackupForm({ checkDate: '', checkType: 'scheduled', backupLocation: '', backupFileName: '', backupStatus: 'passed', restoreTestStatus: '', findings: '' }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function backupCreateAction(id: number) {
     const title = prompt('Action title?'); if (!title) return;
     try { await api(`/records-reports/backup-checks/${id}/create-action`, { method: 'POST', body: JSON.stringify({ title }) }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
-  async function backupClose(id: number) { try { await api(`/records-reports/backup-checks/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError((e as Error).message); } }
+  async function backupClose(id: number) { try { await api(`/records-reports/backup-checks/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError(errorText(e)); } }
 
   async function submitIntegrity(e: FormEvent) {
     e.preventDefault(); setError(null);
     try { await api('/records-reports/data-integrity-checks', { method: 'POST', body: JSON.stringify(integrityForm) }); setIntegrityForm({ checkDate: '', checkType: 'manual', moduleKey: '', recordsChecked: '', issuesFound: '', findingsSummary: '' }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function runBasicScan() {
     try { const r = await api<{ checkNumber: string; recordsChecked: number; issuesFound: number; status: string }>('/records-reports/data-integrity-checks/run-basic-scan', { method: 'POST', body: JSON.stringify({}) }); alert(`Scan ${r.checkNumber}: ${r.recordsChecked} records checked, ${r.issuesFound} issue(s). Status: ${r.status}`); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
   async function integrityCreateAction(id: number) {
     const title = prompt('Action title?'); if (!title) return;
     try { await api(`/records-reports/data-integrity-checks/${id}/create-action`, { method: 'POST', body: JSON.stringify({ title }) }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
-  async function integrityClose(id: number) { try { await api(`/records-reports/data-integrity-checks/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError((e as Error).message); } }
+  async function integrityClose(id: number) { try { await api(`/records-reports/data-integrity-checks/${id}/close`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError(errorText(e)); } }
 
   const tabs = ['Dashboard', 'Report Templates', 'Generate Report', 'Report Requests', 'Print Jobs', 'Evidence Packs', 'Audit Trail', 'Audit Trail Reviews', 'Retention Rules', 'Backup/Restore Checks', 'Data Integrity Checks'];
 

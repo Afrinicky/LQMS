@@ -132,7 +132,7 @@ export function iqcImportExportRoutes() {
    * file may carry a single control or a whole register. An existing lot is
    * updated rather than duplicated, and its analytes are merged by name.
    */
-  router.post('/controls/import', requirePermission('iqc', 'create'), upload.single('file'), (req, res) => {
+  router.post('/controls/import', requirePermission('iqc', 'import'), upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded.' });
     let rows: Record<string, unknown>[];
     try { rows = readSheet(req.file.buffer, 'CONTROL'); }
@@ -351,7 +351,7 @@ export function iqcImportExportRoutes() {
    * so an imported failure is caught, flagged and withholds patient results in
    * the same way.
    */
-  router.post('/runs/import', requirePermission('iqc', 'create'), upload.single('file'), (req, res) => {
+  router.post('/runs/import', requirePermission('iqc', 'import'), upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded.' });
     let rows: Record<string, unknown>[];
     try { rows = readSheet(req.file.buffer, 'RUN'); }

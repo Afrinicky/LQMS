@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { LayoutList, Plus, Settings2, Trash2, User } from 'lucide-react';
 import { DetailModal, EmptyState, KpiStrip } from '../../components/ui';
-import { api } from '../../services/api';
+import { api, errorText , apiRead } from '../../services/api';
 import { useAuth } from '../../hooks/useAuth';
 import { usePermissions } from '../../hooks/usePermissions';
 import { focusAttr } from '../../hooks/useFocusTarget';
@@ -71,12 +71,12 @@ export default function AppraisalWorkspace({ staff, sections, departments, posit
     try {
       const query = new URLSearchParams(Object.entries(filters).filter(([, v]) => v) as [string, string][]).toString();
       const [rows, summary] = await Promise.all([
-        api<PerformanceAppraisal[]>(`/personnel/appraisals${query ? `?${query}` : ''}`),
+        apiRead<PerformanceAppraisal[]>(`/personnel/appraisals${query ? `?${query}` : ''}`, []),
         api<AppraisalOverview>('/personnel/appraisal-overview').catch(() => null),
       ]);
       setAppraisals(rows);
       if (summary) setOverview(summary);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setLoading(false); }
   }, [filters]);
 
@@ -101,7 +101,7 @@ export default function AppraisalWorkspace({ staff, sections, departments, posit
       setCreating(false);
       await load();
       setSelectedId(created.id);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   const mine = useMemo(
@@ -310,7 +310,7 @@ function AppraisalEditor({ appraisalId, staff, sections, positions, mayEdit, may
 
   const load = useCallback(async () => {
     try { setRecord(await api<PerformanceAppraisal>(`/personnel/appraisals/${appraisalId}`)); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }, [appraisalId]);
 
   useEffect(() => { void load(); }, [load]);
@@ -333,7 +333,7 @@ function AppraisalEditor({ appraisalId, staff, sections, positions, mayEdit, may
       await api(`/personnel/appraisals/${appraisalId}${path}`, { method: 'POST', body: JSON.stringify(body) });
       setNotice(message);
       await refresh();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
 
   const tabs: EditorTab[] = ['Ratings', 'Objectives', 'Development plan', 'Evidence', 'Details', 'Sign-off'];
@@ -451,7 +451,7 @@ function RatingsGrid({ record, maxScore, isSubject, mayEdit, onError, onChanged 
       await api(`/personnel/appraisals/${record.id}/items`, { method: 'PUT', body: JSON.stringify({ perspective, items: payload }) });
       setDraft({});
       await onChanged();
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
     finally { setSaving(false); }
   }
 
@@ -463,13 +463,13 @@ function RatingsGrid({ record, maxScore, isSubject, mayEdit, onError, onChanged 
       setExtra({ section: extra.section, itemTitle: '', itemDescription: '', successMeasure: '', weight: '1' });
       setAdding(false);
       await onChanged();
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }
 
   async function removeItem(id: number) {
     onError(null);
     try { await api(`/personnel/appraisals/${record.id}/items/${id}`, { method: 'DELETE' }); await onChanged(); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
 
   if (items.length === 0) {
@@ -603,7 +603,7 @@ function Objectives({ record, mayEdit, onError, onChanged }: {
       await api(`/personnel/appraisals/${record.id}/objectives`, { method: 'POST', body: JSON.stringify(form) });
       setForm({ objective: '', successMeasure: '', targetDate: '', weight: '1' });
       await onChanged();
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }
 
   async function update(id: number) {
@@ -612,13 +612,13 @@ function Objectives({ record, mayEdit, onError, onChanged }: {
       await api(`/personnel/appraisals/${record.id}/objectives/${id}`, { method: 'PUT', body: JSON.stringify(patch) });
       setEditing(null);
       await onChanged();
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }
 
   async function remove(id: number) {
     onError(null);
     try { await api(`/personnel/appraisals/${record.id}/objectives/${id}`, { method: 'DELETE' }); await onChanged(); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
 
   return <div className="objectives">
@@ -694,13 +694,13 @@ function DevelopmentPlan({ record, staff, mayEdit, onError, onChanged, onAct }: 
       await api(`/personnel/appraisals/${record.id}/development-actions`, { method: 'POST', body: JSON.stringify(form) });
       setForm({ action: '', actionType: form.actionType, developmentNeed: '', targetDate: '', responsibleStaffId: '' });
       await onChanged();
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }
 
   async function remove(id: number) {
     onError(null);
     try { await api(`/personnel/appraisals/${record.id}/development-actions/${id}`, { method: 'DELETE' }); await onChanged(); }
-    catch (e) { onError((e as Error).message); }
+    catch (e) { onError(errorText(e)); }
   }
 
   return <div className="development-plan">
@@ -791,7 +791,7 @@ function AppraisalDetails({ record, staff, sections, positions, editable, onErro
       await api(`/personnel/appraisals/${record.id}`, { method: 'PUT', body: JSON.stringify(form) });
       setSaved(true);
       await onChanged();
-    } catch (e) { onError((e as Error).message); }
+    } catch (e) { onError(errorText(e)); }
   }
 
   if (!editable) {

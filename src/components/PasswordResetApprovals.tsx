@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { usePermissions } from '../hooks/usePermissions';
 import { ShieldQuestion, Check, X, Clock, Loader2 } from 'lucide-react';
-import { api } from '../services/api';
+import { api, errorText } from '../services/api';
 
 /**
  * Password reset requests waiting on an administrator.
@@ -45,7 +45,7 @@ export default function PasswordResetApprovals({ compact = false }: { compact?: 
   const load = useCallback(() => {
     api<{ pending: ResetRequest[]; recent: ResetRequest[] }>('/users/password-resets')
       .then(r => { setPending(r.pending ?? []); setRecent(r.recent ?? []); })
-      .catch(e => setError((e as Error).message));
+      .catch(e => setError(errorText(e)));
   }, []);
 
   useEffect(() => {
@@ -63,7 +63,7 @@ export default function PasswordResetApprovals({ compact = false }: { compact?: 
         ? 'Approved. The reset form has opened on their screen.'
         : 'Refused. They have been told.');
       load();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
     finally { setBusy(null); }
   }
 

@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useRef, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, ModuleAlerts } from '../components/ui';
 import { useModules } from '../hooks/useModules';
-import { api, API_BASE, getToken } from '../services/api';
+import { api, API_BASE, getToken, errorText } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import { downloadXlsx } from '../services/xlsx';
 import type { Staff, Section, EquipmentItem } from '../../shared/types/api';
@@ -67,7 +67,7 @@ async function openPrint(path: string, onError: (m: string) => void) {
     if (!res.ok) throw new Error(await res.text() || res.statusText);
     const w = window.open('', '_blank'); if (!w) { onError('Allow pop-ups to open the report.'); return; }
     w.document.open(); w.document.write(await res.text()); w.document.close();
-  } catch (e) { onError((e as Error).message); }
+  } catch (e) { onError(errorText(e)); }
 }
 
 export function VerificationValidationPage({ embedded = false }: { embedded?: boolean } = {}) {
@@ -99,35 +99,35 @@ export function VerificationValidationPage({ embedded = false }: { embedded?: bo
     try {
       const [list, eq] = await Promise.all([api<StudyRow[]>('/verification-validation'), api<EquipVerif[]>('/verification-validation/equipment')]);
       setStudies(list); setEquipVerifs(eq);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   useEffect(() => { if (embedded || isEnabled('verification_validation')) void load(); }, [isEnabled]);
   if (!embedded && !isEnabled('verification_validation')) return <DisabledModule />;
 
-  async function openStudy(id: number) { setError(null); try { setSelected(await api<Study>(`/verification-validation/${id}`)); } catch (e) { setError((e as Error).message); } }
+  async function openStudy(id: number) { setError(null); try { setSelected(await api<Study>(`/verification-validation/${id}`)); } catch (e) { setError(errorText(e)); } }
   async function refreshSelected() { if (selected) await openStudy(selected.id); await load(); }
 
   async function createStudy(e: FormEvent) {
     e.preventDefault(); setError(null); setMsg(null);
     if (!nf.testName || !nf.methodName) { setError('Test and method are required.'); return; }
     try { const r = await api<{ id: number }>('/verification-validation', { method: 'POST', body: JSON.stringify(nf) }); setNf(blankNew); await load(); await openStudy(r.id); setTab('Register'); setMsg('Study created with its standard performance characteristics — fill in the results below.'); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
-  async function saveHeader(patch: Record<string, unknown>) { if (!selected) return; try { await api(`/verification-validation/${selected.id}`, { method: 'PUT', body: JSON.stringify(patch) }); await refreshSelected(); } catch (e) { setError((e as Error).message); } }
-  async function saveParam(pid: number, patch: Record<string, unknown>) { try { await api(`/verification-validation/parameters/${pid}`, { method: 'PUT', body: JSON.stringify(patch) }); await refreshSelected(); } catch (e) { setError((e as Error).message); } }
+  async function saveHeader(patch: Record<string, unknown>) { if (!selected) return; try { await api(`/verification-validation/${selected.id}`, { method: 'PUT', body: JSON.stringify(patch) }); await refreshSelected(); } catch (e) { setError(errorText(e)); } }
+  async function saveParam(pid: number, patch: Record<string, unknown>) { try { await api(`/verification-validation/parameters/${pid}`, { method: 'PUT', body: JSON.stringify(patch) }); await refreshSelected(); } catch (e) { setError(errorText(e)); } }
   async function addParameter() {
     if (!selected || !addParam) return;
     const meta = catalogue[addParam];
-    try { await api(`/verification-validation/${selected.id}/parameters`, { method: 'POST', body: JSON.stringify({ parameter: addParam, parameterLabel: meta?.label || addParam, statisticLabel: meta?.stat, unit: meta?.unit }) }); setAddParam(''); await refreshSelected(); } catch (e) { setError((e as Error).message); }
+    try { await api(`/verification-validation/${selected.id}/parameters`, { method: 'POST', body: JSON.stringify({ parameter: addParam, parameterLabel: meta?.label || addParam, statisticLabel: meta?.stat, unit: meta?.unit }) }); setAddParam(''); await refreshSelected(); } catch (e) { setError(errorText(e)); }
   }
-  async function delParam(pid: number) { try { await api(`/verification-validation/parameters/${pid}`, { method: 'DELETE' }); await refreshSelected(); } catch (e) { setError((e as Error).message); } }
-  async function seedStandard() { if (!selected) return; try { const r = await api<{ added: number }>(`/verification-validation/${selected.id}/seed-parameters`, { method: 'POST', body: JSON.stringify({}) }); setMsg(`${r.added} standard characteristic(s) added.`); await refreshSelected(); } catch (e) { setError((e as Error).message); } }
-  async function review() { if (!selected) return; try { await api(`/verification-validation/${selected.id}/review`, { method: 'POST', body: JSON.stringify({}) }); setMsg('Marked as reviewed.'); await refreshSelected(); } catch (e) { setError((e as Error).message); } }
+  async function delParam(pid: number) { try { await api(`/verification-validation/parameters/${pid}`, { method: 'DELETE' }); await refreshSelected(); } catch (e) { setError(errorText(e)); } }
+  async function seedStandard() { if (!selected) return; try { const r = await api<{ added: number }>(`/verification-validation/${selected.id}/seed-parameters`, { method: 'POST', body: JSON.stringify({}) }); setMsg(`${r.added} standard characteristic(s) added.`); await refreshSelected(); } catch (e) { setError(errorText(e)); } }
+  async function review() { if (!selected) return; try { await api(`/verification-validation/${selected.id}/review`, { method: 'POST', body: JSON.stringify({}) }); setMsg('Marked as reviewed.'); await refreshSelected(); } catch (e) { setError(errorText(e)); } }
   async function authorize(authorizeForUse: boolean, reject = false) {
     if (!selected) return;
-    try { const r = await api<{ verdict: string }>(`/verification-validation/${selected.id}/authorize`, { method: 'POST', body: JSON.stringify({ authorizeForUse, reject }) }); setMsg(reject ? 'Study rejected.' : `Authorised — verdict: ${r.verdict.replace(/_/g, ' ')}.`); await refreshSelected(); } catch (e) { setError((e as Error).message); }
+    try { const r = await api<{ verdict: string }>(`/verification-validation/${selected.id}/authorize`, { method: 'POST', body: JSON.stringify({ authorizeForUse, reject }) }); setMsg(reject ? 'Study rejected.' : `Authorised — verdict: ${r.verdict.replace(/_/g, ' ')}.`); await refreshSelected(); } catch (e) { setError(errorText(e)); }
   }
-  async function removeStudy(id: number) { if (!confirm('Delete this study and its characteristics?')) return; try { await api(`/verification-validation/${id}`, { method: 'DELETE' }); if (selected?.id === id) setSelected(null); await load(); } catch (e) { setError((e as Error).message); } }
+  async function removeStudy(id: number) { if (!confirm('Delete this study and its characteristics?')) return; try { await api(`/verification-validation/${id}`, { method: 'DELETE' }); if (selected?.id === id) setSelected(null); await load(); } catch (e) { setError(errorText(e)); } }
   const reportRef = useRef<HTMLInputElement>(null);
   async function uploadReport(file: File) {
     if (!selected) return; setError(null);
@@ -137,15 +137,15 @@ export function VerificationValidationPage({ embedded = false }: { embedded?: bo
       const res = await fetch(`${API_BASE}/verification-validation/${selected.id}/report`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
       if (!res.ok) throw new Error((await res.json().catch(() => ({ error: res.statusText }))).error ?? res.statusText);
       setMsg('Report attached.'); await refreshSelected();
-    } catch (e) { setError((e as Error).message); } finally { if (reportRef.current) reportRef.current.value = ''; }
+    } catch (e) { setError(errorText(e)); } finally { if (reportRef.current) reportRef.current.value = ''; }
   }
   async function submitEquip(e: FormEvent) {
     e.preventDefault(); setError(null);
     if (!equipForm.equipmentId) { setError('Select equipment.'); return; }
     try { await api('/verification-validation/equipment', { method: 'POST', body: JSON.stringify(equipForm) }); setEquipForm({ equipmentId: '', verificationType: 'calibration_verification', verificationDate: '', reason: '', acceptanceCriteria: '', resultsSummary: '', conclusion: '', status: 'in_progress' }); await load(); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   }
-  async function approveEquip(id: number) { try { await api(`/verification-validation/equipment/${id}/approve`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError((e as Error).message); } }
+  async function approveEquip(id: number) { try { await api(`/verification-validation/equipment/${id}/approve`, { method: 'POST', body: JSON.stringify({}) }); await load(); } catch (e) { setError(errorText(e)); } }
 
   const canManage = selected && selected.status !== 'approved' && selected.status !== 'rejected';
   const summary = {
@@ -194,7 +194,7 @@ export function VerificationValidationPage({ embedded = false }: { embedded?: bo
         <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
           <h3 style={{ margin: 0 }}>Verification &amp; validation studies</h3>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            {can('verification_validation', 'export') && <button type="button" className="secondary" onClick={() => downloadXlsx('/verification-validation/export', 'Method_Verification_Register.xlsx').catch(e => setError((e as Error).message))}>Export to Excel</button>}
+            {can('verification_validation', 'export') && <button type="button" className="secondary" onClick={() => downloadXlsx('/verification-validation/export', 'Method_Verification_Register.xlsx').catch(e => setError(errorText(e)))}>Export to Excel</button>}
             <button type="button" onClick={() => setTab('New study')}>+ New study</button>
           </div>
         </div>
@@ -275,7 +275,7 @@ export function VerificationValidationPage({ embedded = false }: { embedded?: bo
       ]} />
       <div className="card" style={{ marginTop: 16 }}>
         <div className="section-head"><h3 style={{ margin: 0 }}>Verification &amp; validation register</h3>
-          {can('verification_validation', 'export') && <button type="button" className="secondary" onClick={() => downloadXlsx('/verification-validation/export', 'Method_Verification_Register.xlsx').catch(e => setError((e as Error).message))}>Export to Excel</button>}</div>
+          {can('verification_validation', 'export') && <button type="button" className="secondary" onClick={() => downloadXlsx('/verification-validation/export', 'Method_Verification_Register.xlsx').catch(e => setError(errorText(e)))}>Export to Excel</button>}</div>
         <table className="data-table"><thead><tr><th>Number</th><th>Test / method</th><th>Type</th><th>Guideline</th><th>Completed</th><th>Verdict</th><th>Status</th><th></th></tr></thead><tbody>
           {studies.map(s => <tr key={s.id}>
             <td>{s.verification_number}</td><td>{s.test_name}<div className="muted" style={{ fontSize: 11 }}>{s.method_name}</div></td>
@@ -417,7 +417,7 @@ function ParamDataEditor({ param, onClose, onComputed, setError }: { param: VPar
       const r = await api<{ observed: string }>(`/verification-validation/parameters/${param.id}/compute`, { method: 'POST', body: JSON.stringify({}) });
       setComputed(r.observed || 'No result — check your data.');
       onComputed();
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   const help = param.parameter === 'method_comparison' ? 'Enter paired results: your test method (A) against the comparator/reference (B). Slope, intercept and Pearson r are computed by least squares.'
     : param.parameter === 'linearity' ? 'Enter measured (A) against assigned/expected (B) values across the range. r² and slope are computed.'

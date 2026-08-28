@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
 import { useModules } from '../hooks/useModules';
-import { api } from '../services/api';
+import { api, errorText, apiRead } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import PermissionTabs from '../components/PermissionTabs';
 import type {
@@ -83,69 +83,69 @@ export function InformationManagementPage() {
     try {
       const [sum, a, s, ar, inc, dc, cr, rel, val, dt, rv] = await Promise.all([
         api<InformationManagementSummary>('/dashboard/information-management-summary').catch(() => null),
-        api<InformationAsset[]>('/information-management/assets'),
-        api<InformationSystem[]>('/information-management/systems'),
-        api<SystemAccessReview[]>('/information-management/access-reviews'),
-        api<InformationSecurityIncident[]>('/information-management/security-incidents'),
-        api<DataCorrectionRequest[]>('/information-management/data-corrections'),
-        api<SystemChangeRequest[]>('/information-management/change-requests'),
-        api<SoftwareReleaseRecord[]>('/information-management/releases'),
-        api<SystemValidationRecord[]>('/information-management/validations'),
-        api<SystemDowntimeRecord[]>('/information-management/downtime'),
-        api<InformationManagementReview[]>('/information-management/reviews')
+        apiRead<InformationAsset[]>('/information-management/assets', []),
+        apiRead<InformationSystem[]>('/information-management/systems', []),
+        apiRead<SystemAccessReview[]>('/information-management/access-reviews', []),
+        apiRead<InformationSecurityIncident[]>('/information-management/security-incidents', []),
+        apiRead<DataCorrectionRequest[]>('/information-management/data-corrections', []),
+        apiRead<SystemChangeRequest[]>('/information-management/change-requests', []),
+        apiRead<SoftwareReleaseRecord[]>('/information-management/releases', []),
+        apiRead<SystemValidationRecord[]>('/information-management/validations', []),
+        apiRead<SystemDowntimeRecord[]>('/information-management/downtime', []),
+        apiRead<InformationManagementReview[]>('/information-management/reviews', [])
       ]);
       if (sum) setSummary(sum);
       setAssets(a); setSystems(s); setAccessReviews(ar); setIncidents(inc); setCorrections(dc);
       setChangeReqs(cr); setReleases(rel); setValidations(val); setDowntime(dt); setReviews(rv);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(errorText(e)); }
   }
   useEffect(() => { if (isEnabled('information_management')) void load(); }, [isEnabled]);
   if (!isEnabled('information_management')) return <DisabledModule />;
 
   async function post(path: string, body: any) { return api(path, { method: 'POST', body: JSON.stringify(body) }); }
 
-  async function submitAsset(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/information-management/assets', assetForm); setAssetForm({ assetCode: '', assetName: '', assetType: 'electronic_file', ownerStaffId: '', departmentId: '', sectionId: '', description: '', dataCategory: '', confidentialityLevel: 'internal', storageLocation: '', backupMethod: '', retentionRuleId: '', status: 'active' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function setAssetStatus(id: number, status: string) { try { await post(`/information-management/assets/${id}/status`, { status }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitSystem(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/information-management/systems', systemForm); setSystemForm({ systemCode: '', systemName: '', systemType: 'sech_lims', vendorOrOwner: '', purpose: '', dataHandled: '', hostingLocation: '', accessMethod: '', backupResponsibility: '', supportContact: '', criticality: 'medium', status: 'active' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function setSystemStatus(id: number, status: string) { try { await post(`/information-management/systems/${id}/status`, { status }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitAccess(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/information-management/access-reviews', accessForm); setAccessForm({ systemId: '', reviewDate: '', reviewPeriodStart: '', reviewPeriodEnd: '', usersReviewed: '', accessIssuesFound: '', inactiveAccountsFound: '', excessiveAccessFound: '', actionsRequired: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function generateAccessItems(id: number) { try { await post(`/information-management/access-reviews/${id}/generate-items`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function accessCreateAction(id: number) { const title = prompt('Action title?'); if (!title) return; try { await post(`/information-management/access-reviews/${id}/create-action`, { title }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function closeAccess(id: number) { try { await post(`/information-management/access-reviews/${id}/close`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitIncident(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/information-management/security-incidents', incidentForm); setIncidentForm({ incidentDate: '', incidentType: 'unauthorised_access', systemId: '', assetId: '', title: '', description: '', immediateAction: '', severity: 'medium', confidentialityImpact: '', dataLossSuspected: false, investigationSummary: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function incidentCreateAction(id: number) { const title = prompt('Action title?'); if (!title) return; try { await post(`/information-management/security-incidents/${id}/create-action`, { title }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function incidentCreateNc(id: number) { try { await post(`/information-management/security-incidents/${id}/create-nc`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function incidentCreateCapa(id: number) { try { await post(`/information-management/security-incidents/${id}/create-capa`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function closeIncident(id: number) { try { await post(`/information-management/security-incidents/${id}/close`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitCorrection(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/information-management/data-corrections', correctionForm); setCorrectionForm({ requestDate: '', systemId: '', moduleKey: '', recordType: '', recordReference: '', correctionReason: '', originalValueSummary: '', requestedCorrectionSummary: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function reviewCorrection(id: number) { try { await post(`/information-management/data-corrections/${id}/review`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function approveCorrection(id: number) { try { await post(`/information-management/data-corrections/${id}/approve`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function completeCorrection(id: number) { try { await post(`/information-management/data-corrections/${id}/complete`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function correctionCreateAction(id: number) { const title = prompt('Action title?'); if (!title) return; try { await post(`/information-management/data-corrections/${id}/create-action`, { title }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function closeCorrection(id: number) { try { await post(`/information-management/data-corrections/${id}/close`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitChange(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/information-management/change-requests', changeForm); setChangeForm({ requestDate: '', systemId: '', changeType: 'configuration', title: '', description: '', reason: '', riskLevel: 'medium', implementationDate: '', validationRequired: false, validationSummary: '', rollbackPlan: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function reviewChange(id: number) { try { await post(`/information-management/change-requests/${id}/review`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function approveChange(id: number) { try { await post(`/information-management/change-requests/${id}/approve`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function implementChange(id: number) { try { await post(`/information-management/change-requests/${id}/implement`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function validateChange(id: number) { const summary = prompt('Validation summary?') || ''; try { await post(`/information-management/change-requests/${id}/validate`, { validationSummary: summary }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function changeCreateAction(id: number) { const title = prompt('Action title?'); if (!title) return; try { await post(`/information-management/change-requests/${id}/create-action`, { title }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function closeChange(id: number) { try { await post(`/information-management/change-requests/${id}/close`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitRelease(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/information-management/releases', releaseForm); setReleaseForm({ systemId: '', versionLabel: '', releaseDate: '', releaseSummary: '', changesIncluded: '', testingSummary: '', deploymentNotes: '', changeRequestId: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function approveRelease(id: number) { try { await post(`/information-management/releases/${id}/approve`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function deployRelease(id: number) { const notes = prompt('Deployment notes?') || ''; try { await post(`/information-management/releases/${id}/deploy`, { deploymentNotes: notes }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function archiveRelease(id: number) { try { await post(`/information-management/releases/${id}/archive`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitValidation(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/information-management/validations', validationForm); setValidationForm({ systemId: '', validationDate: '', validationType: 'uat', scope: '', testSummary: '', deviationsFound: '', outcome: '', releaseId: '', changeRequestId: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function approveValidation(id: number) { try { await post(`/information-management/validations/${id}/approve`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function closeValidation(id: number) { try { await post(`/information-management/validations/${id}/close`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitDowntime(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/information-management/downtime', downtimeForm); setDowntimeForm({ systemId: '', downtimeStart: '', downtimeEnd: '', downtimeType: 'unplanned', affectedServices: '', impactSummary: '', workaroundUsed: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function downtimeCreateAction(id: number) { const title = prompt('Action title?'); if (!title) return; try { await post(`/information-management/downtime/${id}/create-action`, { title }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function downtimeCreateNc(id: number) { try { await post(`/information-management/downtime/${id}/create-nc`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function resolveDowntime(id: number) { try { await post(`/information-management/downtime/${id}/resolve`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function closeDowntime(id: number) { try { await post(`/information-management/downtime/${id}/close`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function submitReview(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/information-management/reviews', reviewForm); setReviewForm({ reviewPeriodStart: '', reviewPeriodEnd: '', reviewDate: '' }); await load(); } catch (e) { setError((e as Error).message); } }
-  async function generateReviewSummary(id: number) { try { await post(`/information-management/reviews/${id}/generate-summary`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function approveReview(id: number) { try { await post(`/information-management/reviews/${id}/approve`, {}); await load(); } catch (e) { setError((e as Error).message); } }
-  async function closeReview(id: number) { try { await post(`/information-management/reviews/${id}/close`, {}); await load(); } catch (e) { setError((e as Error).message); } }
+  async function submitAsset(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/information-management/assets', assetForm); setAssetForm({ assetCode: '', assetName: '', assetType: 'electronic_file', ownerStaffId: '', departmentId: '', sectionId: '', description: '', dataCategory: '', confidentialityLevel: 'internal', storageLocation: '', backupMethod: '', retentionRuleId: '', status: 'active' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function setAssetStatus(id: number, status: string) { try { await post(`/information-management/assets/${id}/status`, { status }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitSystem(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/information-management/systems', systemForm); setSystemForm({ systemCode: '', systemName: '', systemType: 'sech_lims', vendorOrOwner: '', purpose: '', dataHandled: '', hostingLocation: '', accessMethod: '', backupResponsibility: '', supportContact: '', criticality: 'medium', status: 'active' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function setSystemStatus(id: number, status: string) { try { await post(`/information-management/systems/${id}/status`, { status }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitAccess(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/information-management/access-reviews', accessForm); setAccessForm({ systemId: '', reviewDate: '', reviewPeriodStart: '', reviewPeriodEnd: '', usersReviewed: '', accessIssuesFound: '', inactiveAccountsFound: '', excessiveAccessFound: '', actionsRequired: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function generateAccessItems(id: number) { try { await post(`/information-management/access-reviews/${id}/generate-items`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function accessCreateAction(id: number) { const title = prompt('Action title?'); if (!title) return; try { await post(`/information-management/access-reviews/${id}/create-action`, { title }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function closeAccess(id: number) { try { await post(`/information-management/access-reviews/${id}/close`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitIncident(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/information-management/security-incidents', incidentForm); setIncidentForm({ incidentDate: '', incidentType: 'unauthorised_access', systemId: '', assetId: '', title: '', description: '', immediateAction: '', severity: 'medium', confidentialityImpact: '', dataLossSuspected: false, investigationSummary: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function incidentCreateAction(id: number) { const title = prompt('Action title?'); if (!title) return; try { await post(`/information-management/security-incidents/${id}/create-action`, { title }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function incidentCreateNc(id: number) { try { await post(`/information-management/security-incidents/${id}/create-nc`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function incidentCreateCapa(id: number) { try { await post(`/information-management/security-incidents/${id}/create-capa`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function closeIncident(id: number) { try { await post(`/information-management/security-incidents/${id}/close`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitCorrection(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/information-management/data-corrections', correctionForm); setCorrectionForm({ requestDate: '', systemId: '', moduleKey: '', recordType: '', recordReference: '', correctionReason: '', originalValueSummary: '', requestedCorrectionSummary: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function reviewCorrection(id: number) { try { await post(`/information-management/data-corrections/${id}/review`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function approveCorrection(id: number) { try { await post(`/information-management/data-corrections/${id}/approve`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function completeCorrection(id: number) { try { await post(`/information-management/data-corrections/${id}/complete`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function correctionCreateAction(id: number) { const title = prompt('Action title?'); if (!title) return; try { await post(`/information-management/data-corrections/${id}/create-action`, { title }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function closeCorrection(id: number) { try { await post(`/information-management/data-corrections/${id}/close`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitChange(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/information-management/change-requests', changeForm); setChangeForm({ requestDate: '', systemId: '', changeType: 'configuration', title: '', description: '', reason: '', riskLevel: 'medium', implementationDate: '', validationRequired: false, validationSummary: '', rollbackPlan: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function reviewChange(id: number) { try { await post(`/information-management/change-requests/${id}/review`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function approveChange(id: number) { try { await post(`/information-management/change-requests/${id}/approve`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function implementChange(id: number) { try { await post(`/information-management/change-requests/${id}/implement`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function validateChange(id: number) { const summary = prompt('Validation summary?') || ''; try { await post(`/information-management/change-requests/${id}/validate`, { validationSummary: summary }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function changeCreateAction(id: number) { const title = prompt('Action title?'); if (!title) return; try { await post(`/information-management/change-requests/${id}/create-action`, { title }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function closeChange(id: number) { try { await post(`/information-management/change-requests/${id}/close`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitRelease(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/information-management/releases', releaseForm); setReleaseForm({ systemId: '', versionLabel: '', releaseDate: '', releaseSummary: '', changesIncluded: '', testingSummary: '', deploymentNotes: '', changeRequestId: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function approveRelease(id: number) { try { await post(`/information-management/releases/${id}/approve`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function deployRelease(id: number) { const notes = prompt('Deployment notes?') || ''; try { await post(`/information-management/releases/${id}/deploy`, { deploymentNotes: notes }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function archiveRelease(id: number) { try { await post(`/information-management/releases/${id}/archive`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitValidation(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/information-management/validations', validationForm); setValidationForm({ systemId: '', validationDate: '', validationType: 'uat', scope: '', testSummary: '', deviationsFound: '', outcome: '', releaseId: '', changeRequestId: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function approveValidation(id: number) { try { await post(`/information-management/validations/${id}/approve`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function closeValidation(id: number) { try { await post(`/information-management/validations/${id}/close`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitDowntime(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/information-management/downtime', downtimeForm); setDowntimeForm({ systemId: '', downtimeStart: '', downtimeEnd: '', downtimeType: 'unplanned', affectedServices: '', impactSummary: '', workaroundUsed: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function downtimeCreateAction(id: number) { const title = prompt('Action title?'); if (!title) return; try { await post(`/information-management/downtime/${id}/create-action`, { title }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function downtimeCreateNc(id: number) { try { await post(`/information-management/downtime/${id}/create-nc`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function resolveDowntime(id: number) { try { await post(`/information-management/downtime/${id}/resolve`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function closeDowntime(id: number) { try { await post(`/information-management/downtime/${id}/close`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function submitReview(e: FormEvent) { e.preventDefault(); setError(null); try { await post('/information-management/reviews', reviewForm); setReviewForm({ reviewPeriodStart: '', reviewPeriodEnd: '', reviewDate: '' }); await load(); } catch (e) { setError(errorText(e)); } }
+  async function generateReviewSummary(id: number) { try { await post(`/information-management/reviews/${id}/generate-summary`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function approveReview(id: number) { try { await post(`/information-management/reviews/${id}/approve`, {}); await load(); } catch (e) { setError(errorText(e)); } }
+  async function closeReview(id: number) { try { await post(`/information-management/reviews/${id}/close`, {}); await load(); } catch (e) { setError(errorText(e)); } }
 
   const tabs = ['Dashboard', 'Information Assets', 'Information Systems', 'Access Reviews', 'Security Incidents', 'Data Corrections', 'Change Requests', 'Software Releases', 'System Validations', 'Downtime Records', 'Information Reviews', 'Reports'];
 
