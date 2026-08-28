@@ -689,7 +689,7 @@ ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(i.module_key)}/${esc(i
     res.json(db.prepare('SELECT * FROM data_integrity_checks ORDER BY check_date DESC').all());
   });
 
-  router.post('/data-integrity-checks', requirePermission('records_reports', 'create'), (req, res) => {
+  router.post('/data-integrity-checks', requirePermission('records_reports.retention', 'create'), (req, res) => {
     if (!req.body.checkDate) return res.status(400).json({ error: 'checkDate is required' });
     if (!req.body.checkType) return res.status(400).json({ error: 'checkType is required' });
     const db = getDb();
@@ -724,7 +724,7 @@ ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(i.module_key)}/${esc(i
     res.status(201).json({ id: actionId });
   });
 
-  router.post('/data-integrity-checks/:id/close', requirePermission('records_reports', 'approve'), (req, res) => {
+  router.post('/data-integrity-checks/:id/close', requirePermission('records_reports.retention', 'approve'), (req, res) => {
     const db = getDb();
     const c = db.prepare('SELECT * FROM data_integrity_checks WHERE id = ?').get(req.params.id) as any;
     if (!c) return res.status(404).json({ error: 'Integrity check not found' });
@@ -733,7 +733,7 @@ ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(i.module_key)}/${esc(i
     res.json({ ok: true });
   });
 
-  router.post('/data-integrity-checks/run-basic-scan', requirePermission('records_reports', 'create'), (req, res) => {
+  router.post('/data-integrity-checks/run-basic-scan', requirePermission('records_reports.retention', 'create'), (req, res) => {
     const db = getDb();
     const findings: string[] = [];
     let recordsChecked = 0; let issues = 0;

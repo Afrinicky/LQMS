@@ -52,7 +52,7 @@ export function qrRoutes() {
     res.json(qr);
   });
 
-  router.post('/generate', requirePermission('organisation', 'create'), (req, res) => {
+  router.post('/generate', requirePermission('organisation.structure', 'create'), (req, res) => {
     const { entityType, entityId, label } = req.body ?? {};
     if (!QR_ENTITY_TYPES.includes(entityType)) return res.status(400).json({ error: `entityType must be one of: ${QR_ENTITY_TYPES.join(', ')}` });
     if (entityId === undefined || entityId === null || entityId === '') return res.status(400).json({ error: 'entityId is required' });
@@ -61,7 +61,7 @@ export function qrRoutes() {
     res.status(201).json(qr);
   });
 
-  router.post('/generate-all', requirePermission('organisation', 'create'), (req, res) => {
+  router.post('/generate-all', requirePermission('organisation.structure', 'create'), (req, res) => {
     const entityType = req.body?.entityType;
     if (!QR_ENTITY_TYPES.includes(entityType)) return res.status(400).json({ error: `entityType must be one of: ${QR_ENTITY_TYPES.join(', ')}` });
     const summary = ensureQrForAll(entityType, req.user!.id);

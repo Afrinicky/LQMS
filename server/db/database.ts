@@ -6278,6 +6278,70 @@ CREATE INDEX IF NOT EXISTS idx_appraisal_attachments ON appraisal_attachments(ap
   seedCompetencyFrameworks(database);
   seedOrientationFrameworks(database);
   seedSupplierEvaluationFrameworks(database);
+
+  // ---------------------------------------------------------------------
+  // Last: deliver the tasks that never reached anybody
+  // ---------------------------------------------------------------------
+  // Runs at the END of the migration, after every column this query reads has
+  // actually been added.
+  // Attestations and declarations were notified by looping over the LOGIN
+  // ACCOUNTS attached to a staff record. Somebody with no account yet, or whose
+  // account was linked afterwards, got no notification row — and never would,
+  // because the loop only ran when the document was issued. Whole benches were
+  // therefore holding pending attestations they were never told about, while
+  // the same work piled up unread in the administrator's inbox.
+  //
+  // Notifications are addressed to the STAFF RECORD now (see notifyStaff in
+  // routes/documents.ts). This writes the ones that were missed, once, so the
+  // existing backlog lands where it belongs instead of staying invisible.
+  {
+    const hasAttestations = database.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'document_attestations'",
+    ).get() as { name: string } | undefined;
+    const alreadyDelivered = (database.prepare("SELECT value FROM settings WHERE key = 'attestationNotificationsBackfilled'").get() as { value: string } | undefined)?.value;
+    if (hasAttestations && alreadyDelivered !== '2') {
+      const outstanding = database.prepare(`
+        SELECT a.id, a.staff_id AS staffId, a.due_date AS dueDate, a.document_id AS documentId,
+               d.title, d.document_code AS documentCode
+        FROM document_attestations a
+        JOIN documents d ON d.id = a.document_id
+        WHERE a.status IN ('pending', 'overdue')
+          AND s_active(a.staff_id) = 1
+          AND NOT EXISTS (
+            SELECT 1 FROM notifications n
+            WHERE n.record_type = 'document_attestations' AND n.record_id = CAST(a.id AS TEXT)
+              AND n.assigned_to_staff_id = a.staff_id
+          )
+      `.replace('s_active(a.staff_id) = 1', '(SELECT is_active FROM staff WHERE id = a.staff_id) = 1'))
+        .all() as Array<{ id: number; staffId: number; dueDate: string | null; documentId: number; title: string; documentCode: string | null }>;
+
+      const accountOf = database.prepare('SELECT id FROM users WHERE staff_id = ? AND is_active = 1 ORDER BY id LIMIT 1');
+      const insert = database.prepare(`INSERT INTO notifications
+        (user_id, module_key, title, message, status, severity, notification_type, record_type, record_id,
+         assigned_to_staff_id, assigned_to_user_id, action_url, action_label, due_date, created_by)
+        VALUES (?, 'documents', ?, ?, 'unread', 'medium', 'follow_up', 'document_attestations', ?, ?, ?, ?, 'Read & attest', ?, ?)`);
+      const tx = database.transaction(() => {
+        for (const a of outstanding) {
+          const account = accountOf.get(a.staffId) as { id: number } | undefined;
+          const message = `Please read and attest: ${a.documentCode ? a.documentCode + ' — ' : ''}${a.title}${a.dueDate ? ` (due ${a.dueDate})` : ''}`;
+          insert.run(
+            account?.id ?? null, 'Controlled document awaiting your attestation', message,
+            String(a.id), a.staffId, account?.id ?? null,
+            `/documents?open=${a.documentId}&attest=${a.id}`, a.dueDate, account?.id ?? null,
+          );
+        }
+      });
+      tx();
+      database.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('attestationNotificationsBackfilled', '2', CURRENT_TIMESTAMP)").run();
+      if (outstanding.length) {
+        database.prepare('INSERT INTO audit_logs (actor_user_id, action, entity, new_value) VALUES (NULL, ?, ?, ?)')
+          .run('attestation_notifications_backfilled', 'notifications', JSON.stringify({ delivered: outstanding.length }));
+        console.log(`[migrate] delivered ${outstanding.length} attestation notification(s) that never reached their staff`);
+      }
+    }
+  }
+
+
 }
 
 /**

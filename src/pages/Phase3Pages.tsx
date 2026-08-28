@@ -1745,10 +1745,10 @@ export function InventoryPage() {
             <td className="reg-actions-col" onClick={e => e.stopPropagation()}>
               <RowMenu label={`Manage ${i.name}`}>{close => <>
                 <button type="button" role="menuitem" onClick={() => { close(); openDetail(i.id); }}><FileText size={14} /> Open</button>
-                {can('supplier_inventory', 'edit') && <button type="button" role="menuitem" onClick={() => { close(); openDetail(i.id, 'edit'); }}><Pencil size={14} /> Edit details</button>}
-                {can('supplier_inventory', 'create') && <button type="button" role="menuitem" onClick={() => { close(); setBatchForm(f => ({ ...f, itemId: String(i.id) })); setRecvTab('Goods receipt'); setTab('Receiving'); }}><PackagePlus size={14} /> Book in a delivery</button>}
-                {can('supplier_inventory', 'print') && <button type="button" role="menuitem" onClick={() => { close(); printLabelSheet([{ barcodeValue: effectiveBarcode(i), title: i.name, lines: [effectiveBarcode(i), i.storage_path || ''].filter(Boolean) }], { widthMm: 50, heightMm: 25, title: i.name }); }}><Tag size={14} /> Print its label</button>}
-                {can('supplier_inventory', 'void_archive') && <button type="button" role="menuitem" className="danger" onClick={() => { close(); void openItemRemoval(i); }}><Trash2 size={14} /> Remove…</button>}
+                {can('supplier_inventory.stock', 'edit') && <button type="button" role="menuitem" onClick={() => { close(); openDetail(i.id, 'edit'); }}><Pencil size={14} /> Edit details</button>}
+                {can('supplier_inventory.stock', 'create') && <button type="button" role="menuitem" onClick={() => { close(); setBatchForm(f => ({ ...f, itemId: String(i.id) })); setRecvTab('Goods receipt'); setTab('Receiving'); }}><PackagePlus size={14} /> Book in a delivery</button>}
+                {can('supplier_inventory.labels', 'print') && <button type="button" role="menuitem" onClick={() => { close(); printLabelSheet([{ barcodeValue: effectiveBarcode(i), title: i.name, lines: [effectiveBarcode(i), i.storage_path || ''].filter(Boolean) }], { widthMm: 50, heightMm: 25, title: i.name }); }}><Tag size={14} /> Print its label</button>}
+                {can('supplier_inventory.stock', 'void_archive') && <button type="button" role="menuitem" className="danger" onClick={() => { close(); void openItemRemoval(i); }}><Trash2 size={14} /> Remove…</button>}
               </>}</RowMenu>
             </td>
           </tr>)}
@@ -1933,13 +1933,13 @@ export function InventoryPage() {
               <td className="reg-actions-col" onClick={e => e.stopPropagation()}>
                 <RowMenu label={`Manage batch ${b.batch_number || b.id}`}>{close => <>
                   <button type="button" role="menuitem" onClick={() => { close(); openDetail(b.item_id); }}><FileText size={14} /> Open the item</button>
-                  {(b.acceptance_status === 'pending' || b.acceptance_status === 'quarantined') && can('supplier_inventory', 'edit') && !b.reversed_at && <>
+                  {(b.acceptance_status === 'pending' || b.acceptance_status === 'quarantined') && can('supplier_inventory.stock', 'edit') && !b.reversed_at && <>
                     <button type="button" role="menuitem" onClick={() => { close(); acceptBatch(b.id, 'accepted'); }}>Accept on receipt</button>
                     <button type="button" role="menuitem" className="danger" onClick={() => { close(); acceptBatch(b.id, 'rejected'); }}>Reject on receipt</button>
                   </>}
-                  {can('supplier_inventory', 'edit') && !b.reversed_at && <button type="button" role="menuitem" onClick={() => { close(); setEditingBatch(b); }}><Pencil size={14} /> Correct this receipt…</button>}
+                  {can('supplier_inventory.stock', 'edit') && !b.reversed_at && <button type="button" role="menuitem" onClick={() => { close(); setEditingBatch(b); }}><Pencil size={14} /> Correct this receipt…</button>}
                   <button type="button" role="menuitem" onClick={() => { close(); createBatchNc(b.id); }}><ShieldAlert size={14} /> Raise a nonconformity</button>
-                  {can('supplier_inventory', 'print') && <button type="button" role="menuitem" onClick={() => { close(); printLabelSheet([{ barcodeValue: b.product_barcode || b.batch_number || String(b.id), title: b.item_name || '', lines: [b.batch_number ? `Batch ${b.batch_number}` : '', b.expiry_date ? `Exp ${String(b.expiry_date).slice(0, 10)}` : ''].filter(Boolean) }], { widthMm: 50, heightMm: 25, title: 'Batch label' }); }}><Tag size={14} /> Print its label</button>}
+                  {can('supplier_inventory.labels', 'print') && <button type="button" role="menuitem" onClick={() => { close(); printLabelSheet([{ barcodeValue: b.product_barcode || b.batch_number || String(b.id), title: b.item_name || '', lines: [b.batch_number ? `Batch ${b.batch_number}` : '', b.expiry_date ? `Exp ${String(b.expiry_date).slice(0, 10)}` : ''].filter(Boolean) }], { widthMm: 50, heightMm: 25, title: 'Batch label' }); }}><Tag size={14} /> Print its label</button>}
                   {/* Reversing a receipt is not an everyday action and is not
                       offered to everyone, so it sits at the bottom of the menu
                       behind a confirmation that asks for a reason. */}
@@ -2115,8 +2115,8 @@ export function InventoryPage() {
               <td className="reg-actions-col" onClick={e => e.stopPropagation()}>
                 <RowMenu label={`Manage ${sp.name}`}>{close => <>
                   <button type="button" role="menuitem" onClick={() => { close(); setEditingSupplier(sp); }}><Pencil size={14} /> Open and edit</button>
-                  {can('supplier_inventory', 'create') && <button type="button" role="menuitem" onClick={() => { close(); setEvalForm(f => ({ ...f, supplierId: String(sp.id) })); setSupplierTab('Evaluation'); }}><Star size={14} /> Evaluate</button>}
-                  {can('supplier_inventory', 'void_archive') && <button type="button" role="menuitem" className="danger" onClick={() => { close(); void openSupplierRemoval(sp); }}><Trash2 size={14} /> Remove…</button>}
+                  {can('supplier_inventory.suppliers', 'create') && <button type="button" role="menuitem" onClick={() => { close(); setEvalForm(f => ({ ...f, supplierId: String(sp.id) })); setSupplierTab('Evaluation'); }}><Star size={14} /> Evaluate</button>}
+                  {can('supplier_inventory.suppliers', 'void_archive') && <button type="button" role="menuitem" className="danger" onClick={() => { close(); void openSupplierRemoval(sp); }}><Trash2 size={14} /> Remove…</button>}
                 </>}</RowMenu>
               </td>
             </tr>)}
@@ -2199,8 +2199,8 @@ export function InventoryPage() {
                 <td className="reg-actions-col">
                   <RowMenu label={`Manage ${sp.name}`}>{close => <>
                     <button type="button" role="menuitem" onClick={() => { close(); setEditingSupplier(sp); }}><Pencil size={14} /> Open and edit</button>
-                    {can('supplier_inventory', 'create') && <button type="button" role="menuitem" onClick={() => { close(); setEvalForm(f => ({ ...f, supplierId: String(sp.id) })); setSupplierTab('Evaluation'); }}><Star size={14} /> Evaluate</button>}
-                    {can('supplier_inventory', 'void_archive') && <button type="button" role="menuitem" className="danger" onClick={() => { close(); void openSupplierRemoval(sp); }}><Trash2 size={14} /> Remove…</button>}
+                    {can('supplier_inventory.suppliers', 'create') && <button type="button" role="menuitem" onClick={() => { close(); setEvalForm(f => ({ ...f, supplierId: String(sp.id) })); setSupplierTab('Evaluation'); }}><Star size={14} /> Evaluate</button>}
+                    {can('supplier_inventory.suppliers', 'void_archive') && <button type="button" role="menuitem" className="danger" onClick={() => { close(); void openSupplierRemoval(sp); }}><Trash2 size={14} /> Remove…</button>}
                   </>}</RowMenu>
                 </td>
               </tr>)}
@@ -2247,7 +2247,7 @@ export function InventoryPage() {
 
     {tab === 'Barcode Labels' && <BarcodeLabelGenerator />}
 
-    {tab === 'Forecasting' && <ForecastingPanel canEdit={can('supplier_inventory', 'edit')} refreshKey={stockKey}
+    {tab === 'Forecasting' && <ForecastingPanel canEdit={can('supplier_inventory.planning', 'edit')} refreshKey={stockKey}
       onApplied={() => { setStockKey(k => k + 1); void load(); }} />}
 
     {/* The item's own page, opened from wherever the item was found — the
@@ -2520,7 +2520,7 @@ function InventoryDetailPanel({
   const [reversingBatch, setReversingBatch] = useState<InventoryBatch | null>(null);
   const [reversingMovement, setReversingMovement] = useState<any>(null);
   const label = (list: ConfigOption[], value?: string | null) => list.find(o => o.value === value)?.label ?? value ?? '—';
-  const mayCorrect = can('supplier_inventory', 'edit');
+  const mayCorrect = can('supplier_inventory.stock', 'edit');
   const mayReverse = can('supplier_inventory.stock', 'void_archive');
 
   async function save(e: FormEvent) {
@@ -2553,14 +2553,14 @@ function InventoryDetailPanel({
     header={<>
       {item.is_active === 0 && <span className="badge inactive">withdrawn</span>}
       {formatBadge(item.status)}
-      {can('supplier_inventory', 'edit') && mode === 'view' &&
+      {can('supplier_inventory.stock', 'edit') && mode === 'view' &&
         <button type="button" className="secondary" onClick={() => setMode('edit')}><Pencil size={14} /> Edit</button>}
       {/* Removing is not an everyday action, so it lives under the menu with
           the rest of the management actions rather than beside Edit. */}
       <RowMenu label={`Manage ${item.name}`}>{close => <>
         {mayCorrect && <button type="button" role="menuitem" onClick={() => { close(); setAdjusting(true); }}><Scale size={14} /> Adjust the stock — debit or credit…</button>}
         {can('supplier_inventory', 'print') && <button type="button" role="menuitem" onClick={() => { close(); printLabelSheet([{ barcodeValue: effectiveBarcode(item), title: item.name, lines: [effectiveBarcode(item), item.storage_path || ''].filter(Boolean) }], { widthMm: 50, heightMm: 25, title: item.name }); }}><Tag size={14} /> Print its label</button>}
-        {can('supplier_inventory', 'void_archive') && <button type="button" role="menuitem" className="danger" onClick={() => { close(); onRemove(); }}><Trash2 size={14} /> Remove…</button>}
+        {can('supplier_inventory.stock', 'void_archive') && <button type="button" role="menuitem" className="danger" onClick={() => { close(); onRemove(); }}><Trash2 size={14} /> Remove…</button>}
       </>}</RowMenu>
     </>}>
 
@@ -2799,7 +2799,7 @@ function SupplierDetailPanel({ supplier, evaluations, can, onClose, onSaved, onR
     header={<>
       {evaluationBadge(supplier)}
       {formatBadge(supplier.status)}
-      {can('supplier_inventory', 'void_archive') && <RowMenu label={`Manage ${supplier.name}`}>{close => <>
+      {can('supplier_inventory.stock', 'void_archive') && <RowMenu label={`Manage ${supplier.name}`}>{close => <>
         <button type="button" role="menuitem" className="danger" onClick={() => { close(); onRemove(); }}><Trash2 size={14} /> Remove…</button>
       </>}</RowMenu>}
     </>}>

@@ -23,6 +23,12 @@ export function seedDefaults() {
       { name: 'Safety Manager', description: 'Oversees safety incidents and reviews blood bank adverse events.' },
       { name: 'Data Officer', description: 'Imports LHIMS raw data and prepares monthly reports.' },
       { name: 'POCT Officer', description: 'Oversees point-of-care testing sites, devices, operators, QC, EQA, and incidents.' },
+      // Positions the organogram has always had but the access model never
+      // named, so their holders fell back to whatever profile happened to be on
+      // their account. Each is a real job with a real, narrow set of rights.
+      { name: 'Stores Officer', description: 'Runs the store: receiving, issuing, counts and the stock ledger.' },
+      { name: 'Customer Service Officer', description: 'Front desk: sample reception, feedback, complaints and the communication log.' },
+      { name: 'Internal Auditor', description: 'Reads the whole management system and runs internal assessments. Changes nothing else.' },
       { name: 'Quality User', description: 'General QMS user role.', is_system: 1 }
     ];
     for (const role of rolesToSeed) {
@@ -86,17 +92,44 @@ export function seedDefaults() {
     // Bump whenever the table below changes in a way an existing laboratory
     // must receive — a right withdrawn, or a new area added to a role. See the
     // note beside the application loop for why this exists.
-    const ROLE_DEFAULTS_VERSION = '2026.08-features.5-stock-corrections';
+    const ROLE_DEFAULTS_VERSION = '2026.08-features.6-bench-baseline';
 
     // Every member of staff, whatever their rank: their own record, their own
     // inbox, the launchpad, the ability to raise a safety incident or a
     // nonconformity, and read access to the documents they must follow.
+    // Three things, and only these three:
+    //   1. be told what they must do — their inbox, and the calendar it is due on;
+    //   2. raise what they find — a nonconformity, a safety incident, a complaint;
+    //   3. keep their own record — profile, certificates, declarations, training.
+    // Everything beyond that belongs to a job, and is granted by the profile for
+    // that job below.
     const EVERYONE: Partial<Record<AccessLevel, string[]>> = {
-      view: ['home', 'dashboard', 'documents.library', 'organisation.structure', 'dennis'],
-      // Reminder sounds are a personal setting in the same sense a person's own
-      // inbox is: everyone tunes, or silences, their own device.
+      view: [
+        'home', 'dashboard', 'dennis',
+        // The documents they must follow, and attest to when one is issued.
+        'documents.library',
+        // The code of conduct and the organogram they sign against.
+        'organisation.structure',
+        // What is due, and when.
+        'notifications.calendar',
+        // The duty roster and bench schedule they are ON. Reading the roster is
+        // how a person knows which shift they work; changing it belongs to
+        // whoever builds it, which is why this is View and stops there.
+        'personnel.rosters',
+      ],
+      // A person's own record, own inbox, own reminder sounds. `personal`
+      // features, so this level governs what they see of OTHER people's — which
+      // is nothing — while their own is always theirs.
       manage: ['personnel.self', 'notifications.inbox', 'notifications.sounds'],
-      contribute: ['nc_capa', 'facilities_safety.incidents', 'actions'],
+      // Their own declarations, training and duties are NOT granted here on
+      // purpose. Those registers list the whole laboratory, and `view` on one
+      // is the right to read everybody's. A person reaches their own through
+      // the self-service routes (`/personnel/my-declarations`, `/my-tasks`,
+      // `/my-profile`) and the User Portal, which check the caller against
+      // their own staff record and nothing else.
+      contribute: [
+        'nc_capa', 'facilities_safety.incidents', 'actions', 'complaints',
+      ],
     };
 
     const ROLE_ACCESS: Record<string, Partial<Record<AccessLevel, string[]>>> = {
@@ -367,6 +400,62 @@ export function seedDefaults() {
         ],
       },
 
+      // ---- Stores -----------------------------------------------------------
+      // Runs the store and nothing else. Correcting the ledger after the fact —
+      // reversing a receipt, cancelling a voucher, abandoning a count — stays
+      // with the Laboratory Manager, so this profile stops at Manage.
+      'Stores Officer': {
+        manage: ['supplier_inventory.stock', 'supplier_inventory.storage', 'supplier_inventory.labels'],
+        contribute: ['supplier_inventory.planning'],
+        view: ['supplier_inventory.suppliers', 'supplier_inventory.reports', 'equipment.register'],
+      },
+
+      // ---- Front desk -------------------------------------------------------
+      // Receives samples and receives people. Holds the customer-facing
+      // registers and the sample-receipt bench, and nothing behind them.
+      'Customer Service Officer': {
+        manage: [
+          'customer_focus.feedback', 'customer_focus.communication',
+          'customer_focus.surveys', 'process_management.receipt',
+        ],
+        contribute: ['customer_focus.advisory', 'process_management.rejections'],
+        view: [
+          'customer_focus.stakeholders', 'customer_focus.reports',
+          'process_management.directory', 'documents.records',
+        ],
+      },
+
+      // ---- Internal audit ---------------------------------------------------
+      // Reads the management system end to end and runs the assessment
+      // programme. Auditing something is not operating it, so everything else
+      // is View — the whole point of the role is that it changes nothing it
+      // audits.
+      'Internal Auditor': {
+        full: ['assessments'],
+        manage: ['actions'],
+        view: [
+          'nc_capa', 'complaints', 'risks', 'quality_indicators', 'continual_improvement',
+          'management_review', 'meetings', 'monthly_reports',
+          'iqc', 'eqa', 'verification_validation', 'measurement_uncertainty',
+          'poct', 'blood_bank_handover',
+          'documents.records', 'documents.masterlist', 'documents.archive', 'documents.workflow',
+          'personnel.register', 'personnel.training', 'personnel.orientation', 'personnel.authorizations',
+          'equipment.register', 'equipment.maintenance', 'equipment.verification',
+          'supplier_inventory.stock', 'supplier_inventory.suppliers', 'supplier_inventory.storage',
+          'process_management.receipt', 'process_management.directory', 'process_management.intervals',
+          'process_management.critical', 'process_management.rejections', 'process_management.reviews',
+          'information_management.assets', 'information_management.access', 'information_management.security',
+          'information_management.change', 'information_management.reviews',
+          'monitoring.readings', 'monitoring.reports',
+          'facilities_safety.incidents', 'facilities_safety.equipment', 'facilities_safety.inspections',
+          'facilities_safety.waste',
+          'organisation.structure', 'organisation.quality_config', 'organisation.records_review',
+          'organisation.licences',
+          'records_reports.generate', 'records_reports.audit', 'records_reports.retention',
+          'system_audit.trail', 'system_audit.flags', 'system_audit.checks',
+        ],
+      },
+
       // POCT oversight. Deliberately holds NO rights over the personnel
       // register: the previous default let a POCT Officer edit any member of
       // staff's record, which their role never required.
@@ -462,6 +551,68 @@ export function seedDefaults() {
         } else if (allowed) {
           db.prepare('INSERT OR IGNORE INTO role_permissions (role_id, permission_id, allowed, source) VALUES (?, ?, 1, ?)').run(role.id, permission.id, 'Role default');
         }
+      }
+    }
+
+    // ========================================================================
+    // Positions → access profiles
+    // ------------------------------------------------------------------------
+    // A position is what the organogram calls the job; a profile is what the
+    // software lets that job do. Leaving the two unconnected meant a person's
+    // access came from whatever profile happened to be on their login account,
+    // which is not a decision anybody made — and the Access Control screen
+    // rightly complained that fifteen positions held staff with no mapping.
+    //
+    // These are the defaults. Only a position that has NO mapping yet is
+    // touched, so a laboratory's own choice is never overwritten; matching is
+    // on the normalised title, so "INTERNAL AUDITOR", "Internal Auditor" and
+    // "internal  auditor" are the same job.
+    // ========================================================================
+    const POSITION_PROFILE_DEFAULTS: Array<{ match: RegExp; profile: string }> = [
+      { match: /^system\s*admin/, profile: 'System Administrator' },
+      { match: /^(laboratory|lab)\s*manager$/, profile: 'Laboratory Manager' },
+      { match: /^quality\s*manager$/, profile: 'Quality Manager' },
+      { match: /^quality\s*(team\s*member|officer)$/, profile: 'Quality Team Member' },
+      { match: /^safety\s*manager$/, profile: 'Safety Manager' },
+      { match: /^blood\s*bank/, profile: 'Blood Bank Unit Head' },
+      { match: /^data\s*officer$/, profile: 'Data Officer' },
+      { match: /^poct/, profile: 'POCT Officer' },
+      { match: /^stores?\s*(officer|keeper)$/, profile: 'Stores Officer' },
+      { match: /^customer\s*service/, profile: 'Customer Service Officer' },
+      { match: /^internal\s*auditor$/, profile: 'Internal Auditor' },
+      // Any other "… Unit Head" / "… Head of Unit" runs a section.
+      { match: /(unit\s*head|head\s*of\s*unit|section\s*head|unit\s*manager)$/, profile: 'Section Head' },
+      { match: /^biomedical\s*scientist$/, profile: 'Biomedical Scientist' },
+      { match: /^(medical\s*)?laboratory\s*(scientist|technologist)$/, profile: 'Biomedical Scientist' },
+      { match: /^technician$/, profile: 'Technician' },
+      // An intern is bench staff under supervision: the narrowest bench profile.
+      { match: /^(intern|student|trainee|attach(e|ment)e?)$/, profile: 'Technician' },
+      { match: /^(secretary|administrative\s*assistant|records\s*clerk)$/, profile: 'Quality User' },
+    ];
+
+    {
+      const profileIdByName = new Map(
+        (db.prepare('SELECT id, name FROM roles').all() as Array<{ id: number; name: string }>)
+          .map(r => [r.name.toLowerCase(), r.id]),
+      );
+      const normalise = (t: string) => t.trim().toLowerCase().replace(/[_\-]+/g, ' ').replace(/\s+/g, ' ');
+      const unmapped = db.prepare(
+        'SELECT id, title FROM positions WHERE access_profile_role_id IS NULL',
+      ).all() as Array<{ id: number; title: string }>;
+      let mapped = 0;
+      for (const position of unmapped) {
+        const title = normalise(position.title);
+        const rule = POSITION_PROFILE_DEFAULTS.find(r => r.match.test(title));
+        if (!rule) continue;
+        const profileId = profileIdByName.get(rule.profile.toLowerCase());
+        if (!profileId) continue;
+        db.prepare('UPDATE positions SET access_profile_role_id = ? WHERE id = ?').run(profileId, position.id);
+        mapped++;
+      }
+      if (mapped > 0) {
+        db.prepare('INSERT INTO audit_logs (actor_user_id, action, entity, new_value) VALUES (NULL, ?, ?, ?)')
+          .run('position_profiles_seeded', 'positions', JSON.stringify({ mapped }));
+        console.log(`[seed] mapped ${mapped} organogram position(s) to an access profile`);
       }
     }
 

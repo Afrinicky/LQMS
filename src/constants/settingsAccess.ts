@@ -34,12 +34,17 @@ export const SETTINGS_TABS: SettingsTab[] = [
   { to: '/settings/people', label: 'People & Access', module: 'settings', action: 'edit', administration: true, grantsEntry: true },
   { to: '/settings/sections', label: 'Section/Unit Configuration', module: 'settings', action: 'edit', administration: true, grantsEntry: true },
   { to: '/settings/config-lists', label: 'Dropdown Lists', module: 'settings', action: 'edit', administration: true, grantsEntry: true },
-  { to: '/settings/stock', label: 'Stock & Storage', module: 'supplier_inventory', action: 'edit', grantsEntry: true },
-  { to: '/settings/scheduling', label: 'Roster & Scheduling', module: 'personnel', action: 'edit', grantsEntry: true },
-  { to: '/settings/activities', label: 'Unit Activities & Reminders', module: 'personnel.activities', action: 'view', grantsEntry: true },
+  // Each delegated tool names the FEATURE it configures, never the module.
+  // A module key is the union of everything inside it, and every member of
+  // staff holds "manage my own record" — so `personnel:edit` was true for the
+  // whole laboratory and put Settings, with Roster & Scheduling in it, in
+  // front of a Biomedical Scientist whose access profile said "No access".
+  { to: '/settings/stock', label: 'Stock & Storage', module: 'supplier_inventory.stock', action: 'edit', grantsEntry: true },
+  { to: '/settings/scheduling', label: 'Roster & Scheduling', module: 'personnel.rosters', action: 'edit', grantsEntry: true },
+  { to: '/settings/activities', label: 'Unit Activities & Reminders', module: 'personnel.activities', action: 'edit', grantsEntry: true },
   { to: '/settings/system', label: 'System', module: 'settings', action: 'edit', administration: true, grantsEntry: true },
-  { to: '/settings/document-import', label: 'Document Master List Import', module: 'documents', action: 'create', grantsEntry: true },
-  { to: '/settings/evidence', label: 'Evidence Upload', module: 'records_reports', action: 'create', grantsEntry: true },
+  { to: '/settings/document-import', label: 'Document Master List Import', module: 'documents.masterlist', action: 'create', grantsEntry: true },
+  { to: '/settings/evidence', label: 'Evidence Upload', module: 'records_reports.evidence', action: 'create', grantsEntry: true },
   { to: '/settings/actions', label: 'Action Tracker', module: 'actions', action: 'view', grantsEntry: false },
 ];
 

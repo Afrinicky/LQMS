@@ -132,7 +132,7 @@ export function centralArchivesRoutes() {
   });
 
   // -------- Manual upload --------
-  router.post('/', requirePermission('documents', 'create'), (req, res) => {
+  router.post('/', requirePermission('documents.archive', 'create'), (req, res) => {
     if (!req.body.title) return res.status(400).json({ error: 'title is required' });
     if (!req.body.archiveType || !ARCHIVE_TYPES.includes(req.body.archiveType)) {
       return res.status(400).json({ error: `archiveType must be one of: ${ARCHIVE_TYPES.join(', ')}` });
@@ -177,7 +177,7 @@ export function centralArchivesRoutes() {
     res.status(201).json(result);
   });
 
-  router.put('/:id', requirePermission('documents', 'edit'), (req, res) => {
+  router.put('/:id', requirePermission('documents.archive', 'edit'), (req, res) => {
     const db = getDb();
     const old = db.prepare('SELECT * FROM central_archives WHERE id = ?').get(req.params.id) as any;
     if (!old) return res.status(404).json({ error: 'Archive not found' });
@@ -207,7 +207,7 @@ export function centralArchivesRoutes() {
     res.json(db.prepare('SELECT s.*, st.full_name AS responsible_name FROM central_archive_schedules s LEFT JOIN staff st ON st.id = s.responsible_staff_id ORDER BY s.title').all());
   });
 
-  router.post('/schedules', requirePermission('documents', 'edit'), (req, res) => {
+  router.post('/schedules', requirePermission('documents.archive', 'edit'), (req, res) => {
     if (!req.body.scheduleKey || !req.body.title) return res.status(400).json({ error: 'scheduleKey and title are required' });
     const db = getDb();
     const exists = db.prepare('SELECT id FROM central_archive_schedules WHERE schedule_key = ?').get(req.body.scheduleKey);
@@ -235,7 +235,7 @@ export function centralArchivesRoutes() {
   // Pulls patient results from the LHIMS import rows the lab has processed, in
   // the given period, and produces an Excel/CSV file the lab can retain. The
   // resulting file is registered as a central archive entry automatically.
-  router.post('/patient-results', requirePermission('documents', 'create'), (req, res) => {
+  router.post('/patient-results', requirePermission('documents.archive', 'create'), (req, res) => {
     const db = getDb();
     if (!req.body.periodStart || !req.body.periodEnd) return res.status(400).json({ error: 'periodStart and periodEnd are required' });
     const start = String(req.body.periodStart);

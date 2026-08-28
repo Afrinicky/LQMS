@@ -223,6 +223,71 @@ console.log('\n[4] One access model — profiles, then individuals');
 }
 
 /* ==========================================================================
+   4b — A write is never granted by a module union
+   --------------------------------------------------------------------------
+   A module key is the union of everything inside it. Every member of staff
+   holds "manage my own record" (`personnel.self`), so `personnel:edit` was
+   true for the whole laboratory — and every gate written against the module
+   opened with it: Settings → Roster & Scheduling appeared in the sidebar, and
+   the duty roster handed Save / Publish / Approve / Delete to a Biomedical
+   Scientist who held nothing but View on rosters. A write must name the area
+   it writes to.
+   ========================================================================= */
+console.log('\n[4b] Writes name a feature, never a module that has features');
+{
+  const modulesWithFeatures = new Set(
+    [...featureSrc.matchAll(/\{\s*key:\s*'[^']+',\s*module:\s*'([^']+)'/g)].map(m => m[1]),
+  );
+  const WRITE = new Set(['create', 'edit', 'export', 'approve', 'void_archive']);
+  const offenders = [];
+  for (const p of [...SERVER_FILES, ...CLIENT_FILES]) {
+    read(p).split('\n').forEach((l, i) => {
+      for (const m of l.matchAll(/(requirePermission|can)\(\s*'([a-z_]+)'\s*,\s*'([a-z_]+)'/g)) {
+        if (modulesWithFeatures.has(m[2]) && WRITE.has(m[3])) {
+          offenders.push(`${path.basename(p)}:${i + 1} ${m[1]}('${m[2]}','${m[3]}')`);
+        }
+      }
+    });
+  }
+  check('no write right is asked of a module key', offenders.length === 0, offenders.slice(0, 8).join(' | '));
+
+  const resolver = read('server/services/permissionResolver.ts');
+  check('personal areas contribute only view/print to their module',
+    /MODULE_ACTIONS_FROM_PERSONAL/.test(resolver) && /f\.personal \|\| MODULE_ACTIONS_FROM_PERSONAL\.has\(action\)/.test(resolver));
+
+  const settings = read('src/constants/settingsAccess.ts');
+  const delegated = [...settings.matchAll(/module: '([a-z_.]+)', action: '(\w+)'/g)]
+    .filter(m => m[1] !== 'settings' && m[1] !== 'actions');
+  check('every delegated Settings page names a feature, not a module',
+    delegated.every(m => m[1].includes('.')),
+    delegated.filter(m => !m[1].includes('.')).map(m => m[1]).join(', '));
+}
+
+/* ==========================================================================
+   4c — A task is addressed to a person, not to a login account
+   --------------------------------------------------------------------------
+   Attestations were notified by looping over the ACCOUNTS attached to a staff
+   record. Somebody with no account yet, or linked to one afterwards, got no
+   row and never would — whole benches held pending attestations nobody told
+   them about, while the same work piled up unread in the administrator's
+   inbox. The address is the staff record.
+   ========================================================================= */
+console.log('\n[4c] Tasks are addressed to the staff record, and the inbox is personal');
+{
+  const docs = read('server/routes/documents.ts');
+  check('notifyStaff writes one row keyed on the staff record',
+    /Addressed to the STAFF RECORD/.test(docs) && !/for \(const u of users\)/.test(docs));
+  const org = read('server/routes/organisationExtended.ts');
+  check('notifyAllStaff reaches staff without a login account',
+    /FROM staff WHERE is_active = 1/.test(org));
+  const notif = read('server/routes/notifications.ts');
+  check('the inbox listing is personal unless the caller manages alerts',
+    /An inbox is personal/.test(notif) && /notifications\.rules', 'view'/.test(notif));
+  check('acknowledging your own alert needs only your own inbox',
+    /'\/:id\/acknowledge', requirePermission\('notifications\.inbox', 'edit'\)/.test(notif));
+}
+
+/* ==========================================================================
    5 — Module pages filter their tab bars
    ========================================================================= */
 console.log('\n[5] Module pages filter their tab bars by permission');

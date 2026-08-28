@@ -240,12 +240,12 @@ function AppRoutes() {
         <Route path="people" element={<RequirePermission module="settings" action="edit"><PeopleAccess/></RequirePermission>}/>
         <Route path="sections" element={<RequirePermission module="settings" action="edit"><SectionConfig/></RequirePermission>}/>
         <Route path="config-lists" element={<RequirePermission module="settings" action="edit"><ConfigListsPage/></RequirePermission>}/>
-        <Route path="stock" element={<RequirePermission module="supplier_inventory" action="edit"><StockSettingsPage/></RequirePermission>}/>
-        <Route path="scheduling" element={<RequirePermission module="personnel" action="edit"><RosterSettings/></RequirePermission>}/>
-        <Route path="activities" element={<RequirePermission module="personnel.activities" action="view"><ActivitySettingsPage/></RequirePermission>}/>
+        <Route path="stock" element={<RequirePermission module="supplier_inventory.stock" action="edit"><StockSettingsPage/></RequirePermission>}/>
+        <Route path="scheduling" element={<RequirePermission module="personnel.rosters" action="edit"><RosterSettings/></RequirePermission>}/>
+        <Route path="activities" element={<RequirePermission module="personnel.activities" action="edit"><ActivitySettingsPage/></RequirePermission>}/>
         <Route path="system" element={<RequirePermission module="settings" action="edit"><SystemSettings/></RequirePermission>}/>
-        <Route path="document-import" element={<RequirePermission module="documents" action="create"><DocumentImport/></RequirePermission>}/>
-        <Route path="evidence" element={<RequirePermission module="records_reports" action="create"><EvidenceUpload/></RequirePermission>}/>
+        <Route path="document-import" element={<RequirePermission module="documents.masterlist" action="create"><DocumentImport/></RequirePermission>}/>
+        <Route path="evidence" element={<RequirePermission module="records_reports.evidence" action="create"><EvidenceUpload/></RequirePermission>}/>
         <Route path="actions" element={<RequirePermission module="actions"><ActionTracker/></RequirePermission>}/>
         {/* legacy deep links → People & Access */}
         <Route path="register-staff" element={<Navigate to="/settings/people" replace/>}/>

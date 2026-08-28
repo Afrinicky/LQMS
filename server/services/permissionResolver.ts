@@ -89,7 +89,15 @@ export function profileIdForUser(userId: number): { profileId: number | null; vi
     { id: number; role_id: number; staff_id: number | null; is_active: number } | undefined;
   if (!user || user.is_active !== 1) return { profileId: null, via: null };
 
-  if (user.staff_id) {
+  // An administrator's account always wins over the organogram. Otherwise an
+  // administrator whose staff record happens to hold a bench position would be
+  // demoted by a position mapping — and, if they were the only administrator,
+  // the laboratory would be locked out of its own access control with no way
+  // back in.
+  const accountIsAdministrator = (db.prepare('SELECT is_administrator AS a FROM roles WHERE id = ?')
+    .get(user.role_id) as { a: number } | undefined)?.a === 1;
+
+  if (user.staff_id && !accountIsAdministrator) {
     const mapped = db.prepare(`
       SELECT p.access_profile_role_id AS profileId, p.title AS title
       FROM staff_position_assignments spa
@@ -187,13 +195,28 @@ function computeGrants(userId: number): Map<string, Grant> {
   // ── Invariant (c): a module's access is the union of its features ─────────
   // Permissions are granted on features, but 1,000+ existing route guards name
   // modules. Deriving the module from its features keeps every one of them
-  // working: `personnel:view` now means "can view at least one part of
-  // Personnel", which is exactly the question the module gate is asking. The
-  // finer question is asked with a feature key.
+  // working: `personnel:view` means "can view at least one part of Personnel",
+  // which is exactly the question the module gate is asking. The finer
+  // question is asked with a feature key.
+  //
+  // A PERSONAL feature is the exception, and it matters more than it sounds.
+  // Everyone manages their OWN record — `personnel.self` is granted at Manage
+  // to every member of staff, because they maintain their own profile and
+  // certificates. Folding that into the union made `personnel:edit` true for
+  // the entire laboratory, and every gate written against the module then
+  // opened: Settings → Roster & Scheduling appeared in the sidebar, and the
+  // duty roster handed out Save / Publish / Approve / Delete to a Biomedical
+  // Scientist who held nothing but View on rosters.
+  //
+  // So a personal feature contributes only what it honestly means at module
+  // level: the workspace is worth showing, and its own record can be printed.
+  // Changing anything in the module still needs a grant on a real area of it.
+  const MODULE_ACTIONS_FROM_PERSONAL = new Set(['view', 'print']);
   for (const moduleKey of new Set(FEATURES.map(f => f.module))) {
     const features = featuresOfModule(moduleKey);
     for (const action of PERMISSION_ACTIONS) {
-      const allowedBy = features.find(f => grants.get(key(f.key, action))?.allowed === true);
+      const contributors = features.filter(f => !f.personal || MODULE_ACTIONS_FROM_PERSONAL.has(action));
+      const allowedBy = contributors.find(f => grants.get(key(f.key, action))?.allowed === true);
       if (allowedBy) {
         set(moduleKey, action, true, SOURCE_DERIVED, `Allowed by the "${allowedBy.label}" area.`);
       } else {

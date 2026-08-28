@@ -195,7 +195,7 @@ export function processManagementRoutes() {
     res.json(db.prepare(query).all(...params));
   });
 
-  router.post('/specimen-rejections', requirePermission('process_management', 'create'), (req, res) => {
+  router.post('/specimen-rejections', requirePermission('process_management.rejections', 'create'), (req, res) => {
     if (!req.body.rejectionDate) return res.status(400).json({ error: 'rejectionDate is required' });
     if (!req.body.rejectionReason) return res.status(400).json({ error: 'rejectionReason is required' });
     const db = getDb();
@@ -216,7 +216,7 @@ export function processManagementRoutes() {
     res.json(r);
   });
 
-  router.put('/specimen-rejections/:id', requirePermission('process_management', 'edit'), (req, res) => {
+  router.put('/specimen-rejections/:id', requirePermission('process_management.rejections', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM specimen_rejection_records WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Rejection not found' });
@@ -246,7 +246,7 @@ export function processManagementRoutes() {
     res.status(201).json({ id: actionId });
   });
 
-  router.post('/specimen-rejections/:id/close', requirePermission('process_management', 'approve'), (req, res) => {
+  router.post('/specimen-rejections/:id/close', requirePermission('process_management.rejections', 'approve'), (req, res) => {
     const db = getDb();
     const r = db.prepare('SELECT * FROM specimen_rejection_records WHERE id = ?').get(req.params.id) as any;
     if (!r) return res.status(404).json({ error: 'Rejection not found' });
@@ -755,7 +755,7 @@ export function processManagementRoutes() {
   router.get('/sample-receipts', requirePermission('process_management', 'view'), (_req, res) => {
     res.json(getDb().prepare('SELECT * FROM sample_receipt_records ORDER BY receipt_date DESC, created_at DESC').all());
   });
-  router.post('/sample-receipts', requirePermission('process_management', 'create'), (req, res) => {
+  router.post('/sample-receipts', requirePermission('process_management.receipt', 'create'), (req, res) => {
     if (!req.body.receiptDate) return res.status(400).json({ error: 'receiptDate is required' });
     const db = getDb();
     const createdAt = new Date().toISOString();
@@ -766,7 +766,7 @@ export function processManagementRoutes() {
     res.status(201).json({ id: r.lastInsertRowid, receiptNumber: number });
   });
   // Escalate a received sample to the specimen-rejection register.
-  router.post('/sample-receipts/:id/reject', requirePermission('process_management', 'create'), (req, res) => {
+  router.post('/sample-receipts/:id/reject', requirePermission('process_management.receipt', 'create'), (req, res) => {
     const db = getDb();
     const rec = db.prepare('SELECT * FROM sample_receipt_records WHERE id = ?').get(req.params.id) as any;
     if (!rec) return res.status(404).json({ error: 'Sample receipt not found' });

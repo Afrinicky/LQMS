@@ -2,9 +2,14 @@
 
 **Date:** August 2026
 **Scope:** every module, every access-control surface, both sides of the wire.
-**Verification:** `npm run audit:access` (static, 16 checks) and
-`npm run audit:access:live` (live, 14 checks against a running host), plus the
+**Verification:** `npm run audit:access` (static, 23 checks) and
+`npm run audit:access:live` (live, 21 checks against a running host), plus the
 pre-existing `rbac:check`, `rbac:matrix` and `rbac:selfservice` suites.
+
+> Part 1 (§1–§6) is the unification. **Part 2 (§7–§10), at the foot of this
+> document, is the second pass** after the laboratory tested it: the module-union
+> leak that let a Biomedical Scientist open Settings and approve duty rosters,
+> the notification bug that left bench inboxes empty, and the access preset.
 
 ---
 
@@ -306,3 +311,216 @@ and passing.
   declaration, their own signed copy — stay ungated by design. Personal
   features are reached unconditionally for one's own record; the level controls
   what is seen of everybody else's (`canReachPersonalRecord`).
+
+
+---
+
+# Part 2 — the preset, and the leaks the first pass did not close
+
+**Date:** August 2026 (second pass, after the laboratory tested Part 1)
+
+Three screenshots settled what was still wrong: Access Control said Settings =
+**No access** for a Biomedical Scientist, and a Biomedical Scientist had
+Settings open; Access Control said Rosters = **View**, and a Biomedical
+Scientist was saving, publishing and approving a duty roster. A hundred
+attestations sat in the administrator's inbox while the bench inboxes they
+belonged to were empty.
+
+## 7. One root cause behind both screenshots
+
+A module key is the **union of everything inside it**. Every member of staff
+holds `personnel.self` at **Manage** — they maintain their own profile and
+certificates, which is exactly right. Folding that into the union made
+`personnel:edit` true for the **entire laboratory**, and every gate written
+against the module opened with it:
+
+```
+personnel.self : manage      (everyone — their own record)
+        ↓ union
+personnel : edit  = TRUE for everyone
+        ↓
+/settings/scheduling   gated on personnel:edit  → Settings appears in the sidebar
+canEditRosters         = can('personnel','edit') → Save / Publish / Approve / Delete
+```
+
+Two fixes, and they close the whole class:
+
+1. **A personal area contributes only `view` and `print` to its module.**
+   `server/services/permissionResolver.ts`. The workspace stays reachable — a
+   person can open Personnel to find My Profile — but changing anything in a
+   module now requires a grant on a real area of it. Their own record is still
+   entirely theirs, through `canReachPersonalRecord`.
+2. **Every write names the area it writes to, never the module.** 58 sites
+   corrected — 33 route guards and 25 client gates. `audit:access` check
+   **[4b]** now fails the build if a `create`, `edit`, `export`, `approve` or
+   `void_archive` right is ever asked of a module that has features again.
+
+The delegated Settings pages were the worst of it, and now name features:
+
+| Settings page | Was | Now |
+|---|---|---|
+| Roster & Scheduling | `personnel:edit` — true for all staff | `personnel.rosters:edit` |
+| Unit Activities & Reminders | `personnel.activities:view` | `personnel.activities:edit` |
+| Stock & Storage | `supplier_inventory:edit` | `supplier_inventory.stock:edit` |
+| Document Master List Import | `documents:create` | `documents.masterlist:create` |
+| Evidence Upload | `records_reports:create` | `records_reports.evidence:create` |
+
+Result, checked live against every seeded profile:
+
+| Profile | Settings | Pages offered |
+|---|---|---|
+| System Administrator | shown | all eleven |
+| Laboratory Manager | shown | Stock, Roster, Unit Activities, Master List, Evidence |
+| Quality Manager | shown | Unit Activities, Master List, Evidence |
+| Section Head | shown | Stock, Roster, Unit Activities |
+| Stores Officer | shown | Stock & Storage |
+| **Biomedical Scientist** | **hidden** | — |
+| **Technician** | **hidden** | — |
+| **Internal Auditor** | **hidden** | — |
+
+Only the administrator profile holds the `settings` key at all; everyone else
+who sees Settings sees a short list of delegated tools and nothing else.
+
+## 8. Why the attestations never arrived
+
+`notifyStaff` looped over the **login accounts** attached to a staff record:
+
+```js
+const users = db.prepare('SELECT id FROM users WHERE staff_id = ? AND is_active = 1').all(staffId);
+for (const u of users) { /* insert the notification */ }
+```
+
+A person with no account yet, or whose account was linked to their staff record
+*after* the document was issued, matched nothing — so the loop inserted nothing,
+and never would, because it only ran at the moment of issue. The attestation
+existed; the person was never told. `notifyAllStaff` in
+`organisationExtended.ts` (the code of conduct) had the same shape.
+
+Three changes:
+
+- **A task is addressed to the staff record, not to an account.** One row per
+  person on `assigned_to_staff_id`, with `user_id` filled in when an account
+  exists. Link the account later and the waiting task is simply there. Repeat
+  delivery for the same person and record is refused.
+- **The backlog is delivered once**, by a migration that writes the missing
+  notification for every pending or overdue attestation that has none.
+- **An inbox is personal.** `GET /notifications` returned *every* row unless the
+  caller passed `?mine=true` — which is why a hundred other people's
+  attestations piled up in the administrator's inbox. It is personal by
+  default; seeing the whole queue takes `notifications.rules:view` and an
+  explicit `?all=true`. Acknowledging, resolving and dismissing moved from
+  `notifications:edit` to `notifications.inbox:edit`, so acting on your own
+  alerts needs nothing but your own inbox.
+
+Verified end to end: a staff member created with no account, a document issued
+and distributed, *then* the account created and linked — the attestation is in
+their inbox, and the administrator's inbox holds one item, their own.
+
+## 9. The preset
+
+`ROLE_DEFAULTS_VERSION` is bumped to `2026.08-features.6-bench-baseline`, which
+applies the table below **authoritatively, once**. This matters: a laboratory
+already running was carrying grants from before features existed — the
+Biomedical Scientist in the screenshot held **77 of 99 areas** — and
+`INSERT OR IGNORE` could never clear them. After the re-apply that profile
+holds **28**.
+
+### What every member of staff gets, and only this
+
+1. **To be told what they must do** — their own inbox, their reminder sounds,
+   the review calendar, and the duty roster they are on (read).
+2. **To raise what they find** — a nonconformity, a safety incident, a
+   complaint, and their assigned actions.
+3. **To keep their own record** — profile, certificates, declarations,
+   training, through `personnel.self` and the self-service routes.
+4. **The documents they must follow** — the library, and the code of conduct
+   they sign against.
+
+Their own declarations, training and duties are deliberately **not** granted as
+areas: `view` on those registers is the right to read *everybody's*. A person
+reaches their own through `/personnel/my-profile`, `/my-tasks`,
+`/my-declarations` and the User Portal, which check the caller against their
+own staff record.
+
+### The daily job on top of that
+
+Each profile adds the bench work it is responsible for — IQC, environmental
+readings, equipment maintenance, sample receipt, the store, the front desk —
+and nothing beyond it. Three profiles the organogram always had but the access
+model never named were added: **Stores Officer**, **Customer Service Officer**
+and **Internal Auditor** (reads the whole management system, runs assessments,
+changes nothing it audits).
+
+| Profile | Areas | Settings |
+|---|---|---|
+| System Administrator | 82 | yes |
+| Laboratory Manager | 79 | delegated only |
+| Quality Manager | 75 | delegated only |
+| Internal Auditor | 47 | no |
+| Quality Team Member | 46 | no |
+| Section Head | 43 | delegated only |
+| Biomedical Scientist | 28 | no |
+| Technician | 20 | no |
+| Customer Service Officer | 18 | no |
+| Data Officer / Safety Manager | 17 | no |
+| Blood Bank Unit Head / Stores Officer | 15 | no |
+| Quality User | 14 | no |
+| POCT Officer | 13 | no |
+
+### Every position is wired to a profile
+
+The Access Control screen was right to complain that fifteen positions held
+staff with no mapping — their access came from whatever profile happened to be
+on their login account, which is not a decision anybody made. The seed now maps
+them by normalised title, so `INTERNAL AUDITOR`, `Internal Auditor` and
+`internal  auditor` are one job:
+
+```
+Biochemistry Unit Head    → Section Head          Quality Manager       → Quality Manager
+Biomedical Scientist      → Biomedical Scientist  Quality Team Member   → Quality Team Member
+Blood Bank Unit Head      → Blood Bank Unit Head  Safety Manager        → Safety Manager
+Customer Service Officer  → Customer Service      Secretary             → Quality User
+Data Officer              → Data Officer          Stores Officer        → Stores Officer
+Haematology Unit Head     → Section Head          System Administrator  → System Administrator
+Laboratory Manager        → Laboratory Manager    Technician            → Technician
+Microbiology Unit Head    → Section Head          Intern / trainee      → Technician
+POCT Officer              → POCT Officer          Internal Auditor      → Internal Auditor
+```
+
+Only a position with **no mapping yet** is touched, so a laboratory's own choice
+is never overwritten. Sixteen positions mapped on first boot; the warning
+clears.
+
+**One safeguard:** an administrator's account always wins over the organogram.
+Without it, an administrator whose staff record happens to hold a bench position
+would be demoted by the mapping — and, if they were the only administrator, the
+laboratory would be locked out of its own access control with no way back in.
+
+## 10. What the audits now prove
+
+`npm run audit:access` — **23 static checks**, adding:
+
+- **[4b]** No write right is ever asked of a module key; personal areas
+  contribute only view/print; every delegated Settings page names a feature.
+- **[4c]** Tasks are addressed to the staff record; `notifyAllStaff` reaches
+  staff with no login account; the inbox is personal unless the caller manages
+  alerts; acknowledging your own alert needs only your own inbox.
+
+`npm run audit:access:live` — **21 live checks**, adding:
+
+- **[6]** Only the administrator profile holds Settings. For each bench profile:
+  Settings absent from the map and refused by the API (People & Access,
+  modules, sections); no roster create, approve, or acting-head appointment; no
+  staff-register export; no personnel register or appraisals — **and** their
+  inbox, calendar, own profile, own tasks, own declarations, the roster they are
+  on, and the documents they must follow all reachable, and an NC, a complaint
+  and a safety incident all raisable.
+- **[7]** Every active organogram position is mapped to a profile.
+- **[8]** The default inbox listing carries nobody else's work, and asking for
+  everybody's does not widen it.
+
+Alongside: `rbac:check` 19/19, `rbac:matrix` 14/14, `rbac:selfservice` 22/22
+(now asserting the roster is readable by all and writable by none of the bench),
+`account-check` 37/37, `complaints-check` 38/38, `core-documents-check` 20/20,
+`inventory-check` 43/43, `inventory-records-check` 56/56, `iqc-check` 38/38,
+`iqc-io-check` 80/80, `iqc-admin-check` 73/73, `office-edit-check` 74/74.

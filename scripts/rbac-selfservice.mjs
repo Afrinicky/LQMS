@@ -60,10 +60,27 @@ for (const [label, path] of [
   ['the staff document register', '/personnel/staff-documents'],
   ['technical authorizations', '/authorizations/technical'],
   ['orientation records', '/personnel/orientations'],
-  ['duty rosters', '/scheduling/duty-rosters'],
 ]) {
   const r = await j(path, { token: T });
   check(`CANNOT list everyone's ${label}`, r.status === 403, `got ${r.status}`);
+}
+
+// The duty roster is the one register in Personnel that every member of staff
+// SHOULD see — it is how a person knows which shift they work. What they must
+// not do is change it, and that is the assertion worth making.
+console.log('\n[The duty roster — readable by all, writable by rostering staff]');
+{
+  const readable = await j('/scheduling/duty-rosters', { token: T });
+  check('CAN read the duty roster they are on', readable.status === 200, `got ${readable.status}`);
+  for (const [label, path, method, body] of [
+    ['create a roster', '/scheduling/duty-rosters', 'POST', { month: '2030-01' }],
+    ['approve a roster', '/scheduling/duty-rosters/1/approve', 'POST', {}],
+    ['paint roster cells', '/scheduling/duty-rosters/1/cells', 'POST', { cells: [] }],
+    ['appoint an acting unit head', '/scheduling/acting-unit-heads', 'POST', { sectionId: 1, staffId: 1 }],
+  ]) {
+    const r = await j(path, { token: T, method, body });
+    check(`CANNOT ${label}`, r.status === 403, `got ${r.status}`);
+  }
 }
 
 console.log('\n[Directory — names stay available so pickers keep working]');

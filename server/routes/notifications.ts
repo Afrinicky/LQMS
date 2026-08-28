@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { getDb } from '../db/database.js';
+import { resolvePermission } from '../services/permissionResolver.js';
 import { requirePermission, viewableModulesOf } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
@@ -842,21 +843,33 @@ export function notificationsRoutes() {
   });
 
   // -------- Notifications CRUD (must come AFTER specific routes) --------
-  router.get('/', requirePermission('notifications', 'view'), (req, res) => {
+  // An inbox is personal.
+  //
+  // This listing used to return EVERY row unless the caller passed
+  // `?mine=true` — which is why a hundred other people's attestations piled up
+  // in the administrator's inbox. It is personal by default now. Seeing the
+  // whole queue is a supervisory act, so it takes the right that governs the
+  // alert programme (`notifications.rules`), and is asked for explicitly.
+  router.get('/', requirePermission('notifications.inbox', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = []; const params: unknown[] = [];
     if (req.query.status) { filters.push('status = ?'); params.push(String(req.query.status)); }
     if (req.query.moduleKey) { filters.push('module_key = ?'); params.push(String(req.query.moduleKey)); }
     if (req.query.severity) { filters.push('severity = ?'); params.push(String(req.query.severity)); }
-    if (req.query.mine === 'true') {
-      // Show everything routed to the current user: rows assigned to the caller's
-      // staff id, rows explicitly linked to their user account, or rows created
-      // with just user_id (older code path). Excludes rows for other people.
+
+    const wantsEveryone = req.query.all === 'true'
+      && resolvePermission(req.user!.id, 'notifications.rules', 'view').allowed;
+    if (!wantsEveryone) {
+      // Everything routed to this person: rows addressed to their staff record
+      // (the durable address, written whether or not they had an account at the
+      // time), or to their user account by either of the older code paths.
       const parts: string[] = [];
       const pp: unknown[] = [];
       if (req.user?.staffId) { parts.push('assigned_to_staff_id = ?'); pp.push(req.user.staffId); }
       if (req.user?.id) { parts.push('user_id = ?'); pp.push(req.user.id); parts.push('assigned_to_user_id = ?'); pp.push(req.user.id); }
-      if (parts.length) { filters.push(`(${parts.join(' OR ')})`); params.push(...pp); }
+      // No staff record and no account rows: an empty inbox, never everybody's.
+      filters.push(parts.length ? `(${parts.join(' OR ')})` : '1 = 0');
+      params.push(...pp);
     }
     let query = 'SELECT * FROM notifications';
     if (filters.length) query += ` WHERE ${filters.join(' AND ')}`;
@@ -868,7 +881,7 @@ export function notificationsRoutes() {
     res.json(rows.filter(n => !n.module_key || viewable.has(n.module_key)));
   });
 
-  router.post('/', requirePermission('notifications', 'create'), (req, res) => {
+  router.post('/', requirePermission('notifications.rules', 'create'), (req, res) => {
     if (!req.body.title) return res.status(400).json({ error: 'title is required' });
     if (!req.body.message) return res.status(400).json({ error: 'message is required' });
     if (!req.body.notificationType) return res.status(400).json({ error: 'notificationType is required' });
@@ -913,10 +926,10 @@ export function notificationsRoutes() {
     res.json({ ok: true });
   }
 
-  router.post('/:id/read', requirePermission('notifications', 'view'), (req, res) => transitionStatus(req, res, 'read', 'read'));
-  router.post('/:id/acknowledge', requirePermission('notifications', 'edit'), (req, res) => transitionStatus(req, res, 'acknowledged', 'acknowledge', { staffField: 'acknowledged_by_staff_id', tsField: 'acknowledged_at' }));
-  router.post('/:id/resolve', requirePermission('notifications', 'edit'), (req, res) => transitionStatus(req, res, 'resolved', 'resolve', { staffField: 'resolved_by_staff_id', tsField: 'resolved_at' }));
-  router.post('/:id/dismiss', requirePermission('notifications', 'edit'), (req, res) => transitionStatus(req, res, 'dismissed', 'dismiss'));
+  router.post('/:id/read', requirePermission('notifications.inbox', 'view'), (req, res) => transitionStatus(req, res, 'read', 'read'));
+  router.post('/:id/acknowledge', requirePermission('notifications.inbox', 'edit'), (req, res) => transitionStatus(req, res, 'acknowledged', 'acknowledge', { staffField: 'acknowledged_by_staff_id', tsField: 'acknowledged_at' }));
+  router.post('/:id/resolve', requirePermission('notifications.inbox', 'edit'), (req, res) => transitionStatus(req, res, 'resolved', 'resolve', { staffField: 'resolved_by_staff_id', tsField: 'resolved_at' }));
+  router.post('/:id/dismiss', requirePermission('notifications.inbox', 'edit'), (req, res) => transitionStatus(req, res, 'dismissed', 'dismiss'));
 
   return router;
 }
