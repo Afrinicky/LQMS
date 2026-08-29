@@ -45,12 +45,13 @@ import { audit } from '../services/auditService.js';
 import { parseIntNullable, getCurrentStaffId } from './routeHelpers.js';
 import { resolvePermission } from '../services/permissionResolver.js';
 import { equipmentIsDiagnostic } from '../../shared/constants/equipment.js';
-import { chartStatistics } from '../services/iqcEvaluation.js';
+import { generateRecordNumber } from '../utils/recordNumber.js';
 import {
   IQC_ENTRY_METHODS, parseEntryMethods, FEED_TRANSPORTS, FEED_PROTOCOLS,
   type IqcEntryMethod,
 } from '../../shared/constants/routineWork.js';
 import { tierFeatureKey, TIER_ACTION } from '../../shared/constants/activities.js';
+import { effectiveTarget, withEffectiveTarget } from '../services/iqcTargets.js';
 
 const numericOnly = (req: any, _res: any, next: any) => (/^\d+$/.test(req.params.id) ? next() : next('route'));
 
@@ -116,7 +117,7 @@ export function iqcPortalRoutes() {
       return res.json({
         date, sectionId: null, groups: [], counts: { due: 0, done: 0, failed: 0, pendingReview: 0 },
         canPerform: mayPerform(req), canReview: mayReview(req),
-        message: 'Your account is not linked to a unit, so no controls can be listed for you. Ask an administrator to link your staff record to your section.',
+        message: 'Your account is not linked to a unit. Ask an administrator to set it.',
       });
     }
 
@@ -228,7 +229,7 @@ export function iqcPortalRoutes() {
       },
       misfiled: misfiled.map(m => ({
         id: m.id, materialName: m.material_name, equipmentName: m.equipment_name,
-        why: `${m.equipment_name} is not diagnostic equipment, so a control on it has no examination to control. Move the control to the analyser that reports the result, or correct the equipment's category.`,
+        why: `${m.equipment_name} does not report results. Move the control to the analyser, or correct the equipment category.`,
       })),
       canPerform: mayPerform(req),
       canReview: mayReview(req),
@@ -238,24 +239,259 @@ export function iqcPortalRoutes() {
   });
 
   /* ======================================================================
-     Defining a control from the portal
+     What the unit's tests are controlled by, and what they are not
      ----------------------------------------------------------------------
-     The wizard is the module's — literally the same component — so what it
-     needs here is only the lists it fills its dropdowns from. They are served
-     from this router rather than from /sections, /staff and /equipment so the
-     right that governs them is the one that governs defining a control, not
-     three unrelated module rights a bench scientist may not hold.
+     The board answers "has today's control been run?". It cannot answer the
+     question that comes first — "is this examination controlled at all?" — and
+     a unit whose board is empty was being told only that no controls exist,
+     with no way to see how big the gap was or to close it.
+
+     The unit's own test menu is the denominator. ISO 15189:2022 §7.3.7.1
+     requires a QC procedure for each examination, so a test on the menu with no
+     control against it is a finding, and it is one the unit head can act on.
      ==================================================================== */
-  router.get('/portal/lookups', requirePermission('iqc', 'create'), (req, res) => {
+
+  /** A test name and a control's test name are the same string, loosely compared. */
+  function testKey(value: unknown): string {
+    return String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  }
+
+  /**
+   * Whether the reader may set their unit's controls up.
+   *
+   * A unit head is accountable for their unit's quality control and is the
+   * person who ought to be defining it. Holding the module's create right
+   * qualifies anybody; being the head of the unit in question qualifies them
+   * for that unit alone, which is the narrower and more honest grant.
+   */
+  function mayDefineFor(req: any, sectionId: number | null): boolean {
+    if (resolvePermission(req.user!.id, 'iqc', 'create').allowed) return true;
+    if (!sectionId) return false;
+    const staffId = getCurrentStaffId(req);
+    if (staffId === null) return false;
+    const head = getDb().prepare('SELECT head_staff_id FROM sections WHERE id = ?').get(sectionId) as any;
+    return Boolean(head?.head_staff_id && Number(head.head_staff_id) === Number(staffId));
+  }
+
+  router.get('/portal/coverage', (req, res) => {
     const db = getDb();
-    const sections = db.prepare('SELECT id, name FROM sections ORDER BY name').all();
-    const staff = db.prepare('SELECT id, full_name AS fullName FROM staff WHERE is_active = 1 ORDER BY full_name').all();
-    // Only diagnostic equipment carries IQC — the same test the module screen
-    // applies, from the same shared helper.
-    const equipment = (db.prepare(`SELECT id, name, equipment_number, category, equipment_category, equipment_archetype, section_id, status
-        FROM equipment_items ORDER BY name`).all() as any[])
-      .filter(item => equipmentIsDiagnostic(item));
-    res.json({ sections, staff, equipment, sectionId: currentSection(db, req) });
+    const sectionId = parseIntNullable(req.query.sectionId) ?? currentSection(db, req);
+    if (!sectionId) {
+      return res.json({
+        sectionId: null, sectionName: null, tests: [], counts: { tests: 0, covered: 0, uncovered: 0, controls: 0, needingLimits: 0 },
+        canDefine: false, equipment: [],
+        message: 'Your account is not linked to a unit.',
+      });
+    }
+
+    const section = db.prepare('SELECT id, name FROM sections WHERE id = ?').get(sectionId) as any;
+    const tests = db.prepare(`SELECT t.id, t.test_code, t.test_name, t.method_name, t.equipment_id, t.status,
+          e.name AS equipment_name, e.equipment_number
+        FROM lab_test_catalog t LEFT JOIN equipment_items e ON e.id = t.equipment_id
+        WHERE t.section_id = ? AND COALESCE(t.status, 'active') = 'active'
+        ORDER BY t.test_name`).all(sectionId) as any[];
+
+    const controls = db.prepare(`SELECT m.id, m.material_name, m.test_name, m.level_label, m.lot_number,
+          m.control_type, m.expiry_date, m.equipment_id, m.is_active,
+          e.name AS equipment_name
+        FROM iqc_materials m LEFT JOIN equipment_items e ON e.id = m.equipment_id
+        WHERE m.is_active = 1 AND COALESCE(m.performing_section_id, m.section_id, e.section_id) = ?
+        ORDER BY m.test_name, m.level_label`).all(sectionId) as any[];
+
+    // Which controls belong to which test. A test may carry several levels, and
+    // a control may exist for a test that is not on the menu — both are worth
+    // seeing, so neither side is dropped.
+    const byTest = new Map<string, any[]>();
+    for (const c of controls) {
+      const key = testKey(c.test_name);
+      const list = byTest.get(key) ?? [];
+      list.push(c);
+      byTest.set(key, list);
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const analyteStats = db.prepare(`SELECT iqc_material_id,
+          COUNT(*) AS n,
+          SUM(CASE WHEN (target_sd IS NOT NULL AND target_sd > 0)
+                     OR (established_sd IS NOT NULL AND established_sd > 0) THEN 1 ELSE 0 END) AS with_sd
+        FROM iqc_analytes WHERE is_active = 1 GROUP BY iqc_material_id`).all() as any[];
+    const statsByMaterial = new Map(analyteStats.map(r => [Number(r.iqc_material_id), r]));
+
+    const decorate = (c: any) => {
+      const stats = statsByMaterial.get(Number(c.id));
+      const analytes = Number(stats?.n ?? 0);
+      const withSd = Number(stats?.with_sd ?? 0);
+      return {
+        id: c.id, materialName: c.material_name, testName: c.test_name, levelLabel: c.level_label,
+        lotNumber: c.lot_number, controlType: c.control_type, equipmentName: c.equipment_name ?? null,
+        expiryDate: c.expiry_date, expired: Boolean(c.expiry_date && c.expiry_date < today),
+        analytes,
+        // A quantitative control whose parameters have no SD records results
+        // and judges nothing. It is "set up" and not yet working, and that
+        // distinction is the whole point of showing it.
+        analytesWithoutLimits: c.control_type === 'quantitative' ? Math.max(0, analytes - withSd) : 0,
+      };
+    };
+
+    const rows = tests.map(t => {
+      const matched = (byTest.get(testKey(t.test_name)) ?? []).map(decorate);
+      return {
+        id: t.id, testCode: t.test_code, testName: t.test_name, methodName: t.method_name,
+        equipmentId: t.equipment_id, equipmentName: t.equipment_name, equipmentNumber: t.equipment_number,
+        controls: matched,
+        covered: matched.length > 0,
+        needingLimits: matched.reduce((sum: number, c: any) => sum + c.analytesWithoutLimits, 0),
+      };
+    });
+
+    // Controls the unit runs for something that is not on its test menu. Not an
+    // error — a menu is often incomplete — but the unit head should see them
+    // rather than have them vanish out of the count.
+    const menuKeys = new Set(tests.map(t => testKey(t.test_name)));
+    const unlisted = controls.filter(c => !menuKeys.has(testKey(c.test_name))).map(decorate);
+
+    // The instruments a control could be attached to, so the setup form can
+    // offer them without a second round trip.
+    const equipment = (db.prepare(`SELECT id, name, equipment_number, category, equipment_archetype, equipment_category, status
+        FROM equipment_items WHERE section_id = ? AND status != 'decommissioned' ORDER BY name`).all(sectionId) as any[])
+      .filter(e => equipmentIsDiagnostic(e))
+      .map(e => ({ id: e.id, name: e.name, equipmentNumber: e.equipment_number }));
+
+    res.json({
+      sectionId, sectionName: section?.name ?? null,
+      tests: rows,
+      unlisted,
+      equipment,
+      counts: {
+        tests: rows.length,
+        covered: rows.filter(r => r.covered).length,
+        uncovered: rows.filter(r => !r.covered).length,
+        controls: controls.length,
+        needingLimits: rows.reduce((sum, r) => sum + r.needingLimits, 0)
+          + unlisted.reduce((sum: number, c: any) => sum + c.analytesWithoutLimits, 0),
+        unlisted: unlisted.length,
+      },
+      canDefine: mayDefineFor(req, sectionId),
+      message: null,
+    });
+  });
+
+  /**
+   * Define a control for THIS unit, from the bench.
+   *
+   * The full definition screen lives in the IQC module and stays there — it
+   * carries in-house provenance, culture and sensitivity panels, import
+   * layouts, instrument feeds. This is the narrow path a unit head needs and
+   * could not previously take: a test on their menu has no control, and they
+   * are the person accountable for that.
+   *
+   * Two things it does that the module screen cannot.
+   *
+   * The unit is not a field. It is the caller's own unit, taken from their
+   * staff record and written to BOTH section_id and performing_section_id, so
+   * the control cannot be saved unowned — which is exactly how controls were
+   * ending up invisible to the bench that owned them.
+   *
+   * The SD is optional and saying so is the point. Most commercial inserts give
+   * a mean and a range and no SD; refusing the control until somebody invents
+   * one is why controls do not get defined. It is accepted without, and this
+   * laboratory's own SD is established from its runs.
+   */
+  router.post('/portal/controls', (req, res) => {
+    const db = getDb();
+    const sectionId = currentSection(db, req);
+    if (!sectionId) return res.status(400).json({ error: 'Your staff record is not linked to a unit. Ask an administrator to set it.' });
+    if (!mayDefineFor(req, sectionId)) {
+      return res.status(403).json({ error: 'You do not have permission to define controls. Ask your unit head.' });
+    }
+
+    const materialName = String(req.body?.materialName ?? '').trim();
+    const testName = String(req.body?.testName ?? '').trim();
+    const lotNumber = String(req.body?.lotNumber ?? '').trim();
+    if (!materialName) return res.status(400).json({ error: 'Give the control a name.' });
+    if (!testName) return res.status(400).json({ error: 'Name the test this control is for.' });
+    if (!lotNumber) return res.status(400).json({ error: 'A lot or batch number is required — a control without one cannot be traced to the vial it came from.' });
+
+    const source = req.body?.source === 'in_house' ? 'in_house' : 'commercial';
+    const controlType = ['quantitative', 'qualitative', 'semi_quantitative'].includes(req.body?.controlType)
+      ? req.body.controlType : 'quantitative';
+    if (source === 'in_house' && !String(req.body?.preparationMethod ?? '').trim()) {
+      return res.status(400).json({ error: 'Record how the in-house control was prepared.' });
+    }
+
+    const analytes = (Array.isArray(req.body?.analytes) ? req.body.analytes : [])
+      .filter((a: any) => String(a?.analyte ?? '').trim());
+    if (!analytes.length) return res.status(400).json({ error: 'Add at least one parameter.' });
+    if (controlType === 'qualitative' && analytes.some((a: any) => !String(a?.expectedResult ?? '').trim())) {
+      return res.status(400).json({ error: 'Every parameter needs an expected result.' });
+    }
+
+    // Only the unit's own diagnostic instruments. A control cannot be filed
+    // against another unit's analyser from here, and never against a fridge.
+    let equipmentId = parseIntNullable(req.body?.equipmentId);
+    if (equipmentId !== null) {
+      const item = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(equipmentId) as any;
+      if (!item) return res.status(400).json({ error: 'That instrument does not exist.' });
+      if (Number(item.section_id) !== Number(sectionId)) {
+        return res.status(400).json({ error: `${item.name} belongs to another unit.` });
+      }
+      if (!equipmentIsDiagnostic(item)) {
+        return res.status(400).json({ error: `${item.name} does not report results. Choose an analyser.` });
+      }
+    }
+
+    const ruleProfile = controlType === 'qualitative' ? 'match_expected'
+      : controlType === 'semi_quantitative' ? 'range_only'
+      : (['westgard_standard', 'westgard_simple'].includes(req.body?.ruleProfile) ? req.body.ruleProfile : 'westgard_standard');
+
+    const createdAt = new Date().toISOString();
+    const materialCode = generateRecordNumber(db, 'iqc_materials', 'IQCM', createdAt, 'material_code');
+    const n = (v: unknown) => (v === undefined || v === '' || v === null || Number.isNaN(Number(v)) ? null : Number(v));
+
+    let materialId = 0;
+    const tx = db.transaction(() => {
+      const result = db.prepare(`INSERT INTO iqc_materials (material_code, material_name, section_id, performing_section_id,
+          test_name, analyte, lot_number, manufacturer, expiry_date, open_vial_expiry, storage_condition,
+          equipment_id, is_active, created_by, created_at, source, control_type, level_label, qc_frequency, rule_profile,
+          prepared_by_staff_id, preparation_date, preparation_method, base_material, validation_summary, instructions)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(materialCode, materialName, sectionId, sectionId, testName,
+          String(analytes[0].analyte).trim(), lotNumber,
+          req.body?.manufacturer ?? null, req.body?.expiryDate ?? null, req.body?.openVialExpiry ?? null,
+          req.body?.storageCondition ?? null, equipmentId, req.user!.id, createdAt,
+          source, controlType, req.body?.levelLabel ?? null,
+          req.body?.qcFrequency ?? 'each_run', ruleProfile,
+          parseIntNullable(req.body?.preparedByStaffId), req.body?.preparationDate ?? null,
+          req.body?.preparationMethod ?? null, req.body?.baseMaterial ?? null,
+          req.body?.validationSummary ?? null, req.body?.instructions ?? null);
+      materialId = Number(result.lastInsertRowid);
+
+      const insert = db.prepare(`INSERT INTO iqc_analytes (iqc_material_id, analyte, unit, target_mean, target_sd,
+          acceptable_low, acceptable_high, decimal_places, expected_result, display_order)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      analytes.forEach((a: any, index: number) => {
+        insert.run(materialId, String(a.analyte).trim(), a.unit ?? null,
+          n(a.targetMean), n(a.targetSd), n(a.acceptableLow), n(a.acceptableHigh),
+          n(a.decimalPlaces) ?? 2, a.expectedResult ?? null, index);
+      });
+    });
+    tx();
+
+    audit(req, {
+      action: 'create', entity: 'iqc_materials', entityId: materialId,
+      newValue: { materialCode, materialName, testName, lotNumber, sectionId, controlType, analytes: analytes.length, via: 'portal' },
+    });
+
+    const missingSd = controlType === 'quantitative'
+      && analytes.filter((a: any) => n(a.targetSd) === null).length;
+    res.status(201).json({
+      id: materialId, materialCode,
+      // Said plainly, once, at the moment it matters: the control is usable
+      // now, and it starts judging properly once the runs are in.
+      note: missingSd
+        ? `${missingSd} parameter${missingSd === 1 ? '' : 's'} without an SD — limits are calculated from your own runs.`
+        : null,
+    });
   });
 
   /**
@@ -269,7 +505,12 @@ export function iqcPortalRoutes() {
         LEFT JOIN sections s ON s.id = COALESCE(m.performing_section_id, m.section_id) WHERE m.id = ?`).get(req.params.id) as any;
     if (!material) return res.status(404).json({ error: 'Control not found' });
 
-    const analytes = db.prepare('SELECT * FROM iqc_analytes WHERE iqc_material_id = ? AND is_active = 1 ORDER BY display_order, id').all(req.params.id) as any[];
+    // The bench sees the limits the run will actually be judged against: what
+    // was entered, or what this laboratory established from its own runs. A
+    // screen showing a blank SD next to an evaluation that used one is how a
+    // technician stops trusting the evaluation.
+    const analytes = (db.prepare('SELECT * FROM iqc_analytes WHERE iqc_material_id = ? AND is_active = 1 ORDER BY display_order, id').all(req.params.id) as any[])
+      .map(withEffectiveTarget);
     const recent = db.prepare(`SELECT r.id, r.run_number, r.run_date, r.run_time, r.status, r.rule_summary,
           r.reviewed_at, r.patient_results_released, r.entry_method, s.full_name AS operator_name
         FROM iqc_runs r LEFT JOIN staff s ON s.id = r.operator_staff_id

@@ -12,43 +12,36 @@ import {
 import type { LogSheetIndex } from '../../../shared/types/api';
 
 /**
- * Environmental charting, decontamination and equipment maintenance, in the
- * portal — the three registers that are the same object with different rows.
+ * Environmental charting, decontamination and maintenance in the portal — three
+ * registers that are the same object with different rows.
  *
- * Each one shows the unit's whole programme for the month down the left and the
- * chosen sheet's grid beside it. Two things about that arrangement are
- * deliberate.
+ * Every asset is listed whether or not anything has been recorded against it. A
+ * list of only the charts that have entries would show a healthy month on a
+ * bench that stopped charting on the 9th, which is the failure the register
+ * exists to make visible.
  *
- * The programme is shown even where nothing has been recorded. A list of the
- * charts that have entries would show a healthy month on a bench that stopped
- * charting on the 9th, which is precisely the failure the register exists to
- * make visible. So every asset the unit is responsible for is listed, with how
- * much of its month is actually recorded, whether it has ever been opened or not.
- *
- * The grid is worked here, not somewhere else. A member of staff standing at a
- * fridge with a thermometer should type the number where they are told the
- * reading is due. Sending them to another module to record it is how readings
- * end up written on a scrap of paper "for later".
+ * The grid is worked here rather than in another module: somebody standing at a
+ * fridge should type the number where they are told the reading is due.
  */
 
 const KIND_META: Record<SheetKind, { icon: ReactNode; title: string; lead: string; empty: string }> = {
   environmental: {
     icon: <Thermometer size={16} />,
     title: 'Environmental monitoring',
-    lead: 'The fridges, freezers, rooms and incubators your unit is responsible for, and this month\'s chart for each. A reading outside its range raises an excursion the moment you enter it.',
-    empty: 'Nothing is being charted for your unit yet. Register the first fridge, freezer, room or incubator above — or, if it is already registered elsewhere, ask Facilities & Safety to name your unit as responsible for reading it.',
+    lead: 'This month\'s chart for each fridge, freezer, room and incubator in this unit.',
+    empty: 'No environmental assets are assigned to this unit. They are registered under Facilities & Safety.',
   },
   decontamination: {
     icon: <Droplets size={16} />,
     title: 'Decontamination',
-    lead: 'Everything your unit decontaminates, how often, and this month\'s log. Everyone in the unit does this work and everyone can record it.',
-    empty: 'No decontamination is set up for your unit yet. The laboratory-wide programme — benches, floors, fans, windows — is adopted under Facilities & Safety → Decontamination, and your unit head can add whatever your own room needs.',
+    lead: 'This month\'s log for everything this unit decontaminates.',
+    empty: 'No decontamination is set up for this unit yet. It is adopted under Facilities & Safety.',
   },
   equipment_maintenance: {
     icon: <Wrench size={16} />,
-    title: 'Equipment maintenance',
-    lead: 'The routine care your unit\'s instruments need — daily across the days, weekly and scheduled servicing across the weeks — on one chart per instrument.',
-    empty: 'None of your unit\'s equipment has maintenance tasks defined yet. Tasks are added on the instrument under Equipment → Maintenance; a starting list is offered for microscopes, fridges, centrifuges, analysers, autoclaves and cabinets.',
+    title: 'Maintenance charts',
+    lead: 'One chart per instrument — daily tasks across the days, scheduled servicing across the weeks.',
+    empty: 'No maintenance tasks are defined yet. Add them from the Equipment list above.',
   },
 };
 
@@ -161,14 +154,18 @@ export default function PortalRoutineSheets({ kind }: { kind: SheetKind }) {
                 {totals.awaiting > 0 && <span><strong>{totals.awaiting}</strong> waiting to be verified</span>}
               </div>
 
-              <div className="rs-split">
-                <div className="rs-list">
-                  <SheetPicker sheets={index.sheets} activeId={activeId} onPick={setActiveId} />
-                </div>
+              {/*
+                The picker sits above the grid, not beside it. A month is 31
+                columns wide; a fixed sidebar took a quarter of the screen to
+                list, very often, one fridge, and squeezed every entry cell to
+                pay for it.
+              */}
+              <div className="rs-stack">
+                <SheetPicker sheets={index.sheets} activeId={activeId} onPick={setActiveId} horizontal />
                 <div className="rs-grid">
                   {activeId
                     ? <LogSheetGrid sheetId={activeId} onChanged={load} />
-                    : <p className="muted">Choose a sheet on the left to record on it.</p>}
+                    : <p className="muted">Choose a sheet above to record on it.</p>}
                 </div>
               </div>
             </>

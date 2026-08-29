@@ -624,6 +624,27 @@ export type LogSheetCell = {
   recorded_by_staff_id?:number|null; recorded_by_name?:string|null;
   recorded_at:string; reading_time?:string|null;
   excursion_id?:number|null; environmental_reading_id?:number|null;
+  /** How many times this entry has been changed after the day it belongs to. */
+  amendment_count?:number|null;
+  last_amended_at?:string|null;
+  last_amend_reason?:string|null;
+};
+
+/**
+ * A trend across the month that no single reading shows.
+ *
+ * Every reading in range and the fridge failing anyway is the case these
+ * exist for: a drift has a direction, and by the time one reading breaches,
+ * the contents have been out of range for days.
+ */
+export type SheetTrend = {
+  rowId:number; rowLabel:string; unit:string|null; slot:string|null;
+  kind:'rising'|'falling'|'shift'|'approaching_limit'|'widening';
+  severity:'watch'|'act';
+  summary:string; meaning:string;
+  from:{ day:number; value:number };
+  to:{ day:number; value:number };
+  points:number;
 };
 
 export type LogSheet = {
@@ -636,6 +657,11 @@ export type LogSheet = {
   submitted_by_staff_id?:number|null; submittedByName?:string|null; submitted_at?:string|null;
   verified_by_staff_id?:number|null; verifiedByName?:string|null; verified_at?:string|null;
   verification_comments?:string|null;
+  /**
+   * The laboratory's own reading window, in minutes past midnight. The grid
+   * greys exactly the cells the server would refuse, rather than guessing.
+   */
+  amDueAt?:number; pmDueAt?:number; pmOpensAt?:number;
   nc?:{ id:number; nc_number:string; status:string }|null;
   signature?:{ id:number; signer_name?:string|null; signed_at:string; meaning?:string|null; staff_id?:number|null; signature_image_file_id?:number|null; image?:string|null }|null;
   attachment?:{ id:number; original_name:string; mime_type?:string|null; size_bytes:number }|null;
@@ -655,7 +681,28 @@ export type LogSheetCompleteness = {
 export type LogSheetPayload = {
   sheet:LogSheet; rows:LogSheetRow[]; cells:LogSheetCell[];
   completeness:LogSheetCompleteness;
+  trends?:SheetTrend[];
   permissions?:{ canRecord:boolean; canVerify:boolean; canRaiseNc:boolean; tier:string };
+};
+
+/** What came back from writing cells, including what was refused and why. */
+export type SaveCellsOutcome = {
+  saved:number; cleared:number; amended:number;
+  breaches:Array<{ day:number; slot:string; label:string; value:string; status:string }>;
+  excursions:number[];
+  refused:Array<{ day:number; slot:string; label:string; reason:string }>;
+};
+
+/** One change made to an entry after the day it belonged to. */
+export type LogCellAmendment = {
+  id:number; sheet_id:number; row_id:number; day:number; slot:string;
+  action:'amend'|'delete';
+  row_label?:string|null; unit?:string|null;
+  old_value_num?:number|null; old_value_text?:string|null; old_status?:string|null; old_note?:string|null;
+  new_value_num?:number|null; new_value_text?:string|null; new_status?:string|null;
+  reason:string;
+  amended_by_name?:string|null; originally_by_name?:string|null;
+  old_recorded_at?:string|null; amended_at:string;
 };
 
 export type LogSheetSummary = {
@@ -678,6 +725,10 @@ export type LogCellInput = {
   done?:boolean|null; na?:boolean|null;
   note?:string|null; initials?:string|null; readingTime?:string|null;
   source?:string|null;
+  /** Withdraw the entry rather than change it. */
+  clear?:boolean;
+  /** Why a closed day's entry is being changed. Required once the day has ended. */
+  amendReason?:string|null;
 };
 
 /* ---------------------------------------------------------- decontamination */
@@ -721,10 +772,38 @@ export type IqcBoard = {
   message?:string;
 };
 
-/** One parameter of a control, as offered for charting in the portal. */
-export type IqcChartAnalyte = {
-  id:number; analyte:string; unit:string|null; decimal_places:number|null;
-  target_mean:number|null; target_sd:number|null; is_qualitative:number|null;
+/**
+ * Which of a unit's examinations are controlled, and which are not.
+ *
+ * The unit's own test menu is the denominator: ISO 15189:2022 §7.3.7.1 asks for
+ * a QC procedure for each examination, so a test with no control against it is
+ * a gap the unit head can see and close.
+ */
+export type IqcCoverageControl = {
+  id:number; materialName:string; testName:string; levelLabel:string|null;
+  lotNumber:string; controlType:string; equipmentName:string|null;
+  expiryDate:string|null; expired:boolean;
+  analytes:number;
+  /** Parameters with no SD: recorded, but not yet judged by Westgard. */
+  analytesWithoutLimits:number;
+};
+
+export type IqcCoverageTest = {
+  id:number; testCode:string|null; testName:string; methodName:string|null;
+  equipmentId:number|null; equipmentName:string|null; equipmentNumber:string|null;
+  controls:IqcCoverageControl[];
+  covered:boolean;
+  needingLimits:number;
+};
+
+export type IqcCoverage = {
+  sectionId:number|null; sectionName:string|null;
+  tests:IqcCoverageTest[];
+  unlisted:IqcCoverageControl[];
+  equipment:Array<{ id:number; name:string; equipmentNumber:string|null }>;
+  counts:{ tests:number; covered:number; uncovered:number; controls:number; needingLimits:number; unlisted:number };
+  canDefine:boolean;
+  message:string|null;
 };
 
 /** What a paste, an upload or an instrument message was understood to mean. */
@@ -749,6 +828,46 @@ export type IqcFeedMessage = {
 };
 
 /* ------------------------------------------------------ equipment maintenance */
+
+/**
+ * A unit's own instruments, and what ISO 15189 says each kind is owed.
+ *
+ * The duties differ by archetype and pretending otherwise is how a fridge ends
+ * up in an IQC picker: an analyser owes calibration, verification, uncertainty,
+ * IQC and EQA; a fridge owes acceptance, monitoring, maintenance and
+ * certification. Both owe something, and the screen says which.
+ */
+export type EquipmentDutyState = {
+  duty:string; label:string; clause:string; hint:string;
+  /** False for a duty this system holds no record type for — listed, not judged. */
+  tracked:boolean;
+  /** Whether a programme exists at all. Distinct from whether it is up to date. */
+  setUp:boolean|null;
+  detail:string|null;
+  dueDate:string|null;
+  dueState:'overdue'|'due_soon'|'scheduled'|'unscheduled'|null;
+};
+
+export type UnitEquipmentItem = {
+  id:number; name:string; equipmentNumber:string|null;
+  manufacturer:string|null; model:string|null; serialNumber:string|null;
+  status:string; archetype:string; category:string|null;
+  locationName:string|null; custodianName:string|null;
+  duties:EquipmentDutyState[];
+  gaps:string[]; overdue:string[]; dueSoon:string[];
+  maintenanceTasks:number;
+};
+
+export type UnitEquipmentOverview = {
+  sectionId:number|null; sectionName:string|null; isUnitHead:boolean;
+  equipment:UnitEquipmentItem[];
+  counts:{
+    items:number; withGaps:number; overdue:number; dueSoon:number;
+    needMaintenanceTasks:number; needCalibration:number; needVerification:number; outOfService:number;
+  };
+  message:string|null;
+};
+
 
 export type MaintenanceTask = {
   id:number; equipment_id:number; equipment_name?:string; equipment_number?:string;

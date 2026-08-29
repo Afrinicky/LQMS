@@ -2556,6 +2556,34 @@ button.tiny { padding: 2px 8px; font-size: 11px; }
   border: 1px dashed var(--border-strong); border-radius: var(--radius-sm);
 }
 
+/* Where the limits came from, said on the chart's face. */
+.lj-provenance {
+  margin: 0 0 10px; padding: 8px 12px; border-radius: var(--radius-sm);
+  background: var(--success-bg); color: var(--success);
+  font-size: 11.5px; line-height: 1.6;
+}
+.lj-provenance.is-interim { background: var(--warning-bg); color: var(--warning); }
+.lj-provenance strong { font-weight: 700; }
+.lj-recalc {
+  margin-left: 8px; padding: 1px 9px; border-radius: 99px; cursor: pointer;
+  border: 1px solid currentColor; background: transparent; color: inherit;
+  font-size: 10.5px; font-weight: 600;
+}
+
+/* The panel shown where the SD has not been established yet. */
+.lj-establish {
+  margin-top: 12px; padding: 12px 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong); background: var(--panel);
+}
+.lj-establish > strong { display: block; font-size: 12.5px; color: var(--warning); }
+.lj-establish p { margin: 6px 0 0; font-size: 11.5px; color: var(--muted); line-height: 1.65; }
+.lj-establish button {
+  margin-top: 10px; padding: 7px 14px; border-radius: var(--radius-sm); cursor: pointer;
+  border: 1px solid var(--accent); background: var(--accent-soft); color: var(--text);
+  font-size: 12px; font-weight: 600;
+}
+.lj-establish button:hover { background: var(--accent); }
+
 /* ============================================================================
    IQC WORKSPACE
    ----------------------------------------------------------------------------
@@ -3890,6 +3918,14 @@ button.cell-mark:disabled { cursor: default; }
   font-size: 13px; font-weight: 700;
 }
 .pp-count.crit { background: var(--danger-bg); color: var(--danger); }
+/* The primary action for a portal panel, sitting opposite its title. */
+.pp-action {
+  flex: none; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  padding: 7px 13px; border-radius: var(--radius-sm);
+  border: 1px solid var(--accent); background: var(--accent-soft); color: var(--text);
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+}
+.pp-action:hover { background: var(--accent); }
 .pp-search { min-width: 220px; font-size: 12.5px; }
 .pp-scroll { max-height: 52vh; overflow: auto; }
 .pp-inline-warn {
@@ -4727,6 +4763,70 @@ button.cell-mark:disabled { cursor: default; }
 .ls-weeks { margin-top: 8px; }
 .ls-weeks th, .ls-weeks td { min-width: 110px; width: auto; height: 26px; }
 
+/*
+  A cell whose day has not come.
+
+  Not disabled-looking-but-clickable, and not hidden: it is drawn as unavailable
+  and says why on hover, because the reason ("the afternoon reading is not due
+  until 15:00") is the useful part.
+*/
+.ls-cell.is-closed {
+  cursor: not-allowed; background: var(--panel-2); opacity: .42;
+}
+.ls-cell.is-closed:hover { outline: none; }
+/* Amended after its day: the mark is small and permanent, like a paper one. */
+.ls-cell.is-amended { box-shadow: inset 0 0 0 1px rgba(245, 181, 68, 0.55); }
+.ls-amended {
+  position: absolute; bottom: 0; left: 2px; font-size: 8px; line-height: 1;
+  color: var(--warning);
+}
+
+.ls-pop-amended {
+  display: flex; align-items: flex-start; gap: 5px; margin: 8px 0 0;
+  font-size: 10.5px; color: var(--warning); line-height: 1.5;
+}
+.ls-withdraw {
+  display: inline-flex; align-items: center; gap: 5px;
+  border-color: rgba(233, 105, 105, 0.5) !important; color: var(--danger) !important;
+  background: transparent !important;
+}
+.ls-amend-pop { width: 330px; }
+.ls-amend-head {
+  display: flex; gap: 7px; align-items: flex-start; margin: 0 0 10px;
+  padding: 8px 10px; border-radius: 8px;
+  background: var(--warning-bg); color: var(--warning);
+  font-size: 10.5px; line-height: 1.6;
+}
+.ls-amend-hint { margin: 7px 0 0; font-size: 10.5px; color: var(--faint); line-height: 1.5; }
+
+/* -- trends across the month ---------------------------------------------- */
+.ls-trends {
+  border: 1px solid var(--border-strong); border-radius: 10px;
+  background: var(--surface); padding: 11px 13px;
+}
+.ls-trends.has-act { border-color: rgba(233, 105, 105, 0.45); }
+.ls-trends-head > strong { display: flex; align-items: center; gap: 9px; font-size: 12.5px; }
+.ls-trends-head > span { display: block; margin-top: 3px; font-size: 10.5px; color: var(--faint); line-height: 1.6; }
+.ls-trend-act {
+  padding: 1px 8px; border-radius: 99px; background: var(--danger-bg); color: var(--danger);
+  font-size: 10px; font-weight: 700;
+}
+.ls-trends ul { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.ls-trends li { border-radius: 8px; background: var(--panel); border-left: 3px solid var(--warning); }
+.ls-trends li.t-act { border-left-color: var(--danger); }
+.ls-trends li > button {
+  width: 100%; display: flex; align-items: flex-start; gap: 9px; text-align: left; cursor: pointer;
+  padding: 8px 11px; border: none; background: none; color: var(--text);
+}
+.ls-trends li > button > svg { margin-top: 1px; flex: none; color: var(--warning); }
+.ls-trends li.t-act > button > svg { color: var(--danger); }
+.ls-trend-row { min-width: 0; }
+.ls-trend-label { display: block; font-size: 11.5px; font-weight: 600; }
+.ls-trend-summary { display: block; font-size: 10.5px; color: var(--muted); line-height: 1.55; margin-top: 2px; }
+.ls-trend-meaning {
+  margin: 0; padding: 0 11px 10px 32px; font-size: 11px; color: var(--muted); line-height: 1.7;
+}
+
 /* -- legend and summary --------------------------------------------------- */
 .ls-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 10.5px; color: var(--faint); align-items: center; }
 .ls-legend span { display: inline-flex; align-items: center; gap: 5px; }
@@ -4734,6 +4834,8 @@ button.cell-mark:disabled { cursor: default; }
 .ls-sw.crit { background: var(--danger-bg); } .ls-sw.warn { background: var(--warning-bg); }
 .ls-sw.na { background: rgba(255,255,255,0.06); }
 .ls-sw.blank { background: repeating-linear-gradient(45deg, transparent, transparent 2px, rgba(255,255,255,0.12) 2px, rgba(255,255,255,0.12) 4px); }
+.ls-sw.closed { background: var(--panel-2); opacity: .45; }
+.ls-sw.amended { background: var(--surface); box-shadow: inset 0 0 0 1px rgba(245,181,68,0.7); }
 .ls-legend-hint { margin-left: auto; font-style: italic; }
 
 .ls-summary { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
@@ -4768,20 +4870,59 @@ button.cell-mark:disabled { cursor: default; }
 /* -- the sheet picker ----------------------------------------------------- */
 .ls-picker { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
 .ls-pick {
-  width: 100%; text-align: left; padding: 8px 11px; border-radius: 9px; cursor: pointer;
+  width: 100%; text-align: left; padding: 8px 11px; border-radius: 8px; cursor: pointer;
   border: 1px solid var(--border); background: var(--surface); color: var(--text);
-  border-left-width: 3px;
+  display: flex; align-items: flex-start; gap: 9px;
 }
-.ls-pick:hover { border-color: var(--border-strong); }
-.ls-pick.is-active { background: var(--accent-soft); border-color: var(--accent); }
-.ls-pick.t-ok { border-left-color: var(--success); }
-.ls-pick.t-warn { border-left-color: var(--warning); }
-.ls-pick.t-crit { border-left-color: var(--danger); }
-.ls-pick.t-none { border-left-color: var(--border-strong); }
-.ls-pick-name { display: block; font-size: 12.5px; font-weight: 600; }
-.ls-pick-meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 10.5px; color: var(--faint); margin-top: 2px; }
+.ls-pick:hover { border-color: var(--border-strong); background: var(--panel-2); }
+.ls-pick.is-active { border-color: var(--accent); background: var(--accent-soft); }
+.ls-pick-body { min-width: 0; flex: 1; }
+.ls-pick-name {
+  display: block; font-size: 12.5px; font-weight: 600; line-height: 1.35;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ls-pick-meta {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline;
+  font-size: 10.5px; color: var(--faint); margin-top: 3px;
+}
+.ls-pick-pct { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--muted); }
 .ls-pick-meta .crit { color: var(--danger); }
-.ls-pick-meta .warn { color: var(--warning); }
+.ls-pick-status {
+  padding: 0 6px; border-radius: 3px; background: var(--panel-2); color: var(--muted);
+  font-size: 9.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em;
+}
+
+/*
+  One small dot carries the status.
+
+  Ringing every item in red, amber or green produced thirteen competing borders
+  and no hierarchy — the two charts that were actually behind looked exactly as
+  urgent as the eleven that were fine. A 6px dot in a fixed position reads down
+  the column at a glance and leaves the cards themselves quiet.
+*/
+.ls-pick-dot {
+  flex: none; width: 6px; height: 6px; margin-top: 6px; border-radius: 50%;
+  background: var(--border-strong);
+}
+.ls-pick.t-ok .ls-pick-dot { background: var(--success); }
+.ls-pick.t-warn .ls-pick-dot { background: var(--warning); }
+.ls-pick.t-crit .ls-pick-dot { background: var(--danger); }
+
+/*
+  Above the grid: a uniform grid, not a ragged strip.
+
+  Equal columns mean the names line up and the percentages form a column the eye
+  can run down. Chips sized to their own text cannot do that, which is what made
+  the strip look improvised.
+*/
+.ls-picker.is-grid {
+  flex-direction: row; flex-wrap: wrap; display: grid; gap: 6px;
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+}
+.ls-picker.is-grid > li { min-width: 0; }
+@media (max-width: 560px) {
+  .ls-picker.is-grid { grid-template-columns: 1fr; }
+}
 
 /* -- the module/portal split --------------------------------------------- */
 .rs-month { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
@@ -4813,7 +4954,87 @@ button.cell-mark:disabled { cursor: default; }
 .rs-totals .warn { color: var(--warning); } .rs-totals .crit { color: var(--danger); }
 .rs-split { display: grid; grid-template-columns: minmax(200px, 250px) 1fr; gap: 14px; align-items: start; }
 @media (max-width: 900px) { .rs-split { grid-template-columns: 1fr; } }
+/* The portal's arrangement: sheets across the top, the grid full width below. */
+.rs-stack { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .rs-grid { min-width: 0; }
+/* -- the unit's equipment inventory --------------------------------------- */
+.ueq-counts { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.ueq-stat {
+  display: flex; flex-direction: column; gap: 1px; padding: 7px 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface); min-width: 118px; max-width: 190px;
+}
+.ueq-stat strong { font-size: 18px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.ueq-stat span { font-size: 10.5px; color: var(--faint); line-height: 1.35; }
+.ueq-stat.tone-ok strong { color: var(--success); }
+.ueq-stat.tone-warn strong { color: var(--warning); }
+.ueq-stat.tone-crit strong { color: var(--danger); }
+
+.ueq-notice {
+  display: flex; align-items: center; gap: 7px; margin: 0 0 12px; padding: 8px 12px;
+  border-radius: var(--radius-sm); background: var(--success-bg); color: var(--success);
+  font-size: 11.5px;
+}
+
+/*
+  One border, one weight, one background.
+
+  An earlier pass ringed each instrument in red or amber by its worst duty,
+  which produced a wall of competing outlines. The state is carried by the words
+  on the right instead, so the list reads as a list.
+*/
+.ueq-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.ueq-list > li + li { border-top: 1px solid var(--border); }
+.ueq-row {
+  width: 100%; display: flex; align-items: center; gap: 9px; cursor: pointer; text-align: left;
+  padding: 10px 13px; border: none; background: var(--surface); color: var(--text);
+}
+.ueq-row:hover { background: var(--panel-2); }
+.ueq-row > svg { flex: none; color: var(--faint); }
+.ueq-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; }
+.ueq-summary { display: flex; gap: 12px; flex: none; font-size: 11px; }
+.ueq-summary .crit { color: var(--danger); font-weight: 600; }
+.ueq-summary .warn { color: var(--warning); font-weight: 600; }
+.ueq-summary .ok { color: var(--faint); }
+
+.ueq-detail { padding: 2px 13px 12px 35px; background: var(--panel); border-top: 1px solid var(--border); }
+.ueq-ident { margin: 10px 0; font-size: 10.5px; color: var(--faint); }
+.ueq-duties { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.ueq-duty {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  border-radius: var(--radius-sm); background: var(--surface); border: 1px solid var(--border);
+}
+.ueq-duty.t-gap, .ueq-duty.t-late { border-color: var(--border-strong); }
+.ueq-duty.t-untracked { opacity: .55; }
+.ueq-duty > svg { flex: none; color: var(--faint); }
+.ueq-duty.t-late > svg { color: var(--danger); }
+.ueq-duty.t-gap > svg { color: var(--warning); }
+.ueq-duty.t-ok > svg { color: var(--success); }
+.ueq-duty-main { flex: 1; min-width: 0; }
+.ueq-duty-head { display: block; font-size: 12px; font-weight: 600; }
+.ueq-duty-state { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 10.5px; color: var(--faint); margin-top: 2px; line-height: 1.5; }
+.ueq-due { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; }
+.ueq-due.overdue { color: var(--danger); }
+.ueq-due.due_soon { color: var(--warning); }
+.ueq-set {
+  flex: none; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; cursor: pointer;
+  padding: 4px 11px; border-radius: var(--radius-sm); border: 1px solid var(--border-strong);
+  background: transparent; color: var(--text); font-size: 10.5px; font-weight: 600;
+}
+.ueq-set:hover { border-color: var(--accent); background: var(--accent-soft); }
+
+.ueq-dialog { width: min(840px, 100%); }
+.ueq-framework-label { margin: 0 0 10px; font-size: 11.5px; color: var(--faint); }
+.ueq-tasks { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.ueq-tasks li + li { border-top: 1px solid var(--border); }
+.ueq-tasks li.is-added { opacity: .5; }
+.ueq-tasks label { display: flex; align-items: center; gap: 11px; padding: 8px 12px; cursor: pointer; background: var(--surface); }
+.ueq-tasks input[type="checkbox"] { flex: none; }
+.ueq-task-text { flex: 1; min-width: 0; }
+.ueq-task-text input { width: 100%; }
+.ueq-task-text em { display: block; margin-top: 3px; font-size: 10.5px; color: var(--faint); font-style: normal; line-height: 1.45; }
+.ueq-tasks select { flex: none; width: 148px; }
+.ueq-note { margin: 12px 0 0; font-size: 11px; color: var(--faint); line-height: 1.6; }
+
 .rs-defs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
 .rs-defs li { padding: 8px 11px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); }
 .rs-def-name { display: flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 600; }
@@ -4890,6 +5111,53 @@ button.cell-mark:disabled { cursor: default; }
   background: var(--warning-bg); font-size: 11.5px; line-height: 1.55; margin-top: 12px;
 }
 .iqc-misfiled ul { margin: 5px 0 0; padding-left: 18px; }
+
+/* -- controls set up for the unit's tests --------------------------------- */
+.qcc-counts { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.qcc-stat {
+  display: flex; flex-direction: column; gap: 1px; padding: 7px 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface); min-width: 104px;
+}
+.qcc-stat strong { font-size: 18px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.qcc-stat span { font-size: 10.5px; color: var(--faint); }
+.qcc-stat.tone-ok strong { color: var(--success); }
+.qcc-stat.tone-warn strong { color: var(--warning); }
+.qcc-stat.tone-crit strong { color: var(--danger); }
+
+.qcc-notice {
+  display: flex; align-items: center; gap: 7px; margin: 0 0 12px; padding: 8px 12px;
+  border-radius: var(--radius-sm); background: var(--success-bg); color: var(--success);
+  font-size: 11.5px;
+}
+.qcc-table { width: 100%; }
+.qcc-table td { vertical-align: top; }
+.qcc-table tr.is-gap td:first-child { box-shadow: inset 2px 0 0 var(--danger); }
+.qcc-test { display: block; font-weight: 600; }
+.qcc-sub { display: block; font-size: 10.5px; color: var(--faint); margin-top: 1px; }
+.qcc-none { color: var(--danger); font-weight: 600; }
+.qcc-have { display: flex; flex-direction: column; gap: 2px; }
+.qcc-have > span { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.qcc-act { text-align: right; white-space: nowrap; }
+.qcc-foot { margin: 10px 0 0; font-size: 11px; }
+
+/* -- the short setup form ------------------------------------------------- */
+.qcc-dialog { width: min(860px, 100%); }
+.qcc-choice { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin-bottom: 16px; }
+.qcc-choice button {
+  display: flex; flex-direction: column; gap: 2px; text-align: left; cursor: pointer;
+  padding: 9px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--surface); color: var(--muted);
+}
+.qcc-choice button.active { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+.qcc-choice strong { font-size: 12px; }
+.qcc-choice span { font-size: 10.5px; line-height: 1.45; color: var(--faint); }
+.qcc-analytes { margin-top: 18px; }
+.qcc-analytes-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 6px;
+}
+.qcc-analytes-head strong { font-size: 12px; }
+.qcc-analytes .data-table input { width: 100%; min-width: 68px; }
+.qcc-sd-note { margin: 10px 0 0; font-size: 11px; color: var(--faint); line-height: 1.6; }
 
 /* -- running a control ---------------------------------------------------- */
 .iqc-modal-lead { margin: 0; font-size: 11.5px; color: var(--faint); }

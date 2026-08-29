@@ -28,12 +28,35 @@ export type ChartPoint = {
   operator_name?: string | null;
 };
 
+/**
+ * Where the mean and SD being drawn against actually came from. A chart whose
+ * limits are the laboratory's own says so on its face, because "±0.4, off the
+ * insert" and "±0.4, established here over 22 days" are different claims and
+ * an assessor asks which one this is.
+ */
+export type TargetProvenance = {
+  mean: number | null;
+  sd: number | null;
+  source: 'vendor' | 'established' | 'none';
+  basis: string | null;
+  n: number | null;
+  days: number | null;
+  from: string | null;
+  to: string | null;
+  establishedAt: string | null;
+  provisional: boolean;
+  pointsShort: number;
+  daysShort: number;
+};
+
 export type ChartData = {
   analyte: {
     id: number; name: string; unit: string | null; decimalPlaces: number;
     targetMean: number | null; targetSd: number | null;
+    enteredMean?: number | null; enteredSd?: number | null;
     acceptableLow: number | null; acceptableHigh: number | null;
   };
+  target?: TargetProvenance;
   material: { name: string; lotNumber: string; testName: string; levelLabel: string | null; source: string };
   statistics: { n: number; mean: number | null; sd: number | null; cv: number | null; bias: number | null; biasPercent: number | null; sdIndex: number | null };
   lotChanges: { change_date: string; reason: string | null }[];
@@ -48,9 +71,14 @@ const PLOT_H = H - PAD.top - PAD.bottom;
 const fmt = (v: number | null | undefined, dp = 2) =>
   v === null || v === undefined || Number.isNaN(v) ? '—' : v.toFixed(dp);
 
-export default function LeveyJenningsChart({ data }: { data: ChartData }) {
+export default function LeveyJenningsChart({ data, onEstablish, canEstablish }: {
+  data: ChartData;
+  /** Establish the limits from the laboratory's own runs, where the caller offers it. */
+  onEstablish?: () => void;
+  canEstablish?: boolean;
+}) {
   const [hover, setHover] = useState<ChartPoint | null>(null);
-  const { analyte, material, statistics, points, lotChanges } = data;
+  const { analyte, material, statistics, points, lotChanges, target } = data;
   const dp = analyte.decimalPlaces ?? 2;
 
   const mean = analyte.targetMean;
@@ -67,8 +95,49 @@ export default function LeveyJenningsChart({ data }: { data: ChartData }) {
     [points, mean, sd],
   );
 
-  if (!scale) {
-    return <div className="lj-empty">No control results recorded for this analyte yet.</div>;
+  if (!usable || !scale) {
+    // A control with results but no SD is the commonest reason this chart came
+    // up blank, and a blank panel taught the bench that charting does not work.
+    // The results exist; what is missing is the SD to scale them against. So
+    // the run chart is drawn anyway — every point, in date order, against the
+    // acceptable range where there is one — and the panel says exactly what is
+    // needed to turn it into a Levey-Jennings chart.
+    return (
+      <div className="lj lj-provisional">
+        <div className="lj-head">
+          <div>
+            <h4>{analyte.name}{analyte.unit ? ` (${analyte.unit})` : ''}</h4>
+            <p>{material.name} · lot {material.lotNumber}{material.levelLabel ? ` · ${material.levelLabel}` : ''}</p>
+          </div>
+        </div>
+        {points.length === 0 ? (
+          <div className="lj-empty">No results recorded for this parameter yet.</div>
+        ) : (
+          <>
+            <RunChart points={points} dp={dp} low={analyte.acceptableLow} high={analyte.acceptableHigh} />
+            <div className="lj-stats">
+              <div><dt>Results (n)</dt><dd>{statistics.n}</dd></div>
+              <div><dt>Observed mean</dt><dd>{fmt(statistics.mean, dp)}</dd></div>
+              <div><dt>Observed SD</dt><dd>{fmt(statistics.sd, dp + 1)}</dd></div>
+              <div><dt>CV%</dt><dd>{fmt(statistics.cv, 1)}</dd></div>
+            </div>
+          </>
+        )}
+        <div className="lj-establish">
+          <strong>No control limits set</strong>
+          <p>
+            {target && target.n
+              ? `${target.n} result${target.n === 1 ? '' : 's'} over ${target.days} day${target.days === 1 ? '' : 's'} recorded.`
+              : `${points.length} result${points.length === 1 ? '' : 's'} recorded.`}
+            {' '}Limits are calculated from your own runs — 20 results over 20 days.
+            Until then results are checked against the acceptable range only.
+          </p>
+          {canEstablish && onEstablish && (
+            <button type="button" onClick={onEstablish}>Calculate limits</button>
+          )}
+        </div>
+      </div>
+    );
   }
 
   const centre = scale.centre;
@@ -109,7 +178,18 @@ export default function LeveyJenningsChart({ data }: { data: ChartData }) {
         </ul>
       </div>
 
-      {scale.caveat && <p className="lj-caveat">{scale.caveat}</p>}
+      {target?.source === 'established' && (
+        <p className={`lj-provenance${target.provisional ? ' is-interim' : ''}`}>
+          <strong>{target.provisional ? 'Interim limits' : 'Calculated limits'}</strong>
+          {' · '}SD {fmt(target.sd, dp + 1)} from {target.n} results over {target.days} day{target.days === 1 ? '' : 's'}
+          {target.provisional && target.pointsShort + target.daysShort > 0
+            ? ` · provisional until 20 results over 20 days`
+            : ''}
+          {canEstablish && onEstablish && (
+            <button type="button" className="lj-recalc" onClick={onEstablish}>Recalculate</button>
+          )}
+        </p>
+      )}
 
       <div className="lj-plot">
         <svg viewBox={`0 0 ${W} ${H}`} role="img"
@@ -253,6 +333,67 @@ export default function LeveyJenningsChart({ data }: { data: ChartData }) {
           </div>
         );
       })()}
+    </div>
+  );
+}
+
+/* ----------------------------------------------------------------------------
+   The chart to draw when there is no SD to draw one against
+   ----------------------------------------------------------------------------
+   Not a Levey-Jennings chart and it does not pretend to be: no SD zones, no
+   z axis, no rule labels. Just the results in date order against the acceptable
+   range, scaled to the data. It exists because "we have no SD yet" is not the
+   same as "we have nothing", and the bench that has run this control forty
+   times deserves to see the forty points while the statistics are being
+   established rather than an empty box.
+   ------------------------------------------------------------------------- */
+function RunChart({ points, dp, low, high }: {
+  points: ChartPoint[]; dp: number; low: number | null; high: number | null;
+}) {
+  const values = points.map(p => p.result_value).filter(v => Number.isFinite(v));
+  if (!values.length) return null;
+
+  const candidates = [...values, ...(low !== null ? [low] : []), ...(high !== null ? [high] : [])];
+  const rawMin = Math.min(...candidates);
+  const rawMax = Math.max(...candidates);
+  // A flat series would otherwise divide by zero and collapse the plot.
+  const pad = Math.max((rawMax - rawMin) * 0.12, Math.abs(rawMax) * 0.02, 0.5);
+  const top = rawMax + pad;
+  const bottom = rawMin - pad;
+
+  const y = (v: number) => PAD.top + ((top - Math.min(top, Math.max(bottom, v))) / (top - bottom)) * PLOT_H;
+  const x = (i: number) => PAD.left + (points.length === 1 ? PLOT_W / 2 : (i / (points.length - 1)) * PLOT_W);
+  const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i)},${y(p.result_value)}`).join(' ');
+  const tickEvery = Math.max(1, Math.ceil(points.length / 6));
+
+  return (
+    <div className="lj-plot">
+      <svg viewBox={`0 0 ${W} ${H}`} role="img"
+        aria-label={`Control results for this analyte, ${points.length} results, no control limits established yet`}>
+        {low !== null && high !== null && (
+          <rect x={PAD.left} y={y(high)} width={PLOT_W} height={Math.max(0, y(low) - y(high))} className="lj-zone-1" />
+        )}
+        {[low, high].map((limit, index) => limit === null ? null : (
+          <g key={index}>
+            <line x1={PAD.left} x2={PAD.left + PLOT_W} y1={y(limit)} y2={y(limit)} className="lj-limit-3" />
+            <text x={PAD.left + PLOT_W + 8} y={y(limit) + 3.5} className="lj-lbl">{index === 0 ? 'Low' : 'High'}</text>
+            <text x={PAD.left - 8} y={y(limit) + 3.5} className="lj-axis" textAnchor="end">{fmt(limit, dp)}</text>
+          </g>
+        ))}
+        <path d={line} className="lj-line" fill="none" />
+        {points.map((p, i) => {
+          const outside = (low !== null && p.result_value < low) || (high !== null && p.result_value > high);
+          return <circle key={p.id} cx={x(i)} cy={y(p.result_value)} r={4} className={`lj-pt ${outside ? 'bad' : 'ok'}`} />;
+        })}
+        {points.map((p, i) => (i % tickEvery === 0 || i === points.length - 1) && (
+          <text key={`t${p.id}`} x={x(i)} y={PAD.top + PLOT_H + 20} className="lj-axis" textAnchor="middle">
+            {p.run_date.slice(5)}
+          </text>
+        ))}
+        <text x={PAD.left + PLOT_W / 2} y={H - 6} className="lj-axis-title" textAnchor="middle">
+          Run date · {points.length} results · no control limits
+        </text>
+      </svg>
     </div>
   );
 }

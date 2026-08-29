@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle, Check, CheckCircle2, ClipboardList, Download, FileSpreadsheet,
-  FileWarning, Loader2, Lock, Paperclip, Printer, RefreshCw, ScanLine, Signature, Upload, X,
+  FileWarning, History, Loader2, Lock, Paperclip, Printer, RefreshCw, ScanLine,
+  Signature, TrendingDown, TrendingUp, Trash2, Upload, X,
 } from 'lucide-react';
 import { api, API_BASE, getToken, errorText } from '../../services/api';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -13,7 +14,7 @@ import {
   type CellSlot, type SheetKind,
 } from '../../../shared/constants/routineWork';
 import type {
-  LogSheetPayload, LogSheetRow, LogSheetCell, LogCellInput,
+  LogSheetPayload, LogSheetRow, LogSheetCell, LogCellInput, SaveCellsOutcome, SheetTrend,
 } from '../../../shared/types/api';
 
 /**
@@ -43,9 +44,29 @@ import type {
  * once it is signed the grid locks — a correction after that takes a
  * nonconformity, because changing a record somebody has attested to without
  * saying so is the one thing a QMS cannot allow.
+ *
+ * TIME RUNS ONE WAY. A cell for a day that has not happened is not an early
+ * entry, it is a reading nobody took, so those cells are not clickable and say
+ * why. The PM column of today opens when the afternoon reading is actually due,
+ * because two readings taken together at 08:05 measure one moment twice and
+ * hide the whole afternoon. Correcting or withdrawing today's entry is ordinary
+ * work; changing one whose day has ended takes a supervisor and a written
+ * reason, and the original stays legible beside it.
+ *
+ * The server decides all of that — this only stops somebody typing into a cell
+ * that would be refused, which is a courtesy, not the control.
  */
 
-const DAY_WIDTH = 30;
+const DAY_WIDTH = 34;
+
+/** Minutes past midnight, locally — the clock the person at the fridge reads. */
+function nowMinutes(): number {
+  const now = new Date();
+  return now.getHours() * 60 + now.getMinutes();
+}
+
+const clockLabel = (minutes: number) =>
+  `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 
 type Props = {
   sheetId: number;
@@ -84,13 +105,23 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
     if (!cells.length) return;
     setBusy('save'); setProblem(null);
     try {
-      const result = await api<LogSheetPayload & { breaches: Array<{ day: number; label: string; value: string }> }>(
+      const result = await api<LogSheetPayload & SaveCellsOutcome>(
         `/routine-sheets/${sheetId}/cells`, { method: 'POST', body: JSON.stringify({ cells }) });
       setData(result);
-      if (result.breaches?.length) {
+      // A refusal is reported, never swallowed. Somebody who believes they
+      // charted a reading they did not is worse off than somebody told plainly
+      // that they cannot chart it yet.
+      if (result.refused?.length) {
+        setProblem(result.refused[0].reason);
+        setNotice(null);
+      } else if (result.breaches?.length) {
+        setProblem(null);
         const first = result.breaches[0];
-        setNotice(`${first.label} on day ${first.day} is ${first.value} — outside its acceptable range. An excursion has been raised; record what you did about it in the cell's note.`);
-      } else setNotice(null);
+        setNotice(`${first.label}, day ${first.day}: ${first.value} is out of range. An excursion has been raised — add a note to the cell.`);
+      } else {
+        setProblem(null);
+        setNotice(result.cleared ? 'Entry withdrawn.' : result.amended ? 'Entry amended.' : null);
+      }
       onChanged?.();
     } catch (e) { setProblem(errorText(e)); }
     finally { setBusy(null); }
@@ -101,12 +132,22 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
 
   const { sheet, rows, completeness, permissions } = data;
   const editable = Boolean(permissions?.canRecord) && !sheet.locked;
+  const mayAmend = Boolean(permissions?.canVerify);
   const days = Array.from({ length: sheet.days }, (_, i) => i + 1);
   const daily = rows.filter(r => r.cadence !== 'weekly');
   const weekly = rows.filter(r => r.cadence === 'weekly');
   const today = new Date();
-  const currentMonth = today.toISOString().slice(0, 7) === sheet.month;
+  // Local date, which is the date the person at the fridge is standing in — the
+  // ISO string is UTC and would open tomorrow's column an hour early in Accra
+  // and close today's early elsewhere.
+  const localToday = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const currentMonth = localToday.slice(0, 7) === sheet.month;
   const todayDay = currentMonth ? today.getDate() : null;
+  // A month wholly in the past has no future cells; a future month has nothing
+  // but. `null` means every day of this sheet has already happened.
+  const lastOpenDay = localToday.slice(0, 7) > sheet.month ? sheet.days
+    : currentMonth ? today.getDate() : 0;
+  const pmOpen = nowMinutes() >= (sheet.pmOpensAt ?? 15 * 60);
 
   return (
     <div className={`ls-wrap${compact ? ' is-compact' : ''}`}>
@@ -127,22 +168,10 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
       </header>
 
       {sheet.locked && (
-        <div className="ls-locked">
-          <Lock size={12} />
-          <div className="ls-locked-text">
-            Signed on {String(sheet.verified_at ?? '').slice(0, 10)}
-            {sheet.verifiedByName ? ` by ${sheet.verifiedByName}` : ''}. Nothing on it can be changed.
-            A correction to a signed month is made by raising a nonconformity against it, not by editing the sheet.
-          </div>
-          {/* The signature itself, not just who typed their name. A verified
-              month is expected to carry it, on screen as on the paper form. */}
-          {sheet.signature?.image && (
-            <figure className="ls-sig">
-              <img src={sheet.signature.image} alt={`Signature of ${sheet.verifiedByName ?? sheet.signature.signer_name ?? 'the reviewer'}`} />
-              <figcaption>E-SIG-{sheet.signature.id}</figcaption>
-            </figure>
-          )}
-        </div>
+        <p className="ls-locked">
+          <Lock size={12} /> Signed {String(sheet.verified_at ?? '').slice(0, 10)}
+          {sheet.verifiedByName ? ` by ${sheet.verifiedByName}` : ''}. Corrections require a nonconformity.
+        </p>
       )}
       {problem && <p className="pd-error"><AlertTriangle size={13} /> {problem}</p>}
       {notice && (
@@ -172,6 +201,9 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
               {daily.map(row => (
                 <RowBlock key={row.id} row={row} days={days} todayDay={todayDay}
                   cellIndex={cellIndex} editable={editable} onSave={save}
+                  lastOpenDay={lastOpenDay} pmOpen={pmOpen}
+                  pmOpensAt={sheet.pmOpensAt ?? 15 * 60} pmDueAt={sheet.pmDueAt ?? 16 * 60}
+                  mayAmend={mayAmend}
                   noteFor={noteFor} setNoteFor={setNoteFor} />
               ))}
             </tbody>
@@ -192,10 +224,17 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
                   <th className="ls-rowhead" title={row.label}>{row.label}</th>
                   {[1, 2, 3, 4, 5].map(week => {
                     const slot = (row.slots.length === 1 ? row.slots[0] : row.slots[week - 1] ?? `w${week}`) as CellSlot;
+                    // A week that has not started yet cannot be ticked: a
+                    // monthly service recorded for week 5 on the 3rd is not an
+                    // early entry, it is a service nobody performed.
+                    const weekStarted = lastOpenDay >= (week - 1) * 7 + 1;
                     return (
                       <CellBox key={week} row={row} day={week} slot={slot}
                         cell={cellIndex.get(`${row.id}:${week}:${slot}`)}
                         editable={editable} onSave={save} wide
+                        closed={!weekStarted}
+                        closedReason={`Week ${week} has not started`}
+                        sameDay={false} mayAmend={mayAmend}
                         noteFor={noteFor} setNoteFor={setNoteFor} />
                     );
                   })}
@@ -207,13 +246,14 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
 
         {rows.length === 0 && (
           <p className="muted">
-            This sheet has no rows yet. For a chart, set the parameters and their acceptable ranges on the asset;
-            for a maintenance chart, add the tasks to the instrument. Nothing can be recorded until it is defined.
+            This sheet has no rows yet. Set the parameters on the asset, or add maintenance tasks to the instrument.
           </p>
         )}
       </div>
 
       <Legend />
+
+      <TrendPanel trends={data.trends ?? []} />
 
       <MonthSummary data={data} />
 
@@ -263,10 +303,17 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
    One row of the sheet — one line per slot, with an initials line under it,
    exactly as the paper form has it
    ------------------------------------------------------------------------- */
-function RowBlock({ row, days, todayDay, cellIndex, editable, onSave, noteFor, setNoteFor }: {
+function RowBlock({ row, days, todayDay, cellIndex, editable, onSave, lastOpenDay, pmOpen,
+  pmOpensAt, pmDueAt, mayAmend, noteFor, setNoteFor }: {
   row: LogSheetRow; days: number[]; todayDay: number | null;
   cellIndex: Map<string, LogSheetCell>;
   editable: boolean; onSave: (cells: LogCellInput[]) => void;
+  /** The last day of this month that has actually happened. */
+  lastOpenDay: number;
+  /** Whether the afternoon reading is due yet, by the laboratory's own clock. */
+  pmOpen: boolean;
+  pmOpensAt: number; pmDueAt: number;
+  mayAmend: boolean;
   noteFor: string | null; setNoteFor: (key: string | null) => void;
 }) {
   return (
@@ -280,12 +327,26 @@ function RowBlock({ row, days, todayDay, cellIndex, editable, onSave, noteFor, s
             </th>
           )}
           <th className="ls-slot">{SLOT_LABELS[slot as CellSlot] ?? slot}</th>
-          {days.map(day => (
-            <CellBox key={day} row={row} day={day} slot={slot as CellSlot}
-              cell={cellIndex.get(`${row.id}:${day}:${slot}`)}
-              editable={editable} onSave={onSave} isToday={day === todayDay}
-              noteFor={noteFor} setNoteFor={setNoteFor} />
-          ))}
+          {days.map(day => {
+            // Three states, and they are not the same. A future day is closed
+            // outright. Today's PM is closed until the afternoon. Everything
+            // else is open, and whether it is today decides whether changing it
+            // is ordinary work or an amendment.
+            const future = day > lastOpenDay;
+            const earlyPm = !future && day === todayDay && slot === 'pm' && !pmOpen;
+            return (
+              <CellBox key={day} row={row} day={day} slot={slot as CellSlot}
+                cell={cellIndex.get(`${row.id}:${day}:${slot}`)}
+                editable={editable} onSave={onSave} isToday={day === todayDay}
+                closed={future || earlyPm}
+                closedReason={future
+                  ? 'Not yet due'
+                  : `Afternoon reading due at ${clockLabel(pmDueAt)} — opens from ${clockLabel(pmOpensAt)}`}
+                sameDay={day === todayDay}
+                mayAmend={mayAmend}
+                noteFor={noteFor} setNoteFor={setNoteFor} />
+            );
+          })}
         </tr>
       ))}
     </>
@@ -295,18 +356,32 @@ function RowBlock({ row, days, todayDay, cellIndex, editable, onSave, noteFor, s
 /* ----------------------------------------------------------------------------
    One cell
    ------------------------------------------------------------------------- */
-function CellBox({ row, day, slot, cell, editable, onSave, isToday, wide, noteFor, setNoteFor }: {
+function CellBox({ row, day, slot, cell, editable, onSave, isToday, wide, closed, closedReason,
+  sameDay, mayAmend, noteFor, setNoteFor }: {
   row: LogSheetRow; day: number; slot: CellSlot; cell?: LogSheetCell;
   editable: boolean; onSave: (cells: LogCellInput[]) => void;
   isToday?: boolean; wide?: boolean;
+  /** The day, or the afternoon, has not arrived. Nothing may be written here. */
+  closed?: boolean;
+  closedReason?: string;
+  /** Whether this cell belongs to today, which decides correction vs amendment. */
+  sameDay?: boolean;
+  /** Whether the reader may change an entry whose day has ended. */
+  mayAmend?: boolean;
   noteFor: string | null; setNoteFor: (key: string | null) => void;
 }) {
   const key = `${row.id}:${day}:${slot}`;
   const [draft, setDraft] = useState('');
   const [editing, setEditing] = useState(false);
+  const [amending, setAmending] = useState<{ value: string; clear: boolean } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
+
+  // Writable is narrower than editable: the sheet may be open and this
+  // particular cell still shut, because its day has not happened.
+  const writable = editable && !closed;
+  const amended = Number(cell?.amendment_count ?? 0) > 0;
 
   const breach = cell ? cellIsBreach(cell.status) : false;
   const classes = [
@@ -318,42 +393,82 @@ function CellBox({ row, day, slot, cell, editable, onSave, isToday, wide, noteFo
     cell?.needs_review ? 'is-review' : '',
     isToday ? 'is-today' : '',
     wide ? 'is-wide' : '',
+    closed ? 'is-closed' : '',
+    amended ? 'is-amended' : '',
   ].filter(Boolean).join(' ');
 
-  const title = cell
-    ? [
-        `${row.label} — day ${day} ${SLOT_LABELS[slot] ?? slot}`,
-        CELL_STATUS_LABELS[cell.status as keyof typeof CELL_STATUS_LABELS] ?? cell.status,
-        cell.reading_time ? `read at ${cell.reading_time}` : null,
-        cell.recorded_by_name ? `by ${cell.recorded_by_name}` : null,
-        CELL_SOURCE_LABELS[cell.source as keyof typeof CELL_SOURCE_LABELS] ?? cell.source,
-        cell.note ? `Note: ${cell.note}` : null,
-        cell.needs_review ? 'Read off the attached chart — confirm it.' : null,
-      ].filter(Boolean).join(' · ')
-    : `${row.label} — day ${day} ${SLOT_LABELS[slot] ?? slot}: nothing recorded`;
+  const title = closed
+    ? `${row.label} — day ${day} ${SLOT_LABELS[slot] ?? slot}: ${closedReason ?? 'not open for recording yet'}`
+    : cell
+      ? [
+          `${row.label} — day ${day} ${SLOT_LABELS[slot] ?? slot}`,
+          CELL_STATUS_LABELS[cell.status as keyof typeof CELL_STATUS_LABELS] ?? cell.status,
+          cell.reading_time ? `read at ${cell.reading_time}` : null,
+          cell.recorded_by_name ? `by ${cell.recorded_by_name}` : null,
+          CELL_SOURCE_LABELS[cell.source as keyof typeof CELL_SOURCE_LABELS] ?? cell.source,
+          cell.note ? `Note: ${cell.note}` : null,
+          amended ? `Amended ${String(cell.last_amended_at ?? '').slice(0, 10)}: ${cell.last_amend_reason ?? ''}` : null,
+          cell.needs_review ? 'Read off the attached chart — confirm it.' : null,
+        ].filter(Boolean).join(' · ')
+      : `${row.label} — day ${day} ${SLOT_LABELS[slot] ?? slot}: nothing recorded`;
+
+  /** Turn what was typed into the write the server expects. */
+  function inputFor(value: string, amendReason?: string): LogCellInput | null {
+    const text = value.trim();
+    if (!text) return null;
+    const upper = text.toUpperCase();
+    const base = { rowId: row.id, day, slot, ...(amendReason ? { amendReason } : {}) };
+    if (upper === 'NA' || upper === 'N/A') return { ...base, na: true };
+    if (row.row_type === 'numeric') {
+      const num = Number(text);
+      return Number.isNaN(num) ? null : { ...base, value: num };
+    }
+    if (row.row_type === 'text') return { ...base, text };
+    return { ...base, done: !['N', 'NO', 'X'].includes(upper) };
+  }
 
   function commit(value: string) {
     setEditing(false);
     const text = value.trim();
     if (!text) return;
-    const upper = text.toUpperCase();
-    if (upper === 'NA' || upper === 'N/A') { onSave([{ rowId: row.id, day, slot, na: true }]); return; }
-    if (row.row_type === 'numeric') {
-      const num = Number(text);
-      if (Number.isNaN(num)) return;
-      onSave([{ rowId: row.id, day, slot, value: num }]);
+    // Changing an entry whose day has ended is an amendment, not a correction:
+    // ask for the reason here rather than letting the server refuse it and
+    // making somebody retype the number.
+    if (cell && !sameDay) {
+      if (!mayAmend) return;
+      setAmending({ value: text, clear: false });
       return;
     }
-    if (row.row_type === 'text') { onSave([{ rowId: row.id, day, slot, text }]); return; }
-    onSave([{ rowId: row.id, day, slot, done: !['N', 'NO', 'X'].includes(upper) }]);
+    const input = inputFor(text);
+    if (input) onSave([input]);
+  }
+
+  /**
+   * Withdraw the entry.
+   *
+   * On the day, that is ordinary: the wrong box, a value typed against the
+   * wrong fridge. Afterwards it takes the reason and the amendment trail, the
+   * same as changing it — a deletion is the largest change there is.
+   */
+  function withdraw() {
+    if (!cell || !writable) return;
+    if (sameDay) { onSave([{ rowId: row.id, day, slot, clear: true }]); return; }
+    if (mayAmend) setAmending({ value: '', clear: true });
   }
 
   // A tick row does not need a text box: one click is done, a second is
   // "not done", a third clears the assertion. That is three states in the
   // place a paper form has a tick and a blank.
   function cycleTick() {
-    if (!editable) return;
+    if (!writable) return;
     if (!cell) { onSave([{ rowId: row.id, day, slot, done: true }]); return; }
+    if (!sameDay) {
+      // A tick recorded on a day that has ended is a record like any other.
+      if (!mayAmend) return;
+      const next = cell.status === 'done' ? 'N' : cell.status === 'not_done' ? 'NA' : 'Y';
+      setAmending({ value: next, clear: false });
+      return;
+    }
     if (cell.status === 'done') { onSave([{ rowId: row.id, day, slot, done: false }]); return; }
     if (cell.status === 'not_done') { onSave([{ rowId: row.id, day, slot, na: true }]); return; }
     onSave([{ rowId: row.id, day, slot, done: true }]);
@@ -380,32 +495,68 @@ function CellBox({ row, day, slot, cell, editable, onSave, isToday, wide, noteFo
     : cell.status === 'not_done' ? '✗' : '✓';
 
   return (
-    <td className={classes} title={title}
+    <td className={classes} title={title} aria-disabled={closed || undefined}
       onClick={() => {
-        if (!editable) return;
+        if (!writable) return;
         if (row.row_type === 'tick') cycleTick();
-        else { setDraft(cell?.value_num != null ? String(cell.value_num) : cell?.value_text ?? ''); setEditing(true); }
+        else if (cell && !sameDay) {
+          if (!mayAmend) return;
+          setAmending({ value: cell.value_num != null ? String(cell.value_num) : cell.value_text ?? '', clear: false });
+        } else { setDraft(cell?.value_num != null ? String(cell.value_num) : cell?.value_text ?? ''); setEditing(true); }
       }}
       onContextMenu={e => {
         // Right-click writes the note. On a chart, the note is what turns
-        // "8.4 °C" into a record somebody can defend at an audit.
-        if (!editable || !cell) return;
+        // "8.4 °C" into a record somebody can defend at an audit. It also
+        // reaches the one way to withdraw an entry, which has no other home on
+        // a grid where every cell is one click wide.
+        if (!writable || !cell) return;
         e.preventDefault();
         setNoteFor(noteFor === key ? null : key);
       }}>
       <span className="ls-value">{display}</span>
       {cell?.initials && <span className="ls-ini">{cell.initials}</span>}
       {cell?.note && <span className="ls-hasnote" title={cell.note}>•</span>}
+      {amended && <span className="ls-amended" title={`Amended: ${cell?.last_amend_reason ?? ''}`}>△</span>}
       {noteFor === key && cell && (
-        <NotePopover cell={cell} onClose={() => setNoteFor(null)}
-          onSave={note => { onSave([{ rowId: row.id, day, slot, note, value: cell.value_num, text: cell.value_text, done: cell.status === 'done' ? true : cell.status === 'not_done' ? false : undefined }]); setNoteFor(null); }} />
+        <NotePopover
+          cell={cell} sameDay={Boolean(sameDay)} mayAmend={Boolean(mayAmend)}
+          onClose={() => setNoteFor(null)}
+          onWithdraw={() => { setNoteFor(null); withdraw(); }}
+          onSave={note => {
+            onSave([{
+              rowId: row.id, day, slot, note,
+              value: cell.value_num, text: cell.value_text,
+              done: cell.status === 'done' ? true : cell.status === 'not_done' ? false : undefined,
+              // A note is not a change to the reading, so it never needs an
+              // amendment reason of its own — writing down what was done about
+              // an excursion a week ago is exactly what the chart wants.
+            }]);
+            setNoteFor(null);
+          }} />
+      )}
+      {amending && (
+        <AmendPopover
+          rowLabel={row.label} day={day} slot={slot}
+          cell={cell} clear={amending.clear} value={amending.value}
+          numeric={row.row_type === 'numeric'}
+          onCancel={() => setAmending(null)}
+          onConfirm={(value, reason) => {
+            setAmending(null);
+            if (amending.clear) { onSave([{ rowId: row.id, day, slot, clear: true, amendReason: reason }]); return; }
+            const input = inputFor(value, reason);
+            if (input) onSave([input]);
+          }} />
       )}
     </td>
   );
 }
 
-function NotePopover({ cell, onSave, onClose }: { cell: LogSheetCell; onSave: (note: string) => void; onClose: () => void }) {
+function NotePopover({ cell, sameDay, mayAmend, onSave, onWithdraw, onClose }: {
+  cell: LogSheetCell; sameDay: boolean; mayAmend: boolean;
+  onSave: (note: string) => void; onWithdraw: () => void; onClose: () => void;
+}) {
   const [note, setNote] = useState(cell.note ?? '');
+  const canWithdraw = sameDay || mayAmend;
   return (
     <div className="ls-note-pop" onClick={e => e.stopPropagation()}>
       <label>
@@ -415,10 +566,80 @@ function NotePopover({ cell, onSave, onClose }: { cell: LogSheetCell; onSave: (n
             ? 'Door found ajar, closed and re-read at 09:20; contents transferred to fridge 2.'
             : 'Anything worth recording about this entry'} />
       </label>
+      {Number(cell.amendment_count ?? 0) > 0 && (
+        <p className="ls-pop-amended">
+          <History size={11} /> Amended {String(cell.last_amended_at ?? '').slice(0, 10)}
+          {cell.last_amend_reason ? `: ${cell.last_amend_reason}` : ''}
+        </p>
+      )}
       <div className="pr-btns">
         <button type="button" onClick={() => onSave(note.trim())}>Save note</button>
+        {canWithdraw && (
+          <button type="button" className="ls-withdraw" onClick={onWithdraw}
+            title={sameDay ? 'Withdraw this entry' : 'Withdraw — a reason is recorded'}>
+            <Trash2 size={12} /> Withdraw
+          </button>
+        )}
         <button type="button" className="secondary" onClick={onClose}>Cancel</button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Changing, or withdrawing, an entry whose day has ended.
+ *
+ * The reason is not a formality and the wording says so. The record has already
+ * been read — the morning handover saw it, the excursion register counted it,
+ * results may have been released against it — so what an assessor wants is what
+ * was wrong, how that was established, and who says so. The original stays
+ * legible beside the new value either way (ISO 15189:2022 §8.4).
+ */
+function AmendPopover({ rowLabel, day, slot, cell, clear, value, numeric, onConfirm, onCancel }: {
+  rowLabel: string; day: number; slot: CellSlot; cell?: LogSheetCell;
+  clear: boolean; value: string; numeric: boolean;
+  onConfirm: (value: string, reason: string) => void;
+  onCancel: () => void;
+}) {
+  const [next, setNext] = useState(value);
+  const [reason, setReason] = useState('');
+  const was = cell?.value_num != null ? String(cell.value_num) : cell?.value_text ?? (cell?.status ?? '—');
+  const ready = reason.trim().length >= 10 && (clear || next.trim().length > 0);
+
+  return (
+    <div className="ls-note-pop ls-amend-pop" onClick={e => e.stopPropagation()}>
+      <p className="ls-amend-head">
+        <History size={12} />
+        <span>
+          Day {day} {SLOT_LABELS[slot] ?? slot} has closed. The current entry ({was}) is kept on record.
+        </span>
+      </p>
+
+      {!clear && (
+        <label>
+          <span>New value</span>
+          <TextField value={next} onValue={setNext} autoFocus
+            inputMode={numeric ? 'decimal' : 'text'}
+            placeholder={numeric ? 'The corrected reading' : 'Y, N or NA'} />
+        </label>
+      )}
+
+      <label>
+        <span>Reason</span>
+        <TextField as="textarea" rows={3} value={reason} onValue={setReason}
+          autoFocus={clear}
+          placeholder={clear
+            ? 'Recorded against the wrong asset; entered on Refrigerator 2.'
+            : 'Transcribed as 4.4; the logger read 14.4. Corrected against the printout.'} />
+      </label>
+
+      <div className="pr-btns">
+        <button type="button" disabled={!ready} onClick={() => onConfirm(next, reason.trim())}>
+          {clear ? 'Withdraw' : 'Amend'}
+        </button>
+        <button type="button" className="secondary" onClick={onCancel}>Cancel</button>
+      </div>
+      {!ready && <p className="ls-amend-hint">A reason of at least a sentence is required.</p>}
     </div>
   );
 }
@@ -445,8 +666,7 @@ function MonthSummary({ data }: { data: LogSheetPayload }) {
       </div>
       {c.unexplainedBreaches > 0 && (
         <p className="ls-summary-warn">
-          <AlertTriangle size={12} /> {c.unexplainedBreaches} of those have no note saying what was done about them.
-          Right-click the red cell to add one — an unexplained excursion is the finding, not the excursion itself.
+          <AlertTriangle size={12} /> {c.unexplainedBreaches} without a note. Right-click the cell to add one.
         </p>
       )}
       {c.missingCount > 0 && c.missing.length > 0 && (
@@ -480,7 +700,56 @@ function Legend() {
       <span><i className="ls-sw warn" /> Approaching a limit</span>
       <span><i className="ls-sw na" /> Not applicable</span>
       <span><i className="ls-sw blank" /> Nothing recorded</span>
-      <span className="ls-legend-hint">Click a cell to record it. Right-click one to add a note.</span>
+      <span><i className="ls-sw closed" /> Not yet due</span>
+      <span><i className="ls-sw amended" /> Amended</span>
+      <span className="ls-legend-hint">Click to record · right-click for notes</span>
+    </div>
+  );
+}
+
+/* ----------------------------------------------------------------------------
+   What the month shows that no single reading does
+   ----------------------------------------------------------------------------
+   Every reading in range and the fridge failing anyway is the case this exists
+   for. The findings are computed on the server from the month already on the
+   sheet — the same run rules a Levey-Jennings chart uses, because a laboratory
+   that knows what "ten on one side of the mean" means should not have to learn
+   a second vocabulary for a fridge.
+   ------------------------------------------------------------------------- */
+function TrendPanel({ trends }: { trends: SheetTrend[] }) {
+  const [open, setOpen] = useState<number | null>(0);
+  if (!trends.length) return null;
+
+  const act = trends.filter(t => t.severity === 'act').length;
+  const icon = (kind: SheetTrend['kind']) =>
+    kind === 'rising' ? <TrendingUp size={13} />
+    : kind === 'falling' ? <TrendingDown size={13} />
+    : <AlertTriangle size={13} />;
+
+  return (
+    <div className={`ls-trends${act ? ' has-act' : ''}`}>
+      <div className="ls-trends-head">
+        <strong>
+          Trends
+          <span className="ls-trend-n">{trends.length}</span>
+          {act > 0 && <span className="ls-trend-act">{act} to review</span>}
+        </strong>
+        <span>Patterns across the month that individual readings do not show.</span>
+      </div>
+      <ul>
+        {trends.map((trend, i) => (
+          <li key={i} className={`t-${trend.severity}`}>
+            <button type="button" onClick={() => setOpen(open === i ? null : i)}>
+              {icon(trend.kind)}
+              <span className="ls-trend-row">
+                <span className="ls-trend-label">{trend.rowLabel}</span>
+                <span className="ls-trend-summary">{trend.summary}</span>
+              </span>
+            </button>
+            {open === i && <p className="ls-trend-meaning">{trend.meaning}</p>}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -721,31 +990,55 @@ function VerifyDialog({ sheetId, data, onClose, onDone }: {
 /* ----------------------------------------------------------------------------
    The index of a unit's sheets for a month — used by the portal and the modules
    ------------------------------------------------------------------------- */
-export function SheetPicker({ sheets, activeId, onPick }: {
+/**
+ * Choosing which sheet to work on.
+ *
+ * Down a column beside the grid it stole a quarter of the screen to list, very
+ * often, one fridge. As a strip of coloured chips it was worse: ragged widths,
+ * a different border colour on nearly every item, and no alignment to read down.
+ *
+ * So it is a plain uniform grid. Equal columns, one neutral border, the name and
+ * the percentage in fixed positions so the eye can scan a column of figures
+ * rather than hunt across chips. Status is a single small dot — colour marks the
+ * one or two that need attention instead of decorating all thirteen.
+ */
+export function SheetPicker({ sheets, activeId, onPick, horizontal }: {
   sheets: Array<{ subject: any; sheet: any; completeness: any }>;
   activeId: number | null;
   onPick: (sheetId: number) => void;
+  /** Lay the sheets above the grid rather than in a column beside it. */
+  horizontal?: boolean;
 }) {
   if (!sheets.length) return null;
   return (
-    <ul className="ls-picker">
+    <ul className={`ls-picker${horizontal ? ' is-grid' : ''}`}>
       {sheets.map(({ subject, sheet, completeness }) => {
         const percent = completeness?.percent ?? 0;
         const tone = !sheet ? 'none' : percent >= 95 ? 'ok' : percent >= 70 ? 'warn' : 'crit';
+        const active = sheet?.id === activeId;
         return (
           <li key={subject.id}>
-            <button type="button" className={`ls-pick t-${tone}${sheet?.id === activeId ? ' is-active' : ''}`}
+            <button type="button" className={`ls-pick t-${tone}${active ? ' is-active' : ''}`}
+              aria-current={active || undefined}
               onClick={() => sheet && onPick(sheet.id)}>
-              <span className="ls-pick-name">{subject.subject_name ?? subject.name}</span>
-              <span className="ls-pick-meta">
-                {sheet ? (
-                  <>
-                    <span>{percent}% recorded</span>
-                    {completeness?.breaches > 0 && <span className="crit">{completeness.breaches} out of range</span>}
-                    {completeness?.missingCount > 0 && <span className="warn">{completeness.missingCount} missing</span>}
-                    {sheet.status !== 'open' && <span className="badge">{SHEET_STATUS_LABELS[sheet.status as keyof typeof SHEET_STATUS_LABELS]}</span>}
-                  </>
-                ) : <span className="muted">not started</span>}
+              <span className="ls-pick-dot" aria-hidden="true" />
+              <span className="ls-pick-body">
+                <span className="ls-pick-name" title={subject.subject_name ?? subject.name}>
+                  {subject.subject_name ?? subject.name}
+                </span>
+                <span className="ls-pick-meta">
+                  {sheet ? (
+                    <>
+                      <span className="ls-pick-pct">{percent}%</span>
+                      {completeness?.breaches > 0 && <span className="crit">{completeness.breaches} out of range</span>}
+                      {sheet.status !== 'open' && (
+                        <span className="ls-pick-status">
+                          {SHEET_STATUS_LABELS[sheet.status as keyof typeof SHEET_STATUS_LABELS]}
+                        </span>
+                      )}
+                    </>
+                  ) : <span>Not started</span>}
+                </span>
               </span>
             </button>
           </li>

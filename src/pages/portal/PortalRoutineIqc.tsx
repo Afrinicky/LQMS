@@ -12,12 +12,8 @@ import {
   IQC_ENTRY_METHOD_LABELS, IQC_ENTRY_METHOD_HINTS, type IqcEntryMethod,
 } from '../../../shared/constants/routineWork';
 import { QUALITATIVE_LABELS, RULE_LABELS } from '../../../shared/constants/iqc';
-import LeveyJenningsChart, { type ChartData } from '../../components/LeveyJenningsChart';
-import DefineControlForm from '../../components/iqc/DefineControlForm';
-import type {
-  IqcBoard, IqcBoardControl, IqcMapping, IqcFeedMessage, IqcChartAnalyte,
-  Section, Staff, EquipmentItem,
-} from '../../../shared/types/api';
+import type { IqcBoard, IqcBoardControl, IqcMapping, IqcFeedMessage } from '../../../shared/types/api';
+import PortalIqcCoverage from './PortalIqcCoverage';
 
 /**
  * IQC on the bench.
@@ -123,12 +119,8 @@ export default function PortalRoutineIqc() {
       <section className="portal-panel">
         <div className="pp-head">
           <div>
-            <h3><Beaker size={16} /> Internal quality control — today</h3>
-            <p>
-              Every control your unit runs, on the instruments your unit runs them on.
-              Anyone here can see whether a control has been done; running one and accepting it is
-              registered scientific work.
-            </p>
+            <h3>Internal quality control</h3>
+            <p>Today&rsquo;s controls for this unit.</p>
           </div>
           {counts.due > 0 && <span className="pp-count">{counts.due}</span>}
         </div>
@@ -154,16 +146,12 @@ export default function PortalRoutineIqc() {
 
         {!board.canPerform && (
           <p className="rw-locked">
-            <Lock size={11} /> Running and accepting a control needs the technical routine-work tier.
-            You can see the state of every control below; ask a registered scientist in your unit to run one.
+            <Lock size={11} /> You can view controls but not run them.
           </p>
         )}
 
         {board.groups.length === 0 ? (
-          <p className="muted">
-            No controls are set up against your unit yet. Controls are defined under Quality Control &rarr; IQC;
-            each one names the instrument it runs on and the unit that runs it, and only then does it appear here.
-          </p>
+          <p className="muted">No controls are set up for this unit yet.</p>
         ) : (
           board.groups.map(group => (
             <div key={group.key} className="iqc-group">
@@ -186,7 +174,7 @@ export default function PortalRoutineIqc() {
           <div className="iqc-misfiled">
             <AlertTriangle size={13} />
             <div>
-              <strong>{board.misfiled.length} control{board.misfiled.length === 1 ? '' : 's'} cannot be run from here.</strong>
+              <strong>{board.misfiled.length} control{board.misfiled.length === 1 ? '' : 's'} cannot be run here.</strong>
               <ul>{board.misfiled.map(m => <li key={m.id}>{m.materialName}: {m.why}</li>)}</ul>
             </div>
           </div>
@@ -195,6 +183,8 @@ export default function PortalRoutineIqc() {
       )}
 
       {chartControl && <ChartDialog control={chartControl} onClose={() => setChartControl(null)} />}
+
+      <PortalIqcCoverage onChanged={load} />
 
       {openControl && (
         <RunControlDialog control={openControl} onClose={() => setOpenControl(null)}
