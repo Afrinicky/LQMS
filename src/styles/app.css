@@ -3909,6 +3909,14 @@ button.cell-mark:disabled { cursor: default; }
   font-size: 13px; font-weight: 700;
 }
 .pp-count.crit { background: var(--danger-bg); color: var(--danger); }
+/* The primary action for a portal panel, sitting opposite its title. */
+.pp-action {
+  flex: none; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  padding: 7px 13px; border-radius: var(--radius-sm);
+  border: 1px solid var(--accent); background: var(--accent-soft); color: var(--text);
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+}
+.pp-action:hover { background: var(--accent); }
 .pp-search { min-width: 220px; font-size: 12.5px; }
 .pp-scroll { max-height: 52vh; overflow: auto; }
 .pp-inline-warn {
@@ -4812,46 +4820,58 @@ button.cell-mark:disabled { cursor: default; }
 /* -- the sheet picker ----------------------------------------------------- */
 .ls-picker { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
 .ls-pick {
-  width: 100%; text-align: left; padding: 8px 11px; border-radius: 9px; cursor: pointer;
+  width: 100%; text-align: left; padding: 8px 11px; border-radius: 8px; cursor: pointer;
   border: 1px solid var(--border); background: var(--surface); color: var(--text);
-  border-left-width: 3px;
+  display: flex; align-items: flex-start; gap: 9px;
 }
-.ls-pick:hover { border-color: var(--border-strong); }
-.ls-pick.is-active { background: var(--accent-soft); border-color: var(--accent); }
-.ls-pick.t-ok { border-left-color: var(--success); }
-.ls-pick.t-warn { border-left-color: var(--warning); }
-.ls-pick.t-crit { border-left-color: var(--danger); }
-.ls-pick.t-none { border-left-color: var(--border-strong); }
-.ls-pick-name { display: block; font-size: 12.5px; font-weight: 600; }
-.ls-pick-meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 10.5px; color: var(--faint); margin-top: 2px; }
+.ls-pick:hover { border-color: var(--border-strong); background: var(--panel-2); }
+.ls-pick.is-active { border-color: var(--accent); background: var(--accent-soft); }
+.ls-pick-body { min-width: 0; flex: 1; }
+.ls-pick-name {
+  display: block; font-size: 12.5px; font-weight: 600; line-height: 1.35;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ls-pick-meta {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline;
+  font-size: 10.5px; color: var(--faint); margin-top: 3px;
+}
+.ls-pick-pct { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--muted); }
 .ls-pick-meta .crit { color: var(--danger); }
-.ls-pick-meta .warn { color: var(--warning); }
+.ls-pick-status {
+  padding: 0 6px; border-radius: 3px; background: var(--panel-2); color: var(--muted);
+  font-size: 9.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em;
+}
 
 /*
-  The sheets across the top instead of down the side.
+  One small dot carries the status.
 
-  A month is 31 columns wide; a fixed sidebar took a quarter of the screen to
-  list, very often, one fridge, and squeezed every entry cell to pay for it.
-  As a strip the chips size to their content, wrap on a wide screen and scroll
-  on a narrow one, and the grid below gets the full width.
+  Ringing every item in red, amber or green produced thirteen competing borders
+  and no hierarchy — the two charts that were actually behind looked exactly as
+  urgent as the eleven that were fine. A 6px dot in a fixed position reads down
+  the column at a glance and leaves the cards themselves quiet.
 */
-.ls-picker.is-strip {
-  flex-direction: row; flex-wrap: wrap; gap: 6px;
-  padding-bottom: 2px;
+.ls-pick-dot {
+  flex: none; width: 6px; height: 6px; margin-top: 6px; border-radius: 50%;
+  background: var(--border-strong);
 }
-.ls-picker.is-strip > li { flex: 0 1 auto; min-width: 0; }
-.ls-picker.is-strip .ls-pick {
-  width: auto; padding: 6px 12px; border-left-width: 1px; border-top-width: 3px;
-  display: flex; align-items: baseline; gap: 10px; white-space: nowrap;
+.ls-pick.t-ok .ls-pick-dot { background: var(--success); }
+.ls-pick.t-warn .ls-pick-dot { background: var(--warning); }
+.ls-pick.t-crit .ls-pick-dot { background: var(--danger); }
+
+/*
+  Above the grid: a uniform grid, not a ragged strip.
+
+  Equal columns mean the names line up and the percentages form a column the eye
+  can run down. Chips sized to their own text cannot do that, which is what made
+  the strip look improvised.
+*/
+.ls-picker.is-grid {
+  flex-direction: row; flex-wrap: wrap; display: grid; gap: 6px;
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
 }
-.ls-picker.is-strip .ls-pick.t-ok { border-top-color: var(--success); }
-.ls-picker.is-strip .ls-pick.t-warn { border-top-color: var(--warning); }
-.ls-picker.is-strip .ls-pick.t-crit { border-top-color: var(--danger); }
-.ls-picker.is-strip .ls-pick.t-none { border-top-color: var(--border-strong); }
-.ls-picker.is-strip .ls-pick-name { display: inline; font-size: 12px; }
-.ls-picker.is-strip .ls-pick-meta { margin-top: 0; gap: 7px; }
-@media (max-width: 700px) {
-  .ls-picker.is-strip { flex-wrap: nowrap; overflow-x: auto; }
+.ls-picker.is-grid > li { min-width: 0; }
+@media (max-width: 560px) {
+  .ls-picker.is-grid { grid-template-columns: 1fr; }
 }
 
 /* -- the module/portal split --------------------------------------------- */
@@ -4866,83 +4886,82 @@ button.cell-mark:disabled { cursor: default; }
 .rs-stack { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .rs-grid { min-width: 0; }
 /* -- the unit's equipment inventory --------------------------------------- */
-.ueq .pp-count.crit { background: var(--danger-bg); color: var(--danger); }
-.ueq-counts { display: flex; flex-wrap: wrap; gap: 9px; }
+.ueq-counts { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .ueq-stat {
-  display: flex; flex-direction: column; padding: 8px 14px; border-radius: 9px;
-  border: 1px solid var(--border); background: var(--surface); min-width: 130px; max-width: 200px;
+  display: flex; flex-direction: column; gap: 1px; padding: 7px 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface); min-width: 118px; max-width: 190px;
 }
-.ueq-stat strong { font-size: 19px; line-height: 1.1; font-variant-numeric: tabular-nums; }
-.ueq-stat span { font-size: 10.5px; color: var(--faint); line-height: 1.4; }
+.ueq-stat strong { font-size: 18px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.ueq-stat span { font-size: 10.5px; color: var(--faint); line-height: 1.35; }
 .ueq-stat.tone-ok strong { color: var(--success); }
 .ueq-stat.tone-warn strong { color: var(--warning); }
 .ueq-stat.tone-crit strong { color: var(--danger); }
 
 .ueq-notice {
-  display: flex; align-items: flex-start; gap: 7px; margin: 0; padding: 9px 12px; border-radius: 8px;
-  background: var(--success-bg); color: var(--success); font-size: 11.5px; line-height: 1.6;
+  display: flex; align-items: center; gap: 7px; margin: 0 0 12px; padding: 8px 12px;
+  border-radius: var(--radius-sm); background: var(--success-bg); color: var(--success);
+  font-size: 11.5px;
 }
-.ueq-legend { display: flex; flex-wrap: wrap; gap: 16px; margin: 0; font-size: 10.5px; color: var(--faint); }
-.ueq-legend span { display: inline-flex; align-items: center; gap: 5px; }
-.ueq-legend .dot { fill: currentColor; }
-.ueq-legend .dot.gap { color: var(--warning); }
-.ueq-legend .dot.late { color: var(--danger); }
-.ueq-legend .dot.ok { color: var(--success); }
 
-.ueq-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.ueq-list > li { border: 1px solid var(--border); border-radius: 9px; background: var(--surface); overflow: hidden; }
-.ueq-list > li.is-gap { border-color: rgba(245, 181, 68, 0.4); }
-.ueq-list > li.is-late { border-color: rgba(233, 105, 105, 0.45); }
+/*
+  One border, one weight, one background.
+
+  An earlier pass ringed each instrument in red or amber by its worst duty,
+  which produced a wall of competing outlines. The state is carried by the words
+  on the right instead, so the list reads as a list.
+*/
+.ueq-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.ueq-list > li + li { border-top: 1px solid var(--border); }
 .ueq-row {
   width: 100%; display: flex; align-items: center; gap: 9px; cursor: pointer; text-align: left;
-  padding: 9px 12px; border: none; background: none; color: var(--text);
+  padding: 10px 13px; border: none; background: var(--surface); color: var(--text);
 }
 .ueq-row:hover { background: var(--panel-2); }
-.ueq-name { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; }
-.ueq-summary { display: flex; gap: 10px; flex: none; font-size: 10.5px; font-weight: 600; }
-.ueq-summary .crit { color: var(--danger); }
-.ueq-summary .warn { color: var(--warning); }
-.ueq-summary .ok { color: var(--success); }
+.ueq-row > svg { flex: none; color: var(--faint); }
+.ueq-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; }
+.ueq-summary { display: flex; gap: 12px; flex: none; font-size: 11px; }
+.ueq-summary .crit { color: var(--danger); font-weight: 600; }
+.ueq-summary .warn { color: var(--warning); font-weight: 600; }
+.ueq-summary .ok { color: var(--faint); }
 
-.ueq-detail { padding: 0 12px 11px 34px; border-top: 1px solid var(--border); }
-.ueq-ident { margin: 9px 0; font-size: 10.5px; color: var(--faint); }
-.ueq-duties { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.ueq-detail { padding: 2px 13px 12px 35px; background: var(--panel); border-top: 1px solid var(--border); }
+.ueq-ident { margin: 10px 0; font-size: 10.5px; color: var(--faint); }
+.ueq-duties { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .ueq-duty {
-  display: flex; align-items: flex-start; gap: 9px; padding: 7px 11px;
-  border-radius: 8px; background: var(--panel); border-left: 3px solid var(--border-strong);
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  border-radius: var(--radius-sm); background: var(--surface); border: 1px solid var(--border);
 }
-.ueq-duty.t-gap { border-left-color: var(--warning); }
-.ueq-duty.t-late { border-left-color: var(--danger); }
-.ueq-duty.t-soon { border-left-color: var(--warning); }
-.ueq-duty.t-ok { border-left-color: var(--success); }
-.ueq-duty.t-untracked { opacity: .68; }
-.ueq-duty > svg { margin-top: 2px; flex: none; color: var(--faint); }
+.ueq-duty.t-gap, .ueq-duty.t-late { border-color: var(--border-strong); }
+.ueq-duty.t-untracked { opacity: .55; }
+.ueq-duty > svg { flex: none; color: var(--faint); }
+.ueq-duty.t-late > svg { color: var(--danger); }
+.ueq-duty.t-gap > svg { color: var(--warning); }
+.ueq-duty.t-ok > svg { color: var(--success); }
 .ueq-duty-main { flex: 1; min-width: 0; }
-.ueq-duty-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 12px; font-weight: 600; }
-.ueq-clause { font-size: 9.5px; font-weight: 500; color: var(--faint); cursor: help; }
-.ueq-duty-state { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 10.5px; color: var(--muted); margin-top: 2px; line-height: 1.55; }
+.ueq-duty-head { display: block; font-size: 12px; font-weight: 600; }
+.ueq-duty-state { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 10.5px; color: var(--faint); margin-top: 2px; line-height: 1.5; }
 .ueq-due { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; }
 .ueq-due.overdue { color: var(--danger); }
 .ueq-due.due_soon { color: var(--warning); }
 .ueq-set {
-  flex: none; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; cursor: pointer;
-  padding: 4px 10px; border-radius: 8px; border: 1px solid var(--accent);
-  background: var(--accent-soft); color: var(--text); font-size: 10.5px; font-weight: 600;
+  flex: none; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; cursor: pointer;
+  padding: 4px 11px; border-radius: var(--radius-sm); border: 1px solid var(--border-strong);
+  background: transparent; color: var(--text); font-size: 10.5px; font-weight: 600;
 }
-.ueq-set:hover { background: var(--accent); }
+.ueq-set:hover { border-color: var(--accent); background: var(--accent-soft); }
 
-.ueq-dialog { width: min(860px, 100%); }
-.ueq-framework-label { margin: 0 0 10px; font-size: 12px; color: var(--muted); }
-.ueq-tasks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
-.ueq-tasks li { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
-.ueq-tasks li.is-added { opacity: .55; }
-.ueq-tasks label { display: flex; align-items: center; gap: 10px; padding: 7px 11px; cursor: pointer; }
+.ueq-dialog { width: min(840px, 100%); }
+.ueq-framework-label { margin: 0 0 10px; font-size: 11.5px; color: var(--faint); }
+.ueq-tasks { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.ueq-tasks li + li { border-top: 1px solid var(--border); }
+.ueq-tasks li.is-added { opacity: .5; }
+.ueq-tasks label { display: flex; align-items: center; gap: 11px; padding: 8px 12px; cursor: pointer; background: var(--surface); }
 .ueq-tasks input[type="checkbox"] { flex: none; }
 .ueq-task-text { flex: 1; min-width: 0; }
 .ueq-task-text input { width: 100%; }
-.ueq-task-text em { display: block; margin-top: 3px; font-size: 10.5px; color: var(--faint); font-style: normal; line-height: 1.5; }
-.ueq-tasks select { flex: none; width: 150px; }
-.ueq-note { margin: 12px 0 0; font-size: 11.5px; color: var(--muted); line-height: 1.65; }
+.ueq-task-text em { display: block; margin-top: 3px; font-size: 10.5px; color: var(--faint); font-style: normal; line-height: 1.45; }
+.ueq-tasks select { flex: none; width: 148px; }
+.ueq-note { margin: 12px 0 0; font-size: 11px; color: var(--faint); line-height: 1.6; }
 
 .rs-defs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
 .rs-defs li { padding: 8px 11px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); }
@@ -5021,85 +5040,52 @@ button.cell-mark:disabled { cursor: default; }
 }
 .iqc-misfiled ul { margin: 5px 0 0; padding-left: 18px; }
 
-/* -- is the unit's work controlled at all? -------------------------------- */
-.qcc .pp-count.crit { background: var(--danger-bg); color: var(--danger); }
-.qcc-counts { display: flex; flex-wrap: wrap; gap: 9px; margin-bottom: 4px; }
+/* -- controls set up for the unit's tests --------------------------------- */
+.qcc-counts { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .qcc-stat {
-  display: flex; flex-direction: column; padding: 8px 14px; border-radius: 9px;
-  border: 1px solid var(--border); background: var(--surface); min-width: 128px;
+  display: flex; flex-direction: column; gap: 1px; padding: 7px 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface); min-width: 104px;
 }
-.qcc-stat strong { font-size: 19px; line-height: 1.1; font-variant-numeric: tabular-nums; }
-.qcc-stat span { font-size: 10.5px; color: var(--faint); line-height: 1.4; }
+.qcc-stat strong { font-size: 18px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.qcc-stat span { font-size: 10.5px; color: var(--faint); }
 .qcc-stat.tone-ok strong { color: var(--success); }
 .qcc-stat.tone-warn strong { color: var(--warning); }
 .qcc-stat.tone-crit strong { color: var(--danger); }
-.qcc-stat.tone-info strong { color: var(--text); }
 
-.qcc-clear {
-  display: flex; align-items: center; gap: 7px; margin: 0; padding: 8px 12px; border-radius: 8px;
-  background: var(--success-bg); color: var(--success); font-size: 11.5px;
-}
 .qcc-notice {
-  display: flex; align-items: flex-start; gap: 7px; margin: 0; padding: 9px 12px; border-radius: 8px;
-  background: var(--success-bg); color: var(--success); font-size: 11.5px; line-height: 1.6;
+  display: flex; align-items: center; gap: 7px; margin: 0 0 12px; padding: 8px 12px;
+  border-radius: var(--radius-sm); background: var(--success-bg); color: var(--success);
+  font-size: 11.5px;
 }
-.qcc-limits {
-  display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 10px 13px; border-radius: 9px;
-  background: var(--warning-bg); color: var(--warning); font-size: 11.5px; line-height: 1.6;
-}
-.qcc-toggle {
-  align-self: flex-start; display: inline-flex; align-items: center; gap: 5px;
-  padding: 4px 2px; border: none; background: none; cursor: pointer;
-  color: var(--accent); font-size: 11.5px; font-weight: 600;
-}
-
-.qcc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.qcc-list > li {
-  border: 1px solid var(--border); border-radius: 9px; background: var(--surface); padding: 9px 12px;
-}
-.qcc-list > li.is-gap { border-color: rgba(233, 105, 105, 0.42); background: var(--danger-bg); }
-.qcc-row { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; }
-.qcc-row-main { min-width: 0; flex: 1; }
-.qcc-test { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; flex-wrap: wrap; }
-.qcc-meta { display: flex; flex-wrap: wrap; gap: 10px; font-size: 10.5px; color: var(--faint); margin-top: 3px; }
-.qcc-meta .ok { color: var(--success); font-weight: 600; }
-.qcc-meta .crit { color: var(--danger); font-weight: 700; }
-.qcc-controls { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
-.qcc-controls li { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
-.qcc-add {
-  flex: none; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
-  padding: 5px 11px; border-radius: 8px; cursor: pointer;
-  border: 1px solid var(--accent); background: var(--accent-soft); color: var(--text);
-  font-size: 11px; font-weight: 600;
-}
-.qcc-add:hover { background: var(--accent); }
-
-.qcc-unlisted { font-size: 11.5px; color: var(--muted); }
-.qcc-unlisted summary { cursor: pointer; font-weight: 600; color: var(--text); }
-.qcc-unlisted p { margin: 6px 0; line-height: 1.6; }
-.qcc-unlisted ul { margin: 4px 0 0; padding-left: 18px; line-height: 1.7; }
+.qcc-table { width: 100%; }
+.qcc-table td { vertical-align: top; }
+.qcc-table tr.is-gap td:first-child { box-shadow: inset 2px 0 0 var(--danger); }
+.qcc-test { display: block; font-weight: 600; }
+.qcc-sub { display: block; font-size: 10.5px; color: var(--faint); margin-top: 1px; }
+.qcc-none { color: var(--danger); font-weight: 600; }
+.qcc-have { display: flex; flex-direction: column; gap: 2px; }
+.qcc-have > span { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.qcc-act { text-align: right; white-space: nowrap; }
+.qcc-foot { margin: 10px 0 0; font-size: 11px; }
 
 /* -- the short setup form ------------------------------------------------- */
-.qcc-dialog { width: min(900px, 100%); }
-.qcc-choice { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; margin-bottom: 14px; }
+.qcc-dialog { width: min(860px, 100%); }
+.qcc-choice { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin-bottom: 16px; }
 .qcc-choice button {
-  display: flex; flex-direction: column; gap: 3px; text-align: left; cursor: pointer;
-  padding: 10px 13px; border-radius: 9px; border: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 2px; text-align: left; cursor: pointer;
+  padding: 9px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border);
   background: var(--surface); color: var(--muted);
 }
 .qcc-choice button.active { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
-.qcc-choice strong { font-size: 12.5px; }
-.qcc-choice span { font-size: 10.5px; line-height: 1.5; color: var(--faint); }
-.qcc-analytes { margin-top: 16px; }
-.qcc-analytes-head { margin-bottom: 8px; }
-.qcc-analytes-head strong { display: block; font-size: 12.5px; }
-.qcc-analytes-head span { font-size: 11px; color: var(--faint); line-height: 1.55; }
-.qcc-analytes .data-table input { width: 100%; min-width: 74px; }
-.qcc-sd-note {
-  margin: 12px 0 0; padding: 10px 13px; border-radius: 9px;
-  background: var(--info-bg); color: var(--muted); font-size: 11.5px; line-height: 1.65;
+.qcc-choice strong { font-size: 12px; }
+.qcc-choice span { font-size: 10.5px; line-height: 1.45; color: var(--faint); }
+.qcc-analytes { margin-top: 18px; }
+.qcc-analytes-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 6px;
 }
-.qcc-sd-note strong { color: var(--info); }
+.qcc-analytes-head strong { font-size: 12px; }
+.qcc-analytes .data-table input { width: 100%; min-width: 68px; }
+.qcc-sd-note { margin: 10px 0 0; font-size: 11px; color: var(--faint); line-height: 1.6; }
 
 /* -- running a control ---------------------------------------------------- */
 .iqc-modal-lead { margin: 0; font-size: 11.5px; color: var(--faint); }

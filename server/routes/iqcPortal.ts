@@ -99,7 +99,7 @@ export function iqcPortalRoutes() {
       return res.json({
         date, sectionId: null, groups: [], counts: { due: 0, done: 0, failed: 0, pendingReview: 0 },
         canPerform: mayPerform(req), canReview: mayReview(req),
-        message: 'Your account is not linked to a unit, so no controls can be listed for you. Ask an administrator to link your staff record to your section.',
+        message: 'Your account is not linked to a unit. Ask an administrator to set it.',
       });
     }
 
@@ -211,7 +211,7 @@ export function iqcPortalRoutes() {
       },
       misfiled: misfiled.map(m => ({
         id: m.id, materialName: m.material_name, equipmentName: m.equipment_name,
-        why: `${m.equipment_name} is not diagnostic equipment, so a control on it has no examination to control. Move the control to the analyser that reports the result, or correct the equipment's category.`,
+        why: `${m.equipment_name} does not report results. Move the control to the analyser, or correct the equipment category.`,
       })),
       canPerform: mayPerform(req),
       canReview: mayReview(req),
@@ -260,7 +260,7 @@ export function iqcPortalRoutes() {
       return res.json({
         sectionId: null, sectionName: null, tests: [], counts: { tests: 0, covered: 0, uncovered: 0, controls: 0, needingLimits: 0 },
         canDefine: false, equipment: [],
-        message: 'Your account is not linked to a unit, so there is no test menu to check controls against.',
+        message: 'Your account is not linked to a unit.',
       });
     }
 
@@ -380,30 +380,30 @@ export function iqcPortalRoutes() {
   router.post('/portal/controls', (req, res) => {
     const db = getDb();
     const sectionId = currentSection(db, req);
-    if (!sectionId) return res.status(400).json({ error: 'Your staff record is not linked to a unit, so a control cannot be filed against one. Ask an administrator to set your section.' });
+    if (!sectionId) return res.status(400).json({ error: 'Your staff record is not linked to a unit. Ask an administrator to set it.' });
     if (!mayDefineFor(req, sectionId)) {
-      return res.status(403).json({ error: 'Defining a control is the unit head\u2019s, or somebody holding the right to create controls. Ask your unit head to set this one up.' });
+      return res.status(403).json({ error: 'You do not have permission to define controls. Ask your unit head.' });
     }
 
     const materialName = String(req.body?.materialName ?? '').trim();
     const testName = String(req.body?.testName ?? '').trim();
     const lotNumber = String(req.body?.lotNumber ?? '').trim();
-    if (!materialName) return res.status(400).json({ error: 'Give the control material a name.' });
-    if (!testName) return res.status(400).json({ error: 'Say which examination this control is for.' });
+    if (!materialName) return res.status(400).json({ error: 'Give the control a name.' });
+    if (!testName) return res.status(400).json({ error: 'Name the test this control is for.' });
     if (!lotNumber) return res.status(400).json({ error: 'A lot or batch number is required — a control without one cannot be traced to the vial it came from.' });
 
     const source = req.body?.source === 'in_house' ? 'in_house' : 'commercial';
     const controlType = ['quantitative', 'qualitative', 'semi_quantitative'].includes(req.body?.controlType)
       ? req.body.controlType : 'quantitative';
     if (source === 'in_house' && !String(req.body?.preparationMethod ?? '').trim()) {
-      return res.status(400).json({ error: 'An in-house control has no manufacturer to vouch for it, so how it was prepared is what makes it traceable (ISO 15189:2022 \u00a77.3.7.2). Record that first.' });
+      return res.status(400).json({ error: 'Record how the in-house control was prepared.' });
     }
 
     const analytes = (Array.isArray(req.body?.analytes) ? req.body.analytes : [])
       .filter((a: any) => String(a?.analyte ?? '').trim());
-    if (!analytes.length) return res.status(400).json({ error: 'Add at least one parameter \u2014 what does this control measure?' });
+    if (!analytes.length) return res.status(400).json({ error: 'Add at least one parameter.' });
     if (controlType === 'qualitative' && analytes.some((a: any) => !String(a?.expectedResult ?? '').trim())) {
-      return res.status(400).json({ error: 'A qualitative control is judged against the result it is expected to give, so every parameter needs one.' });
+      return res.status(400).json({ error: 'Every parameter needs an expected result.' });
     }
 
     // Only the unit's own diagnostic instruments. A control cannot be filed
@@ -413,10 +413,10 @@ export function iqcPortalRoutes() {
       const item = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(equipmentId) as any;
       if (!item) return res.status(400).json({ error: 'That instrument does not exist.' });
       if (Number(item.section_id) !== Number(sectionId)) {
-        return res.status(400).json({ error: `${item.name} belongs to another unit. Choose one of your own, or leave the instrument blank for a manual method.` });
+        return res.status(400).json({ error: `${item.name} belongs to another unit.` });
       }
       if (!equipmentIsDiagnostic(item)) {
-        return res.status(400).json({ error: `${item.name} does not report a patient result, so there is no examination on it to control. Choose the analyser that reports the result.` });
+        return res.status(400).json({ error: `${item.name} does not report results. Choose an analyser.` });
       }
     }
 
@@ -469,7 +469,7 @@ export function iqcPortalRoutes() {
       // Said plainly, once, at the moment it matters: the control is usable
       // now, and it starts judging properly once the runs are in.
       note: missingSd
-        ? `${missingSd} of its ${analytes.length} parameter${analytes.length === 1 ? '' : 's'} have no SD. Results will be checked against the acceptable range straight away; the SD and the Levey-Jennings chart appear once this laboratory has run it 20 times over 20 days, which the system does for you.`
+        ? `${missingSd} parameter${missingSd === 1 ? '' : 's'} without an SD — limits are calculated from your own runs.`
         : null,
     });
   });

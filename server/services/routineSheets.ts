@@ -551,10 +551,10 @@ export function sheetTrends(db: DB, sheet: any, rows: any[], cells: any[]): Shee
             rowId: row.id, rowLabel: label, unit, slot: String(slot),
             kind: direction > 0 ? 'rising' : 'falling',
             severity: length >= MIN_TREND_RUN + 3 ? 'act' : 'watch',
-            summary: `${length} readings in a row ${direction > 0 ? 'rising' : 'falling'} — day ${from.day} at ${say(from.value)} to day ${to.day} at ${say(to.value)}.`,
+            summary: `${length} consecutive ${direction > 0 ? 'rises' : 'falls'} — day ${from.day} (${say(from.value)}) to day ${to.day} (${say(to.value)}).`,
             meaning: direction > 0
-              ? 'A steady climb usually means the unit is losing the ability to hold its setting — a failing compressor, a perished door seal, a room that has warmed around it, or a probe drifting. It is worth acting on before anything breaches, because by the time a reading is out of range the contents have been out of range for days.'
-              : 'A steady fall usually means an over-correction after a service or an adjustment, a thermostat drifting, or a probe reading low. Below-range is as much of a problem as above-range for anything that must not freeze.',
+              ? 'Usually a failing compressor, a worn door seal, a warmer room, or a drifting probe. Worth checking before anything goes out of range.'
+              : 'Usually an over-correction after a service, a drifting thermostat, or a probe reading low.',
             from, to, points: length,
           });
         }
@@ -578,8 +578,8 @@ export function sheetTrends(db: DB, sheet: any, rows: any[], cells: any[]): Shee
           out.push({
             rowId: row.id, rowLabel: label, unit, slot: String(slot),
             kind: 'shift', severity: length >= MIN_SHIFT_RUN + 4 ? 'act' : 'watch',
-            summary: `${length} readings in a row ${side > 0 ? 'above' : 'below'} the middle of the range (${say(midpoint)}), days ${series[sideStart].day} to ${series[i - 1].day}.`,
-            meaning: 'Being consistently to one side is not a fault in itself, but it means the unit is running with less margin on that side than the range was set to give it. A setting adjusted back towards the middle restores the margin; leaving it means the next ordinary excursion breaches.',
+            summary: `${length} consecutive readings ${side > 0 ? 'above' : 'below'} mid-range (${say(midpoint)}), days ${series[sideStart].day}–${series[i - 1].day}.`,
+            meaning: 'The unit is running with less margin on that side than the range allows. Adjusting the setting back towards the middle restores it.',
             from: series[sideStart], to: series[i - 1], points: length,
           });
         }
@@ -602,8 +602,8 @@ export function sheetTrends(db: DB, sheet: any, rows: any[], cells: any[]): Shee
             out.push({
               rowId: row.id, rowLabel: label, unit, slot: String(slot),
               kind: 'approaching_limit', severity: endRoom < span / 6 ? 'act' : 'watch',
-              summary: `The month is drifting towards its ${nearer} limit: the first days averaged ${say(mean(first))}, the last ${say(mean(last))} — ${say(startRoom - endRoom)} less margin than it started with.`,
-              meaning: 'Slower than a run of six and just as real. This is the shape a perishing seal, a slowly blocking condenser or an ageing probe makes. It is the finding to raise before the month ends, not after.',
+              summary: `Drifting towards the ${nearer} limit — first days averaged ${say(mean(first))}, last days ${say(mean(last))}. ${say(startRoom - endRoom)} less margin.`,
+              meaning: 'Usually a worn seal, a blocking condenser, or an ageing probe. Slower than a run of consecutive moves, and just as real.',
               from: series[0], to: series[series.length - 1], points: series.length,
             });
           }
@@ -614,8 +614,8 @@ export function sheetTrends(db: DB, sheet: any, rows: any[], cells: any[]): Shee
             out.push({
               rowId: row.id, rowLabel: label, unit, slot: String(slot),
               kind: 'widening', severity: 'watch',
-              summary: `The readings are becoming more scattered: spread of ${say(startSpread)} early in the month against ${say(endSpread)} late.`,
-              meaning: 'Control being lost before the average has moved at all. Usually a unit cycling harder to hold the same setting, a door being opened more, or a probe becoming intermittent. Worth looking at the unit itself rather than the numbers.',
+              summary: `Readings becoming more scattered — spread of ${say(startSpread)} early against ${say(endSpread)} late.`,
+              meaning: 'The average has not moved but control is loosening. Usually a unit cycling harder, a door opened more often, or an intermittent probe.',
               from: series[0], to: series[series.length - 1], points: series.length,
             });
           }
@@ -699,7 +699,7 @@ export function cellWindow(db: DB, sheet: any, row: any, day: number, slot: stri
     const firstDayOfWeek = (day - 1) * 7 + 1;
     const weekStart = dateOfCell(sheet.month, Math.min(firstDayOfWeek, daysInMonth(sheet.month)));
     if (weekStart > today) {
-      return { open: false, sameDay: false, reason: `Week ${day} of ${monthLabel(sheet.month)} has not started yet.` };
+      return { open: false, sameDay: false, reason: `Week ${day} has not started yet.` };
     }
     return { open: true, sameDay: dateOfCell(sheet.month, day) === today };
   }
@@ -708,7 +708,7 @@ export function cellWindow(db: DB, sheet: any, row: any, day: number, slot: stri
   if (date > today) {
     return {
       open: false, sameDay: false,
-      reason: `${date} has not happened yet. A chart records readings that were taken; an entry against a future day is not an early entry, it is a reading nobody took.`,
+      reason: `${date} has not happened yet — a reading cannot be recorded before it is taken.`,
     };
   }
   if (date < today) return { open: true, sameDay: false };
@@ -723,7 +723,7 @@ export function cellWindow(db: DB, sheet: any, row: any, day: number, slot: stri
       const clock = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
       return {
         open: false, sameDay: true,
-        reason: `The afternoon reading is due at ${clock(due)} and this column opens from ${clock(opensAt)}. Two readings taken together in the morning measure one moment twice; the PM column exists because the afternoon is a different one.`,
+        reason: `The afternoon reading is due at ${clock(due)}. This column opens from ${clock(opensAt)}.`,
       };
     }
   }
@@ -893,11 +893,11 @@ export function saveCells(db: DB, sheetId: number, inputs: CellInput[], context:
 
         const reason = String(input.amendReason ?? '').trim();
         if (!context.mayAmendClosedDays) {
-          refuse(`${row.label} on day ${day} was recorded on a day that has ended. Changing what it says now needs a supervisor — the record has already been read, and a quiet edit to it is the one thing a quality system cannot allow (ISO 15189:2022 §8.4). A note about it can still be added by anyone.`);
+          refuse(`${row.label}, day ${day}: the day has closed. Changing the value requires a supervisor. A note can still be added.`);
           return 'refused';
         }
         if (reason.length < 10) {
-          refuse(`Changing ${row.label} on day ${day} after its day has ended needs a reason recorded with it — a sentence saying what was wrong and how the correct value was established.`);
+          refuse(`${row.label}, day ${day}: a reason is required to change a closed entry.`);
           return 'refused';
         }
         return true;
@@ -911,11 +911,11 @@ export function saveCells(db: DB, sheetId: number, inputs: CellInput[], context:
         if (dayClosed) {
           const reason = String(input.amendReason ?? '').trim();
           if (!context.mayAmendClosedDays) {
-            refuse(`${row.label} on day ${day} belongs to a day that has ended. Withdrawing it needs a supervisor.`);
+            refuse(`${row.label}, day ${day}: withdrawing a closed entry requires a supervisor.`);
             continue;
           }
           if (reason.length < 10) {
-            refuse(`Withdrawing ${row.label} on day ${day} after its day has ended needs a reason recorded with it.`);
+            refuse(`${row.label}, day ${day}: a reason is required to withdraw a closed entry.`);
             continue;
           }
           recordAmendment.run(sheetId, row.id, day, slotKey, 'delete',

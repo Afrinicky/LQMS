@@ -1181,15 +1181,24 @@ export function equipmentRoutes() {
     const today = new Date().toISOString().slice(0, 10);
     const soon = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
 
+    // An install upgraded across several versions may be missing a column one of
+    // these reads. That is worth fixing (and the migration does), but it must
+    // never blank the whole inventory: the instruments and their maintenance are
+    // the point of the screen, and losing them because a calibration column is
+    // absent is the wrong failure. A query that cannot be prepared simply
+    // reports nothing for its own duty.
+    const optional = (sql: string) => {
+      try { return db.prepare(sql); } catch { return null; }
+    };
     const taskCount = db.prepare(`SELECT maintenance_kind AS kind, COUNT(*) AS n
         FROM equipment_maintenance_tasks WHERE equipment_id = ? AND is_active = 1 GROUP BY maintenance_kind`);
-    const lastCalibration = db.prepare(`SELECT calibration_date, next_due_date, result, provider, certificate_number
+    const lastCalibration = optional(`SELECT calibration_date, next_due_date, result, provider, certificate_number
         FROM equipment_calibration_records WHERE equipment_id = ? ORDER BY calibration_date DESC, id DESC LIMIT 1`);
-    const lastVerification = db.prepare(`SELECT verification_date, verification_type, conclusion, status
+    const lastVerification = optional(`SELECT verification_date, verification_type, conclusion, status
         FROM equipment_verifications WHERE equipment_id = ? ORDER BY verification_date DESC, id DESC LIMIT 1`);
-    const schedules = db.prepare(`SELECT id, schedule_type, frequency, next_due_date, provider_type, provider_name, is_active
+    const schedules = optional(`SELECT id, schedule_type, frequency, next_due_date, provider_type, provider_name, is_active
         FROM equipment_schedules WHERE equipment_id = ? AND is_active = 1 ORDER BY next_due_date`);
-    const controls = db.prepare(`SELECT COUNT(*) AS n FROM iqc_materials WHERE equipment_id = ? AND is_active = 1`);
+    const controls = optional(`SELECT COUNT(*) AS n FROM iqc_materials WHERE equipment_id = ? AND is_active = 1`);
 
     /**
      * How a due date reads. "Overdue" and "nothing is scheduled" are different
@@ -1210,10 +1219,10 @@ export function equipmentRoutes() {
       const tasks = taskCount.all(item.id) as any[];
       const routine = Number(tasks.find(t => t.kind === 'routine')?.n ?? 0);
       const scheduled = Number(tasks.find(t => t.kind === 'scheduled')?.n ?? 0);
-      const calibration = lastCalibration.get(item.id) as any;
-      const verification = lastVerification.get(item.id) as any;
-      const scheduleRows = schedules.all(item.id) as any[];
-      const iqcCount = Number((controls.get(item.id) as any)?.n ?? 0);
+      const calibration = lastCalibration?.get(item.id) as any;
+      const verification = lastVerification?.get(item.id) as any;
+      const scheduleRows = (schedules?.all(item.id) ?? []) as any[];
+      const iqcCount = Number((controls?.get(item.id) as any)?.n ?? 0);
 
       const scheduleFor = (kind: string) => scheduleRows.find(s => s.schedule_type === kind) ?? null;
       const calibrationDue = calibration?.next_due_date ?? item.next_calibration_due ?? scheduleFor('calibration')?.next_due_date ?? null;
