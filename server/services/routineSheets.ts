@@ -350,10 +350,17 @@ export function sheetPayload(db: DB, sheetId: number): any {
       submittedByName: submitter?.full_name ?? null,
       nc, signature, attachment,
       locked: sheetIsLocked(sheet.status),
+      // The laboratory's own reading window, so the grid greys the same cells
+      // the server would refuse. Sending it beats the client guessing: a
+      // laboratory that reads at 14:00 should not be told to wait until 15:00.
+      ...readingWindow(db),
     },
     rows,
     cells,
     completeness: completeness(db, sheet, rows, cells),
+    // What the month shows that no single reading does. Computed here so the
+    // grid, the print and any export all report the same findings.
+    trends: sheetTrends(db, sheet, rows, cells),
   };
 }
 
@@ -413,6 +420,316 @@ export function completeness(db: DB, sheet: any, rows: any[], cells: any[]): any
   };
 }
 
+/**
+ * When each slot may be recorded, in minutes past midnight, for the client.
+ *
+ * The same numbers `cellWindow` enforces. Two screens disagreeing about when
+ * the afternoon starts is worse than either rule alone.
+ */
+export function readingWindow(db: DB): { pmOpensAt: number; pmDueAt: number; amDueAt: number } {
+  const settings = envSettings(db);
+  const clock = (value: unknown, fallback: number): number => {
+    const match = /^(\d{1,2}):(\d{2})/.exec(String(value ?? ''));
+    return match ? Number(match[1]) * 60 + Number(match[2]) : fallback;
+  };
+  const pmDueAt = clock(settings.reading_time_pm, 16 * 60);
+  const grace = Number(settings.reading_grace_minutes ?? 60);
+  return {
+    amDueAt: clock(settings.reading_time_am, 8 * 60),
+    pmDueAt,
+    pmOpensAt: Math.max(0, pmDueAt - (Number.isFinite(grace) ? grace : 60)),
+  };
+}
+
+/* ============================================================================
+   Trends: what a chart shows that no single reading does
+   ----------------------------------------------------------------------------
+   Every reading on this month's fridge chart is in range and the fridge is
+   failing. That is not a hypothetical — a compressor losing efficiency, a door
+   seal perishing, an incubator drifting after a service all present the same
+   way: nothing breaches, and the numbers walk. By the time one is out of range
+   the reagents have been warm for a fortnight.
+
+   The rules here are the Nelson/Western Electric run rules, which are the
+   standard answer to exactly this and are the same family of rules the IQC side
+   of this system already applies to a Levey-Jennings chart. Using the same ideas
+   in both places is deliberate: a laboratory that knows what "ten on one side of
+   the mean" means on a control chart does not have to learn a second vocabulary
+   for a fridge.
+
+   Four are worth a fridge, and no more — a rule that fires on ordinary noise
+   trains people to ignore the ones that matter:
+
+     TREND      six or more consecutive readings all rising, or all falling.
+                A drift with a direction: something is changing, not wobbling.
+
+     SHIFT      eight or more consecutive readings on the same side of the
+                middle of the acceptable range. The unit has moved and stayed
+                moved.
+
+     CREEPING   the last third of the month averages more than a third of the
+     TOWARDS    range closer to a limit than the first third did. Slower than a
+     A LIMIT    run rule catches, and the shape a dying seal actually makes.
+
+     WIDENING   the spread in the last third is more than double the first
+     SPREAD     third's. Control being lost before the mean has moved at all.
+
+   Deterministic, explainable, and computed from the month already on the sheet.
+   Nothing here needs a model to run, which matters for a laboratory whose
+   server is a desktop PC — and it gives an assistant something factual to
+   explain rather than something to guess at.
+   ========================================================================= */
+
+export type SheetTrend = {
+  rowId: number;
+  rowLabel: string;
+  unit: string | null;
+  slot: string | null;
+  kind: 'rising' | 'falling' | 'shift' | 'approaching_limit' | 'widening';
+  severity: 'watch' | 'act';
+  /** What was seen, in the words a bench would use. */
+  summary: string;
+  /** What it usually means, so the finding is actionable rather than decorative. */
+  meaning: string;
+  from: { day: number; value: number };
+  to: { day: number; value: number };
+  points: number;
+};
+
+const MIN_TREND_RUN = 6;
+const MIN_SHIFT_RUN = 8;
+/** Below this there is not enough month to say anything about its shape. */
+const MIN_FOR_DRIFT = 12;
+
+const round = (v: number, dp = 2) => Number(v.toFixed(dp));
+const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+const sd = (xs: number[]) => {
+  if (xs.length < 2) return 0;
+  const m = mean(xs);
+  return Math.sqrt(xs.reduce((acc, v) => acc + (v - m) ** 2, 0) / (xs.length - 1));
+};
+
+/**
+ * The trends visible on one sheet.
+ *
+ * Read per row and per slot, because the morning and afternoon series are
+ * different observations of the unit and mixing them turns an ordinary daily
+ * cycle into a sawtooth that fires every rule there is.
+ */
+export function sheetTrends(db: DB, sheet: any, rows: any[], cells: any[]): SheetTrend[] {
+  const out: SheetTrend[] = [];
+  const numeric = rows.filter(r => r.row_type === 'numeric' && r.cadence !== 'weekly');
+  if (!numeric.length) return out;
+
+  for (const row of numeric) {
+    const slots = parseJson<CellSlot[]>(row.slots, ['once']);
+    for (const slot of slots) {
+      const series = cells
+        .filter(c => Number(c.row_id) === Number(row.id) && String(c.slot) === String(slot)
+          && c.value_num !== null && c.value_num !== undefined && c.status !== 'na')
+        .map(c => ({ day: Number(c.day), value: Number(c.value_num) }))
+        .filter(p => Number.isFinite(p.value))
+        .sort((a, b) => a.day - b.day);
+      if (series.length < MIN_TREND_RUN) continue;
+
+      const label = `${row.label}${slots.length > 1 ? ` (${String(slot).toUpperCase()})` : ''}`;
+      const unit = row.unit ?? null;
+      const say = (v: number) => `${round(v, 2)}${unit ? ` ${unit}` : ''}`;
+
+      /* ---- monotonic runs: something is moving, and in a direction -------- */
+      let runStart = 0;
+      let direction = 0;
+      for (let i = 1; i <= series.length; i++) {
+        const step = i < series.length ? Math.sign(series[i].value - series[i - 1].value) : 0;
+        if (step !== 0 && step === direction) continue;
+        // The run that just ended: series[runStart..i-1].
+        const length = i - runStart;
+        if (direction !== 0 && length >= MIN_TREND_RUN) {
+          const from = series[runStart];
+          const to = series[i - 1];
+          out.push({
+            rowId: row.id, rowLabel: label, unit, slot: String(slot),
+            kind: direction > 0 ? 'rising' : 'falling',
+            severity: length >= MIN_TREND_RUN + 3 ? 'act' : 'watch',
+            summary: `${length} readings in a row ${direction > 0 ? 'rising' : 'falling'} — day ${from.day} at ${say(from.value)} to day ${to.day} at ${say(to.value)}.`,
+            meaning: direction > 0
+              ? 'A steady climb usually means the unit is losing the ability to hold its setting — a failing compressor, a perished door seal, a room that has warmed around it, or a probe drifting. It is worth acting on before anything breaches, because by the time a reading is out of range the contents have been out of range for days.'
+              : 'A steady fall usually means an over-correction after a service or an adjustment, a thermostat drifting, or a probe reading low. Below-range is as much of a problem as above-range for anything that must not freeze.',
+            from, to, points: length,
+          });
+        }
+        // A step of 0 (two equal readings) breaks the run, which is right: a
+        // flat pair is not a drift.
+        direction = step;
+        runStart = step === 0 ? i : i - 1;
+      }
+
+      /* ---- shift: moved, and stayed moved -------------------------------- */
+      const midpoint = row.min_value != null && row.max_value != null
+        ? (Number(row.min_value) + Number(row.max_value)) / 2
+        : mean(series.map(p => p.value));
+      let side = 0;
+      let sideStart = 0;
+      for (let i = 0; i <= series.length; i++) {
+        const s = i < series.length ? Math.sign(series[i].value - midpoint) : 0;
+        if (s !== 0 && s === side) continue;
+        const length = i - sideStart;
+        if (side !== 0 && length >= MIN_SHIFT_RUN) {
+          out.push({
+            rowId: row.id, rowLabel: label, unit, slot: String(slot),
+            kind: 'shift', severity: length >= MIN_SHIFT_RUN + 4 ? 'act' : 'watch',
+            summary: `${length} readings in a row ${side > 0 ? 'above' : 'below'} the middle of the range (${say(midpoint)}), days ${series[sideStart].day} to ${series[i - 1].day}.`,
+            meaning: 'Being consistently to one side is not a fault in itself, but it means the unit is running with less margin on that side than the range was set to give it. A setting adjusted back towards the middle restores the margin; leaving it means the next ordinary excursion breaches.',
+            from: series[sideStart], to: series[i - 1], points: length,
+          });
+        }
+        side = s;
+        sideStart = s === 0 ? i : i;
+      }
+
+      /* ---- the slow shapes a run rule does not catch ---------------------- */
+      if (series.length >= MIN_FOR_DRIFT && row.min_value != null && row.max_value != null) {
+        const span = Number(row.max_value) - Number(row.min_value);
+        const third = Math.floor(series.length / 3);
+        const first = series.slice(0, third).map(p => p.value);
+        const last = series.slice(-third).map(p => p.value);
+        if (third >= 3 && span > 0) {
+          const headroom = (v: number) => Math.min(v - Number(row.min_value), Number(row.max_value) - v);
+          const startRoom = headroom(mean(first));
+          const endRoom = headroom(mean(last));
+          if (startRoom - endRoom > span / 6) {
+            const nearer = mean(last) > midpoint ? 'upper' : 'lower';
+            out.push({
+              rowId: row.id, rowLabel: label, unit, slot: String(slot),
+              kind: 'approaching_limit', severity: endRoom < span / 6 ? 'act' : 'watch',
+              summary: `The month is drifting towards its ${nearer} limit: the first days averaged ${say(mean(first))}, the last ${say(mean(last))} — ${say(startRoom - endRoom)} less margin than it started with.`,
+              meaning: 'Slower than a run of six and just as real. This is the shape a perishing seal, a slowly blocking condenser or an ageing probe makes. It is the finding to raise before the month ends, not after.',
+              from: series[0], to: series[series.length - 1], points: series.length,
+            });
+          }
+
+          const startSpread = sd(first);
+          const endSpread = sd(last);
+          if (startSpread > 0 && endSpread > startSpread * 2 && endSpread > span / 12) {
+            out.push({
+              rowId: row.id, rowLabel: label, unit, slot: String(slot),
+              kind: 'widening', severity: 'watch',
+              summary: `The readings are becoming more scattered: spread of ${say(startSpread)} early in the month against ${say(endSpread)} late.`,
+              meaning: 'Control being lost before the average has moved at all. Usually a unit cycling harder to hold the same setting, a door being opened more, or a probe becoming intermittent. Worth looking at the unit itself rather than the numbers.',
+              from: series[0], to: series[series.length - 1], points: series.length,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // The ones that need acting on first, then the longest runs — a screen that
+  // lists twelve findings in arbitrary order gets read as noise.
+  return out
+    .sort((a, b) => (a.severity === b.severity ? b.points - a.points : a.severity === 'act' ? -1 : 1))
+    .slice(0, 12);
+}
+
+/* ============================================================================
+   When a cell may be written
+   ----------------------------------------------------------------------------
+   A chart is a record of readings taken. Three rules follow from that and
+   nothing else, and all three were missing:
+
+   THE FUTURE CANNOT BE RECORDED. A reading for the 22nd, typed on the 19th, is
+   not an early entry — it is a fabricated observation, and a chart with three
+   days of them in it is worse than a chart with three gaps, because the gaps
+   are honest. This is the one rule with no exception and no override.
+
+   THE AFTERNOON CANNOT BE RECORDED IN THE MORNING. The whole point of charting
+   a fridge twice is that the two readings are hours apart; taking them
+   together at 08:05 and writing one in the PM column measures nothing and
+   hides a whole afternoon. So a PM cell opens when the afternoon reading is
+   due, less the laboratory's own grace period — the same reading_time_pm and
+   reading_grace_minutes that already govern the reminder, because a system
+   that reminds you at one time and accepts at another is telling you two
+   different things.
+
+   TODAY IS CORRECTABLE; YESTERDAY IS AMENDABLE. Correcting or withdrawing an
+   entry on the day it belongs to is ordinary work — a wrong box, a transposed
+   digit, a re-read after the door was found ajar. Once the day has ended the
+   record has been relied on, so changing it takes somebody senior, a reason,
+   and an amendment trail that keeps the original legible (ISO 15189:2022 §8.4).
+   ========================================================================= */
+
+/** Local calendar date, which is the date the bench is standing in. */
+function todayLocal(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+function nowMinutes(): number {
+  const now = new Date();
+  return now.getHours() * 60 + now.getMinutes();
+}
+
+function parseClock(value: unknown, fallback: number): number {
+  const match = /^(\d{1,2}):(\d{2})/.exec(String(value ?? ''));
+  if (!match) return fallback;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+/** The calendar date a daily cell asserts something about. */
+export function dateOfCell(month: string, day: number): string {
+  return `${month}-${String(day).padStart(2, '0')}`;
+}
+
+export type CellWindow =
+  | { open: true; sameDay: boolean }
+  | { open: false; sameDay: boolean; reason: string };
+
+/**
+ * Whether this cell may be written right now, and if not, why not in words the
+ * person at the fridge can act on.
+ *
+ * A weekly cell is a week, not a day, so it opens once its week has started —
+ * a monthly service ticked on the Monday of week 3 is a normal thing to do.
+ */
+export function cellWindow(db: DB, sheet: any, row: any, day: number, slot: string): CellWindow {
+  const today = todayLocal();
+  const cadence = row?.cadence === 'weekly' ? 'weekly' : 'daily';
+
+  if (cadence === 'weekly') {
+    const firstDayOfWeek = (day - 1) * 7 + 1;
+    const weekStart = dateOfCell(sheet.month, Math.min(firstDayOfWeek, daysInMonth(sheet.month)));
+    if (weekStart > today) {
+      return { open: false, sameDay: false, reason: `Week ${day} of ${monthLabel(sheet.month)} has not started yet.` };
+    }
+    return { open: true, sameDay: dateOfCell(sheet.month, day) === today };
+  }
+
+  const date = dateOfCell(sheet.month, day);
+  if (date > today) {
+    return {
+      open: false, sameDay: false,
+      reason: `${date} has not happened yet. A chart records readings that were taken; an entry against a future day is not an early entry, it is a reading nobody took.`,
+    };
+  }
+  if (date < today) return { open: true, sameDay: false };
+
+  // Today. An afternoon slot waits for the afternoon.
+  if (slot === 'pm') {
+    const settings = envSettings(db);
+    const due = parseClock(settings.reading_time_pm, 16 * 60);
+    const grace = Number(settings.reading_grace_minutes ?? 60);
+    const opensAt = Math.max(0, due - (Number.isFinite(grace) ? grace : 60));
+    if (nowMinutes() < opensAt) {
+      const clock = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+      return {
+        open: false, sameDay: true,
+        reason: `The afternoon reading is due at ${clock(due)} and this column opens from ${clock(opensAt)}. Two readings taken together in the morning measure one moment twice; the PM column exists because the afternoon is a different one.`,
+      };
+    }
+  }
+  return { open: true, sameDay: true };
+}
+
 /* ============================================================================
    Writing to a sheet
    ========================================================================= */
@@ -432,6 +749,10 @@ export interface CellInput {
   source?: string | null;
   confidence?: number | null;
   needsReview?: boolean;
+  /** Withdraw the entry altogether rather than change it. */
+  clear?: boolean;
+  /** Why a closed day's entry is being changed. Required once the day has ended. */
+  amendReason?: string | null;
 }
 
 export interface SaveCellsContext {
@@ -440,12 +761,35 @@ export interface SaveCellsContext {
   initials?: string | null;
   /** Skip the environmental ingest — used when replaying an extraction. */
   skipIngest?: boolean;
+  /**
+   * Whether the caller may change an entry belonging to a day that has ended.
+   * Held by a supervisor, and never assumed: without it a closed day's cell is
+   * refused with the reason, rather than quietly written.
+   */
+  mayAmendClosedDays?: boolean;
+  /**
+   * Lift the calendar rules for a bulk load — an imported month, an extracted
+   * paper chart, a data logger backfill. These carry their own provenance and
+   * are asserting what was recorded at the time, not typing a future reading.
+   * Never set from an interactive cell edit.
+   */
+  backfill?: boolean;
 }
 
 export interface SaveCellsResult {
   saved: number;
   breaches: Array<{ day: number; slot: string; label: string; value: string; status: string }>;
   excursions: number[];
+  /** Entries withdrawn rather than written. */
+  cleared: number;
+  /** Entries changed after their day had ended, each with its reason recorded. */
+  amended: number;
+  /**
+   * Cells the calendar or the amendment rules would not accept, with the reason
+   * for each. Refusing silently would leave somebody believing they had charted
+   * a reading they had not.
+   */
+  refused: Array<{ day: number; slot: string; label: string; reason: string }>;
 }
 
 /**
@@ -470,7 +814,19 @@ export function saveCells(db: DB, sheetId: number, inputs: CellInput[], context:
   const byKey = new Map(rows.map(r => [String(r.row_key), r]));
   const days = daysInMonth(sheet.month);
 
-  const result: SaveCellsResult = { saved: 0, breaches: [], excursions: [] };
+  const result: SaveCellsResult = { saved: 0, breaches: [], excursions: [], cleared: 0, amended: 0, refused: [] };
+
+  const existing = db.prepare('SELECT * FROM routine_log_cells WHERE sheet_id = ? AND row_id = ? AND day = ? AND slot = ?');
+  const remove = db.prepare('DELETE FROM routine_log_cells WHERE sheet_id = ? AND row_id = ? AND day = ? AND slot = ?');
+  const recordAmendment = db.prepare(`INSERT INTO routine_log_cell_amendments
+      (sheet_id, row_id, day, slot, action, old_value_num, old_value_text, old_status, old_note,
+       old_recorded_by_staff_id, old_recorded_at, new_value_num, new_value_text, new_status,
+       reason, amended_by_staff_id, amended_by_user_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const markAmended = db.prepare(`UPDATE routine_log_cells
+      SET amendment_count = COALESCE(amendment_count, 0) + 1, last_amended_at = CURRENT_TIMESTAMP,
+          last_amend_reason = ?
+      WHERE sheet_id = ? AND row_id = ? AND day = ? AND slot = ?`);
 
   const upsert = db.prepare(`INSERT INTO routine_log_cells
       (sheet_id, row_id, day, slot, value_num, value_text, status, initials, note, source, confidence,
@@ -495,6 +851,82 @@ export function saveCells(db: DB, sheetId: number, inputs: CellInput[], context:
       const cadence = row.cadence === 'weekly' ? 'weekly' : 'daily';
       const day = Number(input.day);
       if (!Number.isFinite(day) || day < 1 || (cadence === 'daily' ? day > days : day > 5)) continue;
+      const slotKey = input.slot || 'once';
+
+      const refuse = (reason: string) => {
+        result.refused.push({ day, slot: slotKey, label: row.label, reason });
+      };
+
+      // ---- May this cell be written at all, right now? --------------------
+      // A backfill (an imported month, an extracted paper chart, a logger
+      // download) is asserting what was recorded at the time and carries its
+      // own provenance, so the calendar rules do not apply to it. An
+      // interactive edit never sets that flag.
+      const window: CellWindow = context.backfill
+        ? { open: true, sameDay: false }
+        : cellWindow(db, sheet, row, day, slotKey);
+      if (window.open === false) { refuse(window.reason); continue; }
+
+      const prior = existing.get(sheetId, row.id, day, slotKey) as any;
+      // A day that has ended, on a cell that already says something. Filling a
+      // blank for last Tuesday is not this — that is recording an observation
+      // that was made and not yet typed, which is ordinary and necessary.
+      const dayClosed = Boolean(prior) && !window.sameDay && !context.backfill;
+
+      /**
+       * Whether writing this would change what the record SAYS.
+       *
+       * A note is not an amendment. Writing down what was done about Tuesday's
+       * excursion on Thursday is exactly what the chart wants and exactly what
+       * an assessor looks for; demanding a supervisor's authorisation for it
+       * would stop the one habit worth encouraging. The same goes for an
+       * initial or a reading time. Only the value, or the assertion the cell
+       * makes, is the record being altered.
+       */
+      const amendmentGate = (nextStatus: string, nextNum: number | null, nextText: string | null): boolean | 'refused' => {
+        if (!dayClosed) return false;
+        const sameValue = Number(prior.value_num ?? NaN) === Number(nextNum ?? NaN)
+          || (prior.value_num == null && nextNum == null);
+        const sameText = (prior.value_text ?? null) === (nextText ?? null);
+        const sameStatus = String(prior.status) === nextStatus;
+        if (sameValue && sameText && sameStatus) return false;
+
+        const reason = String(input.amendReason ?? '').trim();
+        if (!context.mayAmendClosedDays) {
+          refuse(`${row.label} on day ${day} was recorded on a day that has ended. Changing what it says now needs a supervisor — the record has already been read, and a quiet edit to it is the one thing a quality system cannot allow (ISO 15189:2022 §8.4). A note about it can still be added by anyone.`);
+          return 'refused';
+        }
+        if (reason.length < 10) {
+          refuse(`Changing ${row.label} on day ${day} after its day has ended needs a reason recorded with it — a sentence saying what was wrong and how the correct value was established.`);
+          return 'refused';
+        }
+        return true;
+      };
+
+      // ---- Withdrawing an entry -------------------------------------------
+      // A deletion is the largest change there is, so it is always gated once
+      // the day has ended, whatever it used to say.
+      if (input.clear) {
+        if (!prior) continue;
+        if (dayClosed) {
+          const reason = String(input.amendReason ?? '').trim();
+          if (!context.mayAmendClosedDays) {
+            refuse(`${row.label} on day ${day} belongs to a day that has ended. Withdrawing it needs a supervisor.`);
+            continue;
+          }
+          if (reason.length < 10) {
+            refuse(`Withdrawing ${row.label} on day ${day} after its day has ended needs a reason recorded with it.`);
+            continue;
+          }
+          recordAmendment.run(sheetId, row.id, day, slotKey, 'delete',
+            prior.value_num, prior.value_text, prior.status, prior.note,
+            prior.recorded_by_staff_id, prior.recorded_at, null, null, null,
+            reason, context.staffId, context.userId);
+        }
+        remove.run(sheetId, row.id, day, slotKey);
+        result.cleared++;
+        continue;
+      }
 
       let status: string;
       let valueNum: number | null = null;
@@ -519,11 +951,9 @@ export function saveCells(db: DB, sheetId: number, inputs: CellInput[], context:
           // excursion that has just been closed. Only a changed VALUE is a new
           // observation; a note, an initial or a time is an amendment to the
           // one already there.
-          const previous = db.prepare('SELECT value_num, environmental_reading_id FROM routine_log_cells WHERE sheet_id = ? AND row_id = ? AND day = ? AND slot = ?')
-            .get(sheetId, row.id, day, input.slot || 'once') as any;
-          const unchanged = previous && previous.value_num !== null && Number(previous.value_num) === numeric;
+          const unchanged = prior && prior.value_num !== null && Number(prior.value_num) === numeric;
           if (unchanged) {
-            readingId = previous.environmental_reading_id ?? null;
+            readingId = prior.environmental_reading_id ?? null;
             if (readingId && input.note) {
               db.prepare('UPDATE environmental_readings SET observation = ? WHERE id = ?').run(input.note, readingId);
             }
@@ -543,16 +973,38 @@ export function saveCells(db: DB, sheetId: number, inputs: CellInput[], context:
         status = input.done === false ? 'not_done' : 'done';
       }
 
-      upsert.run(sheetId, row.id, day, input.slot || 'once', valueNum, valueText, status,
+      // Now that the new value is known, decide whether this is an amendment at
+      // all. It is only one if what the record SAYS changes; a note, an initial
+      // or a reading time added to a past day is an annotation, and blocking
+      // those would stop the habit the chart most depends on.
+      const gate = amendmentGate(status, valueNum, valueText);
+      if (gate === 'refused') continue;
+      const isAmendment = gate === true;
+
+      upsert.run(sheetId, row.id, day, slotKey, valueNum, valueText, status,
         input.initials ?? context.initials ?? null, input.note ?? null,
         input.source ?? 'manual', input.confidence ?? null, input.needsReview ? 1 : 0,
         context.staffId, input.readingTime ?? null, excursionId, readingId, context.userId);
+
+      // The original stays legible. What it said, what it says now, who
+      // authorised the change and why — kept beside the cell rather than only
+      // in the audit log, because the person reviewing the month is looking at
+      // the sheet, not at the audit trail.
+      if (isAmendment) {
+        recordAmendment.run(sheetId, row.id, day, slotKey, 'amend',
+          prior.value_num, prior.value_text, prior.status, prior.note,
+          prior.recorded_by_staff_id, prior.recorded_at,
+          valueNum, valueText, status,
+          String(input.amendReason ?? '').trim(), context.staffId, context.userId);
+        markAmended.run(String(input.amendReason ?? '').trim(), sheetId, row.id, day, slotKey);
+        result.amended++;
+      }
 
       result.saved++;
       if (excursionId) result.excursions.push(excursionId);
       if (cellIsBreach(status)) {
         result.breaches.push({
-          day, slot: input.slot || 'once', label: row.label,
+          day, slot: slotKey, label: row.label,
           value: valueNum != null ? `${valueNum}${row.unit ? ` ${row.unit}` : ''}` : (valueText ?? 'not done'),
           status,
         });

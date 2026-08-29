@@ -7,7 +7,10 @@ import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { generateEquipmentNumber, previewEquipmentNumber, getEquipmentPattern, saveEquipmentPattern } from '../utils/equipmentNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
-import { classForCategory, categoryFromLegacy, isArchetype, type EquipmentArchetype } from '../../shared/constants/equipment.js';
+import {
+  classForCategory, categoryFromLegacy, isArchetype, dutiesFor, DUTY_LABELS, DUTY_CLAUSES, DUTY_HINTS,
+  type EquipmentArchetype, type EquipmentDuty,
+} from '../../shared/constants/equipment.js';
 import { getCurrentStaffId } from './routeHelpers.js';
 import { generateOccurrences } from '../services/activityService.js';
 import { openSheet, refreshSheetRows, sheetsForSection } from '../services/routineSheets.js';
@@ -1132,6 +1135,176 @@ export function equipmentRoutes() {
     audit(req, { action: 'delete', entity: 'equipment_maintenance_tasks', entityId: req.params.id, oldValue: task });
     res.json({ ok: true });
   });
+
+  /* ======================================================================
+     The unit's own instruments, and what each of them is owed
+     ----------------------------------------------------------------------
+     A unit head opening the maintenance tab was being told only that no
+     maintenance tasks existed anywhere in their unit — which is true and
+     useless. It named no instrument, sized no gap, and sent them to a module
+     screen to fix it one instrument at a time.
+
+     What they actually need is the inventory: every instrument the unit holds,
+     what ISO 15189:2022 says that KIND of instrument is owed (§6.4.5
+     maintenance, §6.5.2-6.5.3 calibration with traceability, §7.3.3
+     verification, §6.4.3 acceptance, and so on — the duties differ by
+     archetype and pretending otherwise is how a fridge ends up in an IQC
+     picker), and for each duty whether anything is actually set up.
+
+     The duty list is deliberately derived from the archetype rather than
+     asked for. A refrigerator is not exempt from control, it is controlled
+     differently from an analyser, and the screen should say which.
+     ==================================================================== */
+  router.get('/portal/unit-overview', requirePermission('equipment.register', 'view'), (req, res) => {
+    const db = getDb();
+    const staffId = getCurrentStaffId(req);
+    const sectionId = parseIntNullable(req.query.sectionId)
+      ?? (staffId !== null ? (db.prepare('SELECT section_id FROM staff WHERE id = ?').get(staffId) as any)?.section_id ?? null : null);
+
+    if (!sectionId) {
+      return res.json({
+        sectionId: null, sectionName: null, equipment: [], counts: emptyEquipmentCounts(), isUnitHead: false,
+        message: 'Your account is not linked to a unit, so no equipment inventory can be listed for you. Ask an administrator to link your staff record to your section.',
+      });
+    }
+
+    const section = db.prepare('SELECT id, name, head_staff_id FROM sections WHERE id = ?').get(sectionId) as any;
+    const isUnitHead = Boolean(staffId !== null && section?.head_staff_id && Number(section.head_staff_id) === Number(staffId));
+
+    const items = db.prepare(`SELECT e.*, s.full_name AS custodian_name, l.name AS location_name
+        FROM equipment_items e
+        LEFT JOIN staff s ON s.id = COALESCE(e.responsible_staff_id, e.assigned_to_staff_id)
+        LEFT JOIN locations l ON l.id = e.location_id
+        WHERE e.section_id = ? AND COALESCE(e.decommissioned, 0) = 0 AND e.status != 'decommissioned'
+        ORDER BY e.name`).all(sectionId) as any[];
+
+    const today = new Date().toISOString().slice(0, 10);
+    const soon = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+
+    const taskCount = db.prepare(`SELECT maintenance_kind AS kind, COUNT(*) AS n
+        FROM equipment_maintenance_tasks WHERE equipment_id = ? AND is_active = 1 GROUP BY maintenance_kind`);
+    const lastCalibration = db.prepare(`SELECT calibration_date, next_due_date, result, provider, certificate_number
+        FROM equipment_calibration_records WHERE equipment_id = ? ORDER BY calibration_date DESC, id DESC LIMIT 1`);
+    const lastVerification = db.prepare(`SELECT verification_date, verification_type, conclusion, status
+        FROM equipment_verifications WHERE equipment_id = ? ORDER BY verification_date DESC, id DESC LIMIT 1`);
+    const schedules = db.prepare(`SELECT id, schedule_type, frequency, next_due_date, provider_type, provider_name, is_active
+        FROM equipment_schedules WHERE equipment_id = ? AND is_active = 1 ORDER BY next_due_date`);
+    const controls = db.prepare(`SELECT COUNT(*) AS n FROM iqc_materials WHERE equipment_id = ? AND is_active = 1`);
+
+    /**
+     * How a due date reads. "Overdue" and "nothing is scheduled" are different
+     * states and the difference matters: one is a lapse, the other is a gap in
+     * the programme, and they are answered by different actions.
+     */
+    const dueState = (date: string | null | undefined): string => {
+      if (!date) return 'unscheduled';
+      if (date < today) return 'overdue';
+      if (date <= soon) return 'due_soon';
+      return 'scheduled';
+    };
+
+    const rows = items.map(item => {
+      const { archetype } = resolveCategory(db, item.equipment_category ?? item.category, item.name, item.category);
+      const duties = dutiesFor(archetype);
+
+      const tasks = taskCount.all(item.id) as any[];
+      const routine = Number(tasks.find(t => t.kind === 'routine')?.n ?? 0);
+      const scheduled = Number(tasks.find(t => t.kind === 'scheduled')?.n ?? 0);
+      const calibration = lastCalibration.get(item.id) as any;
+      const verification = lastVerification.get(item.id) as any;
+      const scheduleRows = schedules.all(item.id) as any[];
+      const iqcCount = Number((controls.get(item.id) as any)?.n ?? 0);
+
+      const scheduleFor = (kind: string) => scheduleRows.find(s => s.schedule_type === kind) ?? null;
+      const calibrationDue = calibration?.next_due_date ?? item.next_calibration_due ?? scheduleFor('calibration')?.next_due_date ?? null;
+      const maintenanceDue = scheduleFor('preventive_maintenance')?.next_due_date
+        ?? item.next_maintenance_due ?? item.next_service_due ?? null;
+      const verificationDue = scheduleFor('verification')?.next_due_date ?? null;
+
+      // What is owed, and whether anything answers it. `setUp` is deliberately
+      // "is there a programme", not "is it up to date" — the two failures need
+      // different words in front of a unit head.
+      const state: Record<string, any> = {
+        maintenance: {
+          setUp: routine + scheduled > 0,
+          detail: routine + scheduled > 0
+            ? `${routine} routine, ${scheduled} scheduled task${routine + scheduled === 1 ? '' : 's'}`
+            : 'No maintenance tasks defined',
+          dueDate: maintenanceDue, dueState: dueState(maintenanceDue),
+        },
+        calibration: {
+          setUp: Boolean(calibration || scheduleFor('calibration') || item.calibration_required),
+          detail: calibration
+            ? `Last calibrated ${calibration.calibration_date}${calibration.result ? ` — ${calibration.result}` : ''}${calibration.provider ? `, ${calibration.provider}` : ''}`
+            : scheduleFor('calibration')
+              ? `Scheduled ${scheduleFor('calibration')!.frequency}, never yet performed`
+              : 'No calibration recorded and none scheduled',
+          dueDate: calibrationDue, dueState: dueState(calibrationDue),
+        },
+        verification: {
+          setUp: Boolean(verification || scheduleFor('verification')),
+          detail: verification
+            ? `Last verified ${verification.verification_date}${verification.conclusion ? ` — ${verification.conclusion}` : ''}`
+            : scheduleFor('verification')
+              ? `Scheduled ${scheduleFor('verification')!.frequency}, never yet performed`
+              : 'No performance verification on record',
+          dueDate: verificationDue, dueState: dueState(verificationDue),
+        },
+        iqc: {
+          setUp: iqcCount > 0,
+          detail: iqcCount > 0 ? `${iqcCount} control${iqcCount === 1 ? '' : 's'} defined` : 'No controls defined against it',
+          dueDate: null, dueState: iqcCount > 0 ? 'scheduled' : 'unscheduled',
+        },
+      };
+
+      const owed = duties.map(duty => ({
+        duty,
+        label: DUTY_LABELS[duty],
+        clause: DUTY_CLAUSES[duty],
+        hint: DUTY_HINTS[duty],
+        // Only the four duties above are tracked as records in this system.
+        // The rest are listed so the unit head can see the whole obligation,
+        // marked as not tracked rather than falsely reported as missing.
+        tracked: Object.prototype.hasOwnProperty.call(state, duty),
+        ...(state[duty] ?? { setUp: null, detail: null, dueDate: null, dueState: null }),
+      }));
+
+      return {
+        id: item.id, name: item.name, equipmentNumber: item.equipment_number,
+        manufacturer: item.manufacturer, model: item.model, serialNumber: item.serial_number,
+        status: item.status, archetype, category: item.equipment_category ?? item.category,
+        locationName: item.location_name ?? null, custodianName: item.custodian_name ?? null,
+        duties: owed,
+        gaps: owed.filter(d => d.tracked && d.setUp === false).map(d => d.duty),
+        overdue: owed.filter(d => d.dueState === 'overdue').map(d => d.duty),
+        dueSoon: owed.filter(d => d.dueState === 'due_soon').map(d => d.duty),
+        maintenanceTasks: routine + scheduled,
+      };
+    });
+
+    res.json({
+      sectionId, sectionName: section?.name ?? null, isUnitHead,
+      equipment: rows,
+      counts: {
+        items: rows.length,
+        withGaps: rows.filter(r => r.gaps.length > 0).length,
+        overdue: rows.filter(r => r.overdue.length > 0).length,
+        dueSoon: rows.filter(r => r.dueSoon.length > 0).length,
+        needMaintenanceTasks: rows.filter(r => r.duties.some(d => d.duty === 'maintenance' && d.setUp === false)).length,
+        needCalibration: rows.filter(r => r.duties.some(d => d.duty === 'calibration' && d.setUp === false)).length,
+        needVerification: rows.filter(r => r.duties.some(d => d.duty === 'verification' && d.setUp === false)).length,
+        outOfService: rows.filter(r => r.status === 'out_of_service' || r.status === 'under_repair').length,
+      },
+      message: null,
+    });
+  });
+
+  function emptyEquipmentCounts() {
+    return {
+      items: 0, withGaps: 0, overdue: 0, dueSoon: 0,
+      needMaintenanceTasks: 0, needCalibration: 0, needVerification: 0, outOfService: 0,
+    };
+  }
 
   /** The unit's maintenance charts for a month. */
   router.get('/maintenance-charts', requirePermission('equipment.maintenance', 'view'), (req, res) => {

@@ -15,6 +15,7 @@ import type { RoutineWorkResponse, RoutineActivity, ActivityOccurrence } from '.
 import TextField from '../../components/ui/TextField';
 import PortalRoutineIqc from './PortalRoutineIqc';
 import PortalRoutineSheets, { PortalDeconProgramme } from './PortalRoutineSheets';
+import PortalUnitEquipment from './PortalUnitEquipment';
 
 /**
  * Routine Work — the recurring work of the bench, done from the portal.
@@ -470,7 +471,14 @@ export default function PortalRoutineWork() {
           <PortalDeconProgramme />
         </>
       )}
-      {face === 'equipment_maintenance' && <PortalRoutineSheets kind="equipment_maintenance" />}
+      {face === 'equipment_maintenance' && (
+        <>
+          {/* The inventory comes first. "No maintenance tasks are defined" names
+              no instrument and sizes no gap; this does both, and closes it. */}
+          <PortalUnitEquipment />
+          <PortalRoutineSheets kind="equipment_maintenance" />
+        </>
+      )}
     </div>
   );
 }

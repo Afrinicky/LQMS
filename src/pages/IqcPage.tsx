@@ -94,10 +94,17 @@ const STATUS_LABEL: Record<string, string> = { in_control: 'In control', warning
 
 function useLookups() {
   const [sections, setSections] = useState<Section[]>([]);
+  const [mySectionId, setMySectionId] = useState<number | null>(null);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [equipment, setEquipment] = useState<EquipmentItem[]>([]);
   useEffect(() => {
-    api<Section[]>('/sections').then(setSections).catch(() => setSections([]));
+    // The units come from the lookup, not from /sections: that one is gated on
+    // settings rights, so a unit head defining a control for their own bench
+    // got an empty dropdown and saved a control with no unit on it. A control
+    // with no unit never reaches anybody's board.
+    api<{ mine: number | null; sections: Array<Section & { isMine?: boolean }> }>('/sections/options')
+      .then(r => { setSections(r.sections); setMySectionId(r.mine ?? null); })
+      .catch(() => setSections([]));
     api<Staff[]>('/staff').then(setStaff).catch(() => setStaff([]));
     // Only diagnostic (laboratory / measuring) equipment belongs in quality
     // control. Non-diagnostic support items — fridges, freezers, computers —
@@ -106,14 +113,14 @@ function useLookups() {
       .then(list => setEquipment(list.filter(equipmentIsDiagnostic)))
       .catch(() => setEquipment([]));
   }, []);
-  return { sections, staff, equipment };
+  return { sections, staff, equipment, mySectionId };
 }
 
 export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { isEnabled } = useModules();
   const { can } = usePermissions();
   const { user } = useAuth();
-  const { sections, staff, equipment } = useLookups();
+  const { sections, staff, equipment, mySectionId } = useLookups();
   const isAdmin = user?.isAdministrator === true;
 
   const [tab, setTab] = useState(embedded ? 'Controls' : 'Dashboard');
@@ -188,7 +195,7 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
                 await load();
                 if (n > 0) setNotice(`${n} control${n === 1 ? '' : 's'} brought in from Excel. Check the register.`);
               }} />
-              <DefineControl sections={sections} staff={staff} equipment={equipment}
+              <DefineControl sections={sections} staff={staff} equipment={equipment} mySectionId={mySectionId}
                 onSaved={async () => { await load(); setNotice('Control defined. It is ready to run.'); setTab('Controls'); }}
                 onError={setError} />
             </>
@@ -207,7 +214,7 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
           isAdmin={isAdmin} equipment={equipment} staff={staff} onError={setError} onNotice={setNotice} />
       )}
 
-      {tab === 'Levey-Jennings' && <ChartTab materials={materials} onError={setError} />}
+      {tab === 'Levey-Jennings' && <ChartTab materials={materials} onError={setError} onNotice={setNotice} canEdit={can('iqc', 'edit')} />}
 
       {tab === 'Lot Changes' && <LotChanges materials={materials} onError={setError} canCreate={can('iqc', 'create')} />}
 
@@ -776,8 +783,8 @@ function ImportControls({ onImported }: { onImported: (created: number) => void 
   );
 }
 
-function DefineControl({ sections, staff, equipment, onSaved, onError }: {
-  sections: Section[]; staff: Staff[]; equipment: EquipmentItem[];
+function DefineControl({ sections, staff, equipment, mySectionId, onSaved, onError }: {
+  sections: Section[]; staff: Staff[]; equipment: EquipmentItem[]; mySectionId?: number | null;
   onSaved: () => void | Promise<void>; onError: (m: string) => void;
 }) {
   const { can } = usePermissions();
@@ -798,6 +805,12 @@ function DefineControl({ sections, staff, equipment, onSaved, onError }: {
   const wantsPanel = isCs && csNeedsPanel(form.csScope);
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
+  // A control belongs to the bench that runs it, and the person defining it is
+  // almost always defining it for their own bench. Preselecting their unit is
+  // what stops a control being saved unowned and never appearing on a board.
+  useEffect(() => {
+    if (mySectionId != null) setForm(f => (f.sectionId ? f : { ...f, sectionId: String(mySectionId) }));
+  }, [mySectionId]);
   const profiles = PROFILES_FOR_TYPE[controlType];
   useEffect(() => { if (!profiles.includes(form.ruleProfile)) set('ruleProfile', profiles[0]); }, [controlType]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -886,9 +899,20 @@ function DefineControl({ sections, staff, equipment, onSaved, onError }: {
           <label>Expiry date<input type="date" value={form.expiryDate} onChange={e => set('expiryDate', e.target.value)} /></label>
           <label>Open-vial expiry<input type="date" value={form.openVialExpiry} onChange={e => set('openVialExpiry', e.target.value)} /></label>
           <label>Storage condition<TextField value={form.storageCondition} onValue={nextValue => set('storageCondition', nextValue)} placeholder="e.g. 2–8 °C" /></label>
-          <label>Section<select value={form.sectionId} onChange={e => set('sectionId', e.target.value)}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+          <label>Unit that runs it
+            <select value={form.sectionId} onChange={e => set('sectionId', e.target.value)}>
+              <option value="">—</option>
+              {sections.map(s => <option key={s.id} value={s.id}>{s.name}{mySectionId != null && Number(s.id) === Number(mySectionId) ? ' (yours)' : ''}</option>)}
+            </select>
+          </label>
           <label>Instrument<select value={form.equipmentId} onChange={e => set('equipmentId', e.target.value)}><option value="">—</option>{equipment.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
         </div>
+        {!form.sectionId && (
+          <p className="iqc-note warn">
+            Name the unit that runs this control. Until it has one it appears on nobody&rsquo;s bench board,
+            which is how a control ends up defined and never run.
+          </p>
+        )}
       </fieldset>
 
       {/* 3b — in-house provenance */}
@@ -1531,7 +1555,10 @@ function RunCorrection({ run, mode, equipment, staff, onClose, onDone, onError }
 
 /* -------------------------------------------------------------------- chart */
 
-function ChartTab({ materials, onError }: { materials: Material[]; onError: (m: string) => void }) {
+function ChartTab({ materials, onError, onNotice, canEdit }: {
+  materials: Material[]; onError: (m: string) => void;
+  onNotice?: (m: string) => void; canEdit?: boolean;
+}) {
   const quantitative = materials.filter(m => m.control_type !== 'qualitative');
   const [materialId, setMaterialId] = useState('');
   const [analytes, setAnalytes] = useState<Analyte[]>([]);
@@ -1559,6 +1586,29 @@ function ChartTab({ materials, onError }: { materials: Material[]; onError: (m: 
   }, [analyteId, q, onError]);
 
   const analyteName = analytes.find(a => String(a.id) === analyteId)?.analyte ?? 'chart';
+
+  /**
+   * Establish the limits from this laboratory's own runs.
+   *
+   * `force` is passed only when the analyte already carries an SD somebody
+   * entered: recalculating over a human's figure is a deliberate act — after a
+   * service, a reagent lot change, a method adjustment — and never something
+   * the system should do quietly on their behalf.
+   */
+  const establish = useCallback(async (force: boolean) => {
+    if (!analyteId) return;
+    try {
+      const outcome = await api<{ changed: boolean; reason: string | null; target: { sd: number | null; n: number | null; days: number | null; basis: string | null } }>(
+        `/iqc/analytes/${analyteId}/establish-targets`, { method: 'POST', body: JSON.stringify({ force }) });
+      if (outcome.changed) {
+        const t = outcome.target;
+        onNotice?.(`${analyteName}: SD ${t.sd?.toFixed(4)} established from ${t.n} results over ${t.days} days${t.basis === 'interim' ? ' — interim, until 20 results over 20 days are in' : ''}.`);
+        setData(await api<ChartData>(`/iqc/analytes/${analyteId}/chart${q}`));
+      } else {
+        onError(outcome.reason ?? 'Nothing could be established from the results recorded so far.');
+      }
+    } catch (e) { onError(errorText(e)); }
+  }, [analyteId, analyteName, q, onError, onNotice]);
 
   return (
     <div className="card">
@@ -1597,7 +1647,13 @@ function ChartTab({ materials, onError }: { materials: Material[]; onError: (m: 
       )}
 
       {!materialId && <p className="muted">Choose a quantitative control to chart. Qualitative controls have no numeric series — review them under Review instead.</p>}
-      {data && <LeveyJenningsChart data={data} />}
+      {data && (
+        <LeveyJenningsChart
+          data={data}
+          canEstablish={Boolean(canEdit)}
+          onEstablish={() => void establish(data.target?.source === 'vendor')}
+        />
+      )}
     </div>
   );
 }

@@ -253,15 +253,49 @@ export function routineSheetRoutes() {
     const initials = typeof req.body?.initials === 'string' ? req.body.initials.trim().slice(0, 8) : defaultInitials(db, staffId);
 
     try {
-      const result = saveCells(db, sheet.id, cells, { staffId, userId: req.user!.id, initials });
+      // Changing an entry whose day has ended is a supervisor's act. The same
+      // right that signs the month off is the one that authorises a correction
+      // to it, which keeps a single idea of who is senior to the bench.
+      const result = saveCells(db, sheet.id, cells, {
+        staffId, userId: req.user!.id, initials,
+        mayAmendClosedDays: mayVerify(req, sheet),
+      });
       audit(req, {
         action: 'edit', entity: 'routine_log_sheets', entityId: sheet.id,
-        newValue: { recorded: result.saved, breaches: result.breaches.length },
+        newValue: {
+          recorded: result.saved, cleared: result.cleared, amended: result.amended,
+          breaches: result.breaches.length, refused: result.refused.length,
+        },
       });
+      // A cell the calendar would not accept is reported, never dropped
+      // quietly: somebody who believes they charted a reading they did not is
+      // worse off than somebody told they cannot yet.
       res.json({ ...result, ...sheetPayload(db, sheet.id) });
     } catch (error) {
       res.status(400).json({ error: (error as Error).message });
     }
+  });
+
+  /**
+   * What was changed on this sheet after the day it belonged to, and why.
+   *
+   * The amendment trail is part of the month's record, not a debugging aid: a
+   * supervisor signing off is signing for the corrections as well as the
+   * readings, and an assessor asking "was anything altered?" gets the answer
+   * with names and reasons on it.
+   */
+  router.get('/:id/amendments', numericOnly, (req, res) => {
+    const db = getDb();
+    const sheet = loadSheet(req, res);
+    if (!sheet) return;
+    if (!mayView(req, sheet)) return res.status(403).json({ error: 'You do not have access to this register.' });
+    res.json(db.prepare(`SELECT a.*, r.label AS row_label, r.unit,
+          s.full_name AS amended_by_name, o.full_name AS originally_by_name
+        FROM routine_log_cell_amendments a
+        LEFT JOIN routine_log_rows r ON r.id = a.row_id
+        LEFT JOIN staff s ON s.id = a.amended_by_staff_id
+        LEFT JOIN staff o ON o.id = a.old_recorded_by_staff_id
+        WHERE a.sheet_id = ? ORDER BY a.amended_at DESC, a.id DESC`).all(sheet.id));
   });
 
   /** A person's initials, from their name, so the bench does not retype them. */
@@ -437,8 +471,13 @@ export function routineSheetRoutes() {
       if (!parsed.cells.length) {
         return res.status(400).json({ error: 'Nothing in that file matched this sheet. Download the blank month and fill that, or check the entry names in the first column.', unmatched: parsed.unmatched });
       }
+      // A filled template is asserting what the paper chart already said, so
+      // the calendar rules that govern typing into a live cell do not apply —
+      // it carries its own provenance as an imported file, and refusing its
+      // past days would make the import useless.
       const result = saveCells(db, sheet.id, parsed.cells, {
         staffId: getCurrentStaffId(req), userId: req.user!.id, initials: null,
+        backfill: true, mayAmendClosedDays: mayVerify(req, sheet),
       });
       audit(req, { action: 'import', entity: 'routine_log_sheets', entityId: sheet.id, newValue: { recorded: result.saved } });
       res.json({ ...result, unmatched: parsed.unmatched, ...sheetPayload(db, sheet.id) });
@@ -494,7 +533,12 @@ export function routineSheetRoutes() {
     try {
       const outcome = await extractSheetFromFile(db, sheet.id);
       if (outcome.cells.length) {
-        saveCells(db, sheet.id, outcome.cells, { staffId: getCurrentStaffId(req), userId: req.user!.id, initials: null, skipIngest: true });
+        // Read off the month's own paper chart: the same backfill case as an
+        // import, and every cell it produces is already marked for review.
+        saveCells(db, sheet.id, outcome.cells, {
+          staffId: getCurrentStaffId(req), userId: req.user!.id, initials: null,
+          skipIngest: true, backfill: true, mayAmendClosedDays: true,
+        });
       }
       db.prepare('UPDATE routine_log_sheets SET extraction_status = ?, extraction_note = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
         .run(outcome.status, outcome.note, sheet.id);
