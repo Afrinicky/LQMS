@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { getDb } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
+import { deleteNotificationsWhere } from '../services/notificationCleanup.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getCurrentStaffId } from './routeHelpers.js';
 import { DECLARATION_TEMPLATES, DECLARATION_FORM_TYPES } from '../../shared/constants/declarations.js';
@@ -157,17 +158,53 @@ export function organisationExtendedRoutes() {
   // Delete a declaration form and everything hanging off it — its signatures
   // and the "sign this" notifications it raised. Kept behind the edit/delete
   // controls that are tucked away in the UI, and gated on the archive right.
+  /**
+   * Remove a declaration form.
+   *
+   * Two things had to be got right here, and neither was.
+   *
+   * A declaration that anybody has SIGNED is a record. Deleting it destroys
+   * those signatures, and there is no undo — so it is refused unless the caller
+   * says, in as many words, that they mean to. The usual answer for a
+   * declaration that is finished with is to mark it obsolete, which keeps the
+   * signatures and takes it off the list to sign; the refusal says so.
+   *
+   * And the notifications raised when it was published are not leaves: the
+   * moment somebody opens one, a notification_events row points at it, and
+   * deleting the notification then fails with "FOREIGN KEY constraint failed".
+   * A newly created declaration deleted cleanly; every one that had actually
+   * reached the bench did not. They go through deleteNotificationsWhere, which
+   * clears the children first.
+   */
   router.delete('/ethical-forms/:id', requirePermission('organisation.structure', 'void_archive'), (req, res) => {
     const db = getDb();
     const form = db.prepare('SELECT * FROM ethical_declaration_forms WHERE id = ?').get(req.params.id) as any;
     if (!form) return res.status(404).json({ error: 'Form not found' });
+
+    const signatures = Number((db.prepare('SELECT COUNT(*) AS n FROM ethical_declaration_signatures WHERE form_id = ?')
+      .get(req.params.id) as any)?.n ?? 0);
+    const confirmed = req.query.deleteSignatures === '1' || req.body?.deleteSignatures === true;
+    if (signatures > 0 && !confirmed) {
+      return res.status(409).json({
+        error: 'signed',
+        signatures,
+        message: `${signatures} ${signatures === 1 ? 'person has' : 'people have'} signed "${form.title}". `
+          + 'Deleting it destroys those signatures and cannot be undone. If the declaration is simply finished with, '
+          + 'mark it obsolete instead — that keeps the signatures and takes it off the list to sign.',
+      });
+    }
+
     db.transaction(() => {
       db.prepare('DELETE FROM ethical_declaration_signatures WHERE form_id = ?').run(req.params.id);
-      db.prepare("DELETE FROM notifications WHERE module_key = 'organisation' AND ((record_type = 'ethical_declaration_forms' AND record_id = ?) OR action_url LIKE ?)").run(String(req.params.id), `%form=${req.params.id}%`);
+      deleteNotificationsWhere(
+        db,
+        "module_key = 'organisation' AND ((record_type = 'ethical_declaration_forms' AND record_id = ?) OR action_url LIKE ?)",
+        [String(req.params.id), `%form=${req.params.id}%`],
+      );
       db.prepare('DELETE FROM ethical_declaration_forms WHERE id = ?').run(req.params.id);
     })();
-    audit(req, { action: 'delete', entity: 'ethical_declaration_forms', entityId: Number(req.params.id), oldValue: form });
-    res.json({ ok: true });
+    audit(req, { action: 'delete', entity: 'ethical_declaration_forms', entityId: Number(req.params.id), oldValue: { ...form, signatures } });
+    res.json({ ok: true, signaturesRemoved: signatures });
   });
 
   // ==================================================================

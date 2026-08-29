@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, DonutChart, BarMeter, CHART_COLORS, ModuleAlerts } from '../components/ui';
 import { useModules } from '../hooks/useModules';
-import { api, API_BASE, getToken, errorText, apiRead } from '../services/api';
+import { api, API_BASE, getToken, errorText, apiRead, ApiError } from '../services/api';
 import DisabledModule from '../components/DisabledModule';
 import { MeetingsPage, ManagementReviewPage } from './Phase8Pages';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -286,6 +286,19 @@ export function OrganisationPage() {
 // and can never be done on someone else's behalf. Once signed, every signature
 // is appended to the declaration and the whole record can be printed.
 // ============================================================================
+/** A stored declaration, in the shape the setup form and the PUT endpoint use. */
+function declarationSetupFrom(f: EthicalDeclarationForm) {
+  return {
+    title: f.title || '', formType: f.form_type || 'code_of_conduct', description: f.description || '',
+    version: f.version || '1.0', effectiveDate: f.effective_date || '',
+    reviewFrequencyMonths: f.review_frequency_months != null ? String(f.review_frequency_months) : '12',
+    nextReviewDate: f.next_review_date || '', requiresAnnualReaffirmation: f.requires_annual_reaffirmation !== 0,
+    status: f.status || 'active', bodyContent: f.body_content || '',
+    acknowledgementStatement: f.acknowledgement_statement || '',
+    templateKey: f.template_key || '',
+  };
+}
+
 const emptyDeclarationSetup = {
   title: '', formType: 'code_of_conduct', description: '', version: '1.0', effectiveDate: '',
   reviewFrequencyMonths: '12', nextReviewDate: '', requiresAnnualReaffirmation: true, status: 'active',
@@ -359,25 +372,65 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
   // control on the selected declaration.
   function startEdit(f: EthicalDeclarationForm) {
     setEditingId(f.id);
-    setSetupForm({
-      title: f.title || '', formType: f.form_type || 'code_of_conduct', description: f.description || '',
-      version: f.version || '1.0', effectiveDate: f.effective_date || '',
-      reviewFrequencyMonths: f.review_frequency_months != null ? String(f.review_frequency_months) : '12',
-      nextReviewDate: f.next_review_date || '', requiresAnnualReaffirmation: f.requires_annual_reaffirmation !== 0,
-      status: f.status || 'active', bodyContent: f.body_content || '', acknowledgementStatement: f.acknowledgement_statement || '',
-      templateKey: f.template_key || '',
-    });
+    setSetupForm(declarationSetupFrom(f));
     setUploadFile(null); setShowManage(false); setShowSetup(true);
   }
 
+  /**
+   * Remove a declaration.
+   *
+   * A declaration nobody has signed goes on one confirmation. One that HAS been
+   * signed is a record: the server refuses it, saying how many signatures would
+   * be destroyed and offering the usual alternative — marking it obsolete keeps
+   * the signatures and takes it off the list to sign. That choice is put to the
+   * person here rather than reported as a failure.
+   */
   async function deleteDeclaration(f: EthicalDeclarationForm) {
-    if (!confirm(`Delete "${f.title}" and all of its signatures? This cannot be undone.`)) return;
+    const signed = Number(f.signature_count ?? 0);
+    if (signed === 0 && !confirm(`Delete "${f.title}"? Nobody has signed it. This cannot be undone.`)) return;
     onError('');
     try {
       await api(`/organisation/ethical-forms/${f.id}`, { method: 'DELETE' });
       setSelected(null); setShowManage(false);
       await load();
       onNotice('Declaration deleted.');
+      return;
+    } catch (e) {
+      const refusal = e instanceof ApiError && e.status === 409 && e.data?.error === 'signed' ? e.data : null;
+      if (!refusal) { onError(errorText(e)); return; }
+
+      const count = Number(refusal.signatures ?? signed);
+      const obsolete = confirm(
+        `${refusal.message}\n\nOK — mark it obsolete and keep the ${count} signature${count === 1 ? '' : 's'}.\n`
+        + 'Cancel — do nothing (to delete it outright, use Delete signatures and form on the manage screen).',
+      );
+      if (!obsolete) return;
+      try {
+        await api(`/organisation/ethical-forms/${f.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ ...declarationSetupFrom(f), status: 'obsolete' }),
+        });
+        setShowManage(false);
+        await load();
+        if (selected?.id === f.id) await openForm(f);
+        onNotice('Declaration marked obsolete. Its signatures are kept and it no longer appears as one to sign.');
+      } catch (err) { onError(errorText(err)); }
+    }
+  }
+
+  /** Delete it and its signatures, having been told what that costs. */
+  async function deleteDeclarationWithSignatures(f: EthicalDeclarationForm) {
+    const count = Number(f.signature_count ?? 0);
+    if (!confirm(
+      `Delete "${f.title}" AND the ${count} signature${count === 1 ? '' : 's'} on it?\n\n`
+      + 'The signatures are records of what people agreed to. This cannot be undone.',
+    )) return;
+    onError('');
+    try {
+      await api(`/organisation/ethical-forms/${f.id}?deleteSignatures=1`, { method: 'DELETE' });
+      setSelected(null); setShowManage(false);
+      await load();
+      onNotice(`Declaration deleted, with ${count} signature${count === 1 ? '' : 's'}.`);
     } catch (e) { onError(errorText(e)); }
   }
 
@@ -583,6 +636,15 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
             {showManage && (canEditForm || canDeleteForm) && <div style={{ marginTop: 8, display: 'flex', gap: 8, justifyContent: 'flex-end', borderTop: '1px dashed #e2e8f0', paddingTop: 8 }}>
               {canEditForm && <button type="button" className="secondary" onClick={() => startEdit(selected)}>✎ Edit declaration</button>}
               {canDeleteForm && <button type="button" className="secondary" style={{ color: '#dc2626' }} onClick={() => void deleteDeclaration(selected)}>🗑 Delete declaration</button>}
+              {/* Only offered where there is something to lose. Deleting a
+                  declaration nobody signed needs no second door. */}
+              {canDeleteForm && Number(selected.signature_count ?? 0) > 0 && (
+                <button type="button" className="secondary" style={{ color: '#dc2626' }}
+                  title="Deletes the declaration and the signatures on it"
+                  onClick={() => void deleteDeclarationWithSignatures(selected)}>
+                  🗑 Delete signatures and form
+                </button>
+              )}
             </div>}
             {selected.description && <p style={{ marginTop: 8 }}>{selected.description}</p>}
             {selected.body_content && <div style={{ whiteSpace: 'pre-wrap', marginTop: 10, lineHeight: 1.55, borderTop: '1px solid #e2e8f0', paddingTop: 10 }}>{selected.body_content}</div>}

@@ -13,10 +13,8 @@ import {
 } from '../../../shared/constants/routineWork';
 import { QUALITATIVE_LABELS, RULE_LABELS } from '../../../shared/constants/iqc';
 import LeveyJenningsChart, { type ChartData } from '../../components/LeveyJenningsChart';
-import DefineControlForm from '../../components/iqc/DefineControlForm';
 import type {
   IqcBoard, IqcBoardControl, IqcMapping, IqcFeedMessage, IqcChartAnalyte,
-  Section, Staff, EquipmentItem,
 } from '../../../shared/types/api';
 import PortalIqcCoverage from './PortalIqcCoverage';
 
@@ -57,7 +55,7 @@ const METHOD_ICONS: Record<IqcEntryMethod, ReactNode> = {
   instrument: <Radio size={13} />,
 };
 
-type QcFace = 'board' | 'charts' | 'define';
+type QcFace = 'board' | 'charts';
 
 export default function PortalRoutineIqc() {
   const [board, setBoard] = useState<IqcBoard | null>(null);
@@ -94,9 +92,10 @@ export default function PortalRoutineIqc() {
 
   return (
     <div className="portal-stack">
-      {/* Three faces of the same work: run it, look at the chart, set a new one
-          up. Defining a control is the module's own wizard, not a portal
-          variation of it — one form, one idea of what a control record is. */}
+      {/* Two faces of the same work: run today's controls, or look at the chart
+          and the record behind them. Setting a new control up is not a third
+          place to be — it is a button on the panel that lists them, and it
+          opens the module's own wizard. */}
       <nav className="rw-faces" aria-label="Quality control">
         <button type="button" className={face === 'board' ? 'is-on' : ''} onClick={() => setFace('board')}>
           <Beaker size={13} /> Today&rsquo;s controls
@@ -104,17 +103,7 @@ export default function PortalRoutineIqc() {
         <button type="button" className={face === 'charts' ? 'is-on' : ''} onClick={() => setFace('charts')}>
           <LineChart size={13} /> Charts and records
         </button>
-        {board.canDefine && (
-          <button type="button" className={face === 'define' ? 'is-on' : ''} onClick={() => setFace('define')}>
-            <Plus size={13} /> New control
-          </button>
-        )}
       </nav>
-
-      {face === 'define' && board.canDefine && (
-        <PortalDefineControl sectionId={board.sectionId} sectionName={board.sectionName}
-          onSaved={async () => { await load(); setFace('board'); }} />
-      )}
 
       {face === 'charts' && (
         <ChartsFace controls={controls} onOpen={setChartControl} />
@@ -206,46 +195,6 @@ function Stat({ label, value, tone }: { label: string; value: number; tone: stri
       <strong>{value}</strong>
       <span>{label}</span>
     </div>
-  );
-}
-
-/* ----------------------------------------------------------------------------
-   Setting up a new control, from the portal
-
-   The wizard is the module's — imported, not reimplemented — so a control
-   defined at the bench carries exactly what a control defined in Quality
-   Control carries: its provenance, its rule set, its parameters and their
-   limits. All the portal adds is the unit the person actually works in, filled
-   in for them.
-   ------------------------------------------------------------------------- */
-function PortalDefineControl({ sectionId, sectionName, onSaved }: {
-  sectionId: number | null; sectionName?: string | null; onSaved: () => void | Promise<void>;
-}) {
-  const [lookups, setLookups] = useState<{ sections: Section[]; staff: Staff[]; equipment: EquipmentItem[] } | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
-
-  useEffect(() => {
-    api<{ sections: Section[]; staff: Staff[]; equipment: EquipmentItem[] }>('/iqc/portal/lookups')
-      .then(setLookups)
-      .catch(e => { setProblem(errorText(e)); setLookups({ sections: [], staff: [], equipment: [] }); });
-  }, []);
-
-  if (!lookups) return <div className="portal-loading">Reading the register…</div>;
-
-  return (
-    <>
-      {problem && <p className="pd-error"><AlertTriangle size={13} /> {problem}</p>}
-      <DefineControlForm
-        sections={lookups.sections} staff={lookups.staff} equipment={lookups.equipment}
-        mySectionId={sectionId}
-        heading="Set up a new control"
-        lead={sectionName
-          ? `It will belong to ${sectionName} and appear on this board as soon as it is saved.`
-          : 'It will appear on this board as soon as it is saved.'}
-        onSaved={onSaved}
-        onError={setProblem}
-      />
-    </>
   );
 }
 

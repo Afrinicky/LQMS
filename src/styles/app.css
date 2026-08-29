@@ -5142,6 +5142,16 @@ button.cell-mark:disabled { cursor: default; }
 
 /* -- the short setup form ------------------------------------------------- */
 .qcc-dialog { width: min(860px, 100%); }
+/* The wizard is a tall form of numbered steps, so it gets the room the module
+   gives it and the dialog's own footer is dropped — the wizard has its own. */
+.qcc-dialog.is-wizard { width: min(1000px, 100%); }
+.qcc-dialog.is-wizard .modal-body { padding-top: 6px; }
+
+/* The wizard inside a dialog: no card of its own, because the dialog is one. */
+.iqc-define.is-embedded {
+  background: none; border: none; box-shadow: none; padding: 0; margin: 0;
+}
+.iqc-define.is-embedded .form-actions { position: sticky; bottom: 0; padding-top: 10px; }
 .qcc-choice { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin-bottom: 16px; }
 .qcc-choice button {
   display: flex; flex-direction: column; gap: 2px; text-align: left; cursor: pointer;
