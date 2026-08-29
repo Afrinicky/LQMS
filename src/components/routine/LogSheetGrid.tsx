@@ -115,10 +115,10 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
       } else if (result.breaches?.length) {
         setProblem(null);
         const first = result.breaches[0];
-        setNotice(`${first.label} on day ${first.day} is ${first.value} — outside its acceptable range. An excursion has been raised; record what you did about it in the cell's note.`);
+        setNotice(`${first.label}, day ${first.day}: ${first.value} is out of range. An excursion has been raised — add a note to the cell.`);
       } else {
         setProblem(null);
-        setNotice(result.cleared ? 'Entry withdrawn.' : result.amended ? 'Entry amended. The original is kept beside it with your reason.' : null);
+        setNotice(result.cleared ? 'Entry withdrawn.' : result.amended ? 'Entry amended.' : null);
       }
       onChanged?.();
     } catch (e) { setProblem(errorText(e)); }
@@ -167,9 +167,8 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
 
       {sheet.locked && (
         <p className="ls-locked">
-          <Lock size={12} /> Signed on {String(sheet.verified_at ?? '').slice(0, 10)}
-          {sheet.verifiedByName ? ` by ${sheet.verifiedByName}` : ''}. Nothing on it can be changed.
-          A correction to a signed month is made by raising a nonconformity against it, not by editing the sheet.
+          <Lock size={12} /> Signed {String(sheet.verified_at ?? '').slice(0, 10)}
+          {sheet.verifiedByName ? ` by ${sheet.verifiedByName}` : ''}. Corrections require a nonconformity.
         </p>
       )}
       {problem && <p className="pd-error"><AlertTriangle size={13} /> {problem}</p>}
@@ -232,7 +231,7 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
                         cell={cellIndex.get(`${row.id}:${week}:${slot}`)}
                         editable={editable} onSave={save} wide
                         closed={!weekStarted}
-                        closedReason={`Week ${week} of ${monthLabel(sheet.month)} has not started yet.`}
+                        closedReason={`Week ${week} has not started`}
                         sameDay={false} mayAmend={mayAmend}
                         noteFor={noteFor} setNoteFor={setNoteFor} />
                     );
@@ -245,8 +244,7 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
 
         {rows.length === 0 && (
           <p className="muted">
-            This sheet has no rows yet. For a chart, set the parameters and their acceptable ranges on the asset;
-            for a maintenance chart, add the tasks to the instrument. Nothing can be recorded until it is defined.
+            This sheet has no rows yet. Set the parameters on the asset, or add maintenance tasks to the instrument.
           </p>
         )}
       </div>
@@ -335,8 +333,8 @@ function RowBlock({ row, days, todayDay, cellIndex, editable, onSave, lastOpenDa
                 editable={editable} onSave={onSave} isToday={day === todayDay}
                 closed={future || earlyPm}
                 closedReason={future
-                  ? 'This day has not happened yet. A chart records readings that were taken.'
-                  : `The afternoon reading is due at ${clockLabel(pmDueAt)}; this column opens from ${clockLabel(pmOpensAt)}. Two readings taken together in the morning measure one moment twice.`}
+                  ? 'Not yet due'
+                  : `Afternoon reading due at ${clockLabel(pmDueAt)} — opens from ${clockLabel(pmOpensAt)}`}
                 sameDay={day === todayDay}
                 mayAmend={mayAmend}
                 noteFor={noteFor} setNoteFor={setNoteFor} />
@@ -571,9 +569,7 @@ function NotePopover({ cell, sameDay, mayAmend, onSave, onWithdraw, onClose }: {
         <button type="button" onClick={() => onSave(note.trim())}>Save note</button>
         {canWithdraw && (
           <button type="button" className="ls-withdraw" onClick={onWithdraw}
-            title={sameDay
-              ? 'Withdraw this entry. It was made today, so no authorisation is needed.'
-              : 'Withdraw this entry. Its day has ended, so a reason is recorded with it.'}>
+            title={sameDay ? 'Withdraw this entry' : 'Withdraw — a reason is recorded'}>
             <Trash2 size={12} /> Withdraw
           </button>
         )}
@@ -608,9 +604,7 @@ function AmendPopover({ rowLabel, day, slot, cell, clear, value, numeric, onConf
       <p className="ls-amend-head">
         <History size={12} />
         <span>
-          {clear ? 'Withdrawing' : 'Changing'} <strong>{rowLabel}</strong>, day {day} {SLOT_LABELS[slot] ?? slot}.
-          Its day has ended, so this is an amendment: the entry currently reads <strong>{was}</strong>,
-          and that stays on the record beside whatever replaces it.
+          Day {day} {SLOT_LABELS[slot] ?? slot} has closed. The current entry ({was}) is kept on record.
         </span>
       </p>
 
@@ -624,25 +618,21 @@ function AmendPopover({ rowLabel, day, slot, cell, clear, value, numeric, onConf
       )}
 
       <label>
-        <span>Why is it being {clear ? 'withdrawn' : 'changed'}?</span>
+        <span>Reason</span>
         <TextField as="textarea" rows={3} value={reason} onValue={setReason}
           autoFocus={clear}
           placeholder={clear
-            ? 'Recorded against the wrong fridge — the reading belongs to Refrigerator 2 and has been entered there.'
-            : 'Transcribed as 4.4 from the logger display, which read 14.4; corrected against the printout retained with the chart.'} />
+            ? 'Recorded against the wrong asset; entered on Refrigerator 2.'
+            : 'Transcribed as 4.4; the logger read 14.4. Corrected against the printout.'} />
       </label>
 
       <div className="pr-btns">
         <button type="button" disabled={!ready} onClick={() => onConfirm(next, reason.trim())}>
-          {clear ? 'Withdraw it' : 'Amend it'}
+          {clear ? 'Withdraw' : 'Amend'}
         </button>
         <button type="button" className="secondary" onClick={onCancel}>Cancel</button>
       </div>
-      {!ready && (
-        <p className="ls-amend-hint">
-          A sentence at minimum — what was wrong, and how the correct value was established.
-        </p>
-      )}
+      {!ready && <p className="ls-amend-hint">A reason of at least a sentence is required.</p>}
     </div>
   );
 }
@@ -669,8 +659,7 @@ function MonthSummary({ data }: { data: LogSheetPayload }) {
       </div>
       {c.unexplainedBreaches > 0 && (
         <p className="ls-summary-warn">
-          <AlertTriangle size={12} /> {c.unexplainedBreaches} of those have no note saying what was done about them.
-          Right-click the red cell to add one — an unexplained excursion is the finding, not the excursion itself.
+          <AlertTriangle size={12} /> {c.unexplainedBreaches} without a note. Right-click the cell to add one.
         </p>
       )}
       {c.missingCount > 0 && c.missing.length > 0 && (
@@ -704,11 +693,9 @@ function Legend() {
       <span><i className="ls-sw warn" /> Approaching a limit</span>
       <span><i className="ls-sw na" /> Not applicable</span>
       <span><i className="ls-sw blank" /> Nothing recorded</span>
-      <span><i className="ls-sw closed" /> Not yet — the day, or the afternoon, has not come</span>
-      <span><i className="ls-sw amended" /> Amended after its day</span>
-      <span className="ls-legend-hint">
-        Click a cell to record it. Right-click one to add a note or withdraw it.
-      </span>
+      <span><i className="ls-sw closed" /> Not yet due</span>
+      <span><i className="ls-sw amended" /> Amended</span>
+      <span className="ls-legend-hint">Click to record · right-click for notes</span>
     </div>
   );
 }
@@ -736,13 +723,11 @@ function TrendPanel({ trends }: { trends: SheetTrend[] }) {
     <div className={`ls-trends${act ? ' has-act' : ''}`}>
       <div className="ls-trends-head">
         <strong>
-          {trends.length} trend{trends.length === 1 ? '' : 's'} in this month&rsquo;s readings
-          {act > 0 && <span className="ls-trend-act">{act} worth acting on</span>}
+          Trends
+          <span className="ls-trend-n">{trends.length}</span>
+          {act > 0 && <span className="ls-trend-act">{act} to review</span>}
         </strong>
-        <span>
-          Every reading can be in range while the unit is failing. These are the shapes that say so
-          before anything breaches — the same run rules a control chart uses.
-        </span>
+        <span>Patterns across the month that individual readings do not show.</span>
       </div>
       <ul>
         {trends.map((trend, i) => (
@@ -998,33 +983,55 @@ function VerifyDialog({ sheetId, data, onClose, onDone }: {
 /* ----------------------------------------------------------------------------
    The index of a unit's sheets for a month — used by the portal and the modules
    ------------------------------------------------------------------------- */
+/**
+ * Choosing which sheet to work on.
+ *
+ * Down a column beside the grid it stole a quarter of the screen to list, very
+ * often, one fridge. As a strip of coloured chips it was worse: ragged widths,
+ * a different border colour on nearly every item, and no alignment to read down.
+ *
+ * So it is a plain uniform grid. Equal columns, one neutral border, the name and
+ * the percentage in fixed positions so the eye can scan a column of figures
+ * rather than hunt across chips. Status is a single small dot — colour marks the
+ * one or two that need attention instead of decorating all thirteen.
+ */
 export function SheetPicker({ sheets, activeId, onPick, horizontal }: {
   sheets: Array<{ subject: any; sheet: any; completeness: any }>;
   activeId: number | null;
   onPick: (sheetId: number) => void;
-  /** Lay the sheets across the top rather than down a column beside the grid. */
+  /** Lay the sheets above the grid rather than in a column beside it. */
   horizontal?: boolean;
 }) {
   if (!sheets.length) return null;
   return (
-    <ul className={`ls-picker${horizontal ? ' is-strip' : ''}`}>
+    <ul className={`ls-picker${horizontal ? ' is-grid' : ''}`}>
       {sheets.map(({ subject, sheet, completeness }) => {
         const percent = completeness?.percent ?? 0;
         const tone = !sheet ? 'none' : percent >= 95 ? 'ok' : percent >= 70 ? 'warn' : 'crit';
+        const active = sheet?.id === activeId;
         return (
           <li key={subject.id}>
-            <button type="button" className={`ls-pick t-${tone}${sheet?.id === activeId ? ' is-active' : ''}`}
+            <button type="button" className={`ls-pick t-${tone}${active ? ' is-active' : ''}`}
+              aria-current={active || undefined}
               onClick={() => sheet && onPick(sheet.id)}>
-              <span className="ls-pick-name">{subject.subject_name ?? subject.name}</span>
-              <span className="ls-pick-meta">
-                {sheet ? (
-                  <>
-                    <span>{percent}% recorded</span>
-                    {completeness?.breaches > 0 && <span className="crit">{completeness.breaches} out of range</span>}
-                    {completeness?.missingCount > 0 && <span className="warn">{completeness.missingCount} missing</span>}
-                    {sheet.status !== 'open' && <span className="badge">{SHEET_STATUS_LABELS[sheet.status as keyof typeof SHEET_STATUS_LABELS]}</span>}
-                  </>
-                ) : <span className="muted">not started</span>}
+              <span className="ls-pick-dot" aria-hidden="true" />
+              <span className="ls-pick-body">
+                <span className="ls-pick-name" title={subject.subject_name ?? subject.name}>
+                  {subject.subject_name ?? subject.name}
+                </span>
+                <span className="ls-pick-meta">
+                  {sheet ? (
+                    <>
+                      <span className="ls-pick-pct">{percent}%</span>
+                      {completeness?.breaches > 0 && <span className="crit">{completeness.breaches} out of range</span>}
+                      {sheet.status !== 'open' && (
+                        <span className="ls-pick-status">
+                          {SHEET_STATUS_LABELS[sheet.status as keyof typeof SHEET_STATUS_LABELS]}
+                        </span>
+                      )}
+                    </>
+                  ) : <span>Not started</span>}
+                </span>
               </span>
             </button>
           </li>

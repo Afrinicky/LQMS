@@ -127,10 +127,7 @@ export default function LeveyJenningsChart({ data, onEstablish, canEstablish }: 
           </div>
         </div>
         {points.length === 0 ? (
-          <div className="lj-empty">
-            No control results have been recorded for this analyte yet. Run the control from
-            Routine Work &rarr; Quality control; the chart draws itself from the runs.
-          </div>
+          <div className="lj-empty">No results recorded for this parameter yet.</div>
         ) : (
           <>
             <RunChart points={points} dp={dp} low={analyte.acceptableLow} high={analyte.acceptableHigh} />
@@ -143,18 +140,16 @@ export default function LeveyJenningsChart({ data, onEstablish, canEstablish }: 
           </>
         )}
         <div className="lj-establish">
-          <strong>No SD, so no control limits yet.</strong>
+          <strong>No control limits set</strong>
           <p>
             {target && target.n
-              ? `${target.n} usable result${target.n === 1 ? '' : 's'} over ${target.days} day${target.days === 1 ? '' : 's'} so far.`
-              : `${points.length} result${points.length === 1 ? '' : 's'} recorded so far.`}
-            {' '}A mean and SD may be established from this laboratory&rsquo;s own runs of this lot —
-            20 results over 20 separate days is the definitive set (CLSI C24, ISO 15189:2022 §7.3.7.2),
-            and 20 over 5 days may serve as interim limits meanwhile. Until then a result is checked
-            against the acceptable range only; Westgard needs an SD to work with.
+              ? `${target.n} result${target.n === 1 ? '' : 's'} over ${target.days} day${target.days === 1 ? '' : 's'} recorded.`
+              : `${points.length} result${points.length === 1 ? '' : 's'} recorded.`}
+            {' '}Limits are calculated from your own runs — 20 results over 20 days.
+            Until then results are checked against the acceptable range only.
           </p>
           {canEstablish && onEstablish && (
-            <button type="button" onClick={onEstablish}>Establish the limits from our own runs</button>
+            <button type="button" onClick={onEstablish}>Calculate limits</button>
           )}
         </div>
       </div>
@@ -197,13 +192,11 @@ export default function LeveyJenningsChart({ data, onEstablish, canEstablish }: 
 
       {target?.source === 'established' && (
         <p className={`lj-provenance${target.provisional ? ' is-interim' : ''}`}>
-          <strong>{target.provisional ? 'Interim limits' : 'Limits established here'}</strong>
-          {' — '}SD {fmt(target.sd, dp + 1)} calculated from {target.n} of this laboratory&rsquo;s own results
-          over {target.days} day{target.days === 1 ? '' : 's'}
-          {target.from ? `, ${target.from} to ${target.to}` : ''}.
-          {target.provisional
-            ? ` ${target.pointsShort > 0 ? `${target.pointsShort} more result${target.pointsShort === 1 ? '' : 's'}` : 'No more results'}${target.pointsShort > 0 && target.daysShort > 0 ? ' and ' : ''}${target.daysShort > 0 ? `${target.daysShort} more day${target.daysShort === 1 ? '' : 's'}` : ''} before the definitive set of 20 over 20 days is complete. Treat a rejection against interim limits as a prompt to look, not as a verdict.`
-            : ' Twenty results over twenty days: the definitive set (CLSI C24).'}
+          <strong>{target.provisional ? 'Interim limits' : 'Calculated limits'}</strong>
+          {' · '}SD {fmt(target.sd, dp + 1)} from {target.n} results over {target.days} day{target.days === 1 ? '' : 's'}
+          {target.provisional && target.pointsShort + target.daysShort > 0
+            ? ` · provisional until 20 results over 20 days`
+            : ''}
           {canEstablish && onEstablish && (
             <button type="button" className="lj-recalc" onClick={onEstablish}>Recalculate</button>
           )}
@@ -408,7 +401,7 @@ function RunChart({ points, dp, low, high }: {
           </text>
         ))}
         <text x={PAD.left + PLOT_W / 2} y={H - 6} className="lj-axis-title" textAnchor="middle">
-          Run date · {points.length} results · no control limits established yet
+          Run date · {points.length} results · no control limits
         </text>
       </svg>
     </div>

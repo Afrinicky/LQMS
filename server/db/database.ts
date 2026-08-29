@@ -7011,6 +7011,47 @@ CREATE INDEX IF NOT EXISTS idx_instrument_messages_forward ON instrument_message
     }
   }
 
+  // An install created before the verification record grew its present shape
+  // has the table without these columns, and every screen that reads it dies on
+  // "no such column". CREATE TABLE IF NOT EXISTS cannot repair an existing
+  // table, so the columns are added here.
+  {
+    const has = (table: string) =>
+      new Set((database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(c => c.name));
+    const ensure = (table: string, columns: Array<[string, string]>) => {
+      const exists = database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+      if (!exists) return;
+      const present = has(table);
+      for (const [col, ddl] of columns) {
+        if (!present.has(col)) {
+          try { database.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`); } catch { /* another process won the race */ }
+        }
+      }
+    };
+    ensure('equipment_verifications', [
+      ['verification_number', 'verification_number TEXT'],
+      ['verification_type', 'verification_type TEXT'],
+      ['verification_date', 'verification_date TEXT'],
+      ['reason', 'reason TEXT'],
+      ['acceptance_criteria', 'acceptance_criteria TEXT'],
+      ['results_summary', 'results_summary TEXT'],
+      ['conclusion', 'conclusion TEXT'],
+      ['status', "status TEXT NOT NULL DEFAULT 'in_progress'"],
+      ['verified_by_staff_id', 'verified_by_staff_id INTEGER REFERENCES staff(id)'],
+      ['approved_by_staff_id', 'approved_by_staff_id INTEGER REFERENCES staff(id)'],
+      ['evidence_file_id', 'evidence_file_id INTEGER REFERENCES files(id)'],
+      ['created_by', 'created_by INTEGER REFERENCES users(id)'],
+      ['updated_at', 'updated_at TEXT'],
+    ]);
+    ensure('equipment_calibration_records', [
+      ['calibration_date', 'calibration_date TEXT'],
+      ['next_due_date', 'next_due_date TEXT'],
+      ['result', 'result TEXT'],
+      ['provider', 'provider TEXT'],
+      ['certificate_number', 'certificate_number TEXT'],
+    ]);
+  }
+
   /* ==========================================================================
      Changing a log sheet entry after the day it belongs to
      --------------------------------------------------------------------------

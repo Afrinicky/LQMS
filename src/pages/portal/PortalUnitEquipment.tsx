@@ -1,33 +1,25 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, CalendarClock, CheckCircle2, ChevronDown, ChevronRight, Circle,
-  Loader2, Plus, Ruler, Settings2, ShieldCheck, Wrench, X,
+  Loader2, Plus, Ruler, ShieldCheck, Wrench, X,
 } from 'lucide-react';
 import { api, errorText } from '../../services/api';
 import TextField from '../../components/ui/TextField';
 import type { UnitEquipmentOverview, UnitEquipmentItem, EquipmentDutyState } from '../../../shared/types/api';
 
 /**
- * The unit's instruments, and what each of them is owed.
+ * The unit's instruments and what each is owed.
  *
- * A unit head opening the maintenance tab was told only that no maintenance
- * tasks existed anywhere in their unit. That is true and useless: it names no
- * instrument, sizes no gap, and sends them to a module screen to fix it one
- * instrument at a time — which is why the tab stayed empty.
+ * The maintenance tab used to say only that no tasks existed anywhere in the
+ * unit — naming no instrument and offering no way to fix it. The inventory comes
+ * first now, and each gap is closed from the row it appears on.
  *
- * So the inventory comes first. Every instrument the unit holds, and against
- * each one what ISO 15189:2022 says that KIND of instrument is owed. The duties
- * are derived from the archetype rather than assumed, because they genuinely
- * differ: an analyser owes calibration with traceability, verification,
- * uncertainty, IQC and EQA; a refrigerator owes acceptance, continuous
- * monitoring, maintenance and certification. A fridge is not exempt from
- * control, it is controlled differently, and a screen that says "no
- * calibration" against a fridge is teaching the wrong lesson.
+ * What an instrument is owed is derived from its category rather than assumed:
+ * an analyser owes calibration, verification, uncertainty and QC; a pipette owes
+ * calibration alone; a fridge owes monitoring, maintenance and certification.
  *
- * Two states are kept apart everywhere on this screen, because they call for
- * different actions and get confused constantly: nothing is SET UP (a gap in
- * the programme, which the unit head closes) versus something is OVERDUE (a
- * lapse in doing it, which the bench closes).
+ * Two states are kept apart throughout, because they need different actions:
+ * NOT SET UP is a gap in the programme, OVERDUE is a lapse in performing it.
  */
 
 const DUTY_ICON: Record<string, typeof Wrench> = {
@@ -77,12 +69,8 @@ export default function PortalUnitEquipment({ onChanged }: { onChanged?: () => v
     <section className="portal-panel ueq">
       <div className="pp-head">
         <div>
-          <h3><Settings2 size={16} /> {data.sectionName ? `${data.sectionName} — equipment` : 'Your unit’s equipment'}</h3>
-          <p>
-            Every instrument assigned to your unit, and what ISO 15189:2022 says that kind of
-            instrument is owed. A refrigerator is not exempt from control — it is controlled
-            differently from an analyser, and both are shown here with their own obligations.
-          </p>
+          <h3>Equipment</h3>
+          <p>Instruments assigned to {data.sectionName ?? 'this unit'}, and what each needs.</p>
         </div>
         {counts.withGaps > 0 && <span className="pp-count crit">{counts.withGaps}</span>}
       </div>
@@ -97,30 +85,21 @@ export default function PortalUnitEquipment({ onChanged }: { onChanged?: () => v
 
       {counts.items === 0 ? (
         <p className="muted">
-          No equipment is assigned to {data.sectionName ?? 'your unit'} yet. Instruments are registered
-          under Equipment Management &rarr; Register, and each one names the unit that holds it —
-          until it does, it appears on nobody&rsquo;s inventory.
+          No equipment is assigned to {data.sectionName ?? 'this unit'} yet.
+          Instruments are registered under Equipment Management.
         </p>
       ) : (
         <>
           <div className="ueq-counts">
-            <Stat value={counts.items} label="instruments" tone="info" />
-            <Stat value={counts.needMaintenanceTasks} label="with no maintenance programme"
+            <Stat value={counts.items} label="Instruments" />
+            <Stat value={counts.needMaintenanceTasks} label="No maintenance set up"
               tone={counts.needMaintenanceTasks ? 'crit' : 'ok'} />
-            <Stat value={counts.needCalibration} label="owed calibration, none set up"
+            <Stat value={counts.needCalibration} label="No calibration set up"
               tone={counts.needCalibration ? 'crit' : 'ok'} />
-            <Stat value={counts.needVerification} label="owed verification, none on record"
-              tone={counts.needVerification ? 'warn' : 'ok'} />
-            {counts.overdue > 0 && <Stat value={counts.overdue} label="with something overdue" tone="crit" />}
-            {counts.dueSoon > 0 && <Stat value={counts.dueSoon} label="due within a month" tone="warn" />}
-            {counts.outOfService > 0 && <Stat value={counts.outOfService} label="out of service" tone="warn" />}
+            <Stat value={counts.overdue} label="Overdue" tone={counts.overdue ? 'crit' : 'ok'} />
+            {counts.dueSoon > 0 && <Stat value={counts.dueSoon} label="Due within 30 days" tone="warn" />}
+            {counts.outOfService > 0 && <Stat value={counts.outOfService} label="Out of service" tone="warn" />}
           </div>
-
-          <p className="ueq-legend">
-            <span><Circle size={9} className="dot gap" /> nothing set up — a gap in the programme</span>
-            <span><Circle size={9} className="dot late" /> overdue — set up, but not done</span>
-            <span><Circle size={9} className="dot ok" /> in hand</span>
-          </p>
 
           <ul className="ueq-list">
             {ordered.map(item => (
@@ -137,14 +116,14 @@ export default function PortalUnitEquipment({ onChanged }: { onChanged?: () => v
                   <span className="ueq-summary">
                     {item.overdue.length > 0 && <span className="crit">{item.overdue.length} overdue</span>}
                     {item.gaps.length > 0 && <span className="warn">{item.gaps.length} not set up</span>}
-                    {item.overdue.length === 0 && item.gaps.length === 0 && <span className="ok">All in hand</span>}
+                    {item.overdue.length === 0 && item.gaps.length === 0 && <span className="ok">Complete</span>}
                   </span>
                 </button>
 
                 {expanded === item.id && (
                   <div className="ueq-detail">
                     <p className="ueq-ident">
-                      {[item.manufacturer, item.model].filter(Boolean).join(' ') || 'No make or model recorded'}
+                      {[item.manufacturer, item.model].filter(Boolean).join(' ') || 'No model recorded'}
                       {item.serialNumber ? ` · serial ${item.serialNumber}` : ''}
                       {item.locationName ? ` · ${item.locationName}` : ''}
                       {item.custodianName ? ` · ${item.custodianName}` : ''}
@@ -186,9 +165,9 @@ export default function PortalUnitEquipment({ onChanged }: { onChanged?: () => v
   );
 }
 
-function Stat({ value, label, tone }: { value: number; label: string; tone: string }) {
+function Stat({ value, label, tone }: { value: number; label: string; tone?: string }) {
   return (
-    <div className={`ueq-stat tone-${tone}`}>
+    <div className={`ueq-stat${tone ? ` tone-${tone}` : ''}`}>
       <strong>{value}</strong>
       <span>{label}</span>
     </div>
@@ -204,10 +183,9 @@ function DutyRow({ duty, isUnitHead, onSetUp }: {
     : duty.setUp === false ? 'gap'
     : duty.dueState === 'due_soon' ? 'soon' : 'ok';
 
-  // The two duties whose programme is genuinely set from here. Verification is
-  // an act with an outcome, not a recurring tick, so what is offered here is
-  // the interval it recurs on; performing one stays in the Equipment module
-  // where its acceptance criteria and evidence live.
+  // Only the interval is set from here. Performing a calibration or a
+  // verification stays in Equipment Management, where the certificate,
+  // reference standard and evidence belong.
   const settable = isUnitHead && duty.tracked && duty.setUp === false
     && ['maintenance', 'calibration', 'verification'].includes(duty.duty);
 
@@ -215,23 +193,20 @@ function DutyRow({ duty, isUnitHead, onSetUp }: {
     <li className={`ueq-duty t-${tone}`}>
       <Icon size={13} />
       <div className="ueq-duty-main">
-        <span className="ueq-duty-head">
-          {duty.label}
-          <span className="ueq-clause" title={duty.hint}>{duty.clause}</span>
-        </span>
+        <span className="ueq-duty-head" title={duty.hint}>{duty.label}</span>
         <span className="ueq-duty-state">
-          {duty.tracked ? duty.detail : 'Listed because this kind of instrument owes it; this system holds no record of it yet.'}
+          {duty.tracked ? duty.detail : 'Not tracked in this system'}
           {duty.dueDate && (
             <span className={`ueq-due ${duty.dueState}`}>
               <CalendarClock size={10} />
-              {duty.dueState === 'overdue' ? 'Was due ' : 'Due '}{duty.dueDate}
+              {duty.dueState === 'overdue' ? 'Overdue ' : 'Due '}{duty.dueDate}
             </span>
           )}
         </span>
       </div>
       {settable && (
         <button type="button" className="ueq-set" onClick={onSetUp}>
-          <Plus size={11} /> Set it up
+          <Plus size={11} /> Set up
         </button>
       )}
     </li>
@@ -280,10 +255,7 @@ function MaintenanceSetupDialog({ item, onClose, onSaved }: {
       const result = await api<{ created: number; problems: string[] }>(`/equipment/${item.id}/maintenance-tasks`, {
         method: 'POST', body: JSON.stringify({ tasks }),
       });
-      await onSaved(
-        `${result.created} maintenance task${result.created === 1 ? '' : 's'} added to ${item.name}. `
-        + 'Its monthly chart appears on the Equipment face from now on.',
-      );
+      await onSaved(`${result.created} task${result.created === 1 ? '' : 's'} added to ${item.name}. Its monthly chart is now available.`);
     } catch (e) { setProblem(errorText(e)); }
     finally { setBusy(false); }
   }
@@ -293,11 +265,10 @@ function MaintenanceSetupDialog({ item, onClose, onSaved }: {
       <div className="modal-panel ueq-dialog" onClick={e => e.stopPropagation()}>
         <header className="modal-head">
           <div className="modal-title">
-            <h3>Maintenance for {item.name}</h3>
+            <h3>Maintenance — {item.name}</h3>
             <p className="modal-sub">
-              What an instrument of this kind is normally maintained with. Nothing here overrides the
-              manufacturer&rsquo;s manual — untick what does not apply, and change any wording or
-              frequency your own manual states differently.
+              A starting list for this type of instrument. Untick what does not apply and edit the rest
+              to match your manual.
             </p>
           </div>
           <button type="button" className="modal-x" onClick={onClose} aria-label="Close"><X size={16} /></button>
@@ -307,7 +278,7 @@ function MaintenanceSetupDialog({ item, onClose, onSaved }: {
           {problem && <p className="pd-error"><AlertTriangle size={13} /> {problem}</p>}
           {!framework ? <p className="muted">Reading what this kind of instrument needs…</p> : (
             <>
-              <p className="ueq-framework-label">Starting from: <strong>{framework.label}</strong></p>
+              <p className="ueq-framework-label">{framework.label}</p>
               <ul className="ueq-tasks">
                 {framework.tasks.map((task, i) => (
                   <li key={i} className={task.alreadyAdded ? 'is-added' : ''}>
@@ -354,15 +325,14 @@ function MaintenanceSetupDialog({ item, onClose, onSaved }: {
    Calibration and verification: the interval, not the act
    ----------------------------------------------------------------------------
    Recording a calibration means a certificate, a reference standard and a
-   traceability statement, and that record stays in the Equipment module where
-   it belongs. What was missing from a unit head's reach is the thing that makes
-   the absence visible in the first place — the interval it should recur on, and
-   the date it is next owed. That is what this sets.
+   traceability statement, and that stays in Equipment Management. What was out
+   of a unit head's reach is the interval it should recur on and the date it is
+   next due — which is what makes an absence visible in the first place.
    ------------------------------------------------------------------------- */
 function ScheduleSetupDialog({ item, duty, onClose, onSaved }: {
   item: UnitEquipmentItem; duty: string; onClose: () => void; onSaved: (m: string) => void | Promise<void>;
 }) {
-  const noun = duty === 'calibration' ? 'Calibration' : 'Performance verification';
+  const noun = duty === 'calibration' ? 'Calibration' : 'Verification';
   const [form, setForm] = useState({
     frequency: duty === 'calibration' ? 'annual' : 'annual',
     providerType: duty === 'calibration' ? 'external' : 'internal',
@@ -386,7 +356,7 @@ function ScheduleSetupDialog({ item, duty, onClose, onSaved }: {
           taskDescription: form.taskDescription || `${noun} of ${item.name}`,
         }),
       });
-      await onSaved(`${noun} of ${item.name} is scheduled ${form.frequency}, next due ${result.nextDueDate}.`);
+      await onSaved(`${noun} scheduled for ${item.name} — next due ${result.nextDueDate}.`);
     } catch (e) { setProblem(errorText(e)); }
     finally { setBusy(false); }
   }
@@ -396,11 +366,10 @@ function ScheduleSetupDialog({ item, duty, onClose, onSaved }: {
       <div className="modal-panel narrow" onClick={e => e.stopPropagation()}>
         <header className="modal-head">
           <div className="modal-title">
-            <h3>{noun} of {item.name}</h3>
+            <h3>{noun} — {item.name}</h3>
             <p className="modal-sub">
-              {duty === 'calibration'
-                ? 'How often it is calibrated against a traceable reference, and when the next one is owed (ISO 15189:2022 §6.5.2–6.5.3). The certificate and the traceability statement are recorded against the calibration itself under Equipment Management.'
-                : 'How often this examination’s performance is re-verified in this laboratory (ISO 15189:2022 §7.3.3). The acceptance criteria and the evidence are recorded on the verification itself under Equipment Management.'}
+              How often it is done and when the next one falls due. The record itself is entered
+              under Equipment Management.
             </p>
           </div>
           <button type="button" className="modal-x" onClick={onClose} aria-label="Close"><X size={16} /></button>
@@ -409,7 +378,7 @@ function ScheduleSetupDialog({ item, duty, onClose, onSaved }: {
         <div className="modal-body">
           {problem && <p className="pd-error"><AlertTriangle size={13} /> {problem}</p>}
           <div className="form-grid">
-            <label>How often
+            <label>Frequency
               <select value={form.frequency} onChange={e => set('frequency', e.target.value)}>
                 {FREQUENCIES.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
               </select>
@@ -426,24 +395,20 @@ function ScheduleSetupDialog({ item, duty, onClose, onSaved }: {
                   placeholder="Who performs it" />
               </label>
             )}
-            <label>Next one due
+            <label>Next due
               <input type="date" value={form.nextDueDate} onChange={e => set('nextDueDate', e.target.value)} />
             </label>
-            <label className="wide">What it covers
+            <label className="wide">Description
               <TextField value={form.taskDescription} onValue={v => set('taskDescription', v)}
                 placeholder={`${noun} of ${item.name}`} />
             </label>
           </div>
-          <p className="ueq-note">
-            Leave the date blank and it is set one interval from today. Once the schedule exists, the
-            instrument stops reading as &ldquo;nothing set up&rdquo; and starts reading as due or not due,
-            which is the distinction an assessor asks about.
-          </p>
+          <p className="ueq-note">Leave the date blank to set it one interval from today.</p>
         </div>
 
         <footer className="modal-foot">
           <button type="button" disabled={busy} onClick={() => void submit()}>
-            {busy ? <><Loader2 size={14} className="pd-spin" /> Saving…</> : 'Set the schedule'}
+            {busy ? <><Loader2 size={14} className="pd-spin" /> Saving…</> : 'Save schedule'}
           </button>
           <button type="button" className="secondary" onClick={onClose}>Cancel</button>
         </footer>

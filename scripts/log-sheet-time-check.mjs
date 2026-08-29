@@ -130,7 +130,7 @@ check('adding a note to a past day needs no authorisation — it is the habit wo
 console.log('\n[5] Changing what a past entry says takes a reason, and keeps the original');
 const noReason = await write([{ rowId: tempRow.id, day: pastDay, slot: 'am', value: 6.9 }]);
 check('changing it without a reason is refused', noReason.json?.saved === 0, JSON.stringify(noReason.json?.saved));
-check('and the refusal asks for the reason', /needs a reason recorded with it/.test(noReason.json?.refused?.[0]?.reason ?? ''),
+check('and the refusal asks for the reason', /a reason is required/.test(noReason.json?.refused?.[0]?.reason ?? ''),
   noReason.json?.refused?.[0]?.reason);
 check('the original value is untouched',
   (noReason.json?.cells ?? []).find(c => c.day === pastDay && c.slot === 'am')?.value_num === 4.6,
@@ -237,7 +237,7 @@ check('no run rule fires — nothing runs six the same way',
   !driftTrends.some(t => t.kind === 'rising' || t.kind === 'falling'), JSON.stringify(driftTrends.map(t => t.kind)));
 const approaching = driftTrends.find(t => t.kind === 'approaching_limit');
 check('but the loss of margin is caught', Boolean(approaching), JSON.stringify(driftTrends.map(t => t.kind)));
-check('naming how much margin it has given up', /less margin than it started with/.test(approaching?.summary ?? ''),
+check('naming how much margin it has given up', /less margin/.test(approaching?.summary ?? ''),
   approaching?.summary);
 check('and it is severe enough to act on', approaching?.severity === 'act', String(approaching?.severity));
 check('having stayed one side of the middle, that is caught too',
