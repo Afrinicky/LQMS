@@ -168,10 +168,22 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
       </header>
 
       {sheet.locked && (
-        <p className="ls-locked">
-          <Lock size={12} /> Signed {String(sheet.verified_at ?? '').slice(0, 10)}
-          {sheet.verifiedByName ? ` by ${sheet.verifiedByName}` : ''}. Corrections require a nonconformity.
-        </p>
+        <div className="ls-locked">
+          <Lock size={12} />
+          <div className="ls-locked-text">
+            Signed {String(sheet.verified_at ?? '').slice(0, 10)}
+            {sheet.verifiedByName ? ` by ${sheet.verifiedByName}` : ''}. Corrections require a nonconformity.
+            {sheet.verification_comments && <span className="ls-locked-note">{sheet.verification_comments}</span>}
+          </div>
+          {/* The signature itself, not just who typed their name. A verified
+              month is expected to carry it, on screen as on the paper form. */}
+          {sheet.signature?.image && (
+            <figure className="ls-sig">
+              <img src={sheet.signature.image} alt={`Signature of ${sheet.verifiedByName ?? sheet.signature.signer_name ?? 'the reviewer'}`} />
+              <figcaption>E-SIG-{sheet.signature.id}</figcaption>
+            </figure>
+          )}
+        </div>
       )}
       {problem && <p className="pd-error"><AlertTriangle size={13} /> {problem}</p>}
       {notice && (

@@ -52,6 +52,7 @@ import {
 } from '../../shared/constants/routineWork.js';
 import { tierFeatureKey, TIER_ACTION } from '../../shared/constants/activities.js';
 import { effectiveTarget, withEffectiveTarget } from '../services/iqcTargets.js';
+import { chartStatistics } from '../services/iqcEvaluation.js';
 
 const numericOnly = (req: any, _res: any, next: any) => (/^\d+$/.test(req.params.id) ? next() : next('route'));
 
@@ -494,6 +495,27 @@ export function iqcPortalRoutes() {
     });
   });
 
+  /* ======================================================================
+     Defining a control from the portal
+     ----------------------------------------------------------------------
+     The wizard is the module's — literally the same component — so what it
+     needs here is only the lists it fills its dropdowns from. They are served
+     from this router rather than from /sections, /staff and /equipment so the
+     right that governs them is the one that governs defining a control, not
+     three unrelated module rights a bench scientist may not hold.
+     ==================================================================== */
+  router.get('/portal/lookups', requirePermission('iqc', 'create'), (req, res) => {
+    const db = getDb();
+    const sections = db.prepare('SELECT id, name FROM sections ORDER BY name').all();
+    const staff = db.prepare('SELECT id, full_name AS fullName FROM staff WHERE is_active = 1 ORDER BY full_name').all();
+    // Only diagnostic equipment carries IQC — the same test the module screen
+    // applies, from the same shared helper.
+    const equipment = (db.prepare(`SELECT id, name, equipment_number, category, equipment_category, equipment_archetype, section_id, status
+        FROM equipment_items ORDER BY name`).all() as any[])
+      .filter(item => equipmentIsDiagnostic(item));
+    res.json({ sections, staff, equipment, sectionId: currentSection(db, req) });
+  });
+
   /**
    * One control, everything the entry screen needs: its analytes in order, its
    * limits, what the bench used last time, and which ways in it allows.
@@ -587,20 +609,27 @@ export function iqcPortalRoutes() {
       ORDER BY res.run_date DESC, res.id DESC LIMIT ?`).all(req.params.id, limit) as any[];
     const points = rows.reverse();
     const numeric = points.filter(p => Number(p.is_qualitative) !== 1).map(p => Number(p.result_value)).filter(v => !Number.isNaN(v));
+    // Drawn against the same target the module's chart uses: the vendor's pair
+    // where one was entered, otherwise the SD this laboratory established from
+    // its own runs. A portal chart scaled differently from the module's chart
+    // of the same analyte would be worse than no portal chart.
+    const target = effectiveTarget(analyte);
     const lotChanges = db.prepare(`SELECT change_date, reason FROM iqc_lot_changes
       WHERE old_iqc_material_id = ? OR new_iqc_material_id = ? ORDER BY change_date`).all(analyte.material_id, analyte.material_id);
 
     res.json({
       analyte: {
         id: analyte.id, name: analyte.analyte, unit: analyte.unit, decimalPlaces: analyte.decimal_places,
-        targetMean: analyte.target_mean, targetSd: analyte.target_sd,
+        targetMean: target.mean, targetSd: target.sd,
+        enteredMean: analyte.target_mean, enteredSd: analyte.target_sd,
         acceptableLow: analyte.acceptable_low, acceptableHigh: analyte.acceptable_high,
       },
+      target,
       material: {
         id: analyte.material_id, name: analyte.material_name, lotNumber: analyte.lot_number,
         testName: analyte.test_name, levelLabel: analyte.level_label, source: analyte.source,
       },
-      statistics: chartStatistics(numeric, analyte.target_mean, analyte.target_sd),
+      statistics: chartStatistics(numeric, target.mean, target.sd),
       lotChanges, points,
       runIds: [...new Set(points.map(p => Number(p.run_id)).filter(Boolean))],
     });

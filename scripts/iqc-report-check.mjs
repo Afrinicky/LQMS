@@ -121,15 +121,19 @@ check('with no caveat over it', !p1.body.includes('class="caveat"'));
 
 const p2 = await text(`/iqc/analytes/${noSdA.id}/chart/print?autoprint=0`, A);
 check('a control with NO assigned SD still prints a chart', p2.status === 200 && plotted(p2.body) >= 4, `${plotted(p2.body)} points`);
-check('its limits are named provisional rather than passed off as control limits',
-  p2.body.includes('provisional limits'), p2.body.slice(p2.body.indexOf('<h1'), p2.body.indexOf('<h1') + 120));
-check('and the page says where the limits came from',
-  p2.body.includes('drawn from the results themselves'));
+check('it is called a run chart rather than passed off as a Levey-Jennings chart',
+  p2.body.includes('Run chart — no control limits established yet'),
+  p2.body.slice(p2.body.indexOf('<h1'), p2.body.indexOf('<h1') + 140));
+check('and it does NOT invent SD bands from the handful of runs so far',
+  !p2.body.includes('+1SD') && !p2.body.includes('provisional limits'));
+check('the page says what is needed before limits exist',
+  p2.body.includes('20 results over 20 days'));
+check('and it is drawn against the acceptable range, which is what a result is checked against',
+  p2.body.includes('>High<') || p2.body.includes('>Low<') || p2.body.includes('no acceptable range'));
 
 const p3 = await text(`/iqc/analytes/${flatA.id}/chart/print?autoprint=0`, A);
 check('two identical results with no SD still print a chart', p3.status === 200 && plotted(p3.body) >= 2, `${plotted(p3.body)} points`);
-check('and it is honestly called a run chart', p3.body.includes('Run chart — no control limits yet'));
-check('saying why there are no limits', p3.body.includes('no spread to draw limits from'));
+check('and it too is called a run chart', p3.body.includes('Run chart — no control limits established yet'));
 
 /* ==========================================================================
    2. The runs, as a printed record
@@ -157,7 +161,7 @@ check('several controls print together', several.status === 200
 check('with a chart for each of them',
   (several.body.match(/<section class="chart">/g) ?? []).length === 2);
 check('and a chart that has no SD still draws inside the report',
-  several.body.includes('provisional limits') || several.body.includes('Run chart'));
+  several.body.includes('Run chart — no control limits established yet'));
 
 const empty = await text('/iqc/runs/report/print?autoprint=0', A);
 check('selecting nothing prints nothing rather than the whole register',

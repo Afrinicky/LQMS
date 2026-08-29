@@ -41,14 +41,14 @@ export const emptyAnalyte = (): AnalyteDraft => ({
   decimalPlaces: '2', expectedResult: '', astMethod: '', expectedInterpretation: '',
 });
 
-export default function DefineControlForm({ sections, staff, equipment, onSaved, onError, heading, lead, defaultSectionId }: {
+export default function DefineControlForm({ sections, staff, equipment, mySectionId, onSaved, onError, heading, lead }: {
   sections: Section[]; staff: Staff[]; equipment: EquipmentItem[];
+  /** The unit the person defining this control works in. Preselected. */
+  mySectionId?: number | null;
   onSaved: () => void | Promise<void>; onError: (m: string) => void;
   /** Overridden in the portal, where "Define a control" reads oddly on a personal page. */
   heading?: string;
   lead?: string;
-  /** The unit to start on — the portal knows which one the person works in. */
-  defaultSectionId?: number | null;
 }) {
   const { can } = usePermissions();
   const [source, setSource] = useState<IqcSource>('commercial');
@@ -56,7 +56,7 @@ export default function DefineControlForm({ sections, staff, equipment, onSaved,
   const [form, setForm] = useState({
     materialName: '', testName: '', lotNumber: '', levelLabel: '', manufacturer: '',
     expiryDate: '', openVialExpiry: '', storageCondition: '',
-    sectionId: defaultSectionId ? String(defaultSectionId) : '', equipmentId: '',
+    sectionId: mySectionId != null ? String(mySectionId) : '', equipmentId: '',
     qcFrequency: 'each_run', ruleProfile: 'westgard_standard' as IqcRuleProfile,
     preparedByStaffId: '', preparationDate: '', preparationMethod: '', baseMaterial: '',
     validationSummary: '', stabilityPeriod: '', instructions: '', expectedOrganism: '', csScope: 'both',
@@ -70,12 +70,14 @@ export default function DefineControlForm({ sections, staff, equipment, onSaved,
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
-  // The portal knows which unit the person works in, but it may resolve a beat
-  // after this form mounts. Fill it in when it arrives, and never overwrite a
-  // choice already made.
+  // A control belongs to the bench that runs it, and the person defining it is
+  // almost always defining it for their own bench. Preselecting their unit is
+  // what stops a control being saved unowned and never appearing on a board.
+  // It may resolve a beat after this form mounts, so it is filled in when it
+  // arrives — and never over a choice already made.
   useEffect(() => {
-    if (defaultSectionId) setForm(f => (f.sectionId ? f : { ...f, sectionId: String(defaultSectionId) }));
-  }, [defaultSectionId]);
+    if (mySectionId != null) setForm(f => (f.sectionId ? f : { ...f, sectionId: String(mySectionId) }));
+  }, [mySectionId]);
   const profiles = PROFILES_FOR_TYPE[controlType];
   useEffect(() => { if (!profiles.includes(form.ruleProfile)) set('ruleProfile', profiles[0]); }, [controlType]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -167,9 +169,20 @@ export default function DefineControlForm({ sections, staff, equipment, onSaved,
           <label>Expiry date<input type="date" value={form.expiryDate} onChange={e => set('expiryDate', e.target.value)} /></label>
           <label>Open-vial expiry<input type="date" value={form.openVialExpiry} onChange={e => set('openVialExpiry', e.target.value)} /></label>
           <label>Storage condition<TextField value={form.storageCondition} onValue={nextValue => set('storageCondition', nextValue)} placeholder="e.g. 2–8 °C" /></label>
-          <label>Section<select value={form.sectionId} onChange={e => set('sectionId', e.target.value)}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+          <label>Unit that runs it
+            <select value={form.sectionId} onChange={e => set('sectionId', e.target.value)}>
+              <option value="">—</option>
+              {sections.map(s => <option key={s.id} value={s.id}>{s.name}{mySectionId != null && Number(s.id) === Number(mySectionId) ? ' (yours)' : ''}</option>)}
+            </select>
+          </label>
           <label>Instrument<select value={form.equipmentId} onChange={e => set('equipmentId', e.target.value)}><option value="">—</option>{equipment.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
         </div>
+        {!form.sectionId && (
+          <p className="iqc-note warn">
+            Name the unit that runs this control. Until it has one it appears on nobody&rsquo;s bench board,
+            which is how a control ends up defined and never run.
+          </p>
+        )}
       </fieldset>
 
       {/* 3b — in-house provenance */}

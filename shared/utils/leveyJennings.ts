@@ -20,19 +20,23 @@
  * So there are three ways to scale the same series, and the chart says which
  * one it used:
  *
- *   TARGET     — assigned mean and SD. The real thing: ±1/2/3 SD zones, Westgard
- *                rules mean what they say.
- *   OBSERVED   — no assigned SD, but the runs so far have a usable spread. Limits
- *                are drawn from the observed mean and SD and labelled provisional,
- *                because they describe what the method HAS done, not what it
- *                SHOULD do. Useful for seeing drift; not evidence of control.
- *   PLAIN      — neither. Fewer than two results, or every result identical (an
- *                SD of zero). Points are plotted on an ordinary value axis with
- *                the target mean drawn if there is one. It is a run chart, and
- *                it is called one.
+ *   TARGET     — an SD to scale against: the vendor's, or the one this
+ *                laboratory established from its own runs. The real thing:
+ *                ±1/2/3 SD zones, Westgard rules mean what they say.
+ *   PLAIN      — no SD yet. Points are plotted on an ordinary value axis
+ *                against the acceptable range, which is what a result IS
+ *                checked against until limits exist. It is a run chart, and it
+ *                is called one.
+ *
+ * There is deliberately no third mode that computes ±1/2/3 SD bands from the
+ * handful of results recorded so far. This laboratory establishes its limits
+ * from 20 results over 20 days (see server/services/iqcTargets.ts); bands drawn
+ * from four results would look exactly like control limits on the page and
+ * invite Westgard rules to be read off them, which is the opposite of what that
+ * policy says. Until there is an SD, the honest chart is a run chart.
  */
 
-export type LjMode = 'target' | 'observed' | 'plain';
+export type LjMode = 'target' | 'plain';
 
 export interface LjSeriesPoint {
   value: number;
@@ -60,6 +64,8 @@ export interface LjScale {
   z: (value: number) => number | null;
   /** The horizontal lines to draw, outermost first, with their labels. */
   gridlines: { value: number; k: number | null; label: string; kind: 'mean' | 'limit' | 'outer' | 'value' }[];
+  /** In a run chart, the acceptable range to shade. Absent when limits exist. */
+  acceptable?: { low: number | null; high: number | null };
   /** What to tell the reader about how this chart is scaled. Null when it is the real thing. */
   caveat: string | null;
 }
@@ -88,7 +94,10 @@ export function ljScale(
   targetMean: number | null | undefined,
   targetSd: number | null | undefined,
   geometry: LjGeometry,
+  range?: { low?: number | null; high?: number | null },
 ): LjScale | null {
+  const acceptableLow = range?.low ?? null;
+  const acceptableHigh = range?.high ?? null;
   if (values.length === 0) return null;
 
   const plotW = geometry.width - geometry.padLeft - geometry.padRight;
@@ -97,21 +106,15 @@ export function ljScale(
 
   const mean = typeof targetMean === 'number' && Number.isFinite(targetMean) ? targetMean : null;
 
-  // Which centre and spread to draw from.
-  let mode: LjMode; let centre: number | null; let sd: number | null;
-  if (mean !== null && usableSd(targetSd)) {
-    mode = 'target'; centre = mean; sd = targetSd;
-  } else {
-    const observedMean = values.reduce((a, b) => a + b, 0) / values.length;
-    const observedSd = values.length >= 2
-      ? Math.sqrt(values.reduce((sum, v) => sum + (v - observedMean) ** 2, 0) / (values.length - 1))
-      : 0;
-    if (usableSd(observedSd)) {
-      mode = 'observed'; centre = mean ?? observedMean; sd = observedSd;
-    } else {
-      mode = 'plain'; centre = mean ?? observedMean; sd = null;
-    }
-  }
+  // An SD to scale against, or none. `targetSd` is already the EFFECTIVE SD by
+  // the time it reaches here — the vendor's where one was entered, otherwise
+  // the one established from this laboratory's own runs — so this is the whole
+  // test.
+  const mode: LjMode = mean !== null && usableSd(targetSd) ? 'target' : 'plain';
+  const centre: number | null = mode === 'target'
+    ? mean
+    : (mean ?? values.reduce((a, b) => a + b, 0) / values.length);
+  const sd = mode === 'target' ? (targetSd as number) : null;
 
   if (sd !== null && centre !== null) {
     const zs = values.map(v => (v - centre!) / sd!);
@@ -128,7 +131,7 @@ export function ljScale(
       .map(k => ({
         value: centre! + k * sd!,
         k,
-        label: k === 0 ? (mode === 'observed' ? 'Mean (obs.)' : 'Mean') : `${k > 0 ? '+' : '−'}${Math.abs(k)}SD`,
+        label: k === 0 ? 'Mean' : `${k > 0 ? '+' : '−'}${Math.abs(k)}SD`,
         kind: (k === 0 ? 'mean' : Math.abs(k) === 3 ? 'outer' : 'limit') as 'mean' | 'limit' | 'outer',
       }));
     return {
@@ -136,47 +139,60 @@ export function ljScale(
       offScale: (value: number) => Math.abs((value - centre!) / sd!) > extent,
       z: (value: number) => (value - centre!) / sd!,
       gridlines,
-      caveat: mode === 'observed'
-        ? 'No SD is assigned to this control, so the limits below are drawn from the results themselves and are provisional. '
-          + 'They show how this method has behaved, not what it should do — set an assigned mean and SD, or establish them from at least 20 runs, before treating them as control limits.'
-        : null,
+      caveat: null,
     };
   }
 
-  // Plain: an ordinary value axis around the data, padded so a flat series does
-  // not sit on the frame. A control run five times with the same number is a
-  // real and common thing on a new lot, and it must still draw.
-  const min = Math.min(...values, ...(mean !== null ? [mean] : []));
-  const max = Math.max(...values, ...(mean !== null ? [mean] : []));
+  // Plain: an ordinary value axis around the data AND the acceptable range, so
+  // a result sitting outside the range is visibly outside it. A flat series
+  // (the same number every run — real, and common on a new lot) is padded so it
+  // does not sit on the frame instead of dividing by zero.
+  const bounds = [
+    ...values,
+    ...(mean !== null ? [mean] : []),
+    ...(typeof acceptableLow === 'number' && Number.isFinite(acceptableLow) ? [acceptableLow] : []),
+    ...(typeof acceptableHigh === 'number' && Number.isFinite(acceptableHigh) ? [acceptableHigh] : []),
+  ];
+  const min = Math.min(...bounds);
+  const max = Math.max(...bounds);
   const span = max - min;
-  const pad = span > 0 ? span * 0.35 : Math.max(Math.abs(max) * 0.1, 1);
+  const pad = Math.max(span * 0.12, Math.abs(max) * 0.02, 0.5);
   const top = max + pad;
   const bottom = min - pad;
   const y = (value: number) => {
     const clamped = Math.min(top, Math.max(bottom, value));
     return geometry.padTop + ((top - clamped) / (top - bottom)) * plotH;
   };
-  const ticks = 5;
-  const gridlines: LjScale['gridlines'] = Array.from({ length: ticks }, (_, i) => ({
-    value: bottom + ((top - bottom) * i) / (ticks - 1),
-    k: null,
-    label: '',
-    kind: 'value',
-  }));
+
+  const gridlines: LjScale['gridlines'] = [];
+  if (typeof acceptableHigh === 'number' && Number.isFinite(acceptableHigh)) {
+    gridlines.push({ value: acceptableHigh, k: null, label: 'High', kind: 'outer' });
+  }
+  if (typeof acceptableLow === 'number' && Number.isFinite(acceptableLow)) {
+    gridlines.push({ value: acceptableLow, k: null, label: 'Low', kind: 'outer' });
+  }
   if (mean !== null) gridlines.push({ value: mean, k: 0, label: 'Target mean', kind: 'mean' });
 
+  const hasRange = gridlines.some(g => g.kind === 'outer');
   return {
     mode: 'plain', centre, sd: null, extent: null, clipped: false, top, bottom, y, x,
     offScale: () => false,
     z: () => null,
     gridlines,
-    caveat: values.length < 2
-      ? 'One result so far. This is a run chart, not a Levey-Jennings chart: control limits appear once the control has an assigned SD, or once enough runs exist to estimate one.'
-      : 'Every result in this window is the same value, so there is no spread to draw limits from. This is a run chart until the control has an assigned SD or the results vary.',
+    /** Also the pair drawn as a shaded band, when both ends exist. */
+    acceptable: {
+      low: typeof acceptableLow === 'number' && Number.isFinite(acceptableLow) ? acceptableLow : null,
+      high: typeof acceptableHigh === 'number' && Number.isFinite(acceptableHigh) ? acceptableHigh : null,
+    },
+    caveat: hasRange
+      ? 'No control limits have been established for this parameter yet, so this is a run chart: the results in date order '
+        + 'against the acceptable range. Limits are calculated from the laboratory\'s own runs — 20 results over 20 days — '
+        + 'and Westgard rules apply only once they exist.'
+      : 'No control limits and no acceptable range have been set for this parameter, so nothing here can be in or out of '
+        + 'control. Set an acceptable range on the control, and establish limits from 20 results over 20 days.',
   };
 }
-
 /** What to call the chart, given how it had to be scaled. */
 export function ljChartTitle(mode: LjMode): string {
-  return mode === 'target' ? 'Levey-Jennings chart' : mode === 'observed' ? 'Levey-Jennings chart — provisional limits' : 'Run chart — no control limits yet';
+  return mode === 'target' ? 'Levey-Jennings chart' : 'Run chart — no control limits established yet';
 }
