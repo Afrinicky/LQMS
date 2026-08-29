@@ -144,14 +144,25 @@ export default function PortalRoutineSheets({ kind }: { kind: SheetKind }) {
                 {totals.awaiting > 0 && <span><strong>{totals.awaiting}</strong> waiting to be verified</span>}
               </div>
 
-              <div className="rs-split">
-                <div className="rs-list">
-                  <SheetPicker sheets={index.sheets} activeId={activeId} onPick={setActiveId} />
-                </div>
+              {/*
+                The picker sits above the grid, not beside it.
+
+                A month is 31 columns wide and a chart with AM and PM is two
+                rows per parameter; a fixed 250px column down the left took a
+                quarter of the screen to list, very often, one fridge — and
+                squeezed the entries into a strip. So the sheets run across the
+                top as a strip of their own, and the grid gets the whole width
+                it needs. On a unit with one chart the strip is a single chip
+                and costs almost nothing; on a unit with twelve it scrolls
+                sideways, which is the right trade against making every entry
+                cell narrower for everybody.
+              */}
+              <div className="rs-stack">
+                <SheetPicker sheets={index.sheets} activeId={activeId} onPick={setActiveId} horizontal />
                 <div className="rs-grid">
                   {activeId
                     ? <LogSheetGrid sheetId={activeId} onChanged={load} />
-                    : <p className="muted">Choose a sheet on the left to record on it.</p>}
+                    : <p className="muted">Choose a sheet above to record on it.</p>}
                 </div>
               </div>
             </>

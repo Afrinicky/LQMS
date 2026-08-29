@@ -7012,6 +7012,62 @@ CREATE INDEX IF NOT EXISTS idx_instrument_messages_forward ON instrument_message
   }
 
   /* ==========================================================================
+     Changing a log sheet entry after the day it belongs to
+     --------------------------------------------------------------------------
+     A reading is an assertion about a moment. Correcting one on the day is
+     ordinary work — the wrong box, a transposed digit, a re-read after the
+     door was found ajar — and needs no ceremony beyond the audit trail every
+     write already leaves.
+
+     Changing one after its day has ended is a different act. The record has
+     been relied on: the morning handover read it, the excursion register
+     counted it, somebody may have released results against it. ISO 15189:2022
+     §8.4 and §7.5 both say the same thing about a record altered after the
+     fact — the original stays legible, who changed it and why is part of the
+     record, and the change is authorised by somebody senior to whoever made
+     the entry.
+
+     So this table is the amendment trail: what the cell said, what it says
+     now, who authorised the change and the reason they gave. Nothing is
+     overwritten silently, and the sheet shows an amended cell as amended.
+     ========================================================================= */
+  database.exec(`
+CREATE TABLE IF NOT EXISTS routine_log_cell_amendments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sheet_id INTEGER NOT NULL REFERENCES routine_log_sheets(id),
+  row_id INTEGER NOT NULL REFERENCES routine_log_rows(id),
+  day INTEGER NOT NULL,
+  slot TEXT NOT NULL,
+  -- 'amend' changed a value; 'delete' withdrew the entry altogether.
+  action TEXT NOT NULL DEFAULT 'amend',
+  old_value_num REAL,
+  old_value_text TEXT,
+  old_status TEXT,
+  old_note TEXT,
+  old_recorded_by_staff_id INTEGER REFERENCES staff(id),
+  old_recorded_at TEXT,
+  new_value_num REAL,
+  new_value_text TEXT,
+  new_status TEXT,
+  reason TEXT NOT NULL,
+  amended_by_staff_id INTEGER REFERENCES staff(id),
+  amended_by_user_id INTEGER REFERENCES users(id),
+  amended_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_log_amendments_cell
+  ON routine_log_cell_amendments(sheet_id, row_id, day, slot);
+`);
+
+  // A cell carries the count of times it has been amended, so the grid can mark
+  // it without joining the trail for every one of a thousand cells.
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(routine_log_cells)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!cols.has('amendment_count')) database.exec('ALTER TABLE routine_log_cells ADD COLUMN amendment_count INTEGER NOT NULL DEFAULT 0');
+    if (!cols.has('last_amended_at')) database.exec('ALTER TABLE routine_log_cells ADD COLUMN last_amended_at TEXT');
+    if (!cols.has('last_amend_reason')) database.exec('ALTER TABLE routine_log_cells ADD COLUMN last_amend_reason TEXT');
+  }
+
+  /* ==========================================================================
      Target values a laboratory established for itself
      --------------------------------------------------------------------------
      A commercial control arrives with an assayed mean and, very often, no SD —
