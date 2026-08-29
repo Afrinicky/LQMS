@@ -772,6 +772,13 @@ export type IqcBoard = {
   message?:string;
 };
 
+/** One parameter of a control, as offered for charting in the portal. */
+export type IqcChartAnalyte = {
+  id:number; analyte:string; unit:string|null; decimal_places:number|null;
+  target_mean:number|null; target_sd:number|null; expected_result?:string|null;
+  is_qualitative:number|null;
+};
+
 /**
  * Which of a unit's examinations are controlled, and which are not.
  *

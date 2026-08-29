@@ -12,7 +12,12 @@ import {
   IQC_ENTRY_METHOD_LABELS, IQC_ENTRY_METHOD_HINTS, type IqcEntryMethod,
 } from '../../../shared/constants/routineWork';
 import { QUALITATIVE_LABELS, RULE_LABELS } from '../../../shared/constants/iqc';
-import type { IqcBoard, IqcBoardControl, IqcMapping, IqcFeedMessage } from '../../../shared/types/api';
+import LeveyJenningsChart, { type ChartData } from '../../components/LeveyJenningsChart';
+import DefineControlForm from '../../components/iqc/DefineControlForm';
+import type {
+  IqcBoard, IqcBoardControl, IqcMapping, IqcFeedMessage, IqcChartAnalyte,
+  Section, Staff, EquipmentItem,
+} from '../../../shared/types/api';
 import PortalIqcCoverage from './PortalIqcCoverage';
 
 /**
@@ -232,7 +237,7 @@ function PortalDefineControl({ sectionId, sectionName, onSaved }: {
       {problem && <p className="pd-error"><AlertTriangle size={13} /> {problem}</p>}
       <DefineControlForm
         sections={lookups.sections} staff={lookups.staff} equipment={lookups.equipment}
-        defaultSectionId={sectionId}
+        mySectionId={sectionId}
         heading="Set up a new control"
         lead={sectionName
           ? `It will belong to ${sectionName} and appear on this board as soon as it is saved.`

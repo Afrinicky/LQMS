@@ -81,27 +81,28 @@ export default function LeveyJenningsChart({ data, onEstablish, canEstablish }: 
   const { analyte, material, statistics, points, lotChanges, target } = data;
   const dp = analyte.decimalPlaces ?? 2;
 
+  // The effective target: the vendor's pair where one was entered, otherwise
+  // the SD this laboratory established from its own runs.
   const mean = analyte.targetMean;
   const sd = analyte.targetSd;
 
-  // How the vertical axis is worked out — including the case that used to make
-  // this chart give up: a control with a mean but no assigned SD, or too few
-  // runs to have a spread. See shared/utils/leveyJennings.ts. The chart is
-  // always drawn; what changes is what it is honestly called.
+  // Where the lines go. The same module the printed chart is drawn from, so the
+  // record filed at the end of the month matches the screen it was read on.
   const scale = useMemo(
     () => ljScale(points.map(p => p.result_value), mean, sd, {
       padTop: PAD.top, padRight: PAD.right, padBottom: PAD.bottom, padLeft: PAD.left, width: W, height: H,
-    }),
-    [points, mean, sd],
+    }, { low: analyte.acceptableLow, high: analyte.acceptableHigh }),
+    [points, mean, sd, analyte.acceptableLow, analyte.acceptableHigh],
   );
 
-  if (!usable || !scale) {
-    // A control with results but no SD is the commonest reason this chart came
-    // up blank, and a blank panel taught the bench that charting does not work.
-    // The results exist; what is missing is the SD to scale them against. So
-    // the run chart is drawn anyway — every point, in date order, against the
-    // acceptable range where there is one — and the panel says exactly what is
-    // needed to turn it into a Levey-Jennings chart.
+  // No SD to scale against — the commonest state a control is in for its first
+  // weeks, and the reason this chart used to come up blank. A blank panel
+  // taught the bench that charting does not work. The results exist; what is
+  // missing is the SD to scale them against. So the run chart is drawn anyway —
+  // every point, in date order, against the acceptable range where there is one
+  // — and the panel says exactly what is needed to turn it into a
+  // Levey-Jennings chart. Invented limits are not offered in its place.
+  if (!scale || scale.mode !== 'target') {
     return (
       <div className="lj lj-provisional">
         <div className="lj-head">
