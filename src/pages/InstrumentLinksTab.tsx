@@ -199,8 +199,9 @@ export default function InstrumentLinksTab() {
               SECHLIMS never sits in the path of the LHIMS link, never binds its port and never dials an analyser
               it is connected to — it refuses to, and says so. What it takes are the analysers transmitting
               nowhere today: the second haematology analyser, and both chemistry analysers.
-              An analyser whose one host port already goes to LHIMS cannot also send here; for that machine the
-              bench enters controls by pasting, uploading or scanning instead.
+              The analyser whose one host port already goes to LHIMS reaches here a different way — by following
+              the middleware&rsquo;s own append log, which reads a file rather than touching the connection.
+              The order to set all of this up in is written down in <code>docs/ANALYSER_TCPIP_SETUP.md</code>.
             </p>
           </div>
         </div>
