@@ -146,8 +146,8 @@ export const FEATURES: FeatureDef[] = [
     desc: 'The equipment register — adding assets and editing their identity.',
     tabs: ['Equipment Register', 'Equipment Profile', 'New Equipment'] },
   { key: 'equipment.maintenance', module: 'equipment', label: 'Maintenance & calibration',
-    desc: 'Calibration, planned maintenance, breakdowns and their scanned records.',
-    tabs: ['Calibration', 'Maintenance Records', 'Scanned Records', 'Breakdowns'] },
+    desc: 'Calibration, planned maintenance, breakdowns and their scanned records, the maintenance task lists behind them, and the monthly maintenance charts.',
+    tabs: ['Calibration', 'Maintenance Records', 'Maintenance Charts', 'Scanned Records', 'Breakdowns'] },
   { key: 'equipment.verification', module: 'equipment', label: 'Verification & validation', sensitive: true,
     desc: 'Equipment verification and validation studies.', tabs: ['Verification & Validation'] },
   { key: 'equipment.adverse', module: 'equipment', label: 'Adverse events',
@@ -270,7 +270,15 @@ export const FEATURES: FeatureDef[] = [
     desc: 'Occupational health: immunisation status and exposure incidents. Confidential staff health data.',
     tabs: ['Immunisation & Exposure'] },
   { key: 'facilities_safety.environment', module: 'facilities_safety', label: 'Environmental monitoring',
-    desc: 'Environmental monitoring from the safety workspace.', tabs: ['Environmental Monitoring'] },
+    desc: 'Environmental monitoring from the safety workspace, including the monthly charts and their verification.',
+    tabs: ['Environmental Monitoring'] },
+  // Decontamination is everybody's work, so the right that matters here is the
+  // one that governs the PROGRAMME — adding a decontamination, changing what
+  // every unit carries, excusing a unit from one. Filling in the log is routine
+  // work at the general tier, which the whole laboratory holds.
+  { key: 'facilities_safety.decontamination', module: 'facilities_safety', label: 'Decontamination programme',
+    desc: 'The bench and environment decontamination programme: what is decontaminated, how often, and the monthly logs and their verification. Performing a decontamination needs only general routine work.',
+    tabs: ['Decontamination'] },
 
   // ── Environmental Monitoring (its own module) ───────────────────────────
   { key: 'monitoring.readings', module: 'monitoring', label: 'Readings & excursions',

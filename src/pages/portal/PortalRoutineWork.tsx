@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  AlertTriangle, ArrowRight, CheckCircle2, ClipboardCheck, Clock, Eye, Lock,
-  Loader2, Repeat, ShieldAlert, SlashIcon, Sparkles,
+  AlertTriangle, ArrowRight, Beaker, CheckCircle2, ClipboardCheck, Clock, Droplets,
+  Eye, Lock, Loader2, Repeat, ShieldAlert, SlashIcon, Sparkles, Thermometer, Wrench,
 } from 'lucide-react';
 import { api, errorText } from '../../services/api';
 import { useDutyReminders } from '../../hooks/useDutyReminders';
@@ -13,9 +13,25 @@ import {
 import { usePortal } from './portalData';
 import type { RoutineWorkResponse, RoutineActivity, ActivityOccurrence } from '../../../shared/types/api';
 import TextField from '../../components/ui/TextField';
+import PortalRoutineIqc from './PortalRoutineIqc';
+import PortalRoutineSheets, { PortalDeconProgramme } from './PortalRoutineSheets';
 
 /**
  * Routine Work — the recurring work of the bench, done from the portal.
+ *
+ * The tab is a shell over five faces, because "routine work" is not one screen:
+ *
+ *   Due now              what is on this person's list today, worked in place
+ *   Quality control      the unit's controls, run and accepted from here
+ *   Environment          the month's temperature and humidity charts
+ *   Decontamination      the month's bench and environment logs
+ *   Equipment            the month's maintenance charts
+ *
+ * The last four are each a whole register, and each used to live only inside
+ * its own module — which is why routine work was invisible from the portal
+ * until the morning it was overdue. The rule is that a person completes the
+ * work where they are told it is due, so the registers come to the portal
+ * rather than the portal linking away to them.
  *
  * Environmental charting, bench and equipment decontamination, scheduled
  * equipment maintenance, IQC: the work that is not a task somebody assigned but
@@ -237,7 +253,7 @@ function ProgrammeGroup({ category, rows, onOpen }: {
 /* ----------------------------------------------------------------------------
    The face
    ------------------------------------------------------------------------- */
-export default function PortalRoutineWork() {
+export function PortalRoutineDue() {
   const { setError } = usePortal();
   const { refresh: refreshDuty } = useDutyReminders();
   const [data, setData] = useState<RoutineWorkResponse | null>(null);
@@ -405,6 +421,56 @@ export default function PortalRoutineWork() {
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+
+/* ----------------------------------------------------------------------------
+   The tab itself: five faces over one idea
+   ------------------------------------------------------------------------- */
+type RoutineFace = 'due' | 'iqc' | 'environmental' | 'decontamination' | 'equipment_maintenance';
+
+const FACES: Array<{ key: RoutineFace; label: string; icon: ReactNode; hint: string }> = [
+  { key: 'due', label: 'Due from me', icon: <ClipboardCheck size={14} />,
+    hint: 'Everything routine on your list today, and your unit\u2019s whole programme.' },
+  { key: 'iqc', label: 'Quality control', icon: <Beaker size={14} />,
+    hint: 'Your unit\u2019s controls: whether they have been run today, and running them.' },
+  { key: 'environmental', label: 'Environment', icon: <Thermometer size={14} />,
+    hint: 'This month\u2019s temperature, humidity and pressure charts.' },
+  { key: 'decontamination', label: 'Decontamination', icon: <Droplets size={14} />,
+    hint: 'This month\u2019s bench and environment decontamination logs.' },
+  { key: 'equipment_maintenance', label: 'Equipment', icon: <Wrench size={14} />,
+    hint: 'This month\u2019s maintenance charts for your unit\u2019s instruments.' },
+];
+
+export default function PortalRoutineWork() {
+  const [face, setFace] = useState<RoutineFace>('due');
+  const { data: duty } = useDutyReminders();
+
+  return (
+    <div className="portal-stack">
+      <nav className="rw-faces" aria-label="Routine work">
+        {FACES.map(item => (
+          <button key={item.key} type="button" title={item.hint}
+            className={face === item.key ? 'is-active' : ''}
+            onClick={() => setFace(item.key)}>
+            {item.icon} {item.label}
+            {item.key === 'due' && duty?.counts?.due ? <span className="rw-face-n">{duty.counts.due}</span> : null}
+          </button>
+        ))}
+      </nav>
+
+      {face === 'due' && <PortalRoutineDue />}
+      {face === 'iqc' && <PortalRoutineIqc />}
+      {face === 'environmental' && <PortalRoutineSheets kind="environmental" />}
+      {face === 'decontamination' && (
+        <>
+          <PortalRoutineSheets kind="decontamination" />
+          <PortalDeconProgramme />
+        </>
+      )}
+      {face === 'equipment_maintenance' && <PortalRoutineSheets kind="equipment_maintenance" />}
     </div>
   );
 }

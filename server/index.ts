@@ -39,6 +39,9 @@ import { orientationFrameworkRoutes } from './routes/orientationFrameworks.js';
 import { appraisalRoutes } from './routes/appraisals.js';
 import { schedulingRoutes } from './routes/scheduling.js';
 import { dutyActivityRoutes } from './routes/dutyActivities.js';
+import { routineSheetRoutes } from './routes/routineSheets.js';
+import { decontaminationRoutes } from './routes/decontamination.js';
+import { iqcPortalRoutes } from './routes/iqcPortal.js';
 import { systemAuditRoutes } from './routes/systemAudit.js';
 import { scannedRecordsRoutes } from './routes/scannedRecords.js';
 import { assessmentsRoutes } from './routes/assessments.js';
@@ -122,6 +125,7 @@ export function createApiServer() {
   app.use('/api/organisation', organisationRoutes());
   // Runs, analytes and charts mount first so their specific paths win over
   // the older material/result routes that share the same prefix.
+  app.use('/api/iqc', iqcPortalRoutes());
   app.use('/api/iqc', iqcAdminRoutes());
   app.use('/api/iqc', iqcImportExportRoutes());
   app.use('/api/iqc', iqcRunRoutes());
@@ -151,6 +155,8 @@ export function createApiServer() {
   app.use('/api/scheduling', schedulingRoutes());
   // Duty-driven unit activities, the reminders they raise and the sound catalogue.
   app.use('/api/duty', dutyActivityRoutes());
+  app.use('/api/routine-sheets', routineSheetRoutes());
+  app.use('/api/decontamination', decontaminationRoutes());
   // The system's audit of itself: the live trail, and everything not done.
   app.use('/api/system-audit', systemAuditRoutes());
   app.use('/api/scanned-records', scannedRecordsRoutes());

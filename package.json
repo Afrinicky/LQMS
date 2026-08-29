@@ -25,6 +25,7 @@
     "audit:dashboard": "node scripts/dashboard-perf-check.mjs",
     "check:accounts": "node scripts/account-check.mjs",
     "check:iqc": "node scripts/iqc-check.mjs",
+    "check:routine-work": "node scripts/routine-work-check.mjs",
     "rebuild:native": "electron-builder install-app-deps",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",

@@ -27,6 +27,8 @@ import BarcodeLabelGenerator from '../components/BarcodeLabelGenerator';
 import { code128Svg } from '../../shared/utils/barcode';
 import { printLabelSheet, LABEL_PRESETS } from '../utils/labelPrint';
 import { EnvironmentalMonitoringPage, EnvLiveCards } from './EnvironmentalMonitoringPage';
+import DecontaminationPage from './DecontaminationPage';
+import EquipmentMaintenanceCharts from './EquipmentMaintenanceCharts';
 import { usePermissions } from '../hooks/usePermissions';
 import PermissionTabs from '../components/PermissionTabs';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
@@ -365,7 +367,7 @@ export function EquipmentPage() {
   return <div>
     <PageHeader eyebrow="Equipment Management" title="Equipment Management" subtitle="Asset register, maintenance, calibration, and breakdown tracking." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
-    {tabBarFor('equipment')(tab, ['Dashboard', 'Equipment Register', 'Equipment Profile', 'New Equipment', 'Verification & Validation', 'Calibration', 'Maintenance Records', 'Scanned Records', 'Breakdowns', 'Adverse Events', 'Training & Competency', 'Equipment Files', 'Reports placeholder'], setTab)}
+    {tabBarFor('equipment')(tab, ['Dashboard', 'Equipment Register', 'Equipment Profile', 'New Equipment', 'Verification & Validation', 'Calibration', 'Maintenance Records', 'Maintenance Charts', 'Scanned Records', 'Breakdowns', 'Adverse Events', 'Training & Competency', 'Equipment Files', 'Reports placeholder'], setTab)}
 
     {tab === 'Dashboard' && <><ModuleAlerts moduleKey="equipment" /><KpiStrip items={[
       { label: 'Equipment items', value: summary?.equipmentTotal ?? equipment.length, onClick: () => setTab('Equipment Register') },
@@ -469,6 +471,7 @@ export function EquipmentPage() {
     {tab === 'Calibration' && <><EquipmentLifecycleTab kind="calibration" equipment={equipment} staff={staff} setError={setError} onChanged={reloadSelected} /><ReferenceStandardsPanel staff={staff} setError={setError} /></>}
 
     {tab === 'Maintenance Records' && <EquipmentMaintenanceTab equipment={equipment} staff={staff} sections={sections} setError={setError} onChanged={() => { void load(); void reloadSelected(); }} />}
+    {tab === 'Maintenance Charts' && <EquipmentMaintenanceCharts equipment={equipment} setError={setError} />}
 
     {tab === 'Scanned Records' && <ScannedRecordUpload moduleKey="equipment" sections={sections} equipment={equipment.map(e => ({ id: e.id, name: `${e.equipment_number} — ${e.name}` }))} defaultEquipmentId={selected?.id}
       heading="Scanned maintenance logs & legacy equipment records"
@@ -3196,7 +3199,7 @@ export function SafetyPage() {
   return <div>
     <PageHeader eyebrow="Facilities and Safety" title="Facilities &amp; Safety" subtitle="Safety incidents, equipment, inspections, waste, chemicals and occupational health." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
-    {tabBarFor('facilities_safety')(tab, ['Dashboard', 'Safety Incidents', 'New Incident', 'Safety Equipment', 'Inspections & Drills', 'Waste Disposal', 'Hazardous Chemicals', 'Immunisation & Exposure', 'Environmental Monitoring'], setTab)}
+    {tabBarFor('facilities_safety')(tab, ['Dashboard', 'Safety Incidents', 'New Incident', 'Safety Equipment', 'Inspections & Drills', 'Waste Disposal', 'Hazardous Chemicals', 'Immunisation & Exposure', 'Environmental Monitoring', 'Decontamination'], setTab)}
 
     {tab === 'Dashboard' && <><KpiStrip items={[
       { label: 'Open incidents', value: openIncidents, tone: openIncidents ? 'warning' : undefined, onClick: () => setTab('Safety Incidents') },
@@ -3399,6 +3402,7 @@ export function SafetyPage() {
     </>}
 
     {tab === 'Environmental Monitoring' && <EnvironmentalMonitoringPage embedded />}
+    {tab === 'Decontamination' && <DecontaminationPage embedded />}
   </div>;
 }
 

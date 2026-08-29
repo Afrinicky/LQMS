@@ -5,6 +5,7 @@ import { config } from '../config/index.js';
 import { SYNCABLE_TABLES } from './syncableTables.js';
 import { CONFIG_LISTS } from '../../shared/constants/configLists.js';
 import { BUILTIN_SOUNDS, DEFAULT_SOUND_FOR_EVENT } from '../../shared/constants/activities.js';
+import { DECON_FRAMEWORKS } from '../../shared/constants/routineWork.js';
 import { seedCompetencyFrameworks } from './seedCompetency.js';
 import { seedOrientationFrameworks } from './seedOrientation.js';
 import { seedSupplierEvaluationFrameworks } from './seedSupplierEvaluation.js';
@@ -6408,6 +6409,360 @@ CREATE INDEX IF NOT EXISTS idx_appraisal_attachments ON appraisal_attachments(ap
     if (!sigCols.has('signed_file_id')) database.exec('ALTER TABLE ethical_declaration_signatures ADD COLUMN signed_file_id INTEGER REFERENCES files(id)');
   }
 
+  // -------------------------------------------------------------------
+  // Routine work — the monthly log sheet.
+  //
+  // A laboratory's routine record is a sheet, not a stream: a month across the
+  // top, the things being recorded down the side, one initial per cell, and the
+  // supervisor's signature at the bottom on the last day. The temperature
+  // chart, the bench decontamination log and the freezer maintenance schedule
+  // are the same object with different rows, so they are one set of tables.
+  //
+  // Rows are snapshotted onto the sheet when it is opened. If somebody changes
+  // a fridge's acceptable range in March, February's chart must still print
+  // with the range that was actually in force in February — a record that
+  // silently rewrites its own acceptance criteria is worse than no record.
+  // -------------------------------------------------------------------
+  database.exec(`
+CREATE TABLE IF NOT EXISTS routine_log_sheets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sheet_kind TEXT NOT NULL,                -- environmental | decontamination | equipment_maintenance
+  subject_type TEXT NOT NULL,              -- environmental_assets | decontamination_definitions | equipment_items
+  subject_id INTEGER NOT NULL,
+  section_id INTEGER REFERENCES sections(id),
+  month TEXT NOT NULL,                     -- YYYY-MM
+  title TEXT NOT NULL,
+  subtitle TEXT,                           -- "Decontaminant used:", serial number, the range under the heading
+  status TEXT NOT NULL DEFAULT 'open',     -- open | submitted | verified | archived
+  -- Closing the month
+  submitted_by_staff_id INTEGER REFERENCES staff(id),
+  submitted_at TEXT,
+  verified_by_staff_id INTEGER REFERENCES staff(id),
+  verified_at TEXT,
+  verification_signature_id INTEGER REFERENCES e_signatures(id),
+  verification_comments TEXT,
+  nc_id INTEGER REFERENCES nonconforming_events(id),
+  archive_id INTEGER REFERENCES central_archives(id),
+  archived_at TEXT,
+  -- The month's paper chart, where one is kept, and what could be read off it
+  attachment_file_id INTEGER REFERENCES files(id),
+  attachment_kind TEXT,                    -- chart | printout | certificate
+  extraction_status TEXT NOT NULL DEFAULT 'none',
+  extraction_note TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT,
+  -- The unit is part of the key. A laboratory-wide decontamination is carried
+  -- by every unit, and each keeps its own log with its own initials and its own
+  -- supervisor's signature — one shared sheet would have Haematology signing
+  -- for Microbiology's benches.
+  UNIQUE (sheet_kind, subject_type, subject_id, section_id, month)
+);
+CREATE INDEX IF NOT EXISTS idx_routine_sheets_month ON routine_log_sheets(month, sheet_kind);
+CREATE INDEX IF NOT EXISTS idx_routine_sheets_section ON routine_log_sheets(section_id, status);
+
+-- One row of the sheet, snapshotted from its definition at the time the sheet
+-- was opened, so a later edit upstream cannot rewrite a signed month.
+CREATE TABLE IF NOT EXISTS routine_log_rows (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sheet_id INTEGER NOT NULL REFERENCES routine_log_sheets(id) ON DELETE CASCADE,
+  row_key TEXT NOT NULL,
+  label TEXT NOT NULL,
+  row_type TEXT NOT NULL DEFAULT 'tick',   -- numeric | tick | text
+  unit TEXT,
+  min_value REAL,
+  max_value REAL,
+  slots TEXT NOT NULL DEFAULT '["once"]',  -- JSON of am/pm/once or w1..w5
+  cadence TEXT NOT NULL DEFAULT 'daily',   -- daily | weekly : which axis the row runs on
+  source_ref TEXT,                         -- e.g. the parameter or task this row came from
+  display_order INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (sheet_id, row_key)
+);
+
+-- One cell: a row, on a day (or a week), in a slot. An absent row is an absent
+-- record, which is exactly what the sheet has to be able to say.
+CREATE TABLE IF NOT EXISTS routine_log_cells (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sheet_id INTEGER NOT NULL REFERENCES routine_log_sheets(id) ON DELETE CASCADE,
+  row_id INTEGER NOT NULL REFERENCES routine_log_rows(id) ON DELETE CASCADE,
+  day INTEGER NOT NULL,                    -- 1..31, or the week number for a weekly row
+  slot TEXT NOT NULL DEFAULT 'once',
+  value_num REAL,
+  value_text TEXT,
+  status TEXT NOT NULL DEFAULT 'normal',
+  initials TEXT,
+  note TEXT,
+  source TEXT NOT NULL DEFAULT 'manual',   -- manual | device | import | extraction | instrument
+  confidence REAL,                         -- how sure the reader was, when read off a scan
+  needs_review INTEGER NOT NULL DEFAULT 0,
+  recorded_by_staff_id INTEGER REFERENCES staff(id),
+  recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  reading_time TEXT,
+  excursion_id INTEGER REFERENCES environmental_excursions(id),
+  environmental_reading_id INTEGER REFERENCES environmental_readings(id),
+  maintenance_record_id INTEGER REFERENCES equipment_maintenance_records(id),
+  created_by INTEGER REFERENCES users(id),
+  updated_at TEXT,
+  UNIQUE (sheet_id, row_id, day, slot)
+);
+CREATE INDEX IF NOT EXISTS idx_routine_cells_sheet ON routine_log_cells(sheet_id, day);
+CREATE INDEX IF NOT EXISTS idx_routine_cells_review ON routine_log_cells(sheet_id, needs_review);
+
+-- -------------------------------------------------------------------
+-- Decontamination.
+--
+-- The laboratory sets the general programme — benches, floors, fans, windows.
+-- A unit head adds what their own room needs. A general definition belongs to
+-- the whole laboratory (section_id NULL) and every unit carries it; a unit
+-- definition belongs to one unit. Frequency can be overridden per unit without
+-- forking the definition, which is the difference between a bench wiped twice
+-- daily in Haematology and once daily in the store.
+-- -------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS decontamination_definitions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  definition_code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  scope TEXT NOT NULL DEFAULT 'general',   -- general | unit
+  section_id INTEGER REFERENCES sections(id),
+  department_id INTEGER REFERENCES departments(id),
+  bench_id INTEGER REFERENCES section_benches(id),
+  surface_type TEXT,
+  frequency TEXT NOT NULL DEFAULT 'daily', -- twice_daily | daily | weekly | fortnightly | monthly | quarterly
+  decontaminant TEXT,
+  method TEXT,
+  instructions TEXT,
+  contact_time_minutes INTEGER,
+  performer_tier TEXT NOT NULL DEFAULT 'general',
+  framework_key TEXT,                      -- the shipped framework it was created from
+  activity_id INTEGER REFERENCES unit_activities(id),  -- the scheduled reminder it drives
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_decon_defs_section ON decontamination_definitions(section_id, is_active);
+
+-- A unit's local reading of a laboratory-wide definition: it carries the same
+-- work but at its own frequency, and may say why.
+CREATE TABLE IF NOT EXISTS decontamination_unit_settings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  definition_id INTEGER NOT NULL REFERENCES decontamination_definitions(id) ON DELETE CASCADE,
+  section_id INTEGER NOT NULL REFERENCES sections(id),
+  frequency TEXT,
+  decontaminant TEXT,
+  is_excluded INTEGER NOT NULL DEFAULT 0,
+  exclusion_reason TEXT,
+  activity_id INTEGER REFERENCES unit_activities(id),
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT,
+  UNIQUE (definition_id, section_id)
+);
+
+-- -------------------------------------------------------------------
+-- Equipment maintenance tasks.
+--
+-- equipment_schedules says when servicing falls due. This says what is actually
+-- done: the individual acts that make up a maintenance visit, each with its own
+-- cadence, so a microscope's chart can carry "clean the objectives" daily and
+-- "check the stage movement" weekly on the same sheet.
+-- -------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS equipment_maintenance_tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  equipment_id INTEGER NOT NULL REFERENCES equipment_items(id) ON DELETE CASCADE,
+  schedule_id INTEGER REFERENCES equipment_schedules(id),
+  maintenance_kind TEXT NOT NULL DEFAULT 'routine',  -- routine | scheduled
+  task_text TEXT NOT NULL,
+  guidance TEXT,
+  frequency TEXT NOT NULL DEFAULT 'daily',  -- daily | twice_daily | weekly | monthly | quarterly | biannual | annual
+  performer_tier TEXT NOT NULL DEFAULT 'general',
+  provider_type TEXT,                       -- internal | external
+  consumable TEXT,                          -- lens tissue, immersion oil, filter
+  display_order INTEGER NOT NULL DEFAULT 0,
+  framework_key TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_eq_maint_tasks_equipment ON equipment_maintenance_tasks(equipment_id, is_active);
+
+-- -------------------------------------------------------------------
+-- Control results arriving from an analyser over the network.
+--
+-- The analysers here already speak TCP/IP; a control run is the same message
+-- with a control identifier in it. A feed recognises those messages and parks
+-- them on the bench rather than writing a run behind somebody's back — a
+-- control nobody looked at is not quality control.
+-- -------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS iqc_instrument_feeds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  feed_code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  equipment_id INTEGER REFERENCES equipment_items(id),
+  section_id INTEGER REFERENCES sections(id),
+  transport TEXT NOT NULL DEFAULT 'tcp_server',  -- tcp_server | tcp_client | serial | file_drop | http_post
+  protocol TEXT NOT NULL DEFAULT 'astm',         -- astm | hl7 | delimited | custom
+  host TEXT,
+  port INTEGER,
+  watch_path TEXT,
+  control_id_patterns TEXT,                      -- JSON: sample IDs that mean "this is a control"
+  analyte_map TEXT,                              -- JSON: instrument mnemonic -> analyte name
+  auto_accept INTEGER NOT NULL DEFAULT 0,
+  last_message_at TEXT,
+  last_error TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS iqc_feed_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  feed_id INTEGER REFERENCES iqc_instrument_feeds(id) ON DELETE CASCADE,
+  received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  raw_message TEXT,
+  sample_id TEXT,
+  lot_number TEXT,
+  instrument_run_at TEXT,
+  parsed_values TEXT,                            -- JSON: [{ analyte, value, unit, flag }]
+  iqc_material_id INTEGER REFERENCES iqc_materials(id),
+  iqc_run_id INTEGER REFERENCES iqc_runs(id),
+  status TEXT NOT NULL DEFAULT 'received',       -- received | matched | unmatched | accepted | rejected
+  status_note TEXT,
+  handled_by_staff_id INTEGER REFERENCES staff(id),
+  handled_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_iqc_feed_messages_status ON iqc_feed_messages(status, received_at);
+
+-- The analyser's own export layout, remembered so the same file drops into the
+-- same columns next month. "Which row the parameters start on" is adjustable
+-- because every analyser prints a different number of header lines.
+CREATE TABLE IF NOT EXISTS iqc_import_layouts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  layout_code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  equipment_id INTEGER REFERENCES equipment_items(id),
+  iqc_material_id INTEGER REFERENCES iqc_materials(id),
+  file_kind TEXT NOT NULL DEFAULT 'csv',   -- csv | xlsx | docx_table | text
+  orientation TEXT NOT NULL DEFAULT 'rows',-- rows = one analyte per row; columns = one analyte per column
+  header_row INTEGER NOT NULL DEFAULT 1,
+  first_data_row INTEGER NOT NULL DEFAULT 2,
+  analyte_column TEXT,
+  value_column TEXT,
+  unit_column TEXT,
+  lot_column TEXT,
+  datetime_column TEXT,
+  analyte_map TEXT,                        -- JSON: file label -> analyte name
+  sample_headers TEXT,                     -- JSON: the headers last seen, to recognise the file again
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+`);
+
+  // How a control's results may be entered, and what the bench last used. A
+  // control with many parameters is unrecordable one box at a time; a control
+  // with one is unrecordable through a spreadsheet. The control says which.
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(iqc_materials)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!cols.has('entry_methods')) database.exec("ALTER TABLE iqc_materials ADD COLUMN entry_methods TEXT");
+    if (!cols.has('preferred_entry_method')) database.exec('ALTER TABLE iqc_materials ADD COLUMN preferred_entry_method TEXT');
+    if (!cols.has('import_layout_id')) database.exec('ALTER TABLE iqc_materials ADD COLUMN import_layout_id INTEGER REFERENCES iqc_import_layouts(id)');
+    if (!cols.has('feed_id')) database.exec('ALTER TABLE iqc_materials ADD COLUMN feed_id INTEGER REFERENCES iqc_instrument_feeds(id)');
+    // Which unit's bench actually runs this control day to day. section_id on
+    // the material is where it is administered; this is where it appears in a
+    // portal, and they are not always the same in a laboratory that shares an
+    // analyser between two units.
+    if (!cols.has('performing_section_id')) database.exec('ALTER TABLE iqc_materials ADD COLUMN performing_section_id INTEGER REFERENCES sections(id)');
+  }
+
+  // Where a run's numbers came from, kept on the run itself: an assessor asking
+  // "how did this get here?" should not have to infer it.
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(iqc_runs)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!cols.has('entry_method')) database.exec("ALTER TABLE iqc_runs ADD COLUMN entry_method TEXT NOT NULL DEFAULT 'manual'");
+    if (!cols.has('source_file_id')) database.exec('ALTER TABLE iqc_runs ADD COLUMN source_file_id INTEGER REFERENCES files(id)');
+    if (!cols.has('feed_message_id')) database.exec('ALTER TABLE iqc_runs ADD COLUMN feed_message_id INTEGER REFERENCES iqc_feed_messages(id)');
+  }
+
+  // Environmental monitoring: manual charting or automatic loggers, and whether
+  // the month's paper chart may be attached. A laboratory that charts by hand
+  // should never be shown a data-logger screen, so the mode is a setting and
+  // the screens obey it rather than showing everything to everybody.
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(environmental_settings)').all() as Array<{ name: string }>).map(c => c.name));
+    const add: Array<[string, string]> = [
+      ['logging_mode', "logging_mode TEXT NOT NULL DEFAULT 'manual'"],
+      ['chart_upload_enabled', 'chart_upload_enabled INTEGER NOT NULL DEFAULT 0'],
+      ['max_attachment_mb', 'max_attachment_mb INTEGER NOT NULL DEFAULT 4'],
+      ['monthly_verification_required', 'monthly_verification_required INTEGER NOT NULL DEFAULT 1'],
+      ['reading_slots', "reading_slots TEXT NOT NULL DEFAULT '[\"am\",\"pm\"]'"],
+      ['reading_time_am', "reading_time_am TEXT NOT NULL DEFAULT '08:00'"],
+      ['reading_time_pm', "reading_time_pm TEXT NOT NULL DEFAULT '16:00'"],
+      ['reading_grace_minutes', 'reading_grace_minutes INTEGER NOT NULL DEFAULT 60'],
+    ];
+    for (const [col, ddl] of add) if (!cols.has(col)) database.exec(`ALTER TABLE environmental_settings ADD COLUMN ${ddl}`);
+  }
+
+  // Which parameters an environmental asset is charted for. The original schema
+  // assumed temperature and humidity; a room with a pressure differential or a
+  // CO2 incubator needs its own rows, and the chart has to be able to grow.
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(environmental_assets)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!cols.has('charted_parameters')) database.exec('ALTER TABLE environmental_assets ADD COLUMN charted_parameters TEXT');
+    if (!cols.has('logging_mode')) database.exec('ALTER TABLE environmental_assets ADD COLUMN logging_mode TEXT');
+    if (!cols.has('reading_slots')) database.exec('ALTER TABLE environmental_assets ADD COLUMN reading_slots TEXT');
+  }
+
+  // Extra parameters beyond temperature and humidity, stored beside the reading
+  // rather than as columns, because the set is per-asset and open-ended.
+  database.exec(`
+CREATE TABLE IF NOT EXISTS environmental_reading_values (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  reading_id INTEGER NOT NULL REFERENCES environmental_readings(id) ON DELETE CASCADE,
+  parameter TEXT NOT NULL,
+  value REAL,
+  unit TEXT,
+  status TEXT NOT NULL DEFAULT 'normal',
+  UNIQUE (reading_id, parameter)
+);
+CREATE TABLE IF NOT EXISTS environmental_asset_parameters (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  asset_id INTEGER NOT NULL REFERENCES environmental_assets(id) ON DELETE CASCADE,
+  parameter TEXT NOT NULL,
+  label TEXT NOT NULL,
+  unit TEXT,
+  min_value REAL,
+  max_value REAL,
+  decimal_places INTEGER NOT NULL DEFAULT 1,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  UNIQUE (asset_id, parameter)
+);
+`);
+
+  // An install created before the unit became part of a sheet's identity has a
+  // three-part unique index, under which two units would fight over one
+  // laboratory-wide decontamination log. Rebuild it in place; nothing is lost
+  // because the old key is a strict subset of the new one.
+  {
+    const indexes = database.prepare("PRAGMA index_list(routine_log_sheets)").all() as Array<{ name: string; unique: number }>;
+    for (const index of indexes) {
+      if (!index.unique || index.name.startsWith('sqlite_autoindex')) continue;
+      const columns = (database.prepare(`PRAGMA index_info(${index.name})`).all() as Array<{ name: string }>).map(c => c.name);
+      if (columns.includes('subject_id') && !columns.includes('section_id')) {
+        database.exec(`DROP INDEX IF EXISTS ${index.name}`);
+      }
+    }
+    // SQLite puts the table-level UNIQUE into an autoindex, which cannot be
+    // dropped, so an upgraded install gets the wider key as a named index
+    // alongside it. Both hold; the wider one is the one that matters.
+    database.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_routine_sheets_identity
+      ON routine_log_sheets(sheet_kind, subject_type, subject_id, IFNULL(section_id, 0), month)`);
+  }
+
+  seedDecontaminationFrameworks(database);
+
   seedNotificationSounds(database);
   seedFormTemplates(database);
   seedCompetencyFrameworks(database);
@@ -6686,4 +7041,28 @@ function seedFormTemplates(database: Database.Database) {
     if (exists.get(t.key)) continue;
     insert.run(t.key, t.title, t.category, t.description, t.module, JSON.stringify({ sections: t.sections }), t.requiresSig);
   }
+}
+
+/**
+ * The general decontamination programme, shipped ready to use.
+ *
+ * A laboratory should not have to invent "wipe the bench tops twice a day" to
+ * start recording that they did. These are laboratory-wide definitions with no
+ * section: every unit carries them, and a unit head adjusts the frequency for
+ * their own room or adds what their room needs on top. They are seeded once —
+ * a laboratory that deletes or edits one gets to keep that decision.
+ */
+function seedDecontaminationFrameworks(database: Database.Database) {
+  const seeded = database.prepare("SELECT value FROM settings WHERE key = 'decontamination.frameworksSeeded'").get() as { value?: string } | undefined;
+  if (seeded?.value === '1') return;
+
+  const insert = database.prepare(`INSERT OR IGNORE INTO decontamination_definitions
+    (definition_code, name, scope, section_id, surface_type, frequency, decontaminant, method, instructions, framework_key, performer_tier)
+    VALUES (?, ?, 'general', NULL, ?, ?, ?, ?, ?, ?, 'general')`);
+
+  for (const f of DECON_FRAMEWORKS) {
+    insert.run(`DECON-GEN-${f.key.toUpperCase().replace(/_/g, '-')}`, f.name, f.surfaceType,
+      f.frequency, f.decontaminant, f.method, f.instructions, f.key);
+  }
+  database.prepare("INSERT INTO settings (key, value) VALUES ('decontamination.frameworksSeeded', '1') ON CONFLICT(key) DO UPDATE SET value = '1'").run();
 }

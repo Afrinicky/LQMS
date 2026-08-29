@@ -16,6 +16,8 @@ import type {
 } from '../../shared/types/api';
 import TextField from '../components/ui/TextField';
 import { Notice } from '../components/ui/Feedback';
+import PortalRoutineSheets from './portal/PortalRoutineSheets';
+import { LOGGING_MODES, LOGGING_MODE_LABELS, LOGGING_MODE_HINTS, MAX_ATTACHMENT_MB } from '../../shared/constants/routineWork';
 
 // Tabs are filtered by permission — a tab whose feature this user cannot
 // view is not drawn. See src/components/PermissionTabs.tsx.
@@ -32,7 +34,18 @@ const TAB_MODULE = 'monitoring';
  */
 const ENV = 'facilities_safety.environment';
 
-const TABS = ['Live Dashboard', 'Assets', 'Devices', 'Manual Entry', 'Alerts', 'Excursions', 'Insights', 'Notifications', 'Charts', 'Scanned Charts', 'Reports', 'Settings'];
+const TABS = ['Live Dashboard', 'Monthly Charts', 'Assets', 'Devices', 'Manual Entry', 'Alerts', 'Excursions', 'Insights', 'Notifications', 'Charts', 'Scanned Charts', 'Reports', 'Settings'];
+
+/**
+ * Tabs that only mean anything to a laboratory running automatic data loggers.
+ *
+ * A laboratory that reads its thermometers by hand has no devices, no polling
+ * interval and no battery alerts, and showing it a device register is not
+ * flexibility — it is a screen full of things that will never have a row in
+ * them, which is how people learn to ignore a module. The logging mode is set
+ * once under Settings and these disappear.
+ */
+const AUTOMATED_ONLY = ['Devices'];
 
 /**
  * What a tab actually asks of the person opening it. A tab that is nothing but
@@ -45,6 +58,7 @@ const TAB_ACTION: Record<string, 'view' | 'create' | 'edit'> = {
   'Settings': 'edit',
   'Notifications': 'edit',
   'Manual Entry': 'create',
+  'Monthly Charts': 'view',
   'Scanned Charts': 'create',
 };
 
@@ -127,7 +141,10 @@ export function EnvironmentalMonitoringPage({ embedded = false }: { embedded?: b
   // Tabs the person may actually work in. A tab filtered away must not stay
   // selected — a bookmark or a rights change mid-session lands the user on the
   // first tab they can open rather than on a blank panel.
-  const permittedTabs = TABS.filter(t => can(ENV, TAB_ACTION[t] ?? 'view'));
+  const loggingMode = (settings as any)?.logging_mode ?? 'manual';
+  const permittedTabs = TABS
+    .filter(t => can(ENV, TAB_ACTION[t] ?? 'view'))
+    .filter(t => loggingMode === 'automated' || !AUTOMATED_ONLY.includes(t));
   useEffect(() => {
     if (permittedTabs.length && !permittedTabs.includes(tab)) setTab(permittedTabs[0]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -167,6 +184,8 @@ export function EnvironmentalMonitoringPage({ embedded = false }: { embedded?: b
     {tabBar(tab, permittedTabs, setTab)}
     {error && <Notice kind="error">{error}</Notice>}
     {notice && <Notice kind="success">{notice}</Notice>}
+
+    {tab === 'Monthly Charts' && <PortalRoutineSheets kind="environmental" />}
 
     {tab === 'Live Dashboard' && <LiveDashboard dashboard={dashboard} onOpenChart={id => { setChartAsset(String(id)); setChartRange('24h'); setTab('Charts'); }} onRefresh={loadDashboard} />}
 
@@ -468,18 +487,51 @@ function ExcursionsTab({ excursions, onChanged, onError, onFlash }: any) {
 function SettingsTab({ settings, onSaved, onError, onFlash }: any) {
   const { can } = usePermissions();
   const [f, setF] = useState<any>(null);
-  useEffect(() => { if (settings) setF({ pollingEnabled: !!settings.polling_enabled, defaultPollIntervalSeconds: settings.default_poll_interval_seconds, excursionNcMinutes: settings.excursion_nc_minutes, batteryLowThreshold: settings.battery_low_threshold, noCommMinutes: settings.no_comm_minutes, preventExpiredDevices: !!settings.prevent_expired_devices, webhookUrl: (settings as any).webhook_url ?? '' }); }, [settings]);
+  useEffect(() => { if (settings) setF({ pollingEnabled: !!settings.polling_enabled, defaultPollIntervalSeconds: settings.default_poll_interval_seconds, excursionNcMinutes: settings.excursion_nc_minutes, batteryLowThreshold: settings.battery_low_threshold, noCommMinutes: settings.no_comm_minutes, preventExpiredDevices: !!settings.prevent_expired_devices, webhookUrl: (settings as any).webhook_url ?? '',
+    loggingMode: (settings as any).logging_mode ?? 'manual',
+    chartUploadEnabled: !!(settings as any).chart_upload_enabled,
+    maxAttachmentMb: (settings as any).max_attachment_mb ?? 4,
+    monthlyVerificationRequired: (settings as any).monthly_verification_required !== 0,
+    readingTimeAm: (settings as any).reading_time_am ?? '08:00',
+    readingTimePm: (settings as any).reading_time_pm ?? '16:00',
+  }); }, [settings]);
   if (!f) return <p>Loading settings…</p>;
   async function save(e: FormEvent) { e.preventDefault(); onError(null); try { await api('/environmental/settings', { method: 'PUT', body: JSON.stringify(f) }); onFlash('Settings saved.'); onSaved(); } catch (err) { onError(errorText(err)); } }
   return <div className="card">
     <h3>Monitoring settings</h3>
     {can('facilities_safety.environment', 'edit') && <form className="form-grid" onSubmit={save}>
-      <label><input type="checkbox" checked={f.pollingEnabled} onChange={e => setF({ ...f, pollingEnabled: e.target.checked })} /> Enable automated polling</label>
-      <label>Default poll interval<select value={f.defaultPollIntervalSeconds} onChange={e => setF({ ...f, defaultPollIntervalSeconds: Number(e.target.value) })}>{[[30, '30 seconds'], [60, '1 minute'], [300, '5 minutes'], [600, '10 minutes'], [1800, '30 minutes'], [3600, 'Hourly']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
+      {/* How this laboratory logs its environment. Everything below obeys it:
+          choose Manual and the device register, polling interval and battery
+          alerts disappear from every screen, module and portal alike, because a
+          laboratory that reads its thermometers by hand should not be shown a
+          data-logger console it will never use. Choosing Automatic does not
+          remove hand entry — a logger that has failed still has to be
+          correctable, or the record becomes one nobody can fix. */}
+      <label style={{ gridColumn: '1 / -1' }}>How the environment is logged
+        <select value={f.loggingMode} onChange={e => setF({ ...f, loggingMode: e.target.value })}>
+          {LOGGING_MODES.map(m => <option key={m} value={m}>{LOGGING_MODE_LABELS[m]}</option>)}
+        </select>
+        <span className="muted" style={{ display: 'block', marginTop: 4, fontSize: 11.5 }}>
+          {LOGGING_MODE_HINTS[f.loggingMode as keyof typeof LOGGING_MODE_HINTS]}
+        </span>
+      </label>
+      <label>Morning reading due at<input type="time" value={f.readingTimeAm} onChange={e => setF({ ...f, readingTimeAm: e.target.value })} /></label>
+      <label>Afternoon reading due at<input type="time" value={f.readingTimePm} onChange={e => setF({ ...f, readingTimePm: e.target.value })} /></label>
+      <label><input type="checkbox" checked={f.monthlyVerificationRequired} onChange={e => setF({ ...f, monthlyVerificationRequired: e.target.checked })} /> The unit supervisor verifies and signs each month&rsquo;s chart</label>
+      <label><input type="checkbox" checked={f.chartUploadEnabled} onChange={e => setF({ ...f, chartUploadEnabled: e.target.checked })} /> Allow the month&rsquo;s paper chart to be attached and read in</label>
+      {f.chartUploadEnabled && <label>Largest attached chart (MB)
+        <NumberField min={1} max={MAX_ATTACHMENT_MB} value={f.maxAttachmentMb} onValue={n => setF({ ...f, maxAttachmentMb: n ?? 4 })} />
+        <span className="muted" style={{ display: 'block', marginTop: 4, fontSize: 11.5 }}>
+          One photograph per asset per month adds up fast on laboratory hardware. Keep this small; scan in black
+          and white rather than raising it.
+        </span>
+      </label>}
+      {f.loggingMode === 'automated' && <label><input type="checkbox" checked={f.pollingEnabled} onChange={e => setF({ ...f, pollingEnabled: e.target.checked })} /> Enable automated polling</label>}
+      {f.loggingMode === 'automated' && <><label>Default poll interval<select value={f.defaultPollIntervalSeconds} onChange={e => setF({ ...f, defaultPollIntervalSeconds: Number(e.target.value) })}>{[[30, '30 seconds'], [60, '1 minute'], [300, '5 minutes'], [600, '10 minutes'], [1800, '30 minutes'], [3600, 'Hourly']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
       <label>Excursion → NC after (minutes)<NumberField min={0} value={f.excursionNcMinutes} onValue={n => setF({ ...f, excursionNcMinutes: n ?? 0 })} /></label>
       <label>Battery low threshold (%)<NumberField min={0} max={100} value={f.batteryLowThreshold} onValue={n => setF({ ...f, batteryLowThreshold: n ?? 0 })} /></label>
       <label>No-communication alert after (minutes)<NumberField min={0} value={f.noCommMinutes} onValue={n => setF({ ...f, noCommMinutes: n ?? 0 })} /></label>
-      <label><input type="checkbox" checked={f.preventExpiredDevices} onChange={e => setF({ ...f, preventExpiredDevices: e.target.checked })} /> Prevent use of calibration-expired devices</label>
+      <label><input type="checkbox" checked={f.preventExpiredDevices} onChange={e => setF({ ...f, preventExpiredDevices: e.target.checked })} /> Prevent use of calibration-expired devices</label></>}
       <label>Webhook URL (Teams/Slack incoming webhook)<TextField value={f.webhookUrl} onValue={nextValue => setF({ ...f, webhookUrl: nextValue })} placeholder="https://…" /></label>
       <button type="submit">Save settings</button>
     </form>}

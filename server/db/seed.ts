@@ -136,6 +136,11 @@ export function seedDefaults() {
         // how a person knows which shift they work; changing it belongs to
         // whoever builds it, which is why this is View and stops there.
         'personnel.rosters',
+        // The decontamination programme their unit carries. Everybody performs
+        // decontamination, so everybody has to be able to read what is on the
+        // programme and how often — performing it is routine work at the
+        // general tier, granted below; changing the programme is not.
+        'facilities_safety.decontamination',
       ],
       // A person's own record, own inbox, own reminder sounds, and the portal
       // that gathers all three. `personal` features, so this level governs what
@@ -231,6 +236,9 @@ export function seedDefaults() {
           'documents.authoring', 'documents.records',
           'customer_focus.feedback', 'customer_focus.communication', 'customer_focus.advisory',
           'facilities_safety.incidents', 'facilities_safety.equipment', 'facilities_safety.inspections',
+          // A unit head adds what their own room needs to the laboratory-wide
+          // decontamination programme, and verifies their unit's monthly logs.
+          'facilities_safety.decontamination', 'facilities_safety.environment',
           'records_reports.generate', 'notifications.calendar',
         ],
         view: [
@@ -411,6 +419,7 @@ export function seedDefaults() {
           'facilities_safety.incidents', 'facilities_safety.equipment',
           'facilities_safety.inspections', 'facilities_safety.waste',
           'facilities_safety.health', 'facilities_safety.environment',
+          'facilities_safety.decontamination',
         ],
         manage: ['nc_capa', 'actions', 'risks', 'monitoring.readings', 'monitoring.reports'],
         view: ['blood_bank_handover', 'personnel.training', 'notifications.calendar', 'system_audit.flags'],

@@ -11,6 +11,9 @@ import { getDriver, listDrivers, COMMUNICATION_METHODS } from '../services/envir
 import { listChannels, getChannels, processQueue } from '../services/environmental/notifications.js';
 import { computeInsights } from '../services/environmental/insights.js';
 import { buildReport, reportToWorkbook, reportToHtml, REPORT_TYPES } from '../services/environmental/reports.js';
+import { getCurrentStaffId } from './routeHelpers.js';
+import { openSheet, refreshSheetRows, sheetsForSection } from '../services/routineSheets.js';
+import { LOGGING_MODES, MAX_ATTACHMENT_MB } from '../../shared/constants/routineWork.js';
 
 const numericOnly = (req: any, _res: any, next: any) => (/^\d+$/.test(req.params.id) ? next() : next('route'));
 // Environmental Monitoring is a feature of Facilities & Safety, not the whole
@@ -39,7 +42,21 @@ export function environmentalRoutes() {
       ['excursion_nc_minutes', 'excursionNcMinutes'], ['battery_low_threshold', 'batteryLowThreshold'],
       ['no_comm_minutes', 'noCommMinutes'], ['prevent_expired_devices', 'preventExpiredDevices'], ['email_enabled', 'emailEnabled'],
       ['webhook_url', 'webhookUrl'],
+      // How this laboratory logs its environment. A laboratory that charts by
+      // hand should never be shown a data-logger screen, so the mode is stored
+      // here and every screen — module and portal alike — obeys it.
+      ['logging_mode', 'loggingMode'], ['chart_upload_enabled', 'chartUploadEnabled'],
+      ['max_attachment_mb', 'maxAttachmentMb'], ['monthly_verification_required', 'monthlyVerificationRequired'],
+      ['reading_slots', 'readingSlots'], ['reading_time_am', 'readingTimeAm'],
+      ['reading_time_pm', 'readingTimePm'], ['reading_grace_minutes', 'readingGraceMinutes'],
     ];
+    if (b.loggingMode !== undefined && !LOGGING_MODES.includes(String(b.loggingMode) as any)) {
+      return res.status(400).json({ error: `Logging must be one of: ${LOGGING_MODES.join(', ')}.` });
+    }
+    if (b.maxAttachmentMb !== undefined && Number(b.maxAttachmentMb) > MAX_ATTACHMENT_MB) {
+      return res.status(400).json({ error: `An attached chart cannot be capped above ${MAX_ATTACHMENT_MB} MB. Attachments accumulate every month on every asset, and this system runs on laboratory hardware.` });
+    }
+    if (b.readingSlots !== undefined && Array.isArray(b.readingSlots)) b.readingSlots = JSON.stringify(b.readingSlots);
     for (const [col, key] of fields) if (b[key] !== undefined) getDb().prepare(`UPDATE environmental_settings SET ${col} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1`).run(typeof b[key] === 'boolean' ? (b[key] ? 1 : 0) : b[key], );
     audit(req, { action: 'edit', entity: 'environmental_settings', entityId: 1, newValue: b });
     res.json({ ok: true });
@@ -452,6 +469,96 @@ export function environmentalRoutes() {
     db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run('environmental', 'environmental_excursions', String(exc.id), 'nc_capa', 'nonconforming_events', String(ncId), 'NC from environmental excursion');
     audit(req, { action: 'create', entity: 'nonconforming_events', entityId: ncId, newValue: { ncNumber, excursionId: exc.id } });
     res.status(201).json({ id: ncId, ncNumber });
+  });
+
+
+  /* ======================================================================
+     The monthly chart
+     ----------------------------------------------------------------------
+     Readings have always gone into environmental_readings. What the laboratory
+     actually keeps, signs and files is the month's chart, and until now there
+     was nowhere for that to exist — so a year of readings could be perfect and
+     there was still nothing an assessor recognised to hand them.
+
+     The chart does not duplicate the readings. Every numeric cell goes through
+     the same ingest path a reading typed on this screen does, so an out-of-range
+     value opens the same excursion and raises the same NC. The chart is the
+     view the laboratory signs; the readings are still the data.
+     ==================================================================== */
+
+  router.get('/charts', requirePermission(MODULE, 'view'), (req, res) => {
+    const db = getDb();
+    const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : new Date().toISOString().slice(0, 7);
+    const staffId = getCurrentStaffId(req);
+    const sectionId = parseIntNullable(req.query.sectionId)
+      ?? (staffId !== null ? (db.prepare('SELECT section_id FROM staff WHERE id = ?').get(staffId) as any)?.section_id ?? null : null);
+    const settings = db.prepare('SELECT * FROM environmental_settings WHERE id = 1').get() as any;
+    if (!sectionId) return res.json({ month, sectionId: null, sheets: [], settings });
+    res.json({
+      month, sectionId, settings,
+      sheets: sheetsForSection(db, 'environmental', sectionId, month, { userId: req.user!.id }),
+    });
+  });
+
+  router.post('/charts/open', requirePermission(MODULE, 'view'), (req, res) => {
+    const db = getDb();
+    const assetId = parseIntNullable(req.body?.assetId);
+    const month = /^\d{4}-\d{2}$/.test(String(req.body?.month)) ? String(req.body.month) : new Date().toISOString().slice(0, 7);
+    if (!assetId) return res.status(400).json({ error: 'assetId is required' });
+    const sheet = openSheet(db, { kind: 'environmental', subjectId: assetId, month, userId: req.user!.id });
+    if (!sheet) return res.status(404).json({ error: 'Environmental asset not found' });
+    refreshSheetRows(db, sheet);
+    res.json({ sheetId: sheet.id });
+  });
+
+  /* ======================================================================
+     What an asset is charted for
+     ----------------------------------------------------------------------
+     The original schema assumed temperature and humidity. A CO2 incubator, a
+     room with a pressure differential, a cold room with an alarm delay — each
+     needs its own row with its own limits, and a chart that cannot grow a row
+     forces the laboratory back onto paper for exactly the assets that matter
+     most.
+     ==================================================================== */
+
+  router.get('/assets/:id/parameters', numericOnly, requirePermission(MODULE, 'view'), (req, res) => {
+    res.json(getDb().prepare('SELECT * FROM environmental_asset_parameters WHERE asset_id = ? ORDER BY display_order, id').all(req.params.id));
+  });
+
+  router.put('/assets/:id/parameters', numericOnly, requirePermission(MODULE, 'edit'), (req, res) => {
+    const db = getDb();
+    const asset = db.prepare('SELECT id FROM environmental_assets WHERE id = ?').get(req.params.id);
+    if (!asset) return res.status(404).json({ error: 'Environmental asset not found' });
+    const rows = Array.isArray(req.body?.parameters) ? req.body.parameters : null;
+    if (!rows) return res.status(400).json({ error: 'parameters must be an array' });
+
+    const num = (v: unknown) => (v === '' || v === null || v === undefined || Number.isNaN(Number(v)) ? null : Number(v));
+    const tx = db.transaction(() => {
+      const keep = new Set<string>();
+      rows.forEach((p: any, i: number) => {
+        const key = String(p.parameter ?? '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_');
+        if (!key) return;
+        keep.add(key);
+        db.prepare(`INSERT INTO environmental_asset_parameters
+            (asset_id, parameter, label, unit, min_value, max_value, decimal_places, display_order, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+            ON CONFLICT(asset_id, parameter) DO UPDATE SET label = excluded.label, unit = excluded.unit,
+              min_value = excluded.min_value, max_value = excluded.max_value,
+              decimal_places = excluded.decimal_places, display_order = excluded.display_order, is_active = 1`)
+          .run(req.params.id, key, String(p.label ?? p.parameter).trim(), p.unit ?? null,
+            num(p.minValue), num(p.maxValue), num(p.decimalPlaces) ?? 1, i);
+      });
+      // A parameter dropped from the list is deactivated, never deleted: the
+      // months already charted against it are records.
+      for (const existing of db.prepare('SELECT parameter FROM environmental_asset_parameters WHERE asset_id = ?').all(req.params.id) as any[]) {
+        if (!keep.has(String(existing.parameter))) {
+          db.prepare('UPDATE environmental_asset_parameters SET is_active = 0 WHERE asset_id = ? AND parameter = ?').run(req.params.id, existing.parameter);
+        }
+      }
+    });
+    tx();
+    audit(req, { action: 'edit', entity: 'environmental_asset_parameters', entityId: req.params.id, newValue: { count: rows.length } });
+    res.json(db.prepare('SELECT * FROM environmental_asset_parameters WHERE asset_id = ? ORDER BY display_order, id').all(req.params.id));
   });
 
   return router;
