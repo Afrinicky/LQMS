@@ -42,9 +42,14 @@ const A = (await j('/auth/login', { method: 'POST', body: { username: 'admin', p
 if (!A) { console.error('Could not sign in — is the API running on ' + BASE + '?'); process.exit(1); }
 
 const stamp = Date.now().toString(36).toUpperCase();
-const PORT_HAEM2 = 15401;   // the second haematology analyser — transmits to nothing today
-const PORT_CHEM1 = 15402;   // chemistry analyser 1 — transmits to nothing today
-const PORT_LHIMS = 15500;   // stands in for the port the LHIMS client owns
+// Ports are unique per run. The system correctly refuses to give two links the
+// same port, so a re-run against a database that already holds this script's
+// links must not ask for the ports they are using.
+const PORT_BASE = 15400 + (Date.now() % 400) * 10;
+const PORT_HAEM2 = PORT_BASE + 1;   // the second haematology analyser — transmits to nothing today
+const PORT_CHEM1 = PORT_BASE + 2;   // chemistry analyser 1 — transmits to nothing today
+const PORT_HL7 = PORT_BASE + 3;
+const PORT_LHIMS = PORT_BASE + 9;   // stands in for the port the LHIMS client owns
 
 /* ==========================================================================
    ASTM: what a Sysmex actually puts on the wire
@@ -163,7 +168,11 @@ check('because a second host connection can drop the first',
 
 const doubleSend = await j('/instrument-links', { token: A, method: 'POST', body: {
   name: `Double sender ${stamp}`, role: 'lhims_owned', mode: 'server', protocol: 'astm',
-  listenPort: 15599, forwardEnabled: true, forwardHost: '10.10.0.5', forwardPort: 5000,
+  listenPort: PORT_BASE + 8,
+  // Everything else filled in, so what it trips on is the safety rule and not
+  // a missing field.
+  forwardEnabled: true, forwardTarget: 'lhims_api',
+  lhimsUrl: 'http://10.10.0.5/', lhimsUsername: 'lhims', lhimsMapKey: 'sysmex_xs500i',
 } });
 check('forwarding to LHIMS from a link LHIMS already has is refused', doubleSend.status === 400, `${doubleSend.status}`);
 check('because it would send the same result twice',
@@ -277,12 +286,12 @@ console.log('\n[4] An HL7 analyser');
 
 const hl7Link = await j('/instrument-links', { token: A, method: 'POST', body: {
   name: `Mindray BC-5800 ${stamp}`, sectionId, profileKey: 'mindray_bc5800',
-  role: 'sechlims_only', mode: 'server', protocol: 'hl7', listenPort: 15403,
+  role: 'sechlims_only', mode: 'server', protocol: 'hl7', listenPort: PORT_HL7,
 } });
 check('an HL7 link starts', hl7Link.status === 201);
 await wait(400);
 
-const ack = await sendHl7(15403, [
+const ack = await sendHl7(PORT_HL7, [
   'MSH|^~\\&|Mindray|BC-5800|SECHLIMS|LAB|20260829110000||ORU^R01|MSG00021|P|2.3.1',
   'PID|1||QC1||Control^Level1',
   'OBR|1||QC1|00001^Automated Count^99MRC|||20260829105500',

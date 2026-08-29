@@ -38,11 +38,15 @@ import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  framerFor, parseFor, type Framer, type AnalyserMessage,
+  framerFor, parseFor, splitTransmissions, type Framer, type AnalyserMessage,
 } from './protocols.js';
 import {
-  LINK_MAX_FRAME_BYTES, LINK_RECONNECT_MS, linkIsOurs, looksLikeControl, mapAnalyte,
+  LINK_MAX_FRAME_BYTES, LINK_RECONNECT_MS, linkIsOurs, looksLikeControl, mapAnalyte, modeIsPassive,
 } from '../../../shared/constants/instruments.js';
+import {
+  LHIMS_MAX_ATTEMPTS, LHIMS_TAP_POLL_MS, LHIMS_TAP_START_AT_END,
+  lhimsAccepted, lhimsMeasureId, lhimsResultUrl, lhimsSafeUrl,
+} from '../../../shared/constants/lhims.js';
 
 type DB = any;
 type DbGetter = () => DB;
@@ -56,6 +60,10 @@ interface LinkRow {
   watch_path: string | null;
   analyte_map: string | null; control_patterns: string | null;
   forward_enabled: number; forward_host: string | null; forward_port: number | null;
+  forward_target: string | null;
+  lhims_url: string | null; lhims_username: string | null; lhims_password: string | null;
+  lhims_map_key: string | null; measure_map: string | null;
+  tap_path: string | null; tap_offset: number | null;
   auto_start: number; is_active: number;
 }
 
@@ -76,6 +84,9 @@ class Link {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private idleTimers = new Map<net.Socket, NodeJS.Timeout>();
   private watcher: fs.FSWatcher | null = null;
+  private tapTimer: NodeJS.Timeout | null = null;
+  private tapOffset = 0;
+  private tapCarry = '';
   private stopping = false;
   /**
    * Whether this link actually opened anything.
@@ -107,13 +118,14 @@ class Link {
 
     // The guard that matters. A link belonging to LHIMS is not started, and
     // the register says so rather than leaving somebody to wonder.
-    if (!linkIsOurs(this.row.role)) {
+    if (!linkIsOurs(this.row.role, this.row.mode)) {
       this.setState('blocked', 'LHIMS owns this link. SECHLIMS is deliberately not binding or dialling it, so the existing transmission is untouched.');
       return;
     }
     if (!this.row.is_active) { this.setState('stopped', 'Switched off'); return; }
     this.opened = true;
 
+    if (this.row.mode === 'lhims_tap') return this.startTap();
     if (this.row.mode === 'file_drop') return this.startWatcher();
     if (this.row.mode === 'client') return this.startClient();
     return this.startServer();
@@ -209,6 +221,96 @@ class Link {
       this.socket = socket;
     };
     connect();
+  }
+
+  /* ------------------------------------------------------- the LHIMS tap */
+  /**
+   * Follow the LHIMS client's own append log.
+   *
+   * This is how the analyser LHIMS owns reaches SECHLIMS without being
+   * disturbed. The middleware, with WRITE_TO_FILE switched on, appends every
+   * message it receives to LHIMSDataInput.txt before it does anything else with
+   * it. We open that file read-only, remember where we got to, and read what
+   * has been added — exactly what `tail -f` does.
+   *
+   * It cannot affect the transmission. No port is bound, no socket is opened,
+   * nothing is intercepted, and the file is never written to or locked. If this
+   * host is switched off for a week, the LHIMS client carries on and we simply
+   * pick up from our offset when it comes back.
+   *
+   * Polling rather than fs.watch on purpose: the file usually lives on a
+   * network share, and watch events over SMB are unreliable in exactly the way
+   * that loses a result.
+   */
+  private startTap(): void {
+    const file = this.row.tap_path?.trim();
+    if (!file) {
+      this.setState('error', 'No path set to the LHIMS client\'s log file.', 'No path set');
+      this.opened = false;
+      return;
+    }
+
+    // Where to begin. Stored per link so a restart resumes rather than
+    // re-reading a year of history, and the first start begins at the end
+    // because the point is to follow what happens from now on.
+    const stored = Number(this.row.tap_offset ?? 0);
+    try {
+      const size = fs.existsSync(file) ? fs.statSync(file).size : 0;
+      this.tapOffset = stored > 0 ? Math.min(stored, size) : (LHIMS_TAP_START_AT_END ? size : 0);
+    } catch { this.tapOffset = 0; }
+
+    const poll = () => {
+      if (this.stopping) return;
+      try { this.readTap(file); }
+      catch (error) { this.setState('error', `Reading ${file}: ${(error as Error).message}`, (error as Error).message); }
+    };
+    this.tapTimer = setInterval(poll, LHIMS_TAP_POLL_MS);
+    poll();
+    this.setState('following',
+      `Following ${file} from byte ${this.tapOffset}. Read-only — the LHIMS client's own transmission is untouched.`);
+  }
+
+  private readTap(file: string): void {
+    if (!fs.existsSync(file)) {
+      this.setState('error', `${file} is not there. Check WRITE_TO_FILE is set to Yes in the LHIMS client, and that the share is reachable.`);
+      return;
+    }
+    const size = fs.statSync(file).size;
+
+    // The client was reinstalled, or somebody emptied the log. Starting over is
+    // right; carrying a stale offset would skip everything until it grew past it.
+    if (size < this.tapOffset) {
+      this.tapOffset = 0;
+      this.tapCarry = '';
+      this.setState('following', `${file} was truncated or replaced; following it again from the beginning.`);
+    }
+    if (size === this.tapOffset) return;
+
+    const handle = fs.openSync(file, 'r');
+    try {
+      const length = size - this.tapOffset;
+      const buffer = Buffer.alloc(Math.min(length, LINK_MAX_FRAME_BYTES));
+      const read = fs.readSync(handle, buffer, 0, buffer.length, this.tapOffset);
+      this.tapOffset += read;
+      this.tapCarry += buffer.subarray(0, read).toString('latin1');
+    } finally {
+      fs.closeSync(handle);
+    }
+
+    // The client appends whole transmissions, each ending in its ASTM
+    // terminator record. Split on that, and hold anything after the last one in
+    // case we caught the file mid-append.
+    const { complete, remainder } = splitTransmissions(this.tapCarry, this.row.protocol);
+    this.tapCarry = remainder.length > LINK_MAX_FRAME_BYTES ? '' : remainder;
+    for (const text of complete) {
+      if (text.trim()) this.ingest(text, 'lhims-client-log');
+    }
+    if (complete.length) {
+      try {
+        this.getDb().prepare('UPDATE instrument_links SET tap_offset = ? WHERE id = ?').run(this.tapOffset, this.id);
+      } catch { /* the offset is an optimisation, not the record */ }
+      this.setState('following', `Following ${file}. ${complete.length} message(s) read just now.`);
+    }
   }
 
   /* ------------------------------------------------------------ file drop */
@@ -415,6 +517,7 @@ class Link {
     this.stopping = true;
     this.opened = false;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+    if (this.tapTimer) { clearInterval(this.tapTimer); this.tapTimer = null; }
     for (const timer of this.idleTimers.values()) clearTimeout(timer);
     this.idleTimers.clear();
     if (this.socket) { this.socket.destroy(); this.socket = null; }
@@ -505,40 +608,158 @@ export class InstrumentBridge {
   }
 
   /**
-   * Pass copies onward to the LHIMS middleware, for the links told to.
+   * Carry results into LHIMS, for the links told to.
    *
-   * Store and forward: a message is recorded first and sent afterwards, so the
-   * middleware being down costs nothing but a delay. Attempts are capped —
-   * a message that has failed five times is a configuration problem, and
-   * retrying it forever only hides that.
+   * This is the same HTTP call the LHIMS middleware makes — api/update_result.php
+   * with a specimen id, a measure id and a value — so a result posted from here
+   * lands in exactly the field the middleware would have put it in. It is how
+   * the three analysers the middleware never carried can start reaching LHIMS,
+   * without the middleware changing at all.
+   *
+   * Store and forward: the message is written down first and delivered
+   * afterwards, so LHIMS being unreachable costs a delay and nothing else.
+   * Attempts are capped, because a message that has failed five times is a
+   * configuration problem and retrying it forever only hides that.
    */
   private async drainForwardQueue(): Promise<void> {
     let pending: any[] = [];
     try {
-      pending = this.getDb().prepare(`SELECT m.*, l.forward_host, l.forward_port, l.name AS link_name, l.role
+      pending = this.getDb().prepare(`SELECT m.*, l.forward_host, l.forward_port, l.forward_target,
+            l.lhims_url, l.lhims_username, l.lhims_password, l.lhims_map_key, l.measure_map,
+            l.name AS link_name, l.role
           FROM instrument_messages m JOIN instrument_links l ON l.id = m.link_id
-          WHERE m.forward_status = 'pending' AND l.forward_enabled = 1 AND m.forward_attempts < 5
-          ORDER BY m.id LIMIT 25`).all() as any[];
+          WHERE m.forward_status = 'pending' AND l.forward_enabled = 1 AND m.forward_attempts < ?
+          ORDER BY m.id LIMIT 25`).all(LHIMS_MAX_ATTEMPTS) as any[];
     } catch { return; }
     if (!pending.length) return;
 
     for (const message of pending) {
-      // A link LHIMS already receives must never be forwarded to it: that
-      // would post the same result twice.
+      // A link LHIMS already receives must never be delivered to it: that would
+      // post the same result twice, and a duplicated haemoglobin in a patient
+      // record is a worse failure than a missing one.
       if (message.role === 'lhims_owned') {
-        this.markForward(message.id, 'failed', 'This link belongs to LHIMS already; forwarding it would send the same result twice.');
+        this.markForward(message.id, 'failed', 'This link belongs to LHIMS already; delivering it would store the same result twice.');
         continue;
       }
-      if (!message.forward_host || !message.forward_port) {
-        this.markForward(message.id, 'failed', 'No LHIMS address is set on this link.');
+      // Only patient results go to LHIMS. A control run is quality control,
+      // belongs on the IQC board, and has no patient record to be filed under.
+      if (message.kind !== 'patient') {
+        this.markForward(message.id, 'not_required', null);
         continue;
       }
       try {
-        await this.sendOnward(message.forward_host, Number(message.forward_port), message.raw_message ?? '');
-        this.markForward(message.id, 'sent', null);
+        const outcome = message.forward_target === 'tcp'
+          ? await this.deliverByTcp(message)
+          : await this.deliverToLhims(message);
+        this.markForward(message.id, this.settle(outcome, message), outcome.note);
       } catch (error) {
-        this.markForward(message.id, 'pending', (error as Error).message);
+        this.markForward(message.id, this.settle({ status: 'retry', note: null }, message), (error as Error).message);
       }
+    }
+  }
+
+  /**
+   * What a delivery attempt means for the message's state.
+   *
+   * The distinction that matters: a REFUSAL is usually temporary — LHIMS
+   * restarting, the network dropping — and deserves another go, whereas a
+   * message with no specimen identifier or no address to send to will fail
+   * identically forever and only wastes attempts. So 'retry' keeps the message
+   * pending until the cap, and only then admits defeat; 'failed' is reserved
+   * for the problems a person has to fix.
+   */
+  private settle(outcome: { status: string; note: string | null }, message: any): string {
+    if (outcome.status !== 'retry') return outcome.status;
+    const attempts = Number(message.forward_attempts ?? 0) + 1;
+    return attempts >= LHIMS_MAX_ATTEMPTS ? 'failed' : 'pending';
+  }
+
+  /**
+   * One message, delivered result by result.
+   *
+   * A parameter with no measure id is NOT sent. LHIMS storing a haemoglobin
+   * under whatever id happened to be nearby is far worse than LHIMS not storing
+   * it, so the unmapped codes are named in the status instead and the message
+   * is marked partly delivered — visible, and fixable, rather than silently wrong.
+   */
+  private async deliverToLhims(message: any): Promise<{ status: string; note: string | null }> {
+    if (!message.lhims_url || !message.lhims_username) {
+      return { status: 'failed', note: 'No LHIMS address or username is set on this link.' };
+    }
+    const specimenId = String(message.sample_id ?? '').trim();
+    if (!specimenId) {
+      return { status: 'failed', note: 'This message carries no specimen identifier, so LHIMS has nothing to file it under.' };
+    }
+
+    const values: any[] = json<any[]>(message.parsed_values, []);
+    if (!values.length) return { status: 'not_required', note: 'Nothing in this message to deliver.' };
+
+    const overrides = json<Record<string, number>>(message.measure_map, {});
+    const credentials = { username: String(message.lhims_username), password: String(message.lhims_password ?? '') };
+
+    let delivered = 0;
+    const unmapped: string[] = [];
+    const refused: string[] = [];
+
+    for (const value of values) {
+      const measureId = lhimsMeasureId(String(value.code ?? value.analyte ?? ''), overrides, message.lhims_map_key);
+      if (!measureId) { unmapped.push(String(value.code ?? value.analyte ?? '?')); continue; }
+
+      const raw = String(value.value ?? '').trim();
+      if (!raw) continue;
+      // How many decimal places the analyser reported, so LHIMS stores the
+      // number as it was measured rather than rounded.
+      const decimals = raw.includes('.') ? Math.min(4, raw.split('.')[1].length) : 0;
+
+      const url = lhimsResultUrl(String(message.lhims_url), credentials, {
+        specimenId, measureId, value: raw, decimals,
+      });
+      const answer = await this.httpGet(url);
+      if (lhimsAccepted(answer)) delivered++;
+      else refused.push(`${value.code}: ${answer.slice(0, 40) || 'no answer'}`);
+    }
+
+    const notes: string[] = [];
+    if (delivered) notes.push(`${delivered} result(s) delivered`);
+    if (unmapped.length) notes.push(`no LHIMS measure id for ${unmapped.slice(0, 8).join(', ')}${unmapped.length > 8 ? '…' : ''} — map these on the link`);
+    if (refused.length) notes.push(`LHIMS refused ${refused.slice(0, 4).join('; ')}`);
+
+    // Nothing got through, but every parameter was mapped and addressed: that
+    // is LHIMS refusing or unreachable, so it is worth another go rather than
+    // being written off.
+    if (delivered === 0 && refused.length) {
+      return { status: 'retry', note: notes.join('. ') || null };
+    }
+    // Nothing got through and nothing was even mappable: retrying identical
+    // calls will not help, and the unmapped codes are named for somebody to fix.
+    if (delivered === 0) {
+      return { status: 'failed', note: notes.join('. ') || 'Nothing in this message could be mapped to a LHIMS measure id.' };
+    }
+    const status = (unmapped.length || refused.length) ? 'partial' : 'sent';
+    return { status, note: notes.join('. ') || null };
+  }
+
+  /** A plain TCP hand-off, for a middleware that wants the raw transmission. */
+  private async deliverByTcp(message: any): Promise<{ status: string; note: string | null }> {
+    if (!message.forward_host || !message.forward_port) {
+      return { status: 'failed', note: 'No address is set on this link to hand the message to.' };
+    }
+    await this.sendOnward(String(message.forward_host), Number(message.forward_port), message.raw_message ?? '');
+    return { status: 'sent', note: null };
+  }
+
+  /** One GET, with a timeout, never throwing on a refusal. */
+  private async httpGet(url: string): Promise<string> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      return (await response.text()).trim();
+    } catch (error) {
+      // The safe URL, so a password never reaches a log or a screen.
+      throw new Error(`${lhimsSafeUrl(url)} — ${(error as Error).message}`);
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -546,7 +767,7 @@ export class InstrumentBridge {
     try {
       this.getDb().prepare(`UPDATE instrument_messages SET forward_status = ?, forward_error = ?,
           forward_attempts = forward_attempts + 1,
-          forwarded_at = CASE WHEN ? = 'sent' THEN CURRENT_TIMESTAMP ELSE forwarded_at END
+          forwarded_at = CASE WHEN ? IN ('sent', 'partial') THEN CURRENT_TIMESTAMP ELSE forwarded_at END
           WHERE id = ?`).run(status, error, status, messageId);
     } catch { /* the next sweep will try again */ }
   }

@@ -4996,3 +4996,14 @@ button.cell-mark:disabled { cursor: default; }
 }
 .il-try-result { display: flex; flex-direction: column; gap: 12px; font-size: 11.5px; }
 .il-try-result p { margin: 0 0 6px; }
+
+/* The LHIMS tap: the steps have to be followed on another machine, so they are
+   set out as steps rather than buried in a hint. */
+.il-tap-steps {
+  padding: 10px 13px; border-radius: 9px; background: var(--info-bg);
+  border: 1px solid rgba(78, 141, 255, 0.28); font-size: 11.5px; line-height: 1.55;
+}
+.il-tap-steps strong { display: block; color: var(--info); margin-bottom: 5px; }
+.il-tap-steps ol { margin: 0; padding-left: 20px; color: var(--muted); }
+.il-tap-steps ol li { margin: 3px 0; }
+.il-tap-steps p { margin: 7px 0 0; color: var(--muted); }

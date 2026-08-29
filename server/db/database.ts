@@ -6842,6 +6842,34 @@ CREATE INDEX IF NOT EXISTS idx_instrument_messages_kind ON instrument_messages(k
 CREATE INDEX IF NOT EXISTS idx_instrument_messages_forward ON instrument_messages(forward_status);
 `);
 
+  // Carrying a result INTO LHIMS, and taking a copy OUT of its middleware.
+  //
+  // The LHIMS client posts each result to api/update_result.php with a
+  // measure_id — the number LHIMS knows a parameter by, taken from the
+  // laboratory's own client configuration. SECHLIMS makes the same call for the
+  // analysers the middleware never carried, which is how they reach LHIMS
+  // without the middleware changing.
+  //
+  // In the other direction, `tap_path` points at the client's own append log.
+  // Following that file is the only way an analyser LHIMS owns reaches SECHLIMS,
+  // and it touches the transmission not at all.
+  {
+    const cols = new Set((database.prepare("PRAGMA table_info(instrument_links)").all() as Array<{ name: string }>).map(c => c.name));
+    const add: Array<[string, string]> = [
+      ['forward_target', "forward_target TEXT NOT NULL DEFAULT 'lhims_api'"],
+      ['lhims_url', 'lhims_url TEXT'],
+      ['lhims_username', 'lhims_username TEXT'],
+      // Stored because the delivery is unattended and has to survive a restart.
+      // It is never returned by any endpoint and never written to a log.
+      ['lhims_password', 'lhims_password TEXT'],
+      ['lhims_map_key', 'lhims_map_key TEXT'],
+      ['measure_map', 'measure_map TEXT'],
+      ['tap_path', 'tap_path TEXT'],
+      ['tap_offset', 'tap_offset INTEGER NOT NULL DEFAULT 0'],
+    ];
+    for (const [col, ddl] of add) if (!cols.has(col)) database.exec(`ALTER TABLE instrument_links ADD COLUMN ${ddl}`);
+  }
+
   // A feed message says which link produced it, so the IQC bench can see which
   // analyser a waiting control came off.
   {

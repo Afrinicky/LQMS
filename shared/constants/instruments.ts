@@ -19,14 +19,21 @@
  *   BOTH chemistry analysers. They speak TCP/IP and transmit to nothing today,
  *   because the middleware was written for haematology. SECHLIMS takes them.
  *
- *   The first haematology analyser. Its single host port is spoken for, and an
- *   analyser with one host port cannot serve two masters. SECHLIMS says so
- *   plainly rather than pretending, and the bench uses one of the other five
- *   ways of entering a control on that machine.
+ *   The first haematology analyser — as a COPY, and this is the interesting one.
+ *   Its single host port is spoken for, so SECHLIMS cannot be a second
+ *   destination for it. But the LHIMS client has a setting of its own,
+ *   WRITE_TO_FILE, which makes it append every message it receives to
+ *   LHIMSDataInput.txt before it does anything else with it. SECHLIMS follows
+ *   that file, read-only, the way `tail -f` does. No port, no socket, no
+ *   interception: if SECHLIMS stops, the LHIMS transmission does not notice.
+ *   That is how all four analysers reach SECHLIMS without one of them being
+ *   disturbed.
  *
- * A link may later be told to pass what it receives ON to the LHIMS middleware
- * — which would fix LHIMS's own coverage gap — but that is off by default and
- * is a decision the laboratory takes deliberately, once it trusts the bridge.
+ * In the other direction, SECHLIMS can carry a result INTO LHIMS by making the
+ * same HTTP call the middleware makes — api/update_result.php, with the
+ * measure ids from the laboratory's own client configuration. That is how the
+ * three analysers LHIMS never carried can start reaching it. It is off by
+ * default, and refused outright for an analyser LHIMS already receives.
  */
 
 /* ============================================================================
@@ -47,36 +54,63 @@ export const LINK_ROLE_HINTS: Record<LinkRole, string> = {
     + 'and nothing existing is affected. Both chemistry analysers and the second haematology analyser are this.',
   lhims_owned:
     'Recorded so the system knows to stay away from it. SECHLIMS will refuse to bind this port or dial this '
-    + 'analyser, and the bench enters that machine\'s controls by pasting, uploading or scanning instead. '
-    + 'Nothing about the existing transmission changes.',
+    + 'analyser. It may still take a COPY of what this analyser sends, by following the LHIMS client\'s own '
+    + 'append log — that reads a file rather than touching the connection, so the existing transmission is '
+    + 'unaffected either way.',
   shared_forward:
     'SECHLIMS receives from the analyser and forwards a copy onward to the LHIMS middleware. Only switch this '
     + 'on for an analyser LHIMS is NOT already receiving, once the link has proved itself — it is how LHIMS '
     + 'could eventually carry all four analysers, but it must never be pointed at a link LHIMS already has.',
 };
 
-/** A link the bridge is allowed to open at all. */
-export function linkIsOurs(role?: string | null): boolean {
-  return role !== 'lhims_owned';
-}
-
 /* ============================================================================
    How the analyser is reached
    ========================================================================= */
-export const LINK_MODES = ['server', 'client', 'file_drop'] as const;
+export const LINK_MODES = ['server', 'client', 'file_drop', 'lhims_tap'] as const;
 export type LinkMode = (typeof LINK_MODES)[number];
 
 export const LINK_MODE_LABELS: Record<LinkMode, string> = {
   server: 'SECHLIMS listens; the analyser connects to it',
   client: 'SECHLIMS connects out to the analyser',
   file_drop: 'The analyser writes files to a watched folder',
+  lhims_tap: 'Follow the LHIMS client\'s own log — a copy, touching nothing',
 };
 
 export const LINK_MODE_HINTS: Record<LinkMode, string> = {
   server: 'The usual arrangement, and what the LHIMS client uses. Give the analyser this host\'s address and the port below.',
   client: 'For an analyser that listens instead of dialling out. SECHLIMS opens the connection and keeps it open.',
   file_drop: 'For an analyser whose only export is a file. Nothing is connected; the folder is watched.',
+  lhims_tap:
+    'The way to get a copy of an analyser LHIMS already owns. Set WRITE_TO_FILE = Yes in the LHIMS client and it '
+    + 'appends every message it receives to LHIMSDataInput.txt; SECHLIMS follows that file read-only, the way tail does. '
+    + 'No port is bound, no connection is opened, nothing is intercepted — if SECHLIMS stops, the LHIMS transmission '
+    + 'does not notice.',
 };
+
+/**
+ * A mode that only ever reads a file somebody else writes.
+ *
+ * This is the one arrangement in which a link may point at an analyser LHIMS
+ * owns, because it does not touch that analyser or its connection at all — it
+ * reads the middleware's own log. Every other mode is refused on an LHIMS-owned
+ * link, and that difference is what makes including haematology 1 safe.
+ */
+export function modeIsPassive(mode?: string | null): boolean {
+  return mode === 'lhims_tap';
+}
+
+/**
+ * May the bridge open this link at all?
+ *
+ * An LHIMS-owned link is off limits — with exactly one exception, and it is
+ * the exception that lets haematology 1 reach SECHLIMS: following the
+ * middleware's own append log reads a file, and reading a file cannot disturb
+ * a socket. Anything that binds, dials or intercepts stays refused.
+ */
+export function linkIsOurs(role?: string | null, mode?: string | null): boolean {
+  if (role !== 'lhims_owned') return true;
+  return modeIsPassive(mode);
+}
 
 /* ============================================================================
    What it says on the wire
@@ -103,7 +137,7 @@ export const LINK_RECONNECT_MS = 15_000;
 /** A frame larger than this is a runaway, not a result. */
 export const LINK_MAX_FRAME_BYTES = 512 * 1024;
 
-export const LINK_STATES = ['stopped', 'listening', 'connected', 'connecting', 'error', 'blocked'] as const;
+export const LINK_STATES = ['stopped', 'listening', 'connected', 'connecting', 'following', 'error', 'blocked'] as const;
 export type LinkState = (typeof LINK_STATES)[number];
 
 export const LINK_STATE_LABELS: Record<LinkState, string> = {
@@ -111,6 +145,7 @@ export const LINK_STATE_LABELS: Record<LinkState, string> = {
   listening: 'Listening for the analyser',
   connected: 'Connected',
   connecting: 'Trying to connect',
+  following: 'Following the LHIMS client\'s log',
   error: 'Failed',
   blocked: 'Left alone — LHIMS owns this link',
 };

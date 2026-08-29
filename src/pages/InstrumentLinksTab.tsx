@@ -12,21 +12,33 @@ import {
   LINK_MODES, LINK_MODE_HINTS, LINK_MODE_LABELS,
   LINK_PROTOCOLS, LINK_PROTOCOL_HINTS, LINK_PROTOCOL_LABELS,
   LINK_ROLES, LINK_ROLE_HINTS, LINK_ROLE_LABELS, LINK_STATE_LABELS,
-  DEFAULT_CONTROL_PATTERNS, type LinkMode, type LinkProtocol, type LinkRole,
+  DEFAULT_CONTROL_PATTERNS, modeIsPassive,
+  type LinkMode, type LinkProtocol, type LinkRole,
 } from '../../shared/constants/instruments';
+import { LHIMS_TAP_FILENAME, LHIMS_TAP_SETUP_STEPS } from '../../shared/constants/lhims';
 
 /**
  * Analyser links.
  *
  * The screen exists to make one thing impossible to get wrong by accident: the
  * link the LHIMS middleware uses for patient results must be left alone. So
- * that link is recorded here too — not to be run, but so the system knows to
- * stay away from its port and its address, and so anybody looking at this page
- * can see at a glance which link is which.
+ * that link is recorded here too, and the system stays away from its port and
+ * its address — anybody looking at this page can see at a glance which link is
+ * which.
  *
- * Everything else here is additive. The second haematology analyser and both
- * chemistry analysers transmit to nothing today; giving each its own port costs
- * the existing arrangement nothing and gains three machines.
+ * Three arrangements, all of them additive:
+ *
+ *   An analyser transmitting nowhere gets its own port here. Both chemistry
+ *   analysers and the second haematology analyser are this, and it costs the
+ *   existing setup nothing.
+ *
+ *   The analyser LHIMS owns is copied by FOLLOWING the LHIMS client's own log —
+ *   the file it already writes when WRITE_TO_FILE is on. Read-only, no port, no
+ *   connection. That is how all four analysers reach SECHLIMS.
+ *
+ *   And in the other direction, a link can carry its patient results INTO
+ *   LHIMS by making the same call the middleware makes, which is how the three
+ *   analysers LHIMS never carried can start reaching it.
  */
 
 type Link = {
@@ -38,7 +50,12 @@ type Link = {
   remote_host: string | null; remote_port: number | null;
   watch_path: string | null;
   analyte_map: Record<string, string>; control_patterns: string[];
+  measure_map: Record<string, number>;
   forward_enabled: number; forward_host: string | null; forward_port: number | null;
+  forward_target: string | null;
+  lhims_url: string | null; lhims_username: string | null; lhims_password_set: boolean;
+  lhims_map_key: string | null;
+  tap_path: string | null; tap_offset: number | null;
   auto_start: number; is_active: number;
   state: string; state_detail: string | null; last_error: string | null;
   last_connected_at: string | null; last_message_at: string | null;
@@ -48,6 +65,7 @@ type Link = {
 };
 
 type Profile = { key: string; label: string; vendor: string; discipline: string; protocol: string; notes: string | null; analyteCount: number };
+type LhimsMap = { key: string; label: string; vendor: string; sourceConfig: string; measureCount: number };
 
 const EMPTY = {
   name: '', equipmentId: '', sectionId: '', profileKey: 'sysmex_xn',
@@ -55,6 +73,9 @@ const EMPTY = {
   listenHost: '', listenPort: '', remoteHost: '', remotePort: '', watchPath: '',
   controlPatterns: DEFAULT_CONTROL_PATTERNS.join(', '),
   forwardEnabled: false, forwardHost: '', forwardPort: '',
+  forwardTarget: 'lhims_api',
+  lhimsUrl: '', lhimsUsername: '', lhimsPassword: '', lhimsMapKey: '',
+  tapPath: '',
   autoStart: true, notes: '',
 };
 
@@ -63,6 +84,7 @@ export default function InstrumentLinksTab() {
   const canEdit = can('iqc', 'edit');
   const [links, setLinks] = useState<Link[] | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [lhimsMaps, setLhimsMaps] = useState<LhimsMap[]>([]);
   const [equipment, setEquipment] = useState<Array<{ id: number; name: string; section_id?: number | null }>>([]);
   const [sections, setSections] = useState<Array<{ id: number; name: string }>>([]);
   const [error, setError] = useState<string | null>(null);
@@ -84,11 +106,11 @@ export default function InstrumentLinksTab() {
     void (async () => {
       try {
         const [p, e, s] = await Promise.all([
-          api<{ profiles: Profile[] }>('/instrument-links/profiles'),
+          api<{ profiles: Profile[]; lhimsMaps: LhimsMap[] }>('/instrument-links/profiles'),
           api<Array<{ id: number; name: string; section_id?: number | null }>>('/equipment'),
           api<Array<{ id: number; name: string }>>('/sections'),
         ]);
-        setProfiles(p.profiles); setEquipment(e); setSections(s);
+        setProfiles(p.profiles); setLhimsMaps(p.lhimsMaps ?? []); setEquipment(e); setSections(s);
       } catch { /* the pickers are a convenience */ }
     })();
   }, []);
@@ -117,6 +139,14 @@ export default function InstrumentLinksTab() {
       forwardEnabled: form.forwardEnabled,
       forwardHost: form.forwardHost || null,
       forwardPort: form.forwardPort ? Number(form.forwardPort) : null,
+      forwardTarget: form.forwardTarget,
+      lhimsUrl: form.lhimsUrl || null,
+      lhimsUsername: form.lhimsUsername || null,
+      // Left out entirely when untouched, so an edit does not blank a stored
+      // password the screen was never shown.
+      ...(form.lhimsPassword ? { lhimsPassword: form.lhimsPassword } : {}),
+      lhimsMapKey: form.lhimsMapKey || null,
+      tapPath: form.tapPath || null,
       autoStart: form.autoStart, notes: form.notes || null,
     };
     try {
@@ -213,8 +243,9 @@ export default function InstrumentLinksTab() {
       </div>
 
       {showForm && (
-        <LinkForm form={form} setForm={setForm} profiles={profiles} equipment={equipment} sections={sections}
-          editing={Boolean(editing)} busy={busy === 'save'}
+        <LinkForm form={form} setForm={setForm} profiles={profiles} lhimsMaps={lhimsMaps}
+          equipment={equipment} sections={sections}
+          editing={Boolean(editing)} passwordSet={Boolean(editing?.lhims_password_set)} busy={busy === 'save'}
           onSave={() => void save()} onClose={() => { setShowForm(false); setEditing(null); }} />
       )}
       {openMessages && <MessagesDialog link={openMessages} onClose={() => setOpenMessages(null)} />}
@@ -236,6 +267,11 @@ function formFrom(link: Link) {
     controlPatterns: (link.control_patterns ?? []).join(', '),
     forwardEnabled: Boolean(link.forward_enabled),
     forwardHost: link.forward_host ?? '', forwardPort: link.forward_port ? String(link.forward_port) : '',
+    forwardTarget: link.forward_target ?? 'lhims_api',
+    lhimsUrl: link.lhims_url ?? '', lhimsUsername: link.lhims_username ?? '',
+    lhimsPassword: '',
+    lhimsMapKey: link.lhims_map_key ?? '',
+    tapPath: link.tap_path ?? '',
     autoStart: Boolean(link.auto_start), notes: link.notes ?? '',
   };
 }
@@ -249,7 +285,7 @@ function LinkRow({ link, canEdit, busy, onStart, onStop, onEdit, onMessages, onT
   onMessages: () => void; onTry: () => void;
 }) {
   const tone = link.state === 'connected' ? 'ok'
-    : link.state === 'listening' ? 'ok'
+    : link.state === 'listening' || link.state === 'following' ? 'ok'
     : link.state === 'blocked' ? 'lhims'
     : link.state === 'error' ? 'crit' : 'idle';
 
@@ -264,7 +300,8 @@ function LinkRow({ link, canEdit, busy, onStart, onStop, onEdit, onMessages, onT
             {LINK_STATE_LABELS[link.state as keyof typeof LINK_STATE_LABELS] ?? link.state}
           </span>
           {link.role === 'lhims_owned' && <span className="badge">LHIMS</span>}
-          {Boolean(link.forward_enabled) && <span className="badge">forwards a copy to LHIMS</span>}
+          {modeIsPassive(link.mode) && <span className="badge">read-only copy</span>}
+          {Boolean(link.forward_enabled) && <span className="badge">carries to LHIMS</span>}
         </span>
         <span className="il-meta">
           {link.equipment_name && <span>{link.equipment_name}</span>}
@@ -273,6 +310,7 @@ function LinkRow({ link, canEdit, busy, onStart, onStop, onEdit, onMessages, onT
           <span>
             {link.mode === 'server' ? `listening on ${link.listen_host || 'every interface'}:${link.listen_port ?? '—'}`
               : link.mode === 'client' ? `dials ${link.remote_host}:${link.remote_port}`
+              : link.mode === 'lhims_tap' ? `reads ${link.tap_path}`
               : `watches ${link.watch_path}`}
           </span>
           {link.message_count > 0 && <span>{link.message_count} message{link.message_count === 1 ? '' : 's'}</span>}
@@ -283,7 +321,7 @@ function LinkRow({ link, canEdit, busy, onStart, onStop, onEdit, onMessages, onT
         {link.state_detail && <p className={`il-detail${link.state === 'error' ? ' is-error' : ''}`}>{link.state_detail}</p>}
       </div>
       <div className="il-side">
-        {canEdit && link.role !== 'lhims_owned' && (
+        {canEdit && (link.role !== 'lhims_owned' || modeIsPassive(link.mode)) && (
           link.running
             ? <button type="button" className="pq-link" disabled={busy} onClick={onStop}><Square size={12} /> Stop</button>
             : <button type="button" className="pq-link" disabled={busy} onClick={onStart}>
@@ -301,10 +339,11 @@ function LinkRow({ link, canEdit, busy, onStart, onStop, onEdit, onMessages, onT
 /* ----------------------------------------------------------------------------
    Adding or changing a link
    ------------------------------------------------------------------------- */
-function LinkForm({ form, setForm, profiles, equipment, sections, editing, busy, onSave, onClose }: {
+function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, editing, passwordSet, busy, onSave, onClose }: {
   form: typeof EMPTY; setForm: (fn: (f: typeof EMPTY) => typeof EMPTY) => void;
-  profiles: Profile[]; equipment: Array<{ id: number; name: string }>; sections: Array<{ id: number; name: string }>;
-  editing: boolean; busy: boolean; onSave: () => void; onClose: () => void;
+  profiles: Profile[]; lhimsMaps: LhimsMap[];
+  equipment: Array<{ id: number; name: string }>; sections: Array<{ id: number; name: string }>;
+  editing: boolean; passwordSet: boolean; busy: boolean; onSave: () => void; onClose: () => void;
 }) {
   const set = <K extends keyof typeof EMPTY>(key: K, value: (typeof EMPTY)[K]) => setForm(f => ({ ...f, [key]: value }));
   const profile = profiles.find(p => p.key === form.profileKey);
@@ -402,6 +441,21 @@ function LinkForm({ form, setForm, profiles, equipment, sections, editing, busy,
           <label><span>Folder to watch</span>
             <TextField value={form.watchPath} onValue={v => set('watchPath', v)} placeholder="C:\\Analyser\\Export" /></label>
         )}
+        {form.mode === 'lhims_tap' && (
+          <>
+            <label><span>Path to the LHIMS client&rsquo;s {LHIMS_TAP_FILENAME}</span>
+              <TextField value={form.tapPath} onValue={v => set('tapPath', v)}
+                placeholder={`\\\\HAEM-PC\\LHIMS CLIENT\\${LHIMS_TAP_FILENAME}`} /></label>
+            <div className="il-tap-steps">
+              <strong>To switch the log on, on the PC running the LHIMS client:</strong>
+              <ol>{LHIMS_TAP_SETUP_STEPS.map((step, i) => <li key={i}>{step}</li>)}</ol>
+              <p>
+                SECHLIMS only ever reads this file. It never writes to it, never empties it and never holds it
+                open — so the LHIMS transmission carries on exactly as it does now, whether this is running or not.
+              </p>
+            </div>
+          </>
+        )}
 
         <label><span>Sample identifiers that mean &ldquo;this is a control&rdquo;</span>
           <TextField value={form.controlPatterns} onValue={v => set('controlPatterns', v)} />
@@ -416,22 +470,62 @@ function LinkForm({ form, setForm, profiles, equipment, sections, editing, busy,
           <input type="checkbox" checked={form.forwardEnabled} disabled={form.role === 'lhims_owned'}
             onChange={e => set('forwardEnabled', e.target.checked)} />
           <span>
-            Also pass a copy on to the LHIMS middleware
+            Also carry this analyser&rsquo;s patient results into LHIMS
             <em>
               {' '}— only for an analyser LHIMS is <strong>not</strong> already receiving, and only once this link
-              has proved itself. It is how LHIMS could eventually carry all four analysers.
+              has proved itself. It makes the same call the LHIMS middleware makes, so LHIMS gains the analysers
+              its own client could never carry. Control runs are never sent; they belong on the IQC board.
             </em>
           </span>
         </label>
         {form.forwardEnabled && (
-          <div className="iqc-run-meta">
-            <label><span>LHIMS address</span>
-              <TextField value={form.forwardHost} onValue={v => set('forwardHost', v)} placeholder="10.10.0.5" /></label>
-            <label><span>Port</span>
-              <NumberField min={1} max={65535} value={form.forwardPort ? Number(form.forwardPort) : null}
-                onValue={n => set('forwardPort', n ? String(n) : '')} />
+          <>
+            <label><span>How to deliver</span>
+              <select value={form.forwardTarget} onChange={e => set('forwardTarget', e.target.value)}>
+                <option value="lhims_api">Post each result to the LHIMS API, as the middleware does</option>
+                <option value="tcp">Hand the raw transmission to another program</option>
+              </select>
             </label>
-          </div>
+            {form.forwardTarget === 'lhims_api' ? (
+              <>
+                <div className="iqc-run-meta">
+                  <label><span>LHIMS address</span>
+                    <TextField value={form.lhimsUrl} onValue={v => set('lhimsUrl', v)}
+                      placeholder="http://10.10.0.5/lhims/" /></label>
+                  <label><span>Username</span>
+                    <TextField value={form.lhimsUsername} onValue={v => set('lhimsUsername', v)} /></label>
+                  <label><span>Password</span>
+                    <input type="password" value={form.lhimsPassword} autoComplete="new-password"
+                      placeholder={passwordSet ? 'unchanged' : ''}
+                      onChange={e => set('lhimsPassword', e.target.value)} />
+                  </label>
+                </div>
+                <label><span>What LHIMS calls each parameter</span>
+                  <select value={form.lhimsMapKey} onChange={e => set('lhimsMapKey', e.target.value)}>
+                    <option value="">Choose the analyser&rsquo;s LHIMS map…</option>
+                    {lhimsMaps.map(m => (
+                      <option key={m.key} value={m.key}>{m.label} — {m.measureCount} parameters</option>
+                    ))}
+                  </select>
+                  <span className="muted" style={{ display: 'block', marginTop: 4, fontSize: 11.5 }}>
+                    These are the measure ids from your own LHIMS client configuration files, so a result lands in
+                    the same LHIMS field the middleware would have put it in. A parameter with no id is not sent —
+                    it is listed for you instead, because LHIMS storing a value under the wrong id is worse than
+                    not storing it. Use &ldquo;Try one&rdquo; to see exactly which would go and which would not.
+                  </span>
+                </label>
+              </>
+            ) : (
+              <div className="iqc-run-meta">
+                <label><span>Address</span>
+                  <TextField value={form.forwardHost} onValue={v => set('forwardHost', v)} placeholder="10.10.0.5" /></label>
+                <label><span>Port</span>
+                  <NumberField min={1} max={65535} value={form.forwardPort ? Number(form.forwardPort) : null}
+                    onValue={n => set('forwardPort', n ? String(n) : '')} />
+                </label>
+              </div>
+            )}
+          </>
         )}
 
         <label className="ls-check">

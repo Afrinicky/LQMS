@@ -25,8 +25,12 @@ import { getBridge } from '../services/instrumentBridge/index.js';
 import { parseFor } from '../services/instrumentBridge/protocols.js';
 import {
   INSTRUMENT_PROFILES, LINK_MODES, LINK_PROTOCOLS, LINK_ROLES, LINK_ROLE_LABELS,
-  DEFAULT_CONTROL_PATTERNS, looksLikeControl, mapAnalyte, profileByKey,
+  DEFAULT_CONTROL_PATTERNS, looksLikeControl, mapAnalyte, modeIsPassive, profileByKey,
 } from '../../shared/constants/instruments.js';
+import {
+  LHIMS_MEASURE_MAPS, LHIMS_TAP_FILENAME, LHIMS_TAP_SETUP_STEPS,
+  lhimsMapByKey, lhimsMeasureId,
+} from '../../shared/constants/lhims.js';
 
 const MODULE = 'iqc';
 const numericOnly = (req: any, _res: any, next: any) => (/^\d+$/.test(req.params.id) ? next() : next('route'));
@@ -54,6 +58,13 @@ export function instrumentLinkRoutes() {
       roles: LINK_ROLES.map(r => ({ key: r, label: LINK_ROLE_LABELS[r] })),
       modes: LINK_MODES, protocols: LINK_PROTOCOLS,
       defaultControlPatterns: DEFAULT_CONTROL_PATTERNS,
+      // What LHIMS calls each parameter, taken from this laboratory's own
+      // client configuration files.
+      lhimsMaps: LHIMS_MEASURE_MAPS.map(m => ({
+        key: m.key, label: m.label, vendor: m.vendor,
+        sourceConfig: m.sourceConfig, measureCount: Object.keys(m.measures).length,
+      })),
+      tap: { filename: LHIMS_TAP_FILENAME, steps: LHIMS_TAP_SETUP_STEPS },
     });
   });
 
@@ -78,13 +89,27 @@ export function instrumentLinkRoutes() {
         ${req.query.active === 'all' ? '' : 'WHERE l.is_active = 1'}
         ORDER BY CASE l.role WHEN 'lhims_owned' THEN 1 ELSE 0 END, l.name`).all() as any[];
 
-    res.json(rows.map(row => ({
-      ...row,
+    res.json(rows.map(row => shape(row)));
+  });
+
+  /**
+   * A link as the browser may see it.
+   *
+   * The LHIMS password is stored because delivery is unattended and has to
+   * survive a restart — but it is never sent back out. The screen is told
+   * whether one is set, which is all it needs to draw the form honestly.
+   */
+  function shape(row: any) {
+    const { lhims_password, ...rest } = row;
+    return {
+      ...rest,
       analyte_map: json<Record<string, string>>(row.analyte_map, {}),
       control_patterns: json<string[]>(row.control_patterns, []),
+      measure_map: json<Record<string, number>>(row.measure_map, {}),
+      lhims_password_set: Boolean(lhims_password),
       running: bridge.isRunning(row.id),
-    })));
-  });
+    };
+  }
 
   function body(req: any, existing: any = {}) {
     const b = req.body ?? {};
@@ -107,6 +132,15 @@ export function instrumentLinkRoutes() {
       forwardEnabled: b.forwardEnabled !== undefined ? (b.forwardEnabled ? 1 : 0) : (existing.forward_enabled ?? 0),
       forwardHost: pick(b.forwardHost, existing.forward_host) ?? null,
       forwardPort: b.forwardPort !== undefined ? parseIntNullable(b.forwardPort) : (existing.forward_port ?? null),
+      forwardTarget: String(pick(b.forwardTarget, existing.forward_target) ?? 'lhims_api'),
+      lhimsUrl: pick(b.lhimsUrl, existing.lhims_url) ?? null,
+      lhimsUsername: pick(b.lhimsUsername, existing.lhims_username) ?? null,
+      // An absent password keeps whatever is stored; an empty string clears it.
+      lhimsPassword: b.lhimsPassword === undefined ? (existing.lhims_password ?? null)
+        : (String(b.lhimsPassword) || null),
+      lhimsMapKey: pick(b.lhimsMapKey, existing.lhims_map_key) ?? null,
+      measureMap: b.measureMap !== undefined ? JSON.stringify(b.measureMap ?? {}) : (existing.measure_map ?? null),
+      tapPath: pick(b.tapPath, existing.tap_path) ?? null,
       autoStart: b.autoStart !== undefined ? (b.autoStart ? 1 : 0) : (existing.auto_start ?? 1),
       isActive: b.isActive !== undefined ? (b.isActive ? 1 : 0) : (existing.is_active ?? 1),
       notes: pick(b.notes, existing.notes) ?? null,
@@ -126,14 +160,33 @@ export function instrumentLinkRoutes() {
     if (v.mode === 'server' && !v.listenPort) return 'A listening link needs the port the analyser will send to.';
     if (v.mode === 'client' && (!v.remoteHost || !v.remotePort)) return 'A dialling link needs the analyser\'s address and port.';
     if (v.mode === 'file_drop' && !v.watchPath) return 'A watched link needs the folder the analyser writes into.';
-
-    // Forwarding a copy to LHIMS from a link LHIMS already receives would post
-    // the same result twice. Refused outright rather than warned about.
-    if (v.forwardEnabled && v.role === 'lhims_owned') {
-      return 'This link is recorded as one LHIMS already receives, so forwarding a copy to LHIMS would send the same result twice. Turn forwarding off, or correct the link\'s role.';
+    if (v.mode === 'lhims_tap' && !v.tapPath) {
+      return `Following the LHIMS client needs the path to its ${LHIMS_TAP_FILENAME}. Set WRITE_TO_FILE = Yes in the client first, then point this at the file it writes.`;
     }
-    if (v.forwardEnabled && (!v.forwardHost || !v.forwardPort)) {
-      return 'Forwarding needs the address and port of the LHIMS middleware to send to.';
+
+    // Delivering to LHIMS needs somewhere to deliver to, and a way to name each
+    // parameter in LHIMS's own terms.
+    // The safety rule comes first, and on its own. A link LHIMS already receives
+    // must never deliver back into LHIMS — that stores one result twice — and
+    // telling somebody their URL is missing when the real answer is "not this
+    // link, ever" sends them off to fill in fields that will not help.
+    if (v.forwardEnabled && v.role === 'lhims_owned') {
+      return 'This link is recorded as one LHIMS already receives, so carrying its results to LHIMS would store the same result twice. Turn it off, or correct the link\'s role.';
+    }
+
+    // A raw TCP hand-off needs an address; delivery to the LHIMS API needs a
+    // URL instead. Demanding both is what made the API route impossible to
+    // configure.
+    if (v.forwardEnabled && v.forwardTarget === 'tcp' && (!v.forwardHost || !v.forwardPort)) {
+      return 'Handing the raw transmission to another program needs its address and port.';
+    }
+    if (v.forwardEnabled && v.forwardTarget !== 'tcp') {
+      if (!v.lhimsUrl || !v.lhimsUsername) {
+        return 'Carrying results to LHIMS needs its address and the username the middleware uses.';
+      }
+      if (!v.lhimsMapKey && !v.measureMap) {
+        return 'Carrying results to LHIMS needs to know what LHIMS calls each parameter. Choose the analyser\'s LHIMS map, or set the measure ids by hand.';
+      }
     }
 
     // Never let a new link take a port an LHIMS-owned link uses.
@@ -178,11 +231,13 @@ export function instrumentLinkRoutes() {
     const result = db.prepare(`INSERT INTO instrument_links
         (link_code, name, equipment_id, section_id, profile_key, role, mode, protocol,
          listen_host, listen_port, remote_host, remote_port, watch_path, analyte_map, control_patterns,
-         forward_enabled, forward_host, forward_port, auto_start, is_active, notes, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+         forward_enabled, forward_host, forward_port, forward_target, lhims_url, lhims_username,
+         lhims_password, lhims_map_key, measure_map, tap_path, auto_start, is_active, notes, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(code, v.name, v.equipmentId, v.sectionId, v.profileKey, v.role, v.mode, v.protocol,
         v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath, v.analyteMap, v.controlPatterns,
-        v.forwardEnabled, v.forwardHost, v.forwardPort, v.autoStart, v.isActive, v.notes, req.user!.id);
+        v.forwardEnabled, v.forwardHost, v.forwardPort, v.forwardTarget, v.lhimsUrl, v.lhimsUsername,
+        v.lhimsPassword, v.lhimsMapKey, v.measureMap, v.tapPath, v.autoStart, v.isActive, v.notes, req.user!.id);
 
     const id = Number(result.lastInsertRowid);
     if (v.isActive && v.autoStart) bridge.restart(id);
@@ -201,10 +256,14 @@ export function instrumentLinkRoutes() {
     db.prepare(`UPDATE instrument_links SET name = ?, equipment_id = ?, section_id = ?, profile_key = ?,
         role = ?, mode = ?, protocol = ?, listen_host = ?, listen_port = ?, remote_host = ?, remote_port = ?,
         watch_path = ?, analyte_map = ?, control_patterns = ?, forward_enabled = ?, forward_host = ?,
-        forward_port = ?, auto_start = ?, is_active = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+        forward_port = ?, forward_target = ?, lhims_url = ?, lhims_username = ?, lhims_password = ?,
+        lhims_map_key = ?, measure_map = ?, tap_path = ?,
+        auto_start = ?, is_active = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
       .run(v.name, v.equipmentId, v.sectionId, v.profileKey, v.role, v.mode, v.protocol,
         v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath, v.analyteMap, v.controlPatterns,
-        v.forwardEnabled, v.forwardHost, v.forwardPort, v.autoStart, v.isActive, v.notes, req.params.id);
+        v.forwardEnabled, v.forwardHost, v.forwardPort, v.forwardTarget, v.lhimsUrl, v.lhimsUsername,
+        v.lhimsPassword, v.lhimsMapKey, v.measureMap, v.tapPath,
+        v.autoStart, v.isActive, v.notes, req.params.id);
 
     // Settings changed means the socket has to be rebuilt; a link that is now
     // LHIMS's, or now inactive, is stopped rather than restarted.
@@ -232,9 +291,9 @@ export function instrumentLinkRoutes() {
     const db = getDb();
     const link = db.prepare('SELECT * FROM instrument_links WHERE id = ?').get(req.params.id) as any;
     if (!link) return res.status(404).json({ error: 'Link not found' });
-    if (link.role === 'lhims_owned') {
+    if (link.role === 'lhims_owned' && !modeIsPassive(link.mode)) {
       return res.status(400).json({
-        error: 'This link is recorded as one LHIMS owns. SECHLIMS deliberately does not open it, so the transmission that is working today is not disturbed. Change its role only if LHIMS has genuinely stopped using it.',
+        error: 'This link is recorded as one LHIMS owns, and it is set to bind or dial. SECHLIMS deliberately does not open it, so the transmission working today is not disturbed. To take a COPY of this analyser instead, set the link to follow the LHIMS client\'s log — that reads a file and touches nothing.',
       });
     }
     bridge.restart(Number(req.params.id));
@@ -250,8 +309,7 @@ export function instrumentLinkRoutes() {
 
   function currentState(db: any, id: number) {
     const row = db.prepare('SELECT * FROM instrument_links WHERE id = ?').get(id) as any;
-    if (!row) return null;
-    return { ...row, analyte_map: json(row.analyte_map, {}), control_patterns: json(row.control_patterns, []), running: bridge.isRunning(id) };
+    return row ? shape(row) : null;
   }
 
   /* ======================================================================
@@ -290,26 +348,49 @@ export function instrumentLinkRoutes() {
 
     const linkMap = json<Record<string, string>>(link.analyte_map, {});
     const patterns = json<string[]>(link.control_patterns, []);
+    const measureOverrides = json<Record<string, number>>(link.measure_map, {});
     let parsed;
     try { parsed = parseFor(link.protocol, text); }
     catch (error) { return res.status(400).json({ error: `That could not be read as ${link.protocol}: ${(error as Error).message}` }); }
 
-    res.json({
-      protocol: link.protocol,
-      messages: parsed.map(message => ({
+    const carriesToLhims = Boolean(link.forward_enabled) && link.forward_target !== 'tcp';
+    const unmapped = new Set<string>();
+
+    const messages = parsed.map(message => {
+      const kind = message.results.length === 0 ? 'unknown'
+        : (looksLikeControl(message.sampleId, patterns) || looksLikeControl(message.lotNumber, patterns)) ? 'control' : 'patient';
+      return {
         sampleId: message.sampleId,
         lotNumber: message.lotNumber,
         instrument: message.instrument,
         runAt: message.runAt,
-        wouldBeTreatedAs: message.results.length === 0 ? 'unknown'
-          : (looksLikeControl(message.sampleId, patterns) || looksLikeControl(message.lotNumber, patterns)) ? 'control' : 'patient',
-        results: message.results.map(result => ({
-          code: result.code,
-          analyte: mapAnalyte(result.code, linkMap, link.profile_key),
-          mapped: mapAnalyte(result.code, linkMap, link.profile_key) !== result.code,
-          value: result.value, unit: result.unit, flag: result.flag,
-        })),
-      })),
+        wouldBeTreatedAs: kind,
+        // Only a patient result goes to LHIMS; a control belongs on the IQC
+        // board and has no patient record to be filed under.
+        wouldGoToLhims: carriesToLhims && kind === 'patient',
+        results: message.results.map(result => {
+          const analyte = mapAnalyte(result.code, linkMap, link.profile_key);
+          const measureId = lhimsMeasureId(result.code, measureOverrides, link.lhims_map_key);
+          if (carriesToLhims && kind === 'patient' && !measureId) unmapped.add(result.code);
+          return {
+            code: result.code,
+            analyte,
+            mapped: analyte !== result.code,
+            value: result.value, unit: result.unit, flag: result.flag,
+            lhimsMeasureId: measureId,
+          };
+        }),
+      };
+    });
+
+    res.json({
+      protocol: link.protocol,
+      carriesToLhims,
+      lhimsMap: link.lhims_map_key ? (lhimsMapByKey(link.lhims_map_key)?.label ?? link.lhims_map_key) : null,
+      // Named rather than counted: these are the parameters LHIMS would not
+      // receive, and the whole point of trying a message first is to find them.
+      unmappedForLhims: [...unmapped],
+      messages,
     });
   });
 

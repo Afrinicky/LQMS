@@ -527,3 +527,45 @@ export function parseFor(protocol: string, text: string): AnalyserMessage[] {
   if (protocol === 'delimited') return parseDelimited(text);
   return parseAstm(text);
 }
+
+
+/* ============================================================================
+   Splitting an append log back into transmissions
+   ----------------------------------------------------------------------------
+   The LHIMS client writes each message it receives to the end of one file, one
+   after another, with no separator of its own. What marks the boundary is the
+   protocol's own terminator: ASTM ends a transmission with an L record, HL7
+   with the end of the message segment group.
+
+   Anything after the last terminator is held back rather than parsed, because
+   the file may have been read half way through an append — and half a
+   transmission parsed as a whole one is a result with parameters missing.
+   ========================================================================= */
+export function splitTransmissions(text: string, protocol: string): { complete: string[]; remainder: string } {
+  if (!text) return { complete: [], remainder: '' };
+
+  if (protocol === 'hl7') {
+    // Each message starts at an MSH. A new MSH means the previous one finished.
+    const parts = text.split(/(?=MSH\|)/g).filter(p => p.trim());
+    if (parts.length <= 1) return { complete: [], remainder: text };
+    return { complete: parts.slice(0, -1), remainder: parts[parts.length - 1] };
+  }
+
+  const lines = text.split(/\r\n|\r|\n/);
+  const complete: string[] = [];
+  let current: string[] = [];
+  let lastTerminated = -1;
+
+  lines.forEach((line, index) => {
+    current.push(line);
+    // An ASTM terminator record: L, optionally with a frame number in front.
+    if (/^\d?L\|/.test(line.trim())) {
+      complete.push(current.join('\r\n'));
+      current = [];
+      lastTerminated = index;
+    }
+  });
+
+  if (lastTerminated === -1) return { complete: [], remainder: text };
+  return { complete, remainder: current.join('\r\n') };
+}

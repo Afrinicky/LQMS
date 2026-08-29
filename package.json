@@ -27,6 +27,7 @@
     "check:iqc": "node scripts/iqc-check.mjs",
     "check:routine-work": "node scripts/routine-work-check.mjs",
     "check:bridge": "node scripts/instrument-bridge-check.mjs",
+    "check:lhims": "node scripts/lhims-bridge-check.mjs",
     "rebuild:native": "electron-builder install-app-deps",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
