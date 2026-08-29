@@ -777,6 +777,46 @@ export type IqcFeedMessage = {
 
 /* ------------------------------------------------------ equipment maintenance */
 
+/**
+ * A unit's own instruments, and what ISO 15189 says each kind is owed.
+ *
+ * The duties differ by archetype and pretending otherwise is how a fridge ends
+ * up in an IQC picker: an analyser owes calibration, verification, uncertainty,
+ * IQC and EQA; a fridge owes acceptance, monitoring, maintenance and
+ * certification. Both owe something, and the screen says which.
+ */
+export type EquipmentDutyState = {
+  duty:string; label:string; clause:string; hint:string;
+  /** False for a duty this system holds no record type for — listed, not judged. */
+  tracked:boolean;
+  /** Whether a programme exists at all. Distinct from whether it is up to date. */
+  setUp:boolean|null;
+  detail:string|null;
+  dueDate:string|null;
+  dueState:'overdue'|'due_soon'|'scheduled'|'unscheduled'|null;
+};
+
+export type UnitEquipmentItem = {
+  id:number; name:string; equipmentNumber:string|null;
+  manufacturer:string|null; model:string|null; serialNumber:string|null;
+  status:string; archetype:string; category:string|null;
+  locationName:string|null; custodianName:string|null;
+  duties:EquipmentDutyState[];
+  gaps:string[]; overdue:string[]; dueSoon:string[];
+  maintenanceTasks:number;
+};
+
+export type UnitEquipmentOverview = {
+  sectionId:number|null; sectionName:string|null; isUnitHead:boolean;
+  equipment:UnitEquipmentItem[];
+  counts:{
+    items:number; withGaps:number; overdue:number; dueSoon:number;
+    needMaintenanceTasks:number; needCalibration:number; needVerification:number; outOfService:number;
+  };
+  message:string|null;
+};
+
+
 export type MaintenanceTask = {
   id:number; equipment_id:number; equipment_name?:string; equipment_number?:string;
   schedule_id?:number|null; maintenance_kind:'routine'|'scheduled';
