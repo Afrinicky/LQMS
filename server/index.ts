@@ -42,6 +42,7 @@ import { dutyActivityRoutes } from './routes/dutyActivities.js';
 import { routineSheetRoutes } from './routes/routineSheets.js';
 import { decontaminationRoutes } from './routes/decontamination.js';
 import { iqcPortalRoutes } from './routes/iqcPortal.js';
+import { SignatureRequiredError } from './services/signatureService.js';
 import { instrumentLinkRoutes } from './routes/instrumentLinks.js';
 import { systemAuditRoutes } from './routes/systemAudit.js';
 import { scannedRecordsRoutes } from './routes/scannedRecords.js';
@@ -220,6 +221,9 @@ export function createApiServer() {
 
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const message = err instanceof Error ? err.message : 'Unexpected server error';
+    // Refusing to sign for want of a signature on file is the caller's to fix,
+    // not a server fault — answer with the remedy rather than a 500.
+    if (err instanceof SignatureRequiredError) return res.status(400).json({ error: message, code: err.code });
     res.status(500).json({ error: message });
   });
   return app;

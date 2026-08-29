@@ -663,7 +663,7 @@ export type LogSheet = {
    */
   amDueAt?:number; pmDueAt?:number; pmOpensAt?:number;
   nc?:{ id:number; nc_number:string; status:string }|null;
-  signature?:{ id:number; signer_name?:string|null; signed_at:string; meaning?:string|null }|null;
+  signature?:{ id:number; signer_name?:string|null; signed_at:string; meaning?:string|null; staff_id?:number|null; signature_image_file_id?:number|null; image?:string|null }|null;
   attachment?:{ id:number; original_name:string; mime_type?:string|null; size_bytes:number }|null;
   attachment_file_id?:number|null; attachment_kind?:string|null;
   extraction_status:string; extraction_note?:string|null;
@@ -767,7 +767,8 @@ export type IqcBoard = {
   groups:Array<{ key:string; equipmentId?:number|null; name:string; equipmentNumber?:string|null; controls:IqcBoardControl[] }>;
   counts:{ controls:number; due:number; done:number; failed:number; pendingReview:number; expired:number; pendingFeed:number };
   misfiled:Array<{ id:number; materialName:string; equipmentName?:string|null; why:string }>;
-  canPerform:boolean; canReview:boolean;
+  canPerform:boolean; canReview:boolean; canDefine?:boolean;
+  sectionName?:string|null;
   message?:string;
 };
 

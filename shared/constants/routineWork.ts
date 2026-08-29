@@ -639,3 +639,86 @@ export const MAINTENANCE_TO_ACTIVITY_FREQUENCY: Record<MaintenanceFrequency, str
   twice_daily: 'daily', daily: 'daily', weekly: 'weekly', monthly: 'monthly',
   quarterly: 'quarterly', biannual: 'biannual', annual: 'annual',
 };
+
+/* ============================================================================
+   Registering something new to chart
+   ----------------------------------------------------------------------------
+   The presets exist because the acceptable range is the part that gets left
+   blank, and a chart with no range records numbers rather than control. Each
+   one is the range the laboratory would set anyway; every value is editable
+   before it is saved, because a range is a decision the laboratory owns and no
+   default should quietly become one.
+   ========================================================================= */
+
+export interface ChartParameterPreset {
+  label: string;
+  unit: string;
+  minValue: number | null;
+  maxValue: number | null;
+  decimalPlaces: number;
+}
+
+export interface EnvironmentalChartPreset {
+  key: string;
+  label: string;
+  /** How often it is normally read. */
+  frequency: string;
+  parameters: ChartParameterPreset[];
+}
+
+export const ENVIRONMENTAL_CHART_PRESETS: EnvironmentalChartPreset[] = [
+  {
+    key: 'refrigerator', label: 'Refrigerator', frequency: 'twice_daily',
+    parameters: [{ label: 'Temperature', unit: '°C', minValue: 2, maxValue: 8, decimalPlaces: 1 }],
+  },
+  {
+    key: 'blood_bank_fridge', label: 'Blood bank refrigerator', frequency: 'twice_daily',
+    parameters: [{ label: 'Temperature', unit: '°C', minValue: 2, maxValue: 6, decimalPlaces: 1 }],
+  },
+  {
+    key: 'freezer', label: 'Freezer', frequency: 'twice_daily',
+    parameters: [{ label: 'Temperature', unit: '°C', minValue: -25, maxValue: -15, decimalPlaces: 1 }],
+  },
+  {
+    key: 'ultra_low_freezer', label: 'Ultra-low freezer (−80)', frequency: 'daily',
+    parameters: [{ label: 'Temperature', unit: '°C', minValue: -86, maxValue: -65, decimalPlaces: 1 }],
+  },
+  {
+    key: 'cold_room', label: 'Cold room', frequency: 'twice_daily',
+    parameters: [{ label: 'Temperature', unit: '°C', minValue: 2, maxValue: 8, decimalPlaces: 1 }],
+  },
+  {
+    key: 'incubator', label: 'Incubator', frequency: 'daily',
+    parameters: [{ label: 'Temperature', unit: '°C', minValue: 35, maxValue: 37, decimalPlaces: 1 }],
+  },
+  {
+    key: 'co2_incubator', label: 'CO₂ incubator', frequency: 'daily',
+    parameters: [
+      { label: 'Temperature', unit: '°C', minValue: 36, maxValue: 38, decimalPlaces: 1 },
+      { label: 'CO₂', unit: '%', minValue: 4.5, maxValue: 5.5, decimalPlaces: 1 },
+    ],
+  },
+  {
+    key: 'water_bath', label: 'Water bath', frequency: 'daily',
+    parameters: [{ label: 'Temperature', unit: '°C', minValue: 36.5, maxValue: 37.5, decimalPlaces: 1 }],
+  },
+  {
+    key: 'room', label: 'Room', frequency: 'daily',
+    parameters: [
+      { label: 'Temperature', unit: '°C', minValue: 18, maxValue: 25, decimalPlaces: 1 },
+      { label: 'Humidity', unit: '%', minValue: 30, maxValue: 70, decimalPlaces: 0 },
+    ],
+  },
+  {
+    key: 'other', label: 'Something else', frequency: 'daily',
+    parameters: [{ label: '', unit: '', minValue: null, maxValue: null, decimalPlaces: 1 }],
+  },
+];
+
+/** How often a chart is read. Kept plain, because it is read by the bench. */
+export const CHART_FREQUENCIES: { key: string; label: string }[] = [
+  { key: 'twice_daily', label: 'Twice a day — morning and afternoon' },
+  { key: 'daily', label: 'Once a day' },
+  { key: 'weekly', label: 'Once a week' },
+  { key: 'continuous', label: 'Continuously, by a data logger' },
+];

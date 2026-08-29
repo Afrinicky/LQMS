@@ -5,7 +5,10 @@ import {
 } from 'lucide-react';
 import { api, errorText } from '../../services/api';
 import LogSheetGrid, { SheetPicker } from '../../components/routine/LogSheetGrid';
-import { monthLabel, LOGGING_MODE_LABELS, type SheetKind } from '../../../shared/constants/routineWork';
+import {
+  monthLabel, LOGGING_MODE_LABELS, ENVIRONMENTAL_CHART_PRESETS, CHART_FREQUENCIES,
+  type SheetKind, type ChartParameterPreset,
+} from '../../../shared/constants/routineWork';
 import type { LogSheetIndex } from '../../../shared/types/api';
 
 /**
@@ -54,6 +57,7 @@ export default function PortalRoutineSheets({ kind }: { kind: SheetKind }) {
   const [activeId, setActiveId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [problem, setProblem] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -127,6 +131,19 @@ export default function PortalRoutineSheets({ kind }: { kind: SheetKind }) {
           </p>
         )}
 
+        {kind === 'environmental' && (
+          <div className="rs-add">
+            {adding
+              ? <NewEnvironmentalLog month={month} onClose={() => setAdding(false)}
+                  onCreated={async id => { setAdding(false); await load(); setActiveId(id); }} />
+              : (
+                <button type="button" className="pq-link" onClick={() => setAdding(true)}>
+                  <Plus size={13} /> Register something new to chart
+                </button>
+              )}
+          </div>
+        )}
+
         {loading ? <p className="muted">Loading this month&rsquo;s sheets…</p>
           : !index || index.sheets.length === 0 ? <p className="muted">{meta.empty}</p> : (
             <>
@@ -154,6 +171,137 @@ export default function PortalRoutineSheets({ kind }: { kind: SheetKind }) {
             </>
           )}
       </section>
+    </div>
+  );
+}
+
+/* ----------------------------------------------------------------------------
+   Registering something new to chart
+
+   The unit that reads the fridge is the unit that knows a new one has arrived.
+   Sending them to Facilities & Safety to say so is why a new fridge goes
+   unmonitored for a fortnight, so it is done here, and it becomes their unit's
+   to read.
+
+   The presets exist for one reason: the acceptable range is the field that gets
+   left blank, and a chart with no range records numbers rather than control.
+   Every value is still editable, because a range is the laboratory's decision.
+   ------------------------------------------------------------------------- */
+type ParameterDraft = { label: string; unit: string; minValue: string; maxValue: string; decimalPlaces: string };
+
+const draftFrom = (p: ChartParameterPreset): ParameterDraft => ({
+  label: p.label, unit: p.unit,
+  minValue: p.minValue === null ? '' : String(p.minValue),
+  maxValue: p.maxValue === null ? '' : String(p.maxValue),
+  decimalPlaces: String(p.decimalPlaces),
+});
+
+function NewEnvironmentalLog({ month, onClose, onCreated }: {
+  month: string; onClose: () => void; onCreated: (sheetId: number) => void | Promise<void>;
+}) {
+  const [preset, setPreset] = useState(ENVIRONMENTAL_CHART_PRESETS[0]);
+  const [name, setName] = useState('');
+  const [frequency, setFrequency] = useState(ENVIRONMENTAL_CHART_PRESETS[0].frequency);
+  const [notes, setNotes] = useState('');
+  const [parameters, setParameters] = useState<ParameterDraft[]>(ENVIRONMENTAL_CHART_PRESETS[0].parameters.map(draftFrom));
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  function choosePreset(key: string) {
+    const next = ENVIRONMENTAL_CHART_PRESETS.find(p => p.key === key) ?? ENVIRONMENTAL_CHART_PRESETS[0];
+    setPreset(next);
+    setFrequency(next.frequency);
+    setParameters(next.parameters.map(draftFrom));
+  }
+
+  const setParameter = (index: number, key: keyof ParameterDraft, value: string) =>
+    setParameters(list => list.map((p, i) => (i === index ? { ...p, [key]: value } : p)));
+
+  async function save() {
+    setBusy(true); setProblem(null);
+    try {
+      const created = await api<{ id: number; sheetId: number | null }>('/environmental/charts/assets', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: name.trim(), assetType: preset.key, monitoringFrequency: frequency,
+          notes: notes.trim() || null, month,
+          parameters: parameters
+            .filter(p => p.label.trim())
+            .map(p => ({
+              label: p.label.trim(), unit: p.unit.trim(),
+              minValue: p.minValue === '' ? null : Number(p.minValue),
+              maxValue: p.maxValue === '' ? null : Number(p.maxValue),
+              decimalPlaces: Number(p.decimalPlaces) || 0,
+            })),
+        }),
+      });
+      if (created.sheetId) await onCreated(created.sheetId);
+      else onClose();
+    } catch (e) { setProblem(errorText(e)); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="rs-newlog">
+      <div className="rs-newlog-head">
+        <strong>Register something new to chart</strong>
+        <button type="button" className="pq-link" onClick={onClose}>Cancel</button>
+      </div>
+      <p className="muted">
+        It becomes your unit&rsquo;s to read, and this month&rsquo;s chart opens as soon as it is saved.
+        A reading outside the range you set here raises an excursion the moment it is entered.
+      </p>
+
+      {problem && <p className="pd-error"><AlertTriangle size={13} /> {problem}</p>}
+
+      <div className="rs-newlog-grid">
+        <label><span>What is it?</span>
+          <select value={preset.key} onChange={e => choosePreset(e.target.value)}>
+            {ENVIRONMENTAL_CHART_PRESETS.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+          </select>
+        </label>
+        <label><span>What does the bench call it?</span>
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Reagent fridge 2, Haematology bench" />
+        </label>
+        <label><span>How often is it read?</span>
+          <select value={frequency} onChange={e => setFrequency(e.target.value)}>
+            {CHART_FREQUENCIES.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
+          </select>
+        </label>
+      </div>
+
+      <table className="rs-param-table">
+        <thead><tr><th>Parameter</th><th>Unit</th><th>Lowest acceptable</th><th>Highest acceptable</th><th>Decimals</th><th /></tr></thead>
+        <tbody>
+          {parameters.map((p, i) => (
+            <tr key={i}>
+              <td><input value={p.label} onChange={e => setParameter(i, 'label', e.target.value)} placeholder="Temperature" /></td>
+              <td><input value={p.unit} onChange={e => setParameter(i, 'unit', e.target.value)} placeholder="°C" style={{ width: 64 }} /></td>
+              <td><input type="number" step="any" value={p.minValue} onChange={e => setParameter(i, 'minValue', e.target.value)} style={{ width: 92 }} /></td>
+              <td><input type="number" step="any" value={p.maxValue} onChange={e => setParameter(i, 'maxValue', e.target.value)} style={{ width: 92 }} /></td>
+              <td><input type="number" min={0} max={3} value={p.decimalPlaces} onChange={e => setParameter(i, 'decimalPlaces', e.target.value)} style={{ width: 56 }} /></td>
+              <td>{parameters.length > 1 && (
+                <button type="button" className="pq-link" onClick={() => setParameters(list => list.filter((_, x) => x !== i))}>Remove</button>
+              )}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <button type="button" className="pq-link"
+        onClick={() => setParameters(list => [...list, { label: '', unit: '', minValue: '', maxValue: '', decimalPlaces: '1' }])}>
+        <Plus size={12} /> Add another parameter
+      </button>
+
+      <label className="rs-newlog-notes"><span>Anything the person reading it should know</span>
+        <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Alarm is on the wall behind it; defrosts on the first Monday." />
+      </label>
+
+      <div className="pr-btns">
+        <button type="button" disabled={busy || !name.trim()} onClick={() => void save()}>
+          {busy ? 'Saving…' : 'Register it and open the chart'}
+        </button>
+        <button type="button" className="secondary" onClick={onClose}>Cancel</button>
+      </div>
     </div>
   );
 }

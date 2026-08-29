@@ -15,6 +15,7 @@
  * asked to be able to take away.
  */
 import * as XLSX from 'xlsx';
+import { signatureImageDataUri } from './signatureService.js';
 import {
   daysInMonth, monthLabel, SLOT_LABELS, CELL_STATUS_LABELS, CELL_SOURCE_LABELS,
   cellIsBreach, type CellSlot,
@@ -146,9 +147,17 @@ export function sheetToHtml(db: DB, sheetId: number, autoprint: boolean): string
       }).join('')}</tbody>
     </table>` : '';
 
+  // The signature the reviewer applied, on the sheet. A verified month that
+  // carries only a typed name is the thing an assessor questions first, and it
+  // is what the paper form has always shown.
+  const signatureImage = data.signature ? signatureImageDataUri(data.signature) : null;
+
   const signatureBlock = data.signature ? `
     <div class="sigblock">
       <div><span class="siglabel">Reviewed and verified by</span><span class="signame">${esc(data.verifier ?? data.signature.signer_name)}</span></div>
+      <div><span class="siglabel">Signature</span>${signatureImage
+        ? `<img class="sigimg" src="${signatureImage}" alt="signature of ${esc(data.verifier ?? data.signature.signer_name)}"/>`
+        : '<span class="signone">not on file</span>'}</div>
       <div><span class="siglabel">Signed</span><span>${esc(String(data.signature.signed_at).slice(0, 16).replace('T', ' '))}</span></div>
       <div class="sigmeaning">${esc(data.signature.meaning ?? '')}</div>
       <div class="sigref">Electronic signature reference E-SIG-${data.signature.id}. Recorded in the audit trail with the signer, time and device.</div>
@@ -190,6 +199,8 @@ table.list thead th{background:#eef2f7}
 .sigblock div{margin:2px 0}
 .siglabel{display:inline-block;width:150px;color:#444}
 .signame{font-weight:bold}
+.sigimg{height:30px;max-width:170px;vertical-align:middle;background:#fff}
+.signone{color:#888;font-style:italic}
 .sigmeaning{margin-top:6px;font-style:italic;color:#333}
 .sigref{margin-top:6px;font-size:9px;color:#555}
 .siglines{margin-top:20px;font-size:11px}

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { RULE_LABELS, RULE_MEANING, isRejection } from '../../shared/constants/iqc';
+import { ljScale, ljChartTitle } from '../../shared/utils/leveyJennings';
 
 /**
  * Levey-Jennings chart.
@@ -82,34 +83,17 @@ export default function LeveyJenningsChart({ data, onEstablish, canEstablish }: 
 
   const mean = analyte.targetMean;
   const sd = analyte.targetSd;
-  const usable = mean !== null && sd !== null && sd > 0 && points.length > 0;
 
-  // The vertical scale shows ±4 SD by default and stretches to fit — but only
-  // to ±6. A gross outlier (a transcription slip of 20 g/dL against a mean of
-  // 13.5 is 16 SD out) would otherwise squash the control limits into a band a
-  // few pixels tall and make the chart useless for the runs that matter. Points
-  // past the edge are pinned to it and drawn as a triangle, which is what a
-  // printed Levey-Jennings chart has always done with an off-scale result.
-  const MAX_EXTENT = 6;
-  const scale = useMemo(() => {
-    if (!usable) return null;
-    const zs = points.map(p => (p.result_value - mean!) / sd!);
-    const needed = Math.ceil(Math.max(...zs.map(Math.abs)) + 0.5);
-    const extent = Math.min(MAX_EXTENT, Math.max(4, needed));
-    const top = mean! + extent * sd!;
-    const bottom = mean! - extent * sd!;
-    return {
-      extent,
-      clipped: needed > extent,
-      z: (value: number) => (value - mean!) / sd!,
-      y: (value: number) => {
-        const clamped = Math.min(top, Math.max(bottom, value));
-        return PAD.top + ((top - clamped) / (top - bottom)) * PLOT_H;
-      },
-      offScale: (value: number) => Math.abs((value - mean!) / sd!) > extent,
-      x: (i: number) => PAD.left + (points.length === 1 ? PLOT_W / 2 : (i / (points.length - 1)) * PLOT_W),
-    };
-  }, [usable, points, mean, sd]);
+  // How the vertical axis is worked out — including the case that used to make
+  // this chart give up: a control with a mean but no assigned SD, or too few
+  // runs to have a spread. See shared/utils/leveyJennings.ts. The chart is
+  // always drawn; what changes is what it is honestly called.
+  const scale = useMemo(
+    () => ljScale(points.map(p => p.result_value), mean, sd, {
+      padTop: PAD.top, padRight: PAD.right, padBottom: PAD.bottom, padLeft: PAD.left, width: W, height: H,
+    }),
+    [points, mean, sd],
+  );
 
   if (!usable || !scale) {
     // A control with results but no SD is the commonest reason this chart came
@@ -156,9 +140,13 @@ export default function LeveyJenningsChart({ data, onEstablish, canEstablish }: 
     );
   }
 
+  const centre = scale.centre;
+  const bandSd = scale.sd;
+
   const zoneBand = (from: number, to: number, className: string) => {
-    const yTop = scale.y(mean! + to * sd!);
-    const yBottom = scale.y(mean! + from * sd!);
+    if (centre === null || bandSd === null) return null;
+    const yTop = scale.y(centre + to * bandSd);
+    const yBottom = scale.y(centre + from * bandSd);
     return <rect key={`${from}-${to}-${className}`} x={PAD.left} y={yTop} width={PLOT_W} height={Math.max(0, yBottom - yTop)} className={className} />;
   };
 
@@ -178,7 +166,7 @@ export default function LeveyJenningsChart({ data, onEstablish, canEstablish }: 
         <div>
           <h4>{analyte.name}{analyte.unit ? ` (${analyte.unit})` : ''}</h4>
           <p>
-            {material.name} · lot {material.lotNumber}
+            {ljChartTitle(scale.mode)} · {material.name} · lot {material.lotNumber}
             {material.levelLabel ? ` · ${material.levelLabel}` : ''}
             {material.source === 'in_house' ? ' · in-house' : ''}
           </p>
@@ -206,24 +194,25 @@ export default function LeveyJenningsChart({ data, onEstablish, canEstablish }: 
       <div className="lj-plot">
         <svg viewBox={`0 0 ${W} ${H}`} role="img"
           aria-label={`Levey-Jennings chart for ${analyte.name}, ${points.length} results`}>
-          {/* SD zones, drawn outward so the outer bands sit behind the inner */}
-          {zoneBand(-scale.extent, scale.extent, 'lj-zone-3')}
-          {zoneBand(-2, 2, 'lj-zone-2')}
-          {zoneBand(-1, 1, 'lj-zone-1')}
+          {/* SD zones, drawn outward so the outer bands sit behind the inner.
+              Nothing to shade when the chart is a run chart. */}
+          {scale.extent !== null && zoneBand(-scale.extent, scale.extent, 'lj-zone-3')}
+          {scale.extent !== null && zoneBand(-2, 2, 'lj-zone-2')}
+          {scale.extent !== null && zoneBand(-1, 1, 'lj-zone-1')}
 
-          {/* Control limits */}
-          {[3, 2, 1, 0, -1, -2, -3].map(k => {
-            const value = mean! + k * sd!;
-            const y = scale.y(value);
-            const isMean = k === 0;
+          {/* Control limits, or a plain value axis where there are none yet */}
+          {scale.gridlines.map((g, i) => {
+            const y = scale.y(g.value);
             return (
-              <g key={k}>
+              <g key={`${g.kind}-${g.k ?? i}`}>
                 <line x1={PAD.left} x2={PAD.left + PLOT_W} y1={y} y2={y}
-                  className={isMean ? 'lj-mean' : Math.abs(k) === 3 ? 'lj-limit-3' : 'lj-limit'} />
-                <text x={PAD.left + PLOT_W + 8} y={y + 3.5} className={isMean ? 'lj-lbl-mean' : 'lj-lbl'}>
-                  {isMean ? 'Mean' : `${k > 0 ? '+' : '−'}${Math.abs(k)}SD`}
-                </text>
-                <text x={PAD.left - 8} y={y + 3.5} className="lj-axis" textAnchor="end">{fmt(value, dp)}</text>
+                  className={g.kind === 'mean' ? 'lj-mean' : g.kind === 'outer' ? 'lj-limit-3' : 'lj-limit'} />
+                {g.label && (
+                  <text x={PAD.left + PLOT_W + 8} y={y + 3.5} className={g.kind === 'mean' ? 'lj-lbl-mean' : 'lj-lbl'}>
+                    {g.label}
+                  </text>
+                )}
+                <text x={PAD.left - 8} y={y + 3.5} className="lj-axis" textAnchor="end">{fmt(g.value, dp)}</text>
               </g>
             );
           })}
@@ -248,7 +237,7 @@ export default function LeveyJenningsChart({ data, onEstablish, canEstablish }: 
             const cls = rejected ? 'bad' : warned ? 'warn' : 'ok';
             const x = scale.x(i), y = scale.y(p.result_value);
             const off = scale.offScale(p.result_value);
-            const above = scale.z(p.result_value) > 0;
+            const above = (scale.z(p.result_value) ?? p.result_value - (centre ?? 0)) > 0;
             return (
               <g key={p.id} onMouseEnter={() => setHover(p)} onMouseLeave={() => setHover(null)}>
                 {off ? (
@@ -293,6 +282,7 @@ export default function LeveyJenningsChart({ data, onEstablish, canEstablish }: 
               </span>
             )}
             {scale.offScale(hover.result_value) && <span className="bad">Off scale — beyond ±{scale.extent} SD</span>}
+            {scale.mode !== 'target' && <span className="warn">Provisional scale — no assigned SD</span>}
             {hover.equipment_name && <span className="muted">{hover.equipment_name}</span>}
             {hover.operator_name && <span className="muted">{hover.operator_name}</span>}
           </div>

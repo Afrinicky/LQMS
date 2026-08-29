@@ -25,7 +25,7 @@ import { getDb } from '../db/database.js';
 import { audit } from '../services/auditService.js';
 import { recordSignature } from '../services/signatureService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
-import { getCurrentStaffId, parseIntNullable } from './routeHelpers.js';
+import { getCurrentStaffId, parseIntNullable, blockedForNoSignature } from './routeHelpers.js';
 
 interface FormField {
   key: string;
@@ -192,6 +192,10 @@ export function formsRoutes() {
     const createdAt = new Date().toISOString();
     const submissionNumber = generateRecordNumber(db, 'form_submissions', 'FORM', createdAt);
     const result = deriveResult(schema, answers as Record<string, unknown>);
+    // A template that requires a signature must not leave a saved, unsigned
+    // submission behind when the signer has none on file.
+    if (template.requires_signature && blockedForNoSignature(req, res)) return;
+
     const insert = db.prepare(`INSERT INTO form_submissions
         (submission_number, template_id, template_key, template_version, answers_json, result, status, submitted_by_staff_id, submitted_by_user_id, department_id, section_id, created_at)
         VALUES (?, ?, ?, ?, ?, ?, 'submitted', ?, ?, ?, ?, ?)`)

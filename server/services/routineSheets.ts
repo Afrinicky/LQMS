@@ -30,6 +30,7 @@ import {
 import { deconTimesPerDay } from '../../shared/constants/routineWork.js';
 import { recordReading } from './environmental/monitorService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
+import { signatureImageDataUri } from './signatureService.js';
 
 type DB = any;
 
@@ -336,7 +337,12 @@ export function sheetPayload(db: DB, sheetId: number): any {
   const nc = sheet.nc_id
     ? db.prepare('SELECT id, nc_number, status FROM nonconforming_events WHERE id = ?').get(sheet.nc_id) as any : null;
   const signature = sheet.verification_signature_id
-    ? db.prepare('SELECT id, signer_name, signed_at, meaning FROM e_signatures WHERE id = ?').get(sheet.verification_signature_id) as any : null;
+    ? db.prepare('SELECT id, signer_name, signed_at, meaning, staff_id, signature_image_file_id FROM e_signatures WHERE id = ?').get(sheet.verification_signature_id) as any : null;
+  // The signature the reviewer actually applied, carried with the sheet so a
+  // verified month shows the signature rather than a typed name. It is the
+  // image stored WITH the signing, so replacing a signature on a profile later
+  // cannot change what an already-signed month appears to have been signed with.
+  const signatureImage = signature ? signatureImageDataUri(signature) : null;
   const attachment = sheet.attachment_file_id
     ? db.prepare('SELECT id, original_name, mime_type, size_bytes FROM files WHERE id = ?').get(sheet.attachment_file_id) as any : null;
 
@@ -348,7 +354,7 @@ export function sheetPayload(db: DB, sheetId: number): any {
       sectionName: section?.name ?? null,
       verifiedByName: verifier?.full_name ?? null,
       submittedByName: submitter?.full_name ?? null,
-      nc, signature, attachment,
+      nc, signature: signature ? { ...signature, image: signatureImage } : null, attachment,
       locked: sheetIsLocked(sheet.status),
       // The laboratory's own reading window, so the grid greys the same cells
       // the server would refuse. Sending it beats the client guessing: a

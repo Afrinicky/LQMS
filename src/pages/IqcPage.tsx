@@ -14,13 +14,12 @@ import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import { PageHeader, KpiStrip, ModuleAlerts } from '../components/ui';
 import LeveyJenningsChart, { type ChartData } from '../components/LeveyJenningsChart';
 import {
-  IQC_SOURCES, IQC_SOURCE_LABELS, IQC_SOURCE_HINTS,
-  IQC_CONTROL_TYPES, IQC_CONTROL_TYPE_LABELS, IQC_CONTROL_TYPE_HINTS,
+  IQC_CONTROL_TYPES, IQC_CONTROL_TYPE_LABELS,
   IQC_FREQUENCIES, IQC_FREQUENCY_LABELS,
-  IQC_RULE_PROFILE_LABELS, IQC_RULE_PROFILE_HINTS, PROFILES_FOR_TYPE,
-  QUALITATIVE_SCALES, QUALITATIVE_LABELS, ANALYTE_TEMPLATES,
+  IQC_RULE_PROFILE_LABELS, PROFILES_FOR_TYPE,
+  QUALITATIVE_SCALES, QUALITATIVE_LABELS,
   AST_INTERPRETATIONS, AST_INTERPRETATION_LABELS, AST_METHODS, AST_METHOD_LABELS,
-  CS_SCOPES, CS_SCOPE_LABELS, CS_SCOPE_HINTS, csNeedsOrganism, csNeedsPanel,
+  CS_SCOPES, CS_SCOPE_LABELS, csNeedsOrganism, csNeedsPanel,
   RULE_LABELS, RULE_MEANING, isRejection,
   type IqcSource, type IqcControlType, type IqcRuleProfile, type QualitativeOutcome,
 } from '../../shared/constants/iqc';
@@ -29,6 +28,7 @@ import { equipmentIsDiagnostic } from '../../shared/constants/equipment';
 import TextField from '../components/ui/TextField';
 import { Notice } from '../components/ui/Feedback';
 import InstrumentLinksTab from './InstrumentLinksTab';
+import DefineControlForm from '../components/iqc/DefineControlForm';
 
 /* ============================================================================
    IQC — internal quality control.
@@ -77,17 +77,6 @@ type Run = {
   material_name: string; lot_number: string; test_name: string; control_type: IqcControlType;
   level_label: string | null; equipment_name: string | null; operator_name: string | null;
 };
-
-type AnalyteDraft = {
-  analyte: string; unit: string; targetMean: string; targetSd: string;
-  acceptableLow: string; acceptableHigh: string; decimalPlaces: string; expectedResult: string;
-  astMethod: string; expectedInterpretation: string;
-};
-
-const emptyAnalyte = (): AnalyteDraft => ({
-  analyte: '', unit: '', targetMean: '', targetSd: '', acceptableLow: '', acceptableHigh: '',
-  decimalPlaces: '2', expectedResult: '', astMethod: '', expectedInterpretation: '',
-});
 
 const STATUS_TONE: Record<string, string> = { in_control: 'ok', warning: 'warn', out_of_control: 'bad' };
 const STATUS_LABEL: Record<string, string> = { in_control: 'In control', warning: 'Warning', out_of_control: 'Rejected' };
@@ -1642,6 +1631,21 @@ function ChartTab({ materials, onError, onNotice, canEdit }: {
           exportPath={`/iqc/analytes/${analyteId}/chart.xlsx${q}`}
           printPath={`/iqc/analytes/${analyteId}/chart/print${q}`}
           printLabel="Print chart (PDF)"
+          exportOnly
+        />
+      )}
+
+      {/* The runs themselves, as a record — every reading beside the target it
+          was measured against, with the chart on the same document. The chart
+          answers "is the method behaving"; this answers "what did it read, and
+          was that acceptable", which is the question asked at review. */}
+      {materialId && (
+        <XlsxToolbar
+          module="iqc"
+          exportName={`Control_runs_${analyteName.replace(/\W+/g, '_')}.xlsx`}
+          exportPath={`/iqc/runs/report.xlsx?materialIds=${materialId}${range ? `&${range}` : ''}`}
+          printPath={`/iqc/runs/report/print?materialIds=${materialId}&charts=1${range ? `&${range}` : ''}`}
+          printLabel="Print the runs, with the chart (PDF)"
           exportOnly
         />
       )}

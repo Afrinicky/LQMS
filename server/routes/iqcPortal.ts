@@ -71,6 +71,24 @@ export function iqcPortalRoutes() {
     return resolvePermission(req.user!.id, 'iqc', 'approve').allowed
       || resolvePermission(req.user!.id, tierFeatureKey('supervisory'), TIER_ACTION).allowed;
   }
+  /** Defining a control from the portal is the same right the module asks for. */
+  function mayDefine(req: any): boolean {
+    return resolvePermission(req.user!.id, 'iqc', 'create').allowed;
+  }
+  /**
+   * Is this control on the caller's own board?
+   *
+   * The same unit resolution the board uses, so a chart is reachable exactly
+   * when the control that produced it is — no wider, and no narrower.
+   */
+  function reachableControl(db: any, req: any, materialId: number): boolean {
+    const sectionId = currentSection(db, req);
+    if (!sectionId) return false;
+    const row = db.prepare(`SELECT COALESCE(m.performing_section_id, m.section_id, e.section_id) AS resolved
+        FROM iqc_materials m LEFT JOIN equipment_items e ON e.id = m.equipment_id WHERE m.id = ?`).get(materialId) as any;
+    return Number(row?.resolved) === Number(sectionId);
+  }
+
   function currentSection(db: any, req: any): number | null {
     const staffId = getCurrentStaffId(req);
     if (staffId === null) return null;
@@ -215,6 +233,8 @@ export function iqcPortalRoutes() {
       })),
       canPerform: mayPerform(req),
       canReview: mayReview(req),
+      canDefine: mayDefine(req),
+      sectionName: (db.prepare('SELECT name FROM sections WHERE id = ?').get(sectionId) as any)?.name ?? null,
     });
   });
 
@@ -513,6 +533,76 @@ export function iqcPortalRoutes() {
       feedWaiting: Number(waiting?.n ?? 0),
       canPerform: mayPerform(req),
       canReview: mayReview(req),
+    });
+  });
+
+  /* ======================================================================
+     The chart, in the portal
+     ----------------------------------------------------------------------
+     A bench scientist who has just run a control wants to see where the point
+     landed. Sending them to the Quality Control module to look is how a chart
+     ends up consulted monthly instead of daily — and the run they just entered
+     is the one they most need to see in context.
+
+     Reading a chart is not performing quality control, so it needs no tier: if
+     the control is on this person's board, they may look at its chart.
+     ==================================================================== */
+
+  /** The analytes of one control, for choosing which chart to look at. */
+  router.get('/portal/controls/:id/chart-analytes', numericOnly, (req, res) => {
+    const db = getDb();
+    if (!reachableControl(db, req, Number(req.params.id))) {
+      return res.status(404).json({ error: 'That control is not on your unit\'s board.' });
+    }
+    // Whether a parameter is qualitative is a property of the control, not of
+    // the analyte row — a qualitative control's parameters have an expected
+    // result rather than a mean, and nothing numeric to chart.
+    const material = db.prepare('SELECT control_type FROM iqc_materials WHERE id = ?').get(req.params.id) as any;
+    const qualitative = material?.control_type === 'qualitative' ? 1 : 0;
+    const rows = db.prepare(`SELECT id, analyte, unit, decimal_places, target_mean, target_sd, expected_result
+        FROM iqc_analytes WHERE iqc_material_id = ? AND is_active = 1 ORDER BY display_order, id`).all(req.params.id) as any[];
+    res.json(rows.map(row => ({ ...row, is_qualitative: qualitative })));
+  });
+
+  /** The chart itself — the same figures the module\'s chart is drawn from. */
+  router.get('/portal/analytes/:id/chart', numericOnly, (req, res) => {
+    const db = getDb();
+    const analyte = db.prepare(`SELECT a.*, m.material_name, m.lot_number, m.test_name, m.control_type,
+        m.level_label, m.source, m.id AS material_id
+      FROM iqc_analytes a JOIN iqc_materials m ON m.id = a.iqc_material_id WHERE a.id = ?`).get(req.params.id) as any;
+    if (!analyte) return res.status(404).json({ error: 'Analyte not found' });
+    if (!reachableControl(db, req, Number(analyte.material_id))) {
+      return res.status(404).json({ error: 'That control is not on your unit\'s board.' });
+    }
+
+    const limit = Math.min(Math.max(Number(req.query.limit) || 120, 10), 500);
+    const rows = db.prepare(`SELECT res.id, res.run_date, res.run_time, res.result_value, res.qualitative_result,
+        res.expected_result, res.is_qualitative, res.z_score, res.status, res.rule_violation,
+        r.id AS run_id, r.run_number, e.name AS equipment_name, s.full_name AS operator_name
+      FROM iqc_results res
+      LEFT JOIN iqc_runs r ON r.id = res.iqc_run_id
+      LEFT JOIN equipment_items e ON e.id = res.equipment_id
+      LEFT JOIN staff s ON s.id = res.entered_by_staff_id
+      WHERE res.iqc_analyte_id = ?
+      ORDER BY res.run_date DESC, res.id DESC LIMIT ?`).all(req.params.id, limit) as any[];
+    const points = rows.reverse();
+    const numeric = points.filter(p => Number(p.is_qualitative) !== 1).map(p => Number(p.result_value)).filter(v => !Number.isNaN(v));
+    const lotChanges = db.prepare(`SELECT change_date, reason FROM iqc_lot_changes
+      WHERE old_iqc_material_id = ? OR new_iqc_material_id = ? ORDER BY change_date`).all(analyte.material_id, analyte.material_id);
+
+    res.json({
+      analyte: {
+        id: analyte.id, name: analyte.analyte, unit: analyte.unit, decimalPlaces: analyte.decimal_places,
+        targetMean: analyte.target_mean, targetSd: analyte.target_sd,
+        acceptableLow: analyte.acceptable_low, acceptableHigh: analyte.acceptable_high,
+      },
+      material: {
+        id: analyte.material_id, name: analyte.material_name, lotNumber: analyte.lot_number,
+        testName: analyte.test_name, levelLabel: analyte.level_label, source: analyte.source,
+      },
+      statistics: chartStatistics(numeric, analyte.target_mean, analyte.target_sd),
+      lotChanges, points,
+      runIds: [...new Set(points.map(p => Number(p.run_id)).filter(Boolean))],
     });
   });
 

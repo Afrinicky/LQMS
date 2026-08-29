@@ -11,6 +11,7 @@ import { generateRecordNumber } from '../utils/recordNumber.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
 import { parseIntNullable, getStaffIdOrCurrent, getCurrentStaffId } from './routeHelpers.js';
 import { printSheet, htmlEscape, htmlText, signatureBlock } from '../utils/printLayout.js';
+import { staffSignatureDataUri } from '../services/signatureService.js';
 import {
   COMPETENCY_METHODS, COMPETENCY_METHOD_LABELS, COMPETENCY_AUDIENCES,
   COMPETENCY_ASSESSMENT_TYPES, COMPETENCY_ASSESSMENT_TYPE_LABELS, COMPETENCY_STATUSES,
@@ -209,24 +210,6 @@ function loadAssessment(db: any, id: number | string) {
   return record;
 }
 
-/**
- * A staff member's signature on file, as a data URI, for embedding directly in
- * a printed record. Printed sheets are fetched into a new window and can't send
- * an auth header, so the image is inlined here rather than linked. Returns null
- * when the person has no signature on file or the file is missing.
- */
-function staffSignatureDataUri(db: any, staffId: number | null | undefined): string | null {
-  if (!staffId) return null;
-  const staff = db.prepare('SELECT signature_file_id FROM staff WHERE id = ?').get(staffId) as Row | undefined;
-  if (!staff?.signature_file_id) return null;
-  const file = db.prepare('SELECT stored_name, mime_type, storage_area FROM files WHERE id = ?').get(staff.signature_file_id) as Row | undefined;
-  if (!file) return null;
-  const root = file.storage_area === 'evidence' ? evidenceRoot : uploadRoot;
-  try {
-    const bytes = fs.readFileSync(path.join(root, file.stored_name));
-    return `data:${file.mime_type || 'image/png'};base64,${bytes.toString('base64')}`;
-  } catch { return null; }
-}
 
 export function competencyRoutes() {
   const router = Router();
@@ -1217,9 +1200,9 @@ ${authorizationsHtml}
 ${attachmentsHtml}
 
 <div class="signatures">
-  ${signatureBlock('Assessor', record.assessor_name, record.completed_at, record.completed_at ? staffSignatureDataUri(db, record.assessor_staff_id) : null)}
-  ${signatureBlock('Technical reviewer', record.reviewer_name, record.reviewed_at, record.reviewed_at ? staffSignatureDataUri(db, record.reviewer_staff_id) : null)}
-  ${signatureBlock('Member of staff', record.staff_name, record.staff_acknowledged_at, record.staff_acknowledged_at ? staffSignatureDataUri(db, record.staff_id) : null)}
+  ${signatureBlock('Assessor', record.assessor_name, record.completed_at, record.completed_at ? staffSignatureDataUri(record.assessor_staff_id) : null)}
+  ${signatureBlock('Technical reviewer', record.reviewer_name, record.reviewed_at, record.reviewed_at ? staffSignatureDataUri(record.reviewer_staff_id) : null)}
+  ${signatureBlock('Member of staff', record.staff_name, record.staff_acknowledged_at, record.staff_acknowledged_at ? staffSignatureDataUri(record.staff_id) : null)}
 </div>`;
 
     audit(req, { action: 'print', entity: 'competency_assessments', entityId: req.params.id });
