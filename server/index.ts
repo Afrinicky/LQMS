@@ -42,6 +42,7 @@ import { dutyActivityRoutes } from './routes/dutyActivities.js';
 import { routineSheetRoutes } from './routes/routineSheets.js';
 import { decontaminationRoutes } from './routes/decontamination.js';
 import { iqcPortalRoutes } from './routes/iqcPortal.js';
+import { instrumentLinkRoutes } from './routes/instrumentLinks.js';
 import { systemAuditRoutes } from './routes/systemAudit.js';
 import { scannedRecordsRoutes } from './routes/scannedRecords.js';
 import { assessmentsRoutes } from './routes/assessments.js';
@@ -157,6 +158,7 @@ export function createApiServer() {
   app.use('/api/duty', dutyActivityRoutes());
   app.use('/api/routine-sheets', routineSheetRoutes());
   app.use('/api/decontamination', decontaminationRoutes());
+  app.use('/api/instrument-links', instrumentLinkRoutes());
   // The system's audit of itself: the live trail, and everything not done.
   app.use('/api/system-audit', systemAuditRoutes());
   app.use('/api/scanned-records', scannedRecordsRoutes());

@@ -6761,6 +6761,95 @@ CREATE TABLE IF NOT EXISTS environmental_asset_parameters (
       ON routine_log_sheets(sheet_kind, subject_type, subject_id, IFNULL(section_id, 0), month)`);
   }
 
+  // -------------------------------------------------------------------
+  // Analyser links.
+  //
+  // The laboratory runs the national LHIMS middleware on one haematology
+  // analyser and that link carries patient results. It must keep working
+  // exactly as it does today, so a link carries a ROLE, and a link marked as
+  // LHIMS's is never opened — the bridge refuses to bind its port or dial its
+  // address. Everything else here is additive: the second haematology analyser
+  // and both chemistry analysers transmit to nothing at present, so taking
+  // them costs the existing arrangement nothing at all.
+  // -------------------------------------------------------------------
+  database.exec(`
+CREATE TABLE IF NOT EXISTS instrument_links (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  link_code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  equipment_id INTEGER REFERENCES equipment_items(id),
+  section_id INTEGER REFERENCES sections(id),
+  profile_key TEXT,                         -- sysmex_xn, mindray_bc5800, selectra_pro…
+  role TEXT NOT NULL DEFAULT 'sechlims_only',  -- sechlims_only | lhims_owned | shared_forward
+  mode TEXT NOT NULL DEFAULT 'server',      -- server | client | file_drop
+  protocol TEXT NOT NULL DEFAULT 'astm',    -- astm | hl7 | delimited
+  listen_host TEXT,                         -- what to bind in server mode; NULL = every interface
+  listen_port INTEGER,
+  remote_host TEXT,                         -- the analyser, in client mode
+  remote_port INTEGER,
+  watch_path TEXT,
+  analyte_map TEXT,                         -- JSON: instrument mnemonic -> analyte name
+  control_patterns TEXT,                    -- JSON: sample ids that mean "this is a control"
+  -- Passing a copy onward to the LHIMS middleware. Off by default, and only
+  -- ever for an analyser LHIMS is NOT already receiving.
+  forward_enabled INTEGER NOT NULL DEFAULT 0,
+  forward_host TEXT,
+  forward_port INTEGER,
+  auto_start INTEGER NOT NULL DEFAULT 1,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  -- Live state, kept here so the screen and a restart agree about what happened
+  state TEXT NOT NULL DEFAULT 'stopped',
+  state_detail TEXT,
+  last_connected_at TEXT,
+  last_message_at TEXT,
+  last_error TEXT,
+  messages_received INTEGER NOT NULL DEFAULT 0,
+  controls_matched INTEGER NOT NULL DEFAULT 0,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_instrument_links_active ON instrument_links(is_active, role);
+
+-- Everything an analyser has said, verbatim.
+--
+-- Kept whether or not it could be understood: the raw text of a message nobody
+-- could map is exactly what is needed to map it, and an analyser that sends
+-- something unexpected at 3am leaves evidence rather than a gap.
+CREATE TABLE IF NOT EXISTS instrument_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  link_id INTEGER REFERENCES instrument_links(id) ON DELETE CASCADE,
+  received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  peer TEXT,                                -- which address sent it
+  raw_message TEXT,
+  sample_id TEXT,
+  lot_number TEXT,
+  instrument_name TEXT,
+  instrument_run_at TEXT,
+  result_count INTEGER NOT NULL DEFAULT 0,
+  parsed_values TEXT,                       -- JSON: [{ analyte, code, value, unit, flag }]
+  -- What the message turned out to be, and where it went.
+  kind TEXT NOT NULL DEFAULT 'unknown',     -- control | patient | unknown
+  iqc_feed_message_id INTEGER REFERENCES iqc_feed_messages(id),
+  forward_status TEXT NOT NULL DEFAULT 'not_required',  -- not_required | pending | sent | failed
+  forward_attempts INTEGER NOT NULL DEFAULT 0,
+  forward_error TEXT,
+  forwarded_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_instrument_messages_link ON instrument_messages(link_id, received_at);
+CREATE INDEX IF NOT EXISTS idx_instrument_messages_kind ON instrument_messages(kind, received_at);
+CREATE INDEX IF NOT EXISTS idx_instrument_messages_forward ON instrument_messages(forward_status);
+`);
+
+  // A feed message says which link produced it, so the IQC bench can see which
+  // analyser a waiting control came off.
+  {
+    const cols = new Set((database.prepare("PRAGMA table_info(iqc_feed_messages)").all() as Array<{ name: string }>).map(c => c.name));
+    if (!cols.has('link_id')) database.exec('ALTER TABLE iqc_feed_messages ADD COLUMN link_id INTEGER REFERENCES instrument_links(id)');
+    if (!cols.has('instrument_message_id')) database.exec('ALTER TABLE iqc_feed_messages ADD COLUMN instrument_message_id INTEGER REFERENCES instrument_messages(id)');
+  }
+
   seedDecontaminationFrameworks(database);
 
   seedNotificationSounds(database);

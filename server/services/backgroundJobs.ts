@@ -54,6 +54,14 @@ export function startBackgroundServices(getDb: DbGetter): void {
     .then(({ BackupScheduler }) => { new BackupScheduler().start(); console.log('[jobs] backup scheduler started'); })
     .catch(e => console.error('[jobs] backup scheduler failed to start:', e));
 
+  // Analyser links. Every link the laboratory has asked to run on its own —
+  // and pointedly NOT the one the LHIMS middleware owns, which the bridge
+  // refuses to open so the transmission that carries patient results today is
+  // left exactly as it is. Idle until a laboratory adds a link.
+  import('./instrumentBridge/index.js')
+    .then(({ getBridge }) => getBridge(getDb).start())
+    .catch(e => console.error('[jobs] analyser bridge failed to start:', e));
+
   // Synchronization engine (stub). Self-gates on SECH_LIMS_SYNC_ENABLED.
   import('../sync/syncEngine.js')
     .then(({ getSyncEngine }) => getSyncEngine().start())

@@ -28,6 +28,7 @@ import type { Section, Staff, EquipmentItem } from '../../shared/types/api';
 import { equipmentIsDiagnostic } from '../../shared/constants/equipment';
 import TextField from '../components/ui/TextField';
 import { Notice } from '../components/ui/Feedback';
+import InstrumentLinksTab from './InstrumentLinksTab';
 
 /* ============================================================================
    IQC — internal quality control.
@@ -136,7 +137,7 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
   useEffect(() => { if (embedded || isEnabled('iqc')) void load(); }, [embedded, isEnabled, load]);
   if (!embedded && !isEnabled('iqc')) return <DisabledModule />;
 
-  const tabs = ['Dashboard', 'Controls', 'New Control', 'Run Control', 'Review', 'Levey-Jennings', 'Lot Changes']
+  const tabs = ['Dashboard', 'Controls', 'New Control', 'Run Control', 'Review', 'Levey-Jennings', 'Lot Changes', 'Analyser Links']
     .filter(n => !embedded || n !== 'Dashboard');
 
   const pendingReview = runs.filter(r => !r.reviewed_at && r.status !== 'in_control');
@@ -209,6 +210,8 @@ export function IqcPage({ embedded = false }: { embedded?: boolean } = {}) {
       {tab === 'Levey-Jennings' && <ChartTab materials={materials} onError={setError} />}
 
       {tab === 'Lot Changes' && <LotChanges materials={materials} onError={setError} canCreate={can('iqc', 'create')} />}
+
+      {tab === 'Analyser Links' && <InstrumentLinksTab />}
     </div>
   );
 }
