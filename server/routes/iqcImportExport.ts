@@ -28,6 +28,8 @@ import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import { buildWorkbook, sendWorkbook, readSheet, cell, numCell } from '../utils/xlsxRegister.js';
 import { evaluateRun, chartStatistics, type AnalyteDef, type History } from '../services/iqcEvaluation.js';
+import { renderLjSvg, ljSvgElement, CHART_GEOMETRY, type ChartPointRow } from '../services/iqcChartSvg.js';
+import { collectRunReport, renderRunReport, runReportRows, RUN_REPORT_HEADERS, type RunReportSelection } from '../services/iqcRunReport.js';
 import {
   IQC_SOURCES, IQC_CONTROL_TYPES, IQC_FREQUENCIES, IQC_RULE_PROFILES,
   QUALITATIVE_OUTCOMES, RULE_LABELS,
@@ -466,6 +468,34 @@ export function iqcImportExportRoutes() {
     res.json({ totalRows: rows.length, created: runsCreated, readings: readingsCreated, rejected, errors });
   });
 
+  /* ================================================= The runs, as a document */
+
+  /**
+   * The record of one or more control runs, printed.
+   *
+   * Selection is either an explicit list of run ids (?ids=4,7,9 — "print these")
+   * or a control and a window (?materialId=3&from=&to=). ?charts=1 appends a
+   * Levey-Jennings chart per parameter, drawn over the recorded series so a run
+   * on the sheet is read in context.
+   */
+  router.get('/runs/report/print', requirePermission('iqc', 'print'), (req, res) => {
+    const data = collectRunReport(db(), reportSelection(req));
+    const lab = (db().prepare('SELECT facility_name FROM laboratory_profile WHERE id = 1').get() as { facility_name: string } | undefined)?.facility_name ?? 'Laboratory';
+    const html = renderRunReport(data, { lab, autoprint: req.query.autoprint !== '0' });
+    audit(req, { action: 'print', entity: 'iqc_runs', newValue: { runs: data.runs.map(r => r.id), charts: data.charts.length } });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  });
+
+  /** The same selection as a workbook — one row per reading, targets included. */
+  router.get('/runs/report.xlsx', requirePermission('iqc', 'export'), (req, res) => {
+    const data = collectRunReport(db(), { ...reportSelection(req), charts: false });
+    audit(req, { action: 'export', entity: 'iqc_runs', newValue: { runs: data.runs.length } });
+    const suffix = data.period ? `_${data.period.replace(/\s+to\s+/, '_to_')}` : '';
+    sendWorkbook(res, buildWorkbook(RUN_REPORT_HEADERS, runReportRows(data), 'CONTROL RUNS'),
+      `Control_runs${suffix}.xlsx`);
+  });
+
   /* ============================================== Levey-Jennings out of here */
 
   /** Chart data as a workbook: the series, then the statistics beneath it. */
@@ -513,6 +543,28 @@ export function iqcImportExportRoutes() {
 
   /* ------------------------------------------------------------- internals */
 
+  /**
+   * What to put on a run report. An explicit id list wins; otherwise a control
+   * and a window. Neither means no runs — printing the whole register by
+   * accident produces a document nobody reads.
+   */
+  function reportSelection(req: { query: Record<string, unknown> }): RunReportSelection {
+    // Both forms accept a comma-separated list or a repeated parameter, because
+    // both are what a URL built by hand and a URL built by the screen look like.
+    const numbers = (value: unknown): number[] =>
+      (Array.isArray(value) ? value : [value])
+        .flatMap(part => String(part ?? '').split(','))
+        .map(part => Number(part.trim()))
+        .filter(n => Number.isFinite(n) && n > 0);
+    return {
+      ids: numbers(req.query.ids),
+      materialIds: [...numbers(req.query.materialIds), ...numbers(req.query.materialId)],
+      from: req.query.from ? String(req.query.from) : null,
+      to: req.query.to ? String(req.query.to) : null,
+      charts: req.query.charts === '1' || req.query.charts === 'true',
+    };
+  }
+
   function chartContext(analyteId: string, from?: string, to?: string) {
     const database = db();
     const analyte = database.prepare(`SELECT a.*, m.material_name, m.lot_number, m.test_name, m.control_type,
@@ -542,8 +594,9 @@ export function iqcImportExportRoutes() {
 
 /**
  * The chart, drawn as SVG on the server so the printed page is identical to the
- * screen and needs no browser rendering beyond laying out the page. Geometry
- * mirrors src/components/LeveyJenningsChart.tsx, including the ±6 SD cap.
+ * screen and needs no browser rendering beyond laying out the page. The drawing
+ * itself lives in services/iqcChartSvg.ts, over the same geometry the on-screen
+ * chart uses, so the two cannot drift apart.
  */
 function renderChartPrint(ctx: {
   lab: string; analyte: Record<string, any>; material: Record<string, any>;
@@ -555,51 +608,7 @@ function renderChartPrint(ctx: {
   const sd = analyte.target_sd as number | null;
   const fmt = (v: unknown, d = dp) => (v === null || v === undefined || Number.isNaN(Number(v)) ? '—' : Number(v).toFixed(d));
 
-  const W = 980, H = 360, PAD = { top: 20, right: 110, bottom: 48, left: 70 };
-  const PW = W - PAD.left - PAD.right, PH = H - PAD.top - PAD.bottom;
-  let svg = '';
-
-  const numeric = points.filter(p => Number(p.is_qualitative) !== 1);
-  if (mean !== null && sd !== null && sd > 0 && numeric.length > 0) {
-    const zs = numeric.map(p => (Number(p.result_value) - mean) / sd);
-    const extent = Math.min(6, Math.max(4, Math.ceil(Math.max(...zs.map(Math.abs)) + 0.5)));
-    const top = mean + extent * sd, bottom = mean - extent * sd;
-    const y = (v: number) => PAD.top + ((top - Math.min(top, Math.max(bottom, v))) / (top - bottom)) * PH;
-    const x = (i: number) => PAD.left + (numeric.length === 1 ? PW / 2 : (i / (numeric.length - 1)) * PW);
-
-    const band = (a: number, b: number, fill: string) =>
-      `<rect x="${PAD.left}" y="${y(mean + b * sd)}" width="${PW}" height="${Math.max(0, y(mean + a * sd) - y(mean + b * sd))}" fill="${fill}"/>`;
-    svg += band(-extent, extent, '#fdeaec') + band(-2, 2, '#fef6e6') + band(-1, 1, '#eafaf2');
-
-    for (const k of [3, 2, 1, 0, -1, -2, -3]) {
-      const v = mean + k * sd, yy = y(v);
-      const stroke = k === 0 ? '#1849c0' : Math.abs(k) === 3 ? '#d64258' : '#b9c2d0';
-      const dash = k === 0 ? '' : ' stroke-dasharray="4 4"';
-      svg += `<line x1="${PAD.left}" x2="${PAD.left + PW}" y1="${yy}" y2="${yy}" stroke="${stroke}" stroke-width="${k === 0 ? 1.6 : 1}"${dash}/>`;
-      svg += `<text x="${PAD.left + PW + 7}" y="${yy + 3.5}" font-size="10" fill="${k === 0 ? '#1849c0' : '#6b7686'}">${k === 0 ? 'Mean' : `${k > 0 ? '+' : '−'}${Math.abs(k)}SD`}</text>`;
-      svg += `<text x="${PAD.left - 8}" y="${yy + 3.5}" font-size="9.5" fill="#6b7686" text-anchor="end">${fmt(v)}</text>`;
-    }
-
-    svg += `<polyline fill="none" stroke="#98a2b3" stroke-width="1.3" points="${numeric.map((p, i) => `${x(i)},${y(Number(p.result_value))}`).join(' ')}"/>`;
-    numeric.forEach((p, i) => {
-      const rejected = p.status === 'out_of_control';
-      const warned = p.status === 'warning';
-      const colour = rejected ? '#d64258' : warned ? '#d99413' : '#199e6b';
-      const off = Math.abs((Number(p.result_value) - mean) / sd) > extent;
-      const px = x(i), py = y(Number(p.result_value));
-      svg += off
-        ? `<polygon points="${px},${py - 6} ${px - 5},${py + 4} ${px + 5},${py + 4}" fill="${colour}"/>`
-        : `<circle cx="${px}" cy="${py}" r="${rejected ? 4.5 : 3.4}" fill="${colour}"/>`;
-      if (rejected) svg += `<text x="${px}" y="${py - 9}" font-size="8.5" fill="#d64258" text-anchor="middle">${esc(RULE_LABELS[String(p.rule_violation ?? '')] ?? '!')}</text>`;
-    });
-
-    const every = Math.max(1, Math.ceil(numeric.length / 8));
-    numeric.forEach((p, i) => {
-      if (i % every === 0 || i === numeric.length - 1) {
-        svg += `<text x="${x(i)}" y="${PAD.top + PH + 18}" font-size="9" fill="#6b7686" text-anchor="middle">${esc(String(p.run_date).slice(5))}</text>`;
-      }
-    });
-  }
+  const chart = renderLjSvg(points as ChartPointRow[], mean, sd, dp);
 
   const rows = points.map(p => `<tr>
     <td>${esc(p.run_date)}</td><td>${esc(p.run_time ?? '')}</td>
@@ -630,6 +639,7 @@ function renderChartPrint(ctx: {
   th { background: #eef2f7; font-size: 9px; text-transform: uppercase; letter-spacing: .03em; }
   td.bad { color: #d64258; font-weight: 700; }
   td.warn { color: #b4770c; font-weight: 700; }
+  .caveat { border: 1px solid #e6c98a; background: #fdf6e6; color: #6a5320; padding: 7px 10px; font-size: 10px; margin: 0 0 8px; border-radius: 3px; }
   .sign { display: flex; gap: 40px; margin-top: 18px; font-size: 10px; }
   .sign div { flex: 1; border-top: 1px solid #16202f; padding-top: 5px; }
   .foot { margin-top: 14px; font-size: 8.5px; color: #6b7686; border-top: 1px solid #d5dbe4; padding-top: 6px; }
@@ -637,7 +647,7 @@ function renderChartPrint(ctx: {
 </style></head><body>
 <div class="hdr">
   <div>
-    <h1>Levey-Jennings chart — ${esc(analyte.analyte)}${analyte.unit ? ` (${esc(analyte.unit)})` : ''}</h1>
+    <h1>${esc(chart.title)} — ${esc(analyte.analyte)}${analyte.unit ? ` (${esc(analyte.unit)})` : ''}</h1>
     <div class="sub">
       ${esc(material.material_name)} · lot ${esc(material.lot_number)}${material.level_label ? ` · ${esc(material.level_label)}` : ''}
       · ${esc(material.test_name)}${material.source === 'in_house' ? ' · in-house prepared' : ''}
@@ -649,7 +659,9 @@ function renderChartPrint(ctx: {
   </div>
 </div>
 
-<svg viewBox="0 0 ${W} ${H}" width="100%" height="300" xmlns="http://www.w3.org/2000/svg">${svg}</svg>
+${chart.caveat ? `<p class="caveat">${esc(chart.caveat)}</p>` : ''}
+
+${ljSvgElement(chart, CHART_GEOMETRY, 300)}
 
 <div class="stats">
   <div><dt>Results (n)</dt><dd>${stats.n ?? 0}</dd></div>

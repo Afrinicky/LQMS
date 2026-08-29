@@ -2,6 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import * as XLSX from 'xlsx';
 import { getDb } from '../db/database.js';
+import { requireAuth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
@@ -14,6 +15,12 @@ import { buildReport, reportToWorkbook, reportToHtml, REPORT_TYPES } from '../se
 import { getCurrentStaffId } from './routeHelpers.js';
 import { openSheet, refreshSheetRows, sheetsForSection } from '../services/routineSheets.js';
 import { LOGGING_MODES, MAX_ATTACHMENT_MB } from '../../shared/constants/routineWork.js';
+import { resolvePermission } from '../services/permissionResolver.js';
+import { tierFeatureKey, TIER_ACTION } from '../../shared/constants/activities.js';
+
+/** A number, or nothing — an empty box is "not set", never zero. */
+const num = (value: unknown): number | null =>
+  (value === '' || value === null || value === undefined || Number.isNaN(Number(value)) ? null : Number(value));
 
 const numericOnly = (req: any, _res: any, next: any) => (/^\d+$/.test(req.params.id) ? next() : next('route'));
 // Environmental Monitoring is a feature of Facilities & Safety, not the whole
@@ -498,6 +505,93 @@ export function environmentalRoutes() {
       month, sectionId, settings,
       sheets: sheetsForSection(db, 'environmental', sectionId, month, { userId: req.user!.id }),
     });
+  });
+
+  /**
+   * Register a new thing to chart, from wherever the person is standing.
+   *
+   * The unit that reads a fridge is the unit that knows a new fridge has
+   * arrived, and the old arrangement sent them to Facilities & Safety to say
+   * so — which in practice meant the new fridge went unmonitored until somebody
+   * remembered. So a unit can register its own asset here, and it is assigned
+   * to that unit, appearing on its chart board the moment it is saved.
+   *
+   * It is not an open door: it takes the environment module's create right, or
+   * the supervisory routine-work tier a unit head holds. And it can only ever
+   * be assigned to the caller's own unit — naming somebody else's is a
+   * Facilities & Safety act, because it makes another unit responsible.
+   */
+  router.post('/charts/assets', requireAuth, (req, res) => {
+    const db = getDb();
+    const mayCreate = resolvePermission(req.user!.id, MODULE, 'create').allowed
+      || resolvePermission(req.user!.id, tierFeatureKey('supervisory'), TIER_ACTION).allowed;
+    if (!mayCreate) {
+      return res.status(403).json({
+        error: 'Registering something new to chart is a unit head\'s. Your profile holds neither the environment '
+          + 'create right nor the supervisory routine-work tier.',
+      });
+    }
+    const staffId = getCurrentStaffId(req);
+    const sectionId = staffId !== null
+      ? (db.prepare('SELECT section_id FROM staff WHERE id = ?').get(staffId) as any)?.section_id ?? null
+      : null;
+    if (!sectionId) {
+      return res.status(400).json({ error: 'Your account is not linked to a unit, so there is nobody to make responsible for the readings.' });
+    }
+
+    const name = String(req.body?.name ?? '').trim();
+    if (!name) return res.status(400).json({ error: 'Give it a name — what the bench calls it, so the person reading it recognises it.' });
+    const assetType = String(req.body?.assetType ?? '').trim() || 'refrigerator';
+    const parameters = Array.isArray(req.body?.parameters) ? req.body.parameters : [];
+    if (parameters.length === 0) {
+      return res.status(400).json({ error: 'A chart with no parameter has nothing to record. Add at least one — temperature, humidity, whatever this asset is monitored for — with the range it must stay inside.' });
+    }
+    for (const p of parameters) {
+      const label = String(p?.label ?? '').trim();
+      if (!label) return res.status(400).json({ error: 'Every parameter needs a name.' });
+      const min = num(p?.minValue), max = num(p?.maxValue);
+      if (min === null && max === null) {
+        return res.status(400).json({ error: `${label} has no acceptable range. Without one nothing can be out of range, and the chart records numbers rather than control.` });
+      }
+      if (min !== null && max !== null && min > max) {
+        return res.status(400).json({ error: `${label}: the lowest acceptable value is above the highest.` });
+      }
+    }
+
+    const created = new Date().toISOString();
+    const code = generateRecordNumber(db, 'environmental_assets', 'ENV', created);
+    const result = db.transaction(() => {
+      const inserted = db.prepare(`INSERT INTO environmental_assets
+          (asset_code, name, asset_type, section_id, responsible_section_id, location_id,
+           temp_min, temp_max, monitoring_frequency, status, is_active, notes, created_by, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 1, ?, ?, ?)`)
+        .run(code, name, assetType, sectionId, sectionId, parseIntNullable(req.body?.locationId),
+          num(parameters[0]?.minValue), num(parameters[0]?.maxValue),
+          String(req.body?.monitoringFrequency ?? '').trim() || 'daily',
+          String(req.body?.notes ?? '').trim() || null, req.user!.id, created);
+      const assetId = Number(inserted.lastInsertRowid);
+
+      parameters.forEach((p: any, index: number) => {
+        const label = String(p.label).trim();
+        const key = label.toLowerCase().replace(/[^a-z0-9_]+/g, '_') || `parameter_${index + 1}`;
+        db.prepare(`INSERT INTO environmental_asset_parameters
+            (asset_id, parameter, label, unit, min_value, max_value, decimal_places, display_order, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`)
+          .run(assetId, key, label, String(p.unit ?? '').trim() || null,
+            num(p.minValue), num(p.maxValue),
+            Number.isFinite(Number(p.decimalPlaces)) ? Number(p.decimalPlaces) : 1, index);
+      });
+      return assetId;
+    })();
+
+    // Open this month straight away, so the chart the person came to fill in is
+    // there rather than one action further on.
+    const month = /^\d{4}-\d{2}$/.test(String(req.body?.month)) ? String(req.body.month) : new Date().toISOString().slice(0, 7);
+    const sheet = openSheet(db, { kind: 'environmental', subjectId: result, month, sectionId, userId: req.user!.id });
+    if (sheet) refreshSheetRows(db, sheet);
+
+    audit(req, { action: 'create', entity: 'environmental_assets', entityId: result, newValue: { code, name, assetType, sectionId, parameters: parameters.length } });
+    res.status(201).json({ id: result, assetCode: code, sheetId: sheet?.id ?? null });
   });
 
   router.post('/charts/open', requirePermission(MODULE, 'view'), (req, res) => {

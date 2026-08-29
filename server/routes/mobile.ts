@@ -29,7 +29,7 @@ import { audit } from '../services/auditService.js';
 import { recordSignature } from '../services/signatureService.js';
 import { queuePush } from '../services/pushService.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
-import { getCurrentStaffId, requireCurrentStaffId, parseIntNullable } from './routeHelpers.js';
+import { getCurrentStaffId, requireCurrentStaffId, parseIntNullable, blockedForNoSignature } from './routeHelpers.js';
 
 const upload = multer({
   storage: multer.diskStorage({ destination: (_req, _file, cb) => cb(null, uploadRoot), filename: (_req, file, cb) => cb(null, safeStoredFilename(file.originalname)) }),
@@ -209,6 +209,7 @@ export function mobileRoutes() {
     const decl = db.prepare('SELECT * FROM staff_declarations WHERE id = ?').get(req.params.id) as Row | undefined;
     if (!decl) return res.status(404).json({ error: 'Declaration not found' });
     if (decl.staff_id && Number(decl.staff_id) !== staffId) return res.status(403).json({ error: 'This declaration is assigned to another staff member.' });
+    if (blockedForNoSignature(req, res)) return;
     // Uses the signer's signature on file (attached automatically by the service).
     const onFile = db.prepare('SELECT signature_file_id FROM staff WHERE id = ?').get(staffId) as { signature_file_id?: number | null } | undefined;
     const sig = recordSignature(req, { moduleKey: 'personnel', recordType: 'staff_declaration', recordId: req.params.id, purpose: 'declaration_sign', meaning: `Signed: ${String(decl.title ?? '')}` });
@@ -281,6 +282,9 @@ export function mobileRoutes() {
     const ann = db.prepare('SELECT requires_acknowledgement FROM announcements WHERE id = ?').get(req.params.id) as { requires_acknowledgement?: number } | undefined;
     if (!ann) return res.status(404).json({ error: 'Announcement not found' });
     const acknowledge = req.body?.acknowledge === true || req.body?.acknowledge === 'true';
+    // Acknowledging an announcement that requires it is a signature. Refuse
+    // before the read is written, so the announcement can still be marked read.
+    if (acknowledge && ann.requires_acknowledgement && blockedForNoSignature(req, res)) return;
     db.prepare(`INSERT INTO announcement_reads (announcement_id, staff_id, user_id, read_at, acknowledged_at)
         VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?)
         ON CONFLICT(announcement_id, user_id) DO UPDATE SET read_at = CURRENT_TIMESTAMP, acknowledged_at = COALESCE(excluded.acknowledged_at, announcement_reads.acknowledged_at)`)

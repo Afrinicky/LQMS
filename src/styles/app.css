@@ -2542,6 +2542,15 @@ button.tiny { padding: 2px 8px; font-size: 11px; }
 .lj-vcount { color: var(--muted); font-variant-numeric: tabular-nums; }
 .lj-vmean { color: var(--muted); flex: 1; min-width: 220px; line-height: 1.5; }
 
+/* Said out loud when the chart is scaled from the results rather than from an
+   assigned SD. A provisional chart that does not admit it is worse than none. */
+.lj-caveat {
+  margin: 0 0 10px; padding: 9px 12px; border-radius: var(--radius-sm);
+  background: var(--warning-bg);
+  border: 1px solid rgba(245,181,68,.28);
+  color: var(--muted); font-size: 11.5px; line-height: 1.55;
+}
+
 .lj-empty {
   padding: 26px; text-align: center; color: var(--muted); font-size: 12.5px; line-height: 1.6;
   border: 1px dashed var(--border-strong); border-radius: var(--radius-sm);
@@ -4590,6 +4599,34 @@ button.cell-mark:disabled { cursor: default; }
    ========================================================================= */
 
 /* -- the five faces of the tab ------------------------------------------- */
+/* ============================================================================
+   IQC IN THE PORTAL — charts and printable records
+   ========================================================================= */
+.iqc-chart-picks { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.iqc-chart-picks li {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 11px; background: var(--panel); border-radius: var(--radius-sm);
+}
+.iqc-chart-picks li:hover { background: var(--panel-2); }
+.iqc-chart-picks .ls-check { flex: 1; min-width: 0; margin: 0; }
+.iqc-chart-picks strong { font-size: 12.5px; }
+.iqc-chart-picks em { display: block; font-style: normal; color: var(--faint); font-size: 11.5px; margin-top: 1px; }
+
+.iqc-report-bar {
+  display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  background: var(--panel-2); border: 1px solid var(--border);
+}
+.iqc-report-bar label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--faint); }
+.iqc-report-bar .muted { font-size: 11.5px; }
+
+.iqc-chart-tabs { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 12px; }
+.iqc-chart-tabs button {
+  padding: 4px 11px; border-radius: 99px; border: 1px solid var(--border);
+  background: transparent; color: var(--muted); font-size: 11.5px; cursor: pointer;
+}
+.iqc-chart-tabs button.is-on { background: var(--accent); border-color: transparent; color: #fff; font-weight: 650; }
+
 .rw-faces { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
 .rw-faces button {
   display: inline-flex; align-items: center; gap: 6px; padding: 7px 13px;
@@ -4618,9 +4655,22 @@ button.cell-mark:disabled { cursor: default; }
 .ls-status.s-submitted { background: var(--warning-bg); color: var(--warning); }
 .ls-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
 .ls-locked {
-  display: flex; align-items: center; gap: 6px; margin: 0; padding: 7px 11px; border-radius: 8px;
+  display: flex; align-items: center; gap: 10px; margin: 0; padding: 7px 11px; border-radius: 8px;
   background: var(--success-bg); color: var(--success); font-size: 11.5px; line-height: 1.5;
 }
+.ls-locked-text { flex: 1; min-width: 0; }
+.ls-locked-note { display: block; color: var(--muted); font-style: italic; margin-top: 2px; }
+
+/* The reviewer's own signature on a verified month. Kept on a white ground —
+   a signature scanned from paper is black ink and disappears on a dark panel. */
+.ls-sig {
+  margin: 0; flex: 0 0 auto; text-align: center;
+  background: #fff; border-radius: 4px; padding: 4px 8px;
+}
+.ls-sig img { display: block; height: 34px; max-width: 170px; object-fit: contain; }
+.ls-sig figcaption { font-size: 9px; color: #5a6577; letter-spacing: .04em; margin-top: 1px; }
+
+.ls-nosig { color: var(--warning); font-size: 11.5px; line-height: 1.5; max-width: 640px; }
 .ls-breach-note {
   display: flex; align-items: center; gap: 7px; margin: 0; padding: 8px 11px; border-radius: 8px;
   background: var(--danger-bg); color: var(--danger); font-size: 11.5px; line-height: 1.5;
@@ -4737,6 +4787,28 @@ button.cell-mark:disabled { cursor: default; }
 .rs-month { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
 .rs-month span { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; min-width: 120px; justify-content: center; }
 .rs-mode { margin: 0 0 8px; font-size: 11.5px; color: var(--faint); }
+.rs-add { margin: 4px 0 10px; }
+
+/* Registering a new chart from the portal. Laid out as a short form rather than
+   a modal: it is the kind of thing done standing at the fridge. */
+.rs-newlog {
+  padding: 13px 15px; border-radius: var(--radius-sm);
+  background: var(--panel-2); border: 1px solid var(--border-strong);
+  display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px;
+}
+.rs-newlog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.rs-newlog-head strong { font-size: 13px; }
+.rs-newlog > .muted { margin: 0; font-size: 11.5px; line-height: 1.55; }
+.rs-newlog-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.rs-newlog-grid label, .rs-newlog-notes { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--faint); }
+.rs-param-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.rs-param-table th {
+  text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--faint); font-weight: 600; padding: 0 6px 4px 0;
+}
+.rs-param-table td { padding: 2px 6px 2px 0; }
+.rs-param-table input { width: 100%; }
+
 .rs-totals { display: flex; gap: 16px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); margin-bottom: 10px; }
 .rs-totals .warn { color: var(--warning); } .rs-totals .crit { color: var(--danger); }
 .rs-split { display: grid; grid-template-columns: minmax(200px, 250px) 1fr; gap: 14px; align-items: start; }

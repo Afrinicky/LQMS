@@ -1,16 +1,23 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   AlertTriangle, ArrowRight, Beaker, Check, CheckCircle2, ClipboardPaste, Clock,
-  Download, FileSpreadsheet, FileUp, Keyboard, Loader2, Lock, Radio, ScanLine,
-  ShieldAlert, Table2, Upload, X, XCircle,
+  Download, FileSpreadsheet, FileUp, Keyboard, LineChart, Loader2, Lock, Plus,
+  Printer, Radio, ScanLine, ShieldAlert, Table2, Upload, X, XCircle,
 } from 'lucide-react';
 import { api, API_BASE, getToken, errorText } from '../../services/api';
+import { downloadXlsx, openPrintable } from '../../services/xlsx';
+import { usePermissions } from '../../hooks/usePermissions';
 import TextField from '../../components/ui/TextField';
 import {
   IQC_ENTRY_METHOD_LABELS, IQC_ENTRY_METHOD_HINTS, type IqcEntryMethod,
 } from '../../../shared/constants/routineWork';
 import { QUALITATIVE_LABELS, RULE_LABELS } from '../../../shared/constants/iqc';
-import type { IqcBoard, IqcBoardControl, IqcMapping, IqcFeedMessage } from '../../../shared/types/api';
+import LeveyJenningsChart, { type ChartData } from '../../components/LeveyJenningsChart';
+import DefineControlForm from '../../components/iqc/DefineControlForm';
+import type {
+  IqcBoard, IqcBoardControl, IqcMapping, IqcFeedMessage, IqcChartAnalyte,
+  Section, Staff, EquipmentItem,
+} from '../../../shared/types/api';
 
 /**
  * IQC on the bench.
@@ -49,12 +56,16 @@ const METHOD_ICONS: Record<IqcEntryMethod, ReactNode> = {
   instrument: <Radio size={13} />,
 };
 
+type QcFace = 'board' | 'charts' | 'define';
+
 export default function PortalRoutineIqc() {
   const [board, setBoard] = useState<IqcBoard | null>(null);
   const [loading, setLoading] = useState(true);
   const [problem, setProblem] = useState<string | null>(null);
   const [openControl, setOpenControl] = useState<IqcBoardControl | null>(null);
+  const [chartControl, setChartControl] = useState<IqcBoardControl | null>(null);
   const [showFeed, setShowFeed] = useState(false);
+  const [face, setFace] = useState<QcFace>('board');
 
   const load = useCallback(async () => {
     try { setBoard(await api<IqcBoard>('/iqc/portal/board')); setProblem(null); }
@@ -78,8 +89,37 @@ export default function PortalRoutineIqc() {
 
   const { counts } = board;
 
+  const controls = board.groups.flatMap(g => g.controls);
+
   return (
     <div className="portal-stack">
+      {/* Three faces of the same work: run it, look at the chart, set a new one
+          up. Defining a control is the module's own wizard, not a portal
+          variation of it — one form, one idea of what a control record is. */}
+      <nav className="rw-faces" aria-label="Quality control">
+        <button type="button" className={face === 'board' ? 'is-on' : ''} onClick={() => setFace('board')}>
+          <Beaker size={13} /> Today&rsquo;s controls
+        </button>
+        <button type="button" className={face === 'charts' ? 'is-on' : ''} onClick={() => setFace('charts')}>
+          <LineChart size={13} /> Charts and records
+        </button>
+        {board.canDefine && (
+          <button type="button" className={face === 'define' ? 'is-on' : ''} onClick={() => setFace('define')}>
+            <Plus size={13} /> New control
+          </button>
+        )}
+      </nav>
+
+      {face === 'define' && board.canDefine && (
+        <PortalDefineControl sectionId={board.sectionId} sectionName={board.sectionName}
+          onSaved={async () => { await load(); setFace('board'); }} />
+      )}
+
+      {face === 'charts' && (
+        <ChartsFace controls={controls} onOpen={setChartControl} />
+      )}
+
+      {face === 'board' && (
       <section className="portal-panel">
         <div className="pp-head">
           <div>
@@ -135,7 +175,7 @@ export default function PortalRoutineIqc() {
               <ul className="iqc-list">
                 {group.controls.map(control => (
                   <ControlRow key={control.id} control={control} canPerform={board.canPerform}
-                    onOpen={() => setOpenControl(control)} />
+                    onOpen={() => setOpenControl(control)} onChart={() => setChartControl(control)} />
                 ))}
               </ul>
             </div>
@@ -152,6 +192,9 @@ export default function PortalRoutineIqc() {
           </div>
         )}
       </section>
+      )}
+
+      {chartControl && <ChartDialog control={chartControl} onClose={() => setChartControl(null)} />}
 
       {openControl && (
         <RunControlDialog control={openControl} onClose={() => setOpenControl(null)}
@@ -172,10 +215,225 @@ function Stat({ label, value, tone }: { label: string; value: number; tone: stri
 }
 
 /* ----------------------------------------------------------------------------
+   Setting up a new control, from the portal
+
+   The wizard is the module's — imported, not reimplemented — so a control
+   defined at the bench carries exactly what a control defined in Quality
+   Control carries: its provenance, its rule set, its parameters and their
+   limits. All the portal adds is the unit the person actually works in, filled
+   in for them.
+   ------------------------------------------------------------------------- */
+function PortalDefineControl({ sectionId, sectionName, onSaved }: {
+  sectionId: number | null; sectionName?: string | null; onSaved: () => void | Promise<void>;
+}) {
+  const [lookups, setLookups] = useState<{ sections: Section[]; staff: Staff[]; equipment: EquipmentItem[] } | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  useEffect(() => {
+    api<{ sections: Section[]; staff: Staff[]; equipment: EquipmentItem[] }>('/iqc/portal/lookups')
+      .then(setLookups)
+      .catch(e => { setProblem(errorText(e)); setLookups({ sections: [], staff: [], equipment: [] }); });
+  }, []);
+
+  if (!lookups) return <div className="portal-loading">Reading the register…</div>;
+
+  return (
+    <>
+      {problem && <p className="pd-error"><AlertTriangle size={13} /> {problem}</p>}
+      <DefineControlForm
+        sections={lookups.sections} staff={lookups.staff} equipment={lookups.equipment}
+        defaultSectionId={sectionId}
+        heading="Set up a new control"
+        lead={sectionName
+          ? `It will belong to ${sectionName} and appear on this board as soon as it is saved.`
+          : 'It will appear on this board as soon as it is saved.'}
+        onSaved={onSaved}
+        onError={setProblem}
+      />
+    </>
+  );
+}
+
+/* ----------------------------------------------------------------------------
+   Charts and records
+
+   Two things a bench needs after running a control and cannot get from the
+   board: where the point landed on the chart, and a printable record of what
+   was run against what it should have been. Both are here, because sending
+   somebody to another module to see their own morning's work is how charts end
+   up looked at monthly.
+   ------------------------------------------------------------------------- */
+function ChartsFace({ controls, onOpen }: { controls: IqcBoardControl[]; onOpen: (c: IqcBoardControl) => void }) {
+  const { can } = usePermissions();
+  const [picked, setPicked] = useState<number[]>([]);
+  const [from, setFrom] = useState(() => new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10));
+  const [to, setTo] = useState(() => new Date().toISOString().slice(0, 10));
+
+  const toggle = (id: number) =>
+    setPicked(list => (list.includes(id) ? list.filter(x => x !== id) : [...list, id]));
+
+  /** The report endpoints are downloads, so they are opened with the session token. */
+  const reportUrl = (path: string) => {
+    const params = new URLSearchParams({ from, to, charts: '1', materialIds: picked.join(',') });
+    return `${path}?${params.toString()}`;
+  };
+
+  return (
+    <section className="portal-panel">
+      <div className="pp-head">
+        <div>
+          <h3><LineChart size={16} /> Charts and records</h3>
+          <p>
+            The Levey-Jennings chart for any parameter your unit controls, and a printable record of the runs
+            behind it — every result beside the target it was measured against.
+          </p>
+        </div>
+      </div>
+
+      {controls.length === 0 ? (
+        <p className="muted">No controls are set up against your unit yet.</p>
+      ) : (
+        <>
+          <ul className="iqc-chart-picks">
+            {controls.map(control => (
+              <li key={control.id}>
+                <label className="ls-check">
+                  <input type="checkbox" checked={picked.includes(control.id)} onChange={() => toggle(control.id)} />
+                  <span>
+                    <strong>{control.materialName}</strong>
+                    <em> {control.testName} · lot {control.lotNumber}{control.levelLabel ? ` · ${control.levelLabel}` : ''}</em>
+                  </span>
+                </label>
+                <button type="button" className="pq-link" onClick={() => onOpen(control)}>
+                  <LineChart size={12} /> View the chart
+                </button>
+              </li>
+            ))}
+          </ul>
+
+          <div className="iqc-report-bar">
+            <label><span>From</span><input type="date" value={from} max={to} onChange={e => setFrom(e.target.value)} /></label>
+            <label><span>To</span><input type="date" value={to} min={from} onChange={e => setTo(e.target.value)} /></label>
+            {can('iqc', 'print') && (
+              <ReportButton kind="print" path={reportUrl('/iqc/runs/report/print')} disabled={picked.length === 0}>
+                <Printer size={13} /> Print the runs {picked.length ? `(${picked.length})` : ''}
+              </ReportButton>
+            )}
+            {can('iqc', 'export') && (
+              <ReportButton kind="export" path={reportUrl('/iqc/runs/report.xlsx')} name="Control_runs.xlsx" disabled={picked.length === 0}>
+                <FileSpreadsheet size={13} /> Excel
+              </ReportButton>
+            )}
+            {picked.length === 0 && <span className="muted">Tick the controls to include.</span>}
+            {!can('iqc', 'print') && !can('iqc', 'export') && (
+              <span className="muted">Taking a copy of the quality-control record needs the print or export right on Quality Control.</span>
+            )}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+/**
+ * A report button.
+ *
+ * The report endpoints need the session token in a header, so a plain link
+ * would come back 401 in a new tab. The shared helpers fetch and hand the
+ * result to the browser — the same ones the module toolbars use, so a portal
+ * download behaves exactly like a module download.
+ */
+function ReportButton({ kind, path, name, disabled, children }: {
+  kind: 'print' | 'export'; path: string; name?: string; disabled?: boolean; children: ReactNode;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  return (
+    <>
+      <button type="button" className="pq-link" disabled={disabled || busy} onClick={async () => {
+        setBusy(true); setProblem(null);
+        try {
+          if (kind === 'print') await openPrintable(path);
+          else await downloadXlsx(path, name ?? 'report.xlsx');
+        } catch (e) { setProblem(errorText(e)); }
+        finally { setBusy(false); }
+      }}>
+        {busy ? <Loader2 size={13} className="pd-spin" /> : children}
+      </button>
+      {problem && <span className="pd-error">{problem}</span>}
+    </>
+  );
+}
+
+/** One control's charts, a parameter at a time. */
+function ChartDialog({ control, onClose }: { control: IqcBoardControl; onClose: () => void }) {
+  const { can } = usePermissions();
+  const [analytes, setAnalytes] = useState<IqcChartAnalyte[] | null>(null);
+  const [analyteId, setAnalyteId] = useState<number | null>(null);
+  const [chart, setChart] = useState<ChartData | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  useEffect(() => {
+    api<IqcChartAnalyte[]>(`/iqc/portal/controls/${control.id}/chart-analytes`)
+      .then(list => {
+        const quantitative = list.filter(a => Number(a.is_qualitative) !== 1);
+        setAnalytes(quantitative);
+        setAnalyteId(quantitative[0]?.id ?? null);
+      })
+      .catch(e => { setProblem(errorText(e)); setAnalytes([]); });
+  }, [control.id]);
+
+  useEffect(() => {
+    if (!analyteId) { setChart(null); return; }
+    setChart(null);
+    api<ChartData>(`/iqc/portal/analytes/${analyteId}/chart`)
+      .then(setChart)
+      .catch(e => setProblem(errorText(e)));
+  }, [analyteId]);
+
+  return (
+    <Modal title={`${control.materialName} — lot ${control.lotNumber}`} onClose={onClose}>
+      {problem && <p className="pd-error"><AlertTriangle size={13} /> {problem}</p>}
+      {analytes === null ? <p className="muted">Reading the parameters…</p>
+        : analytes.length === 0 ? (
+          <p className="muted">
+            This control has no quantitative parameter, so there is nothing to chart. A qualitative control
+            passes or fails against its expected result; its record is in the runs.
+          </p>
+        ) : (
+          <>
+            <div className="iqc-chart-tabs">
+              {analytes.map(a => (
+                <button key={a.id} type="button" className={a.id === analyteId ? 'is-on' : ''} onClick={() => setAnalyteId(a.id)}>
+                  {a.analyte}
+                </button>
+              ))}
+            </div>
+            {chart ? <LeveyJenningsChart data={chart} /> : <p className="muted">Drawing the chart…</p>}
+            <div className="iqc-report-bar">
+              {can('iqc', 'print') && (
+                <ReportButton kind="print" path={`/iqc/runs/report/print?materialIds=${control.id}&charts=1`}>
+                  <Printer size={13} /> Print this control&rsquo;s runs with the chart
+                </ReportButton>
+              )}
+              {can('iqc', 'export') && (
+                <ReportButton kind="export" path={`/iqc/runs/report.xlsx?materialIds=${control.id}`}
+                  name={`Control_runs_${control.lotNumber}.xlsx`}>
+                  <FileSpreadsheet size={13} /> Excel
+                </ReportButton>
+              )}
+            </div>
+          </>
+        )}
+    </Modal>
+  );
+}
+
+/* ----------------------------------------------------------------------------
    One control on the board
    ------------------------------------------------------------------------- */
-function ControlRow({ control, canPerform, onOpen }: {
-  control: IqcBoardControl; canPerform: boolean; onOpen: () => void;
+function ControlRow({ control, canPerform, onOpen, onChart }: {
+  control: IqcBoardControl; canPerform: boolean; onOpen: () => void; onChart: () => void;
 }) {
   const latest = control.runsToday[0];
   const tone = control.expired ? 'crit'
@@ -214,6 +472,9 @@ function ControlRow({ control, canPerform, onOpen }: {
         )}
       </div>
       <div className="iqc-row-side">
+        <button type="button" className="pq-link" onClick={onChart} title="The Levey-Jennings chart and the runs behind it">
+          <LineChart size={12} /> Chart
+        </button>
         {control.expired ? (
           <span className="iqc-blocked" title="A control cannot be run on an expired lot; the result would not mean anything.">
             <ShieldAlert size={13} /> lot expired

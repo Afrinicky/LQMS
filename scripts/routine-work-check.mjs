@@ -138,6 +138,40 @@ check('adding a note to a cell does not post the reading again',
    ======================================================================== */
 console.log('\n[2] The supervisor signs the month');
 
+// Nothing may be signed by somebody with no signature on file. This is checked
+// FIRST because it has to hold before any of the rest matters: a verified month
+// carrying only a typed name is exactly what an assessor challenges.
+const unsigned = await j(`/routine-sheets/${sheetId}/verify`, { token: A, method: 'POST', body: {
+  comments: 'Fine', acknowledgeGaps: true,
+} });
+check('a month cannot be signed by somebody with no signature on file',
+  unsigned.status === 400 && String(unsigned.json?.error ?? '').includes('no signature on file'),
+  `${unsigned.status} ${JSON.stringify(unsigned.json)?.slice(0, 140)}`);
+check('and the refusal says where to add one',
+  String(unsigned.json?.error ?? '').includes('Replace signature'), unsigned.json?.error);
+
+// The rule is not the log sheet's own: it holds at the one place every
+// signature in the system passes through, so it holds everywhere.
+const genericUnsigned = await j('/signatures', { token: A, method: 'POST', body: {
+  moduleKey: 'iqc', recordType: 'iqc_runs', recordId: '1', purpose: 'test_sign', meaning: 'anything',
+} });
+check('nothing at all can be signed without a signature on file',
+  genericUnsigned.status === 400 && genericUnsigned.json?.code === 'signature_required',
+  `${genericUnsigned.status} ${JSON.stringify(genericUnsigned.json)?.slice(0, 120)}`);
+
+// A 1×1 PNG stands in for the signature the supervisor would upload once.
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64');
+{
+  const fd = new FormData();
+  fd.append('file', new Blob([PNG], { type: 'image/png' }), 'signature.png');
+  const r = await fetch(`${BASE}/signatures/me`, { method: 'POST', headers: { Authorization: `Bearer ${A}` }, body: fd });
+  check('a signature can be put on file', r.ok, `${r.status}`);
+}
+check('the account now reports a signature on file',
+  (await j('/signatures/me', { token: A })).json?.hasSignature === true);
+
 const refused = await j(`/routine-sheets/${sheetId}/verify`, { token: A, method: 'POST', body: { comments: 'Fine' } });
 check('signing a month with gaps is refused until the gaps are acknowledged',
   refused.status === 409 && refused.json?.error === 'gaps', `${refused.status}`);
@@ -153,6 +187,20 @@ check('and states the gaps it was signed over',
   String(verified.json?.signature?.meaning ?? '').includes('not recorded'), verified.json?.signature?.meaning);
 check('an NC was raised against the month', Boolean(verified.json?.ncId));
 
+// The signature must reach the sheet as an image, not only as a name — on the
+// screen that shows it and on the sheet that is printed and filed.
+const signed = (await j(`/routine-sheets/${sheetId}`, { token: A })).json;
+check('the verified sheet carries the signature image, not just the name',
+  String(signed?.sheet?.signature?.image ?? '').startsWith('data:image/'),
+  String(signed?.sheet?.signature?.image ?? '(none)').slice(0, 40));
+check('and still names the person who signed it', Boolean(signed?.sheet?.verifiedByName));
+{
+  const r = await fetch(`${BASE}/routine-sheets/${sheetId}/print?autoprint=0`, { headers: { Authorization: `Bearer ${A}` } });
+  const html = await r.text();
+  check('the printed sheet shows the signature itself', r.ok && html.includes('class="sigimg"'), `${r.status}`);
+  check('and does not print "not on file" over a signed month', !html.includes('<span class="signone">'));
+}
+
 const locked = await j(`/routine-sheets/${sheetId}/cells`, { token: A, method: 'POST', body: {
   cells: [{ rowId: tempRow.id, day: 2, slot: 'am', value: 5 }],
 } });
@@ -162,6 +210,52 @@ check('and says a nonconformity is how a signed record gets corrected',
 
 const archived = await j(`/routine-sheets/${sheetId}/archive`, { token: A, method: 'POST', body: {} });
 check('a signed month can be archived', archived.status === 200 && Boolean(archived.json?.archiveId));
+
+/* ==========================================================================
+   2b. Registering something new to chart, from where the work happens
+   ======================================================================== */
+console.log('\n[2b] A unit registers its own new fridge');
+
+const registered = await j('/environmental/charts/assets', { token: A, method: 'POST', body: {
+  name: `Vaccine fridge ${stamp}`, assetType: 'refrigerator', monitoringFrequency: 'twice_daily', month,
+  parameters: [{ label: 'Temperature', unit: '\u00b0C', minValue: 2, maxValue: 8, decimalPlaces: 1 }],
+} });
+check('a unit can register something new to chart', registered.status === 201, JSON.stringify(registered.json)?.slice(0, 160));
+check('and this month\'s chart is open the moment it is saved', Boolean(registered.json?.sheetId));
+
+const newAsset = ((await j('/environmental/assets', { token: A })).json ?? []).find(a => a.id === registered.json?.id);
+check('it is the registering unit that is made responsible for reading it',
+  Number(newAsset?.responsible_section_id) === Number(sectionId), JSON.stringify(newAsset?.responsible_section_id));
+
+const newSheet = (await j(`/routine-sheets/${registered.json?.sheetId}`, { token: A })).json;
+check('the chart carries the parameter that was set up, with its unit and range',
+  (newSheet?.rows ?? []).some(r => /^Temperature/.test(r.label) && r.label.includes('\u00b0C') && r.min_value === 2 && r.max_value === 8),
+  JSON.stringify((newSheet?.rows ?? []).map(r => r.label)));
+
+// A chart with no range records numbers rather than control, so it is refused.
+const noRange = await j('/environmental/charts/assets', { token: A, method: 'POST', body: {
+  name: `Rangeless ${stamp}`, assetType: 'other',
+  parameters: [{ label: 'Temperature', unit: '\u00b0C', minValue: null, maxValue: null }],
+} });
+check('a parameter with no acceptable range is refused',
+  noRange.status === 400 && /acceptable range/i.test(String(noRange.json?.error)), noRange.json?.error);
+
+const noParams = await j('/environmental/charts/assets', { token: A, method: 'POST', body: {
+  name: `Empty ${stamp}`, assetType: 'other', parameters: [],
+} });
+check('and so is a chart with nothing on it', noParams.status === 400, `${noParams.status}`);
+
+const backwards = await j('/environmental/charts/assets', { token: A, method: 'POST', body: {
+  name: `Inverted ${stamp}`, assetType: 'other',
+  parameters: [{ label: 'Temperature', unit: '\u00b0C', minValue: 8, maxValue: 2 }],
+} });
+check('a range entered the wrong way round is caught', backwards.status === 400, backwards.json?.error);
+
+// It must land on the unit's own board, not merely in the asset register.
+const chartBoard = (await j(`/environmental/charts?month=${month}`, { token: A })).json;
+check('the new chart appears on the unit\'s board straight away',
+  (chartBoard?.sheets ?? []).some(s => Number(s.subject?.id) === Number(registered.json?.id)),
+  `${(chartBoard?.sheets ?? []).length} sheet(s)`);
 
 /* ==========================================================================
    3. Decontamination

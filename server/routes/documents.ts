@@ -7,7 +7,7 @@ import { requirePermission } from '../middleware/permissions.js';
 import { resolvePermission } from '../services/permissionResolver.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
-import { parseIntNullable, getStaffIdOrCurrent, getCurrentStaffId } from './routeHelpers.js';
+import { parseIntNullable, getStaffIdOrCurrent, getCurrentStaffId, blockedForNoSignature } from './routeHelpers.js';
 import { extractDocument, deriveDocumentCodeFromName } from '../utils/documentExtract.js';
 import { extractIntoVersion } from '../services/documentContent.js';
 import { indexDocument } from '../services/dennisService.js';
@@ -1336,13 +1336,17 @@ tr.pending td { color: #9b2c2c; background: #fff5f5; }
     }
     if (!attestation) return res.status(404).json({ error: 'No pending attestation was found for you on this document.' });
     if (attestation.status === 'signed') return res.status(400).json({ error: 'This attestation has already been signed.' });
+    // No signature on file, no attestation. It used to be marked signed and the
+    // trail entry quietly dropped, which left an attestation that said "signed"
+    // with nothing behind it.
+    if (blockedForNoSignature(req, res)) return;
     // Apply the signer's signature on file (uploaded once, reused everywhere).
     const onFile = db.prepare('SELECT signature_file_id FROM staff WHERE id = ?').get(staffId) as { signature_file_id?: number | null } | undefined;
     const signatureFileId = parseIntNullable(req.body.signatureFileId) ?? onFile?.signature_file_id ?? null;
     db.prepare("UPDATE document_attestations SET status = 'signed', attested_at = CURRENT_TIMESTAMP, signed_by_user_id = ?, signature_file_id = ?, notes = COALESCE(?, notes) WHERE id = ?")
       .run(req.user!.id, signatureFileId, req.body.notes ?? null, attestation.id);
     // Also record it in the unified electronic-signature trail.
-    try { recordSignature(req, { moduleKey: 'documents', recordType: 'document_attestations', recordId: attestation.id, purpose: 'document_acknowledgement', meaning: 'Acknowledged controlled document' }); } catch { /* trail is best-effort */ }
+    recordSignature(req, { moduleKey: 'documents', recordType: 'document_attestations', recordId: attestation.id, purpose: 'document_acknowledgement', meaning: 'Acknowledged controlled document' });
     db.prepare("UPDATE document_distribution SET status = 'completed' WHERE document_id = ? AND target_staff_id = ? AND status = 'pending'").run(req.params.id, staffId);
     // Auto-resolve the "sign this document" notifications for the caller so the
     // inbox and dashboard clear the moment the required action is completed.

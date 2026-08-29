@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { api, API_BASE, getToken, errorText } from '../../services/api';
 import { usePermissions } from '../../hooks/usePermissions';
+import { useSignatureOnFile, NO_SIGNATURE_HINT } from '../../hooks/useSignatureOnFile';
 import TextField from '../ui/TextField';
 import {
   SLOT_LABELS, CELL_STATUS_LABELS, CELL_SOURCE_LABELS, SHEET_STATUS_LABELS, SHEET_STATUS_HINTS,
@@ -63,6 +64,7 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
   const [busy, setBusy] = useState<string | null>(null);
   const [noteFor, setNoteFor] = useState<string | null>(null);
   const [showVerify, setShowVerify] = useState(false);
+  const { hasSignature } = useSignatureOnFile();
 
   const load = useCallback(async () => {
     try { setData(await api<LogSheetPayload>(`/routine-sheets/${sheetId}`)); setProblem(null); }
@@ -125,11 +127,22 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
       </header>
 
       {sheet.locked && (
-        <p className="ls-locked">
-          <Lock size={12} /> Signed on {String(sheet.verified_at ?? '').slice(0, 10)}
-          {sheet.verifiedByName ? ` by ${sheet.verifiedByName}` : ''}. Nothing on it can be changed.
-          A correction to a signed month is made by raising a nonconformity against it, not by editing the sheet.
-        </p>
+        <div className="ls-locked">
+          <Lock size={12} />
+          <div className="ls-locked-text">
+            Signed on {String(sheet.verified_at ?? '').slice(0, 10)}
+            {sheet.verifiedByName ? ` by ${sheet.verifiedByName}` : ''}. Nothing on it can be changed.
+            A correction to a signed month is made by raising a nonconformity against it, not by editing the sheet.
+          </div>
+          {/* The signature itself, not just who typed their name. A verified
+              month is expected to carry it, on screen as on the paper form. */}
+          {sheet.signature?.image && (
+            <figure className="ls-sig">
+              <img src={sheet.signature.image} alt={`Signature of ${sheet.verifiedByName ?? sheet.signature.signer_name ?? 'the reviewer'}`} />
+              <figcaption>E-SIG-{sheet.signature.id}</figcaption>
+            </figure>
+          )}
+        </div>
       )}
       {problem && <p className="pd-error"><AlertTriangle size={13} /> {problem}</p>}
       {notice && (
@@ -206,9 +219,14 @@ export default function LogSheetGrid({ sheetId, onChanged, hideVerification, com
 
       {!hideVerification && permissions?.canVerify && !sheet.locked && (
         <div className="ls-verify-bar">
-          <button type="button" className="ls-primary" onClick={() => setShowVerify(true)}>
+          {/* Said before the form is filled in rather than after it is submitted:
+              the server refuses to sign for anybody with no signature on file. */}
+          <button type="button" className="ls-primary" disabled={hasSignature === false}
+            title={hasSignature === false ? NO_SIGNATURE_HINT : undefined}
+            onClick={() => setShowVerify(true)}>
             <Signature size={14} /> Review and sign off {monthLabel(sheet.month)}
           </button>
+          {hasSignature === false && <span className="ls-nosig">{NO_SIGNATURE_HINT}</span>}
           {sheet.status === 'submitted' && (
             <button type="button" className="pq-link" disabled={busy === 'reopen'}
               onClick={async () => {
