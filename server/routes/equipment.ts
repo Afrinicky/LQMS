@@ -8,6 +8,13 @@ import { generateRecordNumber } from '../utils/recordNumber.js';
 import { generateEquipmentNumber, previewEquipmentNumber, getEquipmentPattern, saveEquipmentPattern } from '../utils/equipmentNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import { classForCategory, categoryFromLegacy, isArchetype, type EquipmentArchetype } from '../../shared/constants/equipment.js';
+import { getCurrentStaffId } from './routeHelpers.js';
+import { generateOccurrences } from '../services/activityService.js';
+import { openSheet, refreshSheetRows, sheetsForSection } from '../services/routineSheets.js';
+import {
+  MAINTENANCE_FRAMEWORKS, MAINTENANCE_FREQUENCIES, MAINTENANCE_KINDS,
+  MAINTENANCE_TO_ACTIVITY_FREQUENCY, frameworkForEquipment,
+} from '../../shared/constants/routineWork.js';
 
 // A category is a configurable label; the archetype pinned to it is what the
 // system acts on. Resolve the archetype from the configured list, falling back
@@ -33,6 +40,9 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 
 
 const BREAKDOWN_STATUSES = ['open', 'under_repair', 'action_required', 'returned_to_service', 'closed'];
 const EQUIPMENT_STATUSES = ['active', 'operational', 'out_of_service', 'under_repair', 'restricted_use', 'retired'];
+
+/** Only a numeric `:id` names one equipment item; anything else is a collection route. */
+const numericOnly = (req: any, _res: any, next: any) => (/^\d+$/.test(req.params.id) ? next() : next('route'));
 
 export function equipmentRoutes() {
   const router = Router();
@@ -650,7 +660,12 @@ export function equipmentRoutes() {
     res.status(201).json({ ok: true });
   });
 
-  router.get('/:id', requirePermission('equipment.register', 'view'), (req, res) => {
+  // `/:id` matches any single segment, so it would otherwise swallow every
+  // collection route declared after it — /maintenance-tasks and
+  // /maintenance-charts among them, which is exactly how those started
+  // answering 404. An equipment id is always numeric, so anything else falls
+  // through to the route that actually means it.
+  router.get('/:id', numericOnly, requirePermission('equipment.register', 'view'), (req, res) => {
     const db = getDb();
     const item = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(req.params.id);
     if (!item) return res.status(404).json({ error: 'Equipment item not found' });
@@ -733,7 +748,7 @@ export function equipmentRoutes() {
     res.status(201).json({ id: result.lastInsertRowid, equipmentNumber });
   });
 
-  router.put('/:id', requirePermission('equipment.register', 'edit'), (req, res) => {
+  router.put('/:id', numericOnly, requirePermission('equipment.register', 'edit'), (req, res) => {
     const db = getDb();
     const oldValue = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(req.params.id) as any;
     if (!oldValue) return res.status(404).json({ error: 'Equipment item not found' });
@@ -986,7 +1001,266 @@ export function equipmentRoutes() {
     res.json({ ok: true });
   });
 
+  /* ======================================================================
+     Maintenance tasks — what is actually done, and when
+     ----------------------------------------------------------------------
+     equipment_schedules already says when servicing falls due. What it never
+     said is what the visit consists of, and that is the part the bench needs:
+     "clean the objectives" is a task somebody does on a Tuesday, not a date on
+     a calendar.
+
+     Tasks carry their own cadence, so one instrument's chart holds the daily
+     lens clean, the weekly condenser check and the annual engineer's service
+     together — which is how the laboratory's own freezer schedule is laid out,
+     daily rows across the days and weekly rows across the weeks.
+     ==================================================================== */
+
+  router.get('/maintenance-tasks', requirePermission('equipment.maintenance', 'view'), (req, res) => {
+    const db = getDb();
+    const clauses: string[] = ['t.is_active = 1'];
+    const params: unknown[] = [];
+    if (req.query.equipmentId) { clauses.push('t.equipment_id = ?'); params.push(Number(req.query.equipmentId)); }
+    if (req.query.sectionId) { clauses.push('e.section_id = ?'); params.push(Number(req.query.sectionId)); }
+    if (req.query.kind) { clauses.push('t.maintenance_kind = ?'); params.push(String(req.query.kind)); }
+    if (req.query.active === 'all') clauses.shift();
+    res.json(db.prepare(`SELECT t.*, e.name AS equipment_name, e.equipment_number, e.section_id,
+          s.provider_name, s.provider_type AS schedule_provider_type, s.next_due_date
+        FROM equipment_maintenance_tasks t
+        JOIN equipment_items e ON e.id = t.equipment_id
+        LEFT JOIN equipment_schedules s ON s.id = t.schedule_id
+        ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''}
+        ORDER BY e.name, t.maintenance_kind, t.display_order, t.id`).all(...params));
+  });
+
+  /**
+   * What this instrument would normally be maintained with.
+   *
+   * A laboratory adding a microscope should not have to invent "clean the
+   * objectives daily". The framework is chosen from the instrument's name and
+   * archetype, offered in full, and edited on the way in — nothing here
+   * overrides a manufacturer's manual, and the screen says so.
+   */
+  router.get('/:id/maintenance-framework', requirePermission('equipment.maintenance', 'view'), (req, res) => {
+    const db = getDb();
+    const equipment = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(req.params.id) as any;
+    if (!equipment) return res.status(404).json({ error: 'Equipment not found' });
+    const framework = frameworkForEquipment(equipment.name, equipment.equipment_archetype ?? equipment.equipment_category);
+    const existing = db.prepare('SELECT task_text FROM equipment_maintenance_tasks WHERE equipment_id = ? AND is_active = 1').all(req.params.id) as any[];
+    const have = new Set(existing.map(t => String(t.task_text).toLowerCase().trim()));
+    res.json({
+      framework: framework.key,
+      label: framework.label,
+      allFrameworks: MAINTENANCE_FRAMEWORKS.map(f => ({ key: f.key, label: f.label })),
+      tasks: framework.tasks.map(t => ({ ...t, alreadyAdded: have.has(t.task.toLowerCase().trim()) })),
+    });
+  });
+
+  router.post('/:id/maintenance-tasks', requirePermission('equipment.maintenance', 'create'), (req, res) => {
+    const db = getDb();
+    const equipment = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(req.params.id) as any;
+    if (!equipment) return res.status(404).json({ error: 'Equipment not found' });
+
+    const items = Array.isArray(req.body?.tasks) ? req.body.tasks : [req.body ?? {}];
+    const insert = db.prepare(`INSERT INTO equipment_maintenance_tasks
+        (equipment_id, schedule_id, maintenance_kind, task_text, guidance, frequency, performer_tier,
+         provider_type, consumable, display_order, framework_key, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const startOrder = Number((db.prepare('SELECT COALESCE(MAX(display_order), -1) + 1 AS n FROM equipment_maintenance_tasks WHERE equipment_id = ?').get(req.params.id) as any).n);
+
+    const created: number[] = [];
+    const problems: string[] = [];
+    const tx = db.transaction(() => {
+      items.forEach((item: any, index: number) => {
+        const text = String(item.task ?? item.taskText ?? '').trim();
+        if (!text) { problems.push('A task with no wording was skipped.'); return; }
+        const frequency = String(item.frequency ?? 'daily');
+        if (!(MAINTENANCE_FREQUENCIES as readonly string[]).includes(frequency)) { problems.push(`"${text}": ${frequency} is not a frequency this system schedules.`); return; }
+        const kind = String(item.kind ?? item.maintenanceKind ?? 'routine');
+        if (!(MAINTENANCE_KINDS as readonly string[]).includes(kind)) { problems.push(`"${text}": maintenance must be routine or scheduled.`); return; }
+        const result = insert.run(req.params.id, parseIntNullable(item.scheduleId), kind, text,
+          item.guidance ?? null, frequency,
+          // Scheduled servicing defaults to the supervisor, routine care to
+          // whoever is on duty. A laboratory that disagrees changes it here.
+          String(item.tier ?? item.performerTier ?? (kind === 'scheduled' ? 'supervisory' : 'general')),
+          item.providerType ?? (kind === 'scheduled' ? 'external' : 'internal'),
+          item.consumable ?? null, startOrder + index, item.frameworkKey ?? null, req.user!.id);
+        created.push(Number(result.lastInsertRowid));
+      });
+    });
+    tx();
+
+    if (created.length) syncMaintenanceSchedule(db, Number(req.params.id), req.user!.id);
+    audit(req, { action: 'create', entity: 'equipment_maintenance_tasks', entityId: req.params.id, newValue: { added: created.length } });
+    res.status(created.length ? 201 : 400).json({ created: created.length, ids: created, problems });
+  });
+
+  router.put('/maintenance-tasks/:id', requirePermission('equipment.maintenance', 'edit'), (req, res) => {
+    const db = getDb();
+    const task = db.prepare('SELECT * FROM equipment_maintenance_tasks WHERE id = ?').get(req.params.id) as any;
+    if (!task) return res.status(404).json({ error: 'Maintenance task not found' });
+    const b = req.body ?? {};
+    const frequency = b.frequency !== undefined ? String(b.frequency) : task.frequency;
+    if (!(MAINTENANCE_FREQUENCIES as readonly string[]).includes(frequency)) {
+      return res.status(400).json({ error: `Frequency must be one of: ${MAINTENANCE_FREQUENCIES.join(', ')}.` });
+    }
+    db.prepare(`UPDATE equipment_maintenance_tasks SET task_text = ?, guidance = ?, frequency = ?,
+        maintenance_kind = ?, performer_tier = ?, provider_type = ?, consumable = ?, schedule_id = ?,
+        display_order = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(String(b.taskText ?? b.task ?? task.task_text).trim(), b.guidance ?? task.guidance, frequency,
+        String(b.maintenanceKind ?? b.kind ?? task.maintenance_kind),
+        String(b.performerTier ?? b.tier ?? task.performer_tier),
+        b.providerType ?? task.provider_type, b.consumable ?? task.consumable,
+        b.scheduleId !== undefined ? parseIntNullable(b.scheduleId) : task.schedule_id,
+        b.displayOrder !== undefined ? (parseIntNullable(b.displayOrder) ?? task.display_order) : task.display_order,
+        b.isActive !== undefined ? (b.isActive ? 1 : 0) : task.is_active, req.params.id);
+    syncMaintenanceSchedule(db, Number(task.equipment_id), req.user!.id);
+    audit(req, { action: 'edit', entity: 'equipment_maintenance_tasks', entityId: req.params.id, oldValue: task, newValue: b });
+    res.json({ ok: true });
+  });
+
+  /**
+   * Retiring a task deactivates it. The months already charted against it are
+   * records, and a chart that loses its own rows when somebody tidies the task
+   * list is not a chart.
+   */
+  router.delete('/maintenance-tasks/:id', requirePermission('equipment.maintenance', 'edit'), (req, res) => {
+    const db = getDb();
+    const task = db.prepare('SELECT * FROM equipment_maintenance_tasks WHERE id = ?').get(req.params.id) as any;
+    if (!task) return res.status(404).json({ error: 'Maintenance task not found' });
+    db.prepare('UPDATE equipment_maintenance_tasks SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(req.params.id);
+    syncMaintenanceSchedule(db, Number(task.equipment_id), req.user!.id);
+    audit(req, { action: 'delete', entity: 'equipment_maintenance_tasks', entityId: req.params.id, oldValue: task });
+    res.json({ ok: true });
+  });
+
+  /** The unit's maintenance charts for a month. */
+  router.get('/maintenance-charts', requirePermission('equipment.maintenance', 'view'), (req, res) => {
+    const db = getDb();
+    const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : new Date().toISOString().slice(0, 7);
+    const sectionId = parseIntNullable(req.query.sectionId)
+      ?? (getCurrentStaffId(req) !== null ? (db.prepare('SELECT section_id FROM staff WHERE id = ?').get(getCurrentStaffId(req)) as any)?.section_id ?? null : null);
+    if (!sectionId) return res.json({ month, sectionId: null, sheets: [] });
+    res.json({ month, sectionId, sheets: sheetsForSection(db, 'equipment_maintenance', sectionId, month, { userId: req.user!.id }) });
+  });
+
+  /** Open one instrument's chart for a month. */
+  router.post('/maintenance-charts/open', requirePermission('equipment.maintenance', 'view'), (req, res) => {
+    const db = getDb();
+    const equipmentId = parseIntNullable(req.body?.equipmentId);
+    const month = /^\d{4}-\d{2}$/.test(String(req.body?.month)) ? String(req.body.month) : new Date().toISOString().slice(0, 7);
+    if (!equipmentId) return res.status(400).json({ error: 'equipmentId is required' });
+    const sheet = openSheet(db, { kind: 'equipment_maintenance', subjectId: equipmentId, month, userId: req.user!.id });
+    if (!sheet) return res.status(404).json({ error: 'Equipment not found' });
+    refreshSheetRows(db, sheet);
+    res.json({ sheetId: sheet.id });
+  });
+
+  /**
+   * The external engineer's visit.
+   *
+   * Scheduled servicing is not a tick on a chart — it is a visit, by a named
+   * engineer, against a contract, producing a report the laboratory has to be
+   * able to show. So it writes a maintenance record, moves the schedule on, and
+   * marks the chart row done in one act rather than asking somebody to do the
+   * same thing in three places and forget one.
+   */
+  router.post('/:id/service-visit', requirePermission('equipment.maintenance', 'create'), (req, res) => {
+    const db = getDb();
+    const equipment = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(req.params.id) as any;
+    if (!equipment) return res.status(404).json({ error: 'Equipment not found' });
+    const b = req.body ?? {};
+    const date = String(b.maintenanceDate ?? '').trim() || new Date().toISOString().slice(0, 10);
+    if (!String(b.workDone ?? b.actionTaken ?? '').trim()) {
+      return res.status(400).json({ error: 'Record what the engineer actually did. A service visit with no work recorded proves nothing.' });
+    }
+
+    const result = db.prepare(`INSERT INTO equipment_maintenance_records
+        (equipment_id, maintenance_date, maintenance_type, performed_by_staff_id, findings, action_taken,
+         next_due_date, status, evidence_file_id, service_provider, provider_type, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?)`)
+      .run(req.params.id, date, b.maintenanceType ?? 'scheduled', getStaffIdOrCurrent(req, b.performedByStaffId),
+        b.findings ?? null, String(b.workDone ?? b.actionTaken).trim(), b.nextDueDate ?? null,
+        parseIntNullable(b.evidenceFileId), b.serviceProvider ?? null, b.providerType ?? 'external', req.user!.id);
+
+    if (b.nextDueDate) {
+      db.prepare('UPDATE equipment_items SET last_service_date = ?, next_service_due = ?, next_maintenance_due = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .run(date, b.nextDueDate, b.nextDueDate, req.params.id);
+      const scheduleId = parseIntNullable(b.scheduleId);
+      if (scheduleId) {
+        db.prepare('UPDATE equipment_schedules SET last_done_date = ?, next_due_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+          .run(date, b.nextDueDate, scheduleId);
+      }
+    }
+    audit(req, { action: 'create', entity: 'equipment_maintenance_records', entityId: result.lastInsertRowid, newValue: { equipmentId: req.params.id, date, provider: b.serviceProvider } });
+    res.status(201).json({ id: result.lastInsertRowid });
+  });
+
   return router;
+}
+
+/* ============================================================================
+   Putting maintenance on somebody's list
+   ----------------------------------------------------------------------------
+   One reminder per (instrument × cadence), not one per task. A microscope with
+   four daily tasks produces one "Microscope — daily care" entry on the bench's
+   list that opens the chart, rather than four items that each need ticking and
+   that nobody will tick four times.
+   ========================================================================= */
+export function syncMaintenanceSchedule(db: any, equipmentId: number, userId: number | null): void {
+  const equipment = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(equipmentId) as any;
+  if (!equipment?.section_id) return;
+
+  const tasks = db.prepare('SELECT * FROM equipment_maintenance_tasks WHERE equipment_id = ? AND is_active = 1').all(equipmentId) as any[];
+  const byFrequency = new Map<string, any[]>();
+  for (const task of tasks) {
+    const frequency = MAINTENANCE_TO_ACTIVITY_FREQUENCY[task.frequency as keyof typeof MAINTENANCE_TO_ACTIVITY_FREQUENCY] ?? 'daily';
+    const list = byFrequency.get(frequency) ?? [];
+    list.push(task);
+    byFrequency.set(frequency, list);
+  }
+
+  const wanted = new Set<string>();
+  for (const [frequency, group] of byFrequency) {
+    const code = `ACT-MAINT-${equipmentId}-${frequency.toUpperCase()}`;
+    wanted.add(code);
+    const kinds = new Set(group.map(t => t.maintenance_kind));
+    const scheduledOnly = kinds.size === 1 && kinds.has('scheduled');
+    // The lowest tier on the group decides, so a technician able to do the
+    // daily clean is not blocked by the annual service sharing a chart.
+    const tiers = group.map(t => String(t.performer_tier || 'general'));
+    const tier = tiers.includes('general') ? 'general' : tiers.includes('technical') ? 'technical' : 'supervisory';
+
+    const label = scheduledOnly
+      ? `${equipment.name} — ${frequency} servicing`
+      : `${equipment.name} — ${frequency} maintenance`;
+    const instructions = group.slice(0, 8).map(t => `• ${t.task_text}`).join('\n')
+      + (group.length > 8 ? `\n• …and ${group.length - 8} more on the chart` : '');
+    const route = `/equipment?tab=Maintenance&equipment=${equipmentId}`;
+
+    const existing = db.prepare('SELECT id FROM unit_activities WHERE activity_code = ?').get(code) as any;
+    if (existing) {
+      db.prepare(`UPDATE unit_activities SET name = ?, instructions = ?, frequency = ?, performer_tier = ?,
+          section_id = ?, equipment_id = ?, target_route = ?, is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+        .run(label, instructions, frequency, tier, equipment.section_id, equipmentId, route, existing.id);
+      continue;
+    }
+    db.prepare(`INSERT INTO unit_activities
+        (activity_code, name, description, instructions, category, section_id, equipment_id,
+         target_module_key, target_route, frequency, assign_mode, performer_tier, priority, estimated_minutes, is_active, created_by)
+        VALUES (?, ?, ?, ?, 'equipment', ?, ?, 'equipment.maintenance', ?, ?, 'on_duty', ?, 'normal', ?, 1, ?)`)
+      .run(code, label, `${group.length} task(s) on ${equipment.name}.`, instructions,
+        equipment.section_id, equipmentId, route, frequency, tier, Math.min(60, 5 * group.length), userId);
+  }
+
+  // A cadence that no longer has any task on it stops appearing on the list.
+  const stale = db.prepare("SELECT id, activity_code FROM unit_activities WHERE activity_code LIKE ? AND is_active = 1").all(`ACT-MAINT-${equipmentId}-%`) as any[];
+  for (const activity of stale) {
+    if (!wanted.has(String(activity.activity_code))) {
+      db.prepare('UPDATE unit_activities SET is_active = 0 WHERE id = ?').run(activity.id);
+    }
+  }
+
+  try { generateOccurrences(db, {}); } catch { /* the scheduler will catch up */ }
 }
 
 export { BREAKDOWN_STATUSES, EQUIPMENT_STATUSES };

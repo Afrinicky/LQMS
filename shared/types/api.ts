@@ -599,3 +599,155 @@ export type SystemAuditCheck = { key:string; label:string; category:string; desc
 export type SystemAuditSummary = { generatedAt:string; flags:{ open:number; acknowledged:number; critical:number; high:number; medium:number; low:number; newToday:number; resolvedToday:number }; byCategory:Array<{ category:string; label:string; count:number; critical:number }>; byModule:Array<{ module_key:string; count:number }>; trail:{ eventsToday:number; eventsThisWeek:number; actors:number; entities:number; lastEventAt:string|null }; activities:{ dueToday:number; doneToday:number; missedThisWeek:number; flaggedForRedesign:number }; schedules:{ pending:number; overdue:number; carriedForwardThisMonth:number }; lastScan:SystemAuditScan|null };
 export type SystemAuditTrailEntry = AuditLogRow & { actor_name?:string|null; actor_username?:string|null; module_key?:string|null; action_url?:string|null; summary?:string|null };
 export type SystemAuditTrailResponse = { entries:SystemAuditTrailEntry[]; total:number; offset:number; limit:number; actions:string[]; entities:string[]; actors:Array<{ id:number; name:string }> };
+
+/* ============================================================================
+   Routine work — the monthly log sheet
+   ----------------------------------------------------------------------------
+   Shared by the portal, the Facilities & Safety screens and the Equipment
+   module, because all three draw the same grid and a second definition of it
+   would drift within a release.
+   ========================================================================= */
+
+export type LogSheetRow = {
+  id:number; sheet_id:number; row_key:string; label:string;
+  row_type:'numeric'|'tick'|'text';
+  unit?:string|null; min_value?:number|null; max_value?:number|null;
+  slots:string[]; cadence:'daily'|'weekly';
+  source_ref?:string|null; display_order:number;
+};
+
+export type LogSheetCell = {
+  id:number; sheet_id:number; row_id:number; day:number; slot:string;
+  value_num?:number|null; value_text?:string|null; status:string;
+  initials?:string|null; note?:string|null; source:string;
+  confidence?:number|null; needs_review:number;
+  recorded_by_staff_id?:number|null; recorded_by_name?:string|null;
+  recorded_at:string; reading_time?:string|null;
+  excursion_id?:number|null; environmental_reading_id?:number|null;
+};
+
+export type LogSheet = {
+  id:number; sheet_kind:'environmental'|'decontamination'|'equipment_maintenance';
+  subject_type:string; subject_id:number; section_id?:number|null;
+  month:string; monthLabel:string; days:number;
+  title:string; subtitle?:string|null;
+  status:'open'|'submitted'|'verified'|'archived'; locked:boolean;
+  sectionName?:string|null;
+  submitted_by_staff_id?:number|null; submittedByName?:string|null; submitted_at?:string|null;
+  verified_by_staff_id?:number|null; verifiedByName?:string|null; verified_at?:string|null;
+  verification_comments?:string|null;
+  nc?:{ id:number; nc_number:string; status:string }|null;
+  signature?:{ id:number; signer_name?:string|null; signed_at:string; meaning?:string|null }|null;
+  attachment?:{ id:number; original_name:string; mime_type?:string|null; size_bytes:number }|null;
+  attachment_file_id?:number|null; attachment_kind?:string|null;
+  extraction_status:string; extraction_note?:string|null;
+  archive_id?:number|null; archived_at?:string|null;
+};
+
+/** What is recorded and what is not — computed for the person signing it off. */
+export type LogSheetCompleteness = {
+  expected:number; recorded:number; percent:number;
+  missing:Array<{ rowId:number; label:string; day:number; slot:string }>;
+  missingCount:number; breaches:number; unexplainedBreaches:number;
+  needsReview:number; monthEnded:boolean;
+};
+
+export type LogSheetPayload = {
+  sheet:LogSheet; rows:LogSheetRow[]; cells:LogSheetCell[];
+  completeness:LogSheetCompleteness;
+  permissions?:{ canRecord:boolean; canVerify:boolean; canRaiseNc:boolean; tier:string };
+};
+
+export type LogSheetSummary = {
+  subject:Record<string, unknown> & { id:number; subject_name?:string };
+  sheet:LogSheet|null;
+  completeness:LogSheetCompleteness|null;
+};
+
+export type LogSheetIndex = {
+  kind:string; month:string; sectionId:number|null;
+  sheets:LogSheetSummary[];
+  canVerify?:boolean; canRecord?:boolean;
+  settings?:Record<string, unknown>|null;
+};
+
+/** One cell being written. `done:false` asserts it was NOT done — not a blank. */
+export type LogCellInput = {
+  rowId?:number; rowKey?:string; day:number; slot:string;
+  value?:number|string|null; text?:string|null;
+  done?:boolean|null; na?:boolean|null;
+  note?:string|null; initials?:string|null; readingTime?:string|null;
+  source?:string|null;
+};
+
+/* ---------------------------------------------------------- decontamination */
+
+export type DecontaminationDefinition = {
+  id:number; definition_code:string; name:string;
+  scope:'general'|'unit'; section_id?:number|null; section_name?:string|null;
+  bench_id?:number|null; surface_type?:string|null;
+  frequency:string; decontaminant?:string|null; method?:string|null;
+  instructions?:string|null; contact_time_minutes?:number|null;
+  performer_tier:string; framework_key?:string|null;
+  activity_id?:number|null; is_active:number;
+  /** Present when the list was asked for on behalf of one unit. */
+  effective_frequency?:string; effective_decontaminant?:string|null;
+  is_excluded?:number; exclusion_reason?:string|null; unit_setting_id?:number|null;
+};
+
+/* -------------------------------------------------------------- IQC portal */
+
+export type IqcBoardControl = {
+  id:number; materialName:string; materialCode:string;
+  testName:string; levelLabel?:string|null; lotNumber:string;
+  controlType:string; ruleProfile:string; frequency?:string|null;
+  equipmentId?:number|null; equipmentName?:string|null; equipmentNumber?:string|null;
+  expiryDate?:string|null; expired:boolean;
+  analyteCount:number;
+  entryMethods:string[]; preferredEntryMethod?:string|null;
+  feedId?:number|null; importLayoutId?:number|null;
+  runsToday:Array<{ id:number; run_number:string; status:string; run_time?:string|null; reviewed_at?:string|null; patient_results_released?:number|null; entry_method?:string|null; operator_name?:string|null }>;
+  doneToday:boolean; statusToday?:string|null; pendingReview:boolean;
+  lastRunDate?:string|null;
+};
+
+export type IqcBoard = {
+  date:string; sectionId:number|null;
+  groups:Array<{ key:string; equipmentId?:number|null; name:string; equipmentNumber?:string|null; controls:IqcBoardControl[] }>;
+  counts:{ controls:number; due:number; done:number; failed:number; pendingReview:number; expired:number; pendingFeed:number };
+  misfiled:Array<{ id:number; materialName:string; equipmentName?:string|null; why:string }>;
+  canPerform:boolean; canReview:boolean;
+  message?:string;
+};
+
+/** What a paste, an upload or an instrument message was understood to mean. */
+export type IqcMapping = {
+  orientation?:'rows'|'columns';
+  readings:Array<{ analyteId:number; analyte:string; unit:string|null; value:number|null; qualitativeResult?:string|null; raw:string }>;
+  unmatchedLabels:string[];
+  missingAnalytes:Array<{ analyteId:number; analyte:string }>;
+  matched:number;
+  preview?:unknown[][];
+  totalRows?:number;
+  skipRows?:number;
+};
+
+export type IqcFeedMessage = {
+  id:number; feed_id?:number|null; feed_name?:string|null; protocol?:string|null;
+  equipment_name?:string|null; received_at:string;
+  sample_id?:string|null; lot_number?:string|null; instrument_run_at?:string|null;
+  parsed_values?:Array<{ analyte:string; value:number|string; unit?:string; flag?:string }>|null;
+  iqc_material_id?:number|null; material_name?:string|null; test_name?:string|null; level_label?:string|null;
+  iqc_run_id?:number|null; status:string; status_note?:string|null;
+};
+
+/* ------------------------------------------------------ equipment maintenance */
+
+export type MaintenanceTask = {
+  id:number; equipment_id:number; equipment_name?:string; equipment_number?:string;
+  schedule_id?:number|null; maintenance_kind:'routine'|'scheduled';
+  task_text:string; guidance?:string|null; frequency:string;
+  performer_tier:string; provider_type?:string|null; consumable?:string|null;
+  display_order:number; framework_key?:string|null; is_active:number;
+  provider_name?:string|null; next_due_date?:string|null;
+};
