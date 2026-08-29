@@ -41,7 +41,10 @@ export const emptyAnalyte = (): AnalyteDraft => ({
   decimalPlaces: '2', expectedResult: '', astMethod: '', expectedInterpretation: '',
 });
 
-export default function DefineControlForm({ sections, staff, equipment, mySectionId, onSaved, onError, heading, lead }: {
+export default function DefineControlForm({
+  sections, staff, equipment, mySectionId, onSaved, onError, heading, lead,
+  defaultTestName, defaultEquipmentId, embedded, allowed,
+}: {
   sections: Section[]; staff: Staff[]; equipment: EquipmentItem[];
   /** The unit the person defining this control works in. Preselected. */
   mySectionId?: number | null;
@@ -49,14 +52,31 @@ export default function DefineControlForm({ sections, staff, equipment, mySectio
   /** Overridden in the portal, where "Define a control" reads oddly on a personal page. */
   heading?: string;
   lead?: string;
+  /** Opened from a test that has no control: start on that test and its instrument. */
+  defaultTestName?: string;
+  defaultEquipmentId?: number | null;
+  /**
+   * Inside a dialog that already carries the heading and the panel. The form
+   * drops its own card and title so it does not sit in a box within a box.
+   */
+  embedded?: boolean;
+  /**
+   * Draw it even without the IQC create right.
+   *
+   * A unit head may define a control for their own unit whether or not they
+   * hold that right — the server says so, and the portal offers the button on
+   * that basis. Without this the button opened an empty dialog.
+   */
+  allowed?: boolean;
 }) {
   const { can } = usePermissions();
   const [source, setSource] = useState<IqcSource>('commercial');
   const [controlType, setControlType] = useState<IqcControlType>('quantitative');
   const [form, setForm] = useState({
-    materialName: '', testName: '', lotNumber: '', levelLabel: '', manufacturer: '',
+    materialName: '', testName: defaultTestName ?? '', lotNumber: '', levelLabel: '', manufacturer: '',
     expiryDate: '', openVialExpiry: '', storageCondition: '',
-    sectionId: mySectionId != null ? String(mySectionId) : '', equipmentId: '',
+    sectionId: mySectionId != null ? String(mySectionId) : '',
+    equipmentId: defaultEquipmentId != null ? String(defaultEquipmentId) : '',
     qcFrequency: 'each_run', ruleProfile: 'westgard_standard' as IqcRuleProfile,
     preparedByStaffId: '', preparationDate: '', preparationMethod: '', baseMaterial: '',
     validationSummary: '', stabilityPeriod: '', instructions: '', expectedOrganism: '', csScope: 'both',
@@ -124,12 +144,16 @@ export default function DefineControlForm({ sections, staff, equipment, mySectio
 
   const outcomes = QUALITATIVE_SCALES.find(s => s.key === scale)?.outcomes ?? [];
 
+  if (!(allowed ?? can('iqc', 'create'))) return null;
+
   return (
-    can('iqc', 'create') && <form className="card iqc-define" onSubmit={submit}>
-      <div className="section-head">
-        <h3>{heading ?? 'Define a control'}</h3>
-        {lead && <p className="iqc-panel-lead">{lead}</p>}
-      </div>
+    <form className={embedded ? 'iqc-define is-embedded' : 'card iqc-define'} onSubmit={submit}>
+      {!embedded && (
+        <div className="section-head">
+          <h3>{heading ?? 'Define a control'}</h3>
+          {lead && <p className="iqc-panel-lead">{lead}</p>}
+        </div>
+      )}
 
       {/* 1 — where it came from */}
       <fieldset className="iqc-step">

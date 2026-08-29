@@ -1,10 +1,12 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { getDb } from '../db/database.js';
+import { requireAuth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
+import { resolvePermission } from '../services/permissionResolver.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
-import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
+import { parseIntNullable, getStaffIdOrCurrent, getCurrentStaffId } from './routeHelpers.js';
 import { buildWorkbook, sendWorkbook, readSheet, cell, numCell } from '../utils/xlsxRegister.js';
 
 const xlsxUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
@@ -95,6 +97,14 @@ function fetchSiblingZScores(db: any, material: any, runDate: string): SiblingZ[
   return out;
 }
 
+/** Does this caller head the unit the control is being filed against? */
+function headsSection(req: any, sectionId: number): boolean {
+  const staffId = getCurrentStaffId(req);
+  if (staffId === null) return false;
+  const head = getDb().prepare('SELECT head_staff_id FROM sections WHERE id = ?').get(sectionId) as any;
+  return Boolean(head?.head_staff_id && Number(head.head_staff_id) === Number(staffId));
+}
+
 export function iqcRoutes() {
   const router = Router();
 
@@ -112,7 +122,24 @@ export function iqcRoutes() {
       ORDER BY m.is_active DESC, m.material_name, m.lot_number`).all());
   });
 
-  router.post('/materials', requirePermission('iqc', 'create'), (req, res) => {
+  /**
+   * Define a control.
+   *
+   * The right is the IQC create right — with one addition the portal depends
+   * on: a UNIT HEAD may define a control for their OWN unit without it. That
+   * is not a widening of who may define controls; it is the same rule the
+   * portal's coverage panel already applies when it offers the button, moved
+   * to where the control is actually written so the two cannot disagree. They
+   * did: a unit head was shown the button and got a form that refused to draw.
+   */
+  router.post('/materials', requireAuth, (req, res, next) => {
+    if (resolvePermission(req.user!.id, 'iqc', 'create').allowed) return next();
+    const sectionId = parseIntNullable(req.body?.sectionId);
+    if (sectionId && headsSection(req, sectionId)) return next();
+    return res.status(403).json({
+      error: 'Defining a control needs the create right on Quality Control, or headship of the unit it belongs to.',
+    });
+  }, (req, res) => {
     if (!req.body.materialName) return res.status(400).json({ error: 'Give the control material a name.' });
     if (!req.body.testName) return res.status(400).json({ error: 'Say which test this control is for.' });
     if (!req.body.lotNumber) return res.status(400).json({ error: 'A lot or batch number is required.' });

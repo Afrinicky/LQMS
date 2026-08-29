@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Loader2, Plus, Trash2, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Plus, X } from 'lucide-react';
 import { api, errorText } from '../../services/api';
-import TextField from '../../components/ui/TextField';
-import type { IqcCoverage, IqcCoverageTest } from '../../../shared/types/api';
+import DefineControlForm from '../../components/iqc/DefineControlForm';
+import type {
+  IqcCoverage, IqcCoverageTest, Section, Staff, EquipmentItem,
+} from '../../../shared/types/api';
 
 /**
  * Setting up the unit's controls, from the portal.
@@ -17,15 +19,8 @@ import type { IqcCoverage, IqcCoverageTest } from '../../../shared/types/api';
  * a control and which do not.
  */
 
-type Draft = {
-  analyte: string; unit: string; targetMean: string; targetSd: string;
-  acceptableLow: string; acceptableHigh: string; expectedResult: string;
-};
-
-const emptyDraft = (): Draft => ({
-  analyte: '', unit: '', targetMean: '', targetSd: '',
-  acceptableLow: '', acceptableHigh: '', expectedResult: '',
-});
+/** What the wizard fills its dropdowns from. */
+type Lookups = { sections: Section[]; staff: Staff[]; equipment: EquipmentItem[]; sectionId: number | null };
 
 export default function PortalIqcCoverage({ onChanged }: { onChanged?: () => void }) {
   const [data, setData] = useState<IqcCoverage | null>(null);
@@ -150,7 +145,6 @@ export default function PortalIqcCoverage({ onChanged }: { onChanged?: () => voi
       {setup && (
         <SetUpControlDialog
           test={setup.test}
-          equipment={data.equipment}
           onClose={() => setSetup(null)}
           onSaved={async message => {
             setSetup(null);
@@ -180,52 +174,39 @@ function Stat({ value, label, tone }: { value: number; label: string; tone?: str
    panels, instrument feeds and import layouts stay on the full definition screen
    in the IQC module; what is needed here is the vial in somebody's hand.
    ------------------------------------------------------------------------- */
-function SetUpControlDialog({ test, equipment, onClose, onSaved }: {
+/**
+ * Setting a control up — the module's own wizard, in a dialog.
+ *
+ * It used to be a shortened form of its own: three type buttons, a handful of
+ * fields, a parameter table. Two forms for one act is how a control ends up
+ * defined with a rule set in one place and none in the other, and how a
+ * laboratory ends up with two ideas of what a control record contains. So this
+ * is the same component Quality Control uses — the numbered steps, the
+ * provenance an in-house control has to carry, the rule sets, the templates —
+ * opened where the person already is.
+ *
+ * The dialog adds only what the portal knows: the unit they work in, and the
+ * test and instrument of the row they pressed the button on.
+ */
+function SetUpControlDialog({ test, onClose, onSaved }: {
   test: IqcCoverageTest | null;
-  equipment: Array<{ id: number; name: string; equipmentNumber: string | null }>;
   onClose: () => void;
   onSaved: (message: string) => void | Promise<void>;
 }) {
-  const [controlType, setControlType] = useState<'quantitative' | 'qualitative' | 'semi_quantitative'>('quantitative');
-  const [form, setForm] = useState({
-    testName: test?.testName ?? '',
-    materialName: '', levelLabel: '', lotNumber: '', manufacturer: '',
-    expiryDate: '', storageCondition: '',
-    equipmentId: test?.equipmentId ? String(test.equipmentId) : '',
-    source: 'commercial' as 'commercial' | 'in_house',
-    preparationMethod: '',
-  });
-  const [rows, setRows] = useState<Draft[]>([emptyDraft()]);
-  const [busy, setBusy] = useState(false);
+  const [lookups, setLookups] = useState<Lookups | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
 
-  const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
-  const setRow = (i: number, k: keyof Draft, v: string) =>
-    setRows(rs => rs.map((r, index) => (index === i ? { ...r, [k]: v } : r)));
-
-  const quantitative = controlType !== 'qualitative';
-
-  async function submit() {
-    setBusy(true); setProblem(null);
-    try {
-      const result = await api<{ id: number; materialCode: string; note: string | null }>('/iqc/portal/controls', {
-        method: 'POST',
-        body: JSON.stringify({
-          ...form, controlType,
-          equipmentId: form.equipmentId || null,
-          analytes: rows.filter(r => r.analyte.trim()),
-        }),
-      });
-      await onSaved(
-        `${form.materialName} added for ${form.testName}.` + (result.note ? ` ${result.note}` : ''),
-      );
-    } catch (e) { setProblem(errorText(e)); }
-    finally { setBusy(false); }
-  }
+  // The lists the wizard fills its dropdowns from, served by the right that
+  // governs defining a control rather than three unrelated module rights.
+  useEffect(() => {
+    api<Lookups>('/iqc/portal/lookups')
+      .then(setLookups)
+      .catch(e => { setProblem(errorText(e)); setLookups({ sections: [], staff: [], equipment: [], sectionId: null }); });
+  }, []);
 
   return (
     <div className="modal-scrim" role="dialog" aria-modal="true" onClick={onClose}>
-      <div className="modal-panel qcc-dialog" onClick={e => e.stopPropagation()}>
+      <div className="modal-panel qcc-dialog is-wizard" onClick={e => e.stopPropagation()}>
         <header className="modal-head">
           <div className="modal-title">
             <h3>New control</h3>
@@ -238,125 +219,26 @@ function SetUpControlDialog({ test, equipment, onClose, onSaved }: {
 
         <div className="modal-body">
           {problem && <p className="pd-error"><AlertTriangle size={13} /> {problem}</p>}
-
-          <div className="qcc-choice">
-            {([
-              ['quantitative', 'Numeric', 'A measured value.'],
-              ['qualitative', 'Reactive / non-reactive', 'Matched against an expected result.'],
-              ['semi_quantitative', 'Graded', 'A titre or grade within a range.'],
-            ] as const).map(([key, label, hint]) => (
-              <button key={key} type="button" className={controlType === key ? 'active' : ''}
-                onClick={() => setControlType(key)}>
-                <strong>{label}</strong><span>{hint}</span>
-              </button>
-            ))}
-          </div>
-
-          <div className="form-grid">
-            <label>Test
-              <TextField value={form.testName} onValue={v => set('testName', v)}
-                disabled={Boolean(test)} placeholder="e.g. Full blood count" autoFocus={!test} />
-            </label>
-            <label>Control name
-              <TextField value={form.materialName} onValue={v => set('materialName', v)}
-                placeholder="e.g. Haematology Control Normal" autoFocus={Boolean(test)} />
-            </label>
-            <label>Level
-              <TextField value={form.levelLabel} onValue={v => set('levelLabel', v)} placeholder="e.g. Level 1" />
-            </label>
-            <label>Lot number
-              <TextField value={form.lotNumber} onValue={v => set('lotNumber', v)} />
-            </label>
-            <label>Expiry
-              <input type="date" value={form.expiryDate} onChange={e => set('expiryDate', e.target.value)} />
-            </label>
-            <label>Source
-              <select value={form.source} onChange={e => set('source', e.target.value)}>
-                <option value="commercial">Bought in</option>
-                <option value="in_house">Made here</option>
-              </select>
-            </label>
-            {form.source === 'commercial' && (
-              <label>Manufacturer<TextField value={form.manufacturer} onValue={v => set('manufacturer', v)} /></label>
-            )}
-            <label>Instrument
-              <select value={form.equipmentId} onChange={e => set('equipmentId', e.target.value)}>
-                <option value="">Manual method</option>
-                {equipment.map(x => (
-                  <option key={x.id} value={x.id}>{x.name}{x.equipmentNumber ? ` (${x.equipmentNumber})` : ''}</option>
-                ))}
-              </select>
-            </label>
-            <label>Storage
-              <TextField value={form.storageCondition} onValue={v => set('storageCondition', v)} placeholder="e.g. 2–8 °C" />
-            </label>
-          </div>
-
-          {form.source === 'in_house' && (
-            <label className="stack">Preparation method
-              <TextField as="textarea" rows={2} value={form.preparationMethod}
-                onValue={v => set('preparationMethod', v)}
-                placeholder="How it was pooled, aliquoted and stored." />
-            </label>
+          {!lookups ? <p className="muted">Reading the register…</p> : (
+            <DefineControlForm
+              sections={lookups.sections}
+              staff={lookups.staff}
+              equipment={lookups.equipment}
+              mySectionId={lookups.sectionId}
+              defaultTestName={test?.testName ?? ''}
+              defaultEquipmentId={test?.equipmentId ?? null}
+              embedded
+              /* The panel only offers this where the server said the person may
+                 define a control — including a unit head without the module's
+                 create right, which the wizard would otherwise refuse to draw. */
+              allowed
+              onError={setProblem}
+              onSaved={() => onSaved(
+                test ? `Control added for ${test.testName}.` : 'Control defined. It appears on the board today.',
+              )}
+            />
           )}
-
-          <div className="qcc-analytes">
-            <div className="qcc-analytes-head">
-              <strong>Parameters</strong>
-              <button type="button" className="pq-link" onClick={() => setRows(rs => [...rs, emptyDraft()])}>
-                <Plus size={12} /> Add
-              </button>
-            </div>
-            <table className="data-table compact">
-              <thead>
-                <tr>
-                  <th>Parameter</th>
-                  {quantitative ? <>
-                    <th>Unit</th><th>Mean</th><th>SD</th><th>Low</th><th>High</th>
-                  </> : <th>Expected</th>}
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r, i) => (
-                  <tr key={i}>
-                    <td><TextField value={r.analyte} onValue={v => setRow(i, 'analyte', v)} placeholder="e.g. Haemoglobin" /></td>
-                    {quantitative ? <>
-                      <td><TextField value={r.unit} onValue={v => setRow(i, 'unit', v)} placeholder="g/dL" /></td>
-                      <td><TextField value={r.targetMean} onValue={v => setRow(i, 'targetMean', v)} inputMode="decimal" /></td>
-                      <td><TextField value={r.targetSd} onValue={v => setRow(i, 'targetSd', v)} inputMode="decimal" placeholder="optional" /></td>
-                      <td><TextField value={r.acceptableLow} onValue={v => setRow(i, 'acceptableLow', v)} inputMode="decimal" /></td>
-                      <td><TextField value={r.acceptableHigh} onValue={v => setRow(i, 'acceptableHigh', v)} inputMode="decimal" /></td>
-                    </> : (
-                      <td><TextField value={r.expectedResult} onValue={v => setRow(i, 'expectedResult', v)} placeholder="e.g. Reactive" /></td>
-                    )}
-                    <td>
-                      {rows.length > 1 && (
-                        <button type="button" className="pq-link" title="Remove"
-                          onClick={() => setRows(rs => rs.filter((_, index) => index !== i))}>
-                          <Trash2 size={12} />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {quantitative && (
-              <p className="qcc-sd-note">
-                Leave the SD blank if the insert does not give one. It is calculated from this
-                laboratory&rsquo;s own runs once there are enough of them.
-              </p>
-            )}
-          </div>
         </div>
-
-        <footer className="modal-foot">
-          <button type="button" disabled={busy} onClick={() => void submit()}>
-            {busy ? <><Loader2 size={14} className="pd-spin" /> Saving…</> : 'Save control'}
-          </button>
-          <button type="button" className="secondary" onClick={onClose}>Cancel</button>
-        </footer>
       </div>
     </div>
   );

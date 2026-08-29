@@ -46,6 +46,7 @@
     "check:alerts": "tsx scripts/alerts-check.mjs",
     "check:iqc-admin": "node scripts/iqc-admin-check.mjs",
     "check:iqc-report": "node scripts/iqc-report-check.mjs",
+    "check:portal-wizard": "node scripts/portal-wizard-check.mjs",
     "check:backup": "tsx scripts/backup-check.mjs",
     "check:backup-scheduler": "tsx scripts/backup-scheduler-check.mjs",
     "check:backup-destinations": "tsx scripts/backup-destinations-check.mjs",

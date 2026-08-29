@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { useLocation } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, Info, X, XCircle } from 'lucide-react';
 import { onWriteOutcome, writeOutcomeCounts } from '../../services/api';
 
@@ -49,9 +50,18 @@ const ICONS: Record<NoticeKind, typeof Info> = {
  * to retype a field because of, so it waits to be dismissed. A confirmation has
  * done its job the moment it is seen.
  */
+/**
+ * How long a message stays up.
+ *
+ * A refusal is held far longer than a confirmation, because it has to be read
+ * and usually acted on. It is not held forever: the page that raised it renders
+ * the same sentence inline as well, so the record of what went wrong does not
+ * depend on the floating copy — and a floating copy that never leaves is litter
+ * anchored to a control that may no longer be there.
+ */
 const HOLD_MS: Record<NoticeKind, number> = {
-  error: 0, // stays until dismissed or replaced
-  warn: 0,
+  error: 20000,
+  warn: 20000,
   success: 5000,
   info: 5000,
 };
@@ -156,6 +166,19 @@ function isShowing(kind: NoticeKind, message: string) {
 
 export function dismissToast(id: number) {
   if (current && current.id === id) { current = null; publish(); }
+}
+
+/**
+ * Take down whatever is up.
+ *
+ * Called when the page changes. A message is an answer to something the person
+ * just did HERE — "FOREIGN KEY constraint failed" on the declarations screen
+ * means nothing floating over the main dashboard a moment later, and an error
+ * that follows somebody around the application until they close it by hand
+ * reads as a fault in the application rather than an answer to their action.
+ */
+export function clearToasts() {
+  if (current) { current = null; publish(); }
 }
 
 function useCurrent() {
@@ -307,7 +330,14 @@ function ActionMessage({ toast }: { toast: Toast }) {
 /** Mounted once by the shell. Draws the message that is up, if there is one. */
 export function FeedbackHost() {
   const toast = useCurrent();
+  const { pathname, search } = useLocation();
   useEffect(startListening, []);
+
+  // Leaving the page takes the message with it. It was an answer to something
+  // done there; carried onto the next screen it is just an alarm with no
+  // subject, and it used to sit there until somebody closed it by hand.
+  useEffect(() => { clearToasts(); }, [pathname, search]);
+
   if (typeof document === 'undefined') return null;
   return createPortal(
     <div className="fb-layer" aria-live="polite">
