@@ -19,7 +19,7 @@ import { audit } from '../services/auditService.js';
 import { mintViewTicket, VIEW_TICKET_MS } from '../services/viewTickets.js';
 import { writeBackupZip, isSafeBackupName, createBackup } from '../services/backupService.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
-import { parseIntNullable } from './routeHelpers.js';
+import { parseIntNullable, getCurrentStaffId } from './routeHelpers.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { buildWorkbook, sendWorkbook, readSheet, cell, numCell } from '../utils/xlsxRegister.js';
 import * as tailscale from '../services/tailscale.js';
@@ -2481,6 +2481,41 @@ export function commonRoutes() {
     res.json({ ok: true });
   });
   router.get('/sections', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT id, name, department_id FROM sections WHERE is_active = 1 ORDER BY name').all()));
+
+  /**
+   * The units, for anybody who has to name one.
+   *
+   * `/sections` above is the settings screen's list and is gated on settings
+   * rights, which a unit head does not hold. That is correct for editing the
+   * organisation and wrong for every form in the system with a "which unit?"
+   * field on it: a unit head defining a control could not choose their own
+   * unit, so controls were being saved with no unit and never appeared on
+   * anybody's board until an administrator went in and set it.
+   *
+   * A list of unit names is not a confidence. What matters is which one is
+   * YOURS, so that is marked, and the forms that use this default to it.
+   */
+  router.get('/sections/options', requireAuth, (req, res) => {
+    const db = getDb();
+    const staffId = getCurrentStaffId(req);
+    const mine = staffId === null ? null
+      : (db.prepare('SELECT section_id FROM staff WHERE id = ?').get(staffId) as any)?.section_id ?? null;
+    const rows = db.prepare(`SELECT s.id, s.name, s.department_id, d.name AS department_name, s.head_staff_id
+        FROM sections s LEFT JOIN departments d ON d.id = s.department_id
+        WHERE s.is_active = 1 ORDER BY s.name`).all() as any[];
+    res.json({
+      mine: mine === null ? null : Number(mine),
+      // Whether the reader is accountable for their unit, which is what
+      // decides whether they may set its programme up rather than only read it.
+      isHeadOfMine: Boolean(mine !== null && staffId !== null
+        && rows.some(r => Number(r.id) === Number(mine) && Number(r.head_staff_id) === Number(staffId))),
+      sections: rows.map(r => ({
+        id: r.id, name: r.name, department_id: r.department_id,
+        departmentName: r.department_name ?? null,
+        isMine: mine !== null && Number(r.id) === Number(mine),
+      })),
+    });
+  });
 
   // =====================================================================
   // Section / Unit Configuration

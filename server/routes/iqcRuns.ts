@@ -20,6 +20,10 @@ import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import { evaluateRun, chartStatistics, type AnalyteDef, type History } from '../services/iqcEvaluation.js';
+import {
+  effectiveTarget, withEffectiveTarget, establishTargets, establishForMaterial, refreshEstablishedTargets,
+  DEFINITIVE_POINTS, DEFINITIVE_DAYS, INTERIM_POINTS, INTERIM_DAYS,
+} from '../services/iqcTargets.js';
 import type { IqcControlType, IqcRuleProfile } from '../../shared/constants/iqc.js';
 
 type MaterialRow = {
@@ -143,7 +147,13 @@ export function iqcRunRoutes() {
     const isCs = material.control_type === 'culture_sensitivity';
     const observedOrganism = isCs ? (String(req.body?.observedOrganism ?? '').trim() || null) : null;
 
-    const analytes = db.prepare('SELECT * FROM iqc_analytes WHERE iqc_material_id = ? AND is_active = 1 ORDER BY display_order, id').all(materialId) as AnalyteDef[];
+    // The limits the run is judged against are the effective ones: what a human
+    // entered where they entered it, and otherwise what this laboratory has
+    // established from its own runs of this lot. A control whose vendor gave no
+    // SD is still judged, on the laboratory's own imprecision, exactly as ISO
+    // 15189 §7.3.7.2 intends — instead of passing everything by default.
+    const analytes = (db.prepare('SELECT * FROM iqc_analytes WHERE iqc_material_id = ? AND is_active = 1 ORDER BY display_order, id').all(materialId) as any[])
+      .map(withEffectiveTarget) as AnalyteDef[];
     // An identification-only C&S control has no antimicrobial panel — it is run
     // on the organism alone, so the "must have analytes" rule is lifted for it.
     if (analytes.length === 0 && !isCs) return res.status(400).json({ error: 'This control has no analytes defined yet. Define what it measures first.' });
@@ -210,9 +220,96 @@ export function iqcRunRoutes() {
     });
     tx();
 
+    // This run is one more point in the cumulative set. Recomputing here is
+    // what makes the twentieth run the one that turns a control that could not
+    // be judged into a control that can, on the day it happens rather than
+    // whenever somebody next remembers to press a button.
+    refreshEstablishedTargets(db, materialId, req.user!.id);
+
     audit(req, { action: 'create', entity: 'iqc_runs', entityId: runId, newValue: { runNumber, status: verdict.status, rule: verdict.ruleSummary } });
-    res.status(201).json({ id: runId, runNumber, ...verdict });
+    res.status(201).json({ id: runId, runNumber, ...verdict, targets: currentTargets(db, materialId) });
   });
+
+  /* ------------------------------------------------- establishing the target */
+
+  /**
+   * Establish this control's mean and SD from the laboratory's own runs.
+   *
+   * Runs by itself after every run, so this is here for the two moments a
+   * person needs it: seeing where a control stands before it has enough data,
+   * and deliberately recalculating after a change — a service, a new reagent
+   * lot, a method adjustment — where the old limits no longer describe the
+   * system. `force` is what makes that second case possible, and it is the only
+   * thing that will overwrite a figure somebody typed in.
+   */
+  router.post('/materials/:id/establish-targets', requirePermission('iqc', 'edit'), (req, res) => {
+    const db = getDb();
+    const material = db.prepare('SELECT id, material_name, control_type FROM iqc_materials WHERE id = ?').get(req.params.id) as any;
+    if (!material) return res.status(404).json({ error: 'Control not found' });
+    if (material.control_type !== 'quantitative') {
+      return res.status(400).json({ error: 'Only a quantitative control has a mean and SD to establish. A qualitative control is judged against the result it is expected to give.' });
+    }
+    const force = req.body?.force === true || req.body?.force === 'true';
+    const outcomes = establishForMaterial(db, Number(req.params.id), { userId: req.user!.id, force });
+    const changed = outcomes.filter(o => o.changed);
+    if (changed.length) {
+      audit(req, {
+        action: 'edit', entity: 'iqc_analytes', entityId: req.params.id,
+        newValue: { established: changed.map(o => ({ analyte: o.analyte, sd: o.target.sd, n: o.target.n, days: o.target.days, basis: o.target.basis })), force },
+      });
+    }
+    res.json({ materialId: material.id, changed: changed.length, outcomes });
+  });
+
+  /** One analyte, for a panel where only one parameter needs re-establishing. */
+  router.post('/analytes/:id/establish-targets', requirePermission('iqc', 'edit'), (req, res) => {
+    const db = getDb();
+    try {
+      const force = req.body?.force === true || req.body?.force === 'true';
+      const outcome = establishTargets(db, Number(req.params.id), { userId: req.user!.id, force });
+      if (outcome.changed) {
+        audit(req, {
+          action: 'edit', entity: 'iqc_analytes', entityId: req.params.id,
+          newValue: { sd: outcome.target.sd, n: outcome.target.n, days: outcome.target.days, basis: outcome.target.basis, force },
+        });
+      }
+      res.json(outcome);
+    } catch (e) { res.status(404).json({ error: (e as Error).message }); }
+  });
+
+  /**
+   * How every analyte on a control stands: what it is judged against now, and
+   * how far off a definitive set it is. This is what a unit head opens when the
+   * chart says it cannot be drawn.
+   */
+  router.get('/materials/:id/targets', requirePermission('iqc', 'view'), (req, res) => {
+    const db = getDb();
+    const material = db.prepare('SELECT id, material_name, lot_number, control_type FROM iqc_materials WHERE id = ?').get(req.params.id) as any;
+    if (!material) return res.status(404).json({ error: 'Control not found' });
+    const analytes = db.prepare('SELECT * FROM iqc_analytes WHERE iqc_material_id = ? AND is_active = 1 ORDER BY display_order, id').all(req.params.id) as any[];
+    const counted = db.prepare(`SELECT COUNT(*) AS n, COUNT(DISTINCT run_date) AS days FROM iqc_results
+        WHERE iqc_analyte_id = ? AND COALESCE(is_qualitative, 0) != 1 AND status IN ('accepted', 'warning')`);
+    res.json({
+      material,
+      requirement: { points: DEFINITIVE_POINTS, days: DEFINITIVE_DAYS, interimPoints: INTERIM_POINTS, interimDays: INTERIM_DAYS },
+      analytes: analytes.map(a => {
+        const usable = counted.get(a.id) as any;
+        return {
+          id: a.id, analyte: a.analyte, unit: a.unit, decimalPlaces: a.decimal_places,
+          enteredMean: a.target_mean, enteredSd: a.target_sd,
+          usableResults: Number(usable?.n ?? 0), usableDays: Number(usable?.days ?? 0),
+          ...effectiveTarget(a),
+        };
+      }),
+      canEstablish: true,
+    });
+  });
+
+  /** What each analyte on a control is being judged against, and where it came from. */
+  function currentTargets(db: any, materialId: number) {
+    return (db.prepare('SELECT * FROM iqc_analytes WHERE iqc_material_id = ? AND is_active = 1 ORDER BY display_order, id').all(materialId) as any[])
+      .map(a => ({ analyteId: a.id, analyte: a.analyte, ...effectiveTarget(a) }));
+  }
 
   router.post('/runs/:id/review', requirePermission('iqc', 'approve'), (req, res) => {
     const db = getDb();
@@ -279,7 +376,12 @@ export function iqcRunRoutes() {
 
     const points = rows.reverse();
     const numeric = points.filter(p => Number(p.is_qualitative) !== 1).map(p => Number(p.result_value)).filter(v => !Number.isNaN(v));
-    const stats = chartStatistics(numeric, analyte.target_mean, analyte.target_sd);
+    // What the chart is drawn against: the vendor's pair where one was entered,
+    // and otherwise this laboratory's own established SD. The chart says which,
+    // because "±0.4 g/dL, established here from 24 runs over 22 days" and
+    // "±0.4 g/dL, off the insert" are not the same claim.
+    const target = effectiveTarget(analyte);
+    const stats = chartStatistics(numeric, target.mean, target.sd);
 
     // Lot changes for the parent material, so a step in the series has a
     // visible cause rather than looking like a fault.
@@ -289,10 +391,14 @@ export function iqcRunRoutes() {
     res.json({
       analyte: {
         id: analyte.id, name: analyte.analyte, unit: analyte.unit, decimalPlaces: analyte.decimal_places,
-        targetMean: analyte.target_mean, targetSd: analyte.target_sd,
+        targetMean: target.mean, targetSd: target.sd,
+        // What was actually entered on the definition, kept separate so the
+        // chart can show a vendor mean beside a laboratory-established SD.
+        enteredMean: analyte.target_mean, enteredSd: analyte.target_sd,
         acceptableLow: analyte.acceptable_low, acceptableHigh: analyte.acceptable_high,
         expectedResult: analyte.expected_result,
       },
+      target,
       material: {
         id: analyte.material_id, name: analyte.material_name, lotNumber: analyte.lot_number,
         testName: analyte.test_name, controlType: analyte.control_type,

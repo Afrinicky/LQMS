@@ -11,6 +11,7 @@ import {
 } from '../../../shared/constants/routineWork';
 import { QUALITATIVE_LABELS, RULE_LABELS } from '../../../shared/constants/iqc';
 import type { IqcBoard, IqcBoardControl, IqcMapping, IqcFeedMessage } from '../../../shared/types/api';
+import PortalIqcCoverage from './PortalIqcCoverage';
 
 /**
  * IQC on the bench.
@@ -121,8 +122,8 @@ export default function PortalRoutineIqc() {
 
         {board.groups.length === 0 ? (
           <p className="muted">
-            No controls are set up against your unit yet. Controls are defined under Quality Control &rarr; IQC;
-            each one names the instrument it runs on and the unit that runs it, and only then does it appear here.
+            No controls are set up against your unit yet, so there is nothing to run this morning.
+            What your unit&rsquo;s tests need, and setting one up, is directly below.
           </p>
         ) : (
           board.groups.map(group => (
@@ -152,6 +153,10 @@ export default function PortalRoutineIqc() {
           </div>
         )}
       </section>
+
+      {/* Whether the work is controlled at all — the question that comes before
+          "has today's control been run?", and the one a unit head can act on. */}
+      <PortalIqcCoverage onChanged={load} />
 
       {openControl && (
         <RunControlDialog control={openControl} onClose={() => setOpenControl(null)}

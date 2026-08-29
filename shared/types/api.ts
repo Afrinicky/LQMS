@@ -720,6 +720,40 @@ export type IqcBoard = {
   message?:string;
 };
 
+/**
+ * Which of a unit's examinations are controlled, and which are not.
+ *
+ * The unit's own test menu is the denominator: ISO 15189:2022 §7.3.7.1 asks for
+ * a QC procedure for each examination, so a test with no control against it is
+ * a gap the unit head can see and close.
+ */
+export type IqcCoverageControl = {
+  id:number; materialName:string; testName:string; levelLabel:string|null;
+  lotNumber:string; controlType:string; equipmentName:string|null;
+  expiryDate:string|null; expired:boolean;
+  analytes:number;
+  /** Parameters with no SD: recorded, but not yet judged by Westgard. */
+  analytesWithoutLimits:number;
+};
+
+export type IqcCoverageTest = {
+  id:number; testCode:string|null; testName:string; methodName:string|null;
+  equipmentId:number|null; equipmentName:string|null; equipmentNumber:string|null;
+  controls:IqcCoverageControl[];
+  covered:boolean;
+  needingLimits:number;
+};
+
+export type IqcCoverage = {
+  sectionId:number|null; sectionName:string|null;
+  tests:IqcCoverageTest[];
+  unlisted:IqcCoverageControl[];
+  equipment:Array<{ id:number; name:string; equipmentNumber:string|null }>;
+  counts:{ tests:number; covered:number; uncovered:number; controls:number; needingLimits:number; unlisted:number };
+  canDefine:boolean;
+  message:string|null;
+};
+
 /** What a paste, an upload or an instrument message was understood to mean. */
 export type IqcMapping = {
   orientation?:'rows'|'columns';

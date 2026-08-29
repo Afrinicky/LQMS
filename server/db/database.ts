@@ -7011,6 +7011,45 @@ CREATE INDEX IF NOT EXISTS idx_instrument_messages_forward ON instrument_message
     }
   }
 
+  /* ==========================================================================
+     Target values a laboratory established for itself
+     --------------------------------------------------------------------------
+     A commercial control arrives with an assayed mean and, very often, no SD —
+     and an in-house control arrives with neither. Without an SD there is no z
+     score, so Westgard cannot run, the Levey-Jennings chart cannot be drawn,
+     and the control is recorded but never actually controls anything.
+
+     ISO 15189:2022 §7.3.7.2 and CLSI C24 both answer this the same way: the
+     laboratory establishes its own mean and SD from its own runs of that lot on
+     that instrument, because the number that matters is this laboratory's
+     imprecision, not the manufacturer's. Twenty points over twenty days is the
+     definitive set; twenty points over at least five days may serve as interim
+     limits until the twenty days are in.
+
+     These columns hold what was established, from how much data, over what
+     period — so the chart can say where its limits came from, and an assessor
+     asking "who decided ±0.4?" gets an answer with a date on it.
+     ========================================================================= */
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(iqc_analytes)').all() as Array<{ name: string }>).map(c => c.name));
+    const add: Array<[string, string]> = [
+      ['established_mean', 'established_mean REAL'],
+      ['established_sd', 'established_sd REAL'],
+      ['established_n', 'established_n INTEGER'],
+      ['established_days', 'established_days INTEGER'],
+      ['established_from', 'established_from TEXT'],
+      ['established_to', 'established_to TEXT'],
+      ['established_at', 'established_at TEXT'],
+      ['established_by', 'established_by INTEGER REFERENCES users(id)'],
+      // 'interim' while the twenty days are still being collected, 'definitive'
+      // once they are in. A laboratory that has entered the vendor's own SD
+      // keeps it: what is established here never silently overwrites it.
+      ['established_basis', 'established_basis TEXT'],
+      ['established_excluded', 'established_excluded INTEGER'],
+    ];
+    for (const [col, ddl] of add) if (!cols.has(col)) database.exec(`ALTER TABLE iqc_analytes ADD COLUMN ${ddl}`);
+  }
+
   // SQLite plans a query from the statistics it collected the last time it was
   // asked to. A database that has been running for months without ANALYZE
   // plans against the shape it had on the day it was created, which is how an
