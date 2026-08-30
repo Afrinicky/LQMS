@@ -4,6 +4,7 @@ import {
   Droplets, Lock, Plus, Thermometer, Wrench,
 } from 'lucide-react';
 import { api, errorText } from '../../services/api';
+import TextField from '../../components/ui/TextField';
 import LogSheetGrid, { SheetPicker } from '../../components/routine/LogSheetGrid';
 import {
   monthLabel, LOGGING_MODE_LABELS, ENVIRONMENTAL_CHART_PRESETS, CHART_FREQUENCIES,
@@ -261,7 +262,7 @@ function NewEnvironmentalLog({ month, onClose, onCreated }: {
           </select>
         </label>
         <label><span>What does the bench call it?</span>
-          <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Reagent fridge 2, Haematology bench" />
+          <TextField value={name} onValue={setName} placeholder="e.g. Reagent fridge 2, Haematology bench" />
         </label>
         <label><span>How often is it read?</span>
           <select value={frequency} onChange={e => setFrequency(e.target.value)}>
@@ -275,8 +276,8 @@ function NewEnvironmentalLog({ month, onClose, onCreated }: {
         <tbody>
           {parameters.map((p, i) => (
             <tr key={i}>
-              <td><input value={p.label} onChange={e => setParameter(i, 'label', e.target.value)} placeholder="Temperature" /></td>
-              <td><input value={p.unit} onChange={e => setParameter(i, 'unit', e.target.value)} placeholder="°C" style={{ width: 64 }} /></td>
+              <td><TextField value={p.label} onValue={next => setParameter(i, 'label', next)} placeholder="Temperature" /></td>
+              <td><TextField value={p.unit} onValue={next => setParameter(i, 'unit', next)} placeholder="°C" style={{ width: 64 }} /></td>
               <td><input type="number" step="any" value={p.minValue} onChange={e => setParameter(i, 'minValue', e.target.value)} style={{ width: 92 }} /></td>
               <td><input type="number" step="any" value={p.maxValue} onChange={e => setParameter(i, 'maxValue', e.target.value)} style={{ width: 92 }} /></td>
               <td><input type="number" min={0} max={3} value={p.decimalPlaces} onChange={e => setParameter(i, 'decimalPlaces', e.target.value)} style={{ width: 56 }} /></td>
@@ -293,7 +294,7 @@ function NewEnvironmentalLog({ month, onClose, onCreated }: {
       </button>
 
       <label className="rs-newlog-notes"><span>Anything the person reading it should know</span>
-        <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Alarm is on the wall behind it; defrosts on the first Monday." />
+        <TextField value={notes} onValue={setNotes} placeholder="Alarm is on the wall behind it; defrosts on the first Monday." />
       </label>
 
       <div className="pr-btns">

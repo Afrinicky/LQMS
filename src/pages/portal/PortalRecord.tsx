@@ -7,6 +7,7 @@ import { ChangePasswordModal } from '../../components/ChangePasswordModal';
 import { titleCase, usePortal, type SelfEditableProfile } from './portalData';
 import type { JobDescriptionDoc } from '../../../shared/types/api';
 import { errorText } from '../../services/api';
+import TextField from '../../components/ui/TextField';
 
 // The controlled-document window, borrowed so a job description is read here
 // exactly as it is read in Document Control — same version, same watermark,
@@ -263,6 +264,11 @@ export default function PortalRecord() {
 
   const set = (k: keyof EditForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm(f => (f ? { ...f, [k]: e.target.value } : f));
+  // The same setter taking the text, for TextField: a text box holds its own
+  // typing and reports it once it pauses, so a keystroke does not re-render
+  // this whole page. Selects and date pickers keep `set` above.
+  const setText = (k: keyof EditForm) => (value: string) =>
+    setForm(f => (f ? { ...f, [k]: value } : f));
 
   return (
     <div className="portal-stack">
@@ -293,15 +299,15 @@ export default function PortalRecord() {
 
             <h5 className="pf-legend">How to reach me</h5>
             <div className="pf-grid">
-              <label><span>Phone</span><input value={form.phone} onChange={set('phone')} placeholder="e.g. 024 000 0000" /></label>
-              <label><span>Email</span><input type="email" value={form.email} onChange={set('email')} /></label>
+              <label><span>Phone</span><TextField value={form.phone} onValue={setText('phone')} placeholder="e.g. 024 000 0000" /></label>
+              <label><span>Email</span><TextField type="email" value={form.email} onValue={setText('email')} /></label>
             </div>
 
             <h5 className="pf-legend">In an emergency, call</h5>
             <div className="pf-grid">
-              <label><span>Name</span><input value={form.emergencyContact} onChange={set('emergencyContact')} /></label>
-              <label><span>Phone</span><input value={form.emergencyContactPhone} onChange={set('emergencyContactPhone')} /></label>
-              <label><span>Relationship</span><input value={form.emergencyContactRelation} onChange={set('emergencyContactRelation')} placeholder="Spouse, parent, sibling…" /></label>
+              <label><span>Name</span><TextField value={form.emergencyContact} onValue={setText('emergencyContact')} /></label>
+              <label><span>Phone</span><TextField value={form.emergencyContactPhone} onValue={setText('emergencyContactPhone')} /></label>
+              <label><span>Relationship</span><TextField value={form.emergencyContactRelation} onValue={setText('emergencyContactRelation')} placeholder="Spouse, parent, sibling…" /></label>
             </div>
 
             <h5 className="pf-legend">Personal</h5>
@@ -319,18 +325,18 @@ export default function PortalRecord() {
                   {ID_TYPES.map(t => <option key={t || 'none'} value={t}>{t || '—'}</option>)}
                 </select>
               </label>
-              <label><span>ID number</span><input value={form.nationalIdNumber} onChange={set('nationalIdNumber')} /></label>
+              <label><span>ID number</span><TextField value={form.nationalIdNumber} onValue={setText('nationalIdNumber')} /></label>
             </div>
 
             <h5 className="pf-legend">Professional standing</h5>
             <div className="pf-grid">
               <label className="pf-wide">
                 <span>Qualifications</span>
-                <textarea rows={2} value={form.qualifications} onChange={set('qualifications')}
+                <TextField as="textarea" rows={2} value={form.qualifications} onValue={setText('qualifications')}
                   placeholder="e.g. BSc Medical Laboratory Science; MSc Clinical Microbiology" />
               </label>
-              <label><span>Regulator</span><input value={form.professionalRegulator} onChange={set('professionalRegulator')} placeholder="e.g. AHPC" /></label>
-              <label><span>Licence number</span><input value={form.professionalLicence} onChange={set('professionalLicence')} /></label>
+              <label><span>Regulator</span><TextField value={form.professionalRegulator} onValue={setText('professionalRegulator')} placeholder="e.g. AHPC" /></label>
+              <label><span>Licence number</span><TextField value={form.professionalLicence} onValue={setText('professionalLicence')} /></label>
               <label><span>Licence expires</span><input type="date" value={form.licenceExpiryDate} onChange={set('licenceExpiryDate')} /></label>
             </div>
             <p className="pd-hint">

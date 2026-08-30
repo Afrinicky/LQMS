@@ -223,6 +223,12 @@ export default function PersonnelRegisterAdmin() {
   }
 
   const set = (k: keyof StaffFormValues) => (e: { target: { value: string } }) => setForm(f => ({ ...f, [k]: e.target.value }));
+  // The same setter, taking the text rather than the event, for TextField.
+  // Text boxes hold their own typing and report it once it pauses, so a
+  // keystroke does not re-render this whole register — which is what made
+  // typing here feel frozen. Selects and date pickers are one interaction
+  // rather than a stream of them, and keep `set` above.
+  const setText = (k: keyof StaffFormValues) => (value: string) => setForm(f => ({ ...f, [k]: value }));
 
   return <div className="reg-admin">
     <div className="card">
@@ -380,33 +386,33 @@ export default function PersonnelRegisterAdmin() {
     >
       {error && <Notice kind="error">{error}</Notice>}
       {can('personnel.self', 'view') && <form id="reg-edit-form" className="form-grid" onSubmit={saveEdit}>
-        <label>Staff ID<input value={form.employeeNo} onChange={set('employeeNo')} placeholder="e.g. SNO-001" /></label>
-        <label>Surname<input value={form.surname} onChange={set('surname')} /></label>
-        <label>Middle name(s)<input value={form.middleName} onChange={set('middleName')} /></label>
-        <label>First name(s)<input value={form.firstName} onChange={set('firstName')} /></label>
-        <label>Initials<input value={form.initials} onChange={set('initials')} placeholder="auto" /></label>
+        <label>Staff ID<TextField value={form.employeeNo} onValue={setText('employeeNo')} placeholder="e.g. SNO-001" /></label>
+        <label>Surname<TextField value={form.surname} onValue={setText('surname')} /></label>
+        <label>Middle name(s)<TextField value={form.middleName} onValue={setText('middleName')} /></label>
+        <label>First name(s)<TextField value={form.firstName} onValue={setText('firstName')} /></label>
+        <label>Initials<TextField value={form.initials} onValue={setText('initials')} placeholder="auto" /></label>
         <label>Date of birth<input type="date" value={form.dateOfBirth} onChange={set('dateOfBirth')} /></label>
         <label>Gender<select value={form.gender} onChange={set('gender')}><option value="">—</option>{GENDERS.map(g => <option key={g} value={g}>{g}</option>)}</select></label>
-        <label>Designation (grade)<input value={form.designation} onChange={set('designation')} placeholder="e.g. Principal Medical Lab Scientist" /></label>
-        <label>Position / role<input value={form.jobTitle} onChange={set('jobTitle')} placeholder="e.g. Biochemistry Unit Head" /></label>
+        <label>Designation (grade)<TextField value={form.designation} onValue={setText('designation')} placeholder="e.g. Principal Medical Lab Scientist" /></label>
+        <label>Position / role<TextField value={form.jobTitle} onValue={setText('jobTitle')} placeholder="e.g. Biochemistry Unit Head" /></label>
         <label>Unit / Section<select value={form.sectionId} onChange={set('sectionId')}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-        <label>Professional regulator<input value={form.professionalRegulator} onChange={set('professionalRegulator')} placeholder="e.g. AHPC" /></label>
-        <label>Professional licence no.<input value={form.professionalLicence} onChange={set('professionalLicence')} /></label>
+        <label>Professional regulator<TextField value={form.professionalRegulator} onValue={setText('professionalRegulator')} placeholder="e.g. AHPC" /></label>
+        <label>Professional licence no.<TextField value={form.professionalLicence} onValue={setText('professionalLicence')} /></label>
         <label>Licence expiry<input type="date" value={form.licenceExpiryDate} onChange={set('licenceExpiryDate')} /></label>
-        <label>Qualifications<input value={form.qualifications} onChange={set('qualifications')} placeholder="Separate several with |" /></label>
+        <label>Qualifications<TextField value={form.qualifications} onValue={setText('qualifications')} placeholder="Separate several with |" /></label>
         <label>Personnel category<select value={form.personnelCategory} onChange={set('personnelCategory')}>{PERSONNEL_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
         <label>Appointment type<select value={form.appointmentType} onChange={set('appointmentType')}>{APPOINTMENT_TYPES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
         <label>Date of appointment<input type="date" value={form.appointmentDate} onChange={set('appointmentDate')} /></label>
         <label>National ID type<select value={form.nationalIdType} onChange={set('nationalIdType')}>{NATIONAL_ID_TYPES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
-        <label>National ID number<input value={form.nationalIdNumber} onChange={set('nationalIdNumber')} /></label>
-        <label>Contact phone<input value={form.phone} onChange={set('phone')} /></label>
-        <label>Email<input type="email" value={form.email} onChange={set('email')} /></label>
-        <label>Emergency contact<input value={form.emergencyContact} onChange={set('emergencyContact')} placeholder="e.g. Spouse - 0200000000" /></label>
+        <label>National ID number<TextField value={form.nationalIdNumber} onValue={setText('nationalIdNumber')} /></label>
+        <label>Contact phone<TextField value={form.phone} onValue={setText('phone')} /></label>
+        <label>Email<TextField type="email" value={form.email} onValue={setText('email')} /></label>
+        <label>Emergency contact<TextField value={form.emergencyContact} onValue={setText('emergencyContact')} placeholder="e.g. Spouse - 0200000000" /></label>
         <label>Cadre<select value={form.cadre} onChange={set('cadre')}><option value="">Auto (from designation)</option>{CADRES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
         <label>Professional rank<select value={form.professionalRank} onChange={set('professionalRank')}><option value="">Auto (from designation)</option>{ranks.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}</select></label>
         <label>Availability<select value={form.availabilityStatus} onChange={set('availabilityStatus')}>{AVAILABILITY_STATUSES.map(a => <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Assign position<select value={form.positionId} onChange={set('positionId')}><option value="">— keep current —</option>{positions.filter(p => !!p.isActive).map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>
-        <label>Staff file location<input value={form.staffFileLocation} onChange={set('staffFileLocation')} placeholder="e.g. /SECH-LAB-PERSONNEL-FILES/SNO-001/" /></label>
+        <label>Staff file location<TextField value={form.staffFileLocation} onValue={setText('staffFileLocation')} placeholder="e.g. /SECH-LAB-PERSONNEL-FILES/SNO-001/" /></label>
       </form>}
     </DetailModal>
 

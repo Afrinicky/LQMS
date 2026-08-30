@@ -5,7 +5,7 @@ import { audit } from '../services/auditService.js';
 import { deleteNotificationsWhere } from '../services/notificationCleanup.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getCurrentStaffId } from './routeHelpers.js';
-import { DECLARATION_TEMPLATES, DECLARATION_FORM_TYPES } from '../../shared/constants/declarations.js';
+import { DECLARATION_TEMPLATES, DECLARATION_FORM_TYPES, DECLARATION_STATUSES } from '../../shared/constants/declarations.js';
 
 /**
  * Tell every member of staff there is something for them to sign.
@@ -159,22 +159,24 @@ export function organisationExtendedRoutes() {
   // and the "sign this" notifications it raised. Kept behind the edit/delete
   // controls that are tucked away in the UI, and gated on the archive right.
   /**
-   * Remove a declaration form.
+   * Remove a declaration form, and everything that belongs to it.
    *
-   * Two things had to be got right here, and neither was.
+   * This is a real delete and it is meant to be: a laboratory setting the
+   * system up produces declarations that were only ever tests, and they have to
+   * be able to go. Signatures on the form go with it, because a signature on a
+   * form that no longer exists is not a record of anything.
    *
-   * A declaration that anybody has SIGNED is a record. Deleting it destroys
-   * those signatures, and there is no undo — so it is refused unless the caller
-   * says, in as many words, that they mean to. The usual answer for a
-   * declaration that is finished with is to mark it obsolete, which keeps the
-   * signatures and takes it off the list to sign; the refusal says so.
+   * The screen asks first, and says how many signatures go. That is the right
+   * place for the question — the server refusing it outright left demonstration
+   * data stuck in the register with no way out.
    *
-   * And the notifications raised when it was published are not leaves: the
-   * moment somebody opens one, a notification_events row points at it, and
-   * deleting the notification then fails with "FOREIGN KEY constraint failed".
-   * A newly created declaration deleted cleanly; every one that had actually
-   * reached the bench did not. They go through deleteNotificationsWhere, which
-   * clears the children first.
+   * The declaration that is FINISHED WITH rather than mistaken is a different
+   * act, and has its own: mark it obsolete below, which keeps the signatures.
+   *
+   * The notifications raised when it was published are not leaves — the moment
+   * somebody opens one, a notification_events row points at it, and deleting
+   * the notification then fails with "FOREIGN KEY constraint failed". They go
+   * through deleteNotificationsWhere, which clears the children first.
    */
   router.delete('/ethical-forms/:id', requirePermission('organisation.structure', 'void_archive'), (req, res) => {
     const db = getDb();
@@ -183,16 +185,6 @@ export function organisationExtendedRoutes() {
 
     const signatures = Number((db.prepare('SELECT COUNT(*) AS n FROM ethical_declaration_signatures WHERE form_id = ?')
       .get(req.params.id) as any)?.n ?? 0);
-    const confirmed = req.query.deleteSignatures === '1' || req.body?.deleteSignatures === true;
-    if (signatures > 0 && !confirmed) {
-      return res.status(409).json({
-        error: 'signed',
-        signatures,
-        message: `${signatures} ${signatures === 1 ? 'person has' : 'people have'} signed "${form.title}". `
-          + 'Deleting it destroys those signatures and cannot be undone. If the declaration is simply finished with, '
-          + 'mark it obsolete instead — that keeps the signatures and takes it off the list to sign.',
-      });
-    }
 
     db.transaction(() => {
       db.prepare('DELETE FROM ethical_declaration_signatures WHERE form_id = ?').run(req.params.id);
@@ -207,9 +199,55 @@ export function organisationExtendedRoutes() {
     res.json({ ok: true, signaturesRemoved: signatures });
   });
 
-  // ==================================================================
-  // ORGANOGRAM CONTINUITY PLANS — for the absence of key personnel
-  // ==================================================================
+  /**
+   * Retire a declaration, or bring it back.
+   *
+   * Its own action rather than a re-send of the whole setup form, which is what
+   * it used to be: sending twenty fields back to change one is how a body of
+   * text gets truncated by a screen that never meant to touch it.
+   *
+   * Marking one obsolete keeps every signature — they are the record of what
+   * people agreed to while it was in force — and takes it out of circulation:
+   * it can no longer be signed, and the outstanding "sign this" notifications
+   * are cleared, because asking somebody to sign a withdrawn declaration is the
+   * kind of thing that teaches a laboratory to ignore its own inbox.
+   */
+  router.post('/ethical-forms/:id/status', requirePermission('organisation.structure', 'edit'), (req, res) => {
+    const db = getDb();
+    const form = db.prepare('SELECT * FROM ethical_declaration_forms WHERE id = ?').get(req.params.id) as any;
+    if (!form) return res.status(404).json({ error: 'Form not found' });
+
+    const status = String(req.body?.status ?? '').trim();
+    if (!DECLARATION_STATUSES.includes(status as never)) {
+      return res.status(400).json({ error: `Status must be one of: ${DECLARATION_STATUSES.join(', ')}.` });
+    }
+    if (status === form.status) return res.json({ ok: true, status, unchanged: true });
+
+    const reason = String(req.body?.reason ?? '').trim() || null;
+    let cleared = 0;
+    db.transaction(() => {
+      db.prepare('UPDATE ethical_declaration_forms SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .run(status, req.params.id);
+      if (status !== 'active') {
+        // Nobody is asked to sign a declaration that is out of force.
+        cleared = deleteNotificationsWhere(
+          db,
+          "module_key = 'organisation' AND status NOT IN ('resolved','dismissed') "
+            + "AND ((record_type = 'ethical_declaration_forms' AND record_id = ?) OR action_url LIKE ?)",
+          [String(req.params.id), `%form=${req.params.id}%`],
+        );
+      }
+    })();
+
+    const signatures = Number((db.prepare('SELECT COUNT(*) AS n FROM ethical_declaration_signatures WHERE form_id = ?')
+      .get(req.params.id) as any)?.n ?? 0);
+    audit(req, {
+      action: 'edit', entity: 'ethical_declaration_forms', entityId: Number(req.params.id),
+      oldValue: { status: form.status }, newValue: { status, reason, notificationsCleared: cleared },
+    });
+    res.json({ ok: true, status, signaturesKept: signatures, notificationsCleared: cleared });
+  });
+
   router.get('/continuity-plans', requirePermission('organisation.structure', 'view'), (_req, res) => {
     const db = getDb();
     res.json(db.prepare(`SELECT cp.*, p.title AS position_title, dp.title AS deputy_position_title, s.full_name AS deputy_name

@@ -611,8 +611,8 @@ function RunControlDialog({ control, onClose, onSaved }: {
                           ))}
                         </select>
                       ) : (
-                        <input inputMode="decimal" value={raw}
-                          onChange={e => setValues(v => ({ ...v, [a.id]: e.target.value }))} />
+                        <TextField inputMode="decimal" value={raw}
+                          onValue={next => setValues(v => ({ ...v, [a.id]: next }))} />
                       )}
                       <span className="iqc-an-range">
                         {a.target_mean != null ? `mean ${a.target_mean}` : ''}
@@ -676,7 +676,7 @@ function PastePanel({ controlId, onMapped, onProblem }: {
     <div className="iqc-panel">
       <label>
         <span>Paste the block of results</span>
-        <textarea rows={6} value={text} onChange={e => setText(e.target.value)} className="iqc-paste"
+        <TextField as="textarea" rows={6} value={text} onValue={setText} className="iqc-paste"
           placeholder={'WBC\t6.2\nRBC\t4.51\nHGB\t13.4\nHCT\t40.1\n…\n\nCopy straight out of Excel, Word or the analyser\'s screen — parameter names and values together. The columns do not have to be in the control\'s order; they are matched by name.'} />
       </label>
       <div className="iqc-panel-row">
@@ -775,9 +775,9 @@ function WorksheetPanel({ controlId, analytes, values, setValues, onProblem }: {
                 <td>{a.analyte}</td>
                 <td className="u">{a.unit ?? ''}</td>
                 <td>
-                  <input value={values[a.id] ?? ''} inputMode="decimal"
+                  <TextField value={values[a.id] ?? ''} inputMode="decimal"
                     onPaste={e => handlePaste(index, e)}
-                    onChange={e => setValues(v => ({ ...v, [a.id]: e.target.value }))} />
+                    onValue={next => setValues(v => ({ ...v, [a.id]: next }))} />
                 </td>
                 <td className="r">{a.acceptable_low ?? '−'}–{a.acceptable_high ?? '−'}</td>
                 <td className="shift">
