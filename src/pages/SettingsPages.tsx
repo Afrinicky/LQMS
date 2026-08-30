@@ -2106,9 +2106,9 @@ function DestinationForm({ def, existing, onCancel, onSaved, onError }: {
             : f.type === 'checkbox'
               ? <span className="bk-check"><input type="checkbox" checked={config[f.key] === 'true'}
                   onChange={e => set(f.key, e.target.checked ? 'true' : '')} /> <span>{f.help}</span></span>
-              : <input type={f.type === 'password' ? 'password' : 'text'} value={config[f.key] ?? ''}
+              : <TextField type={f.type === 'password' ? 'password' : 'text'} value={config[f.key] ?? ''}
                   placeholder={existing?.hasSecret && f.type === 'password' ? 'Stored — leave blank to keep it' : f.placeholder}
-                  onChange={e => set(f.key, e.target.value)} />}
+                  onValue={next => set(f.key, next)} />}
           {f.help && f.type !== 'checkbox' && <span className="hint">{f.help}</span>}
         </label>
       ))}

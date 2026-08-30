@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { KeyRound, X } from 'lucide-react';
 import { api, errorText } from '../services/api';
+import TextField from './ui/TextField';
 
 /**
  * Self-service password change for the desktop app. Any signed-in user confirms
@@ -53,11 +54,11 @@ export function ChangePasswordModal({ onClose, required = false, onChanged }: { 
         ) : (
           <form className="pw-body" onSubmit={submit}>
             <label className="pw-label">Current password</label>
-            <input type={type} value={current} onChange={e => setCurrent(e.target.value)} autoComplete="current-password" autoFocus />
+            <TextField type={type} value={current} onValue={setCurrent} autoComplete="current-password" autoFocus />
             <label className="pw-label">New password</label>
-            <input type={type} value={next} onChange={e => setNext(e.target.value)} autoComplete="new-password" />
+            <TextField type={type} value={next} onValue={setNext} autoComplete="new-password" />
             <label className="pw-label">Confirm new password</label>
-            <input type={type} value={confirm} onChange={e => setConfirm(e.target.value)} autoComplete="new-password" />
+            <TextField type={type} value={confirm} onValue={setConfirm} autoComplete="new-password" />
             <label className="pw-show"><input type="checkbox" checked={show} onChange={e => setShow(e.target.checked)} /> Show passwords</label>
             {error && <p className="pw-error">{error}</p>}
             <div className="form-actions">

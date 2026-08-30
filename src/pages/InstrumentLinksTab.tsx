@@ -636,7 +636,7 @@ function TryDialog({ link, onClose }: { link: Link; onClose: () => void }) {
           which analytes, and whether it would be treated as a control. Nothing is recorded; this answers a
           question rather than making an entry.
         </p>
-        <textarea rows={8} className="iqc-paste" value={text} onChange={e => setText(e.target.value)}
+        <TextField as="textarea" rows={8} className="iqc-paste" value={text} onValue={setText}
           placeholder={'H|\\^&|||XN-550^1.0|||||||P|1|20260829103000\nO|1|QC2||^^^^FBC|R||20260829102800|||||||||||||||||F\nR|1|^^^HGB|13.4|g/dL||N||F\nL|1|N'} />
         {problem && <Notice kind="error">{problem}</Notice>}
         {result && (

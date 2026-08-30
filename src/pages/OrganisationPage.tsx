@@ -136,6 +136,11 @@ export function QualityConfigurationView({ config }: { config: LaboratoryConfig 
   </div>;
 }
 
+/** Draft / Active / Obsolete, worded the same everywhere. */
+const DECLARATION_STATUS_LABELS: Record<string, string> = {
+  draft: 'Draft', active: 'Active', obsolete: 'Obsolete',
+};
+
 const FORM_TYPES: Array<{ key: string; label: string }> = [
   { key: 'code_of_conduct', label: 'Code of Conduct' },
   { key: 'adherence', label: 'Adherence to Organisational Policies & Procedures' },
@@ -379,58 +384,60 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
   /**
    * Remove a declaration.
    *
-   * A declaration nobody has signed goes on one confirmation. One that HAS been
-   * signed is a record: the server refuses it, saying how many signatures would
-   * be destroyed and offering the usual alternative — marking it obsolete keeps
-   * the signatures and takes it off the list to sign. That choice is put to the
-   * person here rather than reported as a failure.
+   * A real delete, signed or not — a laboratory setting the system up has
+   * declarations that were only ever tests, and they have to be able to go.
+   * The one question asked names what goes with it, because the signatures on
+   * it go too and there is no undo.
+   *
+   * A declaration that is merely FINISHED WITH should be marked obsolete
+   * instead; that keeps the signatures, and is its own button.
    */
   async function deleteDeclaration(f: EthicalDeclarationForm) {
     const signed = Number(f.signature_count ?? 0);
-    if (signed === 0 && !confirm(`Delete "${f.title}"? Nobody has signed it. This cannot be undone.`)) return;
+    const warning = signed > 0
+      ? `Delete "${f.title}" and the ${signed} signature${signed === 1 ? '' : 's'} on it?\n\n`
+        + 'The signatures are the record of what those people agreed to. This cannot be undone.\n\n'
+        + 'If the declaration is simply finished with, mark it obsolete instead — that keeps the signatures.'
+      : `Delete "${f.title}"? Nobody has signed it. This cannot be undone.`;
+    if (!confirm(warning)) return;
     onError('');
     try {
-      await api(`/organisation/ethical-forms/${f.id}`, { method: 'DELETE' });
+      const result = await api<{ signaturesRemoved?: number }>(`/organisation/ethical-forms/${f.id}`, { method: 'DELETE' });
       setSelected(null); setShowManage(false);
       await load();
-      onNotice('Declaration deleted.');
-      return;
-    } catch (e) {
-      const refusal = e instanceof ApiError && e.status === 409 && e.data?.error === 'signed' ? e.data : null;
-      if (!refusal) { onError(errorText(e)); return; }
-
-      const count = Number(refusal.signatures ?? signed);
-      const obsolete = confirm(
-        `${refusal.message}\n\nOK — mark it obsolete and keep the ${count} signature${count === 1 ? '' : 's'}.\n`
-        + 'Cancel — do nothing (to delete it outright, use Delete signatures and form on the manage screen).',
-      );
-      if (!obsolete) return;
-      try {
-        await api(`/organisation/ethical-forms/${f.id}`, {
-          method: 'PUT',
-          body: JSON.stringify({ ...declarationSetupFrom(f), status: 'obsolete' }),
-        });
-        setShowManage(false);
-        await load();
-        if (selected?.id === f.id) await openForm(f);
-        onNotice('Declaration marked obsolete. Its signatures are kept and it no longer appears as one to sign.');
-      } catch (err) { onError(errorText(err)); }
-    }
+      const removed = Number(result?.signaturesRemoved ?? 0);
+      onNotice(removed > 0
+        ? `Declaration deleted, with ${removed} signature${removed === 1 ? '' : 's'}.`
+        : 'Declaration deleted.');
+    } catch (e) { onError(errorText(e)); }
   }
 
-  /** Delete it and its signatures, having been told what that costs. */
-  async function deleteDeclarationWithSignatures(f: EthicalDeclarationForm) {
-    const count = Number(f.signature_count ?? 0);
-    if (!confirm(
-      `Delete "${f.title}" AND the ${count} signature${count === 1 ? '' : 's'} on it?\n\n`
-      + 'The signatures are records of what people agreed to. This cannot be undone.',
+  /**
+   * Take a declaration out of force, or put it back.
+   *
+   * Its own action, not a re-send of the setup form. Obsolete keeps every
+   * signature and stops the declaration being one to sign — including clearing
+   * the outstanding requests in people's inboxes.
+   */
+  async function setDeclarationStatus(f: EthicalDeclarationForm, status: 'active' | 'obsolete') {
+    const signed = Number(f.signature_count ?? 0);
+    if (status === 'obsolete' && !confirm(
+      `Mark "${f.title}" obsolete?\n\n`
+      + `It stops being one to sign and any outstanding requests to sign it are withdrawn. `
+      + `The ${signed} signature${signed === 1 ? '' : 's'} already on it ${signed === 1 ? 'is' : 'are'} kept.`,
     )) return;
     onError('');
     try {
-      await api(`/organisation/ethical-forms/${f.id}?deleteSignatures=1`, { method: 'DELETE' });
-      setSelected(null); setShowManage(false);
+      const result = await api<{ notificationsCleared?: number }>(`/organisation/ethical-forms/${f.id}/status`, {
+        method: 'POST', body: JSON.stringify({ status }),
+      });
+      setShowManage(false);
       await load();
-      onNotice(`Declaration deleted, with ${count} signature${count === 1 ? '' : 's'}.`);
+      if (selected?.id === f.id) await openForm(f);
+      const cleared = Number(result?.notificationsCleared ?? 0);
+      onNotice(status === 'obsolete'
+        ? `Declaration marked obsolete. Its signatures are kept${cleared > 0 ? `, and ${cleared} outstanding request${cleared === 1 ? '' : 's'} to sign it withdrawn` : ''}.`
+        : 'Declaration is active again. Staff will see it as one to sign.');
     } catch (e) { onError(errorText(e)); }
   }
 
@@ -598,17 +605,28 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
                 const signedByMe = !!f.my_signature;
                 const total = f.total_staff || 1;
                 const pct = Math.round((100 * (f.signature_count || 0)) / total);
+                // A declaration out of force is not one to sign, and saying
+                // "signed" or "to sign" over it is how a withdrawn declaration
+                // goes on looking current.
+                const inForce = (f.status ?? 'active') === 'active';
                 return <button key={f.id} type="button" onClick={() => openForm(f)}
-                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px', border: 'none', borderBottom: '1px solid #eef0f4', background: isSelected ? 'var(--accent-soft, #eef4ff)' : 'transparent', cursor: 'pointer' }}>
-                  <div style={{ fontWeight: 600 }}>{f.title}</div>
+                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px', border: 'none', borderBottom: '1px solid #eef0f4', background: isSelected ? 'var(--accent-soft, #eef4ff)' : 'transparent', cursor: 'pointer', opacity: inForce ? 1 : 0.62 }}>
+                  <div style={{ fontWeight: 600, textDecoration: f.status === 'obsolete' ? 'line-through' : undefined }}>{f.title}</div>
                   <div style={{ fontSize: 11, color: '#64748b', marginTop: 3 }}>
                     {FORM_TYPES.find(t => t.key === f.form_type)?.label || f.form_type} · v{f.version || '—'}
-                    {signedByMe ? <span className="badge" style={{ marginLeft: 6, background: '#dcfce7', color: '#166534' }}>signed</span> : <span className="badge" style={{ marginLeft: 6, background: '#fef3c7', color: '#92400e' }}>to sign</span>}
+                    {!inForce
+                      ? <span className="badge" style={{ marginLeft: 6, background: '#e2e8f0', color: '#475569' }}>{DECLARATION_STATUS_LABELS[f.status ?? ''] ?? f.status}</span>
+                      : signedByMe
+                        ? <span className="badge" style={{ marginLeft: 6, background: '#dcfce7', color: '#166534' }}>signed</span>
+                        : <span className="badge" style={{ marginLeft: 6, background: '#fef3c7', color: '#92400e' }}>to sign</span>}
                   </div>
                   <div style={{ marginTop: 5, height: 5, background: '#e5e7eb', borderRadius: 3, overflow: 'hidden' }}>
                     <div style={{ width: `${pct}%`, height: '100%', background: pct >= 80 ? '#16a34a' : pct >= 40 ? '#f59e0b' : '#dc2626' }} />
                   </div>
-                  <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>{f.signature_count} of {f.total_staff} signed ({pct}%)</div>
+                  <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>
+                    {f.signature_count} of {f.total_staff} signed ({pct}%)
+                    {f.status === 'obsolete' && ' \u00b7 no longer in force'}
+                  </div>
                 </button>;
               })}
             </div>}
@@ -623,8 +641,21 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
             <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
               <div style={{ flex: 1, minWidth: 220 }}>
                 <span className="hint">{FORM_TYPES.find(t => t.key === selected.form_type)?.label || selected.form_type}</span>
-                <h3 style={{ margin: '2px 0 0' }}>{selected.title}</h3>
+                <h3 style={{ margin: '2px 0 0' }}>
+                  {selected.title}
+                  {selected.status !== 'active' && (
+                    <span className="badge" style={{ marginLeft: 8, background: '#e2e8f0', color: '#475569', verticalAlign: 'middle', fontSize: 11 }}>
+                      {DECLARATION_STATUS_LABELS[selected.status ?? ''] ?? selected.status}
+                    </span>
+                  )}
+                </h3>
                 <p className="muted" style={{ margin: 0, fontSize: 12 }}>v{selected.version || '—'} · effective {selected.effective_date || '—'} · issued by {selected.uploaded_by_name || '—'} on {String(selected.uploaded_at).slice(0, 10)}</p>
+                {selected.status === 'obsolete' && (
+                  <p className="muted" style={{ margin: '4px 0 0', fontSize: 12 }}>
+                    Withdrawn. Nobody is asked to sign it and it cannot be signed; the signatures already on it are kept
+                    as the record of what was agreed while it was in force.
+                  </p>
+                )}
               </div>
               <button type="button" className="badge" onClick={() => void printDeclaration()} style={{ cursor: 'pointer' }}>🖨 Print</button>
               {selected.file_id && <a className="badge" onClick={() => void downloadFileById(selected.file_id!, selected.file_name || 'declaration')} style={{ cursor: 'pointer' }}>⬇ Download form</a>}
@@ -636,15 +667,10 @@ function CodeOfConductView({ staff, onError, onNotice }: { staff: Staff[]; onErr
             {showManage && (canEditForm || canDeleteForm) && <div style={{ marginTop: 8, display: 'flex', gap: 8, justifyContent: 'flex-end', borderTop: '1px dashed #e2e8f0', paddingTop: 8 }}>
               {canEditForm && <button type="button" className="secondary" onClick={() => startEdit(selected)}>✎ Edit declaration</button>}
               {canDeleteForm && <button type="button" className="secondary" style={{ color: '#dc2626' }} onClick={() => void deleteDeclaration(selected)}>🗑 Delete declaration</button>}
-              {/* Only offered where there is something to lose. Deleting a
-                  declaration nobody signed needs no second door. */}
-              {canDeleteForm && Number(selected.signature_count ?? 0) > 0 && (
-                <button type="button" className="secondary" style={{ color: '#dc2626' }}
-                  title="Deletes the declaration and the signatures on it"
-                  onClick={() => void deleteDeclarationWithSignatures(selected)}>
-                  🗑 Delete signatures and form
-                </button>
-              )}
+              {/* Out of force, or back into it. Keeps every signature. */}
+              {canEditForm && (selected.status === 'obsolete'
+                ? <button type="button" className="secondary" onClick={() => void setDeclarationStatus(selected, 'active')}>↩ Make active again</button>
+                : <button type="button" className="secondary" onClick={() => void setDeclarationStatus(selected, 'obsolete')}>⊘ Mark obsolete</button>)}
             </div>}
             {selected.description && <p style={{ marginTop: 8 }}>{selected.description}</p>}
             {selected.body_content && <div style={{ whiteSpace: 'pre-wrap', marginTop: 10, lineHeight: 1.55, borderTop: '1px solid #e2e8f0', paddingTop: 10 }}>{selected.body_content}</div>}

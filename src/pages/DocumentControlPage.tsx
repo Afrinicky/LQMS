@@ -2081,8 +2081,8 @@ function DocumentDetailPanel(props: any) {
       </tr>)}
     </tbody></table>
     {can('documents.authoring', 'create') && <form className="form-grid" onSubmit={submitVersion}>
-      <label>New version number<input value={versionForm.versionNumber} onChange={(e: any) => setVersionForm({ ...versionForm, versionNumber: e.target.value })} required /></label>
-      <label>Revision summary<input value={versionForm.revisionSummary} onChange={(e: any) => setVersionForm({ ...versionForm, revisionSummary: e.target.value })} /></label>
+      <label>New version number<TextField value={versionForm.versionNumber} onValue={v => setVersionForm({ ...versionForm, versionNumber: v })} required /></label>
+      <label>Revision summary<TextField value={versionForm.revisionSummary} onValue={v => setVersionForm({ ...versionForm, revisionSummary: v })} /></label>
       <label>Effective date<input type="date" value={versionForm.effectiveDate} onChange={(e: any) => setVersionForm({ ...versionForm, effectiveDate: e.target.value })} /></label>
       <label>File<input type="file" accept=".pdf,.doc,.docx,.txt,.md,.rtf,.odt" onChange={(e: any) => setVersionFile(e.target.files?.[0] ?? null)} /></label>
       <button type="submit">Add version</button>
@@ -2096,7 +2096,7 @@ function DocumentDetailPanel(props: any) {
     {(doc.status === 'under_review' || doc.status === 'draft' || doc.status === 'reviewed') && can('documents.workflow', 'edit') && <form className="form-grid" onSubmit={submitReview}>
       <label>Review date<input type="date" value={reviewForm.reviewDate} onChange={(e: any) => setReviewForm({ ...reviewForm, reviewDate: e.target.value })} required /></label>
       <label>Outcome<select value={reviewForm.reviewOutcome} onChange={(e: any) => setReviewForm({ ...reviewForm, reviewOutcome: e.target.value })}>{REVIEW_OUTCOMES.map(o => <option key={o} value={o}>{o.replace(/_/g, ' ')}</option>)}</select></label>
-      <label>Notes<textarea value={reviewForm.reviewNotes} onChange={(e: any) => setReviewForm({ ...reviewForm, reviewNotes: e.target.value })} /></label>
+      <label>Notes<TextField as="textarea" value={reviewForm.reviewNotes} onValue={v => setReviewForm({ ...reviewForm, reviewNotes: v })} /></label>
       <label>Next review date<input type="date" value={reviewForm.nextReviewDate} onChange={(e: any) => setReviewForm({ ...reviewForm, nextReviewDate: e.target.value })} /></label>
       <label><input type="checkbox" checked={reviewForm.actionRequired} onChange={(e: any) => setReviewForm({ ...reviewForm, actionRequired: e.target.checked })} /> Action required</label>
       <button type="submit">Record review</button>
@@ -2114,7 +2114,7 @@ function DocumentDetailPanel(props: any) {
       {attestForm.targetType === 'section' && <label>Section<select value={attestForm.sectionId} onChange={(e: any) => setAttestForm({ ...attestForm, sectionId: e.target.value })}><option value="">—</option>{sections.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>}
       {attestForm.targetType === 'department' && <label>Department<select value={attestForm.departmentId} onChange={(e: any) => setAttestForm({ ...attestForm, departmentId: e.target.value })}><option value="">—</option>{departments.map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>}
       <label>Due date<input type="date" value={attestForm.dueDate} onChange={(e: any) => setAttestForm({ ...attestForm, dueDate: e.target.value })} /></label>
-      <label>Notes<input value={attestForm.notes} onChange={(e: any) => setAttestForm({ ...attestForm, notes: e.target.value })} /></label>
+      <label>Notes<TextField value={attestForm.notes} onValue={v => setAttestForm({ ...attestForm, notes: v })} /></label>
       <button type="submit">Assign attestations</button>
     </form>}
 
@@ -2124,16 +2124,16 @@ function DocumentDetailPanel(props: any) {
       {(doc.printLogs || []).length === 0 && <tr><td colSpan={6} className="muted">No prints logged.</td></tr>}
     </tbody></table>
     {can('documents.library', 'print') && <form className="form-grid" onSubmit={submitPrint}>
-      <label>Purpose<input value={printForm.printPurpose} onChange={(e: any) => setPrintForm({ ...printForm, printPurpose: e.target.value })} /></label>
+      <label>Purpose<TextField value={printForm.printPurpose} onValue={v => setPrintForm({ ...printForm, printPurpose: v })} /></label>
       <label><input type="checkbox" checked={printForm.controlledCopy} onChange={(e: any) => setPrintForm({ ...printForm, controlledCopy: e.target.checked })} /> Controlled copy</label>
-      <label>Copy #<input value={printForm.copyNumber} onChange={(e: any) => setPrintForm({ ...printForm, copyNumber: e.target.value })} /></label>
-      <label>Watermark<input value={printForm.watermark} onChange={(e: any) => setPrintForm({ ...printForm, watermark: e.target.value })} /></label>
+      <label>Copy #<TextField value={printForm.copyNumber} onValue={v => setPrintForm({ ...printForm, copyNumber: v })} /></label>
+      <label>Watermark<TextField value={printForm.watermark} onValue={v => setPrintForm({ ...printForm, watermark: v })} /></label>
       <button type="submit">Log print</button>
     </form>}
 
     {doc.status !== 'obsolete' && <div style={{ marginTop: 16 }}>
       <h4>Mark obsolete</h4>
-      <label>Reason<input value={obsoleteReason} onChange={(e: any) => setObsoleteReason(e.target.value)} /></label>{' '}
+      <label>Reason<TextField value={obsoleteReason} onValue={setObsoleteReason} /></label>{' '}
       <button onClick={submitObsolete}>Mark obsolete</button>
     </div>}
 

@@ -91,18 +91,48 @@ const signed = await makeForm(`Signed ${stamp}`);
 const sig = await j(`/organisation/ethical-forms/${signed.id}/sign`, { token: A, method: 'POST', body: { affirmationText: 'I agree' } });
 check('it can be signed', sig.status === 201, `${sig.status}`);
 
-const refused = await j(`/organisation/ethical-forms/${signed.id}`, { token: A, method: 'DELETE' });
-check('deleting a SIGNED declaration is refused', refused.status === 409 && refused.json?.error === 'signed', `${refused.status}`);
-check('the refusal counts the signatures at stake', Number(refused.json?.signatures) === 1, JSON.stringify(refused.json?.signatures));
-check('and offers marking it obsolete instead',
-  String(refused.json?.message ?? '').includes('obsolete'), refused.json?.message);
+/* -------------------------------------------------------------------------
+   Marking one obsolete — its own act, and it must SHOW
+   ---------------------------------------------------------------------- */
+const retired = await j(`/organisation/ethical-forms/${signed.id}/status`, {
+  token: A, method: 'POST', body: { status: 'obsolete' },
+});
+check('a declaration can be marked obsolete', retired.status === 200 && retired.json?.status === 'obsolete',
+  JSON.stringify(retired.json));
+check('and its signatures are kept', Number(retired.json?.signaturesKept) === 1, JSON.stringify(retired.json?.signaturesKept));
 
-const stillThere = await j(`/organisation/ethical-forms/${signed.id}`, { token: A });
-check('the declaration is still there after the refusal', stillThere.status === 200);
+const listed = (await j('/organisation/ethical-forms', { token: A })).json ?? [];
+const row = listed.find(f => f.id === signed.id);
+check('the register reports it as obsolete, not as one to sign', row?.status === 'obsolete', row?.status);
+check('and still counts the signature it holds', Number(row?.signature_count) === 1, JSON.stringify(row?.signature_count));
 
-const forced = await j(`/organisation/ethical-forms/${signed.id}?deleteSignatures=1`, { token: A, method: 'DELETE' });
-check('saying so outright deletes it and its signatures',
-  forced.status === 200 && forced.json?.signaturesRemoved === 1, JSON.stringify(forced.json));
+// Nobody is asked to sign a withdrawn declaration.
+const notesNow = (await j('/notifications?limit=200', { token: A })).json;
+const openList = Array.isArray(notesNow) ? notesNow : (notesNow?.rows ?? notesNow?.notifications ?? []);
+check('outstanding requests to sign it are withdrawn',
+  !openList.some(n => String(n.action_url ?? '').includes(`form=${signed.id}`) && !['resolved', 'dismissed'].includes(n.status)),
+  `${openList.length} notification(s) remain`);
+
+const cannotSign = await j(`/organisation/ethical-forms/${signed.id}/sign`, { token: A, method: 'POST', body: { affirmationText: 'again' } });
+check('an obsolete declaration cannot be signed', cannotSign.status >= 400, `${cannotSign.status}`);
+
+const back = await j(`/organisation/ethical-forms/${signed.id}/status`, { token: A, method: 'POST', body: { status: 'active' } });
+check('and it can be brought back into force', back.status === 200 && back.json?.status === 'active', JSON.stringify(back.json));
+
+const nonsense = await j(`/organisation/ethical-forms/${signed.id}/status`, { token: A, method: 'POST', body: { status: 'banana' } });
+check('a status that is not one of the three is refused', nonsense.status === 400, `${nonsense.status}`);
+
+/* -------------------------------------------------------------------------
+   Deleting a SIGNED declaration — permitted, because demonstration data has
+   to be able to go
+   ---------------------------------------------------------------------- */
+const forced = await j(`/organisation/ethical-forms/${signed.id}`, { token: A, method: 'DELETE' });
+check('a signed declaration deletes outright', forced.status === 200, JSON.stringify(forced.json));
+check('and says how many signatures went with it',
+  Number(forced.json?.signaturesRemoved) === 1, JSON.stringify(forced.json?.signaturesRemoved));
+
+const afterDelete = await j(`/organisation/ethical-forms/${signed.id}`, { token: A });
+check('it is really gone', afterDelete.status === 404, `${afterDelete.status}`);
 
 /* ==========================================================================
    2. One wizard, and who may use it
