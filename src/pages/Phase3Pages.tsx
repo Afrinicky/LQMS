@@ -686,7 +686,11 @@ function EquipmentProfile({ item, staff, sections, departments, locations, onBac
     </div> : null}
 
     {editing
-      ? can('supplier_inventory.suppliers', 'edit') && <form className="form" style={{ marginTop: 14 }} onSubmit={e => { e.preventDefault(); void save(); }}>
+      // PUT /equipment/:id — the asset register's own edit right. This asked
+      // for the right to edit a SUPPLIER, which is a different module: a
+      // Stores Officer was offered the form and refused by the server, while
+      // whoever actually maintains the equipment register could not see it.
+      ? can('equipment.register', 'edit') && <form className="form" style={{ marginTop: 14 }} onSubmit={e => { e.preventDefault(); void save(); }}>
           <label>Unique identifier<TextField value={form.equipmentNumber} onValue={nextValue => setForm({ ...form, equipmentNumber: nextValue })} /></label>
           <label>Name<TextField value={form.name} onValue={nextValue => setForm({ ...form, name: nextValue })} required /></label>
           <label>Category<TextField value={form.category} onValue={nextValue => setForm({ ...form, category: nextValue })} /></label>
@@ -873,7 +877,12 @@ function EquipmentLifecycleTab({ kind, equipment, staff, setError, onChanged }: 
       </div>
     </div>}
 
-    {can('facilities_safety.incidents', 'create') && <form className="form" onSubmit={submit} style={{ marginTop: 12 }}>
+    {/* This one component records BOTH verifications and calibrations, and
+        they are governed separately — POST /equipment/:id/verifications wants
+        equipment.verification:create, /calibrations wants
+        equipment.maintenance:create. It asked for the right to report a
+        safety incident, which governs neither. */}
+    {can(isVer ? 'equipment.verification' : 'equipment.maintenance', 'create') && <form className="form" onSubmit={submit} style={{ marginTop: 12 }}>
       <label>Equipment<select value={equipId} onChange={e => setEquipId(e.target.value)} required><option value="">Select equipment</option>{equipment.map(e2 => <option key={e2.id} value={e2.id}>{e2.equipment_number} — {e2.name}</option>)}</select></label>
       {isVer ? <>
         <label>Type<select value={form.verificationType} onChange={e => setForm({ ...form, verificationType: e.target.value })}><option value="verification">Verification</option><option value="validation">Validation</option></select></label>
@@ -955,7 +964,9 @@ function ReferenceStandardsPanel({ staff, setError }: { staff: Staff[]; setError
   return <div className="card" style={{ marginTop: 16 }}>
     <h3>Reference standards &amp; certified reference materials</h3>
     <p className="muted" style={{ marginTop: 0 }}>The reference materials and instruments (certified thermometer, tachometer, CRMs) that underpin in-house calibration and metrological traceability.</p>
-    {can('facilities_safety.incidents', 'create') && <form className="form" onSubmit={submit}>
+    {/* POST /equipment/reference-standards — the maintenance and calibration
+        right, which is what the server asks for. */}
+    {can('equipment.maintenance', 'create') && <form className="form" onSubmit={submit}>
       <label>Name<TextField value={form.name} onValue={nextValue => setForm({ ...form, name: nextValue })} required /></label>
       <label>Type<select value={form.standardType} onChange={e => setForm({ ...form, standardType: e.target.value })}><option value="certified_reference_material">Certified reference material</option><option value="reference_instrument">Reference instrument</option><option value="other">Other</option></select></label>
       <label>Identifier / serial<TextField value={form.identifier} onValue={nextValue => setForm({ ...form, identifier: nextValue })} /></label>
@@ -1165,7 +1176,9 @@ function EquipmentAdverseEventsTab({ equipment, staff, setError, onChanged }: { 
     <div className="card">
       <h3>Report an equipment adverse event</h3>
       <p className="muted" style={{ marginTop: 0 }}>Reportable incidents are nonconformities: a linked NC is raised automatically. Investigation, corrective action, follow-up, retrospective impact and external reporting are captured on the record.</p>
-      {can('facilities_safety.incidents', 'create') && <form className="form" onSubmit={submit}>
+      {/* An equipment adverse event has its own right. Close enough to a
+          safety incident to explain the copy-paste, and not the same thing. */}
+      {can('equipment.adverse', 'create') && <form className="form" onSubmit={submit}>
         <label>Equipment<select value={form.equipmentId} onChange={e => setForm({ ...form, equipmentId: e.target.value })} required><option value="">Select equipment</option>{equipment.map(e2 => <option key={e2.id} value={e2.id}>{e2.equipment_number} — {e2.name}</option>)}</select></label>
         <label>Event date<input type="date" value={form.eventDate} onChange={e => setForm({ ...form, eventDate: e.target.value })} required /></label>
         <label>Reported by<select value={form.reportedByStaffId} onChange={e => setForm({ ...form, reportedByStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
@@ -1384,7 +1397,11 @@ function EquipmentFilesTab({ equipment, sections, departments, setError, onChang
     </div>
     <p className="muted" style={{ marginTop: 0 }}>Documents added here are created as controlled documents in <strong>Documents &amp; Records</strong> and linked to the equipment, so an update in either module is reflected in both.</p>
     {!equipId ? <p className="muted">Select an equipment item to view and add its files.</p> : <>
-      {can('facilities_safety.incidents', 'create') && <form className="form" onSubmit={submit}>
+      {/* Two rights, because this form does two things: it authors a
+          controlled document (POST /documents) and attaches it to the
+          instrument (POST /equipment/:id/documents). Asking for only one of
+          them shows a form that half-fails. */}
+      {can('documents.authoring', 'create') && can('equipment.files', 'edit') && <form className="form" onSubmit={submit}>
         <label>Title<TextField value={form.title} onValue={nextValue => setForm({ ...form, title: nextValue })} required /></label>
         <label>Document type<select value={form.documentType} onChange={e => setForm({ ...form, documentType: e.target.value })}>{EQUIP_DOC_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
         <label>Department<select value={form.departmentId} onChange={e => setForm({ ...form, departmentId: e.target.value })}><option value="">—</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
@@ -1848,7 +1865,10 @@ export function InventoryPage() {
 
     {tab === 'New Item' && <div className="card">
       <h3>Register a stock item</h3>
-      {can('monitoring.assets', 'create') && <form className="form" onSubmit={submitItem}>
+      {/* POST /supplier-inventory/items. `monitoring.assets` governs the
+          environmental monitoring register — a different module that happens
+          to have an "add item" form of its own. */}
+      {can('supplier_inventory.stock', 'create') && <form className="form" onSubmit={submitItem}>
         <label>Name<TextField value={itemForm.name} onValue={nextValue => setItemForm({ ...itemForm, name: nextValue })} required /></label>
         <label>Category<select value={itemForm.category} onChange={e => setItemForm({ ...itemForm, category: e.target.value })} required>
           <option value="">Select the category</option>
@@ -2457,7 +2477,10 @@ function BatchEditModal({ batch, suppliers, storagePlaces, supplySources, procur
       {issued} {batch.unit_of_measure || ''} has already gone out of this delivery, so the quantity received cannot be
       corrected below that. If the whole receipt was wrong, reverse it instead.
     </Notice>}
-    {can('supplier_inventory.suppliers', 'edit') && <form id="edit-batch" className="form" onSubmit={save}>
+    {/* Stock, not suppliers. The two live in one module and are granted
+        separately: a Stores Officer holds stock and not suppliers, so this
+        form was hidden from exactly the person whose job it is. */}
+    {can('supplier_inventory.stock', 'edit') && <form id="edit-batch" className="form" onSubmit={save}>
       <label>Batch number<TextField value={form.batchNumber} onValue={nextValue => setForm({ ...form, batchNumber: nextValue })} /></label>
       <label>Lot number<TextField value={form.lotNumber} onValue={nextValue => setForm({ ...form, lotNumber: nextValue })} /></label>
       {procurement.mode === 'both' && <label>How it was obtained
@@ -2667,7 +2690,8 @@ function InventoryDetailPanel({
       Stock is at or below the minimum. {item.supplier_name ? `Reorder from ${item.supplier_name}.` : 'No supplier is recorded against this item.'}
     </Notice>}
 
-    {mode === 'edit' ? can('supplier_inventory.suppliers', 'edit') && <form className="form" onSubmit={save} style={{ marginTop: 14 }}>
+    {/* PUT /supplier-inventory/items/:id — the stock right, not the supplier one. */}
+    {mode === 'edit' ? can('supplier_inventory.stock', 'edit') && <form className="form" onSubmit={save} style={{ marginTop: 14 }}>
       <label>Name<TextField value={form.name} onValue={nextValue => setForm({ ...form, name: nextValue })} required /></label>
       <label>Category<select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} required>
         {categories.map(c => <option key={c.id} value={c.value}>{c.label}</option>)}
@@ -2841,7 +2865,9 @@ function ItemRemovalModal({ impact, busy, onClose, onDone, setError }: {
       <TextField value={reason} onValue={nextValue => setReason(nextValue)} placeholder="Discontinued, replaced by…, entered in error" />
     </label>
     <div className="danger-actions">
-      {can('supplier_inventory.suppliers', 'void_archive') && <button type="button" disabled={!!working} onClick={() => void run('withdraw')}>
+      {/* Withdrawing a stock item is DELETE /supplier-inventory/items/:id,
+          which asks for the stock void/archive right. */}
+      {can('supplier_inventory.stock', 'void_archive') && <button type="button" disabled={!!working} onClick={() => void run('withdraw')}>
         {working === 'withdraw' ? 'Withdrawing…' : 'Withdraw from the register'}
       </button>}
       <p className="muted">It leaves the working register. Every batch and movement stays on the record.</p>

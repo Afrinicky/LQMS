@@ -613,7 +613,10 @@ function EditControl({ material, analytes, sections, staff, equipment, onSaved, 
   }
 
   return (
-    can('iqc', 'create') && <form className="iqc-detail iqc-edit" onSubmit={submit}>
+    // A PUT to /iqc/materials/:id. The form asked for `create`, so somebody
+    // who may define a new control but not change one was shown an edit form
+    // the server then refused.
+    can('iqc', 'edit') && <form className="iqc-detail iqc-edit" onSubmit={submit}>
       <div className="section-head">
         <h4><Pencil size={14} /> Edit {material.material_name} · lot {material.lot_number}</h4>
         <span className="chip">{IQC_CONTROL_TYPE_LABELS[material.control_type]}</span>

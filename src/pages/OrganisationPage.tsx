@@ -855,7 +855,12 @@ function OrganogramContinuityView({ staff, onError, onNotice }: { staff: Staff[]
             <button className="drawer-close" onClick={() => setEditingId(null)}>×</button>
           </div>
           <div className="doc-drawer-body">
-            {can('organisation.budget', 'edit') && can('organisation.budget', 'create') && <form className="form-grid" onSubmit={submit}>
+            {/* Continuity plans are part of the organisation's structure, and
+                that is what the server asks for. The budget right governs
+                something else entirely, so this form was shown to the wrong
+                people and hidden from the right ones. The action follows what
+                the form will actually do. */}
+            {can('organisation.structure', editingId === 'new' ? 'create' : 'edit') && <form className="form-grid" onSubmit={submit}>
               <label>Key role<TextField value={form.keyRole} onValue={nextValue => setForm({ ...form, keyRole: nextValue })} required placeholder="e.g. Laboratory Manager" /></label>
               <label>Position<select value={form.positionId} onChange={e => setForm({ ...form, positionId: e.target.value })}><option value="">—</option>{positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>
               <label>Deputy position<select value={form.deputyPositionId} onChange={e => setForm({ ...form, deputyPositionId: e.target.value })}><option value="">—</option>{positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}</select></label>

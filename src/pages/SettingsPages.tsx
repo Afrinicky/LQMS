@@ -140,7 +140,9 @@ export function RegisterStaff() {
       {error && <Notice kind="error">{error}</Notice>}
       {success && <Notice kind="success">{success}</Notice>}
 
-      {can('settings', 'create') && <form className="form" onSubmit={submit}>
+      {/* POST /staff/register — the register's own create right, which is what
+          the server asks for and what Personnel Management grants. */}
+      {can('personnel.register', 'create') && <form className="form" onSubmit={submit}>
         <fieldset className="reg-section">
           <legend>Personal &amp; role details</legend>
           <div className="form-grid">
@@ -1382,7 +1384,9 @@ export function EvidenceUpload(){
     alert('Evidence uploaded and linked.');
   }
   return <div className="card"><h3>Evidence Upload</h3>
-    {can('settings', 'create') && <form className="form" onSubmit={submit}>
+    {/* POST /evidence — the evidence-upload right this page is delegated on,
+        and the one its own Settings entry already asks for. */}
+    {can('records_reports.evidence', 'create') && <form className="form" onSubmit={submit}>
       <label>File<input name="file" type="file" required/></label>
       <label>Module key<input name="moduleKey" defaultValue="documents" required/></label>
       <label>Record type<input name="recordType" defaultValue="foundation_record" required/></label>
@@ -1402,7 +1406,10 @@ export function ActionTracker(){
     alert('Action created.');
   }
   return <div className="card"><h3>Action Tracker</h3>
-    {can('settings', 'create') && <form className="form" onSubmit={submit}>
+    {/* POST /actions — the Action Tracker's own create right. Nearly every
+        role holds it; `settings:create` is held by almost nobody, so this
+        form was hidden from the people it exists for. */}
+    {can('actions', 'create') && <form className="form" onSubmit={submit}>
       <label>Title<input name="title" required/></label>
       <label>Module key<input name="moduleKey" defaultValue="nc_capa"/></label>
       <label>Priority<select name="priority"><option>normal</option><option>high</option><option>low</option></select></label>
