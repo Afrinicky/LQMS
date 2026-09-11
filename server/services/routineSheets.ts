@@ -1232,3 +1232,177 @@ export function subjectsForSection(db: DB, kind: SheetKind, sectionId: number | 
         AND EXISTS (SELECT 1 FROM equipment_maintenance_tasks t WHERE t.equipment_id = e.id AND t.is_active = 1)
       ORDER BY e.name`).all(sectionId);
 }
+
+/* ============================================================================
+   Removing a schedule
+
+   Everything above is built on the principle that a record is not editable
+   once it has been attested to, and that principle is right. But it left the
+   register with no way back out: a fridge registered twice, a chart opened
+   against the wrong instrument, a decontamination somebody set up while
+   learning the screen — each of them charted for a fortnight before anybody
+   noticed, and therefore each of them permanent. A register that cannot be
+   corrected stops being trusted, and an untrusted register is worked around.
+
+   So removal exists, and it is deliberately narrow:
+
+     - it is a senior act, not a bench one (the route decides that, not this)
+     - it takes a written reason, which goes into the audit trail
+     - it removes the SCHEDULE and the sheets that hang off it, and touches
+       nothing else: the instrument stays on the equipment register, the
+       readings a logger wrote stay in the readings table, a nonconformity
+       raised off the month stays raised
+
+   What "removing the schedule" means differs by kind, because the three
+   registers hang off three different things:
+
+     environmental          the asset was registered in order to be charted, so
+                            it is retired outright
+     decontamination        a unit's own definition is retired; a
+                            laboratory-wide one is not — the unit is excused
+                            from it instead, with the reason, because one unit
+                            cannot retire the whole laboratory's programme
+     equipment_maintenance  the instrument is not the schedule — its tasks are,
+                            so the tasks are retired and the instrument stays
+                            on the equipment register untouched
+   ========================================================================= */
+
+/**
+ * Delete one month's sheet, with its rows, its cells and its amendment trail.
+ *
+ * Verified and archived months are deleted too when asked. That is the point:
+ * "it has already been charted" was the state that used to make a mistake
+ * permanent.
+ */
+export function deleteSheet(db: DB, sheetId: number): boolean {
+  const sheet = db.prepare('SELECT id FROM routine_log_sheets WHERE id = ?').get(sheetId) as any;
+  if (!sheet) return false;
+  db.transaction(() => {
+    // The amendment trail references the sheet and its rows without a cascade,
+    // so it goes first or the delete is refused by the foreign key.
+    db.prepare('DELETE FROM routine_log_cell_amendments WHERE sheet_id = ?').run(sheetId);
+    db.prepare('DELETE FROM routine_log_cells WHERE sheet_id = ?').run(sheetId);
+    db.prepare('DELETE FROM routine_log_rows WHERE sheet_id = ?').run(sheetId);
+    // A nonconformity raised off the month stays raised — it is a record of a
+    // real failure and does not belong to the chart. What goes is the link back
+    // to a sheet that no longer exists, so the NC does not offer a dead one.
+    db.prepare(`DELETE FROM record_links
+        WHERE source_module_key = 'routine_work' AND source_record_type = 'routine_log_sheets' AND source_record_id = ?`)
+      .run(String(sheetId));
+    db.prepare('DELETE FROM routine_log_sheets WHERE id = ?').run(sheetId);
+  })();
+  return true;
+}
+
+export interface DeleteScheduleResult {
+  /** What it was called, so the screen can say what it just removed. */
+  subjectName: string | null;
+  /** How many months of chart went with it. */
+  sheetsDeleted: number;
+  /** What happened to the schedule itself, in the words the screen should use. */
+  outcome: 'retired' | 'excused' | 'tasks_retired';
+}
+
+/**
+ * Take a subject off a unit's routine programme, with every month it charted.
+ */
+export function deleteRoutineSchedule(db: DB, options: {
+  kind: SheetKind; subjectId: number; sectionId: number | null; reason: string;
+}): DeleteScheduleResult | null {
+  const subjectType = SUBJECT_FOR_KIND[options.kind];
+  const now = new Date().toISOString();
+
+  // Only this unit's months go. A laboratory-wide decontamination charted by
+  // four units loses the log of the unit that asked, not the other three.
+  const sheets = (options.kind === 'decontamination' && options.sectionId !== null
+    ? db.prepare(`SELECT id FROM routine_log_sheets
+         WHERE sheet_kind = ? AND subject_type = ? AND subject_id = ? AND IFNULL(section_id, 0) = ?`)
+      .all(options.kind, subjectType, options.subjectId, options.sectionId)
+    : db.prepare('SELECT id FROM routine_log_sheets WHERE sheet_kind = ? AND subject_type = ? AND subject_id = ?')
+      .all(options.kind, subjectType, options.subjectId)) as Array<{ id: number }>;
+
+  if (options.kind === 'environmental') {
+    const asset = db.prepare('SELECT id, name FROM environmental_assets WHERE id = ?').get(options.subjectId) as any;
+    if (!asset) return null;
+    db.transaction(() => {
+      for (const s of sheets) deleteSheet(db, s.id);
+      // Retired rather than erased: the readings, excursions and any
+      // nonconformity raised off them still point at this row, and deleting it
+      // would orphan records the laboratory has to keep. Retired, it leaves
+      // every register it appeared on.
+      db.prepare(`UPDATE environmental_assets SET is_active = 0, status = 'retired',
+          notes = TRIM(COALESCE(notes, '') || ?), updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+        .run(`\nRemoved from the routine programme on ${now.slice(0, 10)}: ${options.reason}`, options.subjectId);
+      db.prepare('UPDATE environmental_asset_parameters SET is_active = 0 WHERE asset_id = ?').run(options.subjectId);
+      retireActivitiesFor(db, 'environmental_asset_id', options.subjectId);
+    })();
+    return { subjectName: asset.name, sheetsDeleted: sheets.length, outcome: 'retired' };
+  }
+
+  if (options.kind === 'decontamination') {
+    const definition = db.prepare('SELECT id, name, section_id, activity_id FROM decontamination_definitions WHERE id = ?')
+      .get(options.subjectId) as any;
+    if (!definition) return null;
+    const labWide = definition.section_id === null || definition.section_id === undefined;
+    db.transaction(() => {
+      for (const s of sheets) deleteSheet(db, s.id);
+      if (labWide && options.sectionId !== null) {
+        // One unit cannot retire the whole laboratory's programme, so it is
+        // excused from it instead — which is the existing, recorded way a unit
+        // says "we do not do this here", and it carries the reason.
+        db.prepare(`INSERT INTO decontamination_unit_settings (definition_id, section_id, is_excluded, exclusion_reason)
+            VALUES (?, ?, 1, ?)
+            ON CONFLICT(definition_id, section_id) DO UPDATE SET is_excluded = 1, exclusion_reason = excluded.exclusion_reason`)
+          .run(options.subjectId, options.sectionId, options.reason);
+        db.prepare(`UPDATE unit_activities SET is_active = 0 WHERE id IN
+            (SELECT activity_id FROM decontamination_unit_settings
+              WHERE definition_id = ? AND section_id = ? AND activity_id IS NOT NULL)`)
+          .run(options.subjectId, options.sectionId);
+      } else {
+        db.prepare('UPDATE decontamination_definitions SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+          .run(options.subjectId);
+        if (definition.activity_id) db.prepare('UPDATE unit_activities SET is_active = 0 WHERE id = ?').run(definition.activity_id);
+        db.prepare(`UPDATE unit_activities SET is_active = 0 WHERE id IN
+            (SELECT activity_id FROM decontamination_unit_settings WHERE definition_id = ? AND activity_id IS NOT NULL)`)
+          .run(options.subjectId);
+      }
+    })();
+    return {
+      subjectName: definition.name,
+      sheetsDeleted: sheets.length,
+      outcome: labWide && options.sectionId !== null ? 'excused' : 'retired',
+    };
+  }
+
+  const equipment = db.prepare('SELECT id, name FROM equipment_items WHERE id = ?').get(options.subjectId) as any;
+  if (!equipment) return null;
+  db.transaction(() => {
+    for (const s of sheets) deleteSheet(db, s.id);
+    // The instrument is not the schedule. Its maintenance tasks are what put a
+    // chart on the register, so those are retired and the equipment record is
+    // left exactly as it was.
+    db.prepare('UPDATE equipment_maintenance_tasks SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE equipment_id = ?')
+      .run(options.subjectId);
+    retireActivitiesFor(db, 'equipment_id', options.subjectId);
+  })();
+  return { subjectName: equipment.name, sheetsDeleted: sheets.length, outcome: 'tasks_retired' };
+}
+
+/**
+ * Stop the reminders a removed schedule was raising.
+ *
+ * A schedule that is gone from the register but still putting "chart the
+ * fridge" on somebody's list every morning is worse than the duplicate that
+ * was removed, so the activities tied to the subject are retired with it.
+ * Occurrences already recorded are left alone — they are the record of work
+ * that really was done.
+ */
+function retireActivitiesFor(db: DB, column: 'environmental_asset_id' | 'equipment_id', subjectId: number): void {
+  try {
+    db.prepare(`UPDATE unit_activities SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE ${column} = ?`).run(subjectId);
+    db.prepare(`DELETE FROM activity_occurrences WHERE status IN ('pending', 'in_progress')
+        AND activity_id IN (SELECT id FROM unit_activities WHERE ${column} = ?)`).run(subjectId);
+  } catch {
+    // An older database without these columns simply has no reminders to stop.
+  }
+}

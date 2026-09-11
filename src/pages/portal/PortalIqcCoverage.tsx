@@ -22,7 +22,7 @@ import type {
 /** What the wizard fills its dropdowns from. */
 type Lookups = { sections: Section[]; staff: Staff[]; equipment: EquipmentItem[]; sectionId: number | null };
 
-export default function PortalIqcCoverage({ onChanged }: { onChanged?: () => void }) {
+export default function PortalIqcCoverage({ onChanged, sectionId }: { onChanged?: () => void; sectionId?: number | null }) {
   const [data, setData] = useState<IqcCoverage | null>(null);
   const [loading, setLoading] = useState(true);
   const [problem, setProblem] = useState<string | null>(null);
@@ -30,10 +30,10 @@ export default function PortalIqcCoverage({ onChanged }: { onChanged?: () => voi
   const [setup, setSetup] = useState<{ test: IqcCoverageTest | null } | null>(null);
 
   const load = useCallback(async () => {
-    try { setData(await api<IqcCoverage>('/iqc/portal/coverage')); setProblem(null); }
+    try { setData(await api<IqcCoverage>(`/iqc/portal/coverage${sectionId ? `?sectionId=${sectionId}` : ''}`)); setProblem(null); }
     catch (e) { setProblem(errorText(e)); }
     finally { setLoading(false); }
-  }, []);
+  }, [sectionId]);
 
   useEffect(() => { void load(); }, [load]);
 

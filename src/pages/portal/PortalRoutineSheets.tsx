@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   AlertTriangle, CalendarDays, ChevronLeft, ChevronRight, ClipboardList,
-  Droplets, Lock, Plus, Thermometer, Wrench,
+  Droplets, Lock, MoreHorizontal, Plus, Thermometer, Trash2, Wrench,
 } from 'lucide-react';
 import { api, errorText } from '../../services/api';
 import TextField from '../../components/ui/TextField';
@@ -52,18 +52,19 @@ const ENDPOINT: Record<SheetKind, string> = {
   equipment_maintenance: '/equipment/maintenance-charts',
 };
 
-export default function PortalRoutineSheets({ kind }: { kind: SheetKind }) {
+export default function PortalRoutineSheets({ kind, sectionId }: { kind: SheetKind; sectionId?: number | null }) {
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [index, setIndex] = useState<LogSheetIndex | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [problem, setProblem] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [removing, setRemoving] = useState<RemovalTarget | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const next = await api<LogSheetIndex>(`${ENDPOINT[kind]}?month=${month}`);
+      const next = await api<LogSheetIndex>(`${ENDPOINT[kind]}?month=${month}${sectionId ? `&sectionId=${sectionId}` : ''}`);
       setIndex(next);
       setProblem(null);
       // Land on whichever chart most needs attention, rather than the first one
@@ -78,7 +79,7 @@ export default function PortalRoutineSheets({ kind }: { kind: SheetKind }) {
       });
     } catch (e) { setProblem(errorText(e)); setIndex(null); }
     finally { setLoading(false); }
-  }, [kind, month]);
+  }, [kind, month, sectionId]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -94,6 +95,10 @@ export default function PortalRoutineSheets({ kind }: { kind: SheetKind }) {
   }, [index]);
 
   const loggingMode = (index?.settings as any)?.logging_mode as string | undefined;
+  const active = useMemo(
+    () => (index?.sheets ?? []).find(s => s.sheet?.id === activeId) ?? null,
+    [index, activeId],
+  );
 
   function shiftMonth(step: number) {
     const [year, m] = month.split('-').map(Number);
@@ -168,10 +173,150 @@ export default function PortalRoutineSheets({ kind }: { kind: SheetKind }) {
                     ? <LogSheetGrid sheetId={activeId} onChanged={load} />
                     : <p className="muted">Choose a sheet above to record on it.</p>}
                 </div>
+                {index.canDelete && active && (
+                  <ScheduleAdmin kind={kind} entry={active} month={month}
+                    onRemove={target => setRemoving(target)} />
+                )}
               </div>
             </>
           )}
+
+        {removing && (
+          <RemoveScheduleDialog target={removing} sectionId={sectionId ?? null}
+            onClose={() => setRemoving(null)}
+            onDone={async () => { setRemoving(null); setActiveId(null); await load(); }} />
+        )}
       </section>
+    </div>
+  );
+}
+
+/* ----------------------------------------------------------------------------
+   Removing a schedule, and the months charted against it
+
+   Deliberately out of the way. Everything else on this screen is the work of
+   the bench, done many times a day by whoever is on duty; this is the opposite
+   — rare, senior, and irreversible — so it lives behind a single quiet control
+   rather than as a button beside "Register something new to chart", and the
+   server refuses it outright to anybody but the administrator, the Quality
+   Manager and the Laboratory Manager.
+
+   It exists because the register previously had no way back out. A fridge
+   entered twice, a chart opened against the wrong instrument, a decontamination
+   somebody set up while learning the screen: each of them charted for a
+   fortnight before anybody noticed, and "it has already been charted" made the
+   mistake permanent. A register that cannot be corrected is a register that
+   stops being trusted.
+   ------------------------------------------------------------------------- */
+type RemovalTarget = {
+  scope: 'sheet' | 'schedule';
+  kind: SheetKind;
+  subjectId: number;
+  sheetId: number | null;
+  name: string;
+  monthLabel: string;
+};
+
+const REMOVAL_CONSEQUENCE: Record<SheetKind, string> = {
+  environmental: 'The asset is taken off the monitoring programme and stops appearing on any unit’s board. '
+    + 'Readings already taken stay in the environmental record, and so does any excursion or nonconformity raised off them.',
+  decontamination: 'The unit stops carrying this decontamination. A laboratory-wide one is not removed from the other units — '
+    + 'this unit is excused from it, with the reason you give here.',
+  equipment_maintenance: 'The instrument’s maintenance tasks are retired, so it stops producing a chart. '
+    + 'The instrument itself stays on the equipment register exactly as it is.',
+};
+
+function ScheduleAdmin({ kind, entry, month, onRemove }: {
+  kind: SheetKind; entry: { subject: { id: number; subject_name?: string }; sheet: { id: number } | null };
+  month: string; onRemove: (target: RemovalTarget) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const name = entry.subject.subject_name || 'this schedule';
+
+  const target = (scope: 'sheet' | 'schedule'): RemovalTarget => ({
+    scope, kind, subjectId: entry.subject.id, sheetId: entry.sheet?.id ?? null,
+    name, monthLabel: monthLabel(month),
+  });
+
+  return (
+    <div className="rs-admin">
+      <button type="button" className="rs-admin-toggle" aria-expanded={open}
+        title="Corrections a senior post can make to this register"
+        onClick={() => setOpen(o => !o)}>
+        <MoreHorizontal size={14} />
+      </button>
+      {open && (
+        <div className="rs-admin-menu" role="menu">
+          <span className="rs-admin-head">{name}</span>
+          {entry.sheet && (
+            <button type="button" role="menuitem" onClick={() => { setOpen(false); onRemove(target('sheet')); }}>
+              <Trash2 size={12} /> Delete {monthLabel(month)}&rsquo;s chart
+            </button>
+          )}
+          <button type="button" role="menuitem" onClick={() => { setOpen(false); onRemove(target('schedule')); }}>
+            <Trash2 size={12} /> Remove this schedule entirely
+          </button>
+          <span className="rs-admin-foot">
+            Reserved to the administrator, the Quality Manager and the Laboratory Manager. Every removal is
+            recorded with your name and your reason.
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RemoveScheduleDialog({ target, sectionId, onClose, onDone }: {
+  target: RemovalTarget; sectionId: number | null; onClose: () => void; onDone: () => void | Promise<void>;
+}) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const wholeSchedule = target.scope === 'schedule';
+
+  async function remove() {
+    setBusy(true); setProblem(null);
+    try {
+      const path = wholeSchedule
+        ? `/routine-sheets/subjects/${target.kind}/${target.subjectId}`
+        : `/routine-sheets/${target.sheetId}`;
+      await api(path, {
+        method: 'DELETE',
+        body: JSON.stringify({ reason: reason.trim(), sectionId: sectionId ?? undefined }),
+      });
+      await onDone();
+    } catch (e) { setProblem(errorText(e)); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="rs-remove">
+      <div className="rs-remove-head">
+        <strong><Trash2 size={13} /> {wholeSchedule ? `Remove ${target.name}` : `Delete ${target.monthLabel}’s chart`}</strong>
+        <button type="button" className="pq-link" onClick={onClose}>Cancel</button>
+      </div>
+      <p className="muted">
+        {wholeSchedule
+          ? `${REMOVAL_CONSEQUENCE[target.kind]} Every month already charted against it is deleted with it, signed and verified months included.`
+          : `${target.monthLabel}’s entries, notes and amendment trail are deleted, including a supervisor’s signature if the month was already verified. `
+            + 'The schedule stays, and the month reopens blank so it can be charted again.'}
+      </p>
+
+      {problem && <p className="pd-error"><AlertTriangle size={13} /> {problem}</p>}
+
+      <label className="rs-remove-reason">
+        <span>Why is it being removed?</span>
+        <TextField value={reason} onValue={setReason}
+          placeholder="e.g. Registered twice — this is the duplicate; the readings are on ENV-0007." />
+      </label>
+
+      <div className="pr-btns">
+        <button type="button" className="danger" disabled={busy || reason.trim().length < 10} onClick={() => void remove()}>
+          {busy ? 'Removing…' : wholeSchedule ? 'Remove it and its charts' : 'Delete this month’s chart'}
+        </button>
+        <button type="button" className="secondary" onClick={onClose}>Keep it</button>
+      </div>
     </div>
   );
 }
@@ -315,16 +460,16 @@ function NewEnvironmentalLog({ month, onClose, onCreated }: {
  * and how often, and that question has an answer even in a month where nothing
  * has been recorded yet.
  */
-export function PortalDeconProgramme() {
+export function PortalDeconProgramme({ sectionId }: { sectionId?: number | null } = {}) {
   const [rows, setRows] = useState<any[] | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
-      try { setRows(await api<any[]>('/decontamination/definitions')); }
+      try { setRows(await api<any[]>(`/decontamination/definitions${sectionId ? `?sectionId=${sectionId}` : ''}`)); }
       catch (e) { setProblem(errorText(e)); }
     })();
-  }, []);
+  }, [sectionId]);
 
   if (problem) return <p className="pd-error"><AlertTriangle size={13} /> {problem}</p>;
   if (!rows) return <p className="muted">Loading the programme…</p>;

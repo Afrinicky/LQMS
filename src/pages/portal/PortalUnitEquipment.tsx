@@ -34,7 +34,7 @@ const FREQUENCIES = [
   ['quarterly', 'Every three months'], ['biannual', 'Twice a year'], ['annual', 'Every year'],
 ] as const;
 
-export default function PortalUnitEquipment({ onChanged }: { onChanged?: () => void }) {
+export default function PortalUnitEquipment({ onChanged, sectionId }: { onChanged?: () => void; sectionId?: number | null }) {
   const [data, setData] = useState<UnitEquipmentOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [problem, setProblem] = useState<string | null>(null);
@@ -44,10 +44,13 @@ export default function PortalUnitEquipment({ onChanged }: { onChanged?: () => v
   const [scheduleSetup, setScheduleSetup] = useState<{ item: UnitEquipmentItem; duty: string } | null>(null);
 
   const load = useCallback(async () => {
-    try { setData(await api<UnitEquipmentOverview>('/equipment/portal/unit-overview')); setProblem(null); }
+    try {
+      setData(await api<UnitEquipmentOverview>(`/equipment/portal/unit-overview${sectionId ? `?sectionId=${sectionId}` : ''}`));
+      setProblem(null);
+    }
     catch (e) { setProblem(errorText(e)); }
     finally { setLoading(false); }
-  }, []);
+  }, [sectionId]);
 
   useEffect(() => { void load(); }, [load]);
 

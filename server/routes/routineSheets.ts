@@ -16,6 +16,9 @@
  *   GET    /routine-sheets/:id/print             the sheet as the laboratory knows it
  *   POST   /routine-sheets/:id/attachment        attach the month's paper chart
  *   POST   /routine-sheets/:id/extract           read the attached chart into cells
+ *   GET    /routine-sheets/units                 the units this reader may work in
+ *   DELETE /routine-sheets/:id                   remove one month's chart
+ *   DELETE /routine-sheets/subjects/:kind/:id    remove the schedule itself
  *
  * Two different rights are at work and they are deliberately not the same one.
  * Filling a cell is routine work: anyone on duty in the unit does it, gated on
@@ -37,7 +40,9 @@ import { recordSignature } from '../services/signatureService.js';
 import {
   openSheet, refreshSheetRows, sheetPayload, saveCells, submitSheet, reopenSheet,
   verifySheet, archiveSheet, raiseSheetNc, sheetsForSection, subjectsForSection,
+  deleteSheet, deleteRoutineSchedule,
 } from '../services/routineSheets.js';
+import { unitScopePayload, resolveUnitScope, isCrossUnitRole } from '../services/unitScope.js';
 import { sheetToHtml, sheetToWorkbook, sheetTemplateWorkbook, parseSheetWorkbook } from '../services/routineSheetRender.js';
 import { extractSheetFromFile } from '../services/routineSheetExtraction.js';
 import {
@@ -159,7 +164,9 @@ export function routineSheetRoutes() {
     const kind = isKind(req.query.kind) ? req.query.kind : null;
     if (!kind) return res.status(400).json({ error: `kind must be one of: ${SHEET_KINDS.join(', ')}` });
     const month = isMonth(req.query.month) ? String(req.query.month) : monthOf(new Date().toISOString().slice(0, 10));
-    const sectionId = parseIntNullable(req.query.sectionId) ?? currentSectionId(db, req);
+    // The unit is the reader's own, unless they hold one of the posts that
+    // answers for the whole laboratory and has asked for another.
+    const scope = unitScopePayload(req, req.query.sectionId);
 
     const moduleKey = SHEET_KIND_MODULE[kind];
     if (!resolvePermission(req.user!.id, moduleKey, 'view').allowed
@@ -167,29 +174,95 @@ export function routineSheetRoutes() {
       return res.status(403).json({ error: 'You do not have access to this register.' });
     }
 
-    const rows = sheetsForSection(db, kind, sectionId, month, { userId: req.user!.id });
+    const rows = sheetsForSection(db, kind, scope.sectionId, month, { userId: req.user!.id });
     res.json({
-      kind, month, sectionId,
+      kind, month, sectionId: scope.sectionId,
+      units: scope.units, canChooseUnit: scope.canChooseUnit,
       sheets: rows,
       canVerify: mayVerify(req, { sheet_kind: kind }),
       canRecord: resolvePermission(req.user!.id, tierFeatureKey('general'), TIER_ACTION).allowed,
+      canDelete: isCrossUnitRole(req.user!.id),
     });
   });
 
-  /** The unit the signed-in person belongs to, when the caller did not say. */
-  function currentSectionId(db: any, req: any): number | null {
-    const staffId = getCurrentStaffId(req);
-    if (staffId === null) return null;
-    const row = db.prepare('SELECT section_id FROM staff WHERE id = ?').get(staffId) as any;
-    return row?.section_id ?? null;
-  }
+  /**
+   * The units this reader may work in, for the picker the registers draw.
+   *
+   * One entry — their own — for everybody but the senior posts, so the picker
+   * does not appear at all rather than appearing with nothing to choose.
+   */
+  router.get('/units', (req, res) => {
+    const scope = unitScopePayload(req);
+    res.json({
+      sectionId: scope.sectionId, homeSectionId: scope.homeSectionId,
+      canChooseUnit: scope.canChooseUnit, canDelete: isCrossUnitRole(req.user!.id),
+      units: scope.units,
+    });
+  });
 
   /** What a unit could be charting, whether or not a sheet exists yet. */
   router.get('/subjects', (req, res) => {
     const kind = isKind(req.query.kind) ? req.query.kind : null;
     if (!kind) return res.status(400).json({ error: 'kind is required' });
-    const sectionId = parseIntNullable(req.query.sectionId) ?? currentSectionId(getDb(), req);
-    res.json(subjectsForSection(getDb(), kind, sectionId));
+    res.json(subjectsForSection(getDb(), kind, resolveUnitScope(req, req.query.sectionId).sectionId));
+  });
+
+  /* ======================================================================
+     Removing a schedule, and the months charted against it
+     ----------------------------------------------------------------------
+     Deliberately not on the bench's screen. A chart is removed when it should
+     never have existed — a duplicate fridge, a chart opened against the wrong
+     instrument — and that judgement belongs to the people accountable for the
+     whole laboratory, not to whoever is standing at the bench today. So the
+     right is the same cross-unit seniority used above, a written reason is
+     required, and both go into the audit trail.
+     ==================================================================== */
+
+  /** Remove one month's chart, whether or not it has been charted or signed. */
+  router.delete('/:id', numericOnly, (req, res) => {
+    const db = getDb();
+    const sheet = loadSheet(req, res);
+    if (!sheet) return;
+    if (!isCrossUnitRole(req.user!.id)) {
+      return res.status(403).json({ error: 'Deleting a chart is reserved to the administrator, the Quality Manager and the Laboratory Manager.' });
+    }
+    const reason = String(req.body?.reason ?? '').trim();
+    if (reason.length < 10) return res.status(400).json({ error: 'Say why this chart is being deleted — it goes into the audit trail.' });
+
+    const payload = sheetPayload(db, sheet.id);
+    deleteSheet(db, sheet.id);
+    audit(req, {
+      action: 'delete', entity: 'routine_log_sheets', entityId: sheet.id,
+      oldValue: { title: sheet.title, month: sheet.month, status: sheet.status, recorded: payload.completeness?.recorded ?? 0 },
+      newValue: { reason },
+    });
+    res.json({ ok: true, deleted: sheet.id });
+  });
+
+  /** Remove the schedule itself, with every month it ever charted. */
+  router.delete('/subjects/:kind/:subjectId', (req, res) => {
+    const db = getDb();
+    const kind = isKind(req.params.kind) ? req.params.kind : null;
+    const subjectId = parseIntNullable(req.params.subjectId);
+    if (!kind || !subjectId) return res.status(400).json({ error: 'kind and subjectId are required' });
+    if (!isCrossUnitRole(req.user!.id)) {
+      return res.status(403).json({ error: 'Deleting a routine schedule is reserved to the administrator, the Quality Manager and the Laboratory Manager.' });
+    }
+    const reason = String(req.body?.reason ?? '').trim();
+    if (reason.length < 10) return res.status(400).json({ error: 'Say why this schedule is being removed — it goes into the audit trail.' });
+
+    const scope = resolveUnitScope(req, req.body?.sectionId);
+    const result = deleteRoutineSchedule(db, {
+      kind, subjectId, sectionId: scope.sectionId, reason,
+    });
+    if (!result) return res.status(404).json({ error: 'That schedule no longer exists.' });
+
+    audit(req, {
+      action: 'delete', entity: 'routine_log_sheets', entityId: subjectId,
+      oldValue: { kind, subjectId, sectionId: scope.sectionId, subjectName: result.subjectName },
+      newValue: { reason, sheetsDeleted: result.sheetsDeleted, outcome: result.outcome },
+    });
+    res.json({ ok: true, ...result });
   });
 
   router.post('/open', (req, res) => {

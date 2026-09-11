@@ -8,6 +8,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import PageHeader from '../components/ui/PageHeader';
 import TextField from '../components/ui/TextField';
 import LogSheetGrid, { SheetPicker } from '../components/routine/LogSheetGrid';
+import RegisterUnitPicker from '../components/routine/RegisterUnitPicker';
 import {
   DECON_FREQUENCIES, DECON_FREQUENCY_LABELS, DECON_SCOPE_HINTS, DECON_SCOPE_LABELS,
   monthLabel, type DeconFrequency,
@@ -73,19 +74,23 @@ function DeconLogs({ onError }: { onError: (m: string | null) => void }) {
   const [index, setIndex] = useState<LogSheetIndex | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  // Null until a senior post picks one, at which point the server is asked for
+  // that unit instead of the reader's own.
+  const [sectionId, setSectionId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const next = await api<LogSheetIndex>(`/decontamination/logs?month=${month}`);
+      const next = await api<LogSheetIndex>(`/decontamination/logs?month=${month}${sectionId ? `&sectionId=${sectionId}` : ''}`);
       setIndex(next);
       onError(null);
+      if (sectionId === null && next.sectionId) setSectionId(next.sectionId);
       setActiveId(previous => next.sheets.some(s => s.sheet?.id === previous)
         ? previous
         : next.sheets.find(s => s.sheet)?.sheet?.id ?? null);
     } catch (e) { onError(errorText(e)); }
     finally { setLoading(false); }
-  }, [month, onError]);
+  }, [month, sectionId, onError]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -113,6 +118,10 @@ function DeconLogs({ onError }: { onError: (m: string | null) => void }) {
             disabled={month >= new Date().toISOString().slice(0, 7)}><ChevronRight size={14} /></button>
         </div>
       </div>
+
+      <RegisterUnitPicker units={index?.units} canChooseUnit={index?.canChooseUnit}
+        sectionId={sectionId} onPick={setSectionId}
+        hint="You answer for every unit’s decontamination programme, so you can read and sign off any of them." />
 
       {loading ? <p className="muted">Loading…</p>
         : !index?.sheets.length ? (

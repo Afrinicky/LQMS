@@ -7,6 +7,7 @@ import { api, errorText } from '../services/api';
 import { usePermissions } from '../hooks/usePermissions';
 import TextField from '../components/ui/TextField';
 import LogSheetGrid, { SheetPicker } from '../components/routine/LogSheetGrid';
+import RegisterUnitPicker from '../components/routine/RegisterUnitPicker';
 import {
   MAINTENANCE_FREQUENCIES, MAINTENANCE_FREQUENCY_LABELS, MAINTENANCE_KINDS,
   MAINTENANCE_KIND_HINTS, MAINTENANCE_KIND_LABELS, monthLabel,
@@ -65,17 +66,21 @@ function Charts({ setError }: { setError: (m: string | null) => void }) {
   const [index, setIndex] = useState<LogSheetIndex | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  // Null until a senior post picks one, at which point the server is asked for
+  // that unit instead of the reader's own.
+  const [sectionId, setSectionId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const next = await api<LogSheetIndex>(`/equipment/maintenance-charts?month=${month}`);
+      const next = await api<LogSheetIndex>(`/equipment/maintenance-charts?month=${month}${sectionId ? `&sectionId=${sectionId}` : ''}`);
       setIndex(next); setError(null);
+      if (sectionId === null && next.sectionId) setSectionId(next.sectionId);
       setActiveId(previous => next.sheets.some(s => s.sheet?.id === previous)
         ? previous : next.sheets.find(s => s.sheet)?.sheet?.id ?? null);
     } catch (e) { setError(errorText(e)); }
     finally { setLoading(false); }
-  }, [month, setError]);
+  }, [month, sectionId, setError]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -103,6 +108,10 @@ function Charts({ setError }: { setError: (m: string | null) => void }) {
             disabled={month >= new Date().toISOString().slice(0, 7)}><ChevronRight size={14} /></button>
         </div>
       </div>
+
+      <RegisterUnitPicker units={index?.units} canChooseUnit={index?.canChooseUnit}
+        sectionId={sectionId} onPick={setSectionId}
+        hint="You answer for every unit’s maintenance programme, so you can read and sign off any of them." />
 
       {loading ? <p className="muted">Loading…</p>
         : !index?.sheets.length ? (

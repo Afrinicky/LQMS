@@ -43,6 +43,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { parseIntNullable, getCurrentStaffId } from './routeHelpers.js';
+import { unitScopePayload, resolveUnitScope } from '../services/unitScope.js';
 import { resolvePermission } from '../services/permissionResolver.js';
 import { equipmentIsDiagnostic } from '../../shared/constants/equipment.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
@@ -111,12 +112,16 @@ export function iqcPortalRoutes() {
    */
   router.get('/portal/board', (req, res) => {
     const db = getDb();
-    const sectionId = parseIntNullable(req.query.sectionId) ?? currentSection(db, req);
+    // A unit's controls are a unit's, except for the posts that answer for the
+    // whole laboratory — they choose which unit's board they are looking at.
+    const scope = unitScopePayload(req, req.query.sectionId);
+    const sectionId = scope.sectionId;
     const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date)) ? String(req.query.date) : new Date().toISOString().slice(0, 10);
 
     if (!sectionId) {
       return res.json({
         date, sectionId: null, groups: [], counts: { due: 0, done: 0, failed: 0, pendingReview: 0 },
+        units: scope.units, canChooseUnit: scope.canChooseUnit,
         canPerform: mayPerform(req), canReview: mayReview(req),
         message: 'Your account is not linked to a unit. Ask an administrator to set it.',
       });
@@ -223,6 +228,7 @@ export function iqcPortalRoutes() {
 
     res.json({
       date, sectionId,
+      units: scope.units, canChooseUnit: scope.canChooseUnit,
       groups: [...groups.values()],
       counts: {
         controls: rows.length,
@@ -281,7 +287,7 @@ export function iqcPortalRoutes() {
 
   router.get('/portal/coverage', (req, res) => {
     const db = getDb();
-    const sectionId = parseIntNullable(req.query.sectionId) ?? currentSection(db, req);
+    const sectionId = resolveUnitScope(req, req.query.sectionId).sectionId;
     if (!sectionId) {
       return res.json({
         sectionId: null, sectionName: null, tests: [], counts: { tests: 0, covered: 0, uncovered: 0, controls: 0, needingLimits: 0 },
@@ -858,7 +864,7 @@ export function iqcPortalRoutes() {
 
   router.get('/portal/feeds', (req, res) => {
     const db = getDb();
-    const sectionId = parseIntNullable(req.query.sectionId) ?? currentSection(db, req);
+    const sectionId = resolveUnitScope(req, req.query.sectionId).sectionId;
     res.json(db.prepare(`SELECT f.*, e.name AS equipment_name,
           (SELECT COUNT(*) FROM iqc_feed_messages m WHERE m.feed_id = f.id AND m.status IN ('matched','unmatched')) AS waiting
         FROM iqc_instrument_feeds f LEFT JOIN equipment_items e ON e.id = f.equipment_id
@@ -901,7 +907,7 @@ export function iqcPortalRoutes() {
    */
   router.get('/portal/feed-messages', (req, res) => {
     const db = getDb();
-    const sectionId = parseIntNullable(req.query.sectionId) ?? currentSection(db, req);
+    const sectionId = resolveUnitScope(req, req.query.sectionId).sectionId;
     const status = typeof req.query.status === 'string' ? req.query.status : null;
     // A control run reaches the bench from one of two places: a feed something
     // else posts into, or an analyser link the bridge is holding open. Both are

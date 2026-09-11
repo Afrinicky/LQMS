@@ -11,11 +11,12 @@ import {
   frequencyPhrase, type ActivityCategory, type ActivityTier,
 } from '../../../shared/constants/activities';
 import { usePortal } from './portalData';
-import type { RoutineWorkResponse, RoutineActivity, ActivityOccurrence } from '../../../shared/types/api';
+import type { RoutineWorkResponse, RoutineActivity, ActivityOccurrence, RoutineUnit } from '../../../shared/types/api';
 import TextField from '../../components/ui/TextField';
 import PortalRoutineIqc from './PortalRoutineIqc';
 import PortalRoutineSheets, { PortalDeconProgramme } from './PortalRoutineSheets';
 import PortalUnitEquipment from './PortalUnitEquipment';
+import RegisterUnitPicker from '../../components/routine/RegisterUnitPicker';
 
 /**
  * Routine Work — the recurring work of the bench, done from the portal.
@@ -254,7 +255,7 @@ function ProgrammeGroup({ category, rows, onOpen }: {
 /* ----------------------------------------------------------------------------
    The face
    ------------------------------------------------------------------------- */
-export function PortalRoutineDue() {
+export function PortalRoutineDue({ sectionId }: { sectionId?: number | null } = {}) {
   const { setError } = usePortal();
   const { refresh: refreshDuty } = useDutyReminders();
   const [data, setData] = useState<RoutineWorkResponse | null>(null);
@@ -262,10 +263,10 @@ export function PortalRoutineDue() {
   const [filter, setFilter] = useState<string>('all');
 
   const load = useCallback(async () => {
-    try { setData(await api<RoutineWorkResponse>('/duty/routine')); }
+    try { setData(await api<RoutineWorkResponse>(`/duty/routine${sectionId ? `?sectionId=${sectionId}` : ''}`)); }
     catch (e) { setError(errorText(e)); }
     finally { setLoading(false); }
-  }, [setError]);
+  }, [setError, sectionId]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -307,7 +308,9 @@ export function PortalRoutineDue() {
 
   if (loading) return <div className="portal-loading">Reading your unit&rsquo;s routine programme…</div>;
 
-  const unitName = data?.duty.sectionName;
+  // The programme on screen is the unit being READ, which for a senior post is
+  // not necessarily the unit the roster put them in this morning.
+  const unitName = data?.sectionName ?? data?.duty.sectionName;
 
   return (
     <div className="portal-stack">
@@ -445,9 +448,50 @@ const FACES: Array<{ key: RoutineFace; label: string; icon: ReactNode; hint: str
     hint: 'This month\u2019s maintenance charts for your unit\u2019s instruments.' },
 ];
 
+/**
+ * Whose unit is being worked on.
+ *
+ * Routine work is a unit's, and for almost everybody the unit is simply the one
+ * their staff record names — so this returns a single unit, the picker below
+ * never renders, and nothing about the screen changes.
+ *
+ * Three posts are the exception. The administrator, the Quality Manager and the
+ * Laboratory Manager answer for every unit's programme, and being pinned to the
+ * unit they happen to sit in meant a Quality Manager in Haematology could not
+ * open Biochemistry's charts, set up Microbiology's decontamination, or show an
+ * assessor the whole programme. For them the unit is a choice, and it is made
+ * once here rather than five times inside the five faces.
+ */
+function useRoutineUnits() {
+  const [units, setUnits] = useState<RoutineUnit[]>([]);
+  const [canChoose, setCanChoose] = useState(false);
+  const [sectionId, setSectionId] = useState<number | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const next = await api<{ units: RoutineUnit[]; canChooseUnit: boolean; sectionId: number | null }>('/routine-sheets/units');
+        setUnits(next.units ?? []);
+        setCanChoose(Boolean(next.canChooseUnit));
+        setSectionId(next.sectionId ?? null);
+      } catch {
+        // A reader whose account is not linked to a unit simply gets no picker;
+        // every register below already says so in its own words.
+      }
+    })();
+  }, []);
+
+  return { units, canChoose, sectionId, setSectionId };
+}
+
 export default function PortalRoutineWork() {
   const [face, setFace] = useState<RoutineFace>('due');
   const { data: duty } = useDutyReminders();
+  const { units, canChoose, sectionId, setSectionId } = useRoutineUnits();
+
+  // Only a reader who may switch sends a unit at all. For everybody else the
+  // server decides from their own staff record, exactly as it always did.
+  const unit = canChoose ? sectionId : null;
 
   return (
     <div className="portal-stack">
@@ -462,21 +506,28 @@ export default function PortalRoutineWork() {
         ))}
       </nav>
 
-      {face === 'due' && <PortalRoutineDue />}
-      {face === 'iqc' && <PortalRoutineIqc />}
-      {face === 'environmental' && <PortalRoutineSheets kind="environmental" />}
+      <RegisterUnitPicker units={units} canChooseUnit={canChoose} sectionId={sectionId} onPick={setSectionId}
+        hint="You answer for every unit’s routine programme, so you can read, set up and chart any of them." />
+
+      {face === 'due' && <PortalRoutineDue sectionId={unit} />}
+      {face === 'iqc' && <PortalRoutineIqc sectionId={unit} />}
+      {face === 'environmental' && <PortalRoutineSheets kind="environmental" sectionId={unit} />}
       {face === 'decontamination' && (
         <>
-          <PortalRoutineSheets kind="decontamination" />
-          <PortalDeconProgramme />
+          <PortalRoutineSheets kind="decontamination" sectionId={unit} />
+          {/* The programme is read per unit rather than as the whole
+              catalogue, so "what YOUR unit decontaminates" is what it says.
+              The reader's own unit is enough here — the picker above only
+              changes it for the posts that may look elsewhere. */}
+          <PortalDeconProgramme sectionId={sectionId} />
         </>
       )}
       {face === 'equipment_maintenance' && (
         <>
           {/* The inventory comes first. "No maintenance tasks are defined" names
               no instrument and sizes no gap; this does both, and closes it. */}
-          <PortalUnitEquipment />
-          <PortalRoutineSheets kind="equipment_maintenance" />
+          <PortalUnitEquipment sectionId={unit} />
+          <PortalRoutineSheets kind="equipment_maintenance" sectionId={unit} />
         </>
       )}
     </div>
