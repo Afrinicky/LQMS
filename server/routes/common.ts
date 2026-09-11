@@ -11,6 +11,7 @@ import { seedDefaults } from '../db/seed.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requirePermission, viewableModulesOf } from '../middleware/permissions.js';
 import { resolvePermission, explainUserAccess } from '../services/permissionResolver.js';
+import { trainingFileFor } from '../services/trainingRecord.js';
 import { ACCESS_LEVELS, LEVEL_ACTIONS, featuresOfModule, type AccessLevel } from '../../shared/constants/features.js';
 import { pendingRequests, recentRequests, decideRequest } from '../services/passwordResetService.js';
 import { historicReferences, purgeDisposableRows, purgeUserEverywhere } from '../services/userReferences.js';
@@ -1711,7 +1712,15 @@ export function commonRoutes() {
       training: (db.prepare('SELECT COUNT(*) c FROM training_attendance WHERE staff_id = ?').get(req.params.id) as any).c,
       openActions: (db.prepare("SELECT COUNT(*) c FROM actions WHERE assigned_to_staff_id = ? AND status != 'Closed'").get(req.params.id) as any).c,
     };
-    res.json({ staff, positions, account, authorizations, activity });
+    // The person's whole training file, gathered from every module that records
+    // training rather than only from the personnel register. Training given on
+    // an analyser and entered in Equipment Management is this person's training
+    // and belongs on this profile; before, it was only visible to somebody who
+    // thought to open the equipment.
+    let training: ReturnType<typeof trainingFileFor> = { entries: [], summary: null as any };
+    try { training = trainingFileFor(db, Number(req.params.id)); }
+    catch { /* one panel short is better than no profile */ }
+    res.json({ staff, positions, account, authorizations, activity, training });
   });
 
   router.post('/staff/:id/positions', requirePermission('personnel.register', 'edit'), (req, res) => {

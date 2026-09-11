@@ -24,6 +24,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { AccessControl } from './AccessControl';
 import UserAccountActions from '../components/UserAccountActions';
 import PersonnelRegisterAdmin from '../components/PersonnelRegisterAdmin';
+import TrainingRecordPanel from '../components/training/TrainingRecordPanel';
 import { openStoredFile } from '../services/files';
 import PasswordResetApprovals from '../components/PasswordResetApprovals';
 import type {
@@ -245,9 +246,18 @@ export function RegisterStaff() {
         <div className="card mini"><h4>Documents</h4><p className="metric">{profile.activity.documents}</p></div>
         <div className="card mini"><h4>Declarations</h4><p className="metric">{profile.activity.declarations}</p></div>
         <div className="card mini"><h4>Competency</h4><p className="metric">{profile.activity.competency}</p></div>
-        <div className="card mini"><h4>Training</h4><p className="metric">{profile.activity.training}</p></div>
+        {/* The tile counts sessions in the personnel register; the file below
+            counts everything, including the training given on an instrument and
+            recorded in Equipment Management. The two differ on purpose, and the
+            file is the honest number. */}
+        <div className="card mini"><h4>Training sessions</h4><p className="metric">{profile.training?.summary?.total ?? profile.activity.training}</p></div>
         <div className="card mini"><h4>Open actions</h4><p className="metric">{profile.activity.openActions}</p></div>
       </div>
+
+      {/* Their whole training file, wherever each record was made. */}
+      <TrainingRecordPanel staffId={profile.staff.id} entries={profile.training?.entries}
+        title={`${profile.staff.full_name} — training file`} />
+
       <p className="hint"><Link to="/personnel">Open in Personnel Management</Link></p>
     </div>}
   </div>;

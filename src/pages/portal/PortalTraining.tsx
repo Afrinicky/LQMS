@@ -5,6 +5,8 @@ import { downloadFileById, dueTone, titleCase, usePortal } from './portalData';
 import { uploadPersonalFile } from './PortalTaskDrawer';
 import type { StaffCpdRecord } from '../../../shared/types/api';
 import TextField from '../../components/ui/TextField';
+import TrainingRecordPanel from '../../components/training/TrainingRecordPanel';
+import { trainerDisplayName } from '../../../shared/constants/training';
 
 /**
  * My training and competency — the evidence that this person is competent to
@@ -34,12 +36,12 @@ const CPD_TYPES = [
 
 type CpdForm = {
   id?: number;
-  title: string; provider: string; trainingType: string;
+  title: string; provider: string; trainerName: string; trainingType: string;
   startDate: string; endDate: string; hours: string; location: string; description: string;
 };
 
 const emptyForm: CpdForm = {
-  title: '', provider: '', trainingType: 'external_course',
+  title: '', provider: '', trainerName: '', trainingType: 'external_course',
   startDate: '', endDate: '', hours: '', location: '', description: '',
 };
 
@@ -69,6 +71,7 @@ export default function PortalTraining() {
       id: r.id,
       title: r.title,
       provider: r.provider || '',
+      trainerName: r.trainer_name || '',
       trainingType: r.training_type || 'external_course',
       startDate: r.start_date || '',
       endDate: r.end_date || '',
@@ -88,6 +91,7 @@ export default function PortalTraining() {
       const body = JSON.stringify({
         title: form.title.trim(),
         provider: form.provider.trim() || null,
+        trainerName: form.trainerName.trim() || null,
         trainingType: form.trainingType,
         startDate: form.startDate || null,
         endDate: form.endDate || null,
@@ -113,6 +117,13 @@ export default function PortalTraining() {
 
   return (
     <div className="portal-stack">
+      {/* ---- Everything, wherever it was recorded ----
+          Training given on an instrument and entered in Equipment Management is
+          this person's training and was previously invisible to them; it is
+          here now, alongside the sessions the laboratory booked and the courses
+          they entered themselves. */}
+      <TrainingRecordPanel title="My whole training file" />
+
       {/* ---- What I have done, recorded by me ---- */}
       <section className="portal-panel">
         <div className="pp-head">
@@ -148,6 +159,10 @@ export default function PortalTraining() {
                 </select>
               </label>
               <label><span>Who ran it?</span><TextField value={form.provider} onValue={nextValue => setForm({ ...form, provider: nextValue })} placeholder="Provider or institution" /></label>
+              {/* You know who taught it. There was nowhere to say so, which
+                  meant the one kind of record that always has a real outside
+                  trainer behind it was also the one that could not name them. */}
+              <label><span>Who taught it?</span><TextField value={form.trainerName} onValue={nextValue => setForm({ ...form, trainerName: nextValue })} placeholder="The trainer's name, if you have it" /></label>
               <label><span>Started</span><input type="date" value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })} /></label>
               <label><span>Finished</span><input type="date" value={form.endDate} onChange={e => setForm({ ...form, endDate: e.target.value })} /></label>
               <label><span>Hours</span><input type="number" min={0} step="0.5" value={form.hours} onChange={e => setForm({ ...form, hours: e.target.value })} placeholder="e.g. 8" /></label>
@@ -227,7 +242,7 @@ export default function PortalTraining() {
           <p className="muted">No training is scheduled for you.</p>
         ) : (
           <table className="data-table">
-            <thead><tr><th>Date</th><th>Training</th><th>Type</th><th>Where</th><th>My attendance</th></tr></thead>
+            <thead><tr><th>Date</th><th>Training</th><th>Trainer</th><th>Where</th><th>My attendance</th></tr></thead>
             <tbody>
               {training.map(t => {
                 const due = dueTone(t.training_date);
@@ -235,7 +250,9 @@ export default function PortalTraining() {
                   <tr key={t.id}>
                     <td>{t.training_date}{due && <div className={`pr-sub ${due.tone}`}>{due.text}</div>}</td>
                     <td>{t.title}<div className="muted pr-sub">{t.training_number}</div></td>
-                    <td>{titleCase(t.training_type)}</td>
+                    {/* Named whichever kind of trainer it is. This column read
+                        "—" for every session an outside trainer was giving. */}
+                    <td>{trainerDisplayName(t)}{t.delivery_mode === 'external' && <div className="muted pr-sub">External</div>}</td>
                     <td>{t.location || '—'}</td>
                     <td><span className="badge">{titleCase(t.attendance_status) || 'Invited'}</span></td>
                   </tr>

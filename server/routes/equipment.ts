@@ -5,6 +5,8 @@ import { getDb } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
+import { syncEquipmentTrainingEvent, trainingFileFor } from '../services/trainingRecord.js';
+import { TRAINING_DELIVERY_MODES, TRAINER_TYPES } from '../../shared/constants/training.js';
 import { generateEquipmentNumber, previewEquipmentNumber, getEquipmentPattern, saveEquipmentPattern } from '../utils/equipmentNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import {
@@ -583,16 +585,54 @@ export function equipmentRoutes() {
   });
 
   // ===================== Equipment training & competence =====================
+  // The trainer comes back joined whichever kind it was: a member of staff by
+  // name, or the outside person as they were typed in. The register showed a
+  // blank for every session an engineer gave, which is most of them.
+  const COMPETENCE_SELECT = `SELECT c.*, s.full_name AS staff_name, s.employee_no,
+      t.full_name AS trainer_name, a.full_name AS assessor_name,
+      te.training_number AS training_event_number
+    FROM equipment_competencies c
+    JOIN staff s ON s.id = c.staff_id
+    LEFT JOIN staff t ON t.id = c.trainer_staff_id
+    LEFT JOIN staff a ON a.id = c.assessor_staff_id
+    LEFT JOIN training_events te ON te.id = c.training_event_id`;
+
   router.get('/competencies', requirePermission('equipment.training', 'view'), (_req, res) => {
     const db = getDb();
-    res.json(db.prepare(`SELECT c.*, e.name AS equipment_name, e.equipment_number, s.full_name AS staff_name FROM equipment_competencies c JOIN equipment_items e ON e.id = c.equipment_id JOIN staff s ON s.id = c.staff_id ORDER BY c.created_at DESC`).all());
+    res.json(db.prepare(`SELECT c2.*, e.name AS equipment_name, e.equipment_number FROM (${COMPETENCE_SELECT}) c2
+      JOIN equipment_items e ON e.id = c2.equipment_id ORDER BY c2.created_at DESC`).all());
   });
 
   router.get('/:id/competencies', requirePermission('equipment.training', 'view'), (req, res) => {
     const db = getDb();
-    res.json(db.prepare('SELECT c.*, s.full_name AS staff_name FROM equipment_competencies c JOIN staff s ON s.id = c.staff_id WHERE c.equipment_id = ? ORDER BY c.created_at DESC').all(req.params.id));
+    res.json(db.prepare(`${COMPETENCE_SELECT} WHERE c.equipment_id = ? ORDER BY c.created_at DESC`).all(req.params.id));
   });
 
+  /**
+   * Everything this person has been trained on, from wherever it was recorded.
+   *
+   * Offered here so somebody signing off competence on an instrument can see
+   * the rest of the person's training file without leaving the equipment
+   * screen — including the training this very form is about to add to it.
+   */
+  router.get('/competencies/staff/:staffId', requirePermission('equipment.training', 'view'), (req, res) => {
+    res.json(trainingFileFor(getDb(), Number(req.params.staffId)));
+  });
+
+  /**
+   * Training and competence on one instrument.
+   *
+   * The trainer here is very often NOT on the staff register — the installing
+   * engineer, the supplier's application specialist — and the form only had a
+   * dropdown of employees, so the single most important trainer a laboratory
+   * deals with could not be named. Both kinds are now accepted, and which kind
+   * it was is stored rather than inferred.
+   *
+   * What is recorded here also reaches the person's own training file: a
+   * training event is raised in the personnel register carrying this record's
+   * id, so the same session shows up in Personnel Management and on the
+   * person's portal without anybody entering it a second time.
+   */
   router.post('/:id/competencies', requirePermission('equipment.training', 'create'), (req, res) => {
     if (!req.body.staffId) return res.status(400).json({ error: 'staffId is required' });
     const db = getDb();
@@ -604,9 +644,39 @@ export function equipmentRoutes() {
     const assessmentDate = req.body.assessmentDate ?? req.body.trainingDate ?? new Date().toISOString().slice(0, 10);
     const activity = `Operate equipment ${equipment.equipment_number} — ${equipment.name}`;
 
+    const deliveryMode = String(req.body.deliveryMode ?? 'internal');
+    const trainerType = String(req.body.trainerType ?? 'internal_staff');
+    if (!(TRAINING_DELIVERY_MODES as readonly string[]).includes(deliveryMode)) {
+      return res.status(400).json({ error: `Say whether the training was internal or external: ${TRAINING_DELIVERY_MODES.join(', ')}.` });
+    }
+    if (!(TRAINER_TYPES as readonly string[]).includes(trainerType)) {
+      return res.status(400).json({ error: `Say whether the trainer was a member of staff or from outside: ${TRAINER_TYPES.join(', ')}.` });
+    }
+    const externalName = String(req.body.externalTrainerName ?? '').trim();
+    // An unnamed outside trainer is the gap this change closes; accepting one
+    // would leave the record saying exactly what it said before.
+    if (trainerType === 'external_person' && !externalName) {
+      return res.status(400).json({ error: 'Name the trainer who came from outside, and the organisation they came from.' });
+    }
+    // One trainer per record. Whichever kind was chosen is kept and the other
+    // cleared, so a register can never show two trainers for one session.
+    const trainerStaffId = trainerType === 'external_person' ? null : parseIntNullable(req.body.trainerStaffId);
+    const trainingHours = req.body.trainingHours === undefined || req.body.trainingHours === '' ? null : Number(req.body.trainingHours);
+
     const tx = db.transaction(() => {
-      const result = db.prepare(`INSERT INTO equipment_competencies (equipment_id, staff_id, training_date, trainer_staff_id, assessment_method, assessment_date, assessor_staff_id, outcome, authorized, authorization_level, notes, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(req.params.id, staffId, req.body.trainingDate ?? null, parseIntNullable(req.body.trainerStaffId), req.body.assessmentMethod ?? null, assessmentDate, parseIntNullable(req.body.assessorStaffId), outcome, authorized, req.body.authorizationLevel ?? null, req.body.notes ?? null, 'recorded', req.user!.id);
+      const result = db.prepare(`INSERT INTO equipment_competencies
+          (equipment_id, staff_id, training_date, trainer_staff_id, delivery_mode, trainer_type,
+           external_trainer_name, external_trainer_organisation, external_trainer_qualifications, provider,
+           training_hours, assessment_method, assessment_date, assessor_staff_id, outcome, authorized,
+           authorization_level, notes, status, created_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(req.params.id, staffId, req.body.trainingDate ?? null, trainerStaffId, deliveryMode, trainerType,
+          trainerType === 'external_person' ? externalName : null,
+          trainerType === 'external_person' ? (req.body.externalTrainerOrganisation ?? null) : null,
+          trainerType === 'external_person' ? (req.body.externalTrainerQualifications ?? null) : null,
+          req.body.provider ?? null, trainingHours,
+          req.body.assessmentMethod ?? null, assessmentDate, parseIntNullable(req.body.assessorStaffId),
+          outcome, authorized, req.body.authorizationLevel ?? null, req.body.notes ?? null, 'recorded', req.user!.id);
       const ecId = Number(result.lastInsertRowid);
 
       let competencyAssessmentId: number | null = null;
@@ -629,10 +699,17 @@ export function equipmentRoutes() {
         db.prepare('UPDATE equipment_competencies SET competency_assessment_id = ?, technical_authorization_id = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
           .run(competencyAssessmentId, technicalAuthorizationId, authorized ? 'authorised' : 'competent', ecId);
       }
-      return { ecId, competencyAssessmentId, technicalAuthorizationId };
+      // The same session, on the person's own training file. Inside the
+      // transaction so a competence record and its training event are never
+      // half-written: either both exist or neither does.
+      const trainingEventId = syncEquipmentTrainingEvent(db, ecId, {
+        userId: req.user!.id,
+        makeNumber: generateRecordNumber,
+      });
+      return { ecId, competencyAssessmentId, technicalAuthorizationId, trainingEventId };
     });
     const out = tx();
-    audit(req, { action: 'create', entity: 'equipment_competencies', entityId: out.ecId, newValue: { equipmentId: req.params.id, staffId, outcome, authorized } });
+    audit(req, { action: 'create', entity: 'equipment_competencies', entityId: out.ecId, newValue: { equipmentId: req.params.id, staffId, outcome, authorized, deliveryMode, trainerType } });
     res.status(201).json(out);
   });
 

@@ -30,6 +30,9 @@ import { EnvironmentalMonitoringPage, EnvLiveCards } from './EnvironmentalMonito
 import DecontaminationPage from './DecontaminationPage';
 import EquipmentMaintenanceCharts from './EquipmentMaintenanceCharts';
 import { usePermissions } from '../hooks/usePermissions';
+import TrainerFields, { emptyTrainer, trainerPayload, trainerProblem } from '../components/training/TrainerFields';
+import TrainingRecordPanel from '../components/training/TrainingRecordPanel';
+import { trainerDisplayName } from '../../shared/constants/training';
 import PermissionTabs from '../components/PermissionTabs';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import { useCappedRows } from '../hooks/useCappedRows';
@@ -1224,21 +1227,52 @@ function EquipmentAdverseEventsTab({ equipment, staff, setError, onChanged }: { 
 
 // Staff training & competence on a specific equipment. Competent + authorised
 // records flow into the personnel competency and technical-authorisation files.
+/**
+ * Training and competence on one instrument.
+ *
+ * The trainer here is very often NOT on the staff register — the installing
+ * engineer, the supplier's application specialist — and this form had the same
+ * staff-only dropdown as the personnel register, so the single most important
+ * kind of equipment training a laboratory receives could not name who gave it.
+ * `TrainerFields` is the same block the personnel training form uses, so the
+ * two screens now ask the question identically.
+ *
+ * What is recorded here also reaches the person's own training file. It is not
+ * copied by hand and it is not a separate record to keep in step: the server
+ * raises one training event carrying this record's id, so Personnel Management
+ * and the person's portal show the same session, and correcting it here
+ * corrects it there.
+ */
 function EquipmentCompetencyTab({ equipment, staff, setError, onChanged }: { equipment: EquipmentItem[]; staff: Staff[]; setError: (m: string | null) => void; onChanged: () => void }) {
   const { can } = usePermissions();
   const [list, setList] = useState<EquipmentCompetency[]>([]);
-  const blank = { equipmentId: '', staffId: '', trainingDate: '', trainerStaffId: '', assessmentMethod: 'direct_observation', assessmentDate: '', assessorStaffId: '', outcome: 'competent', authorized: true, authorizationLevel: 'Perform', notes: '' };
+  const blank = {
+    ...emptyTrainer(),
+    equipmentId: '', staffId: '', trainingDate: '', trainingHours: '',
+    assessmentMethod: 'direct_observation', assessmentDate: '', assessorStaffId: '',
+    outcome: 'competent', authorized: true, authorizationLevel: 'Perform', notes: '',
+  };
   const [form, setForm] = useState(blank);
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [viewStaff, setViewStaff] = useState<{ id: number; name: string } | null>(null);
   function load() { api<EquipmentCompetency[]>('/equipment/competencies').then(setList).catch(() => setList([])); }
   useEffect(() => { load(); }, []);
 
   async function submit(e: FormEvent) {
-    e.preventDefault(); setError(null);
+    e.preventDefault(); setError(null); setNotice(null);
     if (!form.equipmentId || !form.staffId) { setError('Select equipment and staff.'); return; }
+    const problem = trainerProblem(form);
+    if (problem) { setError(problem); return; }
     setBusy(true);
     try {
-      await api(`/equipment/${form.equipmentId}/competencies`, { method: 'POST', body: JSON.stringify(form) });
+      const answer = await api<{ trainingEventId?: number | null }>(`/equipment/${form.equipmentId}/competencies`, {
+        method: 'POST', body: JSON.stringify({ ...form, ...trainerPayload(form) }),
+      });
+      const person = staff.find(s => String(s.id) === String(form.staffId));
+      setNotice(answer?.trainingEventId
+        ? `Recorded. It is now on ${person?.fullName ?? 'the staff member'}'s training file in Personnel Management and on their portal.`
+        : 'Recorded.');
       setForm(blank); load(); onChanged();
     } catch (e) { setError(errorText(e)); }
     finally { setBusy(false); }
@@ -1247,12 +1281,25 @@ function EquipmentCompetencyTab({ equipment, staff, setError, onChanged }: { equ
   return <div>
     <div className="card">
       <h3>Record training &amp; competence on equipment</h3>
-      <p className="muted" style={{ marginTop: 0 }}>When a staff member is competent and authorised, a competency assessment and technical authorisation are created automatically in Personnel Management, so the training file is populated in one place.</p>
-      {can('facilities_safety.incidents', 'create') && <form className="form" onSubmit={submit}>
+      <p className="muted" style={{ marginTop: 0 }}>
+        The trainer can be one of our own staff or somebody from outside — the engineer who installed it, the
+        supplier&apos;s application specialist. Whatever is recorded here lands on the person&apos;s own training file
+        as well, so it does not have to be entered twice. When they are competent and authorised, the competency
+        assessment and technical authorisation are created in Personnel Management at the same time.
+      </p>
+      {notice && <Notice kind="success">{notice}</Notice>}
+      {can('equipment.training', 'create') && <form className="form" onSubmit={submit}>
         <label>Equipment<select value={form.equipmentId} onChange={e => setForm({ ...form, equipmentId: e.target.value })} required><option value="">Select equipment</option>{equipment.map(e2 => <option key={e2.id} value={e2.id}>{e2.equipment_number} — {e2.name}</option>)}</select></label>
         <label>Staff<select value={form.staffId} onChange={e => setForm({ ...form, staffId: e.target.value })} required><option value="">Select staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
         <label>Training date<input type="date" value={form.trainingDate} onChange={e => setForm({ ...form, trainingDate: e.target.value })} /></label>
-        <label>Trainer<select value={form.trainerStaffId} onChange={e => setForm({ ...form, trainerStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        <label>Training hours<input type="number" min="0" step="0.5" value={form.trainingHours} onChange={e => setForm({ ...form, trainingHours: e.target.value })} placeholder="e.g. 4" /></label>
+
+        {/* The fix: either kind of trainer, asked the same way as everywhere else. */}
+        <div style={{ gridColumn: '1 / -1' }}>
+          <TrainerFields value={form} onChange={next => setForm({ ...form, ...next })} staff={staff}
+            providerLabel="Supplier / training provider" />
+        </div>
+
         <label>Assessment method<select value={form.assessmentMethod} onChange={e => setForm({ ...form, assessmentMethod: e.target.value })}>{['direct_observation', 'record_review', 'blind_sample', 'split_sample', 'problem_solving', 'result_interpretation', 'interview', 'other'].map(m => <option key={m} value={m}>{m.replace(/_/g, ' ')}</option>)}</select></label>
         <label>Assessment date<input type="date" value={form.assessmentDate} onChange={e => setForm({ ...form, assessmentDate: e.target.value })} /></label>
         <label>Assessor<select value={form.assessorStaffId} onChange={e => setForm({ ...form, assessorStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
@@ -1265,10 +1312,30 @@ function EquipmentCompetencyTab({ equipment, staff, setError, onChanged }: { equ
     </div>
     <div className="card" style={{ marginTop: 16 }}>
       <h3>Equipment competence register</h3>
-      {list.length === 0 ? <p className="muted">No records yet.</p> : <table className="table"><thead><tr><th>Staff</th><th>Equipment</th><th>Assessed</th><th>Outcome</th><th>Authorised</th><th>Personnel records</th><th>Status</th></tr></thead><tbody>
-        {list.map(c => <tr key={c.id}><td>{c.staff_name}</td><td>{c.equipment_number} — {c.equipment_name}</td><td>{c.assessment_date || c.training_date || '—'}</td><td>{c.outcome ? formatBadge(c.outcome) : '—'}</td><td>{c.authorized ? `✓ ${c.authorization_level || ''}` : '—'}</td><td>{c.competency_assessment_id ? `COMP #${c.competency_assessment_id}` : '—'}{c.technical_authorization_id ? ` · AUTH #${c.technical_authorization_id}` : ''}</td><td>{formatBadge(c.status)}</td></tr>)}
+      {list.length === 0 ? <p className="muted">No records yet.</p> : <table className="table"><thead><tr><th>Staff</th><th>Equipment</th><th>Trainer</th><th>Assessed</th><th>Outcome</th><th>Authorised</th><th>Personnel records</th><th>Status</th></tr></thead><tbody>
+        {list.map(c => <tr key={c.id}>
+          <td>
+            {c.staff_name}
+            {/* Their whole training file, from here — the point of joining the
+                two registers up is being able to see it without leaving. */}
+            <br /><button type="button" className="ghost" onClick={() => setViewStaff({ id: c.staff_id, name: c.staff_name ?? 'Staff member' })}>Training file</button>
+          </td>
+          <td>{c.equipment_number} — {c.equipment_name}</td>
+          <td>
+            {trainerDisplayName(c)}
+            {c.delivery_mode === 'external' && <><br /><small className="muted">Externally delivered</small></>}
+          </td>
+          <td>{c.assessment_date || c.training_date || '—'}</td>
+          <td>{c.outcome ? formatBadge(c.outcome) : '—'}</td>
+          <td>{c.authorized ? `✓ ${c.authorization_level || ''}` : '—'}</td>
+          <td>{c.competency_assessment_id ? `COMP #${c.competency_assessment_id}` : '—'}{c.technical_authorization_id ? ` · AUTH #${c.technical_authorization_id}` : ''}{c.training_event_number ? ` · ${c.training_event_number}` : ''}</td>
+          <td>{formatBadge(c.status)}</td>
+        </tr>)}
       </tbody></table>}
     </div>
+    {viewStaff && <DetailModal open onClose={() => setViewStaff(null)} title={<>{viewStaff.name} — training file</>}>
+      <TrainingRecordPanel staffId={viewStaff.id} title={`${viewStaff.name}'s training`} />
+    </DetailModal>}
   </div>;
 }
 
