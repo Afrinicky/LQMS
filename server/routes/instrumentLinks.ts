@@ -10,6 +10,10 @@
  *   POST   /instrument-links/:id/stop        stop it
  *   GET    /instrument-links/:id/messages    what this analyser has said
  *   POST   /instrument-links/:id/simulate    play a message at it, to prove the mapping
+ *   POST   /instrument-links/:id/fetch       look now, rather than wait to be sent to
+ *   POST   /instrument-links/fetch-all       look on every link that can be looked at
+ *   GET    /instrument-links/overview        is analyser transmission working?
+ *   GET    /instrument-links/:id/files       which files this link has read
  *
  * The whole surface is administrative — connecting an analyser is not bench
  * work — so it takes the IQC module's own edit right, and the safety rules the
@@ -141,6 +145,13 @@ export function instrumentLinkRoutes() {
       lhimsMapKey: pick(b.lhimsMapKey, existing.lhims_map_key) ?? null,
       measureMap: b.measureMap !== undefined ? JSON.stringify(b.measureMap ?? {}) : (existing.measure_map ?? null),
       tapPath: pick(b.tapPath, existing.tap_path) ?? null,
+      // Looking, as well as being sent to.
+      fetchEnabled: b.fetchEnabled !== undefined ? (b.fetchEnabled ? 1 : 0) : (existing.fetch_enabled ?? 0),
+      fetchIntervalSeconds: b.fetchIntervalSeconds !== undefined
+        ? Math.max(30, Number(b.fetchIntervalSeconds) || 300) : (existing.fetch_interval_seconds ?? 300),
+      filePattern: pick(b.filePattern, existing.file_pattern) ?? null,
+      archivePath: pick(b.archivePath, existing.archive_path) ?? null,
+      deleteAfterRead: b.deleteAfterRead !== undefined ? (b.deleteAfterRead ? 1 : 0) : (existing.delete_after_read ?? 0),
       autoStart: b.autoStart !== undefined ? (b.autoStart ? 1 : 0) : (existing.auto_start ?? 1),
       isActive: b.isActive !== undefined ? (b.isActive ? 1 : 0) : (existing.is_active ?? 1),
       notes: pick(b.notes, existing.notes) ?? null,
@@ -189,6 +200,18 @@ export function instrumentLinkRoutes() {
       }
     }
 
+    // Deleting the analyser's own export and moving it aside are alternatives,
+    // not a pair. Doing both would delete the archive it was just moved into.
+    if (v.deleteAfterRead && v.archivePath) {
+      return 'Choose one: move each file to an archive folder after reading it, or delete it. Doing both would delete the copy that was just archived.';
+    }
+    // Fetching is for the modes that can be asked. A listening socket has
+    // nothing to fetch — the analyser decides when to transmit — and offering
+    // a schedule that can never do anything is worse than not offering it.
+    if (v.fetchEnabled && v.mode !== 'file_drop' && v.mode !== 'lhims_tap') {
+      return 'Only a watched folder or the LHIMS client\'s log can be fetched on a schedule. A link the analyser connects to receives whenever the analyser sends.';
+    }
+
     // Never let a new link take a port an LHIMS-owned link uses.
     if (v.role !== 'lhims_owned' && v.mode === 'server' && v.listenPort) {
       const clash = db.prepare(`SELECT name FROM instrument_links
@@ -232,12 +255,16 @@ export function instrumentLinkRoutes() {
         (link_code, name, equipment_id, section_id, profile_key, role, mode, protocol,
          listen_host, listen_port, remote_host, remote_port, watch_path, analyte_map, control_patterns,
          forward_enabled, forward_host, forward_port, forward_target, lhims_url, lhims_username,
-         lhims_password, lhims_map_key, measure_map, tap_path, auto_start, is_active, notes, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+         lhims_password, lhims_map_key, measure_map, tap_path,
+         fetch_enabled, fetch_interval_seconds, file_pattern, archive_path, delete_after_read,
+         auto_start, is_active, notes, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(code, v.name, v.equipmentId, v.sectionId, v.profileKey, v.role, v.mode, v.protocol,
         v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath, v.analyteMap, v.controlPatterns,
         v.forwardEnabled, v.forwardHost, v.forwardPort, v.forwardTarget, v.lhimsUrl, v.lhimsUsername,
-        v.lhimsPassword, v.lhimsMapKey, v.measureMap, v.tapPath, v.autoStart, v.isActive, v.notes, req.user!.id);
+        v.lhimsPassword, v.lhimsMapKey, v.measureMap, v.tapPath,
+        v.fetchEnabled, v.fetchIntervalSeconds, v.filePattern, v.archivePath, v.deleteAfterRead,
+        v.autoStart, v.isActive, v.notes, req.user!.id);
 
     const id = Number(result.lastInsertRowid);
     if (v.isActive && v.autoStart) bridge.restart(id);
@@ -258,11 +285,13 @@ export function instrumentLinkRoutes() {
         watch_path = ?, analyte_map = ?, control_patterns = ?, forward_enabled = ?, forward_host = ?,
         forward_port = ?, forward_target = ?, lhims_url = ?, lhims_username = ?, lhims_password = ?,
         lhims_map_key = ?, measure_map = ?, tap_path = ?,
+        fetch_enabled = ?, fetch_interval_seconds = ?, file_pattern = ?, archive_path = ?, delete_after_read = ?,
         auto_start = ?, is_active = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
       .run(v.name, v.equipmentId, v.sectionId, v.profileKey, v.role, v.mode, v.protocol,
         v.listenHost, v.listenPort, v.remoteHost, v.remotePort, v.watchPath, v.analyteMap, v.controlPatterns,
         v.forwardEnabled, v.forwardHost, v.forwardPort, v.forwardTarget, v.lhimsUrl, v.lhimsUsername,
         v.lhimsPassword, v.lhimsMapKey, v.measureMap, v.tapPath,
+        v.fetchEnabled, v.fetchIntervalSeconds, v.filePattern, v.archivePath, v.deleteAfterRead,
         v.autoStart, v.isActive, v.notes, req.params.id);
 
     // Settings changed means the socket has to be rebuilt; a link that is now
@@ -311,6 +340,84 @@ export function instrumentLinkRoutes() {
     const row = db.prepare('SELECT * FROM instrument_links WHERE id = ?').get(id) as any;
     return row ? shape(row) : null;
   }
+
+
+  /* ======================================================================
+     Fetching
+     ----------------------------------------------------------------------
+     Everything above is built around being pushed to: the analyser dials in,
+     or writes a file, and something arrives. That is how transmission normally
+     works, and it leaves two things impossible — proving a new link works
+     without waiting for the analyser to decide to send something, and catching
+     up after this host has been switched off for an afternoon.
+
+     So a link can be asked to look. Only the modes that CAN look answer it: a
+     listening socket has nothing to fetch, because the analyser holds what it
+     has not sent yet, and a button that appears to do something and does not
+     is worse than no button.
+     ==================================================================== */
+  router.post('/:id/fetch', numericOnly, requirePermission(MODULE, 'view'), (req, res) => {
+    const db = getDb();
+    const link = db.prepare('SELECT * FROM instrument_links WHERE id = ?').get(req.params.id) as any;
+    if (!link) return res.status(404).json({ error: 'Link not found' });
+    const outcome = bridge.fetchNow(Number(req.params.id));
+    audit(req, { action: 'edit', entity: 'instrument_links', entityId: req.params.id, newValue: { fetched: true, read: outcome.read } });
+    res.json({ ...outcome, link: currentState(db, Number(req.params.id)) });
+  });
+
+  /**
+   * Look on every link that can be looked at.
+   *
+   * The one button somebody presses after the host has been off overnight. An
+   * LHIMS-owned link is skipped rather than attempted, because fetching it
+   * would mean opening it, and that is the one thing this bridge never does.
+   */
+  router.post('/fetch-all', requirePermission(MODULE, 'view'), (req, res) => {
+    const db = getDb();
+    const links = db.prepare(`SELECT id, name FROM instrument_links
+        WHERE is_active = 1 AND mode IN ('file_drop', 'lhims_tap') AND role != 'lhims_owned'
+        ORDER BY name`).all() as any[];
+    const results = links.map(link => {
+      // One link's folder being unreachable must not stop the rest being read.
+      try { return { id: link.id, name: link.name, ...bridge.fetchNow(link.id) }; }
+      catch (error) { return { id: link.id, name: link.name, ok: false, read: 0, note: (error as Error).message }; }
+    });
+    const read = results.reduce((sum, r) => sum + Number(r.read ?? 0), 0);
+    audit(req, { action: 'edit', entity: 'instrument_links', entityId: 0, newValue: { fetchedAll: links.length, read } });
+    res.json({
+      checked: links.length,
+      read,
+      note: links.length === 0
+        ? 'No link on this system is set up to be fetched. A watched folder or the LHIMS client\'s log can be; an analyser that connects to SECHLIMS sends when it is ready.'
+        : read ? `${read} new item(s) read across ${links.length} link(s).` : `Nothing new on any of the ${links.length} link(s) checked.`,
+      results,
+    });
+  });
+
+  /**
+   * Is analyser transmission working?
+   *
+   * One answer, for the screen that has to give it. Before this, answering
+   * meant opening every link in turn and reading its state, which is why
+   * nobody could say.
+   */
+  router.get('/overview', requirePermission(MODULE, 'view'), (_req, res) => {
+    res.json(bridge.overview());
+  });
+
+  /**
+   * Which files this link has read.
+   *
+   * The record that makes a folder sweep safe, shown so somebody can see it:
+   * a file that was read, when, and how many messages came out of it. "The
+   * analyser definitely exported that run" is settled here rather than argued
+   * about.
+   */
+  router.get('/:id/files', numericOnly, requirePermission(MODULE, 'view'), (req, res) => {
+    const rows = getDb().prepare(`SELECT * FROM instrument_files WHERE link_id = ?
+        ORDER BY id DESC LIMIT 200`).all(req.params.id);
+    res.json(rows);
+  });
 
   /* ======================================================================
      What the analyser has said

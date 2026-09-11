@@ -1,11 +1,11 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CalendarDays, CheckCircle2, ClipboardList, Cpu, ExternalLink, GraduationCap,
-  Loader2, Plus, Search, Target, Trash2, TrendingUp, UserCheck, Users, X,
+  Loader2, Plus, Target, Trash2, TrendingUp, UserCheck, Users,
 } from 'lucide-react';
 import { api, apiRead, errorText } from '../../services/api';
 import { usePermissions } from '../../hooks/usePermissions';
-import { DetailModal, KpiStrip, Notice } from '../../components/ui';
+import { DetailModal, KpiStrip, Notice, RegisterSearch } from '../../components/ui';
 import TextField from '../../components/ui/TextField';
 import TrainerFields, {
   emptyTrainer, trainerFrom, trainerPayload, trainerProblem, type TrainerValue,
@@ -126,7 +126,7 @@ export default function TrainingWorkspace({ staff, sections, equipment }: {
         e.external_trainer_organisation, e.provider, e.location, e.equipment_name]
         .some(v => String(v ?? '').toLowerCase().includes(term));
     });
-  }, [events, search, filter, ]);
+  }, [events, search, filter]);
 
   const stats = useMemo(() => {
     const all = events ?? [];
@@ -199,12 +199,12 @@ export default function TrainingWorkspace({ staff, sections, equipment }: {
       ]} />
 
       <div className="training-toolbar">
-        <div className="training-search">
-          <Search size={14} />
-          <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search by title, number, trainer, provider or instrument" />
-          {search && <button type="button" onClick={() => setSearch('')} aria-label="Clear"><X size={13} /></button>}
-        </div>
+        {/* RegisterSearch rather than a plain input: the text lives inside it,
+            so a keystroke re-renders one box instead of this whole workspace
+            and its card list. On a register of any size that difference is a
+            box that types and a box that appears to have stopped responding. */}
+        <RegisterSearch className="training-search" onQuery={setSearch}
+          placeholder="Search by title, number, trainer, provider or instrument" />
         <div className="training-filter">
           {([['all', 'All'], ['planned', 'Planned'], ['completed', 'Completed'],
             ['external', 'External'], ['follow_up', 'Follow-up owed']] as const).map(([key, label]) => (

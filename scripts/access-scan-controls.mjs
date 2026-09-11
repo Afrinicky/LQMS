@@ -105,14 +105,34 @@ for (const f of walk('src')) {
   const fnRe = /(?:async\s+function\s+([A-Za-z_$][\w$]*)|(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\()/g;
   const marks = []; let m;
   while ((m = fnRe.exec(src))) marks.push({ name: m[1]||m[2], at: m.index });
-  const writerCalls = new Map(); // fn -> [{method,path}]
+  // fn name -> every definition of that name, with where it starts.
+  //
+  // Keyed by name ALONE, a file holding six `submit` functions kept only the
+  // last, and every `onSubmit={submit}` in the file was attributed to it. In
+  // Phase3Pages that meant the equipment competence form was judged against
+  // the safety-incidents endpoint — so a form gated on the WRONG right read as
+  // correct, and correcting the right read as the bug. The definition nearest
+  // above the control is the one that control refers to, so all of them are
+  // kept and the nearest is chosen at match time.
+  const writerCalls = new Map(); // fn -> [{ at, calls: [{method,path}] }]
   marks.forEach((mk,i)=>{
     const body = src.slice(mk.at, i+1<marks.length?marks[i+1].at:src.length);
     const calls = [];
     for (const c of body.matchAll(/api[<(][^'"`]*['"`]([^'"`]+)['"`][\s\S]{0,120}?method:\s*'(POST|PUT|PATCH|DELETE)'/g)) calls.push({method:c[2],path:c[1]});
     for (const c of body.matchAll(/fetch\(`?\$?\{?API_BASE\}?([^'"`]*)['"`,][\s\S]{0,120}?method:\s*'(POST|PUT|PATCH|DELETE)'/g)) calls.push({method:c[2],path:c[1]});
-    if (calls.length) writerCalls.set(mk.name, calls);
+    if (calls.length) (writerCalls.get(mk.name) ?? writerCalls.set(mk.name, []).get(mk.name)).push({ at: mk.at, calls });
   });
+
+  // Character offset of the start of each line, so "nearest definition above
+  // this control" can be answered.
+  const lineAt = [];
+  { let n = 0; for (const l of lines) { lineAt.push(n); n += l.length + 1; } }
+  const callsFor = (name, lineIndex) => {
+    const defs = writerCalls.get(name) ?? [];
+    const here = lineAt[lineIndex] ?? 0;
+    const above = defs.filter(d => d.at <= here);
+    return (above.length ? above[above.length - 1] : defs[0]).calls;
+  };
 
   lines.forEach((line,i)=>{
     if (!/<button|<form|role="menuitem"|onSubmit=|onClick=/.test(line)) return;
@@ -121,7 +141,7 @@ for (const f of walk('src')) {
     if (!fn) return;
     const ctx = lines.slice(Math.max(0,i-3), i+1).join('\n');
     const gates = new Set();
-    for (const c of writerCalls.get(fn)) {
+    for (const c of callsFor(fn, i)) {
       const r = lookup(c.method, c.path);
       if (r?.key && r.action && !['ADMIN','RESOLVED'].includes(r.action)) gates.add(`${r.key}:${r.action}`);
       else if (r) gates.add(`(${r.action ?? 'unguarded'})`);

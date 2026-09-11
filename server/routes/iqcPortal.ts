@@ -212,9 +212,14 @@ export function iqcPortalRoutes() {
       groups.set(key, group);
     }
 
+    // Control runs waiting on the bench, from a posted feed OR from an analyser
+    // link the bridge is holding open. Counting only the first meant the tile
+    // read zero while the Sysmex was parking controls all morning.
     const pendingFeed = db.prepare(`SELECT COUNT(*) AS n FROM iqc_feed_messages fm
         LEFT JOIN iqc_instrument_feeds f ON f.id = fm.feed_id
-        WHERE fm.status IN ('matched', 'unmatched') AND (f.section_id IS NULL OR f.section_id = ?)`).get(sectionId) as any;
+        LEFT JOIN instrument_links l ON l.id = fm.link_id
+        WHERE fm.status IN ('matched', 'unmatched')
+          AND (COALESCE(f.section_id, l.section_id) IS NULL OR COALESCE(f.section_id, l.section_id) = ?)`).get(sectionId) as any;
 
     res.json({
       date, sectionId,
@@ -539,11 +544,19 @@ export function iqcPortalRoutes() {
         WHERE r.iqc_material_id = ? ORDER BY r.run_date DESC, r.id DESC LIMIT 10`).all(req.params.id);
     const layout = material.import_layout_id
       ? db.prepare('SELECT * FROM iqc_import_layouts WHERE id = ?').get(material.import_layout_id) : null;
+    // What is transmitting for this control. A posted feed if one is attached;
+    // otherwise the analyser link held open against the instrument this control
+    // runs on — which is the usual case now and was previously reported as
+    // "no instrument feed is attached", sending the bench off to configure
+    // something that was already working.
     const feed = material.feed_id
-      ? db.prepare('SELECT id, name, transport, protocol, last_message_at, last_error, is_active FROM iqc_instrument_feeds WHERE id = ?').get(material.feed_id) : null;
-    const waiting = material.feed_id
-      ? db.prepare("SELECT COUNT(*) AS n FROM iqc_feed_messages WHERE iqc_material_id = ? AND status = 'matched'").get(req.params.id) as any
-      : { n: 0 };
+      ? db.prepare('SELECT id, name, transport, protocol, last_message_at, last_error, is_active FROM iqc_instrument_feeds WHERE id = ?').get(material.feed_id)
+      : material.equipment_id
+        ? db.prepare(`SELECT id, name, mode AS transport, protocol, last_message_at, last_error, is_active, state
+            FROM instrument_links WHERE equipment_id = ? AND is_active = 1 ORDER BY id LIMIT 1`).get(material.equipment_id)
+        : null;
+    const waiting = db.prepare(`SELECT COUNT(*) AS n FROM iqc_feed_messages
+        WHERE iqc_material_id = ? AND status = 'matched'`).get(req.params.id) as any;
 
     res.json({
       material: {
@@ -890,13 +903,26 @@ export function iqcPortalRoutes() {
     const db = getDb();
     const sectionId = parseIntNullable(req.query.sectionId) ?? currentSection(db, req);
     const status = typeof req.query.status === 'string' ? req.query.status : null;
-    const rows = db.prepare(`SELECT m.*, f.name AS feed_name, f.protocol, e.name AS equipment_name,
+    // A control run reaches the bench from one of two places: a feed something
+    // else posts into, or an analyser link the bridge is holding open. Both are
+    // read here, and the link's name is taken when there is no feed — a message
+    // that arrived straight off the Sysmex was showing as "feed" with nothing
+    // to say which machine it came from, which is the one thing the bench needs
+    // in order to know whether to trust it.
+    const rows = db.prepare(`SELECT m.*,
+          COALESCE(f.name, l.name) AS feed_name,
+          COALESCE(f.protocol, l.protocol) AS protocol,
+          COALESCE(e.name, le.name) AS equipment_name,
+          l.id AS link_id_joined, l.state AS link_state,
           mat.material_name, mat.test_name, mat.level_label
         FROM iqc_feed_messages m
         LEFT JOIN iqc_instrument_feeds f ON f.id = m.feed_id
         LEFT JOIN equipment_items e ON e.id = f.equipment_id
+        LEFT JOIN instrument_links l ON l.id = m.link_id
+        LEFT JOIN equipment_items le ON le.id = l.equipment_id
         LEFT JOIN iqc_materials mat ON mat.id = m.iqc_material_id
-        WHERE (f.section_id IS NULL OR f.section_id = ? OR ? IS NULL)
+        WHERE (COALESCE(f.section_id, l.section_id) IS NULL
+               OR COALESCE(f.section_id, l.section_id) = ? OR ? IS NULL)
           AND (? IS NULL OR m.status = ?)
         ORDER BY m.received_at DESC LIMIT 200`).all(sectionId, sectionId, status, status) as any[];
     res.json(rows.map(r => ({ ...r, parsed_values: safeJson(r.parsed_values) })));
@@ -956,8 +982,16 @@ export function iqcPortalRoutes() {
 
     const analytes = db.prepare('SELECT * FROM iqc_analytes WHERE iqc_material_id = ? AND is_active = 1 ORDER BY display_order, id').all(materialId) as any[];
     const values = (safeJson(message.parsed_values) as any[]) ?? [];
-    const feed = message.feed_id ? db.prepare('SELECT analyte_map FROM iqc_instrument_feeds WHERE id = ?').get(message.feed_id) as any : null;
-    const map = (safeJson(feed?.analyte_map) as Record<string, string> | null) ?? {};
+    // The map that named these parameters. A message from a bridge link has no
+    // feed, and reading the feed table for it returned nothing — so every
+    // analyte came through under the analyser's own mnemonic and matched
+    // nothing on the control.
+    const source = message.feed_id
+      ? db.prepare('SELECT analyte_map FROM iqc_instrument_feeds WHERE id = ?').get(message.feed_id) as any
+      : message.link_id
+        ? db.prepare('SELECT analyte_map FROM instrument_links WHERE id = ?').get(message.link_id) as any
+        : null;
+    const map = (safeJson(source?.analyte_map) as Record<string, string> | null) ?? {};
 
     const grid = values.map(v => [String(map[String(v.analyte)] ?? v.analyte ?? ''), v.value]);
     const mapped = mapRows(grid, analytes);

@@ -31,6 +31,7 @@ import DecontaminationPage from './DecontaminationPage';
 import EquipmentMaintenanceCharts from './EquipmentMaintenanceCharts';
 import { usePermissions } from '../hooks/usePermissions';
 import TrainerFields, { emptyTrainer, trainerPayload, trainerProblem } from '../components/training/TrainerFields';
+import EquipmentAnalyserTab from '../components/instruments/EquipmentAnalyserTab';
 import TrainingRecordPanel from '../components/training/TrainingRecordPanel';
 import { trainerDisplayName } from '../../shared/constants/training';
 import PermissionTabs from '../components/PermissionTabs';
@@ -370,7 +371,7 @@ export function EquipmentPage() {
   return <div>
     <PageHeader eyebrow="Equipment Management" title="Equipment Management" subtitle="Asset register, maintenance, calibration, and breakdown tracking." />
     {error && <div className="card" style={{ color: 'var(--danger)' }}>{error}</div>}
-    {tabBarFor('equipment')(tab, ['Dashboard', 'Equipment Register', 'Equipment Profile', 'New Equipment', 'Verification & Validation', 'Calibration', 'Maintenance Records', 'Maintenance Charts', 'Scanned Records', 'Breakdowns', 'Adverse Events', 'Training & Competency', 'Equipment Files', 'Reports placeholder'], setTab)}
+    {tabBarFor('equipment')(tab, ['Dashboard', 'Equipment Register', 'Equipment Profile', 'New Equipment', 'Verification & Validation', 'Calibration', 'Maintenance Records', 'Maintenance Charts', 'Scanned Records', 'Breakdowns', 'Adverse Events', 'Analyser Sync', 'Training & Competency', 'Equipment Files', 'Reports placeholder'], setTab)}
 
     {tab === 'Dashboard' && <><ModuleAlerts moduleKey="equipment" /><KpiStrip items={[
       { label: 'Equipment items', value: summary?.equipmentTotal ?? equipment.length, onClick: () => setTab('Equipment Register') },
@@ -505,6 +506,11 @@ export function EquipmentPage() {
     </div>}
 
     {tab === 'Adverse Events' && <EquipmentAdverseEventsTab equipment={equipment} staff={staff} setError={setError} onChanged={() => { void load(); void reloadSelected(); }} />}
+
+    {/* "Is the Sysmex transmitting?" is an equipment question long before it is
+        a quality-control one, and the answer lived only in the last tab of the
+        IQC workspace. */}
+    {tab === 'Analyser Sync' && <EquipmentAnalyserTab equipment={equipment} />}
 
     {tab === 'Training & Competency' && <EquipmentCompetencyTab equipment={equipment} staff={staff} setError={setError} onChanged={() => { void reloadSelected(); }} />}
 

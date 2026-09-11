@@ -412,6 +412,11 @@ export const TAB_MODULE_OVERRIDES: Record<string, string> = {
   POCT: 'poct',
   'Blood banking': 'blood_bank_handover',
   Complaints: 'complaints',
+  // The equipment page's analyser tab reads the instrument links, and the
+  // server gates those on the quality-control module. Gating the tab on
+  // `equipment` instead would draw it for somebody the API then refuses,
+  // leaving them at an empty panel with nothing to explain it.
+  'Analyser Sync': 'iqc',
 };
 
 /**

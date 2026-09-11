@@ -42,6 +42,12 @@ export const SETTINGS_TABS: SettingsTab[] = [
   { to: '/settings/stock', label: 'Stock & Storage', module: 'supplier_inventory.stock', action: 'edit', grantsEntry: true },
   { to: '/settings/scheduling', label: 'Roster & Scheduling', module: 'personnel.rosters', action: 'edit', grantsEntry: true },
   { to: '/settings/activities', label: 'Unit Activities & Reminders', module: 'personnel.activities', action: 'edit', grantsEntry: true },
+  // Connecting an analyser is configuration, not bench work, and it had no
+  // home in Settings at all — it lived as the last tab of the IQC workspace,
+  // which is not where anybody looks to set up an instrument. It keeps the IQC
+  // module's own edit right, because that is the right the server enforces on
+  // it and inventing a second one would only let the two disagree.
+  { to: '/settings/analysers', label: 'Analyser Sync & Interfacing', module: 'iqc', action: 'edit', grantsEntry: true },
   { to: '/settings/system', label: 'System', module: 'settings', action: 'edit', administration: true, grantsEntry: true },
   { to: '/settings/document-import', label: 'Document Master List Import', module: 'documents.masterlist', action: 'import', grantsEntry: true },
   { to: '/settings/evidence', label: 'Evidence Upload', module: 'records_reports.evidence', action: 'create', grantsEntry: true },

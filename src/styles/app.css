@@ -5408,14 +5408,9 @@ button.cell-mark:disabled { cursor: default; }
 .training-workspace { display: grid; gap: 16px; }
 
 .training-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.training-search {
-  display: flex; align-items: center; gap: 8px; flex: 1 1 280px; min-width: 220px;
-  padding: 8px 12px; border-radius: var(--radius-pill);
-  border: 1px solid var(--border); background: var(--surface); color: var(--muted);
-}
-.training-search input { flex: 1; border: 0; background: transparent; padding: 0; color: var(--text); font-size: 12.5px; }
-.training-search input:focus { outline: none; box-shadow: none; }
-.training-search button { padding: 2px; background: none; border: 0; color: var(--faint); }
+/* RegisterSearch brings its own .reg-search styling; this only gives it room
+   in the toolbar row. */
+.training-search { flex: 1 1 280px; min-width: 220px; }
 
 .training-filter { display: flex; gap: 6px; flex-wrap: wrap; }
 .training-filter button {
@@ -5567,4 +5562,52 @@ button.cell-mark:disabled { cursor: default; }
   .training-toolbar { flex-direction: column; align-items: stretch; }
   .training-entry { grid-template-columns: 1fr; }
   .training-entry-icon { display: none; }
+}
+
+/* ============================================================================
+   ANALYSER SYNC — the overview, and the equipment view
+   ----------------------------------------------------------------------------
+   The one question this has to answer at a glance is "is transmission
+   working?", and it could not be answered before without opening every link in
+   turn. The strip below is that answer. The colour rule it follows matters: a
+   BLOCKED link is tinted like the LHIMS badge, never like a failure, because
+   blocked means the bridge is deliberately staying away from the link carrying
+   patient results — the most important safety rule in the system, working.
+   ========================================================================= */
+.il-overview {
+  display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
+  margin-bottom: 16px;
+}
+.il-ov {
+  display: grid; gap: 2px; padding: 13px 15px; border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, var(--card), var(--surface)); border: 1px solid var(--border);
+}
+.il-ov strong { font-size: 21px; font-weight: 650; line-height: 1.1; }
+.il-ov span { font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--faint); }
+.il-ov em { font-style: normal; font-size: 10.5px; color: var(--muted); margin-top: 3px; }
+.il-ov.t-ok strong { color: var(--success); }
+.il-ov.t-warn { border-color: rgba(245, 181, 68, 0.3); }
+.il-ov.t-warn strong { color: var(--warning); }
+.il-ov.t-crit { border-color: rgba(255, 107, 125, 0.3); }
+.il-ov.t-crit strong { color: var(--danger); }
+/* Left alone on purpose: informational, never alarming. */
+.il-ov.t-lhims { border-color: rgba(78, 141, 255, 0.28); }
+.il-ov.t-lhims strong { color: var(--info); }
+
+.il-head-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* What the last look found, in its own words — "nothing new in the folder" is
+   an answer, and hiding it is how somebody concludes the button does nothing. */
+.il-detail.is-fetch { color: var(--info); }
+
+.il-unlinked { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; font-size: 12px; }
+.il-unlinked li {
+  padding: 8px 12px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border);
+}
+.il-unlinked strong { color: var(--accent-bright); margin-right: 6px; }
+
+@media (max-width: 720px) {
+  .il-overview { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+  .il-head-actions { width: 100%; }
+  .il-head-actions button { flex: 1; justify-content: center; }
 }
