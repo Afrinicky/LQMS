@@ -24,6 +24,7 @@ import './styles/app.css';
 
 const DocumentControlPage = lazy(() => import('./pages/DocumentControlPage').then(m => ({ default: m.DocumentControlPage })));
 const DennisPage = lazy(() => import('./pages/DennisPage').then(m => ({ default: m.DennisPage })));
+const InstrumentLinksTab = lazy(() => import('./pages/InstrumentLinksTab'));
 const PersonnelManagementPage = lazy(() => import('./pages/PersonnelManagementPage').then(m => ({ default: m.PersonnelManagementPage })));
 const AssessmentsPage = lazy(() => import('./pages/Phase8Pages').then(m => ({ default: m.AssessmentsPage })));
 const MeetingsPage = lazy(() => import('./pages/Phase8Pages').then(m => ({ default: m.MeetingsPage })));
@@ -256,6 +257,9 @@ function AppRoutes() {
         <Route path="stock" element={<RequirePermission module="supplier_inventory.stock" action="edit"><StockSettingsPage/></RequirePermission>}/>
         <Route path="scheduling" element={<RequirePermission module="personnel.rosters" action="edit"><RosterSettings/></RequirePermission>}/>
         <Route path="activities" element={<RequirePermission module="personnel.activities" action="edit"><ActivitySettingsPage/></RequirePermission>}/>
+        {/* The same component the IQC workspace renders, so Settings and the
+            bench cannot show different versions of an analyser's state. */}
+        <Route path="analysers" element={<RequirePermission module="iqc" action="edit"><Suspense fallback={<ModuleFallback/>}><InstrumentLinksTab standalone/></Suspense></RequirePermission>}/>
         <Route path="system" element={<RequirePermission module="settings" action="edit"><SystemSettings/></RequirePermission>}/>
         <Route path="document-import" element={<RequirePermission module="documents.masterlist" action="create"><DocumentImport/></RequirePermission>}/>
         <Route path="evidence" element={<RequirePermission module="records_reports.evidence" action="create"><EvidenceUpload/></RequirePermission>}/>

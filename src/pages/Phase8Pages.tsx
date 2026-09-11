@@ -645,7 +645,9 @@ export function MeetingsPage({ embedded = false }: { embedded?: boolean } = {}) 
       </DetailModal>}
     </>}
 
-    {tab === 'New Meeting' && can('continual_improvement.projects', 'create') && <form className="form-grid" onSubmit={submit}>
+    {/* POST /meetings. Every "New …" form in this file asked for the right to
+        start an improvement project, which governs none of them. */}
+    {tab === 'New Meeting' && can('meetings', 'create') && <form className="form-grid" onSubmit={submit}>
       <label>Type<select value={form.meetingType} onChange={e => setForm({ ...form, meetingType: e.target.value })}>{MEETING_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select></label>
       <label>Title<TextField value={form.title} onValue={nextValue => setForm({ ...form, title: nextValue })} required /></label>
       <label>Date<input type="date" value={form.meetingDate} onChange={e => setForm({ ...form, meetingDate: e.target.value })} required /></label>
@@ -732,7 +734,8 @@ export function ManagementReviewPage({ embedded = false }: { embedded?: boolean 
       </DetailModal>}
     </>}
 
-    {tab === 'New Review' && can('continual_improvement.projects', 'create') && <form className="form-grid" onSubmit={submit}>
+    {/* POST /management-review. */}
+    {tab === 'New Review' && can('management_review', 'create') && <form className="form-grid" onSubmit={submit}>
       <label>Period start<input type="date" value={form.reviewPeriodStart} onChange={e => setForm({ ...form, reviewPeriodStart: e.target.value })} required /></label>
       <label>Period end<input type="date" value={form.reviewPeriodEnd} onChange={e => setForm({ ...form, reviewPeriodEnd: e.target.value })} required /></label>
       <label>Review date<input type="date" value={form.reviewDate} onChange={e => setForm({ ...form, reviewDate: e.target.value })} required /></label>
@@ -791,7 +794,8 @@ export function QualityIndicatorsPage({ embedded = false }: { embedded?: boolean
       {indicators.map(i => <tr key={i.id}><td>{i.indicator_code}</td><td>{i.indicator_name}</td><td>{i.frequency}</td><td>{i.target_value ?? '—'}</td><td>{i.warning_threshold ?? '—'}</td><td>{i.critical_threshold ?? '—'}</td><td>{i.is_active ? 'Yes' : 'No'}</td></tr>)}
     </tbody></table>}
 
-    {tab === 'New Indicator' && can('continual_improvement.projects', 'create') && <form className="form-grid" onSubmit={submit}>
+    {/* POST /quality-indicators. */}
+    {tab === 'New Indicator' && can('quality_indicators', 'create') && <form className="form-grid" onSubmit={submit}>
       <label>Code (auto if blank)<TextField value={form.indicatorCode} onValue={nextValue => setForm({ ...form, indicatorCode: nextValue })} /></label>
       <label>Name<TextField value={form.indicatorName} onValue={nextValue => setForm({ ...form, indicatorName: nextValue })} required /></label>
       <label>Section<select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>

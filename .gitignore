@@ -11,6 +11,8 @@ coverage/
 *.sqlite3
 *.db-journal
 *.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
 *.log
 logs/
 backups/

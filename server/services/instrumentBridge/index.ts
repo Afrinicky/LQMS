@@ -64,6 +64,9 @@ interface LinkRow {
   lhims_url: string | null; lhims_username: string | null; lhims_password: string | null;
   lhims_map_key: string | null; measure_map: string | null;
   tap_path: string | null; tap_offset: number | null;
+  // Fetching, for the modes that can be asked rather than only pushed to.
+  fetch_enabled: number; fetch_interval_seconds: number | null;
+  file_pattern: string | null; archive_path: string | null; delete_after_read: number;
   auto_start: number; is_active: number;
 }
 
@@ -314,6 +317,21 @@ class Link {
   }
 
   /* ------------------------------------------------------------ file drop */
+  /**
+   * A watched folder, swept as well as watched.
+   *
+   * The old arrangement only ever saw files CREATED while the watcher was
+   * running. Everything already sitting in the folder when the link started was
+   * invisible — permanently — and so was everything written while this host was
+   * switched off. A laboratory that pointed a link at a folder holding a
+   * fortnight of exports got nothing, with no error to explain it, which is the
+   * worst way for a feature to fail.
+   *
+   * So the folder is swept on start, on a schedule, and whenever somebody asks;
+   * the watcher stays because it makes an arriving file land in seconds rather
+   * than at the next sweep. Both paths go through the same sweep, so a file
+   * cannot be read twice by being both watched and swept.
+   */
   private startWatcher(): void {
     const dir = this.row.watch_path?.trim();
     if (!dir || !fs.existsSync(dir)) {
@@ -323,22 +341,196 @@ class Link {
     try {
       this.watcher = fs.watch(dir, (_event, filename) => {
         if (!filename) return;
-        const full = path.join(dir, String(filename));
-        // Give the analyser a moment to finish writing before reading it.
-        setTimeout(() => {
-          try {
-            if (!fs.existsSync(full) || !fs.statSync(full).isFile()) return;
-            const text = fs.readFileSync(full, 'latin1');
-            if (text.trim()) this.ingest(text, `file:${filename}`);
-          } catch (error) {
-            this.setState('error', (error as Error).message, (error as Error).message);
-          }
-        }, 750);
+        // Give the analyser a moment to finish writing before reading it. The
+        // sweep decides what is actually new, so a burst of events for one file
+        // costs a directory listing rather than a duplicated result.
+        setTimeout(() => { try { this.sweepFolder(); } catch { /* reported by the sweep */ } }, 750);
       });
-      this.setState('listening', `Watching ${dir}`);
+      const found = this.sweepFolder();
+      this.setState('listening', found
+        ? `Watching ${dir}. ${found} file(s) read on starting.`
+        : `Watching ${dir}`);
     } catch (error) {
       this.setState('error', (error as Error).message, (error as Error).message);
     }
+  }
+
+  /** Does this file name look like something the analyser exports? */
+  private matchesPattern(name: string): boolean {
+    const pattern = this.row.file_pattern?.trim();
+    // No pattern means every file. A folder an analyser writes into usually
+    // holds nothing else, and refusing files because they were not named in
+    // advance loses results for a configuration nobody knew they had to fill in.
+    if (!pattern) return true;
+    const parts = pattern.split(/[,;]/).map(p => p.trim()).filter(Boolean);
+    if (!parts.length) return true;
+    return parts.some(part => {
+      const escaped = part.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
+      return new RegExp(`^${escaped}$`, 'i').test(name);
+    });
+  }
+
+  /**
+   * Read whatever in the folder has not been read.
+   *
+   * The whole safety of this rests on `instrument_files`. A file is identified
+   * by its name, its size and its own modification time, so looking again picks
+   * up what was missed without ingesting yesterday's results a second time —
+   * and a file genuinely replaced by a newer version of itself reads as new,
+   * because it is. Re-reading a control run is not a harmless duplicate: it
+   * puts a point on a Levey-Jennings chart that never happened.
+   *
+   * Returns how many files were read, for the note on the screen.
+   */
+  private sweepFolder(): number {
+    const dir = this.row.watch_path?.trim();
+    if (!dir || !fs.existsSync(dir)) return 0;
+    const db = this.getDb();
+
+    let names: string[] = [];
+    try { names = fs.readdirSync(dir); }
+    catch (error) {
+      this.setState('error', `Reading ${dir}: ${(error as Error).message}`, (error as Error).message);
+      return 0;
+    }
+
+    let read = 0;
+    for (const name of names.sort()) {
+      if (!this.matchesPattern(name)) continue;
+      const full = path.join(dir, name);
+      let stat: fs.Stats;
+      try {
+        stat = fs.statSync(full);
+        if (!stat.isFile()) continue;
+      } catch { continue; }
+
+      // A file still being written to has its size change under us, and half a
+      // transmission parses as a shorter one rather than as an error. Anything
+      // touched in the last two seconds waits for the next sweep.
+      if (Date.now() - stat.mtimeMs < 2_000) continue;
+
+      const modified = new Date(stat.mtimeMs).toISOString();
+      try {
+        const seen = db.prepare(`SELECT id FROM instrument_files
+            WHERE link_id = ? AND file_name = ? AND file_size = ? AND modified_at = ?`)
+          .get(this.id, name, stat.size, modified);
+        if (seen) continue;
+      } catch { /* without the table, fall through and read it */ }
+
+      let messages = 0;
+      let outcome = 'read';
+      let note: string | null = null;
+      try {
+        const text = fs.readFileSync(full, 'latin1');
+        if (text.trim()) {
+          // One file may hold several transmissions, exactly as the tap's log
+          // does, so it is split the same way rather than parsed as one.
+          const { complete, remainder } = splitTransmissions(text, this.row.protocol);
+          const chunks = complete.length ? complete : [text];
+          for (const chunk of chunks) if (chunk.trim()) messages += this.ingest(chunk, `file:${name}`);
+          if (complete.length && remainder.trim()) {
+            // Something after the last terminator. Recorded rather than
+            // dropped: an analyser whose export is not framed as expected
+            // should leave evidence of it.
+            messages += this.ingest(remainder, `file:${name}`);
+          }
+        } else {
+          outcome = 'empty';
+          note = 'The file held nothing.';
+        }
+      } catch (error) {
+        outcome = 'error';
+        note = (error as Error).message;
+        this.setState('error', `Reading ${name}: ${note}`, note);
+      }
+
+      try {
+        db.prepare(`INSERT OR IGNORE INTO instrument_files
+            (link_id, file_name, file_size, modified_at, message_count, outcome, note)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`)
+          .run(this.id, name, stat.size, modified, messages, outcome, note);
+      } catch { /* the read happened; not recording it costs one re-read */ }
+
+      if (outcome !== 'error') {
+        read++;
+        this.disposeOf(full, name);
+      }
+    }
+    return read;
+  }
+
+  /**
+   * What becomes of a file once it has been read.
+   *
+   * Both options are off by default, and deliberately so: the analyser's export
+   * is the laboratory's own record of what it sent, and a bridge that deletes
+   * it by default destroys the only copy the first time it misreads something.
+   * A folder that is never cleared is a housekeeping problem; a folder that
+   * clears itself is a lost result.
+   */
+  private disposeOf(full: string, name: string): void {
+    const archive = this.row.archive_path?.trim();
+    try {
+      if (archive) {
+        fs.mkdirSync(archive, { recursive: true });
+        // Stamped, because analysers reuse file names and an archive that
+        // overwrites yesterday's export is not an archive.
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        fs.renameSync(full, path.join(archive, `${stamp}_${name}`));
+      } else if (this.row.delete_after_read) {
+        fs.unlinkSync(full);
+      }
+    } catch (error) {
+      this.setState('error', `Could not move ${name} aside: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * Look now, rather than waiting to be spoken to.
+   *
+   * Everything about this bridge was built around being pushed to, which is how
+   * transmission normally works and leaves two things impossible: proving a new
+   * link works without waiting for the analyser to decide to send something,
+   * and catching up after the host has been off for an afternoon.
+   *
+   * Only the modes that can be asked answer it. A listening socket has nothing
+   * to fetch — the analyser holds that — and saying so plainly is better than a
+   * button that appears to do something and does not.
+   */
+  fetchNow(): { ok: boolean; read: number; note: string } {
+    if (!linkIsOurs(this.row.role, this.row.mode)) {
+      return { ok: false, read: 0, note: 'LHIMS owns this link. SECHLIMS does not open it, and fetching would mean opening it.' };
+    }
+    const stamp = (note: string, read: number) => {
+      try {
+        this.getDb().prepare(`UPDATE instrument_links SET last_fetch_at = CURRENT_TIMESTAMP,
+            last_fetch_note = ? WHERE id = ?`).run(note, this.id);
+      } catch { /* the note is for the screen, not the record */ }
+      return { ok: true, read, note };
+    };
+
+    if (this.row.mode === 'file_drop') {
+      const read = this.sweepFolder();
+      return stamp(read ? `${read} new file(s) read from the folder.` : 'Nothing new in the folder.', read);
+    }
+    if (this.row.mode === 'lhims_tap') {
+      const file = this.row.tap_path?.trim();
+      if (!file) return { ok: false, read: 0, note: 'No path is set to the LHIMS client\'s log file.' };
+      const before = this.tapOffset;
+      try { this.readTap(file); }
+      catch (error) { return { ok: false, read: 0, note: (error as Error).message }; }
+      const gained = this.tapOffset - before;
+      return stamp(gained > 0 ? `Read ${gained} new byte(s) from the LHIMS client's log.` : 'Nothing new in the log.', gained > 0 ? 1 : 0);
+    }
+    if (this.row.mode === 'client') {
+      // Dialling out IS the fetch, so the honest answer is whether the
+      // connection is up — not a pretence that a message was pulled.
+      const live = Boolean(this.socket && !this.socket.destroyed);
+      return { ok: live, read: 0, note: live
+        ? 'Connected to the analyser and listening for what it sends. This link pulls nothing on demand; the analyser decides when to transmit.'
+        : 'Not connected to the analyser at the moment. It will keep retrying.' };
+    }
+    return { ok: false, read: 0, note: 'This link waits for the analyser to connect to it, so there is nothing to fetch. The analyser decides when to transmit.' };
   }
 
   /* -------------------------------------------------------------- the wire */
@@ -414,7 +606,7 @@ class Link {
    * order to map it, and an analyser that says something unexpected overnight
    * should leave evidence rather than a gap.
    */
-  private ingest(text: string, peer: string): void {
+  private ingest(text: string, peer: string): number {
     const db = this.getDb();
     let parsed: AnalyserMessage[] = [];
     try { parsed = parseFor(this.row.protocol, text); }
@@ -425,6 +617,7 @@ class Link {
 
     // A transmission with nothing parseable in it is still recorded, so the
     // bench can look at what actually arrived.
+    let recorded = 0;
     const toStore = parsed.length ? parsed : [{
       sampleId: null, lotNumber: null, instrument: null, runAt: null, results: [], raw: text,
     } as AnalyserMessage];
@@ -463,7 +656,9 @@ class Link {
       }
 
       if (kind === 'control') this.routeControl(db, messageId, message, values);
+      recorded++;
     }
+    return recorded;
   }
 
   /**
@@ -534,6 +729,7 @@ export class InstrumentBridge {
   private getDb: DbGetter;
   private links = new Map<number, Link>();
   private forwardTimer: NodeJS.Timeout | null = null;
+  private fetchTimer: NodeJS.Timeout | null = null;
   private started = false;
 
   constructor(getDb: DbGetter) { this.getDb = getDb; }
@@ -559,6 +755,99 @@ export class InstrumentBridge {
     // Onward forwarding to LHIMS, for links that have been told to. Idle when
     // none has, which is the default.
     this.forwardTimer = setInterval(() => { void this.drainForwardQueue(); }, 20_000);
+
+    // Looking, for the links that have been told to look. One timer that wakes
+    // every thirty seconds and decides which links are due, rather than a timer
+    // per link: a laboratory with a dozen folders should not be running a dozen
+    // clocks, and one sweep that throws must not stop the others.
+    this.fetchTimer = setInterval(() => { this.runDueFetches(); }, 30_000);
+  }
+
+  /**
+   * Sweep the links whose interval has elapsed.
+   *
+   * The interval is kept on the link rather than shared, because a folder an
+   * analyser writes to every few minutes and a log that is appended to all day
+   * do not want the same cadence, and polling a network share harder than it
+   * needs is how a share starts refusing connections.
+   */
+  private runDueFetches(): void {
+    let rows: Array<{ id: number; fetch_interval_seconds: number | null; last_fetch_at: string | null }> = [];
+    try {
+      rows = this.getDb().prepare(`SELECT id, fetch_interval_seconds, last_fetch_at FROM instrument_links
+          WHERE is_active = 1 AND fetch_enabled = 1 AND mode IN ('file_drop', 'lhims_tap')
+            AND role != 'lhims_owned'`).all() as any[];
+    } catch { return; }
+
+    const now = Date.now();
+    for (const row of rows) {
+      const link = this.links.get(row.id);
+      if (!link) continue;
+      const every = Math.max(30, Number(row.fetch_interval_seconds ?? 300)) * 1000;
+      const last = row.last_fetch_at ? Date.parse(String(row.last_fetch_at).replace(' ', 'T') + 'Z') : 0;
+      if (Number.isFinite(last) && now - last < every) continue;
+      // One link's sweep failing is one link's problem.
+      try { link.fetchNow(); }
+      catch (error) { console.error(`[bridge] scheduled fetch on link ${row.id}:`, (error as Error).message); }
+    }
+  }
+
+  /**
+   * Look now, on one link, because somebody asked.
+   *
+   * A link that is not running is started for the attempt rather than refused:
+   * "fetch" on a stopped link means "go and look", and telling somebody to
+   * start it first before it can look in a folder is a step that exists only
+   * because of how this was built.
+   */
+  fetchNow(linkId: number): { ok: boolean; read: number; note: string } {
+    let link = this.links.get(linkId);
+    if (!link) {
+      let row: LinkRow | undefined;
+      try { row = this.getDb().prepare('SELECT * FROM instrument_links WHERE id = ?').get(linkId) as LinkRow; }
+      catch { return { ok: false, read: 0, note: 'That link could not be read.' }; }
+      if (!row) return { ok: false, read: 0, note: 'That link no longer exists.' };
+      if (!row.is_active) return { ok: false, read: 0, note: 'This link is switched off.' };
+      link = new Link(this.getDb, row);
+      this.links.set(linkId, link);
+    }
+    return link.fetchNow();
+  }
+
+  /**
+   * What the whole bridge is doing, in one answer.
+   *
+   * Built for the screen that asks "is analyser transmission working?" — a
+   * question nobody could answer without opening every link in turn and
+   * reading its state.
+   */
+  overview(): Record<string, unknown> {
+    const db = this.getDb();
+    const blank = { links: 0, running: 0, blocked: 0, failing: 0, messagesToday: 0, controlsWaiting: 0, forwardPending: 0, forwardFailed: 0, lastMessageAt: null as string | null };
+    try {
+      const links = db.prepare('SELECT * FROM instrument_links WHERE is_active = 1').all() as LinkRow[];
+      const counts = db.prepare(`SELECT
+          (SELECT COUNT(*) FROM instrument_messages WHERE date(received_at) = date('now')) AS today,
+          (SELECT MAX(received_at) FROM instrument_messages) AS last_at,
+          (SELECT COUNT(*) FROM iqc_feed_messages WHERE status IN ('matched','unmatched')) AS waiting,
+          (SELECT COUNT(*) FROM instrument_messages WHERE forward_status = 'pending') AS pending,
+          (SELECT COUNT(*) FROM instrument_messages WHERE forward_status = 'failed') AS failed`).get() as any;
+      return {
+        links: links.length,
+        // A blocked link is not a broken one: it is the bridge deliberately
+        // staying away from the transmission LHIMS owns, and counting it as a
+        // failure would make the screen say something is wrong when the most
+        // important safety rule in the system is working.
+        running: links.filter(l => this.isRunning(l.id)).length,
+        blocked: links.filter(l => (l as any).state === 'blocked').length,
+        failing: links.filter(l => (l as any).state === 'error').length,
+        messagesToday: Number(counts?.today ?? 0),
+        lastMessageAt: counts?.last_at ?? null,
+        controlsWaiting: Number(counts?.waiting ?? 0),
+        forwardPending: Number(counts?.pending ?? 0),
+        forwardFailed: Number(counts?.failed ?? 0),
+      };
+    } catch { return blank; }
   }
 
   private startLink(row: LinkRow): void {
@@ -592,6 +881,7 @@ export class InstrumentBridge {
     for (const link of this.links.values()) link.stop();
     this.links.clear();
     if (this.forwardTimer) { clearInterval(this.forwardTimer); this.forwardTimer = null; }
+    if (this.fetchTimer) { clearInterval(this.fetchTimer); this.fetchTimer = null; }
     this.started = false;
   }
 

@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  AlertTriangle, Check, Cable, Loader2, Play, Plus, Radio, ShieldCheck,
-  Square, TestTube2, Trash2, X,
+  AlertTriangle, Check, Cable, DownloadCloud, FolderOpen, Loader2, Play, Plus, Radio,
+  ShieldCheck, Square, TestTube2, Trash2, X,
 } from 'lucide-react';
 import { api, errorText } from '../services/api';
 import { usePermissions } from '../hooks/usePermissions';
 import TextField from '../components/ui/TextField';
 import NumberField from '../components/ui/NumberField';
 import { Notice } from '../components/ui/Feedback';
+import PageHeader from '../components/ui/PageHeader';
 import {
   LINK_MODES, LINK_MODE_HINTS, LINK_MODE_LABELS,
   LINK_PROTOCOLS, LINK_PROTOCOL_HINTS, LINK_PROTOCOL_LABELS,
@@ -56,12 +57,22 @@ type Link = {
   lhims_url: string | null; lhims_username: string | null; lhims_password_set: boolean;
   lhims_map_key: string | null;
   tap_path: string | null; tap_offset: number | null;
+  fetch_enabled: number; fetch_interval_seconds: number | null;
+  last_fetch_at: string | null; last_fetch_note: string | null;
+  file_pattern: string | null; archive_path: string | null; delete_after_read: number;
   auto_start: number; is_active: number;
   state: string; state_detail: string | null; last_error: string | null;
   last_connected_at: string | null; last_message_at: string | null;
   messages_received: number; controls_matched: number;
   message_count: number; control_count: number; forward_pending: number;
   running: boolean; notes: string | null;
+};
+
+/** What the whole bridge is doing — the answer to "is transmission working?". */
+type Overview = {
+  links: number; running: number; blocked: number; failing: number;
+  messagesToday: number; lastMessageAt: string | null;
+  controlsWaiting: number; forwardPending: number; forwardFailed: number;
 };
 
 type Profile = { key: string; label: string; vendor: string; discipline: string; protocol: string; notes: string | null; analyteCount: number };
@@ -76,10 +87,22 @@ const EMPTY = {
   forwardTarget: 'lhims_api',
   lhimsUrl: '', lhimsUsername: '', lhimsPassword: '', lhimsMapKey: '',
   tapPath: '',
+  // Looking, as well as being sent to.
+  fetchEnabled: false, fetchIntervalSeconds: '300',
+  filePattern: '', archivePath: '', deleteAfterRead: false,
   autoStart: true, notes: '',
 };
 
-export default function InstrumentLinksTab() {
+/** Only a folder or a log file can be asked to be read again. */
+const CAN_FETCH = (mode: string) => mode === 'file_drop' || mode === 'lhims_tap';
+
+/**
+ * `standalone` renders the page's own heading and the overview strip. The
+ * component is the same one on both routes on purpose: Settings and the IQC tab
+ * showing subtly different versions of an analyser's state is exactly how two
+ * screens come to disagree about whether transmission is working.
+ */
+export default function InstrumentLinksTab({ standalone = false }: { standalone?: boolean } = {}) {
   const { can } = usePermissions();
   const canEdit = can('iqc', 'edit');
   const [links, setLinks] = useState<Link[] | null>(null);
@@ -94,11 +117,23 @@ export default function InstrumentLinksTab() {
   const [form, setForm] = useState({ ...EMPTY });
   const [busy, setBusy] = useState<number | 'save' | null>(null);
   const [openMessages, setOpenMessages] = useState<Link | null>(null);
+  const [openFiles, setOpenFiles] = useState<Link | null>(null);
   const [trying, setTrying] = useState<Link | null>(null);
+  const [overview, setOverview] = useState<Overview | null>(null);
+  const [fetching, setFetching] = useState<number | 'all' | null>(null);
 
   const load = useCallback(async () => {
-    try { setLinks(await api<Link[]>('/instrument-links')); setError(null); }
-    catch (e) { setError(errorText(e)); }
+    try {
+      const [rows, summary] = await Promise.all([
+        api<Link[]>('/instrument-links'),
+        // The overview is a convenience; the list is the record. A summary that
+        // will not load must not empty the screen.
+        api<Overview>('/instrument-links/overview').catch(() => null),
+      ]);
+      setLinks(rows);
+      if (summary) setOverview(summary);
+      setError(null);
+    } catch (e) { setError(errorText(e)); }
   }, []);
 
   useEffect(() => { void load(); }, [load]);
@@ -147,6 +182,11 @@ export default function InstrumentLinksTab() {
       ...(form.lhimsPassword ? { lhimsPassword: form.lhimsPassword } : {}),
       lhimsMapKey: form.lhimsMapKey || null,
       tapPath: form.tapPath || null,
+      fetchEnabled: form.fetchEnabled,
+      fetchIntervalSeconds: Number(form.fetchIntervalSeconds) || 300,
+      filePattern: form.filePattern || null,
+      archivePath: form.archivePath || null,
+      deleteAfterRead: form.deleteAfterRead,
       autoStart: form.autoStart, notes: form.notes || null,
     };
     try {
@@ -157,6 +197,34 @@ export default function InstrumentLinksTab() {
       await load();
     } catch (e) { setError(errorText(e)); }
     finally { setBusy(null); }
+  }
+
+  /**
+   * Ask one link to look now.
+   *
+   * The answer is always stated, including when the answer is "there is nothing
+   * to fetch on a link the analyser connects to" — a button that quietly does
+   * nothing teaches people the feature is broken.
+   */
+  async function fetchOne(link: Link) {
+    setFetching(link.id); setError(null); setNotice(null);
+    try {
+      const answer = await api<{ ok: boolean; read: number; note: string }>(`/instrument-links/${link.id}/fetch`, { method: 'POST' });
+      if (answer.ok) setNotice(`${link.name}: ${answer.note}`); else setError(`${link.name}: ${answer.note}`);
+      await load();
+    } catch (e) { setError(errorText(e)); }
+    finally { setFetching(null); }
+  }
+
+  /** The one button after the host has been switched off overnight. */
+  async function fetchAll() {
+    setFetching('all'); setError(null); setNotice(null);
+    try {
+      const answer = await api<{ note: string }>('/instrument-links/fetch-all', { method: 'POST' });
+      setNotice(answer.note);
+      await load();
+    } catch (e) { setError(errorText(e)); }
+    finally { setFetching(null); }
   }
 
   async function act(link: Link, action: 'start' | 'stop') {
@@ -171,6 +239,35 @@ export default function InstrumentLinksTab() {
 
   return (
     <div>
+      {standalone && (
+        <PageHeader
+          eyebrow="Settings"
+          title="Analyser sync"
+          subtitle="Where the laboratory's analysers connect to SECHLIMS, what they have sent, and what is passed on to LHIMS."
+        />
+      )}
+
+      {/* Is transmission working? One strip, so the answer does not require
+          opening every link in turn and reading its state — which is why
+          nobody could answer it. */}
+      {overview && (
+        <div className="il-overview">
+          <OverviewStat label="Links configured" value={overview.links} />
+          <OverviewStat label="Running now" value={overview.running} tone={overview.running ? 'ok' : undefined} />
+          {/* Blocked is not broken. It is the bridge deliberately staying away
+              from the transmission LHIMS owns, which is the most important
+              safety rule in this system working exactly as intended. */}
+          {overview.blocked > 0 && <OverviewStat label="Left alone (LHIMS)" value={overview.blocked} tone="lhims" />}
+          {overview.failing > 0 && <OverviewStat label="Failing" value={overview.failing} tone="crit" />}
+          <OverviewStat label="Messages today" value={overview.messagesToday}
+            note={overview.lastMessageAt ? `last at ${String(overview.lastMessageAt).slice(11, 16)}` : 'nothing yet today'} />
+          <OverviewStat label="Controls on the bench" value={overview.controlsWaiting}
+            tone={overview.controlsWaiting ? 'warn' : undefined} note="waiting to be accepted in IQC" />
+          {overview.forwardPending > 0 && <OverviewStat label="Waiting for LHIMS" value={overview.forwardPending} tone="warn" />}
+          {overview.forwardFailed > 0 && <OverviewStat label="LHIMS refused" value={overview.forwardFailed} tone="crit" />}
+        </div>
+      )}
+
       <div className="card">
         <div className="pp-head">
           <div>
@@ -181,11 +278,18 @@ export default function InstrumentLinksTab() {
               which is how the transmission that carries patient results today stays exactly as it is.
             </p>
           </div>
-          {canEdit && (
-            <button type="button" onClick={() => { setEditing(null); setForm({ ...EMPTY }); setShowForm(true); }}>
-              <Plus size={13} /> Add a link
+          <div className="il-head-actions">
+            {/* Fetching exists because everything else here waits to be spoken
+                to. After a night with the host switched off, this is the button. */}
+            <button type="button" className="secondary" disabled={fetching !== null} onClick={() => void fetchAll()}>
+              {fetching === 'all' ? <Loader2 size={13} className="pd-spin" /> : <DownloadCloud size={13} />} Fetch now
             </button>
-          )}
+            {canEdit && (
+              <button type="button" onClick={() => { setEditing(null); setForm({ ...EMPTY }); setShowForm(true); }}>
+                <Plus size={13} /> Add a link
+              </button>
+            )}
+          </div>
         </div>
 
         {error && <Notice kind="error">{error}</Notice>}
@@ -219,9 +323,11 @@ export default function InstrumentLinksTab() {
               <ul className="il-list">
                 {ours.map(link => (
                   <LinkRow key={link.id} link={link} canEdit={canEdit} busy={busy === link.id}
+                    fetching={fetching === link.id}
                     onStart={() => void act(link, 'start')} onStop={() => void act(link, 'stop')}
                     onEdit={() => { setEditing(link); setForm(formFrom(link)); setShowForm(true); }}
-                    onMessages={() => setOpenMessages(link)} onTry={() => setTrying(link)} />
+                    onMessages={() => setOpenMessages(link)} onFiles={() => setOpenFiles(link)}
+                    onFetch={() => void fetchOne(link)} onTry={() => setTrying(link)} />
                 ))}
               </ul>
             )}
@@ -232,9 +338,11 @@ export default function InstrumentLinksTab() {
                 <ul className="il-list">
                   {theirs.map(link => (
                     <LinkRow key={link.id} link={link} canEdit={canEdit} busy={busy === link.id}
+                      fetching={fetching === link.id}
                       onStart={() => void act(link, 'start')} onStop={() => void act(link, 'stop')}
                       onEdit={() => { setEditing(link); setForm(formFrom(link)); setShowForm(true); }}
-                      onMessages={() => setOpenMessages(link)} onTry={() => setTrying(link)} />
+                      onMessages={() => setOpenMessages(link)} onFiles={() => setOpenFiles(link)}
+                      onFetch={() => void fetchOne(link)} onTry={() => setTrying(link)} />
                   ))}
                 </ul>
               </>
@@ -250,6 +358,7 @@ export default function InstrumentLinksTab() {
           onSave={() => void save()} onClose={() => { setShowForm(false); setEditing(null); }} />
       )}
       {openMessages && <MessagesDialog link={openMessages} onClose={() => setOpenMessages(null)} />}
+      {openFiles && <FilesDialog link={openFiles} onClose={() => setOpenFiles(null)} />}
       {trying && <TryDialog link={trying} onClose={() => setTrying(null)} />}
     </div>
   );
@@ -273,17 +382,33 @@ function formFrom(link: Link) {
     lhimsPassword: '',
     lhimsMapKey: link.lhims_map_key ?? '',
     tapPath: link.tap_path ?? '',
+    fetchEnabled: Boolean(link.fetch_enabled),
+    fetchIntervalSeconds: String(link.fetch_interval_seconds ?? 300),
+    filePattern: link.file_pattern ?? '', archivePath: link.archive_path ?? '',
+    deleteAfterRead: Boolean(link.delete_after_read),
     autoStart: Boolean(link.auto_start), notes: link.notes ?? '',
   };
+}
+
+function OverviewStat({ label, value, note, tone }: {
+  label: string; value: number; note?: string; tone?: 'ok' | 'warn' | 'crit' | 'lhims';
+}) {
+  return (
+    <div className={`il-ov${tone ? ` t-${tone}` : ''}`}>
+      <strong>{value}</strong>
+      <span>{label}</span>
+      {note && <em>{note}</em>}
+    </div>
+  );
 }
 
 /* ----------------------------------------------------------------------------
    One link
    ------------------------------------------------------------------------- */
-function LinkRow({ link, canEdit, busy, onStart, onStop, onEdit, onMessages, onTry }: {
-  link: Link; canEdit: boolean; busy: boolean;
+function LinkRow({ link, canEdit, busy, fetching, onStart, onStop, onEdit, onMessages, onFiles, onFetch, onTry }: {
+  link: Link; canEdit: boolean; busy: boolean; fetching: boolean;
   onStart: () => void; onStop: () => void; onEdit: () => void;
-  onMessages: () => void; onTry: () => void;
+  onMessages: () => void; onFiles: () => void; onFetch: () => void; onTry: () => void;
 }) {
   const tone = link.state === 'connected' ? 'ok'
     : link.state === 'listening' || link.state === 'following' ? 'ok'
@@ -318,7 +443,15 @@ function LinkRow({ link, canEdit, busy, onStart, onStop, onEdit, onMessages, onT
           {link.control_count > 0 && <span>{link.control_count} control{link.control_count === 1 ? '' : 's'}</span>}
           {link.last_message_at && <span>last heard {String(link.last_message_at).slice(0, 16).replace('T', ' ')}</span>}
           {link.forward_pending > 0 && <span className="warn">{link.forward_pending} waiting to forward</span>}
+          {Boolean(link.fetch_enabled) && CAN_FETCH(link.mode) && (
+            <span>checked every {Math.round((link.fetch_interval_seconds ?? 300) / 60)} min</span>
+          )}
+          {link.last_fetch_at && <span>last looked {String(link.last_fetch_at).slice(0, 16).replace('T', ' ')}</span>}
         </span>
+        {/* What the last look found, in its own words. "Nothing new in the
+            folder" is an answer, and not showing it is how somebody concludes
+            the button does nothing. */}
+        {link.last_fetch_note && <p className="il-detail is-fetch">{link.last_fetch_note}</p>}
         {link.state_detail && <p className={`il-detail${link.state === 'error' ? ' is-error' : ''}`}>{link.state_detail}</p>}
       </div>
       <div className="il-side">
@@ -329,7 +462,13 @@ function LinkRow({ link, canEdit, busy, onStart, onStop, onEdit, onMessages, onT
                 {busy ? <Loader2 size={12} className="pd-spin" /> : <Play size={12} />} Start
               </button>
         )}
+        {CAN_FETCH(link.mode) && link.role !== 'lhims_owned' && (
+          <button type="button" className="pq-link" disabled={fetching} onClick={onFetch}>
+            {fetching ? <Loader2 size={12} className="pd-spin" /> : <DownloadCloud size={12} />} Fetch
+          </button>
+        )}
         <button type="button" className="pq-link" onClick={onMessages}>Messages</button>
+        {link.mode === 'file_drop' && <button type="button" className="pq-link" onClick={onFiles}><FolderOpen size={12} /> Files</button>}
         <button type="button" className="pq-link" onClick={onTry}><TestTube2 size={12} /> Try one</button>
         {canEdit && <button type="button" className="pq-link" onClick={onEdit}>Settings</button>}
       </div>
@@ -439,8 +578,37 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
           </div>
         )}
         {form.mode === 'file_drop' && (
-          <label><span>Folder to watch</span>
-            <TextField value={form.watchPath} onValue={v => set('watchPath', v)} placeholder="C:\\Analyser\\Export" /></label>
+          <>
+            <label><span>Folder to watch</span>
+              <TextField value={form.watchPath} onValue={v => set('watchPath', v)} placeholder="C:\\Analyser\\Export" /></label>
+            <div className="iqc-run-meta">
+              <label><span>Which files (optional)</span>
+                <TextField value={form.filePattern} onValue={v => set('filePattern', v)} placeholder="*.txt, *.csv" />
+                <span className="muted" style={{ display: 'block', marginTop: 4, fontSize: 11.5 }}>
+                  Separated by commas. Left blank, every file in the folder is read — usually right, since a
+                  folder an analyser exports into holds nothing else.
+                </span>
+              </label>
+              <label><span>Move each file here after reading (optional)</span>
+                <TextField value={form.archivePath} onValue={v => set('archivePath', v)}
+                  placeholder="C:\\Analyser\\Export\\Done" /></label>
+            </div>
+            <label className="ls-check">
+              <input type="checkbox" checked={form.deleteAfterRead} disabled={Boolean(form.archivePath)}
+                onChange={e => set('deleteAfterRead', e.target.checked)} />
+              <span>
+                Delete each file once it has been read
+                {/* Off by default and deliberately so: the analyser's export is
+                    the laboratory's own record of what it sent, and a bridge
+                    that deletes it destroys the only copy the first time it
+                    misreads something. */}
+                <em>
+                  {' '}— leave this off unless the folder must stay empty. The export is your own record of what the
+                  analyser sent, and it is worth keeping. Moving files aside is the safer way to keep the folder clear.
+                </em>
+              </span>
+            </label>
+          </>
         )}
         {form.mode === 'lhims_tap' && (
           <>
@@ -525,6 +693,36 @@ function LinkForm({ form, setForm, profiles, lhimsMaps, equipment, sections, edi
                     onValue={n => set('forwardPort', n ? String(n) : '')} />
                 </label>
               </div>
+            )}
+          </>
+        )}
+
+        {/* Fetching. Only offered for the modes that can actually be asked:
+            an analyser that connects to SECHLIMS decides for itself when to
+            transmit, and a schedule that can never do anything would only
+            teach people the setting does not work. */}
+        {CAN_FETCH(form.mode) && (
+          <>
+            <label className="ls-check">
+              <input type="checkbox" checked={form.fetchEnabled} onChange={e => set('fetchEnabled', e.target.checked)} />
+              <span>
+                Look for new results on a schedule
+                <em>
+                  {' '}— as well as reacting when something arrives. This is what catches up after the host has been
+                  switched off, and what picks up files that were already in the folder before the link existed.
+                  You can also press <strong>Fetch</strong> at any time.
+                </em>
+              </span>
+            </label>
+            {form.fetchEnabled && (
+              <label><span>How often to look (seconds)</span>
+                <NumberField min={30} max={86400} value={Number(form.fetchIntervalSeconds) || 300}
+                  onValue={n => set('fetchIntervalSeconds', String(n ?? 300))} />
+                <span className="muted" style={{ display: 'block', marginTop: 4, fontSize: 11.5 }}>
+                  Five minutes suits most folders. A share polled harder than it needs starts refusing connections,
+                  so choose the slowest interval the bench can live with.
+                </span>
+              </label>
             )}
           </>
         )}
@@ -683,3 +881,67 @@ function TryDialog({ link, onClose }: { link: Link; onClose: () => void }) {
 }
 
 export { Trash2 as RetireLinkIcon };
+
+
+/* ----------------------------------------------------------------------------
+   Which files this link has read
+   ----------------------------------------------------------------------------
+   The record that makes a folder sweep safe, shown rather than only kept. A
+   file that was read, when, and how many messages came out of it — so "the
+   analyser definitely exported that run" is settled here instead of argued
+   about, and a file that was read but held nothing is visible as such rather
+   than looking like it was missed.
+   ------------------------------------------------------------------------- */
+function FilesDialog({ link, onClose }: { link: Link; onClose: () => void }) {
+  const [rows, setRows] = useState<Array<Record<string, any>> | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      try { setRows(await api<Array<Record<string, any>>>(`/instrument-links/${link.id}/files`)); }
+      catch { setRows([]); }
+    })();
+  }, [link.id]);
+
+  return (
+    <div className="ls-modal-back" onClick={onClose}>
+      <div className="ls-modal is-wide" onClick={e => e.stopPropagation()}>
+        <header>
+          <h4><FolderOpen size={15} /> Files read — {link.name}</h4>
+          <button type="button" className="pq-link" onClick={onClose}><X size={14} /></button>
+        </header>
+        <p className="iqc-panel-lead">
+          Watching <code>{link.watch_path}</code>. A file is remembered by its name, its size and its own
+          modification time, so looking again picks up what was missed without reading yesterday&rsquo;s results a
+          second time — re-reading a control run would put a point on a Levey-Jennings chart that never happened.
+        </p>
+        {!rows ? <p className="muted"><Loader2 size={13} className="pd-spin" /> Loading…</p>
+          : rows.length === 0 ? (
+            <p className="muted">
+              Nothing read from this folder yet. Press <strong>Fetch</strong> on the link to look now — files
+              already sitting in the folder are picked up, not just ones that arrive from here on.
+            </p>
+          ) : (
+            <table className="data-table">
+              <thead><tr><th>File</th><th>Read</th><th>Messages</th><th>Size</th><th>Outcome</th></tr></thead>
+              <tbody>
+                {rows.map(row => (
+                  <tr key={row.id}>
+                    <td>{row.file_name}</td>
+                    <td>{String(row.read_at ?? '').slice(0, 16).replace('T', ' ')}</td>
+                    <td>{row.message_count}</td>
+                    <td>{row.file_size ?? '—'}</td>
+                    <td>
+                      <span className={`badge ${row.outcome === 'error' ? 'failed' : row.outcome === 'empty' ? 'pending' : 'done'}`}>
+                        {row.outcome}
+                      </span>
+                      {row.note && <div className="muted" style={{ fontSize: 11 }}>{row.note}</div>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+      </div>
+    </div>
+  );
+}

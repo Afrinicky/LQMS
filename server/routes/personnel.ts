@@ -7,6 +7,13 @@ import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
+import { resolvePermission } from '../services/permissionResolver.js';
+import { trainingFileFor } from '../services/trainingRecord.js';
+import {
+  TRAINING_DELIVERY_MODES, TRAINER_TYPES, TRAINING_CATEGORIES, TRAINING_FORMATS,
+  TRAINING_STATUSES as TRAINING_STATUS_LIST, ATTENDANCE_STATUSES as ATTENDANCE_STATUS_LIST,
+  TRAINING_OUTCOMES, EFFECTIVENESS_METHODS, EFFECTIVENESS_OUTCOMES, effectivenessDueDate,
+} from '../../shared/constants/training.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -59,8 +66,10 @@ function pick(row: Record<string, unknown>, ...keys: string[]): string | null {
 
 const DECLARATION_TYPES = ['confidentiality', 'ethical_declaration', 'conflict_of_interest', 'safety_commitment', 'other'];
 const DECLARATION_STATUSES = ['pending', 'signed', 'withdrawn'];
-const TRAINING_STATUSES = ['planned', 'completed', 'cancelled'];
-const ATTENDANCE_STATUSES = ['invited', 'attended', 'absent', 'excused'];
+// Both lists now come from shared/constants/training.ts, so the server, the
+// browser and an export cannot disagree about what "attended" is called.
+const TRAINING_STATUSES: readonly string[] = TRAINING_STATUS_LIST;
+const ATTENDANCE_STATUSES: readonly string[] = ATTENDANCE_STATUS_LIST;
 const STAFF_DOC_VERIFICATION = ['pending', 'verified', 'rejected', 'expired'];
 const ROSTER_STATUSES = ['draft', 'published', 'approved', 'archived'];
 
@@ -158,63 +167,334 @@ export function personnelRoutes() {
   });
 
   // ============= Training =============
+  /**
+   * The training register.
+   *
+   * A session now carries two facts that used to be one: who ARRANGED it
+   * (internal or external) and who TAUGHT it (a member of staff, or somebody
+   * from outside). The old form could only name a trainer from the staff
+   * dropdown, so the week the supplier's engineer trained four people there was
+   * nowhere to put his name and the record said the session had no trainer.
+   */
+  const trainingFields = (body: any, existing: any = {}) => {
+    const pick = <T>(value: T | undefined, fallback: T) => (value === undefined ? fallback : value);
+    const deliveryMode = String(pick(body.deliveryMode, existing.delivery_mode) ?? 'internal');
+    const trainerType = String(pick(body.trainerType, existing.trainer_type) ?? 'internal_staff');
+    return {
+      title: String(pick(body.title, existing.title) ?? '').trim(),
+      description: pick(body.description, existing.description) ?? null,
+      trainingType: pick(body.trainingType, existing.training_type) ?? null,
+      category: pick(body.category, existing.category) ?? null,
+      trainingFormat: pick(body.trainingFormat, existing.training_format) ?? null,
+      objectives: pick(body.objectives, existing.objectives) ?? null,
+      deliveryMode,
+      trainerType,
+      // A staff trainer and an outside trainer are mutually exclusive on one
+      // session, and storing both is how a register ends up showing two
+      // trainers for a session that had one. Whichever kind was chosen is
+      // kept; the other is cleared.
+      trainerStaffId: trainerType === 'external_person' ? null
+        : (body.trainerStaffId !== undefined ? parseIntNullable(body.trainerStaffId) : (existing.trainer_staff_id ?? null)),
+      externalTrainerName: trainerType === 'external_person'
+        ? (pick(body.externalTrainerName, existing.external_trainer_name) ?? null) : null,
+      externalTrainerOrganisation: trainerType === 'external_person'
+        ? (pick(body.externalTrainerOrganisation, existing.external_trainer_organisation) ?? null) : null,
+      externalTrainerQualifications: trainerType === 'external_person'
+        ? (pick(body.externalTrainerQualifications, existing.external_trainer_qualifications) ?? null) : null,
+      provider: pick(body.provider, existing.provider) ?? null,
+      departmentId: body.departmentId !== undefined ? parseIntNullable(body.departmentId) : (existing.department_id ?? null),
+      sectionId: body.sectionId !== undefined ? parseIntNullable(body.sectionId) : (existing.section_id ?? null),
+      equipmentId: body.equipmentId !== undefined ? parseIntNullable(body.equipmentId) : (existing.equipment_id ?? null),
+      documentId: body.documentId !== undefined ? parseIntNullable(body.documentId) : (existing.document_id ?? null),
+      trainingDate: String(pick(body.trainingDate, existing.training_date) ?? ''),
+      endDate: pick(body.endDate, existing.end_date) ?? null,
+      startTime: pick(body.startTime, existing.start_time) ?? null,
+      endTime: pick(body.endTime, existing.end_time) ?? null,
+      durationHours: body.durationHours !== undefined
+        ? (body.durationHours === '' || body.durationHours === null ? null : Number(body.durationHours))
+        : (existing.duration_hours ?? null),
+      location: pick(body.location, existing.location) ?? null,
+      evidenceFileId: body.evidenceFileId !== undefined ? parseIntNullable(body.evidenceFileId) : (existing.evidence_file_id ?? null),
+      effectivenessMethod: String(pick(body.effectivenessMethod, existing.effectiveness_method) ?? 'not_required'),
+      effectivenessDueDate: pick(body.effectivenessDueDate, existing.effectiveness_due_date) ?? null,
+      status: String(pick(body.status, existing.status) ?? 'planned'),
+      notes: pick(body.notes, existing.notes) ?? null,
+    };
+  };
+
+  /** Everything a session has to satisfy before it is worth recording. */
+  function validateTraining(v: ReturnType<typeof trainingFields>): string | null {
+    if (!v.title) return 'Give the training a title.';
+    if (!v.trainingDate) return 'When was the training held?';
+    if (!TRAINING_STATUSES.includes(v.status)) return `status must be one of: ${TRAINING_STATUSES.join(', ')}`;
+    if (!(TRAINING_DELIVERY_MODES as readonly string[]).includes(v.deliveryMode)) {
+      return `Say whether the training was internal or external: ${TRAINING_DELIVERY_MODES.join(', ')}.`;
+    }
+    if (!(TRAINER_TYPES as readonly string[]).includes(v.trainerType)) {
+      return `Say whether the trainer was a member of staff or from outside: ${TRAINER_TYPES.join(', ')}.`;
+    }
+    // A trainer who is not on the staff register has to be named, or the record
+    // says the session had a trainer and cannot say who — which is the gap this
+    // whole change exists to close.
+    if (v.trainerType === 'external_person' && !String(v.externalTrainerName ?? '').trim()) {
+      return 'Name the trainer who came from outside, and the organisation they came from.';
+    }
+    if (v.category && !(TRAINING_CATEGORIES as readonly string[]).includes(String(v.category))) {
+      return `category must be one of: ${TRAINING_CATEGORIES.join(', ')}`;
+    }
+    if (v.trainingFormat && !(TRAINING_FORMATS as readonly string[]).includes(String(v.trainingFormat))) {
+      return `trainingFormat must be one of: ${TRAINING_FORMATS.join(', ')}`;
+    }
+    if (!(EFFECTIVENESS_METHODS as readonly string[]).includes(v.effectivenessMethod)) {
+      return `effectivenessMethod must be one of: ${EFFECTIVENESS_METHODS.join(', ')}`;
+    }
+    if (v.durationHours !== null && (!Number.isFinite(Number(v.durationHours)) || Number(v.durationHours) < 0)) {
+      return 'Duration has to be a number of hours.';
+    }
+    return null;
+  }
+
   router.get('/training', requirePermission('personnel.training', 'view'), (req, res) => {
     const db = getDb();
     const filters: string[] = [];
     const params: unknown[] = [];
-    if (req.query.status) { filters.push('status = ?'); params.push(String(req.query.status)); }
-    let query = 'SELECT * FROM training_events';
+    if (req.query.status) { filters.push('e.status = ?'); params.push(String(req.query.status)); }
+    if (req.query.deliveryMode) { filters.push('e.delivery_mode = ?'); params.push(String(req.query.deliveryMode)); }
+    if (req.query.category) { filters.push('e.category = ?'); params.push(String(req.query.category)); }
+    if (req.query.staffId) {
+      filters.push('EXISTS (SELECT 1 FROM training_attendance a WHERE a.training_event_id = e.id AND a.staff_id = ?)');
+      params.push(Number(req.query.staffId));
+    }
+    let query = `SELECT e.*, t.full_name AS trainer_name, sec.name AS section_name,
+        eq.name AS equipment_name, eq.equipment_number,
+        (SELECT COUNT(*) FROM training_attendance a WHERE a.training_event_id = e.id) AS invited_count,
+        (SELECT COUNT(*) FROM training_attendance a WHERE a.training_event_id = e.id AND a.attendance_status IN ('attended','partial')) AS attended_count
+      FROM training_events e
+      LEFT JOIN staff t ON t.id = e.trainer_staff_id
+      LEFT JOIN sections sec ON sec.id = e.section_id
+      LEFT JOIN equipment_items eq ON eq.id = e.equipment_id`;
     if (filters.length) query += ` WHERE ${filters.join(' AND ')}`;
-    query += ' ORDER BY training_date DESC';
+    query += ' ORDER BY e.training_date DESC, e.id DESC';
     res.json(db.prepare(query).all(...params));
   });
 
   router.post('/training', requirePermission('personnel.training', 'create'), (req, res) => {
-    if (!req.body.title) return res.status(400).json({ error: 'title is required' });
-    if (!req.body.trainingDate) return res.status(400).json({ error: 'trainingDate is required' });
-    const status = req.body.status ?? 'planned';
-    if (!TRAINING_STATUSES.includes(status)) return res.status(400).json({ error: `status must be one of: ${TRAINING_STATUSES.join(', ')}` });
     const db = getDb();
+    const v = trainingFields(req.body ?? {});
+    const problem = validateTraining(v);
+    if (problem) return res.status(400).json({ error: problem });
+
     const createdAt = new Date().toISOString();
     const trainingNumber = generateRecordNumber(db, 'training_events', 'TRN', createdAt);
-    const result = db.prepare(`INSERT INTO training_events (training_number, title, description, training_type, department_id, section_id, trainer_staff_id, training_date, start_time, end_time, location, evidence_file_id, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(trainingNumber, req.body.title, req.body.description ?? null, req.body.trainingType ?? null, parseIntNullable(req.body.departmentId), parseIntNullable(req.body.sectionId), parseIntNullable(req.body.trainerStaffId), req.body.trainingDate, req.body.startTime ?? null, req.body.endTime ?? null, req.body.location ?? null, parseIntNullable(req.body.evidenceFileId), status, req.user!.id, createdAt);
+    // When a follow-up is owed but nobody said by when, the date is worked out
+    // rather than left blank: an effectiveness review with no due date is one
+    // nothing can ever report as overdue, which is the same as not asking for it.
+    const dueDate = v.effectivenessMethod === 'not_required' ? null
+      : (v.effectivenessDueDate || effectivenessDueDate(v.trainingDate));
+
+    const result = db.prepare(`INSERT INTO training_events
+        (training_number, title, description, training_type, category, training_format, objectives,
+         delivery_mode, trainer_type, trainer_staff_id, external_trainer_name, external_trainer_organisation,
+         external_trainer_qualifications, provider, department_id, section_id, equipment_id, document_id,
+         training_date, end_date, start_time, end_time, duration_hours, location, evidence_file_id,
+         effectiveness_method, effectiveness_due_date, status, source_module, created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'personnel', ?, ?)`)
+      .run(trainingNumber, v.title, v.description, v.trainingType, v.category, v.trainingFormat, v.objectives,
+        v.deliveryMode, v.trainerType, v.trainerStaffId, v.externalTrainerName, v.externalTrainerOrganisation,
+        v.externalTrainerQualifications, v.provider, v.departmentId, v.sectionId, v.equipmentId, v.documentId,
+        v.trainingDate, v.endDate, v.startTime, v.endTime, v.durationHours, v.location, v.evidenceFileId,
+        v.effectivenessMethod, dueDate, v.status, req.user!.id, createdAt);
     const id = Number(result.lastInsertRowid);
-    if (parseIntNullable(req.body.evidenceFileId)) {
-      db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run('personnel', 'training_events', String(id), 'documents', 'files', String(req.body.evidenceFileId), 'Training evidence file');
+    if (v.evidenceFileId) {
+      db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run('personnel', 'training_events', String(id), 'documents', 'files', String(v.evidenceFileId), 'Training evidence file');
     }
-    audit(req, { action: 'create', entity: 'training_events', entityId: id, newValue: { trainingNumber, ...req.body } });
+    audit(req, { action: 'create', entity: 'training_events', entityId: id, newValue: { trainingNumber, ...v } });
     res.status(201).json({ id, trainingNumber });
+  });
+
+  router.put('/training/:id', requirePermission('personnel.training', 'edit'), (req, res) => {
+    const db = getDb();
+    const existing = db.prepare('SELECT * FROM training_events WHERE id = ?').get(req.params.id) as any;
+    if (!existing) return res.status(404).json({ error: 'Training event not found' });
+    // A session raised by the equipment file is owned there. Editing it here
+    // would be overwritten the next time the equipment record is saved, so the
+    // caller is told where the record actually lives instead.
+    if (existing.source_module === 'equipment') {
+      return res.status(400).json({
+        error: 'This session was recorded against a piece of equipment, so Equipment Management owns it. Change it on the equipment competence record and it will update here.',
+      });
+    }
+    const v = trainingFields(req.body ?? {}, existing);
+    const problem = validateTraining(v);
+    if (problem) return res.status(400).json({ error: problem });
+    const dueDate = v.effectivenessMethod === 'not_required' ? null
+      : (v.effectivenessDueDate || effectivenessDueDate(v.trainingDate));
+
+    db.prepare(`UPDATE training_events SET title = ?, description = ?, training_type = ?, category = ?,
+        training_format = ?, objectives = ?, delivery_mode = ?, trainer_type = ?, trainer_staff_id = ?,
+        external_trainer_name = ?, external_trainer_organisation = ?, external_trainer_qualifications = ?,
+        provider = ?, department_id = ?, section_id = ?, equipment_id = ?, document_id = ?,
+        training_date = ?, end_date = ?, start_time = ?, end_time = ?, duration_hours = ?, location = ?,
+        evidence_file_id = ?, effectiveness_method = ?, effectiveness_due_date = ?, status = ?,
+        updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(v.title, v.description, v.trainingType, v.category, v.trainingFormat, v.objectives,
+        v.deliveryMode, v.trainerType, v.trainerStaffId, v.externalTrainerName, v.externalTrainerOrganisation,
+        v.externalTrainerQualifications, v.provider, v.departmentId, v.sectionId, v.equipmentId, v.documentId,
+        v.trainingDate, v.endDate, v.startTime, v.endTime, v.durationHours, v.location, v.evidenceFileId,
+        v.effectivenessMethod, dueDate, v.status, req.params.id);
+    audit(req, { action: 'edit', entity: 'training_events', entityId: req.params.id, oldValue: { title: existing.title, status: existing.status }, newValue: v });
+    res.json({ ok: true });
   });
 
   router.get('/training/:id', requirePermission('personnel.training', 'view'), (req, res) => {
     const db = getDb();
-    const event = db.prepare('SELECT * FROM training_events WHERE id = ?').get(req.params.id) as any;
+    const event = db.prepare(`SELECT e.*, t.full_name AS trainer_name, sec.name AS section_name,
+        eq.name AS equipment_name, eq.equipment_number, r.full_name AS effectiveness_reviewer_name
+      FROM training_events e
+      LEFT JOIN staff t ON t.id = e.trainer_staff_id
+      LEFT JOIN sections sec ON sec.id = e.section_id
+      LEFT JOIN equipment_items eq ON eq.id = e.equipment_id
+      LEFT JOIN staff r ON r.id = e.effectiveness_reviewed_by_staff_id
+      WHERE e.id = ?`).get(req.params.id) as any;
     if (!event) return res.status(404).json({ error: 'Training event not found' });
-    const attendance = db.prepare('SELECT a.*, s.full_name AS staff_name FROM training_attendance a JOIN staff s ON s.id = a.staff_id WHERE a.training_event_id = ? ORDER BY s.full_name').all(req.params.id);
+    const attendance = db.prepare(`SELECT a.*, s.full_name AS staff_name, s.employee_no, sec.name AS section_name
+      FROM training_attendance a
+      JOIN staff s ON s.id = a.staff_id
+      LEFT JOIN sections sec ON sec.id = s.section_id
+      WHERE a.training_event_id = ? ORDER BY s.full_name`).all(req.params.id);
     res.json({ ...event, attendance });
   });
 
+  /**
+   * Who was there, and what they came away with.
+   *
+   * Attendance and outcome are recorded together because the register was only
+   * ever able to say somebody was in the room, which is not what a laboratory
+   * is asked to show. The hours land on the person's row rather than the
+   * session's: somebody who attended half of a two-day course has a day on
+   * their file, not two.
+   */
   router.post('/training/:id/attendance', requirePermission('personnel.training', 'create'), (req, res) => {
     if (!parseIntNullable(req.body.staffId)) return res.status(400).json({ error: 'staffId is required' });
     const db = getDb();
-    const event = db.prepare('SELECT id FROM training_events WHERE id = ?').get(req.params.id);
+    const event = db.prepare('SELECT id, duration_hours FROM training_events WHERE id = ?').get(req.params.id) as any;
     if (!event) return res.status(404).json({ error: 'Training event not found' });
     const status = req.body.attendanceStatus ?? 'invited';
     if (!ATTENDANCE_STATUSES.includes(status)) return res.status(400).json({ error: `attendanceStatus must be one of: ${ATTENDANCE_STATUSES.join(', ')}` });
+    const outcome = String(req.body.outcome ?? 'not_assessed');
+    if (!(TRAINING_OUTCOMES as readonly string[]).includes(outcome)) {
+      return res.status(400).json({ error: `outcome must be one of: ${TRAINING_OUTCOMES.join(', ')}` });
+    }
+    // Somebody who was there for the whole session gets the session's own
+    // duration unless a different figure was given; somebody who came for part
+    // of it has to have their hours stated, because guessing half is fiction.
+    const hours = req.body.hours !== undefined && req.body.hours !== ''
+      ? Number(req.body.hours)
+      : (status === 'attended' ? (event.duration_hours ?? null) : null);
+    const score = (key: string) => (req.body[key] === undefined || req.body[key] === '' ? null : Number(req.body[key]));
+
     const existing = db.prepare('SELECT id FROM training_attendance WHERE training_event_id = ? AND staff_id = ?').get(req.params.id, req.body.staffId) as any;
     let id: number;
     if (existing) {
-      db.prepare('UPDATE training_attendance SET attendance_status = ?, signed_at = CASE WHEN ? = \'attended\' THEN CURRENT_TIMESTAMP ELSE signed_at END, remarks = COALESCE(?, remarks) WHERE id = ?')
-        .run(status, status, req.body.remarks ?? null, existing.id);
+      db.prepare(`UPDATE training_attendance SET attendance_status = ?,
+          signed_at = CASE WHEN ? IN ('attended','partial') THEN COALESCE(signed_at, CURRENT_TIMESTAMP) ELSE signed_at END,
+          remarks = COALESCE(?, remarks), outcome = ?, hours = ?, pre_test_score = ?, post_test_score = ?,
+          certificate_file_id = COALESCE(?, certificate_file_id), updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+        .run(status, status, req.body.remarks ?? null, outcome, hours, score('preTestScore'), score('postTestScore'),
+          parseIntNullable(req.body.certificateFileId), existing.id);
       id = existing.id;
     } else {
-      const result = db.prepare(`INSERT INTO training_attendance (training_event_id, staff_id, attendance_status, signed_at, remarks, created_by) VALUES (?, ?, ?, CASE WHEN ? = 'attended' THEN CURRENT_TIMESTAMP ELSE NULL END, ?, ?)`)
-        .run(req.params.id, req.body.staffId, status, status, req.body.remarks ?? null, req.user!.id);
+      const result = db.prepare(`INSERT INTO training_attendance
+          (training_event_id, staff_id, attendance_status, signed_at, remarks, outcome, hours,
+           pre_test_score, post_test_score, certificate_file_id, created_by)
+          VALUES (?, ?, ?, CASE WHEN ? IN ('attended','partial') THEN CURRENT_TIMESTAMP ELSE NULL END, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(req.params.id, req.body.staffId, status, status, req.body.remarks ?? null, outcome, hours,
+          score('preTestScore'), score('postTestScore'), parseIntNullable(req.body.certificateFileId), req.user!.id);
       id = Number(result.lastInsertRowid);
     }
-    audit(req, { action: 'attendance', entity: 'training_attendance', entityId: id, newValue: { trainingEventId: req.params.id, staffId: req.body.staffId, status } });
+    audit(req, { action: 'attendance', entity: 'training_attendance', entityId: id, newValue: { trainingEventId: req.params.id, staffId: req.body.staffId, status, outcome } });
     res.status(201).json({ id });
+  });
+
+  router.delete('/training/:id/attendance/:attendanceId', requirePermission('personnel.training', 'edit'), (req, res) => {
+    const db = getDb();
+    const row = db.prepare('SELECT * FROM training_attendance WHERE id = ? AND training_event_id = ?').get(req.params.attendanceId, req.params.id) as any;
+    if (!row) return res.status(404).json({ error: 'That person is not on this session.' });
+    db.prepare('DELETE FROM training_attendance WHERE id = ?').run(req.params.attendanceId);
+    audit(req, { action: 'delete', entity: 'training_attendance', entityId: req.params.attendanceId, oldValue: row });
+    res.json({ ok: true });
+  });
+
+  /**
+   * Did the training work?
+   *
+   * The question a training register is actually asked at assessment, and the
+   * one it could never answer. A session is not finished when it has been
+   * held; it is finished when somebody has looked at the work afterwards and
+   * said whether it changed. "Not effective" is a real answer and carries the
+   * retraining with it rather than quietly closing the record.
+   */
+  router.post('/training/:id/effectiveness', requirePermission('personnel.training', 'edit'), (req, res) => {
+    const db = getDb();
+    const event = db.prepare('SELECT * FROM training_events WHERE id = ?').get(req.params.id) as any;
+    if (!event) return res.status(404).json({ error: 'Training event not found' });
+    const outcome = String(req.body?.outcome ?? '');
+    if (!(EFFECTIVENESS_OUTCOMES as readonly string[]).includes(outcome)) {
+      return res.status(400).json({ error: `outcome must be one of: ${EFFECTIVENESS_OUTCOMES.join(', ')}` });
+    }
+    const method = req.body?.method ? String(req.body.method) : event.effectiveness_method;
+    if (!(EFFECTIVENESS_METHODS as readonly string[]).includes(method)) {
+      return res.status(400).json({ error: `method must be one of: ${EFFECTIVENESS_METHODS.join(', ')}` });
+    }
+    const staffId = getStaffIdOrCurrent(req, req.body?.reviewedByStaffId);
+    db.prepare(`UPDATE training_events SET effectiveness_method = ?, effectiveness_outcome = ?,
+        effectiveness_notes = ?, effectiveness_reviewed_by_staff_id = ?, effectiveness_reviewed_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(method, outcome, req.body?.notes ?? null, staffId, req.params.id);
+
+    // Per person as well as per session, so a session that worked for four
+    // people and not for the fifth records exactly that.
+    const perPerson = Array.isArray(req.body?.perPerson) ? req.body.perPerson : [];
+    for (const entry of perPerson) {
+      const attendanceId = parseIntNullable(entry?.attendanceId);
+      const personOutcome = String(entry?.outcome ?? '');
+      if (!attendanceId || !(EFFECTIVENESS_OUTCOMES as readonly string[]).includes(personOutcome)) continue;
+      db.prepare(`UPDATE training_attendance SET effectiveness_outcome = ?, effectiveness_notes = ?,
+          updated_at = CURRENT_TIMESTAMP WHERE id = ? AND training_event_id = ?`)
+        .run(personOutcome, entry?.notes ?? null, attendanceId, req.params.id);
+    }
+    audit(req, { action: 'edit', entity: 'training_events', entityId: req.params.id, newValue: { effectiveness: outcome, method } });
+    res.json({ ok: true });
+  });
+
+  /**
+   * One person's whole training file.
+   *
+   * Gathered from every place training is recorded — this register, the
+   * equipment file, what the person declared themselves, and the competency
+   * assessments that prove any of it worked. Where a record was made decides
+   * how it is labelled, never whether it is here.
+   */
+  router.get('/training-record/:staffId', (req, res) => {
+    const staffId = Number(req.params.staffId);
+    // Your own file is always yours to read. Somebody else's needs the right
+    // that opens the register, which is the same test the staff profile uses.
+    if (staffId !== Number(req.user?.staffId ?? -1)
+      && !resolvePermission(req.user!.id, 'personnel.training', 'view').allowed
+      && !resolvePermission(req.user!.id, 'personnel.register', 'view').allowed) {
+      return res.status(403).json({ error: 'You may only open your own training file.' });
+    }
+    const db = getDb();
+    const staff = db.prepare('SELECT id, full_name, employee_no FROM staff WHERE id = ?').get(staffId);
+    if (!staff) return res.status(404).json({ error: 'Staff record not found' });
+    res.json({ staff, ...trainingFileFor(db, staffId) });
+  });
+
+  /** The signed-in person's own file, without needing to know their staff id. */
+  router.get('/my-training-record', (req, res) => {
+    const staffId = Number(req.user?.staffId ?? 0);
+    if (!staffId) return res.json({ staff: null, entries: [], summary: null });
+    res.json({ staff: null, ...trainingFileFor(getDb(), staffId) });
   });
 
   // Competency assessment lives in routes/competency.ts — a framework, a
@@ -367,7 +647,15 @@ export function personnelRoutes() {
     res.json({
       pendingAttestations: db.prepare("SELECT a.*, d.document_code, d.title FROM document_attestations a JOIN documents d ON d.id = COALESCE(a.document_id, (SELECT document_id FROM document_versions WHERE id = a.document_version_id)) WHERE a.staff_id = ? AND a.status IN ('pending','overdue') ORDER BY a.due_date NULLS LAST").all(staffId),
       pendingDeclarations: db.prepare("SELECT * FROM staff_declarations WHERE staff_id = ? AND status = 'pending'").all(staffId),
-      upcomingTraining: db.prepare("SELECT te.*, ta.attendance_status FROM training_attendance ta JOIN training_events te ON te.id = ta.training_event_id WHERE ta.staff_id = ? AND te.training_date >= date('now') ORDER BY te.training_date").all(staffId),
+      // Upcoming sessions carry the trainer whichever kind they are, so the
+      // portal can say "with the Sysmex engineer" rather than leaving the line
+      // blank for every session somebody from outside is giving.
+      upcomingTraining: db.prepare(`SELECT te.*, ta.attendance_status, t.full_name AS trainer_name
+        FROM training_attendance ta
+        JOIN training_events te ON te.id = ta.training_event_id
+        LEFT JOIN staff t ON t.id = te.trainer_staff_id
+        WHERE ta.staff_id = ? AND te.training_date >= date('now') AND te.status != 'cancelled'
+        ORDER BY te.training_date`).all(staffId),
       upcomingCompetency: db.prepare("SELECT * FROM competency_assessments WHERE staff_id = ? AND status IN ('planned','in_progress') ORDER BY assessment_date").all(staffId),
       assignedActions: db.prepare("SELECT * FROM actions WHERE assigned_to_staff_id = ? AND status != 'Closed' ORDER BY due_date NULLS LAST").all(staffId),
       upcomingDuties: db.prepare("SELECT a.*, r.roster_number FROM duty_roster_assignments a JOIN duty_rosters r ON r.id = a.roster_id WHERE a.staff_id = ? AND a.duty_date >= date('now') AND r.status IN ('published','approved') ORDER BY a.duty_date").all(staffId)
@@ -792,13 +1080,19 @@ export function personnelRoutes() {
     if (!title) return res.status(400).json({ error: 'What was the training called?' });
     const trainingType = CPD_TYPES.includes(String(req.body.trainingType)) ? String(req.body.trainingType) : 'external_course';
     const hours = req.body.hours === '' || req.body.hours === null || req.body.hours === undefined ? null : Number(req.body.hours);
-    const r = getDb().prepare(`INSERT INTO staff_cpd_records (staff_id, title, provider, training_type, start_date, end_date, hours, location, description, file_id, verification_status, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'declared', ?)`).run(
+    // Somebody who went on a course knows who ran it and who taught it. There
+    // was nowhere to say so, which meant the one kind of record that always has
+    // a real outside trainer behind it was also the one that could not name them.
+    const deliveryMode = req.body.deliveryMode === 'internal' ? 'internal' : 'external';
+    const r = getDb().prepare(`INSERT INTO staff_cpd_records (staff_id, title, provider, training_type, start_date, end_date, hours, location, description, file_id, verification_status, delivery_mode, trainer_name, category, certificate_reference, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'declared', ?, ?, ?, ?, ?)`).run(
       staffId, title, req.body.provider ?? null, trainingType,
       req.body.startDate || null, req.body.endDate || null,
       Number.isFinite(hours) ? hours : null,
       req.body.location ?? null, req.body.description ?? null,
-      parseIntNullable(req.body.fileId), req.user.id);
+      parseIntNullable(req.body.fileId), deliveryMode,
+      req.body.trainerName ?? null, req.body.category ?? null, req.body.certificateReference ?? null,
+      req.user.id);
     audit(req, { action: 'self_create', entity: 'staff_cpd_records', entityId: r.lastInsertRowid, newValue: { staffId, title, trainingType } });
     res.status(201).json({ id: r.lastInsertRowid });
   });
@@ -821,10 +1115,14 @@ export function personnelRoutes() {
     const trainingType = CPD_TYPES.includes(String(req.body.trainingType)) ? String(req.body.trainingType) : String(prev.training_type);
     const title = String(req.body.title ?? '').trim() || String(prev.title);
     const hours = req.body.hours === '' || req.body.hours === null || req.body.hours === undefined ? null : Number(req.body.hours);
-    getDb().prepare(`UPDATE staff_cpd_records SET title = ?, provider = ?, training_type = ?, start_date = ?, end_date = ?, hours = ?, location = ?, description = ?, file_id = COALESCE(?, file_id), updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+    const deliveryMode = req.body.deliveryMode === 'internal' ? 'internal'
+      : req.body.deliveryMode === 'external' ? 'external' : String(prev.delivery_mode ?? 'external');
+    getDb().prepare(`UPDATE staff_cpd_records SET title = ?, provider = ?, training_type = ?, start_date = ?, end_date = ?, hours = ?, location = ?, description = ?, file_id = COALESCE(?, file_id), delivery_mode = ?, trainer_name = ?, category = ?, certificate_reference = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
       .run(title, req.body.provider ?? null, trainingType, req.body.startDate || null, req.body.endDate || null,
         Number.isFinite(hours) ? hours : null, req.body.location ?? null, req.body.description ?? null,
-        parseIntNullable(req.body.fileId), req.params.id);
+        parseIntNullable(req.body.fileId), deliveryMode,
+        req.body.trainerName ?? null, req.body.category ?? null, req.body.certificateReference ?? null,
+        req.params.id);
     audit(req, { action: 'self_edit', entity: 'staff_cpd_records', entityId: Number(req.params.id), oldValue: prev, newValue: req.body });
     res.json({ ok: true });
   });

@@ -24,6 +24,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { AccessControl } from './AccessControl';
 import UserAccountActions from '../components/UserAccountActions';
 import PersonnelRegisterAdmin from '../components/PersonnelRegisterAdmin';
+import TrainingRecordPanel from '../components/training/TrainingRecordPanel';
 import { openStoredFile } from '../services/files';
 import PasswordResetApprovals from '../components/PasswordResetApprovals';
 import type {
@@ -139,7 +140,9 @@ export function RegisterStaff() {
       {error && <Notice kind="error">{error}</Notice>}
       {success && <Notice kind="success">{success}</Notice>}
 
-      {can('settings', 'create') && <form className="form" onSubmit={submit}>
+      {/* POST /staff/register — the register's own create right, which is what
+          the server asks for and what Personnel Management grants. */}
+      {can('personnel.register', 'create') && <form className="form" onSubmit={submit}>
         <fieldset className="reg-section">
           <legend>Personal &amp; role details</legend>
           <div className="form-grid">
@@ -245,9 +248,18 @@ export function RegisterStaff() {
         <div className="card mini"><h4>Documents</h4><p className="metric">{profile.activity.documents}</p></div>
         <div className="card mini"><h4>Declarations</h4><p className="metric">{profile.activity.declarations}</p></div>
         <div className="card mini"><h4>Competency</h4><p className="metric">{profile.activity.competency}</p></div>
-        <div className="card mini"><h4>Training</h4><p className="metric">{profile.activity.training}</p></div>
+        {/* The tile counts sessions in the personnel register; the file below
+            counts everything, including the training given on an instrument and
+            recorded in Equipment Management. The two differ on purpose, and the
+            file is the honest number. */}
+        <div className="card mini"><h4>Training sessions</h4><p className="metric">{profile.training?.summary?.total ?? profile.activity.training}</p></div>
         <div className="card mini"><h4>Open actions</h4><p className="metric">{profile.activity.openActions}</p></div>
       </div>
+
+      {/* Their whole training file, wherever each record was made. */}
+      <TrainingRecordPanel staffId={profile.staff.id} entries={profile.training?.entries}
+        title={`${profile.staff.full_name} — training file`} />
+
       <p className="hint"><Link to="/personnel">Open in Personnel Management</Link></p>
     </div>}
   </div>;
@@ -1372,7 +1384,9 @@ export function EvidenceUpload(){
     alert('Evidence uploaded and linked.');
   }
   return <div className="card"><h3>Evidence Upload</h3>
-    {can('settings', 'create') && <form className="form" onSubmit={submit}>
+    {/* POST /evidence — the evidence-upload right this page is delegated on,
+        and the one its own Settings entry already asks for. */}
+    {can('records_reports.evidence', 'create') && <form className="form" onSubmit={submit}>
       <label>File<input name="file" type="file" required/></label>
       <label>Module key<input name="moduleKey" defaultValue="documents" required/></label>
       <label>Record type<input name="recordType" defaultValue="foundation_record" required/></label>
@@ -1392,7 +1406,10 @@ export function ActionTracker(){
     alert('Action created.');
   }
   return <div className="card"><h3>Action Tracker</h3>
-    {can('settings', 'create') && <form className="form" onSubmit={submit}>
+    {/* POST /actions — the Action Tracker's own create right. Nearly every
+        role holds it; `settings:create` is held by almost nobody, so this
+        form was hidden from the people it exists for. */}
+    {can('actions', 'create') && <form className="form" onSubmit={submit}>
       <label>Title<input name="title" required/></label>
       <label>Module key<input name="moduleKey" defaultValue="nc_capa"/></label>
       <label>Priority<select name="priority"><option>normal</option><option>high</option><option>low</option></select></label>

@@ -257,12 +257,25 @@ console.log('\n[4b] Writes name a feature, never a module that has features');
   check('personal areas contribute only view/print to their module',
     /MODULE_ACTIONS_FROM_PERSONAL/.test(resolver) && /f\.personal \|\| MODULE_ACTIONS_FROM_PERSONAL\.has\(action\)/.test(resolver));
 
+  // A delegated Settings page must not be gated on a key that is a UNION of
+  // other rights. That was the actual bug: `personnel` is the union of
+  // everything inside it, every member of staff holds "manage my own record",
+  // so `personnel:edit` was true for the whole laboratory and put Settings in
+  // front of a Biomedical Scientist whose access profile said "No access".
+  //
+  // "Must contain a dot" was a proxy for that, and it is the wrong test: a
+  // module with NO features is not a union of anything — its key resolves from
+  // the role's own grant and nothing else. `iqc` is one of those, and `iqc:edit`
+  // is held by four roles, not by everybody. So the property is checked
+  // directly, which both catches what the proxy caught and stops it failing a
+  // page that is correctly gated.
   const settings = read('src/constants/settingsAccess.ts');
   const delegated = [...settings.matchAll(/module: '([a-z_.]+)', action: '(\w+)'/g)]
     .filter(m => m[1] !== 'settings' && m[1] !== 'actions');
-  check('every delegated Settings page names a feature, not a module',
-    delegated.every(m => m[1].includes('.')),
-    delegated.filter(m => !m[1].includes('.')).map(m => m[1]).join(', '));
+  const unions = delegated.filter(m => !m[1].includes('.') && modulesWithFeatures.has(m[1]));
+  check('no delegated Settings page is gated on a module key that is a union of features',
+    unions.length === 0,
+    unions.map(m => m[1]).join(', '));
 }
 
 /* ==========================================================================

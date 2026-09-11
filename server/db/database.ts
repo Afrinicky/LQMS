@@ -6870,6 +6870,70 @@ CREATE INDEX IF NOT EXISTS idx_instrument_messages_forward ON instrument_message
     for (const [col, ddl] of add) if (!cols.has(col)) database.exec(`ALTER TABLE instrument_links ADD COLUMN ${ddl}`);
   }
 
+
+  /* ==========================================================================
+     Fetching, as well as being sent to
+     --------------------------------------------------------------------------
+     The bridge was built entirely around being pushed to: an analyser dials in
+     or writes a file, and something arrives. That is how most transmission
+     works, and it leaves two real gaps.
+
+     The first is that nothing could be asked for. When a link has been down
+     for an afternoon, or somebody has just set one up and wants to know
+     whether the folder it is pointed at actually holds anything, there was no
+     way to say "look now". `fetch_*` below is that: an interval for looking on
+     a schedule, and a record of when it last looked and what it found, so the
+     screen can answer "is this working?" without waiting for the analyser to
+     decide to speak.
+
+     The second is worse and was silent. A watched folder only ever reported
+     files created while the watcher was running. Every file already sitting in
+     it when the link started was invisible — permanently — and so was
+     everything written while the host was off. A sweep fixes that, and
+     `instrument_files` is what makes a sweep safe: it remembers which files
+     have been read, by name, size and modification time, so looking again
+     picks up what was missed without ingesting yesterday's results a second
+     time. Re-reading a control run is not a harmless duplicate; it puts a
+     point on a Levey-Jennings chart that never happened.
+     ======================================================================= */
+  {
+    const cols = new Set((database.prepare("PRAGMA table_info(instrument_links)").all() as Array<{ name: string }>).map(c => c.name));
+    const add: Array<[string, string]> = [
+      // Looking on a schedule, for the modes where looking is possible at all.
+      // A listening socket has nothing to fetch; a folder and a log file do.
+      ['fetch_enabled', 'fetch_enabled INTEGER NOT NULL DEFAULT 0'],
+      ['fetch_interval_seconds', 'fetch_interval_seconds INTEGER NOT NULL DEFAULT 300'],
+      ['last_fetch_at', 'last_fetch_at TEXT'],
+      ['last_fetch_note', 'last_fetch_note TEXT'],
+      // Which files in the watched folder are results, and what to do with one
+      // after it has been read. Moving a file aside is how most analyser
+      // exports are meant to be consumed; deleting is offered because some
+      // write into a folder they also clear themselves.
+      ['file_pattern', 'file_pattern TEXT'],
+      ['archive_path', 'archive_path TEXT'],
+      ['delete_after_read', 'delete_after_read INTEGER NOT NULL DEFAULT 0'],
+    ];
+    for (const [col, ddl] of add) if (!cols.has(col)) database.exec(`ALTER TABLE instrument_links ADD COLUMN ${ddl}`);
+  }
+
+  database.exec(`
+CREATE TABLE IF NOT EXISTS instrument_files (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  link_id INTEGER NOT NULL REFERENCES instrument_links(id) ON DELETE CASCADE,
+  file_name TEXT NOT NULL,
+  file_size INTEGER,
+  -- The file's own modification time, not ours. A file replaced with a newer
+  -- version of itself is a new file; the same file seen again is not.
+  modified_at TEXT,
+  read_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  message_count INTEGER NOT NULL DEFAULT 0,
+  outcome TEXT NOT NULL DEFAULT 'read',
+  note TEXT,
+  UNIQUE(link_id, file_name, file_size, modified_at)
+);
+CREATE INDEX IF NOT EXISTS idx_instrument_files_link ON instrument_files(link_id, read_at);
+`);
+
   // A feed message says which link produced it, so the IQC bench can see which
   // analyser a waiting control came off.
   {
@@ -7145,6 +7209,151 @@ CREATE INDEX IF NOT EXISTS idx_log_amendments_cell
       ['established_excluded', 'established_excluded INTEGER'],
     ];
     for (const [col, ddl] of add) if (!cols.has(col)) database.exec(`ALTER TABLE iqc_analytes ADD COLUMN ${ddl}`);
+  }
+
+
+  /* ==========================================================================
+     Training that an outside person delivered, and training that adds up
+     --------------------------------------------------------------------------
+     A training event could only name a trainer who was on the staff register.
+     So when the supplier's engineer came and trained four people on the new
+     analyser, there was nowhere to put his name — the field was a dropdown of
+     employees — and the laboratory's own record said the session had no
+     trainer. Most of the training that matters most is exactly that: the
+     application specialist, the reference laboratory, the visiting trainer,
+     the online course.
+
+     Two separate facts were being confused, so both are stored:
+       delivery_mode — internal or external: who ARRANGED and ran the session.
+       trainer_type  — a member of staff, or somebody from outside: who TAUGHT.
+     They do not always agree. An in-house session can be taught by the
+     supplier's engineer, and a member of staff can teach on an external
+     course, so neither is inferred from the other.
+
+     The rest of these columns answer the question a training register is
+     actually asked and could never answer: did it work? A session now carries
+     how its effect will be judged and by when, and until somebody records the
+     finding it reads as outstanding rather than quietly counting as done.
+
+     And source_module/source_record_id let a session created from somewhere
+     else in the system — equipment training, a corrective action — point back
+     at what caused it, so one training file per person can gather all of them
+     without losing where each came from.
+     ======================================================================= */
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(training_events)').all() as Array<{ name: string }>).map(c => c.name));
+    const add: Array<[string, string]> = [
+      ['delivery_mode', "delivery_mode TEXT NOT NULL DEFAULT 'internal'"],
+      ['trainer_type', "trainer_type TEXT NOT NULL DEFAULT 'internal_staff'"],
+      ['external_trainer_name', 'external_trainer_name TEXT'],
+      ['external_trainer_organisation', 'external_trainer_organisation TEXT'],
+      ['external_trainer_qualifications', 'external_trainer_qualifications TEXT'],
+      // Who PROVIDED the training, which is not always who taught it: a course
+      // run by a national programme and taught by a contracted tutor.
+      ['provider', 'provider TEXT'],
+      ['category', 'category TEXT'],
+      ['training_format', 'training_format TEXT'],
+      ['objectives', 'objectives TEXT'],
+      ['duration_hours', 'duration_hours REAL'],
+      ['end_date', 'end_date TEXT'],
+      // What the session was about, where it is a thing the system already
+      // holds. A briefing on a new SOP and training on an analyser are the two
+      // cases that matter, and both were previously unrecordable.
+      ['equipment_id', 'equipment_id INTEGER REFERENCES equipment_items(id)'],
+      ['document_id', 'document_id INTEGER REFERENCES documents(id)'],
+      // Did it work?
+      ['effectiveness_method', "effectiveness_method TEXT NOT NULL DEFAULT 'not_required'"],
+      ['effectiveness_due_date', 'effectiveness_due_date TEXT'],
+      ['effectiveness_outcome', "effectiveness_outcome TEXT NOT NULL DEFAULT 'pending'"],
+      ['effectiveness_notes', 'effectiveness_notes TEXT'],
+      ['effectiveness_reviewed_by_staff_id', 'effectiveness_reviewed_by_staff_id INTEGER REFERENCES staff(id)'],
+      ['effectiveness_reviewed_at', 'effectiveness_reviewed_at TEXT'],
+      // Where this record was made, when it was not made here.
+      ['source_module', 'source_module TEXT'],
+      ['source_record_type', 'source_record_type TEXT'],
+      ['source_record_id', 'source_record_id INTEGER'],
+    ];
+    for (const [col, ddl] of add) if (!cols.has(col)) database.exec(`ALTER TABLE training_events ADD COLUMN ${ddl}`);
+    database.exec('CREATE INDEX IF NOT EXISTS idx_training_events_date ON training_events(training_date)');
+    database.exec('CREATE INDEX IF NOT EXISTS idx_training_events_source ON training_events(source_module, source_record_type, source_record_id)');
+
+    // An event created before delivery_mode existed was, by construction, one
+    // the laboratory ran with one of its own staff teaching — that was the
+    // only kind the form could produce. Saying so explicitly is more honest
+    // than leaving the column at a default nobody chose.
+    database.exec("UPDATE training_events SET delivery_mode = 'internal' WHERE delivery_mode IS NULL OR delivery_mode = ''");
+    database.exec("UPDATE training_events SET trainer_type = 'internal_staff' WHERE trainer_type IS NULL OR trainer_type = ''");
+  }
+
+  /* --------------------------------------------------------------------------
+     Attendance: present is not the same as trained.
+
+     The register recorded that somebody was in the room. What the laboratory
+     is asked for is what they came away with — so the outcome, the hours that
+     count towards their file, and the certificate they were given all live on
+     the attendance row, where they belong to the person rather than the event.
+     ----------------------------------------------------------------------- */
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(training_attendance)').all() as Array<{ name: string }>).map(c => c.name));
+    const add: Array<[string, string]> = [
+      ['outcome', "outcome TEXT NOT NULL DEFAULT 'not_assessed'"],
+      ['hours', 'hours REAL'],
+      ['pre_test_score', 'pre_test_score REAL'],
+      ['post_test_score', 'post_test_score REAL'],
+      ['certificate_file_id', 'certificate_file_id INTEGER REFERENCES files(id)'],
+      // The assessment that later proved this training worked, for the person
+      // it worked for. Effectiveness is judged per person, not per session.
+      ['competency_assessment_id', 'competency_assessment_id INTEGER REFERENCES competency_assessments(id)'],
+      ['effectiveness_outcome', "effectiveness_outcome TEXT NOT NULL DEFAULT 'pending'"],
+      ['effectiveness_notes', 'effectiveness_notes TEXT'],
+      ['updated_at', 'updated_at TEXT'],
+    ];
+    for (const [col, ddl] of add) if (!cols.has(col)) database.exec(`ALTER TABLE training_attendance ADD COLUMN ${ddl}`);
+    database.exec('CREATE INDEX IF NOT EXISTS idx_training_attendance_staff ON training_attendance(staff_id)');
+  }
+
+  /* --------------------------------------------------------------------------
+     Equipment training, by the person who actually gave it.
+
+     Training on an analyser is very often given by somebody who does not work
+     here — the installing engineer, the application specialist — and the
+     equipment form had the same staff-only dropdown. It now takes either, and
+     carries the id of the training event it raises in the personnel register,
+     so the same session appears on the person's file without being entered
+     twice or drifting apart from the equipment record.
+     ----------------------------------------------------------------------- */
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(equipment_competencies)').all() as Array<{ name: string }>).map(c => c.name));
+    const add: Array<[string, string]> = [
+      ['delivery_mode', "delivery_mode TEXT NOT NULL DEFAULT 'internal'"],
+      ['trainer_type', "trainer_type TEXT NOT NULL DEFAULT 'internal_staff'"],
+      ['external_trainer_name', 'external_trainer_name TEXT'],
+      ['external_trainer_organisation', 'external_trainer_organisation TEXT'],
+      ['external_trainer_qualifications', 'external_trainer_qualifications TEXT'],
+      ['provider', 'provider TEXT'],
+      ['training_hours', 'training_hours REAL'],
+      ['training_event_id', 'training_event_id INTEGER REFERENCES training_events(id)'],
+    ];
+    for (const [col, ddl] of add) if (!cols.has(col)) database.exec(`ALTER TABLE equipment_competencies ADD COLUMN ${ddl}`);
+    database.exec('CREATE INDEX IF NOT EXISTS idx_equipment_competencies_staff ON equipment_competencies(staff_id)');
+  }
+
+  /* --------------------------------------------------------------------------
+     Declared CPD, with the trainer named.
+
+     Somebody who went on a course knows who taught it and who ran it. The
+     portal had nowhere to say so, which meant the one training record with a
+     real external trainer behind it was also the one that could not name them.
+     ----------------------------------------------------------------------- */
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(staff_cpd_records)').all() as Array<{ name: string }>).map(c => c.name));
+    const add: Array<[string, string]> = [
+      ['delivery_mode', "delivery_mode TEXT NOT NULL DEFAULT 'external'"],
+      ['trainer_name', 'trainer_name TEXT'],
+      ['category', 'category TEXT'],
+      ['certificate_reference', 'certificate_reference TEXT'],
+    ];
+    for (const [col, ddl] of add) if (!cols.has(col)) database.exec(`ALTER TABLE staff_cpd_records ADD COLUMN ${ddl}`);
   }
 
   // SQLite plans a query from the statistics it collected the last time it was

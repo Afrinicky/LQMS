@@ -14,9 +14,10 @@ import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import CompetencyWorkspace from './personnel/CompetencyWorkspace';
 import AppraisalWorkspace from './personnel/AppraisalWorkspace';
 import OrientationInduction from './personnel/OrientationInduction';
+import TrainingWorkspace from './personnel/TrainingWorkspace';
 import type {
   Section, Department, Staff, Position,
-  StaffDocument, StaffDeclaration, TrainingEvent, DutyRoster,
+  StaffDocument, StaffDeclaration, DutyRoster, EquipmentItem,
   PersonnelSummary, MyTasks, MyProfile, RosterCoverage, StaffSuggestionsResponse, ProfessionalRank,
   JobDescriptionDoc, JobDescriptionRegister,
 } from '../../shared/types/api';
@@ -38,7 +39,6 @@ const tabBar = (active: string, tabs: string[], onChange: (name: string) => void
 
 const STAFF_DOC_TYPES = ['CV', 'Qualification', 'Licence', 'Certificate', 'Contract', 'Job description', 'ID', 'Reference', 'Other'];
 const DECLARATION_TYPES = ['confidentiality', 'ethical_declaration', 'conflict_of_interest', 'safety_commitment', 'other'];
-const ATTENDANCE_STATUSES = ['invited', 'attended', 'absent', 'excused'];
 const GENDERS = ['MALE', 'FEMALE', 'OTHER'];
 const PERSONNEL_CATEGORIES = ['STAFF', 'INTERN', 'NSS', 'LOCUM', 'STUDENT', 'CONTRACTOR'];
 const APPOINTMENT_TYPES = ['FULL TIME', 'PART TIME', 'CONTRACT', 'INTERN', 'NSS', 'LOCUM'];
@@ -96,8 +96,6 @@ export function PersonnelManagementPage() {
   const [summary, setSummary] = useState<PersonnelSummary | null>(null);
   const [staffDocs, setStaffDocs] = useState<StaffDocument[]>([]);
   const [declarations, setDeclarations] = useState<StaffDeclaration[]>([]);
-  const [trainings, setTrainings] = useState<TrainingEvent[]>([]);
-  const [selectedTraining, setSelectedTraining] = useState<TrainingEvent | null>(null);
   // A dashboard alert arrives with ?tab= and ?focus=; the tab bar opens the tab,
   // this scrolls to the record and flashes it. Competence and appraisal records
   // carry their own focus targets inside their workspaces.
@@ -120,22 +118,26 @@ export function PersonnelManagementPage() {
   const importInputRef = useRef<HTMLInputElement>(null);
   const [ranks, setRanks] = useState<ProfessionalRank[]>([]);
   useEffect(() => { api<ProfessionalRank[]>('/professional-ranks').then(setRanks).catch(() => setRanks([])); }, []);
-  const [trainingForm, setTrainingForm] = useState({ title: '', description: '', trainingType: '', sectionId: '', trainerStaffId: '', trainingDate: '', startTime: '', endTime: '', location: '' });
-  const [attendanceForm, setAttendanceForm] = useState({ staffId: '', attendanceStatus: 'attended', remarks: '' });
+  // Training is very often about one instrument, and saying which is what ties
+  // the session to the equipment file. A reader with no equipment rights simply
+  // gets an empty list and the field offers "not about a specific instrument".
+  const [equipment, setEquipment] = useState<EquipmentItem[]>([]);
+  useEffect(() => { void apiRead<EquipmentItem[]>('/equipment', []).then(setEquipment); }, []);
   const [rosterForm, setRosterForm] = useState({ departmentId: '', sectionId: '', rosterStartDate: '', rosterEndDate: '', notes: '' });
   const [assignForm, setAssignForm] = useState({ staffId: '', dutyDate: '', shiftName: '', startTime: '', endTime: '', dutyRole: '', notes: '' });
 
   async function load() {
     try {
-      const [sum, sd, decl, tr, rs] = await Promise.all([
+      const [sum, sd, decl, rs] = await Promise.all([
         api<PersonnelSummary>('/dashboard/personnel-summary').catch(() => null),
         apiRead<StaffDocument[]>('/personnel/staff-documents', []),
         apiRead<StaffDeclaration[]>('/personnel/declarations', []),
-        apiRead<TrainingEvent[]>('/personnel/training', []),
         apiRead<DutyRoster[]>('/personnel/rosters', [])
       ]);
       if (sum) setSummary(sum);
-      setStaffDocs(sd); setDeclarations(decl); setTrainings(tr); setRosters(rs);
+      // The training register is loaded by the workspace that owns it, so a
+      // tab nobody has opened does not fetch it on every visit to this page.
+      setStaffDocs(sd); setDeclarations(decl); setRosters(rs);
     } catch (e) { setError(errorText(e)); }
   }
   useEffect(() => { if (isEnabled('personnel')) void load(); }, [isEnabled]);
@@ -238,30 +240,6 @@ export function PersonnelManagementPage() {
   async function signDeclaration(id: number) {
     try { await api(`/personnel/declarations/${id}/sign`, { method: 'POST', body: JSON.stringify({}) }); await load(); }
     catch (e) { setError(errorText(e)); }
-  }
-
-  async function submitTraining(e: FormEvent) {
-    e.preventDefault(); setError(null);
-    try {
-      await api('/personnel/training', { method: 'POST', body: JSON.stringify(trainingForm) });
-      setTrainingForm({ title: '', description: '', trainingType: '', sectionId: '', trainerStaffId: '', trainingDate: '', startTime: '', endTime: '', location: '' });
-      await load();
-    } catch (e) { setError(errorText(e)); }
-  }
-
-  async function openTraining(id: number) {
-    try { setSelectedTraining(await api<TrainingEvent>(`/personnel/training/${id}`)); }
-    catch (e) { setError(errorText(e)); }
-  }
-
-  async function submitAttendance(e: FormEvent) {
-    e.preventDefault(); setError(null);
-    if (!selectedTraining) return;
-    try {
-      await api(`/personnel/training/${selectedTraining.id}/attendance`, { method: 'POST', body: JSON.stringify(attendanceForm) });
-      setAttendanceForm({ staffId: '', attendanceStatus: 'attended', remarks: '' });
-      await openTraining(selectedTraining.id);
-    } catch (e) { setError(errorText(e)); }
   }
 
   async function submitRoster(e: FormEvent) {
@@ -478,39 +456,7 @@ export function PersonnelManagementPage() {
 
     {tab === 'Orientation & Induction' && <OrientationInduction staff={staff} sections={sections} departments={departments} />}
 
-    {tab === 'Training Events' && <>
-      {can('personnel.training', 'create') && <form className="form-grid" onSubmit={submitTraining}>
-        <label>Title<TextField value={trainingForm.title} onValue={nextValue => setTrainingForm({ ...trainingForm, title: nextValue })} required /></label>
-        <label>Description<TextField as="textarea" value={trainingForm.description} onValue={nextValue => setTrainingForm({ ...trainingForm, description: nextValue })} /></label>
-        <label>Type<TextField value={trainingForm.trainingType} onValue={nextValue => setTrainingForm({ ...trainingForm, trainingType: nextValue })} placeholder="e.g. internal, external, refresher" /></label>
-        <label>Section<select value={trainingForm.sectionId} onChange={e => setTrainingForm({ ...trainingForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-        <label>Trainer<select value={trainingForm.trainerStaffId} onChange={e => setTrainingForm({ ...trainingForm, trainerStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-        <label>Date<input type="date" value={trainingForm.trainingDate} onChange={e => setTrainingForm({ ...trainingForm, trainingDate: e.target.value })} required /></label>
-        <label>Start time<input type="time" value={trainingForm.startTime} onChange={e => setTrainingForm({ ...trainingForm, startTime: e.target.value })} /></label>
-        <label>End time<input type="time" value={trainingForm.endTime} onChange={e => setTrainingForm({ ...trainingForm, endTime: e.target.value })} /></label>
-        <label>Location<TextField value={trainingForm.location} onValue={nextValue => setTrainingForm({ ...trainingForm, location: nextValue })} /></label>
-        <button type="submit">Create training event</button>
-      </form>}
-      <table className="data-table"><thead><tr><th>Number</th><th>Title</th><th>Type</th><th>Date</th><th>Status</th><th></th></tr></thead><tbody>
-        {trainings.map(t => <tr key={t.id}>
-          <td>{t.training_number}</td><td>{t.title}</td><td>{t.training_type || '—'}</td>
-          <td>{t.training_date}</td><td>{formatBadge(t.status)}</td>
-          <td><button onClick={() => openTraining(t.id)}>Open</button></td>
-        </tr>)}
-      </tbody></table>
-      {selectedTraining && <DetailModal open onClose={() => setSelectedTraining(null)} title={<>{selectedTraining.training_number} — {selectedTraining.title}</>}>
-        <h4>Attendance</h4>
-        <table className="data-table"><thead><tr><th>Staff</th><th>Status</th><th>Signed</th><th>Remarks</th></tr></thead><tbody>
-          {(selectedTraining.attendance || []).map(a => <tr key={a.id}><td>{a.staff_name || staffName(staff, a.staff_id)}</td><td>{formatBadge(a.attendance_status)}</td><td>{a.signed_at || '—'}</td><td>{a.remarks || '—'}</td></tr>)}
-        </tbody></table>
-        {can('personnel.training', 'create') && <form className="form-grid" onSubmit={submitAttendance}>
-          <label>Staff<select value={attendanceForm.staffId} onChange={e => setAttendanceForm({ ...attendanceForm, staffId: e.target.value })} required><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-          <label>Status<select value={attendanceForm.attendanceStatus} onChange={e => setAttendanceForm({ ...attendanceForm, attendanceStatus: e.target.value })}>{ATTENDANCE_STATUSES.map(a => <option key={a} value={a}>{a}</option>)}</select></label>
-          <label>Remarks<TextField value={attendanceForm.remarks} onValue={nextValue => setAttendanceForm({ ...attendanceForm, remarks: nextValue })} /></label>
-          <button type="submit">Record attendance</button>
-        </form>}
-      </DetailModal>}
-    </>}
+    {tab === 'Training Events' && <TrainingWorkspace staff={staff} sections={sections} equipment={equipment} />}
 
     {tab === 'Competency Assessments' &&
       <CompetencyWorkspace staff={staff} sections={sections} departments={departments} positions={positions} />}
