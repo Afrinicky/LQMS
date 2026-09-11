@@ -34,6 +34,7 @@ import TrainerFields, { emptyTrainer, trainerPayload, trainerProblem } from '../
 import EquipmentAnalyserTab from '../components/instruments/EquipmentAnalyserTab';
 import TrainingRecordPanel from '../components/training/TrainingRecordPanel';
 import { trainerDisplayName } from '../../shared/constants/training';
+import { PrintButton } from './personnel/competencyShared';
 import PermissionTabs from '../components/PermissionTabs';
 import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import { useCappedRows } from '../hooks/useCappedRows';
@@ -1267,7 +1268,7 @@ function EquipmentCompetencyTab({ equipment, staff, setError, onChanged }: { equ
   const [list, setList] = useState<EquipmentCompetency[]>([]);
   const blank = {
     ...emptyTrainer(),
-    equipmentId: '', staffId: '', trainingDate: '', trainingHours: '',
+    equipmentId: '', staffIds: [] as string[], trainingDate: '', trainingHours: '',
     assessmentMethod: 'direct_observation', assessmentDate: '', assessorStaffId: '',
     outcome: 'competent', authorized: true, authorizationLevel: 'Perform', notes: '',
   };
@@ -1280,21 +1281,32 @@ function EquipmentCompetencyTab({ equipment, staff, setError, onChanged }: { equ
 
   async function submit(e: FormEvent) {
     e.preventDefault(); setError(null); setNotice(null);
-    if (!form.equipmentId || !form.staffId) { setError('Select equipment and staff.'); return; }
+    if (!form.equipmentId || form.staffIds.length === 0) { setError('Select the instrument and who was trained on it.'); return; }
     const problem = trainerProblem(form);
     if (problem) { setError(problem); return; }
     setBusy(true);
     try {
-      const answer = await api<{ trainingEventId?: number | null }>(`/equipment/${form.equipmentId}/competencies`, {
-        method: 'POST', body: JSON.stringify({ ...form, ...trainerPayload(form) }),
+      const answer = await api<{ trainingEventId?: number | null; trainedCount?: number }>(`/equipment/${form.equipmentId}/competencies`, {
+        method: 'POST', body: JSON.stringify({ ...form, ...trainerPayload(form), staffIds: form.staffIds }),
       });
-      const person = staff.find(s => String(s.id) === String(form.staffId));
+      const count = answer?.trainedCount ?? form.staffIds.length;
+      const who = count === 1
+        ? (staff.find(s => String(s.id) === String(form.staffIds[0]))?.fullName ?? 'the staff member') + "'s"
+        : `all ${count} of their`;
       setNotice(answer?.trainingEventId
-        ? `Recorded. It is now on ${person?.fullName ?? 'the staff member'}'s training file in Personnel Management and on their portal.`
+        ? `Recorded as one session. It is on ${who} training file in Personnel Management and on their portal, and the training report can be printed from the register below.`
         : 'Recorded.');
       setForm(blank); load(); onChanged();
     } catch (e) { setError(errorText(e)); }
     finally { setBusy(false); }
+  }
+
+  /** Everybody trained in one sitting, ticked off a list. */
+  function toggleTrainee(id: string) {
+    setForm(current => ({
+      ...current,
+      staffIds: current.staffIds.includes(id) ? current.staffIds.filter(x => x !== id) : [...current.staffIds, id],
+    }));
   }
 
   return <div>
@@ -1309,7 +1321,24 @@ function EquipmentCompetencyTab({ equipment, staff, setError, onChanged }: { equ
       {notice && <Notice kind="success">{notice}</Notice>}
       {can('equipment.training', 'create') && <form className="form" onSubmit={submit}>
         <label>Equipment<select value={form.equipmentId} onChange={e => setForm({ ...form, equipmentId: e.target.value })} required><option value="">Select equipment</option>{equipment.map(e2 => <option key={e2.id} value={e2.id}>{e2.equipment_number} — {e2.name}</option>)}</select></label>
-        <label>Staff<select value={form.staffId} onChange={e => setForm({ ...form, staffId: e.target.value })} required><option value="">Select staff</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+        {/* A group, because that is how an instrument is taught: the engineer
+            commissions the analyser and trains everybody who will use it in one
+            morning. Entering that as four unrelated sessions is what the form
+            used to force, and it is why the commissioning training had no
+            attendance sheet. */}
+        <fieldset className="trainee-picker" style={{ gridColumn: '1 / -1' }}>
+          <legend>Who was trained <span className="muted">— tick everybody who was at the session</span></legend>
+          <div className="trainee-list">
+            {staff.map(s => <label key={s.id} className="trainee-option">
+              <input type="checkbox" checked={form.staffIds.includes(String(s.id))} onChange={() => toggleTrainee(String(s.id))} />
+              <span>{s.fullName}{s.designation ? <small className="muted"> · {s.designation}</small> : null}</span>
+            </label>)}
+          </div>
+          <small className="muted">
+            {form.staffIds.length === 0 ? 'Nobody chosen yet.'
+              : `${form.staffIds.length} ${form.staffIds.length === 1 ? 'person' : 'people'} — recorded as one session, with one attendance sheet. Each gets their own competence decision.`}
+          </small>
+        </fieldset>
         <label>Training date<input type="date" value={form.trainingDate} onChange={e => setForm({ ...form, trainingDate: e.target.value })} /></label>
         <label>Training hours<input type="number" min="0" step="0.5" value={form.trainingHours} onChange={e => setForm({ ...form, trainingHours: e.target.value })} placeholder="e.g. 4" /></label>
 
@@ -1331,7 +1360,7 @@ function EquipmentCompetencyTab({ equipment, staff, setError, onChanged }: { equ
     </div>
     <div className="card" style={{ marginTop: 16 }}>
       <h3>Equipment competence register</h3>
-      {list.length === 0 ? <p className="muted">No records yet.</p> : <table className="table"><thead><tr><th>Staff</th><th>Equipment</th><th>Trainer</th><th>Assessed</th><th>Outcome</th><th>Authorised</th><th>Personnel records</th><th>Status</th></tr></thead><tbody>
+      {list.length === 0 ? <p className="muted">No records yet.</p> : <table className="table"><thead><tr><th>Staff</th><th>Equipment</th><th>Trainer</th><th>Assessed</th><th>Outcome</th><th>Authorised</th><th>Personnel records</th><th>Training report</th><th>Status</th></tr></thead><tbody>
         {list.map(c => <tr key={c.id}>
           <td>
             {c.staff_name}
@@ -1348,6 +1377,16 @@ function EquipmentCompetencyTab({ equipment, staff, setError, onChanged }: { equ
           <td>{c.outcome ? formatBadge(c.outcome) : '—'}</td>
           <td>{c.authorized ? `✓ ${c.authorization_level || ''}` : '—'}</td>
           <td>{c.competency_assessment_id ? `COMP #${c.competency_assessment_id}` : '—'}{c.technical_authorization_id ? ` · AUTH #${c.technical_authorization_id}` : ''}{c.training_event_number ? ` · ${c.training_event_number}` : ''}</td>
+          <td>
+            {/* The same training report the personnel register prints, from
+                here — the session is one session wherever it was entered, and
+                an assessor asking for the commissioning training's report
+                should not be told to go and look in another module. */}
+            {c.training_event_id
+              ? <PrintButton path={`/personnel/training/${c.training_event_id}/print`} label="Report"
+                  title="The training report for this session, with its attendance sheet" />
+              : <span className="muted">—</span>}
+          </td>
           <td>{formatBadge(c.status)}</td>
         </tr>)}
       </tbody></table>}

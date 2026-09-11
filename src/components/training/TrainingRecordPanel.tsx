@@ -102,6 +102,14 @@ export default function TrainingRecordPanel({ staffId, title = 'Training file', 
             {summary.effectivenessOutstanding > 0 && (
               <Stat label="Follow-up owed" value={summary.effectivenessOutstanding} tone="warn" />
             )}
+            {/* An attendance sheet this person was marked present at and has not
+                signed. It is stated because the session cannot be closed until
+                it is signed, so it is outstanding work rather than a cosmetic
+                gap in the file. */}
+            {summary.awaitingSignature > 0 && (
+              <Stat label="Sheets to sign" value={summary.awaitingSignature} tone="warn" />
+            )}
+            {summary.scheduled > 0 && <Stat label="Still to come" value={summary.scheduled} />}
           </div>
 
           {origins.length > 1 && (
@@ -171,9 +179,18 @@ function Entry({ entry }: { entry: TrainingRecordEntry }) {
         </div>
 
         <div className="training-entry-tags">
+          {/* A session still to come, or held and not yet signed off, is not the
+              same thing as a record — and a file that cannot tell them apart
+              reads as a list of claims. */}
+          {entry.status === 'planned' && <span className="badge tone-warn">Scheduled</span>}
+          {entry.status === 'postponed' && <span className="badge tone-warn">Postponed</span>}
+          {entry.status === 'in_progress' && <span className="badge tone-live">Running now</span>}
+          {entry.status === 'completed' && <span className="badge tone-warn">Awaiting closure</span>}
+          {entry.status === 'cancelled' && <span className="badge tone-bad">Called off</span>}
           {entry.attendanceStatus && entry.attendanceStatus !== 'attended' && (
             <span className="badge">{ATTENDANCE_STATUS_LABELS[entry.attendanceStatus] ?? entry.attendanceStatus}</span>
           )}
+          {entry.signedAt && <span className="badge tone-ok">Signed {String(entry.signedAt).slice(0, 10)}</span>}
           {entry.outcome && entry.outcome !== 'not_assessed' && (
             <span className={`badge tone-${outcomeTone}`}>
               <Award size={11} /> {TRAINING_OUTCOME_LABELS[entry.outcome] ?? entry.outcome.replace(/_/g, ' ')}

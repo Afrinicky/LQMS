@@ -637,11 +637,21 @@ export function equipmentRoutes() {
    * person's portal without anybody entering it a second time.
    */
   router.post('/:id/competencies', requirePermission('equipment.training', 'create'), (req, res) => {
-    if (!req.body.staffId) return res.status(400).json({ error: 'staffId is required' });
+    // One person, or the bench. An engineer who comes to commission an analyser
+    // trains everybody who will use it in one morning, and the form used to
+    // force that to be entered as four unrelated sessions — so the register
+    // could not show what actually happened, and the attendance sheet for the
+    // commissioning training did not exist. `staffIds` records it as one
+    // session with several names on it; `staffId` still works for one person.
+    const requested: unknown[] = Array.isArray(req.body.staffIds) && req.body.staffIds.length
+      ? req.body.staffIds : [req.body.staffId];
+    const staffIds: number[] = [...new Set(requested
+      .map(value => parseIntNullable(value))
+      .filter((value): value is number => value !== null && value > 0))];
+    if (staffIds.length === 0) return res.status(400).json({ error: 'Choose at least one member of staff.' });
     const db = getDb();
     const equipment = db.prepare('SELECT id, name, equipment_number, section_id, department_id FROM equipment_items WHERE id = ?').get(req.params.id) as any;
     if (!equipment) return res.status(404).json({ error: 'Equipment item not found' });
-    const staffId = parseIntNullable(req.body.staffId);
     const outcome = req.body.outcome ?? 'competent';
     const authorized = req.body.authorized ? 1 : 0;
     const assessmentDate = req.body.assessmentDate ?? req.body.trainingDate ?? new Date().toISOString().slice(0, 10);
@@ -666,7 +676,10 @@ export function equipmentRoutes() {
     const trainerStaffId = trainerType === 'external_person' ? null : parseIntNullable(req.body.trainerStaffId);
     const trainingHours = req.body.trainingHours === undefined || req.body.trainingHours === '' ? null : Number(req.body.trainingHours);
 
-    const tx = db.transaction(() => {
+    // Every trainee gets their own competence record — competence is a judgement
+    // about a person, not a group — but they share one training event, so the
+    // session reads as the one session it was.
+    const recordOne = (staffId: number, shareEventId: number | null) => {
       const result = db.prepare(`INSERT INTO equipment_competencies
           (equipment_id, staff_id, training_date, trainer_staff_id, delivery_mode, trainer_type,
            external_trainer_name, external_trainer_organisation, external_trainer_qualifications, provider,
@@ -688,7 +701,11 @@ export function equipmentRoutes() {
       // also get a technical authorization — both appear in Personnel Management.
       if (outcome === 'competent' || outcome === 'competent_with_supervision') {
         const createdAt = new Date().toISOString();
-        const competencyNumber = generateRecordNumber(db, 'competency_assessments', 'COMP', createdAt);
+        // The UNIQUE column is named so the sequence is derived from the
+        // highest number already issued rather than from a row count — which
+        // repeats a number the moment a record has been deleted, and now also
+        // the moment a whole bench is recorded in one call.
+        const competencyNumber = generateRecordNumber(db, 'competency_assessments', 'COMP', createdAt, 'competency_number');
         const compRes = db.prepare(`INSERT INTO competency_assessments (competency_number, staff_id, department_id, section_id, activity, assessment_method, assessor_staff_id, assessment_date, outcome, findings, retraining_required, next_assessment_due, authorization_recommendation, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
           .run(competencyNumber, staffId, equipment.department_id ?? null, equipment.section_id ?? null, activity, req.body.assessmentMethod ?? 'direct_observation', parseIntNullable(req.body.assessorStaffId), assessmentDate, outcome, req.body.notes ?? null, 0, req.body.nextAssessmentDue ?? null, authorized ? `Authorise to operate: ${req.body.authorizationLevel ?? 'Perform'}` : null, 'completed', req.user!.id, createdAt);
         competencyAssessmentId = Number(compRes.lastInsertRowid);
@@ -708,12 +725,40 @@ export function equipmentRoutes() {
       const trainingEventId = syncEquipmentTrainingEvent(db, ecId, {
         userId: req.user!.id,
         makeNumber: generateRecordNumber,
+        shareEventId,
       });
-      return { ecId, competencyAssessmentId, technicalAuthorizationId, trainingEventId };
+      return { ecId, staffId, competencyAssessmentId, technicalAuthorizationId, trainingEventId };
+    };
+
+    const out = db.transaction(() => {
+      const records: Array<ReturnType<typeof recordOne>> = [];
+      let sharedEventId: number | null = null;
+      for (const staffId of staffIds) {
+        const one = recordOne(staffId, sharedEventId);
+        // The first trainee raises the session; everybody after joins it.
+        if (!sharedEventId && one.trainingEventId) sharedEventId = one.trainingEventId;
+        records.push(one);
+      }
+      return { records, trainingEventId: sharedEventId };
+    })();
+
+    const first = out.records[0];
+    for (const record of out.records) {
+      audit(req, {
+        action: 'create', entity: 'equipment_competencies', entityId: record.ecId,
+        newValue: { equipmentId: req.params.id, staffId: record.staffId, outcome, authorized, deliveryMode, trainerType, trainingEventId: record.trainingEventId },
+      });
+    }
+    res.status(201).json({
+      // The shape one trainee always returned, so the existing caller is
+      // unaffected, with the whole group alongside it.
+      ecId: first.ecId,
+      competencyAssessmentId: first.competencyAssessmentId,
+      technicalAuthorizationId: first.technicalAuthorizationId,
+      trainingEventId: out.trainingEventId,
+      trainedCount: out.records.length,
+      records: out.records,
     });
-    const out = tx();
-    audit(req, { action: 'create', entity: 'equipment_competencies', entityId: out.ecId, newValue: { equipmentId: req.params.id, staffId, outcome, authorized, deliveryMode, trainerType } });
-    res.status(201).json(out);
   });
 
   // ===================== Equipment documents (via Documents module) =====================

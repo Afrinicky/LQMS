@@ -1,12 +1,20 @@
-import { useRef, useState } from 'react';
-import { AlertTriangle, BookOpenCheck, GraduationCap, Loader2, Paperclip, Pencil, Plus, Target, Trash2, Upload, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  AlertTriangle, BookOpenCheck, CalendarClock, CheckCircle2, Cpu, ExternalLink, GraduationCap,
+  Loader2, Lock, Paperclip, Pencil, PenLine, Plus, Printer, Repeat, Target, Trash2, Upload, X, XCircle,
+} from 'lucide-react';
 import { api, errorText } from '../../services/api';
+import { openPrintable } from '../../services/xlsx';
 import { downloadFileById, dueTone, titleCase, usePortal } from './portalData';
 import { uploadPersonalFile } from './PortalTaskDrawer';
 import type { StaffCpdRecord } from '../../../shared/types/api';
 import TextField from '../../components/ui/TextField';
 import TrainingRecordPanel from '../../components/training/TrainingRecordPanel';
-import { trainerDisplayName } from '../../../shared/constants/training';
+import {
+  trainerDisplayName, trainingIsLocked, attendedInPerson, recurrenceSummary,
+  TRAINING_STATUS_LABELS, TRAINING_STATUS_TONES, TRAINING_CATEGORY_LABELS,
+  ATTENDANCE_STATUS_LABELS, TRAINING_OUTCOME_LABELS, TRAINING_OUTCOME_TONES,
+} from '../../../shared/constants/training';
 
 /**
  * My training and competency — the evidence that this person is competent to
@@ -52,10 +60,40 @@ const outcomeTone = (outcome?: string | null) => {
   return 'pending';
 };
 
+/** One row of my own training, as the portal needs to act on it. */
+type MySession = {
+  id: number; training_number: string; title: string; description: string | null;
+  category: string | null; training_format: string | null; delivery_mode: string;
+  trainer_type: string; trainer_name: string | null;
+  external_trainer_name: string | null; external_trainer_organisation: string | null;
+  provider: string | null; objectives: string | null;
+  training_date: string; end_date: string | null; start_time: string | null; end_time: string | null;
+  duration_hours: number | null; location: string | null; status: string; training_mode: string;
+  frequency: string; frequency_interval_days: number | null;
+  postponed_from_date: string | null; postponement_reason: string | null; cancellation_reason: string | null;
+  remedial_for_event_id: number | null; closed_at: string | null;
+  section_name: string | null; equipment_name: string | null; equipment_number: string | null;
+  attendance_id: number; attendance_status: string; outcome: string | null; hours: number | null;
+  signed_at: string | null; sheet_designation: string | null; remarks: string | null;
+};
+
+type MySessions = { sessions: MySession[]; awaitingSignature: number; hasSignatureOnFile: boolean };
+
 export default function PortalTraining() {
   const { tasks, cpd, reload, setError, setNotice } = usePortal();
-  const training = tasks?.upcomingTraining ?? [];
   const competency = tasks?.upcomingCompetency ?? [];
+
+  /* My own sessions, with everything needed to act on them.
+     The portal used to show only a read-only list of what had been booked, so
+     the two things a member of staff actually needs to do about training —
+     signing the attendance sheet, and printing the report for a session they
+     attended — were impossible from here. */
+  const [mine, setMine] = useState<MySessions | null>(null);
+  const loadMine = useCallback(async () => {
+    try { setMine(await api<MySessions>('/personnel/my-training-sessions')); }
+    catch { setMine({ sessions: [], awaitingSignature: 0, hasSignatureOnFile: false }); }
+  }, []);
+  useEffect(() => { void loadMine(); }, [loadMine]);
 
   const [form, setForm] = useState<CpdForm | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -229,39 +267,9 @@ export default function PortalTraining() {
         )}
       </section>
 
-      {/* ---- What the laboratory has scheduled for me ---- */}
-      <section className="portal-panel">
-        <div className="pp-head">
-          <div>
-            <h3><GraduationCap size={16} /> Training booked for me</h3>
-            <p>Events the laboratory has scheduled. Attendance is recorded against your file by whoever runs them.</p>
-          </div>
-          {training.length > 0 && <span className="pp-count">{training.length}</span>}
-        </div>
-        {training.length === 0 ? (
-          <p className="muted">No training is scheduled for you.</p>
-        ) : (
-          <table className="data-table">
-            <thead><tr><th>Date</th><th>Training</th><th>Trainer</th><th>Where</th><th>My attendance</th></tr></thead>
-            <tbody>
-              {training.map(t => {
-                const due = dueTone(t.training_date);
-                return (
-                  <tr key={t.id}>
-                    <td>{t.training_date}{due && <div className={`pr-sub ${due.tone}`}>{due.text}</div>}</td>
-                    <td>{t.title}<div className="muted pr-sub">{t.training_number}</div></td>
-                    {/* Named whichever kind of trainer it is. This column read
-                        "—" for every session an outside trainer was giving. */}
-                    <td>{trainerDisplayName(t)}{t.delivery_mode === 'external' && <div className="muted pr-sub">External</div>}</td>
-                    <td>{t.location || '—'}</td>
-                    <td><span className="badge">{titleCase(t.attendance_status) || 'Invited'}</span></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </section>
+      {/* ---- My sessions: what is coming, and what I owe a signature to ---- */}
+      <MyTrainingSessions data={mine} onChanged={async () => { await loadMine(); await reload(); }}
+        setError={setError} setNotice={setNotice} />
 
       <section className="portal-panel">
         <div className="pp-head">
@@ -295,5 +303,242 @@ export default function PortalTraining() {
         )}
       </section>
     </div>
+  );
+}
+
+/* ============================================================================
+   My training sessions
+   ----------------------------------------------------------------------------
+   WHAT THIS FIXES. The portal could show a member of staff a list of training
+   that had been booked for them, and nothing else — so the two things they
+   actually have to do about training could not be done here at all:
+
+     SIGN THE ATTENDANCE SHEET. Training sessions are signed for, like every
+     other sheet in this laboratory. The sheet went round on paper and somebody
+     typed the result in, which means the system held a claim that a person
+     attended with nothing from that person behind it. They sign it themselves
+     now, with the signature on their own record, and the meaning of what they
+     are signing is stated above the button.
+
+     HAVE THE EVIDENCE. A closed session is this person's training record, and
+     somebody asked at interview or at registration renewal for proof of it had
+     to go and ask Personnel Management to print it. They can print the report
+     for any session they attended.
+
+   And a session that has been postponed or called off says so here, rather than
+   the person turning up to a room with nobody in it.
+   ========================================================================= */
+function MyTrainingSessions({ data, onChanged, setError, setNotice }: {
+  data: MySessions | null;
+  onChanged: () => Promise<void>;
+  setError: (m: string | null) => void;
+  setNotice: (m: string | null) => void;
+}) {
+  const [busy, setBusy] = useState<number | null>(null);
+
+  if (!data) {
+    return (
+      <section className="portal-panel">
+        <div className="pp-head"><div><h3><GraduationCap size={16} /> My training sessions</h3></div></div>
+        <p className="muted"><Loader2 size={14} className="pd-spin" /> Reading your sessions…</p>
+      </section>
+    );
+  }
+
+  const sessions = data.sessions;
+  // Still to happen, as opposed to on the record. A postponed session is
+  // upcoming: it has a date and the person is still expected at it.
+  const upcoming = sessions.filter(s => ['planned', 'in_progress', 'postponed'].includes(s.status));
+  const toSign = sessions.filter(s => attendedInPerson(s.attendance_status) && !s.signed_at && s.status !== 'cancelled');
+  const done = sessions.filter(s => trainingIsLocked(s.status) || s.status === 'completed');
+
+  async function sign(session: MySession) {
+    setBusy(session.attendance_id);
+    setError(null);
+    try {
+      await api(`/personnel/training/${session.id}/attendance/${session.attendance_id}/sign`, {
+        method: 'POST', body: JSON.stringify({}),
+      });
+      setNotice(`You have signed the attendance sheet for ${session.training_number}.`);
+      await onChanged();
+    } catch (e) { setError(errorText(e)); }
+    finally { setBusy(null); }
+  }
+
+  async function printReport(session: MySession) {
+    try { await openPrintable(`/personnel/training/${session.id}/print`); }
+    catch (e) { setError(errorText(e)); }
+  }
+
+  return (
+    <>
+      {/* The one thing the portal owes this person an action on. It is a banner
+          rather than a column in a table because an unsigned attendance sheet is
+          an outstanding piece of work, and the register cannot close without it. */}
+      {toSign.length > 0 && (
+        <section className="portal-panel pt-sign-call">
+          <div className="pp-head">
+            <div>
+              <h3><PenLine size={16} /> {toSign.length === 1 ? 'A training attendance sheet needs your signature'
+                : `${toSign.length} training attendance sheets need your signature`}</h3>
+              <p>
+                You were marked present at these sessions. Signing attests that you attended — the same signature you
+                use everywhere else in the system, taken from your own record.
+              </p>
+            </div>
+          </div>
+          {!data.hasSignatureOnFile && (
+            <p className="pd-error">
+              <AlertTriangle size={14} /> You have no signature on file yet, so you cannot sign. Add one under
+              My Record → Replace signature, then come back.
+            </p>
+          )}
+          <ul className="pt-sign-list">
+            {toSign.map(session => (
+              <li key={session.attendance_id}>
+                <div>
+                  <strong>{session.title}</strong>
+                  <div className="muted pr-sub">
+                    {session.training_number} · {session.training_date}
+                    {session.sheet_designation ? ` · signing as ${session.sheet_designation}` : ''}
+                    {session.hours ? ` · ${session.hours} h credited` : ''}
+                  </div>
+                </div>
+                <button type="button" disabled={busy === session.attendance_id || !data.hasSignatureOnFile}
+                  onClick={() => void sign(session)}>
+                  {busy === session.attendance_id
+                    ? <><Loader2 size={14} className="pd-spin" /> Signing…</>
+                    : <><PenLine size={14} /> Sign the sheet</>}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <section className="portal-panel">
+        <div className="pp-head">
+          <div>
+            <h3><GraduationCap size={16} /> Training coming up for me</h3>
+            <p>
+              Sessions the laboratory has scheduled you for. You are sent a notice when one is booked and again the day
+              before. Whoever runs the session marks who attended; you sign the sheet yourself.
+            </p>
+          </div>
+          {upcoming.length > 0 && <span className="pp-count">{upcoming.length}</span>}
+        </div>
+        {upcoming.length === 0 ? (
+          <p className="muted">No training is scheduled for you.</p>
+        ) : (
+          <ul className="pt-session-list">
+            {upcoming.map(session => {
+              const due = dueTone(session.training_date);
+              const series = recurrenceSummary(session.frequency, session.frequency_interval_days);
+              return (
+                <li key={session.id} className={`pt-session status-${session.status}`}>
+                  <div className="pt-session-main">
+                    <strong>{session.title}</strong>
+                    <span className={`badge tone-${TRAINING_STATUS_TONES[session.status] ?? 'muted'}`}>
+                      {TRAINING_STATUS_LABELS[session.status] ?? session.status}
+                    </span>
+                    {session.remedial_for_event_id && (
+                      <span className="badge tone-warn">Individual retraining arranged for you</span>
+                    )}
+                  </div>
+                  <div className="pt-session-meta">
+                    <span><CalendarClock size={12} /> {session.training_date}
+                      {session.start_time ? ` at ${session.start_time}` : ''}</span>
+                    {due && <span className={due.tone}>{due.text}</span>}
+                    <span>{trainerDisplayName(session)}</span>
+                    {session.delivery_mode === 'external' && <span><ExternalLink size={12} /> External</span>}
+                    {session.location && <span>{session.location}</span>}
+                    {session.duration_hours ? <span>{session.duration_hours} h</span> : null}
+                    {series && <span><Repeat size={12} /> {series}</span>}
+                    {session.equipment_name && <span><Cpu size={12} /> {session.equipment_name}</span>}
+                    {session.category && <span>{TRAINING_CATEGORY_LABELS[session.category] ?? session.category}</span>}
+                    <span className="badge">{ATTENDANCE_STATUS_LABELS[session.attendance_status] ?? 'Invited'}</span>
+                  </div>
+                  {session.objectives && <p className="pt-session-note"><Target size={12} /> {session.objectives}</p>}
+                  {/* A session that has moved says so here. Turning up to an
+                      empty room because the change was only recorded in the
+                      register is exactly what this prevents. */}
+                  {session.status === 'postponed' && session.postponed_from_date && (
+                    <p className="pt-session-note"><CalendarClock size={12} /> Moved from {session.postponed_from_date}
+                      {session.postponement_reason ? ` — ${session.postponement_reason}` : ''}</p>
+                  )}
+                  {session.postponed_from_date && session.status === 'planned' && (
+                    <p className="pt-session-note"><CalendarClock size={12} /> This session was moved from
+                      {` ${session.postponed_from_date}`}
+                      {session.postponement_reason ? ` — ${session.postponement_reason}` : ''}</p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      <section className="portal-panel">
+        <div className="pp-head">
+          <div>
+            <h3><CheckCircle2 size={16} /> Training I have attended</h3>
+            <p>
+              Sessions that have been held. Once a senior role has reviewed and closed one it is part of your
+              permanent record, and you can print its report — the session and the signed attendance sheet together.
+            </p>
+          </div>
+          {done.length > 0 && <span className="pp-count">{done.length}</span>}
+        </div>
+        {done.length === 0 ? (
+          <p className="muted">Nothing yet.</p>
+        ) : (
+          <table className="data-table">
+            <thead><tr><th>When</th><th>Training</th><th>My attendance</th><th>Outcome</th><th>Hours</th><th>Record</th></tr></thead>
+            <tbody>
+              {done.map(session => (
+                <tr key={session.id}>
+                  <td>{session.training_date}</td>
+                  <td>
+                    {session.title}
+                    <div className="muted pr-sub">{session.training_number}
+                      {session.cancellation_reason ? ' · called off' : ''}</div>
+                  </td>
+                  <td>
+                    <span className="badge">{ATTENDANCE_STATUS_LABELS[session.attendance_status] ?? session.attendance_status}</span>
+                    {session.signed_at
+                      ? <div className="muted pr-sub"><PenLine size={10} /> signed {String(session.signed_at).slice(0, 10)}</div>
+                      : attendedInPerson(session.attendance_status)
+                        ? <div className="pr-sub overdue">not signed</div> : null}
+                  </td>
+                  <td>
+                    {session.outcome && session.outcome !== 'not_assessed'
+                      ? <span className={`badge tone-${TRAINING_OUTCOME_TONES[session.outcome] ?? 'muted'}`}>
+                          {TRAINING_OUTCOME_LABELS[session.outcome] ?? session.outcome}</span>
+                      : <span className="muted">—</span>}
+                  </td>
+                  <td>{session.hours ?? '—'}</td>
+                  <td>
+                    {/* Their own evidence, printable by them. Asking Personnel
+                        Management for a copy of training you sat through is the
+                        sort of thing that sends people back to photocopies. */}
+                    {trainingIsLocked(session.status) ? (
+                      <button type="button" className="link-button" onClick={() => void printReport(session)}>
+                        <Printer size={11} /> Training report
+                      </button>
+                    ) : (
+                      <span className="muted" title="Not yet reviewed and closed, so it is not part of your record yet">
+                        awaiting closure
+                      </span>
+                    )}
+                    {session.status === 'closed' && <div className="muted pr-sub"><Lock size={10} /> closed record</div>}
+                    {session.status === 'cancelled' && <div className="muted pr-sub"><XCircle size={10} /> called off</div>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+    </>
   );
 }

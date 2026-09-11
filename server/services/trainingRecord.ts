@@ -45,12 +45,12 @@ const num = (value: unknown): number | null => {
  */
 function fromTrainingEvents(db: DB, staffId: number): TrainingRecordEntry[] {
   const rows = db.prepare(`SELECT a.id AS attendance_id, a.attendance_status, a.outcome, a.hours AS attendance_hours,
-        a.certificate_file_id, a.remarks, a.effectiveness_outcome AS person_effectiveness,
+        a.certificate_file_id, a.remarks, a.effectiveness_outcome AS person_effectiveness, a.signed_at,
         e.id AS event_id, e.training_number, e.title, e.description, e.category, e.training_type,
         e.training_format, e.delivery_mode, e.trainer_type, e.external_trainer_name,
         e.external_trainer_organisation, e.provider, e.training_date, e.end_date, e.duration_hours,
         e.location, e.status, e.equipment_id, e.effectiveness_outcome, e.effectiveness_due_date,
-        e.evidence_file_id, e.source_module,
+        e.evidence_file_id, e.source_module, e.frequency,
         t.full_name AS trainer_name, eq.name AS equipment_name
       FROM training_attendance a
       JOIN training_events e ON e.id = a.training_event_id
@@ -81,6 +81,11 @@ function fromTrainingEvents(db: DB, staffId: number): TrainingRecordEntry[] {
     format: str(row.training_format),
     attendanceStatus: str(row.attendance_status) ?? 'invited',
     outcome: str(row.outcome) ?? 'not_assessed',
+    // Where the session itself got to. A file that cannot tell a session still
+    // to come from one that has been held and signed reads as a list of claims.
+    status: str(row.status) ?? 'planned',
+    signedAt: str(row.signed_at),
+    frequency: str(row.frequency),
     effectivenessOutcome: str(row.person_effectiveness) ?? str(row.effectiveness_outcome) ?? 'pending',
     effectivenessDueDate: str(row.effectiveness_due_date),
     equipmentId: num(row.equipment_id),
@@ -127,6 +132,11 @@ function fromEquipmentCompetence(db: DB, staffId: number): TrainingRecordEntry[]
     // A competence record is only ever made about somebody who was there.
     attendanceStatus: 'attended',
     outcome: str(row.outcome) ?? 'not_assessed',
+    // An equipment competence record is written after the fact about training
+    // that has already been given, so it arrives on the file finished.
+    status: 'closed',
+    signedAt: null,
+    frequency: null,
     effectivenessOutcome: row.outcome && String(row.outcome).startsWith('competent') ? 'effective' : 'pending',
     effectivenessDueDate: null,
     equipmentId: num(row.equipment_id),
@@ -157,6 +167,9 @@ function fromCpd(db: DB, staffId: number): TrainingRecordEntry[] {
     format: str(row.training_type),
     attendanceStatus: 'attended',
     outcome: 'not_assessed',
+    status: 'closed',
+    signedAt: null,
+    frequency: null,
     // A course somebody went to on their own time has no effectiveness review
     // owed against it, and showing one outstanding forever would make the
     // laboratory's real outstanding reviews impossible to find.
@@ -200,6 +213,9 @@ function fromCompetency(db: DB, staffId: number): TrainingRecordEntry[] {
     format: str(row.assessment_method),
     attendanceStatus: 'attended',
     outcome: str(row.outcome) ?? 'not_assessed',
+    status: str(row.status) ?? 'completed',
+    signedAt: str(row.staff_acknowledged_at),
+    frequency: null,
     effectivenessOutcome: null,
     effectivenessDueDate: str(row.next_assessment_due),
     equipmentId: null,
@@ -256,11 +272,30 @@ export function trainingFileFor(db: DB, staffId: number) {
  * already has an event updates that event rather than creating a second one. A
  * person's file gaining a duplicate every time somebody corrects a typo is
  * exactly the failure this is meant to prevent.
+ *
+ * ONE SESSION, SEVERAL PEOPLE. An engineer who comes to commission an analyser
+ * trains the whole bench on it in one morning, not four people in four separate
+ * sessions — so `shareEventId` lets the second and subsequent competence records
+ * from that morning join the event the first one raised, instead of each
+ * manufacturing a session of its own. The register then shows what happened:
+ * one session, four names on the attendance sheet.
+ *
+ * THE EVENT ARRIVES CLOSED. An equipment competence record is written after the
+ * training has been given — there is nothing to schedule, nobody to notify and
+ * no documentation outstanding — so the session it raises is retrospective and
+ * closed, which is what puts it straight onto the person's file. The equipment
+ * record remains the master; reopening its shadow in the training register would
+ * only let the two drift apart.
  */
 export function syncEquipmentTrainingEvent(
   db: DB,
   competencyId: number,
-  opts: { userId?: number | null; makeNumber: (db: DB, table: string, prefix: string, createdAt: string) => string },
+  opts: {
+    userId?: number | null;
+    makeNumber: (db: DB, table: string, prefix: string, createdAt?: string, codeColumn?: string) => string;
+    /** Join this existing session instead of raising one — a group trained together. */
+    shareEventId?: number | null;
+  },
 ): number | null {
   const row = db.prepare(`SELECT c.*, e.name AS equipment_name, e.equipment_number, e.section_id
       FROM equipment_competencies c
@@ -297,34 +332,40 @@ export function syncEquipmentTrainingEvent(
     effectiveness_outcome: String(row.outcome ?? '').startsWith('competent') ? 'effective' : 'pending',
   };
 
-  let eventId = num(row.training_event_id);
+  let eventId = num(row.training_event_id) ?? num(opts.shareEventId);
   if (eventId) {
     db.prepare(`UPDATE training_events SET title = ?, description = ?, category = ?, delivery_mode = ?,
         trainer_type = ?, trainer_staff_id = ?, external_trainer_name = ?, external_trainer_organisation = ?,
         external_trainer_qualifications = ?, provider = ?, training_format = ?, duration_hours = ?,
         training_date = ?, equipment_id = ?, section_id = ?, effectiveness_method = ?,
-        effectiveness_outcome = ?, status = 'completed', updated_at = CURRENT_TIMESTAMP
+        effectiveness_outcome = ?, status = 'closed', training_mode = 'retrospective',
+        held_at = COALESCE(held_at, ?), closed_at = COALESCE(closed_at, CURRENT_TIMESTAMP),
+        updated_at = CURRENT_TIMESTAMP
         WHERE id = ?`)
       .run(fields.title, fields.description, fields.category, fields.delivery_mode, fields.trainer_type,
         fields.trainer_staff_id, fields.external_trainer_name, fields.external_trainer_organisation,
         fields.external_trainer_qualifications, fields.provider, fields.training_format, fields.duration_hours,
         fields.training_date, fields.equipment_id, fields.section_id, fields.effectiveness_method,
-        fields.effectiveness_outcome, eventId);
+        fields.effectiveness_outcome, trainingDate, eventId);
+    if (num(row.training_event_id) !== eventId) {
+      db.prepare('UPDATE equipment_competencies SET training_event_id = ? WHERE id = ?').run(eventId, competencyId);
+    }
   } else {
     const createdAt = new Date().toISOString();
-    const number = opts.makeNumber(db, 'training_events', 'TRN', createdAt);
+    const number = opts.makeNumber(db, 'training_events', 'TRN', createdAt, 'training_number');
     const inserted = db.prepare(`INSERT INTO training_events
         (training_number, title, description, category, delivery_mode, trainer_type, trainer_staff_id,
          external_trainer_name, external_trainer_organisation, external_trainer_qualifications, provider,
          training_format, duration_hours, training_date, equipment_id, section_id,
-         effectiveness_method, effectiveness_outcome, status,
+         effectiveness_method, effectiveness_outcome, status, training_mode, held_at, closed_at,
          source_module, source_record_type, source_record_id, created_by, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', 'equipment', 'equipment_competencies', ?, ?, ?)`)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'closed', 'retrospective', ?, CURRENT_TIMESTAMP,
+                'equipment', 'equipment_competencies', ?, ?, ?)`)
       .run(number, fields.title, fields.description, fields.category, fields.delivery_mode, fields.trainer_type,
         fields.trainer_staff_id, fields.external_trainer_name, fields.external_trainer_organisation,
         fields.external_trainer_qualifications, fields.provider, fields.training_format, fields.duration_hours,
         fields.training_date, fields.equipment_id, fields.section_id, fields.effectiveness_method,
-        fields.effectiveness_outcome, competencyId, opts.userId ?? null, createdAt);
+        fields.effectiveness_outcome, fields.training_date, competencyId, opts.userId ?? null, createdAt);
     eventId = Number(inserted.lastInsertRowid);
     db.prepare('UPDATE equipment_competencies SET training_event_id = ? WHERE id = ?').run(eventId, competencyId);
   }
@@ -334,16 +375,42 @@ export function syncEquipmentTrainingEvent(
   // the equipment record reached.
   const outcome = String(row.outcome ?? '').startsWith('competent') ? 'competent'
     : row.outcome === 'not_yet_competent' ? 'needs_further_training' : 'not_assessed';
+  // The designation is snapshot onto the sheet here, exactly as it is when
+  // somebody is marked present in the personnel register: the attendance sheet
+  // for training given two years ago has to keep saying what grade the person
+  // held then.
+  const person = db.prepare('SELECT designation, job_title FROM staff WHERE id = ?').get(row.staff_id) as any;
+  const designation = person?.designation || person?.job_title || null;
   const existing = db.prepare('SELECT id FROM training_attendance WHERE training_event_id = ? AND staff_id = ?')
     .get(eventId, row.staff_id) as any;
   if (existing) {
     db.prepare(`UPDATE training_attendance SET attendance_status = 'attended', outcome = ?, hours = ?,
-        updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(outcome, num(row.training_hours), existing.id);
+        designation = COALESCE(designation, ?), marked_at = COALESCE(marked_at, CURRENT_TIMESTAMP),
+        marked_by_staff_id = COALESCE(marked_by_staff_id, ?),
+        updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(outcome, num(row.training_hours), designation, num(row.assessor_staff_id), existing.id);
   } else {
+    // No signature is stamped on. Somebody was assessed as competent on the
+    // instrument, which is the assessor's judgement; whether the person signed
+    // an attendance sheet for the session is a different claim, and they sign it
+    // themselves from their portal like everybody else.
     db.prepare(`INSERT INTO training_attendance
-        (training_event_id, staff_id, attendance_status, signed_at, outcome, hours, remarks, created_by)
-        VALUES (?, ?, 'attended', CURRENT_TIMESTAMP, ?, ?, ?, ?)`)
-      .run(eventId, row.staff_id, outcome, num(row.training_hours), str(row.notes), opts.userId ?? null);
+        (training_event_id, staff_id, attendance_status, outcome, hours, remarks, designation,
+         marked_by_staff_id, marked_at, created_by)
+        VALUES (?, ?, 'attended', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`)
+      .run(eventId, row.staff_id, outcome, num(row.training_hours), str(row.notes), designation,
+        num(row.assessor_staff_id), opts.userId ?? null);
+  }
+
+  // Where a whole bench was trained in one session, the session's own
+  // effectiveness reads from all of them rather than from whoever happened to be
+  // recorded last: one person not yet competent means the session still owes a
+  // follow-up, however well it went for the other three.
+  const sheet = db.prepare(`SELECT outcome FROM training_attendance WHERE training_event_id = ?`).all(eventId) as any[];
+  if (sheet.length > 1) {
+    const allCompetent = sheet.every(a => a.outcome === 'competent');
+    db.prepare('UPDATE training_events SET effectiveness_outcome = ? WHERE id = ?')
+      .run(allCompetent ? 'effective' : 'pending', eventId);
   }
 
   return eventId;

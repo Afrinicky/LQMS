@@ -5,14 +5,33 @@ import { getDb, uploadRoot } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
-import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
+import { parseIntNullable, getStaffIdOrCurrent, getCurrentStaffId, blockedForNoSignature } from './routeHelpers.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
 import { resolvePermission } from '../services/permissionResolver.js';
 import { trainingFileFor } from '../services/trainingRecord.js';
 import {
+  inviteParticipants, notifyParticipants, raiseNextOccurrence, raiseRemedialTraining,
+} from '../services/trainingLifecycle.js';
+import {
+  recordSignature, SignatureRequiredError, hasSignatureOnFile, staffSignatureDataUri, fileDataUri,
+} from '../services/signatureService.js';
+import { printSheet, signatureBlock, htmlEscape, htmlText } from '../utils/printLayout.js';
+import {
   TRAINING_DELIVERY_MODES, TRAINER_TYPES, TRAINING_CATEGORIES, TRAINING_FORMATS,
   TRAINING_STATUSES as TRAINING_STATUS_LIST, ATTENDANCE_STATUSES as ATTENDANCE_STATUS_LIST,
   TRAINING_OUTCOMES, EFFECTIVENESS_METHODS, EFFECTIVENESS_OUTCOMES, effectivenessDueDate,
+  TRAINING_MODES, TRAINING_FREQUENCIES, trainingIsLocked, trainingRecurs, trainingWasHeld,
+  attendedInPerson, mayCountersign, recurrenceSummary, trainerDisplayName,
+  // The printed report has to name things the way every screen names them, or a
+  // laboratory ends up with a sheet that disagrees with the system that made it.
+  TRAINING_STATUS_LABELS as TRAINING_STATUS_LABEL_MAP,
+  TRAINING_MODE_LABELS as TRAINING_MODE_LABEL_MAP,
+  TRAINING_CATEGORY_LABELS as TRAINING_CATEGORY_LABEL_MAP,
+  TRAINING_FORMAT_LABELS as TRAINING_FORMAT_LABEL_MAP,
+  TRAINING_OUTCOME_LABELS as TRAINING_OUTCOME_LABEL_MAP,
+  ATTENDANCE_STATUS_LABELS as ATTENDANCE_STATUS_LABEL_MAP,
+  EFFECTIVENESS_METHOD_LABELS as EFFECTIVENESS_METHOD_LABEL_MAP,
+  EFFECTIVENESS_OUTCOME_LABELS as EFFECTIVENESS_OUTCOME_LABEL_MAP,
 } from '../../shared/constants/training.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -168,18 +187,161 @@ export function personnelRoutes() {
 
   // ============= Training =============
   /**
-   * The training register.
+   * The training register, as a session that actually has a life.
    *
-   * A session now carries two facts that used to be one: who ARRANGED it
+   * WHAT THIS REPLACES. A training session was a row. It was created, and from
+   * then on it was editable for ever by anybody holding the edit right — so an
+   * old session could be reopened and quietly rewritten, and there was no moment
+   * at which it stopped being a draft and became evidence. None of the work a
+   * laboratory really does around training had anywhere to happen.
+   *
+   * It now runs one way, and each step is its own endpoint rather than a status
+   * field somebody sets by hand:
+   *
+   *   SCHEDULE → the session and everybody expected at it, in one act. The memo
+   *              goes out immediately; the notice goes out again when the day
+   *              comes. Or POSTPONE it, or CALL IT OFF — both tell the people who
+   *              were told the first time.
+   *   START    → the session is running, from start time to stop time.
+   *   ATTEND   → a senior role or the facilitator marks who came; each person
+   *              signs the sheet themselves, exactly as they sign every other
+   *              sheet in this system.
+   *   CLOSE    → a senior role completes the documentation and signs. That is
+   *              the moment the session becomes a record: it lands on every
+   *              attendee's file and their portal, the next occurrence of a
+   *              recurring session is raised, and anybody the session did not
+   *              work for gets an individual session of their own.
+   *
+   * After closure the record is out of reach. A senior role can still amend it —
+   * a laboratory has to be able to correct its own file — but it is a deliberate
+   * reopening, it is audited, and it is not on the screen for anybody else.
+   *
+   * A session also carries two facts that used to be one: who ARRANGED it
    * (internal or external) and who TAUGHT it (a member of staff, or somebody
-   * from outside). The old form could only name a trainer from the staff
-   * dropdown, so the week the supplier's engineer trained four people there was
-   * nowhere to put his name and the record said the session had no trainer.
+   * from outside).
    */
+
+  /**
+   * Is the caller a senior role for training purposes?
+   *
+   * Closing a session, reopening a closed one, amending it afterwards and
+   * deleting it are the four acts reserved to the people accountable for the
+   * training programme — in the shipped access profiles, the System
+   * Administrator, the Laboratory Manager and the Quality Manager, who hold
+   * `approve` on the training register. A section head, who holds `manage`,
+   * runs sessions and records attendance but does not close the file on them.
+   *
+   * Expressed as the `approve` right rather than a list of role names, so a
+   * laboratory that has reorganised its own access profiles gets the behaviour
+   * it configured rather than one hard-coded here.
+   */
+  function isSeniorTrainingRole(req: any): boolean {
+    return resolvePermission(req.user!.id, 'personnel.training', 'approve').allowed;
+  }
+
+  const TRAINING_SELECT = `SELECT e.*, t.full_name AS trainer_name, sec.name AS section_name,
+      eq.name AS equipment_name, eq.equipment_number,
+      r.full_name AS effectiveness_reviewer_name, cl.full_name AS closed_by_name,
+      cx.full_name AS cancelled_by_name,
+      parent.training_number AS series_parent_number,
+      cause.training_number AS remedial_for_number,
+      rem.full_name AS remedial_for_staff_name,
+      (SELECT COUNT(*) FROM training_attendance a WHERE a.training_event_id = e.id) AS invited_count,
+      (SELECT COUNT(*) FROM training_attendance a WHERE a.training_event_id = e.id
+        AND a.attendance_status IN ('attended','partial')) AS attended_count,
+      (SELECT COUNT(*) FROM training_attendance a WHERE a.training_event_id = e.id
+        AND a.signed_at IS NOT NULL) AS signed_count
+    FROM training_events e
+    LEFT JOIN staff t ON t.id = e.trainer_staff_id
+    LEFT JOIN sections sec ON sec.id = e.section_id
+    LEFT JOIN equipment_items eq ON eq.id = e.equipment_id
+    LEFT JOIN staff r ON r.id = e.effectiveness_reviewed_by_staff_id
+    LEFT JOIN staff cl ON cl.id = e.closed_by_staff_id
+    LEFT JOIN staff cx ON cx.id = e.cancelled_by_staff_id
+    LEFT JOIN training_events parent ON parent.id = e.series_parent_id
+    LEFT JOIN training_events cause ON cause.id = e.remedial_for_event_id
+    LEFT JOIN staff rem ON rem.id = e.remedial_for_staff_id`;
+
+  /**
+   * The attendance sheet, as a sheet.
+   *
+   * Name, the designation held at the time, the signature and the date — the
+   * same four things every other signing sheet in this system carries. The
+   * designation comes off the attendance row where it was snapshot at signing,
+   * falling back to the staff record only for a line nobody has signed yet; a
+   * sheet signed three years ago must not silently acquire today's job title.
+   */
+  const ATTENDANCE_SELECT = `SELECT a.*, s.full_name AS staff_name, s.employee_no,
+      COALESCE(a.designation, s.designation, s.job_title) AS sheet_designation,
+      sec.name AS section_name, m.full_name AS marked_by_name,
+      CASE WHEN s.signature_file_id IS NOT NULL THEN 1 ELSE 0 END AS has_signature_on_file,
+      rem.training_number AS remedial_number
+    FROM training_attendance a
+    JOIN staff s ON s.id = a.staff_id
+    LEFT JOIN sections sec ON sec.id = s.section_id
+    LEFT JOIN staff m ON m.id = a.marked_by_staff_id
+    LEFT JOIN training_events rem ON rem.id = a.remedial_event_id`;
+
+  function loadTrainingEvent(db: any, id: unknown) {
+    const event = db.prepare(`${TRAINING_SELECT} WHERE e.id = ?`).get(id) as any;
+    if (!event) return null;
+    event.attendance = db.prepare(`${ATTENDANCE_SELECT} WHERE a.training_event_id = ? ORDER BY s.full_name`).all(id);
+    return event;
+  }
+
+  /**
+   * Refuse to change a finished record, unless the caller is senior.
+   *
+   * The single rule the whole lock rests on, in one place so no endpoint can
+   * forget it. The refusal says what the state is and who can change it, because
+   * "permission denied" on a record somebody can see in front of them is the
+   * least helpful thing a system can say.
+   */
+  function refuseIfFinished(req: any, res: any, event: any, verb: string): boolean {
+    if (!trainingIsLocked(event.status)) return false;
+    if (isSeniorTrainingRole(req)) return false;
+    const what = event.status === 'cancelled' ? 'was called off' : 'has been closed and signed';
+    res.status(409).json({
+      error: `${event.training_number} ${what}, so it cannot be ${verb}. A closed session is the laboratory's record of `
+        + 'the training: only the administrator, the laboratory manager or the quality manager can reopen it.',
+      code: 'training_closed',
+    });
+    return true;
+  }
+
+  /**
+   * May this caller reach this session's report?
+   *
+   * A training session is not a personal record with one owner, so
+   * canReachPersonalRecord cannot answer it: a session has a whole attendance
+   * sheet of owners. Whoever runs the register reaches any session; anybody who
+   * was ON one reaches their own, because it is their training record and
+   * somebody unable to print evidence of training they sat through goes back to
+   * keeping private photocopies.
+   */
+  function mayReachTrainingReport(req: any, event: any, action: string): boolean {
+    if (resolvePermission(req.user!.id, 'personnel.training', action).allowed) return true;
+    if (action !== 'view' && action !== 'print') return false;
+    const me = getCurrentStaffId(req);
+    return me !== null && (event.attendance as any[] ?? []).some(a => Number(a.staff_id) === Number(me));
+  }
+
+  /** A session the equipment file owns must be changed where it is owned. */
+  function refuseIfEquipmentOwned(res: any, event: any): boolean {
+    if (event.source_module !== 'equipment') return false;
+    res.status(400).json({
+      error: 'This session was recorded against a piece of equipment, so Equipment Management owns it. Change it on the '
+        + 'equipment competence record and it will update here.',
+    });
+    return true;
+  }
+
   const trainingFields = (body: any, existing: any = {}) => {
     const pick = <T>(value: T | undefined, fallback: T) => (value === undefined ? fallback : value);
     const deliveryMode = String(pick(body.deliveryMode, existing.delivery_mode) ?? 'internal');
     const trainerType = String(pick(body.trainerType, existing.trainer_type) ?? 'internal_staff');
+    const trainingMode = String(pick(body.trainingMode, existing.training_mode) ?? 'scheduled');
+    const frequency = String(pick(body.frequency, existing.frequency) ?? 'none');
     return {
       title: String(pick(body.title, existing.title) ?? '').trim(),
       description: pick(body.description, existing.description) ?? null,
@@ -189,6 +351,15 @@ export function personnelRoutes() {
       objectives: pick(body.objectives, existing.objectives) ?? null,
       deliveryMode,
       trainerType,
+      // Scheduled in advance, or written down afterwards. Stored rather than
+      // guessed from the date, because a session planned for last week that
+      // nobody closed is outstanding work, while one entered today about last
+      // week is a finished record — and a date cannot tell them apart.
+      trainingMode,
+      frequency,
+      frequencyIntervalDays: body.frequencyIntervalDays !== undefined
+        ? parseIntNullable(body.frequencyIntervalDays) : (existing.frequency_interval_days ?? null),
+      seriesEndsOn: pick(body.seriesEndsOn, existing.series_ends_on) ?? null,
       // A staff trainer and an outside trainer are mutually exclusive on one
       // session, and storing both is how a register ends up showing two
       // trainers for a session that had one. Whichever kind was chosen is
@@ -217,7 +388,6 @@ export function personnelRoutes() {
       evidenceFileId: body.evidenceFileId !== undefined ? parseIntNullable(body.evidenceFileId) : (existing.evidence_file_id ?? null),
       effectivenessMethod: String(pick(body.effectivenessMethod, existing.effectiveness_method) ?? 'not_required'),
       effectivenessDueDate: pick(body.effectivenessDueDate, existing.effectiveness_due_date) ?? null,
-      status: String(pick(body.status, existing.status) ?? 'planned'),
       notes: pick(body.notes, existing.notes) ?? null,
     };
   };
@@ -225,8 +395,10 @@ export function personnelRoutes() {
   /** Everything a session has to satisfy before it is worth recording. */
   function validateTraining(v: ReturnType<typeof trainingFields>): string | null {
     if (!v.title) return 'Give the training a title.';
-    if (!v.trainingDate) return 'When was the training held?';
-    if (!TRAINING_STATUSES.includes(v.status)) return `status must be one of: ${TRAINING_STATUSES.join(', ')}`;
+    if (!v.trainingDate) return v.trainingMode === 'retrospective' ? 'When was the training held?' : 'When is the training to be held?';
+    if (!(TRAINING_MODES as readonly string[]).includes(v.trainingMode)) {
+      return `Say whether the session is being scheduled or recorded after the event: ${TRAINING_MODES.join(', ')}.`;
+    }
     if (!(TRAINING_DELIVERY_MODES as readonly string[]).includes(v.deliveryMode)) {
       return `Say whether the training was internal or external: ${TRAINING_DELIVERY_MODES.join(', ')}.`;
     }
@@ -238,6 +410,14 @@ export function personnelRoutes() {
     // whole change exists to close.
     if (v.trainerType === 'external_person' && !String(v.externalTrainerName ?? '').trim()) {
       return 'Name the trainer who came from outside, and the organisation they came from.';
+    }
+    if (!(TRAINING_FREQUENCIES as readonly string[]).includes(v.frequency)) {
+      return `frequency must be one of: ${TRAINING_FREQUENCIES.join(', ')}`;
+    }
+    // "Every set number of days" with no number is a series that can never
+    // produce its next date, which reads as a one-off that claims to recur.
+    if (v.frequency === 'custom' && !(Number(v.frequencyIntervalDays) > 0)) {
+      return 'Say how many days apart the sessions in the series are.';
     }
     if (v.category && !(TRAINING_CATEGORIES as readonly string[]).includes(String(v.category))) {
       return `category must be one of: ${TRAINING_CATEGORIES.join(', ')}`;
@@ -251,6 +431,9 @@ export function personnelRoutes() {
     if (v.durationHours !== null && (!Number.isFinite(Number(v.durationHours)) || Number(v.durationHours) < 0)) {
       return 'Duration has to be a number of hours.';
     }
+    if (v.endDate && v.trainingDate && String(v.endDate) < String(v.trainingDate)) {
+      return 'The session cannot finish before it starts.';
+    }
     return null;
   }
 
@@ -259,25 +442,28 @@ export function personnelRoutes() {
     const filters: string[] = [];
     const params: unknown[] = [];
     if (req.query.status) { filters.push('e.status = ?'); params.push(String(req.query.status)); }
+    if (req.query.mode) { filters.push('e.training_mode = ?'); params.push(String(req.query.mode)); }
     if (req.query.deliveryMode) { filters.push('e.delivery_mode = ?'); params.push(String(req.query.deliveryMode)); }
     if (req.query.category) { filters.push('e.category = ?'); params.push(String(req.query.category)); }
+    if (req.query.equipmentId) { filters.push('e.equipment_id = ?'); params.push(Number(req.query.equipmentId)); }
     if (req.query.staffId) {
       filters.push('EXISTS (SELECT 1 FROM training_attendance a WHERE a.training_event_id = e.id AND a.staff_id = ?)');
       params.push(Number(req.query.staffId));
     }
-    let query = `SELECT e.*, t.full_name AS trainer_name, sec.name AS section_name,
-        eq.name AS equipment_name, eq.equipment_number,
-        (SELECT COUNT(*) FROM training_attendance a WHERE a.training_event_id = e.id) AS invited_count,
-        (SELECT COUNT(*) FROM training_attendance a WHERE a.training_event_id = e.id AND a.attendance_status IN ('attended','partial')) AS attended_count
-      FROM training_events e
-      LEFT JOIN staff t ON t.id = e.trainer_staff_id
-      LEFT JOIN sections sec ON sec.id = e.section_id
-      LEFT JOIN equipment_items eq ON eq.id = e.equipment_id`;
+    let query = TRAINING_SELECT;
     if (filters.length) query += ` WHERE ${filters.join(' AND ')}`;
     query += ' ORDER BY e.training_date DESC, e.id DESC';
     res.json(db.prepare(query).all(...params));
   });
 
+  /**
+   * Schedule a session, or record one that has already happened.
+   *
+   * The participants are part of this call rather than something to add
+   * afterwards, because training is given to groups and a register where the
+   * group is a separate second step is a register full of sessions with nobody
+   * on them. Scheduling one tells everybody named, now.
+   */
   router.post('/training', requirePermission('personnel.training', 'create'), (req, res) => {
     const db = getDb();
     const v = trainingFields(req.body ?? {});
@@ -285,45 +471,69 @@ export function personnelRoutes() {
     if (problem) return res.status(400).json({ error: problem });
 
     const createdAt = new Date().toISOString();
-    const trainingNumber = generateRecordNumber(db, 'training_events', 'TRN', createdAt);
+    const trainingNumber = generateRecordNumber(db, 'training_events', 'TRN', createdAt, 'training_number');
     // When a follow-up is owed but nobody said by when, the date is worked out
     // rather than left blank: an effectiveness review with no due date is one
     // nothing can ever report as overdue, which is the same as not asking for it.
     const dueDate = v.effectivenessMethod === 'not_required' ? null
       : (v.effectivenessDueDate || effectivenessDueDate(v.trainingDate));
+    // A session being scheduled starts as planned and waits for its day. One
+    // being written down afterwards has already been held, so it starts with its
+    // documentation outstanding and what it needs is the attendance and a
+    // signature — not a plan for something that is over.
+    const status = v.trainingMode === 'retrospective' ? 'completed' : 'planned';
 
-    const result = db.prepare(`INSERT INTO training_events
-        (training_number, title, description, training_type, category, training_format, objectives,
-         delivery_mode, trainer_type, trainer_staff_id, external_trainer_name, external_trainer_organisation,
-         external_trainer_qualifications, provider, department_id, section_id, equipment_id, document_id,
-         training_date, end_date, start_time, end_time, duration_hours, location, evidence_file_id,
-         effectiveness_method, effectiveness_due_date, status, source_module, created_by, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'personnel', ?, ?)`)
-      .run(trainingNumber, v.title, v.description, v.trainingType, v.category, v.trainingFormat, v.objectives,
-        v.deliveryMode, v.trainerType, v.trainerStaffId, v.externalTrainerName, v.externalTrainerOrganisation,
-        v.externalTrainerQualifications, v.provider, v.departmentId, v.sectionId, v.equipmentId, v.documentId,
-        v.trainingDate, v.endDate, v.startTime, v.endTime, v.durationHours, v.location, v.evidenceFileId,
-        v.effectivenessMethod, dueDate, v.status, req.user!.id, createdAt);
-    const id = Number(result.lastInsertRowid);
-    if (v.evidenceFileId) {
-      db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run('personnel', 'training_events', String(id), 'documents', 'files', String(v.evidenceFileId), 'Training evidence file');
-    }
-    audit(req, { action: 'create', entity: 'training_events', entityId: id, newValue: { trainingNumber, ...v } });
-    res.status(201).json({ id, trainingNumber });
+    const participants: unknown[] = Array.isArray(req.body?.participantStaffIds) ? req.body.participantStaffIds : [];
+
+    const tx = db.transaction(() => {
+      const result = db.prepare(`INSERT INTO training_events
+          (training_number, title, description, training_type, category, training_format, objectives,
+           delivery_mode, trainer_type, trainer_staff_id, external_trainer_name, external_trainer_organisation,
+           external_trainer_qualifications, provider, department_id, section_id, equipment_id, document_id,
+           training_date, end_date, start_time, end_time, duration_hours, location, evidence_file_id,
+           effectiveness_method, effectiveness_due_date, status, training_mode,
+           frequency, frequency_interval_days, series_index, series_ends_on,
+           held_at, source_module, created_by, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 'personnel', ?, ?)`)
+        .run(trainingNumber, v.title, v.description, v.trainingType, v.category, v.trainingFormat, v.objectives,
+          v.deliveryMode, v.trainerType, v.trainerStaffId, v.externalTrainerName, v.externalTrainerOrganisation,
+          v.externalTrainerQualifications, v.provider, v.departmentId, v.sectionId, v.equipmentId, v.documentId,
+          v.trainingDate, v.endDate, v.startTime, v.endTime, v.durationHours, v.location, v.evidenceFileId,
+          v.effectivenessMethod, dueDate, status, v.trainingMode,
+          v.frequency, v.frequencyIntervalDays, v.seriesEndsOn,
+          v.trainingMode === 'retrospective' ? v.trainingDate : null,
+          req.user!.id, createdAt);
+      const id = Number(result.lastInsertRowid);
+      if (v.evidenceFileId) {
+        db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)').run('personnel', 'training_events', String(id), 'documents', 'files', String(v.evidenceFileId), 'Training evidence file');
+      }
+      const invited = inviteParticipants(db, id, participants as any[], req.user!.id);
+      // Only a session still to come has anybody to notify. Sending a memo
+      // about a session that finished last month is noise, and noise is what
+      // makes people stop reading the ones that matter.
+      const told = status === 'planned' ? notifyParticipants(db, id, 'scheduled') : 0;
+      return { id, invited, told };
+    });
+    const out = tx();
+
+    audit(req, { action: 'create', entity: 'training_events', entityId: out.id, newValue: { trainingNumber, ...v, invited: out.invited } });
+    res.status(201).json({ id: out.id, trainingNumber, status, invited: out.invited, notified: out.told });
   });
 
+  /**
+   * Change a session that is still open.
+   *
+   * A closed session does not come through here for anybody but a senior role,
+   * and that is the whole point: an old session that can be reopened and edited
+   * is not a record of anything.
+   */
   router.put('/training/:id', requirePermission('personnel.training', 'edit'), (req, res) => {
     const db = getDb();
     const existing = db.prepare('SELECT * FROM training_events WHERE id = ?').get(req.params.id) as any;
     if (!existing) return res.status(404).json({ error: 'Training event not found' });
-    // A session raised by the equipment file is owned there. Editing it here
-    // would be overwritten the next time the equipment record is saved, so the
-    // caller is told where the record actually lives instead.
-    if (existing.source_module === 'equipment') {
-      return res.status(400).json({
-        error: 'This session was recorded against a piece of equipment, so Equipment Management owns it. Change it on the equipment competence record and it will update here.',
-      });
-    }
+    if (refuseIfEquipmentOwned(res, existing)) return;
+    if (refuseIfFinished(req, res, existing, 'changed')) return;
+
     const v = trainingFields(req.body ?? {}, existing);
     const problem = validateTraining(v);
     if (problem) return res.status(400).json({ error: problem });
@@ -335,56 +545,197 @@ export function personnelRoutes() {
         external_trainer_name = ?, external_trainer_organisation = ?, external_trainer_qualifications = ?,
         provider = ?, department_id = ?, section_id = ?, equipment_id = ?, document_id = ?,
         training_date = ?, end_date = ?, start_time = ?, end_time = ?, duration_hours = ?, location = ?,
-        evidence_file_id = ?, effectiveness_method = ?, effectiveness_due_date = ?, status = ?,
+        evidence_file_id = ?, effectiveness_method = ?, effectiveness_due_date = ?,
+        training_mode = ?, frequency = ?, frequency_interval_days = ?, series_ends_on = ?,
         updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
       .run(v.title, v.description, v.trainingType, v.category, v.trainingFormat, v.objectives,
         v.deliveryMode, v.trainerType, v.trainerStaffId, v.externalTrainerName, v.externalTrainerOrganisation,
         v.externalTrainerQualifications, v.provider, v.departmentId, v.sectionId, v.equipmentId, v.documentId,
         v.trainingDate, v.endDate, v.startTime, v.endTime, v.durationHours, v.location, v.evidenceFileId,
-        v.effectivenessMethod, dueDate, v.status, req.params.id);
-    audit(req, { action: 'edit', entity: 'training_events', entityId: req.params.id, oldValue: { title: existing.title, status: existing.status }, newValue: v });
+        v.effectivenessMethod, dueDate, v.trainingMode, v.frequency, v.frequencyIntervalDays, v.seriesEndsOn,
+        req.params.id);
+
+    // Amending a closed record is a thing a laboratory must be able to do and
+    // must never do silently. It is written down as what it is.
+    audit(req, {
+      action: trainingIsLocked(existing.status) ? 'amend_closed' : 'edit',
+      entity: 'training_events', entityId: req.params.id,
+      oldValue: { title: existing.title, status: existing.status, trainingDate: existing.training_date },
+      newValue: v,
+    });
     res.json({ ok: true });
   });
 
   router.get('/training/:id', requirePermission('personnel.training', 'view'), (req, res) => {
-    const db = getDb();
-    const event = db.prepare(`SELECT e.*, t.full_name AS trainer_name, sec.name AS section_name,
-        eq.name AS equipment_name, eq.equipment_number, r.full_name AS effectiveness_reviewer_name
-      FROM training_events e
-      LEFT JOIN staff t ON t.id = e.trainer_staff_id
-      LEFT JOIN sections sec ON sec.id = e.section_id
-      LEFT JOIN equipment_items eq ON eq.id = e.equipment_id
-      LEFT JOIN staff r ON r.id = e.effectiveness_reviewed_by_staff_id
-      WHERE e.id = ?`).get(req.params.id) as any;
+    const event = loadTrainingEvent(getDb(), req.params.id);
     if (!event) return res.status(404).json({ error: 'Training event not found' });
-    const attendance = db.prepare(`SELECT a.*, s.full_name AS staff_name, s.employee_no, sec.name AS section_name
-      FROM training_attendance a
-      JOIN staff s ON s.id = a.staff_id
-      LEFT JOIN sections sec ON sec.id = s.section_id
-      WHERE a.training_event_id = ? ORDER BY s.full_name`).all(req.params.id);
-    res.json({ ...event, attendance });
+    // The screen hides what the server would refuse, rather than each screen
+    // working the rule out for itself and one of them getting it wrong.
+    event.locked = trainingIsLocked(event.status);
+    event.may_manage_closed = isSeniorTrainingRole(req);
+    res.json(event);
+  });
+
+  /**
+   * Put more people on the list.
+   *
+   * Bulk, because "a group of people, sometimes a selection, sometimes one" is
+   * how training is actually given, and adding a ward's worth of staff one
+   * dropdown at a time is why sessions were left with nobody on them. Anybody
+   * already on the list keeps their attendance and their signature.
+   */
+  router.post('/training/:id/participants', requirePermission('personnel.training', 'create'), (req, res) => {
+    const db = getDb();
+    const event = db.prepare('SELECT * FROM training_events WHERE id = ?').get(req.params.id) as any;
+    if (!event) return res.status(404).json({ error: 'Training event not found' });
+    if (refuseIfFinished(req, res, event, 'added to')) return;
+
+    const ids: unknown[] = Array.isArray(req.body?.staffIds) ? req.body.staffIds
+      : (req.body?.staffId ? [req.body.staffId] : []);
+    if (ids.length === 0) return res.status(400).json({ error: 'Choose at least one member of staff.' });
+
+    const added = inviteParticipants(db, Number(req.params.id), ids as any[], req.user!.id);
+    // Only people who have not already been told get a memo, which is what
+    // notifyParticipants' own deduplication gives us for free.
+    const told = event.status === 'planned' || event.status === 'postponed' ? notifyParticipants(db, Number(req.params.id), 'scheduled') : 0;
+    audit(req, { action: 'edit', entity: 'training_events', entityId: req.params.id, newValue: { participantsAdded: added } });
+    res.status(201).json({ added, notified: told });
+  });
+
+  /**
+   * The session has begun.
+   *
+   * A real start time, not the one on the plan: a session scheduled for 09:00
+   * that began at 10:20 because the engineer was late began at 10:20, and the
+   * hours that go onto people's files follow the real clock.
+   */
+  router.post('/training/:id/start', requirePermission('personnel.training', 'edit'), (req, res) => {
+    const db = getDb();
+    const event = db.prepare('SELECT * FROM training_events WHERE id = ?').get(req.params.id) as any;
+    if (!event) return res.status(404).json({ error: 'Training event not found' });
+    if (refuseIfFinished(req, res, event, 'started')) return;
+    if (event.status === 'in_progress') return res.json({ ok: true, status: 'in_progress' });
+
+    db.prepare(`UPDATE training_events SET status = 'in_progress', opened_at = CURRENT_TIMESTAMP,
+        start_time = COALESCE(?, start_time), updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(req.body?.startTime ?? null, req.params.id);
+    audit(req, { action: 'edit', entity: 'training_events', entityId: req.params.id, oldValue: { status: event.status }, newValue: { status: 'in_progress' } });
+    res.json({ ok: true, status: 'in_progress' });
+  });
+
+  /**
+   * The session is over, and the documentation is outstanding.
+   *
+   * Separate from closing it, because the facilitator who ran the session is
+   * usually not the person who signs it off — and a session that is over but
+   * unsigned is exactly the state a training register needs to be able to show.
+   */
+  router.post('/training/:id/hold', requirePermission('personnel.training', 'edit'), (req, res) => {
+    const db = getDb();
+    const event = db.prepare('SELECT * FROM training_events WHERE id = ?').get(req.params.id) as any;
+    if (!event) return res.status(404).json({ error: 'Training event not found' });
+    if (refuseIfFinished(req, res, event, 'ended')) return;
+
+    db.prepare(`UPDATE training_events SET status = 'completed', held_at = COALESCE(held_at, CURRENT_TIMESTAMP),
+        end_time = COALESCE(?, end_time), updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(req.body?.endTime ?? null, req.params.id);
+    audit(req, { action: 'edit', entity: 'training_events', entityId: req.params.id, oldValue: { status: event.status }, newValue: { status: 'completed' } });
+    res.json({ ok: true, status: 'completed' });
+  });
+
+  /**
+   * Put the session off.
+   *
+   * Not a deletion and not an edit of the date: the register has to be able to
+   * say this session was moved, from when, and why — and everybody who was told
+   * about the first date has to be told about the second. A session moved
+   * silently is worse than one never booked.
+   */
+  router.post('/training/:id/postpone', requirePermission('personnel.training', 'edit'), (req, res) => {
+    const db = getDb();
+    const event = db.prepare('SELECT * FROM training_events WHERE id = ?').get(req.params.id) as any;
+    if (!event) return res.status(404).json({ error: 'Training event not found' });
+    if (refuseIfFinished(req, res, event, 'postponed')) return;
+    const newDate = String(req.body?.trainingDate ?? '').slice(0, 10);
+    const reason = String(req.body?.reason ?? '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate)) return res.status(400).json({ error: 'Give the new date for the session.' });
+    if (!reason) return res.status(400).json({ error: 'Say why the session is being postponed — the people expected at it will be told.' });
+
+    db.prepare(`UPDATE training_events SET training_date = ?,
+        postponed_from_date = COALESCE(postponed_from_date, ?), postponement_reason = ?,
+        postponed_at = CURRENT_TIMESTAMP, status = 'planned',
+        effectiveness_due_date = CASE WHEN effectiveness_method = 'not_required' THEN NULL ELSE ? END,
+        reminder_sent_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(newDate, event.training_date, reason, effectivenessDueDate(newDate), req.params.id);
+    // Cleared so the notice for the new date can be sent: the old one was about
+    // a day that is no longer happening.
+    db.prepare("DELETE FROM notifications WHERE record_type IN ('training_events:scheduled','training_events:reminder') AND record_id = ?")
+      .run(String(req.params.id));
+    const told = notifyParticipants(db, Number(req.params.id), 'postponed');
+    notifyParticipants(db, Number(req.params.id), 'scheduled');
+
+    audit(req, { action: 'postpone', entity: 'training_events', entityId: req.params.id, oldValue: { trainingDate: event.training_date }, newValue: { trainingDate: newDate, reason } });
+    res.json({ ok: true, status: 'planned', trainingDate: newDate, notified: told });
+  });
+
+  /**
+   * Call the session off.
+   *
+   * Kept rather than deleted. "This session was planned and did not happen, for
+   * this reason" is a fact a training programme is asked about, and it is gone
+   * the moment the row is.
+   */
+  router.post('/training/:id/cancel', requirePermission('personnel.training', 'edit'), (req, res) => {
+    const db = getDb();
+    const event = db.prepare('SELECT * FROM training_events WHERE id = ?').get(req.params.id) as any;
+    if (!event) return res.status(404).json({ error: 'Training event not found' });
+    if (refuseIfFinished(req, res, event, 'called off')) return;
+    const reason = String(req.body?.reason ?? '').trim();
+    if (!reason) return res.status(400).json({ error: 'Say why the session is being called off — the people expected at it will be told.' });
+
+    db.prepare(`UPDATE training_events SET status = 'cancelled', cancellation_reason = ?,
+        cancelled_at = CURRENT_TIMESTAMP, cancelled_by_staff_id = ?,
+        effectiveness_method = 'not_required', effectiveness_due_date = NULL,
+        updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(reason, getStaffIdOrCurrent(req, null), req.params.id);
+    // Nothing is owed about a session that is not happening, so the memo and
+    // the reminder are withdrawn rather than left in people's inboxes.
+    db.prepare("DELETE FROM notifications WHERE record_type IN ('training_events:scheduled','training_events:reminder') AND record_id = ?")
+      .run(String(req.params.id));
+    const told = notifyParticipants(db, Number(req.params.id), 'cancelled');
+
+    audit(req, { action: 'cancel', entity: 'training_events', entityId: req.params.id, oldValue: { status: event.status }, newValue: { status: 'cancelled', reason } });
+    res.json({ ok: true, status: 'cancelled', notified: told });
   });
 
   /**
    * Who was there, and what they came away with.
    *
-   * Attendance and outcome are recorded together because the register was only
-   * ever able to say somebody was in the room, which is not what a laboratory
-   * is asked to show. The hours land on the person's row rather than the
-   * session's: somebody who attended half of a two-day course has a day on
-   * their file, not two.
+   * Marking somebody present is done BY somebody — the facilitator or a senior
+   * role — and that is recorded, because "a supervisor saw them in the room" and
+   * "they say they were there" are different claims and an attendance sheet
+   * rests on the first.
+   *
+   * The designation is snapshot here rather than read from the staff record when
+   * the sheet is printed. A sheet showing that a Medical Laboratory Technician
+   * attended must still say that after their promotion; reading it live would
+   * rewrite the history of who was qualified to do what.
    */
   router.post('/training/:id/attendance', requirePermission('personnel.training', 'create'), (req, res) => {
     if (!parseIntNullable(req.body.staffId)) return res.status(400).json({ error: 'staffId is required' });
     const db = getDb();
-    const event = db.prepare('SELECT id, duration_hours FROM training_events WHERE id = ?').get(req.params.id) as any;
+    const event = db.prepare('SELECT * FROM training_events WHERE id = ?').get(req.params.id) as any;
     if (!event) return res.status(404).json({ error: 'Training event not found' });
+    if (refuseIfFinished(req, res, event, 'marked')) return;
     const status = req.body.attendanceStatus ?? 'invited';
     if (!ATTENDANCE_STATUSES.includes(status)) return res.status(400).json({ error: `attendanceStatus must be one of: ${ATTENDANCE_STATUSES.join(', ')}` });
     const outcome = String(req.body.outcome ?? 'not_assessed');
     if (!(TRAINING_OUTCOMES as readonly string[]).includes(outcome)) {
       return res.status(400).json({ error: `outcome must be one of: ${TRAINING_OUTCOMES.join(', ')}` });
     }
+    const person = db.prepare('SELECT id, designation, job_title FROM staff WHERE id = ?').get(req.body.staffId) as any;
+    if (!person) return res.status(404).json({ error: 'Staff record not found' });
+
     // Somebody who was there for the whole session gets the session's own
     // duration unless a different figure was given; somebody who came for part
     // of it has to have their hours stated, because guessing half is fiction.
@@ -392,47 +743,297 @@ export function personnelRoutes() {
       ? Number(req.body.hours)
       : (status === 'attended' ? (event.duration_hours ?? null) : null);
     const score = (key: string) => (req.body[key] === undefined || req.body[key] === '' ? null : Number(req.body[key]));
+    const markedBy = getStaffIdOrCurrent(req, null);
+    const designation = person.designation || person.job_title || null;
 
-    const existing = db.prepare('SELECT id FROM training_attendance WHERE training_event_id = ? AND staff_id = ?').get(req.params.id, req.body.staffId) as any;
+    const existing = db.prepare('SELECT * FROM training_attendance WHERE training_event_id = ? AND staff_id = ?').get(req.params.id, req.body.staffId) as any;
     let id: number;
     if (existing) {
       db.prepare(`UPDATE training_attendance SET attendance_status = ?,
-          signed_at = CASE WHEN ? IN ('attended','partial') THEN COALESCE(signed_at, CURRENT_TIMESTAMP) ELSE signed_at END,
           remarks = COALESCE(?, remarks), outcome = ?, hours = ?, pre_test_score = ?, post_test_score = ?,
-          certificate_file_id = COALESCE(?, certificate_file_id), updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-        .run(status, status, req.body.remarks ?? null, outcome, hours, score('preTestScore'), score('postTestScore'),
-          parseIntNullable(req.body.certificateFileId), existing.id);
+          certificate_file_id = COALESCE(?, certificate_file_id),
+          designation = COALESCE(designation, ?),
+          marked_by_staff_id = CASE WHEN ? IN ('attended','partial') THEN ? ELSE marked_by_staff_id END,
+          marked_at = CASE WHEN ? IN ('attended','partial') THEN COALESCE(marked_at, CURRENT_TIMESTAMP) ELSE marked_at END,
+          time_in = COALESCE(?, time_in), time_out = COALESCE(?, time_out),
+          updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+        .run(status, req.body.remarks ?? null, outcome, hours, score('preTestScore'), score('postTestScore'),
+          parseIntNullable(req.body.certificateFileId), designation,
+          status, markedBy, status, req.body.timeIn ?? null, req.body.timeOut ?? null, existing.id);
+      // A signature belongs to a person who was in the room. Marking somebody
+      // absent after they had signed would leave a signature attesting to
+      // attendance the record denies, so the signature goes with the claim.
+      if (!attendedInPerson(status) && existing.signed_at) {
+        db.prepare('UPDATE training_attendance SET signed_at = NULL, signature_id = NULL, signature_file_id = NULL WHERE id = ?').run(existing.id);
+      }
       id = existing.id;
     } else {
       const result = db.prepare(`INSERT INTO training_attendance
-          (training_event_id, staff_id, attendance_status, signed_at, remarks, outcome, hours,
-           pre_test_score, post_test_score, certificate_file_id, created_by)
-          VALUES (?, ?, ?, CASE WHEN ? IN ('attended','partial') THEN CURRENT_TIMESTAMP ELSE NULL END, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(req.params.id, req.body.staffId, status, status, req.body.remarks ?? null, outcome, hours,
-          score('preTestScore'), score('postTestScore'), parseIntNullable(req.body.certificateFileId), req.user!.id);
+          (training_event_id, staff_id, attendance_status, remarks, outcome, hours,
+           pre_test_score, post_test_score, certificate_file_id, designation,
+           marked_by_staff_id, marked_at, time_in, time_out, created_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                  CASE WHEN ? IN ('attended','partial') THEN ? ELSE NULL END,
+                  CASE WHEN ? IN ('attended','partial') THEN CURRENT_TIMESTAMP ELSE NULL END, ?, ?, ?)`)
+        .run(req.params.id, req.body.staffId, status, req.body.remarks ?? null, outcome, hours,
+          score('preTestScore'), score('postTestScore'), parseIntNullable(req.body.certificateFileId), designation,
+          status, markedBy, status, req.body.timeIn ?? null, req.body.timeOut ?? null, req.user!.id);
       id = Number(result.lastInsertRowid);
     }
     audit(req, { action: 'attendance', entity: 'training_attendance', entityId: id, newValue: { trainingEventId: req.params.id, staffId: req.body.staffId, status, outcome } });
     res.status(201).json({ id });
   });
 
+  /**
+   * Sign the attendance sheet.
+   *
+   * The sheet behaves like every other signing sheet in this system: the
+   * signature that goes on it is the signer's own signature on file, and
+   * somebody with no signature set up is told how to set one up rather than
+   * being allowed to leave a typed name where a signature belongs.
+   *
+   * Two ways in, because both happen in a laboratory:
+   *
+   *   The person signs for themselves, on their portal or at the screen. That is
+   *   the default and the only one that produces an electronic signature.
+   *
+   *   The session was signed on paper — the sheet went round the bench and came
+   *   back with pen on it — and somebody is entering that. It is recorded as
+   *   exactly that, with who entered it, and the paper sheet remains the
+   *   original. Claiming an electronic signature for it would be a lie.
+   */
+  router.post('/training/:id/attendance/:attendanceId/sign', (req, res) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    const db = getDb();
+    const event = db.prepare('SELECT * FROM training_events WHERE id = ?').get(req.params.id) as any;
+    if (!event) return res.status(404).json({ error: 'Training event not found' });
+    const row = db.prepare(`SELECT a.*, s.full_name AS staff_name, s.designation, s.job_title
+      FROM training_attendance a JOIN staff s ON s.id = a.staff_id
+      WHERE a.id = ? AND a.training_event_id = ?`).get(req.params.attendanceId, req.params.id) as any;
+    if (!row) return res.status(404).json({ error: 'That person is not on this session.' });
+
+    const me = getStaffIdOrCurrent(req, null);
+    const onPaper = Boolean(req.body?.onPaper);
+    const self = me !== null && Number(me) === Number(row.staff_id);
+    // Signing for somebody else is only ever transcribing a paper sheet, and
+    // only somebody who runs the register may do it.
+    if (!self && !(onPaper && resolvePermission(req.user.id, 'personnel.training', 'edit').allowed)) {
+      return res.status(403).json({ error: 'You may only sign the attendance sheet for yourself.' });
+    }
+    if (!mayCountersign(row.attendance_status)) {
+      return res.status(400).json({
+        error: `${row.staff_name} is marked as ${row.attendance_status}. Only somebody who was at the session signs for it — `
+          + 'mark them present first.',
+      });
+    }
+    if (row.signed_at) return res.json({ ok: true, alreadySigned: true, signedAt: row.signed_at });
+
+    const designation = row.designation || row.job_title || null;
+    if (onPaper) {
+      db.prepare(`UPDATE training_attendance SET signed_at = CURRENT_TIMESTAMP,
+          designation = COALESCE(designation, ?),
+          remarks = TRIM(COALESCE(remarks || ' · ', '') || 'Signed on the paper attendance sheet'),
+          updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(designation, row.id);
+      audit(req, { action: 'sign', entity: 'training_attendance', entityId: row.id, newValue: { onPaper: true, staffId: row.staff_id } });
+      return res.json({ ok: true, onPaper: true });
+    }
+
+    // Asked before anything is written: a row stamped as signed with no
+    // signature behind it is precisely what this check exists to prevent.
+    if (!hasSignatureOnFile(me)) {
+      return res.status(400).json({
+        error: 'You have no signature on file, so you cannot sign the attendance sheet. Add one under My Portal → My Record → '
+          + 'Replace signature (or ask Personnel Management to upload it for you), then sign again.',
+        code: 'signature_required',
+      });
+    }
+    try {
+      const signature = recordSignature(req, {
+        moduleKey: 'personnel', recordType: 'training_attendance', recordId: row.id,
+        purpose: 'training_attendance',
+        meaning: `I attended ${event.training_number ?? 'this training session'} — ${event.title} on ${String(event.training_date).slice(0, 10)}.`,
+        staffId: Number(row.staff_id),
+      });
+      db.prepare(`UPDATE training_attendance SET signed_at = CURRENT_TIMESTAMP, signature_id = ?,
+          signature_file_id = (SELECT signature_file_id FROM staff WHERE id = ?),
+          designation = COALESCE(designation, ?), updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+        .run(signature.id, row.staff_id, designation, row.id);
+      res.json({ ok: true, signedAt: signature.signedAt, signatureId: signature.id });
+    } catch (e) {
+      if (e instanceof SignatureRequiredError) return res.status(400).json({ error: e.message, code: e.code });
+      throw e;
+    }
+  });
+
   router.delete('/training/:id/attendance/:attendanceId', requirePermission('personnel.training', 'edit'), (req, res) => {
     const db = getDb();
+    const event = db.prepare('SELECT * FROM training_events WHERE id = ?').get(req.params.id) as any;
+    if (!event) return res.status(404).json({ error: 'Training event not found' });
+    if (refuseIfFinished(req, res, event, 'changed')) return;
     const row = db.prepare('SELECT * FROM training_attendance WHERE id = ? AND training_event_id = ?').get(req.params.attendanceId, req.params.id) as any;
     if (!row) return res.status(404).json({ error: 'That person is not on this session.' });
+    // Taking a signed line off the sheet would remove evidence somebody gave.
+    // They can be marked absent; they cannot be made never to have signed.
+    if (row.signed_at) {
+      return res.status(409).json({ error: 'That person has signed the attendance sheet, so their line cannot be removed. Change their attendance instead.' });
+    }
     db.prepare('DELETE FROM training_attendance WHERE id = ?').run(req.params.attendanceId);
     audit(req, { action: 'delete', entity: 'training_attendance', entityId: req.params.attendanceId, oldValue: row });
     res.json({ ok: true });
   });
 
   /**
+   * Close the session. This is the act that makes it a record.
+   *
+   * Reserved to the senior roles because of what it does, not as a formality:
+   * from here the session is on every attendee's file and their portal, it is
+   * out of reach of casual editing, the next occurrence of a recurring session
+   * exists, and anybody the session did not work for has an individual session
+   * of their own already scheduled.
+   *
+   * It is signed. A closure carrying a typed name and nothing else is the first
+   * thing an assessor challenges, and this system has one way of signing things.
+   */
+  router.post('/training/:id/close', requirePermission('personnel.training', 'approve'), (req, res) => {
+    const db = getDb();
+    const event = db.prepare('SELECT * FROM training_events WHERE id = ?').get(req.params.id) as any;
+    if (!event) return res.status(404).json({ error: 'Training event not found' });
+    if (event.status === 'closed') return res.status(409).json({ error: `${event.training_number} is already closed.` });
+    if (event.status === 'cancelled') return res.status(409).json({ error: `${event.training_number} was called off, so there is nothing to close.` });
+
+    const attendance = db.prepare('SELECT * FROM training_attendance WHERE training_event_id = ?').all(req.params.id) as any[];
+    if (attendance.length === 0) {
+      return res.status(400).json({ error: 'Nobody is on this session. A training record with no attendance is not evidence of anything.' });
+    }
+    // Everybody who was expected has to be accounted for. "Invited" on a closed
+    // sheet means nobody ever said whether they turned up, which is the gap that
+    // makes an attendance sheet worthless.
+    const unaccounted = attendance.filter(a => a.attendance_status === 'invited');
+    if (unaccounted.length > 0) {
+      return res.status(400).json({
+        error: `${unaccounted.length} ${unaccounted.length === 1 ? 'person is' : 'people are'} still marked only as invited. `
+          + 'Say who came and who did not before closing — a closed sheet has to account for everybody on it.',
+        code: 'attendance_incomplete',
+      });
+    }
+    const present = attendance.filter(a => attendedInPerson(a.attendance_status));
+    if (present.length === 0) {
+      return res.status(400).json({ error: 'Nobody is recorded as having attended. Call the session off instead of closing it.' });
+    }
+    if (blockedForNoSignature(req, res)) return;
+
+    const summary = String(req.body?.closureSummary ?? '').trim() || null;
+    const out = db.transaction(() => {
+      let signatureId: number | null = null;
+      const signature = recordSignature(req, {
+        moduleKey: 'personnel', recordType: 'training_events', recordId: req.params.id,
+        purpose: 'training_closure',
+        meaning: `I have reviewed ${event.training_number} — ${event.title}, am satisfied the record and the attendance `
+          + 'sheet are complete and correct, and close it to the training file of everybody who attended.',
+      });
+      signatureId = signature.id;
+
+      db.prepare(`UPDATE training_events SET status = 'closed', closed_at = CURRENT_TIMESTAMP,
+          closed_by_staff_id = ?, closure_summary = ?, closure_signature_id = ?,
+          held_at = COALESCE(held_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+        .run(getStaffIdOrCurrent(req, null), summary, signatureId, req.params.id);
+
+      // The hours the session took are attributed to everybody who was there
+      // and whose own figure was never entered — the point of recording a
+      // duration at all is that it lands on people's files.
+      if (event.duration_hours) {
+        db.prepare(`UPDATE training_attendance SET hours = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE training_event_id = ? AND attendance_status = 'attended' AND hours IS NULL`)
+          .run(event.duration_hours, req.params.id);
+      }
+
+      const remedial = raiseRemedialTraining(db, Number(req.params.id), { userId: req.user!.id, makeNumber: generateRecordNumber });
+      const next = trainingRecurs(event.frequency)
+        ? raiseNextOccurrence(db, Number(req.params.id), { userId: req.user!.id, makeNumber: generateRecordNumber })
+        : null;
+      const told = notifyParticipants(db, Number(req.params.id), 'closed');
+      return { signatureId, remedial, next, told };
+    })();
+
+    audit(req, {
+      action: 'close', entity: 'training_events', entityId: req.params.id,
+      oldValue: { status: event.status },
+      newValue: { status: 'closed', attended: present.length, remedialRaised: out.remedial.length, nextOccurrence: out.next?.trainingNumber ?? null },
+    });
+    res.json({
+      ok: true, status: 'closed', notified: out.told,
+      remedial: out.remedial, nextOccurrence: out.next,
+    });
+  });
+
+  /**
+   * Reopen a closed session.
+   *
+   * Deliberately not pretty. A laboratory has to be able to correct its own
+   * file — a name on the wrong line, an outcome entered against the wrong
+   * person — and pretending otherwise just means the correction happens in a
+   * spreadsheet nobody can audit. So it is here, it is senior-only, it demands a
+   * reason, and it is recorded as a reopening rather than as an edit.
+   */
+  router.post('/training/:id/reopen', requirePermission('personnel.training', 'approve'), (req, res) => {
+    const db = getDb();
+    const event = db.prepare('SELECT * FROM training_events WHERE id = ?').get(req.params.id) as any;
+    if (!event) return res.status(404).json({ error: 'Training event not found' });
+    if (!trainingIsLocked(event.status)) return res.status(409).json({ error: `${event.training_number} is not closed.` });
+    const reason = String(req.body?.reason ?? '').trim();
+    if (!reason) return res.status(400).json({ error: 'Say why this closed record is being reopened. It is recorded against your name.' });
+
+    db.prepare(`UPDATE training_events SET status = 'completed', closed_at = NULL, closed_by_staff_id = NULL,
+        closure_signature_id = NULL,
+        closure_summary = TRIM(COALESCE(closure_summary || CHAR(10), '') || ?),
+        updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(`Reopened: ${reason}`, req.params.id);
+    audit(req, { action: 'reopen', entity: 'training_events', entityId: req.params.id, oldValue: { status: event.status }, newValue: { status: 'completed', reason } });
+    res.json({ ok: true, status: 'completed' });
+  });
+
+  /**
+   * Delete a session.
+   *
+   * Almost always the wrong thing — a session that did not happen is called off,
+   * not deleted, so that the programme can still account for it — so this exists
+   * for the one real case, a record created in error, and it is senior-only. A
+   * session anybody has signed for is never deleted: that signature is evidence
+   * somebody gave.
+   */
+  router.delete('/training/:id', requirePermission('personnel.training', 'approve'), (req, res) => {
+    const db = getDb();
+    const event = db.prepare('SELECT * FROM training_events WHERE id = ?').get(req.params.id) as any;
+    if (!event) return res.status(404).json({ error: 'Training event not found' });
+    if (refuseIfEquipmentOwned(res, event)) return;
+    const signed = db.prepare('SELECT COUNT(*) AS n FROM training_attendance WHERE training_event_id = ? AND signed_at IS NOT NULL').get(req.params.id) as any;
+    if (Number(signed?.n ?? 0) > 0) {
+      return res.status(409).json({
+        error: `${event.training_number} has a signed attendance sheet, so it cannot be deleted. Call it off if it is not going ahead.`,
+      });
+    }
+    db.transaction(() => {
+      db.prepare('DELETE FROM notifications WHERE record_type LIKE ? AND record_id = ?').run('training_events:%', String(req.params.id));
+      db.prepare('DELETE FROM training_attendance WHERE training_event_id = ?').run(req.params.id);
+      db.prepare("DELETE FROM record_links WHERE source_module_key = 'personnel' AND source_record_type = 'training_events' AND source_record_id = ?").run(String(req.params.id));
+      db.prepare('DELETE FROM training_events WHERE id = ?').run(req.params.id);
+    })();
+    audit(req, { action: 'delete', entity: 'training_events', entityId: req.params.id, oldValue: event });
+    res.json({ ok: true });
+  });
+
+  /**
    * Did the training work?
    *
-   * The question a training register is actually asked at assessment, and the
-   * one it could never answer. A session is not finished when it has been
-   * held; it is finished when somebody has looked at the work afterwards and
-   * said whether it changed. "Not effective" is a real answer and carries the
-   * retraining with it rather than quietly closing the record.
+   * The question a training register is actually asked at assessment. A session
+   * is not finished when it has been held; it is finished when somebody has
+   * looked at the work afterwards and said whether it changed. "Not effective"
+   * is a real answer and carries retraining with it rather than quietly closing
+   * the record — so an outcome of "not effective" for somebody raises their own
+   * individual session, exactly as a poor outcome on the day does.
+   *
+   * For a session that recurs, this is the periodic review: each occurrence is
+   * judged in its own right. A one-off is reviewed once and is then done.
    */
   router.post('/training/:id/effectiveness', requirePermission('personnel.training', 'edit'), (req, res) => {
     const db = getDb();
@@ -446,25 +1047,254 @@ export function personnelRoutes() {
     if (!(EFFECTIVENESS_METHODS as readonly string[]).includes(method)) {
       return res.status(400).json({ error: `method must be one of: ${EFFECTIVENESS_METHODS.join(', ')}` });
     }
+    if (blockedForNoSignature(req, res)) return;
     const staffId = getStaffIdOrCurrent(req, req.body?.reviewedByStaffId);
-    db.prepare(`UPDATE training_events SET effectiveness_method = ?, effectiveness_outcome = ?,
-        effectiveness_notes = ?, effectiveness_reviewed_by_staff_id = ?, effectiveness_reviewed_at = CURRENT_TIMESTAMP,
-        updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-      .run(method, outcome, req.body?.notes ?? null, staffId, req.params.id);
 
-    // Per person as well as per session, so a session that worked for four
-    // people and not for the fifth records exactly that.
-    const perPerson = Array.isArray(req.body?.perPerson) ? req.body.perPerson : [];
-    for (const entry of perPerson) {
-      const attendanceId = parseIntNullable(entry?.attendanceId);
-      const personOutcome = String(entry?.outcome ?? '');
-      if (!attendanceId || !(EFFECTIVENESS_OUTCOMES as readonly string[]).includes(personOutcome)) continue;
-      db.prepare(`UPDATE training_attendance SET effectiveness_outcome = ?, effectiveness_notes = ?,
-          updated_at = CURRENT_TIMESTAMP WHERE id = ? AND training_event_id = ?`)
-        .run(personOutcome, entry?.notes ?? null, attendanceId, req.params.id);
+    const out = db.transaction(() => {
+      const signature = recordSignature(req, {
+        moduleKey: 'personnel', recordType: 'training_events', recordId: req.params.id,
+        purpose: 'training_effectiveness_review',
+        meaning: `I have reviewed the effect of ${event.training_number} — ${event.title} by `
+          + `${method.replace(/_/g, ' ')} and find it ${outcome.replace(/_/g, ' ')}.`,
+        staffId,
+      });
+      db.prepare(`UPDATE training_events SET effectiveness_method = ?, effectiveness_outcome = ?,
+          effectiveness_notes = ?, effectiveness_reviewed_by_staff_id = ?, effectiveness_reviewed_at = CURRENT_TIMESTAMP,
+          review_signature_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+        .run(method, outcome, req.body?.notes ?? null, staffId, signature.id, req.params.id);
+
+      // Per person as well as per session, so a session that worked for four
+      // people and not for the fifth records exactly that.
+      const perPerson = Array.isArray(req.body?.perPerson) ? req.body.perPerson : [];
+      for (const entry of perPerson) {
+        const attendanceId = parseIntNullable(entry?.attendanceId);
+        const personOutcome = String(entry?.outcome ?? '');
+        if (!attendanceId || !(EFFECTIVENESS_OUTCOMES as readonly string[]).includes(personOutcome)) continue;
+        db.prepare(`UPDATE training_attendance SET effectiveness_outcome = ?, effectiveness_notes = ?,
+            outcome = CASE WHEN ? = 'not_effective' AND outcome IN ('not_assessed','satisfactory','competent')
+              THEN 'needs_further_training' ELSE outcome END,
+            updated_at = CURRENT_TIMESTAMP WHERE id = ? AND training_event_id = ?`)
+          .run(personOutcome, entry?.notes ?? null, personOutcome, attendanceId, req.params.id);
+      }
+      // A review that found the training did not work owes the people it did
+      // not work for another go, individually. Finding that and doing nothing
+      // about it is the failure the review exists to catch.
+      const remedial = raiseRemedialTraining(db, Number(req.params.id), { userId: req.user!.id, makeNumber: generateRecordNumber });
+      return { signatureId: signature.id, remedial };
+    })();
+
+    audit(req, { action: 'review', entity: 'training_events', entityId: req.params.id, newValue: { effectiveness: outcome, method, remedialRaised: out.remedial.length } });
+    res.json({ ok: true, remedial: out.remedial });
+  });
+
+  /* ══ The training report ═══════════════════════════════════════════════════
+     One document, printable, that IS the training record.
+
+     This is what the register could not produce, and it is the reason a
+     laboratory that had all of this on the screen still kept a paper file: an
+     assessor asks to see the training report for a session, and a training
+     report means the session, what it was for, who taught it, what was
+     achieved — and the attendance sheet, signed. Printing the session without
+     the sheet, or the sheet without the session, produces two documents that
+     each prove half of something.
+
+     It is laid out by the same printSheet the competency record and the
+     appraisal use, because all three end up in the same staff file and are read
+     by the same people.
+
+     `?sheet=blank` prints the attendance sheet with ruled empty lines, which is
+     what somebody actually wants the morning of a session: a sheet to carry to
+     the bench and have signed by hand, already carrying the session's own
+     details and everybody's name and designation.
+     ═══════════════════════════════════════════════════════════════════════ */
+  router.get('/training/:id/print', (req, res) => {
+    if (!req.user) return res.status(401).send('Authentication required');
+    const db = getDb();
+    const event = loadTrainingEvent(db, req.params.id);
+    if (!event) return res.status(404).send('Training event not found');
+    if (!mayReachTrainingReport(req, event, 'print')) return res.status(403).send('Permission denied');
+
+    const blank = String(req.query.sheet ?? '') === 'blank';
+    const attendance = event.attendance as any[];
+    const present = attendance.filter(a => attendedInPerson(a.attendance_status));
+    const held = trainingWasHeld(event.status);
+
+    /* The attendance sheet.
+       Name, designation, what they came away with, the signature and the date —
+       the same shape as every other signing sheet in the system. A signed line
+       carries the signature that was actually applied; an unsigned one carries a
+       rule to sign on, so the same sheet works on screen and on the bench. */
+    const sheetRow = (row: any, index: number) => {
+      const signature = blank ? null
+        : (row.signed_at ? fileDataUri(row.signature_file_id) ?? staffSignatureDataUri(row.staff_id) : null);
+      const signatureCell = signature
+        ? `<img class="sig-img" src="${signature}" alt="signature" />`
+        : (row.signed_at ? '<small>Signed on the paper sheet</small>' : '');
+      return `<tr>
+        <td class="tick">${index + 1}</td>
+        <td><strong>${htmlEscape(row.staff_name)}</strong>${row.employee_no ? `<br/><small>${htmlEscape(row.employee_no)}</small>` : ''}</td>
+        <td>${htmlEscape(row.sheet_designation || '—')}</td>
+        <td>${htmlEscape(row.section_name || '—')}</td>
+        ${blank ? '<td></td>' : `<td>${htmlEscape(ATTENDANCE_STATUS_LABEL_MAP[row.attendance_status] ?? row.attendance_status)}</td>`}
+        ${blank ? '<td></td>' : `<td class="tick">${row.hours ?? '—'}</td>`}
+        <td class="sig-cell">${signatureCell}</td>
+        <td>${blank || !row.signed_at ? '' : htmlEscape(String(row.signed_at).slice(0, 10))}</td>
+      </tr>`;
+    };
+
+    // A blank sheet gets spare lines, because the people who turn up to a
+    // session are never exactly the people who were invited to it.
+    const spareLines = blank
+      ? Array.from({ length: 6 }, () => `<tr><td class="tick"></td><td></td><td></td><td></td><td></td><td></td><td class="sig-cell"></td><td></td></tr>`).join('')
+      : '';
+
+    const attendanceSheet = `
+<h2>Attendance sheet</h2>
+<p class="legend">
+  Everybody named below was expected at this session. A signature attests that the person signing attended it.
+  ${blank ? 'Signatures are taken by hand on this sheet and entered against the session afterwards.'
+    : `${present.length} of ${attendance.length} attended; ${attendance.filter(a => a.signed_at).length} have signed.`}
+</p>
+<table>
+  <thead><tr>
+    <th style="width:4%" class="tick">#</th>
+    <th style="width:21%">Name</th>
+    <th style="width:19%">Designation</th>
+    <th style="width:13%">Unit / section</th>
+    <th style="width:11%">Attendance</th>
+    <th style="width:6%" class="tick">Hours</th>
+    <th style="width:17%">Signature</th>
+    <th style="width:9%">Date</th>
+  </tr></thead>
+  <tbody>
+    ${attendance.map(sheetRow).join('') || '<tr><td colspan="8" class="none">Nobody is on this session.</td></tr>'}
+    ${spareLines}
+  </tbody>
+</table>`;
+
+    if (blank) {
+      audit(req, { action: 'print', entity: 'training_events', entityId: req.params.id, newValue: { sheet: 'blank' } });
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.send(printSheet({
+        title: `${event.training_number} — Attendance sheet`,
+        documentTitle: 'Training attendance sheet',
+        reference: event.training_number,
+        referenceLabel: 'Training number',
+        body: `
+<table class="meta">
+  <tr><th>Training</th><td colspan="3">${htmlEscape(event.title)}</td></tr>
+  <tr><th>Date</th><td>${htmlEscape(event.training_date)}${event.end_date ? ` → ${htmlEscape(event.end_date)}` : ''}</td>
+      <th>Time</th><td>${htmlEscape([event.start_time, event.end_time].filter(Boolean).join(' – ') || '—')}</td></tr>
+  <tr><th>Trainer</th><td>${htmlEscape(trainerDisplayName(event))}</td>
+      <th>Location</th><td>${htmlEscape(event.location || '—')}</td></tr>
+  <tr><th>Subject</th><td>${htmlEscape(event.category ? (TRAINING_CATEGORY_LABEL_MAP[event.category] ?? event.category) : '—')}</td>
+      <th>Unit / section</th><td>${htmlEscape(event.section_name || 'Whole laboratory')}</td></tr>
+</table>
+${event.objectives ? `<h2>What the session is meant to achieve</h2><div class="narrative">${htmlText(event.objectives)}</div>` : ''}
+${attendanceSheet}
+<div class="signatures two">
+  ${signatureBlock('Facilitator / trainer', trainerDisplayName(event) === '—' ? null : trainerDisplayName(event))}
+  ${signatureBlock('Closed and signed by')}
+</div>`,
+        autoprint: req.query.autoprint !== '0',
+        footerNote: 'Blank attendance sheet — have it signed at the session, then record the attendance against the session.',
+      }));
     }
-    audit(req, { action: 'edit', entity: 'training_events', entityId: req.params.id, newValue: { effectiveness: outcome, method } });
-    res.json({ ok: true });
+
+    /* What was achieved, per person. This is the part of a training report that
+       an assessor reads for evidence the session did something, and it was
+       previously only on a screen, one person at a time. */
+    const outcomeRows = present.map(row => `<tr>
+      <td><strong>${htmlEscape(row.staff_name)}</strong></td>
+      <td>${htmlEscape(row.sheet_designation || '—')}</td>
+      <td>${htmlEscape(TRAINING_OUTCOME_LABEL_MAP[row.outcome] ?? row.outcome ?? '—')}</td>
+      <td class="tick">${row.pre_test_score ?? '—'}</td>
+      <td class="tick">${row.post_test_score ?? '—'}</td>
+      <td>${htmlEscape(EFFECTIVENESS_OUTCOME_LABEL_MAP[row.effectiveness_outcome] ?? '—')}</td>
+      <td>${htmlEscape(row.remedial_number ? `Individual retraining ${row.remedial_number}` : (row.remarks || '—'))}</td>
+    </tr>`).join('');
+
+    const series = recurrenceSummary(event.frequency, event.frequency_interval_days);
+    const body = `
+<table class="meta">
+  <tr><th>Training</th><td colspan="3"><strong>${htmlEscape(event.title)}</strong></td></tr>
+  <tr><th>Status</th><td>${htmlEscape(TRAINING_STATUS_LABEL_MAP[event.status] ?? event.status)}</td>
+      <th>How it was recorded</th><td>${htmlEscape(TRAINING_MODE_LABEL_MAP[event.training_mode] ?? event.training_mode)}</td></tr>
+  <tr><th>Date held</th><td>${htmlEscape(event.training_date)}${event.end_date ? ` → ${htmlEscape(event.end_date)}` : ''}</td>
+      <th>Time</th><td>${htmlEscape([event.start_time, event.end_time].filter(Boolean).join(' – ') || '—')}</td></tr>
+  <tr><th>Duration</th><td>${event.duration_hours ? `${htmlEscape(event.duration_hours)} hours` : '—'}</td>
+      <th>Location</th><td>${htmlEscape(event.location || '—')}</td></tr>
+  <tr><th>Subject</th><td>${htmlEscape(event.category ? (TRAINING_CATEGORY_LABEL_MAP[event.category] ?? event.category) : '—')}</td>
+      <th>How it was run</th><td>${htmlEscape(event.training_format ? (TRAINING_FORMAT_LABEL_MAP[event.training_format] ?? event.training_format) : '—')}</td></tr>
+  <tr><th>Who arranged it</th><td>${event.delivery_mode === 'external' ? 'An outside body' : 'The laboratory'}</td>
+      <th>Who taught it</th><td>${htmlEscape(trainerDisplayName(event))}</td></tr>
+  ${event.external_trainer_qualifications ? `<tr><th>Trainer's qualification</th><td colspan="3">${htmlEscape(event.external_trainer_qualifications)}</td></tr>` : ''}
+  <tr><th>Provider</th><td>${htmlEscape(event.provider || '—')}</td>
+      <th>Unit / section</th><td>${htmlEscape(event.section_name || 'Whole laboratory')}</td></tr>
+  ${event.equipment_name ? `<tr><th>Equipment</th><td colspan="3">${htmlEscape(`${event.equipment_number ?? ''} ${event.equipment_name}`.trim())}</td></tr>` : ''}
+  ${series ? `<tr><th>Recurs</th><td>${htmlEscape(series)}</td><th>Occurrence</th><td>${htmlEscape(event.series_index ?? 1)}${event.series_parent_number ? ` of the series begun by ${htmlEscape(event.series_parent_number)}` : ''}</td></tr>` : ''}
+  ${event.postponed_from_date ? `<tr><th>Postponed from</th><td>${htmlEscape(event.postponed_from_date)}</td><th>Reason</th><td>${htmlEscape(event.postponement_reason || '—')}</td></tr>` : ''}
+  ${event.remedial_for_number ? `<tr><th>Arising from</th><td colspan="3">Individual retraining for ${htmlEscape(event.remedial_for_staff_name || 'a member of staff')} following ${htmlEscape(event.remedial_for_number)}</td></tr>` : ''}
+</table>
+
+<div class="scores">
+  <div class="score-box"><div class="label">On the list</div><div class="value">${attendance.length}</div><div class="sub">expected to attend</div></div>
+  <div class="score-box"><div class="label">Attended</div><div class="value">${present.length}</div><div class="sub">${attendance.length - present.length} did not</div></div>
+  <div class="score-box"><div class="label">Signed the sheet</div><div class="value">${attendance.filter(a => a.signed_at).length}</div><div class="sub">of ${present.length} who attended</div></div>
+  <div class="score-box"><div class="label">Training hours</div><div class="value">${event.duration_hours ?? '—'}</div><div class="sub">attributed to each attendee</div></div>
+  <div class="score-box"><div class="label">Effect reviewed</div><div class="value" style="font-size:13px">${htmlEscape(EFFECTIVENESS_OUTCOME_LABEL_MAP[event.effectiveness_outcome] ?? 'Not yet reviewed')}</div><div class="sub">${htmlEscape(event.effectiveness_due_date ? `due ${event.effectiveness_due_date}` : 'no review owed')}</div></div>
+</div>
+
+<h2>What the session was for</h2>
+<div class="narrative">${htmlText(event.objectives)}</div>
+
+${event.description ? `<h2>What it covered</h2><div class="narrative">${htmlText(event.description)}</div>` : ''}
+
+${attendanceSheet}
+
+<h2>What those who attended came away with</h2>
+<table>
+  <thead><tr>
+    <th style="width:20%">Name</th><th style="width:17%">Designation</th><th style="width:15%">Outcome</th>
+    <th style="width:7%" class="tick">Pre</th><th style="width:7%" class="tick">Post</th>
+    <th style="width:14%">Effect on the work</th><th>Remarks / action</th>
+  </tr></thead>
+  <tbody>${outcomeRows || '<tr><td colspan="7" class="none">Nobody is recorded as having attended this session.</td></tr>'}</tbody>
+</table>
+
+<h2>How the effect of this training ${event.effectiveness_reviewed_at ? 'was' : 'is to be'} judged</h2>
+<p class="legend">
+  Method: ${htmlEscape(EFFECTIVENESS_METHOD_LABEL_MAP[event.effectiveness_method] ?? event.effectiveness_method)}${event.effectiveness_due_date ? `, by ${htmlEscape(event.effectiveness_due_date)}` : ''}.
+  ${series ? 'This session recurs, so its effect is reviewed each time it comes round.' : 'A one-off session, reviewed once.'}
+</p>
+<div class="narrative">${htmlText(event.effectiveness_notes)}</div>
+
+${event.closure_summary ? `<h2>Closing note</h2><div class="narrative">${htmlText(event.closure_summary)}</div>` : ''}
+${event.cancellation_reason ? `<h2>Why the session was called off</h2><div class="narrative">${htmlText(event.cancellation_reason)}</div>` : ''}
+
+<div class="signatures">
+  ${signatureBlock('Facilitator / trainer', trainerDisplayName(event) === '—' ? null : trainerDisplayName(event),
+    held ? event.held_at ?? event.training_date : null,
+    event.trainer_staff_id && held ? staffSignatureDataUri(event.trainer_staff_id) : null)}
+  ${signatureBlock('Reviewed and closed by', event.closed_by_name, event.closed_at,
+    event.closed_at ? staffSignatureDataUri(event.closed_by_staff_id) : null)}
+  ${signatureBlock('Effectiveness reviewed by', event.effectiveness_reviewer_name, event.effectiveness_reviewed_at,
+    event.effectiveness_reviewed_at ? staffSignatureDataUri(event.effectiveness_reviewed_by_staff_id) : null)}
+</div>`;
+
+    audit(req, { action: 'print', entity: 'training_events', entityId: req.params.id });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(printSheet({
+      title: `${event.training_number} — Training report`,
+      documentTitle: 'Training report',
+      reference: event.training_number,
+      referenceLabel: 'Training number',
+      body,
+      autoprint: req.query.autoprint !== '0',
+      footerNote: event.status === 'closed'
+        ? 'Closed training record — retain in the training file and in the file of everybody who attended.'
+        : 'Training record — NOT YET CLOSED. The documentation is outstanding and this report is provisional.',
+    }));
   });
 
   /**
@@ -495,6 +1325,45 @@ export function personnelRoutes() {
     const staffId = Number(req.user?.staffId ?? 0);
     if (!staffId) return res.json({ staff: null, entries: [], summary: null });
     res.json({ staff: null, ...trainingFileFor(getDb(), staffId) });
+  });
+
+  /**
+   * My sessions, with everything the portal needs to act on them.
+   *
+   * Separate from the training file, which is a history. This is the live list:
+   * what is coming, what was postponed, and — the part the portal could not do
+   * at all — which attendance sheets are waiting for this person's signature.
+   * Self-scoped, so it needs no register permission.
+   */
+  router.get('/my-training-sessions', (req, res) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    const staffId = Number(req.user.staffId ?? 0);
+    if (!staffId) return res.json({ sessions: [], awaitingSignature: 0, hasSignatureOnFile: false });
+    const db = getDb();
+    const sessions = db.prepare(`SELECT e.id, e.training_number, e.title, e.description, e.category, e.training_format,
+        e.delivery_mode, e.trainer_type, e.external_trainer_name, e.external_trainer_organisation, e.provider,
+        e.training_date, e.end_date, e.start_time, e.end_time, e.duration_hours, e.location, e.status,
+        e.training_mode, e.frequency, e.frequency_interval_days, e.objectives,
+        e.postponed_from_date, e.postponement_reason, e.cancellation_reason,
+        e.remedial_for_event_id, e.closed_at, e.effectiveness_outcome,
+        t.full_name AS trainer_name, sec.name AS section_name,
+        eq.name AS equipment_name, eq.equipment_number,
+        a.id AS attendance_id, a.attendance_status, a.outcome, a.hours, a.signed_at, a.remarks,
+        COALESCE(a.designation, s.designation, s.job_title) AS sheet_designation
+      FROM training_attendance a
+      JOIN training_events e ON e.id = a.training_event_id
+      JOIN staff s ON s.id = a.staff_id
+      LEFT JOIN staff t ON t.id = e.trainer_staff_id
+      LEFT JOIN sections sec ON sec.id = e.section_id
+      LEFT JOIN equipment_items eq ON eq.id = e.equipment_id
+      WHERE a.staff_id = ?
+      ORDER BY CASE WHEN e.status IN ('planned','in_progress','postponed') THEN 0 ELSE 1 END,
+               e.training_date DESC, e.id DESC`).all(staffId) as any[];
+    res.json({
+      sessions,
+      awaitingSignature: sessions.filter(s => attendedInPerson(s.attendance_status) && !s.signed_at).length,
+      hasSignatureOnFile: hasSignatureOnFile(staffId),
+    });
   });
 
   // Competency assessment lives in routes/competency.ts — a framework, a
@@ -654,7 +1523,8 @@ export function personnelRoutes() {
         FROM training_attendance ta
         JOIN training_events te ON te.id = ta.training_event_id
         LEFT JOIN staff t ON t.id = te.trainer_staff_id
-        WHERE ta.staff_id = ? AND te.training_date >= date('now') AND te.status != 'cancelled'
+        WHERE ta.staff_id = ? AND te.training_date >= date('now')
+          AND te.status IN ('planned', 'in_progress', 'postponed')
         ORDER BY te.training_date`).all(staffId),
       upcomingCompetency: db.prepare("SELECT * FROM competency_assessments WHERE staff_id = ? AND status IN ('planned','in_progress') ORDER BY assessment_date").all(staffId),
       assignedActions: db.prepare("SELECT * FROM actions WHERE assigned_to_staff_id = ? AND status != 'Closed' ORDER BY due_date NULLS LAST").all(staffId),
