@@ -34,6 +34,7 @@ import { dutyContextFor, todayIso } from '../services/dutyService.js';
 import {
   currentObligations, ensureMonthSchedules, schedulingPolicy, runScheduleTick,
 } from '../services/scheduleRollover.js';
+import { unitScopePayload } from '../services/unitScope.js';
 
 function isIsoDate(value: unknown): boolean {
   return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -230,10 +231,13 @@ export function dutyActivityRoutes() {
     // comes first, because that is where they are working; their home section
     // is the fallback for somebody not rostered, and for somebody who is
     // neither the programme is empty rather than the whole laboratory's.
-    const homeSection = staffId
-      ? (db.prepare('SELECT section_id FROM staff WHERE id = ?').get(staffId) as { section_id?: number | null } | undefined)?.section_id ?? null
-      : null;
-    const sectionId = duty.sectionId ?? homeSection;
+    //
+    // The senior posts — administrator, Quality Manager, Laboratory Manager —
+    // are not held to any of that: they answer for every unit's programme, so
+    // they may ask for the one they need and get their own when they do not.
+    const scope = unitScopePayload(req, req.query.sectionId);
+    const asked = scope.canChooseUnit ? parseIntNullable(req.query.sectionId) : null;
+    const sectionId = asked ?? duty.sectionId ?? scope.homeSectionId;
 
     const programme = sectionId
       ? db.prepare(`SELECT a.id, a.activity_code, a.name, a.description, a.instructions, a.category, a.frequency,
@@ -275,6 +279,10 @@ export function dutyActivityRoutes() {
     const openMine = mine.filter(o => o.status === 'pending' || o.status === 'in_progress');
     res.json({
       date, duty, tiers, mine, programme: rows,
+      sectionId, units: scope.units, canChooseUnit: scope.canChooseUnit,
+      sectionName: sectionId
+        ? (db.prepare('SELECT name FROM sections WHERE id = ?').get(sectionId) as { name?: string } | undefined)?.name ?? null
+        : null,
       counts: {
         due: openMine.length,
         done: mine.filter(o => o.status === 'done' || o.status === 'not_applicable').length,

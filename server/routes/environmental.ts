@@ -12,11 +12,11 @@ import { getDriver, listDrivers, COMMUNICATION_METHODS } from '../services/envir
 import { listChannels, getChannels, processQueue } from '../services/environmental/notifications.js';
 import { computeInsights } from '../services/environmental/insights.js';
 import { buildReport, reportToWorkbook, reportToHtml, REPORT_TYPES } from '../services/environmental/reports.js';
-import { getCurrentStaffId } from './routeHelpers.js';
 import { openSheet, refreshSheetRows, sheetsForSection } from '../services/routineSheets.js';
 import { LOGGING_MODES, MAX_ATTACHMENT_MB } from '../../shared/constants/routineWork.js';
 import { resolvePermission } from '../services/permissionResolver.js';
 import { tierFeatureKey, TIER_ACTION } from '../../shared/constants/activities.js';
+import { unitScopePayload, isCrossUnitRole } from '../services/unitScope.js';
 
 /** A number, or nothing — an empty box is "not set", never zero. */
 const num = (value: unknown): number | null =>
@@ -493,17 +493,36 @@ export function environmentalRoutes() {
      view the laboratory signs; the readings are still the data.
      ==================================================================== */
 
-  router.get('/charts', requirePermission(MODULE, 'view'), (req, res) => {
+  /**
+   * The unit's charts for a month.
+   *
+   * Gated on the routine-work tier as well as on the environment module,
+   * because the two rights answer different questions. Registering a fridge and
+   * configuring the monitoring programme is the module's; READING the month's
+   * chart and filling in this morning's temperature is routine bench work, and
+   * a technician holds the general tier without holding the module. Requiring
+   * the module here meant that the unit head who set a chart up was very often
+   * the only person who could open it — which is exactly backwards, since they
+   * are the one person who does not stand at the fridge at eight in the
+   * morning.
+   */
+  router.get('/charts', (req, res) => {
     const db = getDb();
+    if (!resolvePermission(req.user!.id, MODULE, 'view').allowed
+      && !resolvePermission(req.user!.id, tierFeatureKey('general'), 'view').allowed) {
+      return res.status(403).json({ error: 'You do not have access to the environmental charts.' });
+    }
     const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : new Date().toISOString().slice(0, 7);
-    const staffId = getCurrentStaffId(req);
-    const sectionId = parseIntNullable(req.query.sectionId)
-      ?? (staffId !== null ? (db.prepare('SELECT section_id FROM staff WHERE id = ?').get(staffId) as any)?.section_id ?? null : null);
+    const scope = unitScopePayload(req, req.query.sectionId);
     const settings = db.prepare('SELECT * FROM environmental_settings WHERE id = 1').get() as any;
-    if (!sectionId) return res.json({ month, sectionId: null, sheets: [], settings });
+    const canDelete = isCrossUnitRole(req.user!.id);
+    if (!scope.sectionId) {
+      return res.json({ month, sectionId: null, sheets: [], settings, units: scope.units, canChooseUnit: scope.canChooseUnit, canDelete });
+    }
     res.json({
-      month, sectionId, settings,
-      sheets: sheetsForSection(db, 'environmental', sectionId, month, { userId: req.user!.id }),
+      month, sectionId: scope.sectionId, settings,
+      units: scope.units, canChooseUnit: scope.canChooseUnit, canDelete,
+      sheets: sheetsForSection(db, 'environmental', scope.sectionId, month, { userId: req.user!.id }),
     });
   });
 
@@ -517,9 +536,12 @@ export function environmentalRoutes() {
    * to that unit, appearing on its chart board the moment it is saved.
    *
    * It is not an open door: it takes the environment module's create right, or
-   * the supervisory routine-work tier a unit head holds. And it can only ever
-   * be assigned to the caller's own unit — naming somebody else's is a
-   * Facilities & Safety act, because it makes another unit responsible.
+   * the supervisory routine-work tier a unit head holds. A unit head can only
+   * ever assign it to their own unit — naming somebody else's would make
+   * another unit responsible. The administrator, the Quality Manager and the
+   * Laboratory Manager are the exception, because answering for the whole
+   * laboratory's monitoring programme means being able to set one up in the
+   * unit that needs it rather than in the one they happen to sit in.
    */
   router.post('/charts/assets', requireAuth, (req, res) => {
     const db = getDb();
@@ -531,10 +553,7 @@ export function environmentalRoutes() {
           + 'create right nor the supervisory routine-work tier.',
       });
     }
-    const staffId = getCurrentStaffId(req);
-    const sectionId = staffId !== null
-      ? (db.prepare('SELECT section_id FROM staff WHERE id = ?').get(staffId) as any)?.section_id ?? null
-      : null;
+    const sectionId = unitScopePayload(req, req.body?.sectionId).sectionId;
     if (!sectionId) {
       return res.status(400).json({ error: 'Your account is not linked to a unit, so there is nobody to make responsible for the readings.' });
     }

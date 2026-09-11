@@ -57,7 +57,7 @@ const METHOD_ICONS: Record<IqcEntryMethod, ReactNode> = {
 
 type QcFace = 'board' | 'charts';
 
-export default function PortalRoutineIqc() {
+export default function PortalRoutineIqc({ sectionId }: { sectionId?: number | null } = {}) {
   const [board, setBoard] = useState<IqcBoard | null>(null);
   const [loading, setLoading] = useState(true);
   const [problem, setProblem] = useState<string | null>(null);
@@ -67,10 +67,10 @@ export default function PortalRoutineIqc() {
   const [face, setFace] = useState<QcFace>('board');
 
   const load = useCallback(async () => {
-    try { setBoard(await api<IqcBoard>('/iqc/portal/board')); setProblem(null); }
+    try { setBoard(await api<IqcBoard>(`/iqc/portal/board${sectionId ? `?sectionId=${sectionId}` : ''}`)); setProblem(null); }
     catch (e) { setProblem(errorText(e)); }
     finally { setLoading(false); }
-  }, []);
+  }, [sectionId]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -178,7 +178,7 @@ export default function PortalRoutineIqc() {
 
       {chartControl && <ChartDialog control={chartControl} onClose={() => setChartControl(null)} />}
 
-      <PortalIqcCoverage onChanged={load} />
+      <PortalIqcCoverage onChanged={load} sectionId={sectionId ?? null} />
 
       {openControl && (
         <RunControlDialog control={openControl} onClose={() => setOpenControl(null)}
@@ -456,6 +456,17 @@ function RunControlDialog({ control, onClose, onSaved }: {
   const [method, setMethod] = useState<IqcEntryMethod>((control.preferredEntryMethod as IqcEntryMethod) || 'manual');
   const [values, setValues] = useState<Record<number, string>>({});
   const [mapping, setMapping] = useState<IqcMapping | null>(null);
+  /**
+   * The day the control was actually run.
+   *
+   * Today, because that is almost always the answer and nobody should have to
+   * fill in a date to record this morning's control. But only almost always: a
+   * run taken on the night shift and entered at handover, or a sheet caught up
+   * on after a weekend, belongs on the day it was run — and stamping it today
+   * would put a point on the wrong day of the Levey-Jennings chart and count a
+   * missed day as done.
+   */
+  const [runDate, setRunDate] = useState(new Date().toISOString().slice(0, 10));
   const [runTime, setRunTime] = useState(new Date().toTimeString().slice(0, 5));
   const [reagentLot, setReagentLot] = useState('');
   const [comment, setComment] = useState('');
@@ -511,7 +522,7 @@ function RunControlDialog({ control, onClose, onSaved }: {
         method: 'POST',
         body: JSON.stringify({
           iqcMaterialId: control.id,
-          runDate: new Date().toISOString().slice(0, 10),
+          runDate,
           runTime, reagentLot: reagentLot || undefined, comment: comment || undefined,
           equipmentId: control.equipmentId ?? undefined,
           entryMethod: method,
@@ -628,9 +639,20 @@ function RunControlDialog({ control, onClose, onSaved }: {
           </div>
 
           <div className="iqc-run-meta">
+            <label>
+              <span>Date run</span>
+              <input type="date" value={runDate} max={new Date().toISOString().slice(0, 10)}
+                onChange={e => setRunDate(e.target.value)} />
+            </label>
             <label><span>Time run</span><input type="time" value={runTime} onChange={e => setRunTime(e.target.value)} /></label>
             <label><span>Reagent lot</span><TextField value={reagentLot} onValue={setReagentLot} placeholder="optional" /></label>
           </div>
+          {runDate !== new Date().toISOString().slice(0, 10) && (
+            <p className="iqc-backdated">
+              <AlertTriangle size={12} /> This run will be recorded against {runDate}, not today. The rules are
+              evaluated against the runs that came before that date, which is what makes a caught-up entry honest.
+            </p>
+          )}
           <label>
             <span>Comment</span>
             <TextField value={comment} onValue={setComment} placeholder="Anything worth recording about this run" />

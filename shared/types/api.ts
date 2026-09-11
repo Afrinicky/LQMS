@@ -576,6 +576,9 @@ export type RoutineWorkResponse = {
   /** The unit's programme — every active activity for their unit. */
   programme:RoutineActivity[];
   counts:{ due:number; done:number; missed:number; blocked:number; programme:number };
+  /** The unit whose programme is being shown, which is not always the reader's own. */
+  sectionId?:number|null; sectionName?:string|null;
+  units?:RoutineUnit[]; canChooseUnit?:boolean;
 };
 
 /**
@@ -743,8 +746,18 @@ export type LogSheetIndex = {
   kind:string; month:string; sectionId:number|null;
   sheets:LogSheetSummary[];
   canVerify?:boolean; canRecord?:boolean;
+  /**
+   * Removing a schedule, or a month already charted against it. Reserved to the
+   * posts that answer for the whole laboratory, and kept off the bench's screen.
+   */
+  canDelete?:boolean;
+  /** The units this reader may work in, and whether they may switch at all. */
+  units?:RoutineUnit[]; canChooseUnit?:boolean;
   settings?:Record<string, unknown>|null;
 };
+
+/** A unit a reader may open a routine register for. */
+export type RoutineUnit = { id:number; name:string };
 
 /** One cell being written. `done:false` asserts it was NOT done — not a blank. */
 export type LogCellInput = {

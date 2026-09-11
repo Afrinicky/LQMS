@@ -16,6 +16,9 @@ import {
 import { getCurrentStaffId } from './routeHelpers.js';
 import { generateOccurrences } from '../services/activityService.js';
 import { openSheet, refreshSheetRows, sheetsForSection } from '../services/routineSheets.js';
+import { unitScopePayload, isCrossUnitRole } from '../services/unitScope.js';
+import { resolvePermission } from '../services/permissionResolver.js';
+import { tierFeatureKey } from '../../shared/constants/activities.js';
 import {
   MAINTENANCE_FRAMEWORKS, MAINTENANCE_FREQUENCIES, MAINTENANCE_KINDS,
   MAINTENANCE_TO_ACTIVITY_FREQUENCY, frameworkForEquipment,
@@ -1235,8 +1238,7 @@ export function equipmentRoutes() {
   router.get('/portal/unit-overview', requirePermission('equipment.register', 'view'), (req, res) => {
     const db = getDb();
     const staffId = getCurrentStaffId(req);
-    const sectionId = parseIntNullable(req.query.sectionId)
-      ?? (staffId !== null ? (db.prepare('SELECT section_id FROM staff WHERE id = ?').get(staffId) as any)?.section_id ?? null : null);
+    const sectionId = unitScopePayload(req, req.query.sectionId).sectionId;
 
     if (!sectionId) {
       return res.json({
@@ -1392,14 +1394,30 @@ export function equipmentRoutes() {
     };
   }
 
-  /** The unit's maintenance charts for a month. */
-  router.get('/maintenance-charts', requirePermission('equipment.maintenance', 'view'), (req, res) => {
+  /**
+   * The unit's maintenance charts for a month.
+   *
+   * Reading the chart and ticking today's clean is routine bench work, so the
+   * general routine-work tier opens it as well as the maintenance right does.
+   * Gating it on the maintenance right alone left the chart visible only to
+   * whoever set the tasks up, while the people who actually perform them were
+   * told they had no access to their own instrument's chart.
+   */
+  router.get('/maintenance-charts', (req, res) => {
     const db = getDb();
+    if (!resolvePermission(req.user!.id, 'equipment.maintenance', 'view').allowed
+      && !resolvePermission(req.user!.id, tierFeatureKey('general'), 'view').allowed) {
+      return res.status(403).json({ error: 'You do not have access to the maintenance charts.' });
+    }
     const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : new Date().toISOString().slice(0, 7);
-    const sectionId = parseIntNullable(req.query.sectionId)
-      ?? (getCurrentStaffId(req) !== null ? (db.prepare('SELECT section_id FROM staff WHERE id = ?').get(getCurrentStaffId(req)) as any)?.section_id ?? null : null);
-    if (!sectionId) return res.json({ month, sectionId: null, sheets: [] });
-    res.json({ month, sectionId, sheets: sheetsForSection(db, 'equipment_maintenance', sectionId, month, { userId: req.user!.id }) });
+    const scope = unitScopePayload(req, req.query.sectionId);
+    const canDelete = isCrossUnitRole(req.user!.id);
+    if (!scope.sectionId) return res.json({ month, sectionId: null, sheets: [], units: scope.units, canChooseUnit: scope.canChooseUnit, canDelete });
+    res.json({
+      month, sectionId: scope.sectionId,
+      units: scope.units, canChooseUnit: scope.canChooseUnit, canDelete,
+      sheets: sheetsForSection(db, 'equipment_maintenance', scope.sectionId, month, { userId: req.user!.id }),
+    });
   });
 
   /** Open one instrument's chart for a month. */

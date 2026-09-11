@@ -35,8 +35,9 @@ import {
   DECON_FRAMEWORKS, DECON_FREQUENCIES, DECON_TO_ACTIVITY_FREQUENCY, DECON_SCOPES,
   deconTimesPerDay, monthOf,
 } from '../../shared/constants/routineWork.js';
-import { ACTIVITY_TIERS } from '../../shared/constants/activities.js';
+import { ACTIVITY_TIERS, tierFeatureKey } from '../../shared/constants/activities.js';
 import { sheetsForSection, openSheet, refreshSheetRows } from '../services/routineSheets.js';
+import { unitScopePayload, resolveUnitScope, isCrossUnitRole } from '../services/unitScope.js';
 
 const MODULE = 'facilities_safety.decontamination';
 const numericOnly = (req: any, _res: any, next: any) => (/^\d+$/.test(req.params.id) ? next() : next('route'));
@@ -67,8 +68,17 @@ export function decontaminationRoutes() {
    * the unit's own, less anything it has been excused from. Without one, it is
    * the whole catalogue as the quality office maintains it.
    */
-  router.get('/definitions', requirePermission(MODULE, 'view'), (req, res) => {
+  router.get('/definitions', (req, res) => {
     const db = getDb();
+    // Knowing what your own bench is supposed to decontaminate, and how often,
+    // is not a module right — it is the first thing anyone on duty needs, and
+    // gating it on the decontamination module meant the programme was readable
+    // only by the people who write it. The register below is still the quality
+    // office's to change; this is the reading of it.
+    if (!resolvePermission(req.user!.id, MODULE, 'view').allowed
+      && !resolvePermission(req.user!.id, tierFeatureKey('general'), 'view').allowed) {
+      return res.status(403).json({ error: 'You do not have access to the decontamination programme.' });
+    }
     const sectionId = parseIntNullable(req.query.sectionId);
     const includeInactive = req.query.active === 'all';
 
@@ -328,17 +338,23 @@ export function decontaminationRoutes() {
   router.get('/logs', (req, res) => {
     const db = getDb();
     const month = /^\d{4}-\d{2}$/.test(String(req.query.month)) ? String(req.query.month) : monthOf(new Date().toISOString().slice(0, 10));
-    const sectionId = parseIntNullable(req.query.sectionId) ?? currentSection(db, req);
-    if (!sectionId) return res.json({ month, sectionId: null, sheets: [] });
+    // Their own unit, or any unit for the posts that answer for all of them.
+    const scope = unitScopePayload(req, req.query.sectionId);
+    const canDelete = isCrossUnitRole(req.user!.id);
+    if (!scope.sectionId) return res.json({ month, sectionId: null, sheets: [], units: scope.units, canChooseUnit: scope.canChooseUnit, canDelete });
     ensureDeconSchedules(db, req.user!.id);
-    res.json({ month, sectionId, sheets: sheetsForSection(db, 'decontamination', sectionId, month, { userId: req.user!.id }) });
+    res.json({
+      month, sectionId: scope.sectionId,
+      units: scope.units, canChooseUnit: scope.canChooseUnit, canDelete,
+      sheets: sheetsForSection(db, 'decontamination', scope.sectionId, month, { userId: req.user!.id }),
+    });
   });
 
   /** Open one definition's log for a month directly. */
   router.post('/logs/open', (req, res) => {
     const db = getDb();
     const definitionId = parseIntNullable(req.body?.definitionId);
-    const sectionId = parseIntNullable(req.body?.sectionId) ?? currentSection(db, req);
+    const sectionId = resolveUnitScope(req, req.body?.sectionId).sectionId;
     const month = /^\d{4}-\d{2}$/.test(String(req.body?.month)) ? String(req.body.month) : monthOf(new Date().toISOString().slice(0, 10));
     if (!definitionId) return res.status(400).json({ error: 'definitionId is required' });
     const sheet = openSheet(db, { kind: 'decontamination', subjectId: definitionId, month, sectionId, userId: req.user!.id });
@@ -346,12 +362,6 @@ export function decontaminationRoutes() {
     refreshSheetRows(db, sheet);
     res.json({ sheetId: sheet.id });
   });
-
-  function currentSection(db: any, req: any): number | null {
-    const staffId = getCurrentStaffId(req);
-    if (staffId === null) return null;
-    return (db.prepare('SELECT section_id FROM staff WHERE id = ?').get(staffId) as any)?.section_id ?? null;
-  }
 
   return router;
 }
