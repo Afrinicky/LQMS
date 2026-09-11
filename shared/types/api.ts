@@ -1,4 +1,10 @@
-import type { TrainingRecordEntry } from '../constants/training';
+// The .js extension is required, and is not a mistake: tsconfig.electron.json
+// compiles shared/ with moduleResolution NodeNext, which rejects an extensionless
+// relative import. `shared/constants/configLists.ts` already imports this way.
+// The root tsconfig uses bundler resolution and accepts either, which is why an
+// extensionless import passed `tsc --noEmit` and `vite build` and only failed in
+// the Electron pass — the one step that runs last.
+import type { TrainingRecordEntry } from '../constants/training.js';
 
 /** What a person's whole training file adds up to. See constants/training.ts. */
 export type TrainingRecordSummary = {
