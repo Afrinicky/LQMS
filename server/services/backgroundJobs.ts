@@ -79,12 +79,19 @@ export function startBackgroundServices(getDb: DbGetter): void {
     import('./scheduleRollover.js'),
     import('./activityService.js'),
     import('./systemAuditService.js'),
-  ]).then(([schedules, activities, systemAudit]) => {
+    import('./trainingLifecycle.js'),
+  ]).then(([schedules, activities, systemAudit, training]) => {
     every('duty & activity tick', 12_000, 10 * 60_000, () => {
       const db = getDb();
       try { schedules.runScheduleTick(db); } catch (e) { console.error('[jobs] schedule tick failed:', e); }
       try { activities.runActivityTick(db); } catch (e) { console.error('[jobs] activity tick failed:', e); }
       try { systemAudit.throttledAuditScan(db); } catch (e) { console.error('[jobs] system audit scan failed:', e); }
+      // Training: the notice that goes out when the day comes, and the next
+      // occurrence of a recurring session whose series would otherwise stop.
+      // A memo sent when the session was booked has been forgotten by then,
+      // which is why a register full of scheduled training still had people
+      // not turning up.
+      try { training.runTrainingTick(db); } catch (e) { console.error('[jobs] training tick failed:', e); }
     });
   }).catch(e => console.error('[jobs] duty & activity scheduler failed to start:', e));
 }

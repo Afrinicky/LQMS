@@ -7272,10 +7272,100 @@ CREATE INDEX IF NOT EXISTS idx_log_amendments_cell
       ['source_module', 'source_module TEXT'],
       ['source_record_type', 'source_record_type TEXT'],
       ['source_record_id', 'source_record_id INTEGER'],
+
+      /* ----------------------------------------------------------------------
+         The lifecycle a real training session actually has
+         ----------------------------------------------------------------------
+         Scheduled in advance, or written down after the fact. The register knew
+         neither, so a session planned for next month and a briefing given last
+         Tuesday were stored identically and the screen had to guess from the
+         date which one it was looking at. They are different pieces of work:
+         the first owes notices to the people expected at it, the second owes
+         nothing to anybody because it is already over.
+         ------------------------------------------------------------------- */
+      ['training_mode', "training_mode TEXT NOT NULL DEFAULT 'scheduled'"],
+
+      /* Training that comes round again.
+         Safety, the quality manual, the annual refresher: a laboratory's real
+         training programme is mostly recurring, and every occurrence had to be
+         created by somebody remembering to. The frequency is held on the
+         session, the next one is raised when this one closes, and each
+         occurrence points back at the first so the series can be read as a
+         series — which is also what makes a recurring session's effectiveness
+         review periodic rather than a single event. */
+      ['frequency', "frequency TEXT NOT NULL DEFAULT 'none'"],
+      ['frequency_interval_days', 'frequency_interval_days INTEGER'],
+      ['series_parent_id', 'series_parent_id INTEGER REFERENCES training_events(id)'],
+      ['series_index', 'series_index INTEGER'],
+      ['series_ends_on', 'series_ends_on TEXT'],
+
+      /* Put off, and called off. Two different things, and neither is a
+         deletion: the register has to be able to say a session was planned and
+         did not happen, and everybody who was told about it has to be told
+         again. The date it was moved FROM is kept, because "postponed twice"
+         is a fact a manager wants and a fresh date erases. */
+      ['postponed_from_date', 'postponed_from_date TEXT'],
+      ['postponement_reason', 'postponement_reason TEXT'],
+      ['postponed_at', 'postponed_at TEXT'],
+      ['cancellation_reason', 'cancellation_reason TEXT'],
+      ['cancelled_at', 'cancelled_at TEXT'],
+      ['cancelled_by_staff_id', 'cancelled_by_staff_id INTEGER REFERENCES staff(id)'],
+
+      /* When the session actually ran, as opposed to when it was meant to.
+         A session scheduled for 09:00 that began at 10:20 because the engineer
+         was late is a session that began at 10:20, and the hours attributed to
+         the people in the room follow the real clock. */
+      ['opened_at', 'opened_at TEXT'],
+      ['held_at', 'held_at TEXT'],
+
+      /* Closure is what turns a session into evidence.
+         Until it is closed the documentation is outstanding; from the moment it
+         is, the session is on every attendee's file and nobody edits it in
+         passing. Who closed it and when are the record of that decision. */
+      ['closed_at', 'closed_at TEXT'],
+      ['closed_by_staff_id', 'closed_by_staff_id INTEGER REFERENCES staff(id)'],
+      ['closure_summary', 'closure_summary TEXT'],
+      ['closure_signature_id', 'closure_signature_id INTEGER REFERENCES e_signatures(id)'],
+
+      /* The reviewer's signature under the effectiveness finding. A review that
+         carries a typed name and nothing else is the first thing an assessor
+         challenges, so the finding and the signature are stored together. */
+      ['review_signature_id', 'review_signature_id INTEGER REFERENCES e_signatures(id)'],
+
+      /* When the people expected at it were told, and told again. Kept so a
+         reminder is sent once rather than every time a timer fires, and so the
+         register can show that notice was actually given. */
+      ['notified_at', 'notified_at TEXT'],
+      ['reminder_sent_at', 'reminder_sent_at TEXT'],
+      ['closure_notified_at', 'closure_notified_at TEXT'],
+
+      /* Training raised for one person because a session did not work for them.
+         Somebody found unsatisfactory does not need the whole session repeated
+         for everybody; they need it again on their own, and the system owes
+         them that session rather than a note asking somebody to remember. */
+      ['remedial_for_event_id', 'remedial_for_event_id INTEGER REFERENCES training_events(id)'],
+      ['remedial_for_staff_id', 'remedial_for_staff_id INTEGER REFERENCES staff(id)'],
     ];
     for (const [col, ddl] of add) if (!cols.has(col)) database.exec(`ALTER TABLE training_events ADD COLUMN ${ddl}`);
     database.exec('CREATE INDEX IF NOT EXISTS idx_training_events_date ON training_events(training_date)');
     database.exec('CREATE INDEX IF NOT EXISTS idx_training_events_source ON training_events(source_module, source_record_type, source_record_id)');
+    database.exec('CREATE INDEX IF NOT EXISTS idx_training_events_status ON training_events(status, training_date)');
+    database.exec('CREATE INDEX IF NOT EXISTS idx_training_events_series ON training_events(series_parent_id)');
+
+    // A session the old register recorded as 'completed' had been held and its
+    // paperwork was, as far as anybody could tell, done — there was no later
+    // state to move it to. Calling those closed is what the laboratory already
+    // believed about them, and leaving them at 'completed' would present years
+    // of finished records as documentation outstanding on the day of upgrade.
+    // The closure carries no signature and no closer, which is honest: nobody
+    // signed them, because there was nothing to sign them with.
+    database.exec(`UPDATE training_events SET status = 'closed',
+        closed_at = COALESCE(closed_at, updated_at, created_at)
+      WHERE status IN ('completed', 'held') AND closed_at IS NULL`);
+    // Anything already in the past that was never closed was plainly not
+    // scheduled by this system — it was somebody writing down what happened.
+    database.exec(`UPDATE training_events SET training_mode = 'retrospective'
+      WHERE training_mode = 'scheduled' AND status = 'closed'`);
 
     // An event created before delivery_mode existed was, by construction, one
     // the laboratory ran with one of its own staff teaching — that was the
@@ -7307,9 +7397,49 @@ CREATE INDEX IF NOT EXISTS idx_log_amendments_cell
       ['effectiveness_outcome', "effectiveness_outcome TEXT NOT NULL DEFAULT 'pending'"],
       ['effectiveness_notes', 'effectiveness_notes TEXT'],
       ['updated_at', 'updated_at TEXT'],
+
+      /* ----------------------------------------------------------------------
+         The attendance sheet, behaving like every other signing sheet here
+         ----------------------------------------------------------------------
+         Every sheet in this system that records who did something carries a
+         name, the designation they held, a signature and a date. The training
+         register carried a status word, so the one document an assessor always
+         asks for was the one it could not produce.
+
+         The designation is SNAPSHOT at the moment of signing rather than joined
+         from the staff record. A sheet signed three years ago by somebody who
+         was then a Medical Laboratory Technician must still say that after
+         their promotion; reading it live would silently rewrite the history of
+         who was qualified to do what, which is the opposite of what the sheet
+         is for.
+
+         Being marked present and signing are two different acts by two
+         different people — a senior role or the facilitator marks, the person
+         themselves signs — so both are kept, with who did the marking.
+         ------------------------------------------------------------------- */
+      ['designation', 'designation TEXT'],
+      ['signature_file_id', 'signature_file_id INTEGER REFERENCES files(id)'],
+      ['signature_id', 'signature_id INTEGER REFERENCES e_signatures(id)'],
+      ['marked_by_staff_id', 'marked_by_staff_id INTEGER REFERENCES staff(id)'],
+      ['marked_at', 'marked_at TEXT'],
+      // The clock against the person, not the session: somebody who had to
+      // leave after an hour has an hour on their file.
+      ['time_in', 'time_in TEXT'],
+      ['time_out', 'time_out TEXT'],
+      // The individual session raised for somebody this one did not work for.
+      ['remedial_event_id', 'remedial_event_id INTEGER REFERENCES training_events(id)'],
     ];
     for (const [col, ddl] of add) if (!cols.has(col)) database.exec(`ALTER TABLE training_attendance ADD COLUMN ${ddl}`);
     database.exec('CREATE INDEX IF NOT EXISTS idx_training_attendance_staff ON training_attendance(staff_id)');
+    database.exec('CREATE INDEX IF NOT EXISTS idx_training_attendance_event ON training_attendance(training_event_id)');
+
+    // Rows written before the sheet had a designation column were signed by
+    // somebody whose grade at the time nobody recorded. Their grade TODAY is
+    // the only thing available and is better than a blank line on a printed
+    // sheet, so it is filled in once, for existing rows only, and never again.
+    database.exec(`UPDATE training_attendance SET designation = (
+        SELECT COALESCE(s.designation, s.job_title) FROM staff s WHERE s.id = training_attendance.staff_id)
+      WHERE designation IS NULL AND signed_at IS NOT NULL`);
   }
 
   /* --------------------------------------------------------------------------
