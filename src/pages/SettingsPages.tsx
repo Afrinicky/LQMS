@@ -38,6 +38,7 @@ import type {
 } from '../../shared/types/api';
 import TextField from '../components/ui/TextField';
 import { Notice } from '../components/ui/Feedback';
+import RiskCriteriaSettings from './settings/RiskCriteriaSettings';
 
 // Maps an organogram position title to the lab role(s) whose default permissions
 // it should inherit, so that selecting a position pre-fills the authorization grid
@@ -3185,7 +3186,7 @@ export function RemoteStaffAccess() {
 // ---------------------------------------------------------------------------
 // System  (system-level settings: modules, backups, devices)
 // ---------------------------------------------------------------------------
-const SYSTEM_TABS = ['Overview', 'Connectivity & Mode', 'Remote Staff Access', 'Quality Workflow', 'System Modules', 'Backup & Restore', 'Device Access / Pairing'] as const;
+const SYSTEM_TABS = ['Overview', 'Connectivity & Mode', 'Remote Staff Access', 'Quality Workflow', 'Risk Criteria', 'System Modules', 'Backup & Restore', 'Device Access / Pairing'] as const;
 type SystemTab = typeof SYSTEM_TABS[number];
 
 export function SystemSettings() {
@@ -3201,6 +3202,7 @@ export function SystemSettings() {
       {tab === 'Connectivity & Mode' && <ConnectivityMode />}
       {tab === 'Remote Staff Access' && <RemoteStaffAccess />}
       {tab === 'Quality Workflow' && <QualityWorkflowSettings />}
+      {tab === 'Risk Criteria' && <RiskCriteriaSettings />}
       {tab === 'System Modules' && <ModuleToggles />}
       {tab === 'Backup & Restore' && <BackupRestore />}
       {tab === 'Device Access / Pairing' && <Devices />}

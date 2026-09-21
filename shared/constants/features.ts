@@ -441,7 +441,7 @@ const CREATE_TAB_NAMES = new Set([
   'Result Entry', 'Results Entry', 'Generate Report', 'Generate Alerts',
   'Feedback Intake', 'Sample Receipt',
   // Registers whose "add" tab is phrased as a verb rather than "New …".
-  'Log a complaint', 'Log Complaint', 'Raise a risk', 'Log a nonconformity',
+  'Log a complaint', 'Log Complaint', 'Raise a risk', 'Risk Identification', 'Log a nonconformity',
   'Register Equipment', 'Add Item', 'Add Element', 'Upload', 'New Import',
 ]);
 

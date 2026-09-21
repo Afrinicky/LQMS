@@ -589,7 +589,7 @@ export function commonRoutes() {
         pendingComplaints: count("SELECT COUNT(*) count FROM complaints WHERE status != 'closed'"),
       })),
       ...only('risks', () => ({
-        highRisks: count("SELECT COUNT(*) count FROM risks WHERE risk_level IN ('High','Critical') AND status != 'closed'"),
+        highRisks: count("SELECT COUNT(*) count FROM risks WHERE COALESCE(residual_level, risk_level) IN ('high','very_high') AND status != 'closed'"),
       })),
       ...only('actions', () => ({
         overdueActions: count('SELECT COUNT(*) count FROM actions WHERE due_date IS NOT NULL AND due_date < CURRENT_TIMESTAMP AND status != ?', 'Closed'),

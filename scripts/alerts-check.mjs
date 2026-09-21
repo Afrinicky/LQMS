@@ -127,7 +127,7 @@ const pageSource = ['Phase3Pages', 'Phase4Pages', 'Phase8Pages', 'PersonnelManag
   'IqcPage', 'QMSPages', 'NcCapaPages', 'OrganisationPage', 'CustomerFocusPage', 'POCTPage',
   'InformationManagementPage', 'ProcessManagementPage', 'MonthlyReportsPage', 'BloodBankHandoverPage',
   'VerificationValidationPage', 'EnvironmentalMonitoringPage', 'SystemAuditPage', 'ComplaintsPage',
-  'CorePages', 'NotificationsPage', 'StaffPortalPage']
+  'CorePages', 'NotificationsPage', 'StaffPortalPage', 'RiskManagementPage']
   .map(f => readFileSync(new URL(`../src/pages/${f}.tsx`, import.meta.url), 'utf8'))
   // My Portal draws its tabs from StaffPortalPage but renders each one from a
   // file of its own, so the faces have to be read too — otherwise a tab that
