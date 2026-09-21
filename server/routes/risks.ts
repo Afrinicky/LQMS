@@ -1,22 +1,23 @@
 import { Router } from 'express';
 import { getDb } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
+import { requireAdministrator, requiredReason } from '../middleware/administrator.js';
 import { requireAuth } from '../middleware/auth.js';
 import { resolvePermission } from '../services/permissionResolver.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
-import { parseIntNullable, getStaffIdOrCurrent, blockedForNoSignature } from './routeHelpers.js';
+import { parseIntNullable, getStaffIdOrCurrent, getCurrentStaffId, blockedForNoSignature } from './routeHelpers.js';
 import { recordSignature, signaturesFor, signatureImageDataUri, fileDataUri } from '../services/signatureService.js';
 import { buildWorkbook, sendWorkbook } from '../utils/xlsxRegister.js';
 import {
   riskCriteria, saveRiskCriteria, evaluateRisk, requiresTreatment, nextReviewDate,
-  canAcceptRisk, bandForScore, type RiskCriteria,
+  canAcceptRisk, bandForScore, closesOnAcceptance, reviewMonthsFor, type RiskCriteria,
 } from '../utils/riskCriteria.js';
 
 // ==========================================================================
 // Risk management — one staged lifecycle, each stage its own queue.
 //
-//   Identification -> Analysis -> Evaluation -> Treatment (control) ->
+//   Identification -> Assessment -> Evaluation -> Control ->
 //   Residual risk -> Acceptance -> Monitoring & review -> Closure
 //
 // A record never sits between stages: completing one stage writes the next
@@ -29,10 +30,11 @@ import {
 export const RISK_STAGES = ['identification', 'analysis', 'evaluation', 'treatment', 'residual', 'acceptance', 'monitoring', 'closed'] as const;
 
 const RISK_HEADERS = [
-  'Risk No.', 'Identified', 'Unit', 'Category', 'Source', 'Risk area', 'Description', 'Cause', 'Consequence',
-  'Existing controls', 'Likelihood', 'Severity', 'Risk score', 'Risk level', 'Treatment option', 'Treatment plan',
-  'Owner', 'Treatment due', 'Residual likelihood', 'Residual severity', 'Residual score', 'Residual level',
-  'Acceptance', 'Accepted by', 'Review due', 'Stage', 'Status',
+  'Risk No.', 'Identified', 'Identified by', 'Unit / Section', 'Category', 'Source', 'Risk area', 'Description',
+  'Cause', 'Consequence', 'Existing controls', 'Likelihood', 'Severity', 'Risk score', 'Risk level',
+  'Control option', 'Control plan', 'Responsible person', 'Target completion',
+  'Residual likelihood', 'Residual severity', 'Residual score', 'Residual level',
+  'Acceptance', 'Accepted by', 'Review due', 'Step', 'Status',
 ] as const;
 
 function escHtml(s: unknown): string {
@@ -63,6 +65,8 @@ export function riskRoutes() {
   const router = Router();
 
   const asFlag = (v: unknown) => (v === true || v === 'true' || v === 1 || v === '1') ? 1 : 0;
+  /** The free text behind an "other" choice, kept only while "other" is chosen. */
+  const other = (choice: unknown, text: unknown) => choice === 'other' ? (String(text ?? '').trim() || null) : null;
 
   function loadRisk(db: any, id: unknown) {
     return db.prepare(`${SELECT_RISK} WHERE r.id = ?`).get(id) as any;
@@ -141,31 +145,58 @@ export function riskRoutes() {
     if (!req.body.riskArea || !req.body.riskDescription) {
       return res.status(400).json({ error: 'A risk area and a risk description are required.' });
     }
+    // An "other" that cannot say what it was is not a record, so each one is
+    // refused until it is spelled out.
+    const external = req.body.identifiedByStaffId === 'other';
+    if (external && !String(req.body.identifiedByOther ?? '').trim()) {
+      return res.status(400).json({ error: 'Name the person or body who identified this risk.' });
+    }
+    for (const [field, value, text] of [
+      ['risk category', req.body.riskCategory, req.body.riskCategoryOther],
+      ['source', req.body.riskSource, req.body.riskSourceOther],
+    ] as Array<[string, unknown, unknown]>) {
+      if (value === 'other' && !String(text ?? '').trim()) {
+        return res.status(400).json({ error: `Specify the ${field}.` });
+      }
+    }
     const createdAt = new Date().toISOString();
     const riskNumber = generateRecordNumber(db, 'risks', 'RISK', createdAt);
     const result = db.prepare(`INSERT INTO risks
-      (risk_number, section_id, risk_category, risk_source, process_affected, risk_area, risk_description, cause, consequence,
-       existing_controls, identified_by_staff_id, identified_date, affects_patient_safety, responsible_staff_id,
+      (risk_number, section_id, risk_category, risk_category_other, risk_source, risk_source_other, process_affected,
+       risk_area, risk_description, cause, consequence, existing_controls,
+       identified_by_staff_id, identified_by_other, identified_date, affects_patient_safety, responsible_staff_id,
        workflow_stage, status, created_by, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'analysis', 'active', ?, ?)`)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'analysis', 'active', ?, ?)`)
       .run(
         riskNumber,
         parseIntNullable(req.body.sectionId),
         req.body.riskCategory ?? null,
+        other(req.body.riskCategory, req.body.riskCategoryOther),
         req.body.riskSource ?? 'proactive_assessment',
+        other(req.body.riskSource, req.body.riskSourceOther),
         req.body.processAffected ?? null,
         req.body.riskArea,
         req.body.riskDescription,
         req.body.cause ?? null,
         req.body.consequence ?? null,
         req.body.existingControls ?? null,
-        getStaffIdOrCurrent(req, req.body.identifiedByStaffId),
+        external ? null : getStaffIdOrCurrent(req, req.body.identifiedByStaffId),
+        external ? String(req.body.identifiedByOther).trim() : null,
         req.body.identifiedDate ?? createdAt.slice(0, 10),
         asFlag(req.body.affectsPatientSafety),
         parseIntNullable(req.body.responsibleStaffId),
         req.user!.id,
         createdAt,
       );
+    // Somebody found this risk and put their name to it. Where that somebody
+    // is the person logging it, their signature goes on the record now rather
+    // than leaving a ruled line on the printed report. Where a risk is logged
+    // on behalf of another person, nobody signs for them: the report names
+    // them and leaves the line for their own signature.
+    const identifier = external ? null : getStaffIdOrCurrent(req, req.body.identifiedByStaffId);
+    if (identifier !== null && identifier === getCurrentStaffId(req)) {
+      sign(req, result.lastInsertRowid, 'risk_identification', `Identified ${riskNumber}`, false);
+    }
     audit(req, { action: 'create', entity: 'risks', entityId: result.lastInsertRowid, newValue: { riskNumber, ...req.body } });
     res.status(201).json({ id: Number(result.lastInsertRowid), riskNumber, nextStage: 'analysis' });
   });
@@ -188,13 +219,16 @@ export function riskRoutes() {
     const db = getDb();
     const oldValue = loadRisk(db, req.params.id);
     if (!oldValue) return res.status(404).json({ error: 'Risk not found' });
-    db.prepare(`UPDATE risks SET section_id = ?, risk_category = ?, risk_source = ?, process_affected = ?, risk_area = ?,
+    db.prepare(`UPDATE risks SET section_id = ?, risk_category = ?, risk_category_other = ?, risk_source = ?,
+      risk_source_other = ?, process_affected = ?, risk_area = ?,
       risk_description = ?, cause = ?, consequence = ?, existing_controls = ?, responsible_staff_id = ?,
       affects_patient_safety = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
       .run(
         parseIntNullable(req.body.sectionId) ?? oldValue.section_id,
         req.body.riskCategory ?? oldValue.risk_category,
+        req.body.riskCategory === undefined ? oldValue.risk_category_other : other(req.body.riskCategory, req.body.riskCategoryOther),
         req.body.riskSource ?? oldValue.risk_source,
+        req.body.riskSource === undefined ? oldValue.risk_source_other : other(req.body.riskSource, req.body.riskSourceOther),
         req.body.processAffected ?? oldValue.process_affected,
         req.body.riskArea ?? oldValue.risk_area,
         req.body.riskDescription ?? oldValue.risk_description,
@@ -239,7 +273,7 @@ export function riskRoutes() {
   //
   // Analysis says how big the risk is; evaluation says what the laboratory's
   // own criteria require be done about it. The criteria can force treatment,
-  // but never forbid it — an assessor may always choose to treat a risk the
+  // but never forbid it — an assessor may always choose to control a risk the
   // criteria would let through.
 
   router.post('/:id/evaluation', requirePermission('risks', 'edit'), (req, res) => {
@@ -247,7 +281,7 @@ export function riskRoutes() {
     const criteria = riskCriteria(db);
     const risk = loadRisk(db, req.params.id);
     if (!risk) return res.status(404).json({ error: 'Risk not found' });
-    if (risk.risk_score == null) return res.status(400).json({ error: 'Analyse the risk on the matrix before evaluating it.' });
+    if (risk.risk_score == null) return res.status(400).json({ error: 'Assess the risk on the matrix before evaluating it.' });
 
     const safety = !!risk.affects_patient_safety;
     const mustTreat = requiresTreatment(criteria, risk.risk_level, safety);
@@ -272,8 +306,8 @@ export function riskRoutes() {
       level: risk.risk_level, score: risk.risk_score, criteriaAction: band?.action ?? null,
       reason: mustTreat
         ? (safety && criteria.alwaysTreatPatientSafety && !requiresTreatment(criteria, risk.risk_level, false)
-          ? 'Flagged as affecting patient safety — treatment is required whatever the band.'
-          : `Assessed as ${band?.label ?? risk.risk_level} — at or above the level your criteria require to be treated.`)
+          ? 'Flagged as affecting patient or staff safety — control is required whatever the band.'
+          : `Assessed as ${band?.label ?? risk.risk_level} — at or above the level your criteria require to be controlled.`)
         : null,
     });
   });
@@ -284,8 +318,8 @@ export function riskRoutes() {
     const db = getDb();
     const risk = loadRisk(db, req.params.id);
     if (!risk) return res.status(404).json({ error: 'Risk not found' });
-    if (!req.body.treatmentOption) return res.status(400).json({ error: 'Select a treatment option.' });
-    if (!req.body.mitigationPlan) return res.status(400).json({ error: 'Describe the treatment plan.' });
+    if (!req.body.treatmentOption) return res.status(400).json({ error: 'Select a control option.' });
+    if (!req.body.mitigationPlan) return res.status(400).json({ error: 'Describe the control plan.' });
     advance(db, req.params.id, 'treatment', {
       treatment_option: req.body.treatmentOption,
       mitigation_plan: req.body.mitigationPlan,
@@ -356,16 +390,16 @@ export function riskRoutes() {
     res.json({ ok: true });
   });
 
-  /** Treatment is done: the risk moves on to be re-scored and accepted. */
+  /** Control is complete: the risk moves on to be re-scored and accepted. */
   router.post('/:id/treatment/complete', requirePermission('risks', 'edit'), (req, res) => {
     const db = getDb();
     const risk = loadRisk(db, req.params.id);
     if (!risk) return res.status(404).json({ error: 'Risk not found' });
-    // A treatment plan is only done when there is something to have done, and
+    // A control plan is only done when there is something to have done, and
     // every part of it is in place. An empty plan marked complete is exactly
     // the record that does not survive an assessment.
     const totals = db.prepare("SELECT COUNT(*) AS n, SUM(CASE WHEN status != 'implemented' THEN 1 ELSE 0 END) AS outstanding FROM risk_controls WHERE risk_id = ?").get(req.params.id) as any;
-    if (!totals.n) return res.status(400).json({ error: 'Record at least one control measure before completing the treatment.' });
+    if (!totals.n) return res.status(400).json({ error: 'Record at least one control measure before completing the control step.' });
     if (totals.outstanding > 0) return res.status(400).json({ error: `${totals.outstanding} control(s) are still outstanding. Mark each one implemented first.` });
     advance(db, req.params.id, 'residual', {
       treatment_completed_at: new Date().toISOString(),
@@ -429,19 +463,29 @@ export function riskRoutes() {
       return res.json({ ok: true, decision, nextStage: 'treatment' });
     }
 
+    // How far a risk is carried follows its size. A band the laboratory has set
+    // no review cycle for is closed once it has been accepted — it stays in the
+    // register as a closed record and is reopened if anything changes — while
+    // the rest go on to be reviewed on their own cycle.
     const level = risk.residual_level || risk.risk_level;
-    const reviewDue = nextReviewDate(criteria, level);
-    advance(db, req.params.id, 'monitoring', {
+    const closes = closesOnAcceptance(criteria, level) && !req.body.reviewDueDate;
+    const reviewDue = req.body.reviewDueDate ?? nextReviewDate(criteria, level);
+    const now = new Date().toISOString();
+    advance(db, req.params.id, closes ? 'closed' : 'monitoring', {
       acceptance_decision: 'accepted',
       acceptance_justification: req.body.justification,
       accepted_by_staff_id: acceptedBy,
-      accepted_at: new Date().toISOString(),
-      review_due_date: req.body.reviewDueDate ?? reviewDue,
-      status: 'active',
+      accepted_at: now,
+      review_due_date: closes ? null : reviewDue,
+      status: closes ? 'closed' : 'active',
+      ...(closes ? { closed_at: now, closed_by_staff_id: acceptedBy, closure_notes: req.body.justification } : {}),
     });
     sign(req, req.params.id, 'risk_acceptance', `Accepted the residual risk of ${risk.risk_number}`, true);
-    audit(req, { action: 'approve', entity: 'risks', entityId: req.params.id, newValue: { decision, reviewDue } });
-    res.json({ ok: true, decision, nextStage: 'monitoring', reviewDueDate: req.body.reviewDueDate ?? reviewDue });
+    audit(req, { action: 'approve', entity: 'risks', entityId: req.params.id, newValue: { decision, reviewDue, closed: closes } });
+    res.json({
+      ok: true, decision, nextStage: closes ? 'closed' : 'monitoring',
+      reviewDueDate: closes ? null : reviewDue, closed: closes,
+    });
   });
 
   // ---- step 7: monitoring & review ---------------------------------------
@@ -549,16 +593,54 @@ export function riskRoutes() {
     res.json({ ok: true, nextStage: 'analysis' });
   });
 
+  /**
+   * Permanent deletion — administrator only, and reasoned.
+   *
+   * A risk that was logged in error should not sit in the register for ever,
+   * but removing a quality record is not something the permission matrix hands
+   * out. It is reserved for the administrator, needs a reason, and the reason
+   * and the record it removed are written to the audit trail before the row
+   * goes.
+   */
+  router.delete('/:id', requireAdministrator('permanently delete a risk'), (req, res) => {
+    const db = getDb();
+    const risk = loadRisk(db, req.params.id);
+    if (!risk) return res.status(404).json({ error: 'Risk not found' });
+    const reason = requiredReason(req.body?.reason);
+    if (!reason) return res.status(400).json({ error: 'Give a reason of at least 10 characters for deleting this risk.' });
+
+    const id = Number(req.params.id);
+    const removed = db.transaction(() => {
+      db.prepare('DELETE FROM risk_controls WHERE risk_id = ?').run(id);
+      db.prepare('DELETE FROM risk_reviews WHERE risk_id = ?').run(id);
+      db.prepare("DELETE FROM e_signatures WHERE module_key = 'risks' AND record_type = 'risks' AND record_id = ?").run(String(id));
+      db.prepare(`DELETE FROM record_links WHERE (source_module_key = 'risks' AND source_record_id = ?)
+        OR (target_module_key = 'risks' AND target_record_id = ?)`).run(String(id), String(id));
+      db.prepare("UPDATE actions SET source_module = NULL, source_record_id = NULL WHERE source_module = 'risks' AND source_record_id = ?").run(String(id));
+      db.prepare('UPDATE capa_records SET risk_id = NULL WHERE risk_id = ?').run(id);
+      db.prepare('DELETE FROM risks WHERE id = ?').run(id);
+    });
+    audit(req, { action: 'delete', entity: 'risks', entityId: req.params.id, oldValue: risk, newValue: { reason } });
+    removed();
+    res.json({ ok: true, riskNumber: risk.risk_number });
+  });
+
   // ---- reporting ---------------------------------------------------------
 
   router.get('/register/export', requirePermission('risks', 'export'), (_req, res) => {
     const db = getDb();
+    const criteria = riskCriteria(db);
+    const label = (band: string | null) => criteria.bands.find(b => b.level === band)?.label ?? '';
     const rows = (db.prepare(`${SELECT_RISK} ORDER BY r.id DESC`).all() as any[]).map(r => ([
-      r.risk_number, r.identified_date ?? '', r.section_name ?? '', (r.risk_category ?? '').replace(/_/g, ' '),
-      (r.risk_source ?? '').replace(/_/g, ' '), r.risk_area ?? '', r.risk_description ?? '', r.cause ?? '', r.consequence ?? '',
-      r.existing_controls ?? '', r.likelihood ?? '', r.severity ?? '', r.risk_score ?? '', r.risk_level ?? '',
-      (r.treatment_option ?? '').replace(/_/g, ' '), r.mitigation_plan ?? '', r.treatment_owner_name ?? '', r.treatment_due_date ?? '',
-      r.residual_likelihood ?? '', r.residual_severity ?? '', r.residual_score ?? '', r.residual_level ?? '',
+      r.risk_number, r.identified_date ?? '',
+      r.identified_by_other ? `${r.identified_by_other} (external)` : (r.identified_by_name ?? ''),
+      r.section_name ?? 'Laboratory-wide',
+      r.risk_category === 'other' && r.risk_category_other ? r.risk_category_other : (r.risk_category ?? '').replace(/_/g, ' '),
+      r.risk_source === 'other' && r.risk_source_other ? r.risk_source_other : (r.risk_source ?? '').replace(/_/g, ' '),
+      r.risk_area ?? '', r.risk_description ?? '', r.cause ?? '', r.consequence ?? '',
+      r.existing_controls ?? '', r.likelihood ?? '', r.severity ?? '', r.risk_score ?? '', label(r.risk_level),
+      (r.treatment_option ?? '').replace(/_/g, ' '), r.mitigation_plan ?? '', r.treatment_owner_name ?? r.responsible_name ?? '', r.treatment_due_date ?? '',
+      r.residual_likelihood ?? '', r.residual_severity ?? '', r.residual_score ?? '', label(r.residual_level),
       (r.acceptance_decision ?? '').replace(/_/g, ' '), r.accepted_by_name ?? '', r.review_due_date ?? '',
       (r.workflow_stage ?? '').replace(/_/g, ' '), r.status ?? '',
     ]));
@@ -572,12 +654,12 @@ export function riskRoutes() {
     const colourFor = (level: string | null) => criteria.bands.find(b => b.level === level)?.color ?? '#999';
     const labelFor = (level: string | null) => criteria.bands.find(b => b.level === level)?.label ?? '—';
     const body = rows.map(r => `<tr>
-      <td>${escHtml(r.risk_number)}</td><td>${escHtml(r.section_name)}</td>
+      <td>${escHtml(r.risk_number)}</td><td>${escHtml(r.section_name || 'Laboratory-wide')}</td>
       <td>${escHtml(r.risk_area)}<div class="sm">${escHtml(r.risk_description)}</div></td>
       <td class="c">${escHtml(r.risk_score)}<br/><span style="color:${colourFor(r.risk_level)};font-weight:bold">${escHtml(labelFor(r.risk_level))}</span></td>
       <td>${escHtml(r.mitigation_plan)}</td>
       <td class="c">${r.residual_score ?? '—'}<br/><span style="color:${colourFor(r.residual_level)};font-weight:bold">${r.residual_level ? escHtml(labelFor(r.residual_level)) : ''}</span></td>
-      <td>${escHtml(r.treatment_owner_name || r.responsible_name)}</td>
+      <td>${escHtml(r.treatment_owner_name || r.responsible_name || '')}</td>
       <td class="c">${escHtml(r.review_due_date)}</td>
       <td class="c">${escHtml(String(r.workflow_stage || '').replace(/_/g, ' '))}</td>
     </tr>`).join('');
@@ -591,7 +673,7 @@ th{background:#eef2f7;font-size:10px}.c{text-align:center}.sm{font-size:9px;colo
 </style><script>window.addEventListener("load",()=>{setTimeout(()=>window.print(),300)})</script></head><body>
 <div class="no-print">The print dialog opens automatically — choose any printer or Save as PDF. <button onclick="window.print()">Print</button></div>
 <h1>${escHtml(facilityName(db))} — Risk Register</h1>
-<table><thead><tr><th>Risk No.</th><th>Unit</th><th>Risk</th><th>Initial</th><th>Treatment plan</th><th>Residual</th><th>Owner</th><th>Review due</th><th>Stage</th></tr></thead>
+<table><thead><tr><th>Risk No.</th><th>Unit / Section</th><th>Risk</th><th>Initial</th><th>Control plan</th><th>Residual</th><th>Responsible person</th><th>Review due</th><th>Step</th></tr></thead>
 <tbody>${body || '<tr><td colspan="9" class="c">No open risks.</td></tr>'}</tbody></table>
 <div class="sm" style="margin-top:12px;border-top:1px solid #ccc;padding-top:5px">${escHtml(facilityName(db))} · ${rows.length} open risk(s) · Generated ${new Date().toISOString().slice(0, 19).replace('T', ' ')}</div>
 </body></html>`;
@@ -599,6 +681,16 @@ th{background:#eef2f7;font-size:10px}.c{text-align:center}.sm{font-size:9px;colo
     res.send(html);
   });
 
+  /**
+   * The risk assessment report.
+   *
+   * A record of what was actually done, and only that. A field with nothing in
+   * it, a stage the risk never went through, a signature block for work that
+   * never happened — each one reads on a printed report as something left
+   * undone, so none of them is drawn. A risk accepted as tolerable without
+   * control measures prints no control section and no control signature; one
+   * still in assessment prints no acceptance.
+   */
   router.get('/:id/print', requirePermission('risks', 'print'), (req, res) => {
     const db = getDb();
     const criteria = riskCriteria(db);
@@ -608,23 +700,39 @@ th{background:#eef2f7;font-size:10px}.c{text-align:center}.sm{font-size:9px;colo
       LEFT JOIN staff st ON st.id = c.responsible_staff_id WHERE c.risk_id = ? ORDER BY c.id`).all(req.params.id) as any[];
     const reviews = db.prepare(`SELECT rv.*, st.full_name AS reviewed_by_name FROM risk_reviews rv
       LEFT JOIN staff st ON st.id = rv.reviewed_by_staff_id WHERE rv.risk_id = ? ORDER BY rv.review_date DESC`).all(req.params.id) as any[];
-    const links = db.prepare(`SELECT * FROM record_links WHERE (source_module_key = 'risks' AND source_record_id = ?) OR (target_module_key = 'risks' AND target_record_id = ?)`)
-      .all(String(req.params.id), String(req.params.id)) as any[];
     const capa = db.prepare('SELECT capa_number FROM capa_records WHERE risk_id = ?').get(req.params.id) as any;
     const actions = db.prepare(`SELECT a.title, a.due_date, a.status, st.full_name AS assigned_name FROM actions a
       LEFT JOIN staff st ON st.id = a.assigned_to_staff_id WHERE a.source_module = 'risks' AND a.source_record_id = ? ORDER BY a.id`)
       .all(String(req.params.id)) as any[];
     const signatures = signaturesFor('risks', 'risks', req.params.id) as any[];
 
+    const has = (v: unknown) => v !== null && v !== undefined && String(v).trim() !== '' && String(v) !== '—';
     const bandOf = (score: number | null | undefined) => score == null ? null : bandForScore(criteria, score);
-    const labelled = (v: unknown) => escHtml(String(v ?? '').replace(/_/g, ' ')) || '—';
-    const line = (label: string, val: unknown) => `<div class="fld"><span class="lb">${label}</span><span class="vl">${escHtml(val || '—')}</span></div>`;
-    const box = (label: string, val: unknown) => `<div class="sec-item"><div class="lb">${label}</div><div class="box">${escHtml(val || '')}</div></div>`;
+    const labelled = (v: unknown) => escHtml(String(v ?? '').replace(/_/g, ' '));
+    /** A field, drawn only when it has something to say. */
+    const line = (label: string, val: unknown) => has(val)
+      ? `<div class="fld"><span class="lb">${label}</span><span class="vl">${escHtml(val)}</span></div>` : '';
+    const box = (label: string, val: unknown) => has(val)
+      ? `<div class="sec-item"><div class="lb">${label}</div><div class="box">${escHtml(val)}</div></div>` : '';
     const chip = (score: number | null | undefined, level: string | null | undefined) => {
       const band = criteria.bands.find(b => b.level === level) ?? bandOf(score);
-      if (score == null || !band) return '<span class="chip" style="background:#888">Not assessed</span>';
+      if (score == null || !band) return '';
       return `<span class="chip" style="background:${band.color}">${score} — ${escHtml(band.label)}</span>`;
     };
+    const identifiedBy = r.identified_by_other
+      ? `${r.identified_by_other} (external)` : r.identified_by_name;
+    const category = r.risk_category === 'other' && r.risk_category_other
+      ? r.risk_category_other : String(r.risk_category || '').replace(/_/g, ' ');
+    const source = r.risk_source === 'other' && r.risk_source_other
+      ? r.risk_source_other : String(r.risk_source || '').replace(/_/g, ' ');
+
+    // Which parts of the lifecycle this risk actually went through.
+    const assessed = r.risk_score != null;
+    const controlled = has(r.treatment_option) || has(r.mitigation_plan) || controls.length > 0;
+    const residualSeparately = r.residual_score != null && has(r.residual_assessed_at);
+    const accepted = has(r.acceptance_decision);
+    const monitored = reviews.length > 0 || has(r.review_due_date) || has(r.last_review_date);
+    const linked = !!capa || actions.length > 0;
 
     const matrix = criteria.likelihood.slice().reverse().map(l => `<tr><td class="hd">${l.score}. <b>${escHtml(l.label)}</b><div class="sm">${escHtml(l.description)}</div></td>${criteria.severity.map(sv => {
       const sc = l.score * sv.score; const band = bandForScore(criteria, sc)!;
@@ -634,23 +742,35 @@ th{background:#eef2f7;font-size:10px}.c{text-align:center}.sm{font-size:9px;colo
       return `<td style="background:${band.color}${mark ? '' : '22'};color:${mark ? '#fff' : '#111'}${mark ? ';outline:3px solid #111;outline-offset:-3px;font-weight:bold' : ''}">${sc}<div class="sm" style="color:inherit">${escHtml(band.label)}${mark}</div></td>`;
     }).join('')}</tr>`).join('');
 
-    // An authorisation block carries the signature that was actually applied,
-    // not the signer's name typed into a box. Where a stage has not been signed
-    // the block prints a ruled line for a wet signature instead.
+    // An authorisation block is drawn for a stage that happened, and carries the
+    // signature that was actually applied. A stage nobody has reached yet has
+    // no block, so the report never shows an empty line waiting to be signed.
     const sigFor = (purpose: string) => signatures.filter(x => x.purpose === purpose).slice(-1)[0] ?? null;
     const authBlock = (title: string, purpose: string, fallbackName: unknown, fallbackDate: unknown) => {
       const sg = sigFor(purpose);
-      const img = sg ? signatureImageDataUri(sg) : null;
       const name = sg?.signer_name || fallbackName || '';
+      if (!sg && !has(name)) return '';
+      const img = sg ? signatureImageDataUri(sg) : null;
       const when = sg?.signed_at || fallbackDate || '';
       return `<div class="auth">
         <div class="auth-role">${escHtml(title)}</div>
         <div class="auth-sig">${img ? `<img src="${img}" alt=""/>` : ''}</div>
         <div class="auth-line"></div>
-        <div class="auth-name">${escHtml(name) || '&nbsp;'}</div>
+        <div class="auth-name">${escHtml(name)}</div>
         <div class="sm">${when ? escHtml(String(when).slice(0, 19).replace('T', ' ')) : 'Signature / Date'}</div>
       </div>`;
     };
+    const auths = [
+      authBlock('Identified by', 'risk_identification', identifiedBy, r.identified_date),
+      assessed ? authBlock('Risk assessment and evaluation', 'risk_analysis', '', r.analysed_at) : '',
+      controlled ? authBlock('Control measures implemented and verified', 'risk_treatment_complete', r.treatment_owner_name, r.treatment_completed_at) : '',
+      residualSeparately ? authBlock('Residual risk assessed', 'risk_residual', '', r.residual_assessed_at) : '',
+      accepted ? authBlock('Residual risk accepted (authorising officer)', 'risk_acceptance', r.accepted_by_name, r.accepted_at) : '',
+      reviews.length ? authBlock('Reviewed by', 'risk_review', reviews[0]?.reviewed_by_name, reviews[0]?.review_date) : '',
+    ].filter(Boolean);
+
+    let n = 0;
+    const heading = (t: string) => `<h2>${++n}. ${t}</h2>`;
 
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${escHtml(r.risk_number)} — Risk Assessment Report</title>
 <style>@page{size:A4 portrait;margin:12mm}*{box-sizing:border-box}html,body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
@@ -660,7 +780,7 @@ h1{text-align:center;font-size:17px;margin:10px 0 2px}
 h2{font-size:12.5px;background:#eee;border:1px solid #999;padding:3px 6px;margin:13px 0 6px}
 .hdr{display:grid;grid-template-columns:1fr 1fr;gap:2px 20px;border:1px solid #999;padding:6px 8px;margin-top:6px}
 .fld{display:flex;gap:6px;padding:1px 0}.fld .lb{font-weight:bold;min-width:132px}.fld .vl{border-bottom:1px dotted #999;flex:1}
-.sec-item{margin:6px 0}.sec-item .lb{font-weight:bold;margin-bottom:2px}.sec-item .box{border:1px solid #999;min-height:32px;padding:4px 6px;white-space:pre-wrap}
+.sec-item{margin:6px 0}.sec-item .lb{font-weight:bold;margin-bottom:2px}.sec-item .box{border:1px solid #999;min-height:26px;padding:4px 6px;white-space:pre-wrap}
 table{border-collapse:collapse;width:100%;font-size:10px;margin:4px 0}table td,table th{border:1px solid #777;padding:3px 4px;text-align:center;vertical-align:middle}
 th{background:#eef2f7}td.l,th.l{text-align:left}
 table.mx .hd{text-align:left;width:19%}
@@ -679,70 +799,80 @@ table.mx .hd{text-align:left;width:19%}
 <div class="no-print">The print dialog opens automatically — choose any printer or Save as PDF. <button onclick="window.print()">Print</button></div>
 ${labMasthead(db)}
 <h1>Risk Assessment Report</h1>
-<div class="subtitle">${escHtml(r.risk_number)} · ${labelled(r.workflow_stage)} · ${escHtml(String(r.status || '').replace(/_/g, ' '))}</div>
+<div class="subtitle">${escHtml(r.risk_number)} · ${labelled(r.workflow_stage)} · ${labelled(r.status)}</div>
 <div class="hdr">
-  <div>${line('Risk Number:', r.risk_number)}${line('Date Identified:', r.identified_date)}${line('Identified by:', r.identified_by_name)}${line('Source of Risk:', String(r.risk_source || '').replace(/_/g, ' '))}</div>
-  <div>${line('Unit / Section:', r.section_name)}${line('Risk Category:', String(r.risk_category || '').replace(/_/g, ' '))}${line('Process Affected:', r.process_affected)}${line('Risk Owner:', r.responsible_name)}</div>
+  <div>${line('Risk Number:', r.risk_number)}${line('Date Identified:', r.identified_date)}${line('Identified by:', identifiedBy)}${line('Source of Risk:', source)}</div>
+  <div>${line('Unit / Section:', r.section_name || 'Laboratory-wide')}${line('Risk Category:', category)}${line('Process Affected:', r.process_affected)}${line('Responsible Person:', r.responsible_name)}</div>
 </div>
 
-<h2>1. Risk Identification</h2>
+${heading('Risk Identification')}
 ${line('Risk area:', r.risk_area)}
-<div>Affects patient safety: <b>${r.affects_patient_safety ? 'Yes' : 'No'}</b></div>
+<div>Affects patient or staff safety: <b>${r.affects_patient_safety ? 'Yes' : 'No'}</b></div>
 ${box('Description of the risk:', r.risk_description)}
 ${box('Cause / source:', r.cause)}
 ${box('Potential consequence:', r.consequence)}
 ${box('Existing controls at the time of identification:', r.existing_controls)}
 
-<h2>2. Risk Analysis and Evaluation</h2>
+${assessed ? `${heading('Risk Assessment and Evaluation')}
 <table class="mx"><thead><tr><th class="hd">Likelihood ↓ / Severity →</th>${criteria.severity.map(sv => `<th>${sv.score}. ${escHtml(sv.label)}<div class="sm">${escHtml(sv.description)}</div></th>`).join('')}</tr></thead><tbody>${matrix}</tbody></table>
-<div class="legend"><span><b>I</b> = initial risk</span><span><b>R</b> = residual risk</span>${criteria.bands.map(b => `<span><i style="background:${b.color}"></i>${escHtml(b.label)} (${b.min}–${b.max})</span>`).join('')}</div>
+<div class="legend"><span><b>I</b> = initial risk</span>${r.residual_score != null ? '<span><b>R</b> = residual risk</span>' : ''}${criteria.bands.map(b => `<span><i style="background:${b.color}"></i>${escHtml(b.label)} (${b.min}–${b.max})</span>`).join('')}</div>
 <div class="scores">
   <span>Initial risk (Likelihood × Severity): ${chip(r.risk_score, r.risk_level)}</span>
-  <span>Evaluation outcome: <b>${labelled(r.evaluation_decision)}</b></span>
+  ${has(r.evaluation_decision) ? `<span>Evaluation outcome: <b>${r.evaluation_decision === 'treat' ? 'Control required' : 'Tolerable — retain'}</b></span>` : ''}
 </div>
-<div class="sm">${escHtml(bandOf(r.risk_score)?.action || '')}</div>
-${box('Analysis notes:', r.analysis_notes)}
+${has(bandOf(r.risk_score)?.action) ? `<div class="sm">${escHtml(bandOf(r.risk_score)!.action)}</div>` : ''}
+${box('Assessment notes:', r.analysis_notes)}` : ''}
 
-<h2>3. Risk Treatment and Control</h2>
-${line('Treatment option:', String(r.treatment_option || '').replace(/_/g, ' '))}${line('Treatment owner:', r.treatment_owner_name)}${line('Target completion:', r.treatment_due_date)}${line('Completed:', r.treatment_completed_at ? String(r.treatment_completed_at).slice(0, 10) : '')}
-${box('Treatment plan:', r.mitigation_plan)}
-<table><thead><tr><th class="l">Control measure</th><th>Control type</th><th>Responsible</th><th>Target date</th><th>Status</th><th>Completed</th><th class="l">Verification</th></tr></thead><tbody>
-${controls.map(c => `<tr><td class="l">${escHtml(c.control_description)}</td><td>${labelled(c.control_type)}</td><td>${escHtml(c.responsible_name || '—')}</td><td>${escHtml(c.target_date || '—')}</td><td>${labelled(c.status)}</td><td>${escHtml(c.completed_date || '—')}</td><td class="l">${escHtml(c.verification_notes || '—')}</td></tr>`).join('') || '<tr><td colspan="7">No control measures recorded.</td></tr>'}
-</tbody></table>
-${box('Treatment notes:', r.treatment_notes)}
+${controlled ? `${heading('Risk Control')}
+${line('Control option:', String(r.treatment_option || '').replace(/_/g, ' '))}${line('Responsible person:', r.treatment_owner_name)}${line('Target completion:', r.treatment_due_date)}${line('Completed:', r.treatment_completed_at ? String(r.treatment_completed_at).slice(0, 10) : '')}
+${box('Control plan:', r.mitigation_plan)}
+${controls.length ? (() => {
+  // A column no control has anything to put in is a column of blanks, so it is
+  // not drawn at all.
+  const cols: Array<[string, (c: any) => string, boolean]> = [
+    ['Control measure', c => escHtml(c.control_description), true],
+    ['Control type', c => labelled(c.control_type), controls.some(c => has(c.control_type))],
+    ['Responsible person', c => escHtml(c.responsible_name || ''), controls.some(c => has(c.responsible_name))],
+    ['Target date', c => escHtml(c.target_date || ''), controls.some(c => has(c.target_date))],
+    ['Status', c => labelled(c.status), true],
+    ['Completed', c => escHtml(c.completed_date || ''), controls.some(c => has(c.completed_date))],
+    ['Verification', c => escHtml(c.verification_notes || ''), controls.some(c => has(c.verification_notes))],
+  ];
+  const shown = cols.filter(([, , keep]) => keep);
+  const wide = (h: string) => h === 'Control measure' || h === 'Verification' ? ' class="l"' : '';
+  return `<table><thead><tr>${shown.map(([h]) => `<th${wide(h)}>${h}</th>`).join('')}</tr></thead><tbody>
+${controls.map(c => `<tr>${shown.map(([h, cell]) => `<td${wide(h)}>${cell(c)}</td>`).join('')}</tr>`).join('')}
+</tbody></table>`;
+})() : ''}
+${box('Control notes:', r.treatment_notes)}` : ''}
 
-<h2>4. Residual Risk and Acceptability</h2>
+${accepted || r.residual_score != null ? `${heading('Residual Risk and Acceptability')}
 <div class="scores">
-  <span>Initial risk: ${chip(r.risk_score, r.risk_level)}</span>
+  ${controlled ? `<span>Initial risk: ${chip(r.risk_score, r.risk_level)}</span>` : ''}
   <span>Residual risk: ${chip(r.residual_score, r.residual_level)}</span>
-  <span>Decision: <b>${labelled(r.acceptance_decision)}</b></span>
+  ${has(r.acceptance_decision) ? `<span>Decision: <b>${labelled(r.acceptance_decision)}</b></span>` : ''}
 </div>
-${line('Residual risk assessed:', r.residual_assessed_at ? String(r.residual_assessed_at).slice(0, 10) : '')}
-${box('Justification for the decision:', r.acceptance_justification)}
-<div class="sm">Acceptance of residual risk is reserved to: ${escHtml(criteria.acceptanceRoles.join(', '))}.</div>
+${residualSeparately ? line('Residual risk assessed:', String(r.residual_assessed_at).slice(0, 10)) : ''}
+${box('Justification for the decision:', r.acceptance_justification)}` : ''}
 
-<h2>5. Monitoring and Review</h2>
+${monitored ? `${heading('Monitoring and Review')}
 ${line('Last review:', r.last_review_date)}${line('Next review due:', r.review_due_date)}
-<table><thead><tr><th>Date</th><th>Outcome</th><th>Risk score</th><th>Residual</th><th>Reviewed by</th><th class="l">Review notes</th><th>Next review</th></tr></thead><tbody>
-${reviews.map(v => `<tr><td>${escHtml(v.review_date)}</td><td>${labelled(v.outcome)}</td><td>${v.risk_score ?? '—'}</td><td>${v.residual_score ?? '—'}</td><td>${escHtml(v.reviewed_by_name || '—')}</td><td class="l">${escHtml(v.review_notes || '')}</td><td>${escHtml(v.next_review_date || '—')}</td></tr>`).join('') || '<tr><td colspan="7">No reviews recorded.</td></tr>'}
-</tbody></table>
+${reviews.length ? `<table><thead><tr><th>Date</th><th>Outcome</th><th>Risk score</th><th>Reviewed by</th><th class="l">Review notes</th><th>Next review</th></tr></thead><tbody>
+${reviews.map(v => `<tr><td>${escHtml(v.review_date)}</td><td>${labelled(v.outcome)}</td><td>${v.residual_score ?? v.risk_score ?? ''}</td><td>${escHtml(v.reviewed_by_name || '')}</td><td class="l">${escHtml(v.review_notes || '')}</td><td>${escHtml(v.next_review_date || '')}</td></tr>`).join('')}
+</tbody></table>` : ''}` : ''}
 
-<h2>6. Linked Records</h2>
+${has(r.closure_notes) || has(r.closed_at) ? `${heading('Closure')}
+${line('Closed on:', r.closed_at ? String(r.closed_at).slice(0, 10) : '')}
+${box('Closure notes:', r.closure_notes)}` : ''}
+
+${linked ? `${heading('Linked Records')}
 <table><thead><tr><th class="l">Record</th><th class="l">Detail</th><th>Due</th><th>Status</th></tr></thead><tbody>
-${capa ? `<tr><td class="l">CAPA ${escHtml(capa.capa_number)}</td><td class="l">Corrective / preventive action raised from this risk</td><td>—</td><td>—</td></tr>` : ''}
-${actions.map(a => `<tr><td class="l">Action</td><td class="l">${escHtml(a.title)}${a.assigned_name ? ` — ${escHtml(a.assigned_name)}` : ''}</td><td>${escHtml(a.due_date || '—')}</td><td>${escHtml(a.status || '—')}</td></tr>`).join('')}
-${(!capa && actions.length === 0 && links.length === 0) ? '<tr><td colspan="4">No linked records.</td></tr>' : ''}
-</tbody></table>
+${capa ? `<tr><td class="l">CAPA ${escHtml(capa.capa_number)}</td><td class="l">Corrective / preventive action raised from this risk</td><td></td><td></td></tr>` : ''}
+${actions.map(a => `<tr><td class="l">Action</td><td class="l">${escHtml(a.title)}${a.assigned_name ? ` — ${escHtml(a.assigned_name)}` : ''}</td><td>${escHtml(a.due_date || '')}</td><td>${escHtml(a.status || '')}</td></tr>`).join('')}
+</tbody></table>` : ''}
 
-<h2>7. Authorisations</h2>
-<div class="auths">
-  ${authBlock('Identified by', '', r.identified_by_name, r.identified_date)}
-  ${authBlock('Risk analysis and evaluation', 'risk_analysis', r.responsible_name, r.analysed_at)}
-  ${authBlock('Controls implemented and verified', 'risk_treatment_complete', r.treatment_owner_name, r.treatment_completed_at)}
-  ${authBlock('Residual risk assessed', 'risk_residual', '', r.residual_assessed_at)}
-  ${authBlock('Residual risk accepted (authorising officer)', 'risk_acceptance', r.accepted_by_name, r.accepted_at)}
-  ${authBlock('Reviewed by', 'risk_review', reviews[0]?.reviewed_by_name, reviews[0]?.review_date)}
-</div>
+${auths.length ? `${heading('Authorisations')}
+<div class="auths">${auths.join('')}</div>` : ''}
 
 <div class="sm" style="margin-top:16px;border-top:1px solid #ccc;padding-top:5px">${escHtml(facilityName(db))} · Risk record ${escHtml(r.risk_number)} · Generated ${new Date().toISOString().slice(0, 19).replace('T', ' ')}</div>
 </body></html>`;

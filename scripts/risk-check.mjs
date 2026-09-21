@@ -12,6 +12,7 @@
  */
 import Database from 'better-sqlite3';
 import path from 'node:path';
+import fs from 'node:fs';
 
 const BASE = process.env.API || 'http://127.0.0.1:4421/api';
 const DATA_DIR = process.env.SECH_LIMS_DATA_DIR || path.join(process.cwd(), 'local-data');
@@ -105,8 +106,13 @@ check('acceptance is refused without a signature on file', unsigned.status === 4
 // Give the administrator a staff record with a signature on file, the way
 // Personnel Management would, so the rest of the lifecycle can be exercised.
 {
+  // A real 1x1 PNG on disk, because a signature the report cannot load is
+  // indistinguishable from one that was never applied.
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  fs.mkdirSync(path.join(DATA_DIR, 'uploads'), { recursive: true });
+  fs.writeFileSync(path.join(DATA_DIR, 'uploads', 'sig-test.png'), PNG);
   const db = new Database(path.join(DATA_DIR, 'sech_lims.sqlite'));
-  const file = db.prepare("INSERT INTO files (original_name, stored_name, mime_type, size_bytes, storage_area) VALUES ('sig.png', 'sig-test.png', 'image/png', 1, 'uploads')").run();
+  const file = db.prepare("INSERT INTO files (original_name, stored_name, mime_type, size_bytes, storage_area) VALUES ('sig.png', 'sig-test.png', 'image/png', ?, 'uploads')").run(PNG.length);
   const staff = db.prepare("INSERT INTO staff (employee_no, full_name, first_name, surname, signature_file_id) VALUES ('RISK-AUTH', 'Admin User', 'Admin', 'User', ?)").run(file.lastInsertRowid);
   db.prepare('UPDATE users SET staff_id = ? WHERE username = ?').run(staff.lastInsertRowid, 'admin');
   db.close();
@@ -132,10 +138,40 @@ check('it stays in monitoring', reviewed.json.nextStage === 'monitoring', `got $
 const reassessed = await j(`/risks/${id}/review`, { token: B, method: 'POST', body: { outcome: 'reassess', reviewNotes: 'New analyser changes the picture.' } });
 check('a changed picture sends the risk back for re-analysis', reassessed.json.nextStage === 'analysis', `got ${reassessed.json.nextStage}`);
 
+console.log('\n[7c] Handling is proportionate to the size of the risk');
+const low = await j('/risks', { token: B, method: 'POST', body: { riskArea: 'Label printer ribbon runs low', riskDescription: 'A ribbon runs out and a label prints faint.' } });
+await j(`/risks/${low.json.id}/analysis`, { token: B, method: 'POST', body: { likelihood: 2, severity: 1 } });
+const lowEval = await j(`/risks/${low.json.id}/evaluation`, { token: B, method: 'POST', body: { decision: 'accept' } });
+check('a low risk may be retained without control', lowEval.json.decision === 'accept', JSON.stringify(lowEval.json));
+check('and goes straight to acceptance', lowEval.json.nextStage === 'acceptance', `got ${lowEval.json.nextStage}`);
+const lowAccept = await j(`/risks/${low.json.id}/accept`, { token: B, method: 'POST', body: { decision: 'accepted', justification: 'Tolerable; caught by the daily printer check.' } });
+check('a low risk closes on acceptance instead of entering the review cycle', lowAccept.json.closed === true && lowAccept.json.nextStage === 'closed', JSON.stringify(lowAccept.json));
+const lowRow = await j(`/risks/${low.json.id}`, { token: B });
+check('it is closed, with the acceptance as its closure', lowRow.json.status === 'closed' && !!lowRow.json.closed_at);
+check('and carries no review date', !lowRow.json.review_due_date);
+const inRegister = (await j('/risks', { token: B })).json.some(x => x.id === low.json.id);
+check('a closed risk is still in the register', inRegister);
+
+console.log('\n[7d] "Other" always says what it was');
+const vagueWho = await j('/risks', { token: B, method: 'POST', body: { riskArea: 'x', riskDescription: 'y', identifiedByStaffId: 'other' } });
+check('an external identifier with no name is refused', vagueWho.status === 400, `status ${vagueWho.status}`);
+const vagueCat = await j('/risks', { token: B, method: 'POST', body: { riskArea: 'x', riskDescription: 'y', riskCategory: 'other' } });
+check('a category of "other" with nothing specified is refused', vagueCat.status === 400, `status ${vagueCat.status}`);
+const external = await j('/risks', { token: B, method: 'POST', body: {
+  riskArea: 'Uncontrolled copy of a method in use', riskDescription: 'A superseded printout was found at the bench.',
+  identifiedByStaffId: 'other', identifiedByOther: 'External assessor, ABC Accreditation',
+  riskCategory: 'other', riskCategoryOther: 'Document control', riskSource: 'other', riskSourceOther: 'Surveillance visit',
+} });
+check('a risk found by an external party is accepted', external.status === 201, JSON.stringify(external.json));
+const ext = (await j(`/risks/${external.json.id}`, { token: B })).json;
+check('and names who found it', ext.identified_by_other === 'External assessor, ABC Accreditation', ext.identified_by_other);
+check('and says what the category was', ext.risk_category_other === 'Document control', ext.risk_category_other);
+check('and says what the source was', ext.risk_source_other === 'Surveillance visit', ext.risk_source_other);
+
 console.log('\n[8] The criteria really are the laboratory\'s own');
 const patched = await j('/risks/criteria', { token: A, method: 'PUT', body: {
   bands: [
-    { label: 'Negligible', max: 2, color: '#1a7f37', action: 'Monitor.', reviewMonths: 12 },
+    { label: 'Negligible', max: 2, color: '#1a7f37', action: 'Monitor.', reviewMonths: 0 },
     { label: 'Tolerable', max: 6, color: '#c9a227', action: 'Control where practicable.', reviewMonths: 6 },
     { label: 'Serious', max: 12, color: '#e8590c', action: 'Treatment plan required.', reviewMonths: 3 },
     { label: 'Intolerable', max: 25, color: '#c1121f', action: 'Stop the activity.', reviewMonths: 1 },
@@ -151,6 +187,9 @@ const second = await j('/risks', { token: A, method: 'POST', body: { riskArea: '
 const rescored = await j(`/risks/${second.json.id}/analysis`, { token: A, method: 'POST', body: { likelihood: 2, severity: 4 } });
 check('the same score now falls in the new band', rescored.json.score === 8 && rescored.json.levelLabel === 'Serious', `${rescored.json.score} ${rescored.json.levelLabel}`);
 
+console.log('\n[8b] A band may be set to close on acceptance');
+check('a zero review cycle is kept', patched.json.bands[0].reviewMonths === 0, String(patched.json.bands[0].reviewMonths));
+
 console.log('\n[9] The register reports on itself');
 const summary = await j('/risks/summary', { token: A });
 check('a summary is served', summary.status === 200 && summary.json.total >= 2, `status ${summary.status}`);
@@ -161,10 +200,32 @@ const html = await printed.text();
 check('the risk prints as a full report', printed.status === 200 && html.includes('Risk Assessment Report'), `status ${printed.status}`);
 check('the report carries its authorisations', html.includes('Authorisations') && html.includes('Residual risk accepted'));
 check('the report carries the matrix and both scores', html.includes('Likelihood') && html.includes('Residual risk'));
+const lowReport = await (await fetch(`${BASE}/risks/${low.json.id}/print`, { headers: { Authorization: `Bearer ${B}` } })).text();
+check('the person who identified the risk signed for it',
+  lowReport.includes('Identified by') && /Identified by[\s\S]{0,400}?<img src="data:/.test(lowReport));
+check('no field is printed with a bare dash', !/<span class="vl">\s*—\s*<\/span>/.test(html));
+check('no empty box is printed', !/<div class="box"><\/div>/.test(html));
+
+// A risk accepted without control measures must not print a control section,
+// an empty control table, or a signature line for work nobody did.
+const lowHtml = await (await fetch(`${BASE}/risks/${low.json.id}/print`, { headers: { Authorization: `Bearer ${B}` } })).text();
+check('a risk with no controls prints no control section', !lowHtml.includes('Risk Control'), 'control section present');
+check('and no control signature block', !lowHtml.includes('Control measures implemented'));
+check('and no "no control measures recorded" filler', !lowHtml.includes('No control measures'));
+check('and no empty linked-records table', !lowHtml.includes('No linked records'));
+check('but still prints its acceptance', lowHtml.includes('Residual Risk and Acceptability'));
+check('and its closure', lowHtml.includes('Closure'));
 const xlsx = await fetch(`${BASE}/risks/register/export`, { headers: { Authorization: `Bearer ${A}` } });
 check('the register exports to Excel', xlsx.status === 200 && (xlsx.headers.get('content-type') || '').includes('spreadsheet'), `status ${xlsx.status}`);
 const regPrint = await fetch(`${BASE}/risks/register/print`, { headers: { Authorization: `Bearer ${A}` } });
 check('the register prints', regPrint.status === 200);
+
+console.log('\n[9b] A risk can be deleted, but only by an administrator and only with a reason');
+const noReasonDel = await j(`/risks/${external.json.id}`, { token: B, method: 'DELETE', body: { reason: 'oops' } });
+check('a thin reason is refused', noReasonDel.status === 400, `status ${noReasonDel.status}`);
+const deleted = await j(`/risks/${external.json.id}`, { token: B, method: 'DELETE', body: { reason: 'Logged twice by mistake during the surveillance visit.' } });
+check('with a reason an administrator may delete it', deleted.status === 200, JSON.stringify(deleted.json));
+check('and it is gone from the register', !(await j('/risks', { token: B })).json.some(x => x.id === external.json.id));
 
 console.log('\n[10] The same matrix governs nonconformities');
 const ncMatrix = await j('/nonconformities/risk-matrix', { token: A });

@@ -12,19 +12,24 @@
 // ==========================================================================
 
 export type ScaleStep = { score: number; label: string; description: string };
-export type RiskBand = { level: string; label: string; min: number; max: number; action: string; color: string; reviewMonths: number };
+export type RiskBand = {
+  level: string; label: string; min: number; max: number; action: string; color: string;
+  /** Months between reviews. 0 means the band needs no recurring review: a risk
+   *  in it is closed once it has been accepted, and reopened if that changes. */
+  reviewMonths: number;
+};
 
 export type RiskCriteria = {
   likelihood: ScaleStep[];
   severity: ScaleStep[];
   bands: RiskBand[];
-  /** Lowest band that must be treated rather than simply accepted. */
+  /** Lowest band that must be controlled rather than simply accepted. */
   treatmentThresholdLevel: string;
   /** Residual re-assessment is mandatory before acceptance. */
   requireResidualAssessment: boolean;
   /** Roles permitted to record the final acceptance decision. */
   acceptanceRoles: string[];
-  /** Always treat a risk flagged as affecting patient safety, whatever its band. */
+  /** Always control a risk affecting patient or staff safety, whatever its band. */
   alwaysTreatPatientSafety: boolean;
 };
 
@@ -44,10 +49,13 @@ export const DEFAULT_RISK_CRITERIA: RiskCriteria = {
     { score: 5, label: 'Catastrophic', description: 'Patient death or major system failure' },
   ],
   bands: [
-    { level: 'low', label: 'Low', min: 1, max: 4, action: 'Acceptable — document and monitor.', color: '#1a7f37', reviewMonths: 12 },
-    { level: 'moderate', label: 'Medium', min: 5, max: 9, action: 'Acceptable with controls — treat where practicable.', color: '#c9a227', reviewMonths: 6 },
-    { level: 'high', label: 'High', min: 10, max: 16, action: 'Not acceptable — treatment plan required.', color: '#e8590c', reviewMonths: 3 },
-    { level: 'very_high', label: 'Very High', min: 17, max: 25, action: 'Critical — stop the activity and escalate to management.', color: '#c1121f', reviewMonths: 1 },
+    // A low risk accepted as tolerable is closed on acceptance rather than
+    // carried round a review cycle for ever; the depth of handling follows the
+    // size of the risk.
+    { level: 'low', label: 'Low', min: 1, max: 4, action: 'Tolerable — accept and record.', color: '#1a7f37', reviewMonths: 0 },
+    { level: 'moderate', label: 'Medium', min: 5, max: 9, action: 'Tolerable with controls — reduce where practicable.', color: '#c9a227', reviewMonths: 12 },
+    { level: 'high', label: 'High', min: 10, max: 16, action: 'Not tolerable — control measures required.', color: '#e8590c', reviewMonths: 6 },
+    { level: 'very_high', label: 'Very High', min: 17, max: 25, action: 'Unacceptable — suspend the activity and escalate.', color: '#c1121f', reviewMonths: 3 },
   ],
   treatmentThresholdLevel: 'moderate',
   requireResidualAssessment: true,
@@ -90,13 +98,24 @@ export function requiresTreatment(criteria: RiskCriteria, level: string | null, 
   return threshold > 0 && bandRank(criteria, level) >= threshold;
 }
 
-/** Next review date for a risk sitting in the given band. */
+/** Next review date for a risk sitting in the given band, or null where the
+ *  band carries no recurring review. */
 export function nextReviewDate(criteria: RiskCriteria, level: string | null, from = new Date()): string | null {
-  const band = criteria.bands.find(b => b.level === level);
-  if (!band) return null;
+  const months = reviewMonthsFor(criteria, level);
+  if (!months) return null;
   const d = new Date(from.getTime());
-  d.setMonth(d.getMonth() + Math.max(1, Number(band.reviewMonths) || 1));
+  d.setMonth(d.getMonth() + months);
   return d.toISOString().slice(0, 10);
+}
+
+export function reviewMonthsFor(criteria: RiskCriteria, level: string | null): number {
+  const band = criteria.bands.find(b => b.level === level);
+  return Math.max(0, Number(band?.reviewMonths) || 0);
+}
+
+/** True when a risk in this band is closed once accepted rather than monitored. */
+export function closesOnAcceptance(criteria: RiskCriteria, level: string | null): boolean {
+  return reviewMonthsFor(criteria, level) === 0;
 }
 
 // --- persistence ----------------------------------------------------------
@@ -125,7 +144,7 @@ function sanitiseBands(input: unknown, fallback: RiskBand[]): RiskBand[] {
       max: Number.isFinite(max) ? Math.min(25, Math.max(1, Math.round(max))) : def.max,
       action: String(row?.action ?? def.action).trim().slice(0, 240) || def.action,
       color: /^#[0-9a-fA-F]{6}$/.test(String(row?.color)) ? String(row?.color) : def.color,
-      reviewMonths: Number.isFinite(Number(row?.reviewMonths)) ? Math.min(60, Math.max(1, Math.round(Number(row?.reviewMonths)))) : def.reviewMonths,
+      reviewMonths: Number.isFinite(Number(row?.reviewMonths)) ? Math.min(60, Math.max(0, Math.round(Number(row?.reviewMonths)))) : def.reviewMonths,
     };
   });
   // Bands must climb without gaps or overlaps, otherwise a score falls nowhere.

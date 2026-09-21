@@ -7,7 +7,11 @@ import { api } from '../../services/api';
 // a risk) comes from here rather than from anything hard-coded.
 
 export type ScaleStep = { score: number; label: string; description: string };
-export type RiskBand = { level: string; label: string; min: number; max: number; action: string; color: string; reviewMonths: number };
+export type RiskBand = {
+  level: string; label: string; min: number; max: number; action: string; color: string;
+  /** Months between reviews; 0 means a risk in this band is closed once accepted. */
+  reviewMonths: number;
+};
 
 export type RiskCriteria = {
   likelihood: ScaleStep[];
@@ -39,10 +43,10 @@ export const DEFAULT_CRITERIA: RiskCriteriaState = {
     { score: 5, label: 'Catastrophic', description: 'Patient death or major system failure' },
   ],
   bands: [
-    { level: 'low', label: 'Low', min: 1, max: 4, action: 'Acceptable — document and monitor.', color: '#1a7f37', reviewMonths: 12 },
-    { level: 'moderate', label: 'Medium', min: 5, max: 9, action: 'Acceptable with controls — treat where practicable.', color: '#c9a227', reviewMonths: 6 },
-    { level: 'high', label: 'High', min: 10, max: 16, action: 'Not acceptable — treatment plan required.', color: '#e8590c', reviewMonths: 3 },
-    { level: 'very_high', label: 'Very High', min: 17, max: 25, action: 'Critical — stop the activity and escalate to management.', color: '#c1121f', reviewMonths: 1 },
+    { level: 'low', label: 'Low', min: 1, max: 4, action: 'Tolerable — accept and record.', color: '#1a7f37', reviewMonths: 0 },
+    { level: 'moderate', label: 'Medium', min: 5, max: 9, action: 'Tolerable with controls — reduce where practicable.', color: '#c9a227', reviewMonths: 12 },
+    { level: 'high', label: 'High', min: 10, max: 16, action: 'Not tolerable — control measures required.', color: '#e8590c', reviewMonths: 6 },
+    { level: 'very_high', label: 'Very High', min: 17, max: 25, action: 'Unacceptable — suspend the activity and escalate.', color: '#c1121f', reviewMonths: 3 },
   ],
   treatmentThresholdLevel: 'moderate',
   requireResidualAssessment: true,
@@ -90,7 +94,7 @@ export const RISK_SOURCES = [
   { v: 'other', l: 'Other' },
 ];
 
-export const TREATMENT_OPTIONS = [
+export const CONTROL_OPTIONS = [
   { v: 'avoid', l: 'Avoid — stop or do not start the activity' },
   { v: 'reduce', l: 'Reduce — lower the likelihood or the severity' },
   { v: 'transfer', l: 'Transfer — share the risk with another party' },
@@ -115,7 +119,9 @@ export const CONTROL_STATUSES = [
 
 export type RiskRow = {
   id: number; risk_number: string; section_id: number | null; section_name: string | null;
-  risk_category: string | null; risk_source: string | null; process_affected: string | null;
+  risk_category: string | null; risk_category_other: string | null;
+  risk_source: string | null; risk_source_other: string | null;
+  identified_by_other: string | null; process_affected: string | null;
   risk_area: string; risk_description: string | null; cause: string | null; consequence: string | null;
   existing_controls: string | null; identified_by_staff_id: number | null; identified_by_name: string | null;
   identified_date: string | null; affects_patient_safety: number;
@@ -158,6 +164,14 @@ export type RiskDetail = RiskRow & {
 
 export const optionLabel = (options: { v: string; l: string }[], value: unknown) =>
   options.find(o => o.v === value)?.l ?? (value ? String(value).replace(/_/g, ' ') : '—');
+
+/** What a list answer reads as, with an "other" answered in the person's own words. */
+export const chosenLabel = (options: { v: string; l: string }[], value: unknown, otherText?: string | null) =>
+  value === 'other' && otherText ? otherText : optionLabel(options, value).split(' (')[0];
+
+/** How a risk was identified, naming an external party where it was one. */
+export const identifiedByLabel = (r: { identified_by_other?: string | null; identified_by_name?: string | null }) =>
+  r.identified_by_other ? `${r.identified_by_other} (external)` : (r.identified_by_name || '—');
 
 /** A coloured band chip, drawn from the laboratory's own criteria. */
 export function BandChip({ level, score, criteria, size = 'md' }: {

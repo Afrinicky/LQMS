@@ -5,7 +5,7 @@ import TextField from '../../components/ui/TextField';
 import { Notice } from '../../components/ui/Feedback';
 import RiskStepper from './RiskStepper';
 import {
-  BandChip, CONTROL_STATUSES, CONTROL_TYPES, TREATMENT_OPTIONS, fmtDate, optionLabel,
+  BandChip, CONTROL_STATUSES, CONTROL_TYPES, CONTROL_OPTIONS, fmtDate, optionLabel,
   type RiskControl, type RiskCriteriaState, type RiskRow,
 } from './riskShared';
 import type { Staff } from '../../../shared/types/api';
@@ -31,17 +31,16 @@ function QueueEmpty({ children }: { children: React.ReactNode }) {
   return <p className="muted" style={{ textAlign: 'center', padding: '20px 8px', margin: 0 }}>{children}</p>;
 }
 
-function StageHead({ stage, title, intro }: { stage: string; title: string; intro: string }) {
+function StageHead({ stage, title }: { stage: string; title: string }) {
   return <>
     <RiskStepper active={stage} />
-    <h3 style={{ marginTop: 0 }}>{title}</h3>
-    <p className="muted" style={{ marginTop: 0 }}>{intro}</p>
+    <h3 style={{ margin: '0 0 10px' }}>{title}</h3>
   </>;
 }
 
 /** The row that opens beneath a queue when an item is picked. */
 function WorkPanel({ risk, onClose, children }: { risk: RiskRow; onClose: () => void; children: React.ReactNode }) {
-  return <div className="card" style={{ marginTop: 16, borderTop: '3px solid var(--primary, #2563eb)' }}>
+  return <div className="card" style={{ marginTop: 16 }}>
     <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
       <h3 style={{ margin: 0 }}>{risk.risk_number}</h3>
       <button style={{ marginLeft: 'auto' }} className="secondary" onClick={onClose}>Close</button>
@@ -69,10 +68,10 @@ function QueueTable({ rows, criteria, columns, action, onPick, onOpen, empty }: 
         {c === 'Initial risk' && <BandChip level={r.risk_level} score={r.risk_score} criteria={criteria} size="sm" />}
         {c === 'Residual risk' && (r.residual_score != null ? <BandChip level={r.residual_level} score={r.residual_score} criteria={criteria} size="sm" /> : '—')}
         {c === 'Identified' && fmtDate(r.identified_date)}
-        {c === 'Owner' && (r.treatment_owner_name || r.responsible_name || '—')}
+        {c === 'Responsible' && (r.treatment_owner_name || r.responsible_name || '—')}
         {c === 'Target' && fmtDate(r.treatment_due_date)}
         {c === 'Review due' && fmtDate(r.review_due_date)}
-        {c === 'Option' && optionLabel(TREATMENT_OPTIONS, r.treatment_option).split(' — ')[0]}
+        {c === 'Option' && optionLabel(CONTROL_OPTIONS, r.treatment_option).split(' — ')[0]}
       </td>)}
       <td style={{ whiteSpace: 'nowrap' }}>
         <button onClick={() => onPick(r)}>{action}</button>{' '}
@@ -114,10 +113,9 @@ export function AnalysisStage({ rows, criteria, onChanged, onOpen }: StageProps)
   }
 
   return <div className="card">
-    <StageHead stage="analysis" title="Risk analysis"
-      intro="Score each identified risk on the laboratory's 5×5 matrix. Likelihood is how often the risk is expected to be realised; severity is the harm if it is. The score and band follow from the criteria your laboratory has set." />
+    <StageHead stage="analysis" title="Risk assessment" />
     {error && <Notice kind="error">{error}</Notice>}
-    <QueueTable rows={rows} criteria={criteria} columns={['Identified', 'Owner']} action="Analyse"
+    <QueueTable rows={rows} criteria={criteria} columns={['Identified', 'Responsible']} action="Analyse"
       onPick={pick} onOpen={onOpen} empty="No risks are waiting to be analysed." />
 
     {sel && <WorkPanel risk={sel} onClose={() => setSel(null)}>
@@ -130,7 +128,7 @@ export function AnalysisStage({ rows, criteria, onChanged, onOpen }: StageProps)
         rows={criteria.likelihood} columns={criteria.severity} bands={criteria.bands}
         rowLabel="Likelihood" columnLabel="Severity" scoreLabel="Initial risk score (Likelihood × Severity)" />
       <label className="check-inline" style={{ display: 'block', marginTop: 10 }}>
-        <input type="checkbox" checked={safety} onChange={e => setSafety(e.target.checked)} /> This risk affects patient safety
+        <input type="checkbox" checked={safety} onChange={e => setSafety(e.target.checked)} /> This risk affects patient or staff safety
       </label>
       <label style={{ display: 'block', marginTop: 8 }}>Analysis notes
         <TextField as="textarea" value={notes} onValue={setNotes} placeholder="Basis for the scores — data, history, expert judgement" />
@@ -169,7 +167,7 @@ export function EvaluationStage({ rows, criteria, onChanged, onOpen }: StageProp
       setSel(null);
       onChanged(
         r.decision === 'treat'
-          ? `${sel.risk_number} requires treatment. It now awaits a control plan.`
+          ? `${sel.risk_number} requires control. It now awaits a control plan.`
           : `${sel.risk_number} is tolerable as it stands. It now awaits an acceptance decision.`,
         r.decision === 'treat' ? 'Risk Control' : 'Risk Acceptance',
       );
@@ -180,11 +178,10 @@ export function EvaluationStage({ rows, criteria, onChanged, onOpen }: StageProp
   const selBand = sel ? criteria.bands.find(b => b.level === sel.risk_level) : null;
 
   return <div className="card">
-    <StageHead stage="evaluation" title="Risk evaluation"
-      intro="Compare each analysed risk against the laboratory's acceptance criteria and decide whether it must be treated or may be retained as it stands." />
+    <StageHead stage="evaluation" title="Risk evaluation" />
     {thresholdBand && <p className="hint" style={{ marginTop: 0 }}>
-      Your criteria require treatment at <strong>{thresholdBand.label}</strong> and above
-      {criteria.alwaysTreatPatientSafety ? ', and for every risk affecting patient safety whatever its band' : ''}.
+      Control required at <strong>{thresholdBand.label}</strong> and above
+      {criteria.alwaysTreatPatientSafety ? ', and for every risk affecting patient or staff safety whatever its band' : ''}.
     </p>}
     {error && <Notice kind="error">{error}</Notice>}
     <QueueTable rows={rows} criteria={criteria} columns={['Initial risk', 'Identified']} action="Evaluate"
@@ -196,13 +193,13 @@ export function EvaluationStage({ rows, criteria, onChanged, onOpen }: StageProp
         {selBand && <span className="muted" style={{ marginLeft: 10 }}>{selBand.action}</span>}</p>
       {forced
         ? <Notice kind="warn" style={{ marginTop: 6 }}>
-            This risk meets your criteria for mandatory treatment{sel.affects_patient_safety && criteria.alwaysTreatPatientSafety ? ' — it affects patient safety' : ''}. A control plan will be required on save.
+            This risk meets your criteria for mandatory control{sel.affects_patient_safety && criteria.alwaysTreatPatientSafety ? ' — it affects patient or staff safety' : ''}. A control plan is required before it can be accepted.
           </Notice>
         : <div className="form-grid" style={{ marginTop: 8 }}>
             <label>Evaluation outcome
               <select value={decision} onChange={e => setDecision(e.target.value as 'treat' | 'accept')}>
-                <option value="treat">Treat — reduce this risk with controls</option>
-                <option value="accept">Retain — tolerable as it stands, monitor only</option>
+                <option value="treat">Control — reduce this risk with control measures</option>
+                <option value="accept">Retain — tolerable as it stands</option>
               </select>
             </label>
           </div>}
@@ -245,7 +242,7 @@ export function TreatmentStage({ rows, criteria, staff, onChanged, onOpen }: Sta
     setBusy(true); setError(null);
     try {
       await api(`/risks/${sel.id}/treatment`, { method: 'POST', body: JSON.stringify(plan) });
-      setMsg('Treatment plan saved.'); onChanged();
+      setMsg('Control plan saved.'); onChanged();
     } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   }
 
@@ -287,29 +284,28 @@ export function TreatmentStage({ rows, criteria, staff, onChanged, onOpen }: Sta
   const outstanding = controls.filter(c => c.status !== 'implemented').length;
 
   return <div className="card">
-    <StageHead stage="treatment" title="Risk control"
-      intro="Plan and implement the measures that reduce each risk. Controls are listed strongest first — design the hazard out where you can, and fall back on procedure and protective equipment only where you cannot." />
+    <StageHead stage="treatment" title="Risk control" />
     {error && <Notice kind="error">{error}</Notice>}
     {msg && <Notice kind="success">{msg}</Notice>}
-    <QueueTable rows={rows} criteria={criteria} columns={['Initial risk', 'Option', 'Owner', 'Target']} action="Plan controls"
-      onPick={pick} onOpen={onOpen} empty="No risks are awaiting treatment." />
+    <QueueTable rows={rows} criteria={criteria} columns={['Initial risk', 'Option', 'Responsible', 'Target']} action="Plan"
+      onPick={pick} onOpen={onOpen} empty="No risks are awaiting control." />
 
     {sel && <WorkPanel risk={sel} onClose={() => setSel(null)}>
       <p style={{ margin: '6px 0' }}>Initial risk: <BandChip level={sel.risk_level} score={sel.risk_score} criteria={criteria} /></p>
-      <h4 style={{ marginBottom: 4 }}>Treatment plan</h4>
+      <h4 style={{ marginBottom: 4 }}>Control plan</h4>
       <div className="form-grid">
-        <label>Treatment option
+        <label>Control option
           <select value={plan.treatmentOption} onChange={e => setPlan({ ...plan, treatmentOption: e.target.value })}>
-            {TREATMENT_OPTIONS.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
+            {CONTROL_OPTIONS.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
           </select>
         </label>
-        <label>Treatment owner
+        <label>Responsible person
           <select value={plan.treatmentOwnerStaffId} onChange={e => setPlan({ ...plan, treatmentOwnerStaffId: e.target.value })}>
             <option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
           </select>
         </label>
         <label>Target completion<input type="date" value={plan.treatmentDueDate} onChange={e => setPlan({ ...plan, treatmentDueDate: e.target.value })} /></label>
-        <label style={{ gridColumn: '1 / -1' }}>Treatment plan
+        <label style={{ gridColumn: '1 / -1' }}>Control plan
           <TextField as="textarea" value={plan.mitigationPlan} onValue={v => setPlan({ ...plan, mitigationPlan: v })} placeholder="What will be done, and how it lowers the likelihood or the severity" />
         </label>
       </div>
@@ -398,15 +394,14 @@ export function ResidualStage({ rows, criteria, onChanged, onOpen }: StageProps)
   const worse = score != null && sel?.risk_score != null && score > sel.risk_score;
 
   return <div className="card">
-    <StageHead stage="residual" title="Residual risk"
-      intro="Re-score each treated risk with its controls in place. The residual risk is what remains, and it is what the laboratory is asked to accept." />
+    <StageHead stage="residual" title="Residual risk" />
     {error && <Notice kind="error">{error}</Notice>}
-    <QueueTable rows={rows} criteria={criteria} columns={['Initial risk', 'Owner', 'Target']} action="Re-score"
-      onPick={pick} onOpen={onOpen} empty="No treated risks are waiting to be re-scored." />
+    <QueueTable rows={rows} criteria={criteria} columns={['Initial risk', 'Responsible', 'Target']} action="Re-score"
+      onPick={pick} onOpen={onOpen} empty="No controlled risks are waiting to be re-scored." />
 
     {sel && <WorkPanel risk={sel} onClose={() => setSel(null)}>
       <p style={{ margin: '6px 0' }}>Initial risk: <BandChip level={sel.risk_level} score={sel.risk_score} criteria={criteria} /></p>
-      <p><strong>Controls put in place:</strong> {sel.mitigation_plan || '—'}</p>
+      <p><strong>Control plan:</strong> {sel.mitigation_plan || '—'}</p>
       <h4 style={{ marginBottom: 4 }}>Score the remaining risk (click a cell)</h4>
       <RiskMatrix occurrence={likelihood} severity={severity} onChange={(l, s) => { setLikelihood(l); setSeverity(s); }}
         rows={criteria.likelihood} columns={criteria.severity} bands={criteria.bands}
@@ -441,15 +436,15 @@ export function AcceptanceStage({ rows, criteria, onChanged, onOpen }: StageProp
     if (!justification.trim()) { setError('Record the justification for this decision.'); return; }
     setBusy(true); setError(null);
     try {
-      const r = await api<{ decision: string; reviewDueDate?: string }>(`/risks/${sel.id}/accept`, {
+      const r = await api<{ decision: string; reviewDueDate?: string | null; closed?: boolean }>(`/risks/${sel.id}/accept`, {
         method: 'POST', body: JSON.stringify({ decision, justification, reviewDueDate: reviewDueDate || undefined }),
       });
       setSel(null);
       onChanged(
-        r.decision === 'accepted'
-          ? `${sel.risk_number} accepted. It moves to monitoring, next review ${r.reviewDueDate || 'as scheduled'}.`
-          : `${sel.risk_number} returned for further treatment.`,
-        r.decision === 'accepted' ? 'Monitoring & Review' : 'Risk Control',
+        r.decision !== 'accepted' ? `${sel.risk_number} returned for further control.`
+          : r.closed ? `${sel.risk_number} accepted and closed.`
+            : `${sel.risk_number} accepted. Next review ${r.reviewDueDate}.`,
+        r.decision !== 'accepted' ? 'Risk Control' : r.closed ? 'Risk Register' : 'Monitoring & Review',
       );
     } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   }
@@ -457,12 +452,11 @@ export function AcceptanceStage({ rows, criteria, onChanged, onOpen }: StageProp
   const band = sel ? criteria.bands.find(b => b.level === (sel.residual_level || sel.risk_level)) : null;
 
   return <div className="card">
-    <StageHead stage="acceptance" title="Risk acceptance"
-      intro="A risk leaves the treatment cycle only when an authorised officer accepts what remains of it, on the record, with a reason." />
-    <p className="hint" style={{ marginTop: 0 }}>Acceptance is reserved to: {criteria.acceptanceRoles.join(', ')}. The decision is signed electronically.</p>
+    <StageHead stage="acceptance" title="Risk acceptance" />
+    <p className="hint" style={{ marginTop: 0 }}>Reserved to: {criteria.acceptanceRoles.join(', ')}.</p>
     {error && <Notice kind="error">{error}</Notice>}
     {!criteria.canAccept && <Notice kind="info">You can see this queue, but accepting a residual risk requires an authorising role.</Notice>}
-    <QueueTable rows={rows} criteria={criteria} columns={['Initial risk', 'Residual risk', 'Owner']} action="Decide"
+    <QueueTable rows={rows} criteria={criteria} columns={['Initial risk', 'Residual risk', 'Responsible']} action="Decide"
       onPick={pick} onOpen={onOpen} empty="No risks are awaiting an acceptance decision." />
 
     {sel && <WorkPanel risk={sel} onClose={() => setSel(null)}>
@@ -471,24 +465,28 @@ export function AcceptanceStage({ rows, criteria, onChanged, onOpen }: StageProp
         <span>Residual risk: {sel.residual_score != null ? <BandChip level={sel.residual_level} score={sel.residual_score} criteria={criteria} /> : <span className="badge">Not assessed</span>}</span>
       </div>
       {band && <p className="muted" style={{ marginTop: 0 }}>{band.action}</p>}
-      <p><strong>Treatment plan:</strong> {sel.mitigation_plan || '—'}</p>
+      <p><strong>Control plan:</strong> {sel.mitigation_plan || '—'}</p>
       <div className="form-grid">
         <label>Decision
           <select value={decision} onChange={e => setDecision(e.target.value as 'accepted' | 'further_treatment')}>
             <option value="accepted">Accept the residual risk</option>
-            <option value="further_treatment">Not acceptable — return for further treatment</option>
+            <option value="further_treatment">Not acceptable — return for further control</option>
           </select>
         </label>
         {decision === 'accepted' && band && <label>Next review due
           <input type="date" value={reviewDueDate} onChange={e => setReviewDueDate(e.target.value)} />
-          <small className="muted">Leave blank to use your {band.label} review cycle of {band.reviewMonths} month(s).</small>
+          <small className="muted">{band.reviewMonths
+            ? `Leave blank for the ${band.label} cycle of ${band.reviewMonths} month(s).`
+            : `${band.label} risks close on acceptance. Set a date to keep this one under review.`}</small>
         </label>}
         <label style={{ gridColumn: '1 / -1' }}>Justification
           <TextField as="textarea" value={justification} onValue={setJustification} placeholder="Why this residual risk is, or is not, acceptable" />
         </label>
       </div>
       <button style={{ marginTop: 10 }} disabled={busy || !criteria.canAccept} onClick={submit}>
-        {busy ? 'Saving…' : decision === 'accepted' ? 'Accept and sign' : 'Return for further treatment'}
+        {busy ? 'Saving…'
+          : decision !== 'accepted' ? 'Return for further control'
+            : (band && !band.reviewMonths && !reviewDueDate) ? 'Accept and close' : 'Accept and sign'}
       </button>
     </WorkPanel>}
   </div>;
@@ -531,13 +529,12 @@ export function MonitoringStage({ rows, criteria, onChanged, onOpen }: StageProp
   const band = sel ? criteria.bands.find(b => b.level === (sel.residual_level || sel.risk_level)) : null;
 
   return <div className="card">
-    <StageHead stage="monitoring" title="Monitoring & review"
-      intro="Accepted risks are reviewed on a cycle set by their band. A review confirms the risk is unchanged, sends it back to be re-analysed when circumstances have moved, or closes it when it no longer applies." />
+    <StageHead stage="monitoring" title="Monitoring & review" />
     <label className="check-inline" style={{ display: 'block', margin: '0 0 8px' }}>
       <input type="checkbox" checked={dueOnly} onChange={e => setDueOnly(e.target.checked)} /> Show only reviews that are due
     </label>
     {error && <Notice kind="error">{error}</Notice>}
-    <QueueTable rows={shown} criteria={criteria} columns={['Residual risk', 'Owner', 'Review due']} action="Review"
+    <QueueTable rows={shown} criteria={criteria} columns={['Residual risk', 'Responsible', 'Review due']} action="Review"
       onPick={pick} onOpen={onOpen} empty={dueOnly ? 'No reviews are due.' : 'No risks are being monitored.'} />
 
     {sel && <WorkPanel risk={sel} onClose={() => setSel(null)}>

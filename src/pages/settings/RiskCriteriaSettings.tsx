@@ -66,8 +66,7 @@ export default function RiskCriteriaSettings() {
       <h3 style={{ marginTop: 0 }}>Risk criteria</h3>
       <p className="muted" style={{ marginTop: 0 }}>
         The 5×5 matrix below is what every risk assessment in this laboratory is scored on — risk management,
-        nonconformities and incidents alike. Change the wording, the bands or the review cycles here and the change
-        applies everywhere at once.
+        nonconformities and incidents alike.
       </p>
     </div>
 
@@ -98,8 +97,9 @@ export default function RiskCriteriaSettings() {
     <div className="card">
       <h3 style={{ marginTop: 0 }}>Risk bands</h3>
       <p className="muted" style={{ marginTop: 0 }}>
-        Set the upper bound of each band; the next band starts where the last one ended, and the top band always
-        reaches 25. The review cycle is how often a risk sitting in that band is brought back for review.
+        Set the upper bound of each band; the next band starts where the last one ended and the top band reaches 25.
+        A band set to <strong>close on acceptance</strong> carries no recurring review — a risk in it is closed once
+        it has been accepted, and reopened if anything changes.
       </p>
       <table className="table">
         <thead><tr><th>Band</th><th style={{ width: 80 }}>From</th><th style={{ width: 110 }}>Up to</th><th style={{ width: 90 }}>Colour</th><th style={{ width: 150 }}>Review cycle</th><th>What this band calls for</th></tr></thead>
@@ -110,6 +110,7 @@ export default function RiskCriteriaSettings() {
             onChange={e => setBand(i, { max: Number(e.target.value) })} /></td>
           <td><input type="color" value={band.color} disabled={readOnly} onChange={e => setBand(i, { color: e.target.value })} style={{ width: 52, height: 30, padding: 2 }} /></td>
           <td><select value={band.reviewMonths} disabled={readOnly} onChange={e => setBand(i, { reviewMonths: Number(e.target.value) })}>
+            <option value={0}>Close on acceptance</option>
             {[1, 2, 3, 6, 12, 24].map(m => <option key={m} value={m}>{m === 12 ? 'Annually' : m === 24 ? 'Every 2 years' : `Every ${m} month${m > 1 ? 's' : ''}`}</option>)}
           </select></td>
           <td><TextField value={band.action} onValue={v => setBand(i, { action: v })} disabled={readOnly} /></td>
@@ -120,7 +121,7 @@ export default function RiskCriteriaSettings() {
     <div className="card">
       <h3 style={{ marginTop: 0 }}>Acceptance rules</h3>
       <div className="form-grid">
-        <label>Treatment is required at
+        <label>Control is required at
           <select value={draft.treatmentThresholdLevel} disabled={readOnly}
             onChange={e => setDraft({ ...draft, treatmentThresholdLevel: e.target.value })}>
             <option value="off">Off — the assessor decides case by case</option>
@@ -131,12 +132,12 @@ export default function RiskCriteriaSettings() {
       <label className="check-inline" style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 12 }}>
         <input type="checkbox" checked={draft.alwaysTreatPatientSafety} disabled={readOnly}
           onChange={e => setDraft({ ...draft, alwaysTreatPatientSafety: e.target.checked })} />
-        Always treat a risk flagged as affecting patient safety, whatever its band
+        Always require control of a risk affecting patient or staff safety, whatever its band
       </label>
       <label className="check-inline" style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
         <input type="checkbox" checked={draft.requireResidualAssessment} disabled={readOnly}
           onChange={e => setDraft({ ...draft, requireResidualAssessment: e.target.checked })} />
-        Require a residual risk assessment before a treated risk may be accepted
+        Require a residual risk assessment before a controlled risk may be accepted
       </label>
 
       <h4 style={{ marginBottom: 6, marginTop: 18 }}>Who may accept a residual risk</h4>
@@ -152,12 +153,12 @@ export default function RiskCriteriaSettings() {
           {role}
         </label>)}
       </div>
-      <p className="hint" style={{ marginTop: 8 }}>At least one role must be able to accept a risk, or no risk can leave the treatment cycle.</p>
+      <p className="hint" style={{ marginTop: 8 }}>At least one role must be able to accept a risk.</p>
     </div>
 
     <div className="card">
       <h3 style={{ marginTop: 0 }}>Preview</h3>
-      <p className="muted" style={{ marginTop: 0 }}>How the matrix will look to an assessor. Click a cell to try it.</p>
+      <p className="muted" style={{ marginTop: 0 }}>How the matrix will look to an assessor.</p>
       <RiskMatrix occurrence={preview.l} severity={preview.s} onChange={(l, s) => setPreview({ l, s })}
         rows={draft.likelihood} columns={draft.severity} bands={draft.bands}
         rowLabel="Likelihood" columnLabel="Severity" scoreLabel="Risk score (Likelihood × Severity)" />

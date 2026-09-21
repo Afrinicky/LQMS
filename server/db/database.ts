@@ -7525,6 +7525,12 @@ CREATE INDEX IF NOT EXISTS idx_log_amendments_cell
       ['closure_notes', 'closure_notes TEXT'],
       ['closed_by_staff_id', 'closed_by_staff_id INTEGER REFERENCES staff(id)'],
       ['closed_at', 'closed_at TEXT'],
+      // "Other" is a real answer everywhere it is offered — an external
+      // assessor who found the risk, a category the list does not carry — and
+      // an answer of "other" that cannot say what it was is not a record.
+      ['risk_category_other', 'risk_category_other TEXT'],
+      ['risk_source_other', 'risk_source_other TEXT'],
+      ['identified_by_other', 'identified_by_other TEXT'],
     ];
     for (const [col, ddl] of add) if (!cols.has(col)) database.exec(`ALTER TABLE risks ADD COLUMN ${ddl}`);
     database.exec('CREATE INDEX IF NOT EXISTS idx_risks_stage ON risks(workflow_stage, status)');

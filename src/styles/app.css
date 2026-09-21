@@ -5860,3 +5860,18 @@ button.cell-mark:disabled { cursor: default; }
 .risk-step.is-done { background: var(--success-bg); color: var(--success); border-color: transparent; }
 .risk-step.is-current { background: var(--accent); color: #fff; font-weight: 700; border-color: transparent; }
 .risk-steps-arrow { color: var(--faint); font-size: 12px; }
+
+/* ---- Risk register ------------------------------------------------------
+   The same toolbar and table the document register uses, sized so the filters
+   and the three actions sit on one row and the nine columns fit the workspace
+   without the row's actions sliding off the right-hand edge. */
+.rk-search { min-width: 160px; flex: 0 1 200px; }
+.rk-toolbar select { max-width: 132px; }
+.rk-toolbar .rk-act { padding: 7px 11px; font-size: 12.5px; white-space: nowrap; }
+.rk-table { font-size: 13px; }
+.rk-table thead th, .rk-table tbody td { padding: 9px 10px; }
+.rk-table .rk-no { white-space: nowrap; width: 1%; }
+.rk-table .rk-area { min-width: 180px; }
+.rk-table .rk-unit { max-width: 130px; }
+.rk-table .rk-person { max-width: 150px; }
+.rk-table tbody td button { padding: 5px 10px; font-size: 12px; }
