@@ -7486,6 +7486,94 @@ CREATE INDEX IF NOT EXISTS idx_log_amendments_cell
     for (const [col, ddl] of add) if (!cols.has(col)) database.exec(`ALTER TABLE staff_cpd_records ADD COLUMN ${ddl}`);
   }
 
+  /* --------------------------------------------------------------------------
+     Risk management — the staged lifecycle.
+
+     The register used to be a flat list scored on an arbitrary 1-125 scale
+     that agreed with nothing else in the system. It now runs the same way the
+     nonconformity register does: a risk is identified, analysed on the 5x5
+     matrix, treated, re-scored, accepted, then reviewed on a cycle set by its
+     band. These columns carry that lifecycle, and the old likelihood/severity
+     values are carried onto the 5x5 score so nothing already logged is lost.
+     ----------------------------------------------------------------------- */
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(risks)').all() as Array<{ name: string }>).map(c => c.name));
+    const add: Array<[string, string]> = [
+      ['workflow_stage', "workflow_stage TEXT NOT NULL DEFAULT 'analysis'"],
+      ['risk_category', 'risk_category TEXT'],
+      ['risk_source', 'risk_source TEXT'],
+      ['process_affected', 'process_affected TEXT'],
+      ['identified_by_staff_id', 'identified_by_staff_id INTEGER REFERENCES staff(id)'],
+      ['identified_date', 'identified_date TEXT'],
+      ['affects_patient_safety', 'affects_patient_safety INTEGER NOT NULL DEFAULT 0'],
+      ['analysis_notes', 'analysis_notes TEXT'],
+      ['analysed_by_staff_id', 'analysed_by_staff_id INTEGER REFERENCES staff(id)'],
+      ['analysed_at', 'analysed_at TEXT'],
+      ['evaluation_decision', 'evaluation_decision TEXT'],
+      ['treatment_option', 'treatment_option TEXT'],
+      ['treatment_owner_staff_id', 'treatment_owner_staff_id INTEGER REFERENCES staff(id)'],
+      ['treatment_due_date', 'treatment_due_date TEXT'],
+      ['treatment_completed_at', 'treatment_completed_at TEXT'],
+      ['treatment_notes', 'treatment_notes TEXT'],
+      ['residual_assessed_at', 'residual_assessed_at TEXT'],
+      ['residual_assessed_by_staff_id', 'residual_assessed_by_staff_id INTEGER REFERENCES staff(id)'],
+      ['acceptance_decision', 'acceptance_decision TEXT'],
+      ['acceptance_justification', 'acceptance_justification TEXT'],
+      ['accepted_by_staff_id', 'accepted_by_staff_id INTEGER REFERENCES staff(id)'],
+      ['accepted_at', 'accepted_at TEXT'],
+      ['last_review_date', 'last_review_date TEXT'],
+      ['closure_notes', 'closure_notes TEXT'],
+      ['closed_by_staff_id', 'closed_by_staff_id INTEGER REFERENCES staff(id)'],
+      ['closed_at', 'closed_at TEXT'],
+    ];
+    for (const [col, ddl] of add) if (!cols.has(col)) database.exec(`ALTER TABLE risks ADD COLUMN ${ddl}`);
+    database.exec('CREATE INDEX IF NOT EXISTS idx_risks_stage ON risks(workflow_stage, status)');
+    database.exec('CREATE INDEX IF NOT EXISTS idx_risks_review ON risks(review_due_date)');
+
+    database.exec(`CREATE TABLE IF NOT EXISTS risk_controls (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      risk_id INTEGER NOT NULL REFERENCES risks(id) ON DELETE CASCADE,
+      control_description TEXT NOT NULL,
+      control_type TEXT,
+      responsible_staff_id INTEGER REFERENCES staff(id),
+      target_date TEXT,
+      status TEXT NOT NULL DEFAULT 'planned',
+      completed_date TEXT,
+      verification_notes TEXT,
+      action_id INTEGER REFERENCES actions(id),
+      created_by INTEGER REFERENCES users(id),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`);
+    database.exec('CREATE INDEX IF NOT EXISTS idx_risk_controls_risk ON risk_controls(risk_id)');
+
+    const reviewCols = new Set((database.prepare('PRAGMA table_info(risk_reviews)').all() as Array<{ name: string }>).map(c => c.name));
+    for (const [col, ddl] of [['outcome', 'outcome TEXT'], ['residual_score', 'residual_score INTEGER'], ['residual_level', 'residual_level TEXT']] as Array<[string, string]>) {
+      if (!reviewCols.has(col)) database.exec(`ALTER TABLE risk_reviews ADD COLUMN ${ddl}`);
+    }
+
+    // Carry legacy records onto the 5x5 scale once. Likelihood and severity
+    // were already captured 1-5; only the score and band were on the old
+    // scale, so they are simply recomputed.
+    const converted = database.prepare("SELECT value FROM settings WHERE key = 'risk.scaleConverted'").get() as { value?: string } | undefined;
+    if (converted?.value !== '1') {
+      const rows = database.prepare('SELECT id, likelihood, severity, risk_level, review_due_date, status, created_at FROM risks').all() as Array<any>;
+      const band = (sc: number) => sc <= 4 ? 'low' : sc <= 9 ? 'moderate' : sc <= 16 ? 'high' : 'very_high';
+      const upd = database.prepare('UPDATE risks SET risk_score = ?, risk_level = ?, identified_date = COALESCE(identified_date, ?), workflow_stage = ? WHERE id = ?');
+      const tx = database.transaction(() => {
+        for (const r of rows) {
+          const l = Math.min(5, Math.max(1, Number(r.likelihood) || 1));
+          const s = Math.min(5, Math.max(1, Number(r.severity) || 1));
+          const score = l * s;
+          // A risk that was already closed stays closed; the rest re-enter the
+          // lifecycle at analysis, where their new score is confirmed.
+          upd.run(score, band(score), String(r.created_at || '').slice(0, 10) || null, r.status === 'closed' ? 'closed' : 'analysis', r.id);
+        }
+      });
+      tx();
+      database.prepare("INSERT INTO settings (key, value) VALUES ('risk.scaleConverted', '1') ON CONFLICT(key) DO UPDATE SET value = '1'").run();
+    }
+  }
+
   // SQLite plans a query from the statistics it collected the last time it was
   // asked to. A database that has been running for months without ANALYZE
   // plans against the shape it had on the day it was created, which is how an

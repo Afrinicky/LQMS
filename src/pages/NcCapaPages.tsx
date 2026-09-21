@@ -7,6 +7,7 @@ import { api, API_BASE, getToken, errorText } from '../services/api';
 import { useModules } from '../hooks/useModules';
 import DisabledModule from '../components/DisabledModule';
 import RiskMatrix, { riskLevelBadge, bandFor } from '../components/RiskMatrix';
+import { useRiskCriteria } from './risk/riskShared';
 import XlsxToolbar from '../components/XlsxToolbar';
 import WorkflowStepper from '../components/WorkflowStepper';
 import { usePermittedTabs } from '../components/PermissionTabs';
@@ -126,6 +127,9 @@ function StageBoard({ kind, stage, sections, cfg, onChanged }: {
   const [contributing, setContributing] = useState('');
   const [evidence, setEvidence] = useState<File | null>(null);
   const [hasEvidence, setHasEvidence] = useState(false);
+  // One matrix for the whole laboratory: the scales and bands are the ones set
+  // in Settings, so an event is scored on exactly the same criteria a risk is.
+  const riskBands = useRiskCriteria();
 
   const isNc = kind === 'nc';
   const investigationLabel = isNc ? 'Root cause analysis' : 'Investigation';
@@ -161,7 +165,7 @@ function StageBoard({ kind, stage, sections, cfg, onChanged }: {
   function pick(it: WFItem) {
     setSel(it); setError(null); setMsg(null);
     setOcc(it.occurrence_score ?? null); setSev(it.severity_score ?? null);
-    const band = it.risk_score ? bandFor(it.risk_score) : null;
+    const band = it.risk_score ? bandFor(it.risk_score, riskBands.bands) : null;
     setRcaReq(it.rca_required != null ? !!it.rca_required : !!(band && (band.level === 'high' || band.level === 'very_high')));
     setSafety(!!it.affects_patient_safety);
     setNotes('');
@@ -207,7 +211,7 @@ function StageBoard({ kind, stage, sections, cfg, onChanged }: {
   }
 
   const previewScore = occ && sev ? occ * sev : null;
-  const previewBand = previewScore ? bandFor(previewScore) : null;
+  const previewBand = previewScore ? bandFor(previewScore, riskBands.bands) : null;
   // Mirror the server-side rules so the assessor sees the outcome before saving.
   const threshold = { off: 99, moderate: 2, high: 3, very_high: 4 }[cfg.autoEscalateRiskLevel];
   const rank = previewBand ? ({ low: 1, moderate: 2, high: 3, very_high: 4 } as Record<string, number>)[previewBand.level] : 0;
@@ -232,7 +236,7 @@ function StageBoard({ kind, stage, sections, cfg, onChanged }: {
         <td>{it.date}</td>
         <td>{it.title}<div className="muted" style={{ fontSize: 11 }}>{it.typeLabel}</div></td>
         <td>{it.unit}</td>
-        <td>{it.risk_score != null ? <>{it.risk_score} {riskLevelBadge(it.risk_level)}</> : '—'}</td>
+        <td>{it.risk_score != null ? <>{it.risk_score} {riskLevelBadge(it.risk_level, riskBands.bands)}</> : '—'}</td>
         <td>{it.affects_patient_safety ? <span className="badge badge--danger">patient safety</span> : '—'}</td>
         <td><button disabled={!cfg.canFollowUp} onClick={() => pick(it)}>{stage === 'risk_assessment' ? 'Assess' : 'Investigate'}</button></td>
       </tr>)}
@@ -250,8 +254,10 @@ function StageBoard({ kind, stage, sections, cfg, onChanged }: {
 
       {stage === 'risk_assessment' ? <>
         <h4 style={{ marginBottom: 4 }}>Score the risk (click a cell)</h4>
-        <RiskMatrix occurrence={occ} severity={sev} onChange={(o, s) => { setOcc(o); setSev(s); }} />
-        {previewBand && <p style={{ margin: '8px 0' }}>Risk score <strong>{previewScore}</strong> — {riskLevelBadge(previewBand.level)} <span className="muted">{previewBand.action}</span></p>}
+        <RiskMatrix occurrence={occ} severity={sev} onChange={(o, s) => { setOcc(o); setSev(s); }}
+          rows={riskBands.likelihood} columns={riskBands.severity} bands={riskBands.bands}
+          rowLabel="Likelihood" columnLabel="Severity" scoreLabel="Risk score (Likelihood × Severity)" />
+        {previewBand && <p style={{ margin: '8px 0' }}>Risk score <strong>{previewScore}</strong> — {riskLevelBadge(previewBand.level, riskBands.bands)} <span className="muted">{previewBand.action}</span></p>}
         <label className="check-inline" style={{ marginTop: 6, display: 'block' }}>
           <input type="checkbox" checked={safety} onChange={e => setSafety(e.target.checked)} /> This event affects patient safety
         </label>
@@ -264,7 +270,7 @@ function StageBoard({ kind, stage, sections, cfg, onChanged }: {
         <label style={{ display: 'block', marginTop: 8 }}>Assessment notes (optional)<TextField as="textarea" value={notes} onValue={nextValue => setNotes(nextValue)} /></label>
         <button style={{ marginTop: 10 }} disabled={busy || !cfg.canFollowUp} onClick={submitRisk}>{busy ? 'Saving…' : 'Complete risk assessment'}</button>
       </> : <>
-        <p style={{ margin: '6px 0' }}>Assessed risk: {sel.risk_score != null ? <>{sel.risk_score} {riskLevelBadge(sel.risk_level)}</> : '—'}{sel.affects_patient_safety ? <span className="badge badge--danger" style={{ marginLeft: 8 }}>patient safety</span> : null}</p>
+        <p style={{ margin: '6px 0' }}>Assessed risk: {sel.risk_score != null ? <>{sel.risk_score} {riskLevelBadge(sel.risk_level, riskBands.bands)}</> : '—'}{sel.affects_patient_safety ? <span className="badge badge--danger" style={{ marginLeft: 8 }}>patient safety</span> : null}</p>
         <h4 style={{ marginBottom: 4 }}>{investigationLabel}</h4>
         <div className="form-grid">
           <label>Investigation team / person<TextField value={team} onValue={nextValue => setTeam(nextValue)} /></label>
@@ -321,6 +327,7 @@ export function NonconformitiesPage({ embedded = false }: { embedded?: boolean }
   const { isEnabled } = useModules();
   const { staff, sections } = useLookupData();
   const cfg = useWorkflowConfig();
+  const riskBands = useRiskCriteria().bands;
   const [tab, setTab] = useState('Register');
   const [list, setList] = useState<NonconformingEvent[]>([]);
   const [capas, setCapas] = useState<CapaRecord[]>([]);
@@ -414,7 +421,7 @@ export function NonconformitiesPage({ embedded = false }: { embedded?: boolean }
             <td>{(n.nc_type || '—').replace(/_/g, ' ')}</td>
             <td>{sections.find(s => s.id === n.section_id)?.name || '—'}</td>
             <td>{n.title}</td>
-            <td>{n.risk_score != null ? <>{n.risk_score} {riskLevelBadge(n.risk_level)}</> : '—'}</td>
+            <td>{n.risk_score != null ? <>{n.risk_score} {riskLevelBadge(n.risk_level, riskBands)}</> : '—'}</td>
             <td>{formatBadge(nc.workflow_stage || 'risk_assessment')}</td>
             <td>{capa ? <Link to="/capa">{capa.capa_number}</Link> : '—'}</td>
             <td style={{ whiteSpace: 'nowrap' }}>
@@ -471,6 +478,7 @@ function NcDetail({ nc, staff, sections, cfg, capa, onClose, onChanged, onError,
   onClose: () => void; onChanged: () => void; onError: (m: string) => void; onMsg: (m: string) => void;
 }) {
   const { can } = usePermissions();
+  const riskBands = useRiskCriteria().bands;
   const n = nc as any;
   const [amend, setAmend] = useState(false);
   const [edit, setEdit] = useState({ title: nc.title, description: nc.description || '', immediateCorrection: n.immediate_correction || '', remedialAction: n.remedial_action || '' });
@@ -488,7 +496,7 @@ function NcDetail({ nc, staff, sections, cfg, capa, onClose, onChanged, onError,
   return <DetailModal
     open
     onClose={onClose}
-    title={<>{nc.nc_number} {formatBadge(nc.status)} {n.risk_score != null ? <>{n.risk_score} {riskLevelBadge(n.risk_level)}</> : null}
+    title={<>{nc.nc_number} {formatBadge(nc.status)} {n.risk_score != null ? <>{n.risk_score} {riskLevelBadge(n.risk_level, riskBands)}</> : null}
       {n.affects_patient_safety ? <span className="badge badge--danger" style={{ marginLeft: 6 }}>patient safety</span> : null}</>}
     header={can('nc_capa', 'print') ? <button className="secondary" onClick={() => openPrintWindow(`/nonconformities/${nc.id}/print`, onError)}>Print report</button> : undefined}
   >
@@ -515,7 +523,7 @@ function NcDetail({ nc, staff, sections, cfg, capa, onClose, onChanged, onError,
       <div>
         <h4 style={{ marginBottom: 4 }}>Risk assessment</h4>
         {n.risk_score != null
-          ? <p style={{ margin: 0 }}>Score {n.risk_score} {riskLevelBadge(n.risk_level)}{n.risk_assessed_at ? <span className="muted"> · assessed {fmtDate(n.risk_assessed_at)}</span> : null}
+          ? <p style={{ margin: 0 }}>Score {n.risk_score} {riskLevelBadge(n.risk_level, riskBands)}{n.risk_assessed_at ? <span className="muted"> · assessed {fmtDate(n.risk_assessed_at)}</span> : null}
             {n.risk_assessment_notes ? <div className="muted" style={{ fontSize: 12 }}>{n.risk_assessment_notes}</div> : null}</p>
           : <p className="muted" style={{ margin: 0 }}>Not yet assessed — see the Risk Assessment tab.</p>}
       </div>
@@ -550,6 +558,7 @@ export function IncidentsPage({ embedded = false }: { embedded?: boolean } = {})
   const { isEnabled } = useModules();
   const { staff, sections } = useLookupData();
   const cfg = useWorkflowConfig();
+  const riskBands = useRiskCriteria().bands;
   const [tab, setTab] = useState('Register');
   const [list, setList] = useState<Incident[]>([]);
   const [sel, setSel] = useState<Incident | null>(null);
@@ -624,7 +633,7 @@ export function IncidentsPage({ embedded = false }: { embedded?: boolean } = {})
             <td>{(i.incident_type || '—').replace(/_/g, ' ')}</td>
             <td>{i.section_name || '—'}</td>
             <td>{i.harm_level || '—'}</td>
-            <td>{i.risk_score != null ? <>{i.risk_score} {riskLevelBadge(i.risk_level)}</> : '—'}</td>
+            <td>{i.risk_score != null ? <>{i.risk_score} {riskLevelBadge(i.risk_level, riskBands)}</> : '—'}</td>
             <td>{formatBadge(i.workflow_stage || 'risk_assessment')}</td>
             <td>{i.capa_number ? <Link to="/capa">{i.capa_number}</Link> : '—'}</td>
             <td><button onClick={() => openDetail(i.id)}>View</button></td>
@@ -670,6 +679,7 @@ export function IncidentsPage({ embedded = false }: { embedded?: boolean } = {})
 function IncidentDetail({ incident: i, cfg, onClose, onChanged, onError, onMsg }: {
   incident: Incident; cfg: WorkflowConfig; onClose: () => void; onChanged: () => void; onError: (m: string) => void; onMsg: (m: string) => void;
 }) {
+  const riskBands = useRiskCriteria().bands;
   const [notifiedTo, setNotifiedTo] = useState(i.notified_to || '');
   const [external, setExternal] = useState(!!i.reportable_external);
   const [authority, setAuthority] = useState(i.external_authority || '');
@@ -690,7 +700,7 @@ function IncidentDetail({ incident: i, cfg, onClose, onChanged, onError, onMsg }
 
   return <div className="card" style={{ marginTop: 16, borderTop: '3px solid #c1121f' }}>
     <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-      <h3 style={{ margin: 0 }}>{i.incident_number} {formatBadge(i.status)} {i.risk_level ? riskLevelBadge(i.risk_level) : null}
+      <h3 style={{ margin: 0 }}>{i.incident_number} {formatBadge(i.status)} {i.risk_level ? riskLevelBadge(i.risk_level, riskBands) : null}
         {i.affects_patient_safety ? <span className="badge badge--danger" style={{ marginLeft: 6 }}>patient safety</span> : null}</h3>
       <button style={{ marginLeft: 'auto' }} className="secondary" onClick={onClose}>Close</button>
     </div>
@@ -705,7 +715,7 @@ function IncidentDetail({ incident: i, cfg, onClose, onChanged, onError, onMsg }
     <div className="grid cols-2" style={{ marginTop: 12 }}>
       <div>
         <h4 style={{ marginBottom: 4 }}>Risk assessment</h4>
-        {i.risk_score != null ? <p style={{ margin: 0 }}>Score {i.risk_score} {riskLevelBadge(i.risk_level)}</p>
+        {i.risk_score != null ? <p style={{ margin: 0 }}>Score {i.risk_score} {riskLevelBadge(i.risk_level, riskBands)}</p>
           : <p className="muted" style={{ margin: 0 }}>Not yet assessed — see the Risk Assessment tab.</p>}
       </div>
       <div>
@@ -786,6 +796,7 @@ export function CapaPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { isEnabled } = useModules();
   const { staff } = useLookupData();
   const cfg = useWorkflowConfig();
+  const riskBands = useRiskCriteria().bands;
   const [tab, setTab] = useState('Register');
   const [list, setList] = useState<any[]>([]);
   const [summary, setSummary] = useState<CapaSummary | null>(null);

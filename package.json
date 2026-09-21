@@ -34,6 +34,7 @@
     "check:fetch": "node scripts/instrument-fetch-check.mjs",
     "check:lhims": "node scripts/lhims-bridge-check.mjs",
     "check:training": "node scripts/training-record-check.mjs",
+    "check:risk": "node scripts/risk-check.mjs",
     "rebuild:native": "electron-builder install-app-deps",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",

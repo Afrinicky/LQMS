@@ -5820,3 +5820,43 @@ button.cell-mark:disabled { cursor: default; }
   .il-head-actions { width: 100%; }
   .il-head-actions button { flex: 1; justify-content: center; }
 }
+
+/* ---- 5×5 risk matrix -----------------------------------------------------
+   The matrix is drawn wherever risk is scored. Its coloured cells carry their
+   own meaning, so only the header rail is themed — it follows the register
+   tables rather than sitting as a pale strip inside the workspace. */
+.risk-matrix { border-collapse: collapse; font-size: 11px; min-width: 620px; }
+.risk-matrix th {
+  border: 1px solid var(--border);
+  background: var(--panel-2, rgba(255, 255, 255, 0.04));
+  color: var(--text);
+  padding: 6px 8px;
+  font-weight: 600;
+  text-align: center;
+  vertical-align: middle;
+}
+.risk-matrix th small { display: block; font-weight: 400; font-size: 9px; color: var(--muted); }
+.risk-matrix td {
+  border: 1px solid var(--border);
+  text-align: center;
+  cursor: pointer;
+  padding: 9px 4px;
+  font-weight: 700;
+  color: #fff;
+}
+.risk-matrix td span { display: block; font-size: 9px; font-weight: 400; }
+.risk-matrix td[data-active="true"] { outline: 3px solid var(--text); outline-offset: -3px; }
+.risk-matrix-foot { margin-top: 10px; display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+.risk-matrix-band { color: #fff; font-weight: 700; padding: 3px 10px; border-radius: 4px; }
+
+/* Lifecycle stepper — the steps a risk travels, in order. */
+.risk-steps { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 16px; }
+.risk-steps > span { display: inline-flex; align-items: center; gap: 6px; }
+.risk-step {
+  font-size: 12px; font-weight: 500; padding: 4px 11px; border-radius: 999px;
+  background: var(--panel-2, rgba(255, 255, 255, 0.05)); color: var(--muted);
+  border: 1px solid var(--border);
+}
+.risk-step.is-done { background: var(--success-bg); color: var(--success); border-color: transparent; }
+.risk-step.is-current { background: var(--accent); color: #fff; font-weight: 700; border-color: transparent; }
+.risk-steps-arrow { color: var(--faint); font-size: 12px; }

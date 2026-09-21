@@ -84,7 +84,7 @@ export function managementReviewRoutes() {
     const complaintsOpen = count("SELECT COUNT(*) count FROM complaints WHERE status != 'closed' AND received_date BETWEEN ? AND ?", start, end);
     sections.push({ area: 'Customer complaints', module: 'complaints', summary: `${complaints} complaint(s) received; ${complaintsOpen} still open.` });
 
-    const highRisks = count("SELECT COUNT(*) count FROM risks WHERE risk_level IN ('High','Critical') AND status != 'closed'");
+    const highRisks = count("SELECT COUNT(*) count FROM risks WHERE COALESCE(residual_level, risk_level) IN ('high','very_high') AND status != 'closed'");
     sections.push({ area: 'Risk register', module: 'risks', summary: `${highRisks} high/critical risk(s) currently open.` });
 
     const indicatorsActive = count('SELECT COUNT(*) count FROM quality_indicators WHERE is_active = 1');

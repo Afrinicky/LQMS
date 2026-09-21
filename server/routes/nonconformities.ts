@@ -9,7 +9,7 @@ import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import multer from 'multer';
 import { getStaffIdOrCurrent } from './routeHelpers.js';
-import { computeRisk, SEVERITY, OCCURRENCE, RISK_BANDS } from '../utils/riskMatrix.js';
+import { computeRisk, activeCriteria } from '../utils/riskMatrix.js';
 import { workflowConfig, decideEscalation, createCapaForNc, canAmendRecords, RECORD_AMEND_ROLES } from '../utils/escalation.js';
 import { saveEvidenceFile } from '../utils/fileStore.js';
 import { buildWorkbook, sendWorkbook, readSheet, cell, numCell } from '../utils/xlsxRegister.js';
@@ -50,7 +50,11 @@ export function nonconformityRoutes() {
   const router = Router();
 
   // Static 5x5 risk-matrix metadata for the form UI.
-  router.get('/risk-matrix', requireAuth, (_req, res) => res.json({ severity: SEVERITY, occurrence: OCCURRENCE, bands: RISK_BANDS }));
+  // The laboratory's own 5x5 criteria — the same scale every module scores on.
+  router.get('/risk-matrix', requireAuth, (_req, res) => {
+    const c = activeCriteria();
+    res.json({ severity: c.severity, occurrence: c.likelihood, bands: c.bands });
+  });
 
   // Quality-workflow configuration for this laboratory. `canFollowUp` tells the
   // UI whether the current user may progress an event beyond logging (risk
@@ -378,7 +382,8 @@ export function nonconformityRoutes() {
     if (!n) return res.status(404).send('Not found');
     const tick = (on: boolean) => on ? '☒' : '☐';
     const risk = computeRisk(n.occurrence_score, n.severity_score);
-    const matrixRows = OCCURRENCE.slice().reverse().map(o => `<tr><td class="hd">${o.score}<br/><b>${escHtml(o.label)}</b><br/><span class="sm">${escHtml(o.description)}</span></td>${SEVERITY.map(s => { const sc = o.score * s.score; const band = RISK_BANDS.find(b => sc >= b.min && sc <= b.max)!; const hit = n.occurrence_score === o.score && n.severity_score === s.score; return `<td style="background:${band.color}22${hit ? ';outline:3px solid #111;outline-offset:-3px' : ''}">${sc} (${band.label})${hit ? ' ◄' : ''}</td>`; }).join('')}</tr>`).join('');
+    const criteria = activeCriteria();
+    const matrixRows = criteria.likelihood.slice().reverse().map(o => `<tr><td class="hd">${o.score}<br/><b>${escHtml(o.label)}</b><br/><span class="sm">${escHtml(o.description)}</span></td>${criteria.severity.map(s => { const sc = o.score * s.score; const band = criteria.bands.find(b => sc >= b.min && sc <= b.max)!; const hit = n.occurrence_score === o.score && n.severity_score === s.score; return `<td style="background:${band.color}22${hit ? ';outline:3px solid #111;outline-offset:-3px' : ''}">${sc} (${band.label})${hit ? ' ◄' : ''}</td>`; }).join('')}</tr>`).join('');
     const line = (label: string, val: unknown) => `<div class="fld"><span class="lb">${label}</span><span class="vl">${escHtml(val || '')}</span></div>`;
     const box = (label: string, val: unknown) => `<div class="sec-item"><div class="lb">${label}</div><div class="box">${escHtml(val || '')}</div></div>`;
     const detectedBy = n.detected_by_full || n.detected_by_name || '';
@@ -418,9 +423,9 @@ ${box('Description of Nonconformity (facts only, no blame):', n.description)}
 ${box('Immediate Action Taken (urgent step taken to contain the problem):', n.immediate_correction)}
 ${box('Remedial Action Taken (a short-term fix to correct the problem):', n.remedial_action)}
 <h2>Section B: Risk Evaluation — 5×5 Risk Assessment Matrix</h2>
-<table class="mx"><thead><tr><th class="hd">Occurrence ↓ / Severity →</th>${SEVERITY.map(s => `<th>${s.score} ${escHtml(s.label)}<br/><span class="sm">${escHtml(s.description)}</span></th>`).join('')}</tr></thead><tbody>${matrixRows}</tbody></table>
+<table class="mx"><thead><tr><th class="hd">Likelihood ↓ / Severity →</th>${criteria.severity.map(s => `<th>${s.score} ${escHtml(s.label)}<br/><span class="sm">${escHtml(s.description)}</span></th>`).join('')}</tr></thead><tbody>${matrixRows}</tbody></table>
 <div class="riskline"><span>Risk Score (Occurrence × Severity) = ${risk.score ?? '____'}</span>
-<span>Risk Level: ${tick(risk.level === 'low')} Low&nbsp;&nbsp; ${tick(risk.level === 'moderate')} Medium&nbsp;&nbsp; ${tick(risk.level === 'high')} High&nbsp;&nbsp; ${tick(risk.level === 'very_high')} Very High</span></div>
+<span>Risk Level: ${criteria.bands.map(b => `${tick(risk.level === b.level)} ${escHtml(b.label)}`).join('&nbsp;&nbsp; ')}</span></div>
 ${risk.action ? `<div class="sm" style="font-size:11px">${escHtml(risk.action)}</div>` : ''}
 <h2>Section C: Root Cause Analysis</h2>
 ${line('Investigation Team / Person:', n.investigation_team)}

@@ -1,4 +1,5 @@
 import { generateRecordNumber } from './recordNumber.js';
+import { activeCriteria } from './riskMatrix.js';
 
 // ==========================================================================
 // Auto-escalation rules for nonconformities and incidents / adverse events.
@@ -34,7 +35,14 @@ export const DEFAULT_ESCALATION: EscalationConfig = {
 };
 
 const RANK: Record<string, number> = { low: 1, moderate: 2, high: 3, very_high: 4 };
-const LEVEL_LABEL: Record<string, string> = { low: 'Low', moderate: 'Medium', high: 'High', very_high: 'Very High' };
+
+// Band names come from the laboratory's own risk criteria, so an escalation
+// message says "High" or whatever the laboratory decided to call that band.
+function levelLabels(): Record<string, string> {
+  const labels: Record<string, string> = {};
+  for (const band of activeCriteria().bands) labels[band.level] = band.label;
+  return labels;
+}
 
 function readBool(db: any, key: string, fallback: boolean): boolean {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
@@ -72,6 +80,7 @@ export function decideEscalation(cfg: EscalationConfig, opts: {
   manualRcaRequired: boolean;
 }): EscalationDecision {
   const { riskLevel, affectsPatientSafety, manualRcaRequired } = opts;
+  const LEVEL_LABEL = levelLabels();
   const threshold = cfg.autoEscalateRiskLevel === 'off' ? Infinity : RANK[cfg.autoEscalateRiskLevel] ?? Infinity;
   const rank = riskLevel ? RANK[riskLevel] ?? 0 : 0;
 

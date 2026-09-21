@@ -1,7 +1,7 @@
-import type { CSSProperties } from 'react';
-// 5x5 risk assessment matrix picker (SECHFO005 / ISO 22367). Click a cell to set
-// Occurrence (row) × Severity (column); the score and risk level are computed and
-// shown. Shared by Nonconformity and Incident/Adverse Event management.
+// 5x5 risk assessment matrix picker. Click a cell to set the row (occurrence /
+// likelihood) and the column (severity); the score and band are computed and
+// shown. The scales and bands are overridable so every module can render the
+// same picker with the laboratory's own risk criteria.
 
 export const SEVERITY = [
   { score: 1, label: 'Negligible', description: 'No patient impact, minor inconvenience' },
@@ -23,47 +23,62 @@ export const RISK_BANDS = [
   { level: 'high', label: 'High', min: 10, max: 16, action: 'Unacceptable — corrective action required.', color: '#e8590c' },
   { level: 'very_high', label: 'Very High', min: 17, max: 25, action: 'Critical — stop the process, immediate management attention.', color: '#c1121f' },
 ];
-export function bandFor(score: number) { return RISK_BANDS.find(b => score >= b.min && score <= b.max) || null; }
-export function riskLevelBadge(level?: string | null) {
-  const b = RISK_BANDS.find(x => x.level === level);
+
+export type MatrixStep = { score: number; label: string; description?: string };
+export type MatrixBand = { level: string; label: string; min: number; max: number; action: string; color: string };
+
+export function bandFor(score: number, bands: MatrixBand[] = RISK_BANDS) {
+  return bands.find(b => score >= b.min && score <= b.max) || null;
+}
+export function riskLevelBadge(level?: string | null, bands: MatrixBand[] = RISK_BANDS) {
+  const b = bands.find(x => x.level === level);
   if (!b) return <span className="badge">—</span>;
   return <span style={{ background: b.color, color: '#fff', fontWeight: 700, fontSize: 11, padding: '2px 8px', borderRadius: 4 }}>{b.label}</span>;
 }
 
-export default function RiskMatrix({ occurrence, severity, onChange }: {
+export default function RiskMatrix({
+  occurrence, severity, onChange, rows = OCCURRENCE, columns = SEVERITY, bands = RISK_BANDS,
+  rowLabel = 'Occurrence', columnLabel = 'Severity', scoreLabel,
+}: {
   occurrence: number | null; severity: number | null; onChange: (occurrence: number, severity: number) => void;
+  rows?: MatrixStep[]; columns?: MatrixStep[]; bands?: MatrixBand[];
+  rowLabel?: string; columnLabel?: string; scoreLabel?: string;
 }) {
   const score = occurrence && severity ? occurrence * severity : null;
-  const band = score ? bandFor(score) : null;
+  const band = score ? bandFor(score, bands) : null;
   return <div>
     <div style={{ overflowX: 'auto' }}>
-      <table style={{ borderCollapse: 'collapse', fontSize: 11, minWidth: 620 }}>
+      <table className="risk-matrix">
         <thead>
           <tr>
-            <th style={{ ...cellHead, minWidth: 120 }}>Occurrence&nbsp;↓ / Severity&nbsp;→</th>
-            {SEVERITY.map(s => <th key={s.score} style={{ ...cellHead, minWidth: 92 }} title={s.description}>{s.score}. {s.label}<div style={{ fontWeight: 400, fontSize: 9, opacity: 0.8 }}>{s.description}</div></th>)}
+            <th style={{ minWidth: 130 }}>{rowLabel}&nbsp;↓ / {columnLabel}&nbsp;→</th>
+            {columns.map(s => <th key={s.score} style={{ minWidth: 92 }} title={s.description}>
+              {s.score}. {s.label}{s.description && <small>{s.description}</small>}
+            </th>)}
           </tr>
         </thead>
         <tbody>
-          {OCCURRENCE.slice().reverse().map(o => <tr key={o.score}>
-            <th style={{ ...cellHead, textAlign: 'left', minWidth: 120 }} title={o.description}>{o.score}. {o.label}<div style={{ fontWeight: 400, fontSize: 9, opacity: 0.8 }}>{o.description}</div></th>
-            {SEVERITY.map(s => {
-              const sc = o.score * s.score; const b = bandFor(sc)!;
+          {rows.slice().reverse().map(o => <tr key={o.score}>
+            <th style={{ textAlign: 'left', minWidth: 130 }} title={o.description}>
+              {o.score}. {o.label}{o.description && <small>{o.description}</small>}
+            </th>
+            {columns.map(s => {
+              const sc = o.score * s.score; const b = bandFor(sc, bands);
               const active = occurrence === o.score && severity === s.score;
-              return <td key={s.score} onClick={() => onChange(o.score, s.score)} title={`${b.label} risk`}
-                style={{ border: '1px solid #999', textAlign: 'center', cursor: 'pointer', padding: '8px 4px', fontWeight: 700, color: '#fff', background: b.color, opacity: active ? 1 : 0.55, outline: active ? '3px solid #111' : 'none', outlineOffset: -3 }}>
-                {sc}<div style={{ fontSize: 9, fontWeight: 400 }}>{b.label}</div>
+              return <td key={s.score} onClick={() => onChange(o.score, s.score)} title={`${b?.label ?? ''} risk`}
+                data-active={active ? 'true' : 'false'}
+                style={{ background: b?.color ?? '#999', opacity: active ? 1 : 0.62 }}>
+                {sc}<span>{b?.label}</span>
               </td>;
             })}
           </tr>)}
         </tbody>
       </table>
     </div>
-    <div style={{ marginTop: 8, display: 'flex', gap: 18, alignItems: 'center', flexWrap: 'wrap' }}>
-      <strong>Risk score (O×S): {score ?? '—'}</strong>
-      {band && <span style={{ background: band.color, color: '#fff', fontWeight: 700, padding: '2px 10px', borderRadius: 4 }}>{band.label} risk</span>}
+    <div className="risk-matrix-foot">
+      <strong>{scoreLabel ?? `Risk score (${rowLabel.charAt(0)}×${columnLabel.charAt(0)})`}: {score ?? '—'}</strong>
+      {band && <span className="risk-matrix-band" style={{ background: band.color }}>{band.label} risk</span>}
       {band && <span className="muted" style={{ fontSize: 12 }}>{band.action}</span>}
     </div>
   </div>;
 }
-const cellHead: CSSProperties = { border: '1px solid #999', background: '#eef2f7', color: '#111', padding: '4px 6px', fontWeight: 700, textAlign: 'center', verticalAlign: 'middle' };
