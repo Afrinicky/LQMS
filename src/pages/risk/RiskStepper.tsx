@@ -4,7 +4,7 @@
 
 export const RISK_STEPS = [
   { key: 'identification', label: 'Identification' },
-  { key: 'analysis', label: 'Analysis' },
+  { key: 'analysis', label: 'Assessment' },
   { key: 'evaluation', label: 'Evaluation' },
   { key: 'treatment', label: 'Control' },
   { key: 'residual', label: 'Residual risk' },
