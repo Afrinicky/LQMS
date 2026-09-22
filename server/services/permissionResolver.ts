@@ -83,7 +83,7 @@ const ALL_PERM_KEYS: string[] = [...MODULES.map(m => m.key), ...FEATURES.map(f =
  * applies. Exactly one is returned, which is what makes contradiction
  * impossible.
  */
-export function profileIdForUser(userId: number): { profileId: number | null; via: 'position' | 'account' | null; positionTitle?: string } {
+export function profileIdForUser(userId: number): { profileId: number | null; via: 'position' | 'account' | 'acting' | null; positionTitle?: string } {
   const db = getDb();
   const user = db.prepare('SELECT id, role_id, staff_id, is_active FROM users WHERE id = ?').get(userId) as
     { id: number; role_id: number; staff_id: number | null; is_active: number } | undefined;
@@ -97,6 +97,7 @@ export function profileIdForUser(userId: number): { profileId: number | null; vi
   const accountIsAdministrator = (db.prepare('SELECT is_administrator AS a FROM roles WHERE id = ?')
     .get(user.role_id) as { a: number } | undefined)?.a === 1;
 
+  let base: { profileId: number; via: 'position' | 'account'; positionTitle?: string } = { profileId: user.role_id, via: 'account' };
   if (user.staff_id && !accountIsAdministrator) {
     const mapped = db.prepare(`
       SELECT p.access_profile_role_id AS profileId, p.title AS title
@@ -107,9 +108,86 @@ export function profileIdForUser(userId: number): { profileId: number | null; vi
       ORDER BY CASE spa.assignment_type WHEN 'primary' THEN 0 ELSE 1 END, spa.id
       LIMIT 1
     `).get(user.staff_id) as { profileId: number; title: string } | undefined;
-    if (mapped?.profileId) return { profileId: mapped.profileId, via: 'position', positionTitle: mapped.title };
+    if (mapped?.profileId) base = { profileId: mapped.profileId, via: 'position', positionTitle: mapped.title };
   }
-  return { profileId: user.role_id, via: 'account' };
+
+  // Somebody appointed to act as a unit head is running that unit, and the work
+  // of running it — preparing the bench schedule, the unit's programme, its
+  // rosters — is what the appointment is for. Recording the appointment and
+  // then leaving them on their bench profile meant the acting head could see
+  // none of it, so for the life of the appointment they carry the profile the
+  // post itself carries.
+  const acting = user.staff_id && !accountIsAdministrator ? actingHeadProfile(db, user.staff_id) : null;
+  if (acting && !isSeniorProfile(base.profileId)) {
+    return { profileId: acting.profileId, via: 'acting', positionTitle: acting.unitName };
+  }
+  return base;
+}
+
+/**
+ * The profile an acting unit head stands in with: the one the unit's
+ * substantive head holds, so the stand-in gets exactly the post's access and
+ * not a guess at it. Falls back to the laboratory's unit-head profile when the
+ * post is vacant or its holder has no account.
+ */
+function actingHeadProfile(db: any, staffId: number): { profileId: number; unitName: string } | null {
+  const today = new Date().toISOString().slice(0, 10);
+  const appt = db.prepare(`SELECT a.section_id, s.name AS unit_name, s.head_staff_id
+      FROM acting_unit_heads a JOIN sections s ON s.id = a.section_id
+      WHERE a.acting_staff_id = ? AND a.status = 'active' AND a.start_date <= ? AND a.end_date >= ?
+      ORDER BY a.start_date DESC, a.id DESC LIMIT 1`).get(staffId, today, today) as
+    { section_id: number; unit_name: string; head_staff_id: number | null } | undefined;
+  if (!appt) return null;
+
+  if (appt.head_staff_id) {
+    const headUser = db.prepare('SELECT id FROM users WHERE staff_id = ? AND is_active = 1 ORDER BY id LIMIT 1')
+      .get(appt.head_staff_id) as { id: number } | undefined;
+    // The substantive head's own profile, resolved the same way anybody's is —
+    // their position mapping included. Their acting appointments are not
+    // followed, so this cannot loop.
+    if (headUser) {
+      const theirs = baseProfileIdForStaffUser(db, headUser.id);
+      if (theirs !== null && !isSeniorProfile(theirs)) return { profileId: theirs, unitName: appt.unit_name };
+    }
+  }
+  const fallback = db.prepare("SELECT id FROM roles WHERE LOWER(name) IN ('section head', 'unit head') ORDER BY id LIMIT 1")
+    .get() as { id: number } | undefined;
+  return fallback ? { profileId: fallback.id, unitName: appt.unit_name } : null;
+}
+
+/** A user's profile WITHOUT considering acting appointments. */
+function baseProfileIdForStaffUser(db: any, userId: number): number | null {
+  const user = db.prepare('SELECT role_id, staff_id, is_active FROM users WHERE id = ?').get(userId) as
+    { role_id: number; staff_id: number | null; is_active: number } | undefined;
+  if (!user || user.is_active !== 1) return null;
+  if (user.staff_id) {
+    const mapped = db.prepare(`
+      SELECT p.access_profile_role_id AS profileId FROM staff_position_assignments spa
+      JOIN positions p ON p.id = spa.position_id
+      WHERE spa.staff_id = ? AND spa.is_active = 1 AND p.is_active = 1 AND p.access_profile_role_id IS NOT NULL
+      ORDER BY CASE spa.assignment_type WHEN 'primary' THEN 0 ELSE 1 END, spa.id LIMIT 1
+    `).get(user.staff_id) as { profileId: number } | undefined;
+    if (mapped?.profileId) return mapped.profileId;
+  }
+  return user.role_id;
+}
+
+/**
+ * The posts that answer for the whole laboratory rather than one unit.
+ *
+ * Standing in for a unit head must never cost somebody rights they already
+ * hold, so a Quality Manager or Laboratory Manager covering a unit keeps their
+ * own profile. Matched on the administrator flag and on the name, because a
+ * laboratory renames these posts and neither should lose its reach.
+ */
+const SENIOR_PROFILE_NAME = /(quality\s*manager|lab(oratory)?\s*manager)/i;
+
+export function isSeniorProfile(profileId: number | null): boolean {
+  if (profileId === null) return false;
+  const row = getDb().prepare('SELECT name, is_administrator AS admin FROM roles WHERE id = ?')
+    .get(profileId) as { name: string; admin: number } | undefined;
+  if (!row) return false;
+  return row.admin === 1 || SENIOR_PROFILE_NAME.test(String(row.name ?? ''));
 }
 
 /* ==========================================================================
@@ -129,17 +207,26 @@ export function profileIdForUser(userId: number): { profileId: number | null; vi
    ========================================================================= */
 const grantCache = new Map<number, Map<string, Grant>>();
 let cachedEpoch = -1;
+let cachedDay = '';
+
+/** Today, as the acting-head window is written. */
+function today(): string { return new Date().toISOString().slice(0, 10); }
 
 function cachedGrants(userId: number): Map<string, Grant> {
   const epoch = accessEpoch();
-  if (epoch !== cachedEpoch) { grantCache.clear(); cachedEpoch = epoch; }
+  // An acting appointment runs between two dates, so an answer built yesterday
+  // can be wrong today with nothing having been written: the appointment began
+  // this morning, or ended last night. The day is therefore part of what the
+  // cache is keyed on, not just the write counter.
+  const day = today();
+  if (epoch !== cachedEpoch || day !== cachedDay) { grantCache.clear(); cachedEpoch = epoch; cachedDay = day; }
   const hit = grantCache.get(userId);
   if (hit) return hit;
   const built = computeGrants(userId);
   // The epoch may have moved while we were building — a write inside the same
   // tick — in which case what we just built is already suspect. Re-read it
   // rather than storing it.
-  if (accessEpoch() !== epoch) return built;
+  if (accessEpoch() !== epoch || today() !== day) return built;
   grantCache.set(userId, built);
   return built;
 }
@@ -379,7 +466,7 @@ function levelFromRows(rows: Map<string, boolean>, permKey: string): AccessLevel
  * Per-area explanation of one user's access: profile level, personal override
  * level (or none), and the effective outcome.
  */
-export function explainUserAccess(userId: number): { profileId: number | null; via: 'position' | 'account' | null; positionTitle?: string; areas: AreaExplanation[] } {
+export function explainUserAccess(userId: number): { profileId: number | null; via: 'position' | 'account' | 'acting' | null; positionTitle?: string; areas: AreaExplanation[] } {
   const db = getDb();
   const { profileId, via, positionTitle } = profileIdForUser(userId);
   const permissions = db.prepare('SELECT id, module_key, action FROM permissions').all() as

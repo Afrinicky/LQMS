@@ -111,7 +111,7 @@ export type AreaExplanation = {
 export type EffectiveAccess = {
   user: { id: number; username: string; fullName: string; roleId: number; isActive: number };
   profile: { id: number; name: string } | null;
-  via: 'position' | 'account' | null;
+  via: 'position' | 'account' | 'acting' | null;
   positionTitle: string | null;
   areas: AreaExplanation[];
 };

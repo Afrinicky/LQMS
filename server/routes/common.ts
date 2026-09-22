@@ -2489,7 +2489,17 @@ export function commonRoutes() {
     audit(req, { action: 'deactivate', entity: 'technical_authorizations', entityId: req.params.id, oldValue: existing, newValue: { is_active: 0 } });
     res.json({ ok: true });
   });
-  router.get('/sections', requirePermission('settings', 'view'), (_req, res) => res.json(getDb().prepare('SELECT id, name, department_id FROM sections WHERE is_active = 1 ORDER BY name').all()));
+  /**
+   * The list of units.
+   *
+   * This was gated on settings rights, which a unit head does not hold, and
+   * every screen that asks "which unit?" swallowed the refusal into an empty
+   * list — so the head of a unit opened the bench-schedule form and could not
+   * find their own unit in it. The same names are already served to any signed-in
+   * user by `/sections/options` below, so the gate was protecting nothing and
+   * costing the people who run the units the forms they run them with.
+   */
+  router.get('/sections', requireAuth, (_req, res) => res.json(getDb().prepare('SELECT id, name, department_id FROM sections WHERE is_active = 1 ORDER BY name').all()));
 
   /**
    * The units, for anybody who has to name one.
@@ -2504,6 +2514,13 @@ export function commonRoutes() {
    * A list of unit names is not a confidence. What matters is which one is
    * YOURS, so that is marked, and the forms that use this default to it.
    */
+  /** Is this person standing in as head of that unit today? */
+  function isActingHeadOf(db: any, staffId: number, sectionId: number): boolean {
+    const day = new Date().toISOString().slice(0, 10);
+    return !!db.prepare(`SELECT 1 FROM acting_unit_heads WHERE acting_staff_id = ? AND section_id = ?
+      AND status = 'active' AND start_date <= ? AND end_date >= ?`).get(staffId, sectionId, day, day);
+  }
+
   router.get('/sections/options', requireAuth, (req, res) => {
     const db = getDb();
     const staffId = getCurrentStaffId(req);
@@ -2516,8 +2533,13 @@ export function commonRoutes() {
       mine: mine === null ? null : Number(mine),
       // Whether the reader is accountable for their unit, which is what
       // decides whether they may set its programme up rather than only read it.
-      isHeadOfMine: Boolean(mine !== null && staffId !== null
-        && rows.some(r => Number(r.id) === Number(mine) && Number(r.head_staff_id) === Number(staffId))),
+      // Accountable for the unit means running it today — an acting head is
+      // running it just as much as the substantive one, which is the whole
+      // point of appointing them.
+      isHeadOfMine: Boolean(mine !== null && staffId !== null && (
+        rows.some(r => Number(r.id) === Number(mine) && Number(r.head_staff_id) === Number(staffId))
+        || isActingHeadOf(db, staffId, Number(mine))
+      )),
       sections: rows.map(r => ({
         id: r.id, name: r.name, department_id: r.department_id,
         departmentName: r.department_name ?? null,
