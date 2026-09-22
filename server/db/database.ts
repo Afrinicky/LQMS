@@ -53,7 +53,12 @@ export function ensureDataDirs() {
    would catch it. Here it cannot be forgotten: the statement itself carries
    the tables it touches.
    ========================================================================= */
-const ACCESS_INPUT_TABLES = /\b(role_permissions|user_permission_overrides|permissions|positions|staff_position_assignments|system_modules|users|roles)\b/i;
+// `acting_unit_heads` and `sections` are here because standing in for a unit
+// head now carries that post's access: appointing somebody, ending the
+// appointment, or changing who substantively heads the unit all change what
+// somebody may do, and a permission that lags behind the record is not a
+// performance problem but a security one.
+const ACCESS_INPUT_TABLES = /\b(role_permissions|user_permission_overrides|permissions|positions|staff_position_assignments|system_modules|users|roles|acting_unit_heads|sections)\b/i;
 const IS_WRITE = /^\s*(INSERT|UPDATE|DELETE|REPLACE|CREATE|ALTER|DROP)\b/i;
 let accessEpochValue = 1;
 /** Changes whenever anything the permission resolver reads has been written. */

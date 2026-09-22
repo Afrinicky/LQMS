@@ -554,7 +554,7 @@ function IndividualsTab({ catalogue, reload }: { catalogue: AccessCatalogue | nu
             <h3>{user?.fullName || user?.username || 'Select a person'}</h3>
             <p className="muted">
               {effective?.profile
-                ? <>Follows <strong>{effective.profile.name}</strong>{effective.via === 'position' && effective.positionTitle ? ` (from the ${effective.positionTitle} position)` : ''}</>
+                ? <>Follows <strong>{effective.profile.name}</strong>{effective.via === 'position' && effective.positionTitle ? ` (from the ${effective.positionTitle} position)` : effective.via === 'acting' && effective.positionTitle ? ` (while acting as head of ${effective.positionTitle})` : ''}</>
                 : 'No access profile'}
               {overrideCount > 0 && <> · {overrideCount} personal {overrideCount === 1 ? 'decision' : 'decisions'} overriding it</>}
             </p>
