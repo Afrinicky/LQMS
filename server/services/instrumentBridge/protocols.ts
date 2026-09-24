@@ -199,8 +199,10 @@ export function parseAstm(text: string): AnalyserMessage[] {
       // Field 3 is the specimen ID the laboratory gave it; field 4 is the
       // instrument's own. A control usually names itself in one or the other.
       const specimen = field(record, 3) || field(record, 4);
+      const specimenParts = specimen.split('^').map(p => p.trim()).filter(Boolean);
+      const sampleId = specimenParts.length ? specimenParts[specimenParts.length - 1] : specimen;
       current = {
-        sampleId: component(specimen, 1) || specimen || null,
+        sampleId: sampleId || null,
         lotNumber: null,
         instrument,
         runAt: astmTime(field(record, 23) || field(record, 22) || null),
