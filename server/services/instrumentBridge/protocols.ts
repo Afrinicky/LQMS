@@ -147,8 +147,33 @@ export function astmTime(value: string | null | undefined): string | null {
  * while the link was down sends its backlog in one go — so this returns a list,
  * and each O record starts a new one.
  */
+/**
+ * LHIMSDataInput.txt contains the XN-550's ASTM framing, but the middleware's
+ * file writer does not keep the checksum bytes: each frame is written as
+ * STX + frame-number + record + CR + ETX. Network mode has already removed the
+ * frame envelope before this parser sees it, so the tap needs to normalise both
+ * forms to the same record text first.
+ */
+function normaliseAstmFrames(text: string): string {
+  if (!/[\x02\x03\x17]/.test(text)) return text;
+
+  const records: string[] = [];
+  const frame = /\x02[0-7]([\s\S]*?)[\x03\x17]/g;
+  let match: RegExpExecArray | null;
+  while ((match = frame.exec(text)) !== null) {
+    const record = match[1].replace(/\r+$/, '').trim();
+    if (record) records.push(record);
+  }
+
+  // If the input looked framed but contained no complete frame, keep it intact
+  // so the caller can hold it as an incomplete transmission rather than losing
+  // a partial write.
+  return records.length ? records.join('\r') : text;
+}
+
 export function parseAstm(text: string): AnalyserMessage[] {
-  const lines = text.split(/[\r\n]+/).map(l => l.trim()).filter(Boolean);
+  const normalised = normaliseAstmFrames(text);
+  const lines = normalised.split(/[\r\n]+/).map(l => l.trim()).filter(Boolean);
   const messages: AnalyserMessage[] = [];
   let current: AnalyserMessage | null = null;
   let instrument: string | null = null;
@@ -543,6 +568,17 @@ export function parseFor(protocol: string, text: string): AnalyserMessage[] {
    ========================================================================= */
 export function splitTransmissions(text: string, protocol: string): { complete: string[]; remainder: string } {
   if (!text) return { complete: [], remainder: '' };
+
+  if (protocol === 'astm' && text.includes('\\x04')) {
+    // The LHIMS client appends raw XN-550 ASTM traffic to its file. Each
+    // transmission ends with EOT (0x04), followed by the next ENQ/STX. Split
+    // on that protocol boundary before parsing the individual frames. Keeping
+    // the final fragment as the remainder means a file write interrupted in
+    // the middle of a transmission is not ingested prematurely.
+    const parts = text.split('\\x04');
+    const complete = parts.slice(0, -1).filter(p => p.trim());
+    return { complete, remainder: parts[parts.length - 1] };
+  }
 
   if (protocol === 'hl7') {
     // Each message starts at an MSH. A new MSH means the previous one finished.
