@@ -569,13 +569,13 @@ export function parseFor(protocol: string, text: string): AnalyserMessage[] {
 export function splitTransmissions(text: string, protocol: string): { complete: string[]; remainder: string } {
   if (!text) return { complete: [], remainder: '' };
 
-  if (protocol === 'astm' && text.includes('\\x04')) {
+  if (protocol === 'astm' && text.includes('\x04')) {
     // The LHIMS client appends raw XN-550 ASTM traffic to its file. Each
     // transmission ends with EOT (0x04), followed by the next ENQ/STX. Split
     // on that protocol boundary before parsing the individual frames. Keeping
     // the final fragment as the remainder means a file write interrupted in
     // the middle of a transmission is not ingested prematurely.
-    const parts = text.split('\\x04');
+    const parts = text.split('\x04');
     const complete = parts.slice(0, -1).filter(p => p.trim());
     return { complete, remainder: parts[parts.length - 1] };
   }
