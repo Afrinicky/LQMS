@@ -1,14 +1,20 @@
 /**
- * Placements end, and the system ends them.
+ * Engagements end, and the system ends them.
  *
- * A student, an intern, a national service person, a locum or a contractor is
- * in the laboratory for a stated period. The register had no way to say so, so
- * they were enrolled like permanent staff and stayed that way: counted in the
- * head count, offered on rosters, holding a working login, months after they
- * had gone. Closing the record was somebody's job to remember, and nobody
+ * A student, an intern, a national service person, a locum, a contractor, a
+ * scientist on a fixed-term contract — every one of them is in the laboratory
+ * for a stated period. The register had no way to say so, so they were
+ * enrolled like permanent staff and stayed that way: counted in the head
+ * count, offered on rosters, holding a working login, months after they had
+ * gone. Closing the record was somebody's job to remember, and nobody
  * remembers.
  *
- * The placement now carries its own end date, and this module is what happens
+ * Whether an engagement runs out is read from the personnel category AND the
+ * appointment type, because a register uses the two differently and either one
+ * on its own leaves people out — a fixed-term scientist is often category
+ * STAFF on a CONTRACT appointment, and would have been missed entirely.
+ *
+ * The engagement now carries its own end date, and this module is what happens
  * when it passes. Two steps, in this order:
  *
  *   1. On the day it ends, the laboratory is TOLD — the person themselves, the
@@ -32,7 +38,10 @@
  * one that has already been closed is a reinstatement, which the register does
  * through its own screen.
  */
-import { PLACEMENT_GRACE_DAYS, PLACEMENT_EXIT_REASON, TEMPORARY_CATEGORIES } from '../../shared/constants/personnel.js';
+import {
+  PLACEMENT_GRACE_DAYS, TEMPORARY_CATEGORIES, TEMPORARY_APPOINTMENT_TYPES,
+  isTimeLimited, placementExitReason,
+} from '../../shared/constants/personnel.js';
 
 type DB = any;
 
@@ -40,17 +49,20 @@ const today = () => new Date().toISOString().slice(0, 10);
 const plusDays = (iso: string, days: number) =>
   new Date(new Date(`${iso}T00:00:00Z`).getTime() + days * 864e5).toISOString().slice(0, 10);
 
-/** Everyone on a placement that has run out, whether or not it has been dealt with. */
+/** Everyone whose engagement has run out, whether or not it has been dealt with. */
 function expiredPlacements(db: DB, onDate: string): any[] {
-  const marks = TEMPORARY_CATEGORIES.map(() => '?').join(', ');
+  const categories = TEMPORARY_CATEGORIES.map(() => '?').join(', ');
+  const appointments = TEMPORARY_APPOINTMENT_TYPES.map(() => '?').join(', ');
   return db.prepare(`SELECT s.id, s.full_name, s.employee_no, s.section_id, s.personnel_category,
-      s.placement_end_date, s.placement_notice_at, s.placement_closed_at, sec.name AS section_name
+      s.appointment_type, s.placement_end_date, s.placement_notice_at, s.placement_closed_at,
+      sec.name AS section_name
     FROM staff s LEFT JOIN sections sec ON sec.id = s.section_id
     WHERE s.is_active = 1
       AND s.placement_end_date IS NOT NULL
       AND date(s.placement_end_date) <= date(?)
-      AND UPPER(COALESCE(s.personnel_category, '')) IN (${marks})`)
-    .all(onDate, ...TEMPORARY_CATEGORIES) as any[];
+      AND (UPPER(COALESCE(s.personnel_category, '')) IN (${categories})
+        OR UPPER(COALESCE(s.appointment_type, '')) IN (${appointments}))`)
+    .all(onDate, ...TEMPORARY_CATEGORIES, ...TEMPORARY_APPOINTMENT_TYPES) as any[];
 }
 
 /**
@@ -109,23 +121,24 @@ function notify(db: DB, staffId: number, notice: {
 }
 
 /**
- * Close a placement: withdraw the access, keep the record.
+ * Close an engagement: withdraw the access, keep the record.
  *
  * The same steps the register takes when somebody records an exit by hand —
  * the login off and its sessions ended, the positions and technical
- * authorisations closed, the reason and the date on the record — so a
- * placement that ends on its own and one closed by the personnel office leave
- * the register in exactly the same state.
+ * authorisations closed, the reason and the date on the record — so one that
+ * ends on its own and one closed by the personnel office leave the register in
+ * exactly the same state. The reason follows what the engagement was: an
+ * internship and a fixed-term contract end differently on paper.
  */
 export function closePlacement(db: DB, staffId: number, opts: { reason?: string; date?: string; notes?: string } = {}): boolean {
-  const staff = db.prepare('SELECT id, full_name, is_active FROM staff WHERE id = ?').get(staffId) as
-    { id: number; full_name: string; is_active: number } | undefined;
+  const staff = db.prepare('SELECT id, full_name, is_active, personnel_category, appointment_type FROM staff WHERE id = ?').get(staffId) as
+    { id: number; full_name: string; is_active: number; personnel_category: string | null; appointment_type: string | null } | undefined;
   if (!staff || staff.is_active !== 1) return false;
 
   const account = db.prepare('SELECT id, role_id FROM users WHERE staff_id = ?').get(staffId) as
     { id: number; role_id: number } | undefined;
-  // Never leave the laboratory without an administrator. A placement should
-  // never hold that account, but if one does, the record is left alone and the
+  // Never leave the laboratory without an administrator. A fixed-term record
+  // should never hold that account, but if one does, it is left alone and the
   // laboratory keeps its way in.
   if (account) {
     const adminRole = db.prepare("SELECT id FROM roles WHERE name = 'System Administrator'").get() as { id: number } | undefined;
@@ -137,7 +150,7 @@ export function closePlacement(db: DB, staffId: number, opts: { reason?: string;
   }
 
   const date = opts.date ?? today();
-  const reason = opts.reason ?? PLACEMENT_EXIT_REASON;
+  const reason = opts.reason ?? placementExitReason(staff.personnel_category, staff.appointment_type);
   db.transaction(() => {
     db.prepare(`UPDATE staff SET is_active = 0, exit_reason = ?, exit_date = ?, exit_notes = ?,
       exit_recorded_at = CURRENT_TIMESTAMP, placement_closed_at = CURRENT_TIMESTAMP,
@@ -145,7 +158,7 @@ export function closePlacement(db: DB, staffId: number, opts: { reason?: string;
       .run(reason, date, opts.notes ?? null, staffId);
     db.prepare("UPDATE staff_position_assignments SET is_active = 0, ends_at = CURRENT_TIMESTAMP WHERE staff_id = ? AND is_active = 1").run(staffId);
     db.prepare('UPDATE technical_authorizations SET is_active = 0 WHERE staff_id = ? AND is_active = 1').run(staffId);
-    // An appointment to act as a unit supervisor cannot outlive the placement
+    // An appointment to act as a unit supervisor cannot outlive the engagement
     // that carried it.
     db.prepare("UPDATE acting_unit_heads SET status = 'ended' WHERE acting_staff_id = ? AND status = 'active'").run(staffId);
     if (account) {
@@ -155,24 +168,25 @@ export function closePlacement(db: DB, staffId: number, opts: { reason?: string;
     db.prepare(`INSERT INTO audit_logs (actor_user_id, action, entity, entity_id, old_value, new_value)
       VALUES (NULL, 'record_exit', 'staff', ?, ?, ?)`)
       .run(String(staffId), JSON.stringify({ isActive: 1 }),
-        JSON.stringify({ isActive: 0, fullName: staff.full_name, exitReason: reason, exitDate: date, closedBy: 'placement end date' }));
+        JSON.stringify({ isActive: 0, fullName: staff.full_name, exitReason: reason, exitDate: date, closedBy: 'engagement end date' }));
   })();
   return true;
 }
 
 /**
- * Has this person's placement run out, grace period and all?
+ * Has this person's engagement run out, grace period and all?
  *
  * Asked at sign-in, so somebody whose week expired an hour ago is not let
  * through because the daily pass has not come round yet. It closes the record
  * on the way — the answer and the consequence are the same event.
  */
 export function placementIsSpent(db: DB, staffId: number): boolean {
-  const row = db.prepare(`SELECT id, placement_end_date, personnel_category, is_active
+  const row = db.prepare(`SELECT id, placement_end_date, personnel_category, appointment_type, is_active
     FROM staff WHERE id = ?`).get(staffId) as
-    { id: number; placement_end_date: string | null; personnel_category: string | null; is_active: number } | undefined;
+    { id: number; placement_end_date: string | null; personnel_category: string | null;
+      appointment_type: string | null; is_active: number } | undefined;
   if (!row || row.is_active !== 1 || !row.placement_end_date) return false;
-  if (!TEMPORARY_CATEGORIES.includes(String(row.personnel_category ?? '').toUpperCase() as never)) return false;
+  if (!isTimeLimited(row.personnel_category, row.appointment_type)) return false;
   if (plusDays(String(row.placement_end_date).slice(0, 10), PLACEMENT_GRACE_DAYS) > today()) return false;
   closePlacement(db, staffId);
   return true;
@@ -192,17 +206,19 @@ export function runPlacementTick(db: DB): { warned: number; closed: number } {
     const ends = String(person.placement_end_date).slice(0, 10);
     const withdrawsOn = plusDays(ends, PLACEMENT_GRACE_DAYS);
     const who = `${person.full_name}${person.employee_no ? ` (${person.employee_no})` : ''}`;
-    const role = String(person.personnel_category ?? 'placement').toLowerCase();
+    // What they were engaged as, in the laboratory's own words: the category
+    // when it says something, otherwise the appointment type.
+    const engagement = String(person.personnel_category || person.appointment_type || '').toLowerCase().trim();
 
     if (!person.placement_notice_at) {
       for (const staffId of recipients(db, person)) {
         if (notify(db, staffId, {
           kind: `placement_ending:${ends}`,
           subjectId: Number(person.id),
-          title: `Placement ended: ${person.full_name}`,
-          message: `${who} was enrolled as ${role}${person.section_name ? ` in ${person.section_name}` : ''} `
-            + `until ${ends}. Access is withdrawn on ${withdrawsOn} unless the placement is extended — `
-            + `set a new end date on the register to extend it.`,
+          title: `Engagement ended: ${person.full_name}`,
+          message: `${who}${engagement ? ` was engaged as ${engagement}` : ''}`
+            + `${person.section_name ? ` in ${person.section_name}` : ''} until ${ends}. `
+            + `Access is withdrawn on ${withdrawsOn} unless a new end date is set on the register.`,
           severity: 'high',
           dueDate: withdrawsOn,
         })) warned++;

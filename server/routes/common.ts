@@ -13,7 +13,7 @@ import { requirePermission, viewableModulesOf } from '../middleware/permissions.
 import { resolvePermission, explainUserAccess } from '../services/permissionResolver.js';
 import { trainingFileFor } from '../services/trainingRecord.js';
 import { ACCESS_LEVELS, LEVEL_ACTIONS, featuresOfModule, type AccessLevel } from '../../shared/constants/features.js';
-import { isTemporaryCategory } from '../../shared/constants/personnel.js';
+import { isTimeLimited } from '../../shared/constants/personnel.js';
 import { runPlacementTick } from '../services/placementLifecycle.js';
 import { pendingRequests, recentRequests, decideRequest } from '../services/passwordResetService.js';
 import { historicReferences, purgeDisposableRows, purgeUserEverywhere } from '../services/userReferences.js';
@@ -155,13 +155,27 @@ function buildStaffColumns(body: Record<string, unknown>): Record<string, string
   if (middle) cols.other_names = middle;
   if ('sectionId' in body) cols.section_id = idOrNull(body.sectionId);
   if ('isActive' in body) cols.is_active = body.isActive ? 1 : 0;
-  // A placement period belongs to a placement. Moving somebody onto the
-  // permanent staff takes the end date off with it, so nothing is left behind
-  // to withdraw their access in a month's time.
-  if ('personnelCategory' in body && !isTemporaryCategory(cols.personnel_category as string | null)) {
-    cols.placement_end_date = null;
-  }
   return cols;
+}
+
+/**
+ * An end date belongs to an engagement that has one.
+ *
+ * Moving somebody onto the permanent staff takes it off with them, so nothing
+ * is left behind to withdraw their access in a month's time. What counts is
+ * the position the record is IN once the edit lands, not the fields this
+ * particular request happened to carry — changing only the appointment type
+ * must be judged against the category already on file, and the other way
+ * round.
+ */
+function clearEndDateWhenPermanent(
+  cols: Record<string, string | number | null>,
+  existing?: Record<string, unknown> | null,
+): void {
+  if (!('personnel_category' in cols) && !('appointment_type' in cols)) return;
+  const category = 'personnel_category' in cols ? cols.personnel_category : (existing?.personnel_category ?? null);
+  const appointment = 'appointment_type' in cols ? cols.appointment_type : (existing?.appointment_type ?? null);
+  if (!isTimeLimited(category as string | null, appointment as string | null)) cols.placement_end_date = null;
 }
 
 /* ── Automatic unit hierarchy helpers (organogram) ──────────────────────────
@@ -1546,6 +1560,7 @@ export function commonRoutes() {
 
   router.post('/staff', requirePermission('personnel.register', 'create'), (req, res) => {
     const cols = buildStaffColumns(req.body);
+    clearEndDateWhenPermanent(cols);
     if (!cols.full_name) return res.status(400).json({ error: 'A full name (or first name + surname) is required.' });
     const keys = Object.keys(cols);
     const r = getDb().prepare(`INSERT INTO staff (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`).run(...keys.map(k => cols[k]));
@@ -1575,7 +1590,8 @@ export function commonRoutes() {
       }
       cols = Object.fromEntries(Object.entries(cols).filter(([c]) => SELF_EDITABLE.has(c)));
     }
-    // Extending a placement restarts its clock: the warning goes out again
+    clearEndDateWhenPermanent(cols, existing as Record<string, unknown>);
+    // Extending an engagement restarts its clock: the warning goes out again
     // against the new date, and the withdrawal that was a week away is not.
     if ('placement_end_date' in cols
       && String(cols.placement_end_date ?? '') !== String((existing as any).placement_end_date ?? '')) {

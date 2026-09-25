@@ -5,7 +5,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { DetailModal, RowMenu } from './ui';
 import {
   GENDERS, PERSONNEL_CATEGORIES, APPOINTMENT_TYPES, NATIONAL_ID_TYPES, CADRES, AVAILABILITY_STATUSES, EXIT_REASONS,
-  emptyStaffForm, staffFormFrom, yearsOfService, isTemporaryCategory, PLACEMENT_GRACE_DAYS, type StaffFormValues,
+  emptyStaffForm, staffFormFrom, yearsOfService, isTimeLimited, PLACEMENT_GRACE_DAYS, type StaffFormValues,
 } from '../../shared/constants/personnel';
 import type { Staff, Section, Position, ProfessionalRank } from '../../shared/types/api';
 import TextField from './ui/TextField';
@@ -229,6 +229,8 @@ export default function PersonnelRegisterAdmin() {
   // typing here feel frozen. Selects and date pickers are one interaction
   // rather than a stream of them, and keep `set` above.
   const setText = (k: keyof StaffFormValues) => (value: string) => setForm(f => ({ ...f, [k]: value }));
+  // Either box can be the one that says the engagement runs out.
+  const fixedTerm = isTimeLimited(form.personnelCategory, form.appointmentType);
 
   return <div className="reg-admin">
     <div className="card">
@@ -304,8 +306,8 @@ export default function PersonnelRegisterAdmin() {
               const licExpired = s.licenceExpiryDate && s.licenceExpiryDate < today;
               const licSoon = s.licenceExpiryDate && !licExpired && s.licenceExpiryDate <= soon;
               const departed = hasLeft(s);
-              // A placement runs out on its own, so the register says when —
-              // before the day, not only after it.
+              // A fixed-term engagement runs out on its own, so the register
+              // says when — before the day, not only after it.
               const placementEnds = !departed ? (s.placementEndDate || '') : '';
               const placementOver = !!placementEnds && placementEnds < today;
               const placementSoon = !!placementEnds && !placementOver && placementEnds <= nearly;
@@ -316,8 +318,8 @@ export default function PersonnelRegisterAdmin() {
                     {s.employeeNo || 'No Staff ID'}
                     {s.personnelCategory ? ` · ${s.personnelCategory}` : ''}
                     {departed && view !== 'former' ? <span className="badge inactive">{s.exitReason || 'left'}</span> : null}
-                    {placementOver && <span className="badge danger">placement ended {placementEnds}</span>}
-                    {placementSoon && <span className="badge warning">placement ends {placementEnds}</span>}
+                    {placementOver && <span className="badge danger">ended {placementEnds}</span>}
+                    {placementSoon && <span className="badge warning">ends {placementEnds}</span>}
                   </span>
                 </td>
                 <td>
@@ -410,15 +412,15 @@ export default function PersonnelRegisterAdmin() {
         <label>Qualifications<TextField value={form.qualifications} onValue={setText('qualifications')} placeholder="Separate several with |" /></label>
         <label>Personnel category<select value={form.personnelCategory} onChange={set('personnelCategory')}>{PERSONNEL_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
         <label>Appointment type<select value={form.appointmentType} onChange={set('appointmentType')}>{APPOINTMENT_TYPES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
-        <label>{isTemporaryCategory(form.personnelCategory) ? 'Placement starts' : 'Date of appointment'}
+        <label>{fixedTerm ? 'Engagement starts' : 'Date of appointment'}
           <input type="date" value={form.appointmentDate} onChange={set('appointmentDate')} /></label>
-        {/* A student, an intern, a national service person or a locum is here
-            for a stated period. Saying when it ends is what lets the system
-            close the record on the day rather than leaving them on the
-            register, and in the head count, for months afterwards. */}
-        {isTemporaryCategory(form.personnelCategory) && <label>Placement ends
+        {/* A student, an intern, a national service person, a locum or anybody
+            on a contract is here for a stated period. Saying when it ends is
+            what lets the system close the record on the day rather than
+            leaving them on the register, and in the head count, for months. */}
+        {fixedTerm && <label>Engagement ends
           <input type="date" value={form.placementEndDate} min={form.appointmentDate || undefined} onChange={set('placementEndDate')} />
-          <span className="muted">Access is withdrawn {PLACEMENT_GRACE_DAYS} days after this date unless it is extended. The record is kept in full.</span>
+          <span className="muted">Access is withdrawn {PLACEMENT_GRACE_DAYS} days later unless extended.</span>
         </label>}
         <label>National ID type<select value={form.nationalIdType} onChange={set('nationalIdType')}>{NATIONAL_ID_TYPES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
         <label>National ID number<TextField value={form.nationalIdNumber} onValue={setText('nationalIdNumber')} /></label>
