@@ -339,7 +339,7 @@ export function PortalRoutineDue({ sectionId }: { sectionId?: number | null } = 
           <p className="pp-inline-warn">
             <AlertTriangle size={13} /> {data.counts.blocked === 1 ? 'One activity on your list needs' : `${data.counts.blocked} activities on your list need`} a
             tier you do not hold. Either the roster placed the wrong person or the activity&rsquo;s tier is
-            set too high — tell your unit head, and the record stays honest either way.
+            set too high — tell your unit supervisor, and the record stays honest either way.
           </p>
         )}
 
@@ -399,7 +399,7 @@ export function PortalRoutineDue({ sectionId }: { sectionId?: number | null } = 
         {grouped.length === 0 ? (
           <p className="muted">
             {unitName
-              ? `No routine activities have been set up for ${unitName} yet. A unit head or the quality office adds them under Settings → Unit Activities & Reminders.`
+              ? `No routine activities have been set up for ${unitName} yet. A unit supervisor or the quality office adds them under Settings → Unit Activities & Reminders.`
               : 'Your account is not linked to a unit, so there is no programme to show. Ask an administrator to link your staff record to your section.'}
           </p>
         ) : (

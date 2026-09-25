@@ -27,7 +27,7 @@ const show = MODULES_OF_INTEREST.length ? MODULES_OF_INTEREST : allModules;
 const SHORT = { view: 'v', create: 'c', edit: 'e', void_archive: 'x', export: 'X', print: 'p', approve: 'A' };
 
 const roleNames = Object.keys(out);
-const lower = ['Technician', 'Biomedical Scientist', 'Quality User', 'Data Officer', 'POCT Officer', 'Blood Bank Unit Head', 'Safety Manager'];
+const lower = ['Technician', 'Biomedical Scientist', 'Quality User', 'Data Officer', 'POCT Officer', 'Unit Supervisor', 'Blood Bank Unit Supervisor', 'Safety Manager'];
 console.log('\nLegend: v=view c=create e=edit x=void/archive X=export p=print A=approve\n');
 console.log('MODULE'.padEnd(26) + lower.map(r => r.slice(0, 11).padEnd(13)).join(''));
 console.log('-'.repeat(26 + lower.length * 13));

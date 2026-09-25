@@ -252,7 +252,7 @@ export function decontaminationRoutes() {
     if (!Number.isFinite(sectionId)) return res.status(400).json({ error: 'A valid unit is required.' });
 
     if (!resolvePermission(req.user!.id, MODULE, 'edit').allowed && !mayRunUnit(db, req, sectionId)) {
-      return res.status(403).json({ error: 'Only a unit head, or the quality office, can change how a unit runs a decontamination.' });
+      return res.status(403).json({ error: 'Only a unit supervisor, or the quality office, can change how a unit runs a decontamination.' });
     }
 
     const frequency = req.body?.frequency ? String(req.body.frequency) : null;

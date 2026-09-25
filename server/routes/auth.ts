@@ -7,6 +7,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { audit } from '../services/auditService.js';
 import { getEffectivePermissions } from '../services/permissionResolver.js';
 import { unitsLedBy } from '../services/unitLeadership.js';
+import { placementIsSpent } from '../services/placementLifecycle.js';
 import { createRequest, statusForClaim, completeReset, notifyApprovers } from '../services/passwordResetService.js';
 const router = Router();
 
@@ -17,6 +18,12 @@ router.post('/login', (req, res) => {
   const { username, password } = req.body as { username: string; password: string };
   const user = getDb().prepare('SELECT u.*, r.name role_name, r.is_administrator, s.full_name staff_name FROM users u JOIN roles r ON r.id = u.role_id LEFT JOIN staff s ON s.id = u.staff_id WHERE username = ? AND u.is_active = 1').get(username) as { id: number; username: string; full_name: string; role_id: number; role_name: string; is_administrator: number; password_hash: string; staff_id: number | null; staff_name: string | null; must_change_password?: number } | undefined;
   if (!user || !bcrypt.compareSync(password, user.password_hash)) return res.status(401).json({ error: 'Invalid username or password' });
+  // A placement that has run its course closes here as well as on the daily
+  // pass, so the rule is true at the moment somebody signs in rather than true
+  // within ten minutes of it.
+  if (user.staff_id && placementIsSpent(getDb(), user.staff_id)) {
+    return res.status(403).json({ error: 'This placement has ended. Ask the personnel office if it is being extended.' });
+  }
   const token = crypto.randomBytes(32).toString('hex');
   getDb().prepare("INSERT INTO auth_sessions (user_id, token, device_id, ip_address, expires_at) VALUES (?, ?, ?, ?, datetime('now', '+12 hours'))").run(user.id, token, req.headers['x-device-id'] ?? null, req.ip);
   res.json({

@@ -5,7 +5,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { DetailModal, RowMenu } from './ui';
 import {
   GENDERS, PERSONNEL_CATEGORIES, APPOINTMENT_TYPES, NATIONAL_ID_TYPES, CADRES, AVAILABILITY_STATUSES, EXIT_REASONS,
-  emptyStaffForm, staffFormFrom, yearsOfService, type StaffFormValues,
+  emptyStaffForm, staffFormFrom, yearsOfService, isTemporaryCategory, PLACEMENT_GRACE_DAYS, type StaffFormValues,
 } from '../../shared/constants/personnel';
 import type { Staff, Section, Position, ProfessionalRank } from '../../shared/types/api';
 import TextField from './ui/TextField';
@@ -300,9 +300,15 @@ export default function PersonnelRegisterAdmin() {
             {rows.map(s => {
               const today = new Date().toISOString().slice(0, 10);
               const soon = new Date(Date.now() + 60 * 864e5).toISOString().slice(0, 10);
+              const nearly = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10);
               const licExpired = s.licenceExpiryDate && s.licenceExpiryDate < today;
               const licSoon = s.licenceExpiryDate && !licExpired && s.licenceExpiryDate <= soon;
               const departed = hasLeft(s);
+              // A placement runs out on its own, so the register says when —
+              // before the day, not only after it.
+              const placementEnds = !departed ? (s.placementEndDate || '') : '';
+              const placementOver = !!placementEnds && placementEnds < today;
+              const placementSoon = !!placementEnds && !placementOver && placementEnds <= nearly;
               return <tr key={s.id} className={departed ? 'row-retired' : ''}>
                 <td>
                   <span className="reg-primary">{s.fullName}{s.initials ? <span className="muted"> ({s.initials})</span> : null}</span>
@@ -310,6 +316,8 @@ export default function PersonnelRegisterAdmin() {
                     {s.employeeNo || 'No Staff ID'}
                     {s.personnelCategory ? ` · ${s.personnelCategory}` : ''}
                     {departed && view !== 'former' ? <span className="badge inactive">{s.exitReason || 'left'}</span> : null}
+                    {placementOver && <span className="badge danger">placement ended {placementEnds}</span>}
+                    {placementSoon && <span className="badge warning">placement ends {placementEnds}</span>}
                   </span>
                 </td>
                 <td>
@@ -394,7 +402,7 @@ export default function PersonnelRegisterAdmin() {
         <label>Date of birth<input type="date" value={form.dateOfBirth} onChange={set('dateOfBirth')} /></label>
         <label>Gender<select value={form.gender} onChange={set('gender')}><option value="">—</option>{GENDERS.map(g => <option key={g} value={g}>{g}</option>)}</select></label>
         <label>Designation (grade)<TextField value={form.designation} onValue={setText('designation')} placeholder="e.g. Principal Medical Lab Scientist" /></label>
-        <label>Position / role<TextField value={form.jobTitle} onValue={setText('jobTitle')} placeholder="e.g. Biochemistry Unit Head" /></label>
+        <label>Position / role<TextField value={form.jobTitle} onValue={setText('jobTitle')} placeholder="e.g. Biochemistry Unit Supervisor" /></label>
         <label>Unit / Section<select value={form.sectionId} onChange={set('sectionId')}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>Professional regulator<TextField value={form.professionalRegulator} onValue={setText('professionalRegulator')} placeholder="e.g. AHPC" /></label>
         <label>Professional licence no.<TextField value={form.professionalLicence} onValue={setText('professionalLicence')} /></label>
@@ -402,7 +410,16 @@ export default function PersonnelRegisterAdmin() {
         <label>Qualifications<TextField value={form.qualifications} onValue={setText('qualifications')} placeholder="Separate several with |" /></label>
         <label>Personnel category<select value={form.personnelCategory} onChange={set('personnelCategory')}>{PERSONNEL_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
         <label>Appointment type<select value={form.appointmentType} onChange={set('appointmentType')}>{APPOINTMENT_TYPES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
-        <label>Date of appointment<input type="date" value={form.appointmentDate} onChange={set('appointmentDate')} /></label>
+        <label>{isTemporaryCategory(form.personnelCategory) ? 'Placement starts' : 'Date of appointment'}
+          <input type="date" value={form.appointmentDate} onChange={set('appointmentDate')} /></label>
+        {/* A student, an intern, a national service person or a locum is here
+            for a stated period. Saying when it ends is what lets the system
+            close the record on the day rather than leaving them on the
+            register, and in the head count, for months afterwards. */}
+        {isTemporaryCategory(form.personnelCategory) && <label>Placement ends
+          <input type="date" value={form.placementEndDate} min={form.appointmentDate || undefined} onChange={set('placementEndDate')} />
+          <span className="muted">Access is withdrawn {PLACEMENT_GRACE_DAYS} days after this date unless it is extended. The record is kept in full.</span>
+        </label>}
         <label>National ID type<select value={form.nationalIdType} onChange={set('nationalIdType')}>{NATIONAL_ID_TYPES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
         <label>National ID number<TextField value={form.nationalIdNumber} onValue={setText('nationalIdNumber')} /></label>
         <label>Contact phone<TextField value={form.phone} onValue={setText('phone')} /></label>

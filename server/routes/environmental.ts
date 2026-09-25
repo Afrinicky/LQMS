@@ -549,7 +549,7 @@ export function environmentalRoutes() {
       || resolvePermission(req.user!.id, tierFeatureKey('supervisory'), TIER_ACTION).allowed;
     if (!mayCreate) {
       return res.status(403).json({
-        error: 'Registering something new to chart is a unit head\'s. Your profile holds neither the environment '
+        error: 'Registering something new to chart is a unit supervisor\'s. Your profile holds neither the environment '
           + 'create right nor the supervisory routine-work tier.',
       });
     }

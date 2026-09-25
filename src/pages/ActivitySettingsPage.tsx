@@ -324,7 +324,7 @@ function ActivityCatalogue({ sections, staff, onChanged }: { sections: Section[]
                 placeholder="/monitoring?tab=Enter%20Reading" />
             </label>
             <label className="inline"><input type="checkbox" checked={form.notifyLeadership} onChange={e => setForm({ ...form, notifyLeadership: e.target.checked })} />
-              <span>Show it to the unit head and managers as oversight</span></label>
+              <span>Show it to the unit supervisor and managers as oversight</span></label>
             <label className="inline"><input type="checkbox" checked={form.evidenceRequired} onChange={e => setForm({ ...form, evidenceRequired: e.target.checked })} />
               <span>Evidence expected on completion</span></label>
             <div className="duty-actions">
@@ -590,7 +590,7 @@ function SchedulingPolicyTab() {
       <h3>Scheduling policy</h3>
       <p>
         When each schedule must exist, and what the system does when it does not. The duty roster and unit reassignment belong to the
-        laboratory manager and quality manager; the bench schedules belong to the unit heads and are due later, because they follow
+        laboratory manager and quality manager; the bench schedules belong to the unit supervisors and are due later, because they follow
         the unit assignments rather than preceding them.
       </p>
       {error && <Notice kind="error">{error}</Notice>}
@@ -615,13 +615,13 @@ function SchedulingPolicyTab() {
         <label className="inline"><input type="checkbox" checked={policy.bench_inherit_gaps === 1} onChange={flag('bench_inherit_gaps')} disabled={!mayEdit} />
           <span>When benches are carried forward, place newly assigned staff into the benches that leavers vacated</span></label>
         <label className="inline"><input type="checkbox" checked={policy.notify_leadership_daily === 1} onChange={flag('notify_leadership_daily')} disabled={!mayEdit} />
-          <span>Show unit activities to the unit head and managers as oversight</span></label>
+          <span>Show unit activities to the unit supervisor and managers as oversight</span></label>
 
         <fieldset className="policy-section">
           <legend>Unit rotation</legend>
           <p className="muted">
             How this laboratory staffs its units. Some keep people in one unit permanently; others rotate them, and may or may not move
-            the unit heads on the same cadence. This sets the model — the reassignment schedule and acting-supervisor tools follow it.
+            the unit supervisors on the same cadence. This sets the model — the reassignment schedule and acting-supervisor tools follow it.
           </p>
           <label className="inline"><input type="checkbox" checked={policy.rotation_enabled === 1} onChange={flag('rotation_enabled')} disabled={!mayEdit} />
             <span>This laboratory rotates staff between units (leave off to keep staff in one unit permanently)</span></label>
@@ -632,8 +632,8 @@ function SchedulingPolicyTab() {
               </select>
             </label>
             <label className="inline"><input type="checkbox" checked={policy.rotation_rotate_unit_heads === 1} onChange={flag('rotation_rotate_unit_heads')} disabled={!mayEdit} />
-              <span>Unit heads rotate too (leave off — the common case — to keep unit heads in place while other staff rotate)</span></label>
-            {policy.rotation_rotate_unit_heads === 1 && <label>How often unit heads rotate
+              <span>Unit supervisors rotate too (leave off — the common case — to keep supervisors in place while other staff rotate)</span></label>
+            {policy.rotation_rotate_unit_heads === 1 && <label>How often unit supervisors rotate
               <select value={policy.rotation_head_frequency} onChange={e => setPolicy({ ...policy, rotation_head_frequency: e.target.value })} disabled={!mayEdit}>
                 {ROTATION_FREQ.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
               </select>

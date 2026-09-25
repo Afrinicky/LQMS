@@ -135,6 +135,8 @@ export type Staff = { id: number; employeeNo?: string; fullName: string; email?:
   dateOfBirth?: string; gender?: string; designation?: string; jobTitle?: string;
   professionalRegulator?: string; professionalLicence?: string; licenceExpiryDate?: string;
   qualifications?: string; unit?: string; personnelCategory?: string; appointmentType?: string;
+  /** A placement's end date, and the day the laboratory was warned it had run out. */
+  placementEndDate?: string | null; placementNoticeAt?: string | null;
   appointmentDate?: string; nationalIdType?: string; nationalIdNumber?: string;
   emergencyContact?: string; staffFileLocation?: string;
   cadre?: string; professionalRank?: string; availabilityStatus?: string;

@@ -182,7 +182,7 @@ export function Home() {
 
    Access follows the same logic: the dashboard is granted to the roles
    accountable for the laboratory as a whole — administrator, laboratory
-   manager, quality manager and unit heads. Everyone else lands on My Portal.
+   manager, quality manager and unit supervisors. Everyone else lands on My Portal.
    ========================================================================= */
 
 export function Dashboard() {

@@ -164,7 +164,7 @@ export type AssignMode = (typeof ASSIGN_MODES)[number];
 export const ASSIGN_MODE_LABELS: Record<AssignMode, string> = {
   on_duty: 'Whoever is on duty in the unit',
   bench: 'Whoever is on the named bench',
-  unit_head: 'The unit head',
+  unit_head: 'The unit supervisor',
   named_staff: 'One named member of staff',
   whole_unit: 'Everyone assigned to the unit',
 };
@@ -179,7 +179,7 @@ export type AssignmentSource = (typeof ASSIGNMENT_SOURCES)[number];
 export const ASSIGNMENT_SOURCE_LABELS: Record<AssignmentSource, string> = {
   duty_roster: 'On duty (duty roster)',
   bench_schedule: 'On this bench (bench schedule)',
-  unit_head: 'Unit head',
+  unit_head: 'Unit supervisor',
   named_staff: 'Named on the activity',
   unit_member: 'Assigned to this unit',
   section_fallback: 'Unit member (no roster entry)',
@@ -364,7 +364,7 @@ export const SCHEDULE_KIND_LABELS: Record<ScheduleKind, string> = {
 export const SCHEDULE_OWNER_KEYWORDS: Record<ScheduleKind, string[]> = {
   duty_roster: ['laboratory manager', 'lab manager', 'quality manager'],
   reassignment: ['laboratory manager', 'lab manager', 'quality manager'],
-  bench_schedule: ['unit head', 'section head', 'head', 'supervisor'],
+  bench_schedule: ['unit supervisor', 'unit head', 'section head', 'head', 'supervisor'],
 };
 
 export const CARRY_FORWARD_REASONS = ['not_prepared', 'partial_bench', 'manual'] as const;

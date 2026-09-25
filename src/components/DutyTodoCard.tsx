@@ -108,7 +108,7 @@ function OccurrenceRow({ occurrence, watching = false }: { occurrence: ActivityO
             <span className="duty-why" title="Why this is on your list">
               {occurrence.assignment_source === 'bench_schedule' ? 'on this bench'
                 : occurrence.assignment_source === 'duty_roster' ? 'on duty'
-                : occurrence.assignment_source === 'unit_head' ? 'as unit head'
+                : occurrence.assignment_source === 'unit_head' ? 'as unit supervisor'
                 : occurrence.assignment_source === 'named_staff' ? 'named on it'
                 : 'unit member'}
             </span>

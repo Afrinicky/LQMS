@@ -921,13 +921,13 @@ export function schedulingRoutes() {
     const startDate = isoDate(req.body.startDate);
     const endDate = isoDate(req.body.endDate);
     if (!sectionId) return res.status(400).json({ error: 'Choose the unit.' });
-    if (!actingStaffId) return res.status(400).json({ error: 'Choose the member of staff who will act as unit head.' });
+    if (!actingStaffId) return res.status(400).json({ error: 'Choose the member of staff who will act as unit supervisor.' });
     if (!startDate || !endDate) return res.status(400).json({ error: 'Give the start and end dates of the acting period.' });
     if (endDate < startDate) return res.status(400).json({ error: 'The end date cannot be before the start date.' });
     const section = db.prepare('SELECT * FROM sections WHERE id = ?').get(sectionId) as any;
     if (!section) return res.status(404).json({ error: 'Unit not found' });
     if (section.head_staff_id && section.head_staff_id === actingStaffId) {
-      return res.status(400).json({ error: 'That member of staff is already the substantive unit head.' });
+      return res.status(400).json({ error: 'That member of staff is already the substantive unit supervisor.' });
     }
     const clash = db.prepare(`SELECT 1 FROM acting_unit_heads WHERE section_id = ? AND status = 'active' AND NOT (end_date < ? OR start_date > ?)`).get(sectionId, startDate, endDate);
     if (clash) return res.status(400).json({ error: 'Another acting appointment already covers part of that period for this unit.' });

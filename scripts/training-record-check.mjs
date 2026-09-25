@@ -97,7 +97,7 @@ const head = await j('/staff/register', {
   method: 'POST', token: A,
   body: {
     surname: 'Boadi', firstName: `Esi${stamp}`, employeeNo: `SH-${stamp}`,
-    createUser: true, username: `head${stamp}`, password: PW, roleId: roleId('Section Head'),
+    createUser: true, username: `head${stamp}`, password: PW, roleId: roleId('Unit Supervisor'),
   },
 });
 const M = (await j('/auth/login', { method: 'POST', body: { username: `mgr${stamp}`, password: PW } })).json?.token;

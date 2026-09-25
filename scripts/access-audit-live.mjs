@@ -283,7 +283,7 @@ async function main() {
   console.log('\n[6] Bench profiles: notified, able to work, and nothing else');
   {
     const BENCH = ['Technician', 'Biomedical Scientist', 'Stores Officer', 'Customer Service Officer'];
-    const MANAGEMENT = ['System Administrator', 'Laboratory Manager', 'Quality Manager', 'Section Head'];
+    const MANAGEMENT = ['System Administrator', 'Laboratory Manager', 'Quality Manager', 'Unit Supervisor'];
 
     // Settings is administration. Only the administrator profile holds the key.
     const settingsHolders = [];

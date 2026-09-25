@@ -14,7 +14,7 @@ import { DEFAULT_CRITERIA, type RiskCriteria, type RiskCriteriaState } from '../
 // risk. What is set here is what every module scores risk on.
 // ---------------------------------------------------------------------------
 
-const ACCEPTANCE_ROLES = ['System Administrator', 'Laboratory Manager', 'Quality Manager', 'Section Head', 'Safety Officer'];
+const ACCEPTANCE_ROLES = ['System Administrator', 'Laboratory Manager', 'Quality Manager', 'Unit Supervisor', 'Safety Officer'];
 
 export default function RiskCriteriaSettings() {
   const [criteria, setCriteria] = useState<RiskCriteriaState | null>(null);

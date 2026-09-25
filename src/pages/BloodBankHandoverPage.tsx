@@ -320,7 +320,7 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
       <label>Period end<input type="date" value={handoverForm.periodEnd} onChange={e => setHandoverForm({ ...handoverForm, periodEnd: e.target.value })} required /></label>
       <label>Outgoing staff<select value={handoverForm.outgoingStaffId} onChange={e => setHandoverForm({ ...handoverForm, outgoingStaffId: e.target.value })} required><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
       <label>Incoming staff<select value={handoverForm.incomingStaffId} onChange={e => setHandoverForm({ ...handoverForm, incomingStaffId: e.target.value })} required><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-      <label>Blood Bank Unit Head<select value={handoverForm.bloodBankUnitHeadId} onChange={e => setHandoverForm({ ...handoverForm, bloodBankUnitHeadId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
+      <label>Blood Bank Unit Supervisor<select value={handoverForm.bloodBankUnitHeadId} onChange={e => setHandoverForm({ ...handoverForm, bloodBankUnitHeadId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
       <label>Units available<input type="number" value={handoverForm.totalUnitsAvailable} onChange={e => setHandoverForm({ ...handoverForm, totalUnitsAvailable: e.target.value })} /></label>
       <label>Units expiring soon<input type="number" value={handoverForm.totalUnitsExpiringSoon} onChange={e => setHandoverForm({ ...handoverForm, totalUnitsExpiringSoon: e.target.value })} /></label>
       <label>Units expired<input type="number" value={handoverForm.totalUnitsExpired} onChange={e => setHandoverForm({ ...handoverForm, totalUnitsExpired: e.target.value })} /></label>
@@ -350,7 +350,7 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
             <button onClick={() => openHandover(h.id)}>Open</button>
             {!h.outgoing_staff_signed_at && can('blood_bank_handover', 'edit') && <button onClick={() => signOutgoing(h.id)}>Sign outgoing</button>}
             {!h.incoming_staff_signed_at && can('blood_bank_handover', 'edit') && <button onClick={() => signIncoming(h.id)}>Sign incoming</button>}
-            {!h.unit_head_reviewed_at && can('blood_bank_handover', 'approve') && <button onClick={() => reviewHandover(h.id)}>Unit head review</button>}
+            {!h.unit_head_reviewed_at && can('blood_bank_handover', 'approve') && <button onClick={() => reviewHandover(h.id)}>Unit supervisor review</button>}
             {h.status !== 'closed' && can('blood_bank_handover', 'approve') && <button onClick={() => closeHandover(h.id)}>Close</button>}
           </td>
         </tr>)}
@@ -359,7 +359,7 @@ export function BloodBankHandoverPage({ embedded = false }: { embedded?: boolean
         <p>Date: {selectedHandover.handover_date} | Period: {selectedHandover.period_start} → {selectedHandover.period_end} | Status: {formatBadge(selectedHandover.status)}</p>
         <p>Outgoing: {selectedHandover.outgoing_staff_name || staffName(staff, selectedHandover.outgoing_staff_id)} {selectedHandover.outgoing_staff_signed_at ? `✓ ${selectedHandover.outgoing_staff_signed_at}` : '(unsigned)'}</p>
         <p>Incoming: {selectedHandover.incoming_staff_name || staffName(staff, selectedHandover.incoming_staff_id)} {selectedHandover.incoming_staff_signed_at ? `✓ ${selectedHandover.incoming_staff_signed_at}` : '(unsigned)'}</p>
-        <p>Unit head: {selectedHandover.unit_head_name || staffName(staff, selectedHandover.blood_bank_unit_head_id)} {selectedHandover.unit_head_reviewed_at ? `✓ ${selectedHandover.unit_head_reviewed_at}` : '(unreviewed)'}</p>
+        <p>Unit supervisor: {selectedHandover.unit_head_name || staffName(staff, selectedHandover.blood_bank_unit_head_id)} {selectedHandover.unit_head_reviewed_at ? `✓ ${selectedHandover.unit_head_reviewed_at}` : '(unreviewed)'}</p>
         <p>Available: {selectedHandover.total_units_available} | Expiring soon: {selectedHandover.total_units_expiring_soon} | Expired: {selectedHandover.total_units_expired}</p>
         <p>Donations: {selectedHandover.total_donations} (family {selectedHandover.family_donor_count}, voluntary {selectedHandover.voluntary_donor_count}, paid {selectedHandover.commercial_paid_donor_count}, outside {selectedHandover.outside_campaign_donor_count}) | Transfusions: {selectedHandover.total_transfusions} | Discards: {selectedHandover.total_discards}</p>
         <p>Donor reactions: {selectedHandover.donor_reactions_count} | Transfusion reactions: {selectedHandover.transfusion_reactions_count}</p>

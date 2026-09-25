@@ -8,7 +8,7 @@ import { Notice } from '../components/ui/Feedback';
 // ==========================================================================
 // Scheduling boards — the department duty roster (Excel-like editable grid),
 // the unit/staff reassignment memo, and per-unit bench schedules. All three
-// render a monthly, fully editable view for managers/unit heads and a
+// render a monthly, fully editable view for managers/unit supervisors and a
 // read-only view for other staff, and each prints to match the paper form.
 // ==========================================================================
 
@@ -423,7 +423,7 @@ function ReRowForm({ staff, sections, heads, editing, onSubmit, onCancel, onNavi
           <span className="rf-cap">{linkedHead?.acting ? 'Acting Unit Supervisor' : 'Supervisor'}</span>
           {form.sectionId
             ? <div className="rf-locked">
-                {linkedHead?.effective_name || '— no head set —'}{linkedHead?.acting && <span className="badge acting">Acting</span>}
+                {linkedHead?.effective_name || '— no supervisor set —'}{linkedHead?.acting && <span className="badge acting">Acting</span>}
                 {onNavigateSupervisors && <button type="button" className="link-button rf-change" onClick={onNavigateSupervisors}>Change? Appoint an acting supervisor →</button>}
               </div>
             : <select value={form.supervisorStaffId} onChange={e => setForm({ ...form, supervisorStaffId: e.target.value })}><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select>}
@@ -549,7 +549,7 @@ export function BenchScheduleBoard({ sections, staff, canEdit }: { sections: Sec
           <button type="submit">+ Create</button>
         </form>}
       </div>
-      <p className="muted" style={{ marginTop: 0 }}>Each unit assigns its staff to benches/workspaces per day. Benches are configured in <em>Settings → Section/Unit Configuration → Benches</em>. Unit heads prepare these for their own unit — or <strong>copy last month</strong> and tweak.</p>
+      <p className="muted" style={{ marginTop: 0 }}>Each unit assigns its staff to benches/workspaces per day. Benches are configured in <em>Settings → Section/Unit Configuration → Benches</em>. Unit supervisors prepare these for their own unit — or <strong>copy last month</strong> and tweak.</p>
       <table className="data-table"><thead><tr><th>Number</th><th>Unit</th><th>Month</th><th>Status</th><th></th></tr></thead><tbody>
         {list.map(s => <tr key={s.id}><td>{s.schedule_number}</td><td>{s.section_name}</td><td>{s.month ? monthDays(s.month).label : '—'}</td><td>{statusBadge(s.status)}</td>
           <td><button onClick={() => open(s.id)}>Open</button> {can('personnel.rosters', 'print') && <button className="secondary" onClick={() => openPrintPage(`/scheduling/bench-schedules/${s.id}/print`, setError)}>Print</button>}{mayDelete(s.section_id) && <> <button className="secondary" onClick={() => remove(s.id)}>Delete</button></>}</td></tr>)}
@@ -606,12 +606,15 @@ export function BenchScheduleBoard({ sections, staff, canEdit }: { sections: Sec
   </div>;
 }
 
-// ========================= Unit supervisors & acting heads =========================
-// The substantive head of a unit lives on the unit record (Settings → Sections).
-// This board shows who is effectively in charge of each unit today, and lets a
-// manager appoint an Acting Unit Head for a fixed period when a head is away.
-// The acting role reverts on its own once the period ends — the server judges it
-// in force purely by today's date.
+// ========================= Unit supervisors & acting supervisors =========================
+// The substantive supervisor of a unit lives on the unit record (Settings →
+// Sections). This board shows who is effectively in charge of each unit today,
+// and lets a manager appoint an acting supervisor for a fixed period when the
+// substantive one is away. The acting role reverts on its own once the period
+// ends — the server judges it in force purely by today's date.
+//
+// Every unit is on this board, the blood bank included: it is a unit of the
+// laboratory like any other and is run the same way.
 const emptyActing = { sectionId: '', actingStaffId: '', startDate: '', endDate: '', reason: '' };
 
 export function ActingSupervisorsBoard({ staff, sections, canEdit }: { staff: Staff[]; sections: Section[]; canEdit: boolean }) {
@@ -635,12 +638,12 @@ export function ActingSupervisorsBoard({ staff, sections, canEdit }: { staff: St
     e.preventDefault(); setError(null); setMsg(null);
     try {
       await api('/scheduling/acting-unit-heads', { method: 'POST', body: JSON.stringify(form) });
-      setForm(emptyActing); setShowForm(false); setMsg('Acting unit head appointed.'); load();
+      setForm(emptyActing); setShowForm(false); setMsg('Acting unit supervisor appointed.'); load();
     } catch (err) { setError(errorText(err)); }
   }
   async function endNow(id: number) {
     setError(null); setMsg(null);
-    try { await api(`/scheduling/acting-unit-heads/${id}/end`, { method: 'POST', body: JSON.stringify({}) }); setMsg('Acting period ended; the substantive head resumes.'); load(); }
+    try { await api(`/scheduling/acting-unit-heads/${id}/end`, { method: 'POST', body: JSON.stringify({}) }); setMsg('Acting period ended; the substantive supervisor resumes.'); load(); }
     catch (err) { setError(errorText(err)); }
   }
   async function remove(id: number) {
@@ -664,14 +667,14 @@ export function ActingSupervisorsBoard({ staff, sections, canEdit }: { staff: St
         <h3 style={{ margin: 0 }}>Unit supervisors</h3>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {mayPrint && <button className="secondary" onClick={() => openPrintPage('/scheduling/unit-supervisors/print', setError)}>Print</button>}
-          {canEdit && <button onClick={() => startForSection(null)}>+ Appoint acting head</button>}
+          {canEdit && <button onClick={() => startForSection(null)}>+ Appoint acting supervisor</button>}
         </div>
       </div>
       <p className="muted" style={{ marginTop: 0 }}>
-        Who is effectively in charge of each unit today{sups ? ` (as at ${sups.onDate})` : ''}. The substantive head is set under Settings → Sections;
-        an acting head stands in for a fixed period and reverts on its own once it ends.
+        Who is effectively in charge of each unit today{sups ? ` (as at ${sups.onDate})` : ''}. The substantive supervisor is set under
+        Settings → Sections; an acting supervisor stands in for a fixed period and reverts on its own once it ends.
       </p>
-      <table className="data-table"><thead><tr><th>Unit</th><th>Substantive head</th><th>In charge today</th>{canEdit && <th></th>}</tr></thead><tbody>
+      <table className="data-table"><thead><tr><th>Unit</th><th>Substantive supervisor</th><th>In charge today</th>{canEdit && <th></th>}</tr></thead><tbody>
         {(sups?.units ?? []).map(u => <tr key={u.section_id}>
           <td>{u.section_name}{u.department_name ? <><br /><small className="muted">{u.department_name}</small></> : null}</td>
           <td>{u.substantive_head_name || <span className="muted">—</span>}</td>
@@ -687,7 +690,7 @@ export function ActingSupervisorsBoard({ staff, sections, canEdit }: { staff: St
     </div>
 
     {canEdit && showForm && <div className="card" style={{ marginTop: 16 }}>
-      <h3 style={{ marginTop: 0 }}>Appoint an acting unit head</h3>
+      <h3 style={{ marginTop: 0 }}>Appoint an acting unit supervisor</h3>
       <form className="form-grid" onSubmit={create}>
         <label>Unit
           <select value={form.sectionId} onChange={e => setForm({ ...form, sectionId: e.target.value })} required>
@@ -695,7 +698,7 @@ export function ActingSupervisorsBoard({ staff, sections, canEdit }: { staff: St
             {sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </label>
-        <label>Acting unit head
+        <label>Acting unit supervisor
           <select value={form.actingStaffId} onChange={e => setForm({ ...form, actingStaffId: e.target.value })} required>
             <option value="">—</option>
             {staff.map(s => <option key={s.id} value={s.id}>{s.fullName}{s.employeeNo ? ` (${s.employeeNo})` : ''}</option>)}
@@ -703,7 +706,7 @@ export function ActingSupervisorsBoard({ staff, sections, canEdit }: { staff: St
         </label>
         <label>From<input type="date" value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })} required /></label>
         <label>Until<input type="date" value={form.endDate} onChange={e => setForm({ ...form, endDate: e.target.value })} required /></label>
-        <label style={{ gridColumn: '1 / -1' }}>Reason (optional)<TextField value={form.reason} onValue={nextValue => setForm({ ...form, reason: nextValue })} placeholder="e.g. Substantive head on annual leave" /></label>
+        <label style={{ gridColumn: '1 / -1' }}>Reason (optional)<TextField value={form.reason} onValue={nextValue => setForm({ ...form, reason: nextValue })} placeholder="e.g. Substantive supervisor on annual leave" /></label>
         <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8 }}>
           <button type="submit">Appoint</button>
           <button type="button" className="secondary" onClick={() => setShowForm(false)}>Cancel</button>
@@ -713,7 +716,7 @@ export function ActingSupervisorsBoard({ staff, sections, canEdit }: { staff: St
 
     <div className="card" style={{ marginTop: 16 }}>
       <h3 style={{ marginTop: 0 }}>Acting appointments</h3>
-      <table className="data-table"><thead><tr><th>Unit</th><th>Acting head</th><th>Standing in for</th><th>Period</th><th>Status</th>{canEdit && <th></th>}</tr></thead><tbody>
+      <table className="data-table"><thead><tr><th>Unit</th><th>Acting supervisor</th><th>Standing in for</th><th>Period</th><th>Status</th>{canEdit && <th></th>}</tr></thead><tbody>
         {appts.map(a => <tr key={a.id}>
           <td>{a.section_name}</td>
           <td>{a.acting_name}</td>

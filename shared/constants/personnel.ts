@@ -7,6 +7,37 @@
  */
 export const GENDERS = ['MALE', 'FEMALE', 'OTHER'] as const;
 export const PERSONNEL_CATEGORIES = ['STAFF', 'INTERN', 'NSS', 'LOCUM', 'STUDENT', 'CONTRACTOR'] as const;
+
+/**
+ * The people who are in the laboratory for a stated period and then gone.
+ *
+ * A student, an intern, a national service person, a locum, a contractor — all
+ * of them arrive with an end date and leave on it. Recorded as ordinary staff
+ * they stayed on the register, in the head count and on the rosters long after
+ * they had gone, and their login kept working, because closing the record was
+ * something a person had to remember to do.
+ *
+ * So the category decides: these carry a placement period, and the system ends
+ * it. Everybody else is permanent until the laboratory says otherwise.
+ */
+export const TEMPORARY_CATEGORIES = ['INTERN', 'NSS', 'LOCUM', 'STUDENT', 'CONTRACTOR'] as const;
+export function isTemporaryCategory(category?: string | null): boolean {
+  return TEMPORARY_CATEGORIES.includes(String(category ?? '').trim().toUpperCase() as never);
+}
+
+/**
+ * How long after the placement ends before access is withdrawn.
+ *
+ * Not on the day itself. A placement is extended at the last minute more often
+ * than anybody plans for, and an intern locked out on the morning their
+ * supervisor meant to sign another month is a support call, not a control. The
+ * laboratory is told the day the placement ends and the withdrawal runs a week
+ * later, which is long enough to extend it and short enough to mean something.
+ */
+export const PLACEMENT_GRACE_DAYS = 7;
+
+/** The exit reason written when a placement is closed by the system. */
+export const PLACEMENT_EXIT_REASON = 'End of internship / national service';
 export const APPOINTMENT_TYPES = ['FULL TIME', 'PART TIME', 'CONTRACT', 'INTERN', 'NSS', 'LOCUM'] as const;
 export const NATIONAL_ID_TYPES = ['GHANA CARD', 'PASSPORT', 'VOTER ID', 'DRIVERS LICENCE', 'OTHER'] as const;
 export const CADRES = ['Scientist', 'Technician', 'Assistant', 'Other'] as const;
@@ -39,7 +70,8 @@ export type StaffFormValues = {
   dateOfBirth: string; gender: string; designation: string; jobTitle: string;
   professionalRegulator: string; professionalLicence: string; licenceExpiryDate: string;
   qualifications: string; sectionId: string; unit: string; personnelCategory: string;
-  appointmentType: string; appointmentDate: string; nationalIdType: string; nationalIdNumber: string;
+  appointmentType: string; appointmentDate: string; placementEndDate: string;
+  nationalIdType: string; nationalIdNumber: string;
   emergencyContact: string; phone: string; email: string; staffFileLocation: string; positionId: string;
   cadre: string; professionalRank: string; availabilityStatus: string;
 };
@@ -48,7 +80,8 @@ export const emptyStaffForm = (): StaffFormValues => ({
   employeeNo: '', surname: '', middleName: '', firstName: '', initials: '', dateOfBirth: '', gender: '',
   designation: '', jobTitle: '', professionalRegulator: '', professionalLicence: '', licenceExpiryDate: '',
   qualifications: '', sectionId: '', unit: '', personnelCategory: 'STAFF', appointmentType: 'FULL TIME',
-  appointmentDate: '', nationalIdType: 'GHANA CARD', nationalIdNumber: '', emergencyContact: '', phone: '',
+  appointmentDate: '', placementEndDate: '', nationalIdType: 'GHANA CARD', nationalIdNumber: '',
+  emergencyContact: '', phone: '',
   email: '', staffFileLocation: '', positionId: '', cadre: '', professionalRank: '', availabilityStatus: 'available',
 });
 
@@ -63,6 +96,7 @@ export function staffFormFrom(s: Record<string, unknown>): StaffFormValues {
     licenceExpiryDate: str('licenceExpiryDate'), qualifications: str('qualifications'), sectionId: str('sectionId'),
     unit: str('unit'), personnelCategory: str('personnelCategory') || 'STAFF',
     appointmentType: str('appointmentType') || 'FULL TIME', appointmentDate: str('appointmentDate'),
+    placementEndDate: str('placementEndDate'),
     nationalIdType: str('nationalIdType') || 'GHANA CARD', nationalIdNumber: str('nationalIdNumber'),
     emergencyContact: str('emergencyContact'), phone: str('phone'), email: str('email'),
     staffFileLocation: str('staffFileLocation'), positionId: '',

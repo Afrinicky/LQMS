@@ -330,7 +330,7 @@ export const AUDIT_CHECKS: AuditCheck[] = [
         category: 'governance' as AuditFlagCategory,
         severity: 'medium' as AuditSeverity,
         moduleKey: 'settings',
-        title: `No unit head: ${row.name}`,
+        title: `No unit supervisor: ${row.name}`,
         detail: 'Bench schedules for this unit have nobody to prepare them, and activities that escalate have nobody to escalate to.',
         recordType: 'sections', recordId: String(row.id),
         sectionId: Number(row.id),
