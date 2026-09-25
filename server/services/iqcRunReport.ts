@@ -244,7 +244,7 @@ function runSection(run: Row, readings: Row[]): string {
   ${run.release_decision_note ? `<p class="note"><strong>Release decision:</strong> ${esc(run.release_decision_note)}</p>` : ''}
   ${run.comment ? `<p class="note"><strong>Comment:</strong> ${esc(run.comment)}</p>` : ''}
   ${reviewerSignature
-    ? `<p class="signed"><span>Accepted by ${esc(run.reviewed_by ?? '')}</span><img class="sig-img" src="${reviewerSignature}" alt="signature"/></p>`
+    ? `<p class="signed"><span>Accepted by ${esc(run.reviewed_by ?? '')}</span><span class="sig-box"><img class="sig-img" src="${reviewerSignature}" alt="Signature"/></span></p>`
     : ''}
 </section>`;
 }
@@ -315,7 +315,9 @@ export function renderRunReport(data: RunReportData, options: {
   td.warn { color: #a1720c; font-weight: 700; }
   .note { margin: 3px 0; font-size: 10px; }
   .signed { display: flex; align-items: center; gap: 10px; font-size: 9.5px; color: #40546f; margin: 6px 0 0; }
-  .sig-img { height: 30px; max-width: 150px; background: #fff; }
+  .sig-box { display: inline-flex; align-items: flex-end; justify-content: center; width: 132px; height: 30px; overflow: hidden; }
+  .sig-box .sig-img { max-width: 100%; max-height: 28px; width: auto; height: auto; object-fit: contain; background: transparent; mix-blend-mode: multiply; }
+  .sign .sig-rule { display: inline-block; width: 132px; border-bottom: 1px solid #16202e; height: 14px; }
   section.chart { border: 1px solid #b3c1d4; border-radius: 5px; padding: 9px 11px; margin-bottom: 11px; page-break-inside: avoid; }
   section.chart h3 { margin: 0 0 1px; font-size: 12px; color: #1B3A6B; }
   .chart-sub { margin: 0 0 6px; font-size: 9.5px; color: #64748b; }

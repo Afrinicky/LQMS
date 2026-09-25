@@ -9,7 +9,7 @@ import { canReachPersonalRecord, resolvePermission } from '../services/permissio
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
-import { parseIntNullable, getStaffIdOrCurrent, getCurrentStaffId } from './routeHelpers.js';
+import { parseIntNullable, getStaffIdOrCurrent, getCurrentStaffId, blockedForNoSignature } from './routeHelpers.js';
 import { printSheet, htmlEscape, htmlText, signatureBlock } from '../utils/printLayout.js';
 import { staffSignatureDataUri } from '../services/signatureService.js';
 import {
@@ -869,6 +869,9 @@ export function competencyRoutes() {
    * name so it is somebody's job rather than a note in a field.
    */
   router.post('/competency/:id/complete', requirePermission('personnel.training', 'edit'), (req, res) => {
+    // Nothing is signed off by somebody with no signature on file: the sheet
+    // this closes carries their signature, not their typed name.
+    if (blockedForNoSignature(req, res)) return;
     const db = getDb();
     const record = db.prepare('SELECT * FROM competency_assessments WHERE id = ?').get(req.params.id) as Row | undefined;
     if (!record) return res.status(404).json({ error: 'Competency assessment not found' });
@@ -937,6 +940,9 @@ export function competencyRoutes() {
 
   /** The countersignature: a second, technically competent pair of eyes. */
   router.post('/competency/:id/review', requirePermission('personnel.training', 'approve'), (req, res) => {
+    // Nothing is signed off by somebody with no signature on file: the sheet
+    // this closes carries their signature, not their typed name.
+    if (blockedForNoSignature(req, res)) return;
     const db = getDb();
     const record = db.prepare('SELECT * FROM competency_assessments WHERE id = ?').get(req.params.id) as Row | undefined;
     if (!record) return res.status(404).json({ error: 'Competency assessment not found' });
@@ -963,6 +969,9 @@ export function competencyRoutes() {
    * checks the signed-in user against the staff member on the assessment.
    */
   router.post('/competency/:id/acknowledge', requireAuth, (req, res) => {
+    // Nothing is signed off by somebody with no signature on file: the sheet
+    // this closes carries their signature, not their typed name.
+    if (blockedForNoSignature(req, res)) return;
     const db = getDb();
     const record = db.prepare('SELECT * FROM competency_assessments WHERE id = ?').get(req.params.id) as Row | undefined;
     if (!record) return res.status(404).json({ error: 'Competency assessment not found' });
@@ -992,6 +1001,9 @@ export function competencyRoutes() {
 
   /** Authorisation to do the work follows from the assessment that proved it. */
   router.post('/competency/:id/create-authorization', requirePermission('personnel.training', 'approve'), (req, res) => {
+    // Nothing is signed off by somebody with no signature on file: the sheet
+    // this closes carries their signature, not their typed name.
+    if (blockedForNoSignature(req, res)) return;
     const db = getDb();
     const moduleKey = nullableText(req.body.moduleKey);
     const level = nullableText(req.body.level);

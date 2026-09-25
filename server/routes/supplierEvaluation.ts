@@ -3,8 +3,9 @@ import { getDb } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
-import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
+import { parseIntNullable, getStaffIdOrCurrent, blockedForNoSignature } from './routeHelpers.js';
 import { printSheet, htmlEscape, htmlText, signatureBlock } from '../utils/printLayout.js';
+import { staffSignatureDataUri } from '../services/signatureService.js';
 
 /**
  * Supplier evaluation on the same footing as competency assessment.
@@ -432,6 +433,9 @@ export function supplierEvaluationRoutes() {
 
   /** Close the evaluation, and feed the supplier register so its status stays true. */
   router.post('/eval-assessments/:id/complete', requirePermission(PERM, 'approve'), (req, res) => {
+    // Nothing is signed off by somebody with no signature on file: the sheet
+    // this closes carries their signature, not their typed name.
+    if (blockedForNoSignature(req, res)) return;
     const db = getDb();
     const record = db.prepare('SELECT * FROM supplier_eval_assessments WHERE id = ?').get(req.params.id) as Row | undefined;
     if (!record) return res.status(404).json({ error: 'Evaluation not found' });
@@ -469,6 +473,9 @@ export function supplierEvaluationRoutes() {
   });
 
   router.post('/eval-assessments/:id/review', requirePermission(PERM, 'approve'), (req, res) => {
+    // Nothing is signed off by somebody with no signature on file: the sheet
+    // this closes carries their signature, not their typed name.
+    if (blockedForNoSignature(req, res)) return;
     const db = getDb();
     const record = db.prepare('SELECT * FROM supplier_eval_assessments WHERE id = ?').get(req.params.id) as Row | undefined;
     if (!record) return res.status(404).json({ error: 'Evaluation not found' });
@@ -541,8 +548,10 @@ export function supplierEvaluationRoutes() {
 <h2>Action required</h2><div class="narrative">${htmlText(record.action_required)}</div>
 <h2>Reviewer's comments</h2><div class="narrative">${htmlText(record.reviewer_comments)}</div>
 <div class="signatures two">
-  ${signatureBlock('Evaluator', record.evaluator_name, record.completed_at)}
-  ${signatureBlock('Reviewer', record.reviewer_name, record.reviewed_at)}
+  ${signatureBlock('Evaluator', record.evaluator_name, record.completed_at,
+    record.completed_at ? staffSignatureDataUri(record.evaluator_staff_id) : null)}
+  ${signatureBlock('Reviewer', record.reviewer_name, record.reviewed_at,
+    record.reviewed_at ? staffSignatureDataUri(record.reviewer_staff_id) : null)}
 </div>`;
     audit(req, { action: 'print', entity: 'supplier_eval_assessments', entityId: req.params.id });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
