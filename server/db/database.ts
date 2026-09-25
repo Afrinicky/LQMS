@@ -4045,14 +4045,14 @@ CREATE INDEX IF NOT EXISTS idx_document_comments_doc ON document_comments(docume
   const retentionSeeded = (database.prepare('SELECT COUNT(*) c FROM record_retention_schedule').get() as { c: number }).c;
   if (retentionSeeded === 0) {
     const rows: Array<[number, string, string, string, string, number]> = [
-      [1, 'Examination request forms', '2 years', 'Paper / Electronic', 'Section Head', 0],
+      [1, 'Examination request forms', '2 years', 'Paper / Electronic', 'Unit Supervisor', 0],
       [2, 'Routine examination results & reports', '5 years', 'LIS / Electronic / Paper', 'Laboratory Manager', 0],
       [3, 'Critical result records', '5 years', 'Electronic / Paper', 'Quality Manager', 0],
-      [4, 'Histology & cytology reports', '10 years minimum', 'Archive / Secure Storage', 'Section Head', 1],
+      [4, 'Histology & cytology reports', '10 years minimum', 'Archive / Secure Storage', 'Unit Supervisor', 1],
       [5, 'Genetic testing records', '10–20 years (high legal risk)', 'Secure Electronic Archive', 'Laboratory Manager', 1],
       [6, 'Pediatric examination records', 'Until patient is 21 years OR 10 years, whichever is longer', 'Electronic / Archive', 'Quality Manager', 1],
-      [7, 'Blood transfusion & compatibility records', '10 years', 'Paper / Electronic', 'Blood Bank Supervisor', 1],
-      [8, 'Quality control (IQC) records', '2 years', 'Paper / Electronic', 'Section Head', 0],
+      [7, 'Blood transfusion & compatibility records', '10 years', 'Paper / Electronic', 'Blood Bank Unit Supervisor', 1],
+      [8, 'Quality control (IQC) records', '2 years', 'Paper / Electronic', 'Unit Supervisor', 0],
       [9, 'External Quality Assessment (EQA/PT)', '5 years', 'Electronic', 'Quality Manager', 0],
       [10, 'Equipment records', 'Lifetime of equipment + 5 years', 'Paper / Electronic', 'Equipment Officer', 0],
       [11, 'Reagent & consumable records', '2 years after expiry', 'Paper / Electronic', 'Stores Officer', 0],
@@ -4657,7 +4657,7 @@ CREATE TABLE IF NOT EXISTS continuity_plans (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   plan_number TEXT NOT NULL UNIQUE,
   position_id INTEGER REFERENCES positions(id),
-  key_role TEXT NOT NULL,             -- Laboratory Manager | Quality Manager | Section Head | Blood Bank Supervisor | ...
+  key_role TEXT NOT NULL,             -- Laboratory Manager | Quality Manager | Unit Supervisor | Blood Bank Unit Supervisor | ...
   deputy_position_id INTEGER REFERENCES positions(id),
   deputy_staff_id INTEGER REFERENCES staff(id),
   acting_arrangement TEXT,            -- Description of who acts and how
@@ -6945,6 +6945,67 @@ CREATE INDEX IF NOT EXISTS idx_instrument_files_link ON instrument_files(link_id
     const cols = new Set((database.prepare("PRAGMA table_info(iqc_feed_messages)").all() as Array<{ name: string }>).map(c => c.name));
     if (!cols.has('link_id')) database.exec('ALTER TABLE iqc_feed_messages ADD COLUMN link_id INTEGER REFERENCES instrument_links(id)');
     if (!cols.has('instrument_message_id')) database.exec('ALTER TABLE iqc_feed_messages ADD COLUMN instrument_message_id INTEGER REFERENCES instrument_messages(id)');
+  }
+
+  // ── The blood bank is a unit like any other, and a unit is run by a supervisor
+  //
+  // The laboratory says "unit supervisor"; the system said "Section Head" for
+  // the profile, "… Unit Head" for the posts, and kept a separate, much
+  // narrower "Blood Bank Unit Head" that could not prepare a bench schedule or
+  // define a control. Two vocabularies for one job, and one unit quietly
+  // treated as a lesser case.
+  //
+  // The rows are RENAMED, never replaced: a profile carries the permissions an
+  // administrator granted it and the accounts that follow it, and a position
+  // carries its occupants, its reporting line and its history. Renaming keeps
+  // every one of those; inserting a new row and pointing people at it would
+  // lose them. Where both names somehow exist, the old one is left alone
+  // rather than collided with the UNIQUE index.
+  {
+    const renameRole = (from: string, to: string) => {
+      const source = database.prepare('SELECT id FROM roles WHERE name = ?').get(from) as { id: number } | undefined;
+      if (!source) return;
+      const taken = database.prepare('SELECT id FROM roles WHERE name = ?').get(to) as { id: number } | undefined;
+      if (taken) return;
+      database.prepare('UPDATE roles SET name = ? WHERE id = ?').run(to, source.id);
+    };
+    renameRole('Section Head', 'Unit Supervisor');
+    renameRole('Blood Bank Unit Head', 'Blood Bank Unit Supervisor');
+
+    // "Haematology Unit Head" → "Haematology Unit Supervisor", and the same for
+    // every other post named that way, including any unit the laboratory added
+    // itself. A title already ending in "Supervisor" is left as it is.
+    const posts = database.prepare("SELECT id, title FROM positions WHERE title LIKE '%Unit Head%' OR title LIKE '%Head of Unit%'")
+      .all() as Array<{ id: number; title: string }>;
+    for (const post of posts) {
+      const renamed = post.title
+        .replace(/\bUnit\s+Head\b/gi, 'Unit Supervisor')
+        .replace(/\bHead\s+of\s+Unit\b/gi, 'Unit Supervisor');
+      if (renamed === post.title) continue;
+      const taken = database.prepare('SELECT id FROM positions WHERE title = ? AND id != ?').get(renamed, post.id);
+      if (taken) continue;
+      database.prepare('UPDATE positions SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(renamed, post.id);
+    }
+  }
+
+  // ── A placement has an end, and the end has to arrive on its own ──────────
+  //
+  // A student, an intern, a national service person or a locum is in the
+  // laboratory for a stated period and then gone. Recorded as ordinary staff
+  // they stayed on the register, in the head count and on the rosters long
+  // after they left, and their login kept working — because somebody had to
+  // remember to retire them, and nobody does.
+  //
+  // So the placement carries its own end date. `appointment_date` is the day
+  // it starts, as it is for everybody; these three columns are what closes it:
+  // when it ends, when the laboratory was warned, and when the withdrawal
+  // actually ran.
+  {
+    const cols = new Set((database.prepare('PRAGMA table_info(staff)').all() as Array<{ name: string }>).map(c => c.name));
+    if (!cols.has('placement_end_date')) database.exec('ALTER TABLE staff ADD COLUMN placement_end_date TEXT');
+    if (!cols.has('placement_notice_at')) database.exec('ALTER TABLE staff ADD COLUMN placement_notice_at TEXT');
+    if (!cols.has('placement_closed_at')) database.exec('ALTER TABLE staff ADD COLUMN placement_closed_at TEXT');
+    database.exec('CREATE INDEX IF NOT EXISTS idx_staff_placement_end ON staff(placement_end_date)');
   }
 
   seedDecontaminationFrameworks(database);

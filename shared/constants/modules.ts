@@ -71,7 +71,7 @@ export const TECHNICAL_AUTHORIZATION_LEVELS = ['View only', 'Perform', 'Review',
 
 export const DEFAULT_POSITIONS = [
   'Laboratory Manager', 'Quality Manager', 'Quality Team Member', 'Secretary', 'Safety Manager',
-  'Blood Bank Unit Head', 'Microbiology Unit Head', 'Biochemistry Unit Head', 'Haematology Unit Head',
+  'Blood Bank Unit Supervisor', 'Microbiology Unit Supervisor', 'Biochemistry Unit Supervisor', 'Haematology Unit Supervisor',
   'Stores Officer', 'Customer Service Officer', 'POCT Officer', 'Biomedical Scientist', 'Technician',
   'System Administrator', 'Data Officer'
 ];

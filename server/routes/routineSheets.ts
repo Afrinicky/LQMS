@@ -315,7 +315,7 @@ export function routineSheetRoutes() {
     if (!sheet) return;
     if (!mayRecord(req, sheet)) {
       return res.status(403).json({
-        error: `Recording on this sheet needs the "${tierForSheet(db, sheet)}" routine-work tier. Ask your unit head, or an administrator, to grant it to your profile.`,
+        error: `Recording on this sheet needs the "${tierForSheet(db, sheet)}" routine-work tier. Ask your unit supervisor, or an administrator, to grant it to your profile.`,
       });
     }
     const cells = Array.isArray(req.body?.cells) ? req.body.cells

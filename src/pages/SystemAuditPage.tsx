@@ -417,7 +417,7 @@ function Schedules() {
         <h3><CalendarClock size={15} /> Preparation status</h3>
         <p className="muted">
           The duty roster and unit reassignment are the laboratory manager&rsquo;s and quality manager&rsquo;s, due before the month turns.
-          The bench schedules are the unit heads&rsquo;, and follow the unit assignments. A month that starts without one runs on the previous
+          The bench schedules are the unit supervisors&rsquo;, and follow the unit assignments. A month that starts without one runs on the previous
           month&rsquo;s, automatically — which is safe, but it is recorded here so nobody mistakes it for a schedule somebody prepared.
         </p>
         <table>

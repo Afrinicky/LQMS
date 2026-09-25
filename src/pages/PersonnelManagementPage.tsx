@@ -19,6 +19,7 @@ import type {
   StaffDeclaration, DutyRoster, EquipmentItem,
   PersonnelSummary, MyTasks, MyProfile, RosterCoverage, StaffSuggestionsResponse, ProfessionalRank,
 } from '../../shared/types/api';
+import { isTemporaryCategory, PLACEMENT_GRACE_DAYS } from '../../shared/constants/personnel';
 import TextField from '../components/ui/TextField';
 import { Notice } from '../components/ui/Feedback';
 
@@ -42,7 +43,7 @@ const emptyStaffForm = {
   employeeNo: '', surname: '', middleName: '', firstName: '', initials: '', dateOfBirth: '', gender: '',
   designation: '', jobTitle: '', professionalRegulator: '', professionalLicence: '', licenceExpiryDate: '',
   qualifications: '', sectionId: '', unit: '', personnelCategory: 'STAFF', appointmentType: 'FULL TIME',
-  appointmentDate: '', nationalIdType: 'GHANA CARD', nationalIdNumber: '', emergencyContact: '', phone: '',
+  appointmentDate: '', placementEndDate: '', nationalIdType: 'GHANA CARD', nationalIdNumber: '', emergencyContact: '', phone: '',
   email: '', staffFileLocation: '', positionId: '', cadre: '', professionalRank: '', availabilityStatus: 'available',
 };
 function yearsBetween(dateStr?: string): string {
@@ -147,7 +148,8 @@ export function PersonnelManagementPage() {
       jobTitle: s.jobTitle ?? '', professionalRegulator: s.professionalRegulator ?? '', professionalLicence: s.professionalLicence ?? '',
       licenceExpiryDate: s.licenceExpiryDate ?? '', qualifications: s.qualifications ?? '', sectionId: s.sectionId ? String(s.sectionId) : '',
       unit: s.unit ?? '', personnelCategory: s.personnelCategory ?? 'STAFF', appointmentType: s.appointmentType ?? 'FULL TIME',
-      appointmentDate: s.appointmentDate ?? '', nationalIdType: s.nationalIdType ?? 'GHANA CARD', nationalIdNumber: s.nationalIdNumber ?? '',
+      appointmentDate: s.appointmentDate ?? '', placementEndDate: s.placementEndDate ?? '',
+      nationalIdType: s.nationalIdType ?? 'GHANA CARD', nationalIdNumber: s.nationalIdNumber ?? '',
       emergencyContact: s.emergencyContact ?? '', phone: s.phone ?? '', email: s.email ?? '', staffFileLocation: s.staffFileLocation ?? '', positionId: '',
       cadre: s.cadre ?? '', professionalRank: s.professionalRank ?? '', availabilityStatus: s.availabilityStatus ?? 'available',
     });
@@ -331,7 +333,7 @@ export function PersonnelManagementPage() {
           <label>Date of birth<input type="date" value={staffForm.dateOfBirth} onChange={e => setStaffForm({ ...staffForm, dateOfBirth: e.target.value })} /></label>
           <label>Gender<select value={staffForm.gender} onChange={e => setStaffForm({ ...staffForm, gender: e.target.value })}><option value="">—</option>{GENDERS.map(g => <option key={g} value={g}>{g}</option>)}</select></label>
           <label>Designation (grade)<TextField value={staffForm.designation} onValue={nextValue => setStaffForm({ ...staffForm, designation: nextValue })} placeholder="e.g. Principal Medical Lab Scientist" /></label>
-          <label>Position / role<TextField value={staffForm.jobTitle} onValue={nextValue => setStaffForm({ ...staffForm, jobTitle: nextValue })} placeholder="e.g. Biochemistry Unit Head" /></label>
+          <label>Position / role<TextField value={staffForm.jobTitle} onValue={nextValue => setStaffForm({ ...staffForm, jobTitle: nextValue })} placeholder="e.g. Biochemistry Unit Supervisor" /></label>
           <label>Unit / Section<select value={staffForm.sectionId} onChange={e => setStaffForm({ ...staffForm, sectionId: e.target.value })}><option value="">—</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
           <label>Professional regulator<TextField value={staffForm.professionalRegulator} onValue={nextValue => setStaffForm({ ...staffForm, professionalRegulator: nextValue })} placeholder="e.g. AHPC" /></label>
           <label>Professional licence no.<TextField value={staffForm.professionalLicence} onValue={nextValue => setStaffForm({ ...staffForm, professionalLicence: nextValue })} /></label>
@@ -339,7 +341,16 @@ export function PersonnelManagementPage() {
           <label>Qualifications<TextField value={staffForm.qualifications} onValue={nextValue => setStaffForm({ ...staffForm, qualifications: nextValue })} placeholder="Separate several with |" /></label>
           <label>Personnel category<select value={staffForm.personnelCategory} onChange={e => setStaffForm({ ...staffForm, personnelCategory: e.target.value })}>{PERSONNEL_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
           <label>Appointment type<select value={staffForm.appointmentType} onChange={e => setStaffForm({ ...staffForm, appointmentType: e.target.value })}>{APPOINTMENT_TYPES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
-          <label>Date of appointment<input type="date" value={staffForm.appointmentDate} onChange={e => setStaffForm({ ...staffForm, appointmentDate: e.target.value })} /></label>
+          <label>{isTemporaryCategory(staffForm.personnelCategory) ? 'Placement starts' : 'Date of appointment'}
+            <input type="date" value={staffForm.appointmentDate} onChange={e => setStaffForm({ ...staffForm, appointmentDate: e.target.value })} /></label>
+          {/* A student or an intern is here for a stated period and then gone.
+              Saying when it ends is what lets the system close the record on
+              time instead of leaving somebody on the register for months. */}
+          {isTemporaryCategory(staffForm.personnelCategory) && <label>Placement ends
+            <input type="date" value={staffForm.placementEndDate} min={staffForm.appointmentDate || undefined}
+              onChange={e => setStaffForm({ ...staffForm, placementEndDate: e.target.value })} />
+            <span className="muted">Access is withdrawn {PLACEMENT_GRACE_DAYS} days after this date unless it is extended. The record is kept.</span>
+          </label>}
           <label>National ID type<select value={staffForm.nationalIdType} onChange={e => setStaffForm({ ...staffForm, nationalIdType: e.target.value })}>{NATIONAL_ID_TYPES.map(c => <option key={c} value={c}>{c}</option>)}</select></label>
           <label>National ID number<TextField value={staffForm.nationalIdNumber} onValue={nextValue => setStaffForm({ ...staffForm, nationalIdNumber: nextValue })} /></label>
           <label>Contact phone<TextField value={staffForm.phone} onValue={nextValue => setStaffForm({ ...staffForm, phone: nextValue })} /></label>

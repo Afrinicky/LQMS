@@ -414,7 +414,7 @@ export function iqcPortalRoutes() {
     const sectionId = currentSection(db, req);
     if (!sectionId) return res.status(400).json({ error: 'Your staff record is not linked to a unit. Ask an administrator to set it.' });
     if (!mayDefineFor(req, sectionId)) {
-      return res.status(403).json({ error: 'You do not have permission to define controls. Ask your unit head.' });
+      return res.status(403).json({ error: 'You do not have permission to define controls. Ask your unit supervisor.' });
     }
 
     const materialName = String(req.body?.materialName ?? '').trim();

@@ -204,7 +204,7 @@ function DeconProgramme({ onError, canEdit }: { onError: (m: string | null) => v
         <div>
           <h3>The decontamination programme</h3>
           <p>
-            Laboratory-wide decontaminations are carried by every unit; a unit head sets their own frequency for
+            Laboratory-wide decontaminations are carried by every unit; a unit supervisor sets their own frequency for
             their room and adds whatever else it needs. Changing a laboratory-wide one changes it everywhere.
           </p>
         </div>

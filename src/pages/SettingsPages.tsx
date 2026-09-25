@@ -44,10 +44,6 @@ import RiskCriteriaSettings from './settings/RiskCriteriaSettings';
 // it should inherit, so that selecting a position pre-fills the authorization grid
 // even when the position title is not an exact role name.
 const POSITION_ROLE_MAP: Record<string, string> = {
-  'haematology unit head': 'Section Head',
-  'biochemistry unit head': 'Section Head',
-  'microbiology unit head': 'Section Head',
-  'blood bank unit head': 'Blood Bank Unit Head',
   'customer service officer': 'Quality User',
   'stores officer': 'Quality User',
   'secretary': 'Quality User',
@@ -56,7 +52,10 @@ function effectiveRoleNames(title: string): string[] {
   const t = title.toLowerCase().trim();
   const names = new Set<string>([t]);
   if (POSITION_ROLE_MAP[t]) names.add(POSITION_ROLE_MAP[t].toLowerCase());
-  if (/unit head|head of/.test(t)) names.add('section head');
+  // The blood bank is a unit like any other, so its supervisor inherits the
+  // unit supervisor's grid and adds the blood registers on top of it.
+  if (/^blood\s*bank/.test(t)) names.add('blood bank unit supervisor');
+  if (/unit supervisor|unit head|section head|head of/.test(t)) names.add('unit supervisor');
   return [...names];
 }
 
@@ -464,7 +463,7 @@ function roleType(title: string): 'management' | 'quality' | 'technical' | 'supp
   const t = title.toLowerCase();
   if (/quality/.test(t)) return 'quality';
   if (/^laboratory manager|laboratory director|^lab manager|^director|superintend/.test(t)) return 'management';
-  if (/unit head|head of|scientist|technologist|technician|technical officer|biomedical|microbiolog|haematolog|chemistry|blood bank|laboratory assistant/.test(t)) return 'technical';
+  if (/unit supervisor|unit head|head of|scientist|technologist|technician|technical officer|biomedical|microbiolog|haematolog|chemistry|blood bank|laboratory assistant/.test(t)) return 'technical';
   return 'support';
 }
 
@@ -501,7 +500,7 @@ function RankConfig() {
   }
   return <div className="card" style={{ marginTop: 16 }}>
     <h3>Professional rank order</h3>
-    <p className="hint">The automatic hierarchy under each Unit Head orders staff of the same cadre by these ranks (top = highest). Staff with no explicit rank are matched against their designation.</p>
+    <p className="hint">The automatic hierarchy under each Unit Supervisor orders staff of the same cadre by these ranks (top = highest). Staff with no explicit rank are matched against their designation.</p>
     {error && <Notice kind="error">{error}</Notice>}
     <table className="data-table" style={{ maxWidth: 520 }}><thead><tr><th>#</th><th>Rank</th><th>Active</th><th></th></tr></thead><tbody>
       {[...ranks].sort((a, b) => a.sortOrder - b.sortOrder).map((r, i, arr) => <tr key={r.id} style={{ opacity: r.isActive ? 1 : 0.5 }}>
@@ -580,7 +579,7 @@ function Organogram({ staff, onChanged }: { staff: Staff[]; onChanged: () => voi
         <button type="button" onClick={printChart}>Print</button>
       </div>
     </div>
-    <p className="hint no-print">The appointed roles below the Laboratory Manager are set by hand. Under each <strong>Unit Head</strong>, the unit’s technical staff are arranged automatically by cadre (Scientist → Technician → Assistant) then professional rank — the highest-ranked becomes the next-in-command, and succession flows downward. Click any appointed role to edit it; the automatic chain follows the staff register.</p>
+    <p className="hint no-print">The appointed roles below the Laboratory Manager are set by hand. Under each <strong>Unit Supervisor</strong>, the unit’s technical staff are arranged automatically by cadre (Scientist → Technician → Assistant) then professional rank — the highest-ranked becomes the next-in-command, and succession flows downward. Click any appointed role to edit it; the automatic chain follows the staff register.</p>
     <div className="org-legend no-print">
       <span className="leg"><span className="org-swatch rt-management" />Management</span>
       <span className="leg"><span className="org-swatch rt-quality" />Quality</span>

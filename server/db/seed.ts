@@ -16,10 +16,10 @@ export function seedDefaults() {
       { name: 'Laboratory Manager', description: 'Lab leadership role for oversight of quality and operations.' },
       { name: 'Quality Manager', description: 'Lead quality assurance, corrective action, and review workflows.' },
       { name: 'Quality Team Member', description: 'Operational QMS user for investigations, CAPA, and action follow-up.' },
-      { name: 'Section Head', description: 'Section manager with oversight for department-scoped quality records.' },
+      { name: 'Unit Supervisor', description: 'Runs a unit of the laboratory: its people, its equipment, its technical quality.' },
       { name: 'Biomedical Scientist', description: 'Technical staff member assigned to quality and operational records.' },
       { name: 'Technician', description: 'Frontline technical staff with access to assigned quality actions and records.' },
-      { name: 'Blood Bank Unit Head', description: 'Blood bank section lead for handover review and quality oversight.' },
+      { name: 'Blood Bank Unit Supervisor', description: 'Runs the blood bank: a unit supervisor, with the blood registers on top.' },
       { name: 'Safety Manager', description: 'Oversees safety incidents and reviews blood bank adverse events.' },
       { name: 'Data Officer', description: 'Imports LHIMS raw data and prepares monthly reports.' },
       { name: 'POCT Officer', description: 'Oversees point-of-care testing sites, devices, operators, QC, EQA, and incidents.' },
@@ -94,7 +94,7 @@ export function seedDefaults() {
     // note beside the application loop for why this exists.
     // Both the routine-work tiers and the bulk-import reservation below have to
     // reach a laboratory that is already running, so the marker moves past both.
-    const ROLE_DEFAULTS_VERSION = '2026.09-features.10-stock-corrections';
+    const ROLE_DEFAULTS_VERSION = '2026.09-features.11-unit-supervisors';
 
     // ── Bulk export and import ─────────────────────────────────────────────
     // Downloading a whole register as a spreadsheet, or loading one back in,
@@ -230,10 +230,16 @@ export function seedDefaults() {
         view: ['assessments', 'meetings', 'notifications.calendar', 'documents.records'],
       },
 
-      // ---- Section / unit leadership ---------------------------------------
-      // Runs a section: its people's rosters and training, its equipment, its
+      // ---- Unit leadership ---------------------------------------------------
+      // Runs a unit: its people's rosters and training, its equipment, its
       // technical quality. Not the laboratory's finances or licences.
-      'Section Head': {
+      //
+      // Every unit of the laboratory is run this way — haematology,
+      // biochemistry, microbiology, the blood bank. The blood bank's
+      // supervisor is this profile with the blood registers added, and is
+      // built from it below rather than written out again, so the two cannot
+      // drift apart as one of them is changed.
+      'Unit Supervisor': {
         full: ['iqc', 'eqa', 'verification_validation', 'measurement_uncertainty'],
         manage: [
           'personnel.rosters', 'personnel.activities', 'personnel.training', 'personnel.orientation',
@@ -408,21 +414,6 @@ export function seedDefaults() {
         ],
       },
 
-      // ---- Specialist leads --------------------------------------------------
-      // Runs the blood bank. Seniority is not breadth: laboratory-wide
-      // equipment, stores and safety equipment belong to the people who own
-      // those functions, so this role contributes to them rather than
-      // managing them.
-      'Blood Bank Unit Head': {
-        full: ['blood_bank_handover'],
-        manage: ['nc_capa', 'actions', 'risks', 'monitoring.readings'],
-        contribute: ['equipment.maintenance', 'supplier_inventory.stock'],
-        view: [
-          'equipment.register', 'supplier_inventory.storage', 'documents.records',
-          'notifications.calendar', 'facilities_safety.equipment',
-        ],
-      },
-
       // Owns safety and occupational health outright. The laboratory's
       // equipment register is not a safety record — safety equipment has its
       // own feature — so it is not granted here.
@@ -528,6 +519,30 @@ export function seedDefaults() {
       },
     };
 
+    // ---- The blood bank is a unit like any other ---------------------------
+    // It used to be a specialist post on a much narrower profile: full rights
+    // over the handover register and little else. So the person running the
+    // blood bank could not do for their unit what every other unit supervisor
+    // does for theirs — no bench schedule, no controls, no training register,
+    // no equipment.
+    //
+    // The profile is therefore the unit supervisor's own, copied whole, with
+    // one addition: the blood registers — units on the shelf, the handover,
+    // the donation campaigns, the transfusion adverse events, the discards —
+    // held outright, because that is the part of the job nobody else does.
+    //
+    // Copied rather than written out again so the two cannot drift: whatever
+    // is granted to a unit supervisor tomorrow reaches the blood bank too.
+    {
+      const unitSupervisor = ROLE_ACCESS['Unit Supervisor'];
+      const copy: Partial<Record<AccessLevel, string[]>> = {};
+      for (const [level, keys] of Object.entries(unitSupervisor) as [AccessLevel, string[]][]) {
+        copy[level] = [...keys];
+      }
+      copy.full = [...(copy.full ?? []), 'blood_bank_handover'];
+      ROLE_ACCESS['Blood Bank Unit Supervisor'] = copy;
+    }
+
     // ---- Who may perform which tier of routine work ------------------------
     // The recurring work of a unit is not one job. Charting a fridge and
     // decontaminating a bench are done by whoever is on duty. Running and
@@ -544,17 +559,17 @@ export function seedDefaults() {
     //
     // The general tier is in the baseline above and so is not repeated.
     const ROUTINE_TECHNICAL_ROLES = [
-      'Biomedical Scientist', 'Section Head', 'Blood Bank Unit Head', 'POCT Officer',
+      'Biomedical Scientist', 'Unit Supervisor', 'Blood Bank Unit Supervisor', 'POCT Officer',
       'Safety Manager', 'Quality Team Member', 'Quality Manager', 'Laboratory Manager',
     ];
     const ROUTINE_SUPERVISORY_ROLES = [
-      'Section Head', 'Blood Bank Unit Head', 'Safety Manager', 'Quality Manager', 'Laboratory Manager',
+      'Unit Supervisor', 'Blood Bank Unit Supervisor', 'Safety Manager', 'Quality Manager', 'Laboratory Manager',
     ];
     // Reading what the whole unit was due to do, and what was actually done.
     // Auditing the programme is not performing it, so the Internal Auditor is
     // here and in neither list above.
     const ROUTINE_OVERSIGHT_ROLES = [
-      'Section Head', 'Blood Bank Unit Head', 'Safety Manager', 'Quality Team Member',
+      'Unit Supervisor', 'Blood Bank Unit Supervisor', 'Safety Manager', 'Quality Team Member',
       'Quality Manager', 'Laboratory Manager', 'Internal Auditor',
     ];
     const addRoutine = (roleNames: string[], key: string, level: AccessLevel) => {
@@ -578,7 +593,7 @@ export function seedDefaults() {
     // blocks, so "who can see the laboratory's overview" stays a single visible
     // decision. The System Administrator holds everything and is not listed.
     const MAIN_DASHBOARD_ROLES = [
-      'Laboratory Manager', 'Quality Manager', 'Section Head', 'Blood Bank Unit Head',
+      'Laboratory Manager', 'Quality Manager', 'Unit Supervisor', 'Blood Bank Unit Supervisor',
     ];
     for (const roleName of MAIN_DASHBOARD_ROLES) {
       const role = ROLE_ACCESS[roleName];
@@ -691,14 +706,15 @@ export function seedDefaults() {
       { match: /^quality\s*manager$/, profile: 'Quality Manager' },
       { match: /^quality\s*(team\s*member|officer)$/, profile: 'Quality Team Member' },
       { match: /^safety\s*manager$/, profile: 'Safety Manager' },
-      { match: /^blood\s*bank/, profile: 'Blood Bank Unit Head' },
+      { match: /^blood\s*bank/, profile: 'Blood Bank Unit Supervisor' },
       { match: /^data\s*officer$/, profile: 'Data Officer' },
       { match: /^poct/, profile: 'POCT Officer' },
       { match: /^stores?\s*(officer|keeper)$/, profile: 'Stores Officer' },
       { match: /^customer\s*service/, profile: 'Customer Service Officer' },
       { match: /^internal\s*auditor$/, profile: 'Internal Auditor' },
-      // Any other "… Unit Head" / "… Head of Unit" runs a section.
-      { match: /(unit\s*head|head\s*of\s*unit|section\s*head|unit\s*manager)$/, profile: 'Section Head' },
+      // Any other "… Unit Supervisor" — or the older "… Unit Head" a register
+      // may still carry — runs a unit.
+      { match: /(unit\s*(supervisor|head|manager)|section\s*(supervisor|head)|head\s*of\s*unit)$/, profile: 'Unit Supervisor' },
       { match: /^biomedical\s*scientist$/, profile: 'Biomedical Scientist' },
       { match: /^(medical\s*)?laboratory\s*(scientist|technologist)$/, profile: 'Biomedical Scientist' },
       { match: /^technician$/, profile: 'Technician' },

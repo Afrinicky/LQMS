@@ -49,9 +49,9 @@ const roles = (await j('/roles', { token: A })).json;
 const roleId = n => roles.find(r => r.name === n)?.id;
 const mkUser = async (username, staffId, roleName) => (await j('/users', { token: A, method: 'POST',
   body: { username, password: PW, fullName: username, roleId: roleId(roleName), staffId } })).json;
-const headUser = await mkUser(`head${stamp}`, head.id, 'Section Head');
+const headUser = await mkUser(`head${stamp}`, head.id, 'Unit Supervisor');
 const actorUser = await mkUser(`act${stamp}`, actor.id, 'Biomedical Scientist');
-check('a Section Head account and a Biomedical Scientist account', !!headUser?.id && !!actorUser?.id, JSON.stringify({ headUser, actorUser }));
+check('a Unit Supervisor account and a Biomedical Scientist account', !!headUser?.id && !!actorUser?.id, JSON.stringify({ headUser, actorUser }));
 
 // The unit records who runs it.
 await j(`/section-config/sections/${sectionId}`, { token: A, method: 'PUT', body: { headStaffId: head.id } });

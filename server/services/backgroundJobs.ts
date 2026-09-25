@@ -80,7 +80,8 @@ export function startBackgroundServices(getDb: DbGetter): void {
     import('./activityService.js'),
     import('./systemAuditService.js'),
     import('./trainingLifecycle.js'),
-  ]).then(([schedules, activities, systemAudit, training]) => {
+    import('./placementLifecycle.js'),
+  ]).then(([schedules, activities, systemAudit, training, placements]) => {
     every('duty & activity tick', 12_000, 10 * 60_000, () => {
       const db = getDb();
       try { schedules.runScheduleTick(db); } catch (e) { console.error('[jobs] schedule tick failed:', e); }
@@ -92,6 +93,10 @@ export function startBackgroundServices(getDb: DbGetter): void {
       // which is why a register full of scheduled training still had people
       // not turning up.
       try { training.runTrainingTick(db); } catch (e) { console.error('[jobs] training tick failed:', e); }
+      // Placements: the notice on the day a student's or intern's period ends,
+      // and the withdrawal a week later if nobody extended it. Idempotent, and
+      // it catches up by itself on a host that was switched off.
+      try { placements.runPlacementTick(db); } catch (e) { console.error('[jobs] placement tick failed:', e); }
     });
   }).catch(e => console.error('[jobs] duty & activity scheduler failed to start:', e));
 }

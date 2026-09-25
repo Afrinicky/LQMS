@@ -13,6 +13,8 @@ import { requirePermission, viewableModulesOf } from '../middleware/permissions.
 import { resolvePermission, explainUserAccess } from '../services/permissionResolver.js';
 import { trainingFileFor } from '../services/trainingRecord.js';
 import { ACCESS_LEVELS, LEVEL_ACTIONS, featuresOfModule, type AccessLevel } from '../../shared/constants/features.js';
+import { isTemporaryCategory } from '../../shared/constants/personnel.js';
+import { runPlacementTick } from '../services/placementLifecycle.js';
 import { pendingRequests, recentRequests, decideRequest } from '../services/passwordResetService.js';
 import { historicReferences, purgeDisposableRows, purgeUserEverywhere } from '../services/userReferences.js';
 import { historicStaffReferences, purgeDisposableStaffRows, describeStaffReference, purgeStaffEverywhere } from '../services/staffReferences.js';
@@ -121,7 +123,8 @@ const STAFF_COLUMN_MAP: Array<[string, string]> = [
   ['professionalRegulator', 'professional_regulator'], ['professionalLicence', 'professional_licence'],
   ['licenceExpiryDate', 'licence_expiry_date'], ['qualifications', 'qualifications'], ['unit', 'unit'],
   ['personnelCategory', 'personnel_category'], ['appointmentType', 'appointment_type'],
-  ['appointmentDate', 'appointment_date'], ['nationalIdType', 'national_id_type'],
+  ['appointmentDate', 'appointment_date'], ['placementEndDate', 'placement_end_date'],
+  ['nationalIdType', 'national_id_type'],
   ['nationalIdNumber', 'national_id_number'], ['emergencyContact', 'emergency_contact'],
   ['email', 'email'], ['phone', 'phone'], ['staffFileLocation', 'staff_file_location'],
   ['cadre', 'cadre'], ['professionalRank', 'professional_rank'], ['availabilityStatus', 'availability_status'],
@@ -152,6 +155,12 @@ function buildStaffColumns(body: Record<string, unknown>): Record<string, string
   if (middle) cols.other_names = middle;
   if ('sectionId' in body) cols.section_id = idOrNull(body.sectionId);
   if ('isActive' in body) cols.is_active = body.isActive ? 1 : 0;
+  // A placement period belongs to a placement. Moving somebody onto the
+  // permanent staff takes the end date off with it, so nothing is left behind
+  // to withdraw their access in a month's time.
+  if ('personnelCategory' in body && !isTemporaryCategory(cols.personnel_category as string | null)) {
+    cols.placement_end_date = null;
+  }
   return cols;
 }
 
@@ -1021,7 +1030,7 @@ export function commonRoutes() {
     const staff = db.prepare(`SELECT id, full_name AS name, section_id AS sectionId, designation, job_title AS jobTitle,
       cadre, professional_rank, availability_status AS availability FROM staff WHERE is_active = 1`).all() as any[];
 
-    const isUnitHead = (title: string) => /unit head|head of|head,|hod\b/i.test(title);
+    const isUnitHead = (title: string) => /unit supervisor|unit head|head of|head,|hod\b/i.test(title);
     const roleType = (title: string): string => {
       const t = title.toLowerCase();
       if (/quality/.test(t)) return 'quality';
@@ -1121,15 +1130,15 @@ export function commonRoutes() {
       'Quality Manager': 'Laboratory Manager',
       'Safety Manager': 'Laboratory Manager',
       'Customer Service Officer': 'Laboratory Manager',
-      'Haematology Unit Head': 'Laboratory Manager',
-      'Biochemistry Unit Head': 'Laboratory Manager',
-      'Microbiology Unit Head': 'Laboratory Manager',
-      'Blood Bank Unit Head': 'Laboratory Manager',
+      'Haematology Unit Supervisor': 'Laboratory Manager',
+      'Biochemistry Unit Supervisor': 'Laboratory Manager',
+      'Microbiology Unit Supervisor': 'Laboratory Manager',
+      'Blood Bank Unit Supervisor': 'Laboratory Manager',
       'Data Officer': 'Laboratory Manager',
       'Stores Officer': 'Laboratory Manager',
       'POCT Officer': 'Quality Manager',
       'Quality Team Member': 'Quality Manager',
-      'Biomedical Scientist': 'Haematology Unit Head',
+      'Biomedical Scientist': 'Haematology Unit Supervisor',
       'Technician': 'Biomedical Scientist',
     };
     const idByTitle = new Map<string, number>();
@@ -1502,7 +1511,9 @@ export function commonRoutes() {
       s.surname, s.middle_name middleName, s.first_name firstName, s.initials, s.date_of_birth dateOfBirth, s.gender,
       s.designation, s.job_title jobTitle, s.professional_regulator professionalRegulator, s.professional_licence professionalLicence,
       s.licence_expiry_date licenceExpiryDate, s.qualifications, s.unit, s.personnel_category personnelCategory,
-      s.appointment_type appointmentType, s.appointment_date appointmentDate, s.national_id_type nationalIdType,
+      s.appointment_type appointmentType, s.appointment_date appointmentDate,
+      s.placement_end_date placementEndDate, s.placement_notice_at placementNoticeAt,
+      s.national_id_type nationalIdType,
       s.national_id_number nationalIdNumber, s.emergency_contact emergencyContact, s.staff_file_location staffFileLocation,
       s.cadre, s.professional_rank professionalRank, s.availability_status availabilityStatus,
       s.exit_reason exitReason, s.exit_date exitDate, s.exit_notes exitNotes, s.exit_recorded_at exitRecordedAt,
@@ -1514,6 +1525,23 @@ export function commonRoutes() {
     LEFT JOIN roles r ON r.id = u.role_id
     WHERE ${activeFilter}
     ORDER BY s.is_active DESC, s.full_name`).all());
+  });
+
+  /**
+   * Bring the placements up to date now, rather than on the next daily pass.
+   *
+   * The same work the scheduler does overnight: warn the laboratory about a
+   * placement that has run out, and withdraw access a week later when nobody
+   * extended it. It is here because the person who has just corrected an end
+   * date on the register wants the consequence of that today, and because a
+   * rule that can only be observed by waiting is a rule nobody trusts.
+   */
+  router.post('/staff/placement-tick', requirePermission('personnel.register', 'edit'), (req, res) => {
+    const result = runPlacementTick(getDb());
+    if (result.warned || result.closed) {
+      audit(req, { action: 'edit', entity: 'staff', newValue: { placementTick: true, ...result } });
+    }
+    res.json(result);
   });
 
   router.post('/staff', requirePermission('personnel.register', 'create'), (req, res) => {
@@ -1546,6 +1574,13 @@ export function commonRoutes() {
         return res.status(403).json({ error: 'Permission denied', decision: { allowed: false, source: 'Denied override', reason: 'You may update your contact details only. Ask the personnel office to change anything else.' } });
       }
       cols = Object.fromEntries(Object.entries(cols).filter(([c]) => SELF_EDITABLE.has(c)));
+    }
+    // Extending a placement restarts its clock: the warning goes out again
+    // against the new date, and the withdrawal that was a week away is not.
+    if ('placement_end_date' in cols
+      && String(cols.placement_end_date ?? '') !== String((existing as any).placement_end_date ?? '')) {
+      cols.placement_notice_at = null;
+      cols.placement_closed_at = null;
     }
     const keys = Object.keys(cols);
     if (keys.length) {

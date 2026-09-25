@@ -125,10 +125,10 @@ export function profileIdForUser(userId: number): { profileId: number | null; vi
 }
 
 /**
- * The profile an acting unit head stands in with: the one the unit's
- * substantive head holds, so the stand-in gets exactly the post's access and
- * not a guess at it. Falls back to the laboratory's unit-head profile when the
- * post is vacant or its holder has no account.
+ * The profile an acting unit supervisor stands in with: the one the unit's
+ * substantive supervisor holds, so the stand-in gets exactly the post's access
+ * and not a guess at it. Falls back to the laboratory's unit-supervisor
+ * profile when the post is vacant or its holder has no account.
  */
 function actingHeadProfile(db: any, staffId: number): { profileId: number; unitName: string } | null {
   const today = new Date().toISOString().slice(0, 10);
@@ -150,8 +150,9 @@ function actingHeadProfile(db: any, staffId: number): { profileId: number; unitN
       if (theirs !== null && !isSeniorProfile(theirs)) return { profileId: theirs, unitName: appt.unit_name };
     }
   }
-  const fallback = db.prepare("SELECT id FROM roles WHERE LOWER(name) IN ('section head', 'unit head') ORDER BY id LIMIT 1")
-    .get() as { id: number } | undefined;
+  const fallback = db.prepare(`SELECT id FROM roles
+      WHERE LOWER(name) IN ('unit supervisor', 'section supervisor', 'section head', 'unit head')
+      ORDER BY id LIMIT 1`).get() as { id: number } | undefined;
   return fallback ? { profileId: fallback.id, unitName: appt.unit_name } : null;
 }
 

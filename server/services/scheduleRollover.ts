@@ -188,7 +188,7 @@ export function obligationsForMonth(db: Db, month: string, today = todayIso()): 
       dueDate: benchDue, daysRemaining, status, prepared: Boolean(schedule), carriedForward: carried,
       scheduleId: schedule?.id ?? null,
       ownerStaffId: unitHeadOf(db, Number(section.id), month),
-      ownerRoleHint: 'Unit Head',
+      ownerRoleHint: 'Unit Supervisor',
       actionUrl: `${ROUTES.bench_schedule}&sectionId=${section.id}`,
       message: messageFor('bench_schedule', month, status, daysRemaining, section.name),
     });

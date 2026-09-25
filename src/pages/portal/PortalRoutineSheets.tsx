@@ -482,7 +482,7 @@ export function PortalDeconProgramme({ sectionId }: { sectionId?: number | null 
           <h3><ClipboardList size={16} /> What your unit decontaminates</h3>
           <p>
             The laboratory-wide programme every unit carries, plus anything your unit added.
-            A padlock means the frequency was set for the whole laboratory and your unit head adjusts it, not you.
+            A padlock means the frequency was set for the whole laboratory and your unit supervisor adjusts it, not you.
           </p>
         </div>
       </div>
