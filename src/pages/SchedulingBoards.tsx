@@ -447,20 +447,53 @@ type BenchCell = { row_id: number; day: number; value: string | null };
 type BenchDef = { id: number; name: string; code: string | null; display_order: number; is_active: number };
 type Bench = { id: number; schedule_number: string; section_id: number; section_name: string; month: string; title: string; status: string; rows: BenchRow[]; cells: BenchCell[]; benches: BenchDef[] };
 
-export function BenchScheduleBoard({ sections, canEdit }: { sections: Section[]; canEdit: boolean }) {
+/**
+ * What this account may do here, straight from the server.
+ *
+ * Two different people use this board: somebody who builds every unit's
+ * schedule, and somebody who runs one unit and builds only theirs. Both are
+ * legitimate, and only the server can say which one is signed in — so it does,
+ * and the board draws exactly that rather than guessing from the permission
+ * map and offering a unit the API would refuse.
+ */
+type BenchAccess = {
+  canCreateAll: boolean; canEditAll: boolean; canApproveAll: boolean; canDeleteAll: boolean;
+  unitsLed: Array<{ id: number; name: string; acting: boolean }>;
+  units: Array<{ id: number; name: string }>;
+};
+
+export function BenchScheduleBoard({ sections, staff, canEdit }: { sections: Section[]; staff: Staff[]; canEdit: boolean }) {
   const { can } = usePermissions();
   const [list, setList] = useState<Array<{ id: number; schedule_number: string; section_id: number; section_name: string; month: string; status: string }>>([]);
+  const [access, setAccess] = useState<BenchAccess | null>(null);
   const [bs, setBs] = useState<Bench | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [form, setForm] = useState({ sectionId: '', month: nextMonthValue() });
   const [copyFrom, setCopyFrom] = useState('');
   const [paint, setPaint] = useState('');
+  const [addStaffId, setAddStaffId] = useState('');
+  const [addLabel, setAddLabel] = useState('');
   const [cellMap, setCellMap] = useState<Map<string, string>>(new Map());
   const dirty = useRef<Set<string>>(new Set());
 
+  const ledIds = useMemo(() => new Set((access?.unitsLed ?? []).map(u => Number(u.id))), [access]);
+  /** Units this account may draw up a schedule for: all of them, or the ones it runs. */
+  const unitChoices: Array<{ id: number; name: string }> = access
+    ? access.units
+    : (canEdit ? sections.map(sec => ({ id: sec.id, name: sec.name })) : []);
+  const mayStart = access ? (access.canCreateAll || access.unitsLed.length > 0) : canEdit;
+  /** May this account change a schedule that belongs to `sectionId`? */
+  const mayWork = (sectionId: number | null | undefined) =>
+    access ? (access.canEditAll || (sectionId != null && ledIds.has(Number(sectionId)))) : canEdit;
+  const mayApprove = (sectionId: number | null | undefined) =>
+    access ? (access.canApproveAll || (sectionId != null && ledIds.has(Number(sectionId)))) : canEdit;
+  const mayDelete = (sectionId: number | null | undefined) =>
+    access ? (access.canDeleteAll || (sectionId != null && ledIds.has(Number(sectionId)))) : canEdit;
+
   function loadList() { api<typeof list>('/scheduling/bench-schedules').then(setList).catch(e => setError(errorText(e))); }
   useEffect(() => { loadList(); }, []);
+  useEffect(() => { api<BenchAccess>('/scheduling/bench-schedules/access').then(setAccess).catch(() => setAccess(null)); }, []);
   // Bench schedules for the unit chosen in the create form, offered as templates.
   const templatesForSection = form.sectionId ? list.filter(s => String(s.section_id) === form.sectionId) : list;
   async function open(id: number) {
@@ -486,6 +519,22 @@ export function BenchScheduleBoard({ sections, canEdit }: { sections: Section[];
   }
   async function act(path: string, ok: string) { if (!bs) return; try { await api(`/scheduling/bench-schedules/${bs.id}/${path}`, { method: 'POST', body: JSON.stringify({}) }); setMsg(ok); loadList(); await open(bs.id); } catch (e) { setError(errorText(e)); } }
   async function remove(id: number) { if (!confirm('Delete this bench schedule?')) return; try { await api(`/scheduling/bench-schedules/${id}`, { method: 'DELETE' }); if (bs?.id === id) setBs(null); loadList(); } catch (e) { setError(errorText(e)); } }
+  // A schedule starts with the unit's staff on it, but the month is not the
+  // register: somebody transfers in, a student arrives, a locum covers a week.
+  // Whoever prepares the schedule adds and removes those lines here.
+  async function addRow(e: FormEvent) {
+    e.preventDefault(); if (!bs) return; setError(null);
+    if (!addStaffId && !addLabel.trim()) { setError('Pick a member of staff, or type a label for the line.'); return; }
+    try {
+      await api(`/scheduling/bench-schedules/${bs.id}/rows`, { method: 'POST', body: JSON.stringify({ staffId: addStaffId || null, label: addStaffId ? null : addLabel.trim() }) });
+      setAddStaffId(''); setAddLabel(''); await open(bs.id);
+    } catch (err) { setError(errorText(err)); }
+  }
+  async function removeRow(rowId: number) {
+    if (!bs || !confirm('Take this line off the schedule?')) return;
+    try { await api(`/scheduling/bench-schedule-rows/${rowId}`, { method: 'DELETE' }); await open(bs.id); }
+    catch (err) { setError(errorText(err)); }
+  }
 
   return <div>
     {error && <Notice kind="error">{error}</Notice>}
@@ -493,8 +542,8 @@ export function BenchScheduleBoard({ sections, canEdit }: { sections: Section[];
     <div className="card">
       <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
         <h3 style={{ margin: 0 }}>Unit Bench Schedules</h3>
-        {canEdit && <form onSubmit={create} style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select value={form.sectionId} onChange={e => { setForm({ ...form, sectionId: e.target.value }); setCopyFrom(''); }} required><option value="">— unit —</option>{sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+        {mayStart && <form onSubmit={create} style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <select value={form.sectionId} onChange={e => { setForm({ ...form, sectionId: e.target.value }); setCopyFrom(''); }} required><option value="">— unit —</option>{unitChoices.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
           <input type="month" value={form.month} onChange={e => setForm({ ...form, month: e.target.value })} required />
           <select value={copyFrom} onChange={e => setCopyFrom(e.target.value)} title="Copy a previous schedule as a template"><option value="">— blank —</option>{templatesForSection.map(s => <option key={s.id} value={s.id}>copy {s.schedule_number}{s.month ? ` (${monthDays(s.month).label})` : ''}</option>)}</select>
           <button type="submit">+ Create</button>
@@ -503,7 +552,7 @@ export function BenchScheduleBoard({ sections, canEdit }: { sections: Section[];
       <p className="muted" style={{ marginTop: 0 }}>Each unit assigns its staff to benches/workspaces per day. Benches are configured in <em>Settings → Section/Unit Configuration → Benches</em>. Unit heads prepare these for their own unit — or <strong>copy last month</strong> and tweak.</p>
       <table className="data-table"><thead><tr><th>Number</th><th>Unit</th><th>Month</th><th>Status</th><th></th></tr></thead><tbody>
         {list.map(s => <tr key={s.id}><td>{s.schedule_number}</td><td>{s.section_name}</td><td>{s.month ? monthDays(s.month).label : '—'}</td><td>{statusBadge(s.status)}</td>
-          <td><button onClick={() => open(s.id)}>Open</button> {can('personnel.rosters', 'print') && <button className="secondary" onClick={() => openPrintPage(`/scheduling/bench-schedules/${s.id}/print`, setError)}>Print</button>}{canEdit && <> <button className="secondary" onClick={() => remove(s.id)}>Delete</button></>}</td></tr>)}
+          <td><button onClick={() => open(s.id)}>Open</button> {can('personnel.rosters', 'print') && <button className="secondary" onClick={() => openPrintPage(`/scheduling/bench-schedules/${s.id}/print`, setError)}>Print</button>}{mayDelete(s.section_id) && <> <button className="secondary" onClick={() => remove(s.id)}>Delete</button></>}</td></tr>)}
         {list.length === 0 && <tr><td colSpan={5} className="muted">No bench schedules yet.</td></tr>}
       </tbody></table>
     </div>
@@ -512,34 +561,47 @@ export function BenchScheduleBoard({ sections, canEdit }: { sections: Section[];
       <div className="section-head" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <h3 style={{ margin: 0 }}>{bs.section_name} — {md.label} {statusBadge(bs.status)}</h3>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {canEdit && <button onClick={save} disabled={dirty.current.size === 0}>Save changes</button>}
+          {mayWork(bs.section_id) && <button onClick={save} disabled={dirty.current.size === 0}>Save changes</button>}
           {can('personnel.rosters', 'print') && <button className="secondary" onClick={() => openPrintPage(`/scheduling/bench-schedules/${bs.id}/print`, setError)}>Print / PDF</button>}
-          {canEdit && bs.status !== 'published' && <button className="secondary" onClick={() => act('publish', 'Published to all staff.')}>Publish</button>}
-          {canEdit && bs.status !== 'approved' && <button className="secondary" onClick={() => act('approve', 'Approved.')}>Approve</button>}
+          {mayWork(bs.section_id) && bs.status !== 'published' && <button className="secondary" onClick={() => act('publish', 'Published to all staff.')}>Publish</button>}
+          {mayApprove(bs.section_id) && bs.status !== 'approved' && <button className="secondary" onClick={() => act('approve', 'Approved.')}>Approve</button>}
           <button className="secondary" onClick={() => setBs(null)}>Close</button>
         </div>
       </div>
-      {bs.benches.length === 0 ? <div className="notice">No benches configured for this unit yet. Add them in <em>Settings → Section/Unit Configuration → Benches</em>.</div> : canEdit && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', margin: '4px 0 12px' }}>
+      {bs.benches.length === 0 ? <div className="notice">No benches configured for this unit yet. Add them in <em>Settings → Section/Unit Configuration → Benches</em>.</div> : mayWork(bs.section_id) && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', margin: '4px 0 12px' }}>
         <span className="muted" style={{ fontSize: 12 }}>Paint bench:</span>
         {bs.benches.filter(b => b.is_active).map(b => { const v = b.code || b.name; return <button key={b.id} type="button" onClick={() => setPaint(v)} title={b.name} style={{ padding: '4px 10px', border: paint === v ? '2px solid #111' : '1px solid #bbb', borderRadius: 5, background: '#eef2f7', color: '#111', cursor: 'pointer', fontWeight: 700 }}>{v}</button>; })}
         <button type="button" onClick={() => setPaint('')} style={{ padding: '4px 10px', border: paint === '' ? '2px solid #111' : '1px solid #bbb', borderRadius: 5, background: '#fff', color: '#111', fontWeight: 700, cursor: 'pointer' }}>Erase</button>
       </div>}
 
       <table style={{ borderCollapse: 'collapse', fontSize: 11, tableLayout: 'fixed', width: 'max-content' }}>
-        <colgroup><col style={{ width: 168 }} />{Array.from({ length: md.days }).map((_, i) => <col key={i} style={{ width: 26 }} />)}</colgroup>
+        <colgroup><col style={{ width: 168 }} />{Array.from({ length: md.days }).map((_, i) => <col key={i} style={{ width: 26 }} />)}{mayWork(bs.section_id) ? <col style={{ width: 30 }} /> : null}</colgroup>
         <thead>
-          <tr><th style={{ ...gridHead, textAlign: 'left', background: '#fff', color: '#c85a2a', fontStyle: 'italic' }}>{md.label}</th>{Array.from({ length: md.days }).map((_, i) => { const d = i + 1; return <th key={d} style={{ ...gridHead, background: md.isWeekend(d) ? '#a8471f' : '#c85a2a' }}>{md.weekday(d)}</th>; })}</tr>
-          <tr><th style={{ ...gridHead, textAlign: 'left' }}>STAFF</th>{Array.from({ length: md.days }).map((_, i) => { const d = i + 1; return <th key={d} style={{ ...gridHead, background: md.isWeekend(d) ? '#a8471f' : '#c85a2a' }}>{d}</th>; })}</tr>
+          <tr><th style={{ ...gridHead, textAlign: 'left', background: '#fff', color: '#c85a2a', fontStyle: 'italic' }}>{md.label}</th>{Array.from({ length: md.days }).map((_, i) => { const d = i + 1; return <th key={d} style={{ ...gridHead, background: md.isWeekend(d) ? '#a8471f' : '#c85a2a' }}>{md.weekday(d)}</th>; })}{mayWork(bs.section_id) && <th style={gridHead}></th>}</tr>
+          <tr><th style={{ ...gridHead, textAlign: 'left' }}>STAFF</th>{Array.from({ length: md.days }).map((_, i) => { const d = i + 1; return <th key={d} style={{ ...gridHead, background: md.isWeekend(d) ? '#a8471f' : '#c85a2a' }}>{d}</th>; })}{mayWork(bs.section_id) && <th style={gridHead}></th>}</tr>
         </thead>
         <tbody>
           {bs.rows.map(row => <tr key={row.id}>
             <td style={{ ...gridCell, textAlign: 'left', fontFamily: 'monospace', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', background: '#fff', color: '#111' }}>{row.staff_id ? row.staff_name : row.label}</td>
-            {Array.from({ length: md.days }).map((_, i) => { const d = i + 1; const v = cellMap.get(`${row.id}:${d}`) || ''; return <td key={d} onClick={() => canEdit && setCell(row.id, d, paint)} style={{ ...gridCell, cursor: canEdit ? 'pointer' : 'default', background: md.isWeekend(d) ? '#f3d9cc' : '#fff', color: '#0b1f33', fontWeight: 800, fontSize: 11 }}>{v}</td>; })}
+            {Array.from({ length: md.days }).map((_, i) => { const d = i + 1; const v = cellMap.get(`${row.id}:${d}`) || ''; const editable = mayWork(bs.section_id); return <td key={d} onClick={() => editable && setCell(row.id, d, paint)} style={{ ...gridCell, cursor: editable ? 'pointer' : 'default', background: md.isWeekend(d) ? '#f3d9cc' : '#fff', color: '#0b1f33', fontWeight: 800, fontSize: 11 }}>{v}</td>; })}
+            {mayWork(bs.section_id) && <td style={{ ...gridCell, whiteSpace: 'nowrap' }}>
+              <button type="button" className="tiny" title="Remove this line" onClick={() => removeRow(row.id)}>×</button>
+            </td>}
           </tr>)}
         </tbody>
       </table>
+      {mayWork(bs.section_id) && <form onSubmit={addRow} style={{ marginTop: 14, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <select value={addStaffId} onChange={e => setAddStaffId(e.target.value)}>
+          <option value="">— add a member of staff —</option>
+          {staff.filter(st => !bs.rows.some(r => Number(r.staff_id) === Number(st.id)))
+            .map(st => <option key={st.id} value={st.id}>{st.fullName}</option>)}
+        </select>
+        <span className="muted">or</span>
+        <TextField value={addLabel} onValue={setAddLabel} placeholder="a label for the line" />
+        <button type="submit">Add line</button>
+      </form>}
       {bs.benches.length > 0 && <div style={{ marginTop: 10, fontSize: 12, fontFamily: 'monospace' }}>{bs.benches.map(b => <span key={b.id} style={{ marginRight: 20 }}><b>{b.code || b.name}</b>: {b.name}</span>)}</div>}
-      {!canEdit && <p className="muted" style={{ marginTop: 12 }}>Read-only.</p>}
+      {!mayWork(bs.section_id) && <p className="muted" style={{ marginTop: 12 }}>Read-only.</p>}
     </div>}
   </div>;
 }

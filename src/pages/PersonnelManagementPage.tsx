@@ -402,7 +402,7 @@ export function PersonnelManagementPage() {
     {tab === 'Duty Roster' && <DutyRosterBoard staff={staff} canEdit={canEditRosters} />}
     {tab === 'Unit Reassignments' && <ReassignmentBoard staff={staff} sections={sections} canEdit={canEditRosters} onNavigate={setTab} />}
     {tab === 'Unit Supervisors' && <ActingSupervisorsBoard staff={staff} sections={sections} canEdit={canEditRosters} />}
-    {tab === 'Bench Schedules' && <BenchScheduleBoard sections={sections} canEdit={canEditRosters} />}
+    {tab === 'Bench Schedules' && <BenchScheduleBoard sections={sections} staff={staff} canEdit={canEditRosters} />}
 
 
     {tab === 'Reports' && <div className="card">

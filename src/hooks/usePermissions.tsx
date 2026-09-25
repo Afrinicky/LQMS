@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { api } from '../services/api';
 import { useAuth } from './useAuth';
-import type { PermissionMap } from '../../shared/types/api';
+import type { PermissionMap, LedUnit } from '../../shared/types/api';
 
 /**
  * The client's copy of the permissions the server computed for this user.
@@ -19,6 +19,8 @@ import type { PermissionMap } from '../../shared/types/api';
  */
 type PermissionContextValue = {
   permissions: PermissionMap;
+  /** The units this person runs today — as their head, or standing in for one. */
+  unitsLed: LedUnit[];
   loading: boolean;
   /** May the user take `action` on `moduleKey`? */
   can: (moduleKey: string, action: PermissionAction) => boolean;
@@ -26,6 +28,8 @@ type PermissionContextValue = {
   canView: (moduleKey: string) => boolean;
   /** May the user take `action` on at least one of these modules? */
   canAny: (moduleKeys: string[], action?: PermissionAction) => boolean;
+  /** Does the user run this unit — as its head, or standing in for one? */
+  leadsUnit: (sectionId: number | null | undefined) => boolean;
   refresh: () => Promise<void>;
 };
 
@@ -36,13 +40,15 @@ const PermissionContext = createContext<PermissionContextValue | undefined>(unde
 export function PermissionProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const [permissions, setPermissions] = useState<PermissionMap>({});
+  const [unitsLed, setUnitsLed] = useState<LedUnit[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
-    if (!user) { setPermissions({}); setLoading(false); return; }
+    if (!user) { setPermissions({}); setUnitsLed([]); setLoading(false); return; }
     try {
-      const r = await api<{ permissions: PermissionMap }>('/auth/permissions');
+      const r = await api<{ permissions: PermissionMap; unitsLed?: LedUnit[] }>('/auth/permissions');
       setPermissions(r.permissions ?? {});
+      setUnitsLed(r.unitsLed ?? []);
     } catch {
       // Fail closed on the first load: with no map, nothing optional is shown.
       // A later refresh that fails — a dropped LAN connection, the host
@@ -71,13 +77,16 @@ export function PermissionProvider({ children }: { children: React.ReactNode }) 
     const can = (moduleKey: string, action: PermissionAction) => (permissions[moduleKey] ?? []).includes(action);
     return {
       permissions,
+      unitsLed,
       loading,
       can,
       canView: (moduleKey: string) => can(moduleKey, 'view'),
       canAny: (moduleKeys: string[], action: PermissionAction = 'view') => moduleKeys.some(k => can(k, action)),
+      leadsUnit: (sectionId: number | null | undefined) =>
+        sectionId != null && unitsLed.some(u => Number(u.id) === Number(sectionId)),
       refresh,
     };
-  }, [permissions, loading, refresh]);
+  }, [permissions, unitsLed, loading, refresh]);
 
   return <PermissionContext.Provider value={value}>{children}</PermissionContext.Provider>;
 }

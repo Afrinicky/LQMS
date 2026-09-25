@@ -36,6 +36,8 @@
     "check:training": "node scripts/training-record-check.mjs",
     "check:risk": "node scripts/risk-check.mjs",
     "check:bench-access": "node scripts/bench-access-check.mjs",
+    "check:unit-lead": "node scripts/unit-lead-access-check.mjs",
+    "check:bin-card": "node scripts/bin-card-check.mjs",
     "rebuild:native": "electron-builder install-app-deps",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",

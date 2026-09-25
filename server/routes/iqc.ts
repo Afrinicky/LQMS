@@ -3,10 +3,10 @@ import multer from 'multer';
 import { getDb } from '../db/database.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
-import { resolvePermission } from '../services/permissionResolver.js';
+import { mayActOnUnit } from '../services/unitLeadership.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
-import { parseIntNullable, getStaffIdOrCurrent, getCurrentStaffId } from './routeHelpers.js';
+import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
 import { buildWorkbook, sendWorkbook, readSheet, cell, numCell } from '../utils/xlsxRegister.js';
 
 const xlsxUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
@@ -97,12 +97,12 @@ function fetchSiblingZScores(db: any, material: any, runDate: string): SiblingZ[
   return out;
 }
 
-/** Does this caller head the unit the control is being filed against? */
-function headsSection(req: any, sectionId: number): boolean {
-  const staffId = getCurrentStaffId(req);
-  if (staffId === null) return false;
-  const head = getDb().prepare('SELECT head_staff_id FROM sections WHERE id = ?').get(sectionId) as any;
-  return Boolean(head?.head_staff_id && Number(head.head_staff_id) === Number(staffId));
+/** The unit a control belongs to, in the order the laboratory means it. */
+function controlSectionId(materialId: number): number | null {
+  const row = getDb().prepare(`SELECT COALESCE(m.performing_section_id, m.section_id, e.section_id) AS resolved
+      FROM iqc_materials m LEFT JOIN equipment_items e ON e.id = m.equipment_id WHERE m.id = ?`)
+    .get(materialId) as { resolved: number | null } | undefined;
+  return row?.resolved ?? null;
 }
 
 export function iqcRoutes() {
@@ -133,11 +133,9 @@ export function iqcRoutes() {
    * did: a unit head was shown the button and got a form that refused to draw.
    */
   router.post('/materials', requireAuth, (req, res, next) => {
-    if (resolvePermission(req.user!.id, 'iqc', 'create').allowed) return next();
-    const sectionId = parseIntNullable(req.body?.sectionId);
-    if (sectionId && headsSection(req, sectionId)) return next();
+    if (mayActOnUnit(req, 'iqc', 'create', parseIntNullable(req.body?.sectionId))) return next();
     return res.status(403).json({
-      error: 'Defining a control needs the create right on Quality Control, or headship of the unit it belongs to.',
+      error: 'Defining a control needs the create right on Quality Control, or the running of the unit it belongs to.',
     });
   }, (req, res) => {
     if (!req.body.materialName) return res.status(400).json({ error: 'Give the control material a name.' });
@@ -285,7 +283,10 @@ export function iqcRoutes() {
     res.json(db.prepare('SELECT * FROM iqc_results WHERE iqc_material_id = ? ORDER BY run_date DESC, id DESC').all(req.params.id));
   });
 
-  router.post('/materials/:id/results', requirePermission('iqc', 'create'), (req, res) => {
+  router.post('/materials/:id/results', (req, res, next) => {
+    if (mayActOnUnit(req, 'iqc', 'create', controlSectionId(Number(req.params.id)))) return next();
+    return res.status(403).json({ error: 'Recording a control result needs the create right on Quality Control, or the running of the unit the control belongs to.' });
+  }, (req, res) => {
     if (!req.body.runDate) return res.status(400).json({ error: 'runDate is required' });
     if (req.body.resultValue === undefined || req.body.resultValue === null || req.body.resultValue === '') {
       return res.status(400).json({ error: 'resultValue is required' });

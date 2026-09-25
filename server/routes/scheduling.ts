@@ -7,6 +7,8 @@ import { requireAuth } from '../middleware/auth.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { parseIntNullable, getStaffIdOrCurrent } from './routeHelpers.js';
+import { resolvePermission } from '../services/permissionResolver.js';
+import { unitsLedByRequest, individuallyDenied, mayActOnUnit } from '../services/unitLeadership.js';
 
 // ==========================================================================
 // Duty Roster & Scheduling
@@ -640,6 +642,68 @@ export function schedulingRoutes() {
   });
 
   // ========================= Bench schedules (per unit monthly grid) =========================
+  /**
+   * Who may prepare a bench schedule.
+   *
+   * A bench schedule is one unit's month: who stands at which bench on which
+   * day. The person who decides that is the person running the unit — its
+   * head, or whoever is standing in for them — and for a long while they could
+   * not, because the only way to reach the grid was the laboratory-wide
+   * rosters right, which their profile does not carry. So the schedule was
+   * drawn by the administrator or not at all.
+   *
+   * The right is therefore read twice. Whoever holds `personnel.rosters` at
+   * the action asked for may work on ANY unit's schedule, as before. Whoever
+   * runs a unit may work on THAT unit's schedule and no other: heading
+   * Haematology is not a reason to rearrange Microbiology's benches.
+   *
+   * What the fallback never does is outrank Access Control. A right withdrawn
+   * from a person on the Individuals screen stays withdrawn, and the schedule
+   * is still unreachable to anybody who may not view rosters at all.
+   */
+  function scheduleUnitId(db: any, scheduleId: unknown): number | null {
+    const row = db.prepare('SELECT section_id FROM bench_schedules WHERE id = ?').get(scheduleId) as
+      { section_id: number | null } | undefined;
+    return row?.section_id ?? null;
+  }
+
+  function benchWrite(action: string, unitOf: (req: any, db: any) => number | null) {
+    return (req: any, res: any, next: any) => {
+      if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+      if (mayActOnUnit(req, 'personnel.rosters', action, unitOf(req, getDb()))) return next();
+      return res.status(403).json({
+        error: 'Bench schedules are prepared by the unit that runs them. You may work on your own unit\'s schedule, or hold the rosters right for the rest.',
+      });
+    };
+  }
+
+  /**
+   * What this account may do with bench schedules, in one answer.
+   *
+   * The screen has to know two different things — may I work on every unit, or
+   * only on the ones I run — and guessing either from the permission map alone
+   * is how a button ends up offered for a unit the API refuses. So the server
+   * says it outright, and the grid draws exactly what it is allowed.
+   */
+  router.get('/bench-schedules/access', requirePermission('personnel.rosters', 'view'), (req, res) => {
+    const db = getDb();
+    const may = (action: string) => resolvePermission(req.user!.id, 'personnel.rosters', action).allowed;
+    // A person whose rosters rights were withdrawn individually runs no unit
+    // as far as this board is concerned: Access Control decided, and running a
+    // unit is not a way back in.
+    const led = individuallyDenied(req.user!.id, 'personnel.rosters', 'edit') ? [] : unitsLedByRequest(req);
+    const everyUnit = db.prepare('SELECT id, name FROM sections WHERE is_active = 1 ORDER BY name')
+      .all() as Array<{ id: number; name: string }>;
+    res.json({
+      canCreateAll: may('create'),
+      canEditAll: may('edit'),
+      canApproveAll: may('approve'),
+      canDeleteAll: may('void_archive'),
+      unitsLed: led,
+      units: may('create') ? everyUnit : led.map(u => ({ id: u.id, name: u.name })),
+    });
+  });
+
   router.get('/bench-schedules', requirePermission('personnel.rosters', 'view'), (req, res) => {
     const db = getDb();
     let q = 'SELECT bs.*, s.name AS section_name FROM bench_schedules bs JOIN sections s ON s.id = bs.section_id';
@@ -651,7 +715,7 @@ export function schedulingRoutes() {
     q += ' ORDER BY bs.month DESC, bs.id DESC';
     res.json(db.prepare(q).all(...params));
   });
-  router.post('/bench-schedules', requirePermission('personnel.rosters', 'create'), (req, res) => {
+  router.post('/bench-schedules', benchWrite('create', req => parseIntNullable(req.body?.sectionId)), (req, res) => {
     const db = getDb();
     const sectionId = parseIntNullable(req.body.sectionId);
     const month = String(req.body.month || '').trim();
@@ -698,7 +762,7 @@ export function schedulingRoutes() {
     if (!bs) return res.status(404).json({ error: 'Schedule not found' });
     res.json(bs);
   });
-  router.put('/bench-schedules/:id', requirePermission('personnel.rosters', 'edit'), (req, res) => {
+  router.put('/bench-schedules/:id', benchWrite('edit', (req, db) => scheduleUnitId(db, req.params.id)), (req, res) => {
     const db = getDb();
     const ex = db.prepare('SELECT * FROM bench_schedules WHERE id = ?').get(req.params.id) as any;
     if (!ex) return res.status(404).json({ error: 'Schedule not found' });
@@ -707,14 +771,14 @@ export function schedulingRoutes() {
       .run(b.title ?? ex.title, b.month && /^\d{4}-\d{2}$/.test(b.month) ? b.month : ex.month, b.notes ?? ex.notes, req.params.id);
     res.json({ ok: true });
   });
-  router.delete('/bench-schedules/:id', requirePermission('personnel.rosters', 'void_archive'), (req, res) => {
+  router.delete('/bench-schedules/:id', benchWrite('void_archive', (req, db) => scheduleUnitId(db, req.params.id)), (req, res) => {
     const db = getDb();
     db.prepare('DELETE FROM bench_schedule_cells WHERE schedule_id = ?').run(req.params.id);
     db.prepare('DELETE FROM bench_schedule_rows WHERE schedule_id = ?').run(req.params.id);
     db.prepare('DELETE FROM bench_schedules WHERE id = ?').run(req.params.id);
     res.json({ ok: true });
   });
-  router.post('/bench-schedules/:id/rows', requirePermission('personnel.rosters', 'edit'), (req, res) => {
+  router.post('/bench-schedules/:id/rows', benchWrite('edit', (req, db) => scheduleUnitId(db, req.params.id)), (req, res) => {
     const db = getDb();
     if (!db.prepare('SELECT id FROM bench_schedules WHERE id = ?').get(req.params.id)) return res.status(404).json({ error: 'Schedule not found' });
     const order = parseIntNullable(req.body.displayOrder) ?? (db.prepare('SELECT COALESCE(MAX(display_order),0)+1 n FROM bench_schedule_rows WHERE schedule_id = ?').get(req.params.id) as { n: number }).n;
@@ -722,13 +786,17 @@ export function schedulingRoutes() {
       .run(req.params.id, parseIntNullable(req.body.staffId), req.body.label || null, order);
     res.status(201).json({ id: Number(r.lastInsertRowid) });
   });
-  router.delete('/bench-schedule-rows/:rowId', requirePermission('personnel.rosters', 'edit'), (req, res) => {
+  router.delete('/bench-schedule-rows/:rowId', benchWrite('edit', (req, db) => {
+    const row = db.prepare('SELECT schedule_id FROM bench_schedule_rows WHERE id = ?').get(req.params.rowId) as
+      { schedule_id: number } | undefined;
+    return row ? scheduleUnitId(db, row.schedule_id) : null;
+  }), (req, res) => {
     const db = getDb();
     db.prepare('DELETE FROM bench_schedule_cells WHERE row_id = ?').run(req.params.rowId);
     db.prepare('DELETE FROM bench_schedule_rows WHERE id = ?').run(req.params.rowId);
     res.json({ ok: true });
   });
-  router.post('/bench-schedules/:id/cells', requirePermission('personnel.rosters', 'edit'), (req, res) => {
+  router.post('/bench-schedules/:id/cells', benchWrite('edit', (req, db) => scheduleUnitId(db, req.params.id)), (req, res) => {
     const db = getDb();
     if (!db.prepare('SELECT id FROM bench_schedules WHERE id = ?').get(req.params.id)) return res.status(404).json({ error: 'Schedule not found' });
     const cells: Array<{ rowId: number; day: number; value?: string | null; note?: string | null }> = Array.isArray(req.body.cells) ? req.body.cells : [];
@@ -745,11 +813,11 @@ export function schedulingRoutes() {
     tx();
     res.json({ ok: true });
   });
-  router.post('/bench-schedules/:id/approve', requirePermission('personnel.rosters', 'approve'), (req, res) => {
+  router.post('/bench-schedules/:id/approve', benchWrite('approve', (req, db) => scheduleUnitId(db, req.params.id)), (req, res) => {
     getDb().prepare("UPDATE bench_schedules SET status = 'approved', approved_by_staff_id = ?, approved_at = CURRENT_TIMESTAMP WHERE id = ?").run(getStaffIdOrCurrent(req, req.body.approvedByStaffId), req.params.id);
     res.json({ ok: true });
   });
-  router.post('/bench-schedules/:id/publish', requirePermission('personnel.rosters', 'edit'), (req, res) => {
+  router.post('/bench-schedules/:id/publish', benchWrite('edit', (req, db) => scheduleUnitId(db, req.params.id)), (req, res) => {
     getDb().prepare("UPDATE bench_schedules SET status = 'published', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
     res.json({ ok: true });
   });

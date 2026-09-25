@@ -74,6 +74,13 @@ export type ApiUser = { id: number; username: string; fullName: string; roleId: 
  * A module that is absent may not be viewed, so the client hides it entirely.
  */
 export type PermissionMap = Record<string, string[]>;
+
+/**
+ * A unit somebody runs today — as its substantive head, or standing in for
+ * one. It travels with the permission map because the work of running a unit
+ * (its bench schedule, its controls) is allowed for that unit and no other.
+ */
+export type LedUnit = { id: number; name: string; acting: boolean };
 export type SystemModule = { id: number; key: string; label: string; path: string; enabled: boolean; alertsPaused: boolean };
 export type Position = { id: number; title: string; description?: string; reportsToPositionId?: number | null; isActive: boolean; archivedAt?: string | null; accessProfileId?: number | null; accessProfileName?: string | null };
 
