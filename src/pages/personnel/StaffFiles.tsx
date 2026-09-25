@@ -1,12 +1,14 @@
-import { FormEvent, Suspense, lazy, useEffect, useMemo, useState } from 'react';
+import { Fragment, FormEvent, Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Printer, Upload } from 'lucide-react';
+import { PenLine, Printer, Upload } from 'lucide-react';
 import { api, API_BASE, getToken, apiRead, errorText } from '../../services/api';
 import { openPrintable } from '../../services/xlsx';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useTabParam } from '../../hooks/useTabParam';
 import { useFocusTarget, focusAttr } from '../../hooks/useFocusTarget';
 import TextField from '../../components/ui/TextField';
+import { SignatureThumb } from '../../components/SignatureThumb';
+import RecordWindow from './RecordWindow';
 import StaffRecordViewer from './StaffRecordViewer';
 import type {
   Staff, StaffDocument, StaffFile, StaffFileItem, StaffFileRegisterRow,
@@ -53,10 +55,9 @@ export default function StaffFiles({ staff, onError }: { staff: Staff[]; onError
   const [openStaffId, setOpenStaffId] = useState<number | null>(null);
   useTabParam(STAFF_FILE_SUBTABS, setSub, 'subtab');
 
-  if (openStaffId !== null) {
-    return <StaffFileDetail staffId={openStaffId} onBack={() => setOpenStaffId(null)} onError={onError} />;
-  }
-
+  // The file opens over the register, as a window, rather than replacing the
+  // page: the register stays where it was, and closing the window puts the
+  // reader back exactly where they were in it.
   return <>
     <div className="tabs sub">
       {STAFF_FILE_SUBTABS.map(name =>
@@ -67,6 +68,8 @@ export default function StaffFiles({ staff, onError }: { staff: Staff[]; onError
     {sub === 'Documents' && <StaffDocumentsRegister staff={staff} onOpen={setOpenStaffId} onError={onError} canCreate={can('personnel.register', 'create')} canVerify={can('personnel.register', 'approve')} />}
     {sub === 'Job Descriptions' && <JobDescriptionsRegister onError={onError} />}
     {sub === 'Verification Queue' && <VerificationQueue staff={staff} onOpen={setOpenStaffId} onError={onError} canVerify={can('personnel.register', 'approve')} />}
+
+    {openStaffId !== null && <StaffFileDetail key={openStaffId} staffId={openStaffId} onClose={() => setOpenStaffId(null)} onError={onError} />}
   </>;
 }
 
@@ -168,8 +171,9 @@ function StaffFileRegister({ onOpen, onError }: { onOpen: (id: number) => void; 
   </>;
 }
 
-/* ── One file ─────────────────────────────────────────────────────────────── */
-function StaffFileDetail({ staffId, onBack, onError }: { staffId: number; onBack: () => void; onError: (m: string | null) => void }) {
+
+/* ── One file, opened as a window ─────────────────────────────────────────── */
+function StaffFileDetail({ staffId, onClose, onError }: { staffId: number; onClose: () => void; onError: (m: string | null) => void }) {
   const { can } = usePermissions();
   const canCreate = can('personnel.register', 'create');
   const canEdit = can('personnel.register', 'edit');
@@ -182,14 +186,16 @@ function StaffFileDetail({ staffId, onBack, onError }: { staffId: number; onBack
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ documentType: 'CV', title: '', issueDate: '', expiryDate: '', remarks: '' });
   const [upload, setUpload] = useState<File | null>(null);
+  const [sigBusy, setSigBusy] = useState(false);
+  const [sigNonce, setSigNonce] = useState(0);
+  const sigInput = useRef<HTMLInputElement>(null);
 
   const load = () => api<StaffFile>(`/personnel/staff-files/${staffId}`).then(setFile).catch(e => onError(errorText(e)));
   useEffect(() => { void load(); }, [staffId]);
 
-  if (!file) return <p className="muted">Opening the staff file…</p>;
-  const s = file.staff;
-  const categories = ['All records', ...(file.categories || []).filter(c => (file.counts[c] ?? 0) > 0)];
-  const items = category === 'All records' ? file.items : file.items.filter(i => i.category === category);
+  const s = file?.staff ?? {};
+  const categories = file ? ['All records', ...(file.categories || []).filter(c => (file.counts[c] ?? 0) > 0)] : [];
+  const items = !file ? [] : category === 'All records' ? file.items : file.items.filter(i => i.category === category);
 
   async function submitDocument(e: FormEvent) {
     e.preventDefault(); onError(null); setBusy(true);
@@ -223,7 +229,6 @@ function StaffFileDetail({ staffId, onBack, onError }: { staffId: number; onBack
       documentType: item.record_type, title: item.title,
       issueDate: item.date ?? '', expiryDate: item.expiry ?? '', remarks: '',
     });
-    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   async function verify(id: number) {
@@ -233,117 +238,189 @@ function StaffFileDetail({ staffId, onBack, onError }: { staffId: number; onBack
     } catch (e) { onError(errorText(e)); }
   }
 
-  const detail = (label: string, value?: string | null) =>
+  // Nothing in the system may be signed by somebody with no signature on file,
+  // so the file both says whether they have one and is where it is set up.
+  async function uploadSignature(picked: File) {
+    onError(null); setSigBusy(true);
+    try {
+      const fd = new FormData(); fd.append('file', picked);
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/personnel/staff-files/${staffId}/signature`,
+        { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({ error: res.statusText }))).error ?? res.statusText);
+      setSigNonce(n => n + 1);
+      await load();
+    } catch (e) { onError(errorText(e)); }
+    finally { setSigBusy(false); if (sigInput.current) sigInput.current.value = ''; }
+  }
+
+  const field = (label: string, value?: string | null) =>
     <div className="sf-field"><span>{label}</span><strong>{value || '—'}</strong></div>;
 
+  // In "All records" the table is broken by heading, the way a paper file is
+  // divided by its tabs. Filtered to one heading it is a plain list.
+  const grouped = category === 'All records'
+    ? (file?.categories ?? []).filter(c => items.some(i => i.category === c)).map(c => [c, items.filter(i => i.category === c)] as const)
+    : [[category, items] as const];
+
+  const rowFor = (item: StaffFileItem, n: number) => <tr key={item.key}
+    className={item.can_open ? 'clickable-row' : undefined}
+    title={item.can_open ? 'Click to open' : undefined}
+    onClick={() => item.can_open && setReading(item)}>
+    <td className="dm-num">{n}</td>
+    <td className="dm-code">{item.reference || '—'}</td>
+    <td className="sf-record">{item.title}</td>
+    <td>{item.record_type}</td>
+    <td className="dm-date">{item.date || '—'}</td>
+    <td className="dm-date">{expiryCell(item.expiry)}</td>
+    <td>{badge(item.status)}</td>
+    <td className="dm-actions" onClick={e => e.stopPropagation()}>
+      {item.can_open
+        ? <button type="button" className="link-btn" onClick={() => setReading(item)}>Open</button>
+        : <span className="dm-dim">restricted</span>}
+      {canEdit && item.key.startsWith('staff-document:') &&
+        <button type="button" className="pq-link" onClick={() => editDocument(item)}>Edit</button>}
+      {canVerify && item.key.startsWith('staff-document:') && item.status === 'pending' &&
+        <button type="button" className="pq-link" onClick={() => verify(item.id)}>Verify</button>}
+    </td>
+  </tr>;
+
+  const toolbar = <>
+    <span className="sf-count">{file ? `${file.items.length} record${file.items.length === 1 ? '' : 's'} on file` : 'Opening…'}</span>
+    <span style={{ flex: 1 }} />
+    {canCreate && <button type="button" className="rw-btn" onClick={() => (adding ? closeForm() : setAdding(true))}>
+      <Upload size={14} />{adding ? 'Cancel' : 'Add document'}
+    </button>}
+    {file?.mayPrintFile && <button type="button" className="rw-btn"
+      onClick={() => openPrintable(`/personnel/staff-files/${staffId}/print`).catch(e => onError(errorText(e)))}>
+      <Printer size={14} />Print file
+    </button>}
+  </>;
+
   return <>
-    <style>{`.sf-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-.sf-avatar{width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--accent-soft);color:var(--accent-bright);font-weight:700;font-size:16px;flex:none}
-.sf-ident h3{margin:0;font-size:17px}
-.sf-ident .muted{font-size:12.5px}
-.sf-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px 18px;margin-top:4px}
-.sf-field{display:flex;flex-direction:column;gap:2px;min-width:0}
-.sf-field span{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
-.sf-field strong{font-size:13px;font-weight:600;overflow-wrap:anywhere}
-.sf-cats{display:flex;gap:6px;flex-wrap:wrap;margin:16px 0 10px}
-.sf-cats button{padding:5px 12px;font-size:12.5px;border-radius:999px;background:transparent;border:1px solid var(--border);color:var(--muted);cursor:pointer;box-shadow:none}
-.sf-cats button:hover{color:var(--text);border-color:var(--border-strong)}
-.sf-cats button.active{background:var(--accent-soft);border-color:var(--accent-bright);color:var(--text)}
-.sf-cats .n{margin-left:6px;opacity:.7}
-.sf-table .dm-title-cell{min-width:150px}
-.sf-table .dm-code{font-size:12px}
-.sf-table .dm-actions .pq-link{padding:4px 9px}`}</style>
+    <RecordWindow
+      title={String(s.full_name || 'Staff file')}
+      subtitle={[s.employee_no, s.designation, s.unit || s.section_name].filter(Boolean).join(' · ') || null}
+      onClose={onClose}
+      toolbar={toolbar}
+      restoreLabel={String(s.full_name || 'Staff file')}
+    >
+      <style>{SF_CSS}</style>
+      {!file ? <p className="muted" style={{ padding: 24 }}>Opening the staff file…</p> : <div className="sf-page">
 
-    <div className="card">
-      <div className="section-head" style={{ alignItems: 'flex-start' }}>
-        <div className="sf-head">
-          <button type="button" className="secondary" onClick={onBack}><ArrowLeft size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Back</button>
+        <section className="sf-identity">
           <span className="sf-avatar">{initialsOf(s.full_name)}</span>
-          <span className="sf-ident">
+          <div className="sf-who">
             <h3>{s.full_name}</h3>
-            <div className="muted">{[s.employee_no, s.designation, s.unit || s.section_name].filter(Boolean).join(' · ') || '—'}</div>
-          </span>
-        </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {canCreate && <button type="button" className="secondary" onClick={() => (adding ? closeForm() : setAdding(true))}>
-            <Upload size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />{adding ? 'Cancel' : 'Add document'}
-          </button>}
-          {file.mayPrintFile && <button type="button" className="secondary" onClick={() => openPrintable(`/personnel/staff-files/${staffId}/print`).catch(e => onError(errorText(e)))}>
-            <Printer size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Print file
-          </button>}
-        </div>
-      </div>
+            <p>{[s.job_title, s.unit || s.section_name, s.department_name].filter(Boolean).join(' · ') || '—'}</p>
+            <div className="sf-tags">
+              {s.employee_no && <span className="badge">{s.employee_no}</span>}
+              {s.personnel_category && <span className="badge">{s.personnel_category}</span>}
+              {s.availability_status && <span className={`badge ${String(s.availability_status).toLowerCase().replace(/\s+/g, '-')}`}>{String(s.availability_status).replace(/_/g, ' ')}</span>}
+              {s.is_active ? null : <span className="badge danger">left the laboratory</span>}
+            </div>
+          </div>
+        </section>
 
-      <div className="sf-grid">
-        {detail('Staff ID', s.employee_no)}
-        {detail('Position', s.job_title)}
-        {detail('Posts held', (file.positions || []).filter(p => p.is_active).map(p => p.title).join(', '))}
-        {detail('Unit', s.unit || s.section_name)}
-        {detail('Department', s.department_name)}
-        {detail('Category', s.personnel_category)}
-        {detail('Appointment', [s.appointment_type, s.appointment_date].filter(Boolean).join(' · '))}
-        {detail('Date of birth', s.date_of_birth)}
-        {detail('Gender', s.gender)}
-        {detail('Regulator', s.professional_regulator)}
-        {detail('Licence', s.professional_licence)}
-        {detail('Licence expiry', s.licence_expiry_date)}
-        {detail('Qualifications', s.qualifications)}
-        {detail('National ID', [s.national_id_type, s.national_id_number].filter(Boolean).join(' — '))}
-        {detail('Phone', s.phone)}
-        {detail('Email', s.email)}
-        {detail('Emergency contact', s.emergency_contact)}
-        {detail('File location', s.staff_file_location)}
-      </div>
-    </div>
+        <section className="sf-panels">
+          <div className="sf-panel">
+            <h4>Appointment</h4>
+            <div className="sf-grid">
+              {field('Position', s.job_title)}
+              {field('Designation', s.designation)}
+              {field('Posts held', (file.positions || []).filter(p => p.is_active).map(p => p.title).join(', '))}
+              {field('Unit', s.unit || s.section_name)}
+              {field('Department', s.department_name)}
+              {field('Appointment', [s.appointment_type, s.appointment_date].filter(Boolean).join(' · '))}
+            </div>
+          </div>
+          <div className="sf-panel">
+            <h4>Professional registration</h4>
+            <div className="sf-grid">
+              {field('Regulator', s.professional_regulator)}
+              {field('Licence', s.professional_licence)}
+              {field('Licence expiry', s.licence_expiry_date)}
+              {field('Qualifications', s.qualifications)}
+              {field('Cadre', s.cadre)}
+              {field('Rank', s.professional_rank)}
+            </div>
+          </div>
+          <div className="sf-panel">
+            <h4>Signature on file</h4>
+            <div className="sf-sig">
+              {file.hasSignature
+                ? <span className="sf-sig-box"><SignatureThumb key={sigNonce} staffId={staffId} height={38} /></span>
+                : <span className="sf-sig-none">No signature on file — this member of staff cannot sign any record until one is added.</span>}
+              {canEdit && <>
+                <button type="button" className="pq-link" disabled={sigBusy} onClick={() => sigInput.current?.click()}>
+                  <PenLine size={13} />{sigBusy ? 'Uploading…' : file.hasSignature ? 'Replace' : 'Upload signature'}
+                </button>
+                <input ref={sigInput} type="file" accept="image/*" style={{ display: 'none' }}
+                  onChange={e => { const f = e.target.files?.[0]; if (f) void uploadSignature(f); }} />
+              </>}
+            </div>
+          </div>
 
-    {adding && (editingId ? canEdit : canCreate) && <form className="card form-grid" onSubmit={submitDocument}>
-      <label>Type<select value={form.documentType} onChange={e => setForm({ ...form, documentType: e.target.value })} required>
-        {STAFF_DOC_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
-      <label>Title<TextField value={form.title} onValue={v => setForm({ ...form, title: v })} required /></label>
-      <label>Issue date<input type="date" value={form.issueDate} onChange={e => setForm({ ...form, issueDate: e.target.value })} /></label>
-      <label>Expiry date<input type="date" value={form.expiryDate} onChange={e => setForm({ ...form, expiryDate: e.target.value })} /></label>
-      <label>File<input type="file" onChange={e => setUpload(e.target.files?.[0] ?? null)} /></label>
-      <label>Remarks<TextField value={form.remarks} onValue={v => setForm({ ...form, remarks: v })} /></label>
-      <button type="submit" disabled={busy}>{busy ? 'Saving…' : editingId ? 'Save changes' : 'Add to file'}</button>
-    </form>}
+          <div className="sf-panel">
+            <h4>Personal &amp; contact</h4>
+            <div className="sf-grid">
+              {field('Date of birth', s.date_of_birth)}
+              {field('Gender', s.gender)}
+              {field('National ID', [s.national_id_type, s.national_id_number].filter(Boolean).join(' — '))}
+              {field('Phone', s.phone)}
+              {field('Email', s.email)}
+              {field('Emergency contact', s.emergency_contact)}
+              {field('File location', s.staff_file_location)}
+            </div>
+          </div>
+        </section>
 
-    <div className="sf-cats">
-      {categories.map(c => <button key={c} type="button" className={category === c ? 'active' : ''} onClick={() => setCategory(c)}>
-        {c}<span className="n">{c === 'All records' ? file.items.length : file.counts[c] ?? 0}</span>
-      </button>)}
-    </div>
+        {adding && (editingId ? canEdit : canCreate) && <form className="sf-form" onSubmit={submitDocument}>
+          <h4>{editingId ? 'Edit document' : 'Add a document to this file'}</h4>
+          <div className="form-grid">
+            <label>Type<select value={form.documentType} onChange={e => setForm({ ...form, documentType: e.target.value })} required>
+              {STAFF_DOC_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
+            <label>Title<TextField value={form.title} onValue={v => setForm({ ...form, title: v })} required /></label>
+            <label>Issue date<input type="date" value={form.issueDate} onChange={e => setForm({ ...form, issueDate: e.target.value })} /></label>
+            <label>Expiry date<input type="date" value={form.expiryDate} onChange={e => setForm({ ...form, expiryDate: e.target.value })} /></label>
+            <label>File<input type="file" onChange={e => setUpload(e.target.files?.[0] ?? null)} /></label>
+            <label>Remarks<TextField value={form.remarks} onValue={v => setForm({ ...form, remarks: v })} /></label>
+            <button type="submit" disabled={busy}>{busy ? 'Saving…' : editingId ? 'Save changes' : 'Add to file'}</button>
+          </div>
+        </form>}
 
-    <div className="dm-table-wrap">
-      <table className="data-table dm-table sf-table"><thead><tr>
-        <th>No.</th><th>Reference</th><th>Record</th><th>Type</th><th>Date</th><th>Expiry</th><th>Status</th><th>Actions</th>
-      </tr></thead><tbody>
-        {items.map((item, i) => <tr key={item.key} className={item.can_open ? 'clickable-row' : undefined}
-          title={item.can_open ? 'Click to open' : undefined} onClick={() => item.can_open && setReading(item)}>
-          <td className="dm-num">{i + 1}</td>
-          <td className="dm-code">{item.reference || '—'}</td>
-          <td className="dm-title-cell">
-            <span className="dm-title">{item.title}</span>
-            <span className="dm-sub">{[item.category, item.file_name || (item.source === 'system' ? 'System record' : null), item.detail].filter(Boolean).join(' · ')}</span>
-          </td>
-          <td>{item.record_type}</td>
-          <td className="dm-date">{item.date || '—'}</td>
-          <td className="dm-date">{expiryCell(item.expiry)}</td>
-          <td>{badge(item.status)}</td>
-          <td className="dm-actions" onClick={e => e.stopPropagation()}>
-            {item.can_open
-              ? <button className="link-btn" onClick={() => setReading(item)}>Open</button>
-              : <span className="dm-dim" style={{ marginRight: 6 }}>restricted</span>}
-            {canEdit && item.key.startsWith('staff-document:') &&
-              <button className="pq-link" onClick={() => editDocument(item)}>Edit</button>}
-            {canVerify && item.key.startsWith('staff-document:') && item.status === 'pending' &&
-              <button className="pq-link" onClick={() => verify(item.id)}>Verify</button>}
-          </td>
-        </tr>)}
-        {items.length === 0 && <tr><td colSpan={8} className="muted" style={{ textAlign: 'center', padding: 24 }}>Nothing filed under this heading yet.</td></tr>}
-      </tbody></table>
-    </div>
+        <section className="sf-records">
+          <div className="sf-cats">
+            {categories.map(c => <button key={c} type="button" className={category === c ? 'active' : ''} onClick={() => setCategory(c)}>
+              {c}<span className="n">{c === 'All records' ? file.items.length : file.counts[c] ?? 0}</span>
+            </button>)}
+          </div>
 
-    {reading && reading.open.kind === 'document' && <Suspense fallback={<div className="card">Opening the document…</div>}>
+          <div className="dm-table-wrap">
+            <table className="data-table dm-table sf-table"><thead><tr>
+              <th style={{ width: '4%' }}>No.</th>
+              <th style={{ width: '14%' }}>Reference</th>
+              <th>Record</th>
+              <th style={{ width: '13%' }}>Type</th>
+              <th style={{ width: '10%' }}>Date</th>
+              <th style={{ width: '12%' }}>Expiry</th>
+              <th style={{ width: '11%' }}>Status</th>
+              <th style={{ width: '15%' }}>Actions</th>
+            </tr></thead><tbody>
+              {grouped.map(([heading, rows]) => rows.length === 0 ? null : <Fragment key={heading}>
+                {category === 'All records' && <tr className="sf-group"><td colSpan={8}>{heading}<span>{rows.length}</span></td></tr>}
+                {rows.map((item, i) => rowFor(item, i + 1))}
+              </Fragment>)}
+              {items.length === 0 && <tr><td colSpan={8} className="muted" style={{ textAlign: 'center', padding: 28 }}>
+                Nothing filed under this heading yet.
+              </td></tr>}
+            </tbody></table>
+          </div>
+        </section>
+      </div>}
+    </RecordWindow>
+
+    {reading && reading.open.kind === 'document' && <Suspense fallback={null}>
       <DocumentViewer
         docId={reading.open.documentId}
         versionId={reading.open.versionId}
@@ -361,6 +438,40 @@ function StaffFileDetail({ staffId, onBack, onError }: { staffId: number; onBack
     />}
   </>;
 }
+
+const SF_CSS = `.sf-page{padding:18px 20px 26px;display:flex;flex-direction:column;gap:18px}
+.sf-identity{display:flex;align-items:center;gap:16px}
+.sf-avatar{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:none;
+  background:linear-gradient(140deg,var(--accent,#2f6bff),#1B49C0);color:#fff;font-weight:700;font-size:17px;letter-spacing:.02em}
+.sf-who h3{margin:0;font-size:19px;letter-spacing:-.01em}
+.sf-who p{margin:3px 0 0;font-size:12.5px;color:var(--muted)}
+.sf-tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.sf-panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.sf-panel{border:1px solid var(--border);border-radius:12px;padding:14px 16px;background:var(--panel)}
+.sf-panel h4{margin:0 0 12px;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.sf-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px 16px}
+.sf-field{display:flex;flex-direction:column;gap:3px;min-width:0}
+.sf-field span{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.sf-field strong{font-size:12.5px;font-weight:600;overflow-wrap:anywhere;line-height:1.35}
+.sf-sig{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.sf-sig-box{display:inline-flex;align-items:center;justify-content:center;width:150px;height:46px;border:1px solid var(--border);border-radius:8px;background:#fff;padding:4px}
+.sf-sig-none{font-size:12px;color:var(--warning,#e0a33a);max-width:26ch;line-height:1.4}
+.sf-form{border:1px solid var(--border);border-radius:12px;padding:14px 16px;background:var(--panel)}
+.sf-form h4{margin:0 0 10px;font-size:13px}
+.sf-form .form-grid{margin:0}
+.sf-records{display:flex;flex-direction:column;gap:10px}
+.sf-cats{display:flex;gap:6px;flex-wrap:wrap}
+.sf-cats button{padding:5px 12px;font-size:12px;border-radius:999px;background:transparent;border:1px solid var(--border);
+  color:var(--muted);cursor:pointer;box-shadow:none;display:inline-flex;align-items:center;gap:7px}
+.sf-cats button:hover{color:var(--text);border-color:var(--border-strong)}
+.sf-cats button.active{background:var(--accent-soft);border-color:var(--accent-bright);color:var(--text)}
+.sf-cats .n{font-variant-numeric:tabular-nums;opacity:.65;font-size:11px}
+.sf-count{font-size:12.5px;color:var(--muted)}
+.sf-table .sf-record{font-weight:600;line-height:1.35}
+.sf-table tr.sf-group td{background:rgba(255,255,255,.035);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  font-weight:700;color:var(--accent-bright);padding:7px 10px}
+.sf-table tr.sf-group td span{margin-left:8px;opacity:.6;letter-spacing:0}
+.sf-table .dm-actions .pq-link{padding:4px 9px}`;
 
 /* ── Documents held across every file ─────────────────────────────────────── */
 function StaffDocumentsRegister({ staff, onOpen, onError, canCreate, canVerify }: {

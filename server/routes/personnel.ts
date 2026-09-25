@@ -15,7 +15,7 @@ import {
 import {
   recordSignature, SignatureRequiredError, hasSignatureOnFile, staffSignatureDataUri, fileDataUri,
 } from '../services/signatureService.js';
-import { printSheet, signatureBlock, htmlEscape, htmlText } from '../utils/printLayout.js';
+import { printSheet, signatureBlock, signatureImage, htmlEscape, htmlText } from '../utils/printLayout.js';
 import {
   TRAINING_DELIVERY_MODES, TRAINER_TYPES, TRAINING_CATEGORIES, TRAINING_FORMATS,
   TRAINING_STATUSES as TRAINING_STATUS_LIST, ATTENDANCE_STATUSES as ATTENDANCE_STATUS_LIST,
@@ -202,13 +202,18 @@ export function personnelRoutes() {
   });
 
   router.post('/declarations/:id/sign', requirePermission('personnel.declarations', 'edit'), (req, res) => {
+    // Nothing is signed off by somebody with no signature on file: the sheet
+    // this closes carries their signature, not their typed name.
+    if (blockedForNoSignature(req, res)) return;
     const db = getDb();
     const decl = db.prepare('SELECT * FROM staff_declarations WHERE id = ?').get(req.params.id) as any;
     if (!decl) return res.status(404).json({ error: 'Declaration not found' });
     const staffId = getStaffIdOrCurrent(req, req.body.staffId);
     if (staffId === null) return res.status(400).json({ error: 'This action requires the logged-in user to be linked to a staff record.' });
-    db.prepare("UPDATE staff_declarations SET staff_id = ?, signed_at = CURRENT_TIMESTAMP, signature_file_id = ?, status = 'signed', updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-      .run(staffId, parseIntNullable(req.body.signatureFileId), req.params.id);
+    db.prepare(`UPDATE staff_declarations SET staff_id = ?, signed_at = CURRENT_TIMESTAMP,
+        signature_file_id = COALESCE(?, (SELECT signature_file_id FROM staff WHERE id = ?)),
+        status = 'signed', updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(staffId, parseIntNullable(req.body.signatureFileId), staffId, req.params.id);
     audit(req, { action: 'sign', entity: 'staff_declarations', entityId: req.params.id, oldValue: { status: decl.status }, newValue: { status: 'signed', staffId } });
     res.json({ ok: true });
   });
@@ -829,6 +834,11 @@ export function personnelRoutes() {
    *   back with pen on it — and somebody is entering that. It is recorded as
    *   exactly that, with who entered it, and the paper sheet remains the
    *   original. Claiming an electronic signature for it would be a lie.
+   *
+   * Either way the person whose attendance is being attested must already have
+   * their signature on file. A row stamped as signed with no signature behind it
+   * printed as the words "signed on the paper sheet" where a signature belongs,
+   * which is the thing a signed sheet exists to avoid.
    */
   router.post('/training/:id/attendance/:attendanceId/sign', (req, res) => {
     if (!req.user) return res.status(401).json({ error: 'Authentication required' });
@@ -858,10 +868,21 @@ export function personnelRoutes() {
 
     const designation = row.designation || row.job_title || null;
     if (onPaper) {
+      // Transcribing the paper sheet still puts that person's signature on the
+      // printed record, so they must have one on file first.
+      if (!hasSignatureOnFile(row.staff_id)) {
+        return res.status(400).json({
+          error: `${row.staff_name} has no signature on file, so the paper sheet cannot be entered against them. `
+            + 'Upload their signature on their staff file (Personnel Management → Staff Files), or ask them to add one '
+            + 'under My Portal → My Record → Replace signature, then enter the sheet again.',
+          code: 'signature_required',
+        });
+      }
       db.prepare(`UPDATE training_attendance SET signed_at = CURRENT_TIMESTAMP,
+          signature_file_id = (SELECT signature_file_id FROM staff WHERE id = ?),
           designation = COALESCE(designation, ?),
           remarks = TRIM(COALESCE(remarks || ' · ', '') || 'Signed on the paper attendance sheet'),
-          updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(designation, row.id);
+          updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(row.staff_id, designation, row.id);
       audit(req, { action: 'sign', entity: 'training_attendance', entityId: row.id, newValue: { onPaper: true, staffId: row.staff_id } });
       return res.json({ ok: true, onPaper: true });
     }
@@ -1155,9 +1176,10 @@ export function personnelRoutes() {
     const sheetRow = (row: any, index: number) => {
       const signature = blank ? null
         : (row.signed_at ? fileDataUri(row.signature_file_id) ?? staffSignatureDataUri(row.staff_id) : null);
+      // A signature, or a rule to sign on. Never words standing in for one.
       const signatureCell = signature
-        ? `<img class="sig-img" src="${signature}" alt="signature" />`
-        : (row.signed_at ? '<small>Signed on the paper sheet</small>' : '');
+        ? `<span class="sig-box">${signatureImage(signature)}</span>`
+        : '<span class="sig-rule"></span>';
       return `<tr>
         <td class="tick">${index + 1}</td>
         <td><strong>${htmlEscape(row.staff_name)}</strong>${row.employee_no ? `<br/><small>${htmlEscape(row.employee_no)}</small>` : ''}</td>
@@ -1173,7 +1195,7 @@ export function personnelRoutes() {
     // A blank sheet gets spare lines, because the people who turn up to a
     // session are never exactly the people who were invited to it.
     const spareLines = blank
-      ? Array.from({ length: 6 }, () => `<tr><td class="tick"></td><td></td><td></td><td></td><td></td><td></td><td class="sig-cell"></td><td></td></tr>`).join('')
+      ? Array.from({ length: 6 }, () => `<tr><td class="tick"></td><td></td><td></td><td></td><td></td><td></td><td class="sig-cell"><span class="sig-rule"></span></td><td></td></tr>`).join('')
       : '';
 
     const attendanceSheet = `
@@ -2194,6 +2216,9 @@ ${event.cancellation_reason ? `<h2>Why the session was called off</h2><div class
     const db = getDb();
     const existing = db.prepare('SELECT * FROM staff_orientations WHERE id = ?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Orientation record not found' });
+    // Signing off the induction puts a signature on the printed record, so the
+    // person doing it must have one on file.
+    if ((req.body.staffSignOff || req.body.facilitatorSignOff) && blockedForNoSignature(req, res)) return;
     const sets: string[] = []; const vals: unknown[] = [];
     for (const step of ORIENTATION_STEPS) if (step in req.body) { sets.push(`${step} = ?`); vals.push(req.body[step] === 'completed' || req.body[step] === true ? 'completed' : 'pending'); }
     for (const [api, col] of [['hireDate', 'hire_date'], ['orientationStart', 'orientation_start'], ['formCompletedDate', 'form_completed_date'], ['staffSignOff', 'staff_sign_off'], ['facilitatorSignOff', 'facilitator_sign_off'], ['status', 'status'], ['notes', 'notes']] as Array<[string, string]>) {

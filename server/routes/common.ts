@@ -20,7 +20,7 @@ import { audit } from '../services/auditService.js';
 import { mintViewTicket, VIEW_TICKET_MS } from '../services/viewTickets.js';
 import { writeBackupZip, isSafeBackupName, createBackup } from '../services/backupService.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
-import { parseIntNullable, getCurrentStaffId } from './routeHelpers.js';
+import { parseIntNullable, getCurrentStaffId, blockedForNoSignature } from './routeHelpers.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { buildWorkbook, sendWorkbook, readSheet, cell, numCell } from '../utils/xlsxRegister.js';
 import * as tailscale from '../services/tailscale.js';
@@ -1620,8 +1620,8 @@ export function commonRoutes() {
 
         for (const a of authorizations ?? []) {
           if (!a?.moduleKey || !a?.level) continue;
-          const authResult = db.prepare('INSERT INTO technical_authorizations (staff_id, module_key, section_id, level, is_active) VALUES (?, ?, ?, ?, 1)')
-            .run(staffId, a.moduleKey, idOrNull(a.sectionId), a.level);
+          const authResult = db.prepare('INSERT INTO technical_authorizations (staff_id, module_key, section_id, level, is_active, created_by) VALUES (?, ?, ?, ?, 1, ?)')
+            .run(staffId, a.moduleKey, idOrNull(a.sectionId), a.level, req.user!.id);
           audit(req, { action: 'create', entity: 'technical_authorizations', entityId: Number(authResult.lastInsertRowid), newValue: { staffId, ...a } });
         }
         return { staffId, userId };
@@ -2474,10 +2474,17 @@ export function commonRoutes() {
     LEFT JOIN sections sec ON sec.id = ta.section_id
     ORDER BY ta.is_active DESC, ta.module_key, sec.name`).all()));
   router.post('/authorizations/technical', requirePermission('settings', 'edit'), (req, res) => {
+    // The authorisation sheet prints "Authorised by" with the granter's own
+    // signature, so granting one asks for a signature on file first.
+    if (blockedForNoSignature(req, res)) return;
     const { staffId, positionId, moduleKey, sectionId, level, expiresAt } = req.body;
     if (!moduleKey || !level) return res.status(400).json({ error: 'moduleKey and level are required.' });
     if (!idOrNull(staffId) && !idOrNull(positionId)) return res.status(400).json({ error: 'Select a staff member or a position to scope this authorization.' });
-    const result = getDb().prepare('INSERT INTO technical_authorizations (staff_id, position_id, module_key, section_id, level, is_active, expires_at) VALUES (?, ?, ?, ?, ?, 1, ?)').run(idOrNull(staffId), idOrNull(positionId), moduleKey, idOrNull(sectionId), level, expiresAt || null);
+    // created_by is who granted it, and the authorisation sheet prints their
+    // name, the date and their signature under "Authorised by". Leaving it out
+    // printed an authorisation in force that nobody appeared to have given.
+    const result = getDb().prepare('INSERT INTO technical_authorizations (staff_id, position_id, module_key, section_id, level, is_active, expires_at, created_by) VALUES (?, ?, ?, ?, ?, 1, ?, ?)')
+      .run(idOrNull(staffId), idOrNull(positionId), moduleKey, idOrNull(sectionId), level, expiresAt || null, req.user!.id);
     audit(req, { action: 'create', entity: 'technical_authorizations', entityId: result.lastInsertRowid, newValue: { staffId, positionId, moduleKey, sectionId, level, expiresAt } });
     res.status(201).json({ ok: true, id: Number(result.lastInsertRowid) });
   });

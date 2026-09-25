@@ -1,9 +1,14 @@
 import { Router } from 'express';
-import { getDb } from '../db/database.js';
+import multer from 'multer';
+import { getDb, uploadRoot } from '../db/database.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { canReachPersonalRecord, resolvePermission } from '../services/permissionResolver.js';
 import { getCurrentStaffId } from './routeHelpers.js';
 import { printSheet, htmlEscape, htmlText, signatureBlock } from '../utils/printLayout.js';
+import { fileDataUri, staffSignatureDataUri } from '../services/signatureService.js';
+import { audit } from '../services/auditService.js';
+import { safeStoredFilename } from '../utils/safeFilename.js';
+import path from 'node:path';
 
 /**
  * The staff file.
@@ -18,6 +23,15 @@ import { printSheet, htmlEscape, htmlText, signatureBlock } from '../utils/print
  */
 
 type Row = Record<string, any>;
+
+// A signature is a small image kept beside every other uploaded file.
+const signatureUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadRoot),
+    filename: (_req, file, cb) => cb(null, safeStoredFilename(file.originalname)),
+  }),
+  limits: { fileSize: 4 * 1024 * 1024 },
+});
 
 const JOB_DESCRIPTION_TYPE = 'Job Description';
 
@@ -365,7 +379,49 @@ export function staffFileRoutes() {
     const counts: Record<string, number> = {};
     for (const item of items) counts[item.category] = (counts[item.category] ?? 0) + 1;
 
-    res.json({ staff, positions, items, counts, categories: STAFF_FILE_CATEGORIES, visibility: see, mayPrintFile: mayOpen.register });
+    res.json({
+      staff, positions, items, counts, categories: STAFF_FILE_CATEGORIES,
+      visibility: see, mayPrintFile: mayOpen.register,
+      hasSignature: Boolean(staff.signature_file_id),
+    });
+  });
+
+  // ============= The signature held for a member of staff ==================
+  /*
+   * Nothing in this system may be signed by somebody with no signature on file,
+   * so Personnel needs a way to set one up for a member of staff who cannot do
+   * it themselves — an intern on their first day, somebody without an account
+   * yet. It lives on the staff file because that is where the rest of what the
+   * laboratory holds about them lives.
+   */
+  router.post('/staff-files/:staffId/signature', requirePermission('personnel.register', 'edit'),
+    signatureUpload.single('file'), (req, res) => {
+      const db = getDb();
+      const staffId = Number(req.params.staffId);
+      const staff = db.prepare('SELECT id, full_name FROM staff WHERE id = ?').get(staffId) as Row | undefined;
+      if (!staff) return res.status(404).json({ error: 'Staff record not found' });
+      if (!req.file) return res.status(400).json({ error: 'No signature image was uploaded.' });
+      if (!/^image\//.test(req.file.mimetype)) return res.status(400).json({ error: 'The signature must be an image.' });
+      const file = db.prepare('INSERT INTO files (original_name, stored_name, mime_type, size_bytes, storage_area, uploaded_by) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(req.file.originalname, path.basename(req.file.path), req.file.mimetype, req.file.size, 'uploads', req.user!.id);
+      const fileId = Number(file.lastInsertRowid);
+      db.prepare('UPDATE staff SET signature_file_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(fileId, staffId);
+      audit(req, { action: 'set_signature', entity: 'staff', entityId: staffId, newValue: { signatureFileId: fileId } });
+      res.status(201).json({ ok: true, fileId });
+    });
+
+  /*
+   * Removing it does not touch anything already signed: a printed record shows
+   * the image captured with the signing, not whatever is on the profile today.
+   */
+  router.delete('/staff-files/:staffId/signature', requirePermission('personnel.register', 'edit'), (req, res) => {
+    const db = getDb();
+    const staffId = Number(req.params.staffId);
+    const staff = db.prepare('SELECT id, signature_file_id FROM staff WHERE id = ?').get(staffId) as Row | undefined;
+    if (!staff) return res.status(404).json({ error: 'Staff record not found' });
+    db.prepare('UPDATE staff SET signature_file_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(staffId);
+    audit(req, { action: 'clear_signature', entity: 'staff', entityId: staffId, oldValue: { signatureFileId: staff.signature_file_id } });
+    res.json({ ok: true });
   });
 
   // ============= Printable sheets for records with no sheet of their own ===
@@ -407,11 +463,18 @@ export function staffFileRoutes() {
 
     if (req.params.kind === 'authorization') {
       if (!see.authorizations) return res.status(403).send('Permission denied');
-      const t = db.prepare(`SELECT t.*, sec.name AS section_name, c.competency_number, m.label AS module_label
+      // Who granted it is the user who created the row; the signature that goes
+      // on the sheet is that person's own, applied on the date it was granted.
+      // Without this the sheet printed an authorisation nobody appeared to have
+      // given — a blank rule under "Authorised by" on a record already in force.
+      const t = db.prepare(`SELECT t.*, sec.name AS section_name, c.competency_number, m.label AS module_label,
+          gs.full_name AS granted_by_name, gs.id AS granted_by_staff_id
         FROM technical_authorizations t
         LEFT JOIN sections sec ON sec.id = t.section_id
         LEFT JOIN competency_assessments c ON c.id = t.competency_assessment_id
         LEFT JOIN system_modules m ON m.key = t.module_key
+        LEFT JOIN users u ON u.id = t.created_by
+        LEFT JOIN staff gs ON gs.id = u.staff_id
         WHERE t.id = ? AND t.staff_id = ?`).get(id, staffId) as Row | undefined;
       if (!t) return res.status(404).send('Authorization not found');
       return res.send(printSheet({
@@ -423,8 +486,13 @@ export function staffFileRoutes() {
           ['Area of work', t.module_label || labelise(t.module_key)], ['Unit', t.section_name], ['Level', labelise(t.level)],
           ['Granted', dateOnly(t.granted_at)], ['Expires', dateOnly(t.expires_at)],
           ['State', t.is_active ? 'Active' : 'Withdrawn'], ['Based on assessment', t.competency_number],
-          ['Notes', t.notes],
-        ])}${signatureBlock('Authorised by')}${signatureBlock('Member of staff', staff.full_name)}`,
+          ['Granted by', t.granted_by_name], ['Notes', t.notes],
+        ])}
+        <div class="signatures two">
+          ${signatureBlock('Authorised by', t.granted_by_name, dateOnly(t.granted_at),
+            t.granted_by_staff_id ? staffSignatureDataUri(Number(t.granted_by_staff_id)) : null)}
+          ${signatureBlock('Member of staff — acknowledged', staff.full_name)}
+        </div>`,
       }));
     }
 
@@ -460,8 +528,12 @@ export function staffFileRoutes() {
           ['Facilitator', o.facilitator_name], ['Completed', dateOnly(o.form_completed_date)],
           ['Status', labelise(o.status)], ['Notes', o.notes],
         ])}<h2>Checklist</h2>${checklistHtml}
-        ${signatureBlock('Facilitator', o.facilitator_name, o.facilitator_sign_off)}
-        ${signatureBlock('Member of staff', staff.full_name, o.staff_sign_off)}`,
+        <div class="signatures two">
+          ${signatureBlock('Facilitator', o.facilitator_name, o.facilitator_sign_off,
+            o.facilitator_sign_off && o.facilitator_staff_id ? staffSignatureDataUri(Number(o.facilitator_staff_id)) : null)}
+          ${signatureBlock('Member of staff', staff.full_name, o.staff_sign_off,
+            o.staff_sign_off ? staffSignatureDataUri(staffId) : null)}
+        </div>`,
       }));
     }
 
@@ -484,7 +556,13 @@ export function staffFileRoutes() {
           ['Conflict of interest', d.conflict_of_interest], ['Reviewed by', d.reviewer_name],
           ['Next review', dateOnly(d.next_review_date)], ['Status', labelise(d.status)],
           ['Notes', d.description],
-        ])}${signatureBlock('Member of staff', staff.full_name, d.signed_at)}${signatureBlock('Reviewed by', d.reviewer_name)}`,
+        ])}
+        <div class="signatures two">
+          ${signatureBlock('Member of staff', staff.full_name, d.signed_at,
+            d.signed_at ? fileDataUri(d.signature_file_id) ?? staffSignatureDataUri(staffId) : null)}
+          ${signatureBlock('Reviewed by', d.reviewer_name, dateOnly(d.review_date),
+            d.review_date && d.reviewed_by_staff_id ? staffSignatureDataUri(Number(d.reviewed_by_staff_id)) : null)}
+        </div>`,
       }));
     }
 
@@ -504,7 +582,10 @@ export function staffFileRoutes() {
           ['Conflict declared', s.conflict_declared ? 'Yes' : 'No'], ['Conflict details', s.conflict_details],
         ])}${s.body_content ? `<h2>Declaration</h2><p>${htmlText(s.body_content)}</p>` : ''}
         ${s.affirmation_text ? `<p>${htmlText(s.affirmation_text)}</p>` : ''}
-        ${signatureBlock('Member of staff', staff.full_name, s.signed_at)}`,
+        <div class="signatures two">
+          ${signatureBlock('Member of staff', staff.full_name, s.signed_at,
+            s.signed_at ? staffSignatureDataUri(staffId) : null)}
+        </div>`,
       }));
     }
 

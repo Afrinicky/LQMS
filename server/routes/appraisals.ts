@@ -9,8 +9,9 @@ import { canReachPersonalRecord } from '../services/permissionResolver.js';
 import { audit } from '../services/auditService.js';
 import { generateRecordNumber } from '../utils/recordNumber.js';
 import { safeStoredFilename } from '../utils/safeFilename.js';
-import { parseIntNullable, getStaffIdOrCurrent, getCurrentStaffId } from './routeHelpers.js';
+import { parseIntNullable, getStaffIdOrCurrent, getCurrentStaffId, blockedForNoSignature } from './routeHelpers.js';
 import { printSheet, htmlEscape, htmlText, signatureBlock } from '../utils/printLayout.js';
+import { staffSignatureDataUri } from '../services/signatureService.js';
 import {
   APPRAISAL_SECTIONS, APPRAISAL_SECTION_LABELS, APPRAISAL_TYPES, APPRAISAL_TYPE_LABELS,
   APPRAISAL_STATUSES, APPRAISAL_CYCLE_TYPES, APPRAISAL_CYCLE_STATUSES, APPRAISAL_RECOMMENDATIONS,
@@ -830,6 +831,9 @@ export function appraisalRoutes() {
 
   /** The member of staff hands their self-assessment to their appraiser. */
   router.post('/appraisals/:id/submit-self-assessment', requireAuth, (req, res) => {
+    // Nothing is signed off by somebody with no signature on file: the sheet
+    // this closes carries their signature, not their typed name.
+    if (blockedForNoSignature(req, res)) return;
     const db = getDb();
     const record = db.prepare('SELECT * FROM performance_appraisals WHERE id = ?').get(req.params.id) as Row | undefined;
     if (!record) return res.status(404).json({ error: 'Appraisal not found' });
@@ -848,6 +852,9 @@ export function appraisalRoutes() {
    * complete and waits on the member of staff's signature.
    */
   router.post('/appraisals/:id/submit-appraisal', requirePermission('personnel.appraisals', 'edit'), (req, res) => {
+    // Nothing is signed off by somebody with no signature on file: the sheet
+    // this closes carries their signature, not their typed name.
+    if (blockedForNoSignature(req, res)) return;
     const db = getDb();
     const record = db.prepare('SELECT * FROM performance_appraisals WHERE id = ?').get(req.params.id) as Row | undefined;
     if (!record) return res.status(404).json({ error: 'Appraisal not found' });
@@ -887,6 +894,9 @@ export function appraisalRoutes() {
 
   /** Second-level review — the moderation step that keeps ratings comparable. */
   router.post('/appraisals/:id/moderate', requirePermission('personnel.appraisals', 'approve'), (req, res) => {
+    // Nothing is signed off by somebody with no signature on file: the sheet
+    // this closes carries their signature, not their typed name.
+    if (blockedForNoSignature(req, res)) return;
     const db = getDb();
     const record = db.prepare('SELECT * FROM performance_appraisals WHERE id = ?').get(req.params.id) as Row | undefined;
     if (!record) return res.status(404).json({ error: 'Appraisal not found' });
@@ -913,6 +923,9 @@ export function appraisalRoutes() {
    * whether they agree or not.
    */
   router.post('/appraisals/:id/acknowledge', requireAuth, (req, res) => {
+    // Nothing is signed off by somebody with no signature on file: the sheet
+    // this closes carries their signature, not their typed name.
+    if (blockedForNoSignature(req, res)) return;
     const db = getDb();
     const record = db.prepare('SELECT * FROM performance_appraisals WHERE id = ?').get(req.params.id) as Row | undefined;
     if (!record) return res.status(404).json({ error: 'Appraisal not found' });
@@ -1098,9 +1111,12 @@ ${developmentHtml}
 ${attachmentsHtml}
 
 <div class="signatures">
-  ${signatureBlock('Appraiser', record.appraiser_name, record.appraiser_submitted_at)}
-  ${signatureBlock('Second-level reviewer', record.reviewer_name, record.reviewed_at)}
-  ${signatureBlock('Member of staff', record.staff_name, record.employee_acknowledged_at)}
+  ${signatureBlock('Appraiser', record.appraiser_name, record.appraiser_submitted_at,
+    record.appraiser_submitted_at ? staffSignatureDataUri(record.appraiser_staff_id) : null)}
+  ${signatureBlock('Second-level reviewer', record.reviewer_name, record.reviewed_at,
+    record.reviewed_at ? staffSignatureDataUri(record.reviewer_staff_id) : null)}
+  ${signatureBlock('Member of staff', record.staff_name, record.employee_acknowledged_at,
+    record.employee_acknowledged_at ? staffSignatureDataUri(record.staff_id) : null)}
 </div>`;
 
     audit(req, { action: 'print', entity: 'performance_appraisals', entityId: req.params.id });

@@ -38,7 +38,17 @@ export function requireCurrentStaffId(req: Request) {
  * may sign; when it returns false the response has already been sent.
  */
 export function blockedForNoSignature(req: Request, res: Response): boolean {
-  if (hasSignatureOnFile(getCurrentStaffId(req))) return false;
-  res.status(400).json({ error: NO_SIGNATURE_MESSAGE, code: 'signature_required' });
+  const staffId = getCurrentStaffId(req);
+  if (hasSignatureOnFile(staffId)) return false;
+  // An account nobody has linked to a staff record has no signature to find,
+  // and telling that person to upload one sends them somewhere that cannot
+  // help them. The two cases have different remedies, so they say so.
+  res.status(400).json(staffId === null
+    ? {
+        error: 'Your user account is not linked to a staff record, so nothing can be signed in your name. '
+          + 'Ask an administrator to link it under Settings → People & Access.',
+        code: 'staff_link_required',
+      }
+    : { error: NO_SIGNATURE_MESSAGE, code: 'signature_required' });
   return true;
 }

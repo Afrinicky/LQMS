@@ -626,6 +626,7 @@ export type StaffFile = {
   categories:string[];
   visibility:Record<string, boolean>;
   mayPrintFile:boolean;
+  hasSignature:boolean;
 };
 
 /** The register view: what exists, and which active posts have nothing. */

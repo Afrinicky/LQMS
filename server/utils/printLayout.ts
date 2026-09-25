@@ -48,13 +48,27 @@ export function printedAt(): string {
  */
 export function signatureBlock(role: string, name?: string | null, dated?: string | null, signatureImg?: string | null): string {
   const sigCell = signatureImg
-    ? `<img class="sig-img" src="${signatureImg}" alt="signature" />`
-    : '______________________';
+    ? `<span class="sig-box">${signatureImage(signatureImg)}</span>`
+    : '<span class="sig-rule"></span>';
   return `<div class="sign">
   <div class="rule">${name ? htmlEscape(name) : ''}</div>
   <div class="role">${htmlEscape(role)}</div>
   <div class="date">Signature: ${sigCell} &nbsp; Date: ${dated ? htmlEscape(String(dated).slice(0, 10)) : '____________'}</div>
 </div>`;
+}
+
+/**
+ * A signature image at a size the sheet chose, not the size the file happens to
+ * be.
+ *
+ * Signatures arrive as whatever the person photographed or drew: a 2000px scan
+ * of a whole page, or a 90px scribble. Left to itself each one printed at its
+ * own scale, so one sheet carried a signature taller than the block it sat in
+ * and the next carried one too small to read. Every signature is now drawn into
+ * the same box and scaled to fit inside it, keeping its own proportions.
+ */
+export function signatureImage(dataUri: string, className = 'sig-img'): string {
+  return `<img class="${className}" src="${dataUri}" alt="Signature" />`;
 }
 
 const STYLES = `@page { size: A4; margin: 13mm; }
@@ -89,8 +103,14 @@ table.meta td { width: 33%; }
 .signatures.two { grid-template-columns: repeat(2, 1fr); }
 .sign .rule { border-bottom: 1px solid #16202e; min-height: 22px; font-weight: 600; padding-bottom: 2px; }
 .sign .role { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b; margin-top: 3px; }
-.sign .date { font-size: 9.5px; color: #40546f; margin-top: 8px; }
-.sign .sig-img { height: 30px; max-width: 150px; vertical-align: middle; background: #fff; }
+.sign .date { font-size: 9.5px; color: #40546f; margin-top: 8px; display: flex; align-items: flex-end; gap: 4px; flex-wrap: wrap; }
+/* Every signature is drawn into a box of one size and scaled to fit it, so a
+   2000px scan and a 90px scribble print at the same weight on the page. */
+.sig-box { display: inline-flex; align-items: flex-end; justify-content: center; width: 132px; height: 30px; border-bottom: 1px solid #16202e; overflow: hidden; }
+.sig-box .sig-img { max-width: 100%; max-height: 28px; width: auto; height: auto; object-fit: contain; background: transparent; mix-blend-mode: multiply; }
+.sig-rule { display: inline-block; width: 132px; border-bottom: 1px solid #16202e; height: 14px; }
+td .sig-box, td.sig-cell .sig-box { width: 100%; max-width: 132px; height: 26px; border-bottom: 0; }
+td .sig-box .sig-img, td.sig-cell .sig-box .sig-img { max-height: 24px; }
 .sheet-foot { margin-top: 22px; border-top: 1px solid #c9d8ef; padding-top: 5px; font-size: 9.5px; color: #64748b; display: flex; justify-content: space-between; gap: 16px; }
 .legend { font-size: 9.5px; color: #4a5b70; margin: 2px 0 10px; }
 .page-break { page-break-before: always; }
