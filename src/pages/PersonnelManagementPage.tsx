@@ -1,5 +1,4 @@
-import { FormEvent, Suspense, lazy, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import PageHeader from '../components/ui/PageHeader';
 import { KpiStrip, ChartCard, BarMeter, BarChart, CHART_COLORS, ModuleAlerts, DetailModal, RegisterSearch } from '../components/ui';
 import { useModules } from '../hooks/useModules';
@@ -10,24 +9,19 @@ import { DutyRosterBoard, ReassignmentBoard, BenchScheduleBoard, ActingSuperviso
 import DisabledModule from '../components/DisabledModule';
 import { usePermissions } from '../hooks/usePermissions';
 import PermissionTabs from '../components/PermissionTabs';
-import { useFocusTarget, focusAttr } from '../hooks/useFocusTarget';
 import CompetencyWorkspace from './personnel/CompetencyWorkspace';
+import StaffFiles from './personnel/StaffFiles';
 import AppraisalWorkspace from './personnel/AppraisalWorkspace';
 import OrientationInduction from './personnel/OrientationInduction';
 import TrainingWorkspace from './personnel/TrainingWorkspace';
 import type {
   Section, Department, Staff, Position,
-  StaffDocument, StaffDeclaration, DutyRoster, EquipmentItem,
+  StaffDeclaration, DutyRoster, EquipmentItem,
   PersonnelSummary, MyTasks, MyProfile, RosterCoverage, StaffSuggestionsResponse, ProfessionalRank,
-  JobDescriptionDoc, JobDescriptionRegister,
 } from '../../shared/types/api';
 import TextField from '../components/ui/TextField';
 import { Notice } from '../components/ui/Feedback';
 
-// Document control's own viewer, so a job description previewed from a
-// personnel screen is the same document, at the same version, as the one read
-// in Documents & Records. Lazy — Personnel Management should not carry it.
-const DocumentViewer = lazy(() => import('./DocumentControlPage').then(m => ({ default: m.DocumentViewer })));
 
 const statusBadgeClass = (status?: string) => `badge ${status ? status.toLowerCase().replace(/\s+/g, '-') : 'unknown'}`;
 const formatBadge = (status?: string) => <span className={statusBadgeClass(status)}>{status ? status.replace(/_/g, ' ') : 'Unknown'}</span>;
@@ -37,7 +31,6 @@ const TAB_MODULE = 'personnel';
 const tabBar = (active: string, tabs: string[], onChange: (name: string) => void) =>
   <PermissionTabs moduleKey={TAB_MODULE} tabs={tabs} active={active} onChange={onChange} />;
 
-const STAFF_DOC_TYPES = ['CV', 'Qualification', 'Licence', 'Certificate', 'Contract', 'Job description', 'ID', 'Reference', 'Other'];
 const DECLARATION_TYPES = ['confidentiality', 'ethical_declaration', 'conflict_of_interest', 'safety_commitment', 'other'];
 const GENDERS = ['MALE', 'FEMALE', 'OTHER'];
 const PERSONNEL_CATEGORIES = ['STAFF', 'INTERN', 'NSS', 'LOCUM', 'STUDENT', 'CONTRACTOR'];
@@ -94,12 +87,7 @@ export function PersonnelManagementPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [summary, setSummary] = useState<PersonnelSummary | null>(null);
-  const [staffDocs, setStaffDocs] = useState<StaffDocument[]>([]);
   const [declarations, setDeclarations] = useState<StaffDeclaration[]>([]);
-  // A dashboard alert arrives with ?tab= and ?focus=; the tab bar opens the tab,
-  // this scrolls to the record and flashes it. Competence and appraisal records
-  // carry their own focus targets inside their workspaces.
-  useFocusTarget(staffDocs.length);
   const [rosters, setRosters] = useState<DutyRoster[]>([]);
   const [selectedRoster, setSelectedRoster] = useState<DutyRoster | null>(null);
   const [myProfile, setMyProfile] = useState<MyProfile | null>(null);
@@ -107,8 +95,6 @@ export function PersonnelManagementPage() {
   const [staffSuggestions, setStaffSuggestions] = useState<StaffSuggestionsResponse | null>(null);
   const [rosterCoverage, setRosterCoverage] = useState<RosterCoverage | null>(null);
 
-  const [docForm, setDocForm] = useState({ staffId: '', documentType: 'CV', title: '', issueDate: '', expiryDate: '', remarks: '' });
-  const [docFile, setDocFile] = useState<File | null>(null);
   const [declForm, setDeclForm] = useState({ declarationType: 'ethical_declaration', title: '', description: '', staffId: '', impartialityConfirmed: true, confidentialityConfirmed: true, codeOfConductAck: true, conflictOfInterest: 'None Declared', formCompletedDate: '', reviewedByStaffId: '', nextReviewDate: '' });
   const [staffForm, setStaffForm] = useState(emptyStaffForm);
   const [editingStaffId, setEditingStaffId] = useState<number | null>(null);
@@ -128,46 +114,20 @@ export function PersonnelManagementPage() {
 
   async function load() {
     try {
-      const [sum, sd, decl, rs] = await Promise.all([
+      const [sum, decl, rs] = await Promise.all([
         api<PersonnelSummary>('/dashboard/personnel-summary').catch(() => null),
-        apiRead<StaffDocument[]>('/personnel/staff-documents', []),
         apiRead<StaffDeclaration[]>('/personnel/declarations', []),
         apiRead<DutyRoster[]>('/personnel/rosters', [])
       ]);
       if (sum) setSummary(sum);
-      // The training register is loaded by the workspace that owns it, so a
-      // tab nobody has opened does not fetch it on every visit to this page.
-      setStaffDocs(sd); setDeclarations(decl); setRosters(rs);
+      // The training register and the staff files are loaded by the workspaces
+      // that own them, so a tab nobody has opened fetches nothing.
+      setDeclarations(decl); setRosters(rs);
     } catch (e) { setError(errorText(e)); }
   }
   useEffect(() => { if (isEnabled('personnel')) void load(); }, [isEnabled]);
   if (!isEnabled('personnel')) return <DisabledModule />;
 
-  async function uploadFile(file: File | null): Promise<string | null> {
-    if (!file) return null;
-    const fd = new FormData();
-    fd.append('file', file);
-    const token = getToken();
-    const response = await fetch(`${API_BASE}/files`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: fd });
-    if (!response.ok) throw new Error((await response.json().catch(() => ({ error: response.statusText }))).error ?? response.statusText);
-    const data = await response.json();
-    return String(data.id);
-  }
-
-  async function submitStaffDoc(e: FormEvent) {
-    e.preventDefault(); setError(null);
-    try {
-      const fileId = await uploadFile(docFile);
-      await api('/personnel/staff-documents', { method: 'POST', body: JSON.stringify({ ...docForm, fileId }) });
-      setDocForm({ staffId: '', documentType: 'CV', title: '', issueDate: '', expiryDate: '', remarks: '' }); setDocFile(null);
-      await load();
-    } catch (e) { setError(errorText(e)); }
-  }
-
-  async function verifyStaffDoc(id: number) {
-    try { await api(`/personnel/staff-documents/${id}/verify`, { method: 'POST', body: JSON.stringify({ verificationStatus: 'verified' }) }); await load(); }
-    catch (e) { setError(errorText(e)); }
-  }
 
   async function submitDeclaration(e: FormEvent) {
     e.preventDefault(); setError(null);
@@ -284,7 +244,7 @@ export function PersonnelManagementPage() {
     catch (e) { setError(errorText(e)); }
   }
 
-  const tabs = ['Dashboard', 'Master Personnel Register', 'Add Staff', 'Staff Documents', 'Job Descriptions', 'Orientation & Induction', 'Declarations', 'Training Events', 'Competency Assessments', 'Performance Appraisals', 'Technical Authorizations', 'Duty Roster', 'Unit Reassignments', 'Unit Supervisors', 'Bench Schedules', 'Reports'];
+  const tabs = ['Dashboard', 'Master Personnel Register', 'Add Staff', 'Staff Files', 'Orientation & Induction', 'Declarations', 'Training Events', 'Competency Assessments', 'Performance Appraisals', 'Technical Authorizations', 'Duty Roster', 'Unit Reassignments', 'Unit Supervisors', 'Bench Schedules', 'Reports'];
 
   return <div className="module-page">
     <PageHeader eyebrow="Personnel Management" title="Personnel Management" subtitle="Personnel records — competence, authorisation, training, induction, and ethics." />
@@ -294,8 +254,8 @@ export function PersonnelManagementPage() {
     {tab === 'Dashboard' && <ModuleAlerts moduleKey="personnel" />}
     {tab === 'Dashboard' && (summary ? <KpiStrip items={[
       { label: 'Active staff', value: summary.totalStaff ?? staff.length, onClick: () => setTab('Master Personnel Register') },
-      { label: 'Docs pending verification', value: summary.staffDocumentsPendingVerification, onClick: () => setTab('Staff Documents') },
-      { label: 'Certificates expiring', value: summary.certificatesExpiringSoon, tone: 'warning', onClick: () => setTab('Staff Documents') },
+      { label: 'Docs pending verification', value: summary.staffDocumentsPendingVerification, onClick: () => setTab('Staff Files') },
+      { label: 'Certificates expiring', value: summary.certificatesExpiringSoon, tone: 'warning', onClick: () => setTab('Staff Files') },
       { label: 'Licences expiring', value: summary.licencesExpiringSoon ?? 0, tone: 'warning', onClick: () => setTab('Master Personnel Register') },
       { label: 'Pending declarations', value: summary.pendingDeclarations, onClick: () => setTab('Declarations') },
       { label: 'Orientations in progress', value: summary.orientationsInProgress ?? 0, onClick: () => setTab('Orientation & Induction') },
@@ -395,34 +355,7 @@ export function PersonnelManagementPage() {
       </div>
     </>}
 
-    {tab === 'Job Descriptions' && <JobDescriptionsTab onError={setError} />}
-
-    {tab === 'Staff Documents' && <>
-      {can('personnel.register', 'create') && <form className="form-grid" onSubmit={submitStaffDoc}>
-        <label>Staff<select value={docForm.staffId} onChange={e => setDocForm({ ...docForm, staffId: e.target.value })} required><option value="">—</option>{staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}</select></label>
-        <label>Type<select value={docForm.documentType} onChange={e => setDocForm({ ...docForm, documentType: e.target.value })} required>{STAFF_DOC_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
-        <label>Title<TextField value={docForm.title} onValue={nextValue => setDocForm({ ...docForm, title: nextValue })} required /></label>
-        <label>Issue date<input type="date" value={docForm.issueDate} onChange={e => setDocForm({ ...docForm, issueDate: e.target.value })} /></label>
-        <label>Expiry date<input type="date" value={docForm.expiryDate} onChange={e => setDocForm({ ...docForm, expiryDate: e.target.value })} /></label>
-        <label>File<input type="file" onChange={e => setDocFile(e.target.files?.[0] ?? null)} /></label>
-        <label>Remarks<TextField value={docForm.remarks} onValue={nextValue => setDocForm({ ...docForm, remarks: nextValue })} /></label>
-        <button type="submit">Upload staff document</button>
-      </form>}
-      <table className="data-table"><thead><tr><th>Staff</th><th>Type</th><th>Title</th><th>Issue</th><th>Expiry</th><th>Verification</th><th>File</th><th></th></tr></thead><tbody>
-        {staffDocs.map(d => {
-          const today = new Date().toISOString().slice(0, 10);
-          const expiringSoon = d.expiry_date && d.expiry_date <= new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10) && d.expiry_date >= today;
-          const expired = d.expiry_date && d.expiry_date < today;
-          return <tr key={d.id} {...focusAttr('staff_documents', d.id)}>
-            <td>{d.staff_name || staffName(staff, d.staff_id)}</td><td>{d.document_type}</td><td>{d.title}</td>
-            <td>{d.issue_date || '—'}</td>
-            <td>{d.expiry_date || '—'} {expired && <span className="badge danger">expired</span>}{expiringSoon && <span className="badge warning">expiring</span>}</td>
-            <td>{formatBadge(d.verification_status)}</td><td>{d.file_name || '—'}</td>
-            <td>{d.verification_status === 'pending' && can('personnel.register', 'approve') && <button onClick={() => verifyStaffDoc(d.id)}>Verify</button>}</td>
-          </tr>;
-        })}
-      </tbody></table>
-    </>}
+    {tab === 'Staff Files' && <StaffFiles staff={staff} onError={setError} />}
 
     {tab === 'Declarations' && <>
       <div className="card"><p className="muted" style={{ marginTop: 0 }}>Ethical declarations record each member of staff's commitment to impartiality, confidentiality, disclosure of conflicts of interest, and the code of conduct.</p>
@@ -486,115 +419,4 @@ export function PersonnelManagementPage() {
       <p className="muted">Training-hours-per-member-of-staff and authorisation expiry trend reports follow in a later phase.</p>
     </div>}
   </div>;
-}
-
-
-/* ============================================================================
-   Job Descriptions
-   ----------------------------------------------------------------------------
-   Personnel Management's view of documents that live in Document Control. It
-   deliberately holds no copies: it reads the register and lists what is issued,
-   for which post, and — the part an assessor actually asks about — which active
-   posts have no description at all.
-
-   Uploading one is document control's job and stays there, so this view links
-   across rather than growing a second upload form. Two ways to create the same
-   controlled document is two ways for it to be created wrongly.
-   ========================================================================= */
-function JobDescriptionsTab({ onError }: { onError: (m: string | null) => void }) {
-  const navigate = useNavigate();
-  const { can } = usePermissions();
-  const [data, setData] = useState<JobDescriptionRegister | null>(null);
-  const [reading, setReading] = useState<JobDescriptionDoc | null>(null);
-
-  useEffect(() => {
-    api<JobDescriptionRegister>('/personnel/job-descriptions')
-      .then(setData)
-      .catch(e => { onError(errorText(e)); setData({ documents: [], gaps: [] }); });
-  }, [onError]);
-
-  if (!data) return <p className="muted">Loading the job description register…</p>;
-
-  const mayAuthor = can('documents.authoring', 'create');
-
-  return <>
-    <div className="section-head">
-      <div>
-        <h3 style={{ margin: 0 }}>Job descriptions</h3>
-        <p className="muted" style={{ marginTop: 4, maxWidth: '72ch' }}>
-          Job descriptions are controlled documents: written, reviewed, approved and versioned in
-          Documents &amp; Records like any other. Naming the post one describes is what puts it here,
-          and on the portal of every member of staff holding that post — from one upload, with no
-          second copy to drift out of step.
-        </p>
-      </div>
-      {mayAuthor && (
-        <button type="button" className="secondary"
-          onClick={() => navigate('/documents?new=Job%20Description')}>
-          Upload a job description
-        </button>
-      )}
-    </div>
-
-    <table className="data-table">
-      <thead><tr><th>Post / person</th><th>Document</th><th>Version</th><th>Status</th><th>Next review</th><th /></tr></thead>
-      <tbody>
-        {data.documents.map(d => (
-          <tr key={d.id}>
-            <td>
-              <strong>{d.position_title ?? d.staff_name ?? '—'}</strong>
-              {d.staff_name && d.applies_to_staff_id ? <div className="muted">issued to this person by name</div> : null}
-              {!d.position_title && !d.staff_name ? <div className="muted">not linked to a post yet — it will not reach anybody&rsquo;s portal</div> : null}
-            </td>
-            <td>{d.title}<div className="muted">{d.document_code ?? '—'}</div></td>
-            <td>{d.version_number ?? '—'}</td>
-            <td>{formatBadge(d.status)}</td>
-            <td>{d.next_review_date ?? '—'}</td>
-            <td style={{ whiteSpace: 'nowrap' }}>
-              {d.current_version_id
-                ? <button type="button" className="pq-link" onClick={() => setReading(d)}>Preview</button>
-                : <span className="muted">no file yet</span>}
-              <button type="button" className="pq-link" onClick={() => navigate(`/documents?open=${d.id}`)}>Open in Documents</button>
-            </td>
-          </tr>
-        ))}
-        {data.documents.length === 0 && (
-          <tr><td colSpan={6} className="muted">No job description has been registered yet.</td></tr>
-        )}
-      </tbody>
-    </table>
-
-    {data.gaps.length > 0 && <>
-      <div className="section-head" style={{ marginTop: 22 }}>
-        <h3 style={{ margin: 0 }}>Posts with no issued description</h3>
-      </div>
-      <p className="muted" style={{ marginTop: 0 }}>
-        ISO 15189 expects every post to have a documented description of its responsibilities and
-        authority. These are the ones that do not, with the number of people currently holding each.
-      </p>
-      <ul className="jd-gaps">
-        {data.gaps.map(g => (
-          <li key={g.id}>
-            <span>{g.title}</span>
-            <span className={`badge ${g.staff_count > 0 ? 'warning' : ''}`}>
-              {g.staff_count === 0 ? 'nobody in post' : g.staff_count === 1 ? '1 member of staff' : `${g.staff_count} members of staff`}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </>}
-
-    {reading && (
-      <Suspense fallback={<div className="card">Opening the document…</div>}>
-        <DocumentViewer
-          docId={reading.id}
-          versionId={Number(reading.current_version_id ?? 0)}
-          onClose={() => setReading(null)}
-          onAttest={() => setReading(null)}
-          onSaved={() => undefined}
-          onError={onError}
-        />
-      </Suspense>
-    )}
-  </>;
 }

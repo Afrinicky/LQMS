@@ -123,6 +123,34 @@ export function personnelRoutes() {
     res.status(201).json({ id });
   });
 
+  // Correcting a document already on a staff file — a mistyped expiry, a title
+  // that does not match the certificate, a remark to add. Editing the details
+  // returns the document to pending, because what was verified is no longer
+  // what is recorded.
+  router.put('/staff-documents/:id', requirePermission('personnel.register', 'edit'), (req, res) => {
+    const db = getDb();
+    const existing = db.prepare('SELECT * FROM staff_documents WHERE id = ?').get(req.params.id) as any;
+    if (!existing) return res.status(404).json({ error: 'Staff document not found' });
+    const sets: string[] = []; const vals: unknown[] = [];
+    for (const [field, col] of [['documentType', 'document_type'], ['title', 'title'], ['issueDate', 'issue_date'],
+      ['expiryDate', 'expiry_date'], ['remarks', 'remarks']] as Array<[string, string]>) {
+      if (field in req.body) { sets.push(`${col} = ?`); vals.push(req.body[field] === '' ? null : req.body[field]); }
+    }
+    if ('fileId' in req.body) { sets.push('file_id = ?'); vals.push(parseIntNullable(req.body.fileId)); }
+    if (sets.length === 0) return res.status(400).json({ error: 'Nothing to change.' });
+    if (existing.verification_status === 'verified') {
+      sets.push("verification_status = 'pending'", 'verified_by_staff_id = NULL', 'verified_at = NULL');
+    }
+    sets.push('updated_at = CURRENT_TIMESTAMP');
+    db.prepare(`UPDATE staff_documents SET ${sets.join(', ')} WHERE id = ?`).run(...vals, req.params.id);
+    if (parseIntNullable(req.body.fileId)) {
+      db.prepare('INSERT INTO record_links (source_module_key, source_record_type, source_record_id, target_module_key, target_record_type, target_record_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run('personnel', 'staff_documents', String(req.params.id), 'documents', 'files', String(req.body.fileId), 'Staff document file');
+    }
+    audit(req, { action: 'edit', entity: 'staff_documents', entityId: Number(req.params.id), oldValue: existing, newValue: req.body });
+    res.json({ ok: true });
+  });
+
   router.post('/staff-documents/:id/verify', requirePermission('personnel.register', 'approve'), (req, res) => {
     const db = getDb();
     const doc = db.prepare('SELECT * FROM staff_documents WHERE id = ?').get(req.params.id) as any;

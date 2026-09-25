@@ -32,7 +32,7 @@ export const ALERT_TARGETS: Record<string, AlertTarget> = {
   archive_retention_due: { tab: 'Central Archive' },
 
   /* Personnel */
-  staff_document_expiry: { tab: 'Staff Documents' },
+  staff_document_expiry: { tab: 'Staff Files', subtab: 'Documents' },
   competency_due: { tab: 'Competency Assessments' },
   appraisal_due: { tab: 'Performance Appraisals' },
   authorization_expiry: { tab: 'Technical Authorizations' },
